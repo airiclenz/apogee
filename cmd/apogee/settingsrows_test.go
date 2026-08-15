@@ -37,6 +37,8 @@ func fabricatedSettings() config.Options {
 		UnconfinedHosts:    []config.UnconfinedHost{{ID: "host-1"}},
 		WebSearchEndpoint:  "off",
 		ToolsDisabled:      []string{"view_diff"},
+		URLAllowHosts:      []string{"docs.example.com"},
+		URLDenyHosts:       nil, // the honest asymmetry: a configured allow list beside an unset deny list
 		UseProjectSkills:   false,
 		AutoCompact:        true,
 		AutoTitle:          false,
@@ -235,41 +237,43 @@ func TestSettingsRowsFormatEffectiveValues(t *testing.T) {
 
 	byPath := rowsByPath(t, settingsRows(fabricatedSettings()))
 	want := map[string]string{
-		"servers":               "3 servers",
-		"server":                "rented-box",
-		"mode":                  "auto",
-		"system-prompt-text":    "2 lines",
-		"system-prompt-file":    "", // unset, and an editable string row's blank is what the field seeds from
-		"system-prompt-models":  "1 model",
-		"context-files.enable":  "true",
-		"context-files.names":   "[AGENTS.md, CLAUDE.md]",
-		"confine-to-workspace":  "false",
-		"unconfined-hosts":      "1 host",
-		"web-search-endpoint":   "off",
-		"mcp-servers":           noneSettingValue,
-		"tools.disabled":        "[view_diff]",
-		"use-project-skills":    "false",
-		"auto-compact":          "true",
-		"auto-title":            "false",
-		"remember-model":        "true",
-		"context-window":        "32768",
-		"response-reserve":      "0.35", // the shortest spelling that reads back as the same share
-		"present.auto-open":     "true",
-		"present.command":       "zed {path}",
-		"present.port":          "8080",
-		"present.host":          "",
-		"ui.spinner":            "glitter",
-		"ui.spinner-color":      "true",
-		"ui.show-scrollbar":     "false",
-		"ui.color-scheme":       "dark",
-		"ui.stall-after":        "2m0s",  // a duration prints itself, and the printing is a spelling the key takes back
-		"cursor-shape":          "block", // unset, so the declared default is what is in force
-		"editor":                "code -w",
-		"bypass":                "true",
-		"mechanisms":            "2 mechanisms", // the explicit `false` entry is not an enabled one
-		"validated-sets.enable": "true",
-		"validated-sets.alias":  "1 alias",
-		"model-profiles":        "1 model profile",
+		"servers":                "3 servers",
+		"server":                 "rented-box",
+		"mode":                   "auto",
+		"system-prompt-text":     "2 lines",
+		"system-prompt-file":     "", // unset, and an editable string row's blank is what the field seeds from
+		"system-prompt-models":   "1 model",
+		"context-files.enable":   "true",
+		"context-files.names":    "[AGENTS.md, CLAUDE.md]",
+		"confine-to-workspace":   "false",
+		"unconfined-hosts":       "1 host",
+		"web-search-endpoint":    "off",
+		"mcp-servers":            noneSettingValue,
+		"tools.disabled":         "[view_diff]",
+		"url-safety.allow-hosts": "[docs.example.com]",
+		"url-safety.deny-hosts":  "[]", // unset: a list row's empty spelling, and every host is still floored
+		"use-project-skills":     "false",
+		"auto-compact":           "true",
+		"auto-title":             "false",
+		"remember-model":         "true",
+		"context-window":         "32768",
+		"response-reserve":       "0.35", // the shortest spelling that reads back as the same share
+		"present.auto-open":      "true",
+		"present.command":        "zed {path}",
+		"present.port":           "8080",
+		"present.host":           "",
+		"ui.spinner":             "glitter",
+		"ui.spinner-color":       "true",
+		"ui.show-scrollbar":      "false",
+		"ui.color-scheme":        "dark",
+		"ui.stall-after":         "2m0s",  // a duration prints itself, and the printing is a spelling the key takes back
+		"cursor-shape":           "block", // unset, so the declared default is what is in force
+		"editor":                 "code -w",
+		"bypass":                 "true",
+		"mechanisms":             "2 mechanisms", // the explicit `false` entry is not an enabled one
+		"validated-sets.enable":  "true",
+		"validated-sets.alias":   "1 alias",
+		"model-profiles":         "1 model profile",
 	}
 	for path, wantValue := range want {
 		if got := byPath[path].Value; got != wantValue {

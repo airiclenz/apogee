@@ -138,6 +138,13 @@ type Settings struct {
 	// one. It is deliberately GLOBAL: a per-profile roster is a later key that builds on it.
 	ToolsDisabled []string
 
+	// urlAllowHosts / urlDenyHosts are the resolved `url-safety:` host layer — the hosts the network
+	// tools may reach, and the hosts they may not. File-only and default-empty (⇒ every host, subject
+	// to the always-on SSRF floor), like toolsDisabled beside it. They TIGHTEN the guard and can
+	// never loosen it: the floor is unreachable from configuration by construction.
+	URLAllowHosts []string
+	URLDenyHosts  []string
+
 	// modelProfiles is the resolved `model-profiles:` map (ADR 0044): the user's pattern-keyed
 	// Model profiles, ordered by pattern so the same file always resolves to the same slice.
 	// File-only (a per-model concern, like mcpServers, with no flag/env) and default-empty ⇒ the
@@ -561,6 +568,13 @@ type Layer struct {
 	// resolution leaves the whole built-in roster standing.
 	ToolsDisabled []string
 
+	// urlAllowHosts / urlDenyHosts are set only by the FILE layer (the host layer is config'd,
+	// default-empty, with no flag/env — like toolsDisabled above). A nil slice means the source
+	// configures no list, so resolution leaves the guard's own default standing: every host, subject
+	// to the always-on SSRF floor.
+	URLAllowHosts []string
+	URLDenyHosts  []string
+
 	// modelProfiles is set only by the FILE layer (the map is config'd, default-empty, with no
 	// flag/env — like mechanisms). A nil slice means the source configures no profile at all, so
 	// a nearer layer that does carries the whole map: the block is replaced entry-and-all, never
@@ -752,6 +766,8 @@ func ResolveSettings(file, env, flag Layer, hostID string) (Settings, []string) 
 	s.Servers = file.Servers             // file-only; env/flag never name an upstream server
 	s.MCPServers = file.MCPServers       // file-only (P3.15); env/flag never set MCP servers
 	s.ToolsDisabled = file.ToolsDisabled // file-only; env/flag never prune the tool roster
+	s.URLAllowHosts = file.URLAllowHosts // file-only; env/flag never narrow the network tools' reach
+	s.URLDenyHosts = file.URLDenyHosts   // file-only, like the allow list it is read beside
 	s.Mechanisms = file.Mechanisms       // file-only (Phase 4); env/flag never enable Mechanisms
 	if file.ValidatedSetsEnable != nil { // file-only (ADR 0016); env/flag never touch the surface
 		s.ValidatedSetsEnable = *file.ValidatedSetsEnable
@@ -986,6 +1002,12 @@ type fileConfig struct {
 	// takes off the menu. A pointer so an absent block falls through to the default (every tool)
 	// rather than reading as an explicit empty one.
 	Tools *toolsConfig `yaml:"tools"`
+	// URLSafety is the host allow/deny layer the network tools' url-safety guard runs on top of its
+	// always-on SSRF floor. A pointer so an absent block falls through to the default (no host list
+	// at all, which is every host subject to the floor) rather than reading as an explicit empty
+	// one. File-only, like the roster above it: which hosts a machine may reach is a per-machine
+	// fact, not an invocation one.
+	URLSafety *urlSafetyConfig `yaml:"url-safety"`
 	// ModelProfiles describes how a model speaks the wire (CONTEXT: Model profile) — its tool-call
 	// format and inline thinking-channel style — keyed by a PATTERN the model name contains
 	// (ADR 0044). File-only, no flag/env, like mcp-servers. Absent/empty ⇒ nothing the user
@@ -1710,6 +1732,25 @@ type toolsConfig struct {
 	Disabled []string `yaml:"disabled"`
 }
 
+// urlSafetyConfig is the on-disk `url-safety:` block — the host allow/deny layer the network tools'
+// guard applies on top of its always-on SSRF floor. Both keys are HOST lists: the scheme allow-set
+// stays code-level, because widening it is exactly the loosening this block must not be able to do.
+//
+// The layer is TIGHTEN-ONLY by construction, which is the whole reason it is safe to configure: the
+// floor (loopback, private, link-local and metadata addresses denied by resolved IP) is not
+// reachable from here at all — it lives behind an unexported field of security.URLGuard — so the
+// worst a mistaken entry can do is take a host away from the model.
+type urlSafetyConfig struct {
+	// AllowHosts, when non-empty, restricts the network tools to exactly these hosts and their
+	// subdomains. Absent/empty ⇒ every host, subject to the floor and to DenyHosts below. Entries
+	// are normalized to the form the transport dials (trim, IDNA, lowercase, trailing root dot
+	// stripped) where the guard is built, so a host may be written here the way a human writes it.
+	AllowHosts []string `yaml:"allow-hosts"`
+	// DenyHosts blocks these hosts and their subdomains regardless of AllowHosts — deny-first, the
+	// guard's own precedence. Absent/empty ⇒ no host is denied beyond the floor.
+	DenyHosts []string `yaml:"deny-hosts"`
+}
+
 // mcpServerConfig is the on-disk schema for one MCP server (P3.15). It mirrors mcp.ServerConfig
 // with yaml tags; toServerConfig maps it across so the on-disk shape and the package's value
 // type stay independently evolvable.
@@ -1888,6 +1929,16 @@ func (fc fileConfig) layer() Layer {
 	}
 	if fc.Tools != nil && len(fc.Tools.Disabled) > 0 {
 		l.ToolsDisabled = fc.Tools.Disabled
+	}
+	if fc.URLSafety != nil {
+		// Each list projects on its own: a block that names only one of them configures that one and
+		// leaves the other to fall through, the way the `validated-sets:` pair below does.
+		if len(fc.URLSafety.AllowHosts) > 0 {
+			l.URLAllowHosts = fc.URLSafety.AllowHosts
+		}
+		if len(fc.URLSafety.DenyHosts) > 0 {
+			l.URLDenyHosts = fc.URLSafety.DenyHosts
+		}
 	}
 	if len(fc.ModelProfiles) > 0 {
 		l.ModelProfiles = toProfileEntries(fc.ModelProfiles)
@@ -2298,6 +2349,8 @@ func ApplyConfig(opts *Options, changed func(string) bool, getenv func(string) s
 	if n := unknownToolNotice(s.ToolsDisabled); n != "" {
 		notify(n)
 	}
+	opts.URLAllowHosts = s.URLAllowHosts
+	opts.URLDenyHosts = s.URLDenyHosts
 	opts.ModelProfiles = s.ModelProfiles
 	opts.Mechanisms = s.Mechanisms
 	opts.ValidatedSetsEnable = s.ValidatedSetsEnable

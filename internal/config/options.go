@@ -216,6 +216,15 @@ type Options struct {
 	// assembly subtracts, so a disabled tool is neither offered to the model nor dispatchable.
 	ToolsDisabled []string
 
+	// urlAllowHosts / urlDenyHosts are the resolved `url-safety:` host layer — the hosts the network
+	// tools (web_fetch, http_request, web_search) may reach, and the hosts they may not. Loaded from
+	// the config file only (default-empty ⇒ every host, subject to the guard's always-on SSRF floor),
+	// like toolsDisabled above. ApplyConfig sets them from settings; the composition root builds the
+	// network tools' security.URLGuard from them, where they can only ever TIGHTEN it — the floor is
+	// not reachable from configuration at all.
+	URLAllowHosts []string
+	URLDenyHosts  []string
+
 	// modelProfiles is the user's `model-profiles:` map (ADR 0044) — the Model profiles they keyed
 	// by a pattern the model name contains — ordered by pattern, loaded from the config file only
 	// (default-empty). ApplyConfig sets it from settings; the composition root matches the BOUND

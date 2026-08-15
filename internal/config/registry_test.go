@@ -395,9 +395,13 @@ func TestRegistryValidateHooksSitOnEditableKeys(t *testing.T) {
 	// `tools.disabled` joins them because a name matching no tool is deliberately a NOTICE rather
 	// than a refusal (unknownToolNotice): a hook here would make the settings surface stricter than
 	// the file it writes, and refuse an edit the next launch would happily read.
+	// The `url-safety` host pair joins them because an entry is normalised permissively where the
+	// guard is built (trim, IDNA, lowercase, trailing root dot stripped), so a hook here would refuse
+	// host spellings the guard itself accepts — and a host that resolves nowhere is not a fact a
+	// per-value check holding no resolver can settle.
 	unchecked := map[string]bool{
 		"server": true, "present.command": true, "present.host": true, "editor": true,
-		"tools.disabled": true,
+		"tools.disabled": true, "url-safety.allow-hosts": true, "url-safety.deny-hosts": true,
 	}
 	for _, k := range KeyRegistry {
 		switch {

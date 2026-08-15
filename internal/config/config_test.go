@@ -1740,6 +1740,62 @@ func TestApplyConfigToolsDisabled(t *testing.T) {
 	})
 }
 
+// The `url-safety:` block round-trips to Options the way the roster above it does: both host lists
+// parse in file order, each key stands on its own so a block naming one leaves the other empty, and
+// an absent block configures no host layer at all — which is every host, subject to the SSRF floor
+// no config key can reach. Entries travel VERBATIM through this package: normalising them to the
+// form the transport dials belongs where the guard is built, not at the yaml seam.
+func TestApplyConfigURLSafety(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range []struct {
+		name      string
+		yaml      string
+		wantAllow []string
+		wantDeny  []string
+	}{
+		{
+			name:      "both lists resolve in file order",
+			yaml:      "url-safety:\n  allow-hosts: [docs.example.com, api.github.com]\n  deny-hosts: [ads.example.com]\n",
+			wantAllow: []string{"docs.example.com", "api.github.com"},
+			wantDeny:  []string{"ads.example.com"},
+		},
+		{
+			name:     "a block naming only the deny list leaves the allow list empty",
+			yaml:     "url-safety:\n  deny-hosts: [ads.example.com]\n",
+			wantDeny: []string{"ads.example.com"},
+		},
+		{
+			name:      "an entry travels as written, for the guard to normalise",
+			yaml:      "url-safety:\n  allow-hosts: [Example.COM.]\n",
+			wantAllow: []string{"Example.COM."},
+		},
+		{
+			name: "an absent block configures no host layer",
+			yaml: "mode: plan\n",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			home := testConfigHome(t, "")
+			writeConfigHome(t, home, tt.yaml)
+			opts := Options{ConfigDir: home}
+			if err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" },
+				os.ReadFile, noNotify); err != nil {
+				t.Fatalf("ApplyConfig: %v", err)
+			}
+			if len(opts.URLAllowHosts) != len(tt.wantAllow) || (tt.wantAllow != nil &&
+				!reflect.DeepEqual(opts.URLAllowHosts, tt.wantAllow)) {
+				t.Errorf("urlAllowHosts = %v; want %v", opts.URLAllowHosts, tt.wantAllow)
+			}
+			if len(opts.URLDenyHosts) != len(tt.wantDeny) || (tt.wantDeny != nil &&
+				!reflect.DeepEqual(opts.URLDenyHosts, tt.wantDeny)) {
+				t.Errorf("urlDenyHosts = %v; want %v", opts.URLDenyHosts, tt.wantDeny)
+			}
+		})
+	}
+}
+
 // The servers config block parses into opts.servers: every entry, in file order, with all four
 // fields — so the composition root can offer them as the servers this session may move to. It is
 // file-only, like mcp-servers, and the two optional keys default empty (a keyless server with no

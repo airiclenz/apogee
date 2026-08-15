@@ -241,6 +241,21 @@ var KeyRegistry = []Key{
 		Desc:     "Built-in tools to take off the menu, by name; the model is neither offered nor able to call them.",
 	},
 	{
+		// The host layer over the network tools' url-safety guard, a name list on one line like the
+		// roster above it — same kind, same field editor, and no validate hook for a reason of its own:
+		// an entry is normalized permissively where the guard is built (trim, IDNA, lowercase, trailing
+		// root dot stripped), so what a hook here would refuse is a host spelling the guard itself
+		// accepts.
+		Path: "url-safety.allow-hosts", Kind: KindStringList,
+		Editable: true,
+		Desc:     "Hosts the network tools may reach, with their subdomains; empty means every host.",
+	},
+	{
+		Path: "url-safety.deny-hosts", Kind: KindStringList,
+		Editable: true,
+		Desc:     "Hosts the network tools may never reach, with their subdomains; deny wins over the allow list.",
+	},
+	{
 		Path: "use-project-skills", Kind: KindBool, Default: "true",
 		Editable: true,
 		Desc:     "Discover skills from the workspace's bare skills/ folder as well as the libraries.",

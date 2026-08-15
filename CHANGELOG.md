@@ -10,6 +10,21 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **A file-only `url-safety:` block now carries host allow/deny lists through the config pipeline.**
+  The network tools' url-safety guard has always had `AllowHosts`/`DenyHosts` fields and no way for a
+  user to reach them: the only host policy a config could express was the always-on SSRF floor. The
+  schema now has a `url-safety:` block with `allow-hosts:` and `deny-hosts:`, resolved through every
+  stop of the six-stop pipeline onto `Options.URLAllowHosts` / `Options.URLDenyHosts`, and described
+  by two `KindStringList` registry rows (`url-safety.allow-hosts`, `url-safety.deny-hosts`) so
+  `/settings` shows and writes them like the `tools.disabled` roster beside them. Both keys are
+  file-only in this codebase's sense — no flag, no env — because which hosts a machine may reach is a
+  per-machine fact, not an invocation one, and the block is HOSTS only: the scheme allow-set stays
+  code-level, since widening it is exactly the loosening this layer must not be able to do. The
+  layer is tighten-only by construction — the floor lives behind an unexported field no config value
+  can reach — and the entries are carried verbatim here, to be normalised where the guard is built.
+  The seeded template documents the block commented out, and the lists reach the running guard in the
+  next change.
+
 - **A `response-reserve:` edited on the bound `servers:` entry now rides the rebind, in force the
   moment it commits.** The re-read already installed the entry's share on the live latch, but the
   ride a `servers:` commit drives asked only whether the window or the reply ceiling had moved — so

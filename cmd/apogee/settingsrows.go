@@ -125,12 +125,18 @@ var settingValues = map[string]func(config.Options) string{
 	// The roster switch shows the NAMES it holds, not a count: the list is short, and which tools
 	// are off is the whole of what the row is asked. Blank when nothing is disabled — the answer
 	// every editable field row gives, since this value seeds the edit field.
-	"tools.disabled":     func(o config.Options) string { return listValue(o.ToolsDisabled) },
-	"use-project-skills": func(o config.Options) string { return boolValue(o.UseProjectSkills) },
-	"auto-compact":       func(o config.Options) string { return boolValue(o.AutoCompact) },
-	"auto-title":         func(o config.Options) string { return boolValue(o.AutoTitle) },
-	"remember-model":     func(o config.Options) string { return boolValue(o.RememberModel) },
-	"context-window":     func(o config.Options) string { return strconv.Itoa(o.ContextWindow) },
+	"tools.disabled": func(o config.Options) string { return listValue(o.ToolsDisabled) },
+	// The url-safety host layer shows its NAMES for the roster's reason: the lists are short, which
+	// hosts are permitted or denied is the whole of what each row is asked, and the value seeds the
+	// edit field — so it reads back as the flow sequence the file carries, "[]" for a list nobody has
+	// set (an empty allow list means every host, not none).
+	"url-safety.allow-hosts": func(o config.Options) string { return listValue(o.URLAllowHosts) },
+	"url-safety.deny-hosts":  func(o config.Options) string { return listValue(o.URLDenyHosts) },
+	"use-project-skills":     func(o config.Options) string { return boolValue(o.UseProjectSkills) },
+	"auto-compact":           func(o config.Options) string { return boolValue(o.AutoCompact) },
+	"auto-title":             func(o config.Options) string { return boolValue(o.AutoTitle) },
+	"remember-model":         func(o config.Options) string { return boolValue(o.RememberModel) },
+	"context-window":         func(o config.Options) string { return strconv.Itoa(o.ContextWindow) },
 	// The share in the SHORTEST spelling that reads back as the same number, which is the spelling
 	// the writer persists too — so the value this row seeds its edit field with is one the next ⏎
 	// can write back unchanged.

@@ -176,7 +176,25 @@ pattern).
 
 **Commit:** `fix(tui): a prompt click below a phantom-wrapped line seats the caret exactly`
 
-## 4. url-safety config key — the config pipeline
+## 4. url-safety config key — the config pipeline — ✅ DONE (2026-08-15)
+
+NOTES (2026-08-15): two test files beyond the item's named `config_test.go` had to move for the new
+rows to land green, and both are the anti-drift pins the item counted on rather than incidental
+edits: `internal/config/registry_test.go`'s `unchecked` set gained both paths (an editable key with
+no validate hook must be listed there with its reason — the same clause `tools.disabled` occupies,
+since an entry is normalised permissively where the guard is built), and
+`cmd/apogee/settingsrows_test.go` gained the two hosts in `fabricatedSettings` plus their two rows in
+the exhaustive value table, which fails by count when a registry key is unpinned.
+NOTES (2026-08-15): no new `settingSections` entry — the item said "section row + accessors", but the
+rows were placed straight after `tools.disabled` (the registry's block-order rule) and therefore
+inherit "Tools & skills", which is exactly the presence `tools.disabled` itself has: it owns no
+section row either. A section of its own would have swallowed every row below it, since a section
+runs to the next opener.
+NOTES (2026-08-15): the rows are `Editable: true`, mirroring `tools.disabled`'s presence per the
+item's settings-pane sentence. No case was added to `applySettingFor` — the item's file list stops at
+`settingsrows.go`, item 5 binds the key to startup-only, and
+`TestApplySettingRefusesEveryKeyItCannotReach` requires every key without a case to refuse by name.
+So a committed edit writes the file and the row reports "saved — live apply failed: …" (see DEFER).
 
 **What:** add the file-only `url-safety:` block (ratified call 2) through the config package's
 six-stop pipeline, mirroring `tools.disabled` at every stop (file-only: bare slices, never

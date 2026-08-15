@@ -394,6 +394,27 @@ system-prompt-text: |
 #   disabled: [view_diff, single_find_and_replace]
 
 # =============================================================================
+# Which HOSTS the network tools (web_fetch, http_request, web_search) may reach. Both lists are
+# empty by default, which means every host — subject to the SSRF floor that is always on and is not
+# configurable: loopback, private, link-local and cloud-metadata addresses are refused by RESOLVED
+# IP whatever these lists say. Config-file only (no flag or env), and global: it applies to every
+# model this config runs.
+#
+# allow-hosts, when it names anything, is the whole permitted set: a URL is fetched only if its host
+# equals — or is a subdomain of — an entry. deny-hosts is the opposite and wins over it, so a host on
+# both is blocked. A host may be written the way you say it (Example.COM. is the same host as
+# example.com); it is normalised where the guard is built.
+#
+# The lists can only ever TIGHTEN what the network tools reach — there is no spelling here that opens
+# an address the floor closes. They are read at STARTUP: editing this key applies from the next run.
+# MCP servers are not covered by it — an mcp-servers: endpoint is an address you configured yourself
+# (see above), not one the model chose.
+#
+# url-safety:
+#   allow-hosts: [docs.example.com, api.github.com]
+#   deny-hosts: [ads.example.com]
+
+# =============================================================================
 # Discover skills from the workspace's bare skills/ folder, in addition to the global library
 # (~/.apogee/skills) and the project's .apogee/skills (both always loaded). A skill is a folder
 # containing a SKILL.md (YAML frontmatter — id/name, displayName, summary/description — plus a
