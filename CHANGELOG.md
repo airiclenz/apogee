@@ -10,6 +10,23 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **`ui.inspector` now arms wire capture, and the engine reports it as events.** A new editable
+  bool key — `ui:` / `inspector:`, default false, file-only like every key in the block — travels the
+  config pipeline to `Options.UI.Inspector`, onto `apogee.Config.Inspector`, and from there into the
+  engine's construction: with it on, `internal/agent` installs the provider's wire observer and every
+  model call reports its request body and its response payload through the session's existing
+  `EventSink` as a new `domain.WireEvent` (`Direction` + `Payload`, stamped with the emitting agent's
+  Turn, depth and spawning call id like every other Event), re-exported on the public surface as
+  `apogee.WireEvent` with its two `apogee.WireDirection…` values. Both drivers plumb it, so a headless
+  run observes the same stream an interactive session does — the event crosses the engine seam as data,
+  never as a control surface (ADR 0031). Credentials cannot travel: the capture is bodies only, never
+  headers. With the key off, no observer is installed at all — nothing is captured, accumulated or
+  emitted, and the session is byte-identical to one built before the key existed. Arming is read once,
+  at startup: a mid-session edit applies from the next run, which the key's own description and its
+  template documentation both say. `SwitchUpstream` re-arms the client it rebuilds, so a `/server`
+  switch does not silently blind a capturing session, and a routed sub-agent spawn arms its own client
+  at the child's depth. This is the engine half of the Inspector; `/inspect` is still to come.
+
 - **The provider client can now report its own wire traffic.** `internal/provider` gained an
   opt-in observer — `provider.WithWireObserver(func(WireRecord))` — that is handed the bytes the
   client already builds and parses: one `WireRequest` record per `Respond`/`Stream` call carrying

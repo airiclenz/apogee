@@ -246,9 +246,17 @@ func (t *usageTally) record(base domain.EventBase, model string, window, prompt,
 // a constraint cycle is a startup error) — and returns an error rather than
 // silently degrading a misconfigured surface. The root facade forwards apogee.New
 // here, binding the real OpenAI-compatible provider client at cfg.Endpoint (P1.1)
-// carrying cfg.APIKey — unconditionally, since an empty key sends no auth header.
+// carrying cfg.APIKey — unconditionally, since an empty key sends no auth header — and,
+// only when cfg.Inspector asks for it, the Inspector's wire observer (wireTap).
 func New(cfg domain.Config) (*Agent, error) {
-	return newAgent(cfg, provider.NewClient(cfg.Endpoint, cfg.Model, provider.WithAPIKey(cfg.APIKey)))
+	opts, tap := armWireCapture(cfg)
+	a, err := newAgent(cfg, provider.NewClient(cfg.Endpoint, cfg.Model,
+		append(opts, provider.WithAPIKey(cfg.APIKey))...))
+	if err != nil {
+		return nil, err
+	}
+	tap.bind(a)
+	return a, nil
 }
 
 // Resume reconstructs an Agent from a prior Session snapshot. Config supplies the
@@ -256,7 +264,14 @@ func New(cfg domain.Config) (*Agent, error) {
 // serializable conversation state comes from snap. External connections (MCP,
 // network) reconnect fresh; no server-side state is restored (ADR 0008).
 func Resume(cfg domain.Config, snap domain.Session) (*Agent, error) {
-	return resumeAgent(cfg, snap, provider.NewClient(cfg.Endpoint, cfg.Model, provider.WithAPIKey(cfg.APIKey)))
+	opts, tap := armWireCapture(cfg)
+	a, err := resumeAgent(cfg, snap, provider.NewClient(cfg.Endpoint, cfg.Model,
+		append(opts, provider.WithAPIKey(cfg.APIKey))...))
+	if err != nil {
+		return nil, err
+	}
+	tap.bind(a)
+	return a, nil
 }
 
 // Close releases the Agent's resources. Because tools are stateless across Turns

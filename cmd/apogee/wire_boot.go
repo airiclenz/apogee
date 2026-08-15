@@ -184,6 +184,10 @@ func (w *rootWiring) resolveConfig() error {
 		// same value.
 		URLAllowHosts: w.opts.URLAllowHosts,
 		URLDenyHosts:  w.opts.URLDenyHosts,
+		// `ui.inspector:` — whether this session captures its own wire traffic for /inspect. It is
+		// read ONCE, here, because that is where the engine installs the observer: a mid-session
+		// edit of the key changes the file and the next start, never the running engine.
+		Inspector: w.opts.UI.Inspector,
 		// Every variable this configuration reads an API key out of (`api-key-env:`, ADR 0047),
 		// which the execution tools drop from the environment they hand a subprocess. It is the
 		// union across ALL configured entries rather than the bound one's: `/server` switches

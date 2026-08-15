@@ -285,3 +285,43 @@ type AuditEvent struct {
 	Reason   string // the guardrail reason, if any
 	IsError  bool   // whether the recorded result was a tool-level error
 }
+
+// The two values WireEvent.Direction takes — which half of one Upstream round-trip the event
+// carries. They are plain string constants rather than a named type because Direction is the
+// event's own field and no other surface switches on the vocabulary; naming them here is what
+// stops a consumer spelling the words itself.
+const (
+	// WireDirectionRequest is the body the engine posted to the Upstream.
+	WireDirectionRequest = "request"
+	// WireDirectionResponse is what the Upstream answered with.
+	WireDirectionResponse = "response"
+)
+
+// WireEvent reports the RAW PROTOCOL of one half of one Upstream round-trip — the request body
+// the loop's model call put on the wire, or the response payload it read back — so a human can
+// see what was actually exchanged when a model behaves in a way the rendered transcript cannot
+// explain. It is emitted only while Config.Inspector arms the capture; a Config that leaves it
+// false produces none of these at all, and the engine builds nothing to produce them with.
+//
+// Direction is WireDirectionRequest or WireDirectionResponse. Payload is the bytes as text: the
+// marshalled JSON request body, or the response's raw payload lines newline-joined in arrival
+// order. Headers are never carried, so the Upstream API key cannot reach an observer through this
+// event. Nothing is retained by the engine — the event IS the report, and an observer that wants
+// history keeps its own (the TUI's Inspector holds a bounded ring).
+//
+// Like every variant it carries EventBase, so a record is attributable to the Agent that made the
+// call: Turn, Depth and the spawning CallID of a delegated run. Traffic from a sub-agent SHARING
+// its parent's Upstream client (an unrouted spawn) is stamped with the parent's identity, which is
+// the honest fact about a shared connection; a routed spawn builds its own client and is stamped
+// with its own.
+//
+// It crosses the engine seam as DATA, not as a control surface: ADR 0031's wire-silence invariant
+// forbids the engine growing a network-facing control surface, and a domain.Event delivered
+// in-process to whatever sink the Driver installed is exactly the benchable-all-the-way-up shape
+// invariant 4 asks for — a bench observes this stream the same way the TUI does, with no socket
+// between them.
+type WireEvent struct {
+	EventBase
+	Direction string
+	Payload   string
+}

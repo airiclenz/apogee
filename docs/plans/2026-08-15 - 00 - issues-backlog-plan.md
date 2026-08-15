@@ -336,7 +336,40 @@ observer, no accumulation occurs (behaviour identical — existing suite green).
 
 **Commit:** `feat(provider): an opt-in wire observer reports request and response bytes`
 
-## 7. Inspector — `ui.inspector` arms capture and the engine emits `WireEvent`s
+## 7. Inspector — `ui.inspector` arms capture and the engine emits `WireEvent`s — ✅ DONE (2026-08-15)
+
+NOTES (2026-08-15): `internal/config/options.go` is untouched. The item asks the key through to "an
+`Options` field", but the `ui:` block already travels whole (`ApplyConfig`'s `opts.UI = s.UI`), so the
+field is `Options.UI.Inspector` — mirroring `ui.show-scrollbar` exactly. A dedicated top-level Options
+field would be a second copy of one key, and the two could drift.
+NOTES (2026-08-15): the observer could not be installed at the item's cited `construct.go:33` region —
+`newAgent` receives an already-built `provider.Responder`, and a Client's observer is fixed by an
+Option at construction. So construct.go gained the seam (`wireTap` + `armWireCapture` + `bind`), and
+the four sites that actually BUILD a client arm it: `New` and `Resume` (`agent.go`), the ROUTED
+sub-agent spawn (`subagent.go`, bound after the child's depth/callID are stamped), and
+`SwitchUpstream` (`rebind.go`). The last is not construction and is the one addition beyond the item's
+text: an observer belongs to the client it was built with, so without it a `/server` switch would
+silently disarm a session that started with `ui.inspector` on — a feature dying with no report. Pinned
+by `TestInspectorSurvivesASwitchUpstream`, confirmed RED against the un-re-armed rebind.
+NOTES (2026-08-15): the item's "depth/callID stamp sub-agent traffic correctly for free" holds only
+where a client is built per agent. An UNROUTED sub-agent speaks over the parent's client (ADR 0045's
+fallback path), so its traffic is stamped with the parent's identity — the honest fact about a shared
+connection, and stated in `wireTap`'s and `domain.WireEvent`'s doc comments rather than papered over
+by giving every child a client of its own.
+NOTES (2026-08-15): `internal/tui/fold_test.go` had to take a row beyond the item's Files line.
+`TestFoldEventCoversEveryEventVariant` parses `internal/domain/events.go` and fails for any variant
+with no stated fold, so a new Event variant cannot land without one; the row states the honest current
+answer — inert in the transcript — which item 8 replaces with the bounded ring.
+NOTES (2026-08-15): added the two exported constants `domain.WireDirectionRequest` /
+`WireDirectionResponse` beside the plain `Direction string` the item specifies. The item names both
+values; naming them in the domain is what stops item 8 and any other Driver spelling the words
+themselves.
+NOTES (2026-08-15): `apogee.go` and `example_test.go` took the item beyond its Files line, per the
+run's binding decision. ADR 0010 makes the root aliases the public surface, and a new `domain.Event`
+variant that only exists inside `internal/domain` is unreachable to an embedder switching on `Event` —
+so the Event-variant alias block gained `WireEvent = domain.WireEvent`, a const block beside it
+re-exports `WireDirectionRequest`/`WireDirectionResponse` (the same shape the Status/Approval/Present
+consts use), and `example_test.go`'s compile-time guard list gained `_ apogee.WireEvent`.
 
 **Depends on item 6.**
 

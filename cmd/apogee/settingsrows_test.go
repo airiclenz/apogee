@@ -47,7 +47,7 @@ func fabricatedSettings() config.Options {
 		ResponseReserve:    0.35,
 		Present:            config.PresentSettings{AutoOpen: true, Command: "zed {path}", Port: 8080},
 		UI: config.UISettings{Spinner: tui.SpinnerGlitter, SpinnerColor: true, ShowScrollbar: false,
-			ColorScheme: "dark", StallAfter: 2 * time.Minute},
+			ColorScheme: "dark", StallAfter: 2 * time.Minute, Inspector: true},
 		Bypass:              true,
 		Mechanisms:          map[string]bool{"validate": true, "syntax": true, "autofix": false},
 		ValidatedSetsEnable: true,
@@ -267,6 +267,7 @@ func TestSettingsRowsFormatEffectiveValues(t *testing.T) {
 		"ui.show-scrollbar":      "false",
 		"ui.color-scheme":        "dark",
 		"ui.stall-after":         "2m0s",  // a duration prints itself, and the printing is a spelling the key takes back
+		"ui.inspector":           "true",  // armed for THIS run, which is the only thing a startup-only key can report
 		"cursor-shape":           "block", // unset, so the declared default is what is in force
 		"editor":                 "code -w",
 		"bypass":                 "true",

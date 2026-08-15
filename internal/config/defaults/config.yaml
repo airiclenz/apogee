@@ -625,12 +625,21 @@ system-prompt-text: |
 # responding is watched — a long silent tool call is normal, and a turn waiting on YOUR answer
 # never counts as quiet.
 #
+# `inspector` arms the Inspector: apogee keeps the raw JSON it posts to the server and the raw
+# stream it gets back, and `/inspect` shows you the most recent of it. That is the view for "the
+# model did something strange and I want to see what was actually on the wire" — the request bodies
+# and the response payloads, never your API key, which is a header and is never captured. Off by
+# default, and off means off: nothing is captured, kept or emitted, so leaving this alone costs
+# nothing at all. It is read once, at startup — changing it here (or from /settings) arms or disarms
+# the capture at your NEXT start, not in the running session.
+#
 # ui:
 #   spinner: snake         # snake | glitter | classic
 #   spinner-color: true    # the 10s colour loop; false = your terminal's own text colour
 #   show-scrollbar: true   # false = no bar in the transcript or any popup; they take back the column
 #   color-scheme: dark     # dark | light | any *.yaml in ~/.apogee/schemes/
 #   stall-after: 90s       # engine silence before "· quiet" qualifies the status line; 0 = off
+#   inspector: false       # true = capture the raw wire traffic /inspect shows; takes effect next start
 
 # =============================================================================
 # The prompt cursor — apogee draws the real terminal cursor, always steady, in the shape named here:

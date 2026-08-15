@@ -304,7 +304,13 @@ func (a *Agent) SwitchUpstream(spec UpstreamSpec) error {
 
 	// Commit — from here on nothing can fail (provider.NewClient never does; a malformed
 	// endpoint surfaces at request time, matching construction).
-	a.upstream = provider.NewClient(spec.Endpoint, "", provider.WithAPIKey(spec.APIKey))
+	// The Inspector's capture is re-armed onto the new client, since an observer belongs to the
+	// client it was built with: without this a `/server` switch would silently disarm a session
+	// that started with `ui.inspector` on. The tap binds to THIS Agent, which is the one that will
+	// speak over the new connection.
+	opts, tap := armWireCapture(a.cfg)
+	tap.bind(a)
+	a.upstream = provider.NewClient(spec.Endpoint, "", append(opts, provider.WithAPIKey(spec.APIKey))...)
 	a.cfg.Endpoint = spec.Endpoint
 	a.cfg.APIKey = spec.APIKey
 	a.cfg.Model = ""

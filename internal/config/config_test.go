@@ -2862,6 +2862,57 @@ func TestApplyConfigUI(t *testing.T) {
 	}
 }
 
+// The `inspector:` key, end to end: YAML → Options, in the three shapes a bool key has. It is the
+// arming switch for the raw-protocol capture, and the arming happens ONCE at startup — so what the
+// resolved Options say is exactly what the session will and will not capture, and a default that
+// drifted to true would turn every session into a capturing one silently.
+func TestApplyConfigUIInspector(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		name string
+		yaml string
+		want bool
+	}{
+		{name: "armed", yaml: "ui:\n  inspector: true\n", want: true},
+		{name: "an explicit false is the shipped default said out loud", yaml: "ui:\n  inspector: false\n"},
+		{name: "an absent key leaves the capture disarmed", yaml: "ui:\n  spinner: classic\n"},
+		{name: "no ui block at all", yaml: "mode: plan\n"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			home := testConfigHome(t, "")
+			writeConfigHome(t, home, tt.yaml)
+			opts := Options{ConfigDir: home}
+			if err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" },
+				os.ReadFile, noNotify); err != nil {
+				t.Fatalf("ApplyConfig: %v", err)
+			}
+			if opts.UI.Inspector != tt.want {
+				t.Errorf("opts.ui.inspector = %v; want %v", opts.UI.Inspector, tt.want)
+			}
+		})
+	}
+}
+
+// Naming one ui key must not disturb the ones beside it — the property the pointer-typed schema
+// buys — so an armed Inspector leaves the spinner, the bar, the scheme and the threshold at their
+// defaults, and naming any of those leaves the Inspector disarmed.
+func TestApplyConfigUIInspectorIsIndependentOfTheOtherUIKeys(t *testing.T) {
+	t.Parallel()
+	home := testConfigHome(t, "")
+	writeConfigHome(t, home, "ui:\n  inspector: true\n")
+	opts := Options{ConfigDir: home}
+	if err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" },
+		os.ReadFile, noNotify); err != nil {
+		t.Fatalf("ApplyConfig: %v", err)
+	}
+	want := defaultUISettings()
+	want.Inspector = true
+	if opts.UI != want {
+		t.Errorf("opts.ui = %+v; want %+v", opts.UI, want)
+	}
+}
+
 // The `stall-after:` key, in every shape it takes: the durations Go spells, the explicit `0` that
 // turns the quiet qualifier off, and the two refusals — a length of time that is negative, and text
 // that is no length of time at all. The zero and the absent key are the pair the pointer exists

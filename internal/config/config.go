@@ -433,6 +433,13 @@ type UISettings struct {
 	// DURATION here, unlike spinner beside it, because the renderer takes a duration and nothing
 	// downstream would gain from a second parse of the same text.
 	StallAfter time.Duration
+	// inspector arms the Inspector's wire capture: with it on, the engine reports the raw request
+	// and response bytes of every model call as domain.WireEvents, which `/inspect` shows. Default
+	// FALSE, and the off-state is a true zero — nothing is captured, accumulated or emitted — so the
+	// key costs a session that leaves it alone exactly nothing. It is read at STARTUP only (the
+	// observer is installed while the engine is constructed), so a mid-session edit takes effect at
+	// the next start; the template's key doc says so.
+	Inspector bool
 	// unparsedStallAfter is a `stall-after:` value time.ParseDuration could make nothing of, kept as
 	// it was written so Validate can name the text the human typed rather than the value it failed
 	// to become. Empty on every config that resolves — including one that never named the key —
@@ -447,8 +454,9 @@ type UISettings struct {
 const defaultStallAfter = 90 * time.Second
 
 // defaultUISettings is the resolved `ui:` block with nothing configured: the renderer's own default
-// style, with the colour loop on, the scroll bar shown, the default colour scheme, and the shipped
-// quiet threshold the stall guard waits out. The style is
+// style, with the colour loop on, the scroll bar shown, the default colour scheme, the shipped
+// quiet threshold the stall guard waits out, and the Inspector disarmed (a false left at the zero
+// value: an off-state that captures nothing is the absence of the feature). The style is
 // ASKED of internal/tui (ParseSpinnerStyle's documented "" ⇒ the default) rather than restated here,
 // so the vocabulary and its default stay in the one package that owns them — the same reason
 // validate does not list the valid names, and the same reason the scheme name comes from
@@ -1681,6 +1689,11 @@ type uiConfig struct {
 	// the 90s default. It stays a raw string at this seam because the parse can FAIL, and a ui block
 	// is refused in one place (UISettings.Validate), never at the yaml boundary.
 	StallAfter *string `yaml:"stall-after"`
+	// Inspector arms the raw-protocol capture `/inspect` shows. A pointer for ShowScrollbar's
+	// reason — an explicit `inspector: false` is a fact about this config, not an absent key — even
+	// though both spell the same off-state today, so the schema stays honest if the default ever
+	// moves.
+	Inspector *bool `yaml:"inspector"`
 }
 
 // toUISettings maps the on-disk ui block onto the resolved value, applying the defaults for the keys
@@ -1714,6 +1727,9 @@ func (u uiConfig) toUISettings() UISettings {
 				s.unparsedStallAfter = text
 			}
 		}
+	}
+	if u.Inspector != nil {
+		s.Inspector = *u.Inspector
 	}
 	return s
 }

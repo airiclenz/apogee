@@ -441,6 +441,67 @@ func resumeAgent(cfg domain.Config, snap domain.Session, up provider.Responder) 
 	return a, nil
 }
 
+// wireTap is the Inspector's capture seam: the provider observer that turns the raw bytes of one
+// Upstream round-trip into a domain.WireEvent on the emitting Agent's EventSink. It exists as a
+// bindable object rather than a plain closure because of an ordering fact — a provider.Client's
+// observer is fixed by an Option at construction, while the Agent whose identity stamps the events
+// is built FROM that client. So the tap is created first, installed on the client, and pointed at
+// the Agent (bind) the moment it exists; the window between the two is closed before any caller
+// can Step, and observe answers a nil binding by capturing nothing rather than by panicking.
+//
+// One tap serves one CLIENT, and a client is shared by an Agent and its unrouted sub-agents — so a
+// delegated call made over the parent's connection is stamped with the parent's identity, which is
+// the honest fact about a shared connection. A ROUTED spawn (ADR 0045) builds a client of its own
+// and therefore gets a tap of its own, stamped at the child's depth and spawning call id.
+type wireTap struct {
+	// a is the Agent whose base() stamps the events. Written once by bind, on the goroutine that
+	// constructs the Agent, before that Agent can take a Step — the same publication the
+	// constructed Agent's own fields rely on.
+	a *Agent
+}
+
+// armWireCapture returns the provider Options that arm the Inspector for an Agent about to be
+// constructed from cfg, together with the tap the caller must bind to it. A cfg that does not ask
+// for the Inspector arms nothing and returns (nil, nil): no observer reaches the Client, so its
+// capture paths stay dead and the session is byte-identical to one built before the key existed.
+// bind on the nil tap is a no-op, so a caller needs no branch of its own.
+func armWireCapture(cfg domain.Config) ([]provider.Option, *wireTap) {
+	if !cfg.Inspector {
+		return nil, nil
+	}
+	t := &wireTap{}
+	return []provider.Option{provider.WithWireObserver(t.observe)}, t
+}
+
+// bind points the tap at the Agent whose identity stamps its events. It is a no-op on a nil tap —
+// the shape armWireCapture returns when the Inspector is disarmed.
+func (t *wireTap) bind(a *Agent) {
+	if t == nil {
+		return
+	}
+	t.a = a
+}
+
+// observe is the provider.WireRecord callback: one record becomes one WireEvent on the bound
+// Agent's sink, stamped with that Agent's current Turn, nesting depth and spawning call id — the
+// same EventBase every other Event it emits carries. The payload is carried as text; it is the
+// Client's own buffer, which the contract on provider.WireRecord permits keeping, and the string
+// conversion copies it anyway.
+//
+// An unbound tap captures nothing: that can only be the construction window described on wireTap,
+// where no call has been made yet, so there is nothing to report and no reason to fail.
+func (t *wireTap) observe(rec provider.WireRecord) {
+	a := t.a
+	if a == nil {
+		return
+	}
+	a.cfg.Events.Emit(domain.WireEvent{
+		EventBase: a.base(a.turns.index),
+		Direction: string(rec.Direction),
+		Payload:   string(rec.Payload),
+	})
+}
+
 // validateConfig enforces the minimum construction surface (Config: Endpoint and Events).
 // Events is load-bearing — the loop emits through it; Endpoint is validated here for an honest
 // contract even when a test injects a fake responder that ignores it (the real provider dials it).

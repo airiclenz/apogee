@@ -343,6 +343,15 @@ var KeyRegistry = []Key{
 		Desc:     "Engine silence after which a running turn is marked quiet on the status line; 0 turns it off.",
 	},
 	{
+		// No validate hook and none possible: a bool's kind IS its whole contract. Editable, and the
+		// edit is honoured at the NEXT start — the observer is installed while the engine is
+		// constructed — which the description says out loud so a row that took the write without
+		// changing the session reads as the key's contract rather than as a failure.
+		Path: "ui.inspector", Kind: KindBool, Default: "false",
+		Editable: true,
+		Desc:     "Capture raw request/response traffic for /inspect; takes effect at the next start.",
+	},
+	{
 		Path: "cursor-shape", Kind: KindEnum, Default: "block", EnumValues: cursorShapeValues,
 		Editable: true,
 		Validate: validateCursorShapeName,

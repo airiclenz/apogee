@@ -51,6 +51,7 @@ var (
 	_ apogee.ErrorEvent
 	_ apogee.UsageEvent
 	_ apogee.AuditEvent
+	_ apogee.WireEvent
 	_ apogee.Approver
 	_ apogee.ApprovalRequest
 	_ apogee.ApprovalDecision

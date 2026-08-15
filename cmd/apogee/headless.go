@@ -394,6 +394,10 @@ func runHeadless(cmd *cobra.Command, args []string, opts *config.Options, noSave
 		// tools reach a host the operator denied for every interactive session.
 		URLAllowHosts: opts.URLAllowHosts,
 		URLDenyHosts:  opts.URLDenyHosts,
+		// `ui.inspector:`, honoured here for the reason every other file-only key is: it is one
+		// configuration. This run has no /inspect pane to show the capture in, but its sink sees
+		// the WireEvents like any other — which is the benchable-all-the-way-up shape (ADR 0031).
+		Inspector: opts.UI.Inspector,
 		// The configured `api-key-env:` variables the execution tools scrub from a subprocess
 		// environment, honoured here for the reason every other file-only key is: one configuration,
 		// so an unattended run cannot be the path on which the operator's key stays inheritable by

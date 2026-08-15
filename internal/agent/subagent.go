@@ -227,6 +227,10 @@ func (a *Agent) newChildAgent(spawnCallID, task, name string) (*Agent, error) {
 	// deliberately never the endpoint — so the child's wire target moves atomically with its key,
 	// the same idiom SwitchUpstream takes for the session (rebind.go). The parent's own responder is
 	// untouched: routing changes what a SPAWN builds, never what the session speaks to.
+	// tap is the Inspector's capture seam for a client this spawn BUILDS (below). An unrouted spawn
+	// builds none — it speaks over the parent's connection, whose tap is already bound to the
+	// parent — so tap stays nil there and binding it is a no-op (wireTap).
+	var tap *wireTap
 	upstream := a.upstream
 	if target := a.delegationTarget(); target != nil {
 		childCfg.Endpoint = target.Endpoint
@@ -265,7 +269,10 @@ func (a *Agent) newChildAgent(spawnCallID, task, name string) (*Agent, error) {
 		if target.Mechanisms != nil {
 			childCfg.Mechanisms = target.Mechanisms()
 		}
-		upstream = provider.NewClient(target.Endpoint, target.Model, provider.WithAPIKey(target.APIKey))
+		var opts []provider.Option
+		opts, tap = armWireCapture(childCfg)
+		upstream = provider.NewClient(target.Endpoint, target.Model,
+			append(opts, provider.WithAPIKey(target.APIKey))...)
 	}
 
 	child, err := newAgent(childCfg, upstream)
@@ -281,6 +288,9 @@ func (a *Agent) newChildAgent(spawnCallID, task, name string) (*Agent, error) {
 	child.callID = spawnCallID
 	child.task = task
 	child.name = name
+	// Bind the routed spawn's own capture seam AFTER its identity is stamped, so its WireEvents
+	// carry the child's depth and spawning call id rather than the zero values newAgent left.
+	tap.bind(child)
 	child.guards = a.guards.ForSubAgent()
 	// The child belongs to the PARENT's session, so it speaks from the parent's context-file
 	// bytes: copy the cache over the one its own construction just read. A sub-agent is not a

@@ -6,9 +6,15 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"io"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"slices"
+	"strings"
+	"sync"
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
@@ -102,4 +108,185 @@ func TestHostToolsBuildsTheURLGuardFromTheConfiguredHosts(t *testing.T) {
 			t.Errorf("an unconfigured Config produced host lists: allow=%q deny=%q", guard.AllowHosts, guard.DenyHosts)
 		}
 	})
+}
+
+// ---------------------------------------------------------------------------
+// The Inspector's arming seam (Config.Inspector → provider wire observer → WireEvent)
+// ---------------------------------------------------------------------------
+
+// wireUpstream is a hermetic Upstream that answers with a two-chunk streamed completion and
+// records the body it was posted, so a test can hold the WireEvent's payload against the bytes
+// that actually went out. The mutex is load-bearing for the reason authRecorder's is: the handler
+// runs on the server's goroutine while the test reads afterwards.
+type wireUpstream struct {
+	mu   sync.Mutex
+	body string
+}
+
+func (u *wireUpstream) serve(w http.ResponseWriter, r *http.Request) {
+	posted, _ := io.ReadAll(r.Body)
+	u.mu.Lock()
+	u.body = string(posted)
+	u.mu.Unlock()
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"seen\"},\"finish_reason\":null}]}\n\n")
+	_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n")
+	_, _ = io.WriteString(w, "data: [DONE]\n\n")
+}
+
+// posted returns the recorded request body under the recorder's lock.
+func (u *wireUpstream) posted(t *testing.T) string {
+	t.Helper()
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	return u.body
+}
+
+// newWireUpstream starts the recording Upstream and returns it with its URL.
+func newWireUpstream(t *testing.T) (*wireUpstream, string) {
+	t.Helper()
+	up := &wireUpstream{}
+	srv := httptest.NewServer(http.HandlerFunc(up.serve))
+	t.Cleanup(srv.Close)
+	return up, srv.URL
+}
+
+// wireEvents picks the WireEvents out of a recorded stream, in emission order.
+func wireEvents(events []domain.Event) []domain.WireEvent {
+	var out []domain.WireEvent
+	for _, e := range events {
+		if we, ok := e.(domain.WireEvent); ok {
+			out = append(out, we)
+		}
+	}
+	return out
+}
+
+// TestInspectorArmsWireEventsThroughTheSink is the arming seam end to end: a Config with the
+// Inspector on reports one request record and one response record per model call, through the
+// SAME EventSink every other Event travels on — the property that keeps the Inspector benchable
+// in-process rather than needing a surface of its own (ADR 0031). It runs against a real provider
+// client and a real (hermetic) HTTP Upstream because the capture lives inside that client: a fake
+// Responder would prove the observer was installed on nothing.
+func TestInspectorArmsWireEventsThroughTheSink(t *testing.T) {
+	t.Parallel()
+
+	up, url := newWireUpstream(t)
+	sink := &recordingSink{}
+	cfg := baseConfig(sink)
+	cfg.Endpoint = url
+	cfg.APIKey = "super-secret-token"
+	cfg.Inspector = true
+
+	a, err := New(cfg)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	stepOnce(t, a, "hi")
+
+	records := wireEvents(sink.events)
+	if len(records) != 2 {
+		t.Fatalf("got %d WireEvents for one model call; want exactly one per direction", len(records))
+	}
+	req, resp := records[0], records[1]
+	if req.Direction != domain.WireDirectionRequest {
+		t.Errorf("first record direction = %q; want %q", req.Direction, domain.WireDirectionRequest)
+	}
+	if resp.Direction != domain.WireDirectionResponse {
+		t.Errorf("second record direction = %q; want %q", resp.Direction, domain.WireDirectionResponse)
+	}
+
+	// The request record is the body that was actually posted, still parseable as the JSON it is.
+	if req.Payload != up.posted(t) {
+		t.Errorf("request payload = %q; want the posted body %q", req.Payload, up.posted(t))
+	}
+	var body map[string]any
+	if err := json.Unmarshal([]byte(req.Payload), &body); err != nil {
+		t.Errorf("request payload does not round-trip as JSON: %v", err)
+	}
+	if body["model"] != "test-model" {
+		t.Errorf("request payload names model %v; want the bound model", body["model"])
+	}
+	// The credential is a header and headers are never captured, so it cannot be in either record.
+	for _, rec := range records {
+		if strings.Contains(rec.Payload, cfg.APIKey) || strings.Contains(rec.Payload, "Bearer") {
+			t.Errorf("%s record carries authorization material: %q", rec.Direction, rec.Payload)
+		}
+	}
+	// The response record is the stream's own payload lines, in arrival order.
+	for _, want := range []string{"\"content\":\"seen\"", "\"finish_reason\":\"stop\"", "[DONE]"} {
+		if !strings.Contains(resp.Payload, want) {
+			t.Errorf("response payload %q is missing %q", resp.Payload, want)
+		}
+	}
+
+	// Both records carry the stamp every Event of this Agent carries: the top-level agent's depth
+	// and empty run identity, on the Turn the call was made for.
+	msg, ok := firstMessageEvent(t, sink.events)
+	if !ok {
+		t.Fatal("the Turn produced no MessageEvent to take the turn index from")
+	}
+	for _, rec := range records {
+		if rec.Depth != 0 || rec.CallID != "" {
+			t.Errorf("%s record stamped depth=%d callID=%q; want the top-level agent's 0/\"\"",
+				rec.Direction, rec.Depth, rec.CallID)
+		}
+		if rec.Turn != msg.Turn {
+			t.Errorf("%s record stamped turn %d; want the Turn that made the call (%d)",
+				rec.Direction, rec.Turn, msg.Turn)
+		}
+	}
+}
+
+// TestInspectorOffEmitsNoWireEvents is the off-state the ratified call turns on: a Config that
+// leaves the key alone installs no observer, so the session emits no WireEvents at all — the
+// capture is absent rather than merely unread.
+func TestInspectorOffEmitsNoWireEvents(t *testing.T) {
+	t.Parallel()
+
+	_, url := newWireUpstream(t)
+	sink := &recordingSink{}
+	cfg := baseConfig(sink)
+	cfg.Endpoint = url // cfg.Inspector stays false
+
+	a, err := New(cfg)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	stepOnce(t, a, "hi")
+
+	if got := wireEvents(sink.events); len(got) != 0 {
+		t.Errorf("a disarmed Inspector emitted %d WireEvents; want none", len(got))
+	}
+}
+
+// TestInspectorSurvivesASwitchUpstream pins the re-arm: an observer belongs to the provider client
+// it was built with, and /server rebuilds that client — so without re-arming, a session that
+// started with the Inspector on would go silently blind the moment the human switched servers.
+func TestInspectorSurvivesASwitchUpstream(t *testing.T) {
+	t.Parallel()
+
+	_, first := newWireUpstream(t)
+	_, second := newWireUpstream(t)
+	sink := &recordingSink{}
+	cfg := baseConfig(sink)
+	cfg.Endpoint = first
+	cfg.Inspector = true
+
+	a, err := New(cfg)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if err := a.SwitchUpstream(UpstreamSpec{Endpoint: second}); err != nil {
+		t.Fatalf("SwitchUpstream: %v", err)
+	}
+	if err := a.Rebind(RebindSpec{Model: "test-model"}); err != nil {
+		t.Fatalf("Rebind: %v", err)
+	}
+	stepOnce(t, a, "hi")
+
+	if got := wireEvents(sink.events); len(got) != 2 {
+		t.Errorf("got %d WireEvents after a server switch; want the capture still armed (2)", len(got))
+	}
 }

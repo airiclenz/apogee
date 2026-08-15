@@ -60,6 +60,20 @@ type Config struct {
 	Confiner  Confiner  // nil ⇒ no confinement ⇒ Auto is refused (ADR 0004)
 	Events    EventSink // where typed Events are pushed; required
 
+	// Inspector arms the raw-protocol capture (`ui.inspector` in config.yaml): with it set, the
+	// engine observes the Upstream client's own bytes and reports each model call's request body
+	// and response payload to Events as a WireEvent, stamped with the emitting Agent's identity
+	// like every other Event. It is a DEBUGGING view of traffic the engine already builds and
+	// parses — nothing is retained here, and the credentials never travel (headers are not part of
+	// the capture, by construction in internal/provider).
+	//
+	// false (the default) installs no observer at all, so the capture paths never run and a session
+	// that leaves it alone is byte-identical to one built before this field existed. It is read at
+	// CONSTRUCTION: New, Resume and a routed sub-agent spawn arm from it, and SwitchUpstream
+	// re-arms the client it rebuilds, but nothing re-reads it mid-session — a host that flips it
+	// applies the change by starting again.
+	Inspector bool
+
 	// Extension points. nil ⇒ the built-in defaults.
 	Tools *ToolRegistry // open extension point (ADR 0002)
 

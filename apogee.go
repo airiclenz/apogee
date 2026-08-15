@@ -192,6 +192,13 @@ type (
 	ErrorEvent          = domain.ErrorEvent
 	UsageEvent          = domain.UsageEvent
 	AuditEvent          = domain.AuditEvent
+	WireEvent           = domain.WireEvent
+)
+
+// The two values WireEvent.Direction takes.
+const (
+	WireDirectionRequest  = domain.WireDirectionRequest
+	WireDirectionResponse = domain.WireDirectionResponse
 )
 
 // ----------------------------------------------------------------------------

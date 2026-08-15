@@ -152,6 +152,14 @@ func foldCases() []foldCase {
 			// hosts (a log shipper), and the transcript deliberately renders none of it.
 			event: domain.AuditEvent{Tool: "terminal", CallID: "1", Decision: "allowed"},
 		},
+		{
+			name: "WireEvent is inert in the transcript",
+			// Nothing here, and deliberately: a raw-protocol record is not a transcript entry —
+			// it says nothing about the conversation and must not disturb entry folding. The
+			// Inspector holds the records in a bounded ring beside the transcript and `/inspect`
+			// is what shows them, so the scrollback, the gauge and the status phrase all stay put.
+			event: domain.WireEvent{Direction: domain.WireDirectionRequest, Payload: `{"model":"m"}`},
+		},
 	}
 }
 
