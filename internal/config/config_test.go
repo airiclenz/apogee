@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/mcp"
@@ -21,10 +22,12 @@ func boolptr(b bool) *bool    { return &b }
 func intptr(i int) *int       { return &i }
 
 // wantUIDefault is the resolved `ui:` block a config that configures none must produce: the
-// default spinner style with its colour loop on, and the transcript's scroll bar shown. It is
-// spelled out rather than taken from defaultUISettings, so a change to any shipped default shows up
-// here as a failure instead of silently agreeing with itself.
-var wantUIDefault = UISettings{Spinner: tui.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "dark"}
+// default spinner style with its colour loop on, the transcript's scroll bar shown, and the stall
+// guard waiting 90 seconds of engine silence out. It is spelled out rather than taken from
+// defaultUISettings, so a change to any shipped default shows up here as a failure instead of
+// silently agreeing with itself.
+var wantUIDefault = UISettings{Spinner: tui.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true,
+	ColorScheme: "dark", StallAfter: 90 * time.Second}
 
 // wantContextFilesDefault is the resolved `context-files:` block a config that configures none must
 // produce: the feature on, looking for the one default name in the workspace root. Spelled out
@@ -224,21 +227,24 @@ func TestResolveSettingsPrecedence(t *testing.T) {
 			name: "the ui block is file-only (all three keys)",
 			file: fileConfig{UI: &uiConfig{Spinner: "glitter", SpinnerColor: boolptr(false), ShowScrollbar: boolptr(false)}}.layer(),
 			want: Settings{Mode: "ask-before", ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: true, AutoTitle: true, ValidatedSetsEnable: true, ContextFiles: wantContextFilesDefault, Present: PresentSettings{AutoOpen: true},
-				UI: UISettings{Spinner: tui.SpinnerGlitter, SpinnerColor: false, ShowScrollbar: false, ColorScheme: "dark"}},
+				UI: UISettings{Spinner: tui.SpinnerGlitter, SpinnerColor: false, ShowScrollbar: false, ColorScheme: "dark",
+					StallAfter: 90 * time.Second}},
 		},
 		{
 			// The keys are independent: naming a style says nothing about the colour loop.
 			name: "ui with only spinner: set → the colour loop stays at its default",
 			file: fileConfig{UI: &uiConfig{Spinner: "classic"}}.layer(),
 			want: Settings{Mode: "ask-before", ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: true, AutoTitle: true, ValidatedSetsEnable: true, ContextFiles: wantContextFilesDefault, Present: PresentSettings{AutoOpen: true},
-				UI: UISettings{Spinner: tui.SpinnerClassic, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "dark"}},
+				UI: UISettings{Spinner: tui.SpinnerClassic, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "dark",
+					StallAfter: 90 * time.Second}},
 		},
 		{
 			// …and the other way round: turning the loop off does not change which style paints.
 			name: "ui with only spinner-color: false → the style stays at its default",
 			file: fileConfig{UI: &uiConfig{SpinnerColor: boolptr(false)}}.layer(),
 			want: Settings{Mode: "ask-before", ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: true, AutoTitle: true, ValidatedSetsEnable: true, ContextFiles: wantContextFilesDefault, Present: PresentSettings{AutoOpen: true},
-				UI: UISettings{Spinner: tui.SpinnerSnake, SpinnerColor: false, ShowScrollbar: true, ColorScheme: "dark"}},
+				UI: UISettings{Spinner: tui.SpinnerSnake, SpinnerColor: false, ShowScrollbar: true, ColorScheme: "dark",
+					StallAfter: 90 * time.Second}},
 		},
 		{
 			// The scroll-bar switch is the third independent key: hiding the bar leaves both
@@ -246,7 +252,8 @@ func TestResolveSettingsPrecedence(t *testing.T) {
 			name: "ui with only show-scrollbar: false → the spinner keys stay at their defaults",
 			file: fileConfig{UI: &uiConfig{ShowScrollbar: boolptr(false)}}.layer(),
 			want: Settings{Mode: "ask-before", ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: true, AutoTitle: true, ValidatedSetsEnable: true, ContextFiles: wantContextFilesDefault, Present: PresentSettings{AutoOpen: true},
-				UI: UISettings{Spinner: tui.SpinnerSnake, SpinnerColor: true, ShowScrollbar: false, ColorScheme: "dark"}},
+				UI: UISettings{Spinner: tui.SpinnerSnake, SpinnerColor: true, ShowScrollbar: false, ColorScheme: "dark",
+					StallAfter: 90 * time.Second}},
 		},
 		{
 			name: "ui is NOT settable by env or flag (file-only ⇒ the defaults hold)",
@@ -2562,8 +2569,8 @@ func TestApplyConfigContextFilesDoesNotRequireTheFilesToExist(t *testing.T) {
 }
 
 // The ui config block parses into opts.ui: every key, file-only like the blocks around it, so the
-// composition root can hand the renderer a style, a colour flag, a scroll-bar flag and a colour
-// scheme it never has to parse.
+// composition root can hand the renderer a style, a colour flag, a scroll-bar flag, a colour scheme
+// and a quiet threshold it never has to parse.
 func TestApplyConfigUI(t *testing.T) {
 	t.Parallel()
 	home := testConfigHome(t, "")
@@ -2572,6 +2579,7 @@ func TestApplyConfigUI(t *testing.T) {
   spinner-color: false
   show-scrollbar: false
   color-scheme: light
+  stall-after: 2m
 `
 	writeConfigHome(t, home, configYAML)
 	opts := Options{ConfigDir: home}
@@ -2579,9 +2587,65 @@ func TestApplyConfigUI(t *testing.T) {
 		t.Fatalf("ApplyConfig: %v", err)
 	}
 
-	want := UISettings{Spinner: tui.SpinnerGlitter, SpinnerColor: false, ShowScrollbar: false, ColorScheme: "light"}
+	want := UISettings{Spinner: tui.SpinnerGlitter, SpinnerColor: false, ShowScrollbar: false, ColorScheme: "light",
+		StallAfter: 2 * time.Minute}
 	if opts.UI != want {
 		t.Errorf("opts.ui = %+v; want %+v", opts.UI, want)
+	}
+}
+
+// The `stall-after:` key, in every shape it takes: the durations Go spells, the explicit `0` that
+// turns the quiet suffix off, and the two refusals — a length of time that is negative, and text
+// that is no length of time at all. The zero and the absent key are the pair the pointer exists
+// for: one disables the guard, the other keeps the shipped 90 seconds.
+func TestApplyConfigStallAfter(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		name    string
+		yaml    string
+		want    time.Duration
+		wantErr string
+	}{
+		{name: "the shipped default, said out loud", yaml: "ui:\n  stall-after: 90s\n", want: 90 * time.Second},
+		{name: "minutes", yaml: "ui:\n  stall-after: 2m\n", want: 2 * time.Minute},
+		{name: "a compound duration", yaml: "ui:\n  stall-after: 1m30s\n", want: 90 * time.Second},
+		{name: "a bare 0 turns the guard off", yaml: "ui:\n  stall-after: 0\n", want: 0},
+		{name: "no ui block at all keeps the default", yaml: "", want: 90 * time.Second},
+		{name: "the block without the key keeps the default", yaml: "ui:\n  spinner: classic\n", want: 90 * time.Second},
+		{
+			name:    "a negative wait is refused",
+			yaml:    "ui:\n  stall-after: -5s\n",
+			wantErr: "invalid ui.stall-after -5s",
+		},
+		{
+			name:    "text that is no duration is refused, quoted as written",
+			yaml:    "ui:\n  stall-after: soonish\n",
+			wantErr: `invalid ui.stall-after "soonish"`,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			home := testConfigHome(t, "")
+			writeConfigHome(t, home, tt.yaml)
+			opts := Options{ConfigDir: home}
+			err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify)
+
+			if tt.wantErr != "" {
+				if err == nil {
+					t.Fatalf("ApplyConfig accepted %q; want it refused", tt.yaml)
+				}
+				if !strings.Contains(err.Error(), tt.wantErr) {
+					t.Errorf("error = %v, want it to mention %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ApplyConfig: %v", err)
+			}
+			if opts.UI.StallAfter != tt.want {
+				t.Errorf("opts.ui.stallAfter = %s; want %s", opts.UI.StallAfter, tt.want)
+			}
+		})
 	}
 }
 
@@ -2619,29 +2683,42 @@ func TestApplyConfigUIPartialKeepsTheOtherDefault(t *testing.T) {
 		{
 			name: "only spinner: → the colour loop stays on and the bar stays shown",
 			yaml: "ui:\n  spinner: classic\n",
-			want: UISettings{Spinner: tui.SpinnerClassic, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "dark"},
+			want: UISettings{Spinner: tui.SpinnerClassic, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "dark",
+				StallAfter: 90 * time.Second},
 		},
 		{
 			name: "only spinner-color: false → the style stays the default and the bar stays shown",
 			yaml: "ui:\n  spinner-color: false\n",
-			want: UISettings{Spinner: tui.SpinnerSnake, SpinnerColor: false, ShowScrollbar: true, ColorScheme: "dark"},
+			want: UISettings{Spinner: tui.SpinnerSnake, SpinnerColor: false, ShowScrollbar: true, ColorScheme: "dark",
+				StallAfter: 90 * time.Second},
 		},
 		{
 			name: "only show-scrollbar: false → the bar goes, the spinner keys stay put",
 			yaml: "ui:\n  show-scrollbar: false\n",
-			want: UISettings{Spinner: tui.SpinnerSnake, SpinnerColor: true, ShowScrollbar: false, ColorScheme: "dark"},
+			want: UISettings{Spinner: tui.SpinnerSnake, SpinnerColor: true, ShowScrollbar: false, ColorScheme: "dark",
+				StallAfter: 90 * time.Second},
 		},
 		{
 			// The explicit `true` and the absent key resolve alike — pinned so the pointer's
 			// present-and-true branch is exercised, not just its nil one.
 			name: "only show-scrollbar: true → the shipped default, said out loud",
 			yaml: "ui:\n  show-scrollbar: true\n",
-			want: UISettings{Spinner: tui.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "dark"},
+			want: UISettings{Spinner: tui.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "dark",
+				StallAfter: 90 * time.Second},
 		},
 		{
 			name: "only color-scheme: → the spinner keys and the bar stay put",
 			yaml: "ui:\n  color-scheme: light\n",
-			want: UISettings{Spinner: tui.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "light"},
+			want: UISettings{Spinner: tui.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "light",
+				StallAfter: 90 * time.Second},
+		},
+		{
+			// And the newest key is independent in both directions: turning the stall guard off says
+			// nothing about the look, and none of the four keys above moves it.
+			name: "only stall-after: 0 → the look is untouched and only the guard goes",
+			yaml: "ui:\n  stall-after: 0\n",
+			want: UISettings{Spinner: tui.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "dark",
+				StallAfter: 0},
 		},
 	}
 	for _, tt := range tests {

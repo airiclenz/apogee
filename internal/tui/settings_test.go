@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	lipgloss "charm.land/lipgloss/v2"
@@ -1201,6 +1202,51 @@ func TestSettingsPaneCursorShapeAppliesAndRefusesTheUnknown(t *testing.T) {
 
 	if got := m.settingsNote(unknown); !strings.Contains(got, "saved — live apply failed") {
 		t.Errorf("marker = %q, want the apply's own refusal", got)
+	}
+}
+
+// `ui.stall-after` is the renderer's own too, and the one whose value is a LENGTH OF TIME: the row
+// carries the text a human types and the Model carries the duration the status line waits out, so
+// the parse happens exactly once, here. Its three answers are pinned together — a duration lands,
+// `0` is the key's own spelling of "off" rather than a refusal, and text no duration can be made of
+// is reported on the row instead of silently ignored (the binary validates before it writes, but
+// the pane is not the only thing that can put a value in that file).
+func TestSettingsPaneStallAfterAppliesAndRefusesWhatIsNotADuration(t *testing.T) {
+	t.Parallel()
+	row := SettingRow{
+		Path: "ui.stall-after", Section: "Interface", Kind: SettingString, Default: "90s",
+		Editable: true, Desc: "Engine silence after which a running turn is marked quiet.",
+	}
+	edit := func(t *testing.T, log *settingsWriteLog, text string) Model {
+		t.Helper()
+		m, _ := settingsEditModel(t, []SettingRow{row}, log)
+		m.opts.StallAfter = 90 * time.Second // the shipped threshold, so "off" is a visible change
+		return step(t, typeSetting(t, step(t, m, keyEnter()), text), keyEnter())
+	}
+
+	log := &settingsWriteLog{}
+	m := edit(t, log, "2m")
+
+	if want := []settingEdit{{path: "ui.stall-after", value: "2m"}}; !reflect.DeepEqual(log.writes, want) {
+		t.Fatalf("writes = %+v, want %+v", log.writes, want)
+	}
+	if len(log.applies) != 0 {
+		t.Errorf("applies = %+v, want none: the renderer owns this key", log.applies)
+	}
+	if got, want := m.opts.StallAfter, 2*time.Minute; got != want {
+		t.Errorf("opts.StallAfter = %s, want %s — the new threshold did not reach the status line", got, want)
+	}
+
+	if got := edit(t, &settingsWriteLog{}, "0").opts.StallAfter; got != 0 {
+		t.Errorf("opts.StallAfter = %s, want 0 — `0` did not turn the guard off", got)
+	}
+
+	m = edit(t, &settingsWriteLog{}, "soonish")
+	if got := m.settingsNote(row); !strings.Contains(got, "saved — live apply failed") {
+		t.Errorf("marker = %q, want the apply's own refusal", got)
+	}
+	if got, want := m.opts.StallAfter, 90*time.Second; got != want {
+		t.Errorf("opts.StallAfter = %s, want %s — a refused apply must not move the threshold", got, want)
 	}
 }
 

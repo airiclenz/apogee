@@ -135,13 +135,16 @@ func (w *rootWiring) options() tui.Options {
 		// already serving — and the renderer actuates the answer through the ordinary `/model` latch.
 		RestoreProfile: w.launcherSeams.restore,
 		// The resolved `ui:` block: which animation paints the status-line spinner, whether its
-		// colour loop runs, and whether the transcript's scroll bar is painted at all. Independent
-		// values, resolved and validated by ApplyConfig, so the renderer selects rather than parses.
+		// colour loop runs, whether the transcript's scroll bar is painted at all, and how long the
+		// engine may go silent before the status line reports the quiet. Independent values, resolved
+		// and validated by ApplyConfig, so the renderer selects rather than parses — the threshold
+		// arrives as the duration it means, not as the text it was written as.
 		// The scroll bar is the one key whose polarity flips here — the config says show, the
 		// renderer's option says hide, so its zero value is the shown default (see tui.Options).
 		Spinner:       w.opts.UI.Spinner,
 		SpinnerColor:  w.opts.UI.SpinnerColor,
 		HideScrollbar: !w.opts.UI.ShowScrollbar,
+		StallAfter:    w.opts.UI.StallAfter,
 		// The `ui.color-scheme:` key, already resolved to the palette itself (wire_live.go): the name
 		// so the renderer can say which scheme is in force, and the warnings the resolve produced so
 		// it can tell the human why the screen is not the one they asked for.

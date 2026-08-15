@@ -10,6 +10,18 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **A new `ui.stall-after` config key carries the stall guard's quiet threshold.** It is a duration
+  written the way Go spells one (`90s`, `2m`, `1m30s`), default `90s`, with `0` turning the guard
+  off — long enough that ingesting a large prompt, legitimately silent for a minute or two on a
+  local model, never trips it. The on-disk key is a pointer (`uiConfig.StallAfter *string`) so an
+  explicit `0` is distinguishable from an absent key, it resolves to a `time.Duration` on
+  `UISettings`, and a negative or unparseable value is a loud startup error naming the key and
+  quoting what was written. It is a registry row like every other key — editable in `/settings`,
+  documented in the seeded template, and applied live in the running session
+  (`settingsApplyLocal`) — and it is threaded to the renderer as `tui.Options.StallAfter`, whose
+  zero value is the guard off. Nothing reads it on screen yet; the status-line suffix it drives
+  lands with the stall guard itself.
+
 - The alias synthesized for a raw `--endpoint`/`APOGEE_ENDPOINT` override no longer collides with a
   configured `servers:` entry name: when the endpoint's host equals one, the label takes a
   `" (endpoint)"` suffix (e.g. `workstation (endpoint)`), so the switch list never draws two rows

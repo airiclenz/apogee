@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
@@ -31,18 +32,19 @@ func fabricatedSettings() config.Options {
 			Global: config.PromptSource{Text: "You are apogee.\nAnswer with code first.\n"},
 			Models: map[string]config.PromptSource{"gpt-oss-20b": {File: "~/prompts/gpt-oss.md"}},
 		},
-		ContextFiles:        []string{"AGENTS.md", "CLAUDE.md"},
-		ConfineToWorkspace:  false,
-		UnconfinedHosts:     []config.UnconfinedHost{{ID: "host-1"}},
-		WebSearchEndpoint:   "off",
-		ToolsDisabled:       []string{"view_diff"},
-		UseProjectSkills:    false,
-		AutoCompact:         true,
-		AutoTitle:           false,
-		RememberModel:       true,
-		ContextWindow:       32768,
-		Present:             config.PresentSettings{AutoOpen: true, Command: "zed {path}", Port: 8080},
-		UI:                  config.UISettings{Spinner: tui.SpinnerGlitter, SpinnerColor: true, ShowScrollbar: false, ColorScheme: "dark"},
+		ContextFiles:       []string{"AGENTS.md", "CLAUDE.md"},
+		ConfineToWorkspace: false,
+		UnconfinedHosts:    []config.UnconfinedHost{{ID: "host-1"}},
+		WebSearchEndpoint:  "off",
+		ToolsDisabled:      []string{"view_diff"},
+		UseProjectSkills:   false,
+		AutoCompact:        true,
+		AutoTitle:          false,
+		RememberModel:      true,
+		ContextWindow:      32768,
+		Present:            config.PresentSettings{AutoOpen: true, Command: "zed {path}", Port: 8080},
+		UI: config.UISettings{Spinner: tui.SpinnerGlitter, SpinnerColor: true, ShowScrollbar: false,
+			ColorScheme: "dark", StallAfter: 2 * time.Minute},
 		Bypass:              true,
 		Mechanisms:          map[string]bool{"validate": true, "syntax": true, "autofix": false},
 		ValidatedSetsEnable: true,
@@ -258,6 +260,7 @@ func TestSettingsRowsFormatEffectiveValues(t *testing.T) {
 		"ui.spinner-color":      "true",
 		"ui.show-scrollbar":     "false",
 		"ui.color-scheme":       "dark",
+		"ui.stall-after":        "2m0s",  // a duration prints itself, and the printing is a spelling the key takes back
 		"cursor-shape":          "block", // unset, so the declared default is what is in force
 		"editor":                "code -w",
 		"bypass":                "true",

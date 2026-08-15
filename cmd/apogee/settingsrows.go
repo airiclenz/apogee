@@ -139,7 +139,10 @@ var settingValues = map[string]func(config.Options) string{
 	"ui.spinner-color":   func(o config.Options) string { return boolValue(o.UI.SpinnerColor) },
 	"ui.show-scrollbar":  func(o config.Options) string { return boolValue(o.UI.ShowScrollbar) },
 	"ui.color-scheme":    func(o config.Options) string { return o.UI.ColorScheme },
-	"cursor-shape":       func(o config.Options) string { return o.CursorShape },
+	// The threshold as a DURATION prints itself (`1m30s`), which is a spelling the key takes back —
+	// so the value this row seeds its edit field with is one the next ⏎ can persist unchanged.
+	"ui.stall-after": func(o config.Options) string { return o.UI.StallAfter.String() },
+	"cursor-shape":   func(o config.Options) string { return o.CursorShape },
 	// The command AS WRITTEN, blank when the key names none — the answer every other editable string
 	// row gives, and the only safe one here too: this value SEEDS the edit field, so a word standing
 	// in for emptiness ("$EDITOR", "the OS opener") would be a word the next ⏎ persisted as a command.

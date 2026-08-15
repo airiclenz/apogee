@@ -2,10 +2,12 @@ package tui
 
 import (
 	"errors"
+	"fmt"
 	"image/color"
 	"os/exec"
 	"strconv"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -1423,6 +1425,14 @@ func (m Model) settingsApplyLocal(path, value string) (Model, string, tea.Cmd, b
 	case settingKeySpinnerColor:
 		on := value == settingTrue
 		m.opts.SpinnerColor, m.spin.color = on, on
+	case settingKeyStallAfter:
+		after, err := parseStallAfter(value)
+		if err != nil {
+			return m, "", nil, true, err
+		}
+		// Nothing is scheduled and nothing is laid out again: the threshold is read where the status
+		// line is painted, and the spinner already repaints it every frame while a turn runs.
+		m.opts.StallAfter = after
 	case settingKeyColorScheme:
 		note, cmd, err := m.applyColorScheme(value)
 		return m, note, cmd, true, err
@@ -1439,6 +1449,22 @@ func (m Model) settingsApplyLocal(path, value string) (Model, string, tea.Cmd, b
 		return m, "", nil, false, nil
 	}
 	return m, "", nil, true, nil
+}
+
+// parseStallAfter reads the `ui.stall-after` row's value as the quiet threshold the status line
+// waits out, and refuses what a threshold cannot be. It restates the parse internal/config makes at
+// startup rather than calling it, because the dependency runs the other way — internal/config
+// imports this package — and the whole of the contract is two lines of time.ParseDuration.
+//
+// The refusal is worded for the row it is rendered on: the key, what the key takes, and the text
+// that was offered, with no path in front of it.
+func parseStallAfter(value string) (time.Duration, error) {
+	after, err := time.ParseDuration(strings.TrimSpace(value))
+	if err != nil || after < 0 {
+		return 0, fmt.Errorf("ui.stall-after takes a length of time of 0 or more, like 90s or 2m "+
+			"(0 turns the quiet suffix off), not %q", value)
+	}
+	return after, nil
 }
 
 // applyColorScheme puts a named colour scheme into effect on THIS screen — the live half of ADR
@@ -1515,6 +1541,7 @@ const (
 	settingKeySpinner       = "ui.spinner"
 	settingKeySpinnerColor  = "ui.spinner-color"
 	settingKeyColorScheme   = "ui.color-scheme"
+	settingKeyStallAfter    = "ui.stall-after"
 	settingKeyCursorShape   = "cursor-shape"
 	settingKeyMechanisms    = "mechanisms"
 )

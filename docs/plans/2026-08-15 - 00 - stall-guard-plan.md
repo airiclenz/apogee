@@ -59,7 +59,15 @@ and waiting-on-user states (an open question or approval) must never show it.
 
 ---
 
-## 1. `ui.stall-after` config key, end to end
+## 1. `ui.stall-after` config key, end to end — ✅ DONE (2026-08-15)
+
+NOTES (2026-08-15): the registry has no duration kind, so the row is `KindString` with a
+`validateStallAfter` hook — the plan's stated fallback. The hook delegates to the startup path
+itself (`uiConfig.toUISettings().Validate()`) rather than parsing a second time.
+NOTES (2026-08-15): `UISettings` gained one unexported companion field, `unparsedStallAfter`: the
+yaml seam cannot return an error, so text no duration can be made of is carried as written for
+`UISettings.Validate` to refuse and quote. An empty value reads as an absent key, the posture the
+block's two other string keys already take.
 
 **What:** add the duration key `ui.stall-after` and thread it to the TUI as
 `tui.Options.StallAfter time.Duration`.

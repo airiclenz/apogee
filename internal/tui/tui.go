@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/term"
@@ -249,6 +250,18 @@ type Options struct {
 	// (ADR 0037) and re-lays out, so the wrap width it decides changes exactly when the human
 	// changes it and never on its own.
 	HideScrollbar bool
+
+	// StallAfter is how long the ENGINE may go silent, mid-turn, before the status line reports the
+	// quiet — what the `ui.stall-after` config key selected, already parsed by the binary
+	// (internal/config's UISettings), so the renderer takes a duration and never a spelling of one.
+	// Past it a running turn's phrase gains a `· quiet <elapsed>` suffix, which is a REPORT and not a
+	// verdict: a slow turn and a dead one are indistinguishable from here, so the honest thing to say
+	// is how long nothing has arrived.
+	//
+	// The zero value is the guard OFF, which is both the config key's own spelling of "off" and what
+	// the hand-built Options of the layout tests want: a suffix appearing under a status line whose
+	// width they pin would be a change they never asked for.
+	StallAfter time.Duration
 
 	// CursorShape is the shape the prompt's caret is drawn with — what the `cursor-shape` config
 	// key selected. apogee draws the REAL terminal cursor (the textarea's simulated one is retired

@@ -409,10 +409,30 @@ type UISettings struct {
 	// a typo costs a warning and the default palette rather than the session (ADR 0040 design
 	// call 8).
 	ColorScheme string
+	// stallAfter is how long the ENGINE may go silent mid-turn before the status line says so: past
+	// it the running phrase gains a `· quiet <elapsed>` suffix, which is the honest fact rather than
+	// a verdict — a slow turn and a dead one look identical from out here, and only the human can
+	// tell them apart. Default 90s, which clears the ingestion of a large prompt (legitimately
+	// silent for a minute or two on a local model); 0 turns the suffix off. It is resolved to a
+	// DURATION here, unlike spinner beside it, because the renderer takes a duration and nothing
+	// downstream would gain from a second parse of the same text.
+	StallAfter time.Duration
+	// unparsedStallAfter is a `stall-after:` value time.ParseDuration could make nothing of, kept as
+	// it was written so Validate can name the text the human typed rather than the value it failed
+	// to become. Empty on every config that resolves — including one that never named the key —
+	// because the yaml seam applies no judgement of its own (toUISettings) and Validate is the one
+	// place a ui block is refused.
+	unparsedStallAfter string
 }
 
+// defaultStallAfter is how long the engine may stay silent before the status line reports the
+// quiet: long enough that ingesting a large prompt never trips it, short enough that a turn which
+// really has died is named while the human is still at the screen.
+const defaultStallAfter = 90 * time.Second
+
 // defaultUISettings is the resolved `ui:` block with nothing configured: the renderer's own default
-// style, with the colour loop on, the scroll bar shown, and the default colour scheme. The style is
+// style, with the colour loop on, the scroll bar shown, the default colour scheme, and the shipped
+// quiet threshold the stall guard waits out. The style is
 // ASKED of internal/tui (ParseSpinnerStyle's documented "" ⇒ the default) rather than restated here,
 // so the vocabulary and its default stay in the one package that owns them — the same reason
 // validate does not list the valid names, and the same reason the scheme name comes from
@@ -426,17 +446,27 @@ func defaultUISettings() UISettings {
 		SpinnerColor:  true,
 		ShowScrollbar: true,
 		ColorScheme:   scheme.DefaultName,
+		StallAfter:    defaultStallAfter,
 	}
 }
 
-// validate rejects a ui block naming a spinner style this build has no animation for. Catching it
-// here makes a typo a startup error that names the key; left to the renderer it would silently
-// resolve to some other style, and the user would be left wondering why their setting did nothing.
-// The valid set comes from internal/tui, which owns the vocabulary — this only adds the key the bad
-// value was read from, which that package cannot know.
+// validate rejects a ui block naming a spinner style this build has no animation for, or a
+// `stall-after:` that is not a length of time to wait. Catching them here makes a typo a startup
+// error that names the key; left to the renderer they would silently resolve to some other style
+// and to the shipped threshold, and the user would be left wondering why their setting did nothing.
+// The spinner's valid set comes from internal/tui, which owns the vocabulary — this only adds the
+// key the bad value was read from, which that package cannot know.
 func (u UISettings) Validate() error {
 	if _, err := tui.ParseSpinnerStyle(string(u.Spinner)); err != nil {
 		return fmt.Errorf("apogee: invalid ui.spinner: %w", err)
+	}
+	if u.unparsedStallAfter != "" {
+		return fmt.Errorf("apogee: invalid ui.stall-after %q: want a length of time like 90s or 2m, "+
+			"or 0 to turn the quiet suffix off", u.unparsedStallAfter)
+	}
+	if u.StallAfter < 0 {
+		return fmt.Errorf("apogee: invalid ui.stall-after %s: want 0 or more, where 0 turns the "+
+			"quiet suffix off", u.StallAfter)
 	}
 	return nil
 }
@@ -1539,6 +1569,13 @@ type uiConfig struct {
 	// validation at this seam: every name is admissible on disk because an unresolvable one is
 	// answered with a warning and the default palette rather than a startup error (ADR 0040).
 	ColorScheme string `yaml:"color-scheme"`
+	// StallAfter is how long the engine may go silent before the status line reports the quiet — a
+	// length of time as `time.ParseDuration` spells it (`90s`, `2m`), or `0` to turn the suffix off.
+	// A pointer for ShowScrollbar's reason turned inside out: here it is the explicit `0` — the
+	// documented spelling of "off" — that must be distinguishable from an absent key, which keeps
+	// the 90s default. It stays a raw string at this seam because the parse can FAIL, and a ui block
+	// is refused in one place (UISettings.Validate), never at the yaml boundary.
+	StallAfter *string `yaml:"stall-after"`
 }
 
 // toUISettings maps the on-disk ui block onto the resolved value, applying the defaults for the keys
@@ -1559,6 +1596,19 @@ func (u uiConfig) toUISettings() UISettings {
 	}
 	if u.ColorScheme != "" {
 		s.ColorScheme = u.ColorScheme // resolved against the schemes folder by wire.go, not here
+	}
+	if u.StallAfter != nil {
+		// An empty value reads as an absent key, the posture the two string keys above take: what the
+		// pointer buys is telling an explicit `0` — the documented spelling of "off" — from a block
+		// that never named the key. Text no duration can be made of is carried AS WRITTEN for
+		// UISettings.Validate to refuse and to quote; this seam judges nothing.
+		if text := strings.TrimSpace(*u.StallAfter); text != "" {
+			if after, err := time.ParseDuration(text); err == nil {
+				s.StallAfter = after
+			} else {
+				s.unparsedStallAfter = text
+			}
+		}
 	}
 	return s
 }

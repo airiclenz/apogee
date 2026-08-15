@@ -307,6 +307,15 @@ var KeyRegistry = []Key{
 		Desc:     "Palette the screen is drawn in; ~/.apogee/schemes/<name>.yaml shadows a built-in.",
 	},
 	{
+		// A length of time, which this table has no kind for — and one key is not a vocabulary, so it
+		// is the writer's plain string with a hook that parses it, the posture present.port takes with
+		// its range: the kind carries the shape, and the hook carries the contract the kind cannot.
+		Path: "ui.stall-after", Kind: KindString, Default: "90s",
+		Editable: true,
+		Validate: validateStallAfter,
+		Desc:     "Engine silence after which a running turn is marked quiet on the status line; 0 turns it off.",
+	},
+	{
 		Path: "cursor-shape", Kind: KindEnum, Default: "block", EnumValues: cursorShapeValues,
 		Editable: true,
 		Validate: validateCursorShapeName,
@@ -488,6 +497,15 @@ func validatePresentPort(value string) error {
 // vocabulary) and names the key the value was read from.
 func validateSpinnerName(value string) error {
 	return UISettings{Spinner: tui.SpinnerStyle(value)}.Validate()
+}
+
+// validateStallAfter refuses a `ui.stall-after:` that is not a length of time to wait, through the
+// startup path itself: the yaml seam that reads the text (toUISettings) and the check that judges
+// what it made of it (UISettings.Validate). Going through the seam rather than calling
+// time.ParseDuration a second time is what keeps the two answers one answer — the empty value that
+// means "the default" and the `0` that means "off" are the seam's calls, not this hook's.
+func validateStallAfter(value string) error {
+	return uiConfig{StallAfter: &value}.toUISettings().Validate()
 }
 
 // validateColorSchemeName refuses a name that could not be a scheme's file name — empty, or one

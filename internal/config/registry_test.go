@@ -271,6 +271,9 @@ func TestSettingKeyValidatorsRefuseWhatStartupWouldRefuse(t *testing.T) {
 		{"mode", "yolo", "invalid --mode"},
 		{"ui.spinner", "twirl", "invalid ui.spinner"},
 		{"cursor-shape", "sideways", "invalid cursor-shape"},
+		{"ui.stall-after", "soonish", "invalid ui.stall-after"},
+		{"ui.stall-after", "-5s", "invalid ui.stall-after"},
+		{"ui.stall-after", "90", "invalid ui.stall-after"}, // a bare number that is not 0 has no unit
 		{"ui.color-scheme", "", "name a scheme"},
 		{"ui.color-scheme", "../../.ssh/config", "a scheme is named, not a path"},
 		{"system-prompt-file", "", "name a file to read the prompt from"},
@@ -314,6 +317,10 @@ func TestSettingKeyValidatorsAcceptTheirDocumentedShapes(t *testing.T) {
 		{"present.port", "8080"},
 		{"mode", string(domain.ModeAuto)},
 		{"ui.spinner", "glitter"},
+		{"ui.stall-after", "90s"},
+		{"ui.stall-after", "2m"},
+		{"ui.stall-after", "0"}, // the documented spelling of "off" — a zero that is not a refusal
+		{"ui.stall-after", ""},  // and the empty field, which is the key's way of saying "the default"
 		{"cursor-shape", "bar"},
 		{"ui.color-scheme", "light"},
 		// A scheme nothing has written yet is accepted on purpose: the loader answers an unresolvable
