@@ -613,6 +613,15 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **A headless run's `RebindSpec` no longer states a different `response-reserve:` share than the
+  run's own `Config` divides by.** `rebindSpecFor` reads the share off the `config.Options` copy it
+  is handed, and a session's copy arrives already overlaid by `liveSettings.rebindInputs` — a seam
+  `apogee headless` never passes through. So the spec it built carried the TOP-LEVEL share while the
+  `Config` beside it divided the window by the bound entry's own override: two numbers for one
+  split, latent only because nothing read the spec's field on that path. The headless path now
+  resolves the share once (`config.ResolveResponseReserve`), writes it onto the copy the resolver
+  reads, and composes the `Config` from the share the resulting spec states — so the two cannot
+  drift apart, whatever comes to read the spec later.
 - A NaN reserve fraction reaching `internal/context.Allocate` now falls to the built-in 0.20 default
   like every other non-share value. The unset guard compared the fraction against both bounds
   (`fraction <= 0 || fraction >= 1`), and NaN compares false to everything, so it slipped past into

@@ -528,6 +528,38 @@ func TestHeadlessBudgetsAgainstTheBoundEntrysPins(t *testing.T) {
 	}
 }
 
+// One run cannot hold two opinions about how it splits its window. The headless path resolves the
+// share once, writes it onto the copy rebindSpecFor reads (the overlay a session gets from
+// liveSettings.rebindInputs, a seam this Driver never passes through), and the Config then reads the
+// share back OFF the resulting RebindSpec — so what the spec states and what the run divides by are
+// the same number by construction.
+//
+// The entry override is what makes the assertion bite: feed the spec the top-level share instead and
+// the Config states 0.2 here, because it is the spec's own field it reads.
+func TestHeadlessSpecStatesTheShareTheConfigDividesBy(t *testing.T) {
+	const (
+		topLevelShare = 0.2
+		entryShare    = 0.35
+	)
+	home := testConfigHome(t, "response-reserve: 0.2\nservers:\n"+
+		"  - name: testbox\n    endpoint: "+testServerEndpoint+"\n    response-reserve: 0.35\n"+
+		"server: testbox\n")
+
+	stub := &stubRunner{}
+	if _, _, err := headlessRunOn(t, stub, fenceableHost, home, "a prompt"); err != nil {
+		t.Fatalf("headless: %v", err)
+	}
+	got := stub.spec.Config.Context.ResponseReserveFraction
+	if got == topLevelShare {
+		t.Fatalf("Config.Context.ResponseReserveFraction = %v — the TOP-LEVEL share; the spec this "+
+			"Config reads its share off must state the bound entry's %v", got, entryShare)
+	}
+	if got != entryShare {
+		t.Errorf("Config.Context.ResponseReserveFraction = %v; want the entry-resolved %v that the "+
+			"RebindSpec states — spec and Config must not drift apart", got, entryShare)
+	}
+}
+
 // Persistence is on by default and --no-save is the opt-out, expressed the only way internal/run
 // reads it: a nil Store.
 func TestHeadlessNoSaveDropsTheStore(t *testing.T) {

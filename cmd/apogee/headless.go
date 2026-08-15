@@ -331,7 +331,15 @@ func runHeadless(cmd *cobra.Command, args []string, opts *config.Options, noSave
 	// entry's own over the top-level key (ResolveContextWindow), honoured here for the reason its
 	// reply ceiling below is: one configuration, so a headless run budgets against the same window
 	// a session on that entry would.
-	spec, notices, err := rebindSpecFor(*opts, roots, manualIDs, opts.Model, 0,
+	//
+	// The copy handed to the resolver carries one overlay: the `response-reserve:` share the bound
+	// entry resolves to. rebindSpecFor reads that share off the Options it is given, and a session's
+	// copy arrives already overlaid by liveSettings.rebindInputs — a seam this Driver never passes
+	// through. Without the overlay the spec would state the TOP-LEVEL share while the Config below
+	// divided the window by the entry's, and one configuration would mean two splits of one window.
+	specOpts := *opts
+	specOpts.ResponseReserve = config.ResolveResponseReserve(opts.StartupResponseReserve, opts.ResponseReserve)
+	spec, notices, err := rebindSpecFor(specOpts, roots, manualIDs, opts.Model, 0,
 		config.ResolveContextWindow(opts.StartupContextWindow, opts.ContextWindow),
 		opts.StartupMaxOutputTokens)
 	if err != nil {
@@ -339,6 +347,16 @@ func runHeadless(cmd *cobra.Command, args []string, opts *config.Options, noSave
 	}
 	for _, n := range notices {
 		cmd.PrintErrln(n)
+	}
+
+	// The share the run actually divides its window by, read back OFF the spec rather than resolved a
+	// second time, so the spec and the Config below cannot state two different splits. rebindSpecFor
+	// always states one — the pointer is its "silence is still expressible" contract, and it never has
+	// anything to be silent about — and a nil would mean nobody said, which is the 0 that hands the
+	// split back to the engine's own built-in fifth.
+	reserve := 0.0
+	if spec.ResponseReserveFraction != nil {
+		reserve = *spec.ResponseReserveFraction
 	}
 
 	// The skill catalog for this run, held in a variable rather than built inline so the SAME
@@ -395,9 +413,8 @@ func runHeadless(cmd *cobra.Command, args []string, opts *config.Options, noSave
 			// top-level key (config.ResolveResponseReserve), honoured here for the same
 			// one-configuration reason: a headless run divides its window exactly as a session on the
 			// same config and the same server does. Unstated at both scopes it stays 0 and the Budget
-			// holds its own built-in fifth back.
-			ResponseReserveFraction: config.ResolveResponseReserve(
-				opts.StartupResponseReserve, opts.ResponseReserve),
+			// holds its own built-in fifth back. It is the share the spec states, read back above.
+			ResponseReserveFraction: reserve,
 			// The bound entry's `max-output-tokens:` pin, honoured here for the reason every other
 			// per-entry fact is: one configuration, so a headless run's reply is bounded exactly as
 			// a session's is (ADR 0046). Unpinned it stays 0 and the engine derives the cap — which
