@@ -9,8 +9,9 @@ import (
 // toProviderRequest drains the post-hook req onto the provider seam's wire shape — the
 // translation boundary between the loop's domain state and the domain-free provider.Request
 // (ADR 0010). It carries messages (with tool calls + tool-call IDs, load-bearing for a
-// multi-Turn tool exchange), the tool menu, and the sampling a pre-request hook shaped; the
-// provider wire has no carrier for SetExtra fields yet (response_format is a Phase-4 concern).
+// multi-Turn tool exchange), the tool menu, the sampling a pre-request hook shaped, and the
+// resolved Thinking effort (resolvedEffort — override ▸ profile ▸ nothing); the provider wire has
+// no carrier for SetExtra fields yet (response_format is a Phase-4 concern).
 func (a *Agent) toProviderRequest(req *domain.Request) provider.Request {
 	st := req.State()
 	messages := make([]provider.Message, 0, len(st.Messages))
@@ -38,10 +39,39 @@ func (a *Agent) toProviderRequest(req *domain.Request) provider.Request {
 	}
 
 	return provider.Request{
-		Model:    st.Model,
-		Messages: messages,
-		Tools:    tools,
-		Sampling: toProviderSampling(st.Sampling),
+		Model:          st.Model,
+		Messages:       messages,
+		Tools:          tools,
+		Sampling:       toProviderSampling(st.Sampling),
+		ThinkingEffort: toProviderEffort(a.resolvedEffort()),
+	}
+}
+
+// resolvedEffort resolves the Thinking effort THIS request asks for, in the one order ADR 0050
+// fixes: the session override (SetEffortOverride) when a user stated one, else the bound model's
+// profile, else nothing at all. The last rung is the wire anchor — no override and no profile
+// entry means no effort key is emitted, so an out-of-the-box request stays byte-identical to the
+// pre-effort loop. It is resolved per request rather than latched at construction, so a mid-run
+// /effort lands on the next request, and it is deliberately blind to Bypass: how hard the model
+// thinks is configuration, not a Mechanism (SetEffortOverride).
+func (a *Agent) resolvedEffort() domain.ThinkingEffort {
+	if override := a.effortOverrideValue(); override != "" {
+		return override
+	}
+	return a.cfg.Profile.Thinking.Effort
+}
+
+// toProviderEffort maps the domain effort onto the provider's own vocabulary at this translation
+// boundary — the provider package holds no domain import (ADR 0010) — exactly as toProviderSampling
+// maps the sampling knobs. It is TOTAL: anything outside the four levels maps to "", which emits
+// nothing on the wire, so a value that somehow slipped past the config loader's enum degrades to
+// the model's own template default rather than to a template error mid-Turn.
+func toProviderEffort(e domain.ThinkingEffort) provider.Effort {
+	switch e {
+	case domain.EffortOff, domain.EffortLow, domain.EffortMedium, domain.EffortHigh:
+		return provider.Effort(e)
+	default:
+		return ""
 	}
 }
 

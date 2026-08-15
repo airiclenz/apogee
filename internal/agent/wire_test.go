@@ -64,3 +64,85 @@ func TestProviderRequestOmitsInterjected(t *testing.T) {
 		t.Errorf("serialized provider request mentions the marker: %s", encoded)
 	}
 }
+
+// TestProviderRequestCarriesResolvedEffort pins the resolution the projection applies — session
+// override ▸ profile ▸ nothing (ADR 0050) — including the anchor at its foot: a session with
+// neither asks for no effort at all, so the request stays byte-identical to the pre-effort loop.
+func TestProviderRequestCarriesResolvedEffort(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		profile  domain.ThinkingEffort
+		override domain.ThinkingEffort
+		want     provider.Effort
+	}{
+		{name: "neither: the anchor", want: ""},
+		{name: "profile alone", profile: domain.EffortLow, want: provider.EffortLow},
+		{name: "override alone", override: domain.EffortMedium, want: provider.EffortMedium},
+		{name: "override beats profile", profile: domain.EffortLow, override: domain.EffortHigh, want: provider.EffortHigh},
+		{name: "override off beats a thinking profile", profile: domain.EffortHigh, override: domain.EffortOff, want: provider.EffortOff},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			a := &Agent{cfg: domain.Config{Model: "test-model"}}
+			a.cfg.Profile.Thinking.Effort = tt.profile
+			a.SetEffortOverride(tt.override)
+
+			got := a.toProviderRequest(effortTestRequest())
+			if got.ThinkingEffort != tt.want {
+				t.Errorf("projected effort = %q, want %q", got.ThinkingEffort, tt.want)
+			}
+		})
+	}
+}
+
+// TestClearedEffortOverrideFallsBackToTheProfile is the other half of the override contract: the
+// zero value is not a fifth level but the removal of the layer, so /effort auto hands the next
+// request straight back to the bound model's profile.
+func TestClearedEffortOverrideFallsBackToTheProfile(t *testing.T) {
+	t.Parallel()
+
+	a := &Agent{cfg: domain.Config{Model: "test-model"}}
+	a.cfg.Profile.Thinking.Effort = domain.EffortLow
+
+	a.SetEffortOverride(domain.EffortHigh)
+	if got := a.toProviderRequest(effortTestRequest()).ThinkingEffort; got != provider.EffortHigh {
+		t.Fatalf("effort under the override = %q, want %q", got, provider.EffortHigh)
+	}
+
+	a.SetEffortOverride("")
+	if got := a.toProviderRequest(effortTestRequest()).ThinkingEffort; got != provider.EffortLow {
+		t.Errorf("effort after clearing the override = %q, want the profile's %q", got, provider.EffortLow)
+	}
+}
+
+// TestEffortHoldsUnderBypass pins the engine stance: effort is CONFIGURATION, not a Mechanism, so
+// Bypass — Mechanisms off, structure on — leaves the emitted effort exactly where it was. Bypass is
+// the floor the Mechanisms must beat, and a floor run that silently stopped thinking would not be
+// the same agent minus the Mechanisms.
+func TestEffortHoldsUnderBypass(t *testing.T) {
+	t.Parallel()
+
+	a := &Agent{cfg: domain.Config{Model: "test-model"}}
+	a.cfg.Profile.Thinking.Effort = domain.EffortMedium
+	a.SetEffortOverride(domain.EffortHigh)
+
+	before := a.toProviderRequest(effortTestRequest()).ThinkingEffort
+	a.SetBypass(true)
+	after := a.toProviderRequest(effortTestRequest()).ThinkingEffort
+
+	if before != provider.EffortHigh || after != before {
+		t.Errorf("effort before/after Bypass = %q/%q, want %q both times", before, after, provider.EffortHigh)
+	}
+}
+
+// effortTestRequest builds the minimal domain.Request the effort projection tests hand in: the
+// resolution reads nothing off the request itself, so one user message is enough.
+func effortTestRequest() *domain.Request {
+	msgs := []domain.Message{{Role: domain.RoleUser, Content: "the ask"}}
+	return domain.NewRequest("test-model", msgs, nil, domain.Budget{}, 0, nil)
+}

@@ -115,6 +115,16 @@ type Agent struct {
 	// above carry theirs, and is never nil on a constructed Agent (newAgent allocates it).
 	delegation *delegationLatch
 
+	// effortMu guards effortOverride, this session's Thinking-effort intent (CONTEXT: Thinking
+	// effort): the level a user asked THIS session to think at, layered above whatever the bound
+	// model's profile carries (ADR 0050). It belongs to the anytime-safe class above — /effort is
+	// settable while a Turn runs and the wire projection reads it once per request — and it is the
+	// one member with NO cfg seed: an override is intent a user states mid-session, never
+	// configuration an Agent is constructed with, so it starts empty and the profile alone governs
+	// until someone sets it. The zero value is the ABSENCE of an override, not a fifth level.
+	effortMu       sync.RWMutex
+	effortOverride domain.ThinkingEffort
+
 	// liveMode, when non-nil, is a sub-agent's read-only view of its PARENT's live mode: the
 	// parent's effectiveMode accessor, captured at spawn (ADR 0013). The per-call
 	// Resolution takes the TIGHTER of this and the child's own spawn mode, so a parent that
@@ -511,6 +521,51 @@ func (a *Agent) contextFileList() []string {
 	a.contextFilesMu.RLock()
 	defer a.contextFilesMu.RUnlock()
 	return a.contextFileNames
+}
+
+// SetEffortOverride states this SESSION's Thinking effort — the level layered ABOVE the bound
+// model's profile (`model-profiles:` → `thinking.effort:`), and the engine half of /effort. The
+// four levels (domain.EffortOff … domain.EffortHigh) each stand until another call moves them;
+// the ZERO value clears the override and hands the resolution back to the profile. Nothing is
+// persisted: an override is what a user asked for NOW, so the next session starts from the
+// profile again (ADR 0050).
+//
+// It is configuration rather than a Mechanism, so it holds under Bypass — Bypass turns the
+// Mechanisms off, while how hard the model thinks is a dial ON the request, the same class as the
+// reply ceiling (ADR 0046). And it is an engine door rather than TUI-local state so that any
+// Driver reaches it — a bench sweeping the levels, a daemon taking it off an API (ADR 0031).
+//
+// It is safe to call from another goroutine while a Step runs, like SetMode: the wire projection
+// reads it once per request under the same lock, so a change lands on the NEXT request and never
+// mid-flight. It is PRIMARY-loop state: a delegated child is a separate Agent built from the
+// parent's Config, which carries no override, so a sub-agent thinks at ITS OWN profile's effort
+// and the session override never leaks into a delegation.
+func (a *Agent) SetEffortOverride(e domain.ThinkingEffort) {
+	a.effortMu.Lock()
+	a.effortOverride = e
+	a.effortMu.Unlock()
+}
+
+// ThinkingEffort reports the two layers behind the effort a request carries: this session's
+// override (SetEffortOverride) and the bound model profile's own setting, each "" when unset. A
+// Driver showing the resolution — bare /effort — needs BOTH, because a level means something
+// different when the user asked for it than when the profile did; the EFFECTIVE value is the
+// override when non-empty, else the profile's, the one order the projection resolves in.
+//
+// The profile half is read without a lock, which is safe for the same reason every other cfg read
+// is: cfg.Profile moves only through the idle-only doors (SetProfile, Rebind) the host itself
+// drives, so it is never written while a Step is running (ADR 0011's idle-only engine-call class).
+func (a *Agent) ThinkingEffort() (override, profile domain.ThinkingEffort) {
+	return a.effortOverrideValue(), a.cfg.Profile.Thinking.Effort
+}
+
+// effortOverrideValue reports the live session override under the lock, so the per-request read is
+// race-free against a concurrent SetEffortOverride. It is the ONE read seam for the field — there
+// is no cfg counterpart to seed it from.
+func (a *Agent) effortOverrideValue() domain.ThinkingEffort {
+	a.effortMu.RLock()
+	defer a.effortMu.RUnlock()
+	return a.effortOverride
 }
 
 // ----------------------------------------------------------------------------

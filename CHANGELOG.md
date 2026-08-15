@@ -276,6 +276,21 @@ point is a **minor** bump, not a breaking change.
   wire it always did, including its one re-send without the kwarg for a server that rejects the
   unknown field outright.
 
+- **Every request now carries the session's resolved thinking effort, and a Driver can override it.**
+  The wire projection resolves the effort in the one order ADR 0050 fixes — session override ▸ the
+  bound model profile's `thinking.effort:` ▸ nothing — and maps the domain value onto the provider
+  vocabulary at the same boundary that already maps sampling, so the provider package stays
+  domain-free and a value outside the four levels emits nothing rather than a word the template
+  cannot read. The foot of that ladder is the wire anchor: a session with no override and a profile
+  with no effort sends no `chat_template_kwargs` at all, byte-identical to the pre-effort loop. The
+  override arrives through a new engine door, `Agent.SetEffortOverride` — the zero value clears it,
+  nothing is persisted, and `Agent.ThinkingEffort()` reports the override and the profile separately
+  so a Driver can show the layering rather than just the winner. It is configuration, not a
+  Mechanism, so it holds under Bypass; it is read once per request under its own lock, so setting it
+  mid-run lands on the next request; it survives a model switch while the profile half re-resolves
+  from the new model; and it is PRIMARY-loop state — a delegated child is built from the parent's
+  Config, which carries no override, so a sub-agent still thinks at its own profile's effort.
+
 ### Changed
 
 - **The block-target, start-up-box and prompt-box-sizing suites move to

@@ -122,7 +122,10 @@ kwarg; empty produces no `chat_template_kwargs` key at all; the title-namer test
 
 **Commit:** `feat(provider): semantic ThinkingEffort replaces DisableThinking on the request seam`
 
-## 3. Engine plumbing: profile effort on the wire, override door
+## 3. Engine plumbing: profile effort on the wire, override door — ✅ DONE (2026-08-15)
+
+NOTES (2026-08-15): the item asks for the child-isolation assertion in "the existing child-construction test", but this package has no single such test — `newChildAgent` is driven from `routedspawn_test.go`, `delegationtarget_test.go` and `contextfiles_test.go`, each pinning its own concern; the assertion is therefore a dedicated test in `internal/agent/agent_test.go`, a file the item's Files list already names and which did not exist before this item.
+NOTES (2026-08-15): the override needed no code in `newChildAgent` — it lives on the Agent rather than on Config, so a child never sees it by construction; the new test is what makes a future move of it onto Config fail loudly.
 
 Depends on item 1. Depends on item 2.
 
