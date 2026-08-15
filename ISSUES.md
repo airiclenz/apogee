@@ -23,6 +23,15 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 
 ## Open defects
 
+### Run residuals — open (2026-08-15, audit-2026-08-11 confirmed findings)
+
+The still-open findings that run left, under the conventions' actionability bar.
+
+- [ ] `internal/security/doc.go`'s file map names a sentinel per file — `ErrPathEscape` on the
+  `pathsafety.go` line (`internal/security/doc.go:86`), `ErrSymlinkedParent` on the `safeio.go`
+  line (`:92`) — but not `ErrRootInaccessible` (`internal/security/pathsafety.go:26`), which
+  `pathsafety.go` now also defines.
+
 ## Parked / deferred work
 
 Live, deliberately deferred work only. Each entry records *enough* design that we don't re-derive
