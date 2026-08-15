@@ -613,6 +613,17 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **`NormalizeURL` now strips the whole trailing run of root dots, so a `DenyHosts` entry cannot be
+  dotted around.** The normaliser removed exactly one trailing dot, so `https://denied.example.com../x`
+  normalised to the host `denied.example.com.` — a residual dot that matches no deny entry
+  (`hostMatches` asks for an exact host or a `"."+entry` suffix), while the dial path rebuilds the
+  request from that same normalised URL (`internal/tools/network.go`) and DNS reaches the denied host
+  anyway. The strip is now a loop, still guarded so a bare `"."` host is left alone, and the doc
+  states the wider normal form. The IDNA fallback beside it — a non-ASCII host that
+  `idna.Lookup.ToASCII` refuses is handed back unchanged, exactly as `net/http.canonicalAddr` dials
+  it — gained the test it never had, asserting both that the profile really rejects the chosen host
+  and that the guard gets the caller's own bytes back rather than an error or a half-mapped string.
+
 - **A headless run's `RebindSpec` no longer states a different `response-reserve:` share than the
   run's own `Config` divides by.** `rebindSpecFor` reads the share off the `config.Options` copy it
   is handed, and a session's copy arrives already overlaid by `liveSettings.rebindInputs` — a seam

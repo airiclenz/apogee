@@ -5,6 +5,8 @@ import (
 	"errors"
 	"net"
 	"testing"
+
+	"golang.org/x/net/idna"
 )
 
 // publicResolver maps every host to a fixed public IP so the existing scheme/host tests stay
@@ -44,6 +46,7 @@ func TestURLGuard_Check(t *testing.T) {
 		// the denied host while spelling it differently.
 		{"trailing root dot does not escape a deny entry", URLGuard{DenyHosts: []string{"example.com"}}, "https://example.com./x", true},
 		{"trailing root dot on a subdomain does not escape a deny entry", URLGuard{DenyHosts: []string{"example.com"}}, "https://api.example.com./x", true},
+		{"a run of trailing root dots does not escape a deny entry", URLGuard{DenyHosts: []string{"example.com"}}, "https://example.com../x", true},
 		{"fullwidth unicode host is denied through its dialled form", URLGuard{DenyHosts: []string{"example.com"}}, "https://ｅｘａｍｐｌｅ.com/x", true},
 		{"ideographic full stop is denied through its dialled form", URLGuard{DenyHosts: []string{"example.com"}}, "https://example.com。/x", true},
 		{"unicode host is judged on what it maps to, not what it looks like", URLGuard{AllowHosts: []string{"example.com"}}, "https://ⓖxample.com/x", true},
@@ -89,9 +92,13 @@ func TestNormalizeURL_ProducesTheDialledForm(t *testing.T) {
 		{name: "whitespace is trimmed", raw: "  https://example.com/p?q=1  ", want: "https://example.com/p?q=1"},
 		{name: "host is lower-cased", raw: "https://EXAMPLE.CoM/P", want: "https://example.com/P"},
 		{name: "the root dot is stripped", raw: "https://evil.com./x", want: "https://evil.com/x"},
+		{name: "two root dots are stripped", raw: "https://evil.com../x", want: "https://evil.com/x"},
+		{name: "a run of root dots is stripped", raw: "https://evil.com.../x", want: "https://evil.com/x"},
+		{name: "a bare root host keeps its dot", raw: "https://./x", want: "https://./x"},
 		{name: "unicode host takes the form the transport dials", raw: "http://ⓖxample.com/", want: "http://gxample.com/"},
 		{name: "an ideographic full stop is a label separator", raw: "http://good.example.com。/", want: "http://good.example.com/"},
 		{name: "punycode is left alone", raw: "https://xn--mnchen-3ya.de/", want: "https://xn--mnchen-3ya.de/"},
+		{name: "a host idna rejects keeps its own bytes", raw: "https://ex_ample.tëst/x", want: "https://ex_ample.t%C3%ABst/x"},
 		{name: "userinfo and port survive", raw: " http://user:pw@Example.COM.:8080/p?q=1 ", want: "http://user:pw@example.com:8080/p?q=1"},
 		{name: "an ipv6 literal keeps its brackets", raw: "http://[::1]:8080/x", want: "http://[::1]:8080/x"},
 		{name: "an ipv4 literal is untouched", raw: "http://127.0.0.1:1/x", want: "http://127.0.0.1:1/x"},
@@ -127,5 +134,29 @@ func TestNormalizeURL_ProducesTheDialledForm(t *testing.T) {
 				t.Errorf("NormalizeURL is not idempotent: %q then %q", u.String(), again.String())
 			}
 		})
+	}
+}
+
+// TestNormalizeURL_KeepsAHostIDNARejects pins the fallback branch: net/http.canonicalAddr
+// dials the ORIGINAL host when idna.Lookup.ToASCII refuses to map it, so NormalizeURL must
+// hand back those same bytes — not an error, not a partially mapped string — or the guard
+// would judge a name the transport never dials. The test asserts the premise too (the profile
+// really does reject this host), so a future idna release that starts accepting it fails here
+// instead of silently leaving the branch uncovered.
+func TestNormalizeURL_KeepsAHostIDNARejects(t *testing.T) {
+	t.Parallel()
+
+	const host = "ex_ample.tëst" // non-ASCII, and the underscore is disallowed under STD3 rules
+
+	if mapped, err := idna.Lookup.ToASCII(host); err == nil {
+		t.Fatalf("idna.Lookup.ToASCII(%q) = %q, nil — the test needs a host the profile rejects", host, mapped)
+	}
+
+	u, err := NormalizeURL("https://" + host + "/x")
+	if err != nil {
+		t.Fatalf("NormalizeURL(%q): %v", host, err)
+	}
+	if got := u.Hostname(); got != host {
+		t.Errorf("NormalizeURL host = %q, want the original %q", got, host)
 	}
 }

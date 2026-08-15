@@ -151,11 +151,13 @@ func (g URLGuard) CheckContext(ctx context.Context, raw string) error {
 //     "gxample.com";
 //   - the DNS root dot — "evil.com." and "evil.com" resolve identically and virtually every
 //     virtual-host server accepts both, but they are different strings to a deny-list match,
-//     so appending one dot defeated a DenyHosts entry.
+//     so appending a dot defeated a DenyHosts entry. Stripping exactly one left the next one
+//     behind ("evil.com.." normalised to "evil.com."), which matched no entry either, so the
+//     whole trailing run goes — only a bare "." host is left alone.
 //
 // The normal form is: whitespace-trimmed, host IDNA-mapped (only when non-ASCII, exactly as
 // net/http does, and left as-is when the mapping fails so the two still agree), lower-cased,
-// with a single trailing root dot removed. Everything else — scheme, userinfo, port, path,
+// with every trailing root dot removed (a bare "." host is left alone). Everything else — scheme, userinfo, port, path,
 // query — is untouched. A parse failure is returned as-is; the caller decides the wording.
 func NormalizeURL(raw string) (*url.URL, error) {
 	u, err := url.Parse(strings.TrimSpace(raw))
@@ -176,7 +178,7 @@ func NormalizeURL(raw string) (*url.URL, error) {
 		}
 	}
 	host = strings.ToLower(host)
-	if len(host) > 1 && strings.HasSuffix(host, ".") {
+	for len(host) > 1 && strings.HasSuffix(host, ".") {
 		host = host[:len(host)-1]
 	}
 	if strings.Contains(host, ":") {
