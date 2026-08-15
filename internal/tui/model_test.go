@@ -3802,6 +3802,47 @@ func TestStatusLineQuietSuffix(t *testing.T) {
 		}
 	})
 
+	// The pin on what the qualifier MEANS: it reports the absence of events, never the length of
+	// the work. A model actually emitting thinking tokens is the loudest thing on the wire, so a
+	// turn that streams reasoning for many multiples of `ui.stall-after` must never surface the
+	// word at any point in it — only a genuine gap longer than the threshold may. The sub-test
+	// above proves one arriving Event takes an owed qualifier back off; this one proves the
+	// sustained case, where the row's single clock counts far past the threshold while the
+	// qualifier never appears at all, because no single gap between chunks ever crosses it.
+	t.Run("a streaming reasoning channel never surfaces it", func(t *testing.T) {
+		// Chunks a shade under the threshold apart: the tightest stream that still never trips the
+		// guard, over a turn eight of those gaps long (~11m 52s, near eight times `after`).
+		const gap = after - time.Second
+		const rounds = 8
+
+		m := guardedRunningModel(t, after)
+
+		for round := 1; round <= rounds; round++ {
+			streamed := time.Duration(round) * gap
+
+			// Nothing heard since the last chunk, on an activity that has been thinking since the
+			// turn began — silentFor arranges the one-span shape, and the activity's own clock is
+			// then pushed the rest of the way back to that start.
+			m = silentFor(m, gap)
+			m.act.since = time.Now().Add(-streamed)
+
+			got := statusText(t, m)
+			if strings.Contains(got, "quiet") {
+				t.Fatalf("status line %s into a streamed turn = %q, want no qualifier while thinking tokens keep arriving", streamed, got)
+			}
+			if !strings.Contains(got, "thinking") {
+				t.Fatalf("status line %s into a streamed turn = %q, want the running phrase on its own clock", streamed, got)
+			}
+
+			// The next chunk lands, restamping the silence clock as every Event does.
+			m = step(t, m, eventMsg{Event: domain.ReasoningEvent{Text: "still reasoning"}})
+
+			if got := statusText(t, m); strings.Contains(got, "quiet") {
+				t.Fatalf("status line after a thinking chunk %s in = %q, want no qualifier", streamed, got)
+			}
+		}
+	})
+
 	t.Run("a running tool call never shows it", func(t *testing.T) {
 		m := guardedRunningModel(t, after)
 		m = step(t, m, eventMsg{Event: domain.ToolCallEvent{

@@ -124,7 +124,10 @@ grep -n "quiet · " layout.md          # new example present
 
 **Commit:** `feat(tui): render stall guard as quiet qualifier on a single activity clock`
 
-## 2. Pin the invariant: streaming thinking tokens keep the quiet qualifier off
+## 2. Pin the invariant: streaming thinking tokens keep the quiet qualifier off — ✅ DONE (2026-08-15)
+
+NOTES (2026-08-15): the round loop backdates `m.act.since` to the turn's start (`time.Now().Add(-round*gap)`) in addition to the `silentFor` call the item names. `silentFor` pins both clocks to the SAME span, which would rewind the turn every round and leave the total simulated elapsed at one gap; pushing the activity clock the rest of the way back is what makes "the total simulated elapsed is many multiples of the threshold" true in the model — and it is what gives the sub-test its bite: a mutation keying `activity.quiet` on the activity clock instead of `lastEvent` fails it (verified, then reverted), whereas with `silentFor` alone it would still pass.
+NOTES (2026-08-15): gap = `after - time.Second` (89s) over 8 rounds ≈ 11m 52s of streamed thinking, ~7.9× `ui.stall-after`, with no single gap crossing it.
 
 Depends on item 1.
 
