@@ -231,7 +231,9 @@ negative duration into garbage. Record under `[Unreleased]` in `CHANGELOG.md`.
 
 **Commit:** `fix(tui): relativeTime treats a future timestamp as just now by decision`
 
-## 7. Pin `discardPending`'s parked-sibling drop
+## 7. Pin `discardPending`'s parked-sibling drop — ✅ DONE (2026-08-15)
+
+NOTES (2026-08-15): the assertion "B's dropped tokens never reach the transcript" is made over the committed `entryAssistant` entries rather than the rendered scrollback, because a collapsed sub-agent run elides everything beneath it (`TestSubAgentStreamStaysInsideItsCollapsedRun`) and a render assertion would pass whether or not the residue committed.
 
 **What:** Test-only. The behaviour at `internal/tui/transcript.go:866-869` — a
 `StreamResetEvent` for a run that is NOT the slot-holding streamer drops that run's parked

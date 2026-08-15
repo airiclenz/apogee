@@ -1632,6 +1632,53 @@ func TestStreamResetOnlyDiscardsItsOwnDepth(t *testing.T) {
 	}
 }
 
+// TestStreamResetDropsOnlyTheParkedSiblingsOwnText is the same rule read sideways, now that siblings
+// share the one live buffer (ADR 0039): the run that re-streams may hold no slot at all. Its parked
+// text — the stream it was displaced from mid-alternation — is superseded exactly like a live buffer
+// would be and goes with the reset, while the sibling actually holding the slot streams on untouched.
+// Both halves are the point: keeping the parked text would let a superseded stream commit later at
+// its own run's report (TestAbandonedChildStreamCommitsWhenItsRunEnds is that exit), and clearing the
+// slot instead would shred the answer of a run that never re-streamed anything.
+func TestStreamResetDropsOnlyTheParkedSiblingsOwnText(t *testing.T) {
+	t.Parallel()
+
+	tr := &transcript{}
+	subAgentCall(tr, "s1", "survey the tests", 0)
+	subAgentCall(tr, "s2", "survey the docs", 0)
+	token := func(spawn, text string) {
+		tr.apply(domain.TokenEvent{EventBase: domain.EventBase{Depth: 1, CallID: spawn}, Text: text})
+	}
+	token("s2", "superseded words") // s2 opens the buffer…
+	token("s1", "the tests ")       // …and s1 takes the slot, parking s2's words
+
+	tr.apply(domain.StreamResetEvent{EventBase: domain.EventBase{Depth: 1, CallID: "s2"}})
+	token("s1", "all pass")
+
+	if want := (runRef{depth: 1, spawn: "s1"}); !tr.streaming || tr.pendingRun != want || tr.pending != "the tests all pass" {
+		t.Errorf("the sibling's re-stream disturbed the live streamer: streaming=%v run=%+v pending=%q",
+			tr.streaming, tr.pendingRun, tr.pending)
+	}
+	if len(tr.parked) != 0 {
+		t.Errorf("parked = %+v, want the resetting sibling's superseded text dropped", tr.parked)
+	}
+
+	// Neither exit may surface the dropped tokens: s1 commits its own answer (a blank MessageEvent
+	// falls back to the buffer), and s2's run ends — the report that would commit a displaced
+	// delegate's residue now has nothing left to commit.
+	tr.apply(domain.MessageEvent{EventBase: domain.EventBase{Depth: 1, CallID: "s1"}})
+	subAgentReport(tr, "s2", "cancelled", 0)
+
+	var committed []string
+	for _, e := range tr.entries {
+		if e.kind == entryAssistant {
+			committed = append(committed, e.text)
+		}
+	}
+	if len(committed) != 1 || committed[0] != "the tests all pass" {
+		t.Errorf("committed assistant text = %q, want only the live streamer's whole answer", committed)
+	}
+}
+
 // ----------------------------------------------------------------------------
 // A sub-agent's context fill folds onto its own run (transcript.applyUsage)
 // ----------------------------------------------------------------------------

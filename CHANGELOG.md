@@ -363,6 +363,20 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **A parked sibling's stream reset is now pinned to drop only its own text.** `discardPending`
+  unparks the resetting run BEFORE the early return that protects another run's live buffer, so a
+  `StreamResetEvent` from a delegate that lost the shared slot mid-alternation (ADR 0039) discards
+  the text it had parked while the sibling holding the slot streams on untouched. The behaviour is
+  owned by the function's doc comment but no test staged parked text for the resetting run —
+  `TestStreamResetOnlyDiscardsItsOwnDepth` only proves the buffer of another run survives — so a
+  refactor moving the unpark below the early return would have changed the semantic silently.
+  `TestStreamResetDropsOnlyTheParkedSiblingsOwnText` now streams sibling A into the slot, parks B's
+  words behind it, resets B, and continues A: A's answer commits whole, `parked` comes back empty,
+  and neither exit that commits a displaced delegate's residue — A's own `MessageEvent` fallback or
+  B's run-ending report — surfaces the superseded tokens. Both assertions were checked against
+  mutated production lines (unpark moved after the early return; the early return removed), so
+  neither passes vacuously.
+
 - **The `CircuitBreaker`'s concurrency guarantee and its post-trip recovery are now pinned by
   tests.** The type's doc comment claims it is "safe for concurrent use", but no test had ever
   spawned a goroutine against it: `TestCircuitBreaker_ConcurrentUse` runs eight goroutines
