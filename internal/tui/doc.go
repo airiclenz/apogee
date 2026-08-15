@@ -523,8 +523,8 @@
 // [Model.foldActivity] — in the one order that works. That order used to be enforced by three comments in three files; it is now a
 // data dependency, because foldEvent reads the open-tool-call fact transcript.apply establishes and
 // PASSES it to foldActivity, which can no longer ask for it early. TestFoldEventCoversEveryEventVariant
-// parses internal/domain/events.go and fails on a variant with no row in the fold table, so a
-// twelfth Event has to be answered for — including with "deliberately nothing".
+// parses internal/domain/events.go and fails on a variant with no row in the fold table, so a new
+// Event variant has to be answered for — including with "deliberately nothing".
 //
 // The tool-call layout pass (post-v1.5.0) tightens how a session reads without touching what the
 // model sees: committed assistant text is trimmed of its leading and trailing blank lines

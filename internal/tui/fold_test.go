@@ -50,7 +50,7 @@ type foldCase struct {
 }
 
 // foldCases is the variant table: every domain.Event, what it does to the view, and — by way
-// of TestFoldEventCoversEveryEventVariant — the assertion that there is no twelfth.
+// of TestFoldEventCoversEveryEventVariant — the assertion that there is no unanswered variant.
 func foldCases() []foldCase {
 	return []foldCase{
 		{

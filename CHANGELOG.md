@@ -317,6 +317,15 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- Docs: the fold-coverage prose no longer counts Events. `internal/tui/doc.go` said "so a twelfth
+  Event has to be answered for" and `foldCases`'s comment said the table asserts "there is no
+  twelfth" — both stale (`internal/domain/events.go` declares 12 variants and the table carries 13
+  rows, `TokenEvent` appearing at depth 0 and 1). They now read "a new Event variant has to be
+  answered for — including with 'deliberately nothing'" and "the assertion that there is no
+  unanswered variant": no numeral survives in either sentence, so neither can go stale on the next
+  Event addition. `TestFoldEventCoversEveryEventVariant` is what actually enforces the coverage and
+  is untouched. The `ISSUES.md` bullet is removed. Comments only — no behaviour change.
+
 - Docs: `Scheme.Warning`'s doc comment now describes the consumer that shipped. It named "the status
   line's quiet-time suffix", a form that never landed — the stall guard renders as a `quiet`
   qualifier *before* the single activity clock — so the clause now reads "the status line's quiet

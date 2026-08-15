@@ -125,7 +125,7 @@ only bullet).
 
 ---
 
-## 4. Count-free Event-count prose
+## 4. Count-free Event-count prose — ✅ DONE (2026-08-15)
 
 **What:** The sentence at `internal/tui/doc.go:527` reads "a twelfth Event has to be
 answered for" — stale: `internal/domain/events.go` declares 12 Event types and `foldCases()`
