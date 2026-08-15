@@ -545,6 +545,11 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- The session-naming call's drop-the-flag fallback now fires only for the `enable_thinking:false`
+  kwarg it actually sets: a naming request that asks for a reasoning LEVEL is no longer silently
+  stripped and re-sent when an Upstream rejects it with a 4xx. Behaviour-preserving today
+  (`title.Prompt` only ever asks for effort `off`), and the guard now says what it means.
+
 - The TUI's stall guard now restamps its quiet clock only for the activity kinds it actually
   watches. `moveActivity` used to restamp on every move — `compacting` and `stopping` included —
   while `quiet` reported only for `thinking`/`responding`, so the two seats were coupled by hand and

@@ -236,7 +236,18 @@ stall-guard residuals section.
 
 ---
 
-## 8. Narrow the title drop-the-flag fallback to the kwarg it sets
+## 8. Narrow the title drop-the-flag fallback to the kwarg it sets — ✅ DONE (2026-08-15)
+
+NOTES (2026-08-15): the guard and its comment moved out of `generate` into a new unexported
+`respondDroppingThinkingOff(ctx, client, req)` in the same file — `generate` builds its request via
+`title.Prompt`, which hardcodes `EffortOff`, so there was no seam through which a LEVEL-carrying
+request could reach the guard and the item's required test could not otherwise be written. The
+extraction is behaviour-identical, keeps the comment's substance (extended with the narrowing's
+rationale), and the new table-driven test drives the real POST path against `scriptedTitleServer`
+rather than a predicate.
+NOTES (2026-08-15): the new test is named `TestTitleGeneratorDropsOnlyTheThinkingOffKwarg` (rather
+than a `TestTitleFallback…` form) so the item's Acceptance filter `-run TestTitleGenerator` actually
+picks it up, matching the neighbouring fallback tests' naming family.
 
 **What:** The guard at `cmd/apogee/title.go:90` fires for ANY non-empty
 `req.ThinkingEffort`, so a future namer carrying a level would silently have it stripped on

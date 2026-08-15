@@ -322,6 +322,66 @@ func TestTitleGeneratorFallsBackWhenTheThinkingKwargIsRejected(t *testing.T) {
 	}
 }
 
+// The re-send exists for the thinking-OFF kwarg and nothing else. A namer that asks for a LEVEL of
+// reasoning asked for reply content rather than for the token cap's backstop, so stripping it would
+// send a request nobody wrote; that rejection escapes on the first POST instead. A request that
+// asked for no effort at all carries no kwarg to drop, so it is never re-sent either.
+func TestTitleGeneratorDropsOnlyTheThinkingOffKwarg(t *testing.T) {
+	t.Parallel()
+
+	rejection := titleAttempt{status: http.StatusBadRequest, errBody: `{"error":"unknown field: chat_template_kwargs"}`}
+	for _, tc := range []struct {
+		name      string
+		effort    provider.Effort
+		script    []titleAttempt
+		wantPosts int
+		wantErr   bool
+	}{
+		{
+			name:      "thinking off is dropped and re-sent",
+			effort:    provider.EffortOff,
+			script:    []titleAttempt{rejection, {content: "a title", finishReason: "stop"}},
+			wantPosts: 2,
+		},
+		{
+			name:      "a requested level is left as written",
+			effort:    provider.EffortLow,
+			script:    []titleAttempt{rejection},
+			wantPosts: 1,
+			wantErr:   true,
+		},
+		{
+			name:      "a request that asked for nothing has nothing to drop",
+			effort:    "",
+			script:    []titleAttempt{rejection},
+			wantPosts: 1,
+			wantErr:   true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			srv, bodies := scriptedTitleServer(t, tc.script...)
+			client := provider.NewClient(srv.URL, "model-a", provider.WithMaxRetries(0))
+			req := provider.Request{
+				Messages:       []provider.Message{{Role: "user", Content: "name this session"}},
+				ThinkingEffort: tc.effort,
+			}
+
+			resp, err := respondDroppingThinkingOff(context.Background(), client, req)
+
+			if tc.wantErr && err == nil {
+				t.Fatalf("respondDroppingThinkingOff = (%q, nil); want the rejection surfaced, not a stripped re-send", resp.Content)
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("respondDroppingThinkingOff: %v; want the fallback attempt's reply", err)
+			}
+			if n := len(bodies()); n != tc.wantPosts {
+				t.Errorf("server saw %d naming POSTs; want %d", n, tc.wantPosts)
+			}
+		})
+	}
+}
+
 // The fallback is ONE re-send, and only for the class it can help. A second rejection escapes as the
 // error, and an overflow is never re-sent at all: the request is too big for the window, which
 // dropping a field cannot fix, and a pointless second POST would take a queue slot ahead of the

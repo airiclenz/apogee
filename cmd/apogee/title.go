@@ -85,21 +85,7 @@ func (w titleWiring) generate(ctx context.Context, prompts []string) (string, er
 		provider.WithRequestTimeout(w.requestTimeout), provider.WithAPIKey(binding.APIKey),
 		provider.WithMaxRetries(0))
 
-	req := title.Prompt(prompts, w.workspaceBase, w.now())
-	resp, err := client.Respond(ctx, req)
-	if err != nil && req.ThinkingEffort != "" && rejectedOutright(err) {
-		// The "answer without thinking" intent rides as a chat_template_kwargs object, which llama.cpp
-		// accepts and a stricter OpenAI-compatible server may reject as an unknown field. Without this
-		// one re-send, asking for it would trade "naming fails on big sessions" for "naming fails
-		// always" on such a server; dropping the flag falls back on the raised token cap, which is the
-		// backstop it was raised to be (internal/title).
-		//
-		// It does not soften the retries-OFF contract above. That policy is about queue time, and a 4xx
-		// comes back before the server generates a token — the second POST costs the user's next
-		// Exchange nothing, where a re-POST of a faulted attempt would have cost it a whole generation.
-		req.ThinkingEffort = ""
-		resp, err = client.Respond(ctx, req)
-	}
+	resp, err := respondDroppingThinkingOff(ctx, client, title.Prompt(prompts, w.workspaceBase, w.now()))
 	if err != nil {
 		return "", err
 	}
@@ -111,6 +97,34 @@ func (w titleWiring) generate(ctx context.Context, prompts []string) (string, er
 		return "", title.ErrTruncated
 	}
 	return resp.Content, nil
+}
+
+// respondDroppingThinkingOff sends req once and, when the Upstream rejects it outright, re-sends it
+// exactly once with the "answer without thinking" ask dropped — the one thing about the naming call
+// that is free to give up.
+//
+// That intent rides as a chat_template_kwargs object, which llama.cpp accepts and a stricter
+// OpenAI-compatible server may reject as an unknown field. Without this one re-send, asking for it
+// would trade "naming fails on big sessions" for "naming fails always" on such a server; dropping
+// the flag falls back on the raised token cap, which is the backstop it was raised to be
+// (internal/title).
+//
+// The re-send is for [provider.EffortOff] and NOTHING else. A request that asked for a LEVEL of
+// reasoning asked for reply content, not for a cap backstop, so silently stripping it would send a
+// request nobody wrote and return a title generated under conditions the caller did not choose;
+// such a rejection escapes on the first POST instead. `title.Prompt` is the only namer today and it
+// asks for off, so the narrower guard is behaviour-preserving — it just says what it means.
+//
+// It does not soften the retries-OFF contract in [titleWiring.generate]. That policy is about queue
+// time, and a 4xx comes back before the server generates a token — the second POST costs the user's
+// next Exchange nothing, where a re-POST of a faulted attempt would have cost it a whole generation.
+func respondDroppingThinkingOff(ctx context.Context, client *provider.Client, req provider.Request) (provider.RawResponse, error) {
+	resp, err := client.Respond(ctx, req)
+	if err != nil && req.ThinkingEffort == provider.EffortOff && rejectedOutright(err) {
+		req.ThinkingEffort = ""
+		resp, err = client.Respond(ctx, req)
+	}
+	return resp, err
 }
 
 // rejectedOutright reports whether err is an Upstream 4xx — the class that means "I will not accept

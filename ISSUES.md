@@ -46,10 +46,6 @@ The still-open findings the render_test.go split left, under the conventions' ac
 The still-open findings the thinking-effort-knob plan run left, under the conventions' actionability
 bar.
 
-- [ ] `cmd/apogee/title.go:90`'s drop-the-flag fallback now fires for ANY non-empty
-  `req.ThinkingEffort`, not only `off`. Harmless today — `title.Prompt` only ever sets
-  `domain.EffortOff` (`internal/domain/config.go:334`) — but the guard no longer says what it means,
-  so a namer that ever carried a level would silently have it stripped on the re-send.
 - [ ] The in-band error path carries no template hint: `inBandError`
   (`internal/provider/client.go:376`, called from `:214`) classifies an error member a server wrapped
   in an HTTP 200 and adds nothing about `chat_template_kwargs`, so an aggregator that wraps a
