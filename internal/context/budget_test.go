@@ -26,6 +26,7 @@ func TestAllocate_ReserveHonouredAndPartsSum(t *testing.T) {
 		{"configured fraction on an odd window", 4097, 0, 0.35},
 		{"explicit reserve alongside a fraction", 8192, 2048, 0.5},
 		{"out-of-range fraction falls back", 8192, 0, 1.5},
+		{"NaN fraction falls back", 8192, 0, math.NaN()},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -82,7 +83,8 @@ func TestAllocate_OversizeReserveClamped(t *testing.T) {
 
 // TestAllocate_ReservePrecedence pins the three-step precedence the reply reserve follows: explicit
 // tokens win over any fraction, a fraction in (0, 1) applies when no tokens are pinned, and a
-// fraction outside that range is treated as unset so it falls through to the built-in default —
+// fraction outside that range — NaN included, which compares false to every bound — is treated as
+// unset so it falls through to the built-in default —
 // the defensive floor beneath the config layer's range validation, never a panic or an absurd
 // reserve.
 func TestAllocate_ReservePrecedence(t *testing.T) {
@@ -97,12 +99,14 @@ func TestAllocate_ReservePrecedence(t *testing.T) {
 	}{
 		{"explicit tokens win over a fraction", 3000, 0.5, 3000},
 		{"explicit tokens win over an out-of-range fraction", 3000, 7.5, 3000},
+		{"explicit tokens win over a NaN fraction", 3000, math.NaN(), 3000},
 		{"fraction applies when no tokens are pinned", 0, 0.5, 5000},
 		{"a small fraction applies too", 0, 0.05, 500},
 		{"zero fraction is unset", 0, 0, builtIn},
 		{"negative fraction is unset", 0, -0.3, builtIn},
 		{"a fraction of exactly 1 is unset", 0, 1, builtIn},
 		{"a fraction above 1 is unset", 0, 1.5, builtIn},
+		{"a NaN fraction is unset", 0, math.NaN(), builtIn},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

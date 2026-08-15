@@ -567,6 +567,16 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- A NaN reserve fraction reaching `internal/context.Allocate` now falls to the built-in 0.20 default
+  like every other non-share value. The unset guard compared the fraction against both bounds
+  (`fraction <= 0 || fraction >= 1`), and NaN compares false to everything, so it slipped past into
+  `int(float64(window) * fraction)` — implementation-dependent garbage: a silent zero reserve on
+  arm64, `math.MinInt64` on amd64, which made `working` negative and every split field nonsense,
+  among other things disarming the automatic compaction trigger (negative History reads as "no
+  basis"). The guard is now stated positively, `!(fraction > 0 && fraction < 1)`, matching
+  `config.isResponseReserveShare`'s treatment of NaN on the config path. The config layer already
+  refused NaN at load; this closes the same hole for a non-config caller and makes the defensive-floor
+  claim in `Allocate`'s own doc comment true again.
 - The two shipped scheme files' `warning` comments now describe its first consumer the way the
   status line renders it — the quiet *qualifier* before the activity clock, the form
   `internal/scheme/scheme.go` carries — instead of the stale "'quiet' suffix" wording

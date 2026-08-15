@@ -73,7 +73,7 @@ func Allocate(window, reserve int, fraction float64) Allocation {
 		return Allocation{}
 	}
 	if reserve <= 0 {
-		if fraction <= 0 || fraction >= 1 {
+		if !(fraction > 0 && fraction < 1) {
 			fraction = defaultReserveFraction
 		}
 		reserve = int(float64(window) * fraction)

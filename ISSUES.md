@@ -27,9 +27,6 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 
 The still-open findings that run left, under the conventions' actionability bar.
 
-- [ ] `internal/context.Allocate`'s own unset guard (`internal/context/budget.go:76`,
-  `fraction <= 0 || fraction >= 1`) lets NaN through for a non-config caller; the config-path
-  validator closes only that path.
 - [ ] The kind-projection map at `cmd/apogee/settingsrows_test.go:409` omits `KindFloat` (as it
   already omits `KindText`/`KindScheme`), and the row-level loop above it asserts through
   `settingKind()`, so it is tautological — the projection for the float kind has only indirect
