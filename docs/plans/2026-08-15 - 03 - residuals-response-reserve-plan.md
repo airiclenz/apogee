@@ -204,7 +204,12 @@ both files open with a header comment naming their sources.
 
 ---
 
-## 7. Restamp the quiet clock only for watched kinds
+## 7. Restamp the quiet clock only for watched kinds — ✅ DONE (2026-08-15)
+
+NOTES (2026-08-15): two prose sites outside the item's Files list were corrected in the same pass
+because this change made them inaccurate — `internal/tui/doc.go`'s stall-guard paragraph and the
+`Model.lastEvent` field comment (`internal/tui/model.go:240`) both said an activity MOVE stamps the
+clock, unqualified; each now names the watched-kind gate. Comment-only, no behaviour.
 
 **What:** `moveActivity` (`internal/tui/activity.go:225`) calls `m.noteEngineHeard()`
 unconditionally — every activity kind restamps the quiet clock, `actCompacting`/`actStopping`

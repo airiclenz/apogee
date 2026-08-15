@@ -239,8 +239,8 @@ type Model struct {
 
 	// lastEvent is when the ENGINE was last heard from: any Event, at any depth, of any variant —
 	// including a ReasoningEvent, since a reasoning stream is life and the stall the guard was built
-	// for (2026-08-14) had NO events at all — plus the launch of a worker whose request is away but
-	// unanswered (moveActivity). It is the quiet clock the stall guard reads: once the gap to now
+	// for (2026-08-14) had NO events at all — plus a move to an activity kind the guard watches, the
+	// launch of a worker whose request is away but unanswered (moveActivity, isQuietWatched). It is the quiet clock the stall guard reads: once the gap to now
 	// crosses [Options.StallAfter] the status line qualifies the running phrase with a bare `quiet`
 	// in front of the activity's own clock — "thinking · quiet · 2m 59s" (runningPhrase,
 	// activity.quiet) — and the silence's own length is shown nowhere. Nothing on a timer touches

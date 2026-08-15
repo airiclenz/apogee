@@ -545,6 +545,12 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- The TUI's stall guard now restamps its quiet clock only for the activity kinds it actually
+  watches. `moveActivity` used to restamp on every move — `compacting` and `stopping` included —
+  while `quiet` reported only for `thinking`/`responding`, so the two seats were coupled by hand and
+  a future watched kind would have inherited the restamp silently. Both now read one shared
+  `activityKind.isQuietWatched` predicate, pinned by a table covering every kind in the vocabulary.
+
 - The `upstreamChoices` overview now credits the helper that actually builds the synthesized
   ephemeral row's label. Its second paragraph still named `hostFromEndpoint` as the source of "the
   endpoint's host as its label", but since the alias gained its collision suffix that label comes

@@ -337,9 +337,10 @@
 //
 // The same file carries the STALL GUARD, which answers the half of that question a phrase alone
 // cannot: whether anything is still coming. [Model.lastEvent] is when the engine was last heard
-// from — every Event stamps it, at any depth and of any variant, and so does an activity MOVE,
-// which is either an Event moving it or a worker just launched (moveActivity), the seam that keeps
-// a fresh Exchange from inheriting the silence of the one before it. Nothing on a timer touches it:
+// from — every Event stamps it, at any depth and of any variant, and so does an activity move to a
+// kind the guard WATCHES, which is either an Event moving it or a worker just launched
+// (moveActivity, gated by activityKind.isQuietWatched so the restamp can never outgrow what quiet
+// reports), the seam that keeps a fresh Exchange from inheriting the silence of the one before it. Nothing on a timer touches it:
 // a heartbeat or a spinner frame proves the TUI is alive, which was never the question. Once the
 // gap to now passes the `ui.stall-after` threshold, statusLine qualifies the phrase with a bare
 // amber " · quiet" in front of the activity's own clock — "thinking · quiet · 21m 03s"

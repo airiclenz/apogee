@@ -127,6 +127,15 @@ func (a activity) elapsed(now time.Time) time.Duration {
 	return 0
 }
 
+// isQuietWatched is whether the stall guard watches this activity kind: the single seat of that
+// rule, read by BOTH of the guard's gates — quiet below, which decides whether the silence is
+// reported, and moveActivity, which decides whether a move restamps the clock that silence is
+// measured from. The two were coupled by hand before, so a kind added to one would have inherited
+// the other silently. Which kinds are watched, and why only those, is quiet's own doc comment.
+func (k activityKind) isQuietWatched() bool {
+	return k == actThinking || k == actResponding
+}
+
 // quiet is whether the status line owes the human the fact that the ENGINE has gone silent at now.
 // lastEvent is when it was last heard from ([Model.lastEvent]); after is the `ui.stall-after`
 // threshold, where 0 turns the guard off entirely.
@@ -148,7 +157,7 @@ func (a activity) quiet(lastEvent, now time.Time, after time.Duration) bool {
 	if after <= 0 || lastEvent.IsZero() {
 		return false
 	}
-	if a.kind != actThinking && a.kind != actResponding {
+	if !a.kind.isQuietWatched() {
 		return false
 	}
 	return now.Sub(lastEvent) >= after
@@ -222,13 +231,20 @@ func (m *Model) setToolActivity(verb, call string, depth int, spawn string) {
 // was just launched and its request is away (the four transitions no Event announces), and both are
 // the engine being heard from. Restamping here is what keeps a fresh Exchange from inheriting the
 // silence of the one before it, structurally, rather than by every launch site remembering to.
+//
+// That restamp is gated on the kinds the guard actually watches (isQuietWatched), so this seat can
+// never outgrow the one that reports: a move to compacting or stopping leaves the clock where it
+// was — neither claims the engine is working, and the guard says nothing for either — while a move
+// to thinking or responding measures the new claim's silence from now.
 func (m *Model) moveActivity(next activity) {
 	next.since = m.act.since
 	if m.act.kind != next.kind || m.act.label != next.label || m.act.call != next.call {
 		next.since = time.Now()
 	}
 	m.act = next
-	m.noteEngineHeard()
+	if next.kind.isQuietWatched() {
+		m.noteEngineHeard()
+	}
 }
 
 // noteEngineHeard restamps the quiet clock: the engine has just been heard from, so the stall guard

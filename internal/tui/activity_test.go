@@ -257,6 +257,43 @@ func TestActivityQuiet(t *testing.T) {
 	}
 }
 
+// TestMoveActivityRestampsOnlyWatchedKinds pins the quiet clock's SECOND seat to the same rule its
+// reporting gate reads (isQuietWatched): a move restamps [Model.lastEvent] only when it moves to a
+// kind the guard watches. Every move used to restamp, whatever it moved to, so the two seats were
+// coupled only by hand — a kind added to quiet's gate would have inherited a restamp nobody chose.
+// Compacting and stopping are the standing proof: both are silent by design, and a restamp there
+// would tell the guard the engine had just spoken when nothing had.
+//
+// The table walks every kind in the vocabulary, so a new one has to be answered for here as well.
+func TestMoveActivityRestampsOnlyWatchedKinds(t *testing.T) {
+	tests := []struct {
+		name        string
+		kind        activityKind
+		wantRestamp bool
+	}{
+		{name: "thinking is watched", kind: actThinking, wantRestamp: true},
+		{name: "responding is watched", kind: actResponding, wantRestamp: true},
+		{name: "a compaction leaves the clock alone", kind: actCompacting},
+		{name: "a stopping worker leaves the clock alone", kind: actStopping},
+		{name: "an open tool call leaves the clock alone", kind: actTool},
+		{name: "a re-streamed turn leaves the clock alone", kind: actRetrying},
+		{name: "an idle slot leaves the clock alone", kind: actIdle},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			m := newTestModel(t)
+			heardAt := time.Now().Add(-20 * time.Minute)
+			m.lastEvent = heardAt
+
+			m.moveActivity(activity{kind: tc.kind})
+
+			if restamped := m.lastEvent.After(heardAt); restamped != tc.wantRestamp {
+				t.Errorf("after a move to %v the clock restamped = %v, want %v", tc.kind, restamped, tc.wantRestamp)
+			}
+		})
+	}
+}
+
 // ----------------------------------------------------------------------------
 // The fold (foldActivity)
 // ----------------------------------------------------------------------------

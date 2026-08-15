@@ -41,16 +41,6 @@ The still-open findings the render_test.go split left, under the conventions' ac
   `internal/tui/model_test.go:1` (4916 lines), `internal/tui/settings_test.go:1` (3217) and
   `internal/tui/mouse_test.go:1` (3168). Same carve treatment; out of this plan's scope.
 
-### Run residuals — open (2026-08-15, stall-guard run)
-
-The still-open findings the stall-guard plan run left, under the conventions' actionability bar.
-
-- [ ] `moveActivity` (`internal/tui/activity.go:223`) restamps the quiet clock for every activity
-  kind, `actCompacting` and `actStopping` (`internal/tui/activity.go:41`, `:42`) included. Harmless
-  today, because `quiet` (`internal/tui/activity.go:141`) reports only for `actThinking` and
-  `actResponding` — but the two seats are coupled, so a future watched kind would inherit the
-  restamp silently.
-
 ### Run residuals — open (2026-08-15, thinking-effort knob run)
 
 The still-open findings the thinking-effort-knob plan run left, under the conventions' actionability
