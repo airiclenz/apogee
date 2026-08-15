@@ -33,6 +33,7 @@ var (
 	_ apogee.ToolCallFormat
 	_ apogee.ThinkingProfile
 	_ apogee.ThinkingStyle
+	_ apogee.ThinkingEffort
 	_ apogee.Mode
 	_ apogee.UserInput
 	_ apogee.StepResult
@@ -123,6 +124,11 @@ var (
 	_ = apogee.ThinkingNone
 	_ = apogee.ThinkingDelimited
 	_ = apogee.ThinkingHarmony
+
+	_ = apogee.EffortOff
+	_ = apogee.EffortLow
+	_ = apogee.EffortMedium
+	_ = apogee.EffortHigh
 
 	_ = apogee.ModePlan
 	_ = apogee.ModeAskBefore

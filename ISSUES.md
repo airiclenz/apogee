@@ -41,18 +41,6 @@ The still-open findings the render_test.go split left, under the conventions' ac
   `internal/tui/model_test.go:1` (4916 lines), `internal/tui/settings_test.go:1` (3217) and
   `internal/tui/mouse_test.go:1` (3168). Same carve treatment; out of this plan's scope.
 
-### Run residuals — open (2026-08-15, thinking-effort knob run)
-
-The still-open findings the thinking-effort-knob plan run left, under the conventions' actionability
-bar.
-
-- [ ] No root alias for the Thinking-effort type: `apogee.go:119` re-exports `ThinkingProfile` /
-  `ThinkingStyle` with their constants, but `domain.ThinkingEffort`
-  (`internal/domain/config.go:330`) and its levels (`:334`) have none, so an out-of-module Driver
-  must pass untyped string constants to `Agent.SetEffortOverride` (`internal/agent/agent.go:543`).
-  [ADR 0031](docs/adr/0031-the-local-platform-north-star-binds-every-future-layer-to-the-embeddable-engine.md)'s
-  Driver-sufficiency invariant is what makes this worth closing.
-
 ## Parked / deferred work
 
 Live, deliberately deferred work only. Each entry records *enough* design that we don't re-derive

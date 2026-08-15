@@ -305,7 +305,11 @@ overflow); existing non-2xx hint tests (`client_test.go:302`, `stream_test.go:20
 
 ---
 
-## 10. Root alias for ThinkingEffort
+## 10. Root alias for ThinkingEffort — ✅ DONE (2026-08-15)
+
+NOTES (2026-08-15): removing the item's ISSUES.md bullet emptied the "Run residuals — open
+(2026-08-15, thinking-effort knob run)" section, so its heading and intro prose went with it (house
+convention in the plan's Standing requirements).
 
 **What:** `apogee.go` re-exports `ThinkingProfile`/`ThinkingStyle` with their constants
 (`:118-128`) but not `domain.ThinkingEffort`, so an out-of-module Driver must pass untyped

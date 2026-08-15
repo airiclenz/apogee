@@ -10,6 +10,13 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **`ThinkingEffort` and its four levels are re-exported at the root.** `apogee.go` already aliased
+  `ThinkingProfile` / `ThinkingStyle` with their constants but not the effort type, so an
+  out-of-module Driver had to hand `Agent.SetEffortOverride` untyped strings — an ADR 0031
+  Driver-sufficiency gap. The facade now carries `apogee.ThinkingEffort` alongside the thinking
+  aliases, plus `EffortOff` / `EffortLow` / `EffortMedium` / `EffortHigh`, and `example_test.go`'s
+  completeness guard pins all five so a dropped re-export fails the build.
+
 - **A new `ui.stall-after` config key carries the stall guard's quiet threshold.** It is a duration
   written the way Go spells one (`90s`, `2m`, `1m30s`), default `90s`, with `0` turning the guard
   off — long enough that ingesting a large prompt, legitimately silent for a minute or two on a
