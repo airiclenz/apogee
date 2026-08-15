@@ -127,9 +127,15 @@ func (a activity) elapsed(now time.Time) time.Duration {
 	return 0
 }
 
-// quiet is how long the ENGINE has been silent at now, and whether the status line owes the human
-// that fact. lastEvent is when it was last heard from ([Model.lastEvent]); after is the
-// `ui.stall-after` threshold, where 0 turns the guard off entirely.
+// quiet is whether the status line owes the human the fact that the ENGINE has gone silent at now.
+// lastEvent is when it was last heard from ([Model.lastEvent]); after is the `ui.stall-after`
+// threshold, where 0 turns the guard off entirely.
+//
+// It answers WHETHER and deliberately not how long. The row spends the fact as a bare `quiet`
+// qualifier in front of the activity's own clock — "thinking · quiet · 2m 59s" (runningPhrase,
+// model.go) — because the silence and the activity are the same span in the case the guard was
+// built for (an engine that never spoke at all), where two clocks read as one fact stated twice.
+// A silence duration returned here and painted nowhere would only invite that second clock back.
 //
 // The guard reports SILENCE and never a verdict, which is what the three gates encode. It speaks
 // only while the worker claims to be thinking or responding: a long silent tool call is normal
@@ -138,18 +144,14 @@ func (a activity) elapsed(now time.Time) time.Duration {
 // until the engine has been heard from once — a zero lastEvent would otherwise measure from the
 // epoch, the elapsed posture above — and nothing on a clock that moved backwards, since after is
 // always positive here.
-func (a activity) quiet(lastEvent, now time.Time, after time.Duration) (time.Duration, bool) {
+func (a activity) quiet(lastEvent, now time.Time, after time.Duration) bool {
 	if after <= 0 || lastEvent.IsZero() {
-		return 0, false
+		return false
 	}
 	if a.kind != actThinking && a.kind != actResponding {
-		return 0, false
+		return false
 	}
-	silence := now.Sub(lastEvent)
-	if silence < after {
-		return 0, false
-	}
-	return silence, true
+	return now.Sub(lastEvent) >= after
 }
 
 // secondsPerMinute is the elapsed clock's rollover point (formatElapsed).
@@ -230,9 +232,9 @@ func (m *Model) moveActivity(next activity) {
 }
 
 // noteEngineHeard restamps the quiet clock: the engine has just been heard from, so the stall guard
-// measures its silence from now (statusLeft's quiet suffix — quiet above, model.go). Timers say
-// nothing here: a heartbeat, a spinner frame and an elapsed-clock repaint all prove the TUI is
-// alive, which was never the question the guard asks.
+// measures its silence from now (the status line's quiet qualifier — quiet above, runningPhrase in
+// model.go). Timers say nothing here: a heartbeat, a spinner frame and an elapsed-clock repaint all
+// prove the TUI is alive, which was never the question the guard asks.
 func (m *Model) noteEngineHeard() {
 	m.lastEvent = time.Now()
 }

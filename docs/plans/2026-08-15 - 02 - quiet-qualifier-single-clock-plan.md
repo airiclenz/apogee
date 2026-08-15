@@ -36,7 +36,35 @@ the silence clock on every event).
   string.
 - No new config knob for the qualifier's form or tint.
 
-## 1. Render the stall guard as a `quiet` qualifier before a single activity clock
+## 1. Render the stall guard as a `quiet` qualifier before a single activity clock — ✅ DONE (2026-08-15)
+
+NOTES (2026-08-15): the CHANGELOG text above REPLACES the existing `[Unreleased]` bullet that opens
+`- **The status line stops claiming "thinking" when nothing is coming.**` (~line 33) IN PLACE — it
+is not an additional entry; the old two-clock form never shipped, so nothing in the changelog may
+describe it. The implementer never writes CHANGELOG.md itself (run protocol), which is why this
+arrives as replacement text rather than as an edit.
+NOTES (2026-08-15): one more never-shipped mention of the old form sits in the sibling `warning`-role
+bullet (~line 32): "it is the tint the stall guard's quiet-time suffix will wear" should read "the
+stall guard's quiet qualifier will wear". Same in-place amendment, verifier's to apply.
+NOTES (2026-08-15): `runningPhrase` now returns the STYLED slot (it has to: the amber covers the
+inserted ` · quiet` alone, and lipgloss cannot tint a fragment inside an outer Render), taking
+`quiet bool` and composing phrase / qualifier / clock as three styled runs. `statusLeft` therefore
+composes the running slot BOTH ways and the width test picks one — that is what drops the qualifier
+whole instead of truncating it, at the same priority as before (queued count still last).
+`quietSuffix` is gone; the fragment is the `quietQualifier` const.
+NOTES (2026-08-15): files beyond the plan's list, all compelled by the reshape. `internal/tui/doc.go`
+— its stall-guard paragraph linked the deleted `[Model.quietSuffix]` and described the two-clock
+form. `internal/tui/activity_test.go` — its three `runningPhrase` assertions took the new signature
+and now strip styling (`strip(...)`), beside the quiet-table change the plan named.
+`internal/config/defaults/config.yaml`, `internal/config/config.go`, `internal/tui/settings.go`,
+`internal/config/config_test.go` — the seeded config template and the `ui.stall-after` refusals
+carried the old `· quiet 3m 10s` example and the word "suffix"; the example strings are the
+carve-out the plan's Out-of-scope names, and the refusals are user-facing help text for behaviour
+that changed. No behaviour, default or key was touched.
+NOTES (2026-08-15): the `silentFor` test helper now backdates `m.act.since` as well as
+`m.lastEvent` — with one clock on the row the assertion `thinking · quiet · 3m 10s` needs the
+activity clock to read the same span, which is exactly the incident's shape (nothing arrived since
+the phrase went up).
 
 **What:** Reshape the running status line's stall surface in `internal/tui/model.go`
 from a duration-carrying suffix appended *after* the clock to a bare qualifier inserted

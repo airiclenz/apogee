@@ -1462,7 +1462,7 @@ func parseStallAfter(value string) (time.Duration, error) {
 	after, err := time.ParseDuration(strings.TrimSpace(value))
 	if err != nil || after < 0 {
 		return 0, fmt.Errorf("ui.stall-after takes a length of time of 0 or more, like 90s or 2m "+
-			"(0 turns the quiet suffix off), not %q", value)
+			"(0 turns the quiet qualifier off), not %q", value)
 	}
 	return after, nil
 }

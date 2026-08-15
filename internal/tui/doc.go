@@ -341,12 +341,14 @@
 // which is either an Event moving it or a worker just launched (moveActivity), the seam that keeps
 // a fresh Exchange from inheriting the silence of the one before it. Nothing on a timer touches it:
 // a heartbeat or a spinner frame proves the TUI is alive, which was never the question. Once the
-// gap to now passes the `ui.stall-after` threshold, statusLine hangs " · quiet 3m 10s" off the
-// phrase in the amber statusWarning ([Model.quietSuffix], activity.quiet holds the rule). It is a
-// FACT and never a verdict — a large prompt is legitimately silent for a minute or two, and the
-// incident that motivated it (2026-08-14: a bare "thinking" for twenty minutes) ended in a normal
-// completion — so the row says how long nothing has arrived and stops there, and drops the suffix
-// the moment an Event lands. It speaks only for thinking and responding: a silent tool call is the
+// gap to now passes the `ui.stall-after` threshold, statusLine qualifies the phrase with a bare
+// amber " · quiet" in front of the activity's own clock — "thinking · quiet · 21m 03s"
+// ([Model.runningPhrase], activity.quiet holds the rule). One clock, not two: the silence and the
+// activity are the same span in the case the guard was built for, so the qualifier says only THAT
+// nothing is arriving. It is a FACT and never a verdict — a large prompt is legitimately silent
+// for a minute or two, and the incident that motivated it (2026-08-14: a bare "thinking" for
+// twenty minutes) ended in a normal completion — so the row stops at the fact, and drops the
+// qualifier the moment an Event lands. It speaks only for thinking and responding: a silent tool call is the
 // tool taking its time, a stopping worker already answers for itself, and the states waiting on the
 // HUMAN never show it, because the silence there is the human's own. It is also the first thing the
 // left slot gives up on a narrow row, dropped whole rather than truncated (layout.md).

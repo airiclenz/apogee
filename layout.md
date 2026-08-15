@@ -209,7 +209,7 @@ instead of failing a test.
 for disappearing — the `N queued` readout carries the count — and the status line therefore owes
 that readout the same width discipline a pane's title row owes its count (below): the left slot is
 composed **to** the window rather than composed long and clipped to it, so a narrow window sheds
-the activity phrase around the count and never the count off the end of the row. The quiet suffix
+the activity phrase around the count and never the count off the end of the row. The quiet qualifier
 (below) is one rung lower still — it qualifies the phrase, so it is the first thing the slot gives
 up, and it is dropped whole rather than truncated.
 
@@ -1125,16 +1125,20 @@ terminal it steps visibly and on a 16-colour one it collapses to a couple of ton
 turning it off is for.
 
 **When the phrase says nothing is happening.** A spinner keeps turning whether or not the engine is
-still answering, so a running phrase gains a second reading once the engine has gone silent:
-`thinking · 21m 03s · quiet 3m 10s`, in the scheme's amber `warning` role. `ui.stall-after` is the
-threshold the silence has to cross — `90s` by default, `0` turns it off — and what the suffix
-counts is the time since the last engine event of any kind arrived, so it appears by itself and
-disappears by itself the moment one does. It is a fact and not a verdict: a large prompt is
-legitimately silent for a minute or two, so the row reports the silence and says nothing about what
-it means. Only `thinking` and `responding` carry it — a silent tool call is the tool taking its
-time, and a stop already says what it is doing — and the states waiting on a human (an open
-question, an approval) never do, the silence there being the human's own. It is also the first
-thing the left slot gives up when the row is tight, dropped whole rather than truncated.
+still answering, so a running phrase gains a qualifier once the engine has gone silent: the
+`thinking · 21m 03s` of a moment ago reads `thinking · quiet · 21m 03s`, with the inserted `· quiet`
+in the scheme's amber `warning` role. The row keeps ONE clock, and it is the activity's: in the case
+this was built for nothing arrived after the request went out, so the silence and the phrase are the
+same span and a second duration behind the word would state that one fact twice — and the clock
+never jumps backwards when the word appears or clears. `ui.stall-after` is the threshold the silence
+has to cross — `90s` by default, `0` turns it off — and what it measures is the time since the last
+engine event of any kind arrived, so the word appears by itself and disappears by itself the moment
+one does. It is a fact and not a verdict: a large prompt is legitimately silent for a minute or two,
+so the row reports the silence and says nothing about what it means. Only `thinking` and
+`responding` carry it — a silent tool call is the tool taking its time, and a stop already says what
+it is doing — and the states waiting on a human (an open question, an approval) never do, the
+silence there being the human's own. It is also the first thing the left slot gives up when the row
+is tight, dropped whole rather than truncated.
 
 ---
 

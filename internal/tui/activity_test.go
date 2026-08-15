@@ -148,13 +148,14 @@ func TestActivityElapsed(t *testing.T) {
 // The quiet clock (the stall guard)
 // ----------------------------------------------------------------------------
 
-// TestActivityQuiet pins the stall guard's firing rule at its own interface: how long the engine
-// has been silent, and whether the status line owes the human that fact at all. The rule is the
-// incident's shape (2026-08-14) — a claim of "thinking" no event has backed for minutes — so the
-// two kinds that make that claim are the only ones it speaks for. A silent tool call is the tool
-// taking its time and says nothing about the engine; a stopping worker already tells the human
-// what it is doing; a compaction emits nothing until it lands; and a threshold of 0 is the key's
-// own off switch.
+// TestActivityQuiet pins the stall guard's firing rule at its own interface: whether the status
+// line owes the human the fact that the engine has gone silent. WHETHER is the whole answer — the
+// row spends it as a bare `quiet` qualifier in front of the activity's own clock, so the silence
+// has no duration of its own to report. The rule is the incident's shape (2026-08-14) — a claim of
+// "thinking" no event has backed for minutes — so the two kinds that make that claim are the only
+// ones it speaks for. A silent tool call is the tool taking its time and says nothing about the
+// engine; a stopping worker already tells the human what it is doing; a compaction emits nothing
+// until it lands; and a threshold of 0 is the key's own off switch.
 func TestActivityQuiet(t *testing.T) {
 	now := time.Now()
 	const after = 90 * time.Second
@@ -165,7 +166,6 @@ func TestActivityQuiet(t *testing.T) {
 		act       activity
 		lastEvent time.Time
 		after     time.Duration
-		want      time.Duration
 		wantOwed  bool
 	}{
 		{
@@ -179,15 +179,13 @@ func TestActivityQuiet(t *testing.T) {
 			act:       activity{kind: actThinking},
 			lastEvent: silentFor(after),
 			after:     after,
-			want:      after,
 			wantOwed:  true,
 		},
 		{
-			name:      "thinking well past it reports the whole gap",
+			name:      "thinking well past it is owed just the same",
 			act:       activity{kind: actThinking},
 			lastEvent: silentFor(20 * time.Minute),
 			after:     after,
-			want:      20 * time.Minute,
 			wantOwed:  true,
 		},
 		{
@@ -195,7 +193,6 @@ func TestActivityQuiet(t *testing.T) {
 			act:       activity{kind: actResponding},
 			lastEvent: silentFor(3 * time.Minute),
 			after:     after,
-			want:      3 * time.Minute,
 			wantOwed:  true,
 		},
 		{
@@ -253,12 +250,8 @@ func TestActivityQuiet(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got, owed := tc.act.quiet(tc.lastEvent, now, tc.after)
-			if owed != tc.wantOwed {
-				t.Fatalf("quiet() owed = %v, want %v", owed, tc.wantOwed)
-			}
-			if got != tc.want {
-				t.Errorf("quiet() = %v, want %v", got, tc.want)
+			if owed := tc.act.quiet(tc.lastEvent, now, tc.after); owed != tc.wantOwed {
+				t.Errorf("quiet() = %v, want %v", owed, tc.wantOwed)
 			}
 		})
 	}
@@ -425,7 +418,7 @@ func TestStatusPhraseNamesTheActingDelegation(t *testing.T) {
 				EventBase: domain.EventBase{Depth: 1, CallID: "s1"},
 				Text:      "working on it",
 			})
-			if got := m.runningPhrase(m.act.since); got != tc.want {
+			if got := strip(m.runningPhrase(m.act.since, false)); got != tc.want {
 				t.Errorf("status phrase = %q, want %q", got, tc.want)
 			}
 		})
@@ -440,12 +433,12 @@ func TestStatusPhraseDropsTheNameWhenTheParentResumes(t *testing.T) {
 		Call: domain.ToolCall{ID: "s1", Tool: "sub_agent", Arguments: []byte(`{"name":"repo-scout","task":"audit"}`)},
 	})
 	m = m.foldEvent(domain.TokenEvent{EventBase: domain.EventBase{Depth: 1, CallID: "s1"}, Text: "working"})
-	if got, want := m.runningPhrase(m.act.since), "repo-scout · responding · 0s"; got != want {
+	if got, want := strip(m.runningPhrase(m.act.since, false)), "repo-scout · responding · 0s"; got != want {
 		t.Fatalf("delegate phrase = %q, want %q", got, want)
 	}
 
 	m = m.foldEvent(domain.MessageEvent{Text: "back"})
-	if got, want := m.runningPhrase(m.act.since), "thinking · 0s"; got != want {
+	if got, want := strip(m.runningPhrase(m.act.since, false)), "thinking · 0s"; got != want {
 		t.Errorf("phrase after the parent resumed = %q, want %q", got, want)
 	}
 }

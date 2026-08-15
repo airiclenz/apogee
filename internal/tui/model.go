@@ -240,8 +240,10 @@ type Model struct {
 	// lastEvent is when the ENGINE was last heard from: any Event, at any depth, of any variant —
 	// including a ReasoningEvent, since a reasoning stream is life and the stall the guard was built
 	// for (2026-08-14) had NO events at all — plus the launch of a worker whose request is away but
-	// unanswered (moveActivity). It is the quiet clock the status line reports off once the gap to
-	// now crosses [Options.StallAfter] (statusLeft, activity.quiet), and nothing on a timer touches
+	// unanswered (moveActivity). It is the quiet clock the stall guard reads: once the gap to now
+	// crosses [Options.StallAfter] the status line qualifies the running phrase with a bare `quiet`
+	// in front of the activity's own clock — "thinking · quiet · 2m 59s" (runningPhrase,
+	// activity.quiet) — and the silence's own length is shown nowhere. Nothing on a timer touches
 	// it: a heartbeat or a spinner frame proves the TUI is alive, not the engine. A plain time.Time,
 	// safe in the value-copied Model (ADR 0011).
 	lastEvent time.Time
@@ -3263,10 +3265,12 @@ func (m Model) statusLine() string {
 func (m Model) statusLeft() string {
 	lead := m.th.statusBar.Render(bodyIndent)
 
-	// quiet is the stall guard's suffix when the engine has gone silent under a running worker, and
-	// "" in every other frame and every other state (quietSuffix). It is carried separately from the
-	// phrase because it is styled differently and because it gives way first — see below.
-	var phrase, quiet string
+	// qualified is the running slot composed WITH the stall guard's `quiet` qualifier — the same row
+	// one rung richer — and "" in every frame and every state that owes nothing (activity.quiet).
+	// The qualifier sits BETWEEN the activity phrase and its clock, so it cannot be a fragment the
+	// width test appends after the fact: the slot is composed both ways and the width below picks
+	// one, which is also what drops the qualifier whole rather than truncating it — see below.
+	var phrase, qualified string
 	switch m.state {
 	case stateIdle:
 		// Idle says nothing for itself — the input box below already invites a message — with TWO
@@ -3283,8 +3287,11 @@ func (m Model) statusLeft() string {
 		}
 	case stateRunning:
 		now := time.Now()
-		phrase = m.spin.view(m.th) + m.th.statusBar.Render(" "+m.runningPhrase(now)) + m.throughputSuffix()
-		quiet = m.quietSuffix(now)
+		spinner, throughput := m.spin.view(m.th)+m.th.statusBar.Render(" "), m.throughputSuffix()
+		phrase = spinner + m.runningPhrase(now, false) + throughput
+		if m.act.quiet(m.lastEvent, now, m.opts.StallAfter) {
+			qualified = spinner + m.runningPhrase(now, true) + throughput
+		}
 	case stateAwaitingApproval:
 		phrase = m.th.statusBar.Render("approval needed")
 	case stateAwaitingAsk:
@@ -3298,11 +3305,12 @@ func (m Model) statusLeft() string {
 
 	queued := m.queuedSegment(true)
 	room := m.width - m.th.measure.Width(lead) - m.th.measure.Width(queued)
-	// The quiet suffix is the FIRST thing the slot gives up, one rung below the phrase it qualifies:
-	// it is dropped whole on a row too tight for both, never truncated, because "· quie…" reports
-	// neither the silence nor its length and would cost the phrase its own last columns to say so.
-	if quiet != "" && m.th.measure.Width(phrase)+m.th.measure.Width(quiet) <= room {
-		phrase += quiet
+	// The quiet qualifier is the FIRST thing the slot gives up, one rung below the phrase it
+	// qualifies: a row too tight for the qualified form falls back to the plain one, so the
+	// qualifier goes whole and never truncates into "· quie…", which would report neither the
+	// silence nor its own word and would cost the phrase its last columns to say so.
+	if qualified != "" && m.th.measure.Width(qualified) <= room {
+		phrase = qualified
 	}
 	if m.th.measure.Width(phrase) <= room {
 		return lead + phrase + queued
@@ -3313,42 +3321,48 @@ func (m Model) statusLeft() string {
 	return lead + m.th.measure.Truncate(phrase, room, "…") + queued
 }
 
-// runningPhrase composes the running left slot's text: the activity phrase and the clock
-// counting THIS activity ("thinking · 12s"). An activity with no phrase — the defensive case,
-// since every path into stateRunning sets one — degrades to the bare clock rather than to a
-// dangling separator. now is passed in so the composition is testable off the wall clock.
+// runningPhrase composes the running left slot's styled text: the activity phrase, the stall
+// guard's bare `quiet` qualifier when quiet says the row owes it, and the clock counting THIS
+// activity — "thinking · quiet · 2m 59s" while the engine is silent, "thinking · 12s" in every
+// frame that owes nothing. There is ONE clock either way, and it is the ACTIVITY's: it counts
+// continuously and never jumps backwards when the qualifier appears or clears. The guard's own
+// span is not shown at all, because in the case it was built for — an engine that never spoke
+// after the request went out — the two spans are the same one, and the row stated it twice.
+//
+// The qualifier's fragment, its separator included, wears the amber statusWarning; the phrase and
+// the clock keep the bar's own field, since the clock belongs to the activity rather than to the
+// guard. Amber and deliberately not the red statusError the errored state keeps for itself: this
+// qualifies a phrase that is still running, it does not announce a fault (theme.go). The qualifier
+// disappears by itself the moment an Event lands, since the clock activity.quiet reads is restamped
+// there (Model.lastEvent).
+//
+// An activity with no phrase — the defensive case, since every path into stateRunning sets one —
+// degrades to the bare clock rather than to a dangling separator, and can never be the qualified
+// case: activity.quiet speaks only for thinking and responding, and both always word themselves.
+// now is passed in so the composition is testable off the wall clock.
 //
 // This is the seam where the acting delegation's NAME is resolved: activity carries the spawning
 // call id, the transcript owns the run heads, and the phrase itself stays pure (activity.go). The
 // lookup happens per frame rather than at fold time on purpose — the name is display identity that
 // the head may not have folded yet, and an unresolved one costs a fallback word, not a wrong word.
-func (m Model) runningPhrase(now time.Time) string {
+func (m Model) runningPhrase(now time.Time, quiet bool) string {
 	clock := formatElapsed(m.act.elapsed(now))
-	if phrase := m.act.text(m.transcript.runName(m.act.spawn)); phrase != "" {
-		return phrase + " · " + clock
+	phrase := m.act.text(m.transcript.runName(m.act.spawn))
+	switch {
+	case phrase == "":
+		return m.th.statusBar.Render(clock)
+	case quiet:
+		return m.th.statusBar.Render(phrase) + m.th.statusWarning.Render(quietQualifier) + m.th.statusBar.Render(" · "+clock)
+	default:
+		return m.th.statusBar.Render(phrase + " · " + clock)
 	}
-	return clock
 }
 
-// quietSuffix is the stall guard's whole surface: " · quiet 3m 10s" hung off the running phrase
-// once the engine has been silent for longer than `ui.stall-after`, and "" in every frame that owes
-// nothing (activity.quiet holds the rule — which activities are watched, and when 0 turns the guard
-// off). It says how long nothing has arrived and stops there: a 43k-token prompt is legitimately
-// silent for a minute or two, so the honest fact is the silence, never a verdict about it — and the
-// suffix disappears by itself the moment an Event lands, since the clock it reads is restamped
-// there (Model.lastEvent).
-//
-// The tint is a QUALIFIER on a running phrase rather than an announced fault, which is why it is
-// the amber statusWarning and deliberately not the red statusError the errored state keeps for
-// itself (theme.go). now is passed in for the runningPhrase reason: so the composition is testable
-// off the wall clock.
-func (m Model) quietSuffix(now time.Time) string {
-	quiet, owed := m.act.quiet(m.lastEvent, now, m.opts.StallAfter)
-	if !owed {
-		return ""
-	}
-	return m.th.statusWarning.Render(" · quiet " + formatElapsed(quiet))
-}
+// quietQualifier is the stall guard's whole surface: the word, and the separator that hangs it off
+// the running phrase (runningPhrase). It says nothing about how long, and nothing about what the
+// silence means — a 43k-token prompt is legitimately silent for a minute or two, so the honest
+// fact is that nothing has arrived, never a verdict about it.
+const quietQualifier = " · quiet"
 
 // statusRight is the status line's right slot: the live context gauge when token usage is
 // known, else a state-appropriate key hint. The gauge is empty only until the first UsageEvent

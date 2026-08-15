@@ -3715,22 +3715,27 @@ func guardedRunningModel(t *testing.T, after time.Duration) Model {
 	return step(t, m, keyEnter())
 }
 
-// silentFor backdates the model's last-event clock so the engine reads as having said nothing for
-// quiet — the silence is arranged rather than waited out, so the row is asserted in no time at all.
-// Callers set the activity FIRST and backdate second: moving the activity is itself the engine
-// being heard from, and would restamp the clock this hands back.
+// silentFor backdates BOTH of the model's clocks by quiet: the last-event clock, so the engine
+// reads as having said nothing for that long, and the activity's own start, because the stall the
+// guard was built for is ONE span and not two — nothing has arrived since the phrase went up, which
+// is exactly why the row shows a single clock. The silence is arranged rather than waited out, so
+// the row is asserted in no time at all. Callers set the activity FIRST and backdate second: moving
+// the activity is itself the engine being heard from, and would restamp both clocks this hands back.
 func silentFor(m Model, quiet time.Duration) Model {
 	m.lastEvent = time.Now().Add(-quiet)
+	m.act.since = m.lastEvent
 	return m
 }
 
 // TestStatusLineQuietSuffix proves the stall guard on the row it actually paints. The status line
-// used to claim "thinking" for twenty minutes with nothing behind it (2026-08-14); it now hangs the
-// honest fact off the phrase once the engine has been silent past `ui.stall-after` — how long
-// nothing has arrived, never a verdict about it — and takes the fact straight back off the moment
-// an Event lands. The states that are waiting on the HUMAN never show it: the silence there is the
-// human's own, and telling them the engine is quiet while it waits for their answer is the same lie
-// in the other direction.
+// used to claim "thinking" for twenty minutes with nothing behind it (2026-08-14); it now qualifies
+// the phrase with a bare `quiet` in front of the activity's own clock once the engine has been
+// silent past `ui.stall-after` — the fact that nothing is arriving, never a verdict about it — and
+// takes the qualifier straight back off the moment an Event lands. There is ONE clock on the row:
+// in the shape the guard was built for the silence and the activity are the same span, so a second
+// duration behind the word only stated the first one twice. The states that are waiting on the
+// HUMAN never show it: the silence there is the human's own, and telling them the engine is quiet
+// while it waits for their answer is the same lie in the other direction.
 func TestStatusLineQuietSuffix(t *testing.T) {
 	const after = 90 * time.Second
 	// A gap that renders unambiguously either side of a second's slack: "3m 10s".
@@ -3740,22 +3745,32 @@ func TestStatusLineQuietSuffix(t *testing.T) {
 		m := silentFor(guardedRunningModel(t, after), 89*time.Second)
 		got := statusText(t, m)
 		if strings.Contains(got, "quiet") {
-			t.Errorf("status line = %q, want no quiet suffix below the threshold", got)
+			t.Errorf("status line = %q, want no quiet qualifier below the threshold", got)
 		}
 		if !strings.Contains(got, "thinking") {
 			t.Errorf("status line = %q, want the running phrase to stand alone", got)
 		}
 	})
 
-	t.Run("past the threshold the phrase gains the silence", func(t *testing.T) {
+	t.Run("past the threshold the phrase gains the qualifier", func(t *testing.T) {
 		m := silentFor(guardedRunningModel(t, after), quiet)
-		if got, want := statusText(t, m), "· quiet 3m 10s"; !strings.Contains(got, want) {
+		got := statusText(t, m)
+		if want := "thinking · quiet · 3m 10s"; !strings.Contains(got, want) {
 			t.Errorf("status line = %q, want it to contain %q", got, want)
 		}
+		// The word carries no clock of its own: the one duration on the row is the activity's.
+		if strings.Contains(got, "quiet 3m 10s") {
+			t.Errorf("status line = %q, want no second clock hung off the qualifier", got)
+		}
 		// The fact is a QUALIFIER on a running phrase, so it carries the amber warning tint rather
-		// than the errored state's red or the bar's own plain field (theme.go).
-		if tinted := m.th.statusWarning.Render(" · quiet 3m 10s"); !strings.Contains(m.statusLine(), tinted) {
-			t.Errorf("status line does not carry the suffix under statusWarning: %q", m.statusLine())
+		// than the errored state's red or the bar's own plain field (theme.go)...
+		if tinted := m.th.statusWarning.Render(quietQualifier); !strings.Contains(m.statusLine(), tinted) {
+			t.Errorf("status line does not carry the qualifier under statusWarning: %q", m.statusLine())
+		}
+		// ...and the tint stops there: the clock is the activity's, not the guard's, so it stays on
+		// the bar's own field rather than inside the amber run.
+		if tinted := m.th.statusWarning.Render(quietQualifier + " · 3m 10s"); strings.Contains(m.statusLine(), tinted) {
+			t.Errorf("status line paints the clock inside the warning tint: %q", m.statusLine())
 		}
 	})
 
@@ -3775,13 +3790,13 @@ func TestStatusLineQuietSuffix(t *testing.T) {
 			t.Run(tc.name, func(t *testing.T) {
 				m := silentFor(guardedRunningModel(t, after), quiet)
 				if got := statusText(t, m); !strings.Contains(got, "quiet") {
-					t.Fatalf("status line = %q, want the suffix before the event lands", got)
+					t.Fatalf("status line = %q, want the qualifier before the event lands", got)
 				}
 
 				m = step(t, m, eventMsg{Event: tc.event})
 
 				if got := statusText(t, m); strings.Contains(got, "quiet") {
-					t.Errorf("status line = %q, want the suffix gone the moment an event arrives", got)
+					t.Errorf("status line = %q, want the qualifier gone the moment an event arrives", got)
 				}
 			})
 		}
@@ -3796,7 +3811,7 @@ func TestStatusLineQuietSuffix(t *testing.T) {
 
 		got := statusText(t, m)
 		if strings.Contains(got, "quiet") {
-			t.Errorf("status line = %q, want no suffix — a long silent tool call is normal", got)
+			t.Errorf("status line = %q, want no qualifier — a long silent tool call is normal", got)
 		}
 		if !strings.Contains(got, "running") {
 			t.Errorf("status line = %q, want the tool's own phrase", got)
@@ -3809,7 +3824,7 @@ func TestStatusLineQuietSuffix(t *testing.T) {
 
 		got := statusText(t, m)
 		if strings.Contains(got, "quiet") {
-			t.Errorf("status line = %q, want no suffix while the stop is in flight", got)
+			t.Errorf("status line = %q, want no qualifier while the stop is in flight", got)
 		}
 		if !strings.Contains(got, "stopping") {
 			t.Errorf("status line = %q, want the sticky stop phrase", got)
@@ -3837,7 +3852,7 @@ func TestStatusLineQuietSuffix(t *testing.T) {
 
 				got := statusText(t, m)
 				if strings.Contains(got, "quiet") {
-					t.Errorf("status line = %q, want no suffix while the wait is the human's own", got)
+					t.Errorf("status line = %q, want no qualifier while the wait is the human's own", got)
 				}
 				if !strings.Contains(got, tc.want) {
 					t.Errorf("status line = %q, want it to contain %q", got, tc.want)
@@ -3849,7 +3864,7 @@ func TestStatusLineQuietSuffix(t *testing.T) {
 	t.Run("a fresh exchange never inherits the last one's silence", func(t *testing.T) {
 		m := silentFor(guardedRunningModel(t, after), quiet)
 		if got := statusText(t, m); !strings.Contains(got, "quiet") {
-			t.Fatalf("status line = %q, want the suffix on the exchange that went quiet", got)
+			t.Fatalf("status line = %q, want the qualifier on the exchange that went quiet", got)
 		}
 
 		m = step(t, m, cancelledMsg{}) // the worker unwound; the slot goes idle
@@ -3869,27 +3884,27 @@ func TestStatusLineQuietSuffix(t *testing.T) {
 	})
 }
 
-// TestStatusLineQuietSuffixGivesWayFirst proves the suffix is paid for out of the row's own width
-// like every other occupant, and that it is the FIRST thing the slot gives up: a window too narrow
-// for both keeps the phrase whole and drops the fact rather than truncating it into "· quie…",
-// which would report neither the silence nor its length (layout.md).
+// TestStatusLineQuietSuffixGivesWayFirst proves the qualifier is paid for out of the row's own
+// width like every other occupant, and that it is the FIRST thing the slot gives up: a window too
+// narrow for both keeps the phrase and its clock whole and drops the word rather than truncating it
+// into "· quie…", which would report neither the silence nor its own word (layout.md).
 func TestStatusLineQuietSuffixGivesWayFirst(t *testing.T) {
 	m := silentFor(guardedRunningModel(t, 90*time.Second), 190*time.Second+500*time.Millisecond)
-	if got := statusText(t, m); !strings.Contains(got, "quiet 3m 10s") {
-		t.Fatalf("status line = %q, want the suffix painted at a full-width window", got)
+	if got := statusText(t, m); !strings.Contains(got, "thinking · quiet · 3m 10s") {
+		t.Fatalf("status line = %q, want the qualifier painted at a full-width window", got)
 	}
 	if got := ansi.StringWidth(m.statusLine()); got != m.width {
-		t.Errorf("status line renders %d columns, want exactly %d (the suffix rides inside the width)", got, m.width)
+		t.Errorf("status line renders %d columns, want exactly %d (the qualifier rides inside the width)", got, m.width)
 	}
 
 	m = step(t, m, tea.WindowSizeMsg{Width: 24, Height: 24})
 
 	got := statusText(t, m)
 	if strings.Contains(got, "quiet") {
-		t.Errorf("status line at 24 columns = %q, want the suffix dropped whole", got)
+		t.Errorf("status line at 24 columns = %q, want the qualifier dropped whole", got)
 	}
-	if !strings.Contains(got, "thinking") {
-		t.Errorf("status line at 24 columns = %q, want the phrase kept intact", got)
+	if !strings.Contains(got, "thinking · 3m 10s") {
+		t.Errorf("status line at 24 columns = %q, want the phrase and its clock kept intact", got)
 	}
 	if w := ansi.StringWidth(m.statusLine()); w > m.width {
 		t.Errorf("status line renders %d columns, want at most %d", w, m.width)

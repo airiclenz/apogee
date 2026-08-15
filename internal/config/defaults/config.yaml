@@ -563,12 +563,13 @@ system-prompt-text: |
 # /settings or with `/color-scheme <name>`.
 #
 # `stall-after` is how long the engine may go completely silent, mid-turn, before the status line
-# says so: past it the running phrase gains a `· quiet 3m 10s` suffix in the scheme's warning
-# colour, counting up until the next event arrives and disappearing the moment one does. It is a
+# says so: past it the running phrase gains a bare `quiet` in front of its clock — `thinking · quiet
+# · 21m 03s` — with the `· quiet` in the scheme's warning colour, and it disappears the moment the
+# next event arrives. The clock stays the activity's own and there is only ever one of it. It is a
 # report, never a verdict — a 43k-token prompt on a big local model is legitimately silent for a
 # minute or two, and apogee cannot tell that from a server that has died, so it reports the one
 # thing it does know — nothing has arrived for this long. Write it the way Go spells a duration
-# (`90s`, `2m`, `1m30s`); `0` turns the suffix off. Only a turn that claims to be thinking or
+# (`90s`, `2m`, `1m30s`); `0` turns the qualifier off. Only a turn that claims to be thinking or
 # responding is watched — a long silent tool call is normal, and a turn waiting on YOUR answer
 # never counts as quiet.
 #
@@ -577,7 +578,7 @@ system-prompt-text: |
 #   spinner-color: true    # the 10s colour loop; false = your terminal's own text colour
 #   show-scrollbar: true   # false = no bar in the transcript or any popup; they take back the column
 #   color-scheme: dark     # dark | light | any *.yaml in ~/.apogee/schemes/
-#   stall-after: 90s       # engine silence before "· quiet …" appears on the status line; 0 = off
+#   stall-after: 90s       # engine silence before "· quiet" qualifies the status line; 0 = off
 
 # =============================================================================
 # The prompt cursor — apogee draws the real terminal cursor, always steady, in the shape named here:

@@ -410,10 +410,10 @@ type UISettings struct {
 	// call 8).
 	ColorScheme string
 	// stallAfter is how long the ENGINE may go silent mid-turn before the status line says so: past
-	// it the running phrase gains a `· quiet <elapsed>` suffix, which is the honest fact rather than
-	// a verdict — a slow turn and a dead one look identical from out here, and only the human can
-	// tell them apart. Default 90s, which clears the ingestion of a large prompt (legitimately
-	// silent for a minute or two on a local model); 0 turns the suffix off. It is resolved to a
+	// it the running phrase gains a bare `quiet` qualifier in front of its clock, which is the honest
+	// fact rather than a verdict — a slow turn and a dead one look identical from out here, and only
+	// the human can tell them apart. Default 90s, which clears the ingestion of a large prompt
+	// (legitimately silent for a minute or two on a local model); 0 turns it off. It is resolved to a
 	// DURATION here, unlike spinner beside it, because the renderer takes a duration and nothing
 	// downstream would gain from a second parse of the same text.
 	StallAfter time.Duration
@@ -462,11 +462,11 @@ func (u UISettings) Validate() error {
 	}
 	if u.unparsedStallAfter != "" {
 		return fmt.Errorf("apogee: invalid ui.stall-after %q: want a length of time like 90s or 2m, "+
-			"or 0 to turn the quiet suffix off", u.unparsedStallAfter)
+			"or 0 to turn the quiet qualifier off", u.unparsedStallAfter)
 	}
 	if u.StallAfter < 0 {
 		return fmt.Errorf("apogee: invalid ui.stall-after %s: want 0 or more, where 0 turns the "+
-			"quiet suffix off", u.StallAfter)
+			"quiet qualifier off", u.StallAfter)
 	}
 	return nil
 }
@@ -1570,7 +1570,7 @@ type uiConfig struct {
 	// answered with a warning and the default palette rather than a startup error (ADR 0040).
 	ColorScheme string `yaml:"color-scheme"`
 	// StallAfter is how long the engine may go silent before the status line reports the quiet — a
-	// length of time as `time.ParseDuration` spells it (`90s`, `2m`), or `0` to turn the suffix off.
+	// length of time as `time.ParseDuration` spells it (`90s`, `2m`), or `0` to turn the qualifier off.
 	// A pointer for ShowScrollbar's reason turned inside out: here it is the explicit `0` — the
 	// documented spelling of "off" — that must be distinguishable from an absent key, which keeps
 	// the 90s default. It stays a raw string at this seam because the parse can FAIL, and a ui block

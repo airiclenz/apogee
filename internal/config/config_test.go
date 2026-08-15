@@ -2595,7 +2595,7 @@ func TestApplyConfigUI(t *testing.T) {
 }
 
 // The `stall-after:` key, in every shape it takes: the durations Go spells, the explicit `0` that
-// turns the quiet suffix off, and the two refusals — a length of time that is negative, and text
+// turns the quiet qualifier off, and the two refusals — a length of time that is negative, and text
 // that is no length of time at all. The zero and the absent key are the pair the pointer exists
 // for: one disables the guard, the other keeps the shipped 90 seconds.
 func TestApplyConfigStallAfter(t *testing.T) {

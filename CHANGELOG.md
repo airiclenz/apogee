@@ -29,22 +29,25 @@ point is a **minor** bump, not a breaking change.
   value like every other key. The theme threads it to a new `statusWarning` style — the warning tone
   on the status line's black field and deliberately NOT bold, so a qualifier tints a running phrase
   instead of announcing a failure the way `statusError` does. Nothing paints with it yet; it is the
-  tint the stall guard's quiet-time suffix will wear.
+  tint the stall guard's quiet qualifier will wear.
 
 - **The status line stops claiming "thinking" when nothing is coming.** A running phrase now gains a
-  warning-tinted quiet suffix — `thinking · 21m 03s · quiet 3m 10s` — once the engine has said
-  nothing for longer than `ui.stall-after`. The clock behind it (`Model.lastEvent`) is stamped by
-  every engine Event, at any depth and of any variant, `ReasoningEvent` included (a reasoning stream
-  is life; the incident that motivated this had *no* events at all), and by the launch of a worker
-  whose request is away, so a fresh exchange never inherits the silence of the one before it.
-  Nothing on a timer touches it: a heartbeat or a spinner frame proves the TUI is alive, which was
-  never the question. It reports a fact and never a verdict — how long nothing has arrived, no
-  "stalled?" wording — and it disappears by itself the moment an Event lands. Only `thinking` and
-  `responding` carry it: a silent tool call is the tool taking its time, a stopping worker already
-  says what it is doing, and the states waiting on the human (an open question, an approval) never
-  show it, the silence there being the human's own. It costs no new tick — the spinner already
-  repaints the row every frame — and it is the first thing the left slot gives up on a narrow
-  window, dropped whole rather than truncated.
+  warning-tinted `quiet` qualifier in front of its clock — `thinking · quiet · 21m 03s` — once the
+  engine has said nothing for longer than `ui.stall-after`. The row keeps ONE clock and it is the
+  activity's: in the shape this was built for nothing arrives after the request goes out, so the
+  silence and the phrase are the same span, and a second duration behind the word would state that
+  one fact twice. The clock the guard reads (`Model.lastEvent`) is stamped by every engine Event, at
+  any depth and of any variant, `ReasoningEvent` included (a reasoning stream is life; the incident
+  that motivated this had *no* events at all), and by the launch of a worker whose request is away,
+  so a fresh exchange never inherits the silence of the one before it. Nothing on a timer touches
+  it: a heartbeat or a spinner frame proves the TUI is alive, which was never the question. It
+  reports a fact and never a verdict — that nothing has arrived, no "stalled?" wording — and it
+  disappears by itself the moment an Event lands. Only `thinking` and `responding` carry it: a
+  silent tool call is the tool taking its time, a stopping worker already says what it is doing, and
+  the states waiting on the human (an open question, an approval) never show it, the silence there
+  being the human's own. It costs no new tick — the spinner already repaints the row every frame —
+  and it is the first thing the left slot gives up on a narrow window, dropped whole rather than
+  truncated.
 
 - **The TUI now retains the model's reasoning, and renders none of it.** A `reasoningTail`
   (`internal/tui/reasoning.go`) keeps the current Turn's reasoning chunks as the seam a future
