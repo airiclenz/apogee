@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/skills"
 )
 
@@ -58,9 +59,9 @@ func TestCommandTableDrivesParserAndMenu(t *testing.T) {
 		parsed = append(parsed, spec.name)
 	}
 	wantParsed := []string{
-		"clear", "color-scheme", "compact", "confine", "continue", "model", "new", "rename",
-		"schedule", "schedule-stop", "server", "sessions", "settings", "skills", "stop-server",
-		"unload-model", "usage", "version"}
+		"clear", "color-scheme", "compact", "confine", "continue", "effort", "model", "new",
+		"rename", "schedule", "schedule-stop", "server", "sessions", "settings", "skills",
+		"stop-server", "unload-model", "usage", "version"}
 	if !reflect.DeepEqual(parsed, wantParsed) {
 		t.Errorf("parser verbs = %v, want %v", parsed, wantParsed)
 	}
@@ -85,6 +86,175 @@ func TestCommandTableDrivesParserAndMenu(t *testing.T) {
 	}
 	if !reflect.DeepEqual(gotCells, wantCells) {
 		t.Errorf("cells = %q, want them read off the table %q", gotCells, wantCells)
+	}
+}
+
+// ----------------------------------------------------------------------------
+// /effort — the thinking-effort verb (command.go's grammar, effort.go's routing)
+// ----------------------------------------------------------------------------
+
+// TestParseEffortVocabulary pins the whole argument grammar: the bare report, the four levels, the
+// "auto" that clears the override, and the two ways a line can be wrong. An out-of-vocabulary word
+// must be an ERROR carrying the usage line rather than a guess — a level the template does not
+// understand fails the next turn, far from the line that caused it.
+func TestParseEffortVocabulary(t *testing.T) {
+	cases := []struct {
+		line    string
+		want    effortArgs
+		wantErr bool
+	}{
+		{line: "/effort", want: effortArgs{action: effortReport}},
+		{line: "/effort off", want: effortArgs{action: effortSet, level: domain.EffortOff}},
+		{line: "/effort low", want: effortArgs{action: effortSet, level: domain.EffortLow}},
+		{line: "/effort medium", want: effortArgs{action: effortSet, level: domain.EffortMedium}},
+		{line: "/effort high", want: effortArgs{action: effortSet, level: domain.EffortHigh}},
+		{line: "/effort auto", want: effortArgs{action: effortClear}},
+		{line: "/effort hihg", wantErr: true},     // a typo'd level
+		{line: "/effort low high", wantErr: true}, // exactly one level, never two
+	}
+	for _, c := range cases {
+		t.Run(c.line, func(t *testing.T) {
+			got := parseInput(c.line, nil)
+			if got.kind != kindCommand || got.command != "effort" {
+				t.Fatalf("parseInput(%q) = {kind:%v cmd:%q}, want the /effort command", c.line, got.kind, got.command)
+			}
+			if c.wantErr {
+				if got.err == nil {
+					t.Fatalf("parseInput(%q).err = nil, want an argument error", c.line)
+				}
+				if !strings.Contains(got.err.Error(), effortUsage) {
+					t.Errorf("error %q does not teach the vocabulary %q", got.err, effortUsage)
+				}
+				if got.effort != (effortArgs{}) {
+					t.Errorf("effort = %+v on a rejected line, want the zero value", got.effort)
+				}
+				return
+			}
+			if got.err != nil {
+				t.Fatalf("parseInput(%q).err = %v, want none", c.line, got.err)
+			}
+			if got.effort != c.want {
+				t.Errorf("parseInput(%q).effort = %+v, want %+v", c.line, got.effort, c.want)
+			}
+		})
+	}
+}
+
+// runEffortLine drives one /effort line through the real key path and returns the model plus the
+// note it left ([lastNote]), so a test asserts on the exact sentence rather than on a view the frame
+// has already wrapped.
+func runEffortLine(t *testing.T, eng *fakeEngine, line string) (Model, string) {
+	t.Helper()
+	m := newTestModelEng(t, eng, testOpts)
+	m.input.SetValue(line)
+	m, cmd := stepCmd(t, m, keyEnter())
+	if cmd != nil {
+		t.Error("/effort returned a Cmd; it is synchronous and must not launch a worker")
+	}
+	if m.state != stateIdle {
+		t.Errorf("state = %v, want idle (/effort must not launch a worker)", m.state)
+	}
+	return m, lastNote(m)
+}
+
+// TestEffortCommandDrivesTheEngineDoor is the run half: a level and "auto" reach
+// Engine.SetEffortOverride with the mapped value, a bare line drives nothing, and every form ends on
+// the binding resolution format — with both layers named, because a level means one thing as an
+// override and another as a profile setting.
+func TestEffortCommandDrivesTheEngineDoor(t *testing.T) {
+	cases := []struct {
+		name     string
+		profile  domain.ThinkingEffort
+		override domain.ThinkingEffort // what the session already carried before the line ran
+		line     string
+		wantSet  []domain.ThinkingEffort
+		wantNote string
+	}{
+		{
+			name:     "a level layers above the profile",
+			profile:  domain.EffortLow,
+			line:     "/effort high",
+			wantSet:  []domain.ThinkingEffort{domain.EffortHigh},
+			wantNote: "thinking effort: high (session override: high; profile: low)",
+		},
+		{
+			name:     "auto clears the override with the zero value",
+			profile:  domain.EffortLow,
+			override: domain.EffortHigh,
+			line:     "/effort auto",
+			wantSet:  []domain.ThinkingEffort{""},
+			wantNote: "thinking effort: low (session override: —; profile: low)",
+		},
+		{
+			name:     "off is a level like any other",
+			line:     "/effort off",
+			wantSet:  []domain.ThinkingEffort{domain.EffortOff},
+			wantNote: "thinking effort: off (session override: off; profile: —)",
+		},
+		{
+			name:     "bare reports the override standing over a profile",
+			profile:  domain.EffortMedium,
+			override: domain.EffortHigh,
+			line:     "/effort",
+			wantNote: "thinking effort: high (session override: high; profile: medium)",
+		},
+		{
+			name:     "bare with neither layer set says the model decides",
+			line:     "/effort",
+			wantNote: "thinking effort: the model's own default (session override: —; profile: —)",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			eng := &fakeEngine{effortProfile: c.profile, effortOverride: c.override}
+			_, note := runEffortLine(t, eng, c.line)
+
+			if got := eng.effortsSet(); !slices.Equal(got, c.wantSet) {
+				t.Errorf("SetEffortOverride calls = %v, want %v", got, c.wantSet)
+			}
+			if note != c.wantNote {
+				t.Errorf("note = %q, want %q", note, c.wantNote)
+			}
+		})
+	}
+}
+
+// A mistyped level must leave the session thinking exactly as it was: the usage line is reported and
+// the engine door is never driven, so a human who typo'd cannot be left believing the level took.
+func TestEffortParseErrorDrivesNothing(t *testing.T) {
+	eng := &fakeEngine{effortProfile: domain.EffortLow}
+	_, note := runEffortLine(t, eng, "/effort hihg")
+
+	if got := eng.effortsSet(); len(got) != 0 {
+		t.Errorf("SetEffortOverride calls = %v, want none on a parse error", got)
+	}
+	if !strings.Contains(note, effortUsage) {
+		t.Errorf("note = %q, want the usage line %q", note, effortUsage)
+	}
+}
+
+// /effort is safe while a worker works in EVERY form, unlike /confine beside it in the table: the
+// override is read when the NEXT request is built, so a level set mid-Turn changes nothing about the
+// one in flight — and mid-Turn is exactly when a human notices the model is thinking too hard.
+func TestEffortRunsWhileTheWorkerWorks(t *testing.T) {
+	eng := &fakeEngine{effortProfile: domain.EffortLow}
+	m := newTestModelEng(t, eng, testOpts)
+	m.input.SetValue("open the exchange")
+	m, _ = stepCmd(t, m, keyEnter())
+	if m.state != stateRunning {
+		t.Fatalf("precondition: state = %v, want running", m.state)
+	}
+
+	m.input.SetValue("/effort high")
+	m = step(t, m, keyEnter())
+	if got := eng.effortsSet(); !slices.Equal(got, []domain.ThinkingEffort{domain.EffortHigh}) {
+		t.Errorf("SetEffortOverride calls = %v, want [high] — the mutating form runs mid-Exchange too", got)
+	}
+	if got := lastNote(m); got != "thinking effort: high (session override: high; profile: low)" {
+		t.Errorf("note = %q, want the resolution stated mid-run", got)
+	}
+	if m.state != stateRunning {
+		t.Errorf("state = %v, want the Exchange still running (the verb touches no worker)", m.state)
 	}
 }
 

@@ -182,7 +182,12 @@ kwargs.
 
 **Commit:** `feat(provider): non-2xx errors hint at thinking effort when kwargs were sent`
 
-## 5. /effort command in the TUI
+## 5. /effort command in the TUI — ✅ DONE (2026-08-15)
+
+NOTES (2026-08-15): the engine door had to be surfaced beyond the item's Files list, as the item-3 implementer reported — `internal/tui/tui.go`'s `Engine` interface gained `SetEffortOverride`/`ThinkingEffort` and `cmd/apogee`'s `lateEngine` implements both (remembering the override while unbound, the `SetMode` posture, and applying it at `Bind`, since `/effort` is runnable before a server is chosen). `internal/tui/seam_test.go`'s `fakeEngine` gained the same two methods plus the scripted layers, without which the package no longer compiles.
+NOTES (2026-08-15): the routing half lives in a new `internal/tui/effort.go` rather than inside `commandrun.go` — the item's own text says "matching how other engine-door commands dispatch", and the one other engine-door verb (`/confine`) dispatches from `commandrun.go` into its own `confine.go`. `commandrun.go` therefore keeps only the switch case, and `doc.go` gained the package-map clause the file map's structural test (`TestDocMapNamesEveryFile`) requires.
+NOTES (2026-08-15): `runCommand`'s doc comment said "The three that can arrive mid-run" while six verbs already carried `whileRunning`; adding a seventh made the count worse, so the word "three" became "verbs" — the smallest edit that leaves the sentence true.
+NOTES (2026-08-15): one test beyond the item's list — `TestEffortRunsWhileTheWorkerWorks` — pins the `whileRunning: true` claim the item makes in its own text (every form runs mid-Exchange, unlike `/confine`, which is per-form).
 
 Depends on item 3.
 

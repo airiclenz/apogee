@@ -3,6 +3,8 @@ package tui
 import (
 	"fmt"
 	"strings"
+
+	"github.com/airiclenz/apogee/internal/domain"
 )
 
 // ----------------------------------------------------------------------------
@@ -31,7 +33,8 @@ const (
 // argument is prose rather than tokens (/schedule's prompt, which must reach the model spaced and
 // lined as it was typed); confine carries the dedicated argument parse of a /confine line (zero value — a status
 // report — for every other verb); colorScheme carries the same for a /color-scheme line (zero value — a
-// listing — for every other verb); and err is set when a
+// listing — for every other verb); effort carries the same for an /effort line (zero value — a
+// resolution report — for every other verb); and err is set when a
 // recognised verb was given arguments it does not understand. An arguments error stays a
 // kindCommand: the router reports the usage line rather than sending the line to the agent or
 // silently doing nothing. For kindMessage, text is the line (trimmed, with @tokens and "/id"
@@ -48,6 +51,7 @@ type parsedInput struct {
 	rest        string
 	confine     confineArgs
 	colorScheme colorSchemeArgs
+	effort      effortArgs
 	err         error
 	text        string
 	fileRefs    []string
@@ -140,6 +144,13 @@ type commandSpec struct {
 // built-in into the human's schemes folder. Idle-only like every other verb that writes config, and
 // argument-taking like /confine, whose grammar it follows down to the usage line.
 //
+// /effort is the Thinking-effort dial (ADR 0050): bare it states the resolution this session landed
+// on, a level layers a session override above the bound model profile's own `thinking.effort:`, and
+// `auto` drops that override so the profile's setting stands again. It is argument-taking like
+// /confine, whose grammar and usage line it follows, and safe while a worker works for the reason
+// the Schedule pair is: the override reaches the model on the NEXT request, so setting it mid-run
+// changes nothing about the Turn already in flight and is precisely when a human wants it.
+//
 // /settings opens the configuration pane (settings.go): every config key with the value this run
 // resolved for it, over the binary's declarative key registry (ADR 0035). Idle-only and modal like
 // /sessions, and noRecall like the reset pair — it opens a surface rather than saying anything to the
@@ -163,6 +174,7 @@ var commandSpecs = []commandSpec{
 	{name: "compact", summary: "summarise the conversation to reclaim context"},
 	{name: "confine", summary: "report or change auto mode's blast radius", takesArgs: true, whileRunning: true},
 	{name: "continue", summary: "ask the model to keep going"},
+	{name: "effort", summary: "set how hard the model thinks — off, low, medium, high, or auto", takesArgs: true, whileRunning: true},
 	{name: "model", summary: "switch model — the launcher's profiles, or what the server serves", takesArgs: true, runsBareAtAccept: true},
 	{name: "new", summary: "start a fresh conversation (same as /clear)", noRecall: true},
 	{name: "rename", summary: "rename this session (bare = ask the model)", takesArgs: true},
@@ -201,6 +213,8 @@ func parseInput(raw string, known func(string) bool) parsedInput {
 			parsed.confine, parsed.err = parseConfine(args)
 		case "color-scheme":
 			parsed.colorScheme, parsed.err = parseColorScheme(args)
+		case "effort":
+			parsed.effort, parsed.err = parseEffort(args)
 		}
 		return parsed
 	}
@@ -467,6 +481,60 @@ func parseColorScheme(args []string) (colorSchemeArgs, error) {
 	default:
 		return colorSchemeArgs{}, fmt.Errorf("unknown /color-scheme subcommand %q. %s", args[0], colorSchemeUsage)
 	}
+}
+
+// ----------------------------------------------------------------------------
+// /effort — the thinking-effort command's argument grammar
+// ----------------------------------------------------------------------------
+
+// effortAction is the subcommand of a parsed /effort line. The zero value is effortReport, so a
+// bare "/effort" states the resolution rather than moving it — the /confine and /color-scheme
+// posture, and for the same reason: the verb that changes something must be the one the human
+// spelled out.
+type effortAction int
+
+const (
+	effortReport effortAction = iota // state the effective effort and the two layers behind it
+	effortSet                        // layer one of the four levels above the profile
+	effortClear                      // "auto": drop the override, leaving the profile's own setting
+)
+
+// effortArgs is the parsed argument list of an /effort line: what was asked for, and the level it
+// was asked of (the zero value for the report and for "auto", neither of which names one — which is
+// also what makes effortClear's level the value SetEffortOverride reads as "no override").
+type effortArgs struct {
+	action effortAction
+	level  domain.ThinkingEffort
+}
+
+// effortUsage is the one-line grammar every /effort argument error carries, so a mistyped level
+// teaches the vocabulary instead of silently leaving the session thinking at the old one.
+const effortUsage = "usage: /effort | /effort off|low|medium|high|auto"
+
+// parseEffort parses the argument tokens that followed an "/effort" verb. No arguments means the
+// report. "auto" is the one word that is not a level: it clears the session override so the bound
+// model profile's own `thinking.effort:` stands again (ADR 0050's resolution ladder, minus its top
+// rung). Everything else must be one of the four levels the domain defines — an out-of-vocabulary
+// word is an error carrying effortUsage, never a guess, because a level the template does not
+// understand fails the NEXT turn rather than this line.
+//
+// The empty string is rejected explicitly even though ThinkingEffort.Valid accepts it: absence is a
+// legitimate CONFIGURATION but never a legitimate argument, and this grammar must not let one
+// through as a silent "auto".
+func parseEffort(args []string) (effortArgs, error) {
+	switch {
+	case len(args) == 0:
+		return effortArgs{action: effortReport}, nil
+	case len(args) > 1:
+		return effortArgs{}, fmt.Errorf("/effort takes exactly one level. %s", effortUsage)
+	case args[0] == "auto":
+		return effortArgs{action: effortClear}, nil
+	}
+	level := domain.ThinkingEffort(args[0])
+	if level == "" || !level.Valid() {
+		return effortArgs{}, fmt.Errorf("unknown thinking effort %q. %s", args[0], effortUsage)
+	}
+	return effortArgs{action: effortSet, level: level}, nil
 }
 
 // refSpan is one resolving token of the mini-language, LOCATED in the text: the byte range

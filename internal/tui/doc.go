@@ -142,6 +142,17 @@
 // seam: file paths and formats are the binary's business, and a save that fails or is unwired
 // never invalidates the session toggle that already happened.
 //
+// effort.go is the routing half of `/effort`, the session end of the Thinking-effort dial (ADR
+// 0050): [Model.runEffort] layers a level above the bound model profile's own `thinking.effort:`
+// through [Engine.SetEffortOverride], clears it again on `auto` with the zero value, and — in every
+// form, the bare report included — closes with one note built by the pure [effortResolutionNote]
+// stating the effective effort AND both layers behind it, because the same word means one thing as
+// an override (it survives a model switch) and another as a profile setting (a switch replaces it).
+// The layers are re-read off [Engine.ThinkingEffort] AFTER the write rather than taken from the
+// argument, the /confine posture. Nothing here persists: the override is session intent, the config
+// key is the durable door, and the verb is safe mid-Exchange because the value is read when the next
+// request is built.
+//
 // The skill flow (post-v1 apogee-code feature-parity) is the mini-language's second half, and it
 // is TEXT rather than state beside it: a skill is invoked by naming its id as a "/token" at a word
 // boundary in the message — "/code-audit please check the parser" — exactly as an @path names a

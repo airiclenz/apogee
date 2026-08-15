@@ -112,15 +112,20 @@ func (s *stubProgram) events() []domain.Event {
 // test scripts the drive sequence — queued results, errors, event emission, or a
 // ctx-honouring block. It records Submit/Step calls for assertions.
 type fakeEngine struct {
-	mu           sync.Mutex
-	submitted    []domain.UserInput
-	stepCalls    int
-	modeSet      []domain.Mode // records SetMode calls (Shift+Tab drove the engine)
-	confineSet   []bool        // records SetConfineToWorkspace calls (the /confine command)
-	confine      bool          // the live blast radius ConfineToWorkspace reports; SetConfineToWorkspace swaps it
-	clearCalls   int           // records ClearContext calls (the /clear command)
-	abortCalls   int           // records AbortExchange calls (discarding a cancelled Exchange)
-	compactCalls int           // records Compact calls (the /compact command)
+	mu         sync.Mutex
+	submitted  []domain.UserInput
+	stepCalls  int
+	modeSet    []domain.Mode // records SetMode calls (Shift+Tab drove the engine)
+	confineSet []bool        // records SetConfineToWorkspace calls (the /confine command)
+	confine    bool          // the live blast radius ConfineToWorkspace reports; SetConfineToWorkspace swaps it
+
+	effortSet      []domain.ThinkingEffort // records SetEffortOverride calls (the /effort command)
+	effortOverride domain.ThinkingEffort   // the live session override ThinkingEffort reports as its first layer
+	effortProfile  domain.ThinkingEffort   // the bound profile's own effort — scripted, never moved from the TUI
+
+	clearCalls   int // records ClearContext calls (the /clear command)
+	abortCalls   int // records AbortExchange calls (discarding a cancelled Exchange)
+	compactCalls int // records Compact calls (the /compact command)
 
 	restoreCalls []domain.Session // records RestoreSession calls (the in-TUI resume primitive), in order
 	inExchange   bool             // the value InExchange reports; a test sets it to model a mid-Exchange restore
@@ -289,6 +294,31 @@ func (f *fakeEngine) ConfineToWorkspace() bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.confine
+}
+
+// SetEffortOverride records the level the /effort command drove and swaps the live override, so a
+// test can prove both that the door was called and that the note afterwards reads back the result.
+func (f *fakeEngine) SetEffortOverride(e domain.ThinkingEffort) {
+	f.mu.Lock()
+	f.effortSet = append(f.effortSet, e)
+	f.effortOverride = e
+	f.mu.Unlock()
+}
+
+// ThinkingEffort answers with the two layers the test scripted: the live override (moved by
+// SetEffortOverride above) and the bound profile's own setting, which no TUI call can change.
+func (f *fakeEngine) ThinkingEffort() (override, profile domain.ThinkingEffort) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.effortOverride, f.effortProfile
+}
+
+// effortsSet reports the levels SetEffortOverride was called with, in order — empty when the UI
+// never drove it (what a bare /effort and a parse error must both leave behind).
+func (f *fakeEngine) effortsSet() []domain.ThinkingEffort {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]domain.ThinkingEffort(nil), f.effortSet...)
 }
 
 // confinesSet reports the blast-radius values SetConfineToWorkspace was called with, in order —

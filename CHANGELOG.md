@@ -304,6 +304,12 @@ point is a **minor** bump, not a breaking change.
   request that carried no kwargs — every out-of-the-box one — gets exactly the error it got before,
   and a classified context overflow is never hinted.
 
+- `/effort` sets this session's thinking effort — `off`, `low`, `medium`, `high` to layer a level
+  above the bound model profile's `thinking.effort:`, `auto` to drop the override, and a bare
+  `/effort` to state the resolution (`thinking effort: <effective> (session override: …;
+  profile: …)`). It runs while a turn is in flight, since the level reaches the model on the next
+  request, and is never persisted.
+
 ### Changed
 
 - **The block-target, start-up-box and prompt-box-sizing suites move to

@@ -13,6 +13,7 @@ import (
 	"sync"
 
 	"github.com/airiclenz/apogee"
+	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/session"
 	"github.com/airiclenz/apogee/internal/tui"
 )
@@ -46,11 +47,12 @@ func buildAgent(cfg apogee.Config, resumed *session.Record) (*apogee.Agent, erro
 // Nothing panics and nothing silently pretends to have worked, because the renderer reaches this
 // type through the same interface either way.
 //
-// The two settings a human can move before a server exists — the autonomy mode and Auto's blast
-// radius — are held here and applied to the Agent the moment it is constructed. Without that, a
-// mode cycled while the picker was open would show in the footer and be nowhere in the engine.
+// The settings a human can move before a server exists — the autonomy mode, Auto's blast radius and
+// the session's Thinking effort — are held here and applied to the Agent the moment it is
+// constructed. Without that, a mode cycled while the picker was open would show in the footer and be
+// nowhere in the engine.
 //
-// The mutex guards the pointer and those two values. Beat-style long calls (Step, Compact) read the
+// The mutex guards the pointer and those values. Beat-style long calls (Step, Compact) read the
 // pointer under the lock and then run OUTSIDE it, like upstreamHolder does with its Monitor, so a
 // Step that takes a minute never holds the Update loop's next call behind it.
 type lateEngine struct {
@@ -58,6 +60,13 @@ type lateEngine struct {
 	agent   *apogee.Agent
 	mode    apogee.Mode
 	confine bool
+
+	// effort is the session's Thinking-effort override (ADR 0050), held here for the reason the two
+	// above are: /effort runs before a server is chosen, and a level set while the picker was open
+	// must not be a level the engine never hears about. It needs no "was it moved" pointer like the
+	// three below, because its zero value already MEANS no override — which is exactly the state a
+	// freshly constructed Agent is in, so a bind can restate it unconditionally.
+	effort domain.ThinkingEffort
 
 	// The settings surface's anytime-safe mutators, held for the same reason the two above are: an
 	// edit committed while the server picker is still up must not fall between the file and the
@@ -129,6 +138,7 @@ func (e *lateEngine) Bind(construct func() (*apogee.Agent, error)) error {
 	// What the human may have moved while there was nothing to move it on.
 	agent.SetMode(e.mode)
 	agent.SetConfineToWorkspace(e.confine)
+	agent.SetEffortOverride(e.effort)
 	if e.pendingBypass != nil {
 		agent.SetBypass(*e.pendingBypass)
 	}
@@ -388,6 +398,34 @@ func (e *lateEngine) ConfineToWorkspace() bool {
 		return agent.ConfineToWorkspace()
 	}
 	return confine
+}
+
+// SetEffortOverride states the session's Thinking effort (the /effort command, ADR 0050), remembered
+// while unbound for SetMode's reason — /effort is safe to run before a server is chosen, and a level
+// the human set there must reach the Agent the bind constructs. The zero value clears the override
+// on both halves at once: it is what a cleared holder passes at the next bind, and what the Agent
+// reads as "no override" today.
+func (e *lateEngine) SetEffortOverride(effort domain.ThinkingEffort) {
+	e.mu.Lock()
+	e.effort = effort
+	agent := e.agent
+	e.mu.Unlock()
+	if agent != nil {
+		agent.SetEffortOverride(effort)
+	}
+}
+
+// ThinkingEffort reports the two layers the next request resolves its effort from: the Agent's own
+// once there is one, and until then the override a bind would install with no profile behind it —
+// because an unbound session has no bound model, so there is no profile setting to report yet.
+func (e *lateEngine) ThinkingEffort() (override, profile domain.ThinkingEffort) {
+	e.mu.Lock()
+	agent, effort := e.agent, e.effort
+	e.mu.Unlock()
+	if agent != nil {
+		return agent.ThinkingEffort()
+	}
+	return effort, ""
 }
 
 // Close releases the Agent, or nothing at all when a session ends without ever binding one.

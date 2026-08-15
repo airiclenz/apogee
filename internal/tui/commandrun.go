@@ -173,16 +173,20 @@ func (m Model) startNewSession() (tea.Model, tea.Cmd) {
 // (settings.go), /version records the build version as a note the same synchronous way,
 // /skills records the discovered skill catalog the same synchronous way (skills.go), /color-scheme
 // lists, switches or exports a palette the same synchronous way (colorscheme.go), and /confine
-// reports or swaps Auto's blast radius the same synchronous way (confine.go).
+// reports or swaps Auto's blast radius the same synchronous way (confine.go), and /effort reports
+// or moves this session's Thinking effort the same synchronous way (effort.go).
 //
 // It is reached at stateIdle — where the engine is quiescent and ClearContext/Compact are safe to
 // launch — OR, for a reporting line alone, while a worker runs. Its callers own that gate
 // ([Model.commandRunnable]); by the time a verb arrives here it is either at a boundary or
-// boundary-FREE. The three that can arrive mid-run are boundary-free by inspection: /version and
+// boundary-FREE. The verbs that can arrive mid-run are boundary-free by inspection: /version and
 // /skills are synchronous notes touching no engine at all, and /confine's status form reads
 // [Engine.ConfineToWorkspace], which the Agent serves under its own RWMutex precisely so the UI may
-// ask while a Step dispatches (agent.go — the SetMode class). Everything else is idle-only and is
-// refused before it gets here.
+// ask while a Step dispatches (agent.go — the SetMode class). /effort belongs to that last class in
+// EVERY form, not only its reporting one: both doors it drives are served under the Agent's own
+// RWMutex, and the override it writes is read when the NEXT request is built, so the Turn already
+// in flight is untouched (ADR 0050). Everything else is idle-only and is refused before it gets
+// here.
 //
 // It never touches the editor: the CALLER has already put the box where it belongs, and the two
 // callers disagree on purpose. A whole-input invocation arrives from submit, which empties the box
@@ -367,6 +371,12 @@ func (m Model) runCommand(parsed parsedInput) (tea.Model, tea.Cmd) {
 		// Report or swap the blast radius. Synchronous and idle-safe like /clear: no upstream
 		// call is involved, only the engine's live flag and (for --save) one config write.
 		return m.runConfine(parsed.confine)
+
+	case "effort":
+		// Report or move this session's Thinking effort (ADR 0050). Synchronous like /confine and
+		// safe mid-Exchange for the reason /confine's status form is: the engine door it drives is
+		// goroutine-safe and is read when the NEXT request is built, never during the one in flight.
+		return m.runEffort(parsed.effort)
 	}
 	return m, nil
 }

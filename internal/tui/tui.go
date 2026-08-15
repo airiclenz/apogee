@@ -188,6 +188,21 @@ type Engine interface {
 	// status report renders it, and /confine off|on reads it to say whether the line changed
 	// anything. Goroutine-safe like SetMode, though the UI calls it only at idle.
 	ConfineToWorkspace() bool
+	// SetEffortOverride states THIS session's Thinking effort (CONTEXT: Thinking effort) — the level
+	// layered ABOVE the bound model profile's own `thinking.effort:` (ADR 0050), and the engine half
+	// of the /effort command. The zero value CLEARS the override, so the profile's setting stands
+	// again; the four levels each stand until another call moves them. Like SetMode it is
+	// goroutine-safe and takes effect on the NEXT request, which is exactly why /effort is safe to
+	// run while a worker works: the Turn already in flight is untouched. It is configuration rather
+	// than a Mechanism, so it holds under Bypass, and it is never persisted — a session intent that
+	// dies with the session.
+	SetEffortOverride(domain.ThinkingEffort)
+	// ThinkingEffort reports the two layers behind the effort the next request will carry: this
+	// session's override (SetEffortOverride) and the bound model profile's own setting, each "" when
+	// unset. Bare /effort renders BOTH, because the same level means something different depending
+	// on which layer it sits in — one survives a model switch, the other is replaced by it.
+	// Goroutine-safe like ConfineToWorkspace.
+	ThinkingEffort() (override, profile domain.ThinkingEffort)
 	// Close releases the Agent's resources.
 	Close() error
 }
