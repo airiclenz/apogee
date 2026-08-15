@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"io/fs"
+	"math"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -1525,6 +1526,121 @@ func TestLoadFileConfigAcceptsAResponseReserveShare(t *testing.T) {
 	}
 	if *l.ResponseReserve != 0.2 {
 		t.Errorf("layer response-reserve = %v; want the file's explicit 0.2", *l.ResponseReserve)
+	}
+}
+
+// The per-entry half of the same key (item 13): a `servers:` entry's own `response-reserve:`
+// outranks the top-level one for the server the session is ON, and 0 at either scope is the absent
+// state that falls through — to the top-level key first, then to the 0 the engine reads as "hold my
+// own built-in share back". The ranks are ResolveContextWindow's, one key over.
+//
+// The out-of-range rows are the defensive floor rather than a second validation: ValidateServers and
+// LoadFileConfig refuse those numbers where the file can still be named, so anything reaching here
+// arrived from a caller that never saw the file — and falling through beats multiplying a window by
+// it.
+func TestResolveResponseReserve(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name           string
+		entry, session float64
+		want           float64
+	}{
+		{name: "the entry's own share wins", entry: 0.35, session: 0.2, want: 0.35},
+		{name: "an entry stating none falls through to the top-level key", session: 0.2, want: 0.2},
+		{name: "neither states one — the engine's own share stands", want: 0},
+		{name: "an entry share of the whole window falls through", entry: 1, session: 0.2, want: 0.2},
+		{name: "a negative entry share falls through", entry: -0.1, session: 0.2, want: 0.2},
+		{name: "NaN falls through at both ranks", entry: math.NaN(), session: math.NaN(), want: 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := ResolveResponseReserve(tt.entry, tt.session); got != tt.want {
+				t.Errorf("ResolveResponseReserve(%v, %v) = %v; want %v", tt.entry, tt.session, got, tt.want)
+			}
+		})
+	}
+}
+
+// A `response-reserve:` on a `servers:` entry is refused at startup by the range rule its top-level
+// twin is refused by — one number, one meaning, wherever in the file it is written — and the refusal
+// names the entry as well as the key, because a list of servers is where a typo hides longest. 0 is
+// the absent state and passes, exactly as it does at the top level.
+func TestValidateServersRefusesAnEntryResponseReserveThatIsNotAShare(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		reserve float64
+		wantErr bool
+	}{
+		{name: "a share inside the open range", reserve: 0.35},
+		{name: "the key absent", reserve: 0},
+		{name: "a negative share", reserve: -0.1, wantErr: true},
+		{name: "the whole window", reserve: 1, wantErr: true},
+		{name: "more than the whole window", reserve: 1.5, wantErr: true},
+		{name: "not a number at all", reserve: math.NaN(), wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			err := ValidateServers([]ServerEntry{{
+				Name: "workstation", Endpoint: "http://127.0.0.1:1111", ResponseReserve: tt.reserve,
+			}})
+			if !tt.wantErr {
+				if err != nil {
+					t.Fatalf("ValidateServers refused response-reserve: %v — %v", tt.reserve, err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("ValidateServers accepted response-reserve: %v; want a refusal", tt.reserve)
+			}
+			if !strings.Contains(err.Error(), "response-reserve") || !strings.Contains(err.Error(), "workstation") {
+				t.Errorf("the refusal names neither the key nor the entry the user has to fix: %v", err)
+			}
+		})
+	}
+}
+
+// The share a session STARTS with is the selected entry's own, flattened exactly as its
+// `context-window:` pin is and for that pin's reason: the number belongs to the entry, so the
+// composition root resolves it over the top-level key at the bind rather than a beat later. An entry
+// stating none carries a zero, which leaves that top-level key answering — and so does the ephemeral
+// entry a raw `--endpoint`/`APOGEE_ENDPOINT` override builds, which is in no list at all.
+func TestApplyConfigStartupResponseReserveComesFromTheSelectedEntry(t *testing.T) {
+	t.Parallel()
+	const servers = "servers:\n" +
+		"  - name: cloud\n    endpoint: https://openrouter.ai/api/v1\n    response-reserve: 0.35\n" +
+		"  - name: workstation\n    endpoint: http://192.168.1.9:1111\n"
+
+	tests := []struct {
+		name     string
+		start    string
+		endpoint string
+		want     float64
+	}{
+		{name: "the selected entry states its own share", start: "cloud", want: 0.35},
+		{name: "the selected entry states none", start: "workstation"},
+		{name: "an endpoint override states nothing", start: "cloud", endpoint: "http://rented.example:8080/v1"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			opts := Options{ConfigDir: testConfigHome(t, servers+"server: "+tt.start+"\n")}
+			getenv := func(name string) string {
+				if name == EnvEndpoint {
+					return tt.endpoint
+				}
+				return ""
+			}
+			if err := ApplyConfig(&opts, func(string) bool { return false }, getenv, os.ReadFile, noNotify); err != nil {
+				t.Fatalf("ApplyConfig: %v", err)
+			}
+			if opts.StartupResponseReserve != tt.want {
+				t.Errorf("startupResponseReserve = %v; want %v — the share travels from the SELECTED "+
+					"entry, unresolved", opts.StartupResponseReserve, tt.want)
+			}
+		})
 	}
 }
 

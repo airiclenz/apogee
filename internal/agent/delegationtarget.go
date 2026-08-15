@@ -58,6 +58,15 @@ type DelegationTarget struct {
 	// in, which by then is the TARGET's window. Inheriting the parent's pin instead would cap a
 	// reply from this server at a number describing another one.
 	MaxOutputTokens int
+	// ResponseReserveFraction is the share of ContextWindow this server holds back for one reply —
+	// the flagged entry's `response-reserve:` override, as written. 0 means the entry states NO
+	// share, and — like the window above rather than the cap between them — the zero is NOT carried:
+	// the child keeps the share the parent resolved, which is the run's own top-level
+	// `response-reserve:` when nobody overrode it. That is the honest fall-through here, because a
+	// share is a fraction of whatever window the child ends up in rather than a number describing one
+	// server's slot, so the run-wide split is meaningful on the routed server too — where an absent
+	// reply CEILING is not, being a token count off the retired server's window.
+	ResponseReserveFraction float64
 	// ParallelAgents is the RECEIVING server's fan-out width — the cap that bounds a routed
 	// depth-0 fan-out and the guided-decomposition batch alike (ADR 0039's one width everywhere,
 	// sourced from the server actually holding the slots). Anything < 2 means serial.

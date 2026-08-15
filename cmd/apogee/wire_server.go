@@ -35,6 +35,7 @@ func startupEntry(opts config.Options) config.ServerEntry {
 		ParallelAgents:  opts.StartupParallelAgents,
 		MaxOutputTokens: opts.StartupMaxOutputTokens,
 		ContextWindow:   opts.StartupContextWindow,
+		ResponseReserve: opts.StartupResponseReserve,
 	}
 }
 
@@ -116,6 +117,13 @@ func (b serverBinder) bind(entry config.ServerEntry) error {
 	// its first Turn rather than from the first beat that rebinds. Unpinned at both scopes it stays
 	// 0, the honest "unknown until the first beat binds one".
 	cfg.Context.MaxContextTokens = config.ResolveContextWindow(entry.ContextWindow, cfg.Context.MaxContextTokens)
+	// And the seventh: how that window is SPLIT on this server — the entry's own `response-reserve:`
+	// over the top-level key already in cfg (config.ResolveResponseReserve, the ranks the window one
+	// above spells). It goes in through the Config for the two bounds' reason — the split must hold
+	// from the session's very first Turn, not from the first beat — and 0 at both scopes is the
+	// honest absent value: the engine then holds its own built-in share back.
+	cfg.Context.ResponseReserveFraction = config.ResolveResponseReserve(
+		entry.ResponseReserve, cfg.Context.ResponseReserveFraction)
 
 	construct := buildAgent
 	if b.build != nil {

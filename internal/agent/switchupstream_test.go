@@ -300,6 +300,44 @@ func TestSwitchUpstreamCarriesTheNewServersTokenBounds(t *testing.T) {
 	}
 }
 
+// TestSwitchUpstreamCarriesTheNewServersResponseReserveShare: the third statement a move makes about
+// the server it lands on — how that server's window is SPLIT for the reply, the share the caller
+// resolved from the new entry's `response-reserve:` over the top-level key. It follows the two bounds
+// above for their reason, and a spec stating none puts the split back to the engine's own built-in
+// share rather than dividing the new server's window the retired server's way.
+func TestSwitchUpstreamCarriesTheNewServersResponseReserveShare(t *testing.T) {
+	cfg := baseConfig(&recordingSink{})
+	cfg.Context.MaxContextTokens = 8192
+
+	a, err := newAgent(cfg, &modelBindingResponder{reply: "unreached"})
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+
+	// Onto an entry stating half its window: the Budget holds exactly that back, whatever the run's
+	// own top-level share says.
+	if err := a.SwitchUpstream(UpstreamSpec{
+		Endpoint: "http://halved.invalid:9999", MaxContextTokens: 100000, ResponseReserveFraction: 0.5,
+	}); err != nil {
+		t.Fatalf("SwitchUpstream onto the entry stating a share: %v", err)
+	}
+	if got := a.budget().ResponseReserve; got != 50000 {
+		t.Errorf("reply reserve = %d after the switch, want the new entry's half of 100,000", got)
+	}
+
+	// Onto an entry stating none: the retired server's half does NOT follow — the engine's own
+	// built-in fifth divides the window again, which is what "nobody said" means here.
+	if err := a.SwitchUpstream(UpstreamSpec{
+		Endpoint: "http://bare.invalid:9999", MaxContextTokens: 100000,
+	}); err != nil {
+		t.Fatalf("SwitchUpstream onto the entry stating none: %v", err)
+	}
+	if got := a.budget().ResponseReserve; got != 20000 {
+		t.Errorf("reply reserve = %d after the unstated switch, want the built-in fifth of 100,000 — "+
+			"the retired entry's share must not follow", got)
+	}
+}
+
 // assertUpstreamUnmoved checks that a refused SwitchUpstream left every binding it would have
 // committed exactly as baseConfig set it — including the injected fake Responder, which a
 // committed switch would have replaced with a real provider client.

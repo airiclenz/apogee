@@ -251,6 +251,13 @@ func (a *Agent) newChildAgent(spawnCallID, task, name string) (*Agent, error) {
 		// above, which is the routed server's; keeping the parent's pin would bound a reply from
 		// this server by a number that describes the one the parent happens to be on.
 		childCfg.Context.MaxOutputTokens = target.MaxOutputTokens
+		// And how the window just settled above is SPLIT — the target's `response-reserve:` override,
+		// applied only when it states one (see the field's contract). An entry that states none leaves
+		// the parent's resolved share standing, which is the run's top-level key: a fraction stays
+		// meaningful against any window, so there is nothing here to describe the wrong server.
+		if target.ResponseReserveFraction > 0 {
+			childCfg.Context.ResponseReserveFraction = target.ResponseReserveFraction
+		}
 		childCfg.Profile = target.Profile
 		if target.Bypass != nil {
 			childCfg.Bypass = *target.Bypass

@@ -198,8 +198,9 @@ func (a *Agent) Rebind(spec RebindSpec) error {
 
 // UpstreamSpec carries the new Upstream target Agent.SwitchUpstream moves the session to: where the
 // server lives, how to authenticate to it, and what it BOUNDS a session to in tokens. That last pair
-// belongs here for the reason the first two do — a context window and a reply ceiling are facts
-// about the SLOT, so a session moved to another server measures against THAT server's numbers
+// belongs here for the reason the first two do — a context window, a reply ceiling and the share of
+// the window that reply gets are facts about the SLOT, so a session moved to another server measures
+// against THAT server's numbers
 // rather than against the retired one's (ADR 0045's per-entry `context-window:`, ADR 0046's
 // `max-output-tokens:`). Both are computed WHOLE by the caller, the posture RebindSpec takes for the
 // per-model bindings: the engine applies what it is handed and reads no config of its own (ADR 0031).
@@ -229,6 +230,14 @@ type UpstreamSpec struct {
 	// cap of nothing is not a broken session, it is a session deriving its own, while keeping the old
 	// pin would bound a reply from this server at a number describing another one.
 	MaxOutputTokens int
+	// ResponseReserveFraction is the share of the window above held back for one reply on the new
+	// server — the new entry's `response-reserve:` resolved over the top-level key by the caller
+	// (config.ResolveResponseReserve), like the window beside it and for its reason: how a window is
+	// split is a statement about the slot the reply has to fit in. 0 ⇒ neither scope states a share,
+	// which hands the split back to the engine's own built-in one (internal/context.Allocate) — the
+	// zero is applied rather than skipped for the reply cap's reason above, since keeping the RETIRED
+	// server's share would divide this server's window by a number describing another one.
+	ResponseReserveFraction float64
 }
 
 // SwitchUpstream moves the session to another Upstream: it binds a fresh provider client at
@@ -255,9 +264,10 @@ type UpstreamSpec struct {
 // went away, until the follow-up Rebind re-resolves them for the new one; they are unreachable
 // meanwhile, since no request can open while nothing is bound.
 // What MOVES with the server: the two token bounds the new entry pins — the context window the
-// Budget and Compaction measure against, and the ceiling the loop states on the wire for one reply.
-// Both are applied as the spec states them, the zeroes included, because an absent pin is a fact
-// about the new server rather than a licence to keep the old server's number (see the spec's fields).
+// Budget and Compaction measure against, and the ceiling the loop states on the wire for one reply —
+// and the share of that window the new server holds back for the reply. All three are applied as the
+// spec states them, the zeroes included, because an absent pin is a fact about the new server rather
+// than a licence to keep the old server's number (see the spec's fields).
 // What resets, with Rebind's own rationale: the token estimator (its chars→token calibration
 // described a model this session no longer speaks to) and the compaction saturation latch (it was
 // judged against a window that is no longer bound).
@@ -277,6 +287,7 @@ func (a *Agent) SwitchUpstream(spec UpstreamSpec) error {
 	a.cfg.Model = ""
 	a.cfg.Context.MaxContextTokens = spec.MaxContextTokens
 	a.cfg.Context.MaxOutputTokens = spec.MaxOutputTokens
+	a.cfg.Context.ResponseReserveFraction = spec.ResponseReserveFraction
 	a.tokens = apogeectx.NewTokenEstimator()
 	a.compactSat = false
 	return nil

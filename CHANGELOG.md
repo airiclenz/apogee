@@ -10,6 +10,21 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **A `response-reserve:` config key sets how much of the context window is held back for the
+  model's reply.** apogee splits every request's window between the prompt and the room the model
+  answers into, and that split was a hardcoded fifth. It is now a config key taking a fraction —
+  `response-reserve: 0.35` — top-level for the run and, like `context-window:` beside it, on a
+  `servers:` entry for one server, where the entry's own share outranks the top-level key
+  (`config.ResolveResponseReserve`). The engine's `Allocate` follows one precedence — an explicit
+  reserve in TOKENS wins, else a configured fraction in (0, 1) of the window, else the built-in
+  0.20 — and both scopes refuse anything that is not a share (negative, 1 or more, NaN) at load,
+  where the file and the number the user wrote can still be named. The per-entry share rides every
+  arrival on a server the two token bounds ride: the startup bind, a `/server` move (a new
+  `UpstreamSpec.ResponseReserveFraction`), a scheduled Firing, a headless run, and a delegation onto
+  the Sub-agent server (a new `DelegationTarget.ResponseReserveFraction`, where an entry stating no
+  share leaves the child on the parent's resolved one). Both keys are documented in the seeded
+  config template.
+
 - **`ThinkingEffort` and its four levels are re-exported at the root.** `apogee.go` already aliased
   `ThinkingProfile` / `ThinkingStyle` with their constants but not the effort type, so an
   out-of-module Driver had to hand `Agent.SetEffortOverride` untyped strings — an ADR 0031

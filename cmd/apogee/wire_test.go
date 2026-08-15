@@ -4023,6 +4023,57 @@ func TestMoveCarriesTheEntrysWindowAndReplyCap(t *testing.T) {
 	}
 }
 
+// The third statement a move carries about the server it lands on: how that server's window is SPLIT
+// for the reply — the entry's own `response-reserve:` over the top-level key (item 13). It rides the
+// switch spec beside the two token bounds, because a session that moved onto a model answering at
+// length must divide THAT server's window its way from the first Turn on the new server rather than
+// keep the share the retired one was configured with.
+//
+// The second move is the half that would be invisible: an entry stating no share falls back to the
+// top-level key rather than carrying the retired entry's 0.35 — and the latch behind it moves too, so
+// a Firing raised after the move divides the window the same way the session does.
+func TestMoveCarriesTheEntrysResponseReserveShare(t *testing.T) {
+	t.Parallel()
+
+	agent := &fakeSwitcher{}
+	holder := newUpstreamHolder()
+	holder.Bind("http://old.invalid:1111", "old-key", "old-model",
+		heartbeat.NewMonitor("http://old.invalid:1111", "old-model", "old-key"))
+	live := newLiveSettings(config.Options{ContextWindow: 16384, ResponseReserve: 0.2}, nil)
+	mover := sessionMover{
+		agent: agent, holder: holder, host: &fakeStamper{}, live: live, keys: config.NewKeyResolver(),
+	}
+
+	stated := config.ServerEntry{
+		Name: "workstation", Endpoint: "http://192.168.64.1:1111",
+		ContextWindow: 65536, ResponseReserve: 0.35,
+	}
+	if _, err := mover.move(stated); err != nil {
+		t.Fatalf("move onto the entry stating its own share: %v", err)
+	}
+	if len(agent.specs) != 1 || agent.specs[0].ResponseReserveFraction != 0.35 {
+		t.Errorf("SwitchUpstream specs = %+v; want the first to carry the entry's own 0.35 share",
+			agent.specs)
+	}
+	if base, _, _, _ := live.rebindInputs(config.Options{}, upstreamBinding{}); base.ResponseReserve != 0.35 {
+		t.Errorf("the next re-resolution's share = %v; want the moved-to entry's 0.35 — the latch went stale",
+			base.ResponseReserve)
+	}
+
+	bare := config.ServerEntry{Name: "laptop", Endpoint: "http://127.0.0.1:8080"}
+	if _, err := mover.move(bare); err != nil {
+		t.Fatalf("move onto the entry stating none: %v", err)
+	}
+	if len(agent.specs) != 2 || agent.specs[1].ResponseReserveFraction != 0.2 {
+		t.Errorf("SwitchUpstream specs = %+v; want the second to fall back to the top-level 0.2, "+
+			"never the retired entry's 0.35", agent.specs)
+	}
+	if base, _, _, _ := live.rebindInputs(config.Options{}, upstreamBinding{}); base.ResponseReserve != 0.2 {
+		t.Errorf("the next re-resolution's share = %v; want the top-level 0.2 back once the entry states none",
+			base.ResponseReserve)
+	}
+}
+
 // A session that STARTS on an entry pinning its own `context-window:` budgets against that pin from
 // its first Turn, not from its first beat. The pin is flattened onto options at resolution and rides
 // the ServerEntry the bind step takes, so it reaches the Config the Agent is CONSTRUCTED from — the
@@ -4539,6 +4590,65 @@ func TestServerBindHandsTheEntrysBoundsToTheEngine(t *testing.T) {
 				t.Errorf("Config.ParallelAgents = %d; want %d — the width this session's very first "+
 					"fan-out may reach, never the retired server's %d",
 					handed.ParallelAgents, tt.wantParallel, retiredWidth)
+			}
+		})
+	}
+}
+
+// The same bind, one key over: the entry's own `response-reserve:` reaches the Config the Agent is
+// CONSTRUCTED from, so the session's very first Turn divides this server's window the way the file
+// says for THIS server (item 13). The unpinned row is the precedence's other half — an entry stating
+// no share leaves the top-level key the Config arrived carrying answering, rather than zeroing it
+// into the engine's own built-in share.
+func TestServerBindHandsTheEntrysResponseReserveToTheEngine(t *testing.T) {
+	t.Parallel()
+	const topLevelShare = 0.2
+
+	tests := []struct {
+		name  string
+		entry config.ServerEntry
+		want  float64
+	}{
+		{
+			name: "the entry's own share outranks the top-level key",
+			entry: config.ServerEntry{
+				Name: "workstation", Endpoint: "http://127.0.0.1:1111", ResponseReserve: 0.35,
+			},
+			want: 0.35,
+		},
+		{
+			name:  "an entry stating none keeps the top-level share",
+			entry: config.ServerEntry{Name: "laptop", Endpoint: "http://127.0.0.1:8080"},
+			want:  topLevelShare,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			base := validCfg(t)
+			base.Context.ResponseReserveFraction = topLevelShare
+
+			engine := newLateEngine(apogee.ModeAskBefore, true)
+			t.Cleanup(func() { _ = engine.Close() })
+			var handed apogee.Config
+			binder := serverBinder{
+				cfg:    base,
+				engine: engine,
+				holder: newUpstreamHolder(),
+				caps:   newParallelAgentsCap(engine),
+				keys:   config.NewKeyResolver(),
+				build: func(cfg apogee.Config, resumed *session.Record) (*apogee.Agent, error) {
+					handed = cfg
+					return buildAgent(cfg, resumed)
+				},
+			}
+			if err := binder.bind(tt.entry); err != nil {
+				t.Fatalf("bind: %v", err)
+			}
+			if handed.Context.ResponseReserveFraction != tt.want {
+				t.Errorf("Config.Context.ResponseReserveFraction = %v; want %v — the share this "+
+					"session's very first Turn budgets its reply room by",
+					handed.Context.ResponseReserveFraction, tt.want)
 			}
 		})
 	}

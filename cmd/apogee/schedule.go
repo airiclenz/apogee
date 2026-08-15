@@ -100,6 +100,13 @@ func (w scheduleWiring) fire(ctx context.Context, f schedule.Firing) (schedule.O
 	cfg.Model, cfg.SystemPrompt = spec.Model, spec.SystemPrompt
 	cfg.EnableMechanisms = spec.EnableMechanisms
 	cfg.Context.MaxContextTokens = spec.MaxContextTokens
+	// And how that window is split for the reply: the bound entry's `response-reserve:` over the
+	// top-level key, resolved onto the options copy by rebindInputs. Taken from there rather than
+	// left on the base Config for the reply ceiling's reason below — the base carries the share the
+	// LAUNCH entry resolved to, so a Firing raised after a `/server` move would otherwise divide this
+	// server's window the way a server this session has left divided its own. 0 is the honest "nobody
+	// stated a share", which hands the split back to the engine's own built-in one.
+	cfg.Context.ResponseReserveFraction = base.ResponseReserve
 	// And the other bound the server states: how big ONE reply of this Firing may be (ADR 0046). It is
 	// taken off the spec for the window's own reason — the base Config was seeded with the LAUNCH
 	// entry's `max-output-tokens:` (wire_boot.go), so a Firing raised after a `/server` move would

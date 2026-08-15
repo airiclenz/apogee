@@ -69,6 +69,19 @@ type liveSettings struct {
 	// `max-output-tokens:` key for an entry's pin to outrank, so what the entry says IS what the
 	// session is bound to.
 	entryCap int
+	// pinnedReserve is the top-level `response-reserve:` share, 0 when the key is unset and apogee's
+	// own built-in share stands. It is held rather than re-read off the launch snapshot because the
+	// entry override below is resolved against it at a `/server` move, and the two must be read as
+	// one statement. There is no setter: the key is file-only and nothing applies an edit of it to a
+	// running session, so unlike pinnedWindow above it never moves.
+	pinnedReserve float64
+	// entryReserve is the BOUND entry's own `response-reserve:` override, 0 when that entry states
+	// none and the top-level share above answers. It is latched beside the two token bounds, moves
+	// with them (followEntry, setServers), and is resolved over the top-level key exactly as the
+	// window is (config.ResolveResponseReserve) — the split describes the server the session is on,
+	// so a move must replace it whole rather than divide the new server's window the retired one's
+	// way.
+	entryReserve float64
 	// entryName is that entry's `servers:` name — how a re-read list is matched back to the server
 	// this session is on, so a `context-window:` edited on the BOUND entry re-resolves the pin above
 	// instead of leaving it describing the file as it was at the last move (parallelAgentsCap.name,
@@ -136,6 +149,8 @@ func newLiveSettings(opts config.Options, manualIDs []apogee.MechanismID) *liveS
 		// through followEntry.
 		entryWindow:        opts.StartupContextWindow,
 		entryCap:           opts.StartupMaxOutputTokens,
+		pinnedReserve:      opts.ResponseReserve,
+		entryReserve:       opts.StartupResponseReserve,
 		entryName:          opts.HostAlias,
 		servers:            opts.Servers,
 		manualIDs:          manualIDs,
@@ -184,6 +199,20 @@ func (s *liveSettings) followEntry(entry config.ServerEntry) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.entryWindow, s.entryCap, s.entryName = entry.ContextWindow, entry.MaxOutputTokens, entry.Name
+	// The third statement the entry makes about its own slot: how its window is split for the reply.
+	// It follows the two pins for their reason — an entry that states no share writes 0, which leaves
+	// the top-level key answering — and it is assigned apart from them only because it is the one
+	// that is not a token count.
+	s.entryReserve = entry.ResponseReserve
+}
+
+// reservePin reports the top-level `response-reserve:` share — what a server move resolves an
+// entry's own override over, the way pin above is what it resolves an entry's window pin over. 0 is
+// the honest "the key is unset", which the engine reads as its own built-in share.
+func (s *liveSettings) reservePin() float64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.pinnedReserve
 }
 
 // window reports the context window in force right now for the server this session is on: the bound
@@ -318,6 +347,12 @@ func (s *liveSettings) setServers(servers []config.ServerEntry) bool {
 	for _, e := range servers {
 		if e.Name != "" && e.Name == s.entryName {
 			s.entryWindow, s.entryCap = e.ContextWindow, e.MaxOutputTokens
+			// The re-read entry's own share travels with the two bounds so the next bind, move or
+			// Firing divides this server's window the way the file says NOW. It is deliberately not
+			// part of the moved-answer below: a rebind carries no share (apogee.RebindSpec states
+			// none), so an edit that moves only this reaches the engine at the next of those three
+			// rather than through the ride this return value drives.
+			s.entryReserve = e.ResponseReserve
 			break
 		}
 	}
@@ -412,6 +447,12 @@ func (s *liveSettings) rebindInputs(base config.Options, bound upstreamBinding) 
 	// Resolved once, so the copy and the returned pin cannot disagree.
 	pin := config.ResolveContextWindow(s.entryWindow, s.pinnedWindow)
 	base.ContextWindow = pin
+	// And how that window is split on the server the session is on NOW: the bound entry's
+	// `response-reserve:` over the top-level key (config.ResolveResponseReserve, the ranks the
+	// window's own resolution spells). It is written ONTO the copy rather than handed back beside the
+	// two bounds because `config.Options` spells this number as a session-wide share, which is
+	// exactly what a caller reading the copy needs — a Firing composes its Config from it.
+	base.ResponseReserve = config.ResolveResponseReserve(s.entryReserve, s.pinnedReserve)
 	base.Servers = s.servers
 	base.Mechanisms = s.mechanisms
 	base.ValidatedSetsEnable = s.validatedEnable

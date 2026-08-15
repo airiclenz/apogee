@@ -1188,6 +1188,25 @@ type UnconfinedHost struct {
 // window at all, so the reserve it would derive from is unknown and the cap falls to its clamp
 // floor; the pin is the only way to let such a server answer at length.
 //
+// ResponseReserve is the top-level `response-reserve:` key, per entry: how much of THIS server's
+// window is held back for the model's REPLY, as a fraction of it (`response-reserve: 0.2` ⇒ a
+// fifth). It rides the entry on the reply cap's reasoning one step earlier — the split is a property
+// of the SLOT the reply has to fit in, so a session moved onto a server that answers at length
+// divides that server's window its way rather than the way the last server's was divided. Three
+// states, the `context-window:` idiom with one difference:
+//
+//   - absent (or 0, which yaml cannot tell from absent) ⇒ the top-level `response-reserve:` key
+//     answers, and unset there too apogee's own built-in 0.20 share stands.
+//   - 0 < F < 1 ⇒ hold that share of this server's window back, whatever the top-level key says.
+//   - anything else — negative, 1 or more, NaN ⇒ refused by ValidateServers on the top-level key's
+//     own range rule: a share of 1 holds the whole window back and leaves no prompt to send.
+//
+// The difference is the fall-through. Unlike the reply cap beside it, this key HAS a top-level key
+// to defer to (ResolveResponseReserve, the ranks ResolveContextWindow spells), because how a window
+// is divided is a tuning fact about the RUN that one server may want stated differently — a
+// thinking model that writes long answers earns a bigger share on the entry that serves it without
+// costing every other server history.
+//
 // LaunchProfile names the llama-launcher Launch profile the interactive TUI comes back on when it
 // starts on this entry and nothing is serving there yet. apogee writes it itself on a profile-load
 // commit while `remember-model:` is on — which is what makes "pick a model, come back on it
@@ -1214,6 +1233,7 @@ type ServerEntry struct {
 	Mechanisms      map[string]bool `yaml:"mechanisms,omitempty"`
 	ContextWindow   int             `yaml:"context-window,omitempty"`
 	MaxOutputTokens int             `yaml:"max-output-tokens,omitempty"`
+	ResponseReserve float64         `yaml:"response-reserve,omitempty"`
 }
 
 // ValidateServers rejects an entry that could never be switched to, at the startup boundary where
@@ -1263,7 +1283,11 @@ type ServerEntry struct {
 // N ≥ 1 is a pin, so a negative number is the only value with nothing to mean, and saying so here
 // beats resolving it to a silent 1 months later. The entry's optional `context-window:` pin is
 // checked for that same one defect, on that same reasoning, and its `max-output-tokens:` cap for
-// that same one again — three keys carrying one idiom carry one refusal.
+// that same one again — three keys carrying one idiom carry one refusal. The entry's optional
+// `response-reserve:` share is checked for the same reason and against a RANGE rather than a sign,
+// because a share has two ways to be unusable rather than one: it is the top-level key's own rule
+// applied one scope in (isResponseReserveShare), so a number the file states for this server is a
+// number the Budget can spend on it.
 //
 // The entry's optional `sub-agents:` flag and the posture keys that ride it carry two defects
 // between them (ADR 0045 decisions 1 and 2). A SECOND flagged entry is refused with BOTH entries
@@ -1355,6 +1379,12 @@ func ValidateServers(servers []ServerEntry) error {
 			return fmt.Errorf("apogee: servers: entry %d (%q): max-output-tokens: %d is negative — give the "+
 				"most tokens one reply from this server may be (1 or more), or remove the key to derive the "+
 				"cap from the reply budget", i+1, s.Name, s.MaxOutputTokens)
+		}
+		if !isResponseReserveShare(s.ResponseReserve) {
+			return fmt.Errorf("apogee: servers: entry %d (%q): response-reserve: %v is not a share of "+
+				"this server's context window — give the part of that window to hold back for the model's "+
+				"reply, above 0 and below 1 (0.2 ⇒ a fifth), or remove the key to take the top-level "+
+				"response-reserve:", i+1, s.Name, s.ResponseReserve)
 		}
 		if s.SubAgents {
 			if flagged >= 0 {
@@ -1481,6 +1511,32 @@ func ResolveContextWindow(entry, session int) int {
 		return entry
 	}
 	if session >= 1 {
+		return session
+	}
+	return 0
+}
+
+// ResolveResponseReserve answers the same question one key further in: which SHARE of that window a
+// session running on a `servers:` entry holds back for the model's reply. entry is that entry's own
+// `response-reserve:` (0 when the key is absent, which yaml cannot tell from an explicit 0) and
+// session is the top-level `response-reserve:` key the whole run carries.
+//
+// The ranks are ResolveContextWindow's, for its reason: a share written on the ENTRY says how the
+// window of THAT server is divided, while the top-level key says how whatever server the session
+// happens to be pointed at divides its own — so a session moved onto an entry that states a share
+// budgets its reply room against the server it is actually on. Stated at neither scope ⇒ 0, which is
+// not a share but the honest "nobody said": the engine then holds its own built-in fifth back
+// (internal/context.Allocate), which is why this bottom rank is a zero rather than that constant —
+// the split belongs to the engine, and repeating the number here would give it two homes.
+//
+// Both inputs are guarded rather than trusted — ValidateServers refuses an out-of-range entry share
+// and LoadFileConfig refuses an out-of-range top-level one — so anything outside the open range
+// (0, 1), NaN included, falls through to the next rank instead of being spent.
+func ResolveResponseReserve(entry, session float64) float64 {
+	if entry > 0 && entry < 1 {
+		return entry
+	}
+	if session > 0 && session < 1 {
 		return session
 	}
 	return 0
@@ -1732,18 +1788,26 @@ func validateModelProfiles(m map[string]modelProfileConfig) error {
 	return nil
 }
 
-// validateResponseReserveFraction rejects a top-level `response-reserve:` outside the open range
-// the Budget can spend. It runs at LOAD, beside the model-profile check, because the key is a
-// SHARE and every way of getting it wrong is silent downstream: 1 or more holds the whole window
-// back and leaves no prompt to send, a negative share has no meaning, and NaN is not a share at
-// all — it compares false against both bounds, so the allocator's own defensive guard would wave
-// it through and multiply the window by it (internal/context.Allocate). Refusing here is what
-// keeps the number the user typed, and the file it is in, still nameable in the error.
+// isResponseReserveShare reports whether f is a `response-reserve:` value the Budget can spend: the
+// open range (0, 1), plus the 0 that IS the key's absent state and resolves to apogee's built-in
+// share rather than to no reserve at all. It is ONE predicate because the top-level key and a
+// `servers:` entry's override are one rule wearing two error messages — the range is a property of
+// the NUMBER, a share of a window, not of where in the file it was written.
 //
-// 0 is the one value outside the open range that passes: it is the key's absent state, and it
-// resolves to apogee's built-in share rather than to no reserve at all.
+// NaN is tested outright rather than left to the comparisons: it answers false to both bounds, so a
+// range test would wave it through to the allocator, which would multiply the window by it
+// (internal/context.Allocate guards the same way, for the same reason).
+func isResponseReserveShare(f float64) bool {
+	return !math.IsNaN(f) && f >= 0 && f < 1
+}
+
+// validateResponseReserveFraction rejects a top-level `response-reserve:` outside the range above.
+// It runs at LOAD, beside the model-profile check, because the key is a SHARE and every way of
+// getting it wrong is silent downstream: 1 or more holds the whole window back and leaves no prompt
+// to send, a negative share has no meaning, and NaN is not a share at all. Refusing here is what
+// keeps the number the user typed, and the file it is in, still nameable in the error.
 func validateResponseReserveFraction(fraction float64) error {
-	if math.IsNaN(fraction) || fraction < 0 || fraction >= 1 {
+	if !isResponseReserveShare(fraction) {
 		return fmt.Errorf("apogee: response-reserve: %v is not a share of the context window — give "+
 			"the part of the window to hold back for the model's reply, above 0 and below 1 "+
 			"(0.2 ⇒ a fifth of the window), or remove the key to take apogee's own 0.20", fraction)
@@ -2205,6 +2269,12 @@ func ApplyConfig(opts *Options, changed func(string) bool, getenv func(string) s
 	// (ResolveContextWindow) at the bind. The ephemeral override entry pins nothing, which leaves an
 	// override run on that top-level key and, unpinned there too, on what the first beat observes.
 	opts.StartupContextWindow = startup.ContextWindow
+	// And how that entry's server divides it (item 13). Flattened for the window's reason and
+	// travelling the same way — the SELECTED entry's own value, carried as written for the
+	// composition root to resolve over the top-level `response-reserve:` key
+	// (ResolveResponseReserve) at the bind. The ephemeral override entry states no share, which
+	// leaves an override run on that top-level key and, unset there too, on apogee's own.
+	opts.StartupResponseReserve = startup.ResponseReserve
 	opts.Mode = s.Mode
 	opts.Bypass = s.Bypass
 	opts.Servers = s.Servers

@@ -87,13 +87,6 @@ as the behavioral oracle, not the TDD. On send the webview posts `{text, skillId
     sets only temperature no longer nils the engine's stamped cap.
     [ADR 0025](docs/adr/0025-interjections-commit-at-the-between-steps-boundary.md) §6 still
     defers the user-after-tool wire risk to this layer by name.
-  - **[P2] Context-budget % config key** — the one piece with no launch-side home:
-    `ResponseReserve` (`internal/context/budget.go:53`) is apogee's own split of the context
-    window between history and the expected response, hardcoded today; a Launch profile's `-c`
-    sets the window size but not this fraction. A small config key is the live remainder. The
-    `MaxTokens` axis already shipped with ADR 0046 as a per-`servers:`-entry pin
-    (`max-output-tokens:` / `context-window:`, riding every rebind) — engine behaviour, NOT a
-    Model-profile field.
 
 - **[P2] Inspector / raw-protocol view** — apogee-code's "Show Code"/Inspector (advanced mode)
   shows wire-level request/response JSON. apogee has only a hidden, non-toggleable debug field in

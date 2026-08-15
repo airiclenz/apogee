@@ -138,6 +138,17 @@ type Options struct {
 	// first beat.
 	StartupContextWindow int
 
+	// startupResponseReserve is the SELECTED startup entry's own `response-reserve:` value, exactly
+	// as the user wrote it: 0 (the key absent) ⇒ that entry states no share, so the top-level
+	// `response-reserve:` key answers and, unset there too, apogee's built-in 0.20 stands. It is a
+	// fact about the entry this session starts ON for the reason the three fields above are — how a
+	// window is divided is a statement about the SLOT the reply must fit in — and the ephemeral
+	// `--endpoint`/`APOGEE_ENDPOINT` override entry carries none, which leaves an override run on
+	// the top-level key. Resolved-not-flag-bound; ApplyConfig sets it from the startup entry, and the
+	// composition root resolves it over that key (ResolveResponseReserve) at the bind, so a session
+	// that STARTS on an entry stating its own share budgets by it from its first Turn.
+	StartupResponseReserve float64
+
 	// prebound says this session starts with NO upstream bound, and why — the zero value being the
 	// ordinary start, on the server selection determined. It is the one resolution outcome that
 	// does not come out of ApplyConfig's write-back but out of its refusal: the root command

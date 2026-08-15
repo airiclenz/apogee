@@ -436,7 +436,44 @@ zero value); options-flattening case.
 
 ---
 
-## 13. `response-reserve:` — per-server override riding every rebind
+## 13. `response-reserve:` — per-server override riding every rebind — ✅ DONE (2026-08-15)
+
+NOTES (2026-08-15): eight files outside the item's Files list were edited, because three of the four
+rebind sites the item enumerates carry their numbers on ENGINE-side spec types that had no field for
+a share. `internal/agent/rebind.go` gained `UpstreamSpec.ResponseReserveFraction` (applied in
+`SwitchUpstream` beside the two token bounds) for the `/server` move; `internal/agent/delegationtarget.go`
+gained `DelegationTarget.ResponseReserveFraction` and `internal/agent/subagent.go` applies it to the
+child — without them the move and the delegation sites could not ride at all, and the item's title
+("riding every rebind") would be false. `cmd/apogee/wire_settings.go` gained the `liveSettings` latch
+(`pinnedReserve`/`entryReserve`, `followEntry`, `setServers`, `reservePin`, and the resolved share
+written onto the `rebindInputs` copy) that the move and Firing sites read; `internal/config/options.go`
+gained `StartupResponseReserve`, without which the startup entry's share cannot reach the bind;
+`cmd/apogee/headless.go` now resolves the bound entry over the top-level key instead of taking the
+top-level key alone (item 12 left it on the latter, correctly, since the per-entry half did not exist
+yet); `README.md` gained the per-server sentence item 12's NOTES explicitly left to this item; and
+`internal/agent/switchupstream_test.go` carries the engine-side test for the new spec field.
+NOTES (2026-08-15): all four enumerated sites were verified before editing and all four flow. The
+`/server` switch is two sites in the current shape, not one — `serverBinder.bind`
+(`cmd/apogee/wire_server.go`, the arrival that CONSTRUCTS the Agent, resolving through the Config) and
+`sessionMover.move` (`cmd/apogee/upstream.go`, the arrival that switches a live one, resolving through
+`UpstreamSpec`) — and both were done. The scheduled Firing takes the resolved share off the options
+copy `rebindInputs` returns, mirroring how it takes the window.
+NOTES (2026-08-15): the delegation site deliberately does NOT mirror the reply cap's "the zero IS the
+answer" rule. `resolveDelegationTarget` has no top-level rank to resolve against (its inputs are the
+flagged entry, the beat and the profiles), so it carries the entry's share as written and
+`subagent.go` applies it only when it names one; an entry stating none leaves the child on the share
+the PARENT resolved, which already is the top-level key when nobody overrode it. A fraction stays
+meaningful against any window, so nothing here can describe the wrong server — unlike a reply ceiling
+in tokens, which is why that field's zero is carried and this one's is not.
+NOTES (2026-08-15): `setServers` re-derives the bound entry's share from a re-read `servers:` list,
+but the share is deliberately not part of the moved-answer that drives a ride: `apogee.RebindSpec`
+carries no share, so a rebind could not apply one. An edit that moves ONLY the bound entry's
+`response-reserve:` therefore reaches the engine at the next bind, `/server` move or Firing rather
+than at the next beat — the same gap `max-output-tokens:` had before `RebindSpec` grew a ceiling
+field, and a candidate follow-up rather than something this item's four sites cover.
+NOTES (2026-08-15): `validateResponseReserveFraction` (item 12) now delegates its range test to a
+shared `isResponseReserveShare` predicate, so the top-level key and the per-entry override refuse the
+same numbers by construction rather than by two copies of one rule; only the error messages differ.
 
 Depends on item 12.
 

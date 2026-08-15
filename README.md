@@ -513,6 +513,9 @@ transcript the moment it binds a model without one. How that window is **split**
 file-only key: apogee holds a fifth of it back for the model's reply and lets the prompt fill
 the rest, and `response-reserve:` (a fraction above 0 and below 1) sets your own share instead
 — raise it for a model that answers at length, lower it to spend more of the window on history.
+The same key on a `servers:` entry sets that share for one server only and outranks the
+top-level one while the session is on it, following a `/server` switch, a scheduled run and a
+delegation onto that server the way its `context-window:` pin does.
 
 Every reply is **bounded**, and by the same budget: apogee tells the server how many tokens
 one answer may take, using the room it already reserves for the reply — clamped to between

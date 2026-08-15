@@ -443,10 +443,15 @@ func resolveDelegationTarget(
 		// half to fall back to — a server advertises no reply ceiling — so an absent key stays 0 and
 		// the child derives its cap from the window resolved above.
 		MaxOutputTokens: entry.MaxOutputTokens,
-		ParallelAgents:  config.ResolveParallelAgents(entry.ParallelAgents, observed.TotalSlots),
-		Profile:         profile,
-		Bypass:          entry.Bypass,
-		Mechanisms:      catalogue,
+		// The entry's `response-reserve:` override, carried as written. There is no observed half
+		// here either — a server reports no split — and no top-level rank to resolve against, on
+		// purpose: an entry that states no share leaves the child on the share the PARENT resolved,
+		// which already IS the top-level key when nobody overrode it (subagent.go).
+		ResponseReserveFraction: entry.ResponseReserve,
+		ParallelAgents:          config.ResolveParallelAgents(entry.ParallelAgents, observed.TotalSlots),
+		Profile:                 profile,
+		Bypass:                  entry.Bypass,
+		Mechanisms:              catalogue,
 	}
 }
 

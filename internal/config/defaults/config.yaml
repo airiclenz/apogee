@@ -467,6 +467,18 @@ system-prompt-text: |
 # the per-reply cap from when no max-output-tokens: is pinned below — pin that key and the cap is
 # stated outright instead, while the split above stays exactly as this share says.
 # response-reserve: 0.2
+#
+# The same key also lives on a servers: entry above, where it says how THAT server's window is
+# split — one scope in, for the server that answers differently from the rest: a thinking model
+# that needs room to reply, a summarizer that needs almost none. The entry's own share wins over
+# the key above wherever the session is pointed, and it follows a /server switch, a scheduled run
+# and a delegation onto that server:
+#
+#   (absent)  the top-level response-reserve: answers, and 0.20 when that is unset too.
+#   F         hold that share of THIS server's window back; above 0 and below 1.
+#
+#   - name: workstation
+#     response-reserve: 0.35
 
 # =============================================================================
 # The most tokens ONE reply may be. This one lives on a servers: entry above, beside that entry's

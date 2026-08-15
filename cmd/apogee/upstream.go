@@ -217,8 +217,9 @@ type sessionMover struct {
 // move re-points the whole session at entry and reports what the display should adopt.
 //
 // It takes a ServerEntry for the reason serverBinder.bind does: arriving on a server is ONE input
-// shape whichever way the session arrives, so the pins that ride the entry — its `context-window:`
-// and its `max-output-tokens:` — reach the engine here exactly as they reach it at a bind, rather
+// shape whichever way the session arrives, so the pins that ride the entry — its `context-window:`,
+// its `max-output-tokens:` and its `response-reserve:` share of the first — reach the engine here
+// exactly as they reach it at a bind, rather
 // than being dropped because a move happened to be spelled as four loose strings. entry.Name is what
 // the footer will call the server (a `servers:` entry's name for a switch, the profile name for a
 // load) and entry.Model is that server's discovery hint, which for a load is deliberately empty: a
@@ -241,6 +242,11 @@ func (m sessionMover) move(entry config.ServerEntry) (tui.ServerSwitchResult, er
 	// written — an unpinned entry sends 0 and the engine derives its own cap from the window (ADR
 	// 0046).
 	window := config.ResolveContextWindow(entry.ContextWindow, m.live.pin())
+	// And how the new server splits it: that entry's own `response-reserve:` over the top-level key,
+	// which survives a move the way the window pin does (config.ResolveResponseReserve). Resolved
+	// here, with the window, so the engine takes one statement about one server — 0 at both scopes
+	// hands the split back to the engine's own built-in share.
+	reserve := config.ResolveResponseReserve(entry.ResponseReserve, m.live.reservePin())
 	// The key that server takes, resolved from the source its entry names and resolved FIRST, in
 	// front of the engine's own validate-then-commit switch: a source that refuses is one more way
 	// this move cannot be made, and it must fail like the others — with the session still on the
@@ -250,10 +256,11 @@ func (m sessionMover) move(entry config.ServerEntry) (tui.ServerSwitchResult, er
 		return tui.ServerSwitchResult{}, err
 	}
 	if err := m.agent.SwitchUpstream(apogee.UpstreamSpec{
-		Endpoint:         entry.Endpoint,
-		APIKey:           apiKey,
-		MaxContextTokens: window,
-		MaxOutputTokens:  entry.MaxOutputTokens,
+		Endpoint:                entry.Endpoint,
+		APIKey:                  apiKey,
+		MaxContextTokens:        window,
+		MaxOutputTokens:         entry.MaxOutputTokens,
+		ResponseReserveFraction: reserve,
 	}); err != nil {
 		return tui.ServerSwitchResult{}, err
 	}
