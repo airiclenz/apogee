@@ -51,11 +51,12 @@ var (
 // It is deliberately NOT the whole Config: mode, approvals, confinement, tools and the
 // conversation are session state that a model switch has no business resetting.
 //
-// One field is the stated exception to "per-model", MaxOutputTokens (ADR 0046's amendment): the
-// reply ceiling describes the SERVER, and it rides here because the `max-output-tokens:` pin has no
-// engine setter of its own — the atomic commit a rebind already makes is the only door a live edit
-// of it can take. It is optional precisely so that exception costs the other callers nothing: a spec
-// that says nothing about the ceiling leaves it exactly as it was.
+// Two fields are the stated exceptions to "per-model", MaxOutputTokens (ADR 0046's amendment) and
+// ResponseReserveFraction: the reply ceiling and the share of the window that reply is given both
+// describe the SERVER, and they ride here because neither the `max-output-tokens:` nor the
+// `response-reserve:` pin has an engine setter of its own — the atomic commit a rebind already makes
+// is the only door a live edit of either can take. Both are optional precisely so those exceptions
+// cost the other callers nothing: a spec that says nothing about a bound leaves it exactly as it was.
 //
 // The model profile used to be on that list. This doc said "`model-profile` is global, not
 // per-model — see Config.Profile; SetProfile is its separate, explicit door", and ADR 0044
@@ -87,6 +88,19 @@ type RebindSpec struct {
 	// operator dropping the pin, and the engine derives the cap from the reply room the Budget
 	// reserves again (maxOutputTokens, loop.go), never "no cap at all".
 	MaxOutputTokens *int
+	// ResponseReserveFraction is the share of the bound context window held back for ONE reply on the
+	// server this session is on — the bound `servers:` entry's `response-reserve:` resolved over the
+	// top-level key by the caller (config.ResolveResponseReserve). Like the ceiling above it is a fact
+	// about the SLOT rather than about the model, and it rides this spec for the ceiling's reason: the
+	// share has no engine setter of its own, so the re-resolution the caller is already driving is the
+	// only door a live edit of it can reach the engine through.
+	//
+	// A POINTER on the ceiling's contract: nil ⇒ this spec says NOTHING about the split and whatever
+	// share is in force stands — which is what keeps a caller that re-resolved only the per-model
+	// bindings from silently re-dividing a window an entry pinned. A non-nil value is applied as
+	// written, the ZERO included: 0 is "neither scope states a share", and internal/context.Allocate
+	// hands the split back to its own built-in default rather than to the departed entry's number.
+	ResponseReserveFraction *float64
 	// EnableMechanisms is the catalogued Mechanism set re-resolved for the new model. It replaces
 	// the current set outright; empty arms nothing (the default-off posture).
 	EnableMechanisms []domain.MechanismID
@@ -102,9 +116,10 @@ type RebindSpec struct {
 // Rebind swaps the Agent's per-model bindings at a quiescent boundary — the wire model, the
 // system-prompt template, the context window the Budget and Compaction measure against, and the
 // catalogued Mechanism set — and rebinds the provider client's wire model with them. It is the
-// engine half of the heartbeat's observed model change (ADR 0024). A spec may carry one bound that
-// is NOT per-model, the reply ceiling (ADR 0046), for the reason its field states: the pin has no
-// setter of its own, so a live edit of it reaches the engine through this same atomic commit.
+// engine half of the heartbeat's observed model change (ADR 0024). A spec may carry two bounds that
+// are NOT per-model, the reply ceiling (ADR 0046) and the share of the window reserved for that
+// reply, for the reason their fields state: neither pin has a setter of its own, so a live edit of
+// them reaches the engine through this same atomic commit.
 //
 // Idle-only, like ClearContext and RestoreSession: it refuses mid-Exchange (ErrInputPending), and
 // the host applies a change observed mid-Exchange at the terminal boundary instead. That
@@ -118,9 +133,10 @@ type RebindSpec struct {
 // cannot satisfy leaves every existing binding, and the whole conversation, exactly as it was.
 //
 // What stands: the conversation and Turn counters, the autonomy mode, session approvals, the
-// confinement flag, and the resolved tools — and the reply ceiling too, unless the spec names one:
-// that bound describes the SERVER, so a spec silent about it (a nil MaxOutputTokens) leaves it
-// exactly where the bind or the move that set it put it.
+// confinement flag, and the resolved tools — and the reply ceiling and its reserve share too, unless
+// the spec names them: those bounds describe the SERVER, so a spec silent about one (a nil
+// MaxOutputTokens or ResponseReserveFraction) leaves it exactly where the bind or the move that set
+// it put it.
 // What MOVES with the model, since ADR 0044: the profile and its parse-seam collaborators. The
 // caller resolves it for the new model and hands it in on the spec; the same unexported
 // applyProfile SetProfile uses installs it, so the next response is read in the new model's
@@ -155,6 +171,13 @@ func (a *Agent) Rebind(spec RebindSpec) error {
 	// spec that fails a gate below moves this no more than it moves the others.
 	if spec.MaxOutputTokens != nil {
 		next.Context.MaxOutputTokens = *spec.MaxOutputTokens
+	}
+	// The reserve share on the same contract and for the same reason (see the field): a nil leaves the
+	// split this session already holds, so only a caller that actually re-resolved `response-reserve:`
+	// moves it, and a stated 0 hands the split back to Allocate's own default. Written onto the copy
+	// with the rest, so a spec that fails a gate below moves this no more than it moves the others.
+	if spec.ResponseReserveFraction != nil {
+		next.Context.ResponseReserveFraction = *spec.ResponseReserveFraction
 	}
 	next.EnableMechanisms = spec.EnableMechanisms
 	// applyProfile below writes the live a.cfg.Profile; carrying the profile on the copy too is

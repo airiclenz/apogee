@@ -10,6 +10,17 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **A `RebindSpec` can now carry the response-reserve share, so a live edit of it reaches the
+  engine.** The reply ceiling already rode the rebind's atomic commit because `max-output-tokens:`
+  has no engine setter of its own; `response-reserve:` has exactly the same gap and had no field to
+  ride. `RebindSpec` now carries `ResponseReserveFraction *float64` on the ceiling's contract — nil
+  ⇒ the spec says nothing about the split and whatever share is in force stands (so a caller that
+  re-resolved only the per-model bindings can never re-divide a window an entry pinned), a stated
+  value replaces it, and a stated `0` is the operator dropping the pin, which hands the split back
+  to `internal/context.Allocate`'s own built-in default rather than to the departed entry's number.
+  `Rebind` writes it onto the `next` copy with the rest of the bindings, so a spec that fails a
+  validation gate moves it no more than it moves the others.
+
 - **A `response-reserve:` config key sets how much of the context window is held back for the
   model's reply.** apogee splits every request's window between the prompt and the room the model
   answers into, and that split was a hardcoded fifth. It is now a config key taking a fraction —

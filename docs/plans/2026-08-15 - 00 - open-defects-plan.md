@@ -120,7 +120,10 @@ compare against the registry, which is independent). Remove the second bullet of
 
 **Commit:** `test(settings): pin the kind projection independently for all nine kinds`
 
-## 3. `RebindSpec` carries the response-reserve share (engine half)
+## 3. `RebindSpec` carries the response-reserve share (engine half) — ✅ DONE (2026-08-15)
+
+NOTES (2026-08-15): CHANGELOG.md is listed in the item's Files but the implementer never edits it — the entry text above is for the verifier to apply.
+NOTES (2026-08-15): besides the `RebindSpec` struct doc the item names, two paragraphs of `Rebind`'s own doc comment were refreshed — "A spec may carry one bound that is NOT per-model, the reply ceiling" and the "What stands:" clause naming only a nil `MaxOutputTokens` — since the new field makes both statements false as written; no other doc was touched.
 
 **What:** In `internal/agent/rebind.go`, add `ResponseReserveFraction *float64` to
 `RebindSpec` (fields at `:66-100`), mirroring the `MaxOutputTokens *int` ceiling field at

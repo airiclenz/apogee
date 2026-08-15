@@ -485,3 +485,57 @@ func TestRebindCarriesTheReplyCeiling(t *testing.T) {
 		t.Errorf("reply cap = %d after the pin was dropped, want the derived 19660", got)
 	}
 }
+
+// TestRebindCarriesTheResponseReserveShare: how the bound window is SPLIT for the reply is the
+// second bound that describes the SERVER rather than the model, and it rides RebindSpec for the
+// reply ceiling's reason — the `response-reserve:` pin has no engine setter of its own, so a live
+// edit of it reaches the engine only through the re-resolution the composition root is already
+// driving.
+//
+// Same three states as the ceiling beside it, asserted through the Budget because the share is only
+// interesting insofar as it moves the tokens actually held back: stated binds, SILENT leaves the
+// share in force standing (so a caller that re-resolved only the per-model bindings can never
+// re-divide a window an entry pinned), and a stated ZERO is the operator dropping the pin — the
+// split falls to the engine's own built-in fifth, not to the departed entry's number.
+func TestRebindCarriesTheResponseReserveShare(t *testing.T) {
+	cfg := baseConfig(&recordingSink{})
+	cfg.Context.MaxContextTokens = 100000
+
+	a, err := newAgent(cfg, &modelBindingResponder{reply: "unreached"})
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+
+	// Stated: the entry's share binds, and the Budget holds back exactly that much of the window.
+	stated := 0.35
+	if err := a.Rebind(RebindSpec{
+		Model: "new-model", MaxContextTokens: 100000, ResponseReserveFraction: &stated,
+	}); err != nil {
+		t.Fatalf("Rebind with a stated share: %v", err)
+	}
+	if got := a.budget().ResponseReserve; got != 35000 {
+		t.Errorf("reply reserve = %d after the rebind, want the spec's 35%% of 100,000", got)
+	}
+
+	// Silent: the share stands. This is the invariant the pointer exists for — the share describes the
+	// server, and a spec that re-resolved only the per-model bindings has said nothing about it.
+	if err := a.Rebind(RebindSpec{Model: "another-model", MaxContextTokens: 100000}); err != nil {
+		t.Fatalf("Rebind with no share stated: %v", err)
+	}
+	if got := a.budget().ResponseReserve; got != 35000 {
+		t.Errorf("reply reserve = %d after a spec silent about it, want the 35,000 still in force — a "+
+			"nil field must leave the bound share untouched, never re-divide the window", got)
+	}
+
+	// The stated ZERO: the operator DROPPED the pin, which is a statement and not silence. Allocate
+	// applies apogee's own 0.20 default rather than keeping the share the previous entry stated.
+	dropped := 0.0
+	if err := a.Rebind(RebindSpec{
+		Model: "third-model", MaxContextTokens: 100000, ResponseReserveFraction: &dropped,
+	}); err != nil {
+		t.Fatalf("Rebind with the pin dropped: %v", err)
+	}
+	if got := a.budget().ResponseReserve; got != 20000 {
+		t.Errorf("reply reserve = %d after the pin was dropped, want the built-in fifth of 100,000", got)
+	}
+}
