@@ -46,6 +46,23 @@ point is a **minor** bump, not a breaking change.
   repaints the row every frame — and it is the first thing the left slot gives up on a narrow
   window, dropped whole rather than truncated.
 
+- **The TUI now retains the model's reasoning, and renders none of it.** A `reasoningTail`
+  (`internal/tui/reasoning.go`) keeps the current Turn's reasoning chunks as the seam a future
+  reasoning display will read: nothing in the view touches the buffer, `/settings` gains no key for
+  it, and the status line's "thinking" still comes from the *arrival* of a `ReasoningEvent` rather
+  than from these bytes. Landing the retention rules ahead of any display is the point of it —
+  they are the rules such a display would live or die by, and they now sit under tests instead of
+  inside a renderer. Text is escape-stripped at this one seam (a `ReasoningEvent`'s `Text` is raw
+  model output that may carry ESC bytes, so an OSC 8 opener is dead before it could reach a cell
+  buffer); the buffer is bounded to the last 4096 bytes, dropped from the front on a rune boundary,
+  because the Model is copied on every Update and a Turn may reason for an hour; and it holds one
+  agent's reasoning at a time, keyed on the same depth-and-spawn identity the activity line uses,
+  since a fan-out's delegates interleave their chunks in one stream. `Model.foldReasoning` is the
+  fourth fold `foldEvent` runs and the only writer — a `StreamResetEvent` (the Turn is superseded)
+  and a `MessageEvent` (the Turn is committed, and its `reasoning_content` is the canonical copy)
+  each end a tail, as do the two worker boundaries no Event announces, a launched Exchange and an
+  unwound worker.
+
 - The alias synthesized for a raw `--endpoint`/`APOGEE_ENDPOINT` override no longer collides with a
   configured `servers:` entry name: when the endpoint's host equals one, the label takes a
   `" (endpoint)"` suffix (e.g. `workstation (endpoint)`), so the switch list never draws two rows

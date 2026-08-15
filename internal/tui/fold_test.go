@@ -46,6 +46,7 @@ type foldCase struct {
 	wantPendingDepth int       // whose buffer that is — the nesting level the tokens streamed at
 	wantPhrase       string    // the activity phrase after the fold ("" = the slot is left idle)
 	wantStats        statsFold // the stats after the fold (the zero value = foldStats moved nothing)
+	wantReasoning    string    // the retained reasoning tail after the fold ("" = it holds nothing)
 }
 
 // foldCases is the variant table: every domain.Event, what it does to the view, and — by way
@@ -72,17 +73,24 @@ func foldCases() []foldCase {
 			// delegate's tokens are not it (foldStats).
 		},
 		{
-			name:       "ReasoningEvent is activity only — the transcript never shows reasoning",
-			event:      domain.ReasoningEvent{Text: "hmm"},
-			wantPhrase: "thinking",
+			name: "ReasoningEvent is activity plus retention — the transcript never shows reasoning",
+			// The scrollback gets nothing and the phrase gets "thinking", as it always did; what is
+			// new is that the chunk is RETAINED, escape-stripped, in the tail behind the fold
+			// (reasoning.go). Nothing renders that tail — the assertion below is the only reader in
+			// the program.
+			event:         domain.ReasoningEvent{Text: "hmm"},
+			wantPhrase:    "thinking",
+			wantReasoning: "hmm",
 		},
 		{
-			name:       "StreamResetEvent discards the pending buffer and says retrying",
+			name:       "StreamResetEvent discards the pending buffer, the reasoning tail, and says retrying",
 			event:      domain.StreamResetEvent{},
 			wantPhrase: "retrying",
 		},
 		{
-			name:        "MessageEvent commits an assistant entry and keeps thinking",
+			name: "MessageEvent commits an assistant entry, ends the reasoning tail, and keeps thinking",
+			// The committed message carries the Turn's reasoning itself (reasoning_content), so the
+			// view's copy has served its purpose and goes.
 			event:       domain.MessageEvent{Text: "done"},
 			wantEntries: 1,
 			wantPhrase:  "thinking",
@@ -258,6 +266,9 @@ func TestFoldEventFoldsEveryVariant(t *testing.T) {
 			}
 			if got := statsOf(m); got != tc.wantStats {
 				t.Errorf("stats = %+v, want %+v", got, tc.wantStats)
+			}
+			if got := m.reasoning.text; got != tc.wantReasoning {
+				t.Errorf("retained reasoning = %q, want %q", got, tc.wantReasoning)
 			}
 		})
 	}

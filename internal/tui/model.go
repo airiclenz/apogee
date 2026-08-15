@@ -246,6 +246,14 @@ type Model struct {
 	// safe in the value-copied Model (ADR 0011).
 	lastEvent time.Time
 
+	// reasoning is the current Turn's reasoning as the view RETAINS it — a bounded, escape-stripped
+	// tail of the chunks domain.ReasoningEvent reveals, for one agent at a time (reasoning.go).
+	// NOTHING RENDERS IT. It is the seam a future reasoning display reads, landed ahead of that
+	// display so the retention rules settle where they can be tested rather than inside a renderer;
+	// what the status line says about reasoning today it says from the ARRIVAL of the event (act,
+	// above), never from these bytes.
+	reasoning reasoningTail
+
 	// Live stats folded from the engine's UsageEvent (server token accounting). ctxUsed is
 	// the latest top-level (Depth 0) total-token count, driving the context-usage gauge;
 	// genStart marks when the current Turn began streaming content (set on its first token,
@@ -1574,6 +1582,10 @@ func (m *Model) finishWorker(next uiState) tea.Cmd {
 	// The worker has unwound, so the activity is over — including a sticky "stopping", which
 	// only this path clears (activity.go). Idle renders an empty left slot.
 	m.act = activity{}
+	// Whatever the model was reasoning about died with the worker: a stop and a fault emit no
+	// closing MessageEvent, so this is the boundary that keeps a cancelled Turn's reasoning from
+	// outliving it (reasoning.go).
+	m.reasoning.reset()
 	m.state = next
 	// The prompt cleared above may have been clamping a multi-line draft to leave itself its four
 	// rows (draftRowsCeiling); with it gone the box grows back to what the draft asks for.

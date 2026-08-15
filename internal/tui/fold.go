@@ -11,9 +11,10 @@ import (
 // ----------------------------------------------------------------------------
 //
 // EVERY engine Event enters the view through foldEvent and nowhere else. The Update loop's
-// eventMsg case hands the Event straight here, so the three folds a view update is made of —
-// the status-line stats, the transcript, the live activity phrase — have one caller, in one
-// order, in one file, instead of three switches in three files ordered by a comment.
+// eventMsg case hands the Event straight here, so the four folds a view update is made of —
+// the status-line stats, the retained reasoning tail, the transcript, the live activity phrase —
+// have one caller, in one order, in one file, instead of switches in as many files ordered by a
+// comment.
 //
 // The order is load-bearing, and it is a DATA dependency rather than prose: the activity's
 // ToolResultEvent rule needs to know whether any tool call is still open, transcript.apply is
@@ -25,11 +26,15 @@ import (
 // it — and TestFoldEventCoversEveryEventVariant reads internal/domain/events.go to check the
 // answer was actually given, including "deliberately nothing".
 
-// foldEvent folds one engine Event into the view: the live token stats, then the transcript,
-// then the activity phrase. It mutates the local copy and returns it, like every Update fold;
-// repainting the viewport is the caller's (the eventMsg case's).
+// foldEvent folds one engine Event into the view: the live token stats, the retained reasoning
+// tail, then the transcript, then the activity phrase. It mutates the local copy and returns it,
+// like every Update fold; repainting the viewport is the caller's (the eventMsg case's).
 func (m Model) foldEvent(e domain.Event) Model {
 	m = m.foldStats(e)
+	// Order-free, and placed here rather than woven into the dependency below because it has none:
+	// the reasoning tail reads nothing the other folds establish, and nothing in the view reads what
+	// it writes — it is retention behind the fold and no surface at all (reasoning.go).
+	m = m.foldReasoning(e)
 	m.transcript.apply(e)
 	// The transcript fold's second half, and separate for one reason: a sub-agent's usage reading
 	// is a FILL, so it needs the window it fills — and where the reading names none, that window is

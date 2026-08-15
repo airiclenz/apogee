@@ -220,7 +220,11 @@ go test ./internal/tui
 
 **Commit:** `feat(tui): status line surfaces engine silence as a quiet-time suffix`
 
-## 4. Reasoning retention plumbing (nothing rendered)
+## 4. Reasoning retention plumbing (nothing rendered) — ✅ DONE (2026-08-15)
+
+NOTES (2026-08-15): the submit-side reset landed in `launchExchange` (commandrun.go), a file the item's Files line does not name — that function is the tail both send paths share, so it is where "submit" exists as one seam rather than two. The other three worker launches (`/continue`'s resume and canned turns, `/compact`) need no reset of their own: `finishWorker` has already cleared the tail at the end of the Exchange before them.
+NOTES (2026-08-15): the item asks that the `foldCases()` row make `TestFoldEventCoversEveryEventVariant` state the new answer, but that test only checks a row EXISTS; its sibling `TestFoldEventFoldsEveryVariant` is what asserts a row's content. The table therefore gained a `wantReasoning` column asserted there, so all thirteen variants now say what they do to the tail — the ReasoningEvent row retains its chunk, every other row retains nothing.
+NOTES (2026-08-15): `reasoning.go` makes the reasoning tail a FOURTH fold behind `foldEvent`, so the "three folds a view update is made of" prose in `fold.go`'s header and in `doc.go`'s fold paragraph — both files the item names — now reads four.
 
 Depends on item 3 (shares `model.go`/`doc.go`; keeps the last-event semantics settled
 first).
