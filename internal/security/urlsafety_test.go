@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net"
+	"strings"
 	"testing"
 
 	"golang.org/x/net/idna"
@@ -159,4 +160,128 @@ func TestNormalizeURL_KeepsAHostIDNARejects(t *testing.T) {
 	if got := u.Hostname(); got != host {
 		t.Errorf("NormalizeURL host = %q, want the original %q", got, host)
 	}
+}
+
+// TestNormalizeHostPattern_MatchesTheDialledForm pins the config side of the match. A deny entry
+// is typed by a human into config.yaml while the host it must block is produced by net/http, so
+// the entry only ever bites if both sides land in the same normal form: the same case folding,
+// the same IDNA mapping, the same trailing-root-dot removal that NormalizeURL applies to the
+// dialled name. Each case therefore asserts the pattern equals what NormalizeURL leaves behind
+// for the same spelling — a drift between the two forms fails here rather than as a deny entry
+// that quietly stops matching.
+func TestNormalizeHostPattern_MatchesTheDialledForm(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{name: "already normal", raw: "example.com", want: "example.com"},
+		{name: "surrounding whitespace is trimmed", raw: "  example.com\t", want: "example.com"},
+		{name: "case is folded", raw: "Example.COM", want: "example.com"},
+		{name: "the root dot is stripped", raw: "example.com.", want: "example.com"},
+		{name: "a run of root dots is stripped", raw: "example.com...", want: "example.com"},
+		{name: "case and root dot together", raw: " Example.COM. ", want: "example.com"},
+		{name: "unicode takes the form the transport dials", raw: "ⓖxample.com", want: "gxample.com"},
+		{name: "an ideographic full stop is a label separator", raw: "good.example.com。", want: "good.example.com"},
+		{name: "punycode is left alone", raw: "xn--mnchen-3ya.de", want: "xn--mnchen-3ya.de"},
+		{name: "a host idna rejects keeps its own bytes", raw: "ex_ample.tëst", want: "ex_ample.tëst"},
+		{name: "a bare root host keeps its dot", raw: ".", want: "."},
+		{name: "an ipv4 literal is untouched", raw: "127.0.0.1", want: "127.0.0.1"},
+		{name: "a blank entry normalises to nothing", raw: "   ", want: ""},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := NormalizeHostPattern(tc.raw)
+			if got != tc.want {
+				t.Errorf("NormalizeHostPattern(%q) = %q, want %q", tc.raw, got, tc.want)
+			}
+			if got == "" {
+				return
+			}
+			// The load-bearing half: whatever the entry normalises to must be the very string
+			// CheckContext compares against, which is NormalizeURL's own host output. The
+			// padding is trimmed first because a URL cannot carry it inside its host at all —
+			// trimming is the one rule of the form that belongs to the pattern side only.
+			u, err := NormalizeURL("https://" + strings.TrimSpace(tc.raw) + "/x")
+			if err != nil {
+				t.Fatalf("NormalizeURL(%q): %v", tc.raw, err)
+			}
+			if dialled := u.Hostname(); dialled != got {
+				t.Errorf("pattern %q normalises to %q but the dialled host is %q — a deny entry spelled this way would never match", tc.raw, got, dialled)
+			}
+		})
+	}
+}
+
+// TestNewURLGuard_BuildsATightenOnlyGuardFromConfig covers the constructor both composition roots
+// go through: the configured lists arrive normalised (so a human's spelling still blocks the host
+// the transport reaches), blank YAML entries are dropped rather than turned into an allow-list
+// that matches nothing, and nothing it fills can weaken the guard — the SSRF floor is on in the
+// result exactly as it is in the zero value.
+func TestNewURLGuard_BuildsATightenOnlyGuardFromConfig(t *testing.T) {
+	t.Parallel()
+
+	t.Run("entries are normalised to the dialled form", func(t *testing.T) {
+		t.Parallel()
+
+		g := NewURLGuard(nil, []string{"Example.COM."}).WithResolver(publicResolver)
+		if err := g.CheckContext(context.Background(), "https://example.com/x"); !errors.Is(err, ErrURLBlocked) {
+			t.Errorf("a config deny spelled %q did not block the host it names: %v", "Example.COM.", err)
+		}
+		if err := g.CheckContext(context.Background(), "https://other.example/x"); err != nil {
+			t.Errorf("the deny entry blocked a host it does not name: %v", err)
+		}
+	})
+
+	t.Run("an allow list restricts to its own hosts", func(t *testing.T) {
+		t.Parallel()
+
+		g := NewURLGuard([]string{" DOCS.Example.com. "}, nil).WithResolver(publicResolver)
+		if err := g.CheckContext(context.Background(), "https://api.docs.example.com/x"); err != nil {
+			t.Errorf("a subdomain of the allowed host was refused: %v", err)
+		}
+		if err := g.CheckContext(context.Background(), "https://elsewhere.example/x"); !errors.Is(err, ErrURLBlocked) {
+			t.Errorf("a host outside the allow list was permitted: %v", err)
+		}
+	})
+
+	t.Run("blank entries do not become an allow-list of nothing", func(t *testing.T) {
+		t.Parallel()
+
+		g := NewURLGuard([]string{"", "  "}, []string{" "}).WithResolver(publicResolver)
+		if g.AllowHosts != nil || g.DenyHosts != nil {
+			t.Errorf("blank entries survived: allow=%q deny=%q", g.AllowHosts, g.DenyHosts)
+		}
+		if err := g.CheckContext(context.Background(), "https://example.com/x"); err != nil {
+			t.Errorf("a list of blanks fenced the whole network off: %v", err)
+		}
+	})
+
+	t.Run("empty lists leave the zero guard", func(t *testing.T) {
+		t.Parallel()
+
+		if got := NewURLGuard(nil, nil); got.AllowHosts != nil || got.DenyHosts != nil ||
+			got.AllowSchemes != nil || got.floorEnabled() != (URLGuard{}).floorEnabled() {
+			t.Errorf("NewURLGuard(nil, nil) = %+v, want the zero guard", got)
+		}
+	})
+
+	t.Run("the floor is untouched by configuration", func(t *testing.T) {
+		t.Parallel()
+
+		// The tighten-only law from the other side: whatever the config lists say, a loopback
+		// host stays refused, because NewURLGuard fills the host lists and nothing else.
+		g := NewURLGuard([]string{"localhost"}, nil).
+			WithResolver(func(context.Context, string) ([]net.IP, error) {
+				return []net.IP{net.ParseIP("127.0.0.1")}, nil
+			})
+		if err := g.CheckContext(context.Background(), "http://localhost/x"); !errors.Is(err, ErrURLBlocked) {
+			t.Errorf("config allowing a loopback host dissolved the SSRF floor: %v", err)
+		}
+	})
 }

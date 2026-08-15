@@ -914,6 +914,42 @@ func TestRegistryWithMCPThreadsExtraReadRoots(t *testing.T) {
 	}
 }
 
+// The `url-safety:` hosts reach the assembly the same way, and they are the one field where the
+// hand-assembly drifting apart from the engine's own is a SECURITY regression rather than a missing
+// convenience: configuring an MCP server would re-open a host the operator denied, in a session
+// that looks identical to one where the denial holds. The engine-side half of the same guarantee is
+// TestHostToolsBuildsTheURLGuardFromTheConfiguredHosts (internal/agent); this is its mirror.
+//
+// The deny is spelled as a human writes one into config.yaml, so the normalisation has to survive
+// this path too — and web_fetch is driven rather than the guard inspected, because what the
+// operator is promised is that the TOOL refuses.
+func TestRegistryWithMCPThreadsURLSafetyHosts(t *testing.T) {
+	t.Parallel()
+	cfg := validCfg(t)
+	cfg.URLDenyHosts = []string{"Blocked.EXAMPLE."}
+
+	tool, ok := registryWithMCP(cfg.WorkspaceDir, cfg, nil).Lookup("web_fetch")
+	if !ok {
+		t.Fatal("web_fetch is missing from the MCP registry build")
+	}
+	// The deny is a string-level match and is checked before the SSRF floor resolves anything,
+	// so this reaches no DNS and no network.
+	result, err := tool.Execute(context.Background(), apogee.ToolCall{
+		ID:        "c1",
+		Tool:      "web_fetch",
+		Arguments: []byte(`{"url":"https://blocked.example/"}`),
+	})
+	if err != nil {
+		t.Fatalf("a blocked URL is not caller cancellation, so it must not be a Go error: %v", err)
+	}
+	if !result.IsError || !strings.Contains(result.Content, "url-safety") {
+		t.Fatalf("web_fetch did not refuse the configured deny: %q — the MCP build dropped url-safety", result.Content)
+	}
+	if !strings.Contains(result.Content, "denied") {
+		t.Errorf("the refusal is not the configured DENY (a dropped guard's floor refuses too): %q", result.Content)
+	}
+}
+
 // The roster switch reaches the assembly through the same Config the rest of the host wiring does,
 // and it has to hold in BOTH halves of what a registry is for: the tool list the engine offers is
 // built from All(), and a call is resolved through Lookup — so a disabled tool must be missing from

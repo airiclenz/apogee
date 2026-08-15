@@ -144,7 +144,7 @@ func (t *liveTools) webSearch() *tools.WebSearch {
 
 // registryWithMCP builds the Agent's tool registry: the built-in default tools scoped to the
 // workspace (with the same host configuration the Agent would derive from Config — the
-// url-safety floor, the web-search endpoint, the Asker, the Presenter, the credential scrub) PLUS
+// url-safety guard, the web-search endpoint, the Asker, the Presenter, the credential scrub) PLUS
 // the dynamically discovered MCP tools registered on top. MCP tools are DYNAMIC (discovered from a
 // server at runtime), so they are NOT in DefaultTools — they ride the registry as classMCP
 // ExternalEffectTools the dispatch disposition gates in Auto. A duplicate name (an MCP server's
@@ -156,7 +156,11 @@ func (t *liveTools) webSearch() *tools.WebSearch {
 // connecting it (`mcp-servers:`) rather than to list every tool it happens to advertise.
 func registryWithMCP(workspace string, cfg apogee.Config, mcpTools []apogee.Tool) *apogee.ToolRegistry {
 	registry := tools.NewDefaultRegistryWithHost(workspace, tools.HostTools{
-		URLGuard:          security.URLGuard{},
+		// The `url-safety:` host layer, off the same Config the engine would have read it from and
+		// through the same constructor — this hand-assembly must not be the one path on which a
+		// configured deny quietly stops applying, or connecting an MCP server would re-open a host
+		// the operator closed in every session without MCP.
+		URLGuard:          security.NewURLGuard(cfg.URLAllowHosts, cfg.URLDenyHosts),
 		WebSearchEndpoint: cfg.WebSearchEndpoint,
 		Asker:             cfg.Asker,
 		Presenter:         cfg.Presenter,

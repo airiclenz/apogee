@@ -228,7 +228,30 @@ commented-out. This item stops at `Options` — no engine or tools change here (
 
 **Commit:** `feat(config): a file-only url-safety block carries allow-hosts and deny-hosts to Options`
 
-## 5. url-safety config key — the lists reach the network tools' guard
+## 5. url-safety config key — the lists reach the network tools' guard — ✅ DONE (2026-08-15)
+
+NOTES (2026-08-15): the shared seam went into `internal/security` (the item's first-named option):
+`NewURLGuard(allowHosts, denyHosts)` plus the exported `NormalizeHostPattern`, both built on a new
+unexported `normalizeHostName` extracted from `NormalizeURL` — the item asked the helper to apply
+"the same host normal form", and sharing the code is what makes that true by construction instead of
+by two copies staying in step. `NormalizeURL`'s behaviour is byte-identical (its own tests, including
+the idempotence and idna-rejection pins, pass untouched). The `HostTools`-duplication trap note from
+the removed ISSUES entry lives in `NewURLGuard`'s doc comment.
+NOTES (2026-08-15): normalisation drops blank entries and returns nil for an all-blank list — the
+permissive reading the item names for these file-only keys, so a stray `- ""` under `allow-hosts`
+cannot fence the whole network off. Documented on `normalizeHostPatterns` and pinned by a subtest.
+NOTES (2026-08-15): two test files beyond the item's Files line had to take the "BOTH composition
+paths" assertion its own Tests line requires, since neither path's test file is listed:
+`internal/agent/construct_test.go` (`TestHostToolsBuildsTheURLGuardFromTheConfiguredHosts`, beside
+the existing `SecretEnvVars` translation test) and `cmd/apogee/wire_test.go`
+(`TestRegistryWithMCPThreadsURLSafetyHosts`, modelled on the `wire_test.go:873` mirror test the item
+names as the pattern). `internal/security/doc.go` also gained a clause naming the new pair on its
+`urlsafety.go` line — the same file-map completeness convention item 1 of this plan enforced.
+NOTES (2026-08-15): `TestNewDefaultRegistryWithHost_ThreadsURLGuardIntoNetworkTools` was extended in
+place rather than duplicated: its guard is now built through `security.NewURLGuard` from a
+config-spelled entry (`"Blocked.EXAMPLE."`), so the one table pins normalisation AND the threading
+into all three network tools, with every existing assertion (including the load-bearing "denied"
+wording) unchanged.
 
 **Depends on item 4.**
 

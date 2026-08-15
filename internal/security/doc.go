@@ -113,7 +113,10 @@
 //
 // The network boundary, likewise in two layers. urlsafety.go is URLGuard, judged on the URL as
 // WRITTEN: scheme and host allow-deny with deny-first precedence, plus NormalizeURL and its
-// IDNA / non-ASCII handling. ssrf.go is the floor beneath it, judged on the RESOLVED IP instead —
+// IDNA / non-ASCII handling, and the NewURLGuard / NormalizeHostPattern pair that turns a host's
+// configured `url-safety:` lists into that guard — the one seam both composition roots build it
+// through, and the reason a config entry matches the host the transport actually dials.
+// ssrf.go is the floor beneath it, judged on the RESOLVED IP instead —
 // the denied v4 and v6 ranges, the NAT64-embedded decode, and the dial-time SafeDialControl /
 // PinnedDialControl that re-check the address the connection actually goes to, so a name that
 // rebinds between the check and the connect cannot walk past it.

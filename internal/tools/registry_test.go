@@ -138,10 +138,14 @@ func TestNewDefaultRegistryWithHost_ThreadsURLGuardIntoNetworkTools(t *testing.T
 
 	const deniedHost = "blocked.example"
 
-	// The host's policy: one denied host. The injected resolver answers a public address for
-	// every name, so the test stays hermetic (no DNS) even though the deny check fires first —
-	// a future reordering that let the floor run ahead of it cannot turn this into a lookup.
-	guard := security.URLGuard{DenyHosts: []string{deniedHost}}.
+	// The host's policy: one denied host, built the way a CONFIGURED policy is built — through
+	// security.NewURLGuard, from an entry spelled as a human writes one into `url-safety:`
+	// (mixed case, a trailing root dot). That makes the table pin the whole path a config deny
+	// travels: normalised at guard construction, threaded into every network tool, and biting on
+	// the host the transport would actually dial. The injected resolver answers a public address
+	// for every name, so the test stays hermetic (no DNS) even though the deny check fires first
+	// — a future reordering that let the floor run ahead of it cannot turn this into a lookup.
+	guard := security.NewURLGuard(nil, []string{"Blocked.EXAMPLE."}).
 		WithResolver(func(context.Context, string) ([]net.IP, error) {
 			return []net.IP{net.ParseIP("93.184.216.34")}, nil
 		})

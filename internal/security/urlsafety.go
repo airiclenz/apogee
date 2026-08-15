@@ -54,6 +54,47 @@ type URLGuard struct {
 	resolver func(ctx context.Context, host string) ([]net.IP, error)
 }
 
+// NewURLGuard builds the network tools' guard from a host's CONFIGURED host lists (the
+// `url-safety:` block's allow-hosts / deny-hosts), normalising every entry to the same form
+// NormalizeURL puts a dialled host in — so an entry written as "Example.COM." matches the host
+// the transport actually reaches. Empty lists ⇒ the zero guard, byte-identical to the default
+// before the key existed.
+//
+// It is the ONE place a Driver turns configuration into a guard, and deliberately so:
+// tools.HostTools is composed by hand in two places (the engine's own assembly in
+// internal/agent, and the CLI's MCP-aware assembly), so a second hand-written copy of the
+// normalise-and-fill loop is exactly how one of those paths would quietly stop applying the
+// user's policy while every test stayed green.
+//
+// The result can only ever TIGHTEN the guard: it fills AllowHosts/DenyHosts and nothing else,
+// and the default-on SSRF floor lives behind the unexported disableFloor field (DisableIPFloor
+// is the only door and is code-level), so no configuration can dissolve it — the tighten-only
+// law this key was deferred under.
+func NewURLGuard(allowHosts, denyHosts []string) URLGuard {
+	return URLGuard{
+		AllowHosts: normalizeHostPatterns(allowHosts),
+		DenyHosts:  normalizeHostPatterns(denyHosts),
+	}
+}
+
+// normalizeHostPatterns normalises every entry of a configured host list and drops the blanks a
+// hand-edited YAML list carries. Dropping them is the permissive reading the file-only keys share
+// (`tools.disabled:` normalises the same way): a list of nothing but blanks becomes nil — "every
+// host, subject to the floor" — rather than an allow-list that matches nothing and blocks the
+// whole network over a stray dash.
+func normalizeHostPatterns(list []string) []string {
+	normalized := make([]string, 0, len(list))
+	for _, entry := range list {
+		if e := NormalizeHostPattern(entry); e != "" {
+			normalized = append(normalized, e)
+		}
+	}
+	if len(normalized) == 0 {
+		return nil
+	}
+	return normalized
+}
+
 // DisableIPFloor returns a copy of g with the default-on SSRF floor turned off. It is the
 // ONLY way to disable the floor (the floor is on for the zero value and survives any config
 // merge), used by a test or a deliberately-unfenced embedder. A config layer cannot reach
@@ -169,6 +210,37 @@ func NormalizeURL(raw string) (*url.URL, error) {
 	if host == "" {
 		return u, nil
 	}
+	host = normalizeHostName(host)
+	if strings.Contains(host, ":") {
+		host = "[" + host + "]" // an IPv6 literal keeps its brackets inside URL.Host
+	}
+	if port := u.Port(); port != "" {
+		host += ":" + port
+	}
+	u.Host = host
+	return u, nil
+}
+
+// NormalizeHostPattern reduces one configured host entry (a `url-safety:` allow-hosts /
+// deny-hosts line) to the same normal form NormalizeURL leaves a dialled host in, so the two are
+// compared as one name rather than two spellings of it: whitespace-trimmed, IDNA-mapped when
+// non-ASCII, lower-cased, with every trailing DNS root dot removed. A blank or all-whitespace
+// entry normalises to "" — the caller decides what to do with it (NewURLGuard drops it).
+//
+// It exists because config is written by a human and the dialled host is produced by net/http:
+// "Example.COM." in a deny list must block the host the transport reaches as "example.com", and
+// only normalising BOTH sides through the same rules makes that true by construction rather than
+// by the author of each list remembering.
+func NormalizeHostPattern(pattern string) string {
+	return normalizeHostName(strings.TrimSpace(pattern))
+}
+
+// normalizeHostName is the host normal form both sides of a match go through: IDNA-mapped when
+// non-ASCII (kept as-is when the mapping fails, exactly as net/http does), lower-cased, and with
+// the whole trailing run of root dots removed — a bare "." host is left alone. It is deliberately
+// shared by NormalizeURL and NormalizeHostPattern: were the config side to grow its own copy, the
+// two forms could drift apart and a correctly-spelled deny entry would silently stop matching.
+func normalizeHostName(host string) string {
 	if !isASCII(host) {
 		// net/http.canonicalAddr converts ONLY a non-ASCII host, and keeps the original when
 		// the conversion fails — mirroring that exactly is what keeps the checked name and
@@ -181,14 +253,7 @@ func NormalizeURL(raw string) (*url.URL, error) {
 	for len(host) > 1 && strings.HasSuffix(host, ".") {
 		host = host[:len(host)-1]
 	}
-	if strings.Contains(host, ":") {
-		host = "[" + host + "]" // an IPv6 literal keeps its brackets inside URL.Host
-	}
-	if port := u.Port(); port != "" {
-		host += ":" + port
-	}
-	u.Host = host
-	return u, nil
+	return host
 }
 
 // isASCII reports whether s is entirely ASCII — the same test net/http applies before

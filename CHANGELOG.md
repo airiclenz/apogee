@@ -10,6 +10,15 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **`url-safety:` hosts now reach the network tools.** The `allow-hosts` / `deny-hosts` lists
+  resolved from `config.yaml` are threaded onto `apogee.Config` and built into the url-safety guard
+  that `web_fetch`, `http_request` and `web_search` filter every URL through, on both composition
+  paths (the engine's own assembly and the CLI's MCP-aware one). Entries are normalised to the
+  dialled host form at guard construction — `Example.COM.` blocks `example.com` — through the new
+  `security.NewURLGuard` / `security.NormalizeHostPattern`. The lists can only ever tighten: the
+  always-on, resolved-IP SSRF floor stays unreachable from configuration, and MCP endpoints are
+  deliberately not covered. The key is read at startup; editing it applies from the next run.
+
 - **A file-only `url-safety:` block now carries host allow/deny lists through the config pipeline.**
   The network tools' url-safety guard has always had `AllowHosts`/`DenyHosts` fields and no way for a
   user to reach them: the only host policy a config could express was the always-on SSRF floor. The

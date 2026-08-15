@@ -149,6 +149,23 @@ type Config struct {
 	// builds one has already said what it wants).
 	DisabledTools []string
 
+	// URLAllowHosts and URLDenyHosts are the host layer of the network tools' url-safety guard —
+	// the hosts web_fetch / http_request / web_search may reach, and the hosts they may not — which
+	// the host folds in from `url-safety:` in config.yaml. Deny wins over allow; a non-empty allow
+	// list restricts to exactly those hosts and their subdomains; empty/nil ⇒ every host, the
+	// byte-identical default before the key existed.
+	//
+	// They can only ever TIGHTEN: the guard's default-on, resolved-IP SSRF floor is not reachable
+	// from configuration at all (security.URLGuard.DisableIPFloor is a code-level opt-out), so a
+	// Config carrying these fields adds denials and never removes the floor. Entries are normalised
+	// to the dialled host form when the guard is built (security.NewURLGuard), so an entry written
+	// with mixed case, a trailing root dot, or non-ASCII still matches.
+	//
+	// Like DisabledTools they apply to the DEFAULT tool set only: an injected Config.Tools is the
+	// host's own assembly and is taken exactly as given (ADR 0001).
+	URLAllowHosts []string
+	URLDenyHosts  []string
+
 	// SecretEnvVars names environment variables the execution tools (terminal, python_exec,
 	// run_tests) must drop from the environment they hand a subprocess — the caller-named half of
 	// a scrub whose fixed half is apogee's own APOGEE_API_KEY. The host folds in the variables its

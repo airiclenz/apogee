@@ -177,6 +177,13 @@ func (w *rootWiring) resolveConfig() error {
 		// Config rather than passed to the assembly alone so every Driver — this session, a headless
 		// run, an embedder — prunes the same roster from the same value.
 		DisabledTools: w.opts.ToolsDisabled,
+		// The `url-safety:` host layer: the hosts the network tools may reach and the hosts they
+		// may not. Empty ⇒ every host, exactly the reach before this key existed — and never less
+		// safe either way, since the guard's SSRF floor is not reachable from configuration. It
+		// rides Config for DisabledTools' reason: every Driver must fence the same hosts from the
+		// same value.
+		URLAllowHosts: w.opts.URLAllowHosts,
+		URLDenyHosts:  w.opts.URLDenyHosts,
 		// Every variable this configuration reads an API key out of (`api-key-env:`, ADR 0047),
 		// which the execution tools drop from the environment they hand a subprocess. It is the
 		// union across ALL configured entries rather than the bound one's: `/server` switches

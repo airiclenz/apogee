@@ -178,48 +178,6 @@ the `confine-to-workspace` flag (the one blanket loosen) + the existing narrow a
 
 ---
 
-### Dedicated url-safety config key for the network tools
-
-**Status:** parked 2026-06-24 (P3.11). Post-v1, **additive** (a new config key + a new
-optional field on the network tools' `URLGuard` — a minor bump).
-
-**The idea:** surface `URLGuard.AllowHosts` / `DenyHosts` (and the scheme allow-set) from
-`config.yaml`, so a user can restrict `web_fetch`/`http_request`/`web_search` to an allow-list
-of hosts, or add explicit host denials, per machine/project.
-
-**Why it's deferred:** P3.11 ships the **load-bearing** url-safety: the **default-on SSRF
-floor** (loopback / private / IMDS / link-local denied by resolved IP, pre-flight AND at dial
-time — DNS-rebinding closed) is **always on** and **tighten-only** (config could only ever ADD
-denials, never dissolve the floor — `URLGuard.DisableIPFloor` is a code-level opt-out, not a
-config key). The floor is the security-relevant part; a user-tunable host allow/deny layer on
-top is a convenience that can wait. This mirrors the **P3.6** deferral of surfacing the
-dangerous-rule config + the breaker threshold into `config.yaml` (the merge logic is built and
-tested; only the file-key surfacing waits). The `WebSearchEndpoint` key **is** surfaced in
-P3.11 (file-only; empty now falls back to the built-in DuckDuckGo default and `off` disables —
-the key selects or disables a provider rather than enabling the tool).
-
-**The tighten-only law (must hold when built):** like the dangerous-rule merge and the SSRF
-floor, a config url-safety layer may only **tighten** (add `DenyHosts`, narrow `AllowHosts`) —
-it can never remove the SSRF floor or widen the scheme set past the safe default.
-
-**The runway is now clear (2026-07-26) — this is a smaller, safer change than it was.** The
-normalisation group of the url-safety live-gap audit landed first, on purpose: this key is what
-populates `AllowHosts`/`DenyHosts` and would have converted three then-latent defects into live
-ones the day it shipped. All three are fixed (`docs/plans/archived/2026-07-26 - 03 -
-url-safety-live-gap-plan.md`, items **8–10**): the URL is normalised **once** by
-`security.NormalizeURL` and the guard now matches the same string the transport dials (trim, IDNA,
-lowercase, one trailing dot stripped — so appending a dot no longer defeats a `DenyHosts` entry),
-the unparseable-url error no longer leaks a key-bearing URL, and the RFC 8215 NAT64 local-use
-prefix is denied. Whoever builds this key inherits a host-matching path that is already correct;
-it needs no normalisation work of its own. **The remaining trap is unchanged and is not this
-plan's:** `HostTools` is composed in two places (`internal/agent/construct.go:402` and
-`cmd/apogee/wire_tools.go:158` — the latter moved out of `wire.go` in the ADR 0043 file split —
-the engine-side one unexported), so a new `HostTools` field must be added in
-**both** or it is silently dropped on one path. That duplication is a deferred
-`/improve-codebase-architecture` candidate, not a blocker.
-
----
-
 ### An embedder cannot register a *vouched-for* network tool (export the network funnel?)
 
 **Status:** parked 2026-07-25 (the url-safety choke-point plan, D5). Post-v1, **additive** (a new

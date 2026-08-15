@@ -385,8 +385,9 @@ func resolveTools(cfg domain.Config) *domain.ToolRegistry {
 }
 
 // hostTools builds the host-supplied tool configuration (P3.11) from Config: the url-safety
-// guard the network tools filter through (the zero URLGuard — its default-on SSRF floor always
-// applies in ALL modes, an app-level guard independent of OS confinement), the configured
+// guard the network tools filter through (built from the configured host lists — its default-on
+// SSRF floor always applies in ALL modes, an app-level guard independent of OS confinement,
+// and configuration can only tighten it), the configured
 // web-search endpoint (empty ⇒ web_search's built-in DuckDuckGo default; "off" disables it),
 // the Asker delegate (nil ⇒ ask_user is not registered), the Presenter delegate (nil ⇒
 // present_document is not registered — ADR 0019), the disabled-tool roster (empty ⇒ the
@@ -394,14 +395,18 @@ func resolveTools(cfg domain.Config) *domain.ToolRegistry {
 // subprocess environment (empty ⇒ apogee's own alone), and the extra read-only roots the read
 // tools may reach (nil ⇒ workspace-only).
 //
-// The url-safety policy is deliberately the default floor, NOT seeded from ConfineNetworkAllow:
-// that field is the OS confinement box's network allow-list (CIDRs the confined SUBPROCESS may
-// reach), a different concept from the in-process tools' host allow/deny — conflating them would
-// silently restrict the network tools to the confinement list. A dedicated url-safety config key
-// is a thin later addition; the SSRF floor is the security-relevant default and is on regardless.
+// The url-safety policy comes from Config.URLAllowHosts / URLDenyHosts (`url-safety:`) and is
+// still deliberately NOT seeded from ConfineNetworkAllow: that field is the OS confinement box's
+// network allow-list (CIDRs the confined SUBPROCESS may reach), a different concept from the
+// in-process tools' host allow/deny — conflating them would silently restrict the network tools to
+// the confinement list. Empty lists ⇒ the zero guard; the SSRF floor is the security-relevant
+// default and is on regardless, because the config layer can only tighten (security.NewURLGuard).
 func hostTools(cfg domain.Config) tools.HostTools {
 	return tools.HostTools{
-		URLGuard:          security.URLGuard{},
+		// Built through the shared constructor rather than filled here, because HostTools is
+		// composed by hand in a second place too (cmd/apogee's MCP-aware assembly) and a
+		// hand-copied fill is how one of the two paths silently stops applying the user's policy.
+		URLGuard:          security.NewURLGuard(cfg.URLAllowHosts, cfg.URLDenyHosts),
 		WebSearchEndpoint: cfg.WebSearchEndpoint,
 		Asker:             cfg.Asker,
 		Presenter:         cfg.Presenter,

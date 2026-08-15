@@ -389,6 +389,11 @@ func runHeadless(cmd *cobra.Command, args []string, opts *config.Options, noSave
 		// key is: it is one configuration, and a headless run of it must offer the model the same
 		// tools an interactive session would.
 		DisabledTools: opts.ToolsDisabled,
+		// The `url-safety:` host layer, honoured here for the reason every other file-only key is:
+		// it is one configuration, and an unattended run must not be the path on which the network
+		// tools reach a host the operator denied for every interactive session.
+		URLAllowHosts: opts.URLAllowHosts,
+		URLDenyHosts:  opts.URLDenyHosts,
 		// The configured `api-key-env:` variables the execution tools scrub from a subprocess
 		// environment, honoured here for the reason every other file-only key is: one configuration,
 		// so an unattended run cannot be the path on which the operator's key stays inheritable by
