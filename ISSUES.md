@@ -23,34 +23,10 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 
 ## Open defects
 
-### Run residuals — open (2026-08-14, open-residuals sweep)
-
-The still-open findings the open-residuals plan run left, under the conventions' actionability bar.
-
-- [ ] The Windows counterpart to the POSIX setsid escape (`internal/tools/exec_pgroup_unix.go:63`)
-  is prose-only and untested: the job object "does not permit breakaway"
-  (`internal/tools/exec_pgroup_other.go:24`), and nothing asserts that a descendant cannot leave the
-  job, so the POSIX side's pinned residual has no Windows twin. Needs a Windows host.
-
-### Test-file layout residuals — open (2026-08-14, render_test.go split)
-
-The still-open findings the render_test.go split left, under the conventions' actionability bar.
-
-- [ ] Package-wide test-file size debt the split exposed: with `internal/tui/render_test.go` down
-  to 459 lines, the files furthest past the coding-standards ~400-line guidance are now
-  `internal/tui/model_test.go:1` (4916 lines), `internal/tui/settings_test.go:1` (3217) and
-  `internal/tui/mouse_test.go:1` (3168). Same carve treatment; out of this plan's scope.
-
 ### Run residuals — open (2026-08-15, residuals + response-reserve sweep)
 
 The still-open findings that run left, under the conventions' actionability bar.
 
-- [ ] Both shipped scheme files still call `warning`'s first consumer "the status line's 'quiet'
-  suffix" (`internal/scheme/schemes/dark.yaml:28`, `internal/scheme/schemes/light.yaml:27`); the
-  status line renders it as a quiet *qualifier* before the activity clock, the form
-  `internal/scheme/scheme.go:44` now carries.
-- [ ] `internal/tui/blockstate.go:1` has no `blockstate_test.go` — the only free 1:1 test-file name
-  left among the two TUI suites' sources. Pre-existing.
 - [ ] `internal/context.Allocate`'s own unset guard (`internal/context/budget.go:76`,
   `fraction <= 0 || fraction >= 1`) lets NaN through for a non-config caller; the config-path
   validator closes only that path.
@@ -666,6 +642,12 @@ the archived plans; what remains open needs hardware this environment does not h
   predicate); only the on-host UX observation of the notice stays untested (recorded so in
   [ADR 0020](docs/adr/0020-windows-confinement-is-a-low-integrity-token-and-the-box-is-a-disk-label.md)'s
   consequences), verifiable only if such a host turns up.
+- **Job-object breakaway assertion on Windows** (folded here 2026-08-15 from the open-residuals
+  sweep's residuals) — the Windows counterpart to the POSIX setsid escape
+  (`internal/tools/exec_pgroup_unix.go:63`) is prose-only and untested: the job object "does not
+  permit breakaway" (`internal/tools/exec_pgroup_other.go:24`), and nothing asserts that a
+  descendant cannot leave the job, so the POSIX side's pinned residual has no Windows twin.
+  Needs a Windows host.
 
 **Not repeated here:** the "pre-existing, NOT Phase 5 scope" group (Linux/macOS live-run
 variants already tracked elsewhere) lives in the CHANGELOG's **"Known post-release verification

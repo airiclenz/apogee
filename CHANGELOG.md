@@ -567,6 +567,13 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- The two shipped scheme files' `warning` comments now describe its first consumer the way the
+  status line renders it — the quiet *qualifier* before the activity clock, the form
+  `internal/scheme/scheme.go` carries — instead of the stale "'quiet' suffix" wording
+  (`internal/scheme/schemes/dark.yaml`, `light.yaml`). With that fixed, the 2026-08-15 residuals
+  register was pruned to the new actionability bar: the pre-existing findings (TUI test-file size
+  debt, the missing `blockstate_test.go`) left `ISSUES.md`, and the Windows job-object breakaway
+  assertion folded into its Phase-5 owner-run leftovers entry.
 - The thinking-effort hint now rides the in-band error path too. A server that wraps its failure
   in an HTTP 200 — an aggregator's usual shape — produced a bare error where the very same failure
   arriving as a 500 got the "this request carried `chat_template_kwargs`" explanation, so a chat
