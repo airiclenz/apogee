@@ -47,6 +47,32 @@ The still-open findings the render_test.go split left, under the conventions' ac
   `internal/tui/model_test.go:1` (4916 lines), `internal/tui/settings_test.go:1` (3217) and
   `internal/tui/mouse_test.go:1` (3168). Same carve treatment; out of this plan's scope.
 
+### Run residuals — open (2026-08-15, stall-guard run)
+
+The still-open findings the stall-guard plan run left, under the conventions' actionability bar.
+
+- [ ] [ADR 0040](docs/adr/0040-color-schemes-are-embedded-roles-with-user-shadowing.md)'s amendment
+  section records role additions only up to `tool-header`, named there as the 25th key
+  (`docs/adr/0040-color-schemes-are-embedded-roles-with-user-shadowing.md:216`); the four roles that
+  landed after it — `success` (`internal/scheme/scheme.go:42`), `warning` (`:49`),
+  `tool-marker-bright` (`:73`) and `tool-leader` (`:78`) — have no entries of their own. The ADR
+  already declares an additive role safe without an amendment (`:222`), so what is behind is the
+  record, not the code.
+- [ ] Nothing pins the scheme role count stated in prose to the struct. `README.md:187`,
+  `layout.md:94` and `newTheme`'s comment (`internal/tui/theme.go:277`) each say 29 semantic roles
+  and `internal/scheme/scheme.go:27`'s `Scheme` carries 29 `yaml:` fields, but the agreement is held
+  by hand — `newTheme`'s count sat silently stale at 26 across three role additions until this run
+  corrected it. `roleKeys` (`internal/scheme/scheme.go:88`) is already built off the struct by
+  reflection, so an assertion over `len(roleKeys)` would catch the next drift.
+- [ ] `moveActivity` (`internal/tui/activity.go:223`) restamps the quiet clock for every activity
+  kind, `actCompacting` and `actStopping` (`internal/tui/activity.go:41`, `:42`) included. Harmless
+  today, because `quiet` (`internal/tui/activity.go:141`) reports only for `actThinking` and
+  `actResponding` — but the two seats are coupled, so a future watched kind would inherit the
+  restamp silently.
+- [ ] `internal/tui/doc.go:514` reads "so a twelfth Event has to be answered for", which is stale:
+  `internal/domain/events.go` declares 12 Event types and `foldCases()`
+  (`internal/tui/fold_test.go:54`) now carries 13 rows.
+
 ## Parked / deferred work
 
 Live, deliberately deferred work only. Each entry records *enough* design that we don't re-derive
