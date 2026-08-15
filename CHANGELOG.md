@@ -10,6 +10,17 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **The provider client can now report its own wire traffic.** `internal/provider` gained an
+  opt-in observer — `provider.WithWireObserver(func(WireRecord))` — that is handed the bytes the
+  client already builds and parses: one `WireRequest` record per `Respond`/`Stream` call carrying
+  the marshalled body exactly as posted (once per call, not once per retry attempt), and one
+  `WireResponse` record carrying the raw SSE `data:` payloads newline-joined in arrival order,
+  delivered once when the stream ends however it ends — or, on a non-2xx reply, the error body
+  after the existing redaction and length cap. Credentials cannot reach an observer by
+  construction: a record is a body, never a header. Nothing is retained in the provider, and with
+  no observer installed — the default — not a byte is accumulated and the streaming path is
+  unchanged. This is the capture half of the Inspector; nothing yet arms it.
+
 - **`url-safety:` hosts now reach the network tools.** The `allow-hosts` / `deny-hosts` lists
   resolved from `config.yaml` are threaded onto `apogee.Config` and built into the url-safety guard
   that `web_fetch`, `http_request` and `web_search` filter every URL through, on both composition

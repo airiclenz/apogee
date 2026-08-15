@@ -124,3 +124,38 @@ type RawResponse struct {
 	// sampling noise a response hash would mistake for a different model (ADR 0021 §6).
 	TopCandidates []string
 }
+
+// WireDirection tags which half of one round-trip a WireRecord holds.
+type WireDirection string
+
+const (
+	// WireRequest tags the body the Client posted to the Upstream.
+	WireRequest WireDirection = "request"
+	// WireResponse tags what the Upstream answered with.
+	WireResponse WireDirection = "response"
+)
+
+// WireRecord is one half of one Upstream round-trip, as bytes — the raw protocol an
+// observer installed with WithWireObserver is handed. It exists so the traffic the Client
+// already builds and parses can be *seen* (the Inspector) without the Client retaining or
+// reformatting anything.
+//
+// What each direction holds, exactly:
+//
+//   - WireRequest — the marshalled request body exactly as posted, emitted once per
+//     Respond/Stream call (not once per retry attempt: the retried bytes are identical).
+//     Headers are never part of a record, so the Authorization bearer token cannot reach
+//     an observer by construction.
+//   - WireResponse — for a stream, the raw SSE "data:" payload lines as received,
+//     newline-joined in arrival order (the terminal "[DONE]" included: this is the
+//     protocol, not a summary of it), delivered once when the stream ends however it
+//     ends. For a non-2xx reply, the error body after Client.sanitize has redacted the
+//     API key and capped the length. The non-streaming success body is not recorded — it
+//     is decoded straight off the connection and the loop streams.
+//
+// Payload is the Client's own buffer, but the Client neither mutates nor retains it after
+// the observer returns, so an observer may keep the slice.
+type WireRecord struct {
+	Direction WireDirection
+	Payload   []byte
+}

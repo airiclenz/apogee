@@ -556,3 +556,89 @@ func TestClientSetModelSwapsWireModel(t *testing.T) {
 		}
 	}
 }
+
+// collectWire returns an observer that appends to records, and the slice it appends to.
+// The observer runs on the goroutine driving the call, so no lock is needed for the
+// single-caller tests below.
+func collectWire(records *[]WireRecord) Option {
+	return WithWireObserver(func(r WireRecord) { *records = append(*records, r) })
+}
+
+// wireOf returns the payloads of every record in one direction, in order.
+func wireOf(t *testing.T, records []WireRecord, dir WireDirection) []string {
+	t.Helper()
+	var out []string
+	for _, r := range records {
+		if r.Direction == dir {
+			out = append(out, string(r.Payload))
+		}
+	}
+	return out
+}
+
+func TestWireObserver_RecordsPostedBodyWithoutCredentials(t *testing.T) {
+	t.Parallel()
+
+	const apiKey = "sk-super-secret"
+	var posted []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		posted, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}]}`)
+	}))
+	defer srv.Close()
+
+	var records []WireRecord
+	client := NewClient(srv.URL, "m", WithAPIKey(apiKey), collectWire(&records))
+	if _, err := client.Respond(context.Background(), Request{Messages: []Message{{Role: "user", Content: "hi"}}}); err != nil {
+		t.Fatalf("Respond: %v", err)
+	}
+
+	requests := wireOf(t, records, WireRequest)
+	if len(requests) != 1 {
+		t.Fatalf("request records = %d, want exactly 1", len(requests))
+	}
+	if requests[0] != string(posted) {
+		t.Errorf("request record = %s, want the posted body %s", requests[0], posted)
+	}
+	if !json.Valid([]byte(requests[0])) {
+		t.Errorf("request record is not the JSON body: %s", requests[0])
+	}
+	for _, leak := range []string{apiKey, "Authorization", "Bearer"} {
+		if strings.Contains(requests[0], leak) {
+			t.Errorf("request record carries %q — headers must never enter a record: %s", leak, requests[0])
+		}
+	}
+	// A successful non-streaming body is decoded straight off the connection, never recorded.
+	if got := wireOf(t, records, WireResponse); len(got) != 0 {
+		t.Errorf("response records = %v, want none for a non-streaming success", got)
+	}
+}
+
+func TestWireObserver_RecordsSanitisedErrorBody(t *testing.T) {
+	t.Parallel()
+
+	const apiKey = "sk-super-secret"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = io.WriteString(w, "bad key "+apiKey)
+	}))
+	defer srv.Close()
+
+	var records []WireRecord
+	client := NewClient(srv.URL, "m", WithAPIKey(apiKey), WithMaxRetries(0), collectWire(&records))
+	if _, err := client.Respond(context.Background(), Request{Messages: []Message{{Role: "user", Content: "hi"}}}); err == nil {
+		t.Fatal("Respond: want an error for HTTP 401")
+	}
+
+	responses := wireOf(t, records, WireResponse)
+	if len(responses) != 1 {
+		t.Fatalf("response records = %d, want exactly 1", len(responses))
+	}
+	if strings.Contains(responses[0], apiKey) {
+		t.Errorf("error record leaks the API key: %s", responses[0])
+	}
+	if !strings.Contains(responses[0], "[REDACTED]") {
+		t.Errorf("error record = %q, want the sanitised body", responses[0])
+	}
+}

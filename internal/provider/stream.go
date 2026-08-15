@@ -93,6 +93,7 @@ func (c *Client) Stream(ctx context.Context, req Request) iter.Seq[Delta] {
 func (c *Client) statusDelta(resp *http.Response, hasTemplateKwargs bool) Delta {
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodyBytes))
 	text := c.sanitize(string(raw))
+	c.observeWire(WireResponse, []byte(text))
 	if resp.StatusCode == http.StatusBadRequest && isContextOverflow(string(raw)) {
 		return Delta{Kind: DeltaContextOverflow, Err: "apogee: context window exceeded: " + text}
 	}
@@ -140,6 +141,15 @@ func (c *Client) parseSSE(body io.Reader, hasTemplateKwargs bool, yield func(Del
 	scanner := bufio.NewScanner(body)
 	scanner.Buffer(make([]byte, 0, 64*1024), maxToolCallBytes+64*1024)
 
+	// Wire capture, when armed: keep each data: payload and hand the joined stream to the
+	// observer once, on whichever return ends this function — [DONE], an in-band error, a
+	// read fault, a consumer that broke, or the server closing. Unarmed, not a byte is kept.
+	capturing := c.wireObserver != nil
+	var captured []string
+	if capturing {
+		defer func() { c.observeWire(WireResponse, []byte(strings.Join(captured, "\n"))) }()
+	}
+
 	var current *ToolCall
 	var pendingFinish string
 	var pendingUsage *Usage
@@ -150,6 +160,9 @@ func (c *Client) parseSSE(body io.Reader, hasTemplateKwargs bool, yield func(Del
 			continue
 		}
 		data := strings.TrimPrefix(line, "data: ")
+		if capturing {
+			captured = append(captured, data)
+		}
 
 		if data == "[DONE]" {
 			if current != nil && !yield(Delta{Kind: DeltaToolCall, ToolCall: current}) {

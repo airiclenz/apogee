@@ -102,7 +102,8 @@ type Client struct {
 	httpClient     *http.Client
 	maxRetries     int
 	retryBaseDelay time.Duration
-	requestTimeout time.Duration // per-attempt bound for Respond; 0 ⇒ caller's ctx governs
+	requestTimeout time.Duration    // per-attempt bound for Respond; 0 ⇒ caller's ctx governs
+	wireObserver   func(WireRecord) // nil ⇒ no wire capture at all (see WithWireObserver)
 }
 
 // Option configures a Client (functional-options pattern — most fields have a sane
@@ -133,6 +134,21 @@ func WithRetryBaseDelay(d time.Duration) Option { return func(c *Client) { c.ret
 // governed by the caller's context). Streaming is never bounded this way — a long
 // generation is not a fault.
 func WithRequestTimeout(d time.Duration) Option { return func(c *Client) { c.requestTimeout = d } }
+
+// WithWireObserver installs a callback that is handed one WireRecord per direction per
+// Respond/Stream call — the request bytes as posted and, at stream end, the raw SSE
+// payloads as received (see WireRecord for the exact shape, including which replies are
+// recorded). It is how a Driver shows raw protocol without the Client keeping any of it:
+// the Client calls the observer and forgets. Nothing accumulates while no observer is
+// installed, which is the default and costs nothing.
+//
+// The observer runs synchronously on the goroutine driving the call, so a slow one slows
+// that call; it must be safe for concurrent use, because one Client serves concurrent
+// Respond/Stream callers. Credentials never reach it — records carry bodies only, never
+// headers, and error bodies arrive already redacted.
+func WithWireObserver(observe func(WireRecord)) Option {
+	return func(c *Client) { c.wireObserver = observe }
+}
 
 // NewClient builds a Client for the OpenAI-compatible server at baseURL, defaulting the
 // model when a Request leaves it empty. A trailing slash on baseURL is trimmed so path
@@ -228,6 +244,10 @@ func (c *Client) Respond(ctx context.Context, req Request) (RawResponse, error) 
 // returned cancel rather than a local defer.
 func (c *Client) send(ctx context.Context, body []byte, attemptTimeout time.Duration) (*http.Response, context.CancelFunc, error) {
 	url := c.baseURL + c.chatPath
+
+	// One request record per call, not per attempt: every retry posts these same bytes, and
+	// this is the last point at which they are still exactly what goes on the wire.
+	c.observeWire(WireRequest, body)
 
 	var lastErr error
 	var wait time.Duration // how long to hold off before the next attempt, set by the failed one
@@ -359,6 +379,7 @@ const thinkingEffortHint = "(this request carried chat_template_kwargs — an un
 func (c *Client) statusError(resp *http.Response, hasTemplateKwargs bool) error {
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodyBytes))
 	text := c.sanitize(string(raw))
+	c.observeWire(WireResponse, []byte(text))
 	if resp.StatusCode == http.StatusBadRequest && isContextOverflow(string(raw)) {
 		return fmt.Errorf("%w: %s", ErrContextOverflow, text)
 	}
@@ -477,6 +498,16 @@ func (c *Client) sanitize(text string) string {
 		text = text[:maxErrorLength] + "...[truncated]"
 	}
 	return text
+}
+
+// observeWire hands one record to the installed wire observer. It is the single capture
+// seam — every capture site goes through it, so the "no observer ⇒ nothing happens"
+// guarantee lives in exactly one nil check.
+func (c *Client) observeWire(direction WireDirection, payload []byte) {
+	if c.wireObserver == nil {
+		return
+	}
+	c.wireObserver(WireRecord{Direction: direction, Payload: payload})
 }
 
 // formatMessage renders one seam Message onto the wire schema. Without native tools a

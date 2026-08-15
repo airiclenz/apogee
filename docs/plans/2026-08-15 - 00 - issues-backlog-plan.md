@@ -294,7 +294,20 @@ untouched.
 
 **Commit:** `feat(tools): config url-safety hosts reach the network tools' guard, tighten-only`
 
-## 6. Inspector — the provider client can report its wire traffic
+## 6. Inspector — the provider client can report its wire traffic — ✅ DONE (2026-08-15)
+
+NOTES (2026-08-15): the request record is emitted from `Client.send` rather than at the two
+marshal sites the item cited (`client.go:190`, `stream.go:65`) — `send` is the single point both
+`Respond` and `Stream` funnel through with the finished bytes, so one guarded capture site yields
+exactly the item's "the marshalled body exactly as posted", once per call rather than once per
+retry attempt.
+NOTES (2026-08-15): the terminal `[DONE]` sentinel is included in the response record, being one
+of "the raw SSE `data:` payload lines as received" — the Inspector shows the protocol, not a
+summary of it.
+NOTES (2026-08-15): a successful NON-streaming `Respond` body produces no response record, as the
+item's binding capture list names only the SSE payloads and the error bodies; it is decoded
+straight off the connection, and buffering it to record it would change existing behaviour on a
+path the loop does not use. Stated in `WireRecord`'s doc comment and pinned by a test.
 
 **What:** `internal/provider` gains an opt-in wire observer so the bytes it already builds and
 parses can be seen without changing any existing behaviour. New exported types in

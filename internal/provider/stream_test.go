@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -454,5 +455,105 @@ func TestStream_EarlyBreakIsClean(t *testing.T) {
 	// Break after the first delta — the iterator must release the body without hanging.
 	for range NewClient(srv.URL, "m").Stream(context.Background(), Request{}) {
 		break
+	}
+}
+
+// roundTripWirePayload is every data: payload of roundTripSSE, in arrival order and
+// newline-joined — what one WireResponse record must hold for that stream.
+const roundTripWirePayload = `{"choices":[{"delta":{"content":"Hel"}}]}
+{"choices":[{"delta":{"content":"lo"}}]}
+{"choices":[{"delta":{"reasoning_content":"hmm"}}]}
+{"choices":[{"delta":{"tool_calls":[{"id":"tc_1","function":{"name":"grep","arguments":"{\"q\":"}}]}}]}
+{"choices":[{"delta":{"tool_calls":[{"function":{"arguments":"\"x\"}"}}]}}]}
+{"choices":[{"delta":{},"finish_reason":"tool_calls"}]}
+{"usage":{"prompt_tokens":3,"completion_tokens":4,"total_tokens":7}}
+[DONE]`
+
+func TestWireObserver_StreamRecordsEveryDataPayload(t *testing.T) {
+	t.Parallel()
+
+	srv := sseServer(roundTripSSE)
+	defer srv.Close()
+
+	var records []WireRecord
+	client := NewClient(srv.URL, "m", collectWire(&records))
+	collectStream(client, Request{Messages: []Message{{Role: "user", Content: "hi"}}})
+
+	if len(wireOf(t, records, WireRequest)) != 1 {
+		t.Errorf("request records = %d, want exactly 1", len(wireOf(t, records, WireRequest)))
+	}
+	responses := wireOf(t, records, WireResponse)
+	if len(responses) != 1 {
+		t.Fatalf("response records = %d, want exactly 1 at stream end", len(responses))
+	}
+	if responses[0] != roundTripWirePayload {
+		t.Errorf("response record =\n%s\nwant\n%s", responses[0], roundTripWirePayload)
+	}
+	// The record must arrive after the stream is drained, never interleaved per chunk.
+	if records[len(records)-1].Direction != WireResponse {
+		t.Errorf("last record = %q, want the response delivered once at stream end", records[len(records)-1].Direction)
+	}
+}
+
+func TestWireObserver_AbsentObserverLeavesStreamUnchanged(t *testing.T) {
+	t.Parallel()
+
+	srv := sseServer(roundTripSSE)
+	defer srv.Close()
+
+	var records []WireRecord
+	observed := collectStream(NewClient(srv.URL, "m", collectWire(&records)), Request{Messages: []Message{{Role: "user", Content: "hi"}}})
+	plain := NewClient(srv.URL, "m")
+	unobserved := collectStream(plain, Request{Messages: []Message{{Role: "user", Content: "hi"}}})
+
+	if plain.wireObserver != nil {
+		t.Fatal("a Client built without WithWireObserver must hold no observer")
+	}
+	if !reflect.DeepEqual(observed, unobserved) {
+		t.Errorf("deltas differ with an observer installed:\n%+v\nvs\n%+v", observed, unobserved)
+	}
+}
+
+func TestWireObserver_StreamRecordsPayloadOnEarlyBreak(t *testing.T) {
+	t.Parallel()
+
+	srv := sseServer(roundTripSSE)
+	defer srv.Close()
+
+	var records []WireRecord
+	client := NewClient(srv.URL, "m", collectWire(&records))
+	for range client.Stream(context.Background(), Request{Messages: []Message{{Role: "user", Content: "hi"}}}) {
+		break // consumer walks away after the first delta
+	}
+
+	responses := wireOf(t, records, WireResponse)
+	if len(responses) != 1 {
+		t.Fatalf("response records = %d, want exactly 1 even on an early break", len(responses))
+	}
+	if !strings.HasPrefix(responses[0], `{"choices":[{"delta":{"content":"Hel"}}]}`) {
+		t.Errorf("response record = %q, want the payloads read before the break", responses[0])
+	}
+}
+
+func TestWireObserver_StreamRecordsSanitisedErrorBody(t *testing.T) {
+	t.Parallel()
+
+	const apiKey = "sk-super-secret"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = io.WriteString(w, "boom "+apiKey)
+	}))
+	defer srv.Close()
+
+	var records []WireRecord
+	client := NewClient(srv.URL, "m", WithAPIKey(apiKey), WithMaxRetries(0), collectWire(&records))
+	collectStream(client, Request{Messages: []Message{{Role: "user", Content: "hi"}}})
+
+	responses := wireOf(t, records, WireResponse)
+	if len(responses) != 1 {
+		t.Fatalf("response records = %d, want exactly 1", len(responses))
+	}
+	if strings.Contains(responses[0], apiKey) || !strings.Contains(responses[0], "[REDACTED]") {
+		t.Errorf("error record = %q, want the sanitised body", responses[0])
 	}
 }
