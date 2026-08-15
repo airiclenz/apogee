@@ -545,6 +545,14 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- The thinking-effort hint now rides the in-band error path too. A server that wraps its failure
+  in an HTTP 200 — an aggregator's usual shape — produced a bare error where the very same failure
+  arriving as a 500 got the "this request carried `chat_template_kwargs`" explanation, so a chat
+  template that rejects an effort value was self-explaining on one framing and silent on the other.
+  `inBandError` and its streaming twin `inBandErrorDelta` now take the same `hasTemplateKwargs`
+  flag the status paths do; the hint rides the wrapping error and never `StatusError.Body`, and a
+  classified context overflow stays unhinted on both framings — no thinking effort caused it.
+
 - The session-naming call's drop-the-flag fallback now fires only for the `enable_thinking:false`
   kwarg it actually sets: a naming request that asks for a reasoning LEVEL is no longer silently
   stripped and re-sent when an Upstream rejects it with a 4xx. Behaviour-preserving today

@@ -117,16 +117,21 @@ func TestRespond_NoChoicesIsZeroValue(t *testing.T) {
 
 // TestRespond_InBandErrorSurfaces covers the aggregator failure mode this guard exists for:
 // an HTTP 200 whose body carries an error member and no usable choices. Without it the reply
-// decodes to a zero RawResponse and the failure masquerades as a successful empty turn.
+// decodes to a zero RawResponse and the failure masquerades as a successful empty turn. The
+// hint cases pin the second half of that mirroring: a request that carried
+// chat_template_kwargs gets the same thinking-effort hint the non-2xx path appends, and gets
+// it on the wrapping error rather than inside the server's own body.
 func TestRespond_InBandErrorSurfaces(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
 		name         string
+		effort       Effort
 		body         string
 		wantOverflow bool
 		wantCode     int
 		wantContains []string
+		wantHint     bool
 	}{
 		{
 			name:         "rate limited with provider metadata",
@@ -146,6 +151,21 @@ func TestRespond_InBandErrorSurfaces(t *testing.T) {
 			wantCode:     0,
 			wantContains: []string{"rate limited"},
 		},
+		{
+			name:         "template failure wrapped in a 200 gets the hint",
+			effort:       EffortHigh,
+			body:         `{"error":{"message":"jinja2.exceptions.TemplateError","code":500}}`,
+			wantCode:     500,
+			wantContains: []string{"TemplateError"},
+			wantHint:     true,
+		},
+		{
+			name:         "overflow stays unhinted even with kwargs on the wire",
+			effort:       EffortHigh,
+			body:         `{"error":{"message":"This model's maximum context length is 8192 tokens","code":400}}`,
+			wantOverflow: true,
+			wantContains: []string{"maximum context length"},
+		},
 	}
 
 	for _, tc := range tests {
@@ -158,7 +178,7 @@ func TestRespond_InBandErrorSurfaces(t *testing.T) {
 			}))
 			defer srv.Close()
 
-			got, err := NewClient(srv.URL, "m").Respond(context.Background(), Request{})
+			got, err := NewClient(srv.URL, "m").Respond(context.Background(), Request{ThinkingEffort: tc.effort})
 			if err == nil {
 				t.Fatalf("Respond returned no error; RawResponse = %+v", got)
 			}
@@ -183,11 +203,17 @@ func TestRespond_InBandErrorSurfaces(t *testing.T) {
 						t.Errorf("StatusError.Body = %q, want it to contain %q", statusErr.Body, want)
 					}
 				}
+				if strings.Contains(statusErr.Body, thinkingEffortHint) {
+					t.Errorf("StatusError.Body = %q, want the hint kept out of the server's body", statusErr.Body)
+				}
 			}
 			for _, want := range tc.wantContains {
 				if !strings.Contains(err.Error(), want) {
 					t.Errorf("error = %q, want it to contain %q", err, want)
 				}
+			}
+			if got := strings.Contains(err.Error(), thinkingEffortHint); got != tc.wantHint {
+				t.Errorf("error %q carries the template hint = %t, want %t", err, got, tc.wantHint)
 			}
 		})
 	}

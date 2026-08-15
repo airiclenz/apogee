@@ -258,19 +258,23 @@ func TestStream_ErrorBodyIsCapped(t *testing.T) {
 
 // TestStream_InBandError covers the aggregator failure mode where an HTTP 200 stream
 // carries the provider's error as a data event: it must end in a terminal fault, never in
-// the Done that would commit a silent empty reply.
+// the Done that would commit a silent empty reply. The hint cases pin that this framing
+// explains a template failure exactly as the non-2xx one does — kwargs on the wire ⇒ the
+// hint rides the terminal delta, no kwargs (and any overflow) ⇒ today's text unchanged.
 func TestStream_InBandError(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
 		name          string
 		apiKey        string
+		effort        Effort
 		body          string
 		wantKind      DeltaKind
 		wantContent   string
 		wantContains  []string
 		wantAbsent    string
 		wantRetryable bool
+		wantHint      bool
 	}{
 		{
 			name: "error only stream",
@@ -340,6 +344,26 @@ data: [DONE]
 			wantContains: []string{"[REDACTED]"},
 			wantAbsent:   "sk-secret-123",
 		},
+		{
+			name:   "template failure wrapped in a 200 gets the hint",
+			effort: EffortHigh,
+			body: `data: {"error":{"message":"jinja2.exceptions.TemplateError","code":500}}
+
+`,
+			wantKind:      DeltaError,
+			wantContains:  []string{"TemplateError"},
+			wantRetryable: true,
+			wantHint:      true,
+		},
+		{
+			name:   "overflow stays unhinted even with kwargs on the wire",
+			effort: EffortHigh,
+			body: `data: {"error":{"message":"This model's maximum context length is 8192 tokens","code":400}}
+
+`,
+			wantKind:     DeltaContextOverflow,
+			wantContains: []string{"maximum context length"},
+		},
 	}
 
 	for _, tc := range tests {
@@ -353,7 +377,7 @@ data: [DONE]
 			if tc.apiKey != "" {
 				opts = append(opts, WithAPIKey(tc.apiKey))
 			}
-			deltas := collectStream(NewClient(srv.URL, "m", opts...), Request{})
+			deltas := collectStream(NewClient(srv.URL, "m", opts...), Request{ThinkingEffort: tc.effort})
 			if len(deltas) == 0 {
 				t.Fatal("no deltas, want a terminal fault")
 			}
@@ -387,6 +411,9 @@ data: [DONE]
 			}
 			if last.Retryable != tc.wantRetryable {
 				t.Errorf("retryable = %v, want %v — the loop re-streams exactly the classes the client retries at the HTTP layer", last.Retryable, tc.wantRetryable)
+			}
+			if got := strings.Contains(last.Err, thinkingEffortHint); got != tc.wantHint {
+				t.Errorf("error %q carries the template hint = %t, want %t", last.Err, got, tc.wantHint)
 			}
 		})
 	}

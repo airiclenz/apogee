@@ -271,7 +271,13 @@ still pass.
 
 ---
 
-## 9. Carry the template hint on the in-band error path
+## 9. Carry the template hint on the in-band error path — ✅ DONE (2026-08-15)
+
+NOTES (2026-08-15): the item says `wire` is in scope at both call sites; it is not at the streaming
+one — `inBandErrorDelta` is called from `parseSSE` (`internal/provider/stream.go:169`), which had no
+view of the request. `hasTemplateKwargs` is therefore threaded through `parseSSE`'s signature
+(`parseSSE(body, hasTemplateKwargs, yield)`) from `Stream`, its only caller, where `wire` is in
+scope and `len(wire.ChatTemplateKwargs) > 0` is evaluated exactly as the item asks.
 
 **What:** `statusError` (`internal/provider/client.go:359-370`) appends `thinkingEffortHint`
 (`:349`) when the request carried `chat_template_kwargs`, but the in-band path — a server

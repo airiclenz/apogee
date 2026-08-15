@@ -46,11 +46,6 @@ The still-open findings the render_test.go split left, under the conventions' ac
 The still-open findings the thinking-effort-knob plan run left, under the conventions' actionability
 bar.
 
-- [ ] The in-band error path carries no template hint: `inBandError`
-  (`internal/provider/client.go:376`, called from `:214`) classifies an error member a server wrapped
-  in an HTTP 200 and adds nothing about `chat_template_kwargs`, so an aggregator that wraps a
-  template error in a 200 produces the same bare failure the non-2xx path now explains. Same failure
-  class, outside the non-2xx scope the enriched-error item covered.
 - [ ] No root alias for the Thinking-effort type: `apogee.go:119` re-exports `ThinkingProfile` /
   `ThinkingStyle` with their constants, but `domain.ThinkingEffort`
   (`internal/domain/config.go:330`) and its levels (`:334`) have none, so an out-of-module Driver

@@ -211,7 +211,7 @@ func (c *Client) Respond(ctx context.Context, req Request) (RawResponse, error) 
 		// An aggregator can answer HTTP 200 and put the provider's failure in the body. It must
 		// not fall through to toRawResponse, which maps such a reply's zero choices to a silent
 		// zero RawResponse — the empty-reply masquerade this guard exists to stop.
-		return RawResponse{}, c.inBandError(*decoded.Error)
+		return RawResponse{}, c.inBandError(*decoded.Error, len(wire.ChatTemplateKwargs) > 0)
 	}
 	return decoded.toRawResponse(), nil
 }
@@ -372,14 +372,21 @@ func (c *Client) statusError(resp *http.Response, hasTemplateKwargs bool) error 
 // inBandError classifies an error member the server wrapped in an HTTP 200, mirroring
 // statusError so both framings of the same failure reach callers as the same error types:
 // a 400 overflow → ErrContextOverflow, anything else → a *StatusError. A non-numeric code
-// yields Code 0 — the sanitised body carries the truth in that case.
-func (c *Client) inBandError(werr wireError) error {
+// yields Code 0 — the sanitised body carries the truth in that case. hasTemplateKwargs rides
+// along for the same reason it does on statusError: an aggregator that wraps a template
+// failure in a 200 leaves the user just as blind as a raw 500 would, so the hint is appended
+// to the wrapping error (never to StatusError.Body) and an overflow is left unhinted.
+func (c *Client) inBandError(werr wireError, hasTemplateKwargs bool) error {
 	code := werr.intCode()
 	text := c.sanitize(werr.render())
 	if code == http.StatusBadRequest && isContextOverflow(werr.Message) {
 		return fmt.Errorf("%w: %s", ErrContextOverflow, text)
 	}
-	return &StatusError{Code: code, Body: text}
+	err := &StatusError{Code: code, Body: text}
+	if !hasTemplateKwargs {
+		return err
+	}
+	return fmt.Errorf("%w %s", err, thinkingEffortHint)
 }
 
 // buildBody projects a Request onto the OpenAI chat-completions JSON body, faithfully to

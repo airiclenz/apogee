@@ -82,7 +82,7 @@ func (c *Client) Stream(ctx context.Context, req Request) iter.Seq[Delta] {
 			yield(c.statusDelta(resp, len(wire.ChatTemplateKwargs) > 0))
 			return
 		}
-		c.parseSSE(resp.Body, yield)
+		c.parseSSE(resp.Body, len(wire.ChatTemplateKwargs) > 0, yield)
 	}
 }
 
@@ -113,11 +113,17 @@ const providerUnavailable = "provider_unavailable"
 // reaches the user verbatim instead of being flattened away. Retryable mirrors the client's
 // own HTTP retry policy (isRetryableStatus) so an in-band 502 is treated exactly like a 502
 // status, with the error_type slug covering the shapes that carry no usable code.
-func (c *Client) inBandErrorDelta(werr wireError, raw string) Delta {
+// hasTemplateKwargs appends thinkingEffortHint exactly as statusDelta does — a template
+// failure an aggregator wrapped in a 200 needs the same explanation as one that arrived as a
+// status — and an overflow stays unhinted, since no thinking effort caused it.
+func (c *Client) inBandErrorDelta(werr wireError, raw string, hasTemplateKwargs bool) Delta {
 	code := werr.intCode()
 	text := fmt.Sprintf("apogee: upstream in-band error %d: %s", code, c.sanitize(raw))
 	if code == http.StatusBadRequest && isContextOverflow(werr.Message) {
 		return Delta{Kind: DeltaContextOverflow, Err: text}
+	}
+	if hasTemplateKwargs {
+		text += " " + thinkingEffortHint
 	}
 	retryable := isRetryableStatus(code) || werr.ErrorType == providerUnavailable
 	return Delta{Kind: DeltaError, Err: text, Retryable: retryable}
@@ -128,7 +134,9 @@ func (c *Client) inBandErrorDelta(werr wireError, raw string) Delta {
 // event rather than failing the stream, caps accumulated tool-call arguments, and emits a
 // terminal Done with the last finish reason and any usage chunk — a faithful port of the
 // oracle's parseSSEStream. Returning false from yield (consumer broke) stops cleanly.
-func (c *Client) parseSSE(body io.Reader, yield func(Delta) bool) {
+// hasTemplateKwargs is carried through from the request Stream built — the in-band error
+// delta needs it, and this is the only seam between that request and the error it explains.
+func (c *Client) parseSSE(body io.Reader, hasTemplateKwargs bool, yield func(Delta) bool) {
 	scanner := bufio.NewScanner(body)
 	scanner.Buffer(make([]byte, 0, 64*1024), maxToolCallBytes+64*1024)
 
@@ -164,7 +172,7 @@ func (c *Client) parseSSE(body io.Reader, yield func(Delta) bool) {
 			// terminal, and it must not fall through to the choice-less `continue` below — that
 			// path ends at the implicit Done and commits a silent empty reply. A flushed-but-
 			// unfinished tool call is dropped with it: the reply is faulted, not partly usable.
-			yield(c.inBandErrorDelta(*chunk.Error, data))
+			yield(c.inBandErrorDelta(*chunk.Error, data, hasTemplateKwargs))
 			return
 		}
 		if chunk.Usage != nil {
