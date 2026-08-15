@@ -257,6 +257,7 @@ a typo is visible before you send.
 | `/version` | Show the apogee version | ✅ |
 | `/usage` | What this session has spent — one row for the main agent, one per sub-agent, and a session total | ✅ |
 | `/confine` | Report or change Auto's blast radius — see [below](#auto-modes-blast-radius) | ✅ report only |
+| `/effort` | Set how hard the model thinks this session — `off`, `low`, `medium`, `high`, or `auto` (back to the profile); bare reports what resolved — see [below](#configuration) | ✅ |
 | `/schedule` | Run a prompt on a cycle — bare lists what is live, `/schedule <prompt>` asks for the cycle and mode, `/schedule <cycle> [auto] <prompt>` creates one outright | ✅ |
 | `/schedule-stop` | Take a schedule off the clock — the only one straight away, a picker when several are live | ✅ |
 | `/clear` (or `/new`) | Close this session into history and start a fresh one | — |
@@ -518,6 +519,31 @@ server, whatever its window says — which is how you let a cloud endpoint that 
 window answer at length. A reply that runs into that ceiling with nothing visible to show
 for it fails the turn and names the cap and roughly what the reasoning cost, rather than
 reporting an empty reply: the remedy is a bigger ceiling or a smaller task, not a retry.
+
+**How hard a model thinks** is a property of the model, so it rides its profile: a
+`model-profiles:` entry's `thinking:` block takes `effort:` — `off`, `low`, `medium` or
+`high` — and apogee forwards that to the server's chat template, which is where a
+reasoning model's dial actually lives:
+
+```yaml
+# ~/.apogee/config.yaml
+model-profiles:
+  qwen3.8:
+    thinking:
+      effort: medium
+```
+
+Leave the key out and **nothing at all** is sent, so the model's own default stands —
+which is exactly why you would set it: Qwen3.8's template reasons at its `xhigh` default
+unless told otherwise, which is a great deal of thinking for a one-line edit. `off` asks
+for no reasoning at all. The key is orthogonal to `style:` beside it, which only says how
+reasoning *arrives*; a value outside those four is a startup error, and a template that
+rejects an effort it does not support fails the turn with a message naming this key.
+`/effort <level>` layers a **session override** on top — `auto` drops it and hands the
+model back to its profile, bare `/effort` reports what the two layers resolved to. That
+override is session intent, not configuration: it survives a model switch, is never
+written to the file, and stays on the primary loop — a delegated sub-agent resolves
+effort from its own profile.
 
 The prompt's caret is the **real terminal cursor**, and it never blinks. Set
 `cursor-shape:` (a file-only key) to `block` (the default), `underline`, or `bar` to say

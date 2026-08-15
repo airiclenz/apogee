@@ -310,6 +310,8 @@ point is a **minor** bump, not a breaking change.
   profile: …)`). It runs while a turn is in flight, since the level reaches the model on the next
   request, and is never persisted.
 
+- Documented the model-profile `thinking.effort:` key and the `/effort` session override in `README.md` — the slash-command table gained an `/effort` row, and the Configuration section gained a paragraph covering the four levels, the absent-means-nothing default, the Qwen3.8 `xhigh` motivation, and the override's session-only, primary-loop-only scope.
+
 ### Changed
 
 - **The block-target, start-up-box and prompt-box-sizing suites move to

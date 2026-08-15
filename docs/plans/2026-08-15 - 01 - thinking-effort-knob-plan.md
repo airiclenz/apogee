@@ -214,7 +214,10 @@ engine door is called with the mapped value and that bare `/effort` renders the 
 
 **Commit:** `feat(tui): /effort sets the session thinking-effort override`
 
-## 6. README documentation
+## 6. README documentation — ✅ DONE (2026-08-15)
+
+NOTES (2026-08-15): the item says "the model-profiles section", but the README has no such section — `model-profiles:` is only mentioned in passing (the Key capabilities bullet, the `/settings` block list, `apogee probe model`). The paragraph therefore went into the **Configuration** section, directly after the "Every reply is bounded" paragraph, which is the README's other place where a thinking model's cost is discussed; it carries its own `model-profiles:` YAML example, the first one in the README.
+NOTES (2026-08-15): the `/effort` table row links to `#configuration` rather than a dedicated anchor, since the new paragraph has no heading of its own to link to.
 
 Depends on item 5.
 
