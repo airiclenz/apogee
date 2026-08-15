@@ -69,14 +69,34 @@ type Request struct {
 	// that does not support the fields simply answers without them, so setting it is safe.
 	LogProbs bool
 
-	// DisableThinking asks the Upstream to answer without a reasoning pass. It is a semantic
-	// seam field — "this call wants no chain-of-thought" — leaving the Client to decide how
-	// that intent is expressed on a given server. The loop never sets it; the naming call
-	// (internal/title) does, because an eight-word title needs no reasoning while a thinking
-	// model will otherwise spend its whole reply budget producing one. Unset ⇒ nothing is
-	// added to the request, so every existing caller's bytes stay unchanged.
-	DisableThinking bool
+	// ThinkingEffort asks the Upstream for a given amount of reasoning. It is a semantic seam
+	// field — "this call wants this much chain-of-thought" — leaving the Client to decide how
+	// that intent is expressed on a given server (ADR 0050). "" ⇒ nothing is added to the
+	// request, so a caller that asks for nothing puts byte-identical bytes on the wire;
+	// EffortOff ⇒ no chain-of-thought at all; a level ⇒ the template's effort dial. Callers
+	// are the loop (from the Model profile, plus the session override) and the naming call
+	// (internal/title), which asks for EffortOff because an eight-word title needs no
+	// reasoning while a thinking model will otherwise spend its whole reply budget producing
+	// one.
+	ThinkingEffort Effort
 }
+
+// Effort is how hard a call asks the Upstream to think. It mirrors the domain vocabulary
+// without importing it — the provider package stays domain-free, so the agent maps at the
+// boundary the way toProviderSampling does. "" is not a fifth level: it is the ABSENCE of the
+// setting, and absence emits nothing (ADR 0050).
+type Effort string
+
+const (
+	// EffortOff asks for no chain-of-thought at all.
+	EffortOff Effort = "off"
+	// EffortLow is the shortest reasoning the template offers.
+	EffortLow Effort = "low"
+	// EffortMedium is the middle rung.
+	EffortMedium Effort = "medium"
+	// EffortHigh is the longest reasoning the template offers.
+	EffortHigh Effort = "high"
+)
 
 // Usage is the token accounting an Upstream reply may carry (absent on servers that omit
 // it — then it is the zero value).

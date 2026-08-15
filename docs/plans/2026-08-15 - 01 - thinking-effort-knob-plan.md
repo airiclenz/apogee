@@ -83,7 +83,16 @@ green.
 
 **Commit:** `feat(config): model-profile thinking gains a validated effort leaf`
 
-## 2. Provider seam: ThinkingEffort replaces DisableThinking
+## 2. Provider seam: ThinkingEffort replaces DisableThinking — ✅ DONE (2026-08-15)
+
+NOTES (2026-08-15): `cmd/apogee/title.go` edited beyond the item's Files list — the naming call's
+"rejected outright, re-send without the kwarg" fallback read and cleared `req.DisableThinking`, so
+deleting the field breaks the build there; both sites now test/clear `req.ThinkingEffort` (`!= ""`
+rather than the removed bool), preserving the behaviour exactly.
+NOTES (2026-08-15): the "title-namer test asserts the `enable_thinking:false` bytes" requirement is
+met across the two packages rather than in one test — `internal/title` asserts the Request carries
+`provider.EffortOff` (it builds a Request and never touches HTTP), and the provider wire-bytes test
+for `EffortOff` asserts exactly `{"enable_thinking": false}` reaches the body.
 
 **What:** One semantic field, one canonical mapping (design calls 2–3).
 - `internal/provider/wire.go`: DELETE `DisableThinking`. Add a provider-local

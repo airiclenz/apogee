@@ -42,7 +42,7 @@ import (
 // (the compaction precedent, agent/compact.go).
 //
 // The token cap is a BACKSTOP, not a budget for the answer. Prompt asks for no reasoning pass at
-// all (DisableThinking), but that intent only lands on a server whose chat template honours it;
+// all (ThinkingEffort off), but that intent only lands on a server whose chat template honours it;
 // on one that ignores it, max_tokens bounds the REASONING tokens too, and a thinking model then
 // spends the whole cap before it writes a word of title. That is not hypothetical: a live
 // qwen3.6-35B-A3B run at the old 1024 answered a big session's naming call with 4,045 characters
@@ -162,8 +162,8 @@ func Prompt(prompts []string, workspaceBase string, date time.Time) provider.Req
 			{Role: "system", Content: systemInstruction},
 			{Role: "user", Content: userMessage(prompts, workspaceBase, date)},
 		},
-		Sampling:        provider.Sampling{Temperature: &temperature, MaxTokens: &maxTokens},
-		DisableThinking: true,
+		Sampling:       provider.Sampling{Temperature: &temperature, MaxTokens: &maxTokens},
+		ThinkingEffort: provider.EffortOff,
 	}
 }
 

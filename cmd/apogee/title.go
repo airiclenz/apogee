@@ -87,7 +87,7 @@ func (w titleWiring) generate(ctx context.Context, prompts []string) (string, er
 
 	req := title.Prompt(prompts, w.workspaceBase, w.now())
 	resp, err := client.Respond(ctx, req)
-	if err != nil && req.DisableThinking && rejectedOutright(err) {
+	if err != nil && req.ThinkingEffort != "" && rejectedOutright(err) {
 		// The "answer without thinking" intent rides as a chat_template_kwargs object, which llama.cpp
 		// accepts and a stricter OpenAI-compatible server may reject as an unknown field. Without this
 		// one re-send, asking for it would trade "naming fails on big sessions" for "naming fails
@@ -97,7 +97,7 @@ func (w titleWiring) generate(ctx context.Context, prompts []string) (string, er
 		// It does not soften the retries-OFF contract above. That policy is about queue time, and a 4xx
 		// comes back before the server generates a token — the second POST costs the user's next
 		// Exchange nothing, where a re-POST of a faulted attempt would have cost it a whole generation.
-		req.DisableThinking = false
+		req.ThinkingEffort = ""
 		resp, err = client.Respond(ctx, req)
 	}
 	if err != nil {

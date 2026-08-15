@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/airiclenz/apogee/internal/provider"
 )
 
 // promptDate is the fixed date every Prompt test builds against, so the rendered context line is
@@ -146,8 +148,9 @@ func TestPromptSetsSamplingConstants(t *testing.T) {
 			if *req.Sampling.MaxTokens != 4096 {
 				t.Errorf("MaxTokens = %d, want 4096", *req.Sampling.MaxTokens)
 			}
-			if !req.DisableThinking {
-				t.Error("DisableThinking = false, want the naming call to ask for no reasoning pass")
+			if req.ThinkingEffort != provider.EffortOff {
+				t.Errorf("ThinkingEffort = %q, want %q — the naming call asks for no reasoning pass",
+					req.ThinkingEffort, provider.EffortOff)
 			}
 		})
 	}

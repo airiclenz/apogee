@@ -320,11 +320,13 @@ func TestBuildBody_ToolsArray(t *testing.T) {
 }
 
 // A request that wants no reasoning carries the exact kwarg object llama.cpp forwards to the
-// chat template — the Qwen-family templates key off `enable_thinking`.
-func TestBuildBody_DisableThinkingEmitsKwarg(t *testing.T) {
+// chat template — the Qwen-family templates key off `enable_thinking`. These are the bytes the
+// deleted DisableThinking field used to produce, asserted here so EffortOff stays its
+// byte-identical successor.
+func TestBuildBody_EffortOffEmitsEnableThinkingKwarg(t *testing.T) {
 	t.Parallel()
 
-	body := captureBody(t, Request{Messages: []Message{{Role: "user", Content: "hi"}}, DisableThinking: true})
+	body := captureBody(t, Request{Messages: []Message{{Role: "user", Content: "hi"}}, ThinkingEffort: EffortOff})
 
 	kwargs, ok := body["chat_template_kwargs"].(map[string]any)
 	if !ok {
@@ -332,6 +334,40 @@ func TestBuildBody_DisableThinkingEmitsKwarg(t *testing.T) {
 	}
 	if len(kwargs) != 1 || kwargs["enable_thinking"] != false {
 		t.Errorf("chat_template_kwargs = %v, want exactly {\"enable_thinking\": false}", kwargs)
+	}
+}
+
+// Every level rides as the template's `reasoning_effort` dial, verbatim — no per-family
+// translation table (ADR 0050), so "high" goes out as "high".
+func TestBuildBody_EffortLevelsEmitReasoningEffortKwarg(t *testing.T) {
+	t.Parallel()
+
+	for _, level := range []Effort{EffortLow, EffortMedium, EffortHigh} {
+		t.Run(string(level), func(t *testing.T) {
+			t.Parallel()
+
+			body := captureBody(t, Request{Messages: []Message{{Role: "user", Content: "hi"}}, ThinkingEffort: level})
+
+			kwargs, ok := body["chat_template_kwargs"].(map[string]any)
+			if !ok {
+				t.Fatalf("chat_template_kwargs = %v, want an object", body["chat_template_kwargs"])
+			}
+			if len(kwargs) != 1 || kwargs["reasoning_effort"] != string(level) {
+				t.Errorf("chat_template_kwargs = %v, want exactly {\"reasoning_effort\": %q}", kwargs, level)
+			}
+		})
+	}
+}
+
+// The Client stays total: the config loader's enum rejects typos, so a value that reached the
+// seam anyway emits nothing rather than putting a word the template cannot read on the wire.
+func TestBuildBody_UnknownEffortEmitsNothing(t *testing.T) {
+	t.Parallel()
+
+	body := captureBody(t, Request{Messages: []Message{{Role: "user", Content: "hi"}}, ThinkingEffort: Effort("hihg")})
+
+	if _, present := body["chat_template_kwargs"]; present {
+		t.Errorf("chat_template_kwargs = %v, want the key omitted for an unrecognised effort", body["chat_template_kwargs"])
 	}
 }
 

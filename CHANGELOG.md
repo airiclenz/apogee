@@ -261,6 +261,21 @@ point is a **minor** bump, not a breaking change.
   and shows it in the `model-profiles:` example. Nothing sends it on the wire yet; the request seam
   and the `/effort` session override land with the items that follow.
 
+- **The request seam carries a semantic thinking effort instead of an on/off thinking switch.**
+  `provider.Request.DisableThinking` is gone; in its place `ThinkingEffort provider.Effort` says how
+  hard a call asks the Upstream to think, with a provider-local vocabulary (`off`, `low`, `medium`,
+  `high`) that mirrors the domain's without importing it — the provider package stays domain-free
+  and the agent maps at the boundary, the way it already maps sampling. The provider Client owns the
+  ONE wire mapping (ADR 0050): `off` emits `chat_template_kwargs: {"enable_thinking": false}` — byte
+  for byte what the deleted switch emitted — and a level emits `{"reasoning_effort": "<level>"}`
+  verbatim, with no per-family translation table until a second family is live-verified. The zero
+  value stays the wire anchor: a request that asks for nothing carries no `chat_template_kwargs` key
+  at all, and an unrecognised non-empty value emits nothing rather than putting a word the template
+  cannot read on the wire — the config loader's enum is the place typos are caught, and the Client
+  stays total. The naming call (`internal/title`) now asks for `off` and puts the same bytes on the
+  wire it always did, including its one re-send without the kwarg for a server that rejects the
+  unknown field outright.
+
 ### Changed
 
 - **The block-target, start-up-box and prompt-box-sizing suites move to

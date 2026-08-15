@@ -406,13 +406,19 @@ func (c *Client) buildBody(req Request) chatRequest {
 		body.TopLogProbs = &n
 	}
 
-	if req.DisableThinking {
-		// llama.cpp forwards chat_template_kwargs into the chat template, and the Qwen-family
-		// templates read `enable_thinking` — so this is how "no chain-of-thought" reaches the
-		// server today. The kwarg is template-dependent and a strict OpenAI-compatible server
-		// may reject the unknown field, so a caller must not rely on it alone. Emitted only
-		// when asked, keeping an ordinary loop request byte-identical on the wire.
+	// llama.cpp forwards chat_template_kwargs into the chat template: the Qwen-family templates
+	// read `enable_thinking` to pre-close the reasoning block, and the newer ones read
+	// `reasoning_effort` for how much of it to produce — so this is how a thinking-effort intent
+	// reaches the server today. This is the ONE canonical mapping (ADR 0050); it is
+	// template-dependent and a strict OpenAI-compatible server may reject the unknown field, so a
+	// caller must not rely on it alone. Emitted only when asked, keeping a request that asks for
+	// nothing byte-identical on the wire. An unrecognised non-empty value emits nothing: the
+	// config loader's enum already rejects typos, and the Client stays total.
+	switch req.ThinkingEffort {
+	case EffortOff:
 		body.ChatTemplateKwargs = map[string]any{"enable_thinking": false}
+	case EffortLow, EffortMedium, EffortHigh:
+		body.ChatTemplateKwargs = map[string]any{"reasoning_effort": string(req.ThinkingEffort)}
 	}
 
 	if hasTools {
