@@ -75,7 +75,18 @@ still passes.
 
 **Commit:** `docs(security): file map names ErrRootInaccessible beside pathsafety.go`
 
-## 2. A hang the block cannot hold collapses to zero
+## 2. A hang the block cannot hold collapses to zero — ✅ DONE (2026-08-15)
+
+NOTES (2026-08-15): `popupWrappedRowLines` needs no collapse of its own — audited and left as-is per
+the item's own alternative. Its single caller `popupRowBlocks` (`popup.go:883`) already guards
+`hang == 0 || hang >= budget` and breaks the composed line whole at the full budget there, which IS
+this collapse taken one level up, so layout.md:1629's "single-cell row measures a hanging indent of
+zero" holds by construction. Only its doc comment gained a sentence naming that invariant.
+NOTES (2026-08-15): the item names the third site as `userBlockAccentRows`; no such function exists
+— `internal/tui/userblock.go:153` (the cited line) is inside `userBlockCellSpans`, the accent-row
+mapping, and that is what took the rule. It must, and not only for the cap: it re-wraps to ask the
+same oracle the block's rows came off, so a lead counted there that `hangingPrefixes` did not draw
+would shift every accent right by the marker the block had shed.
 
 **What:** `hangingPrefixes` (`internal/tui/wrap.go:31`) wraps at `max(1, width-mw)` and then
 prepends the `mw`-column marker, so at block width 1–2 a two-column bullet marker yields

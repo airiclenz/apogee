@@ -1626,7 +1626,15 @@ answer after it across the module's own two-space gutter — so the boxes stack 
 column nothing hand-pads, and an answer too long for the pane **wraps under its own label** rather
 than under the box beside it: the continuation lines hang at the label's column, so one option still
 reads as one block of prose instead of sliding back under a marker that says nothing about it. A
-single-cell row measures a hanging indent of zero and wraps exactly where it always did. The
+single-cell row measures a hanging indent of zero and wraps exactly where it always did. And a
+block too narrow to hold a hanging marker **plus one text column** measures a hanging indent of zero
+as well: the marker and the blank indent under it are **shed whole** and the text wraps flat at the
+block's full width. Markers are never *squeezed* — the alternative is a two-column bullet prepended
+to a wrap floored at one column, which draws three cells inside a two-cell block and breaks the
+absolute width cap, the one rule no surface bends. It is the ladder the pane title above already
+spends its width by: the mark that no longer fits is dropped, and the words keep the block. The rule
+holds wherever a hang is composed — the transcript's markers and list bullets, a tool block's branch
+and gutter, and these rows alike. The
 **`/settings` pane's key rows are four-cell** — the key, its value, an `(env)`/`(flag)` mark where a
 higher-precedence source beat the file, and a last tier carrying whatever else is true of the row:
 the reason the last act on it was refused, else the answer to an act that landed and moved no row —

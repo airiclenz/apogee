@@ -175,6 +175,57 @@ func TestWrapTextBreaksInThePaintersMeasure(t *testing.T) {
 }
 
 // ----------------------------------------------------------------------------
+// The hang a block cannot hold (hangingPrefixes)
+// ----------------------------------------------------------------------------
+
+// A marker is SHED WHOLE by a block that cannot seat it beside a column of text. At block width 1–2
+// a two-column bullet used to be prepended to a wrap floored at one column, composing a three-cell
+// line inside a two-cell block — layout.md's absolute width cap broken by the very glyph meant to
+// decorate what it capped. The rule is the ladder a pane title already spends its width by: the
+// mark that no longer fits is dropped, never squeezed, and the words keep the block.
+//
+// The sweep runs the whole narrow range on both painting measures, since the cap is enforced in the
+// measure the frame is painted in (ADR 0030), and asserts the hang in BOTH directions — gone below
+// the threshold, untouched at and above it — so the collapse cannot pass by quietly shedding the
+// marker at ordinary widths too.
+func TestHangingWrapCollapsesTheHangItCannotHold(t *testing.T) {
+	t.Parallel()
+
+	const marker = "• " // two columns, the shape a markdown list hangs under
+	const text = "alpha beta gamma delta"
+
+	for _, pm := range paintMethods {
+		for width := 0; width <= 6; width++ {
+			t.Run(pm.name+"/width "+strconv.Itoa(width), func(t *testing.T) {
+				t.Parallel()
+				th := newTheme(scheme.Default())
+				th.measure = widthAuthority{method: pm.method}
+				mw := th.measure.Width(marker)
+
+				lines := hangingWrap(th, th.toolDetail, marker, text, width)
+				if len(lines) == 0 {
+					t.Fatalf("width %d: hangingWrap returned no lines at all", width)
+				}
+				for i, ln := range lines {
+					if w := th.measure.Width(ln); w > max(width, 1) {
+						t.Errorf("width %d: line %d %q is %d cells, over the %d cap",
+							width, i, strip(ln), w, max(width, 1))
+					}
+				}
+				switch hung := strings.HasPrefix(strip(lines[0]), marker); {
+				case width < mw+1 && hung:
+					t.Errorf("width %d holds no text column beside the marker, yet the hang survives: %q",
+						width, mapStrip(lines))
+				case width >= mw+1 && !hung:
+					t.Errorf("width %d seats the marker and a text column, yet the hang was shed: %q",
+						width, mapStrip(lines))
+				}
+			})
+		}
+	}
+}
+
+// ----------------------------------------------------------------------------
 // The row-capped clip (clipWrap)
 // ----------------------------------------------------------------------------
 
@@ -326,6 +377,22 @@ func TestClipWrapSurvivesNarrowWidths(t *testing.T) {
 				}
 				if w := th.measure.Width(got[0]); w > max(width, floor) {
 					t.Errorf("width %d: row %q is %d cells, over the %d cap", width, strip(got[0]), w, max(width, floor))
+				}
+
+				// The clipTail allowance above is a DIFFERENT, intended floor, and fitting the tail
+				// re-cuts the kept row on its way out — which would mask a marker overrun rather
+				// than report one. With rows to spare nothing is re-cut, so this is where the
+				// marker has to have been SHED by a block too narrow to hold it beside a text
+				// column (hangCollapses) instead of prepended to a wrap floored at one column.
+				rows, cut := clipWrap(th, th.toolDetail, branchMarker(true), "a long target that cannot fit", width, 99)
+				if cut {
+					t.Errorf("width %d: reported a clip inside a 99-row budget", width)
+				}
+				for i, ln := range rows {
+					if w := th.measure.Width(ln); w > max(width, 1) {
+						t.Errorf("width %d: unclipped row %d %q is %d cells, over the %d cap",
+							width, i, strip(ln), w, max(width, 1))
+					}
 				}
 			}
 

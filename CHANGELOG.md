@@ -653,6 +653,18 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **A hang the block cannot hold now collapses to zero instead of overrunning the width cap.**
+  `hangingPrefixes` floored its wrap at one column and then prepended the marker anyway, so a
+  two-column bullet in a one- or two-column block composed a three-cell line — layout.md's absolute
+  width cap broken by the very glyph decorating what it capped, and the same floor was repeated in
+  `gutteredWrap` and in the user block's accent mapping. A block too narrow to seat the marker AND
+  one column of text now sheds the marker and the continuation indent WHOLE and wraps the text flat
+  at the block's full width; at every width that seats both, nothing changes — `clipWrap` still
+  returns `hangingWrap`'s own lines for fitting text and the markerless `clipCells` path is a no-op
+  by construction. The decision has one name, `hangCollapses`, that all three sites ask. `layout.md`
+  gains the rule beside its hanging-indent doctrine: markers are shed, never squeezed, the same
+  ladder a pane title spends its width by.
+
 - **The `internal/security` file map now names `ErrRootInaccessible` on its `pathsafety.go` line.**
   The package doc's map names the sentinels each file owns — `ErrPathEscape` for `pathsafety.go`,
   `ErrSymlinkedParent` for `safeio.go` — so a reader looking for the error a surface must match

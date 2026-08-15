@@ -952,6 +952,11 @@ func popupRowSplit(th theme, row popupRow, widths []int, last int) (head, tail s
 // it belongs to rather than a paragraph that steps left where the tiers beside it end. Each composed
 // line is right-trimmed, like layoutPopupRow's, so a row that wrapped and a row that did not are
 // trimmed the same way before the painter's marker, styling and truncation run on them.
+//
+// It needs no narrow case of its own (hangCollapses): its ONE caller reaches it only while the hang
+// leaves at least one text column, and breaks the composed line whole at the full budget the moment
+// it does not (popupRowBlocks) — which is that collapse, taken one level up. The composed line is
+// therefore hang plus at most budget-hang cells, inside the budget at every width.
 func popupWrappedRowLines(th theme, head, tail string, budget, hang int) []string {
 	wrapped := wrapText(th, tail, budget-hang)
 	indent := strings.Repeat(" ", hang)

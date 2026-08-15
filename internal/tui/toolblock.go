@@ -366,10 +366,23 @@ func renderExpandedMember(th theme, tv toolView, marker, gutter string, width, r
 // gutter that is not the marker's width would still leave every row the same text column. Today
 // they are the same width by construction (memberGutter is branchMarker's shape), and stating it
 // this way is what keeps that a fact about the glyphs rather than an assumption in the arithmetic.
+//
+// It takes hangingPrefixes' narrow case with it: a block too narrow to hold the marker plus one
+// text column sheds BOTH prefixes and wraps the text flat at the block's full width
+// (hangCollapses), rather than flooring the text at one column and composing a row past the cap.
 func gutteredWrap(th theme, style lipgloss.Style, marker, gutter, text string, width int) []string {
-	rows := wrapText(th, text, max(1, width-th.measure.Width(marker)))
+	mw := th.measure.Width(marker)
+	collapsed := hangCollapses(width, mw)
+	if collapsed {
+		mw = 0
+	}
+	rows := wrapText(th, text, max(1, width-mw))
 	out := make([]string, len(rows))
 	for i, ln := range rows {
+		if collapsed {
+			out[i] = style.Render(ln)
+			continue
+		}
 		prefix := gutter
 		if i == 0 {
 			prefix = marker

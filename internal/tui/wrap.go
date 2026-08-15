@@ -24,14 +24,36 @@ func hangingWrap(th theme, style lipgloss.Style, marker, text string, width int)
 	return out
 }
 
+// hangCollapses reports whether a block width columns wide is too narrow to hold an mw-column
+// hanging marker AND one column of text beside it — the point at which the hang collapses to zero
+// (layout.md, the Column contract's narrow case).
+//
+// A marker is SHED WHOLE there, never squeezed: the alternative is what this package used to do —
+// floor the text at one column and prepend the marker anyway, which composes a three-cell line in a
+// two-cell block and breaks layout.md's absolute width cap, the one rule no surface may bend. It is
+// the same order the pane title spends its width in (layout.md, "Narrowness does not buy silence
+// either"): the mark that no longer fits is dropped rather than shrunk, because a half-marker says
+// something the layout does not mean.
+//
+// An mw of 0 — a caller wrapping with no marker at all (clipCells) — collapses only at a width
+// below one column, where the wrap's own floor already lands on the same single-column line, so the
+// markerless callers are untouched by construction.
+func hangCollapses(width, mw int) bool { return width < mw+1 }
+
 // hangingPrefixes word-wraps text to the width left of the marker and prepends the marker to
 // the first line and a matching blank indent to the rest, returning the unstyled lines. It is
 // shared by the styled hanging wrap and the user block (which then pads each line to a
 // full-width background).
+//
+// A block too narrow to hold the marker plus one text column drops the marker AND the continuation
+// indent and wraps the text flat at the block's full width (hangCollapses).
 func hangingPrefixes(th theme, marker, text string, width int) []string {
 	mw := th.measure.Width(marker)
+	if hangCollapses(width, mw) {
+		return wrapText(th, text, width)
+	}
 	indent := strings.Repeat(" ", mw)
-	lines := wrapText(th, text, max(1, width-mw))
+	lines := wrapText(th, text, width-mw)
 	out := make([]string, len(lines))
 	for i, ln := range lines {
 		if i == 0 {

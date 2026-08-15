@@ -148,6 +148,13 @@ func userBlockCellSpans(th theme, marker, text string, width int, spans []skillS
 		return nil
 	}
 	lead := th.measure.Width(marker) // the marker, and on every later row the blank indent matching it
+	if hangCollapses(width, lead) {
+		// The block shed its marker whole rather than squeeze it (hangingPrefixes), so the rows it
+		// composed start at column 0 and were wrapped to the full width. Asking the same oracle
+		// means taking the same collapse: a lead counted here that the block did not draw would
+		// shift every accent right by the marker it no longer has.
+		lead = 0
+	}
 	var out []skillCellSpan
 	pos := 0 // how far into text the walk has consumed
 	for r, row := range wrapText(th, text, max(1, width-lead)) {

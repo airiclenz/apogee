@@ -677,28 +677,19 @@ moment to give `ConfineWritablePaths` its first writer.
 
 ---
 
-### The TUI width authority — what it did not convert
+### The TUI width authority — the standing rules its work left behind
 
-**Status:** parked 2026-07-31, the residue of the *width authority* plan (`2026-07-31 - 03`, under
-`docs/plans/`, archived on completion) —
-[ADR 0030](docs/adr/0030-the-tui-has-one-width-authority-and-it-mirrors-the-painter.md). Nothing
-here breaks the absolute width cap; each is a place the package still measures in a measure the
-painter may not be using, or mirrors a widget imperfectly. What is open here is the one width entry
-below: `hangingPrefixes` at block width 1–2. The rest of the residue is closed — see `CHANGELOG.md`
-for what landed.
+**Status:** standing rules from the *width authority* plan (`2026-07-31 - 03`, under `docs/plans/`,
+archived on completion) —
+[ADR 0030](docs/adr/0030-the-tui-has-one-width-authority-and-it-mirrors-the-painter.md). The residue
+itself is closed; see `CHANGELOG.md` for what landed. What stays here binds future work, which is
+why it is not in the changelog alone.
 
-**Standing rules the closed work left behind** (they bind future work, so they are not in the
-changelog alone): the one `lipgloss.Style.Width` still in the package — the prompt box framing a
+**The rules:** the one `lipgloss.Style.Width` still in the package — the prompt box framing a
 widget that wraps in GraphemeWidth itself — is ADR 0030 §6's widget-mirror exception, so do not
 re-file it, and never put a `Width` style on a *bordered* surface (§5). `inputContentRows`' taller
 counts need no clamping change: `promptEditor.rows` and `layout()` already clamp
 (`TestPromptEditorRowsClampsTheWidgetCount`).
-
-**`hangingPrefixes` can draw three cells at block width 1–2** (now `internal/tui/wrap.go:31`). It floors its wrap
-width at 1 column and then prepends a two-column marker, so a bullet list in a two-column block
-produces three-cell lines. Pre-existing and untouched by the width work; a real fix has to decide
-what a marker means when the block cannot hold it, which is a `layout.md` question, not a
-measurement one.
 
 ---
 
