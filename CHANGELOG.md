@@ -22,6 +22,15 @@ point is a **minor** bump, not a breaking change.
   zero value is the guard off. Nothing reads it on screen yet; the status-line suffix it drives
   lands with the stall guard itself.
 
+- **A `warning` colour role, and the status bar's second voice.** The scheme vocabulary gains a 29th
+  role, `warning` — the rung between `muted` and `error`: a condition apogee wants noticed that it
+  has not called a fault. Both shipped schemes state it as an amber pitched between their own `muted`
+  and `error` (`#d7af5f` dark, `#9a6700` light), and a user scheme that omits it inherits the dark
+  value like every other key. The theme threads it to a new `statusWarning` style — the warning tone
+  on the status line's black field and deliberately NOT bold, so a qualifier tints a running phrase
+  instead of announcing a failure the way `statusError` does. Nothing paints with it yet; it is the
+  tint the stall guard's quiet-time suffix will wear.
+
 - The alias synthesized for a raw `--endpoint`/`APOGEE_ENDPOINT` override no longer collides with a
   configured `servers:` entry name: when the endpoint's host equals one, the label takes a
   `" (endpoint)"` suffix (e.g. `workstation (endpoint)`), so the switch list never draws two rows

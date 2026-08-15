@@ -45,7 +45,7 @@ func TestNewThemeTakesItsColoursFromTheScheme(t *testing.T) {
 		ModeAllowEdits: "#0c0c0c", ModeAuto: "#0d0d0d", Skill: "#0e0e0e", FileRef: "#0f0f0f",
 		PromptToggle: "#101010", ToolMarker: "#111111", Gauge: "#121212", Selection: "#131313",
 		Spinner1: "#141414", Spinner2: "#151515", Spinner3: "#161616", Spinner4: "#171717",
-		ToolLeader: "#1a1a1a", ToolMarkerBright: "#1b1b1b",
+		ToolLeader: "#1a1a1a", ToolMarkerBright: "#1b1b1b", Warning: "#1c1c1c",
 	}
 	th := newTheme(s)
 
@@ -64,6 +64,12 @@ func TestNewThemeTakesItsColoursFromTheScheme(t *testing.T) {
 		// A foreground role, and a background role.
 		{"errorText fg", th.errorText.GetForeground(), s.Error},
 		{"selection bg", th.selection.GetBackground(), s.Selection},
+		// The status bar's two voices, sampled together: the fault token and the qualifier a rung
+		// below it. They stand side by side on the same black field, so a crossed wire would paint
+		// a "worth noticing" fact in the alarm tone and turn a qualifier into a failure.
+		{"statusError fg", th.statusError.GetForeground(), s.Error},
+		{"statusWarning fg", th.statusWarning.GetForeground(), s.Warning},
+		{"statusWarning bg", th.statusWarning.GetBackground(), s.Surface},
 		// A style carrying two roles at once — an accent on the field it stands on.
 		{"skillToken fg", th.skillToken.GetForeground(), s.Skill},
 		{"skillToken bg", th.skillToken.GetBackground(), s.Surface},

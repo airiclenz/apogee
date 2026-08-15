@@ -112,7 +112,17 @@ go build ./... && go test ./internal/config ./internal/tui ./cmd/apogee
 
 **Commit:** `feat(config): ui.stall-after duration key threaded to the TUI`
 
-## 2. `warning` scheme role and `statusWarning` style
+## 2. `warning` scheme role and `statusWarning` style — ✅ DONE (2026-08-15)
+
+NOTES (2026-08-15): the item's Files line named `internal/tui/colorscheme_test.go` for the theme
+assertion, but that file tests the `/color-scheme` command; the neighbouring style tests (the
+role-to-style wiring table) live in `internal/tui/theme_test.go`, so the `statusWarning` case went
+there — "in whatever pattern neighbouring style tests use", as the item's Tests line asks.
+NOTES (2026-08-15): the role count is stated in prose in four places the item does not list —
+`README.md`, `layout.md`, `CONTEXT.md` (all 28 → 29) and `newTheme`'s own doc comment in
+`internal/tui/theme.go`, which was already stale at 26 and now reads 29. Adding a role without them
+would leave four documents miscounting the vocabulary. ADR 0040 needs no amendment: it decides that
+an additive role is safe and only a rename needs one.
 
 **What:** add the role `warning` to the scheme (`internal/scheme/scheme.go:29-83` struct +
 tag; `roleKeys` is reflected, so the field addition is the registration), give it an amber

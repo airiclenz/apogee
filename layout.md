@@ -91,7 +91,7 @@ the glyph the pointer is on.
 ## What "colour" means everywhere below
 
 **Every colour in this document is a role, and the hex beside it is one scheme's answer.** Colours
-come from the active **colour scheme**: one YAML file of 28 semantic roles, selected by
+come from the active **colour scheme**: one YAML file of 29 semantic roles, selected by
 `ui.color-scheme`, shipped as `dark` and `light` and overridable per user from
 `~/.apogee/schemes/` ([ADR 0040](docs/adr/0040-color-schemes-are-embedded-roles-with-user-shadowing.md),
 `CONTEXT.md` §Color scheme). Every hex quoted below is the built-in **`dark`** scheme's value — what

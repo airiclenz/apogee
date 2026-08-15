@@ -203,6 +203,7 @@ type theme struct {
 	statusBar     lipgloss.Style // status-line segments: faint on black
 	spinnerBase   lipgloss.Style // the status-line spinner's field: the status bar's black, with no foreground of its own so an uncoloured glyph keeps the terminal's text colour — the colour loop layers a per-frame foreground onto it (spinner.go)
 	statusError   lipgloss.Style // status-line "error" token: red bold on black
+	statusWarning lipgloss.Style // status-line qualifier (the `warning` role on the bar's black): amber, and deliberately NOT bold — it tints a fact onto a running phrase rather than announcing a fault the way statusError does
 	chromeRule    lipgloss.Style // the prompt box's own border hairline (dark gray on black): the rule runes and corners inputElisionEdge composes the box's top border row from
 	hairline      lipgloss.Style // both chrome hairlines — the ▔ above the status line and the ▁ under the footer — a dimmer rule (the `divider` role) so they recede
 	footerText    lipgloss.Style // the footer's content (faint on black)
@@ -263,7 +264,7 @@ func (th theme) modeColor(m domain.Mode) color.Color {
 	}
 }
 
-// newTheme builds the styles from a colour scheme — the 26 semantic roles of ADR 0040, resolved
+// newTheme builds the styles from a colour scheme — the 29 semantic roles of ADR 0040, resolved
 // before it is called (the renderer never reads a scheme file itself). It is the ONE seam between a
 // scheme and the look: calling it again with another scheme rebuilds every style, which is what a
 // live scheme switch does (settingsApplyLocal).
@@ -287,6 +288,7 @@ func newTheme(s scheme.Scheme) theme {
 		diffDel        = lipgloss.Color(s.DiffDel)
 		errFg          = lipgloss.Color(s.Error)
 		successFg      = lipgloss.Color(s.Success)
+		warningFg      = lipgloss.Color(s.Warning)
 		code           = lipgloss.Color(s.Code)
 		toolHeaderFg   = lipgloss.Color(s.ToolHeader)
 		modePlan       = lipgloss.Color(s.ModePlan)
@@ -389,13 +391,18 @@ func newTheme(s scheme.Scheme) theme {
 		statusBar:   lipgloss.NewStyle().Foreground(muted).Background(surface),
 		spinnerBase: lipgloss.NewStyle().Background(surface), // match the status bar's black field
 		statusError: lipgloss.NewStyle().Foreground(errFg).Bold(true).Background(surface),
-		chromeRule:  lipgloss.NewStyle().Foreground(chrome).Background(surface),
-		hairline:    lipgloss.NewStyle().Foreground(divider).Background(surface),
-		footerText:  lipgloss.NewStyle().Foreground(muted).Background(surface),
-		scrollThumb: lipgloss.NewStyle().Foreground(muted),
-		scrollTrack: lipgloss.NewStyle().Foreground(chrome),
-		gaugeFill:   lipgloss.NewStyle().Foreground(gauge),
-		gaugeTrack:  lipgloss.NewStyle().Background(chrome),
+		// The bar's second voice, one rung below the error token: the `warning` role on the same
+		// black field, and no bold. Weight is what statusError spends to make a fault unmissable;
+		// a qualifier hung off a phrase that is still running has to be readable as a tint on that
+		// phrase, so it takes the colour and leaves the weight alone.
+		statusWarning: lipgloss.NewStyle().Foreground(warningFg).Background(surface),
+		chromeRule:    lipgloss.NewStyle().Foreground(chrome).Background(surface),
+		hairline:      lipgloss.NewStyle().Foreground(divider).Background(surface),
+		footerText:    lipgloss.NewStyle().Foreground(muted).Background(surface),
+		scrollThumb:   lipgloss.NewStyle().Foreground(muted),
+		scrollTrack:   lipgloss.NewStyle().Foreground(chrome),
+		gaugeFill:     lipgloss.NewStyle().Foreground(gauge),
+		gaugeTrack:    lipgloss.NewStyle().Background(chrome),
 
 		// The colour loop's waypoints, in the order it visits them: violet → green → amber → pink
 		// and back to violet under the dark scheme. Converting them here is what makes the loop a
