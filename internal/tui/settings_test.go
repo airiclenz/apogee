@@ -2018,6 +2018,54 @@ func TestSettingsPaneResetOfModeAppliesTheDefaultLive(t *testing.T) {
 	}
 }
 
+// A reset of a key whose default is UNSET reaches the dispatcher exactly as the mode reset above does.
+// The value it carries is empty because that is what the key went back to, and an empty value is how
+// the seam is told the file no longer sets the key at all — not a reason to leave the session on a
+// value the file has stopped carrying, which no watcher would then heal (the reset refreshes the
+// binary's self-write baseline).
+func TestSettingsPaneResetOfAnEmptyDefaultKeyAppliesLive(t *testing.T) {
+	rows := []SettingRow{{
+		Path: "editor", Section: "Interface", Kind: SettingString, Value: "code -w",
+		Editable: true, Desc: "The command that opens a file for editing.",
+	}}
+	log := &settingsWriteLog{}
+	m, _ := settingsEditModel(t, rows, log)
+
+	m = step(t, step(t, m, keyBackspace()), keyEnter())
+
+	if want := []string{"editor"}; !reflect.DeepEqual(log.resets, want) {
+		t.Fatalf("resets = %+v, want %+v", log.resets, want)
+	}
+	if want := []settingEdit{{path: "editor", value: ""}}; !reflect.DeepEqual(log.applies, want) {
+		t.Errorf("applies = %+v, want %+v — the empty value IS what the engine has to be told", log.applies, want)
+	}
+	if got, want := m.settingsValueCell(rows[0]), settingsUnsetValue+settingsEditMarker; got != want {
+		t.Errorf("value cell = %q, want %q — the key is back to being unset", got, want)
+	}
+}
+
+// What the guard still skips: an empty value that is not a RESET. The pane never writes one — an
+// emptied buffer commits nothing at all — so the only source is a re-read that found a key gone from
+// the file, and that key is journaled on its row without being dispatched, exactly as before.
+func TestSettingsPaneEmptyValueFromTheEditorIsNotApplied(t *testing.T) {
+	rows := []SettingRow{settingsStructuredRow(), {
+		Path: "editor", Section: "Interface", Kind: SettingString, Value: "code -w",
+		Editable: true, Desc: "The command that opens a file for editing.",
+	}}
+	log := &settingsWriteLog{}
+	edit := &externalEditLog{applied: []AppliedSetting{{Path: "editor", Value: ""}}}
+	m := externalEditModel(t, rows, log, edit)
+
+	m = step(t, m, settingsEditedMsg{path: "servers"})
+
+	if len(log.applies) != 0 {
+		t.Errorf("applies = %+v, want none: only a reset carries an empty value out to the seam", log.applies)
+	}
+	if got, want := m.settingsValueCell(rows[1]), settingsUnsetValue+settingsEditMarker; got != want {
+		t.Errorf("value cell = %q, want %q — the re-read is still journaled on the row", got, want)
+	}
+}
+
 // The two new steps are views of the SELECTED row and the rows are re-derived under them, so a key that
 // went away takes its buffer (or its armed reset) with it rather than letting a ⏎ land on whatever now
 // sits at that index — the enum sub-list's contract, on the same predicate.

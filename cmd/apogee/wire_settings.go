@@ -540,6 +540,15 @@ type settingsApplier struct {
 // the moment an external edit starts, so the write alone puts it in force and its case says success
 // with nothing to do (ADR 0041 decision 1). That is not the refusal above, because the file changing
 // IS the session changing for a value only ever read from the file.
+//
+// An EMPTY value means one thing for every key: the file no longer SETS this key, so resolve the
+// built-in default a fresh start would have resolved. That is what a reset of a key whose default is
+// unset hands in (the pane's settingsApplied), and every such key answers it through the case it
+// already has rather than a branch of its own — `web-search-endpoint` resolves "" to the built-in
+// provider, `present.command` and `present.host` rebuild the ladder from a block with the field
+// cleared, `tools.disabled` parses "" as the empty roster, the `system-prompt-` pair re-read a file
+// that no longer carries the key, and `editor` is in force from the write itself.
+// TestApplySettingOnAnEmptyValueResolvesTheBuiltInDefault holds this side of it.
 func applySettingFor(a settingsApplier) func(key, value string) (string, error) {
 	return func(key, value string) (string, error) {
 		// A member this Driver did not compose is a legitimate configuration rather than a bug (ADR

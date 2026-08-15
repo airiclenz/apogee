@@ -170,7 +170,12 @@ signature forever. Record under `[Unreleased]` in `CHANGELOG.md`.
 
 **Commit:** `test(security): pin the CircuitBreaker's concurrency claim and post-trip recovery`
 
-## 5. A reset of an empty-default key reaches the engine
+## 5. A reset of an empty-default key reaches the engine — ✅ DONE (2026-08-15)
+
+NOTES (2026-08-15): the dispatcher needed no behavioural change — all six enumerated keys' apply cases already resolve `""` to the built-in default a fresh start uses (verified case by case), and none of the six turned out to be a key that "cannot express unset for a structural reason". The item's dispatcher work therefore landed as the empty-value contract stated once on `applySettingFor`'s doc comment, naming each of the six, plus `TestApplySettingOnAnEmptyValueResolvesTheBuiltInDefault` pinning three of them (`web-search-endpoint`, `editor`, `present.command`) against a fresh start's own resolution.
+NOTES (2026-08-15): the plan's second TUI test bullet — "a reset of a non-empty-default key still applies its default" — is already pinned end-to-end by `TestSettingsPaneResetOfModeAppliesTheDefaultLive`, so no twin was added for it.
+NOTES (2026-08-15): the guard is key-agnostic, so a SEVENTH resettable empty-default key comes along with the six: `tools.disabled`, whose reset now applies as `ParseSettingList("")` — the empty roster, which is the built-in default. `server` is the only other editable empty-default key and it takes no reset at all (`settingsResetKind`), so nothing else changed reach.
+NOTES (2026-08-15): the "a plain empty-value non-reset edit still skips" test drives the EXTERNAL-EDIT trigger (`applyReloaded`) rather than a keystroke, because the pane's own buffer cannot produce an empty non-reset write — `settingsCommitBuffer` closes on an empty buffer without persisting.
 
 **What:** `settingsApplied` (`internal/tui/settings.go:1343-1355`, guard at `:1347`) skips
 `settingsApplyLive` whenever `edit.value == ""`, so resetting a key whose registry default

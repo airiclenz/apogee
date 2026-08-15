@@ -639,6 +639,22 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **A `/settings` reset of a key whose default is UNSET now reaches the running session instead of
+  stopping at the file.** `settingsApplied` guarded the live apply on a non-empty value, so
+  resetting one of the keys that default to nothing — `web-search-endpoint`, `editor`,
+  `present.command`, `present.host`, `system-prompt-text`, `system-prompt-file`, `tools.disabled` —
+  removed the key's line from `config.yaml` and told the engine nothing: the session went on running
+  the old value until a restart, and the config watcher could not heal it because `ResetSetting`
+  refreshes its self-write baseline the moment the line goes. The guard now asks about the EDIT
+  rather than its value — a reset applies whatever default it recorded, and the empty string is how
+  the dispatcher is told "the file no longer sets this key", which every one of those keys already
+  answers with the built-in default a fresh start would have resolved (the built-in search provider,
+  the `$VISUAL`/`$EDITOR`/OS-opener ladder, a presentation ladder rebuilt from a cleared field, the
+  empty disabled-tool roster, a system-prompt block re-read from the file that no longer carries the
+  key). That contract is now stated on the dispatcher itself and pinned from both sides. An empty
+  value that is NOT a reset still skips: the pane never writes one, so the only source is a re-read
+  that found a key gone, and that case is left exactly as it was.
+
 - **A workspace root that will not open is now reported as `security: workspace root is not
   accessible`, not as a path escape.** Every Safe I/O primitive pins an `os.Root` at the root
   before it touches anything, and a failure to pin it — the root deleted or renamed under a live

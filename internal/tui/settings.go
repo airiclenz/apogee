@@ -1333,9 +1333,17 @@ func (m Model) settingsPersist(row SettingRow, value string) (Model, tea.Cmd, bo
 // unwind it. The edit stays recorded, the row carries the failure instead (settingsApplyFailedNote),
 // and a re-committed edit retries the apply against the same persisted value.
 //
-// The apply is guarded on a non-empty value as well as on the key: a reset records the key's
-// DEFAULT, and a key whose default is unset would otherwise hand the seam an empty string to
-// resolve — which is a question about a key the file no longer sets, not a value it now holds.
+// The apply is guarded on the EDIT rather than on its value alone. A RESET always applies, even when
+// the default it records is empty: the line is gone from the file, and that is a change the running
+// session has to hear — the empty string is precisely how the dispatcher is told "the file no longer
+// sets this key", which it answers with the built-in default a fresh start would have resolved
+// (applySettingFor). Skipping it instead left the session on the old value until a restart, with the
+// config watcher unable to heal it because the reset refreshes its self-write baseline.
+//
+// An empty value that is NOT a reset still skips. Nothing this pane WRITES is ever empty — an empty
+// buffer commits nothing at all (settingsCommitBuffer) — so the only empty value reaching here
+// unreset comes from a re-read that found a key gone (applyReloaded), and that case is left exactly
+// as it was.
 //
 // The Cmd it hands back is the apply's own, and today exactly one key produces one: a colour-scheme
 // switch rebuilds every style under a screen already painted in the previous palette, so the frame
@@ -1344,7 +1352,7 @@ func (m Model) settingsPersist(row SettingRow, value string) (Model, tea.Cmd, bo
 func (m Model) settingsApplied(row SettingRow, edit settingEdit) (Model, tea.Cmd) {
 	var applyErr error
 	var cmd tea.Cmd
-	if edit.value != "" {
+	if edit.reset || edit.value != "" {
 		m, edit.note, cmd, applyErr = m.settingsApplyLive(row.Path, edit.value)
 	}
 	m = m.recordSettingEdit(edit)

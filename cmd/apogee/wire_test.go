@@ -3381,6 +3381,97 @@ func TestApplySettingWebSearchSwapRefusalKeepsTheOldSet(t *testing.T) {
 	}
 }
 
+// An EMPTY value is the pane's way of saying the file no longer SETS a key — what a reset of a key
+// whose default is unset dispatches — and every such key has to answer it with the built-in default a
+// fresh start would have resolved, not with a refusal and not by standing still. Three of the six are
+// driven here; the `system-prompt-` pair re-read the file itself (their own tests above) and
+// `present.host` takes the identical path present.command does.
+func TestApplySettingOnAnEmptyValueResolvesTheBuiltInDefault(t *testing.T) {
+	t.Parallel()
+
+	// The endpoint the live set is built from goes back to the one a start-up with no key builds from
+	// (`tools.HostTools{}`), which is what resolves to the built-in provider — while the tool itself is
+	// re-pointed in place, so clearing the key is no more a set-level change than moving it was.
+	t.Run("web-search-endpoint", func(t *testing.T) {
+		t.Parallel()
+		workspace := t.TempDir()
+		registry := tools.NewDefaultRegistryWithHost(workspace,
+			tools.HostTools{WebSearchEndpoint: "https://search.example.com/s"})
+		spy := &applySettingSpy{}
+		live := newLiveTools(registry, "https://search.example.com/s", nil,
+			func(string, []string) *apogee.ToolRegistry { return apogee.NewToolRegistry() })
+
+		if _, err := applySettingFor(settingsApplier{engine: spy, tools: live})("web-search-endpoint", ""); err != nil {
+			t.Fatalf("apply web-search-endpoint on an empty value: %v", err)
+		}
+		if got, _ := live.built(); got != "" {
+			t.Errorf("the live set is built from %q; want the empty endpoint a fresh start with no key resolves", got)
+		}
+		if _, ok := registry.Lookup("web_search"); !ok {
+			t.Error("web_search left the registry; clearing the endpoint re-points the tool it already holds")
+		}
+		if spy.drove() != 0 {
+			t.Errorf("clearing the endpoint drove the engine: %+v", spy)
+		}
+
+		// And where there is no tool to re-point, the rebuild is handed exactly what start-up hands it
+		// when the key is absent, rather than the endpoint the session happened to launch on.
+		var built []string
+		bare := newLiveTools(apogee.NewToolRegistry(), "https://search.example.com/s", nil,
+			func(endpoint string, disabled []string) *apogee.ToolRegistry {
+				built = append(built, endpoint)
+				return tools.NewDefaultRegistryWithHost(workspace,
+					tools.HostTools{WebSearchEndpoint: endpoint, Disabled: disabled})
+			})
+		if _, err := applySettingFor(settingsApplier{engine: &applySettingSpy{}, tools: bare})("web-search-endpoint", ""); err != nil {
+			t.Fatalf("apply web-search-endpoint on a set with no web_search: %v", err)
+		}
+		if want := []string{""}; !slices.Equal(built, want) {
+			t.Errorf("rebuilds = %q, want %q", built, want)
+		}
+	})
+
+	// `editor` answers an emptied key the way it answers every other value: success with nothing to do.
+	// The ladder reads the key off a FRESH projection of the file each time an external edit starts, so
+	// a removed line is already the $VISUAL/$EDITOR/OS-opener ladder of ADR 0041 by the time the next ⏎
+	// asks — and the default refusal would have reported a failure over a change already in force.
+	t.Run("editor", func(t *testing.T) {
+		t.Parallel()
+		spy := &applySettingSpy{}
+		note, err := applySettingFor(settingsApplier{engine: spy})("editor", "")
+		if err != nil {
+			t.Fatalf("apply editor on an empty value: %v", err)
+		}
+		if note != "" {
+			t.Errorf("note = %q, want none: the write itself is the whole of the apply", note)
+		}
+		if spy.drove() != 0 {
+			t.Errorf("clearing editor drove an engine seam: %+v", spy)
+		}
+	})
+
+	// The ladder is rebuilt from a block with the field CLEARED, which is the block a fresh start
+	// resolves from a file that does not set the key: rung 1 goes back to resolving the OS opener.
+	t.Run("present.command", func(t *testing.T) {
+		t.Parallel()
+		var installed []tui.Presentation
+		live := newLivePresentation(
+			config.PresentSettings{AutoOpen: true, Command: "zed {path}"}, t.TempDir(), "darwin",
+			func(string) string { return "" }, // no SSH: a local session, so rung 1 is wired
+			func(p tui.Presentation) { installed = append(installed, p) })
+
+		if _, err := applySettingFor(settingsApplier{present: live})("present.command", ""); err != nil {
+			t.Fatalf("apply present.command on an empty value: %v", err)
+		}
+		if len(installed) != 2 || installed[1].Opener == nil {
+			t.Fatalf("installed ladders = %+v; want the rebuilt one to still carry the opener", installed)
+		}
+		if got := installed[1].Opener.CommandOverride; got != "" {
+			t.Errorf("the opener still overrides with %q; want none — the OS opener a fresh start wires", got)
+		}
+	})
+}
+
 // fakeMCPSession stands in for a connected set of MCP servers: what it advertises, and whether it has
 // been torn down. The reconnect is exercised against the mcpSession seam rather than a real
 // *mcp.Client because what lives in the composition root is the ORDER of the act — dial, swap, tear
