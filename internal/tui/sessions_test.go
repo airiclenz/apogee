@@ -749,6 +749,9 @@ func TestRelativeTime(t *testing.T) {
 		{"hours", now.Add(-3 * time.Hour), "3h ago"},
 		{"days", now.Add(-2 * 24 * time.Hour), "2d ago"},
 		{"weeks", now.Add(-3 * 7 * 24 * time.Hour), "3w ago"},
+		// A record stamped ahead of the wall clock (skew, an NTP step back, a restored snapshot)
+		// clamps to zero rather than falling through the arms as a negative duration.
+		{"future is just now", now.Add(5 * 24 * time.Hour), "just now"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

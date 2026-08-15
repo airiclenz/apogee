@@ -210,7 +210,9 @@ silent skip. Record under `[Unreleased]` in `CHANGELOG.md`.
 
 **Commit:** `fix(config): a reset of an empty-default key reaches the engine instead of stalling at the file`
 
-## 6. `relativeTime` clamps a future timestamp
+## 6. `relativeTime` clamps a future timestamp — ✅ DONE (2026-08-15)
+
+NOTES (2026-08-15): the new `TestRelativeTime` row pins the behaviour but cannot fail against the pre-fix code — a negative duration already satisfied the first switch arm, which is precisely the accident the item converts into a decision; the clamp's guarantee is against a future reordering of the arms, which no unit test can express today.
 
 **What:** `relativeTime` (`internal/tui/sessions.go:666-669`) computes `d := now.Sub(t)`
 and its first arm `d < time.Minute` accepts any negative duration, so a record whose

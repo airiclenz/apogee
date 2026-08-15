@@ -658,12 +658,18 @@ func workspaceBase(ws string) string {
 }
 
 // relativeTime renders how long ago t was, coarsely: "just now", "5m ago", "3h ago", "2d ago",
-// "4w ago". A zero time (a legacy record whose mtime could not be read) reads "unknown".
+// "4w ago". A zero time (a legacy record whose mtime could not be read) reads "unknown". A
+// timestamp AHEAD of the wall clock — clock skew, an NTP step back, a restored snapshot — clamps
+// to zero and reads "just now" by decision rather than by accident, mirroring formatElapsed's own
+// clamp, so no rearrangement of the arms below can turn a negative duration into garbage.
 func relativeTime(t, now time.Time) string {
 	if t.IsZero() {
 		return "unknown"
 	}
 	d := now.Sub(t)
+	if d < 0 {
+		d = 0
+	}
 	switch {
 	case d < time.Minute:
 		return "just now"

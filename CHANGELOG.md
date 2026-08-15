@@ -639,6 +639,15 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **A session record stamped ahead of the wall clock now reads "just now" by decision rather than
+  by accident.** `relativeTime` computed `now.Sub(t)` and handed the raw duration to its switch,
+  whose first arm (`d < time.Minute`) swallows any negative value — so clock skew, an NTP step
+  back or a restored snapshot rendered correctly only because the arms happen to be ordered that
+  way. A negative duration is now clamped to zero before the switch, mirroring `formatElapsed`'s
+  own clamp on the status-line clock, so the answer for a future timestamp is stated in one place
+  and no later rearrangement of the coarse arms can turn skew into garbage. `TestRelativeTime`
+  gained the future-timestamp row.
+
 - **A `/settings` reset of a key whose default is UNSET now reaches the running session instead of
   stopping at the file.** `settingsApplied` guarded the live apply on a non-empty value, so
   resetting one of the keys that default to nothing — `web-search-endpoint`, `editor`,
