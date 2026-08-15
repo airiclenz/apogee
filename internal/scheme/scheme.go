@@ -41,11 +41,11 @@ type Scheme struct {
 	// glyph, so anything else that ends well can speak in the same voice.
 	Success string `yaml:"success"` // the ✓ and other "this came off" markers
 	// Warning is the rung between `muted` and `error`: a condition apogee wants noticed but
-	// has not called a fault. Its first consumer is the status line's quiet-time suffix — the
-	// honest report that no engine event has arrived for a while — but the role is named for
-	// the meaning rather than that suffix, so anything else that qualifies rather than fails
-	// can speak in the same voice. A scheme keeps it amber-ish: read past `muted`, short of
-	// the alarm `error` carries.
+	// has not called a fault. Its first consumer is the status line's quiet qualifier —
+	// rendered before the activity clock, the honest report that no engine event has arrived
+	// for a while — but the role is named for the meaning rather than that qualifier, so
+	// anything else that qualifies rather than fails can speak in the same voice. A scheme
+	// keeps it amber-ish: read past `muted`, short of the alarm `error` carries.
 	Warning string `yaml:"warning"` // "worth noticing, not a fault" notices
 	Code    string `yaml:"code"`    // inline `code` + fenced code blocks
 	// ToolHeader is the tool label's own tone, kept apart from Code so a scheme can

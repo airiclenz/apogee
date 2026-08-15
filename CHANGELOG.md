@@ -317,6 +317,14 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- Docs: `Scheme.Warning`'s doc comment now describes the consumer that shipped. It named "the status
+  line's quiet-time suffix", a form that never landed — the stall guard renders as a `quiet`
+  qualifier *before* the single activity clock — so the clause now reads "the status line's quiet
+  qualifier — rendered before the activity clock". The rest of the comment (the `muted`/`error` rung
+  framing and "named for the meaning rather than that qualifier") is unchanged. The `ISSUES.md`
+  section holding the finding is removed, it being that section's only bullet. Comment only — no
+  behaviour change.
+
 - The scheme role count stated in prose is now pinned to the struct.
   `TestRoleTableCoversEveryRole` gained an assertion that `len(roleKeys)` — derived from `Scheme`'s
   `yaml:` tags by reflection — equals the 29 the prose states, with a failure message naming the

@@ -103,7 +103,7 @@ residuals section.
 
 ---
 
-## 3. Fix `Warning`'s stale doc comment
+## 3. Fix `Warning`'s stale doc comment — ✅ DONE (2026-08-15)
 
 **What:** Rewrite the doc comment above `Scheme.Warning`
 (`internal/scheme/scheme.go:43-48`): the sentence naming its first consumer "the status
