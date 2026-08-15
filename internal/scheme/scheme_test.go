@@ -62,6 +62,15 @@ func yamlFor(t *testing.T, values map[string]string) []byte {
 
 func TestRoleTableCoversEveryRole(t *testing.T) {
 	t.Parallel()
+	// The vocabulary's size is stated in prose in three places that nothing else holds to the
+	// struct, so pin it here: roleKeys is built off Scheme's yaml tags by reflection, which makes
+	// this the one assertion a silent struct/prose drift has to pass.
+	const wantRoleCount = 29
+	if len(roleKeys) != wantRoleCount {
+		t.Errorf("Scheme declares %d roles, the prose says %d — update README.md:187, layout.md:94 "+
+			"and newTheme's comment (internal/tui/theme.go:267), then this count",
+			len(roleKeys), wantRoleCount)
+	}
 	if len(roleTable) != len(roleKeys) {
 		t.Fatalf("roleTable has %d roles, Scheme declares %d", len(roleTable), len(roleKeys))
 	}

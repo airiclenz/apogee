@@ -317,6 +317,15 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- The scheme role count stated in prose is now pinned to the struct.
+  `TestRoleTableCoversEveryRole` gained an assertion that `len(roleKeys)` — derived from `Scheme`'s
+  `yaml:` tags by reflection — equals the 29 the prose states, with a failure message naming the
+  three sites to update on drift: `README.md:187`, `layout.md:94` and `newTheme`'s comment
+  (`internal/tui/theme.go:267`). The agreement was held by hand until now, and `newTheme`'s count
+  sat silently stale at 26 across three role additions before the stall-guard run corrected it; the
+  next role addition fails the suite instead. The `ISSUES.md` bullet asking for the pin is removed.
+  Tests only — no behaviour change.
+
 - Docs: ADR 0040 gains an `Amendment (2026-08-15)` section recording the four colour roles that
   landed after `tool-header`, whose trail stopped at the 25th key. One entry each, in landing order:
   `tool-leader` (the dotted run to the outcome slot, split off `muted`, 26th key, `ab53c09`, landed

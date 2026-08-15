@@ -82,7 +82,7 @@ so the record stays coherent with 29 keys. Remove the ADR-0040 bullet from `ISSU
 
 ---
 
-## 2. Pin the scheme role count to the struct
+## 2. Pin the scheme role count to the struct — ✅ DONE (2026-08-15)
 
 **What:** In `internal/scheme/scheme_test.go`, extend `TestRoleTableCoversEveryRole` (`:63`,
 which already compares `len(roleTable)` to `len(roleKeys)` but pins no absolute number) with
