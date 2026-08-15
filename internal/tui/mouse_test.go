@@ -163,6 +163,87 @@ func TestClickPositionsCaretMultiline(t *testing.T) {
 	}
 }
 
+// fillsTheInputWidth returns a run of the given rune long enough to make its display width REACH
+// the prompt's wrap width exactly — the geometry bubbles' wrap answers with a PHANTOM trailing
+// sub-line, the seat it keeps for a caret past a full line. The width is asked of the widget
+// (Width() is the wrap width after the prompt gutter and borders come off) rather than restated,
+// so the fill holds whatever the frame around the box costs.
+func fillsTheInputWidth(t *testing.T, m Model, r rune) string {
+	t.Helper()
+	cells := uniseg.StringWidth(string(r))
+	if cells < 1 {
+		t.Fatalf("fill rune %q measures %d cells", r, cells)
+	}
+	fill := strings.Repeat(string(r), m.input.Width()/cells)
+	if pad := m.input.Width() - uniseg.StringWidth(fill); pad > 0 {
+		fill += strings.Repeat("a", pad) // an odd width tops up with a narrow rune
+	}
+	return fill
+}
+
+// TestClickBelowPhantomWrappedLineSeatsCaret is the mouse-path regression for the phantom
+// trailing sub-line. bubbles' wrap appends one to a logical line whose content REACHES the width,
+// and its CursorDown can never enter it — the step's column guess clamps at len(line)-1 while that
+// sub-line starts at len(line) — so a walk of bare CursorDowns stood still on such a line and a
+// click on the row BELOW it landed a row short, on the wrong logical line entirely. The Height-aware
+// walk crosses the whole logical line instead, and the phantom row is itself clickable: a click
+// there seats the caret at that line's END, where CursorEnd puts the keyboard's.
+//
+// The CJK case is the same geometry with wide runes, which shift the fill point: the line reaches
+// the width in half as many runes, so a walk that counted runes rather than cells would miss it.
+func TestClickBelowPhantomWrappedLineSeatsCaret(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		fill rune
+	}{
+		{"narrow runes", 'a'},
+		{"wide runes", '日'},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fill := fillsTheInputWidth(t, modelWithInput(t, ""), tc.fill)
+			m := modelWithInput(t, fill+"\nsecond")
+
+			// The geometry the test rests on: the first logical line wraps to TWO visual rows (its
+			// content plus the phantom), both on screen, unscrolled.
+			m.input.MoveToBegin()
+			if got := m.input.LineInfo().Height; got != 2 {
+				t.Fatalf("first logical line occupies %d visual rows, want 2 (content + phantom)", got)
+			}
+			x0, y0, _, h := m.inputContentRect()
+			if h < 3 || m.input.ScrollYOffset() != 0 {
+				t.Fatalf("box shows %d rows at scroll offset %d, want ≥3 rows unscrolled",
+					h, m.input.ScrollYOffset())
+			}
+
+			// A click on the row BELOW the phantom names the second logical line's first cell.
+			below := step(t, m, leftClick(x0, y0+2))
+			if below.input.Line() != 1 || below.input.Column() != 0 {
+				t.Fatalf("click below the phantom row seated the caret at row %d col %d, want row 1 col 0",
+					below.input.Line(), below.input.Column())
+			}
+			if want := len([]rune(fill)) + 1; below.sel.anchorOff != want {
+				t.Fatalf("anchorOff = %d, want %d (the rune after the newline)", below.sel.anchorOff, want)
+			}
+			// The auto-grow re-clamp runs on that same seat and must not move it.
+			below.reseatInput()
+			if below.input.Line() != 1 || below.input.Column() != 0 {
+				t.Fatalf("reseatInput moved the caret to row %d col %d", below.input.Line(), below.input.Column())
+			}
+
+			// A click ON the phantom row seats the caret at the first logical line's end.
+			phantom := step(t, m, leftClick(x0, y0+1))
+			if phantom.input.Line() != 0 || phantom.input.Column() != len([]rune(fill)) {
+				t.Fatalf("click on the phantom row seated the caret at row %d col %d, want row 0 col %d",
+					phantom.input.Line(), phantom.input.Column(), len([]rune(fill)))
+			}
+			phantom.reseatInput()
+			if phantom.input.Line() != 0 || phantom.input.Column() != len([]rune(fill)) {
+				t.Fatalf("reseatInput moved the caret to row %d col %d", phantom.input.Line(), phantom.input.Column())
+			}
+		})
+	}
+}
+
 // TestDragSelectsAndCopies drives press → drag → release and checks the selection span, the
 // copy Cmd, and the confirmation flash.
 func TestDragSelectsAndCopies(t *testing.T) {

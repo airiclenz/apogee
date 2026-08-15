@@ -653,6 +653,23 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **A prompt click below a phantom-wrapped line now seats the caret exactly.** bubbles' `wrap`
+  appends a PHANTOM trailing sub-line to a logical line whose content reaches the width — the seat
+  it keeps for a caret past a full line — and its `CursorDown` can never enter it: the step's column
+  guess clamps at `len(line)-1` while that sub-line begins at `len(line)`. The mouse path's
+  `reseatCaret` was a bare run of those steps, so it stood still on such a line and a click on the
+  row BELOW it landed a row short, on the wrong logical line entirely, with the drag-selection and
+  the clipboard following the caret there. It is now the Height-aware walk `seatCaret` already
+  expressed for logical targets, aimed at a visual one: it steps whole logical lines (`CursorEnd`,
+  which IS the last sub-row phantom included, then `CursorDown`, which therefore always reaches the
+  next line) while accumulating each line's visual row count from the widget's own
+  `LineInfo().Height`, then seats the residual sub-row inside the line the target falls in. The
+  phantom row is itself clickable and seats the caret at that line's END, where `CursorEnd` puts the
+  keyboard's — never skipped. Every count comes off the widget, which is the wrap oracle (ADR 0030
+  §6), so nothing here re-derives a geometry the terminal did not draw; the walk closes with the
+  same no-op `SetHeight` re-clamp `seatCaret` ends with, so a click deep in a grown box no longer
+  leaves the view on a stale downward offset either.
+
 - **A hang the block cannot hold now collapses to zero instead of overrunning the width cap.**
   `hangingPrefixes` floored its wrap at one column and then prepended the marker anyway, so a
   two-column bullet in a one- or two-column block composed a three-cell line — layout.md's absolute

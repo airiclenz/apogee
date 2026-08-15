@@ -220,19 +220,62 @@ func (e lineEditor) textWithCaret(caret string) string {
 }
 
 // reseatCaret drives the textarea caret to an absolute visual (soft-wrapped) row through the
-// widget's own primitives: MoveToBegin resets to the top — which "unscrolls" its internal
-// viewport to offset 0 — and each CursorDown steps down one visual row, clamping at the end.
-// Walking down from the top re-clamps a scroll offset the widget left stale (its SetHeight only
-// repositions when the caret falls outside the view, never when the box grows), so the caret
-// lands on its real visual row with the least scroll that keeps it visible. It re-derives none
-// of the textarea's wrap, so the geometry holds across bubbles releases. It serves caretTo — a
-// mouse click names a VISUAL row, which is the only thing this walk can express; a caret named by
-// a LOGICAL row and column is seated by seatCaret instead, whose step cannot stall.
+// widget's own primitives. It serves caretTo — a mouse click names a VISUAL row, which is the
+// only thing this walk can express; a caret named by a LOGICAL row and column is seated by
+// seatCaret instead. It re-derives none of the textarea's wrap: every count it walks by is the
+// widget's own LineInfo, which is the wrap oracle (ADR 0030 §6), so the geometry holds across
+// bubbles releases and cannot disagree with what was drawn.
+//
+// The walk is seatCaret's, aimed at a visual target instead of a logical one, and it is that
+// shape for seatCaret's reason. A bare run of CursorDowns — what this used to be — cannot cross a
+// logical line that wraps to a PHANTOM trailing sub-line (bubbles' wrap appends one to a line
+// whose content reaches the width), because the step's column guess clamps at len(line)-1 and
+// that sub-line starts at len(line): the caret stands still, and a click below such a line lands
+// a row short. So the OUTER loop steps whole logical lines — CursorEnd, which IS the last sub-row
+// phantom included, then CursorDown, which therefore always reaches the next logical line —
+// accumulating each line's visual row count (LineInfo().Height) until the target row falls inside
+// the line the caret stands on. seatCaret's no-progress break ends it on the last logical line,
+// where a target row past the value's end clamps into the value instead of running away.
+//
+// The INNER loop then seats the residual sub-row from the line's start. CursorDown moves off a
+// logical line only from its last sub-row, and the residual is never the last one on a line the
+// outer loop stopped inside, so the step stays within the line; when it cannot advance, the row it
+// failed to enter is that phantom trailing one and CursorEnd is what enters it. That is the
+// binding call for a click there: the phantom row is clickable and seats the caret at the logical
+// line's END — the same seat ⏎'s neighbour CursorEnd gives the keyboard — never skipped.
+//
+// MoveToBegin unscrolls the widget's internal viewport to offset 0 first and the walk down
+// re-clamps it, so the caret lands on its real visual row with the least scroll that keeps it
+// visible. The closing SetHeight — at the height the box already has, hence a no-op to the
+// geometry — re-runs the widget's own repositioning on the seated caret without moving it, the
+// same re-clamp seatCaret ends with and for the same reason (bubbles repositions only when the
+// caret falls OUTSIDE the view, so a box that just grew keeps a stale downward offset).
 func (e *lineEditor) reseatCaret(visRow int) {
 	e.input.MoveToBegin()
-	for i := 0; i < visRow; i++ {
-		e.input.CursorDown()
+	rows := 0 // visual rows the logical lines already crossed account for
+	for {
+		height := e.input.LineInfo().Height
+		if visRow < rows+height {
+			break // the target row falls inside the line the caret stands on
+		}
+		before := e.input.Line()
+		e.input.CursorEnd()  // the logical line's last wrapped sub-row, phantom included
+		e.input.CursorDown() // ⇒ the next logical line
+		if e.input.Line() == before {
+			break // the last logical line: a row past the value's end clamps into it
+		}
+		rows += height
 	}
+	e.input.CursorStart() // the walk may have landed mid-line; the residual counts from sub-row 0
+	for target := visRow - rows; e.input.LineInfo().RowOffset < target; {
+		at := e.input.LineInfo().RowOffset
+		e.input.CursorDown()
+		if e.input.LineInfo().RowOffset <= at {
+			e.input.CursorEnd() // the phantom trailing sub-row: only the line's end enters it
+			break
+		}
+	}
+	e.input.SetHeight(e.input.Height())
 }
 
 // caretTo positions the textarea caret at the given absolute visual cell and returns the
@@ -265,7 +308,8 @@ func (e lineEditor) caretByteOffset() int {
 // seatCaret drives the textarea caret to a LOGICAL (row, column) and re-clamps the widget's
 // internal scroll onto it — the one seat both the completion splice (caretToOffset) and the
 // auto-grow re-clamp (reseatInput) are expressed in. Like reseatCaret it re-derives none of the
-// textarea's wrap; unlike reseatCaret it steps LOGICAL lines, which is what makes it total.
+// textarea's wrap and steps whole LOGICAL lines, which is what makes both total; unlike
+// reseatCaret its target IS a logical row, so it needs no visual-row arithmetic on top.
 //
 // The step is Height-aware, and that is the whole point. bubbles' CursorDown leaves a logical line
 // only when the caret already sits on that line's LAST wrapped sub-row (RowOffset+1 >= Height);

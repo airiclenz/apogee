@@ -168,6 +168,77 @@ func TestPromptEditorCaretToOffsetCrossesWrappedRows(t *testing.T) {
 	}
 }
 
+// reseatCaret must reach EVERY visual row a draft wraps to, the phantom trailing sub-line
+// included. bubbles' CursorDown steps one visual row and its column guess clamps at len(line)-1,
+// which is one short of where that sub-line begins, so a walk of bare CursorDowns stalls on a
+// logical line that carries one: every row below it then seats a row short, on the wrong logical
+// line entirely. The Height-aware walk crosses whole logical lines instead, and reads its counts
+// off the widget.
+//
+// wrapRowStarts is the independent mirror the assertion is written against — it decomposes a
+// logical line into visual rows the way the widget does (pinned to it by
+// TestInputContentRowsMirrorsTheWidget) — so the walk is checked against a second derivation of
+// the geometry rather than against itself. Every row of the draft is asked for in turn, at column
+// 0, and must land on that row's logical line at that row's first rune; the phantom row's first
+// rune is the line's end, which is exactly where a click on it belongs.
+func TestPromptEditorReseatCaretReachesEveryVisualRow(t *testing.T) {
+	cases := []struct {
+		name  string
+		width int
+		value string
+	}{
+		// A first line that ends with a space exactly at a row boundary — the phantom geometry —
+		// at the app's real text width and at a narrow one.
+		{"phantom row at app width", 76, strings.Repeat("aaa ", 19) + "\nplease /rev"},
+		{"phantom row at width 8", 8, strings.Repeat("wrapped ", 20) + "\nplease /rev"},
+		// Three logical lines, the middle one phantom-wrapped: the walk crosses two of them.
+		{"phantom row in the middle", 76, "head\n" + strings.Repeat("aaa ", 19) + "\ntail past it"},
+		// An ordinarily wrapped draft, and one of wide runes, still land row for row.
+		{"plain wrap", 20, strings.Repeat("wrapped ", 12) + "\nsecond line, well past the wrap"},
+		{"wide runes", 20, "日本語のテキストです ここに " + strings.Repeat("あ", 30) + "\nsecond 🎉 line"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newPromptEditor(defaultCursorShape, lipgloss.Color(scheme.Default().Surface))
+			e.input.SetWidth(tc.width)
+			e.input.SetHeight(3) // shorter than the draft, so the scroll re-clamp runs for real
+			e.input.SetValue(tc.value)
+
+			type seat struct{ line, col int }
+			var want []seat
+			lines := strings.Split(tc.value, "\n")
+			for i, line := range lines {
+				for _, start := range wrapRowStarts([]rune(line), e.input.Width()) {
+					want = append(want, seat{i, start})
+				}
+			}
+			if len(want) <= len(lines) {
+				t.Fatal("no logical line wraps at this width; the walk is never asked to cross one")
+			}
+
+			for visRow, w := range want {
+				e.caretTo(visRow, 0)
+				if e.input.Line() != w.line || e.input.Column() != w.col {
+					t.Fatalf("caretTo(visual row %d) seated the caret at line %d col %d, want line %d col %d",
+						visRow, e.input.Line(), e.input.Column(), w.line, w.col)
+				}
+				// The auto-grow re-clamp runs on the same seat and must not move the caret either.
+				e.reseatInput()
+				if e.input.Line() != w.line || e.input.Column() != w.col {
+					t.Fatalf("reseatInput moved the caret off visual row %d to line %d col %d",
+						visRow, e.input.Line(), e.input.Column())
+				}
+			}
+
+			// A row below the last one clamps into the value rather than running away.
+			e.caretTo(len(want)+9, 0)
+			if got, last := e.input.Line(), len(lines)-1; got != last {
+				t.Errorf("caretTo(past the last row) seated the caret on line %d, want %d", got, last)
+			}
+		})
+	}
+}
+
 // rows grows one row per logical line and clamps at maxInputRows.
 func TestPromptEditorRowsGrowsAndClamps(t *testing.T) {
 	e := newPromptEditor(defaultCursorShape, lipgloss.Color(scheme.Default().Surface))

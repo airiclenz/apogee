@@ -77,16 +77,6 @@ as the behavioral oracle, not the TDD. On send the webview posts `{text, skillId
 - **[P2] Undo all agent changes** — batch revert of a session's file writes (document that
   terminal side-effects are not undone, as the extension does).
 
-- **[P2] A prompt click below a phantom-wrapped line lands imprecisely** — uncovered while fixing
-  the caret walk for mid-string completion (2026-07-28). bubbles' `wrap` appends a trailing
-  sub-line that `CursorDown` can never enter, so the MOUSE path's `reseatCaret` (which seats a
-  click's *visual* row) can land a row short below such a line. Pre-existing, bounded (its loop
-  cannot spin), and keyboard-only editing is unaffected — the logical-row walk both
-  `caretToOffset` and `reseatInput` express was fixed (`seatCaret` — the caret family now lives in
-  `internal/tui/lineeditor.go`, `reseatCaret` at `:212`, `seatCaret` at `:246`;
-  [ADR 0027](docs/adr/0027-one-slash-namespace-with-inline-skill-tokens.md)). The fix wants the
-  same Height-aware step expressed for a visual target.
-
 **Related (parked below):** per-tool approval overrides (`toolApprovalOverrides`:
 automatic/ask-first/excluded) — apogee-code surfaces this in config; apogee has the internal
 disposition table but no user-facing override. See *Configurable tool × mode security matrix*.

@@ -129,7 +129,17 @@ normal widths.
 
 **Commit:** `fix(tui): a hang the block cannot hold collapses to zero instead of overrunning the cap`
 
-## 3. A prompt click below a phantom-wrapped line seats the caret exactly
+## 3. A prompt click below a phantom-wrapped line seats the caret exactly — ✅ DONE (2026-08-15)
+
+NOTES (2026-08-15): the item's Tests line names only the mouse-path test, but its Files line names
+`prompteditor_test.go` too — so the walk also gained a unit-level sweep there,
+`TestPromptEditorReseatCaretReachesEveryVisualRow`, asserting every visual row of five drafts
+(three phantom geometries, a plain wrap, a wide-rune one) seats on that row's logical line at that
+row's first rune, written against `wrapRowStarts` as the independent mirror the item's own text
+sanctions. Both new tests were confirmed RED against the old `reseatCaret` and green after.
+NOTES (2026-08-15): one line of `seatCaret`'s doc comment changed with it — it read "unlike
+reseatCaret it steps LOGICAL lines, which is what makes it total", which this item's rewrite made
+false. No behaviour touched; leaving a comment that misdescribes its neighbour is the deviation.
 
 **What:** the MOUSE path's `reseatCaret` (`internal/tui/lineeditor.go:231`) is a bare
 `MoveToBegin` + `visRow × CursorDown` loop, and bubbles' `CursorDown` can never enter the
