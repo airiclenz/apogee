@@ -191,7 +191,7 @@ func TestMergeDangerousRules_ProjectCannotDissolveFloorByID(t *testing.T) {
 			// End-to-end: the guard built from the merged set still catches the call.
 			d := NewDangerousActionGuard(merged).Inspect(tc.probe, nil)
 			if d.Tier != tc.wantTier {
-				t.Errorf("Inspect(probe) tier = %v, want %v — the project add shrank the shipped rule's coverage",
+				t.Errorf("Inspect(probe) tier = %d, want %d — the project add shrank the shipped rule's coverage",
 					d.Tier, tc.wantTier)
 			}
 			if d.RuleID != tc.shipped.ID {
@@ -234,7 +234,7 @@ func TestDefaultDangerousRules_ControlPlanesAreOnTheFloor(t *testing.T) {
 			d := g.Inspect(tc.call, nil)
 
 			if d.Tier != TierHardRefuse {
-				t.Fatalf("Inspect(%q) tier = %v, want TierHardRefuse (rule=%q)", tc.name, d.Tier, d.RuleID)
+				t.Fatalf("Inspect(%q) tier = %d, want TierHardRefuse (rule=%q)", tc.name, d.Tier, d.RuleID)
 			}
 			if d.RuleID != tc.ruleID {
 				t.Errorf("Inspect(%q) rule = %q, want %q", tc.name, d.RuleID, tc.ruleID)
@@ -274,7 +274,7 @@ func TestDefaultDangerousRules_ControlPlaneNearMissesNotBlocked(t *testing.T) {
 			d := g.Inspect(tc.call, nil)
 
 			if d.Triggered() {
-				t.Fatalf("Inspect(%q) wrongly triggered: tier=%v rule=%q reason=%q", tc.name, d.Tier, d.RuleID, d.Reason)
+				t.Fatalf("Inspect(%q) wrongly triggered: tier=%d rule=%q reason=%q", tc.name, d.Tier, d.RuleID, d.Reason)
 			}
 		})
 	}
@@ -313,12 +313,12 @@ func TestDefaultDangerousRules_HomeAnchoredRulesMatchTheMacOSHome(t *testing.T) 
 
 			if tc.wantRule == "" {
 				if d.Triggered() {
-					t.Fatalf("Inspect(%q) wrongly triggered: tier=%v rule=%q reason=%q", tc.name, d.Tier, d.RuleID, d.Reason)
+					t.Fatalf("Inspect(%q) wrongly triggered: tier=%d rule=%q reason=%q", tc.name, d.Tier, d.RuleID, d.Reason)
 				}
 				return
 			}
 			if d.Tier != TierHardRefuse {
-				t.Fatalf("Inspect(%q) tier = %v, want TierHardRefuse (rule=%q)", tc.name, d.Tier, d.RuleID)
+				t.Fatalf("Inspect(%q) tier = %d, want TierHardRefuse (rule=%q)", tc.name, d.Tier, d.RuleID)
 			}
 			if d.RuleID != tc.wantRule {
 				t.Errorf("Inspect(%q) rule = %q, want %q", tc.name, d.RuleID, tc.wantRule)
@@ -363,12 +363,12 @@ func TestDefaultDangerousRules_HomeAnchoredRulesMatchTheWindowsHome(t *testing.T
 
 			if tc.wantRule == "" {
 				if d.Triggered() {
-					t.Fatalf("Inspect(%q) wrongly triggered: tier=%v rule=%q reason=%q", tc.name, d.Tier, d.RuleID, d.Reason)
+					t.Fatalf("Inspect(%q) wrongly triggered: tier=%d rule=%q reason=%q", tc.name, d.Tier, d.RuleID, d.Reason)
 				}
 				return
 			}
 			if d.Tier != TierHardRefuse {
-				t.Fatalf("Inspect(%q) tier = %v, want TierHardRefuse (rule=%q)", tc.name, d.Tier, d.RuleID)
+				t.Fatalf("Inspect(%q) tier = %d, want TierHardRefuse (rule=%q)", tc.name, d.Tier, d.RuleID)
 			}
 			if d.RuleID != tc.wantRule {
 				t.Errorf("Inspect(%q) rule = %q, want %q", tc.name, d.RuleID, tc.wantRule)

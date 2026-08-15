@@ -363,6 +363,16 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **The dangerous-action guard's dead `Tier.String()` is gone.** The method was exported, rendered
+  the two tiers as `"force-approval"` / `"hard-refuse"` for audit and log lines, and had no caller
+  anywhere in the repo — the audit trail states its own decision strings — so it sat at 0% coverage
+  on the guard path, the one path where uncovered code is least welcome. The only thing that ever
+  reached it was implicit `Stringer` dispatch from `%v` verbs inside test FAILURE messages; those
+  verbs now read `%d`, so a failing assertion prints the numeric tier beside the `TierHardRefuse` /
+  `TierForceApproval` constant its message already names. No production code ever formatted a
+  `Tier`, so no user-visible or audit output changed, and re-adding the method is a five-line change
+  if a caller ever appears.
+
 - **Every `response-reserve:` arrival site now has the reserve-specific test its
   `context-window:` / `max-output-tokens:` analogue already had.** The share reached four sites on
   the strength of the neighbouring bounds' coverage alone: a scheduled Firing

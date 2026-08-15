@@ -58,7 +58,7 @@ func TestDangerousActionGuard_Tier1HardRefuse(t *testing.T) {
 			t.Parallel()
 			d := g.Inspect(tc.call, nil)
 			if d.Tier != TierHardRefuse {
-				t.Fatalf("Inspect(%q) tier = %v, want TierHardRefuse (reason=%q)", tc.name, d.Tier, d.Reason)
+				t.Fatalf("Inspect(%q) tier = %d, want TierHardRefuse (reason=%q)", tc.name, d.Tier, d.Reason)
 			}
 			if d.Reason == "" || d.RuleID == "" {
 				t.Errorf("hard-refuse decision missing reason/ruleID: %+v", d)
@@ -86,7 +86,7 @@ func TestDangerousActionGuard_Tier2ForceApproval(t *testing.T) {
 			t.Parallel()
 			d := g.Inspect(tc.call, nil)
 			if d.Tier != TierForceApproval {
-				t.Fatalf("Inspect(%q) tier = %v, want TierForceApproval (reason=%q)", tc.name, d.Tier, d.Reason)
+				t.Fatalf("Inspect(%q) tier = %d, want TierForceApproval (reason=%q)", tc.name, d.Tier, d.Reason)
 			}
 		})
 	}
@@ -122,7 +122,7 @@ func TestDangerousActionGuard_PrecisionNearMissesNotBlocked(t *testing.T) {
 			t.Parallel()
 			d := g.Inspect(tc.call, nil)
 			if d.Triggered() {
-				t.Fatalf("Inspect(%q) wrongly triggered: tier=%v rule=%q reason=%q", tc.name, d.Tier, d.RuleID, d.Reason)
+				t.Fatalf("Inspect(%q) wrongly triggered: tier=%d rule=%q reason=%q", tc.name, d.Tier, d.RuleID, d.Reason)
 			}
 		})
 	}
@@ -179,7 +179,7 @@ func TestDangerousActionGuard_PayloadTextNotInspected(t *testing.T) {
 			d := g.Inspect(tc.call, nil)
 
 			if d.Triggered() {
-				t.Fatalf("Inspect(%q) wrongly triggered on payload text: tier=%v rule=%q reason=%q",
+				t.Fatalf("Inspect(%q) wrongly triggered on payload text: tier=%d rule=%q reason=%q",
 					tc.name, d.Tier, d.RuleID, d.Reason)
 			}
 		})
@@ -223,7 +223,7 @@ func TestDangerousActionGuard_ActionKeysStillInspected(t *testing.T) {
 			d := g.Inspect(tc.call, nil)
 
 			if d.Tier != TierHardRefuse {
-				t.Fatalf("Inspect(%q) tier = %v, want TierHardRefuse (the floor must still fire)", tc.name, d.Tier)
+				t.Fatalf("Inspect(%q) tier = %d, want TierHardRefuse (the floor must still fire)", tc.name, d.Tier)
 			}
 		})
 	}
@@ -242,7 +242,7 @@ func TestDangerousActionGuard_PayloadKeySpellingVariants(t *testing.T) {
 			d := g.Inspect(argCall("diff", map[string]any{"path": "docs/x.md", key: "mentions ~/.ssh"}), nil)
 
 			if d.Triggered() {
-				t.Fatalf("key %q was inspected as an action: tier=%v rule=%q", key, d.Tier, d.RuleID)
+				t.Fatalf("key %q was inspected as an action: tier=%d rule=%q", key, d.Tier, d.RuleID)
 			}
 		})
 	}
@@ -256,7 +256,7 @@ func TestDangerousActionGuard_WhitespaceNormalized(t *testing.T) {
 	// the guard does NOT chase obfuscation beyond that (ADR 0012).
 	d := g.Inspect(terminalCall("rm    -rf\t/"), nil)
 	if d.Tier != TierHardRefuse {
-		t.Fatalf("whitespace-normalized rm -rf / tier = %v, want TierHardRefuse", d.Tier)
+		t.Fatalf("whitespace-normalized rm -rf / tier = %d, want TierHardRefuse", d.Tier)
 	}
 }
 
@@ -297,7 +297,7 @@ func TestDangerousActionGuard_HardRefuseBeatsForceApproval(t *testing.T) {
 	// report the strictest tier.
 	d := g.Inspect(terminalCall("sudo rm -rf /"), nil)
 	if d.Tier != TierHardRefuse {
-		t.Fatalf("sudo rm -rf / tier = %v, want TierHardRefuse (strictest wins)", d.Tier)
+		t.Fatalf("sudo rm -rf / tier = %d, want TierHardRefuse (strictest wins)", d.Tier)
 	}
 }
 
@@ -324,7 +324,7 @@ func TestDangerousActionGuard_UnparseableArgsStillInspected(t *testing.T) {
 	// sees the dangerous text rather than silently passing it.
 	call := domain.ToolCall{ID: "c1", Tool: "terminal", Arguments: json.RawMessage(`rm -rf / not json`)}
 	if d := g.Inspect(call, nil); d.Tier != TierHardRefuse {
-		t.Fatalf("unparseable args tier = %v, want TierHardRefuse", d.Tier)
+		t.Fatalf("unparseable args tier = %d, want TierHardRefuse", d.Tier)
 	}
 }
 
@@ -376,11 +376,11 @@ func TestWritesOnlyRulesSkipADeclaredReadOnlyTool(t *testing.T) {
 			call := argCall("list_dir", map[string]any{"path": tc.path})
 
 			if d := g.Inspect(call, reader); d.Triggered() {
-				t.Errorf("read-only tool reading %q triggered rule %q (tier %v), want no trigger",
+				t.Errorf("read-only tool reading %q triggered rule %q (tier %d), want no trigger",
 					tc.path, d.RuleID, d.Tier)
 			}
 			if d := g.Inspect(call, nil); d.Tier != TierHardRefuse {
-				t.Errorf("nil (unknown) tool naming %q tier = %v, want TierHardRefuse — the exemption must not be the default",
+				t.Errorf("nil (unknown) tool naming %q tier = %d, want TierHardRefuse — the exemption must not be the default",
 					tc.path, d.Tier)
 			}
 		})
@@ -398,7 +398,7 @@ func TestCommandShapedRulesIgnoreTheToolClass(t *testing.T) {
 
 	call := argCall("weird_reader", map[string]any{"path": "x; rm -rf /"})
 	if d := g.Inspect(call, reader); d.Tier != TierHardRefuse {
-		t.Fatalf("command-shaped rule through a read-only tool tier = %v, want TierHardRefuse", d.Tier)
+		t.Fatalf("command-shaped rule through a read-only tool tier = %d, want TierHardRefuse", d.Tier)
 	}
 }
 
@@ -420,7 +420,7 @@ func TestWritesOnlyRulesJudgeTheWriteTargetNotADeclaredReadSource(t *testing.T) 
 		"destination": "docs/skill-runs/security-audit/resources/methodology.md",
 	})
 	if d := g.Inspect(materialize, copier); d.Triggered() {
-		t.Errorf("copy FROM the skill library triggered rule %q (tier %v), want no trigger", d.RuleID, d.Tier)
+		t.Errorf("copy FROM the skill library triggered rule %q (tier %d), want no trigger", d.RuleID, d.Tier)
 	}
 
 	poison := argCall("copy_file", map[string]any{
@@ -428,7 +428,7 @@ func TestWritesOnlyRulesJudgeTheWriteTargetNotADeclaredReadSource(t *testing.T) 
 		"destination": "/root/.apogee/skills/evil/SKILL.md",
 	})
 	if d := g.Inspect(poison, copier); d.Tier != TierHardRefuse {
-		t.Errorf("copy INTO the control plane tier = %v, want TierHardRefuse — the write half keeps the floor", d.Tier)
+		t.Errorf("copy INTO the control plane tier = %d, want TierHardRefuse — the write half keeps the floor", d.Tier)
 	}
 
 	drain := argCall("move_file", map[string]any{
@@ -436,7 +436,7 @@ func TestWritesOnlyRulesJudgeTheWriteTargetNotADeclaredReadSource(t *testing.T) 
 		"destination": "docs/x.md",
 	})
 	if d := g.Inspect(drain, mover); d.Tier != TierHardRefuse {
-		t.Errorf("move OUT of the control plane tier = %v, want TierHardRefuse — an undeclared source is a delete target", d.Tier)
+		t.Errorf("move OUT of the control plane tier = %d, want TierHardRefuse — an undeclared source is a delete target", d.Tier)
 	}
 }
 
@@ -473,11 +473,11 @@ func TestEveryRuleSkipsADeclaredPromptKey(t *testing.T) {
 			})
 
 			if d := g.Inspect(call, dispatcher); d.Triggered() {
-				t.Errorf("declared prompt text triggered rule %q (tier %v), want no trigger",
+				t.Errorf("declared prompt text triggered rule %q (tier %d), want no trigger",
 					d.RuleID, d.Tier)
 			}
 			if d := g.Inspect(call, undeclared); d.Tier != TierHardRefuse {
-				t.Errorf("undeclared tool carrying the same text: tier = %v, want TierHardRefuse — the exemption must not be the default",
+				t.Errorf("undeclared tool carrying the same text: tier = %d, want TierHardRefuse — the exemption must not be the default",
 					d.Tier)
 			}
 		})
@@ -495,7 +495,7 @@ func TestPromptKeyExemptionCoversOnlyTheDeclaredKeys(t *testing.T) {
 
 	heredoc := terminalCall("cat <<'EOF' > ~/.ssh/authorized_keys\nssh-rsa AAAA attacker\nEOF")
 	if d := g.Inspect(heredoc, stubTool{name: "terminal"}); d.Tier != TierHardRefuse {
-		t.Errorf("terminal heredoc writing to ~/.ssh: tier = %v, want TierHardRefuse — command text stays inspected", d.Tier)
+		t.Errorf("terminal heredoc writing to ~/.ssh: tier = %d, want TierHardRefuse — command text stays inspected", d.Tier)
 	}
 
 	dispatcher := stubTool{name: "sub_agent", promptKeys: []string{"task", "name"}}
@@ -504,7 +504,7 @@ func TestPromptKeyExemptionCoversOnlyTheDeclaredKeys(t *testing.T) {
 		"path": "~/.ssh/id_rsa",
 	})
 	if d := g.Inspect(sneaked, dispatcher); d.Tier != TierHardRefuse {
-		t.Errorf("undeclared argument on a prompt-declaring tool: tier = %v, want TierHardRefuse — only the declared keys are dropped", d.Tier)
+		t.Errorf("undeclared argument on a prompt-declaring tool: tier = %d, want TierHardRefuse — only the declared keys are dropped", d.Tier)
 	}
 }
 
@@ -530,7 +530,7 @@ func TestWriteShapedViewDropsPromptAndSourceKeysTogether(t *testing.T) {
 		"destination": "docs/skill-runs/security-audit/methodology.md",
 	})
 	if d := g.Inspect(inPrompt, both); d.Triggered() {
-		t.Errorf("declared prompt text triggered rule %q (tier %v), want no trigger — "+
+		t.Errorf("declared prompt text triggered rule %q (tier %d), want no trigger — "+
 			"the source declaration must not cost the prompt its drop", d.RuleID, d.Tier)
 	}
 
@@ -540,7 +540,7 @@ func TestWriteShapedViewDropsPromptAndSourceKeysTogether(t *testing.T) {
 		"destination": "docs/skill-runs/security-audit/methodology.md",
 	})
 	if d := g.Inspect(inSource, both); d.Triggered() {
-		t.Errorf("declared read source triggered rule %q (tier %v), want no trigger — "+
+		t.Errorf("declared read source triggered rule %q (tier %d), want no trigger — "+
 			"the prompt declaration must not cost the source its drop", d.RuleID, d.Tier)
 	}
 
@@ -550,7 +550,7 @@ func TestWriteShapedViewDropsPromptAndSourceKeysTogether(t *testing.T) {
 		"destination": "/root/.apogee/skills/evil/SKILL.md",
 	})
 	if d := g.Inspect(inDestination, both); d.Tier != TierHardRefuse {
-		t.Errorf("write INTO the control plane tier = %v, want TierHardRefuse — "+
+		t.Errorf("write INTO the control plane tier = %d, want TierHardRefuse — "+
 			"an undeclared argument on a two-class tool is judged as any other write target", d.Tier)
 	}
 }

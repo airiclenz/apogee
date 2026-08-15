@@ -556,7 +556,7 @@ func TestCopyFile_GuardJudgesOnlyTheDestination(t *testing.T) {
 	})
 	materialize.Tool = copyFileSpec.name
 	if d := guard.Inspect(materialize, copier); d.Triggered() {
-		t.Errorf("copy FROM the skill library triggered rule %q (tier %v), want no trigger", d.RuleID, d.Tier)
+		t.Errorf("copy FROM the skill library triggered rule %q (tier %d), want no trigger", d.RuleID, d.Tier)
 	}
 
 	poison := callWith(t, "c2", map[string]any{
@@ -565,7 +565,7 @@ func TestCopyFile_GuardJudgesOnlyTheDestination(t *testing.T) {
 	})
 	poison.Tool = copyFileSpec.name
 	if d := guard.Inspect(poison, copier); d.Tier != security.TierHardRefuse {
-		t.Errorf("copy INTO the control plane tier = %v, want TierHardRefuse", d.Tier)
+		t.Errorf("copy INTO the control plane tier = %d, want TierHardRefuse", d.Tier)
 	}
 
 	drain := callWith(t, "c3", map[string]any{
@@ -574,7 +574,7 @@ func TestCopyFile_GuardJudgesOnlyTheDestination(t *testing.T) {
 	})
 	drain.Tool = moveFileSpec.name
 	if d := guard.Inspect(drain, mover); d.Tier != security.TierHardRefuse {
-		t.Errorf("move OUT of the control plane tier = %v, want TierHardRefuse", d.Tier)
+		t.Errorf("move OUT of the control plane tier = %d, want TierHardRefuse", d.Tier)
 	}
 }
 

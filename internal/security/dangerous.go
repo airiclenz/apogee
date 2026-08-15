@@ -30,18 +30,6 @@ const (
 	TierHardRefuse
 )
 
-// String renders a Tier for audit/log lines.
-func (t Tier) String() string {
-	switch t {
-	case TierForceApproval:
-		return "force-approval"
-	case TierHardRefuse:
-		return "hard-refuse"
-	default:
-		return "none"
-	}
-}
-
 // Decision is the dangerous-action guard's verdict on a single tool call.
 type Decision struct {
 	Tier   Tier

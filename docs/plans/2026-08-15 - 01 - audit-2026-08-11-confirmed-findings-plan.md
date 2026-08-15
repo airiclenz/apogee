@@ -127,7 +127,10 @@ collapsed later.
 
 **Commit:** `fix(security): a broken workspace root reports ErrRootInaccessible, not a path escape`
 
-## 3. Remove the dead `Tier.String()`
+## 3. Remove the dead `Tier.String()` — ✅ DONE (2026-08-15)
+
+NOTES (2026-08-15): the `%v` → `%d` verb adjustment reached two files beyond the item's Files list — `internal/security/rules_test.go` and `internal/tools/file_ops_test.go` carry the same `%v`-on-`Tier` dispatch the item names by example (`dangerous_test.go:61`), so every site of the pattern got the same mechanical swap; message wording is unchanged everywhere, since each already names the expected tier constant.
+NOTES (2026-08-15): the item's acceptance grep cannot reach `0` as written — its second alternation `\.String()` also matches the two pre-existing `strings.Builder.String()` calls at `internal/security/dangerous.go:247` and `:250`. The substantive check passes: `grep -c "func (t Tier) String" internal/security/dangerous.go` is `0`, and `Tier.String` has no match anywhere outside `docs/`.
 
 **What:** Delete `Tier.String()` (`internal/security/dangerous.go:34`) — exported, zero
 explicit callers repo-wide, 0% coverage; the only reachable path is implicit Stringer
