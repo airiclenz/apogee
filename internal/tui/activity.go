@@ -127,6 +127,31 @@ func (a activity) elapsed(now time.Time) time.Duration {
 	return 0
 }
 
+// quiet is how long the ENGINE has been silent at now, and whether the status line owes the human
+// that fact. lastEvent is when it was last heard from ([Model.lastEvent]); after is the
+// `ui.stall-after` threshold, where 0 turns the guard off entirely.
+//
+// The guard reports SILENCE and never a verdict, which is what the three gates encode. It speaks
+// only while the worker claims to be thinking or responding: a long silent tool call is normal
+// (the tool, not the engine, is the thing taking its time), a stopping worker is already
+// answering for itself, and a compaction emits nothing until it lands. It reports nothing at all
+// until the engine has been heard from once — a zero lastEvent would otherwise measure from the
+// epoch, the elapsed posture above — and nothing on a clock that moved backwards, since after is
+// always positive here.
+func (a activity) quiet(lastEvent, now time.Time, after time.Duration) (time.Duration, bool) {
+	if after <= 0 || lastEvent.IsZero() {
+		return 0, false
+	}
+	if a.kind != actThinking && a.kind != actResponding {
+		return 0, false
+	}
+	silence := now.Sub(lastEvent)
+	if silence < after {
+		return 0, false
+	}
+	return silence, true
+}
+
 // secondsPerMinute is the elapsed clock's rollover point (formatElapsed).
 const secondsPerMinute = 60
 
@@ -189,12 +214,27 @@ func (m *Model) setToolActivity(verb, call string, depth int, spawn string) {
 // either: the phrase's sub-agent prefix changes, but the same work is still in flight.
 //
 // next.since is ignored — callers state what is happening, never when it started.
+//
+// It is also the second seat of the QUIET clock, beside the eventMsg case that stamps it on every
+// Event: an activity moves either because an Event moved it (the engine spoke) or because a worker
+// was just launched and its request is away (the four transitions no Event announces), and both are
+// the engine being heard from. Restamping here is what keeps a fresh Exchange from inheriting the
+// silence of the one before it, structurally, rather than by every launch site remembering to.
 func (m *Model) moveActivity(next activity) {
 	next.since = m.act.since
 	if m.act.kind != next.kind || m.act.label != next.label || m.act.call != next.call {
 		next.since = time.Now()
 	}
 	m.act = next
+	m.noteEngineHeard()
+}
+
+// noteEngineHeard restamps the quiet clock: the engine has just been heard from, so the stall guard
+// measures its silence from now (statusLeft's quiet suffix — quiet above, model.go). Timers say
+// nothing here: a heartbeat, a spinner frame and an elapsed-clock repaint all prove the TUI is
+// alive, which was never the question the guard asks.
+func (m *Model) noteEngineHeard() {
+	m.lastEvent = time.Now()
 }
 
 // foldActivity derives the live activity from one engine Event (the third fold foldEvent runs).

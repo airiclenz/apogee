@@ -3705,6 +3705,197 @@ func TestModelStatusLineActivity(t *testing.T) {
 	}
 }
 
+// guardedRunningModel is a model with a worker running and the stall guard armed at after —
+// "thinking", the request away and nothing back yet, which is the shape the incident wore.
+func guardedRunningModel(t *testing.T, after time.Duration) Model {
+	t.Helper()
+	m := newTestModel(t)
+	m.opts.StallAfter = after
+	m.input.SetValue("hello")
+	return step(t, m, keyEnter())
+}
+
+// silentFor backdates the model's last-event clock so the engine reads as having said nothing for
+// quiet — the silence is arranged rather than waited out, so the row is asserted in no time at all.
+// Callers set the activity FIRST and backdate second: moving the activity is itself the engine
+// being heard from, and would restamp the clock this hands back.
+func silentFor(m Model, quiet time.Duration) Model {
+	m.lastEvent = time.Now().Add(-quiet)
+	return m
+}
+
+// TestStatusLineQuietSuffix proves the stall guard on the row it actually paints. The status line
+// used to claim "thinking" for twenty minutes with nothing behind it (2026-08-14); it now hangs the
+// honest fact off the phrase once the engine has been silent past `ui.stall-after` — how long
+// nothing has arrived, never a verdict about it — and takes the fact straight back off the moment
+// an Event lands. The states that are waiting on the HUMAN never show it: the silence there is the
+// human's own, and telling them the engine is quiet while it waits for their answer is the same lie
+// in the other direction.
+func TestStatusLineQuietSuffix(t *testing.T) {
+	const after = 90 * time.Second
+	// A gap that renders unambiguously either side of a second's slack: "3m 10s".
+	const quiet = 190*time.Second + 500*time.Millisecond
+
+	t.Run("below the threshold the row says nothing about it", func(t *testing.T) {
+		m := silentFor(guardedRunningModel(t, after), 89*time.Second)
+		got := statusText(t, m)
+		if strings.Contains(got, "quiet") {
+			t.Errorf("status line = %q, want no quiet suffix below the threshold", got)
+		}
+		if !strings.Contains(got, "thinking") {
+			t.Errorf("status line = %q, want the running phrase to stand alone", got)
+		}
+	})
+
+	t.Run("past the threshold the phrase gains the silence", func(t *testing.T) {
+		m := silentFor(guardedRunningModel(t, after), quiet)
+		if got, want := statusText(t, m), "· quiet 3m 10s"; !strings.Contains(got, want) {
+			t.Errorf("status line = %q, want it to contain %q", got, want)
+		}
+		// The fact is a QUALIFIER on a running phrase, so it carries the amber warning tint rather
+		// than the errored state's red or the bar's own plain field (theme.go).
+		if tinted := m.th.statusWarning.Render(" · quiet 3m 10s"); !strings.Contains(m.statusLine(), tinted) {
+			t.Errorf("status line does not carry the suffix under statusWarning: %q", m.statusLine())
+		}
+	})
+
+	t.Run("an arriving event takes it straight back off", func(t *testing.T) {
+		for _, tc := range []struct {
+			name  string
+			event domain.Event
+		}{
+			// A reasoning stream is life: the incident's signature was NO events, not silent ones.
+			{name: "reasoning", event: domain.ReasoningEvent{Text: "still working"}},
+			{name: "streamed text", event: domain.TokenEvent{Text: "so"}},
+			// Accounting moves no phrase (foldActivity ignores it) and still proves the engine alive.
+			{name: "usage", event: domain.UsageEvent{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15}},
+			// A nested agent's event is the engine speaking too, whatever depth it speaks from.
+			{name: "a sub-agent's token", event: domain.TokenEvent{EventBase: domain.EventBase{Depth: 1, CallID: "s1"}, Text: "sub"}},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				m := silentFor(guardedRunningModel(t, after), quiet)
+				if got := statusText(t, m); !strings.Contains(got, "quiet") {
+					t.Fatalf("status line = %q, want the suffix before the event lands", got)
+				}
+
+				m = step(t, m, eventMsg{Event: tc.event})
+
+				if got := statusText(t, m); strings.Contains(got, "quiet") {
+					t.Errorf("status line = %q, want the suffix gone the moment an event arrives", got)
+				}
+			})
+		}
+	})
+
+	t.Run("a running tool call never shows it", func(t *testing.T) {
+		m := guardedRunningModel(t, after)
+		m = step(t, m, eventMsg{Event: domain.ToolCallEvent{
+			Call: domain.ToolCall{ID: "1", Tool: "terminal", Arguments: []byte(`{"command":"go test ./..."}`)},
+		}})
+		m = silentFor(m, quiet)
+
+		got := statusText(t, m)
+		if strings.Contains(got, "quiet") {
+			t.Errorf("status line = %q, want no suffix — a long silent tool call is normal", got)
+		}
+		if !strings.Contains(got, "running") {
+			t.Errorf("status line = %q, want the tool's own phrase", got)
+		}
+	})
+
+	t.Run("a stopping worker never shows it", func(t *testing.T) {
+		m := step(t, guardedRunningModel(t, after), keyEsc()) // esc fired the cancel; the worker unwinds
+		m = silentFor(m, quiet)
+
+		got := statusText(t, m)
+		if strings.Contains(got, "quiet") {
+			t.Errorf("status line = %q, want no suffix while the stop is in flight", got)
+		}
+		if !strings.Contains(got, "stopping") {
+			t.Errorf("status line = %q, want the sticky stop phrase", got)
+		}
+	})
+
+	t.Run("a state waiting on the human never shows it", func(t *testing.T) {
+		for _, tc := range []struct {
+			name  string
+			state uiState
+			want  string
+		}{
+			{name: "an open question", state: stateAwaitingAsk, want: "answer needed"},
+			{name: "an open approval", state: stateAwaitingApproval, want: "approval needed"},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				m := guardedRunningModel(t, after)
+				// The gate is an open tool call the human has not answered — the incident's corrected
+				// shape: it completed into a question nobody was at the screen for.
+				m = step(t, m, eventMsg{Event: domain.ToolCallEvent{
+					Call: domain.ToolCall{ID: "1", Tool: "ask_user", Arguments: []byte(`{"question":"which one?"}`)},
+				}})
+				m.state = tc.state
+				m = silentFor(m, quiet)
+
+				got := statusText(t, m)
+				if strings.Contains(got, "quiet") {
+					t.Errorf("status line = %q, want no suffix while the wait is the human's own", got)
+				}
+				if !strings.Contains(got, tc.want) {
+					t.Errorf("status line = %q, want it to contain %q", got, tc.want)
+				}
+			})
+		}
+	})
+
+	t.Run("a fresh exchange never inherits the last one's silence", func(t *testing.T) {
+		m := silentFor(guardedRunningModel(t, after), quiet)
+		if got := statusText(t, m); !strings.Contains(got, "quiet") {
+			t.Fatalf("status line = %q, want the suffix on the exchange that went quiet", got)
+		}
+
+		m = step(t, m, cancelledMsg{}) // the worker unwound; the slot goes idle
+		m.input.SetValue("again")
+		m = step(t, m, keyEnter()) // and a new request is away
+
+		if got := statusText(t, m); strings.Contains(got, "quiet") {
+			t.Errorf("status line = %q, want the new exchange's clock to start at its own launch", got)
+		}
+	})
+
+	t.Run("the guard turned off never shows it", func(t *testing.T) {
+		m := silentFor(guardedRunningModel(t, 0), 20*time.Minute)
+		if got := statusText(t, m); strings.Contains(got, "quiet") {
+			t.Errorf("status line = %q, want nothing at all with ui.stall-after: 0", got)
+		}
+	})
+}
+
+// TestStatusLineQuietSuffixGivesWayFirst proves the suffix is paid for out of the row's own width
+// like every other occupant, and that it is the FIRST thing the slot gives up: a window too narrow
+// for both keeps the phrase whole and drops the fact rather than truncating it into "· quie…",
+// which would report neither the silence nor its length (layout.md).
+func TestStatusLineQuietSuffixGivesWayFirst(t *testing.T) {
+	m := silentFor(guardedRunningModel(t, 90*time.Second), 190*time.Second+500*time.Millisecond)
+	if got := statusText(t, m); !strings.Contains(got, "quiet 3m 10s") {
+		t.Fatalf("status line = %q, want the suffix painted at a full-width window", got)
+	}
+	if got := ansi.StringWidth(m.statusLine()); got != m.width {
+		t.Errorf("status line renders %d columns, want exactly %d (the suffix rides inside the width)", got, m.width)
+	}
+
+	m = step(t, m, tea.WindowSizeMsg{Width: 24, Height: 24})
+
+	got := statusText(t, m)
+	if strings.Contains(got, "quiet") {
+		t.Errorf("status line at 24 columns = %q, want the suffix dropped whole", got)
+	}
+	if !strings.Contains(got, "thinking") {
+		t.Errorf("status line at 24 columns = %q, want the phrase kept intact", got)
+	}
+	if w := ansi.StringWidth(m.statusLine()); w > m.width {
+		t.Errorf("status line renders %d columns, want at most %d", w, m.width)
+	}
+}
+
 // leadingColumns counts the blank columns a rendered line opens with, styling stripped — the
 // column its first painted glyph sits in.
 func leadingColumns(t *testing.T, line string) int {

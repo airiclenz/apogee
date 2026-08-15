@@ -237,6 +237,15 @@ type Model struct {
 	// deliberately NOT a uiState: the lifecycle machine above is untouched by it (ADR 0011).
 	act activity
 
+	// lastEvent is when the ENGINE was last heard from: any Event, at any depth, of any variant —
+	// including a ReasoningEvent, since a reasoning stream is life and the stall the guard was built
+	// for (2026-08-14) had NO events at all — plus the launch of a worker whose request is away but
+	// unanswered (moveActivity). It is the quiet clock the status line reports off once the gap to
+	// now crosses [Options.StallAfter] (statusLeft, activity.quiet), and nothing on a timer touches
+	// it: a heartbeat or a spinner frame proves the TUI is alive, not the engine. A plain time.Time,
+	// safe in the value-copied Model (ADR 0011).
+	lastEvent time.Time
+
 	// Live stats folded from the engine's UsageEvent (server token accounting). ctxUsed is
 	// the latest top-level (Depth 0) total-token count, driving the context-usage gauge;
 	// genStart marks when the current Turn began streaming content (set on its first token,
@@ -655,6 +664,10 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		return m, nil
 
 	case eventMsg:
+		// Any Event, any depth, any variant: the engine is not silent. Stamped before the fold and
+		// unconditionally, so an Event the folds deliberately ignore — usage accounting, an audit
+		// record, a fired mechanism — still counts as life on the stall guard's clock (activity.go).
+		m.noteEngineHeard()
 		m = m.foldEvent(msg.Event)
 		m.refreshViewport()
 		return m, nil
@@ -3238,7 +3251,10 @@ func (m Model) statusLine() string {
 func (m Model) statusLeft() string {
 	lead := m.th.statusBar.Render(bodyIndent)
 
-	var phrase string
+	// quiet is the stall guard's suffix when the engine has gone silent under a running worker, and
+	// "" in every other frame and every other state (quietSuffix). It is carried separately from the
+	// phrase because it is styled differently and because it gives way first — see below.
+	var phrase, quiet string
 	switch m.state {
 	case stateIdle:
 		// Idle says nothing for itself — the input box below already invites a message — with TWO
@@ -3254,7 +3270,9 @@ func (m Model) statusLeft() string {
 			phrase = m.preboundPhrase()
 		}
 	case stateRunning:
-		phrase = m.spin.view(m.th) + m.th.statusBar.Render(" "+m.runningPhrase(time.Now())) + m.throughputSuffix()
+		now := time.Now()
+		phrase = m.spin.view(m.th) + m.th.statusBar.Render(" "+m.runningPhrase(now)) + m.throughputSuffix()
+		quiet = m.quietSuffix(now)
 	case stateAwaitingApproval:
 		phrase = m.th.statusBar.Render("approval needed")
 	case stateAwaitingAsk:
@@ -3268,6 +3286,12 @@ func (m Model) statusLeft() string {
 
 	queued := m.queuedSegment(true)
 	room := m.width - m.th.measure.Width(lead) - m.th.measure.Width(queued)
+	// The quiet suffix is the FIRST thing the slot gives up, one rung below the phrase it qualifies:
+	// it is dropped whole on a row too tight for both, never truncated, because "· quie…" reports
+	// neither the silence nor its length and would cost the phrase its own last columns to say so.
+	if quiet != "" && m.th.measure.Width(phrase)+m.th.measure.Width(quiet) <= room {
+		phrase += quiet
+	}
 	if m.th.measure.Width(phrase) <= room {
 		return lead + phrase + queued
 	}
@@ -3292,6 +3316,26 @@ func (m Model) runningPhrase(now time.Time) string {
 		return phrase + " · " + clock
 	}
 	return clock
+}
+
+// quietSuffix is the stall guard's whole surface: " · quiet 3m 10s" hung off the running phrase
+// once the engine has been silent for longer than `ui.stall-after`, and "" in every frame that owes
+// nothing (activity.quiet holds the rule — which activities are watched, and when 0 turns the guard
+// off). It says how long nothing has arrived and stops there: a 43k-token prompt is legitimately
+// silent for a minute or two, so the honest fact is the silence, never a verdict about it — and the
+// suffix disappears by itself the moment an Event lands, since the clock it reads is restamped
+// there (Model.lastEvent).
+//
+// The tint is a QUALIFIER on a running phrase rather than an announced fault, which is why it is
+// the amber statusWarning and deliberately not the red statusError the errored state keeps for
+// itself (theme.go). now is passed in for the runningPhrase reason: so the composition is testable
+// off the wall clock.
+func (m Model) quietSuffix(now time.Time) string {
+	quiet, owed := m.act.quiet(m.lastEvent, now, m.opts.StallAfter)
+	if !owed {
+		return ""
+	}
+	return m.th.statusWarning.Render(" · quiet " + formatElapsed(quiet))
 }
 
 // statusRight is the status line's right slot: the live context gauge when token usage is

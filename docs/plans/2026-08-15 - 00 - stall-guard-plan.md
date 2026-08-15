@@ -150,7 +150,16 @@ go test ./internal/scheme ./internal/tui
 
 **Commit:** `feat(scheme): warning role and statusWarning status-line style`
 
-## 3. Stall guard: last-event clock and the quiet suffix
+## 3. Stall guard: last-event clock and the quiet suffix — ✅ DONE (2026-08-15)
+
+NOTES (2026-08-15): the worker-start stamp went into `moveActivity` (activity.go) rather than into the
+submit path the item names. There are four launch sites, not one — `launchExchange`, `/continue`'s
+resume and canned turns, `/compact` — and every one of them already moves the activity; stamping at
+that single funnel makes "a new exchange never inherits the last one's silence" structural instead of
+a line each launch site must remember. The eventMsg stamp the item asks for is unchanged and still
+unconditional, so Events the folds ignore (usage, audit) count as life too.
+NOTES (2026-08-15): a zero `lastEvent` reports no silence at all (the `activity.elapsed` posture),
+so a model that has never heard from an engine cannot render a gap measured from the epoch.
 
 Depends on item 1 and item 2.
 

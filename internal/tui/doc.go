@@ -324,6 +324,22 @@
 // machine is untouched and only statusLine's running branch consults it. The per-tool verb it
 // renders comes from the same open registry toolpresent.go already keys by tool name.
 //
+// The same file carries the STALL GUARD, which answers the half of that question a phrase alone
+// cannot: whether anything is still coming. [Model.lastEvent] is when the engine was last heard
+// from — every Event stamps it, at any depth and of any variant, and so does an activity MOVE,
+// which is either an Event moving it or a worker just launched (moveActivity), the seam that keeps
+// a fresh Exchange from inheriting the silence of the one before it. Nothing on a timer touches it:
+// a heartbeat or a spinner frame proves the TUI is alive, which was never the question. Once the
+// gap to now passes the `ui.stall-after` threshold, statusLine hangs " · quiet 3m 10s" off the
+// phrase in the amber statusWarning ([Model.quietSuffix], activity.quiet holds the rule). It is a
+// FACT and never a verdict — a large prompt is legitimately silent for a minute or two, and the
+// incident that motivated it (2026-08-14: a bare "thinking" for twenty minutes) ended in a normal
+// completion — so the row says how long nothing has arrived and stops there, and drops the suffix
+// the moment an Event lands. It speaks only for thinking and responding: a silent tool call is the
+// tool taking its time, a stopping worker already answers for itself, and the states waiting on the
+// HUMAN never show it, because the silence there is the human's own. It is also the first thing the
+// left slot gives up on a narrow row, dropped whole rather than truncated (layout.md).
+//
 // spinner.go paints the glyph that phrase runs beside, and the animation is this package's own
 // rather than a charm.land/bubbles/v2/spinner widget: the widget renders frames[i] through one
 // fixed style, which leaves no room for a glyph CHOSEN per frame or a colour COMPUTED per frame,

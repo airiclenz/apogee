@@ -209,7 +209,9 @@ instead of failing a test.
 for disappearing — the `N queued` readout carries the count — and the status line therefore owes
 that readout the same width discipline a pane's title row owes its count (below): the left slot is
 composed **to** the window rather than composed long and clipped to it, so a narrow window sheds
-the activity phrase around the count and never the count off the end of the row.
+the activity phrase around the count and never the count off the end of the row. The quiet suffix
+(below) is one rung lower still — it qualifies the phrase, so it is the first thing the slot gives
+up, and it is dropped whole rather than truncated.
 
 **A surface still gets its irreducible rows before any other surface gets a comfortable one.** Each
 open pane's four (below) come off the top of the budget, so a passive band can never squeeze out
@@ -1121,6 +1123,18 @@ the loop off, and `classic` with the loop off is exactly the status line apogee 
 the styles existed. The loop is quantised downstream by the terminal, so on a 256-colour
 terminal it steps visibly and on a 16-colour one it collapses to a couple of tones; that is what
 turning it off is for.
+
+**When the phrase says nothing is happening.** A spinner keeps turning whether or not the engine is
+still answering, so a running phrase gains a second reading once the engine has gone silent:
+`thinking · 21m 03s · quiet 3m 10s`, in the scheme's amber `warning` role. `ui.stall-after` is the
+threshold the silence has to cross — `90s` by default, `0` turns it off — and what the suffix
+counts is the time since the last engine event of any kind arrived, so it appears by itself and
+disappears by itself the moment one does. It is a fact and not a verdict: a large prompt is
+legitimately silent for a minute or two, so the row reports the silence and says nothing about what
+it means. Only `thinking` and `responding` carry it — a silent tool call is the tool taking its
+time, and a stop already says what it is doing — and the states waiting on a human (an open
+question, an approval) never do, the silence there being the human's own. It is also the first
+thing the left slot gives up when the row is tight, dropped whole rather than truncated.
 
 ---
 
