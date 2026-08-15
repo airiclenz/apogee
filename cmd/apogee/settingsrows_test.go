@@ -402,21 +402,45 @@ func TestSettingsRowsProjectRegistryMetadata(t *testing.T) {
 			t.Errorf("row %q does not carry its registry row: %+v", k.Path, row)
 		}
 	}
+	// One kind is pinned at ROW level too, because the loop above cannot speak for it: its kind
+	// clause computes the expectation with settingKind itself, so only a literal named here says
+	// what the pane must show for the registry's one float row.
+	if got := byPath["response-reserve"].Kind; got != tui.SettingInt {
+		t.Errorf("row %q kind = %q; want %q — a share is typed into the same caret buffer an int uses",
+			"response-reserve", got, tui.SettingInt)
+	}
 	// The kinds themselves are a closed projection, and only a structured key reads as structured
-	// (the read-only end the fallback lands on). The one many-to-one is deliberate: a name list is
-	// typed on its row exactly as a string is, so it projects onto the string idiom and keeps its
-	// list-ness on the writer's side of the seam (settingKind).
-	for kind, want := range map[config.Kind]tui.SettingKind{
+	// (the read-only end the fallback lands on). Every edge is stated as a literal here, so the
+	// table is a second opinion on the projection rather than a restatement of it. Three edges are
+	// many-to-one, all deliberate: a name list is typed on its row exactly as a string is, so it
+	// keeps its list-ness on the writer's side of the seam (KindStringList → SettingString); a share
+	// is typed into the same caret buffer an int opens, and there is no tui.SettingFloat
+	// (KindFloat → SettingInt); and a scheme is picked from a list exactly as an enum value is, only
+	// with the list coming from the session (KindScheme → SettingEnum).
+	projection := map[config.Kind]tui.SettingKind{
 		config.KindBool:       tui.SettingBool,
 		config.KindInt:        tui.SettingInt,
 		config.KindString:     tui.SettingString,
 		config.KindStringList: tui.SettingString,
+		config.KindFloat:      tui.SettingInt,
+		config.KindText:       tui.SettingText,
 		config.KindEnum:       tui.SettingEnum,
 		config.KindServer:     tui.SettingServer,
+		config.KindScheme:     tui.SettingEnum,
 		config.KindStructured: tui.SettingStructured,
-	} {
+	}
+	for kind, want := range projection {
 		if got := settingKind(kind); got != want {
 			t.Errorf("settingKind(%q) = %q; want %q", kind, got, want)
+		}
+	}
+	// A kind some key USES but the table does not state would be an edge nobody pins — the
+	// uncovered set the table above closed. The registry is the only enumeration of the kinds in
+	// use, so it is what the guard walks.
+	for _, k := range config.KeyRegistry {
+		if _, ok := projection[k.Kind]; !ok {
+			t.Errorf("registry key %q is kind %q, which the projection table does not state — a kind "+
+				"in use is pinned here, not left to settingKind's fallback", k.Path, k.Kind)
 		}
 	}
 }

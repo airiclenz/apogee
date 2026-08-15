@@ -339,6 +339,13 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **Settings kind projection pinned for every kind.** `TestSettingsRowsProjectRegistryMetadata`
+  now states all ten `config.Kind` edges as literals — `KindFloat → SettingInt`,
+  `KindText → SettingText` and `KindScheme → SettingEnum` joined the seven already there — and
+  guards them against the registry, so a new kind cannot silently join the uncovered set. A direct
+  row-level assertion pins `response-reserve` (the one float row) to `tui.SettingInt`, which the
+  row-level loop cannot do: its kind clause computes the expectation with `settingKind` itself.
+
 - `internal/tui/toolshape_test.go` and `internal/tui/blocktarget_test.go` now open with a header
   comment recording their subject names as a ratified exception to the `{source}_test.go` rule,
   naming the sources each suite spans and why no single one can lend it its name.

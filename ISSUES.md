@@ -27,10 +27,6 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 
 The still-open findings that run left, under the conventions' actionability bar.
 
-- [ ] The kind-projection map at `cmd/apogee/settingsrows_test.go:409` omits `KindFloat` (as it
-  already omits `KindText`/`KindScheme`), and the row-level loop above it asserts through
-  `settingKind()`, so it is tautological — the projection for the float kind has only indirect
-  coverage.
 - [ ] The `response-reserve:` rebind sites carry no reserve-specific test although their
   `context-window:` / `max-output-tokens:` analogues have one (`cmd/apogee/schedule_test.go:345`,
   `cmd/apogee/delegation_test.go:90`). Related: an edit that moves only the bound entry's

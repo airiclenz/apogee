@@ -83,7 +83,10 @@ Remove the first bullet of the `ISSUES.md` open-defects section (the
 
 **Commit:** `fix(context): treat NaN as unset in Allocate's fraction guard`
 
-## 2. Pin the settings kind projection independently for all nine kinds
+## 2. Pin the settings kind projection independently for all nine kinds — ✅ DONE (2026-08-15)
+
+NOTES (2026-08-15): the item says the map "lists 7 of the 9 `config.Kind` values"; the registry actually defines TEN (`internal/config/registry.go:40-80`), so completing it with the item's three named edges yields a ten-row table. The three edges are exactly as the item names them; only the count in the item's prose (and in its commit subject, kept verbatim) is off by one.
+NOTES (2026-08-15): CHANGELOG.md is listed in the item's Files but the implementer never edits it — the entry text above is for the verifier to apply.
 
 **What:** Test-only. In `cmd/apogee/settingsrows_test.go`, the kind-projection map at
 `:409-417` inside `TestSettingsRowsProjectRegistryMetadata` lists 7 of the 9
