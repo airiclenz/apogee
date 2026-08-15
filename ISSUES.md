@@ -73,6 +73,31 @@ The still-open findings the stall-guard plan run left, under the conventions' ac
   `internal/domain/events.go` declares 12 Event types and `foldCases()`
   (`internal/tui/fold_test.go:54`) now carries 13 rows.
 
+### Run residuals — open (2026-08-15, thinking-effort knob run)
+
+The still-open findings the thinking-effort-knob plan run left, under the conventions' actionability
+bar.
+
+- [ ] `cmd/apogee/title.go:90`'s drop-the-flag fallback now fires for ANY non-empty
+  `req.ThinkingEffort`, not only `off`. Harmless today — `title.Prompt` only ever sets
+  `domain.EffortOff` (`internal/domain/config.go:334`) — but the guard no longer says what it means,
+  so a namer that ever carried a level would silently have it stripped on the re-send.
+- [ ] The in-band error path carries no template hint: `inBandError`
+  (`internal/provider/client.go:376`, called from `:214`) classifies an error member a server wrapped
+  in an HTTP 200 and adds nothing about `chat_template_kwargs`, so an aggregator that wraps a
+  template error in a 200 produces the same bare failure the non-2xx path now explains. Same failure
+  class, outside the non-2xx scope the enriched-error item covered.
+- [ ] No root alias for the Thinking-effort type: `apogee.go:119` re-exports `ThinkingProfile` /
+  `ThinkingStyle` with their constants, but `domain.ThinkingEffort`
+  (`internal/domain/config.go:330`) and its levels (`:334`) have none, so an out-of-module Driver
+  must pass untyped string constants to `Agent.SetEffortOverride` (`internal/agent/agent.go:543`).
+  [ADR 0031](docs/adr/0031-the-local-platform-north-star-binds-every-future-layer-to-the-embeddable-engine.md)'s
+  Driver-sufficiency invariant is what makes this worth closing.
+- [ ] `README.md:246`'s prose enumerates the commands that answer while the model works — `/version`,
+  `/skills`, `/usage` and `/confine`'s status report — but the table below it marks `/effort`
+  (`README.md:260`) and `/schedule` (`:261`) ✅ too. Pre-existing incompleteness the effort row
+  widened.
+
 ## Parked / deferred work
 
 Live, deliberately deferred work only. Each entry records *enough* design that we don't re-derive
