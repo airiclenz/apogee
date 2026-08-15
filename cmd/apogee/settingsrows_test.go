@@ -42,6 +42,7 @@ func fabricatedSettings() config.Options {
 		AutoTitle:          false,
 		RememberModel:      true,
 		ContextWindow:      32768,
+		ResponseReserve:    0.35,
 		Present:            config.PresentSettings{AutoOpen: true, Command: "zed {path}", Port: 8080},
 		UI: config.UISettings{Spinner: tui.SpinnerGlitter, SpinnerColor: true, ShowScrollbar: false,
 			ColorScheme: "dark", StallAfter: 2 * time.Minute},
@@ -252,6 +253,7 @@ func TestSettingsRowsFormatEffectiveValues(t *testing.T) {
 		"auto-title":            "false",
 		"remember-model":        "true",
 		"context-window":        "32768",
+		"response-reserve":      "0.35", // the shortest spelling that reads back as the same share
 		"present.auto-open":     "true",
 		"present.command":       "zed {path}",
 		"present.port":          "8080",

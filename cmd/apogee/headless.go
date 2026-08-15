@@ -391,6 +391,10 @@ func runHeadless(cmd *cobra.Command, args []string, opts *config.Options, noSave
 		EnableMechanisms: spec.EnableMechanisms,
 		Context: apogee.ContextConfig{
 			MaxContextTokens: spec.MaxContextTokens,
+			// The top-level `response-reserve:` share, honoured here for the same one-configuration
+			// reason: a headless run divides its window exactly as a session on the same config
+			// does. Unset it stays 0 and the Budget holds its own built-in fifth back.
+			ResponseReserveFraction: opts.ResponseReserve,
 			// The bound entry's `max-output-tokens:` pin, honoured here for the reason every other
 			// per-entry fact is: one configuration, so a headless run's reply is bounded exactly as
 			// a session's is (ADR 0046). Unpinned it stays 0 and the engine derives the cap — which

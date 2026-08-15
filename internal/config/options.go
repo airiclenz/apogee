@@ -36,6 +36,15 @@ type Options struct {
 	HostAlias     string
 	ContextWindow int
 
+	// responseReserve is the `response-reserve:` share — how much of the context window, as a
+	// fraction of it, is held back for the model's reply. Resolved-not-flag-bound like the pin
+	// above, and file-only for the same reason: how a window is divided is a per-machine tuning
+	// fact. 0 means the key is unset and apogee's built-in 0.20 share stands; the loader accepts
+	// nothing between 0 and a usable share, so a non-zero value here always is one. The
+	// composition root hands it to ContextConfig.ResponseReserveFraction, where the Budget applies
+	// it whenever no reply reserve in TOKENS is pinned.
+	ResponseReserve float64
+
 	// apiKey is the upstream bearer token (the startup `servers:` entry's own `api-key` field,
 	// which `APOGEE_API_KEY` overlays), resolved-not-flag-bound like hostAlias above — but for a
 	// different reason:

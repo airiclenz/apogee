@@ -42,6 +42,12 @@ const (
 	KindString     Kind = "string"
 	KindEnum       Kind = "enum"
 	KindStructured Kind = "structured"
+	// KindFloat is a fractional number written on one line — `response-reserve: 0.2`, the schema's
+	// one SHARE. It is a kind of its own rather than an int because rounding it to a whole number
+	// is the same as deleting it, and rather than a string because the value has a range the
+	// surface must refuse outside of (the row's Validate); the pane edits it in the same caret
+	// buffer an int uses, since a share is typed rather than picked.
+	KindFloat Kind = "float"
 	// KindText is a multi-line text value — prose, not a setting written on a line: the system
 	// prompt is the one the schema has. It is a kind of its own rather than structured because the
 	// surface DOES have an editor for it (a multi-line field replacing the pane's key list, ADR 0037
@@ -259,6 +265,12 @@ var KeyRegistry = []Key{
 		Editable: true,
 		Validate: validateContextWindow,
 		Desc:     "Pin the model context window in tokens; 0 discovers it from the server, live.",
+	},
+	{
+		Path: "response-reserve", Kind: KindFloat, Default: "0",
+		Editable: true,
+		Validate: validateResponseReserve,
+		Desc:     "Share of the window held back for the reply, above 0 and below 1; 0 takes apogee's own 0.20.",
 	},
 	{
 		Path: "present.auto-open", Kind: KindBool, Default: "true",
@@ -479,6 +491,20 @@ func validateContextWindow(value string) error {
 			"(0 — the default — follows the window the server reports)", value)
 	}
 	return nil
+}
+
+// validateResponseReserve refuses a reply share the Budget could not spend, through the same check
+// the loader makes on the parsed file (validateResponseReserveFraction) rather than a second range
+// literal. Zero is the default and means "hold apogee's own share back"; anything else has to sit
+// strictly between 0 and 1, and a value that is not a number at all fails the parse below before
+// the range is ever asked about.
+func validateResponseReserve(value string) error {
+	fraction, err := strconv.ParseFloat(strings.TrimSpace(value), 64)
+	if err != nil {
+		return fmt.Errorf("apogee: invalid response-reserve %q: want a share of the context window "+
+			"above 0 and below 1 (0 — the default — holds apogee's own 0.20 back)", value)
+	}
+	return validateResponseReserveFraction(fraction)
 }
 
 // validatePresentPort refuses a port the document server could not bind, through the same check

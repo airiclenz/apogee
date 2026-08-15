@@ -84,6 +84,8 @@ func kindMatchesType(kind Kind, typ reflect.Type) bool {
 		return typ.Kind() == reflect.Bool
 	case KindInt:
 		return typ.Kind() == reflect.Int
+	case KindFloat:
+		return typ.Kind() == reflect.Float64
 	case KindString, KindEnum, KindServer, KindScheme, KindText:
 		return typ.Kind() == reflect.String
 	case KindStringList:

@@ -17,9 +17,10 @@ import (
 	"github.com/airiclenz/apogee/internal/tui"
 )
 
-func strptr(s string) *string { return &s }
-func boolptr(b bool) *bool    { return &b }
-func intptr(i int) *int       { return &i }
+func strptr(s string) *string     { return &s }
+func boolptr(b bool) *bool        { return &b }
+func intptr(i int) *int           { return &i }
+func floatptr(f float64) *float64 { return &f }
 
 // wantUIDefault is the resolved `ui:` block a config that configures none must produce: the
 // default spinner style with its colour loop on, the transcript's scroll bar shown, and the stall
@@ -142,6 +143,17 @@ func TestResolveSettingsPrecedence(t *testing.T) {
 			name: "context-window is NOT set by env or flag (file-only)",
 			env:  Layer{ContextWindow: intptr(65536)},
 			flag: Layer{ContextWindow: intptr(65536)},
+			want: Settings{Mode: "ask-before", ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: true, AutoTitle: true, ValidatedSetsEnable: true, ContextFiles: wantContextFilesDefault, Present: PresentSettings{AutoOpen: true}, UI: wantUIDefault},
+		},
+		{
+			name: "response-reserve is file-only (default 0 ⇒ the engine's own share)",
+			file: Layer{ResponseReserve: floatptr(0.35)},
+			want: Settings{Mode: "ask-before", ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: true, AutoTitle: true, ValidatedSetsEnable: true, ContextFiles: wantContextFilesDefault, Present: PresentSettings{AutoOpen: true}, UI: wantUIDefault, ResponseReserve: 0.35},
+		},
+		{
+			name: "response-reserve is NOT set by env or flag (file-only)",
+			env:  Layer{ResponseReserve: floatptr(0.35)},
+			flag: Layer{ResponseReserve: floatptr(0.35)},
 			want: Settings{Mode: "ask-before", ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: true, AutoTitle: true, ValidatedSetsEnable: true, ContextFiles: wantContextFilesDefault, Present: PresentSettings{AutoOpen: true}, UI: wantUIDefault},
 		},
 		{
@@ -1429,6 +1441,90 @@ func TestApplyConfigContextWindow(t *testing.T) {
 	}
 	if opts.ContextWindow != 65536 {
 		t.Errorf("opts.contextWindow = %d; want the file's explicit 65536", opts.ContextWindow)
+	}
+}
+
+// The response-reserve config block parses into opts.responseReserve (item 12): a file-only key
+// (no flag/env), like the context-window pin it stands beside. What this pins is that an ACCEPTED
+// share reaches the composition root unchanged and that an absent key leaves 0 there — the state
+// the engine reads as "hold my own built-in fifth back". The range refusals are the loader's own
+// business and live in TestLoadFileConfigRefusesAResponseReserveThatIsNotAShare; the downstream
+// opts → ContextConfig.ResponseReserveFraction threading is the composition root's.
+func TestApplyConfigResponseReserve(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		fileYAML string
+		want     float64
+	}{
+		{name: "an explicit share resolves to itself", fileYAML: "response-reserve: 0.35\n", want: 0.35},
+		{name: "an absent key leaves 0 — the engine's own share stands", want: 0},
+		{name: "an explicit 0 is the absent state spelled out", fileYAML: "response-reserve: 0\n", want: 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			home := testConfigHome(t, tt.fileYAML)
+			opts := Options{ConfigDir: home}
+			if err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
+				t.Fatalf("ApplyConfig: %v", err)
+			}
+			if opts.ResponseReserve != tt.want {
+				t.Errorf("opts.responseReserve = %v; want %v", opts.ResponseReserve, tt.want)
+			}
+		})
+	}
+}
+
+// A `response-reserve:` that is not a share of the window is REFUSED at load, with the key named:
+// a negative share has no meaning, 1 (or anything above it) holds the whole window back and leaves
+// no prompt to send, and NaN is not a share at all — it compares false against both bounds, so the
+// allocator's own defensive guard would wave it through and multiply the window by it
+// (internal/context.Allocate). The refusal has to happen here, where the file and the number the
+// user wrote can still be named.
+func TestLoadFileConfigRefusesAResponseReserveThatIsNotAShare(t *testing.T) {
+	t.Parallel()
+	tests := []struct{ name, fileYAML string }{
+		{name: "a negative share", fileYAML: "response-reserve: -0.1\n"},
+		{name: "the whole window", fileYAML: "response-reserve: 1.0\n"},
+		{name: "more than the whole window", fileYAML: "response-reserve: 1.5\n"},
+		{name: "not a number at all", fileYAML: "response-reserve: .nan\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			path := filepath.Join(t.TempDir(), "config.yaml")
+			if err := os.WriteFile(path, []byte(tt.fileYAML), 0o600); err != nil {
+				t.Fatalf("write config.yaml: %v", err)
+			}
+			_, err := LoadFileConfig(path, os.ReadFile, noNotify)
+			if err == nil {
+				t.Fatalf("LoadFileConfig accepted %q; want a refusal", strings.TrimSpace(tt.fileYAML))
+			}
+			if !strings.Contains(err.Error(), "response-reserve") {
+				t.Errorf("the refusal does not name the key the user has to fix: %v", err)
+			}
+		})
+	}
+}
+
+// The accepted half of the same gate: a share inside the open range loads, and projects onto the
+// layer as a set value rather than as the absent state — the distinction resolution reads.
+func TestLoadFileConfigAcceptsAResponseReserveShare(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("response-reserve: 0.2\n"), 0o600); err != nil {
+		t.Fatalf("write config.yaml: %v", err)
+	}
+	l, err := LoadFileConfig(path, os.ReadFile, noNotify)
+	if err != nil {
+		t.Fatalf("LoadFileConfig: %v", err)
+	}
+	if l.ResponseReserve == nil {
+		t.Fatal("the layer carries no response-reserve; an explicit share must be distinguishable from an absent key")
+	}
+	if *l.ResponseReserve != 0.2 {
+		t.Errorf("layer response-reserve = %v; want the file's explicit 0.2", *l.ResponseReserve)
 	}
 }
 

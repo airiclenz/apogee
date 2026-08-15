@@ -196,6 +196,17 @@ func renderSettingValue(k Key, value string) (string, string, error) {
 		}
 		text, err := renderScalar(n)
 		return text, strconv.Itoa(n), err
+	case KindFloat:
+		// The share goes back into the file in the SHORTEST spelling that reads back as the same
+		// number ('g' with precision -1), so `0.2` typed into the pane stays `0.2` on disk rather
+		// than becoming 0.20000000000000001 — the round-trip check below would refuse that edit.
+		f, err := strconv.ParseFloat(v, 64)
+		if err != nil {
+			return "", "", fmt.Errorf("%s is a fractional number, not %q", k.Path, value)
+		}
+		canonical := strconv.FormatFloat(f, 'g', -1, 64)
+		text, err := renderScalar(f)
+		return text, canonical, err
 	case KindEnum:
 		if !slices.Contains(k.EnumValues, v) {
 			return "", "", fmt.Errorf("%s is one of %s, not %q", k.Path, strings.Join(k.EnumValues, ", "), value)

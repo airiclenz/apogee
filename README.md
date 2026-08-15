@@ -509,7 +509,10 @@ under a running session re-binds the window with it. Set `context-window:` (a fi
 key, in tokens) only when your server does not advertise a window, or when its number is
 wrong for how you run it; that key is a **pin** the heartbeat never overrides. With no
 window known, the Budget and automatic compaction stay inactive and apogee says so in the
-transcript the moment it binds a model without one.
+transcript the moment it binds a model without one. How that window is **split** is a second
+file-only key: apogee holds a fifth of it back for the model's reply and lets the prompt fill
+the rest, and `response-reserve:` (a fraction above 0 and below 1) sets your own share instead
+— raise it for a model that answers at length, lower it to spend more of the window on history.
 
 Every reply is **bounded**, and by the same budget: apogee tells the server how many tokens
 one answer may take, using the room it already reserves for the reply — clamped to between

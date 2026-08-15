@@ -131,14 +131,20 @@ var settingValues = map[string]func(config.Options) string{
 	"auto-title":         func(o config.Options) string { return boolValue(o.AutoTitle) },
 	"remember-model":     func(o config.Options) string { return boolValue(o.RememberModel) },
 	"context-window":     func(o config.Options) string { return strconv.Itoa(o.ContextWindow) },
-	"present.auto-open":  func(o config.Options) string { return boolValue(o.Present.AutoOpen) },
-	"present.command":    func(o config.Options) string { return o.Present.Command },
-	"present.port":       func(o config.Options) string { return strconv.Itoa(o.Present.Port) },
-	"present.host":       func(o config.Options) string { return o.Present.Host },
-	"ui.spinner":         func(o config.Options) string { return string(o.UI.Spinner) },
-	"ui.spinner-color":   func(o config.Options) string { return boolValue(o.UI.SpinnerColor) },
-	"ui.show-scrollbar":  func(o config.Options) string { return boolValue(o.UI.ShowScrollbar) },
-	"ui.color-scheme":    func(o config.Options) string { return o.UI.ColorScheme },
+	// The share in the SHORTEST spelling that reads back as the same number, which is the spelling
+	// the writer persists too — so the value this row seeds its edit field with is one the next ⏎
+	// can write back unchanged.
+	"response-reserve": func(o config.Options) string {
+		return strconv.FormatFloat(o.ResponseReserve, 'g', -1, 64)
+	},
+	"present.auto-open": func(o config.Options) string { return boolValue(o.Present.AutoOpen) },
+	"present.command":   func(o config.Options) string { return o.Present.Command },
+	"present.port":      func(o config.Options) string { return strconv.Itoa(o.Present.Port) },
+	"present.host":      func(o config.Options) string { return o.Present.Host },
+	"ui.spinner":        func(o config.Options) string { return string(o.UI.Spinner) },
+	"ui.spinner-color":  func(o config.Options) string { return boolValue(o.UI.SpinnerColor) },
+	"ui.show-scrollbar": func(o config.Options) string { return boolValue(o.UI.ShowScrollbar) },
+	"ui.color-scheme":   func(o config.Options) string { return o.UI.ColorScheme },
 	// The threshold as a DURATION prints itself (`1m30s`), which is a spelling the key takes back —
 	// so the value this row seeds its edit field with is one the next ⏎ can persist unchanged.
 	"ui.stall-after": func(o config.Options) string { return o.UI.StallAfter.String() },
@@ -237,6 +243,11 @@ func settingKind(kind config.Kind) tui.SettingKind {
 		return tui.SettingInt
 	case config.KindString, config.KindStringList:
 		return tui.SettingString
+	case config.KindFloat:
+		// A share is TYPED, so it reaches the renderer as the caret-buffer idiom an int uses — the
+		// pane's int and string rows open the same buffer, and giving the renderer a float kind of
+		// its own would only be a third name for it. The range is the registry row's Validate.
+		return tui.SettingInt
 	case config.KindText:
 		return tui.SettingText
 	case config.KindEnum:

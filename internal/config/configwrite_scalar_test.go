@@ -445,6 +445,11 @@ func plausibleValue(t *testing.T, k Key) string {
 		return "false"
 	case KindInt:
 		return "4096"
+	case KindFloat:
+		// Inside the one share the range accepts, and in the shortest spelling that reads back as
+		// itself — the canonical form renderSettingValue writes, so the sweep's read-back compares
+		// against the value as offered.
+		return "0.35"
 	case KindEnum:
 		if len(k.EnumValues) == 0 {
 			t.Fatalf("%s is an enum with no vocabulary", k.Path)

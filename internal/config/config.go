@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"maps"
+	"math"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -117,6 +118,14 @@ type Settings struct {
 	// > 0 means "the user pinned it" and nothing else. It feeds ContextConfig.MaxContextTokens,
 	// which the Budget and automatic Compaction bind against.
 	ContextWindow int
+
+	// responseReserve is the share of that window held back for the model's reply, as a fraction
+	// (item 12). File-only (no flag/env, like contextWindow above) and default 0 ⇒ unset, so
+	// apogee's built-in 0.20 share stands; the loader accepts nothing but 0 and the open range
+	// (0, 1), so a non-zero value here is always a usable share. It feeds
+	// ContextConfig.ResponseReserveFraction, which the Budget applies whenever no reply reserve in
+	// TOKENS is pinned.
+	ResponseReserve float64
 
 	// mcpServers is the set of external MCP servers to connect on startup (P3.15), file-only
 	// and default-empty (no servers ⇒ the MCP feature is dormant). Their tools surface into the
@@ -537,6 +546,12 @@ type Layer struct {
 	// non-nil pointer.
 	ContextWindow *int
 
+	// responseReserve is set only by the FILE layer (the reply share is config'd, no flag/env —
+	// like contextWindow above). A nil pointer means the source configures no share, so resolution
+	// leaves it 0 and apogee's built-in default stands; only a `response-reserve:` the loader
+	// accepted as a positive share projects to a non-nil pointer.
+	ResponseReserve *float64
+
 	// mcpServers is set only by the FILE layer (P3.15 — MCP servers are config'd, default-empty,
 	// with no flag/env). A nil slice means the source does not configure servers (fall through).
 	MCPServers []mcp.ServerConfig
@@ -727,6 +742,9 @@ func ResolveSettings(file, env, flag Layer, hostID string) (Settings, []string) 
 	}
 	if file.ContextWindow != nil {
 		s.ContextWindow = *file.ContextWindow
+	}
+	if file.ResponseReserve != nil {
+		s.ResponseReserve = *file.ResponseReserve
 	}
 	if file.Editor != nil { // file-only (ADR 0041); the env rungs below it are read at launch time
 		s.Editor = *file.Editor
@@ -951,6 +969,15 @@ type fileConfig struct {
 	// advertises one that is wrong for how it is run. It feeds ContextConfig.MaxContextTokens,
 	// which the Budget and automatic Compaction bind against.
 	ContextWindow int `yaml:"context-window"`
+	// ResponseReserve is how much of that window is held back for the model's REPLY, as a FRACTION
+	// of it (`response-reserve: 0.2` ⇒ a fifth). File-only (no flag/env), like context-window:
+	// beside it. Absent or 0 ⇒ unset, so apogee's built-in 0.20 share stands; a value in the open
+	// range (0, 1) replaces it for every request this session budgets. Anything else is refused at
+	// load (validateResponseReserveFraction) rather than clamped: a share of 1 or more holds the
+	// whole window back and leaves no prompt to send, a negative one has no meaning, and NaN is not
+	// a share at all. It feeds ContextConfig.ResponseReserveFraction, which the Budget applies
+	// whenever no reply reserve in TOKENS is pinned — explicit tokens outrank the fraction.
+	ResponseReserve float64 `yaml:"response-reserve"`
 	// MCPServers configures external MCP servers to connect on startup (P3.15). Absent/empty ⇒
 	// the MCP feature is dormant (no servers, no error). Each server's tools surface into the
 	// registry as classMCP ExternalEffectTools the disposition gates in Auto.
@@ -1705,6 +1732,25 @@ func validateModelProfiles(m map[string]modelProfileConfig) error {
 	return nil
 }
 
+// validateResponseReserveFraction rejects a top-level `response-reserve:` outside the open range
+// the Budget can spend. It runs at LOAD, beside the model-profile check, because the key is a
+// SHARE and every way of getting it wrong is silent downstream: 1 or more holds the whole window
+// back and leaves no prompt to send, a negative share has no meaning, and NaN is not a share at
+// all — it compares false against both bounds, so the allocator's own defensive guard would wave
+// it through and multiply the window by it (internal/context.Allocate). Refusing here is what
+// keeps the number the user typed, and the file it is in, still nameable in the error.
+//
+// 0 is the one value outside the open range that passes: it is the key's absent state, and it
+// resolves to apogee's built-in share rather than to no reserve at all.
+func validateResponseReserveFraction(fraction float64) error {
+	if math.IsNaN(fraction) || fraction < 0 || fraction >= 1 {
+		return fmt.Errorf("apogee: response-reserve: %v is not a share of the context window — give "+
+			"the part of the window to hold back for the model's reply, above 0 and below 1 "+
+			"(0.2 ⇒ a fifth of the window), or remove the key to take apogee's own 0.20", fraction)
+	}
+	return nil
+}
+
 // toProfileEntries projects the on-disk `model-profiles:` map onto the ordered entry list the
 // composition root matches a model name against (ADR 0044). The map is sorted BY PATTERN because a
 // Go map has no order and three surfaces read this slice — the /settings row's diff, the resolution
@@ -1765,6 +1811,9 @@ func (fc fileConfig) layer() Layer {
 	}
 	if fc.ContextWindow > 0 {
 		l.ContextWindow = &fc.ContextWindow
+	}
+	if fc.ResponseReserve > 0 {
+		l.ResponseReserve = &fc.ResponseReserve
 	}
 	if len(fc.MCPServers) > 0 {
 		servers := make([]mcp.ServerConfig, len(fc.MCPServers))
@@ -1847,6 +1896,9 @@ func LoadFileConfig(path string, readFile func(string) ([]byte, error), notify f
 		return Layer{}, fmt.Errorf("apogee: parse config %q: %w", path, err)
 	}
 	if err := validateModelProfiles(fc.ModelProfiles); err != nil {
+		return Layer{}, err
+	}
+	if err := validateResponseReserveFraction(fc.ResponseReserve); err != nil {
 		return Layer{}, err
 	}
 	return fc.layer(), nil
@@ -2166,6 +2218,7 @@ func ApplyConfig(opts *Options, changed func(string) bool, getenv func(string) s
 	opts.AutoTitle = s.AutoTitle
 	opts.RememberModel = s.RememberModel
 	opts.ContextWindow = s.ContextWindow
+	opts.ResponseReserve = s.ResponseReserve
 	opts.MCPServers = s.MCPServers
 	opts.ToolsDisabled = s.ToolsDisabled
 	// A `tools.disabled:` name that matches no tool is a NOTICE, never a refusal: the list is how a

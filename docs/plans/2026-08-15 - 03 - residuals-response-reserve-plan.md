@@ -378,7 +378,30 @@ applied when reserve is 0; fraction 0 / negative / ≥1 → built-in default; cl
 
 ---
 
-## 12. `response-reserve:` — top-level config key
+## 12. `response-reserve:` — top-level config key — ✅ DONE (2026-08-15)
+
+NOTES (2026-08-15): per the dispatch DECISION the range validation refuses NaN as well as `< 0` and
+`>= 1` — `validateResponseReserveFraction` leads with `math.IsNaN`, because NaN compares false
+against both bounds and would otherwise pass the loader, reach `Allocate`'s mirrored guard (which
+lets it through for the same reason) and be multiplied by the window. YAML `.nan` is covered by its
+own case in `TestLoadFileConfigRefusesAResponseReserveThatIsNotAShare`.
+NOTES (2026-08-15): five files outside the item's Files list were edited because the repo's own
+anti-drift gates demand them for ANY new `fileConfig` key — the item's "mirror `context-window:` at
+every step" enumeration missed this step. `TestRegistryIsBijectionWithFileConfig` fails until the key
+has a `KeyRegistry` row, and no existing `Kind` matches a `float64`, so `internal/config/registry.go`
+gained `KindFloat` (+ the row and its string validator), `registry_test.go`'s `kindMatchesType` and
+`configwrite_scalar_test.go`'s `plausibleValue` gained their float cases,
+`configwrite_scalar.go`'s `renderSettingValue` gained the float writer (shortest round-tripping
+spelling), and `cmd/apogee/settingsrows.go` + its test gained the row's value formatter and the
+`KindFloat → tui.SettingInt` projection (the pane's int and string rows open the same caret buffer,
+so no `internal/tui` change was needed).
+NOTES (2026-08-15): `README.md` is not in the item's Files list but gained one sentence in the
+context-window paragraph (`:512`), because a user-facing config key shipped and the README's own
+budget section already describes the reserve this key now sets. Only the top-level key is named;
+item 13 owns the per-server half.
+NOTES (2026-08-15): no CHANGELOG entry in this sidecar — the plan assigns the whole
+`response-reserve:` feature's changelog text to item 13, and item 12's Files list deliberately omits
+`CHANGELOG.md`.
 
 Depends on item 11.
 
