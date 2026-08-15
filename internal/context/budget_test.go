@@ -13,18 +13,23 @@ import (
 // held back, and the four parts sum to the window exactly (no rounding drift, so ≤-window holds).
 func TestAllocate_ReserveHonouredAndPartsSum(t *testing.T) {
 	cases := []struct {
-		name    string
-		window  int
-		reserve int
+		name     string
+		window   int
+		reserve  int
+		fraction float64
 	}{
-		{"explicit reserve", 8192, 2048},
-		{"default reserve (zero ⇒ fraction)", 8192, 0},
-		{"tiny window", 10, 0},
-		{"odd window exercises rounding", 4097, 613},
+		{"explicit reserve", 8192, 2048, 0},
+		{"default reserve (zero ⇒ fraction)", 8192, 0, 0},
+		{"tiny window", 10, 0, 0},
+		{"odd window exercises rounding", 4097, 613, 0},
+		{"configured fraction", 8192, 0, 0.35},
+		{"configured fraction on an odd window", 4097, 0, 0.35},
+		{"explicit reserve alongside a fraction", 8192, 2048, 0.5},
+		{"out-of-range fraction falls back", 8192, 0, 1.5},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			a := Allocate(tc.window, tc.reserve)
+			a := Allocate(tc.window, tc.reserve, tc.fraction)
 
 			if a.Window != tc.window {
 				t.Errorf("Window = %d, want %d", a.Window, tc.window)
@@ -57,7 +62,7 @@ func TestAllocate_ReserveHonouredAndPartsSum(t *testing.T) {
 // allocate, so every field is zero and a consumer treats it as unbounded.
 func TestAllocate_UnknownWindowIsZero(t *testing.T) {
 	for _, window := range []int{0, -1} {
-		if got := Allocate(window, 1024); got != (Allocation{}) {
+		if got := Allocate(window, 1024, 0.3); got != (Allocation{}) {
 			t.Errorf("Allocate(%d, …) = %+v, want the zero Allocation", window, got)
 		}
 	}
@@ -66,12 +71,46 @@ func TestAllocate_UnknownWindowIsZero(t *testing.T) {
 // TestAllocate_OversizeReserveClamped proves a reserve at/over the window is clamped so at least one
 // working token remains rather than leaving a zero (or negative) prompt budget.
 func TestAllocate_OversizeReserveClamped(t *testing.T) {
-	a := Allocate(1000, 5000)
+	a := Allocate(1000, 5000, 0)
 	if a.ResponseReserve != 999 {
 		t.Errorf("ResponseReserve = %d, want it clamped to window-1 (999)", a.ResponseReserve)
 	}
 	if a.ResponseReserve+a.SystemPrompt+a.FileContext+a.History != 1000 {
 		t.Errorf("parts do not sum to the window after clamping: %+v", a)
+	}
+}
+
+// TestAllocate_ReservePrecedence pins the three-step precedence the reply reserve follows: explicit
+// tokens win over any fraction, a fraction in (0, 1) applies when no tokens are pinned, and a
+// fraction outside that range is treated as unset so it falls through to the built-in default —
+// the defensive floor beneath the config layer's range validation, never a panic or an absurd
+// reserve.
+func TestAllocate_ReservePrecedence(t *testing.T) {
+	const window = 10000
+	const builtIn = int(window * defaultReserveFraction) // 2000
+
+	cases := []struct {
+		name        string
+		reserve     int
+		fraction    float64
+		wantReserve int
+	}{
+		{"explicit tokens win over a fraction", 3000, 0.5, 3000},
+		{"explicit tokens win over an out-of-range fraction", 3000, 7.5, 3000},
+		{"fraction applies when no tokens are pinned", 0, 0.5, 5000},
+		{"a small fraction applies too", 0, 0.05, 500},
+		{"zero fraction is unset", 0, 0, builtIn},
+		{"negative fraction is unset", 0, -0.3, builtIn},
+		{"a fraction of exactly 1 is unset", 0, 1, builtIn},
+		{"a fraction above 1 is unset", 0, 1.5, builtIn},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := Allocate(window, tc.reserve, tc.fraction).ResponseReserve; got != tc.wantReserve {
+				t.Errorf("Allocate(%d, %d, %v).ResponseReserve = %d, want %d",
+					window, tc.reserve, tc.fraction, got, tc.wantReserve)
+			}
+		})
 	}
 }
 

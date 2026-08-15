@@ -30,7 +30,7 @@ func TestBudgetIsHonestBeforeCalibration(t *testing.T) {
 	if b.ContextLimit != 8192 {
 		t.Errorf("ContextLimit = %d, want the configured window 8192", b.ContextLimit)
 	}
-	if want := apogeectx.Allocate(8192, 0); b.ResponseReserve != want.ResponseReserve ||
+	if want := apogeectx.Allocate(8192, 0, 0); b.ResponseReserve != want.ResponseReserve ||
 		b.SystemPrompt != want.SystemPrompt || b.FileContext != want.FileContext || b.History != want.History {
 		t.Errorf("allocation = {reserve %d sys %d file %d hist %d}, want context.Allocate %+v",
 			b.ResponseReserve, b.SystemPrompt, b.FileContext, b.History, want)

@@ -470,7 +470,7 @@ func TestContextFilesReportMeasuresStandingContent(t *testing.T) {
 		t.Errorf("StandingTokens = %d, want %d (the estimate over the whole seeded system content)",
 			report.StandingTokens, want)
 	}
-	if share := apogeectx.Allocate(8192, 0).SystemPrompt; report.SystemShare != share {
+	if share := apogeectx.Allocate(8192, 0, 0).SystemPrompt; report.SystemShare != share {
 		t.Errorf("SystemShare = %d, want the Budget's allocation %d", report.SystemShare, share)
 	}
 	if !report.Oversize() {

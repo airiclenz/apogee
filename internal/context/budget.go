@@ -35,8 +35,10 @@ const (
 )
 
 // defaultReserveFraction is the share of the window held back for the model's reply when the
-// caller supplies no explicit reserve (ContextConfig.ResponseReserve == 0). Generous reply
-// headroom matters more for a small local model than squeezing the last tokens of prompt in.
+// caller supplies neither an explicit reserve (ContextConfig.ResponseReserve == 0) nor a
+// configured share (ContextConfig.ResponseReserveFraction outside the accepted (0, 1) range).
+// Generous reply headroom matters more for a small local model than squeezing the last tokens of
+// prompt in.
 const defaultReserveFraction = 0.20
 
 // Allocation is the Budget's split of a model's context window across the parts of one request:
@@ -57,17 +59,24 @@ type Allocation struct {
 }
 
 // Allocate splits window (the model's discovered context window, n_ctx tokens) into an
-// Allocation. reserve is the tokens to hold back for the reply; a non-positive reserve falls back
-// to defaultReserveFraction of the window, and a reserve that would leave no working room is
-// clamped so at least one token remains to fill. A non-positive window yields the zero Allocation
-// (the window is unknown, so there is no basis to allocate). History takes the remainder after the
-// system-prompt and file-context shares, so the parts sum to window exactly with no rounding drift.
-func Allocate(window, reserve int) Allocation {
+// Allocation. The reply reserve follows one precedence: reserve, the tokens to hold back, wins
+// whenever it is positive; else fraction, a share of the window in (0, 1), is applied; else
+// defaultReserveFraction. A fraction outside (0, 1) is treated as UNSET rather than rejected — the
+// config layer validates the key's range, and this is the defensive floor beneath it, so a bad
+// fraction costs the caller the built-in default and never a panic. A reserve that would leave no
+// working room is clamped so at least one token remains to fill. A non-positive window yields the
+// zero Allocation (the window is unknown, so there is no basis to allocate). History takes the
+// remainder after the system-prompt and file-context shares, so the parts sum to window exactly
+// with no rounding drift.
+func Allocate(window, reserve int, fraction float64) Allocation {
 	if window <= 0 {
 		return Allocation{}
 	}
 	if reserve <= 0 {
-		reserve = int(float64(window) * defaultReserveFraction)
+		if fraction <= 0 || fraction >= 1 {
+			fraction = defaultReserveFraction
+		}
+		reserve = int(float64(window) * fraction)
 	}
 	if reserve >= window {
 		reserve = window - 1

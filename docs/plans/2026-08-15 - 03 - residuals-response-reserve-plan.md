@@ -332,7 +332,24 @@ thinking-effort-knob residuals section.
 
 ---
 
-## 11. Response-reserve fraction — engine half
+## 11. Response-reserve fraction — engine half — ✅ DONE (2026-08-15)
+
+NOTES (2026-08-15): the dispatch DECISION's pre-existing commit 7920e6d turned out to be docs-only —
+`git show --stat 7920e6d` reports a single file changed, the plan document itself (400 insertions),
+and `grep -rn ResponseReserveFraction --include=*.go .` returned nothing before this pass. None of
+item 11 was already implemented, so the whole item was written here.
+NOTES (2026-08-15): two files outside the item's Files list were edited because the `Allocate`
+signature change reaches them — `internal/agent/budget_test.go:33` and
+`internal/agent/contextfiles_test.go:473` both call `apogeectx.Allocate(8192, 0)` and now pass the
+new `0` fraction. Mechanical call-site updates, no assertion changed; without them `go vet ./...`
+does not compile.
+NOTES (2026-08-15): no CHANGELOG entry in this sidecar — the plan assigns the whole
+`response-reserve:` feature's changelog text to item 13, and item 11's Files list deliberately omits
+`CHANGELOG.md`.
+NOTES (2026-08-15): `defaultReserveFraction`'s own doc comment (`internal/context/budget.go:37`) was
+corrected in the same pass — it said the default applies when the caller supplies no explicit
+reserve, which this change makes inaccurate (it now also requires no configured fraction).
+Comment-only, no behaviour.
 
 **What:** Give the engine a configurable reserve fraction with the ratified precedence.
 Add `ResponseReserveFraction float64` to `domain.ContextConfig`

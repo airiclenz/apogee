@@ -1016,7 +1016,7 @@ func (a *Agent) resolveSkillRefs(turn int, ids []string) string {
 // until the reducers land (plan item 9).
 func (a *Agent) budget() domain.Budget {
 	window := a.cfg.Context.MaxContextTokens
-	alloc := apogeectx.Allocate(window, a.cfg.Context.ResponseReserve)
+	alloc := apogeectx.Allocate(window, a.cfg.Context.ResponseReserve, a.cfg.Context.ResponseReserveFraction)
 	return domain.Budget{
 		ContextLimit:    window,
 		Used:            a.tokens.Used(),

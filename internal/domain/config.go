@@ -225,6 +225,16 @@ type ContextConfig struct {
 	MaxContextTokens int // 0 ⇒ window unknown; the CLI discovers it or the context-window key supplies it (the Budget then allocates nothing and the engine's growth bounds fall back to one conservative assumed ceiling — internal/agent, ADR 0018)
 	ResponseReserve  int
 
+	// ResponseReserveFraction is the share of the discovered window held back for the model's
+	// reply when no explicit token reserve is pinned — the `response-reserve:` config key
+	// (top-level, or the bound server entry's override), expressed as a fraction. The reserve
+	// follows one precedence, in this order: an explicit ResponseReserve in TOKENS wins whatever
+	// the fraction says; else a fraction in (0, 1) of the window; else the built-in default share
+	// (internal/context.Allocate). 0 means unset, and so does any value outside (0, 1) — the
+	// config layer rejects an out-of-range fraction, and the allocator treats one that reaches it
+	// as unset rather than allocating an absurd reserve.
+	ResponseReserveFraction float64
+
 	// MaxOutputTokens CAPS one reply, in tokens — the ceiling the engine states on the wire so a
 	// reply stops where the engine already budgeted for it rather than at the server's context wall
 	// (ADR 0046). 0 ⇒ nothing pinned, and the engine derives the cap from the Budget's own
