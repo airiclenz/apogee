@@ -36,12 +36,6 @@ The still-open findings the open-residuals plan run left, under the conventions'
 
 The still-open findings the render_test.go split left, under the conventions' actionability bar.
 
-- [ ] Two of the carved test files have no same-named source, against the coding-standards Go rule
-  `{source}_test.go`: `internal/tui/toolshape_test.go:1` and `internal/tui/blocktarget_test.go:1`
-  are named for a subject (tool shape, block target) rather than for a source file, while every
-  other file the split produced pairs with one (`wrap.go`, `userblock.go`, `subagentblock.go`,
-  `toolblock.go`, `toolleader.go`, `toolbranch.go`, `startupbox.go`, `chromelayout.go`). Worth a
-  rename decision.
 - [ ] Package-wide test-file size debt the split exposed: with `internal/tui/render_test.go` down
   to 459 lines, the files furthest past the coding-standards ~400-line guidance are now
   `internal/tui/model_test.go:1` (4916 lines), `internal/tui/settings_test.go:1` (3217) and

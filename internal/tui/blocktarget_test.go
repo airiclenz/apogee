@@ -1,3 +1,9 @@
+// blocktarget_test.go is named for its subject, not for a source file: a deliberate exception to
+// the coding-standards Go rule that a suite is named `{source}_test.go` (ratified 2026-08-15). Its
+// subject is cross-file behaviour — which rendered line is a block's click target, and what the
+// mark on it says — decided together by render.go, blockstate.go, transcript.go, mouse.go and
+// toolbranch.go, so no single source can lend the suite its name.
+
 package tui
 
 import (

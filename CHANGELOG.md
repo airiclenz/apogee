@@ -317,6 +317,10 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- `internal/tui/toolshape_test.go` and `internal/tui/blocktarget_test.go` now open with a header
+  comment recording their subject names as a ratified exception to the `{source}_test.go` rule,
+  naming the sources each suite spans and why no single one can lend it its name.
+
 - Docs: the command-menu prose in `README.md` now names every busy-safe command. It listed four —
   `/version`, `/skills`, `/usage` and `/confine`'s status report — while the table below it marks
   `/effort`, `/schedule` and `/schedule-stop` ✅ too, so the sentence understated what answers while

@@ -172,7 +172,15 @@ only the table.
 
 ---
 
-## 6. Record the subject-named test files as a deliberate exception
+## 6. Record the subject-named test files as a deliberate exception — ✅ DONE (2026-08-15)
+
+NOTES (2026-08-15): per the dispatch DECISION the two header comments already in the working tree
+from the batched attempt were reviewed and kept — each records the exception, cites the 2026-08-15
+ratification and names the item's sources verbatim. One wording deviation stands:
+`blocktarget_test.go`'s why-clause says no single source can lend the suite its name rather than the
+item's "every 1:1 name is taken", because `blockstate_test.go` does not exist — the item's literal
+clause would have been false there. `toolshape_test.go` carries the taken-names clause, which is
+true for all four of its sources.
 
 **What:** Per the ratified call (owner, 2026-08-15): `internal/tui/toolshape_test.go` and
 `internal/tui/blocktarget_test.go` keep their subject names. Add a short header comment atop
