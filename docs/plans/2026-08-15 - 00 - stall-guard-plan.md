@@ -12,10 +12,11 @@ text yet**.
 - **Sized for:** ~200k-context host
 - **Skills:** coding-standards
 
-**Motivating incident (2026-08-14):** a session showed "thinking" for ~8 hours. The server
-slot was idle (`is_processing: false`, `n_decoded: 0`), the session file unwritten since
-20:43Z, the engine left `inExchange: true` — a turn ended silently with no output and no
-error, and the activity line had no way to say the stream had gone quiet.
+**Motivating incident (2026-08-14):** a slow turn (~43k-token prompt on a 27B) showed a
+bare "thinking" for ~20 minutes with no way to tell progress from death; it in fact
+completed normally into an interactive question the owner was not at the screen for. The
+guard's job is therefore honest silence reporting — "quiet Xs" — never a stall verdict,
+and waiting-on-user states (an open question or approval) must never show it.
 
 **Authoritative sources:**
 
@@ -53,9 +54,6 @@ error, and the activity line had no way to say the stream had gone quiet.
 
 - Rendering reasoning text anywhere (status-adjacent tail row, transcript block,
   expandable entry) — future plan; this plan only lands the retention seam.
-- The engine-side defect the incident exposed (a turn ending with no output, no error,
-  engine left `inExchange`) — not diagnosed or fixed here, and no ISSUES.md entry is
-  written by this plan (not ratified).
 - Any engine/`internal/agent` change — this plan is TUI + config + scheme only.
 - Version bumps (see closing note).
 
@@ -180,6 +178,8 @@ Depends on item 1 and item 2.
   `runningPhrase(now)` is already tested with an explicit now).
 - an arriving event resets the clock and clears the suffix.
 - `actTool` and `actStopping` never show it, whatever the quiet time.
+- an open interactive question/approval (an open tool call awaiting the user) shows no
+  suffix regardless of quiet time — the incident's corrected shape, pinned.
 - `StallAfter == 0` never shows it.
 - width guard: with the suffix painted, `ansi.StringWidth(m.statusLine()) == m.width`
   (the model_test.go:3657+ pattern), including a narrow-width case where the suffix
