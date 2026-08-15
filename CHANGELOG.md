@@ -317,6 +317,19 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- Docs: ADR 0040 gains an `Amendment (2026-08-15)` section recording the four colour roles that
+  landed after `tool-header`, whose trail stopped at the 25th key. One entry each, in landing order:
+  `tool-leader` (the dotted run to the outcome slot, split off `muted`, 26th key, `ab53c09`, landed
+  `#8a8a8a` and ships `#353535` per `ad2fdb1`), `tool-marker-bright` (`tool-marker`'s open step,
+  27th key, `8d96941`, landed `#E6C099` and ships `#C0D0F0` per `85affd4`), `success` (`error`'s
+  counterpart, first worn by the finished sub-agent `✓`, 28th key, `a0072a0`, `#56d364` / `#116329`)
+  and `warning` (the rung between `muted` and `error`, first worn by the stall guard's `quiet`
+  qualifier, 29th key, `4299b97`, `#d7af5f` / `#9a6700`). All four are additive keys, so the
+  compatibility surface the record decides is untouched — a *rename* would still need its own
+  amendment. The 2026-08-08 amendment's two "25th key" references now say what the vocabulary stands
+  at today (29) and point forward to the new section. The `ISSUES.md` bullet asking for the record to
+  catch up is removed. Docs only — no behaviour change.
+
 - **The block-target, start-up-box and prompt-box-sizing suites move to
   `internal/tui/blocktarget_test.go`, `internal/tui/startupbox_test.go` and
   `internal/tui/chromelayout_test.go`, and `render_test.go` settles as the split's shared core.**

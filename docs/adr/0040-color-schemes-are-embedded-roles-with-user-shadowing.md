@@ -214,12 +214,14 @@ to the loading rules this record decides:
   warm orange `#FFB050` (`51e9f65`), so a synthesized `+N more lines` marker never reads as a line
   of the body it counts.
 - **`tool-header`** is a role the pre-record palette had no counterpart for: added as the 25th key
-  by `docs/plans/2026-08-08 - 00 - tool-header-color-role-plan.md` to split the tool-call header
-  label and the sub-agent rail off the `code` role they used to borrow. It landed carrying the old
-  `#f0883e` (`4c3b8b9`) and ships `#FFD060`, a gold (`4b7a120`).
+  of what is a 29-key vocabulary today (the four roles after it are recorded in the 2026-08-15
+  amendment below), by `docs/plans/2026-08-08 - 00 - tool-header-color-role-plan.md`, to split the
+  tool-call header label and the sub-agent rail off the `code` role they used to borrow. It landed
+  carrying the old `#f0883e` (`4c3b8b9`) and ships `#FFD060`, a gold (`4b7a120`).
 
 What this record decides is untouched: the role set is a compatibility surface (a *rename* still
-needs an amendment; `tool-header` was an additive 25th key), a role's *value* is scheme data
+needs an amendment; `tool-header` was an additive 25th key, as are the four roles the 2026-08-15
+amendment records), a role's *value* is scheme data
 rather than a decision of this record, and the cross-scheme skill/file-ref distinction test still
 holds. The "existing render tests are the proof" clause reads as history too — those tests assert
 against `scheme.Default()` rather than against pinned literals, so they followed the retunes.
@@ -227,3 +229,43 @@ Nothing pins the shipped hex any more: `internal/scheme`'s `darkPalette` drift g
 on 2026-08-11 (owner call — the schemes stay under tuning, so a color change must never fail a
 test) in favour of colour-agnostic guards on the files' structure — every role stated, stated
 once, parsing clean, and `Default()` complete.
+
+## Amendment (2026-08-15) — the four roles that landed after `tool-header`
+
+The amendment above carries the role trail only as far as `tool-header`, the 25th key. Four more
+roles have landed since, each one additive in exactly the sense this record decides — a new key an
+absent scheme file silently inherits (decision 3), so no user scheme broke on any of them — and
+each one either splitting a tone off a role that used to carry two meanings or naming a meaning the
+palette had no word for. The vocabulary stands at **29 keys** at HEAD, which is what
+`internal/scheme/scheme.go`'s `Scheme` struct declares and `roleKeys` derives; the four are recorded
+here in landing order.
+
+- **`tool-leader`** is the dotted `⋯` run carrying the eye from a tool row's target to the outcome
+  slot right-aligned at the row's edge — split off `muted`, the tone the `▶`/`▼` indicator beside it
+  wears, so a scheme can damp the dots into the background without moving the indicator with them.
+  Its first consumer is that leader itself, landing as the 26th key with the right-aligned outcome
+  slot (`ab53c09`). It landed seeded from muted's `#8a8a8a` and ships `#353535` (`ad2fdb1`); `light`
+  ships `#656d76`.
+- **`tool-marker-bright`** is `tool-marker`'s open step — the pair `muted` / `muted-bright` already
+  models — split off so an EXPANDED block's marker reads a step out of the collapsed ones around it,
+  and stated as a role rather than computed at render time because every color on screen is a role a
+  scheme can name. Its first consumer is the outcome slot in an expanded tool block. Added as the
+  27th key (`8d96941`) carrying `#E6C099`, it ships `#C0D0F0` (`85affd4`); `light` ships `#2F5884`,
+  where "up" is darker rather than brighter.
+- **`success`** is `error`'s counterpart at the other end of an outcome: the tone a marker wears to
+  say a thing came off, a meaning the palette had no word for before it. Its first consumer is the
+  `✓` on a finished sub-agent, but the role is named for the meaning rather than the glyph. Added as
+  the 28th key (`a0072a0`), it ships `#56d364` in `dark` and `#116329` in `light`, with a
+  colour-agnostic guard that no shipped scheme gives `success` and `error` the same voice.
+- **`warning`** is the rung between `muted` and `error`: a condition apogee wants noticed but has not
+  called a fault — again a meaning with no prior word, and the reason the status line has a second
+  voice (`statusWarning`, deliberately not bold). Its first consumer is the stall guard's `quiet`
+  qualifier, rendered before the activity clock. Added as the 29th key (`4299b97`), it ships
+  `#d7af5f` in `dark` and `#9a6700` in `light`.
+
+Nothing here reopens what this record decides. All four are additive keys, so the compatibility
+surface is intact and a *rename* would still need an amendment of its own; their values are scheme
+data rather than decisions of this record, and the retunes above are read the same way as the
+2026-08-08 ones. The count itself is now pinned by test — `internal/scheme/scheme_test.go` asserts
+`len(roleKeys)` against the number the prose states, so the next role addition fails the suite until
+this trail and the prose sites catch up.

@@ -49,7 +49,12 @@ format and the "additive role" rule); [ADR 0031](../adr/0031-the-local-platform-
 
 ---
 
-## 1. ADR 0040 amendment for the four unrecorded roles
+## 1. ADR 0040 amendment for the four unrecorded roles — ✅ DONE (2026-08-15)
+
+NOTES (2026-08-15): the amendment cites both shipped hexes (dark / light) per role plus the retune
+sha where the dark value moved after landing, extending the `tool-header` entry's dark-only form —
+`tool-leader` and `tool-marker-bright` were both retuned after landing, so the landing sha alone
+would have named a hex that no longer ships.
 
 **What:** Append a new `## Amendment (2026-08-15) — …` section to
 `docs/adr/0040-color-schemes-are-embedded-roles-with-user-shadowing.md`, in the house
