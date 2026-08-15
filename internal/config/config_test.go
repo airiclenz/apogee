@@ -2902,6 +2902,77 @@ func TestApplyConfigModelProfiles(t *testing.T) {
 	}
 }
 
+// The thinking block's `effort:` reaches the domain profile as the typed level (ADR 0050), and an
+// entry that leaves the key out keeps the ZERO effort — the anchor that means "emit nothing", so a
+// config written before the key existed still produces byte-identical requests.
+func TestApplyConfigModelProfileEffort(t *testing.T) {
+	t.Parallel()
+	home := testConfigHome(t, "")
+	const configYAML = `model-profiles:
+  qwen3.8:
+    thinking:
+      style: delimited
+      start: "<think>"
+      end: "</think>"
+      effort: low
+  no-effort-here:
+    thinking:
+      style: harmony
+`
+	writeConfigHome(t, home, configYAML)
+	opts := Options{ConfigDir: home}
+	if err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
+		t.Fatalf("ApplyConfig: %v", err)
+	}
+
+	want := []profiles.Entry{
+		{
+			Pattern: "no-effort-here",
+			Profile: domain.ModelProfile{
+				Thinking: domain.ThinkingProfile{Style: domain.ThinkingHarmony},
+			},
+		},
+		{
+			Pattern: "qwen3.8",
+			Profile: domain.ModelProfile{
+				Thinking: domain.ThinkingProfile{
+					Style:  domain.ThinkingDelimited,
+					Start:  "<think>",
+					End:    "</think>",
+					Effort: domain.EffortLow,
+				},
+			},
+		},
+	}
+	if !reflect.DeepEqual(opts.ModelProfiles, want) {
+		t.Errorf("opts.modelProfiles = %+v; want %+v", opts.ModelProfiles, want)
+	}
+}
+
+// An `effort:` outside the four levels is a LOAD error, not a silently-dropped setting: the failure
+// is otherwise invisible (a model sent no effort and a model sent an unmapped one answer alike), so
+// the message has to name the offending pattern and spell the vocabulary out.
+func TestApplyConfigBadModelProfileEffortErrors(t *testing.T) {
+	t.Parallel()
+	home := testConfigHome(t, "")
+	const configYAML = `model-profiles:
+  qwen3.8:
+    thinking:
+      effort: hihg
+`
+	writeConfigHome(t, home, configYAML)
+	opts := Options{ConfigDir: home}
+	err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify)
+	if err == nil {
+		t.Fatal("effort: hihg — want a load error, got nil")
+	}
+	for _, want := range []string{"qwen3.8", "hihg", "off", "low", "medium", "high"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not mention %q — it must name the offending entry and the vocabulary", err, want)
+		}
+	}
+}
+
 // With no `model-profiles:` map, opts.modelProfiles is empty — the user configures no shape, so the
 // composition root resolves against the shipped table alone and, failing that, the zero profile.
 func TestApplyConfigNoProfilesIsEmpty(t *testing.T) {

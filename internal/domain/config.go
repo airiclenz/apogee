@@ -297,6 +297,13 @@ type ThinkingProfile struct {
 	// "</think>"); both must be set for stripping to run. They are ignored for the other styles.
 	Start string
 	End   string
+
+	// Effort is how hard this model is asked to think (CONTEXT: Thinking effort) — a dial the
+	// request forwards to the server's chat template, ORTHOGONAL to Style above: Style says how
+	// the reasoning arrives in the reply, Effort says how much of it to produce. The zero value
+	// ("") is the wire anchor: absent means NOTHING is emitted for it, so an out-of-the-box
+	// request stays byte-identical and the model's own template default stands (ADR 0050).
+	Effort ThinkingEffort
 }
 
 // ThinkingStyle names a model's inline reasoning-channel format. "" is treated as ThinkingNone.
@@ -314,6 +321,37 @@ const (
 	// ThinkingHarmony is gpt-oss's harmony channel format (<|channel|>analysis<|message|>…).
 	ThinkingHarmony ThinkingStyle = "harmony"
 )
+
+// ThinkingEffort names how hard a model is asked to think (CONTEXT: Thinking effort). It is a
+// profile axis rather than a global knob because the vocabulary a template understands is a fact
+// about the model, and the provider Client owns the ONE mapping from these four words onto the
+// wire (ADR 0050). "" is not a fifth level — it is the ABSENCE of the setting, and absence emits
+// nothing.
+type ThinkingEffort string
+
+const (
+	// EffortOff asks for no chain-of-thought at all.
+	EffortOff ThinkingEffort = "off"
+	// EffortLow is the shortest reasoning the template offers.
+	EffortLow ThinkingEffort = "low"
+	// EffortMedium is the middle rung.
+	EffortMedium ThinkingEffort = "medium"
+	// EffortHigh is the longest reasoning the template offers.
+	EffortHigh ThinkingEffort = "high"
+)
+
+// Valid reports whether e is a value this build understands: one of the four levels, or the zero
+// value meaning unset — which is a legitimate configuration, not a defect, because absence is how
+// a profile leaves the model's own template default alone. The config loader asks this so a typo'd
+// `effort:` is a startup error naming the key rather than a setting that silently does nothing.
+func (e ThinkingEffort) Valid() bool {
+	switch e {
+	case "", EffortOff, EffortLow, EffortMedium, EffortHigh:
+		return true
+	default:
+		return false
+	}
+}
 
 // Mode is the autonomy level governing whether tool calls need human approval
 // (CONTEXT: Agent mode). It is orthogonal to Config.Bypass.

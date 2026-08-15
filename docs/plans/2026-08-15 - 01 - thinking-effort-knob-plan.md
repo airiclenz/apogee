@@ -43,7 +43,17 @@ default effort for sub-agents; visible rendering of thinking tokens; `logit_bias
 llama.cpp `--reasoning-budget`; persisting `/effort` to config; any settings-TUI row for
 `model-profiles:`.
 
-## 1. Domain effort type and config-load validation
+## 1. Domain effort type and config-load validation — ✅ DONE (2026-08-15)
+
+NOTES (2026-08-15): `internal/config/defaults_test.go` edited beyond the item's Files list — one
+string added to the existing `TestEmbeddedDefaultConfigDocumentsModelProfiles` want-list so the
+template's new `effort:` example is guarded like the `style:` one beside it.
+NOTES (2026-08-15): `ThinkingEffort.Valid()` accepts the zero value as well as the four levels
+(absence is a legitimate configuration, not a defect); the loader therefore needs no separate
+empty-string check.
+NOTES (2026-08-15): validation runs in `LoadFileConfig` via a new `validateModelProfiles` helper
+rather than inside `fileConfig.layer()`, which has no error return; patterns are walked in sorted
+order so a file with two bad entries reports the same one every run.
 
 **What:** Add the effort leaf to the domain profile and the YAML schema, with load-time enum
 validation.

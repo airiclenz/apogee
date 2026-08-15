@@ -192,6 +192,7 @@ func TestEmbeddedDefaultConfigDocumentsModelProfiles(t *testing.T) {
 		"# model-profiles:",          // the map itself, as a commented example to uncomment
 		"tool-call-format",           // the tool-call axis
 		"style: delimited",           // the thinking axis, with a value it actually takes
+		"effort: medium",             // the effort axis, likewise
 		"minimax-m3",                 // a shipped pattern: the built-in table is documented, not hidden
 		"is retired",                 // and the global key it replaced is named as retired…
 		"refused at startup",         // …loudly, so a stale config's reader knows what happened

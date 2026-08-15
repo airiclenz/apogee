@@ -61,3 +61,46 @@ func TestTighterMode(t *testing.T) {
 		}
 	}
 }
+
+// TestThinkingEffortValid pins the effort vocabulary the config loader gates on (ADR 0050): the
+// four levels pass, the ZERO value passes because absence is a legitimate configuration — the one
+// that emits nothing and leaves the model's own template default alone — and everything else is
+// refused, including a near-miss typo and a case variant (the wire mapping is verbatim, so "High"
+// is not "high").
+func TestThinkingEffortValid(t *testing.T) {
+	cases := []struct {
+		effort domain.ThinkingEffort
+		want   bool
+	}{
+		{domain.EffortOff, true},
+		{domain.EffortLow, true},
+		{domain.EffortMedium, true},
+		{domain.EffortHigh, true},
+		{domain.ThinkingEffort(""), true}, // unset: the send-nothing anchor, not a defect
+		{domain.ThinkingEffort("hihg"), false},
+		{domain.ThinkingEffort("High"), false},
+		{domain.ThinkingEffort("none"), false}, // the thinking STYLE vocabulary is a different axis
+		{domain.ThinkingEffort("xhigh"), false},
+	}
+	for _, tc := range cases {
+		if got := tc.effort.Valid(); got != tc.want {
+			t.Errorf("ThinkingEffort(%q).Valid() = %v, want %v", string(tc.effort), got, tc.want)
+		}
+	}
+
+	// The constants spell exactly what goes on the wire — a rename that changed a level's text
+	// would change the bytes the template sees without any test noticing.
+	for _, tc := range []struct {
+		effort domain.ThinkingEffort
+		want   string
+	}{
+		{domain.EffortOff, "off"},
+		{domain.EffortLow, "low"},
+		{domain.EffortMedium, "medium"},
+		{domain.EffortHigh, "high"},
+	} {
+		if string(tc.effort) != tc.want {
+			t.Errorf("effort constant = %q, want %q", string(tc.effort), tc.want)
+		}
+	}
+}

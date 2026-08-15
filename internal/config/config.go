@@ -1664,9 +1664,10 @@ type modelProfileConfig struct {
 // thinkingConfig is the on-disk schema for a model's inline thinking channel (part of the model
 // profile). It mirrors domain.ThinkingProfile with yaml tags.
 type thinkingConfig struct {
-	Style string `yaml:"style"`
-	Start string `yaml:"start"`
-	End   string `yaml:"end"`
+	Style  string `yaml:"style"`
+	Start  string `yaml:"start"`
+	End    string `yaml:"end"`
+	Effort string `yaml:"effort"`
 }
 
 // toModelProfile maps the on-disk model-profile schema onto the domain.ModelProfile value the
@@ -1677,11 +1678,31 @@ func (p modelProfileConfig) toModelProfile() domain.ModelProfile {
 		ToolCallFormat: domain.ToolCallFormat(p.ToolCallFormat),
 		Pattern:        p.ToolCallPattern,
 		Thinking: domain.ThinkingProfile{
-			Style: domain.ThinkingStyle(p.Thinking.Style),
-			Start: p.Thinking.Start,
-			End:   p.Thinking.End,
+			Style:  domain.ThinkingStyle(p.Thinking.Style),
+			Start:  p.Thinking.Start,
+			End:    p.Thinking.End,
+			Effort: domain.ThinkingEffort(p.Thinking.Effort),
 		},
 	}
+}
+
+// validateModelProfiles rejects a `model-profiles:` map naming a thinking effort outside the four
+// levels the wire mapping knows (ADR 0050). It runs at LOAD, before the layer is built, because a
+// typo'd `effort:` would otherwise reach the wire as an unmapped value and quietly emit nothing —
+// the one failure the user cannot see from the outside, since a model that ignores an effort dial
+// and a model that was never sent one produce the same reply.
+//
+// The patterns are walked in sorted order so a file with two bad entries reports the same one on
+// every run (the reason toProfileEntries sorts too).
+func validateModelProfiles(m map[string]modelProfileConfig) error {
+	for _, pattern := range slices.Sorted(maps.Keys(m)) {
+		effort := domain.ThinkingEffort(m[pattern].Thinking.Effort)
+		if !effort.Valid() {
+			return fmt.Errorf("apogee: invalid model-profiles.%s.thinking.effort %q: want off, low, "+
+				"medium, or high, or leave the key out for the model's own default", pattern, string(effort))
+		}
+	}
+	return nil
 }
 
 // toProfileEntries projects the on-disk `model-profiles:` map onto the ordered entry list the
@@ -1824,6 +1845,9 @@ func LoadFileConfig(path string, readFile func(string) ([]byte, error), notify f
 	var fc fileConfig
 	if err := yaml.Unmarshal(data, &fc); err != nil {
 		return Layer{}, fmt.Errorf("apogee: parse config %q: %w", path, err)
+	}
+	if err := validateModelProfiles(fc.ModelProfiles); err != nil {
+		return Layer{}, err
 	}
 	return fc.layer(), nil
 }

@@ -247,6 +247,20 @@ point is a **minor** bump, not a breaking change.
   backslash escape read like a path segment, which is accepted imprecision, not obfuscation
   resistance.
 
+- **A model profile's thinking block gains a validated `effort:` leaf.** The per-model dial for how
+  hard a model is asked to think (`off | low | medium | high`) is now part of the domain profile:
+  `domain.ThinkingEffort` with the four constants, a `Valid()` gate, and an `Effort` field on
+  `domain.ThinkingProfile`. It is ORTHOGONAL to `style:` beside it — style says how the reasoning
+  arrives in the reply, effort says how much of it to produce — and its ZERO value is the wire
+  anchor: absent means nothing is emitted for it, so a config written before the key existed still
+  produces byte-identical requests and the model's own template default stands (ADR 0050). The
+  on-disk `model-profiles: <pattern>: thinking: effort:` key maps straight across at
+  `toModelProfile`, and a value outside the four levels is a LOAD error naming the offending
+  pattern and spelling the vocabulary out — the failure is otherwise invisible, since a model sent
+  no effort and a model sent an unmapped one answer alike. The seeded template documents the axis
+  and shows it in the `model-profiles:` example. Nothing sends it on the wire yet; the request seam
+  and the `/effort` session override land with the items that follow.
+
 ### Changed
 
 - **The block-target, start-up-box and prompt-box-sizing suites move to
