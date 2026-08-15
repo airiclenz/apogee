@@ -363,6 +363,22 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **The `CircuitBreaker`'s concurrency guarantee and its post-trip recovery are now pinned by
+  tests.** The type's doc comment claims it is "safe for concurrent use", but no test had ever
+  spawned a goroutine against it: `TestCircuitBreaker_ConcurrentUse` runs eight goroutines
+  interleaving `Record` and `Tripped` over one signature they all share (mixed success and
+  failure, final state deliberately non-deterministic) and one signature each of them alone
+  drives to the trip edge — under `-race` the run itself proves the guarantee, and the private
+  signatures carry the deterministic assertion that concurrent traffic never leaks across
+  signatures. The recovery branch — the `delete(b.tripped, sig)` a succeeding call performs —
+  had likewise never been reached, because the existing streak-reset test records only two
+  failures against a threshold of three: `TestCircuitBreaker_SuccessClearsATrippedSignature`
+  now trips a signature with three identical failures, records a success, and asserts the
+  signature is no longer tripped and that its streak restarted (the trip edge returns only on a
+  fresh run of three, never on the first failure after the success) — so a regression leaving
+  `tripped` stale, which would block the call forever, fails the suite. Each assertion was
+  checked against a mutated production line, so none of them passes vacuously.
+
 - **The dangerous-action guard's dead `Tier.String()` is gone.** The method was exported, rendered
   the two tiers as `"force-approval"` / `"hard-refuse"` for audit and log lines, and had no caller
   anywhere in the repo — the audit trail states its own decision strings — so it sat at 0% coverage

@@ -2,6 +2,8 @@ package security
 
 import (
 	"encoding/json"
+	"fmt"
+	"sync"
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
@@ -66,6 +68,35 @@ func TestCircuitBreaker_SuccessResetsStreak(t *testing.T) {
 	}
 }
 
+func TestCircuitBreaker_SuccessClearsATrippedSignature(t *testing.T) {
+	t.Parallel()
+	b := NewCircuitBreaker(3)
+	call := breakerCall("terminal", "boom")
+
+	for i := 0; i < 3; i++ {
+		b.Record(call, true)
+	}
+	if !b.Tripped(call) {
+		t.Fatal("setup: breaker not tripped after 3 identical failures")
+	}
+
+	b.Record(call, false) // the call finally succeeded
+
+	if b.Tripped(call) {
+		t.Fatal("a success after the trip left the signature tripped — the call would be blocked forever")
+	}
+	// The streak restarted too: the trip edge comes back only after a fresh run of 3,
+	// never on the first failure of the new streak.
+	for i := 1; i <= 2; i++ {
+		if b.Record(call, true) {
+			t.Fatalf("trip edge reported on failure #%d of the streak that followed the success", i)
+		}
+	}
+	if !b.Record(call, true) {
+		t.Fatal("breaker did not trip again on the 3rd failure after recovering")
+	}
+}
+
 func TestCircuitBreaker_DistinctCallsIndependent(t *testing.T) {
 	t.Parallel()
 	b := NewCircuitBreaker(2)
@@ -82,6 +113,48 @@ func TestCircuitBreaker_DistinctCallsIndependent(t *testing.T) {
 	}
 	if b.Tripped(c) {
 		t.Fatal("tripping alpha must not trip charlie")
+	}
+}
+
+// TestCircuitBreaker_ConcurrentUse exercises the "safe for concurrent use" guarantee the
+// type's doc comment makes: goroutines interleave Record and Tripped over a signature they
+// all share and one each of them alone drives. Under -race the run itself is the assertion
+// for the shared signature (whose final state is deliberately not deterministic); the
+// private signatures carry the deterministic one.
+func TestCircuitBreaker_ConcurrentUse(t *testing.T) {
+	t.Parallel()
+	const goroutines = 8
+	b := NewCircuitBreaker(3)
+	shared := breakerCall("terminal", "shared")
+	own := func(g int) domain.ToolCall { return breakerCall("terminal", fmt.Sprintf("own-%d", g)) }
+
+	edges := make([]int, goroutines) // edges[g] is written by goroutine g only
+	var wg sync.WaitGroup
+	wg.Add(goroutines)
+
+	for g := 0; g < goroutines; g++ {
+		go func(g int) {
+			defer wg.Done()
+			mine := own(g)
+			for i := 0; i < b.Threshold(); i++ {
+				b.Record(shared, g%2 == 0) // half the goroutines fail the shared signature, half succeed
+				b.Tripped(shared)
+				if b.Record(mine, true) {
+					edges[g]++
+				}
+				b.Tripped(mine)
+			}
+		}(g)
+	}
+	wg.Wait()
+
+	for g := 0; g < goroutines; g++ {
+		if edges[g] != 1 {
+			t.Errorf("signature own-%d saw %d trip edges, want exactly 1", g, edges[g])
+		}
+		if !b.Tripped(own(g)) {
+			t.Errorf("signature own-%d not tripped after %d identical failures", g, b.Threshold())
+		}
 	}
 }
 

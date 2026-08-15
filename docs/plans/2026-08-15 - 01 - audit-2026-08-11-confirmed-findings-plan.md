@@ -148,7 +148,7 @@ name the tier in the message text where clarity needs it). Record the removal un
 
 **Commit:** `chore(security): remove the dead Tier.String on the guard path`
 
-## 4. CircuitBreaker: the concurrency claim and the post-trip recovery get tests
+## 4. CircuitBreaker: the concurrency claim and the post-trip recovery get tests — ✅ DONE (2026-08-15)
 
 **What:** Test-only, both in `internal/security/circuitbreaker_test.go`. (a) The doc at
 `circuitbreaker.go:24` claims "safe for concurrent use" and no test spawns a goroutine
