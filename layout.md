@@ -110,7 +110,7 @@ are load-bearing rather than decorative and every shipped scheme is tested for t
 
 **Every pane above the input box takes its rows from the transcript.** The approval and ask
 prompts, the `/sessions` browser, the `/model` | `/server` picker, the `/settings` pane, the
-`/usage` report, the `/` and
+`/usage` report, the `/inspect` raw-protocol pane, the `/` and
 `@` dropdown, and the staged-interjection band all sit in the frame between the session area and the bottom chrome,
 and the session area is what shrinks to seat them. The frame is composed from ONE derivation of
 how many rows are left over, so the rows the transcript is drawn on, the rows a mouse click may
@@ -147,8 +147,10 @@ up because they are typing.
 **So the surfaces give way in a fixed order, and the order is a claim about what the human is
 doing.** The **session area** goes first and goes to nothing; then the **staged band**, which is a
 reminder rather than a control, and whose count the status line is carrying anyway; then the
-**`/` and `@` dropdown**, which a keystroke opened and a keystroke dismisses; then the **`/usage`
-report**, a question already answered; then the
+**`/` and `@` dropdown**, which a keystroke opened and a keystroke dismisses; then the
+**`/inspect` raw-protocol pane**, a window onto a ring that keeps its records whether or not the
+pane is drawn — reopened on a taller window it says exactly what it would have said; then the
+**`/usage` report**, a question already answered; then the
 **`/settings` pane**; then the **`/sessions` browser and the picker**; and last the **approval or ask
 prompt**, which the run itself is blocked on. The footer is not in the division at all, and the input box is in it only at
 its very end, and only for the prompt (below). Two panes can want the same rows, and on a window
@@ -538,8 +540,8 @@ column stay a single column.
 
 **Every overflowing popup carries the same bar.** A bordered pane whose list is longer than the
 window it was granted paints those same two weights down the last column *inside* its border —
-the picker, the session browser, `/settings` and its sub-lists, `/usage`, the dropdown, the
-approval and ask prompts alike, because a windowed list that gives no sign of what it is holding
+the picker, the session browser, `/settings` and its sub-lists, `/usage`, `/inspect`, the dropdown,
+the approval and ask prompts alike, because a windowed list that gives no sign of what it is holding
 back is the same omission wherever it is drawn. The column is reserved **only while the list
 overflows**: a pane whose rows all fit keeps its full inner width, so the bar appearing is itself
 the statement that there is more, and nothing narrows for a list with nothing to scroll. The thumb
@@ -1434,9 +1436,41 @@ four: it is a question already answered rather than a decision surface, so the i
 stays live and every other key — a printable one included — goes where it always went. Its verb is safe while the agent works — the pane reads
 what the frame already holds and calls nothing — which is exactly when the question gets asked, so
 it is the one pane that can be up beside an approval or ask prompt, seated below it, nearest the
-chrome. In the give-way order it sits between the `/settings` pane and the dropdown: it yields to
-every surface the human is acting **in**, and the dropdown, which the next keystroke re-derives,
-yields before it.
+chrome. In the give-way order it sits between the `/settings` pane and the `/inspect` pane: it
+yields to every surface the human is acting **in**, and the two panes below it — the raw-protocol
+view, and the dropdown the next keystroke re-derives — yield before it.
+
+---
+
+## The `/inspect` popup
+
+**What it shows.** `/inspect` opens a bordered pane in the same transcript-side slot, listing the
+**raw protocol** of the recent model calls: the request body the engine marshalled and the response
+payload it read back, newest last. It is the view for the question the rendered conversation cannot
+answer — the model behaved in a way the transcript does not explain — and the only thing that
+settles that is the bytes.
+
+**It is armed, and off by default.** The engine captures nothing unless the `ui.inspector` config
+key says so, read once at start-up, so a session that never asks for it pays nothing at all. With
+nothing captured the pane draws one row rather than an empty box: the key's name where the capture
+is off, and "armed — the next model call lands here" where it is on. Those are different answers to
+the same silence and only one of them is actionable.
+
+**A bounded ring, oldest first.** The pane holds the twenty most recent halves of a round-trip, each
+headed `request · turn 2` — with `· depth 1` on a delegated run's traffic — and its payload
+pretty-printed under it. A record longer than a hundred lines keeps its head and closes with the
+same `… (+N more lines)` every other elided block carries, so the cut is stated rather than made
+silently. Payload rows are **flat**: a line wider than the pane is clipped at the border like any
+other unwrapped row, because a wrapped one long enough to outgrow the whole window would seat
+nothing at all, and a raw-protocol view that goes blank on a big request body is worse than one that
+cuts a long line short.
+
+**It opens on the newest record.** The rows are a log's order, so the record worth reading is the
+last one; the pane opens on the last full window and the keys move from there. Its keyboard is the
+`/usage` report's exactly — `esc`, `↑`/`↓` by a row, `PgUp`/`PgDn` by a window, and nothing else —
+and it is non-modal on the same terms: the box behind it stays live and every other key goes where
+it always went. Its verb is safe while the agent works, which is when the traffic worth reading is
+being made.
 
 ---
 
@@ -1688,8 +1722,8 @@ quiescent engine is not hidden — its row fills the menu's `— idle only` colu
 unselected style, and accepting it anyway prints the note and leaves the draft exactly as it was.
 The tag belongs to the moment rather than to the verb: while the engine is idle no row fills that
 cell, so the column collapses and the menu reads exactly as it does when nothing can be gated. The
-verbs that only report (`/version`, `/skills`, `/usage`, `/confine` with no arguments) run there and
-then, and
+verbs that only report (`/version`, `/skills`, `/usage`, `/inspect`, `/confine` with no arguments)
+run there and then, and
 so do `/schedule` and `/schedule-stop`, which touch no engine at all: a schedule fires as a run of
 its own, so creating or stopping one needs no quiet moment in this session.
 

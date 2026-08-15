@@ -243,7 +243,7 @@ and `/server` are the exception to that exception and run straight away, since b
 they only open a picker. The menu stays open while the model is working, too —
 commands that need a quiet engine wear an `— idle only` tag for as long as the engine
 is busy, and say so if you pick one anyway, while `/version`, `/skills`, `/usage`,
-`/effort`, `/schedule`, `/schedule-stop` and `/confine`'s status report answer
+`/inspect`, `/effort`, `/schedule`, `/schedule-stop` and `/confine`'s status report answer
 immediately. Once the engine is idle that tag is gone from the menu entirely — there
 is nothing left for it to warn about. A token
 lights up in the box exactly when it resolves — the `skill` role for a skill your catalog
@@ -257,6 +257,7 @@ a typo is visible before you send.
 | `/skills` | List the discovered skills — id, name, summary and where each came from | ✅ |
 | `/version` | Show the apogee version | ✅ |
 | `/usage` | What this session has spent — one row for the main agent, one per sub-agent, and a session total | ✅ |
+| `/inspect` | The raw request and response traffic of the recent model calls — armed by `ui.inspector` (off by default) | ✅ |
 | `/confine` | Report or change Auto's blast radius — see [below](#auto-modes-blast-radius) | ✅ report only |
 | `/effort` | Set how hard the model thinks this session — `off`, `low`, `medium`, `high`, or `auto` (back to the profile); bare reports what resolved — see [below](#configuration) | ✅ |
 | `/schedule` | Run a prompt on a cycle — bare lists what is live, `/schedule <prompt>` asks for the cycle and mode, `/schedule <cycle> [auto] <prompt>` creates one outright | ✅ |

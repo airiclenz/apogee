@@ -656,7 +656,10 @@
 // usage.go the /usage report — one row per agent of what this session has SPENT, read off the
 // per-agent totals the folds already keep (the Model's for the main agent, each run head's for a
 // delegate) rather than summed here, and the lightest pane in the frame: no filter, no selection,
-// esc its only key; popup.go the one bordered pane every overlay — those three, the autocomplete
+// esc its only key; inspector.go the /inspect raw-protocol pane and the bounded ring behind it —
+// the request bodies and response payloads the engine reports as domain.WireEvents while
+// `ui.inspector` arms the capture, folded beside the transcript rather than into it (a wire record
+// is not a conversation entry) and shown in the /usage report's shape; popup.go the one bordered pane every overlay — those three, the autocomplete
 // dropdown, the ask and approval prompts — is painted through; logo.go the embedded start-up wordmark;
 // actuation.go the launcher-verb latch and the folds that close one out (ADR 0029) — at most one
 // world-changing call in flight per address, narrated while it blocks, with the next Beat rather

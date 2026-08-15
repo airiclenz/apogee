@@ -281,6 +281,12 @@ func (m Model) runCommand(parsed parsedInput) (tea.Model, tea.Cmd) {
 		// shows is already folded onto this Model.
 		return m.runUsageCommand()
 
+	case "inspect":
+		// Open the raw-protocol pane over the Inspector's ring (inspector.go). The /usage shape
+		// exactly: synchronous, no engine call and no worker, safe mid-Exchange — every record it
+		// shows was folded onto this Model when the engine reported it.
+		return m.runInspectCommand()
+
 	case "color-scheme":
 		// List, switch or export a colour scheme (colorscheme.go, ADR 0040). Synchronous and
 		// idle-safe like /settings, whose write and apply seams the switch form reuses in full: no

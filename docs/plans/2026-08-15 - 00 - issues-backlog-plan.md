@@ -408,7 +408,33 @@ request-direction and a response-direction `WireEvent` per model call with corre
 
 **Commit:** `feat(engine): ui.inspector arms wire capture as WireEvents through the sink`
 
-## 8. Inspector — `/inspect` opens the raw-protocol pane
+## 8. Inspector — `/inspect` opens the raw-protocol pane — ✅ DONE (2026-08-15)
+
+NOTES (2026-08-15): the ring keeps each payload PRETTY-PRINTED AND CAPPED (a hundred lines per
+record, with the dropped count on the record) rather than the raw payload string the item's text
+names. The pane re-derives its rows on every frame and a frame is painted for every streamed token,
+so keeping the raw bytes would put twenty JSON parses per repaint on the hot path; formatting once at
+fold time also bounds the ring's memory, which the item's own reasoning for the count of twenty was
+reaching for. The cut is stated on the pane, never silent.
+NOTES (2026-08-15): payload rows are FLAT (`popupSpec.wrapRows` off), so a JSON line wider than the
+pane is elided at the border. Wrapping was tried against the popup contract and rejected: a single
+line taller than the pane's whole row budget seats NOTHING at all (`popupRowWindowFrom`), so a big
+request body would open a blank pane — worse, for a raw-protocol view, than a long line cut short.
+NOTES (2026-08-15): `/inspect` opens on the LAST full window rather than at the top. The rows are a
+log's order (the item's "newest last"), so opening at row 0 would put the oldest of twenty bodies on
+the screen and ask for a hundred page-downs to reach the record the reader opened the pane for. The
+verb sets a top past the end and the spec clamps it to the drawn window, so the first `↑` moves from
+what was painted.
+NOTES (2026-08-15): five files beyond the item's Files line. `fold.go` takes the one call that files
+a WireEvent into the ring (foldEvent is the single entry every Event enters the view through);
+`doc.go` takes the new file's line in the package map, which `TestDocMapNamesEveryFile` requires;
+`internal/tui/tui.go` and `cmd/apogee/wire_options.go` carry `ui.inspector` to `Options.Inspector`,
+which is the item's own "config says disarmed" half of the empty-pane rule — without it the pane
+cannot tell "nothing captured" from "nothing being captured"; `README.md` gains the verb's row in the
+command table, the repo convention for a user-facing verb.
+NOTES (2026-08-15): `mouse.go` is untouched, so the pane has no click-to-dismiss and no wheel — the
+`/usage` report has both. The item's Files line names neither the file nor the behaviour, and the
+keyboard contract it does name is complete; see DEFER.
 
 **Depends on item 7.**
 

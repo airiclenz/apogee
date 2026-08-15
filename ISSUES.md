@@ -70,10 +70,6 @@ as the behavioral oracle, not the TDD. On send the webview posts `{text, skillId
     [ADR 0025](docs/adr/0025-interjections-commit-at-the-between-steps-boundary.md) §6 still
     defers the user-after-tool wire risk to this layer by name.
 
-- **[P2] Inspector / raw-protocol view** — apogee-code's "Show Code"/Inspector (advanced mode)
-  shows wire-level request/response JSON. apogee has only a hidden, non-toggleable debug field in
-  `internal/tui/transcript.go`. Add a TUI toggle behind an advanced flag.
-
 - **[P2] Undo all agent changes** — batch revert of a session's file writes (document that
   terminal side-effects are not undone, as the extension does).
 

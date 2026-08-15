@@ -145,6 +145,10 @@ func (w *rootWiring) options() tui.Options {
 		SpinnerColor:  w.opts.UI.SpinnerColor,
 		HideScrollbar: !w.opts.UI.ShowScrollbar,
 		StallAfter:    w.opts.UI.StallAfter,
+		// And `ui.inspector`, which the ENGINE acts on (domain.Config.Inspector arms the capture) and
+		// the renderer only words its empty pane with: /inspect names the key when nothing was
+		// captured and it is off.
+		Inspector: w.opts.UI.Inspector,
 		// The `ui.color-scheme:` key, already resolved to the palette itself (wire_live.go): the name
 		// so the renderer can say which scheme is in force, and the warnings the resolve produced so
 		// it can tell the human why the screen is not the one they asked for.

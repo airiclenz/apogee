@@ -10,6 +10,23 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **`/inspect` shows the raw wire traffic behind `ui.inspector`.** The TUI half of the Inspector: the
+  `domain.WireEvent`s the engine reports while the key arms the capture now land in a bounded ring on
+  the renderer — the twenty most recent halves of an Upstream round-trip, escape-stripped and
+  pretty-printed once as they are folded — and `/inspect` opens a non-modal, scrollable pane over
+  them, newest last, each record headed by its direction and the Turn (and the depth of a delegated
+  run) that made the call. The ring sits BESIDE the transcript and never in it: a wire record is not
+  a conversation entry, so nothing about the scrollback, the gauge or the status phrase moves when
+  one arrives, and the records outlive a `/clear` the way the hidden debug view does. The verb is
+  offered like every other, safe while the agent works, and withheld from prompt recall like
+  `/settings` and `/usage`; the pane opens on the newest record, answers `esc` and the four scroll
+  keys and claims nothing else, and takes its rows in the frame's one allocation between the
+  dropdown and the `/usage` report. With nothing captured it draws one row rather than an empty box —
+  naming `ui.inspector` where the capture is off, and saying it is armed and waiting where it is on.
+  A record longer than a hundred lines keeps its head and closes with the same `… (+N more lines)`
+  every other elided block carries, so nothing is ever cut silently. `layout.md` gains the pane, its
+  give-way position and the popup's own section; the README gains the verb.
+
 - **`ui.inspector` now arms wire capture, and the engine reports it as events.** A new editable
   bool key — `ui:` / `inspector:`, default false, file-only like every key in the block — travels the
   config pipeline to `Options.UI.Inspector`, onto `apogee.Config.Inspector`, and from there into the

@@ -133,6 +133,20 @@ type Model struct {
 	// every state: the verb is whileRunning and the pane reads Model state only.
 	usagePane usagePane
 
+	// inspector is the /inspect pane's state (inspector.go): whether the raw-protocol view is up and
+	// how far its row list is scrolled. Two plain values whose zero value is "closed", the usagePane
+	// posture (ADR 0011), and driven in every state for the same reason: the verb is whileRunning and
+	// the pane reads Model state only.
+	inspector inspectorPane
+
+	// wire is the Inspector's bounded ring: the most recent maxWireRecords halves of an Upstream
+	// round-trip, as the fold recorded them (foldWire). It sits BESIDE the transcript rather than in
+	// it — a wire record is not a conversation entry and must not disturb entry folding — and it is
+	// rebuilt rather than appended into, so it rides safely in the value-copied Model (ADR 0011). It
+	// is empty on every run that leaves `ui.inspector` off, where the engine emits no WireEvents at
+	// all.
+	wire []wireRecord
+
 	// settingEdits is the journal of every config key this SESSION changed through the settings surface
 	// — the fact behind each row's ` *` marker (ADR 0037 decision 8). It lives here rather than on the
 	// pane above because its lifetime is the session's and the pane's is one overlay: the human opens
@@ -1122,6 +1136,15 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// keys in every state: the pane is what the human is reading, and a page key that scrolled the
 	// conversation hidden BEHIND the report would move the one list they cannot see.
 	if handled, next, cmd := m.usageKey(msg); handled {
+		return next, cmd
+	}
+
+	// The /inspect pane claims the same five keys on the same terms (inspector.go): not modal, so
+	// every key it does not act on goes where it always went, and below the modal overlays above
+	// because a pane that owns the keyboard answers its own esc first. It sits beside the report it
+	// is shaped after — the two are never open together in practice and their claims are disjoint
+	// while one of them is closed, so the order between THEM decides nothing.
+	if handled, next, cmd := m.inspectorKey(msg); handled {
 		return next, cmd
 	}
 
@@ -2418,13 +2441,14 @@ func (m *Model) refreshViewportAnchored(line, row int) {
 // allocation they all share ([Model.frameRowPlan]): they are siblings spending the same viewport,
 // not each the only thing in it.
 type frameOverlays struct {
-	prompt   string // the approval or the ask popup (they belong to different states, so never both)
-	browser  string // the /sessions history browser
-	picker   string // the /model | /server picker
-	settings string // the /settings configuration pane (full-height — frameRowPlan)
-	usage    string // the /usage token-accounting report (usage.go)
-	dropdown string // the command / @file / skill autocomplete
-	queued   string // the staged-interjection strip (ADR 0025)
+	prompt    string // the approval or the ask popup (they belong to different states, so never both)
+	browser   string // the /sessions history browser
+	picker    string // the /model | /server picker
+	settings  string // the /settings configuration pane (full-height — frameRowPlan)
+	usage     string // the /usage token-accounting report (usage.go)
+	inspector string // the /inspect raw-protocol pane (inspector.go)
+	dropdown  string // the command / @file / skill autocomplete
+	queued    string // the staged-interjection strip (ADR 0025)
 }
 
 // height is the number of screen rows these overlays take from the transcript. An absent overlay
@@ -2432,7 +2456,7 @@ type frameOverlays struct {
 // rather than measured.
 func (o frameOverlays) height() int {
 	rows := 0
-	for _, block := range []string{o.prompt, o.browser, o.picker, o.settings, o.usage, o.dropdown, o.queued} {
+	for _, block := range []string{o.prompt, o.browser, o.picker, o.settings, o.usage, o.inspector, o.dropdown, o.queued} {
 		if block != "" {
 			rows += lipgloss.Height(block)
 		}
@@ -2463,6 +2487,7 @@ func (m Model) frameOverlays() frameOverlays {
 	o.picker = m.renderPicker()
 	o.settings = m.renderSettings()
 	o.usage = m.renderUsage()
+	o.inspector = m.renderInspector()
 	o.dropdown = m.renderAutocomplete()
 	o.queued = m.renderPendingInterjections()
 	return o
@@ -2482,10 +2507,10 @@ func (m Model) transcriptRows() int {
 	return m.frameOverlays().transcriptRows(m.transcriptBudget())
 }
 
-// frameBlocks is the most blocks one frame stacks — the transcript, the six overlays, the blank
+// frameBlocks is the most blocks one frame stacks — the transcript, the seven overlays, the blank
 // gap row, the ▔ hairline, the status line, the input box, the footer, and the ▁ hairline — so the
 // frame's slice is allocated once at its worst case.
-const frameBlocks = 13
+const frameBlocks = 14
 
 // View stacks the transcript, a single blank line, the ▔ top-edge hairline, the status line,
 // the bordered input box, the footer line and the ▁ bottom-edge hairline, filling the alternate
@@ -2569,6 +2594,13 @@ func (m Model) View() tea.View {
 	// answering keeps the position it has when the report is not up.
 	if ov.usage != "" {
 		rows = append(rows, ov.usage)
+	}
+	// The /inspect pane closes the slot, under the report it is shaped after: its verb is
+	// whileRunning too, so it is the other pane that can be up beside a prompt the run is blocked on,
+	// and the surface the human is answering keeps its position when the raw-protocol view is opened
+	// over it.
+	if ov.inspector != "" {
+		rows = append(rows, ov.inspector)
 	}
 	// Then the ▔ top-edge hairline capping the chrome, the status line, the autocomplete overlay
 	// (when open), the input box, the footer, and the ▁ hairline closing the screen under it.
@@ -3517,16 +3549,23 @@ const transcriptReserve = 3
 // nothing is being decided on — a question already answered, dismissed by the esc that is its only
 // key — so it yields to every surface the human is acting IN, while the dropdown, which the next
 // keystroke re-derives anyway, yields before it.
+//
+// The /inspect pane sits between the two, and yields before the report: both are passive reads, and
+// what separates them is what a lost row costs. The report is a dozen rows of totals that stop
+// being a report the moment they are cut, while the raw-protocol view is a window onto a ring that
+// keeps its records whether or not the pane is drawn — reopened on a taller window, it says exactly
+// what it would have said.
 type framePane int
 
 const (
-	panePrompt   framePane = iota // the approval or the ask prompt
-	paneBrowser                   // the /sessions history browser
-	panePicker                    // the /model | /server picker
-	paneSettings                  // the /settings configuration pane — the frame's one full-height pane
-	paneUsage                     // the /usage token-accounting report
-	paneDropdown                  // the command / @file / skill autocomplete
-	paneKinds                     // not a pane: the count, so a plan can hold one grant per kind
+	panePrompt    framePane = iota // the approval or the ask prompt
+	paneBrowser                    // the /sessions history browser
+	panePicker                     // the /model | /server picker
+	paneSettings                   // the /settings configuration pane — the frame's one full-height pane
+	paneUsage                      // the /usage token-accounting report
+	paneInspector                  // the /inspect raw-protocol pane
+	paneDropdown                   // the command / @file / skill autocomplete
+	paneKinds                      // not a pane: the count, so a plan can hold one grant per kind
 )
 
 // framePaneSet is the set of boxed overlays open in one frame — the siblings an allocation has to
@@ -3559,6 +3598,9 @@ func (m Model) openPanes() framePaneSet {
 	}
 	if m.usagePane.open {
 		s = s.with(paneUsage)
+	}
+	if m.inspector.open {
+		s = s.with(paneInspector)
 	}
 	if m.autocomplete.active && len(m.autocomplete.items) > 0 {
 		s = s.with(paneDropdown)

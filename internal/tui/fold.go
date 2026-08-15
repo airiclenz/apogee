@@ -35,6 +35,11 @@ func (m Model) foldEvent(e domain.Event) Model {
 	// the reasoning tail reads nothing the other folds establish, and nothing in the view reads what
 	// it writes — it is retention behind the fold and no surface at all (reasoning.go).
 	m = m.foldReasoning(e)
+	// Order-free for the same reason, and deliberately NOT part of the transcript fold below: a wire
+	// record is not a conversation entry (inspector.go), so it lands in the Inspector's own ring
+	// beside the transcript and disturbs no entry pairing. It reads nothing the other folds
+	// establish, and nothing but /inspect reads what it writes.
+	m = m.foldWire(e)
 	m.transcript.apply(e)
 	// The transcript fold's second half, and separate for one reason: a sub-agent's usage reading
 	// is a FILL, so it needs the window it fills — and where the reading names none, that window is

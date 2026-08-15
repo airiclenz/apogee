@@ -278,6 +278,14 @@ type Options struct {
 	// width they pin would be a change they never asked for.
 	StallAfter time.Duration
 
+	// Inspector is what the `ui.inspector` config key selected: whether this session's engine was
+	// built with the wire capture armed (domain.Config.Inspector). The renderer does not act on it —
+	// the records arrive as events either way (inspector.go) — it WORDS one row with it: an empty
+	// /inspect pane says "nothing captured yet" where the key is on and names the key where it is
+	// off, and those are different answers to the same silence. The zero value is disarmed, which is
+	// both the key's own default and what the hand-built Options of the layout tests want.
+	Inspector bool
+
 	// CursorShape is the shape the prompt's caret is drawn with — what the `cursor-shape` config
 	// key selected. apogee draws the REAL terminal cursor (the textarea's simulated one is retired
 	// in newPromptEditor) and it never blinks, so the shape is the only axis there is: a Bubble Tea

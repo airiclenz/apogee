@@ -162,6 +162,14 @@ type commandSpec struct {
 // safe while a worker works: it reads the folds the Model already holds, calls nothing, and the
 // question it answers is one a human asks precisely while an agent is burning tokens.
 //
+// /inspect opens the raw-protocol pane (inspector.go): the request bodies and response payloads of
+// the recent model calls, as the provider put them on the wire. It carries /usage's two flags for
+// /usage's two reasons — noRecall because it opens a surface rather than saying anything to the
+// model, and whileRunning because it reads a ring the Model already holds and calls nothing, which
+// is what makes it answerable exactly while the traffic worth reading is being made. It is armed by
+// the `ui.inspector` config key and offered whether or not that key is on: a verb withheld until a
+// key is set is a verb nobody finds the key for, and the pane's own first row names it.
+//
 // Order is display order, and it is ALPHABETICAL — declared here in the literal rather than sorted
 // at render time, because this table is the registry and the order the dropdown reads is one of the
 // things it declares. A menu the human can scan without knowing the table is worth more than any
@@ -175,6 +183,7 @@ var commandSpecs = []commandSpec{
 	{name: "confine", summary: "report or change auto mode's blast radius", takesArgs: true, whileRunning: true},
 	{name: "continue", summary: "ask the model to keep going"},
 	{name: "effort", summary: "set how hard the model thinks — off, low, medium, high, or auto", takesArgs: true, whileRunning: true},
+	{name: "inspect", summary: "show the recent raw request and response traffic", whileRunning: true, noRecall: true},
 	{name: "model", summary: "switch model — the launcher's profiles, or what the server serves", takesArgs: true, runsBareAtAccept: true},
 	{name: "new", summary: "start a fresh conversation (same as /clear)", noRecall: true},
 	{name: "rename", summary: "rename this session (bare = ask the model)", takesArgs: true},
