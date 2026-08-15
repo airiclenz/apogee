@@ -470,37 +470,43 @@ func TestHeadlessInstallsTheParallelAgentsCap(t *testing.T) {
 	}
 }
 
-// The two bounds the bound entry carries reach this Driver as well, on the same terms every other
+// The three bounds the bound entry carries reach this Driver as well, on the same terms every other
 // per-entry fact does (ADR 0031's benchable-all-the-way-up): the window is the entry's own
 // `context-window:` resolved over the top-level key — config.ResolveContextWindow, the same
-// precedence a session's bind resolves — and the reply ceiling is the entry's `max-output-tokens:`
-// (ADR 0046). One configuration cannot mean two windows depending on which Driver reads it.
+// precedence a session's bind resolves — the share that window is split by is its
+// `response-reserve:` resolved the same way (config.ResolveResponseReserve), and the reply ceiling is
+// the entry's `max-output-tokens:` (ADR 0046). One configuration cannot mean two windows, or two
+// splits of one window, depending on which Driver reads it.
 //
 // The unpinned row keeps the precedence honest in the other direction: an entry pinning nothing
-// leaves the top-level key answering for the window, and leaves the cap at 0, where the engine
-// derives it from the room its Budget reserves.
+// leaves the top-level keys answering for the window and the share, and leaves the cap at 0, where
+// the engine derives it from the room its Budget reserves.
 func TestHeadlessBudgetsAgainstTheBoundEntrysPins(t *testing.T) {
 	tests := []struct {
-		name       string
-		entryKeys  string
-		wantWindow int
-		wantOutput int
+		name        string
+		entryKeys   string
+		wantWindow  int
+		wantOutput  int
+		wantReserve float64
 	}{
 		{
-			name:       "the bound entry's own pins outrank the top-level key",
-			entryKeys:  "    context-window: 65536\n    max-output-tokens: 4096\n",
-			wantWindow: 65536,
-			wantOutput: 4096,
+			name: "the bound entry's own pins outrank the top-level key",
+			entryKeys: "    context-window: 65536\n    max-output-tokens: 4096\n" +
+				"    response-reserve: 0.35\n",
+			wantWindow:  65536,
+			wantOutput:  4096,
+			wantReserve: 0.35,
 		},
 		{
-			name:       "an entry pinning nothing leaves the top-level key answering",
-			wantWindow: 16384,
+			name:        "an entry pinning nothing leaves the top-level key answering",
+			wantWindow:  16384,
+			wantReserve: 0.25,
 		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			home := testConfigHome(t, "context-window: 16384\nservers:\n  - name: testbox\n    endpoint: "+
-				testServerEndpoint+"\n"+tc.entryKeys+"server: testbox\n")
+			home := testConfigHome(t, "context-window: 16384\nresponse-reserve: 0.25\nservers:\n"+
+				"  - name: testbox\n    endpoint: "+testServerEndpoint+"\n"+tc.entryKeys+"server: testbox\n")
 
 			stub := &stubRunner{}
 			if _, _, err := headlessRunOn(t, stub, fenceableHost, home, "a prompt"); err != nil {
@@ -513,6 +519,10 @@ func TestHeadlessBudgetsAgainstTheBoundEntrysPins(t *testing.T) {
 			if got := stub.spec.Config.Context.MaxOutputTokens; got != tc.wantOutput {
 				t.Errorf("Config.Context.MaxOutputTokens = %d; want %d — the ceiling one reply of an "+
 					"unattended run may reach", got, tc.wantOutput)
+			}
+			if got := stub.spec.Config.Context.ResponseReserveFraction; got != tc.wantReserve {
+				t.Errorf("Config.Context.ResponseReserveFraction = %v; want %v — the share of that window "+
+					"this run holds back for the reply", got, tc.wantReserve)
 			}
 		})
 	}

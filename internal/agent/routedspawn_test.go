@@ -243,6 +243,64 @@ func TestRoutedSpawnWithoutATargetWindowKeepsTheParents(t *testing.T) {
 	}
 }
 
+// TestRoutedSpawnResponseReserveShare covers how the window settled above is SPLIT, the one routed
+// field whose absence is read as silence rather than as an answer. A target stating a share replaces
+// the parent's, because that share describes how the SUB-AGENT server's window is worth dividing; a
+// target stating none — an entry with no `response-reserve:` key, which the host carries through as
+// a plain 0 (delegation.go, rank-free by design) — leaves the parent's resolved share standing,
+// which already is the run's top-level key when nobody overrode it. Taking that 0 as an answer would
+// hand every unstated routed child the engine's built-in fifth in place of the share the operator
+// actually configured, and a fraction — unlike a token count — stays meaningful against any window,
+// so there is nothing in the inherited number describing the wrong server.
+func TestRoutedSpawnResponseReserveShare(t *testing.T) {
+	t.Parallel()
+
+	// The parent's own share, so "kept" and "replaced" are distinguishable, and neither is the
+	// built-in 0.20 that a dropped share would fall to.
+	const parentShare = 0.5
+
+	cases := []struct {
+		name        string
+		targetShare float64
+		want        float64
+	}{
+		{name: "a target stating a share splits its own window by it", targetShare: 0.35, want: 0.35},
+		{name: "a target stating none leaves the parent's share standing", targetShare: 0, want: parentShare},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			parent := routingParent(t)
+			// Written onto the built parent because the share has no setter of its own: its only live
+			// door is the atomic rebind commit (rebind.go), which is not what this test is asking about.
+			parent.cfg.Context.ResponseReserveFraction = parentShare
+			target := routedTarget()
+			target.ResponseReserveFraction = tc.targetShare
+			parent.SetDelegationTarget(target)
+
+			child := spawn(t, parent)
+
+			if got := child.cfg.Context.ResponseReserveFraction; got != tc.want {
+				t.Errorf("routed child reserve share = %v, want %v", got, tc.want)
+			}
+			// And what that share MEANS for the child: the reserve is held back out of the target's
+			// window, not out of the session's, so the two halves of a routed budget agree.
+			wantReserve := int(tc.want * float64(target.ContextWindow))
+			if got := child.budget().ResponseReserve; got != wantReserve {
+				t.Errorf("routed child holds %d tokens back for the reply, want %d — %v of the target's "+
+					"%d window", got, wantReserve, tc.want, target.ContextWindow)
+			}
+			// The parent divides its own window exactly as it did: routing changes what a SPAWN is
+			// built with, never the session's own split.
+			if got := parent.cfg.Context.ResponseReserveFraction; got != parentShare {
+				t.Errorf("parent reserve share = %v after a routed spawn, want its own %v untouched",
+					got, parentShare)
+			}
+		})
+	}
+}
+
 // TestRoutedSpawnBypassPosture drives ADR 0045 §2's replace-or-inherit rule on the Bypass half: a
 // present flag replaces the parent's LIVE value in both directions, an absent one inherits it.
 func TestRoutedSpawnBypassPosture(t *testing.T) {

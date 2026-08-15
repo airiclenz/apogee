@@ -145,6 +145,46 @@ func TestResolveDelegationTargetObservesWhatIsNotPinned(t *testing.T) {
 	}
 }
 
+// The share a routed child divides ITS window by is the flagged entry's `response-reserve:`, carried
+// as WRITTEN — and this is the one target field the rank order above does not reach. There is no
+// observed half (a server reports no split) and, on purpose, no top-level key to fall back to here:
+// an entry stating no share leaves the child on the share the PARENT resolved (internal/agent's
+// routed spawn), which already IS the top-level key when nobody overrode it. Resolving against that
+// key a second time would state the parent's own answer as the ENTRY's, and the spawn — which reads
+// "the entry said nothing" as a 0 — could then no longer tell the two apart.
+func TestResolveDelegationTargetCarriesTheEntrysResponseReserve(t *testing.T) {
+	t.Parallel()
+
+	observed := heartbeat.Beat{Reachable: true, ActiveModel: "loaded-model", ContextWindow: 8192}
+
+	stated := config.ServerEntry{
+		Name:            "grunt",
+		Endpoint:        "http://127.0.0.1:2222",
+		SubAgents:       true,
+		ResponseReserve: 0.35,
+	}
+	target := resolveDelegationTarget(stated, "", observed, nil, nil)
+	if target == nil {
+		t.Fatal("a reachable server resolved to no target; want the one stating a share")
+	}
+	if target.ResponseReserveFraction != 0.35 {
+		t.Errorf("ResponseReserveFraction = %v; want the entry's 0.35 carried as written",
+			target.ResponseReserveFraction)
+	}
+
+	// And the absent key stays absent: nothing here invents a share for an entry that states none,
+	// because 0 is precisely how the spawn is told to leave the parent's standing.
+	unstated := config.ServerEntry{Name: "grunt", Endpoint: "http://127.0.0.1:2222", SubAgents: true}
+	quiet := resolveDelegationTarget(unstated, "", observed, nil, nil)
+	if quiet == nil {
+		t.Fatal("a reachable server resolved to no target; want the one stating nothing")
+	}
+	if quiet.ResponseReserveFraction != 0 {
+		t.Errorf("ResponseReserveFraction = %v for an entry stating no share; want 0 — the child keeps "+
+			"the share its parent resolved", quiet.ResponseReserveFraction)
+	}
+}
+
 // The grunt model's dialect is resolved for the model that just bound on the SUB-AGENT server (ADR
 // 0044 through ADR 0045): the session may be reading harmony channels while its delegations read
 // `<think>` tags, so the match keys on the target's model and on the user tier this host holds.

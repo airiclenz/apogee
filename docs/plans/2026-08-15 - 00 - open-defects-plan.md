@@ -198,7 +198,11 @@ removed by item 5.)
 
 **Commit:** `feat(config): a bound-entry response-reserve edit rides the beat rebind`
 
-## 5. Reserve-specific tests at the remaining arrival sites
+## 5. Reserve-specific tests at the remaining arrival sites — ✅ DONE (2026-08-15)
+
+NOTES (2026-08-15): CHANGELOG.md is listed in the item's Files but the implementer never edits it — the entry text above is for the verifier to apply.
+NOTES (2026-08-15): the sub-agent-spawn test landed in `internal/agent/routedspawn_test.go`, not the `internal/agent/subagent_test.go` the item names. That file's own header records the split — `subagent_test.go` owns the UNROUTED fallback, `routedspawn_test.go` owns "the dial facts, window, profile and posture a routed child takes from the target" — and the new test's direct analogue, `TestRoutedSpawnWithoutATargetWindowKeepsTheParents` (the other target field with an absence guard), lives there in the exact table shape reused. The item's acceptance line anticipates the name differing; the run pattern used was `TestRoutedSpawn|TestSubAgent`.
+NOTES (2026-08-15): the delegation site got a twin (`TestResolveDelegationTargetCarriesTheEntrysResponseReserve`) rather than an extension of the existing pair — the item's stated alternative. The pins test's doc turns on the beat DISAGREEING with the entry on every pinnable fact, and the share has no observed half to disagree with, so folding it in would have falsified that doc.
 
 Depends on items 3 and 4 (it removes the `ISSUES.md` bullet those items complete).
 

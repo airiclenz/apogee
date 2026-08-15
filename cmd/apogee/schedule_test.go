@@ -398,6 +398,88 @@ func TestScheduleFiringIsBoundedByTheEntryTheSessionMovedOnto(t *testing.T) {
 	}
 }
 
+// How that window is SPLIT follows the ceiling's rule one key further in: the share is the bound
+// entry's `response-reserve:` resolved over the top-level key, read for the server the session is ON.
+// The base Config a Firing copies was seeded with the LAUNCH entry's share (wire_boot.go), so a
+// Firing raised after a `/server` move would otherwise hold back a slice of THIS server's window on
+// the say-so of a server this session has left — and a share that is too generous silently shrinks
+// the room an unattended answer has to land in, exactly where nobody is watching it happen.
+//
+// The unstated row is the same invariant read from the other end: an entry overriding nothing, under
+// a config whose top-level key states nothing either, resolves to the honest 0 — "nobody stated a
+// share", which hands the split back to the engine's own built-in fifth rather than to the number the
+// launch entry happened to state.
+//
+// Composed against the package's runner seam rather than a live model, which is why this test does
+// not call t.Parallel: it replaces a package-level var, exactly as the tests above it do.
+func TestScheduleFiringSplitsTheWindowTheEntryTheSessionMovedOntoStates(t *testing.T) {
+	// The launch entry's own share — the number seeded onto the Config a Firing copies, and the one
+	// that must not survive the move below.
+	const launchShare = 0.5
+
+	for _, tt := range []struct {
+		name      string
+		moved     config.ServerEntry
+		wantShare float64
+	}{
+		{
+			name:      "the moved-onto entry states its own share",
+			moved:     config.ServerEntry{Name: "roomy", ResponseReserve: 0.35},
+			wantShare: 0.35,
+		},
+		{
+			name:      "the moved-onto entry states none",
+			moved:     config.ServerEntry{Name: "unstated"},
+			wantShare: 0,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			roots, err := resolveRoots(t.TempDir(), t.TempDir())
+			if err != nil {
+				t.Fatalf("resolveRoots: %v", err)
+			}
+			stub := &stubRunner{}
+			prevRunner := runOnce
+			runOnce = stub.once
+			t.Cleanup(func() { runOnce = prevRunner })
+
+			// The session as it LAUNCHED: bound to an entry stating launchShare, which reached both the
+			// startup snapshot and the Config the scheduler copies. The top-level key states nothing,
+			// so the entry the session moves onto is the only thing that can answer.
+			launchOpts := config.Options{HostAlias: "launch", StartupResponseReserve: launchShare}
+			base := apogee.Config{WorkspaceDir: roots.workspace}
+			base.Context.ResponseReserveFraction = launchShare
+			live := newLiveSettings(launchOpts, nil)
+			// ...and the move `/server` makes once the engine's own switch committed (sessionMover.move).
+			live.followEntry(tt.moved)
+
+			w := scheduleWiring{
+				base:  base,
+				opts:  launchOpts,
+				roots: roots,
+				live:  live,
+				binding: func() upstreamBinding {
+					return upstreamBinding{Endpoint: "http://moved.invalid", Model: "bound-model"}
+				},
+				width: func() int { return 1 },
+			}
+
+			firing := schedule.Firing{Prompt: "check the build", Mode: domain.ModePlan}
+			if _, err := w.fire(context.Background(), firing); err != nil {
+				t.Fatalf("fire: %v", err)
+			}
+			if !stub.called {
+				t.Fatal("the firing composed no run at all")
+			}
+			if got := stub.spec.Config.Context.ResponseReserveFraction; got != tt.wantShare {
+				t.Errorf("the firing runs at Context.ResponseReserveFraction = %v, want the moved-onto "+
+					"entry's %v — it divided this server's window the way the LAUNCH server's %v says",
+					got, tt.wantShare, launchShare)
+			}
+		})
+	}
+}
+
 // ----------------------------------------------------------------------------
 // What the Fire seam reports back
 // ----------------------------------------------------------------------------

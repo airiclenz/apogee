@@ -363,6 +363,21 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **Every `response-reserve:` arrival site now has the reserve-specific test its
+  `context-window:` / `max-output-tokens:` analogue already had.** The share reached four sites on
+  the strength of the neighbouring bounds' coverage alone: a scheduled Firing
+  (`TestScheduleFiringSplitsTheWindowTheEntryTheSessionMovedOntoStates` pins that it divides the
+  window of the entry the session MOVED ONTO, never the launch server's, and that an entry stating
+  nothing resolves to the honest `0` rather than to the launch number), the Delegation target
+  (`TestResolveDelegationTargetCarriesTheEntrysResponseReserve` pins the deliberately rank-free
+  copy — the entry's share as written, `0` when it states none), the headless Driver
+  (`TestHeadlessBudgetsAgainstTheBoundEntrysPins` gained a `wantReserve` column asserting the
+  entry's override over the top-level key), and the routed sub-agent spawn
+  (`TestRoutedSpawnResponseReserveShare` pins both arms of the `> 0` guard: a stated share splits
+  the target's own window, a target stating none leaves the parent's share standing rather than
+  falling to the built-in fifth). Each new assertion was checked against a mutated production line,
+  so none of them passes vacuously.
+
 - **Settings kind projection pinned for every kind.** `TestSettingsRowsProjectRegistryMetadata`
   now states all ten `config.Kind` edges as literals — `KindFloat → SettingInt`,
   `KindText → SettingText` and `KindScheme → SettingEnum` joined the seven already there — and

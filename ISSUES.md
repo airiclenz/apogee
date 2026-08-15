@@ -23,17 +23,6 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 
 ## Open defects
 
-### Run residuals — open (2026-08-15, residuals + response-reserve sweep)
-
-The still-open findings that run left, under the conventions' actionability bar.
-
-- [ ] The `response-reserve:` rebind sites carry no reserve-specific test although their
-  `context-window:` / `max-output-tokens:` analogues have one (`cmd/apogee/schedule_test.go:345`,
-  `cmd/apogee/delegation_test.go:90`). Related: an edit that moves only the bound entry's
-  `response-reserve:` does not ride a beat rebind — `apogee.RebindSpec`
-  (`internal/agent/rebind.go:66`) carries no share — the same gap `max-output-tokens:` had before
-  its ceiling field.
-
 ## Parked / deferred work
 
 Live, deliberately deferred work only. Each entry records *enough* design that we don't re-derive
