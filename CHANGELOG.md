@@ -291,6 +291,19 @@ point is a **minor** bump, not a breaking change.
   from the new model; and it is PRIMARY-loop state — a delegated child is built from the parent's
   Config, which carries no override, so a sub-agent still thinks at its own profile's effort.
 
+- **A failed request that carried chat-template kwargs now says so.** When the upstream answers a
+  non-2xx status to a request that put `chat_template_kwargs` on the wire, the surfaced error gains
+  one parenthetical: `(this request carried chat_template_kwargs — an unsupported thinking effort
+  for this model's template? check model-profiles thinking.effort or the /effort override)`. That is
+  the shape this failure actually takes — a chat template that rejects an effort value raises inside
+  Jinja and the server answers HTTP 500 with a template traceback that never names the field it
+  choked on — so the hint names both doors the value can have come through instead of leaving a
+  mid-turn 500 unexplained. It rides both surfaces: the unary error, where it is appended by
+  wrapping so `errors.As(*StatusError)` and the status code still reach callers and the server's own
+  body stays unedited, and the streaming error delta, which is where a turn actually fails. A
+  request that carried no kwargs — every out-of-the-box one — gets exactly the error it got before,
+  and a classified context overflow is never hinted.
+
 ### Changed
 
 - **The block-target, start-up-box and prompt-box-sizing suites move to

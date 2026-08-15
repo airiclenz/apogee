@@ -176,6 +176,43 @@ func TestStream_ErrorStatus(t *testing.T) {
 	}
 }
 
+// TestStream_ThinkingEffortHint is the streaming counterpart of TestRespond_ThinkingEffortHint,
+// and the one that matters in practice: the loop streams, so a template that rejects an effort
+// value fails a turn here. Kwargs on the wire ⇒ the hint rides the terminal error delta; no
+// kwargs ⇒ today's text unchanged.
+func TestStream_ThinkingEffortHint(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		effort   Effort
+		wantHint bool
+	}{
+		{name: "effort level puts kwargs on the wire", effort: EffortMedium, wantHint: true},
+		{name: "no effort, no kwargs, no hint", effort: ""},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusInternalServerError)
+				_, _ = io.WriteString(w, "jinja2.exceptions.TemplateError")
+			}))
+			defer srv.Close()
+
+			deltas := collectStream(NewClient(srv.URL, "m", WithMaxRetries(0)), Request{ThinkingEffort: tc.effort})
+			if len(deltas) != 1 || deltas[0].Kind != DeltaError {
+				t.Fatalf("deltas = %+v, want a single error", deltas)
+			}
+			if got := strings.Contains(deltas[0].Err, thinkingEffortHint); got != tc.wantHint {
+				t.Errorf("error %q carries the hint = %t, want %t", deltas[0].Err, got, tc.wantHint)
+			}
+		})
+	}
+}
+
 // TestStream_ErrorBodyIsCapped covers the hostile-upstream case: an error body far larger
 // than maxErrorBodyBytes must not be buffered whole. The proof is positional — an overflow
 // marker sitting past the cap never reaches the sniff (so the delta stays a plain error),

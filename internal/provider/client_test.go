@@ -258,6 +258,60 @@ func TestRespond_InBandErrorRedactsAPIKey(t *testing.T) {
 	}
 }
 
+// TestRespond_ThinkingEffortHint covers the enriched turn error (ADR 0050): a chat template that
+// rejects an effort value raises inside Jinja and the server answers 500 without ever naming the
+// offending field, so a request that carried chat_template_kwargs gets the hint appended. A
+// request that carried none keeps exactly the error it produced before, and either way the
+// *StatusError stays reachable for callers that branch on the status code.
+func TestRespond_ThinkingEffortHint(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		effort   Effort
+		wantHint bool
+	}{
+		{name: "effort level puts kwargs on the wire", effort: EffortHigh, wantHint: true},
+		{name: "thinking off also puts kwargs on the wire", effort: EffortOff, wantHint: true},
+		{name: "no effort, no kwargs, no hint", effort: ""},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusInternalServerError)
+				_, _ = io.WriteString(w, "jinja2.exceptions.TemplateError")
+			}))
+			defer srv.Close()
+
+			client := NewClient(srv.URL, "m", WithMaxRetries(0))
+			_, err := client.Respond(context.Background(), Request{ThinkingEffort: tc.effort})
+			if err == nil {
+				t.Fatal("Respond returned no error, want the upstream 500 surfaced")
+			}
+
+			var status *StatusError
+			if !errors.As(err, &status) {
+				t.Fatalf("error = %v (%T), want a reachable *StatusError", err, err)
+			}
+			if status.Code != http.StatusInternalServerError {
+				t.Errorf("StatusError.Code = %d, want %d", status.Code, http.StatusInternalServerError)
+			}
+			if got := strings.Contains(err.Error(), thinkingEffortHint); got != tc.wantHint {
+				t.Errorf("error %q carries the hint = %t, want %t", err, got, tc.wantHint)
+			}
+			if !tc.wantHint && err.Error() != status.Error() {
+				t.Errorf("error = %q, want the unhinted text %q", err, status.Error())
+			}
+			if strings.Contains(status.Body, thinkingEffortHint) {
+				t.Errorf("StatusError.Body = %q, want the hint kept out of the server's body", status.Body)
+			}
+		})
+	}
+}
+
 func TestBuildBody_RequestShape(t *testing.T) {
 	t.Parallel()
 

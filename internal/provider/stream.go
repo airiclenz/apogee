@@ -61,7 +61,8 @@ type Delta struct {
 func (c *Client) Stream(ctx context.Context, req Request) iter.Seq[Delta] {
 	return func(yield func(Delta) bool) {
 		req.Stream = true
-		body, err := json.Marshal(c.buildBody(req))
+		wire := c.buildBody(req)
+		body, err := json.Marshal(wire)
 		if err != nil {
 			yield(Delta{Kind: DeltaError, Err: fmt.Sprintf("apogee: marshal request: %v", err)})
 			return
@@ -78,7 +79,7 @@ func (c *Client) Stream(ctx context.Context, req Request) iter.Seq[Delta] {
 		defer resp.Body.Close()
 
 		if resp.StatusCode != http.StatusOK {
-			yield(c.statusDelta(resp))
+			yield(c.statusDelta(resp, len(wire.ChatTemplateKwargs) > 0))
 			return
 		}
 		c.parseSSE(resp.Body, yield)
@@ -86,14 +87,20 @@ func (c *Client) Stream(ctx context.Context, req Request) iter.Seq[Delta] {
 }
 
 // statusDelta classifies a non-2xx streamed response into a terminal Delta, mirroring
-// statusError but on the streaming surface — including its maxErrorBodyBytes read cap.
-func (c *Client) statusDelta(resp *http.Response) Delta {
+// statusError but on the streaming surface — including its maxErrorBodyBytes read cap and its
+// thinking-effort hint: hasTemplateKwargs reports that the failed request carried
+// chat_template_kwargs, and a turn is where that failure actually lands, since the loop streams.
+func (c *Client) statusDelta(resp *http.Response, hasTemplateKwargs bool) Delta {
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodyBytes))
 	text := c.sanitize(string(raw))
 	if resp.StatusCode == http.StatusBadRequest && isContextOverflow(string(raw)) {
 		return Delta{Kind: DeltaContextOverflow, Err: "apogee: context window exceeded: " + text}
 	}
-	return Delta{Kind: DeltaError, Err: fmt.Sprintf("apogee: upstream HTTP %d: %s", resp.StatusCode, text)}
+	message := fmt.Sprintf("apogee: upstream HTTP %d: %s", resp.StatusCode, text)
+	if hasTemplateKwargs {
+		message += " " + thinkingEffortHint
+	}
+	return Delta{Kind: DeltaError, Err: message}
 }
 
 // providerUnavailable is the aggregator error_type slug for "the upstream I routed to is

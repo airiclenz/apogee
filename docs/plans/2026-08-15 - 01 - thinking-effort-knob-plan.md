@@ -157,7 +157,11 @@ agent does not inherit the override; Bypass mode leaves the emitted effort uncha
 
 **Commit:** `feat(agent): requests carry resolved thinking effort with a session override door`
 
-## 4. Enriched turn error when kwargs are on the wire
+## 4. Enriched turn error when kwargs are on the wire — ✅ DONE (2026-08-15)
+
+NOTES (2026-08-15): `internal/provider/stream.go` and `internal/provider/stream_test.go` edited beyond the item's Files list — the item's own title says "turn error", and the loop's turns run through `Client.Stream` (`internal/agent/loop.go:586`, `internal/agent/compact.go:350`), never `Respond`, so a hint only in `client.go`'s `statusError` would never surface in the HTTP-500 failure the item describes; `statusDelta` therefore takes the same `hasTemplateKwargs` flag and appends the same `thinkingEffortHint` constant.
+NOTES (2026-08-15): a classified context overflow is left unhinted on both surfaces — that failure is already named by the server and no thinking effort caused it, so the parenthetical would misdirect; the item's stated behaviour (500 with kwargs hinted, 500 without kwargs unchanged) is unaffected.
+NOTES (2026-08-15): the "carried kwargs" fact is read from the built wire body (`len(wire.ChatTemplateKwargs) > 0`) rather than from `req.ThinkingEffort`, so the hint stays correct if another caller ever puts kwargs on the wire.
 
 Depends on item 2.
 

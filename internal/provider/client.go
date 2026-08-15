@@ -186,7 +186,8 @@ func (c *Client) activeModel() string {
 // in-band error member becomes the same kind of error, never an empty reply.
 func (c *Client) Respond(ctx context.Context, req Request) (RawResponse, error) {
 	req.Stream = false
-	body, err := json.Marshal(c.buildBody(req))
+	wire := c.buildBody(req)
+	body, err := json.Marshal(wire)
 	if err != nil {
 		return RawResponse{}, fmt.Errorf("apogee: marshal request: %w", err)
 	}
@@ -199,7 +200,7 @@ func (c *Client) Respond(ctx context.Context, req Request) (RawResponse, error) 
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return RawResponse{}, c.statusError(resp)
+		return RawResponse{}, c.statusError(resp, len(wire.ChatTemplateKwargs) > 0)
 	}
 
 	var decoded chatCompletionResponse
@@ -340,17 +341,32 @@ func parseRetryAfter(h string) (time.Duration, bool) {
 	return 0, true
 }
 
+// thinkingEffortHint is appended to a non-2xx error raised by a request that carried
+// chat_template_kwargs. A chat template that rejects a kwarg value raises inside Jinja and the
+// server answers HTTP 500 with a template traceback that never names the field it choked on, so
+// the bare status leaves the user guessing mid-turn. The hint names both doors the value can have
+// come through — the profile leaf and the session override (ADR 0050).
+const thinkingEffortHint = "(this request carried chat_template_kwargs — an unsupported thinking effort for this model's template? check model-profiles thinking.effort or the /effort override)"
+
 // statusError reads a non-2xx body — at most maxErrorBodyBytes of it, so an oversized one
 // cannot exhaust memory — and classifies it: a 400 overflow → ErrContextOverflow, anything
 // else → a *StatusError carrying the code. The body is sanitised (API key redacted, length
-// capped) before it reaches the caller.
-func (c *Client) statusError(resp *http.Response) error {
+// capped) before it reaches the caller. hasTemplateKwargs reports that the failed request
+// carried chat_template_kwargs, which appends thinkingEffortHint to the surfaced error;
+// the wrapping keeps errors.As(*StatusError) working for callers that branch on the code.
+// A classified context overflow is left unhinted: that failure is already named, and no
+// thinking effort caused it.
+func (c *Client) statusError(resp *http.Response, hasTemplateKwargs bool) error {
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodyBytes))
 	text := c.sanitize(string(raw))
 	if resp.StatusCode == http.StatusBadRequest && isContextOverflow(string(raw)) {
 		return fmt.Errorf("%w: %s", ErrContextOverflow, text)
 	}
-	return &StatusError{Code: resp.StatusCode, Body: text}
+	err := &StatusError{Code: resp.StatusCode, Body: text}
+	if !hasTemplateKwargs {
+		return err
+	}
+	return fmt.Errorf("%w %s", err, thinkingEffortHint)
 }
 
 // inBandError classifies an error member the server wrapped in an HTTP 200, mirroring
