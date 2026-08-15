@@ -653,6 +653,14 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **The `internal/security` file map now names `ErrRootInaccessible` on its `pathsafety.go` line.**
+  The package doc's map names the sentinels each file owns — `ErrPathEscape` for `pathsafety.go`,
+  `ErrSymlinkedParent` for `safeio.go` — so a reader looking for the error a surface must match
+  finds it without opening the file. `pathsafety.go` gained a second sentinel for the root itself
+  being deleted, renamed or not a directory, and the map had not followed: the one error whose
+  whole point is that it is *not* an escape was the one the map left unnamed. It is now named
+  beside `ErrPathEscape`, carrying that distinction in half a line.
+
 - **A session record stamped ahead of the wall clock now reads "just now" by decision rather than
   by accident.** `relativeTime` computed `now.Sub(t)` and handed the raw duration to its switch,
   whose first arm (`d < time.Minute`) swallows any negative value — so clock skew, an NTP step

@@ -83,8 +83,10 @@
 //
 // The filesystem boundary, split check-from-use because the gap between them is the race.
 // pathsafety.go is the CHECK — ResolveInRoot (symlink-aware, traversal-rejecting, validating a
-// not-yet-existing write target against its nearest existing ancestor), ErrPathEscape, and the
-// EvalRealPath / WorkspaceRelative helpers every surface that prints a path goes through.
+// not-yet-existing write target against its nearest existing ancestor), ErrPathEscape,
+// ErrRootInaccessible (the root itself deleted, renamed or not a directory — deliberately not an
+// escape, so the caller blames the root and not the argument), and the EvalRealPath /
+// WorkspaceRelative helpers every surface that prints a path goes through.
 // safeio.go is the USE — SafeReadFile, SafeWriteFile, SafeOpen, SafeCopyFile, SafeCopyFileFrom,
 // SafeRename and SafeRemove, each performed through an os.Root pinned at the root it is fenced
 // by so the validated path IS the path touched (H1), with the same-directory staging file and
