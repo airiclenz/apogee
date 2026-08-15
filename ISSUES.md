@@ -98,6 +98,15 @@ bar.
   (`README.md:260`) and `/schedule` (`:261`) ✅ too. Pre-existing incompleteness the effort row
   widened.
 
+### Run residuals — open (2026-08-15, quiet-qualifier single-clock run)
+
+The still-open findings the quiet-qualifier single-clock plan run left, under the conventions'
+actionability bar.
+
+- [ ] `Warning`'s doc comment names its consumer "the status line's quiet-time suffix"
+  (`internal/scheme/scheme.go:44`) — stale prose for a form that never shipped: the guard renders as
+  a `quiet` qualifier before a single activity clock, not as a suffix.
+
 ## Parked / deferred work
 
 Live, deliberately deferred work only. Each entry records *enough* design that we don't re-derive
