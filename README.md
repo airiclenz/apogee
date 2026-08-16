@@ -6,8 +6,8 @@
   </picture>
 </p>
 
-A **terminal coding agent**, built with **local models in mind**: <br>
-capable with frontier models, engineered so even small, locally-run LLMs (~4B–35B) deliver.
+A **terminal coding agent**, built for **smaller local models** — <br>
+while working even better with bigger ones.
 
 <p align="center">
   <img src="graphics/demo.gif" alt="Apogee finding and fixing a failing Go test against a local model, with a follow-up instruction queued mid-run and delivered at the next tool boundary">

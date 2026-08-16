@@ -743,6 +743,9 @@ experiment, not a decision:
 
 - **(a)** remove `single_find_and_replace` — flagged in all four polls.
 - **(b)** patch-only vs find-replace editing — Qwen vs both Gemmas, a falsifiable disagreement.
+  *Update 2026-08-16:* deepseek-v4-flash voted retire `edit_existing_file` and keep the
+  find-replace family — a second replication for the find-replace side, and the first from above
+  the small-model band.
 - **(c)** `open_file`/`read_file` merge — **open watch-item, not an experiment arm.** This arm was
   decided by owner call on 2026-08-11 and shipped without the bench experiment the standing rule
   otherwise requires (an owner-ratified exception for this arm alone; the rule still binds (a),
@@ -754,6 +757,8 @@ experiment, not a decision:
   it, and a sighting of models no longer locating reopens this arm rather than re-filing it as a
   gap.
 - **(d)** measure whether sub-35B models use `view_diff` at all.
+  *Update 2026-08-16:* second independent flag (deepseek-v4-flash), which paired it with a
+  `write_file` dry-run — see the second-round block below; decide the two together.
 - **(e)** `web_fetch` → `http_request` merge — the real question is whether sub-35B models
   distinguish GET from POST; if they don't, the separate named GET tool earns its slot. Both are
   ExternalEffect-classified, so gating doesn't decide it.
@@ -765,7 +770,8 @@ shipped); a unified `git` tool with subcommands vs the growing `git_*` family.
 
 **Deferred candidates:** env-var parameters on `terminal`/`python_exec` (stable across both Qwen
 sessions); `directory_create`/`directory_delete`; `git_stash`; `git_tag`; `file_metadata`; batch
-rename/replace operations; `workspace_summary`.
+rename/replace operations (×2 — Qwen 2026-08-10 sessions; Qwen3.8-27B 2026-08-16 asked for a
+bounded `replace_all` with a replacement cap and shown context); `workspace_summary`.
 
 **Engine-level notes (not tools):** context-window introspection for the model (Mechanism
 territory); streaming/progress for long-running tools; structured JSON tool outputs.
@@ -786,6 +792,37 @@ territory); streaming/progress for long-running tools; structured JSON tool outp
 2. Models discover capabilities by tool **name**, not by parameters — three sightings in one round:
    `list_dir`'s `recursive` missed twice, `edit_existing_file`'s patch mode missed once. Naming and
    descriptions are the discovery surface.
+
+**Second round (2026-08-16, 3 polls — deepseek-v4-flash, Qwen3.8-27B, Qwen3.6-35B-A3B).** Larger
+models than the first round. Owner framing, ratified this day, and applied to the identity
+statements in `README.md`/`AGENTS.md`/`CONTEXT.md`: **apogee is built for smaller local models —
+while working even better with bigger ones.** The ~4B–35B range is dropped from identity docs
+(kept in ADRs and past rationales as historical context, and in the bench arms above as a concrete
+measurement class); the hard-learned lesson it encoded stays: usefully agentic behaviour starts
+roughly where that upper limit sat, so the Mechanisms are help smaller models *need* and bigger
+models simply don't switch on. Consequences: the default roster stays tuned for the models that
+need the help; feedback from larger models informs the profile/`tools.disabled` tier, not the
+default; the per-profile-rosters grill above is promoted — it is the mechanism serving both
+classes, and it lets a new tool ship default-off/profile-enabled instead of costing every small
+model a tool-list slot.
+
+- **New candidate, replicated within the round (both Qwens): `watch_files` / file-event wait** —
+  "block until path X changes or N seconds elapse"; models currently poll with repeated reads.
+  Deferred; design belongs with the engine's event model, not a quick tool add.
+- **New candidate: `write_file` dry-run/preview** (deepseek) — diff a proposed full-file write
+  before writing; preview exists today only for replace-style edits via `view_diff`. Pairs with
+  arm (d): a write-preview is what would let `view_diff` fold away — decide them together.
+- **Needs a grill session (add): persistent terminal / PTY session** (Qwen3.8's single top pick) —
+  attach to a running dev server, drive REPLs/interactive programs via a start/send/poll session
+  pair. NOT covered by the first round's `concurrent terminal` denial (that was parallelism,
+  [ADR 0039](docs/adr/0039-delegations-fan-out-concurrently-bounded-by-the-servers-parallel-agents-cap.md));
+  this is interactivity, with heavy confinement and lifecycle implications.
+- **Feeds the existing unified-git grill:** `git_add`/staging visibility and `git_blame`
+  (Qwen3.8); `git_pull`/`git_push` (Qwen3.6-35B — remote writes, a gating question before a
+  design question).
+- **Re-filed and re-denied** (unchanged): env/system-info tool (Qwen3.6-35B) — `terminal` covers
+  it. Task/todo persistence (Qwen3.8) — Mechanism territory (guided decomposition), not a tool.
+- Method lesson 1 re-confirmed: same roster, one model removes two tools, another removes none.
 
 ---
 

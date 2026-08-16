@@ -1,8 +1,9 @@
 # Apogee
 
-Apogee is a terminal **coding agent** for small local LLMs (~4B–35B) that owns the
-full agentic loop — provider, tools, context, and sessions — and runs a layer of
-gated, self-regulating **Mechanisms** inside that loop to keep small models on track.
+Apogee is a terminal **coding agent** built for smaller local models — while working
+even better with bigger ones — that owns the full agentic loop — provider, tools,
+context, and sessions — and runs a layer of gated, self-regulating **Mechanisms**
+inside that loop to give smaller models the help they need.
 The hard constraint, inherited unchanged from the predecessor projects: **Apogee's
 Mechanisms must never make the underlying model perform worse than the same agent with
 those Mechanisms off.** That floor is **Bypass mode** (Mechanisms off, structure on) —
