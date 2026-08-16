@@ -137,7 +137,11 @@ func TestPresentDocument_RequestCarriesAbsolutePathDisplayPathAndTitle(t *testin
 	presenter := &scriptedPresenter{outcome: domain.PresentOutcome{Method: domain.PresentShown}}
 	tool := NewPresentDocument(root, presenter)
 
-	_, err := tool.Execute(context.Background(), presentCall(t, map[string]string{
+	// The presenting agent's run identity rides the call's ctx exactly as the asking agent's does
+	// (the engine installs it at the dispatch seam): the tool must copy both onto the request, or
+	// a child's document reaches the host looking like the top-level agent's.
+	ctx := domain.WithSpawnCallID(domain.WithSubAgentDepth(context.Background(), 2), "call-77")
+	_, err := tool.Execute(ctx, presentCall(t, map[string]string{
 		"path": "report.html", "title": "  Architecture review  ",
 	}))
 	if err != nil {
@@ -154,6 +158,35 @@ func TestPresentDocument_RequestCarriesAbsolutePathDisplayPathAndTitle(t *testin
 	}
 	if presenter.seen.Title != "Architecture review" {
 		t.Errorf("Title = %q, want the trimmed %q", presenter.seen.Title, "Architecture review")
+	}
+	if presenter.seen.Depth != 2 {
+		t.Errorf("Depth = %d, want the ctx-installed 2 — the request carries the presenting "+
+			"agent's nesting level", presenter.seen.Depth)
+	}
+	if presenter.seen.SpawnCallID != "call-77" {
+		t.Errorf("SpawnCallID = %q, want the ctx-installed %q — depth alone cannot tell two "+
+			"sibling runs apart", presenter.seen.SpawnCallID, "call-77")
+	}
+}
+
+// TestPresentDocument_TopLevelRequestCarriesTheHonestZeroIdentity pins the floor: with nothing
+// installed on the ctx the request reads depth 0 and no spawn id — the top-level agent's true
+// identity, not a lost value — so a host need not tell "absent" from "outermost".
+func TestPresentDocument_TopLevelRequestCarriesTheHonestZeroIdentity(t *testing.T) {
+	t.Parallel()
+
+	presenter := &scriptedPresenter{outcome: domain.PresentOutcome{Method: domain.PresentShown}}
+	_, err := NewPresentDocument(presentWorkspace(t), presenter).
+		Execute(context.Background(), presentCall(t, map[string]string{"path": "report.html"}))
+	if err != nil {
+		t.Fatalf("Execute returned a Go error: %v", err)
+	}
+	if presenter.seen.Depth != 0 {
+		t.Errorf("Depth = %d, want 0 for a call with no installed identity", presenter.seen.Depth)
+	}
+	if presenter.seen.SpawnCallID != "" {
+		t.Errorf("SpawnCallID = %q, want empty — no sub_agent call spawned the top-level agent",
+			presenter.seen.SpawnCallID)
 	}
 }
 

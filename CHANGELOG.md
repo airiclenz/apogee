@@ -10,6 +10,8 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- Tool-built host requests now carry the identity of the run that raised them: `domain.PresentRequest` gained `Depth` and `SpawnCallID`, `domain.AskRequest` gained `Depth`, filled at the dispatch seam from one new ctx carrier set (`WithSubAgentDepth` / `WithSpawnCallID`) installed for every tool call — depth 0 and an empty spawn id being the honest identity of the top-level agent. A Driver can now draw a sub-agent's presentation at its own depth and inside its own run instead of as the top-level agent's.
+
 - **`/inspect` shows the raw wire traffic behind `ui.inspector`.** The TUI half of the Inspector: the
   `domain.WireEvent`s the engine reports while the key arms the capture now land in a bounded ring on
   the renderer — the twenty most recent halves of an Upstream round-trip, escape-stripped and

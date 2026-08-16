@@ -160,6 +160,11 @@ func (t *AskUser) Execute(ctx context.Context, call domain.ToolCall) (domain.Too
 		// The same fact in fewer words, when the delegation was given a name at all — read off the
 		// same ctx, stamped at the same seam, empty whenever the child is unnamed.
 		SubAgentName: domain.SubAgentNameFromContext(ctx),
+		// How deep the asking agent runs — 0 for the top-level agent, which is an honest depth and
+		// not an absence, so this one is present on every question rather than only a child's. No
+		// spawn call ID rides with it: a question is not a railed transcript entry, so depth buys
+		// identity here and nothing more.
+		Depth: domain.SubAgentDepthFromContext(ctx),
 	}
 	answer, err := t.asker.Ask(ctx, req)
 	if err != nil {

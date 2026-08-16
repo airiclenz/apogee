@@ -748,6 +748,15 @@ func (a *Agent) executeTool(ctx context.Context, turn int, tool domain.Tool, cal
 		}
 	}()
 
+	// Install this Agent's run identity — its nesting depth and the id of the sub_agent call that
+	// spawned it — for EVERY call, the top-level agent's included: depth 0 and an empty spawn id
+	// are the honest identity of the outermost run, not a missing value, so a tool that builds its
+	// own host request (present_document, ask_user) reads a number it can trust rather than one it
+	// must guess at. Depth places such a request at the right level, the spawn id inside the right
+	// run when a depth-0 fan-out has siblings running at once (ADR 0039).
+	ctx = domain.WithSubAgentDepth(ctx, a.depth)
+	ctx = domain.WithSpawnCallID(ctx, a.callID)
+
 	if a.task != "" {
 		// Install this Agent's delegated task so a tool that puts a QUESTION to the human can name
 		// the agent asking it (domain.AskRequest.SubAgentTask), the way an ApprovalRequest already

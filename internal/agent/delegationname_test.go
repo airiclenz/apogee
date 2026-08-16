@@ -2,6 +2,8 @@ package agent
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
@@ -94,7 +96,121 @@ func TestDelegationName_RidesApprovalAndAsk(t *testing.T) {
 			if got := asker.seen[0].SubAgentTask; got != childTask {
 				t.Errorf("AskRequest.SubAgentTask = %q, want the delegated task %q", got, childTask)
 			}
+			// The number the two name fields cannot supply: a named grandchild reads like a named
+			// child until the request says how deep the asking run is. It rides the same ctx the
+			// task does, so the unnamed row must carry it too.
+			if got := asker.seen[0].Depth; got != 1 {
+				t.Errorf("AskRequest.Depth = %d, want 1 — the child asking runs one level down", got)
+			}
 		})
+	}
+}
+
+// recordingPresenter is a host Presenter that keeps every request it was handed and always answers
+// with the baseline rung — the hermetic stand-in for a Driver that owns the presentation ladder.
+// It is called from the Agent's own worker goroutine, one presentation at a time in these runs, so
+// it needs no lock.
+type recordingPresenter struct {
+	seen []domain.PresentRequest
+}
+
+func (p *recordingPresenter) Present(_ context.Context, req domain.PresentRequest) (domain.PresentOutcome, error) {
+	p.seen = append(p.seen, req)
+	return domain.PresentOutcome{Method: domain.PresentShown, Location: req.DisplayPath}, nil
+}
+
+// TestPresentIdentity_RidesTheDispatchCtxOntoTheRequest is the presenter half of the same seam: a
+// depth-1 child presents a document and the host Presenter must be told WHICH run showed it — the
+// nesting depth to draw it at, and the spawning call id that picks the right sibling run when a
+// fan-out has several going at once (ADR 0039). Without both, a child's deliverable surfaces as
+// though the top-level agent had presented it.
+func TestPresentIdentity_RidesTheDispatchCtxOntoTheRequest(t *testing.T) {
+	const (
+		parentInput = "delegate the write-up"
+		childTask   = "write the architecture review"
+		spawnCallID = "c1"
+	)
+
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "review.md"), []byte("# review"), 0o600); err != nil {
+		t.Fatalf("seed review: %v", err)
+	}
+
+	presenter := &recordingPresenter{}
+	sink := &recordingSink{}
+	cfg := subAgentConfig(sink, domain.ModeAskBefore, tools.NewPresentDocument(root, presenter))
+
+	up := newRoutedResponder().
+		route(parentInput, nil, subAgentCallScript(spawnCallID, childTask)).
+		route(childTask, nil, toolCallScript("p1", "present_document", `{"path":"review.md"}`)).
+		route(childTask, nil, contentScript("child done")).
+		route(parentInput, nil, contentScript("parent done"))
+
+	a, err := newAgent(cfg, up)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	if err := a.Submit(domain.UserInput{Text: parentInput}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if _, err := a.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if len(presenter.seen) != 1 {
+		t.Fatalf("the host presented %d documents, want the child's one", len(presenter.seen))
+	}
+	req := presenter.seen[0]
+	if req.DisplayPath != "review.md" {
+		t.Errorf("PresentRequest.DisplayPath = %q, want %q", req.DisplayPath, "review.md")
+	}
+	if req.Depth != 1 {
+		t.Errorf("PresentRequest.Depth = %d, want 1 — the presenting child runs one level down", req.Depth)
+	}
+	if req.SpawnCallID != spawnCallID {
+		t.Errorf("PresentRequest.SpawnCallID = %q, want the spawning call's id %q — depth alone "+
+			"cannot pick the run among concurrent siblings", req.SpawnCallID, spawnCallID)
+	}
+}
+
+// TestPresentIdentity_TopLevelRunPresentsAtDepthZero is the floor beneath it: the same tool called
+// by the top-level agent reports depth 0 and no spawning call — honest values for the outermost
+// run, so a Driver never has to tell "absent" from "outermost".
+func TestPresentIdentity_TopLevelRunPresentsAtDepthZero(t *testing.T) {
+	const userInput = "show me the review"
+
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "review.md"), []byte("# review"), 0o600); err != nil {
+		t.Fatalf("seed review: %v", err)
+	}
+
+	presenter := &recordingPresenter{}
+	cfg := subAgentConfig(&recordingSink{}, domain.ModeAskBefore, tools.NewPresentDocument(root, presenter))
+
+	up := newRoutedResponder().
+		route(userInput, nil, toolCallScript("p1", "present_document", `{"path":"review.md"}`)).
+		route(userInput, nil, contentScript("shown"))
+
+	a, err := newAgent(cfg, up)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	if err := a.Submit(domain.UserInput{Text: userInput}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if _, err := a.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if len(presenter.seen) != 1 {
+		t.Fatalf("the host presented %d documents, want the one", len(presenter.seen))
+	}
+	if got := presenter.seen[0].Depth; got != 0 {
+		t.Errorf("PresentRequest.Depth = %d, want 0 for the top-level agent", got)
+	}
+	if got := presenter.seen[0].SpawnCallID; got != "" {
+		t.Errorf("PresentRequest.SpawnCallID = %q, want empty — no sub_agent call spawned the "+
+			"top-level agent", got)
 	}
 }
 

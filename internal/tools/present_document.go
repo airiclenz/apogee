@@ -111,6 +111,14 @@ func (t *PresentDocument) Execute(ctx context.Context, call domain.ToolCall) (do
 		Path:        path,
 		DisplayPath: display,
 		Title:       strings.TrimSpace(args.Title),
+		// Which run is presenting, read off the ctx the engine installed it on: the depth places
+		// the document at the presenting agent's level and the spawn call ID inside that agent's
+		// own run, which is what keeps a child's presentation from surfacing as the top-level
+		// agent's. Both are stamped here, where the request is BUILT, for the same reason the
+		// asking agent's identity is stamped in ask_user — it is a fact about the presentation,
+		// and the Presenter is an interface boundary away from the Agent that knows it.
+		Depth:       domain.SubAgentDepthFromContext(ctx),
+		SpawnCallID: domain.SpawnCallIDFromContext(ctx),
 	})
 	if err != nil {
 		if ctx.Err() != nil {

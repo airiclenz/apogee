@@ -473,7 +473,13 @@ payload containing escape bytes reaches the pane stripped.
 
 **Commit:** `feat(tui): /inspect shows recent wire traffic behind ui.inspector`
 
-## 9. Depth and spawn identity ride the dispatch ctx onto tool-built requests
+## 9. Depth and spawn identity ride the dispatch ctx onto tool-built requests — ✅ DONE (2026-08-15)
+
+NOTES (2026-08-15): added two floor tests beyond the item's list —
+`TestPresentDocument_TopLevelRequestCarriesTheHonestZeroIdentity` (tools) and
+`TestPresentIdentity_TopLevelRunPresentsAtDepthZero` (agent) — pinning that depth 0 / empty spawn id
+is the outermost run's honest identity, the property that justified installing the carriers outside
+the `a.task != ""` gate. Both live in the files the item already names; no new files.
 
 **What:** ratified call 4, the engine/domain half. (1) New ctx carriers in
 `internal/domain/ask.go` beside `WithSubAgentTask`/`WithSubAgentName` (`:97`, `:120`):

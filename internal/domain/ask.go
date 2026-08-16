@@ -79,6 +79,18 @@ type AskRequest struct {
 	// for the same reason: ask_user builds this request an interface boundary away from the Agent
 	// that knows the name.
 	SubAgentName string
+
+	// Depth is the sub-agent nesting level of the agent that asked: 0 = the top-level agent, a
+	// child = its parent + 1 (ADR 0013), matching EventBase.Depth on the events that agent emits.
+	// It is the one identity fact the two name fields cannot supply — a named grandchild and a
+	// named child read alike — so a Driver can say how deep the question comes from rather than
+	// only who asked.
+	//
+	// 0 is an honest value, not an absence: the top-level agent genuinely runs at depth 0, which
+	// is why it rides its own ctx carrier (WithSubAgentDepth) installed for EVERY tool call
+	// rather than only for a child's. No spawn call ID travels with it: the ask pane is not a
+	// railed transcript entry, so depth buys identity here and nothing more.
+	Depth int
 }
 
 // subAgentTaskCtxKey keys the asking Agent's delegated task in a tool call's context.
@@ -127,6 +139,53 @@ func WithSubAgentName(ctx context.Context, name string) context.Context {
 func SubAgentNameFromContext(ctx context.Context) string {
 	name, _ := ctx.Value(subAgentNameCtxKey{}).(string)
 	return name
+}
+
+// subAgentDepthCtxKey keys the running Agent's nesting depth in a tool call's context.
+type subAgentDepthCtxKey struct{}
+
+// WithSubAgentDepth returns a context carrying depth as the sub-agent nesting level of the agent
+// whose tool call runs under it (AskRequest.Depth, PresentRequest.Depth) — 0 for the top-level
+// agent, parent + 1 for a child (ADR 0013). It is the third carrier in the identity set beside
+// WithSubAgentTask/WithSubAgentName and exists for the same reason: a tool that BUILDS its own
+// host request sits an interface boundary away from the Agent that knows the number.
+//
+// Unlike the task and the name it is installed unconditionally, for every tool call at every
+// level: 0 is an honest depth rather than "no agent", so gating it on delegation would make the
+// top-level agent's own requests indistinguishable from a request that simply lost the value.
+func WithSubAgentDepth(ctx context.Context, depth int) context.Context {
+	return context.WithValue(ctx, subAgentDepthCtxKey{}, depth)
+}
+
+// SubAgentDepthFromContext returns the nesting depth installed by WithSubAgentDepth, or 0 when
+// nothing installed one — the same number the top-level agent installs, so a caller reading 0
+// needs no second signal to know a request belongs to the outermost run.
+func SubAgentDepthFromContext(ctx context.Context) int {
+	depth, _ := ctx.Value(subAgentDepthCtxKey{}).(int)
+	return depth
+}
+
+// spawnCallIDCtxKey keys the running Agent's spawn call ID in a tool call's context.
+type spawnCallIDCtxKey struct{}
+
+// WithSpawnCallID returns a context carrying id as the run identity of the agent whose tool call
+// runs under it: the id of the sub_agent call that spawned it, the same value that stamps every
+// Event that agent emits (EventBase.CallID). It is what tells two SIBLING runs of a depth-0
+// fan-out apart, where depth alone cannot (ADR 0039) — so a Driver can place a tool-built request
+// inside the run that raised it rather than merely at the right level.
+//
+// It rides beside WithSubAgentDepth and is installed just as unconditionally: "" is the honest
+// identity of the top-level agent, which no sub_agent call spawned.
+func WithSpawnCallID(ctx context.Context, id string) context.Context {
+	return context.WithValue(ctx, spawnCallIDCtxKey{}, id)
+}
+
+// SpawnCallIDFromContext returns the spawn call ID installed by WithSpawnCallID, or "" when the
+// call belongs to the top-level agent (or nothing installed one) — the emptiness that means "no
+// spawning call", the same signal EventBase.CallID carries at depth 0.
+func SpawnCallIDFromContext(ctx context.Context) string {
+	id, _ := ctx.Value(spawnCallIDCtxKey{}).(string)
+	return id
 }
 
 // AskAnswer is the human's free-text reply. A STRUCT for the same freeze-safety reason

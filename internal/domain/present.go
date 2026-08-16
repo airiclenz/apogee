@@ -53,6 +53,23 @@ type PresentRequest struct {
 	// Title is an optional human label for the document; it MAY be empty. The host renders it
 	// above the path when set.
 	Title string
+
+	// Depth is the sub-agent nesting level of the agent that presented: 0 = the top-level agent,
+	// a child = its parent + 1 (ADR 0013), the same number EventBase.Depth carries on that
+	// agent's events. A Driver that rails a nested run needs it to draw the presentation at the
+	// depth its run is drawn at — without it a child's document surfaces as if the top-level
+	// agent had shown it.
+	//
+	// 0 is an honest value, not an absence, which is why it rides a ctx carrier installed for
+	// every tool call (WithSubAgentDepth) rather than one only a child installs.
+	Depth int
+
+	// SpawnCallID is the run identity of the presenting agent: the id of the sub_agent call that
+	// spawned it (EventBase.CallID), empty for the top-level agent. Depth alone cannot tell two
+	// SIBLING runs of a depth-0 fan-out apart (ADR 0039), so this is what lets a Driver place the
+	// presentation inside the run that raised it instead of merely at the right level. It rides
+	// WithSpawnCallID, installed beside the depth.
+	SpawnCallID string
 }
 
 // PresentOutcome reports which rung of the presentation ladder actually carried the document
