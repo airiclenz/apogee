@@ -1002,6 +1002,47 @@ func TestTranscriptDepthRendersFramedBlock(t *testing.T) {
 	}
 }
 
+// A delegated presentation is committed with its own run's identity, so it lands INSIDE that run's
+// stretch — under the head that spawned it, with a sibling fan-out already running — and the run's
+// span still reaches past it. Appending it at the tail as a depth-0 entry, which is what it did
+// before it carried a run, dropped a top-level block into the middle of the OTHER run and ended
+// [subAgentSpan] where it landed: one run then read as two railed stretches with an unframed gap.
+func TestPresentedEntryLandsInsideItsOwnRun(t *testing.T) {
+	t.Parallel()
+
+	tr := &transcript{}
+	subAgentCall(tr, "s1", "survey the tests", 0)
+	subAgentCall(tr, "s2", "survey the docs", 0)
+	childCall(tr, "s1", "a1", "alpha.go")
+	childCall(tr, "s2", "b1", "beta.md")
+
+	tr.addPresented(presentedMsg{
+		Path:        "docs/review.html",
+		Method:      domain.PresentShown,
+		Depth:       1,
+		SpawnCallID: "s1",
+	})
+
+	head := headIndex(t, tr, "s1")
+	span := subAgentSpan(tr.entries, head)
+	if span != 2 {
+		t.Fatalf("run s1 spans %d entries, want 2 (its child call and its presentation):\n%s",
+			span, plainRender(tr))
+	}
+	shown := tr.entries[head+span]
+	if shown.kind != entryPresented {
+		t.Fatalf("entry %d is %v, want the presentation at the end of s1's stretch", head+span, shown.kind)
+	}
+	if shown.depth != 1 || shown.spawnCallID != "s1" {
+		t.Errorf("presentation committed at depth %d under run %q, want depth 1 under s1",
+			shown.depth, shown.spawnCallID)
+	}
+	if sibling := headIndex(t, tr, "s2"); subAgentSpan(tr.entries, sibling) != 1 {
+		t.Errorf("run s2 spans %d entries, want its own 1 — the presentation belongs to s1:\n%s",
+			subAgentSpan(tr.entries, sibling), plainRender(tr))
+	}
+}
+
 // A nested event sequence (Depth 0 → 1 → 0) renders the sub-agent block framed, and the frame simply
 // ENDS where it climbs back out — nothing of a group follows it, so the separator is the flat one
 // rather than a ┊ (docs/layout/tool-layout.md, "Grouped Sub-agents") — while the parent stream stays

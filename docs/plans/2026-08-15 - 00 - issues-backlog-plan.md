@@ -514,7 +514,13 @@ all).
 
 **Commit:** `feat(domain): tool-built requests carry sub-agent depth and spawn identity`
 
-## 10. A presented document renders at its run's depth, inside its run
+## 10. A presented document renders at its run's depth, inside its run — ✅ DONE (2026-08-16)
+
+NOTES (2026-08-16): the codec round-trip case the item's Tests line requires went into
+`internal/tui/transcriptcodec_test.go`, one file beyond the item's Files line — every codec test in
+this package lives there and the helpers it drives (`encodeTranscript` / `decodeTranscript`) are that
+file's subject, so putting a codec assertion in `transcript_test.go` would have misfiled it. No
+source file beyond the item's list was touched.
 
 **Depends on item 9.**
 

@@ -1225,6 +1225,42 @@ func TestTranscriptCodecGoldenV1(t *testing.T) {
 	}
 }
 
+// TestTranscriptCodecReplaysADelegatedPresentationRailed proves a child's document reopens where it
+// was drawn. The entry is committed at the presenting agent's own depth and under its own run
+// (transcript.addPresented), and both facts ride the wire on the GENERIC members every entry uses
+// (wireEntry.Depth / wireEntry.SpawnCallID) — no presented-specific codec work — so a resumed
+// scrollback rails the block exactly as the live one did instead of flattening a delegate's
+// presentation onto the human's own conversation.
+func TestTranscriptCodecReplaysADelegatedPresentationRailed(t *testing.T) {
+	t.Parallel()
+	tr := &transcript{}
+	tr.addPresented(presentedMsg{
+		Title:  "Child report",
+		Path:   "out/child.md",
+		Method: domain.PresentShown,
+		Depth:  1, SpawnCallID: "s1",
+	})
+
+	data, err := encodeTranscript(tr)
+	if err != nil {
+		t.Fatalf("encodeTranscript: %v", err)
+	}
+	got, err := decodeTranscript(data)
+	if err != nil {
+		t.Fatalf("decodeTranscript: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("replayed %d entries, want the one presentation", len(got))
+	}
+	if got[0].kind != entryPresented || got[0].depth != 1 || got[0].spawnCallID != "s1" {
+		t.Fatalf("replayed %v at depth %d under run %q; want a presentation at depth 1 under s1",
+			got[0].kind, got[0].depth, got[0].spawnCallID)
+	}
+	if out := plainRender(&transcript{entries: got}); !strings.Contains(out, "│ ▤ Child report") {
+		t.Errorf("the replayed presentation is not railed:\n%s", out)
+	}
+}
+
 // TestTranscriptCodecRoundTripsASubAgentsTotals proves the cumulative accounting a run head wears
 // survives the record: the four members reach the wire under their own keys and come back on the
 // head that delegated, so a reopened session still reports what each delegate spent — a fact the

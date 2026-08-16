@@ -507,7 +507,7 @@ func (t *transcript) addEphemeralNote(text string) {
 	t.entries = append(t.entries, entry{kind: entryNote, text: stripEscapes(text), ephemeral: true})
 }
 
-// addPresented appends the presentation entry for one shown document — rung 0 of the ladder,
+// addPresented records the presentation entry for one shown document — rung 0 of the ladder,
 // and the reason a failed mechanism above it is never an error (ADR 0019 §4). Like addUser it is
 // called from the Update loop rather than the event fold: a presentation is the HOST's act, not
 // an engine Event.
@@ -516,14 +516,25 @@ func (t *transcript) addEphemeralNote(text string) {
 // string reaching the terminal. The path and the URL are escape-stripped too — a filename is
 // filesystem data, not this program's — but never clipped: a truncated path is a link that no
 // longer opens, which is worse than a long one.
+//
+// The entry carries the presenting agent's own depth and run, and goes in through [transcript.place]
+// like every delegated entry the fold commits. Both halves are load-bearing for a child's document:
+// the depth is what rails the block at the level the rest of that run is drawn at (renderBlock), and
+// placing it inside the run's stretch is what keeps the stretch CONTIGUOUS — a depth-0 append landing
+// between a child's entries would end [subAgentSpan] there and cut the rail off mid-run.
 func (t *transcript) addPresented(msg presentedMsg) {
-	t.entries = append(t.entries, entry{kind: entryPresented, presented: presentedView{
-		Title:    clipDetail(stripEscapes(msg.Title)),
-		Path:     stripEscapes(msg.Path),
-		Location: stripEscapes(msg.Location),
-		Method:   msg.Method,
-		Reason:   clipDetail(stripEscapes(msg.Reason)),
-	}})
+	t.place(entry{
+		kind:        entryPresented,
+		depth:       msg.Depth,
+		spawnCallID: msg.SpawnCallID,
+		presented: presentedView{
+			Title:    clipDetail(stripEscapes(msg.Title)),
+			Path:     stripEscapes(msg.Path),
+			Location: stripEscapes(msg.Location),
+			Method:   msg.Method,
+			Reason:   clipDetail(stripEscapes(msg.Reason)),
+		},
+	})
 }
 
 // addStartup appends the one-time start-up box — the logo and the session's host / model /

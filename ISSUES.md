@@ -453,25 +453,6 @@ behaviour — pick it up when a stderr notice proves easy to miss.
 
 ---
 
-### A presented document carries no sub-agent depth (it breaks the run's rail)
-
-**Status:** parked 2026-07-21 (noticed while verifying the `present_document` plan,
-`docs/plans/archived/2026-07-21 - 01 - present-document-tool-plan.md`). Cosmetic, no wrong output.
-
-`domain.PresentRequest` carries no sub-agent depth, so `internal/tui`'s presentation entry is
-always rendered at depth 0 — unrailed even when a sub-agent presented the document. A depth-0
-block sitting inside a sub-agent run breaks the rail framing it: the rail stops above the
-presentation and picks up again below it, with neither a `┊` closing the first stretch nor a
-`┌─┶` header opening the second, so one run reads as two railed stretches with an unframed gap
-between them. Not presentation-specific: any depth-0 entry between two nested blocks does the
-same (a `· cancelled` note already can). The fix is to carry the Step's depth on `PresentRequest` and
-render the entry at it, which is a domain-seam change and wants its own decision — the loop's
-depth is not currently exposed to a host delegate at all (`domain.AskRequest` has the same gap:
-ADR 0039 gave it `SubAgentTask` and `SubAgentName`, so a delegate now learns *which* child is
-asking, but still not *how deep* it sits).
-
----
-
 ### Adaptive prompt complexity — request slimming driven by the capability tier
 
 **Status:** parked 2026-07-22 by decision, not by omission

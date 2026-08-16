@@ -107,12 +107,18 @@ func (p *uiPresenter) Present(ctx context.Context, req domain.PresentRequest) (d
 
 	// Rung 0, unconditionally and last: the entry describes whatever the rungs above it managed.
 	// send is asynchronous (bridge.go), so the worker never waits on the Update loop.
+	//
+	// Depth and SpawnCallID ride along untouched: they are the presenting agent's identity as the
+	// engine stamped it (domain.PresentRequest), and rung 0 is the only place that can put the
+	// entry where that run's other entries are.
 	p.prog.send(presentedMsg{
-		Title:    req.Title,
-		Path:     req.DisplayPath,
-		Location: location,
-		Method:   method,
-		Reason:   reason,
+		Title:       req.Title,
+		Path:        req.DisplayPath,
+		Location:    location,
+		Method:      method,
+		Reason:      reason,
+		Depth:       req.Depth,
+		SpawnCallID: req.SpawnCallID,
 	})
 
 	// The outcome's Location is where the user finds the document (domain.PresentOutcome): the URL

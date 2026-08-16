@@ -84,6 +84,14 @@ type presentedMsg struct {
 	// ("no opener on this machine"). Empty when nothing failed — a rung the host never wired is
 	// skipped, not failed.
 	Reason string
+	// Depth is the nesting level of the agent that presented (domain.PresentRequest.Depth): 0 for
+	// the human's own top-level agent, a child's parent + 1. It is the entry's depth, which is what
+	// rails the block at the level its run is drawn at.
+	Depth int
+	// SpawnCallID is the id of the sub_agent call that spawned the presenting agent, empty at the
+	// top level. It is the entry's run identity: with siblings fanned out at one depth it is the
+	// only thing that picks the run this presentation belongs INSIDE (transcript.place).
+	SpawnCallID string
 }
 
 // exchangeDoneMsg is the worker's terminal Msg when the Exchange reached its final no-tool

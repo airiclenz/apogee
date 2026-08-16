@@ -724,6 +724,21 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **A presented document now renders at its run's depth, inside its run.** The presentation entry
+  was built at depth 0 and appended at the tail whoever raised it, so a delegate's document surfaced
+  as if the human's own agent had shown it — and, worse, dropped a top-level block into the middle
+  of a running delegation: `subAgentSpan` ends at the first entry standing at the parent's depth, so
+  the rail framing that run stopped above the presentation and picked up again below it, one run
+  reading as two railed stretches with an unframed gap between them. The `Depth` and `SpawnCallID`
+  that `domain.PresentRequest` now carries ride the presenter's `presentedMsg` through to the entry,
+  and `transcript.addPresented` commits it through `place` like every other delegated entry: the
+  block is railed at the level the rest of its run is drawn at, and it lands INSIDE that run's
+  stretch — under a concurrent fan-out the spawning call id is what picks the right sibling, since
+  siblings share a depth. The record needed nothing: depth and run identity are generic `wireEntry`
+  members, so a resumed scrollback replays the presentation railed exactly as the live one drew it.
+  With the work landed, the `ISSUES.md` entry *A presented document carries no sub-agent depth* is
+  removed from the register — item 9 closed its `AskRequest` half.
+
 - **A prompt click below a phantom-wrapped line now seats the caret exactly.** bubbles' `wrap`
   appends a PHANTOM trailing sub-line to a logical line whose content reaches the width — the seat
   it keeps for a caret past a full line — and its `CursorDown` can never enter it: the step's column

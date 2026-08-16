@@ -516,6 +516,22 @@ func TestPresentedEntryRendering(t *testing.T) {
 				"  no opener on this machine — path shown",
 			},
 		},
+		{
+			// A child's document is drawn at the depth its run is drawn at: every line of the
+			// block wears the rail gutter, so the presentation reads as part of the run that
+			// raised it instead of as the human's own top-level block.
+			name: "a delegate's document is railed at its own depth",
+			msg: presentedMsg{
+				Path:        "docs/review.html",
+				Method:      domain.PresentOpened,
+				Depth:       1,
+				SpawnCallID: "s1",
+			},
+			want: []string{
+				"│ ▤ docs/review.html",
+				"│   opened on your machine",
+			},
+		},
 	}
 
 	for _, tc := range tests {
@@ -591,18 +607,33 @@ func TestPresentedEntrySanitizesModelText(t *testing.T) {
 
 // TestUpdateFoldsPresentedMsg proves the Update loop records the presentation without touching the
 // state machine: a presentation arriving mid-run leaves the worker running and shows in the View.
+// The presenting agent's identity rides the Msg through to the entry — the depth the block is
+// railed at and the run it is placed in are both carried, not re-derived.
 func TestUpdateFoldsPresentedMsg(t *testing.T) {
 	t.Parallel()
 	m := newTestModel(t)
 	m.state = stateRunning
 
-	m = step(t, m, presentedMsg{Path: "docs/review.html", Method: domain.PresentOpened})
+	m = step(t, m, presentedMsg{
+		Path:        "docs/review.html",
+		Method:      domain.PresentOpened,
+		Depth:       1,
+		SpawnCallID: "s1",
+	})
 
 	if m.state != stateRunning {
 		t.Errorf("state = %v; want the running worker untouched", m.state)
 	}
 	if view := plain(m.View()); !strings.Contains(view, "docs/review.html") {
 		t.Errorf("the View does not carry the presented path:\n%s", view)
+	}
+	shown := m.transcript.entries[len(m.transcript.entries)-1]
+	if shown.kind != entryPresented {
+		t.Fatalf("last entry is %v; want the presentation", shown.kind)
+	}
+	if shown.depth != 1 || shown.spawnCallID != "s1" {
+		t.Errorf("entry recorded at depth %d under run %q; want depth 1 under s1",
+			shown.depth, shown.spawnCallID)
 	}
 }
 
