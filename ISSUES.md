@@ -23,6 +23,34 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 
 ## Open defects
 
+### Run residuals — open (2026-08-16, ISSUES.md backlog batch)
+
+The still-open findings that run left, under the conventions' actionability bar.
+
+- [ ] A `/settings` edit of a startup-only key reports a failure. `url-safety.allow-hosts` and
+  `url-safety.deny-hosts` (`internal/config/registry.go:249`, `:254`) and `ui.inspector` (`:350`)
+  are `Editable: true` with no case in `applySettingFor` (`cmd/apogee/wire_settings.go:552`), so
+  the edit writes the file and then falls to the dispatcher's `default:` (`:734`, `cannotApply`)
+  and the row shows `saved — live apply failed: …` (`internal/tui/settings.go:1560`). Both keys
+  are read at start-up, so the honest row note is "takes effect at the next start" rather than a
+  refusal.
+- [ ] A bracket-spelled IPv6 entry in the url-safety lists never matches. `normalizeHostName`
+  (`internal/security/urlsafety.go:243`) IDNA-maps, lower-cases and strips the trailing root dots
+  but keeps `[` and `]`, while the dialled host the guard checks carries no brackets — so `[::1]`
+  in config does not match. The unbracketed spelling works, and loopback/private v6 is denied by
+  the SSRF floor regardless.
+- [ ] The Inspector shows a request with no reply on the non-streaming path. A `Respond` success
+  body is never recorded (`internal/provider/wire.go:146-155`, documented and pinned), so
+  `renderInspector` (`internal/tui/inspector.go:238`) draws the request record alone; the pane
+  should not imply the response is missing.
+- [ ] `/inspect` has no mouse support — no click-to-dismiss and no wheel scroll — while the
+  `/usage` pane it is shaped after has both (`internal/tui/mouse.go:1329` `handleUsageClick`,
+  `:1345` `usageWheel`). `mouse.go` has no inspector counterpart; `internal/tui/inspector.go:201`
+  handles key presses only.
+- [ ] Nothing tracks the generic case of a depth-0 entry splitting the sub-agent rail. `addNote`
+  and `addEphemeralNote` (`internal/tui/transcript.go:486`, `:506`) still append at depth 0, so
+  any host entry landing mid-run — a `· cancelled` note among them — splits the rail.
+
 ## Parked / deferred work
 
 Live, deliberately deferred work only. Each entry records *enough* design that we don't re-derive
