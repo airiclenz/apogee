@@ -8,6 +8,8 @@ point is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+## [0.15.0] — 2026-08-16
+
 ### Added
 
 - Tool-built host requests now carry the identity of the run that raised them: `domain.PresentRequest` gained `Depth` and `SpawnCallID`, `domain.AskRequest` gained `Depth`, filled at the dispatch seam from one new ctx carrier set (`WithSubAgentDepth` / `WithSpawnCallID`) installed for every tool call — depth 0 and an empty spawn id being the honest identity of the top-level agent. A Driver can now draw a sub-agent's presentation at its own depth and inside its own run instead of as the top-level agent's.
