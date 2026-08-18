@@ -49,6 +49,17 @@ point is a **minor** bump, not a breaking change.
   row kind the elision marker uses. The newest record never carries it, whatever it is: its call may
   still be in flight.
 
+- **`/inspect` answers the mouse, as the `/usage` report it is shaped after already did.** The pane
+  had keys and nothing else, so the one pointer gesture it understood was the transcript scroll
+  behind it. A click **outside** the box now dismisses it — and, the pane being non-modal, that click
+  still lands where it was aimed, seating the caret in the prompt or starting a transcript selection
+  exactly as it would with no pane up — a click **inside** does nothing and is swallowed, so a press
+  on the raw-protocol view cannot drag a selection across the transcript drawn under it, and the
+  **wheel** scrolls the record list one row per notch, clamped at the first row and the last full
+  window: the same two ends `↑`/`↓` and `PgUp`/`PgDn` stop at. Every notch reads the window the
+  painter actually drew rather than a counted-up offset, so a stale scroll — a ring that gained a
+  record, a grant that shrank — corrects itself on the first turn of the wheel instead of drifting.
+
 ## [0.15.0] — 2026-08-16
 
 ### Added

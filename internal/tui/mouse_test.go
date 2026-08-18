@@ -3247,3 +3247,109 @@ func TestUsageWheelScrollsTheReport(t *testing.T) {
 		}
 	}
 }
+
+// ----------------------------------------------------------------------------
+// Mouse in the /inspect pane (inspector.go)
+// ----------------------------------------------------------------------------
+
+// inspectorPaneModel opens the raw-protocol pane over more records than it can seat rows for, which
+// is the state both the hit-test and the scroll below are about. The scroll starts at the TOP rather
+// than where the verb opens it (runInspectCommand seats the last window), because a wheel test needs
+// rows below the window to roll on to.
+func inspectorPaneModel(t *testing.T, records int) Model {
+	t.Helper()
+	m := newTestModel(t)
+	m.opts.Inspector = true
+	for i := range records {
+		m = m.foldEvent(wireEvent(domain.WireDirectionRequest, fmt.Sprintf(`{"n":%d}`, i), i, 0))
+	}
+	m.inspector = inspectorPane{open: true}
+	m.layout()
+	return m
+}
+
+// A click ON the pane is swallowed — it has nothing to select, and a press that armed a drag would
+// take the transcript lines hidden under it — while a click anywhere else dismisses it. That second
+// click still does what it was aimed at: the pane is not modal (layout.md), so the caret is seated in
+// the prompt exactly as it would have been with no pane up.
+func TestInspectorPaneUnderTheClick(t *testing.T) {
+	m := inspectorPaneModel(t, 12)
+	paneTop, h, ok := m.inspectorPaneRect()
+	if !ok {
+		t.Fatal("the pane is not on the frame")
+	}
+
+	inside := step(t, m, leftClick(10, paneTop+h/2))
+	if !inside.inspector.open {
+		t.Error("a click on the pane closed it")
+	}
+	if inside.sel.active || inside.transcriptSel.active {
+		t.Errorf("a click on the pane armed a selection beneath it: prompt %+v, transcript %+v",
+			inside.sel, inside.transcriptSel)
+	}
+
+	_, inputTop, _, _ := m.inputContentRect()
+	outside := step(t, m, leftClick(4, inputTop))
+	if outside.inspector.open {
+		t.Error("a click outside the pane left it up")
+	}
+	if !outside.sel.active {
+		t.Error("the dismissing click was swallowed; it should still seat the caret it was aimed at")
+	}
+}
+
+// The wheel scrolls the record list one row per notch while the pointer is over it and CLAMPS at both
+// ends — rolling past the last row must not land the reader back on the first — and the last window it
+// reaches is a FULL one, the end of the list against the bottom of the pane. A notch outside the pane
+// is the transcript's, which is what keeps the conversation behind the pane scrollable.
+func TestInspectorWheelScrollsTheRecords(t *testing.T) {
+	m := inspectorPaneModel(t, 12)
+	paneTop, h, ok := m.inspectorPaneRect()
+	if !ok {
+		t.Fatal("the pane is not on the frame")
+	}
+	win, ok := m.inspectorWindow()
+	if !ok {
+		t.Fatal("the pane reports no window")
+	}
+	if win.start != 0 || win.end >= win.total {
+		t.Fatalf("precondition: window [%d,%d) of %d rows — the pane must open at the top with rows below it",
+			win.start, win.end, win.total)
+	}
+	seats := win.end - win.start
+	wheel := func(m Model, button tea.MouseButton, y int) Model {
+		return step(t, m, tea.MouseWheelMsg{X: 10, Y: y, Button: button})
+	}
+	y := paneTop + h/2
+
+	down := wheel(m, tea.MouseWheelDown, y)
+	if down.inspector.top != 1 {
+		t.Fatalf("top = %d after one notch down, want 1", down.inspector.top)
+	}
+	if back := wheel(wheel(down, tea.MouseWheelUp, y), tea.MouseWheelUp, y); back.inspector.top != 0 {
+		t.Errorf("top = %d after rolling past the first row, want it clamped at 0", back.inspector.top)
+	}
+
+	end := m
+	for range win.total + 5 {
+		end = wheel(end, tea.MouseWheelDown, y)
+	}
+	last, ok := end.inspectorWindow()
+	if !ok {
+		t.Fatal("the scrolled pane reports no window")
+	}
+	if last.end != last.total {
+		t.Errorf("scrolled to the end the window is [%d,%d) of %d rows, want it to reach the last row",
+			last.start, last.end, last.total)
+	}
+	if got := last.end - last.start; got != seats {
+		t.Errorf("the last window shows %d rows, want a full %d — the rows end at the pane's bottom", got, seats)
+	}
+
+	// Above the pane the transcript still owns the wheel.
+	if paneTop > 0 {
+		if off := wheel(down, tea.MouseWheelUp, paneTop-1); off.inspector.top != down.inspector.top {
+			t.Errorf("a notch above the pane scrolled it to %d", off.inspector.top)
+		}
+	}
+}

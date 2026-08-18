@@ -1472,6 +1472,13 @@ and it is non-modal on the same terms: the box behind it stays live and every ot
 it always went. Its verb is safe while the agent works, which is when the traffic worth reading is
 being made.
 
+**The pointer works on it exactly as it does on the report.** A click **outside** the box dismisses
+the pane and still lands where it was aimed, a click **inside** does nothing and is swallowed rather
+than dragging a selection across the transcript drawn under it, and the **wheel** scrolls the record
+list one row per notch, clamped at the first row and the last full window — the two ends the keys
+stop at. The report is asked first where both are up, so a click on this pane dismisses the report
+above it and is then swallowed here.
+
 ---
 
 ## The prompt box's mini-language

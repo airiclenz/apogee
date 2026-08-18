@@ -27,10 +27,6 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 
 The still-open findings that run left, under the conventions' actionability bar.
 
-- [P] `/inspect` has no mouse support — no click-to-dismiss and no wheel scroll — while the
-  `/usage` pane it is shaped after has both (`internal/tui/mouse.go:1329` `handleUsageClick`,
-  `:1345` `usageWheel`). `mouse.go` has no inspector counterpart; `internal/tui/inspector.go:201`
-  handles key presses only.
 - [P] Nothing tracks the generic case of a depth-0 entry splitting the sub-agent rail. `addNote`
   and `addEphemeralNote` (`internal/tui/transcript.go:486`, `:506`) still append at depth 0, so
   any host entry landing mid-run — a `· cancelled` note among them — splits the rail.

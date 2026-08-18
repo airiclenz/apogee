@@ -220,7 +220,10 @@
 // the same placement plus the wrap the painter chose). A FOURTH joins them while /usage is open, and
 // it is the lightest: the report has nothing to select, so a click inside it is only swallowed, a
 // click outside dismisses it and then goes on to whatever it named, and the wheel scrolls its rows
-// ([Model.usageWindow], reading the same painter's placement). The handlers arbitrate by region, so no two of
+// ([Model.usageWindow], reading the same painter's placement). A FIFTH is that same rectangle one
+// slot further down, while /inspect is open: the raw-protocol pane answers the pointer on the
+// report's terms exactly ([Model.inspectorWindow]), and it is the one pane that can be up beside the
+// report, so it is asked right after it. The handlers arbitrate by region, so no two of
 // them coexist. Scope is the owner's rule, not an
 // accident of routing: the TRANSCRIPT selects in every state, while the PROMPT follows
 // [Model.inputEditable] — idle, ask, running — and stays inert at approval/errored, where a/d/s and

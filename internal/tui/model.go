@@ -1012,6 +1012,12 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		if next, handled := m.usageWheel(msg); handled {
 			return next, nil
 		}
+		// A notch over the open /inspect pane scrolls its record list on the same terms (mouse.go).
+		// It is asked after the report because it is drawn under it, and the two rectangles never
+		// overlap, so only one of them can hold the pointer.
+		if next, handled := m.inspectorWheel(msg); handled {
+			return next, nil
+		}
 		return m.scrollViewport(msg)
 
 	case tea.MouseClickMsg:

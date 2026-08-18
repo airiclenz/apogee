@@ -395,6 +395,14 @@ func (m Model) handleMouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
 		return usage, nil
 	}
 	m = usage
+	// The /inspect pane answers in the same currency (handleInspectorClick), and it is the one pane
+	// that can be up BESIDE the report — View draws it under the report, in the same slot — so it is
+	// asked right after it, in the order the two are drawn in.
+	inspector, claimed := m.handleInspectorClick(msg)
+	if claimed {
+		return inspector, nil
+	}
+	m = inspector
 	if m.inputEditable() {
 		if visRow, visCol, ok := m.pointInputRow(msg.X, msg.Y); ok {
 			m.transcriptSel = transcriptSel{} // the prompt claims it: drop any transcript selection
@@ -1356,6 +1364,118 @@ func (m Model) usageWheel(msg tea.MouseWheelMsg) (Model, bool) {
 		m.usagePane.top = win.start - 1
 	case msg.Button == tea.MouseWheelDown && win.end < win.total:
 		m.usagePane.top = win.start + 1
+	}
+	return m, true
+}
+
+// ----------------------------------------------------------------------------
+// Mouse in the /inspect pane (inspector.go, layout.md "The /inspect popup")
+// ----------------------------------------------------------------------------
+//
+// A fifth rectangle, and the report's twin one slot further down: the raw-protocol view has nothing
+// to select either, so the pointer does the same two things the pane's keys cannot. The doctrine is
+// written once above the report and holds here unchanged — a click OUTSIDE dismisses, a click INSIDE
+// is swallowed so the press cannot arm a drag across the transcript drawn under it, the wheel scrolls
+// a row per notch off the PAINTER's own window, and dismissing never swallows the click.
+//
+// The two panes are the only ones in the frame that can be up TOGETHER (View), and the report is
+// asked first (handleMouseClick), so a click on this pane dismisses the report before it reaches
+// here. That order is the safe one: the slot is bottom-anchored (frameOverlays.transcriptRows), so
+// this pane's bottom edge is fixed and losing the report above it can only grow the box UPWARD — a
+// point inside the box the human clicked is still inside the box that answers.
+
+// inspectorPaneRect is where the open /inspect pane is drawn: the screen row its top border lands on
+// and how many rows it takes. ok is false when it is not on the frame at all — closed, or given way
+// to a window too short to seat it (frameRowPlan).
+//
+// It is usagePaneRect one slot further down, and it names one term more than that one does: the pane
+// CLOSES the transcript-side slot (View), drawn under the report it is shaped after, so the report
+// joins the prompt, the browser, the picker and the /settings pane in the run of blocks stacked
+// above it.
+func (m Model) inspectorPaneRect() (y0, h int, ok bool) {
+	if !m.inspector.open {
+		// Asked before the frame is composed, because every click and every wheel notch asks: with no
+		// pane up there is nothing to place, and composing the frame's overlays to learn that would
+		// put a render on the path of a click the pane has no part in.
+		return 0, 0, false
+	}
+	ov := m.frameOverlays()
+	if ov.inspector == "" {
+		return 0, 0, false
+	}
+	y0 = ov.transcriptRows(m.transcriptBudget()) + gapHeight
+	for _, above := range []string{ov.prompt, ov.browser, ov.picker, ov.settings, ov.usage} {
+		if above != "" {
+			y0 += lipgloss.Height(above)
+		}
+	}
+	return y0, lipgloss.Height(ov.inspector), true
+}
+
+// inspectorWindow is the row window the pane is showing as the frame DREW it: which rows of the
+// record list the pane holds, and how many rows that list has in all. It is everything the wheel
+// needs — whether there is anything above the window to scroll back to, and anything below it to
+// scroll on to.
+//
+// ok is false wherever there is nothing to scroll: the pane closed or given way, or a frame that
+// cannot seat it.
+type inspectorWindow struct {
+	start, end int // the [start, end) rows of the record list the pane is showing
+	total      int // the rows it holds
+}
+
+// inspectorWindow composes the pane exactly as the frame does and reports the window it landed on.
+// It renders to get the answer, the price usageWindow already pays: the painter is the authority on
+// which rows are on the screen, and asking it costs less than an arithmetic that can disagree with
+// it — an offset left over from a taller window, or from a ring that has since gained a record,
+// corrects itself the first time the wheel is turned instead of drifting.
+func (m Model) inspectorWindow() (inspectorWindow, bool) {
+	if !m.inspector.open {
+		return inspectorWindow{}, false
+	}
+	spec, seated := m.inspectorSpec()
+	if !seated {
+		return inspectorWindow{}, false
+	}
+	_, place := renderPopupPlaced(m.th, spec, m.width)
+	return inspectorWindow{start: place.start, end: place.end, total: len(spec.rows)}, true
+}
+
+// handleInspectorClick answers a left-click while the pane is up: inside the box it is claimed and
+// nothing happens — a raw-protocol view has nothing to click ON, and swallowing the press is what
+// keeps it from arming a drag across the transcript underneath — and outside it the pane is
+// dismissed and the click goes on to name whatever it landed on. claimed says only which of the two
+// it was.
+func (m Model) handleInspectorClick(msg tea.MouseClickMsg) (Model, bool) {
+	y0, h, ok := m.inspectorPaneRect()
+	if !ok {
+		return m, false
+	}
+	if msg.Y >= y0 && msg.Y < y0+h {
+		return m, true
+	}
+	return m.dismissInspector(), false
+}
+
+// inspectorWheel scrolls the record list one row per notch while the pointer is over it, and CLAMPS
+// at both ends: a wheel is a scroll, so rolling past the last row must not land the reader back at
+// the first. handled is false anywhere else, which leaves the notch to the transcript scrolling
+// above and behind the pane — and true over a list short enough to show every row it has, where the
+// notch moves nothing because there is nothing off the screen to move to.
+func (m Model) inspectorWheel(msg tea.MouseWheelMsg) (Model, bool) {
+	y0, h, ok := m.inspectorPaneRect()
+	if !ok || msg.Y < y0 || msg.Y >= y0+h {
+		return m, false
+	}
+	win, ok := m.inspectorWindow()
+	if !ok {
+		return m, true
+	}
+	switch {
+	case msg.Button == tea.MouseWheelUp && win.start > 0:
+		m.inspector.top = win.start - 1
+	case msg.Button == tea.MouseWheelDown && win.end < win.total:
+		m.inspector.top = win.start + 1
 	}
 	return m, true
 }

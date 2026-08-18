@@ -191,7 +191,11 @@ and not under the second (newest); a request followed by its response gets no no
 
 ---
 
-## 5. `/inspect` gains mouse support
+## 5. `/inspect` gains mouse support — ✅ DONE (2026-08-18)
+
+NOTES (2026-08-18): two docs beyond the item's Files list were updated, because the change is user-facing and both files state the mouse contract the pane now joins — `layout.md`'s "The `/inspect` popup" section gains the pointer paragraph its `/usage` counterpart already carries, and `internal/tui/doc.go`'s mouse-rectangle enumeration ("a FOURTH joins them") gains the fifth rectangle. Leaving either would have left the two documents saying the pane has no pointer.
+
+NOTES (2026-08-18): a known ordering wart, left as the item specifies (the report is asked first, both for the click and for the wheel): the two panes are the only ones that can be up TOGETHER, and the transcript-side slot is bottom-anchored, so dismissing the report re-lays the slot and can grow the inspector's box upward. A click ON the inspector is unaffected (its bottom edge is fixed, so a point inside stays inside) and the wheel is unaffected (`usageWheel` does not mutate when the pointer is outside it), but a click in the narrow transcript band the box grows into is swallowed instead of falling through, in that one both-panes-open case. Resolving both rects from a single pre-click frame would fix it and was not in the item's scope.
 
 **What:** The inspector pane is shaped after `/usage` but has no mouse handling
 (`internal/tui/mouse.go` has no inspector counterpart; `internal/tui/inspector.go:201` is
