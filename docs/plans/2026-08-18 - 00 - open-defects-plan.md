@@ -81,7 +81,11 @@ edit with an empty value resolves the default. Assert the returned note is `tool
 
 ---
 
-## 2. Startup-only keys stop reporting a live-apply failure
+## 2. Startup-only keys stop reporting a live-apply failure — ✅ DONE (2026-08-18)
+
+NOTES (2026-08-18): test deviation — `TestApplySettingRefusesTheTopLevelResponseReserve` (`cmd/apogee/wire_test.go`) pinned the old refusal as deliberate ("not a defect waiting for a seam"), which ratified call 2 reverses. It is rewritten rather than deleted, as `TestApplySettingSavesTheTopLevelResponseReserveWithoutMovingTheSession`: same assertions that no rebind and no engine seam is driven and that the launch share the next rebind resolves is untouched, with the refusal expectation flipped to the silent success. The item text did not name this test.
+
+NOTES (2026-08-18): the two new cases need no `unreachable` line — they dereference no applier member, so the pre-screen's default (`reaches = true`) already answers them, and `TestApplySettingRefusesEveryKeyItCannotReach` exempts them beside `editor` through the new shared `settingKeysWithNoMemberToReach` list.
 
 Depends on item 1.
 

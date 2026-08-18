@@ -20,6 +20,18 @@ point is a **minor** bump, not a breaking change.
   a fresh start resolves (the empty list, no tightening), and the guard's SSRF floor is unchanged
   either way — it is not reachable from configuration.
 
+- **A `/settings` edit of `ui.inspector` or `response-reserve` no longer reports a failed apply.**
+  Both keys are `Editable` with nothing behind them to move — the Inspector's wire observer is
+  installed while the provider client is constructed, and the reply share is read into the budget
+  the session opens with — so an edit fell to the dispatcher's default refusal and the row said
+  `saved — live apply failed: …` over a write that had done exactly what the key promises. They now
+  take the `editor` key's answer instead: the write is the whole of the apply, the row shows no note
+  and no failure, and the deferral contract ("takes effect at the next start") is stated in each
+  key's own `/settings` Description — `response-reserve`'s gained the sentence `ui.inspector`
+  already carried. A new guard test drives every `Editable` registry key and fails on one that is
+  neither renderer-owned, pane-intercepted, nor accepted by the dispatcher, so a future key cannot
+  ship a lying row.
+
 ## [0.15.0] — 2026-08-16
 
 ### Added

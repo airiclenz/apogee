@@ -539,7 +539,10 @@ type settingsApplier struct {
 // A key nothing HOLDS is a third answer rather than a third class: `editor` is read off the file at
 // the moment an external edit starts, so the write alone puts it in force and its case says success
 // with nothing to do (ADR 0041 decision 1). That is not the refusal above, because the file changing
-// IS the session changing for a value only ever read from the file.
+// IS the session changing for a value only ever read from the file. `ui.inspector` and
+// `response-reserve` take that same answer from the other side — they are read only at START-UP, so
+// the write is the whole of what this session can do and their Descriptions carry the contract
+// ("takes effect at the next start") that the row therefore does not have to.
 //
 // An EMPTY value means one thing for every key: the file no longer SETS this key, so resolve the
 // built-in default a fresh start would have resolved. That is what a reset of a key whose default is
@@ -671,6 +674,20 @@ func applySettingFor(a settingsApplier) func(key, value string) (string, error) 
 			// journal beyond the write itself"). It is named here rather than left to the default because
 			// that default is a refusal — and a refusal over a value already in force would tell the user
 			// their change had not taken effect when it had.
+		case "ui.inspector", "response-reserve":
+			// The two keys that are genuinely START-UP only. `ui.inspector` decides whether a wire
+			// observer is installed while the provider client is CONSTRUCTED (wire_boot.go), and
+			// `response-reserve` is read straight off the file into the budget the session opens with
+			// and has no setter anywhere behind it. Neither has a seam this build could reach, and
+			// neither is a candidate for one: the observer would need an engine seam and a client
+			// rebuild for a capture nobody starts mid-session.
+			//
+			// So they take `editor`'s answer rather than the default refusal, for `editor`'s reason
+			// turned around: the write IS everything this session can do about the key, and a refusal
+			// would report a failure over a save that did exactly what the key promises. The promise
+			// is the Description's own closing sentence ("takes effect at the next start"), which the
+			// pane's header carries — no row note, since ADR 0037 decision 3 gives a settings row a
+			// boundary note only when the session itself moves.
 		case "present.auto-open", "present.command", "present.port", "present.host":
 			return "", a.present.apply(key, value)
 		case "context-window":

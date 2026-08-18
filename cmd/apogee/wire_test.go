@@ -3118,6 +3118,147 @@ func TestApplySettingAcceptsTheEditorKey(t *testing.T) {
 	}
 }
 
+// startupOnlyContract is the closing sentence a key whose edit lands only at the NEXT start carries
+// in its own registry Description. The row shows no note (ADR 0037 decision 3 gives one only when
+// the session itself moves), so the pane's Description header is the single place the human is told.
+const startupOnlyContract = "takes effect at the next start."
+
+// settingKeysWithNoMemberToReach are the keys whose entire live apply is the write the pane has
+// already made. They hold the dispatcher's only exemption from the nil-member refusal, and they are
+// the only shape that can be one: no member of the applier is touched, so there is nothing a Driver
+// could have been composed without. `editor` is re-read off a fresh projection of the file every
+// time an external edit starts (ADR 0041 decision 1); the other two are read once, while the session
+// is being built, and say so in their Descriptions.
+var settingKeysWithNoMemberToReach = []string{"editor", "ui.inspector", "response-reserve"}
+
+// The two START-UP-only keys are `editor`'s counter-case from the other side: keys with no seam that
+// must not refuse either. `ui.inspector` decides whether a wire observer is installed while the
+// provider client is constructed and `response-reserve` is read into the budget the session opens
+// with, so this session genuinely cannot move either — but the file the next one starts from HAS
+// moved, which is the whole of what the key promises. Refusing would report a failed apply over a
+// save that did exactly that, which is the defect this pins.
+//
+// The promise itself is asserted beside the silence, because they are one design: a row with no note
+// says nothing, so the Description is where the human learns when the edit lands.
+func TestApplySettingAcceptsTheStartupOnlyKeys(t *testing.T) {
+	t.Parallel()
+	tests := []struct{ key, value string }{
+		{key: "ui.inspector", value: "true"},
+		{key: "response-reserve", value: "0.25"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.key, func(t *testing.T) {
+			t.Parallel()
+			spy := &applySettingSpy{}
+			note, err := applySettingFor(settingsApplier{engine: spy})(tt.key, tt.value)
+			if err != nil {
+				t.Fatalf("apply %s: %v; the write is the whole of the apply, not a failure", tt.key, err)
+			}
+			if note != "" {
+				t.Errorf("note = %q, want none: nothing about this session changed to report", note)
+			}
+			if spy.drove() != 0 {
+				t.Errorf("applying %s drove an engine seam: %+v", tt.key, spy)
+			}
+			if _, err := applySettingFor(settingsApplier{})(tt.key, tt.value); err != nil {
+				t.Errorf("apply %s through an applier holding nothing: %v; the key reaches no member",
+					tt.key, err)
+			}
+
+			row, ok := config.LookupKey(tt.key)
+			if !ok {
+				t.Fatalf("no registry row for %q", tt.key)
+			}
+			if !strings.HasSuffix(row.Desc, startupOnlyContract) {
+				t.Errorf("Description = %q, want it to end %q: the silent row leaves the header to say when",
+					row.Desc, startupOnlyContract)
+			}
+		})
+	}
+}
+
+// settingKeysAppliedByTheRenderer are the Editable keys the TUI applies to ITSELF and never routes
+// out to the binary, because nothing behind [tui.Options.ApplySetting] would have anything to do
+// with them — their whole effect is a field on the Model. The list is hardcoded because that switch
+// is unexported in another package: internal/tui/settings.go, Model.settingsApplyLocal, is the
+// source, and a key added there belongs here too.
+var settingKeysAppliedByTheRenderer = []string{
+	"auto-title",
+	"ui.show-scrollbar",
+	"ui.spinner",
+	"ui.spinner-color",
+	"ui.stall-after",
+	"ui.color-scheme",
+	"cursor-shape",
+}
+
+// Every Editable key has SOMETHING that applies it. This is the guard four keys went missing from:
+// `Editable: true` with no case in the dispatcher writes the file and then tells the human the save
+// could not be applied to the running session — a lying row, over an edit that landed. There are
+// exactly three honest homes for an editable key and this names all three, so a new key with none
+// fails here rather than shipping that row:
+//
+//	a. the renderer applies it itself (settingKeysAppliedByTheRenderer),
+//	b. the pane intercepts it before the dispatcher is ever asked (`server`, whose live apply is the
+//	   picker's own switch — ADR 0037 decision 4), or
+//	c. applySettingFor accepts it when every member it could need is composed.
+//
+// It is the mirror of TestApplySettingRefusesEveryKeyItCannotReach, which drives the same registry
+// through a ZERO applier: that one holds what a missing MEMBER must answer, this one holds that a
+// missing CASE is not a way to answer anything.
+func TestEveryEditableSettingKeyHasAnApply(t *testing.T) {
+	t.Parallel()
+	apply := applySettingFor(fullyComposedApplier(t))
+	for _, k := range config.KeyRegistry {
+		if !k.Editable || k.Path == settingKeyServer ||
+			slices.Contains(settingKeysAppliedByTheRenderer, k.Path) {
+			continue
+		}
+		t.Run(k.Path, func(t *testing.T) {
+			if _, err := apply(k.Path, k.Default); err != nil {
+				t.Errorf("apply %s=%q: %v; an editable key with no apply shows the human a failed save",
+					k.Path, k.Default, err)
+			}
+		})
+	}
+}
+
+// fullyComposedApplier builds the dispatcher a Driver that composed EVERYTHING hands over — every
+// optional member present, so a refusal from it is the dispatcher's own answer about the key rather
+// than a member this test forgot. The seams behind it are the fixtures the per-key tests above use:
+// a spy engine, a rebind probe, an empty config file for the keys re-read whole, and a tool set that
+// rebuilds into a fresh registry.
+func fullyComposedApplier(t *testing.T) settingsApplier {
+	t.Helper()
+	workspace := t.TempDir()
+	roots, err := resolveRoots(t.TempDir(), workspace)
+	if err != nil {
+		t.Fatalf("resolveRoots: %v", err)
+	}
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	writeSettingsFixture(t, path, "")
+
+	return settingsApplier{
+		engine:     &applySettingSpy{},
+		live:       newLiveSettings(config.Options{}, nil),
+		binding:    func() upstreamBinding { return upstreamBinding{Model: "bound-model"} },
+		rebind:     (&rebindProbe{}).rebind,
+		configPath: path,
+		skills: skills.NewProvider(skills.Sources{
+			Home:      roots.config,
+			Workspace: roots.workspace,
+		}),
+		tools: newLiveTools(apogee.NewToolRegistry(), toolSetSpec{},
+			func(toolSetSpec) *apogee.ToolRegistry { return apogee.NewToolRegistry() }),
+		mcp: newLiveMCP(&fakeMCPSession{}, func([]mcp.ServerConfig) (mcpSession, error) {
+			return &fakeMCPSession{}, nil
+		}),
+		present: newLivePresentation(config.PresentSettings{AutoOpen: true}, workspace, "darwin",
+			func(string) string { return "" }, func(tui.Presentation) {}),
+		roots: roots,
+	}
+}
+
 // `remember-model` is the third shape again: a toggle with no engine seam and no re-resolution, whose
 // whole apply is a store on the live holder. What makes the store the apply is that everything the
 // toggle gates is still in the future — the next explicit `/model` pick, the next committed profile
@@ -3177,11 +3318,11 @@ func TestApplySettingRefusesEveryKeyItCannotReach(t *testing.T) {
 	t.Parallel()
 	apply := applySettingFor(settingsApplier{})
 	for _, k := range config.KeyRegistry {
-		if k.Path == "editor" {
-			// The one exception, and the only shape that can be one: a key whose apply reaches no
-			// member at all, so there is nothing a Driver could be composed without. It is in force
-			// from the write itself (ADR 0041 decision 1) and answers success even here —
-			// TestApplySettingAcceptsTheEditorKey holds that side.
+		if slices.Contains(settingKeysWithNoMemberToReach, k.Path) {
+			// The exceptions, and the only shape that can be one: a key whose apply reaches no
+			// member at all, so there is nothing a Driver could be composed without. Each answers
+			// success even here — TestApplySettingAcceptsTheEditorKey and
+			// TestApplySettingAcceptsTheStartupOnlyKeys hold that side.
 			continue
 		}
 		t.Run(k.Path, func(t *testing.T) {
@@ -4863,10 +5004,14 @@ func TestApplySettingServersDoesNotRebindForAReserveEditThatMovesNothing(t *test
 // offers it (a registry row like any other) and the write puts it in the file, but nothing applies it
 // to a session already running — the holder latches it at construction and grows no setter, because
 // the share a session divides its window by belongs to the server it is BOUND to and the entry
-// override is the live door. So the dispatcher refuses it by name, the same sentence every key
-// without a live seam gets, and the share the next rebind resolves is exactly the one the session
-// launched with. This pins current behaviour; it is not a defect waiting for a seam.
-func TestApplySettingRefusesTheTopLevelResponseReserve(t *testing.T) {
+// override is the live door. So the key is start-up only, and the apply is the write: no rebind is
+// driven, no engine seam moves, and the share the next rebind resolves is exactly the one the
+// session launched with until a next start reads the file again.
+//
+// What it must NOT do is refuse. The file changed, and it changed to exactly what the key promises
+// in its Description — a refusal would report a failed apply over a save that worked, which is the
+// row TestApplySettingAcceptsTheStartupOnlyKeys pins the silence of.
+func TestApplySettingSavesTheTopLevelResponseReserveWithoutMovingTheSession(t *testing.T) {
 	t.Parallel()
 
 	live := newLiveSettings(config.Options{HostAlias: "here", StartupResponseReserve: 0.25}, nil)
@@ -4881,21 +5026,21 @@ func TestApplySettingRefusesTheTopLevelResponseReserve(t *testing.T) {
 	})
 
 	note, err := apply("response-reserve", "0.35")
-	if err == nil {
-		t.Fatalf("apply response-reserve: want a refusal naming the key, got note %q", note)
+	if err != nil {
+		t.Fatalf("apply response-reserve: %v; the write is the whole of the apply, not a failure", err)
 	}
-	if !strings.Contains(err.Error(), "response-reserve") {
-		t.Errorf("error = %q, want it to name the key it refused", err)
+	if note != "" {
+		t.Errorf("note = %q, want none: nothing about this session changed to report", note)
 	}
 	if len(probe.calls) != 0 {
-		t.Errorf("a refused key still drove a rebind: %+v", probe.calls)
+		t.Errorf("a start-up-only key still drove a rebind: %+v", probe.calls)
 	}
 	if spy.drove() != 0 {
-		t.Errorf("a refused key still drove an engine seam: %+v", spy)
+		t.Errorf("a start-up-only key still drove an engine seam: %+v", spy)
 	}
 	base, _, _, _ := live.rebindInputs(config.Options{}, upstreamBinding{})
 	if base.ResponseReserve != 0.25 {
-		t.Errorf("the next rebind's share = %v; want the launch share 0.25, untouched by the refusal",
+		t.Errorf("the next rebind's share = %v; want the launch share 0.25, which no write can move",
 			base.ResponseReserve)
 	}
 }

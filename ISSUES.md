@@ -27,13 +27,6 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 
 The still-open findings that run left, under the conventions' actionability bar.
 
-- [P] A `/settings` edit of a startup-only key reports a failure. `url-safety.allow-hosts` and
-  `url-safety.deny-hosts` (`internal/config/registry.go:249`, `:254`) and `ui.inspector` (`:350`)
-  are `Editable: true` with no case in `applySettingFor` (`cmd/apogee/wire_settings.go:552`), so
-  the edit writes the file and then falls to the dispatcher's `default:` (`:734`, `cannotApply`)
-  and the row shows `saved — live apply failed: …` (`internal/tui/settings.go:1560`). Both keys
-  are read at start-up, so the honest row note is "takes effect at the next start" rather than a
-  refusal.
 - [P] A bracket-spelled IPv6 entry in the url-safety lists never matches. `normalizeHostName`
   (`internal/security/urlsafety.go:243`) IDNA-maps, lower-cases and strips the trailing root dots
   but keeps `[` and `]`, while the dialled host the guard checks carries no brackets — so `[::1]`

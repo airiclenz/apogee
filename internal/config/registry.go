@@ -282,10 +282,15 @@ var KeyRegistry = []Key{
 		Desc:     "Pin the model context window in tokens; 0 discovers it from the server, live.",
 	},
 	{
+		// Editable, and the edit is honoured at the NEXT start — the share is read off the file into
+		// the budget the session opens with and no seam behind it can be re-pointed — which the
+		// description says out loud for `ui.inspector`'s reason: a row that took the write without
+		// changing the session must read as the key's contract rather than as a failure.
 		Path: "response-reserve", Kind: KindFloat, Default: "0",
 		Editable: true,
 		Validate: validateResponseReserve,
-		Desc:     "Share of the window held back for the reply, above 0 and below 1; 0 takes apogee's own 0.20.",
+		Desc: "Share of the window held back for the reply, above 0 and below 1; " +
+			"0 takes apogee's own 0.20; takes effect at the next start.",
 	},
 	{
 		Path: "present.auto-open", Kind: KindBool, Default: "true",
