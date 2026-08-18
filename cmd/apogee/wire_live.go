@@ -57,16 +57,27 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	// registry the engine built privately, and with no MCP server configured the two builds are the
 	// same tools in the same order, so this changes what the root HOLDS, never what the Agent runs.
 	w.cfg.Tools = registryWithMCP(w.roots.workspace, w.cfg, w.mcpSet.tools())
-	w.toolSet = newLiveTools(w.cfg.Tools, w.cfg.WebSearchEndpoint, w.opts.ToolsDisabled,
-		func(endpoint string, disabled []string) *apogee.ToolRegistry {
-			// The set as this session would have built it with another search endpoint and another
-			// roster: the MCP tools are re-folded from the holder rather than remembered, so a
-			// rebuild always carries the connections that are live NOW.
-			host := w.cfg
-			host.WebSearchEndpoint = endpoint
-			host.DisabledTools = disabled
-			return registryWithMCP(w.roots.workspace, host, w.mcpSet.tools())
-		})
+	// What the set the session runs was BUILT from — the values a later rebuild has to carry rather
+	// than take from this snapshot again. The url-safety host lists ride it beside the endpoint and
+	// the roster because the guard is built WITH the set (registryWithMCP hands one URLGuard to every
+	// network tool), so an edit of either list is a rebuild rather than a write on a tool.
+	built := toolSetSpec{
+		endpoint:   w.cfg.WebSearchEndpoint,
+		disabled:   w.opts.ToolsDisabled,
+		allowHosts: w.cfg.URLAllowHosts,
+		denyHosts:  w.cfg.URLDenyHosts,
+	}
+	w.toolSet = newLiveTools(w.cfg.Tools, built, func(spec toolSetSpec) *apogee.ToolRegistry {
+		// The set as this session would have built it with another search endpoint, another roster
+		// and another pair of url-safety host lists: the MCP tools are re-folded from the holder
+		// rather than remembered, so a rebuild always carries the connections that are live NOW.
+		host := w.cfg
+		host.WebSearchEndpoint = spec.endpoint
+		host.DisabledTools = spec.disabled
+		host.URLAllowHosts = spec.allowHosts
+		host.URLDenyHosts = spec.denyHosts
+		return registryWithMCP(w.roots.workspace, host, w.mcpSet.tools())
+	})
 
 	// Resolve the catalogued Mechanisms enabled in config.yaml to the sorted ID list the engine arms
 	// (ADR 0015 §1: wire.go collapses to a YAML→ID-list producer). Startup validates EVERY

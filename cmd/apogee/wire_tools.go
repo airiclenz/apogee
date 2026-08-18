@@ -36,28 +36,42 @@ import (
 type liveTools struct {
 	mu      sync.Mutex
 	current *apogee.ToolRegistry
-	// endpoint is the web-search endpoint the live set was BUILT from. It is remembered because a
-	// rebuild driven by something else entirely — a reconnect to another set of MCP servers — must
-	// carry the endpoint this session is actually on, not the one it launched with: rebuilding from
-	// the startup value would quietly revert a search-endpoint edit made an hour earlier.
-	endpoint string
-
-	// disabled is the `tools.disabled:` roster the live set was built from, remembered for the
-	// endpoint's exact reason: a rebuild driven by anything else must carry the roster this session
-	// is on, or an MCP reconnect would quietly hand back a tool the user switched off.
-	disabled []string
+	// spec is what the live set was BUILT from. It is remembered because a rebuild driven by
+	// something else entirely — a reconnect to another set of MCP servers — must carry the
+	// configuration this session is actually on, not the one it launched with: rebuilding from the
+	// startup values would quietly revert a search-endpoint edit made an hour earlier, hand back a
+	// tool the user switched off, or re-open a host the operator closed.
+	spec toolSetSpec
 
 	// build assembles the whole set as this session would have assembled it at startup, for a given
-	// web-search endpoint and a given disabled roster — host tools plus the MCP tools that are
-	// connected now.
-	build func(webSearchEndpoint string, disabled []string) *apogee.ToolRegistry
+	// spec — host tools plus the MCP tools that are connected now.
+	build func(spec toolSetSpec) *apogee.ToolRegistry
 }
 
-// newLiveTools holds the registry the session was constructed with, the endpoint and roster it was
-// built from, and the recipe for another.
-func newLiveTools(current *apogee.ToolRegistry, endpoint string, disabled []string,
-	build func(webSearchEndpoint string, disabled []string) *apogee.ToolRegistry) *liveTools {
-	return &liveTools{current: current, endpoint: endpoint, disabled: disabled, build: build}
+// toolSetSpec is the configuration one live tool set is built from: the web-search endpoint, the
+// roster of built-in tools taken off the menu, and the two `url-safety:` host lists. They travel as
+// one value because every door below moves exactly ONE of them and has to hand the rest on
+// untouched — carrying them as separate arguments would make three adjacent name lists an argument
+// order away from silently applying a deny list as an allow list.
+type toolSetSpec struct {
+	// endpoint is the web-search endpoint the set's web_search tool was built with.
+	endpoint string
+
+	// disabled is the `tools.disabled:` roster the set was pruned by.
+	disabled []string
+
+	// allowHosts and denyHosts are the `url-safety:` host lists the set's URLGuard was built from.
+	// They belong to the SET rather than to any one tool: the guard is handed to every network tool
+	// at construction and none of them has a setter for it, so moving a list means building again.
+	allowHosts []string
+	denyHosts  []string
+}
+
+// newLiveTools holds the registry the session was constructed with, the spec it was built from, and
+// the recipe for another.
+func newLiveTools(current *apogee.ToolRegistry, spec toolSetSpec,
+	build func(spec toolSetSpec) *apogee.ToolRegistry) *liveTools {
+	return &liveTools{current: current, spec: spec, build: build}
 }
 
 // setSearchEndpoint moves web_search to endpoint. While the tool is registered — the ordinary case,
@@ -75,12 +89,13 @@ func (t *liveTools) setSearchEndpoint(endpoint string, engine settingsEngine) er
 	if ws := t.webSearch(); ws != nil {
 		ws.SetEndpoint(endpoint)
 		t.mu.Lock()
-		t.endpoint = endpoint
+		t.spec.endpoint = endpoint
 		t.mu.Unlock()
 		return nil
 	}
-	_, disabled := t.built()
-	return t.rebuildWith(endpoint, disabled, engine)
+	spec := t.built()
+	spec.endpoint = endpoint
+	return t.rebuildWith(spec, engine)
 }
 
 // setDisabled moves the session onto another `tools.disabled:` roster. Unlike the search endpoint
@@ -89,8 +104,29 @@ func (t *liveTools) setSearchEndpoint(endpoint string, engine settingsEngine) er
 // next request's tool list is offered from it. Being idle-only, SwapTools can refuse mid-run, and the
 // refusal lands on the row over a value already persisted; re-committing retries it.
 func (t *liveTools) setDisabled(disabled []string, engine settingsEngine) error {
-	endpoint, _ := t.built()
-	return t.rebuildWith(endpoint, disabled, engine)
+	spec := t.built()
+	spec.disabled = disabled
+	return t.rebuildWith(spec, engine)
+}
+
+// setAllowHosts moves the session onto another `url-safety.allow-hosts:` list, and setDenyHosts onto
+// another deny list. Both are the swap door for the roster's reason rather than the endpoint's: the
+// guard is built WITH the set (registryWithMCP hands one URLGuard to every network tool) and no tool
+// exposes a setter for it, so which hosts are reachable is part of the set's identity. Being
+// idle-only, SwapTools can refuse mid-run, and the refusal lands on the row over a value already
+// persisted; re-committing retries it.
+func (t *liveTools) setAllowHosts(hosts []string, engine settingsEngine) error {
+	spec := t.built()
+	spec.allowHosts = hosts
+	return t.rebuildWith(spec, engine)
+}
+
+// setDenyHosts moves the session onto another `url-safety.deny-hosts:` list — setAllowHosts above
+// carries the reasoning both share.
+func (t *liveTools) setDenyHosts(hosts []string, engine settingsEngine) error {
+	spec := t.built()
+	spec.denyHosts = hosts
+	return t.rebuildWith(spec, engine)
 }
 
 // rebuild reassembles the whole set as this session would assemble it NOW and hands it to the engine
@@ -98,30 +134,28 @@ func (t *liveTools) setDisabled(disabled []string, engine settingsEngine) error 
 // configuration (ADR 0037 binding F). Today that is one caller: a reconnect to another set of MCP
 // servers, whose tools are part of the set's identity rather than a field on a tool already in it.
 func (t *liveTools) rebuild(engine settingsEngine) error {
-	endpoint, disabled := t.built()
-	return t.rebuildWith(endpoint, disabled, engine)
+	return t.rebuildWith(t.built(), engine)
 }
 
-// built reports the two values the live set was assembled from — the search endpoint and the
-// disabled-tool roster — which is what a rebuild driven by something else entirely must carry
-// forward rather than re-derive from the startup snapshot.
-func (t *liveTools) built() (string, []string) {
+// built reports the spec the live set was assembled from, which is what a rebuild driven by
+// something else entirely must carry forward rather than re-derive from the startup snapshot.
+func (t *liveTools) built() toolSetSpec {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	return t.endpoint, t.disabled
+	return t.spec
 }
 
 // rebuildWith is the swap every door shares: build, hand to the engine, and become the live set only
 // once the engine has taken it. Being idle-only, SwapTools can refuse mid-run — and then nothing has
 // moved, which is what makes re-committing the edit a retry rather than a second half-application.
-func (t *liveTools) rebuildWith(endpoint string, disabled []string, engine settingsEngine) error {
-	next := t.build(endpoint, disabled)
+func (t *liveTools) rebuildWith(spec toolSetSpec, engine settingsEngine) error {
+	next := t.build(spec)
 	if err := engine.SwapTools(next); err != nil {
 		return err
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	t.current, t.endpoint, t.disabled = next, endpoint, disabled
+	t.current, t.spec = next, spec
 	return nil
 }
 

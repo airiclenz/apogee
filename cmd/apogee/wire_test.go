@@ -25,6 +25,7 @@ import (
 	"github.com/airiclenz/apogee/internal/mechanisms"
 	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/scheme"
+	"github.com/airiclenz/apogee/internal/security"
 	"github.com/airiclenz/apogee/internal/session"
 	"github.com/airiclenz/apogee/internal/skills"
 	"github.com/airiclenz/apogee/internal/tools"
@@ -989,11 +990,11 @@ func TestApplySettingToolsDisabledSwapsTheSet(t *testing.T) {
 	workspace := t.TempDir()
 	var built []string
 	spy := &applySettingSpy{}
-	live := newLiveTools(tools.NewDefaultRegistry(workspace), "", nil,
-		func(endpoint string, disabled []string) *apogee.ToolRegistry {
-			built = append(built, strings.Join(disabled, ","))
+	live := newLiveTools(tools.NewDefaultRegistry(workspace), toolSetSpec{},
+		func(spec toolSetSpec) *apogee.ToolRegistry {
+			built = append(built, strings.Join(spec.disabled, ","))
 			return tools.NewDefaultRegistryWithHost(workspace,
-				tools.HostTools{WebSearchEndpoint: endpoint, Disabled: disabled})
+				tools.HostTools{WebSearchEndpoint: spec.endpoint, Disabled: spec.disabled})
 		})
 	apply := applySettingFor(settingsApplier{engine: spy, tools: live})
 
@@ -1033,6 +1034,72 @@ func TestApplySettingToolsDisabledSwapsTheSet(t *testing.T) {
 	}
 	if !strings.Contains(note, "grepp") {
 		t.Errorf("note = %q, want it to name the entry that is no tool", note)
+	}
+}
+
+// The `url-safety:` host lists take the same door, for a related reason: the guard is built WITH the
+// set — registryWithMCP hands one URLGuard to every network tool and no tool exposes a setter for it
+// — so which hosts are reachable is part of the set's identity rather than a value on a tool.
+// Committing either list rebuilds the set, hands it to the engine (SwapTools, ADR 0037 binding F) and
+// reports the roster's boundary: the next request runs against the guard the new set carries.
+func TestApplySettingURLSafetyHostsSwapTheSet(t *testing.T) {
+	t.Parallel()
+	workspace := t.TempDir()
+	var guards []security.URLGuard
+	spy := &applySettingSpy{}
+	live := newLiveTools(tools.NewDefaultRegistry(workspace), toolSetSpec{},
+		func(spec toolSetSpec) *apogee.ToolRegistry {
+			// Built through the guard's own constructor, exactly as the composition root builds it:
+			// the entries the row carries are normalised THERE, so a test that hand-built a
+			// URLGuard literal would pass over a list the running session never matches with.
+			guard := security.NewURLGuard(spec.allowHosts, spec.denyHosts)
+			guards = append(guards, guard)
+			return tools.NewDefaultRegistryWithHost(workspace, tools.HostTools{URLGuard: guard})
+		})
+	apply := applySettingFor(settingsApplier{engine: spy, tools: live})
+
+	note, err := apply("url-safety.deny-hosts", "[metadata.internal, EVIL.example.com]")
+	if err != nil {
+		t.Fatalf("apply url-safety.deny-hosts: %v", err)
+	}
+	if note != toolRosterNote {
+		t.Errorf("note = %q, want %q", note, toolRosterNote)
+	}
+	if len(spy.swaps) != 1 {
+		t.Fatalf("SwapTools calls = %d, want 1: the guard is part of the set, not a field on a tool", len(spy.swaps))
+	}
+	if len(guards) != 1 {
+		t.Fatalf("rebuilds = %d, want 1", len(guards))
+	}
+	if want := []string{"metadata.internal", "evil.example.com"}; !slices.Equal(guards[0].DenyHosts, want) {
+		t.Fatalf("deny hosts = %v, want %v", guards[0].DenyHosts, want)
+	}
+
+	// The other list moves without reverting the one already committed: a rebuild carries the
+	// configuration the session is ON, not the one it launched with.
+	if _, err := apply("url-safety.allow-hosts", "[docs.example.com]"); err != nil {
+		t.Fatalf("apply url-safety.allow-hosts: %v", err)
+	}
+	moved := guards[len(guards)-1]
+	if want := []string{"docs.example.com"}; !slices.Equal(moved.AllowHosts, want) {
+		t.Errorf("allow hosts = %v, want %v", moved.AllowHosts, want)
+	}
+	if want := []string{"metadata.internal", "evil.example.com"}; !slices.Equal(moved.DenyHosts, want) {
+		t.Errorf("deny hosts = %v, want %v: an allow-list edit must not re-open a denied host", moved.DenyHosts, want)
+	}
+
+	// An EMPTY value is the pane saying the file no longer SETS the key, and it resolves the built-in
+	// default a fresh start resolves: the empty list, which tightens nothing. The guard's own SSRF
+	// floor is not reachable from configuration, so clearing a list never unfences it.
+	if _, err := apply("url-safety.deny-hosts", ""); err != nil {
+		t.Fatalf("apply url-safety.deny-hosts on an empty value: %v", err)
+	}
+	cleared := guards[len(guards)-1]
+	if len(cleared.DenyHosts) != 0 {
+		t.Errorf("deny hosts = %v, want none: an emptied key resolves the built-in default", cleared.DenyHosts)
+	}
+	if want := []string{"docs.example.com"}; !slices.Equal(cleared.AllowHosts, want) {
+		t.Errorf("allow hosts = %v, want %v: clearing one list must not clear the other", cleared.AllowHosts, want)
 	}
 }
 
@@ -3338,8 +3405,8 @@ func TestApplySettingWebSearchEndpointMovesTheRegisteredTool(t *testing.T) {
 	spy := &applySettingSpy{}
 	apply := applySettingFor(settingsApplier{
 		engine: spy,
-		tools: newLiveTools(registry, "", nil,
-			func(string, []string) *apogee.ToolRegistry { return apogee.NewToolRegistry() }),
+		tools: newLiveTools(registry, toolSetSpec{},
+			func(toolSetSpec) *apogee.ToolRegistry { return apogee.NewToolRegistry() }),
 	})
 
 	if _, err := apply("web-search-endpoint", "https://search.example.com/s"); err != nil {
@@ -3366,11 +3433,11 @@ func TestApplySettingWebSearchEndpointSwapsWhenTheToolIsAbsent(t *testing.T) {
 	workspace := t.TempDir()
 	var built []string
 	spy := &applySettingSpy{}
-	live := newLiveTools(apogee.NewToolRegistry(), "", nil,
-		func(endpoint string, disabled []string) *apogee.ToolRegistry {
-			built = append(built, endpoint)
+	live := newLiveTools(apogee.NewToolRegistry(), toolSetSpec{},
+		func(spec toolSetSpec) *apogee.ToolRegistry {
+			built = append(built, spec.endpoint)
 			return tools.NewDefaultRegistryWithHost(workspace,
-				tools.HostTools{WebSearchEndpoint: endpoint, Disabled: disabled})
+				tools.HostTools{WebSearchEndpoint: spec.endpoint, Disabled: spec.disabled})
 		})
 	apply := applySettingFor(settingsApplier{engine: spy, tools: live})
 
@@ -3403,9 +3470,9 @@ func TestApplySettingWebSearchSwapRefusalKeepsTheOldSet(t *testing.T) {
 	t.Parallel()
 	old := apogee.NewToolRegistry()
 	spy := &applySettingSpy{swapErr: errors.New("input pending: the tool set can only be swapped between runs")}
-	live := newLiveTools(old, "", nil, func(endpoint string, disabled []string) *apogee.ToolRegistry {
+	live := newLiveTools(old, toolSetSpec{}, func(spec toolSetSpec) *apogee.ToolRegistry {
 		return tools.NewDefaultRegistryWithHost(t.TempDir(),
-			tools.HostTools{WebSearchEndpoint: endpoint, Disabled: disabled})
+			tools.HostTools{WebSearchEndpoint: spec.endpoint, Disabled: spec.disabled})
 	})
 	apply := applySettingFor(settingsApplier{engine: spy, tools: live})
 
@@ -3434,13 +3501,13 @@ func TestApplySettingOnAnEmptyValueResolvesTheBuiltInDefault(t *testing.T) {
 		registry := tools.NewDefaultRegistryWithHost(workspace,
 			tools.HostTools{WebSearchEndpoint: "https://search.example.com/s"})
 		spy := &applySettingSpy{}
-		live := newLiveTools(registry, "https://search.example.com/s", nil,
-			func(string, []string) *apogee.ToolRegistry { return apogee.NewToolRegistry() })
+		live := newLiveTools(registry, toolSetSpec{endpoint: "https://search.example.com/s"},
+			func(toolSetSpec) *apogee.ToolRegistry { return apogee.NewToolRegistry() })
 
 		if _, err := applySettingFor(settingsApplier{engine: spy, tools: live})("web-search-endpoint", ""); err != nil {
 			t.Fatalf("apply web-search-endpoint on an empty value: %v", err)
 		}
-		if got, _ := live.built(); got != "" {
+		if got := live.built().endpoint; got != "" {
 			t.Errorf("the live set is built from %q; want the empty endpoint a fresh start with no key resolves", got)
 		}
 		if _, ok := registry.Lookup("web_search"); !ok {
@@ -3453,11 +3520,11 @@ func TestApplySettingOnAnEmptyValueResolvesTheBuiltInDefault(t *testing.T) {
 		// And where there is no tool to re-point, the rebuild is handed exactly what start-up hands it
 		// when the key is absent, rather than the endpoint the session happened to launch on.
 		var built []string
-		bare := newLiveTools(apogee.NewToolRegistry(), "https://search.example.com/s", nil,
-			func(endpoint string, disabled []string) *apogee.ToolRegistry {
-				built = append(built, endpoint)
+		bare := newLiveTools(apogee.NewToolRegistry(), toolSetSpec{endpoint: "https://search.example.com/s"},
+			func(spec toolSetSpec) *apogee.ToolRegistry {
+				built = append(built, spec.endpoint)
 				return tools.NewDefaultRegistryWithHost(workspace,
-					tools.HostTools{WebSearchEndpoint: endpoint, Disabled: disabled})
+					tools.HostTools{WebSearchEndpoint: spec.endpoint, Disabled: spec.disabled})
 			})
 		if _, err := applySettingFor(settingsApplier{engine: &applySettingSpy{}, tools: bare})("web-search-endpoint", ""); err != nil {
 			t.Fatalf("apply web-search-endpoint on a set with no web_search: %v", err)
@@ -3545,8 +3612,8 @@ type mcpFixture struct {
 func newMCPFixture(start mcpSession, endpoint string, connect func([]mcp.ServerConfig) (mcpSession, error)) *mcpFixture {
 	f := &mcpFixture{}
 	f.set = newLiveMCP(start, connect)
-	f.tools = newLiveTools(apogee.NewToolRegistry(), endpoint, nil, func(e string, _ []string) *apogee.ToolRegistry {
-		f.built = append(f.built, e)
+	f.tools = newLiveTools(apogee.NewToolRegistry(), toolSetSpec{endpoint: endpoint}, func(spec toolSetSpec) *apogee.ToolRegistry {
+		f.built = append(f.built, spec.endpoint)
 		registry := apogee.NewToolRegistry()
 		for _, tool := range f.set.tools() {
 			// The fixture names its own tools, so the only registration that can fail is one this

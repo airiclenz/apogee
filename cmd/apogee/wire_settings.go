@@ -546,8 +546,9 @@ type settingsApplier struct {
 // unset hands in (the pane's settingsApplied), and every such key answers it through the case it
 // already has rather than a branch of its own — `web-search-endpoint` resolves "" to the built-in
 // provider, `present.command` and `present.host` rebuild the ladder from a block with the field
-// cleared, `tools.disabled` parses "" as the empty roster, the `system-prompt-` pair re-read a file
-// that no longer carries the key, and `editor` is in force from the write itself.
+// cleared, `tools.disabled` parses "" as the empty roster, the two `url-safety:` host lists parse it
+// as the empty list the guard tightens nothing from, the `system-prompt-` pair re-read a file that no
+// longer carries the key, and `editor` is in force from the write itself.
 // TestApplySettingOnAnEmptyValueResolvesTheBuiltInDefault holds this side of it.
 func applySettingFor(a settingsApplier) func(key, value string) (string, error) {
 	return func(key, value string) (string, error) {
@@ -640,6 +641,27 @@ func applySettingFor(a settingsApplier) func(key, value string) (string, error) 
 			if unknown := config.UnknownToolNames(names); len(unknown) > 0 {
 				return "no tool named " + strings.Join(unknown, ", "), nil
 			}
+			return toolRosterNote, nil
+		case "url-safety.allow-hosts", "url-safety.deny-hosts":
+			// The host lists reach the session the way the roster above does and for a related
+			// reason: the guard is built WITH the set (registryWithMCP hands one URLGuard to every
+			// network tool) and no tool has a setter for it, so this is the swap door rather than a
+			// re-point. The value arrives as the FILE spells it and is read back by the same parse
+			// the writer rendered it with, and an EMPTY value is the empty list — which is the
+			// built-in default a fresh start resolves: no allow-list narrowing, no configured deny,
+			// and the guard's own SSRF floor still standing under both (it is not reachable from
+			// configuration). An entry that normalises to nothing is dropped where the guard is
+			// built, exactly as it is at startup, so there is nothing to report on the row.
+			hosts := config.ParseSettingList(value)
+			move := a.tools.setAllowHosts
+			if key == "url-safety.deny-hosts" {
+				move = a.tools.setDenyHosts
+			}
+			if err := move(hosts, a.engine); err != nil {
+				return "", err
+			}
+			// The same boundary the roster reports, because it is the same boundary: the set is
+			// swapped on commit and the next request runs against the guard it carries.
 			return toolRosterNote, nil
 		case "editor":
 			// The one key with nothing at all behind it to move: the editor ladder reads `editor` off a
@@ -774,10 +796,10 @@ func (a settingsApplier) unreachable(key string) error {
 		reaches = a.live != nil
 	case "use-project-skills":
 		reaches = a.skills != nil
-	case "web-search-endpoint", "tools.disabled":
+	case "web-search-endpoint", "tools.disabled", "url-safety.allow-hosts", "url-safety.deny-hosts":
 		// The engine as well as the tool set: a registry with no web_search to re-point is rebuilt and
 		// handed through SwapTools, which is the swap door and not this holder's to skip — and the
-		// roster switch is that door every time.
+		// roster switch and the two host lists are that door every time.
 		reaches = a.tools != nil && a.engine != nil
 	case "present.auto-open", "present.command", "present.port", "present.host":
 		reaches = a.present != nil

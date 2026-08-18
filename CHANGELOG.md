@@ -8,6 +8,18 @@ point is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A `/settings` edit of `url-safety.allow-hosts` or `url-safety.deny-hosts` now reaches the running
+  session.** Both keys fell to the dispatcher's default refusal, so the row reported
+  `saved — live apply failed: …` over a value the file already carried. They now take the same door
+  `tools.disabled` takes: the two host lists ride the live tool set's build spec, an edit rebuilds
+  the registry — and with it the `security.URLGuard` every network tool is handed — and hands it to
+  the engine through `Agent.SwapTools`, so the row reports the roster's own boundary
+  ("applies to the next request") instead of a failure. An emptied key resolves the built-in default
+  a fresh start resolves (the empty list, no tightening), and the guard's SSRF floor is unchanged
+  either way — it is not reachable from configuration.
+
 ## [0.15.0] — 2026-08-16
 
 ### Added
