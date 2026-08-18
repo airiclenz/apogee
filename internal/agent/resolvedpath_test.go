@@ -47,7 +47,13 @@ func TestResolvedPathRidesTheCallAndTheApproval(t *testing.T) {
 
 	t.Run("a path that names its own target discloses nothing", func(t *testing.T) {
 		t.Parallel()
-		ws := t.TempDir()
+		// The workspace root is taken already-resolved so that the ONLY symlink in play is the one
+		// the case is about — namely none. A raw t.TempDir() on macOS hands back a /var/... path that
+		// is itself reached through the /var -> /private/var link, which the resolver would faithfully
+		// disclose, drowning the assertion in an artefact of the host's temp dir rather than anything
+		// the call did. Resolving it here keeps the assertion exact: a non-empty disclosure now means
+		// the production logic stopped comparing the resolution against the name.
+		ws := realPath(t, t.TempDir())
 
 		sink := &recordingSink{}
 		conf := &fakeConfiner{caps: capsBoth()}

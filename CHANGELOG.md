@@ -10,6 +10,17 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **`TestResolvedPathRidesTheCallAndTheApproval`'s "a path that names its own target discloses
+  nothing" case no longer fails on macOS.** The case asserts that an ordinary write — one whose
+  argument names its own target — carries no `ResolvedPath` disclosure, but it took its workspace
+  root straight from `t.TempDir()`, which on macOS hands back a `/var/…` path reached through the
+  `/var` -> `/private/var` link. The resolver faithfully disclosed that redirection, so the case
+  failed on an artefact of the host's temp dir rather than on anything the call did. The root is now
+  resolved once in the case's setup (`realPath`, the helper the sibling cases already use), so the
+  no-symlink condition the case is named for is actually true on every host. Production disclosure
+  logic is untouched and the assertion stays exact: dropping `ResolvedWriteTarget`'s
+  `Real == Named` guard still fails the case.
+
 - **A `/settings` edit of `url-safety.allow-hosts` or `url-safety.deny-hosts` now reaches the running
   session.** Both keys fell to the dispatcher's default refusal, so the row reported
   `saved — live apply failed: …` over a value the file already carried. They now take the same door
