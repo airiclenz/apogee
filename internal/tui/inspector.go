@@ -99,6 +99,14 @@ const inspectorDisarmedRow = "capture is off — set ui.inspector: true, then re
 // been made yet, which is a wait rather than a thing to fix.
 const inspectorEmptyRow = "armed — the next model call lands here"
 
+// inspectorNoReplyRow is what stands under a request the ring holds no answer for once a LATER
+// record has landed: the reply was not RECORDED, which is a different fact from the reply not
+// arriving. A non-streaming success body is decoded straight off the connection and never captured
+// (the provider's pinned design, internal/provider/wire.go), so a gap here is the recorder's
+// silence and not the Upstream's — and a flat log that left the reader to infer it from absence
+// reads as a lost response every time the stream was off.
+const inspectorNoReplyRow = "· no response recorded — a non-streaming reply is decoded off the connection"
+
 // runInspectCommand drives the /inspect verb: it opens the pane and does nothing else.
 // Synchronous like /usage — no engine call, no worker, no I/O — and safe while a worker works, for
 // the same reason and a stronger one: everything it shows is already on the Model, and a request
@@ -275,8 +283,9 @@ func (m Model) inspectorSpec() (popupSpec, bool) {
 
 // inspectorRows composes the report: for each record in the ring, oldest first, a header row naming
 // the direction and the agent that made the call, then the payload's lines, then — where the cap
-// cut one — the elision the package words every hidden-lines statement with. An empty ring is ONE
-// row, and which one depends on whether anything is being captured at all.
+// cut one — the elision the package words every hidden-lines statement with, then — where the ring
+// went on without recording the answer — the note that says so (hasUnrecordedReply). An empty ring
+// is ONE row, and which one depends on whether anything is being captured at all.
 //
 // The kinds are composed in the same pass rather than derived from the rows afterwards: a header is
 // a header because of where it was put, and a payload line that happened to look like one would be
@@ -291,7 +300,7 @@ func (m Model) inspectorRows() ([]popupRow, []popupRowKind) {
 	}
 	rows := make([]popupRow, 0, len(m.wire)*2)
 	kinds := make([]popupRowKind, 0, len(m.wire)*2)
-	for _, rec := range m.wire {
+	for i, rec := range m.wire {
 		rows = append(rows, popupRow{wireRecordHeader(rec)})
 		kinds = append(kinds, popupRowHeading)
 		for _, line := range rec.lines {
@@ -302,8 +311,29 @@ func (m Model) inspectorRows() ([]popupRow, []popupRowKind) {
 			rows = append(rows, popupRow{popupElisionMarker(rec.hidden)})
 			kinds = append(kinds, popupRowPlain)
 		}
+		if hasUnrecordedReply(m.wire, i) {
+			rows = append(rows, popupRow{inspectorNoReplyRow})
+			kinds = append(kinds, popupRowPlain)
+		}
 	}
 	return rows, kinds
+}
+
+// hasUnrecordedReply says whether the record at index i is a request the ring will never show an
+// answer for: it is a request, a LATER record exists, and that record is not a response. The
+// successor is what settles it — the ring is filled in arrival order by the one writer (foldWire),
+// so the half that follows a request is its own answer or nothing.
+//
+// The NEWEST record never qualifies, whatever it is: its call may still be in flight, and a pane
+// that called a live request unanswered would be wrong for exactly as long as the answer took.
+func hasUnrecordedReply(records []wireRecord, i int) bool {
+	if records[i].direction != domain.WireDirectionRequest {
+		return false
+	}
+	if i+1 >= len(records) {
+		return false
+	}
+	return records[i+1].direction != domain.WireDirectionResponse
 }
 
 // wireRecordHeader names one record: which half of the round-trip it is and which Turn made it,

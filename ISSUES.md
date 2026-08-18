@@ -18,7 +18,7 @@ only the still-open, ACTIONABLE findings — a defect, or a concrete missing tes
 costs a plan already ratified, and cosmetic observations belong in the run's closing report (the
 closeout commit message), never here; the work the run completed belongs in `CHANGELOG.md`.
 
-[ ] New/Open Items not handled yet
+[ ] New/Open Items not handled yet <br>
 [P] Planned Items - if you add an item to an implementation plan, mark it with `P`
 
 ## Open defects
@@ -27,10 +27,6 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 
 The still-open findings that run left, under the conventions' actionability bar.
 
-- [P] The Inspector shows a request with no reply on the non-streaming path. A `Respond` success
-  body is never recorded (`internal/provider/wire.go:146-155`, documented and pinned), so
-  `renderInspector` (`internal/tui/inspector.go:238`) draws the request record alone; the pane
-  should not imply the response is missing.
 - [P] `/inspect` has no mouse support — no click-to-dismiss and no wheel scroll — while the
   `/usage` pane it is shaped after has both (`internal/tui/mouse.go:1329` `handleUsageClick`,
   `:1345` `usageWheel`). `mouse.go` has no inspector counterpart; `internal/tui/inspector.go:201`

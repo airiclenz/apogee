@@ -40,6 +40,15 @@ point is a **minor** bump, not a breaking change.
   (the `config.yaml` template comment, the settings registry, `urlSafetyConfig` and `domain.Config`)
   now say an IPv6 address is written in brackets.
 
+- **The Inspector now says when a reply was not recorded instead of leaving the reader to infer one
+  that was lost.** `/inspect` is a flat log, so a request record with no response under it read as a
+  response that never came — while a non-streaming success body is decoded straight off the
+  connection and never captured, by the provider's pinned design. A request record the ring went on
+  PAST without recording an answer now carries one note row under its payload,
+  `· no response recorded — a non-streaming reply is decoded off the connection`, in the same plain
+  row kind the elision marker uses. The newest record never carries it, whatever it is: its call may
+  still be in flight.
+
 ## [0.15.0] — 2026-08-16
 
 ### Added

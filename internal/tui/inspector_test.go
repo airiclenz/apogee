@@ -163,6 +163,63 @@ func TestInspectorRowsHeadEveryRecord(t *testing.T) {
 	}
 }
 
+// TestInspectorNamesAnUnrecordedReply pins the note ratified for the flat log: a request the ring
+// went on PAST without recording an answer carries one row saying so, because a non-streaming
+// reply is decoded off the connection and never captured — absence on its own reads as a response
+// that was lost. The newest request never carries it: its call may still be in flight.
+func TestInspectorNamesAnUnrecordedReply(t *testing.T) {
+	m := inspectorModel(t,
+		wireEvent(domain.WireDirectionRequest, `{"a":1}`, 1, 0),
+		wireEvent(domain.WireDirectionRequest, `{"b":2}`, 2, 0),
+	)
+
+	rows, kinds := m.inspectorRows()
+
+	var notes, headings []int
+	for i, row := range rows {
+		switch {
+		case row[0] == inspectorNoReplyRow:
+			notes = append(notes, i)
+			if kinds[i] != popupRowPlain {
+				t.Errorf("the note at row %d is kind %v, want the plain kind the elision marker uses", i, kinds[i])
+			}
+		case kinds[i] == popupRowHeading:
+			headings = append(headings, i)
+		}
+	}
+	if len(notes) != 1 {
+		t.Fatalf("%d note rows for two unanswered requests, want one — the newest may still be in flight", len(notes))
+	}
+	if len(headings) != 2 {
+		t.Fatalf("headings at %v, want one per record", headings)
+	}
+	if notes[0] < headings[0] || notes[0] >= headings[1] {
+		t.Errorf("the note sits at row %d, want it inside the first record (headings at %v)", notes[0], headings)
+	}
+
+	if pane := strip(m.renderInspector()); !strings.Contains(pane, "no response recorded") {
+		t.Errorf("the pane does not say the reply was never recorded:\n%s", pane)
+	}
+}
+
+// TestInspectorSaysNothingWhenTheReplyWasRecorded is the other half of the same rule: a request the
+// ring DID record an answer for is a complete round-trip and gets no note, so the row never becomes
+// noise under every request in a streaming session.
+func TestInspectorSaysNothingWhenTheReplyWasRecorded(t *testing.T) {
+	m := inspectorModel(t,
+		wireEvent(domain.WireDirectionRequest, `{"a":1}`, 1, 0),
+		wireEvent(domain.WireDirectionResponse, `{"b":2}`, 1, 0),
+	)
+
+	rows, _ := m.inspectorRows()
+
+	for i, row := range rows {
+		if row[0] == inspectorNoReplyRow {
+			t.Errorf("row %d names an unrecorded reply for a request the ring answered", i)
+		}
+	}
+}
+
 // TestInspectorDisarmedNamesTheKey is the ratified off-state: with nothing captured and the key
 // off, the pane says which key arms it instead of drawing an empty box. With the key ON the same
 // empty ring is a WAIT, not a thing to fix, so it says that instead.

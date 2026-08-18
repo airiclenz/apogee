@@ -162,7 +162,7 @@ dialled form" subtest (`urlsafety_test.go:229`).
 
 ---
 
-## 4. The Inspector names an unrecorded reply instead of implying a missing one
+## 4. The Inspector names an unrecorded reply instead of implying a missing one — ✅ DONE (2026-08-18)
 
 **What:** `inspectorRows` (`internal/tui/inspector.go:284-310`) is a flat log; a request record
 with no reply renders as a bare heading plus JSON and the reader infers a missing response from
