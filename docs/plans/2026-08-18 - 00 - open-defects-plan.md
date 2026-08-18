@@ -125,7 +125,9 @@ test).
 
 ---
 
-## 3. Bracketed IPv6 entries match in the url-safety lists
+## 3. Bracketed IPv6 entries match in the url-safety lists — ✅ DONE (2026-08-18)
+
+NOTES (2026-08-18): the bracketed entry added to `TestNewURLGuard_BuildsATightenOnlyGuardFromConfig`'s "entries are normalised to the dialled form" subtest uses the documentation-range address `[2001:DB8::1]`, not the item's `[::1]`. `::1` is loopback, so the always-on SSRF floor blocks it whatever the deny list says and the subtest would pass even with the brackets left on; the documentation range passes the floor, so the deny entry is the only thing that can block. The item named `[::1]` only for the `TestNormalizeHostPattern_MatchesTheDialledForm` row, which is verbatim.
 
 **What:** `normalizeHostName` (`internal/security/urlsafety.go:243-257`) keeps `[` and `]`,
 while the dialled side compares bracket-free hosts (`u.Hostname()`, `urlsafety.go:167`), so a

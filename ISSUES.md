@@ -27,11 +27,6 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 
 The still-open findings that run left, under the conventions' actionability bar.
 
-- [P] A bracket-spelled IPv6 entry in the url-safety lists never matches. `normalizeHostName`
-  (`internal/security/urlsafety.go:243`) IDNA-maps, lower-cases and strips the trailing root dots
-  but keeps `[` and `]`, while the dialled host the guard checks carries no brackets — so `[::1]`
-  in config does not match. The unbracketed spelling works, and loopback/private v6 is denied by
-  the SSRF floor regardless.
 - [P] The Inspector shows a request with no reply on the non-streaming path. A `Respond` success
   body is never recorded (`internal/provider/wire.go:146-155`, documented and pinned), so
   `renderInspector` (`internal/tui/inspector.go:238`) draws the request record alone; the pane

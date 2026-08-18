@@ -173,7 +173,7 @@ type Config struct {
 	// from configuration at all (security.URLGuard.DisableIPFloor is a code-level opt-out), so a
 	// Config carrying these fields adds denials and never removes the floor. Entries are normalised
 	// to the dialled host form when the guard is built (security.NewURLGuard), so an entry written
-	// with mixed case, a trailing root dot, or non-ASCII still matches.
+	// with mixed case, a trailing root dot, non-ASCII, or an IPv6 literal in brackets still matches.
 	//
 	// Like DisabledTools they apply to the DEFAULT tool set only: an injected Config.Tools is the
 	// host's own assembly and is taken exactly as given (ADR 0001).

@@ -1759,8 +1759,9 @@ type toolsConfig struct {
 type urlSafetyConfig struct {
 	// AllowHosts, when non-empty, restricts the network tools to exactly these hosts and their
 	// subdomains. Absent/empty ⇒ every host, subject to the floor and to DenyHosts below. Entries
-	// are normalized to the form the transport dials (trim, IDNA, lowercase, trailing root dot
-	// stripped) where the guard is built, so a host may be written here the way a human writes it.
+	// are normalized to the form the transport dials (trim, brackets of an IPv6 literal stripped,
+	// IDNA, lowercase, trailing root dot stripped) where the guard is built, so a host may be written
+	// here the way a human writes it — an IPv6 address in brackets, as a URL carries it.
 	AllowHosts []string `yaml:"allow-hosts"`
 	// DenyHosts blocks these hosts and their subdomains regardless of AllowHosts — deny-first, the
 	// guard's own precedence. Absent/empty ⇒ no host is denied beyond the floor.

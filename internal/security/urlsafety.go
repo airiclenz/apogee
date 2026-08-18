@@ -223,8 +223,9 @@ func NormalizeURL(raw string) (*url.URL, error) {
 
 // NormalizeHostPattern reduces one configured host entry (a `url-safety:` allow-hosts /
 // deny-hosts line) to the same normal form NormalizeURL leaves a dialled host in, so the two are
-// compared as one name rather than two spellings of it: whitespace-trimmed, IDNA-mapped when
-// non-ASCII, lower-cased, with every trailing DNS root dot removed. A blank or all-whitespace
+// compared as one name rather than two spellings of it: whitespace-trimmed, stripped of one
+// surrounding bracket pair (an IPv6 literal is written "[::1]" and dialled as "::1"), IDNA-mapped
+// when non-ASCII, lower-cased, with every trailing DNS root dot removed. A blank or all-whitespace
 // entry normalises to "" — the caller decides what to do with it (NewURLGuard drops it).
 //
 // It exists because config is written by a human and the dialled host is produced by net/http:
@@ -235,12 +236,22 @@ func NormalizeHostPattern(pattern string) string {
 	return normalizeHostName(strings.TrimSpace(pattern))
 }
 
-// normalizeHostName is the host normal form both sides of a match go through: IDNA-mapped when
-// non-ASCII (kept as-is when the mapping fails, exactly as net/http does), lower-cased, and with
-// the whole trailing run of root dots removed — a bare "." host is left alone. It is deliberately
-// shared by NormalizeURL and NormalizeHostPattern: were the config side to grow its own copy, the
-// two forms could drift apart and a correctly-spelled deny entry would silently stop matching.
+// normalizeHostName is the host normal form both sides of a match go through: one surrounding
+// bracket pair removed, IDNA-mapped when non-ASCII (kept as-is when the mapping fails, exactly as
+// net/http does), lower-cased, and with the whole trailing run of root dots removed — a bare "."
+// host is left alone. It is deliberately shared by NormalizeURL and NormalizeHostPattern: were the
+// config side to grow its own copy, the two forms could drift apart and a correctly-spelled deny
+// entry would silently stop matching.
 func normalizeHostName(host string) string {
+	// An IPv6 host is written in a URL — and therefore in a config entry — inside brackets, but
+	// the dialled name the guard compares against carries none (url.URL.Hostname strips them), so
+	// "[::1]" in a deny list matched nothing at all. The pair comes off FIRST: idna would refuse
+	// the bracketed string, and a trailing "]" is not a dot, so the root-dot loop below could
+	// never reach the dots of a bracketed entry either. It is a no-op for NormalizeURL, whose
+	// input is already an unbracketed Hostname().
+	if len(host) > 1 && host[0] == '[' && host[len(host)-1] == ']' {
+		host = host[1 : len(host)-1]
+	}
 	if !isASCII(host) {
 		// net/http.canonicalAddr converts ONLY a non-ASCII host, and keeps the original when
 		// the conversion fails — mirroring that exactly is what keeps the checked name and

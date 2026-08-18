@@ -32,6 +32,14 @@ point is a **minor** bump, not a breaking change.
   neither renderer-owned, pane-intercepted, nor accepted by the dispatcher, so a future key cannot
   ship a lying row.
 
+- **A `url-safety:` allow-hosts / deny-hosts entry written as a bracketed IPv6 literal (`[::1]`) now
+  matches.** `normalizeHostName` strips one surrounding bracket pair before the IDNA mapping and the
+  root-dot loop, so a configured entry lands in the same normal form as the bracket-free host the
+  transport dials; the unbracketed spelling is unchanged, and the strip is a no-op for
+  `NormalizeURL`, whose input never carries brackets. The four places that state the entry format
+  (the `config.yaml` template comment, the settings registry, `urlSafetyConfig` and `domain.Config`)
+  now say an IPv6 address is written in brackets.
+
 ## [0.15.0] — 2026-08-16
 
 ### Added

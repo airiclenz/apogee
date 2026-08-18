@@ -403,7 +403,8 @@ system-prompt-text: |
 # allow-hosts, when it names anything, is the whole permitted set: a URL is fetched only if its host
 # equals — or is a subdomain of — an entry. deny-hosts is the opposite and wins over it, so a host on
 # both is blocked. A host may be written the way you say it (Example.COM. is the same host as
-# example.com); it is normalised where the guard is built.
+# example.com), and an IPv6 address is written in brackets ([::1]); it is normalised where the guard
+# is built.
 #
 # The lists can only ever TIGHTEN what the network tools reach — there is no spelling here that opens
 # an address the floor closes. They are read at STARTUP: editing this key applies from the next run.

@@ -189,6 +189,7 @@ func TestNormalizeHostPattern_MatchesTheDialledForm(t *testing.T) {
 		{name: "a host idna rejects keeps its own bytes", raw: "ex_ample.tëst", want: "ex_ample.tëst"},
 		{name: "a bare root host keeps its dot", raw: ".", want: "."},
 		{name: "an ipv4 literal is untouched", raw: "127.0.0.1", want: "127.0.0.1"},
+		{name: "an ipv6 literal loses its brackets", raw: "[::1]", want: "::1"},
 		{name: "a blank entry normalises to nothing", raw: "   ", want: ""},
 	}
 
@@ -235,6 +236,19 @@ func TestNewURLGuard_BuildsATightenOnlyGuardFromConfig(t *testing.T) {
 		}
 		if err := g.CheckContext(context.Background(), "https://other.example/x"); err != nil {
 			t.Errorf("the deny entry blocked a host it does not name: %v", err)
+		}
+
+		// An IPv6 entry is written the way a URL carries it — in brackets — while the dialled host
+		// is compared bracket-free, so the entry only bites if the constructor takes the brackets
+		// off. The address is from the documentation range on purpose: the SSRF floor lets it
+		// through, so the deny entry is what blocks here and nothing else can pass the test for it.
+		const bracketed = "[2001:DB8::1]"
+		v6 := NewURLGuard(nil, []string{bracketed}).WithResolver(publicResolver)
+		if err := v6.CheckContext(context.Background(), "https://[2001:db8::1]/x"); !errors.Is(err, ErrURLBlocked) {
+			t.Errorf("a config deny spelled %q did not block the address it names: %v", bracketed, err)
+		}
+		if err := v6.CheckContext(context.Background(), "https://[2001:db8::2]/x"); err != nil {
+			t.Errorf("the deny entry %q blocked an address it does not name: %v", bracketed, err)
 		}
 	})
 
