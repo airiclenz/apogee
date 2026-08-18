@@ -228,7 +228,19 @@ ends. Remove the `/inspect` mouse entry from `ISSUES.md` (lines 47-49).
 
 ---
 
-## 6. A host note landing mid-run stays outside the run's stretch
+## 6. A host note landing mid-run stays outside the run's stretch — ✅ DONE (2026-08-18)
+
+NOTES (2026-08-18): mechanism — the rule lands entirely in `transcript.place`'s tail branch (`tailBeforeHostNotes` / `continuesOpenRun` / `isHostNote`, `internal/tui/transcript.go`), the "trailing-note-aware append" the item offers first. `addNote`, `addEphemeralNote` and `addFiring` are untouched: appending a host note at the tail is already the right thing at the moment it is worded, and it is the entries arriving AFTER it that have to step over it. `internal/tui/schedule.go` therefore needed no change despite being on the item's Files list — the Firing block is recognised by kind (`entrySchedule`) in `isHostNote`, and its case is covered by a test.
+
+NOTES (2026-08-18): the invariant is stated by ENTRY KIND rather than by producer, so a depth-0 `entryNote` carrying no run — which includes a top-level approval record (`addApproval`) as well as the two note doors the item names — is a host note for placement purposes. A note that carries a run (an approval or a fired Mechanism inside a delegation) is that run's own record and is untouched.
+
+NOTES (2026-08-18): two shared helpers gained a position-form sibling instead of being duplicated — `prevSiblingAt` (asked of a position and a depth) and `headsSubAgentRun` (asked of an entry), with `prevSibling` and `subAgentHeads` delegating to them. Both are needed because `place` asks these questions on behalf of an entry that is not in the list yet. No behaviour change to either caller.
+
+NOTES (2026-08-18): the codec needs no change, as the item predicted — `decodeTranscript` appends in recorded order and never calls `place`, so correct placement at fold time is what gets recorded.
+
+NOTES (2026-08-18): `internal/tui/doc.go`'s run-contiguity paragraph gained the host-note half of the rule; it stated only the spawn-id half and would otherwise have described a contract the package no longer keeps on its own.
+
+NOTES (2026-08-18): of the five cases now pinned, three were already correct and are regression guards (a delegated entry carrying its run's id, an ephemeral note, and a Firing block — their later children are placed by `runEnd`, which already stopped at the note); the two that failed before the fix are the fan-out group split and the delegated entry carrying no call id.
 
 **What:** `addNote` and `addEphemeralNote` (`internal/tui/transcript.go:486`, `:506`) append at
 depth 0 with no placement rule, and `addFiring` (`internal/tui/schedule.go:425`) is the same

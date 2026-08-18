@@ -66,7 +66,12 @@
 // arrive: a concurrent fan-out interleaves N children's events at one depth, and each entry is
 // placed at the end of the run its spawning call id names ([transcript.place], ADR 0039) instead of
 // at the end of the list — so every rule here reads adjacency off the entries exactly as it did
-// while delegation was serial. That whole frame is what a COLLAPSED run elides: by
+// while delegation was serial. A HOST note — a `· cancelled` line, a Firing block, anything the
+// program says to the human rather than the conversation ([isHostNote]) — is worded at whatever
+// moment it happens, which is routinely the middle of somebody's run, so it lands at the tail and
+// the run's remaining entries slide in FRONT of it ([transcript.tailBeforeHostNotes]): the note
+// keeps its depth-0 unrailed block and stands after the stretch it interrupted, and neither a run's
+// span nor a fan-out group's adjacency is ever cut by one. That whole frame is what a COLLAPSED run elides: by
 // default a sub_agent call block and the span of deeper entries behind it are ONE block ([subAgentSpan],
 // [renderSubAgentRun]), its summary slot carrying the run's transitive tool-call count, the
 // delegate's own context fill where it has reported one ([subAgentFill] — not transitive, since each

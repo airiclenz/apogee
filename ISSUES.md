@@ -23,14 +23,6 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 
 ## Open defects
 
-### Run residuals — open (2026-08-16, ISSUES.md backlog batch)
-
-The still-open findings that run left, under the conventions' actionability bar.
-
-- [P] Nothing tracks the generic case of a depth-0 entry splitting the sub-agent rail. `addNote`
-  and `addEphemeralNote` (`internal/tui/transcript.go:486`, `:506`) still append at depth 0, so
-  any host entry landing mid-run — a `· cancelled` note among them — splits the rail.
-
 ## Parked / deferred work
 
 Live, deliberately deferred work only. Each entry records *enough* design that we don't re-derive

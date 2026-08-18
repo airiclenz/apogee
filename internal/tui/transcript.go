@@ -281,6 +281,12 @@ type startupView struct {
 // sub_agent call block (ADR 0039 decision 6) rather than one interleaved braid behind whichever
 // call happened to be announced last.
 //
+// An entry the run rule cannot answer for is appended — but past any HOST NOTES parked at the tail,
+// when it continues the run or fan-out group those notes interrupted (tailBeforeHostNotes). A note
+// answers the human and lands at the end of the list the moment it is worded, which is in the
+// middle of whatever a delegate is doing; leaving it where it fell would make it a permanent
+// divider through the run behind it.
+//
 // Contiguity is the point: every rule downstream of here — the run span, the railed frame around
 // it, the folded tool run, the click surface's member offsets — reads a block off adjacent
 // entries, and keeping the grouping in the LIST is what lets all of them stay exactly as they were.
@@ -292,6 +298,9 @@ type startupView struct {
 // from the insertion point on has just moved up one. dropFrom is that assumption's guard.
 func (t *transcript) place(e entry) {
 	at := t.runEnd(e.spawnCallID)
+	if at >= len(t.entries) {
+		at = t.tailBeforeHostNotes(e)
+	}
 	if at >= len(t.entries) {
 		t.entries = append(t.entries, e)
 		return
@@ -320,6 +329,78 @@ func (t *transcript) runEnd(spawn string) int {
 		}
 	}
 	return len(t.entries)
+}
+
+// tailBeforeHostNotes is the index a tail-bound entry takes when host notes are parked at the end
+// of the list: the START of that trailing note block when the entry continues a run — or a fan-out
+// group — that was still open when the notes landed, and the end of the list otherwise. It is the
+// half of place's contiguity rule that runEnd cannot state, because it is about the entries the
+// fold commits WITHOUT a spawning call id.
+//
+// Two shapes break without it, and both are permanent once they happen. A sibling delegation
+// announced after the note lands behind it, and [subAgentGroup] reads adjacency of BLOCKS, so the
+// fan-out splits into two groups the reader was promised as one. A delegated entry whose event
+// carries no call id — a serial session's child, a replayed record — lands behind it too, outside
+// its head's [subAgentSpan] and so outside a collapsed run's elision, railed to nothing.
+//
+// The notes slide to the tail instead of the work sliding around them: a note is the HOST speaking
+// to the human, so it belongs after the stretch it interrupted rather than inside a delegate's run
+// (design call 4 of docs/plans/"2026-08-18 - 00 - open-defects-plan"). Nothing about the note
+// itself changes — same depth 0, same text, same unrailed block.
+func (t *transcript) tailBeforeHostNotes(e entry) int {
+	at := len(t.entries)
+	for at > 0 && isHostNote(t.entries[at-1]) {
+		at--
+	}
+	if at == len(t.entries) || at == 0 || !t.continuesOpenRun(e, at) {
+		return len(t.entries)
+	}
+	return at
+}
+
+// continuesOpenRun reports whether e belongs to the run, or the fan-out group, that was still open
+// when the host notes standing at at landed. It is asked of an entry that has not been placed yet,
+// so it reads the list as it will be around at rather than around an index of its own.
+//
+// A DELEGATED entry (depth above 0) qualifies when the block enclosing that position is a still-open
+// delegation: the run the notes interrupted is the only run it can belong to, and the head's span
+// has to reach it. A DELEGATION at the notes' own depth qualifies when the block before them is a
+// still-open delegation too: it is the next member of that fan-out, and members group only while
+// they stand next to each other.
+//
+// Everything else answers no and lands after the notes, in the order it happened — a fresh top-level
+// block belongs after the note, not in front of it.
+func (t *transcript) continuesOpenRun(e entry, at int) bool {
+	head := -1
+	switch {
+	case e.depth > 0:
+		head = enclosingBlock(t.entries, at, e.depth)
+	case headsSubAgentRun(e):
+		head = prevSiblingAt(t.entries, at, e.depth)
+	}
+	return subAgentHeads(t.entries, head) && !t.entries[head].done
+}
+
+// isHostNote reports whether e is a host note: a note or a Firing block standing at depth 0 and
+// belonging to no run (addNote, addEphemeralNote, addFiring, and a top-level approval). Those are
+// the entries the program itself puts in the scrollback while the conversation is elsewhere, and
+// the ones place has to step over. A note carrying a run — an approval or a fired Mechanism inside
+// a delegation — is that run's own record and stays exactly where its run puts it.
+func isHostNote(e entry) bool {
+	return (e.kind == entryNote || e.kind == entrySchedule) && e.depth == 0 && e.spawnCallID == ""
+}
+
+// enclosingBlock is the index of the nearest block SHALLOWER than depth before at — the delegation
+// head an entry at that depth landing there would hang off — or −1 when the position opens its
+// level. Everything at depth or deeper before at belongs to that same enclosing block, so the walk
+// steps over it.
+func enclosingBlock(entries []entry, at, depth int) int {
+	for j := at - 1; j >= 0; j-- {
+		if entries[j].depth < depth {
+			return j
+		}
+	}
+	return -1
 }
 
 // runName is the short name the model gave the delegation that the sub_agent call spawn opened, or
@@ -1301,13 +1382,17 @@ type subAgentBlock struct {
 }
 
 // subAgentHeads reports whether entries[i] is a delegation's call block — the head a sub-agent run
-// hangs off. It matches the retained tool name for [subAgentSpan]'s reason: a relabelling must not
-// switch the rule off, and a third-party tool sharing the "Sub-Agent" label must not switch it on.
+// hangs off. An index outside the list answers false, which is what lets callers hand it the result
+// of a walk that may have found nothing.
 func subAgentHeads(entries []entry, i int) bool {
-	if i < 0 || i >= len(entries) {
-		return false
-	}
-	e := entries[i]
+	return i >= 0 && i < len(entries) && headsSubAgentRun(entries[i])
+}
+
+// headsSubAgentRun is [subAgentHeads] asked of an entry rather than of a position — what place asks
+// of an entry it has not committed yet. It matches the retained tool name for [subAgentSpan]'s
+// reason: a relabelling must not switch the rule off, and a third-party tool sharing the
+// "Sub-Agent" label must not switch it on.
+func headsSubAgentRun(e entry) bool {
 	return e.kind == entryToolCall && e.tool.name == subAgentToolName
 }
 
@@ -1384,11 +1469,18 @@ func prevSibling(entries []entry, i int) int {
 	if i <= 0 || i >= len(entries) {
 		return -1
 	}
-	j := i - 1
-	for j >= 0 && entries[j].depth > entries[i].depth {
+	return prevSiblingAt(entries, i, entries[i].depth)
+}
+
+// prevSiblingAt is [prevSibling] asked of a POSITION and a depth rather than of an entry already in
+// the list — what place asks on behalf of an entry it has not committed yet: the head of the block
+// standing at depth that ends where at begins, or −1 when nothing at that depth precedes it.
+func prevSiblingAt(entries []entry, at, depth int) int {
+	j := at - 1
+	for j >= 0 && entries[j].depth > depth {
 		j--
 	}
-	if j < 0 || entries[j].depth != entries[i].depth {
+	if j < 0 || entries[j].depth != depth {
 		return -1
 	}
 	return j

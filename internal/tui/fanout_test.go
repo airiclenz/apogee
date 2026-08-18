@@ -374,3 +374,34 @@ func TestAbandonedChildStreamCommitsWhenItsRunEnds(t *testing.T) {
 		t.Errorf("the residue committed under run %q, want s1", span[0].spawnCallID)
 	}
 }
+
+// A host note landing between two announcements of one fan-out does not split the group. The
+// delegations are grouped by ADJACENCY of blocks (subAgentGroup), so a note parked between them
+// would be a permanent divider: two "✦ Sub-Agent (1)" headers where the reader was promised one.
+// The sibling announced after the note therefore lands in FRONT of it and the note slides to the
+// tail, where it stands after the whole group.
+func TestNoteBetweenSiblingDelegationsKeepsOneGroup(t *testing.T) {
+	t.Parallel()
+
+	tr := &transcript{}
+	subAgentCall(tr, "s1", "survey the tests", 0)
+	openChildCall(tr, "s1", "a1", "alpha.go")
+	tr.addNote("cancelled")
+	subAgentCall(tr, "s2", "survey the docs", 0)
+	openChildCall(tr, "s2", "b1", "beta.md")
+
+	group := subAgentGroup(tr.entries, headIndex(t, tr, "s1"))
+	if len(group) != 2 {
+		t.Fatalf("the fan-out reads as %d grouped delegations, want 2 — the note split it:\n%s",
+			len(group), plainRender(tr))
+	}
+	if group[1].at != headIndex(t, tr, "s2") {
+		t.Errorf("the second member is entry %d, want s2's head at %d",
+			group[1].at, headIndex(t, tr, "s2"))
+	}
+	last := tr.entries[len(tr.entries)-1]
+	if last.kind != entryNote {
+		t.Errorf("the last entry is %v, want the note after the whole group:\n%s",
+			last.kind, plainRender(tr))
+	}
+}

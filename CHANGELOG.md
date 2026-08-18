@@ -60,6 +60,20 @@ point is a **minor** bump, not a breaking change.
   painter actually drew rather than a counted-up offset, so a stale scroll — a ring that gained a
   record, a grant that shrank — corrects itself on the first turn of the wheel instead of drifting.
 
+- **A host note landing while a sub-agent is working no longer cuts that run in two.** A note —
+  `· cancelled`, a resume notice, an approval record — and a Schedule's Firing block are worded the
+  moment they happen and appended at the end of the transcript, which is routinely the middle of a
+  delegation's run. Everything the run still had to say then landed BEHIND the note: the sibling
+  delegation announced next was no longer adjacent to its own fan-out, so one group of delegates
+  rendered as two, and a delegated entry whose event carries no call id fell outside its head's span
+  and so outside a collapsed run's elision, railed to nothing. `transcript.place` now steps a
+  tail-bound entry over the notes parked at the end when that entry continues the run or fan-out
+  group they interrupted, so the notes slide to the tail until the run and its group close. The note
+  itself is unchanged — same depth-0 unrailed block, same text, same chronology inside it: only its
+  position in the list moves, and only past the open stretch. A note answers the human, so it stands
+  after the work it interrupted and is never railed into a delegate's run (contrast a presented
+  document, which carries the delegate's identity and goes inside).
+
 ## [0.15.0] — 2026-08-16
 
 ### Added

@@ -14,6 +14,7 @@ import (
 	lipgloss "charm.land/lipgloss/v2"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/schedule"
 	"github.com/airiclenz/apogee/internal/scheme"
 	"github.com/airiclenz/apogee/internal/skills"
 )
@@ -1040,6 +1041,98 @@ func TestPresentedEntryLandsInsideItsOwnRun(t *testing.T) {
 	if sibling := headIndex(t, tr, "s2"); subAgentSpan(tr.entries, sibling) != 1 {
 		t.Errorf("run s2 spans %d entries, want its own 1 — the presentation belongs to s1:\n%s",
 			subAgentSpan(tr.entries, sibling), plainRender(tr))
+	}
+}
+
+// A host note landing while a delegation is still drawing stays OUTSIDE that run. The note answers
+// the HUMAN — it carries no delegate identity and is never railed into one (contrast a presented
+// document, TestPresentedEntryLandsInsideItsOwnRun) — so what the child commits afterwards slides in
+// FRONT of it: the head's span still covers the whole run, and the note stands after the work it
+// interrupted rather than cutting it in two.
+func TestHostNoteLandingMidRunStaysOutsideTheRun(t *testing.T) {
+	t.Parallel()
+
+	// A delegated entry that carries its run's id is placed by runEnd, which already stops at the
+	// note; this pins that it keeps doing so.
+	t.Run("a delegated entry carrying its run's id", func(t *testing.T) {
+		t.Parallel()
+
+		tr := &transcript{}
+		subAgentCall(tr, "s1", "survey the tests", 0)
+		childCall(tr, "s1", "a1", "alpha.go")
+		tr.addNote("cancelled")
+		childCall(tr, "s1", "a2", "beta.go")
+
+		assertRunSpansPastTheNote(t, tr, 2)
+	})
+
+	// A delegated entry carrying NO call id — a serial session's child, a replayed record — has no
+	// run to be placed into, so before the trailing-note rule it landed behind the note: outside the
+	// span, and so outside a collapsed run's elision.
+	t.Run("a delegated entry carrying no call id", func(t *testing.T) {
+		t.Parallel()
+
+		tr := &transcript{}
+		subAgentCall(tr, "s1", "survey the tests", 0)
+		childCall(tr, "s1", "a1", "alpha.go")
+		tr.addNote("cancelled")
+		tr.apply(domain.MessageEvent{EventBase: domain.EventBase{Depth: 1}, Text: "child answer"})
+
+		assertRunSpansPastTheNote(t, tr, 2)
+	})
+
+	// An ephemeral note is addNote in every respect the renderer can observe, placement included.
+	t.Run("an ephemeral note", func(t *testing.T) {
+		t.Parallel()
+
+		tr := &transcript{}
+		subAgentCall(tr, "s1", "survey the tests", 0)
+		childCall(tr, "s1", "a1", "alpha.go")
+		tr.addEphemeralNote("resumed: yesterday's session")
+		childCall(tr, "s1", "a2", "beta.go")
+
+		assertRunSpansPastTheNote(t, tr, 2)
+	})
+
+	// A Firing block is the same defect class: a depth-0 host block appended at the tail.
+	t.Run("a firing block", func(t *testing.T) {
+		t.Parallel()
+
+		tr := &transcript{}
+		subAgentCall(tr, "s1", "survey the tests", 0)
+		childCall(tr, "s1", "a1", "alpha.go")
+		tr.addFiring(schedule.Event{
+			Kind: schedule.EventFired, ScheduleID: "sch-1", ScheduleName: "nightly tidy",
+			Prompt: "check the log",
+		})
+		childCall(tr, "s1", "a2", "beta.go")
+
+		head := headIndex(t, tr, "s1")
+		if span := subAgentSpan(tr.entries, head); span != 2 {
+			t.Fatalf("run s1 spans %d entries, want 2 — the firing block cut the run short:\n%s",
+				span, plainRender(tr))
+		}
+		if last := tr.entries[len(tr.entries)-1]; last.kind != entrySchedule {
+			t.Errorf("the last entry is %v, want the firing block after the run:\n%s",
+				last.kind, plainRender(tr))
+		}
+	})
+}
+
+// assertRunSpansPastTheNote checks the one invariant every host-note case shares: run s1's head
+// spans want entries, and the note it interrupted stands after them, at depth 0 and last.
+func assertRunSpansPastTheNote(t *testing.T, tr *transcript, want int) {
+	t.Helper()
+
+	head := headIndex(t, tr, "s1")
+	if span := subAgentSpan(tr.entries, head); span != want {
+		t.Fatalf("run s1 spans %d entries, want %d — the note cut the run short:\n%s",
+			span, want, plainRender(tr))
+	}
+	last := tr.entries[len(tr.entries)-1]
+	if last.kind != entryNote || last.depth != 0 {
+		t.Errorf("the last entry is kind %v at depth %d, want the note after the run at depth 0:\n%s",
+			last.kind, last.depth, plainRender(tr))
 	}
 }
 
