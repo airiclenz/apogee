@@ -245,7 +245,13 @@ reverts nothing.
 
 ---
 
-## 5. The `/undo` command in the TUI
+## 5. The `/undo` command in the TUI — ✅ DONE (2026-08-19)
+
+NOTES (2026-08-19): `internal/tui/model.go` is not on the item's Files list but carries the Model, and the item's "stash the preview's generation on the model" needs a field there — `undoGeneration uint64`, a plain value by ADR 0011. It is dropped back to zero on a spent or empty preview, which needs no special case: a journal holding anything to undo has moved past generation zero, so a cold `/undo confirm` meets the stale guard and earns a fresh preview rather than a revert.
+NOTES (2026-08-19): `internal/tui/command_test.go` is not on the item's Files list either, but `TestCommandTableDrivesParserAndMenu` pins the registry's verb set by name — adding a verb is exactly the change it exists to catch, so its `wantParsed` list gained `undo` in alphabetical place. No other assertion in the package needed touching.
+NOTES (2026-08-19): the parse result is a bare `undoAction` on `parsedInput` rather than a one-field `undoArgs` struct — /confine, /color-scheme and /effort each carry a struct because each has a second field (save, name, level), and /undo has none; a struct wrapping one enum would be speculative.
+NOTES (2026-08-19): `/undo confirm` distinguishes three refusals from the engine, not the two the item names — `undo.ErrStaleGeneration` re-previews, `undo.ErrNothingToUndo` prints the nothing-to-undo note (the empty-journal path a confirm can reach without a preview), and any other error is reported verbatim rather than swallowed.
+NOTES (2026-08-19): the note lines are kept under ~70 characters on purpose, so the transcript renders them unwrapped at the default frame width and the resolved paths — the disclosure the human authorises the revert from — stay readable on one line each.
 
 Depends on item 4.
 

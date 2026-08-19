@@ -113,6 +113,14 @@ type Model struct {
 	// every switching or actuating verb are refused, and a failed beat counts toward nothing.
 	actuation actuation
 
+	// undoGeneration is the journal stamp the last `/undo` preview quoted (undo.go, ADR 0051): the
+	// proof a following `/undo confirm` hands back so the engine can refuse a step the human never
+	// read. The zero value is "no preview stands" — and it needs no special case, because a journal
+	// that holds anything to undo has moved past zero, so a cold confirm meets the stale guard and
+	// earns a fresh preview rather than a revert. A plain uint64, so it rides the value-copied
+	// Model (ADR 0011).
+	undoGeneration uint64
+
 	// picker is the shared single-select overlay's state (picker.go): which offering it lists and
 	// which row is highlighted. Its rows are derived at render time from the state they describe —
 	// the /model picker reads hb.models live, the /server picker opts.Servers — so the value itself

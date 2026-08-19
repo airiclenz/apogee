@@ -45,6 +45,16 @@ point is a **minor** bump, not a breaking change.
 - **Engine surface for undo: `UndoPreview` / `UndoRevert` on the Agent (and on the TUI's `Engine`
   seam)**, with a stale-generation refusal that leaves the journal and the workspace untouched.
 
+- **The two-step `/undo` command.** Bare `/undo` PREVIEWS what putting the last exchange's file
+  writes back would do — the exchange ordinal and every recorded path at its resolved spelling,
+  classified restore / delete / skip-with-reason — and `/undo confirm` executes exactly that
+  preview, reporting the counts and naming every path it left alone. The generation stamped on the
+  preview travels back with the confirmation, so a journal that moved in between (another exchange
+  wrote files) refuses the revert and prints a fresh preview to confirm instead. It is idle-only,
+  because it writes to the workspace and the group it would revert is the one a running Step is
+  still filling; with nothing recorded it says so and states that the journal is per-process, so an
+  empty answer on a resumed session cannot be mistaken for a lost one.
+
 ### Fixed
 
 - **A click in the band the `/inspect` pane grows into now falls through instead of being swallowed.**

@@ -34,7 +34,8 @@ const (
 // lined as it was typed); confine carries the dedicated argument parse of a /confine line (zero value — a status
 // report — for every other verb); colorScheme carries the same for a /color-scheme line (zero value — a
 // listing — for every other verb); effort carries the same for an /effort line (zero value — a
-// resolution report — for every other verb); and err is set when a
+// resolution report — for every other verb); undo carries the same for an /undo line (zero value —
+// a preview — for every other verb); and err is set when a
 // recognised verb was given arguments it does not understand. An arguments error stays a
 // kindCommand: the router reports the usage line rather than sending the line to the agent or
 // silently doing nothing. For kindMessage, text is the line (trimmed, with @tokens and "/id"
@@ -52,6 +53,7 @@ type parsedInput struct {
 	confine     confineArgs
 	colorScheme colorSchemeArgs
 	effort      effortArgs
+	undo        undoAction
 	err         error
 	text        string
 	fileRefs    []string
@@ -151,6 +153,12 @@ type commandSpec struct {
 // the Schedule pair is: the override reaches the model on the NEXT request, so setting it mid-run
 // changes nothing about the Turn already in flight and is precisely when a human wants it.
 //
+// /undo is the two-step revert of the agent's own file writes (undo.go, ADR 0051): bare it PREVIEWS
+// what putting the last exchange's writes back would do, `confirm` executes exactly that preview.
+// Argument-taking like /confine, whose grammar and usage line it follows, and idle-only for the one
+// reason none of the reporting verbs are: it mutates the workspace, and the group it would revert
+// is the one a running Step is still writing into.
+//
 // /settings opens the configuration pane (settings.go): every config key with the value this run
 // resolved for it, over the binary's declarative key registry (ADR 0035). Idle-only and modal like
 // /sessions, and noRecall like the reset pair — it opens a surface rather than saying anything to the
@@ -194,6 +202,7 @@ var commandSpecs = []commandSpec{
 	{name: "settings", summary: "view the configuration this session resolved", noRecall: true},
 	{name: "skills", summary: "list the available skills", whileRunning: true},
 	{name: "stop-server", summary: "stop the server this session is on"},
+	{name: "undo", summary: "put back the files the last exchange wrote (bare = preview)", takesArgs: true},
 	{name: "unload-model", summary: "free the model of the server this session is on"},
 	{name: "usage", summary: "session token usage — main agent and every sub-agent", whileRunning: true, noRecall: true},
 	{name: "version", summary: "show the apogee version", whileRunning: true},
@@ -224,6 +233,8 @@ func parseInput(raw string, known func(string) bool) parsedInput {
 			parsed.colorScheme, parsed.err = parseColorScheme(args)
 		case "effort":
 			parsed.effort, parsed.err = parseEffort(args)
+		case "undo":
+			parsed.undo, parsed.err = parseUndo(args)
 		}
 		return parsed
 	}
@@ -544,6 +555,51 @@ func parseEffort(args []string) (effortArgs, error) {
 		return effortArgs{}, fmt.Errorf("unknown thinking effort %q. %s", args[0], effortUsage)
 	}
 	return effortArgs{action: effortSet, level: level}, nil
+}
+
+// ----------------------------------------------------------------------------
+// /undo — the revert command's argument grammar
+// ----------------------------------------------------------------------------
+
+// undoAction is the subcommand of a parsed /undo line. The zero value is undoPreviewOnly, so a bare
+// "/undo" describes what it WOULD put back and changes nothing — the /confine, /color-scheme and
+// /effort posture, sharpened by what this verb does: the only line that touches the human's files
+// is the one they spelled out (ADR 0051, ratified call 4).
+type undoAction int
+
+const (
+	undoPreviewOnly undoAction = iota // describe the top exchange group; touch nothing
+	undoConfirm                       // revert exactly the step the preview described
+)
+
+// String names the action as the user typed it, so a message that reports one — a test failure
+// included — names the form the human would have written rather than an ordinal.
+func (a undoAction) String() string {
+	if a == undoConfirm {
+		return "confirm"
+	}
+	return "preview"
+}
+
+// undoUsage is the one-line grammar every /undo argument error carries, so a mistyped confirmation
+// teaches the syntax instead of being read as one.
+const undoUsage = "usage: /undo | /undo confirm"
+
+// parseUndo parses the argument tokens that followed an "/undo" verb. No arguments means the
+// preview. "confirm" is the ONLY word that executes, and it must stand alone: anything else is an
+// error carrying undoUsage rather than a guess, because the two mistakes this grammar can make are
+// reverting files nobody asked to revert and silently not reverting files somebody did.
+func parseUndo(args []string) (undoAction, error) {
+	switch {
+	case len(args) == 0:
+		return undoPreviewOnly, nil
+	case len(args) > 1:
+		return undoPreviewOnly, fmt.Errorf("/undo takes at most one argument. %s", undoUsage)
+	case args[0] == "confirm":
+		return undoConfirm, nil
+	default:
+		return undoPreviewOnly, fmt.Errorf("unknown /undo argument %q. %s", args[0], undoUsage)
+	}
 }
 
 // refSpan is one resolving token of the mini-language, LOCATED in the text: the byte range

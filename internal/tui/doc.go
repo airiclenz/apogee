@@ -158,6 +158,19 @@
 // key is the durable door, and the verb is safe mid-Exchange because the value is read when the next
 // request is built.
 //
+// undo.go is the routing half of `/undo`, the human end of the engine's per-exchange pre-image
+// journal (ADR 0051): [Model.runUndo] reads the top un-undone group off [Engine.UndoPreview] and
+// records the note that DISCLOSES it — every recorded path at its resolved spelling, classified
+// restore / delete / skip-with-reason — then `/undo confirm` hands [Engine.UndoRevert] the
+// generation that preview carried, so a journal which moved in between refuses and earns a fresh
+// preview instead of reverting a step nobody read ([Model.undoGeneration] is where that stamp
+// waits). It is the one command verb that writes to the human's files, which is what makes it
+// idle-only where /confine's report is not: the group it would revert is the one a running Step is
+// still filling. The notes are built by the pure [undoPreviewNote], [undoReportNote] and
+// [undoNothingNote] — the last of which states the journal's LIFETIME as well as its emptiness,
+// because it is memory and not storage, so a resumed session can never reach an earlier process's
+// writes.
+//
 // The skill flow (post-v1 apogee-code feature-parity) is the mini-language's second half, and it
 // is TEXT rather than state beside it: a skill is invoked by naming its id as a "/token" at a word
 // boundary in the message — "/code-audit please check the parser" — exactly as an @path names a
