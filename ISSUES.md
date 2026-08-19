@@ -651,102 +651,22 @@ repo does yet — settle that first.
 
 ### Tool-surface findings (4-poll round, 2026-08-10)
 
-**Status:** recorded 2026-08-10 at the close of the tool-surface plan (`2026-08-10 - 00`, under
-`docs/plans/`, archived on completion). Four polls of the target class — Qwen3.6-35B-A3B ×2,
-Gemma-4-26B-A4B, Gemma-4-E4B — were asked what they wanted from apogee's tool surface. The plan
-shipped the uncontested improvements and the promoted new tools (`find_files`, `git_status`,
-`git_log`, `copy_file`/`move_file`/`delete_file`, `run_tests`) plus the global `tools.disabled`
-switch; everything the round raised that did **not** ship is recorded here, so a deferral or a
-denial never becomes a silent drop. **None of it is a live gap.**
+**Status:** recorded 2026-08-10 at the close of the tool-surface plan; extended 2026-08-16 by a
+second poll round. The full record — both rounds, the denials with reasons, the deferred
+candidates, the engine-level notes and the method lessons — is in
+`docs/design/tool-surface-findings.md`; this entry is the deferral trail's pointer, not the record.
+**Nothing leaves the roster on poll evidence alone**: each arm below is a bench experiment, not a
+decision.
 
-**Bench experiments required before any tool removal.** Models are unreliable narrators about their
-own tooling: the E4B poll preferred patch-only editing — the format small models are measurably
-worst at — and a repeat Qwen poll returned a substantially different list, so only REPLICATED
-findings count. Nothing leaves the roster on poll evidence alone; each arm below is a bench
-experiment, not a decision:
-
-- **(a)** remove `single_find_and_replace` — flagged in all four polls.
-- **(b)** patch-only vs find-replace editing — Qwen vs both Gemmas, a falsifiable disagreement.
-  *Update 2026-08-16:* deepseek-v4-flash voted retire `edit_existing_file` and keep the
-  find-replace family — a second replication for the find-replace side, and the first from above
-  the small-model band.
-- **(c)** `open_file`/`read_file` merge — **open watch-item, not an experiment arm.** This arm was
-  decided by owner call on 2026-08-11 and shipped without the bench experiment the standing rule
-  otherwise requires (an owner-ratified exception for this arm alone; the rule still binds (a),
-  (b), (d), (e) and (f) — see `CHANGELOG.md` and
-  `docs/plans/archived/2026-08-11 - 03 - open-file-read-file-merge-plan.md` for what landed). What
-  stays open is what the skipped experiment would have measured: whether sub-35B models find
-  `read_file`'s `locate` *parameter* as readily as they found the `open_file` *name*. Method
-  lesson 2 below says they may not; `read_file`'s description advertises locate by name to hedge
-  it, and a sighting of models no longer locating reopens this arm rather than re-filing it as a
-  gap.
-- **(d)** measure whether sub-35B models use `view_diff` at all.
-  *Update 2026-08-16:* second independent flag (deepseek-v4-flash), which paired it with a
-  `write_file` dry-run — see the second-round block below; decide the two together.
-- **(e)** `web_fetch` → `http_request` merge — the real question is whether sub-35B models
-  distinguish GET from POST; if they don't, the separate named GET tool earns its slot. Both are
-  ExternalEffect-classified, so gating doesn't decide it.
-- **(f)** do sub-35B models ever discover `edit_existing_file`'s patch mode unprompted? — a
-  discovery experiment feeding the explicit-patch-param idea.
-
-**Needs a grill session:** per-profile tool rosters (builds on the `tools.disabled` key this plan
-shipped); a unified `git` tool with subcommands vs the growing `git_*` family.
-
-**Deferred candidates:** env-var parameters on `terminal`/`python_exec` (stable across both Qwen
-sessions); `directory_create`/`directory_delete`; `git_stash`; `git_tag`; `file_metadata`; batch
-rename/replace operations (×2 — Qwen 2026-08-10 sessions; Qwen3.8-27B 2026-08-16 asked for a
-bounded `replace_all` with a replacement cap and shown context); `workspace_summary`.
-
-**Engine-level notes (not tools):** context-window introspection for the model (Mechanism
-territory); streaming/progress for long-running tools; structured JSON tool outputs.
-
-**Denied, with reasons** (do not re-file as gaps):
-
-- `database_query` — [ADR 0031](docs/adr/0031-the-local-platform-north-star-binds-every-future-layer-to-the-embeddable-engine.md):
-  no first-party connectors, that is MCP's job.
-- standalone `apply_patch` — it already exists inside `edit_existing_file`; models missing it is a
-  *discovery* problem, tracked as the explicit-patch-param idea in (f) above.
-- concurrent `terminal` — parallelism lands at the sub-agent layer
-  ([ADR 0039](docs/adr/0039-delegations-fan-out-concurrently-bounded-by-the-servers-parallel-agents-cap.md)).
-- `inspect_environment` — `terminal` covers it.
-
-**Method lessons** (they generalise past this round):
-
-1. Models reliably converge on **problems** but not on **solutions** — removals need measurement.
-2. Models discover capabilities by tool **name**, not by parameters — three sightings in one round:
-   `list_dir`'s `recursive` missed twice, `edit_existing_file`'s patch mode missed once. Naming and
-   descriptions are the discovery surface.
-
-**Second round (2026-08-16, 3 polls — deepseek-v4-flash, Qwen3.8-27B, Qwen3.6-35B-A3B).** Larger
-models than the first round. Owner framing, ratified this day, and applied to the identity
-statements in `README.md`/`AGENTS.md`/`CONTEXT.md`: **apogee is built for smaller local models —
-while working even better with bigger ones.** The ~4B–35B range is dropped from identity docs
-(kept in ADRs and past rationales as historical context, and in the bench arms above as a concrete
-measurement class); the hard-learned lesson it encoded stays: usefully agentic behaviour starts
-roughly where that upper limit sat, so the Mechanisms are help smaller models *need* and bigger
-models simply don't switch on. Consequences: the default roster stays tuned for the models that
-need the help; feedback from larger models informs the profile/`tools.disabled` tier, not the
-default; the per-profile-rosters grill above is promoted — it is the mechanism serving both
-classes, and it lets a new tool ship default-off/profile-enabled instead of costing every small
-model a tool-list slot.
-
-- **New candidate, replicated within the round (both Qwens): `watch_files` / file-event wait** —
-  "block until path X changes or N seconds elapse"; models currently poll with repeated reads.
-  Deferred; design belongs with the engine's event model, not a quick tool add.
-- **New candidate: `write_file` dry-run/preview** (deepseek) — diff a proposed full-file write
-  before writing; preview exists today only for replace-style edits via `view_diff`. Pairs with
-  arm (d): a write-preview is what would let `view_diff` fold away — decide them together.
-- **Needs a grill session (add): persistent terminal / PTY session** (Qwen3.8's single top pick) —
-  attach to a running dev server, drive REPLs/interactive programs via a start/send/poll session
-  pair. NOT covered by the first round's `concurrent terminal` denial (that was parallelism,
-  [ADR 0039](docs/adr/0039-delegations-fan-out-concurrently-bounded-by-the-servers-parallel-agents-cap.md));
-  this is interactivity, with heavy confinement and lifecycle implications.
-- **Feeds the existing unified-git grill:** `git_add`/staging visibility and `git_blame`
-  (Qwen3.8); `git_pull`/`git_push` (Qwen3.6-35B — remote writes, a gating question before a
-  design question).
-- **Re-filed and re-denied** (unchanged): env/system-info tool (Qwen3.6-35B) — `terminal` covers
-  it. Task/todo persistence (Qwen3.8) — Mechanism territory (guided decomposition), not a tool.
-- Method lesson 1 re-confirmed: same roster, one model removes two tools, another removes none.
+- **(a)** remove `single_find_and_replace`.
+- **(b)** patch-only vs find-replace editing.
+- **(c)** `open_file`/`read_file` merge — shipped 2026-08-11 by owner call; the open watch-item is
+  whether models find `read_file`'s `locate` *parameter* as readily as they found the old *name*.
+- **(d)** do sub-35B models use `view_diff` at all? — decide with the `write_file` dry-run.
+- **(e)** `web_fetch` → `http_request` merge.
+- **(f)** is `edit_existing_file`'s patch mode ever discovered unprompted?
+- **Needs a grill session:** per-profile tool rosters (promoted 2026-08-16); a unified `git` tool
+  vs the growing `git_*` family; a persistent terminal / PTY session.
 
 ---
 

@@ -179,6 +179,14 @@ point is a **minor** bump, not a breaking change.
   (new "Addendum" section), leaving a five-line pointer in the *Deferred security-review Lows*
   entry and correcting the stale triage-doc path (missing `archived/` segment).
 
+- Docs: moved the tool-surface poll record — the 2026-08-10 four-poll round and its 2026-08-16
+  second round, with the bench arms, deferred candidates, engine-level notes, denials and method
+  lessons — out of `ISSUES.md` into the new `docs/design/tool-surface-findings.md` (verbatim, ADR
+  links repointed for the new location). The `ISSUES.md` entry is now a pointer in the
+  mechanism-catalogue shape, carrying only the live gates: the six bench arms, arm (c)'s
+  watch-item, the three grill topics, and the standing rule that nothing leaves the roster on poll
+  evidence alone.
+
 ## [0.15.0] — 2026-08-16
 
 ### Added

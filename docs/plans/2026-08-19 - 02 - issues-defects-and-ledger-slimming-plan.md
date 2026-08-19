@@ -167,7 +167,11 @@ residuals; full reasoning in the triage doc — cited with the CORRECT path
 
 ---
 
-## 4. Relocate the tool-surface findings record to a design doc, leave the pointer
+## 4. Relocate the tool-surface findings record to a design doc, leave the pointer — ✅ DONE (2026-08-19)
+
+NOTES (2026-08-19): the pointer entry is 17 lines against the item's "~15" target — the six arms, arm (c)'s watch-item and the three grill topics do not compress further at the file's ~100-column wrap without dropping a named live gate.
+
+NOTES (2026-08-19): only the three markdown ADR links were repointed (`docs/adr/…` → `../adr/…`), per the item's wording; the body's code-span repo-relative paths (`CHANGELOG.md`, `docs/plans/archived/…`) were left verbatim — repo-relative code-span paths are already the house convention inside `docs/design/` (see `mechanism-catalogue.md`).
 
 **What:** Create `docs/design/tool-surface-findings.md` (author call 4) carrying the *Tool-surface
 findings (4-poll round, 2026-08-10)* entry's full body verbatim (author call 3): both poll
