@@ -51,6 +51,23 @@ func editRegions(oldText, newText string) domain.EditRegions {
 	return domain.EditRegions{Regions: cutRegions(diffLines(oldLines, newLines))}
 }
 
+// okEditRegions returns an edit tool's success result: the prose sentence the model reads, with
+// the Edit regions of the change just applied attached beside it as the structured half a host
+// paints the Split diff from (ADR 0052). All three edit tools return through here, so the one
+// question they share — does a summary ride along at all? — is answered in one place.
+//
+// A pair editRegions declines to cut, because the two texts are identical or because the pair is
+// over the diff budget, attaches NO summary rather than an empty one. Absent is the signal the
+// renderer reads to keep the argument-derived list (ratified call 9); a present EditRegions
+// holding no region would instead claim the edit changed nothing.
+func okEditRegions(callID, content, oldText, newText string) domain.ToolResult {
+	regions := editRegions(oldText, newText)
+	if len(regions.Regions) == 0 {
+		return okResult(callID, content)
+	}
+	return okSummary(callID, content, regions)
+}
+
 // cutRegions walks a line diff's operations in order and cuts them into regions, in file order.
 // It returns nil when the operations carry no change at all.
 func cutRegions(ops []diffOp) []domain.EditRegion {

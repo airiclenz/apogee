@@ -92,9 +92,12 @@ func (DiffStat) isToolSummary() {}
 // in hand — a view that recovered the same facts later would have to re-read the file and
 // would race the next edit (ADR 0052).
 //
-// Neighbouring changes whose context ranges would touch are recorded MERGED into one
-// region, so Leading and Trailing never overlap between regions and a consumer can paint
-// them end to end without de-duplicating lines.
+// Neighbouring changes stay SEPARATE regions whose context TILES the lines between them:
+// the earlier region takes up to three of them as its Trailing, the later takes whatever is
+// left as its Leading. Leading and Trailing therefore never overlap between regions — no
+// line is context for two regions at once — and a gap of at most six lines comes out
+// adjacent in line numbering, which a consumer paints end to end without an elision between
+// them and without de-duplicating lines.
 type EditRegion struct {
 	// BeforeStart is the 1-based line the region starts on in the BEFORE file, leading
 	// context included; AfterStart is the same line in the AFTER file. With no leading

@@ -149,7 +149,23 @@ over-budget pair → no regions.
 
 Depends on item 1.
 
-## 3. Tools: find-and-replace records regions
+## 3. Tools: find-and-replace records regions — ✅ DONE (2026-08-19)
+
+NOTES (2026-08-19): the item's Files list names only `find_replace.go` and its test, but the
+"attach the summary only when regions were cut" rule belongs to all three edit tools, so it landed
+as one shared helper `okEditRegions` in `internal/tools/regions.go` (beside the builder it guards)
+instead of being spelled out at each `okSummary` call site — the plan's standing modularity
+requirement, and item 4 returns through the same helper. The item's literal "okResult becomes
+okSummary" is satisfied through it: a success with regions attaches them, a success without them
+still returns `okResult`.
+NOTES (2026-08-19): `internal/tools/doc.go` had to be edited too — its "Exactly SIX built-ins
+attach one" sentence and its list of tools that deliberately attach nothing both became false the
+moment these two tools attached `EditRegions` (item 2's NOTES already recorded that this item owns
+that update). The count is now EIGHT, the find-replace pair moved into the attaching list, and
+`regions.go`'s spine line gained `okEditRegions`. No other file touched.
+NOTES (2026-08-19): `domain.EditRegion`'s own doc comment still described neighbouring changes as
+recorded MERGED into one region; it was reworded to the tiling rule item 2's NOTES ratified, as
+part of this item's commit.
 
 **What:** In `internal/tools/find_replace.go`, both tools hold the file's old and new
 content at apply time; call `editRegions(old, new)` and return the summary —

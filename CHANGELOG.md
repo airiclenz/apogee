@@ -10,6 +10,17 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **The two find-and-replace tools record their Edit regions at apply time.**
+  `single_find_and_replace` and `multi_find_and_replace` now attach the `domain.EditRegions`
+  summary of what they actually wrote — the changed regions with their line numbers and up to
+  three unchanged context lines each side, cut by the shared `editRegions` builder from the file
+  as it was against the file as written. `multi_find_and_replace` summarises the WHOLE applied
+  edit rather than one summary per replacement, so two replacements landing a few lines apart
+  read as the one change they are on the card. The prose sentence each tool returns to the model
+  is byte-for-byte unchanged, a failed call still carries no summary, and a pair with no regions
+  to cut — identical texts, or one over the diff budget — attaches none either, which is the
+  signal a host reads to keep its argument-derived list (ADR 0052). No view consumes it yet.
+
 - **`editRegions`, the one Edit-region builder the three edit tools share.** `internal/tools` can
   now cut a before/after pair into the Edit regions `domain.EditRegions` carries, derived from the
   line diff's OPERATIONS rather than from rendered diff text — one builder for all three edit

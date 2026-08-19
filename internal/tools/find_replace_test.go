@@ -2,8 +2,10 @@ package tools
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -368,5 +370,158 @@ func TestFindReplace_CarryTheMarker(t *testing.T) {
 		if IsWorkspaceScopedWriter(r) {
 			t.Errorf("%s wrongly carries the writer marker (it is read-only)", r.Name())
 		}
+	}
+}
+
+// editRegionsOf returns the domain.EditRegions a successful result attached, failing the test
+// when the result carries no summary or carries some other variant.
+func editRegionsOf(t *testing.T, result domain.ToolResult) domain.EditRegions {
+	t.Helper()
+	if result.Summary == nil {
+		t.Fatalf("result carries no ToolSummary (content: %q)", result.Content)
+	}
+	regions, ok := result.Summary.(domain.EditRegions)
+	if !ok {
+		t.Fatalf("summary is %T, want domain.EditRegions", result.Summary)
+	}
+	return regions
+}
+
+// A successful single_find_and_replace attaches the Edit regions of what it actually wrote, with
+// the line numbers and context a Split diff is painted from — and leaves its prose sentence, the
+// half the MODEL reads, byte-for-byte as it was before regions existed.
+func TestSingleFindReplace_RecordsEditRegions(t *testing.T) {
+	t.Parallel()
+
+	root := tempRoot(t)
+	writeTempFile(t, root, "test.txt", "l1\nl2\nl3\nl4\nl5\nl6\nl7\nl8\nl9\n")
+
+	result, err := NewSingleFindReplace(root).Execute(context.Background(),
+		callWith(t, "c1", map[string]any{"path": "test.txt", "oldText": "l5", "newText": "L5"}))
+	if err != nil {
+		t.Fatalf("Execute returned a Go error: %v", err)
+	}
+	if result.Content != "replaced text in test.txt" {
+		t.Errorf("content = %q, want the unchanged prose sentence", result.Content)
+	}
+
+	want := []domain.EditRegion{{
+		BeforeStart: 2,
+		AfterStart:  2,
+		Leading:     []string{"l2", "l3", "l4"},
+		Removed:     []string{"l5"},
+		Inserted:    []string{"L5"},
+		Trailing:    []string{"l6", "l7", "l8"},
+	}}
+	if got := editRegionsOf(t, result).Regions; !reflect.DeepEqual(got, want) {
+		t.Errorf("regions = %+v, want %+v", got, want)
+	}
+}
+
+// multi_find_and_replace summarises the file's whole change, not one summary per replacement: two
+// replacements far enough apart to stay separate come back as two regions, each numbered where it
+// landed, and their stat is the edit's own added/removed pair.
+func TestMultiFindReplace_RecordsEditRegions(t *testing.T) {
+	t.Parallel()
+
+	root := tempRoot(t)
+	var lines []string
+	for i := 1; i <= 20; i++ {
+		lines = append(lines, fmt.Sprintf("l%02d", i))
+	}
+	writeTempFile(t, root, "test.txt", strings.Join(lines, "\n")+"\n")
+
+	result, err := NewMultiFindReplace(root).Execute(context.Background(),
+		callWith(t, "c1", map[string]any{
+			"path": "test.txt",
+			"replacements": []map[string]any{
+				{"oldText": "l03", "newText": "L03"},
+				{"oldText": "l15", "newText": "L15"},
+			},
+		}))
+	if err != nil {
+		t.Fatalf("Execute returned a Go error: %v", err)
+	}
+	if result.Content != "applied 2 replacements to test.txt" {
+		t.Errorf("content = %q, want the unchanged prose sentence", result.Content)
+	}
+
+	want := []domain.EditRegion{
+		{
+			BeforeStart: 1,
+			AfterStart:  1,
+			Leading:     []string{"l01", "l02"},
+			Removed:     []string{"l03"},
+			Inserted:    []string{"L03"},
+			Trailing:    []string{"l04", "l05", "l06"},
+		},
+		{
+			BeforeStart: 12,
+			AfterStart:  12,
+			Leading:     []string{"l12", "l13", "l14"},
+			Removed:     []string{"l15"},
+			Inserted:    []string{"L15"},
+			Trailing:    []string{"l16", "l17", "l18"},
+		},
+	}
+	regions := editRegionsOf(t, result)
+	if !reflect.DeepEqual(regions.Regions, want) {
+		t.Errorf("regions = %+v, want %+v", regions.Regions, want)
+	}
+	if stat := regions.Stat(); stat.Added != 2 || stat.Removed != 2 {
+		t.Errorf("Stat() = %+v, want 2 added and 2 removed", stat)
+	}
+}
+
+// No summary rides along unless regions were actually cut. A refused replacement never wrote
+// anything, so there is nothing to paint; a replacement whose new text equals its old one wrote
+// the same bytes back, and an empty EditRegions would claim the edit changed nothing rather than
+// letting the card fall back to its argument-derived list.
+func TestFindReplace_NoRegionsNoSummary(t *testing.T) {
+	t.Parallel()
+
+	root := tempRoot(t)
+	writeTempFile(t, root, "test.txt", "l1\nl2\nl3\n")
+
+	cases := []struct {
+		name    string
+		tool    domain.Tool
+		args    map[string]any
+		wantErr bool
+	}{
+		{
+			name:    "single: old text not found",
+			tool:    NewSingleFindReplace(root),
+			args:    map[string]any{"path": "test.txt", "oldText": "absent", "newText": "x"},
+			wantErr: true,
+		},
+		{
+			name: "multi: a later replacement fails and nothing is written",
+			tool: NewMultiFindReplace(root),
+			args: map[string]any{"path": "test.txt", "replacements": []map[string]any{
+				{"oldText": "l2", "newText": "L2"},
+				{"oldText": "absent", "newText": "x"},
+			}},
+			wantErr: true,
+		},
+		{
+			name: "single: replacement text equal to what it replaces",
+			tool: NewSingleFindReplace(root),
+			args: map[string]any{"path": "test.txt", "oldText": "l2", "newText": "l2"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := tc.tool.Execute(context.Background(), callWith(t, "c1", tc.args))
+			if err != nil {
+				t.Fatalf("Execute returned a Go error: %v", err)
+			}
+			if result.IsError != tc.wantErr {
+				t.Fatalf("IsError = %v, want %v (content: %q)", result.IsError, tc.wantErr, result.Content)
+			}
+			if result.Summary != nil {
+				t.Errorf("result carries a %T summary, want none", result.Summary)
+			}
+		})
 	}
 }

@@ -73,6 +73,10 @@ func (t *SingleFindReplace) workspaceWriteTarget(call domain.ToolCall) (writeTar
 // Execute finds oldText in the file and replaces it with newText, honouring ctx
 // cancellation. A missing file, a path escape, oldText not found, oldText found more
 // than once, or oversized newText are reported as IsError results, not Go errors.
+//
+// A success carries the Edit regions of what landed as its domain.ToolSummary (okEditRegions,
+// regions.go) — the structured half a host paints the Split diff from (ADR 0052). The prose
+// sentence the model reads is unchanged by that, and a failure carries no summary at all.
 func (t *SingleFindReplace) Execute(ctx context.Context, call domain.ToolCall) (domain.ToolResult, error) {
 	if err := ctx.Err(); err != nil {
 		return domain.ToolResult{}, err
@@ -119,7 +123,7 @@ func (t *SingleFindReplace) Execute(ctx context.Context, call domain.ToolCall) (
 		return errorResult(call.ID, err.Error()), nil
 	}
 
-	return okResult(call.ID, "replaced text in "+args.Path+resolved), nil
+	return okEditRegions(call.ID, "replaced text in "+args.Path+resolved, string(content), updated), nil
 }
 
 // ----------------------------------------------------------------------------
@@ -192,6 +196,11 @@ func (t *MultiFindReplace) workspaceWriteTarget(call domain.ToolCall) (writeTarg
 // Execute applies the replacements sequentially against an in-memory copy of the file,
 // honouring ctx cancellation, and writes the result only if every replacement matched
 // exactly once. Any failure leaves the file untouched (atomic to the model's view).
+//
+// A success carries the Edit regions of the WHOLE applied edit as its domain.ToolSummary
+// (okEditRegions, regions.go), cut from the file as it was against the file as written — not
+// one summary per replacement, because what a host paints is the file's change, and two
+// replacements landing three lines apart are one region of it (ADR 0052).
 func (t *MultiFindReplace) Execute(ctx context.Context, call domain.ToolCall) (domain.ToolResult, error) {
 	if err := ctx.Err(); err != nil {
 		return domain.ToolResult{}, err
@@ -254,7 +263,8 @@ func (t *MultiFindReplace) Execute(ctx context.Context, call domain.ToolCall) (d
 	if n > 1 {
 		suffix = "s"
 	}
-	return okResult(call.ID, fmt.Sprintf("applied %d replacement%s to %s%s", n, suffix, args.Path, resolved)), nil
+	message := fmt.Sprintf("applied %d replacement%s to %s%s", n, suffix, args.Path, resolved)
+	return okEditRegions(call.ID, message, string(raw), content), nil
 }
 
 var (
