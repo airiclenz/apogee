@@ -10,6 +10,23 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **Expanded diff bodies paint as two panes where the width allows.** The Split diff composer that
+  landed pure and unpainted is now wired into every expanded body path a diff-bodied block can
+  reach: the ungrouped call's body under its branch, the TARGETLESS block whose lines are its own
+  branches (a bare `git_diff_range`, which names neither base nor head and so has no target to lead
+  a row), and the open member of a grouped block — which carries the unspanned sub-agent group
+  member with it. One seam makes the choice for all three (`splitBody`): a body whose tool recorded
+  Edit regions paints as panes when `splitDiffFits` says each pane can still give the code 40
+  columns after its gutters, and as the numbered Stacked rows the same regions already built when
+  it cannot. The question is asked at PAINT time against the width that path holds — the block's
+  width less the indent, the member's room less its `│` gutter — and the answer is kept nowhere, so
+  a resize re-flows the wrap and can flip the reading with no state to keep in step. A block whose
+  result recorded no regions paints exactly as it did before, at every width, and the framing
+  around a split body is untouched: the targetless shape's summary still closes its branch list, an
+  open member still hangs its panes under its own gutter and still closes with `see less…`, and
+  collapsed blocks paint no body at all. The spanned sub-agent member loop is deliberately not
+  wired — it paints the `sub_agent` call's own report, and no Edit region can reach it.
+
 - **The Split diff composer: recorded Edit regions as two panes.** `internal/tui` can now arrange
   the Edit regions a tool recorded into the wide reading the layout spec draws
   (`docs/layout/split-diff-layout.md`): the before file down the left pane and the after file down
@@ -23,7 +40,7 @@ point is a **minor** bump, not a breaking change.
   from the regions themselves and reports whether each pane can still give the code
   `splitPaneMinCols` (40) columns, asked again at every paint so a resize can flip the reading. The
   module is pure composition — regions and a width in, styled rows out, wrapped through the one
-  width authority — and nothing paints it yet.
+  width authority — and every expanded paint path now reads through it.
 
 - **Edit blocks paint the change that LANDED, numbered.** A card whose tool recorded Edit regions
   (`domain.EditRegions`) now shows them as the numbered **Stacked diff** the layout spec draws

@@ -359,7 +359,19 @@ row alignment holds when the wrapping side alternates.
 
 Depends on item 1 (the domain type only — parallel-safe beside item 5: disjoint files).
 
-## 7. TUI: paint integration — split where it fits
+## 7. TUI: paint integration — split where it fits — ✅ DONE (2026-08-19)
+
+NOTES (2026-08-19): the targetless arm needed a call the item's text does not spell out — what happens
+to the branch list when its BODY becomes panes. `renderBranchList` keeps the item's "the branch-list
+framing around it stays": the panes hang at the branch marker's width in blanks (a ┝/┕ per PHYSICAL
+row would mark a wrapped continuation as a branch of its own) and the summary, which has no leader row
+to ride in this shape, still closes the list on its own ┕ line.
+NOTES (2026-08-19): the shared decision seam `splitBody` lives in toolbranch.go beside the other body
+painters rather than in splitdiff.go — that file's own contract is that it "paints no block" and that
+WHICH reading a body gets stays the painter's choice, so the chooser belongs on the painter's side.
+toolblock.go's `renderExpandedMember` calls it across the file boundary; both are package `tui`.
+NOTES (2026-08-19): item 6's CHANGELOG entry ended "and nothing paints it yet", which this item made
+stale; the verifier, as the single writer of that file, reworded the clause in this item's commit.
 
 **What:** Wire the composer into ALL THREE expanded body paint paths a diff-bodied
 block can reach, choosing per paint: regions present AND `splitDiffFits` →

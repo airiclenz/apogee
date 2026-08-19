@@ -709,3 +709,196 @@ func TestAnsweredAskUserBlocksNeverGroup(t *testing.T) {
 		}
 	})
 }
+
+// ----------------------------------------------------------------------------
+// The two readings of a diff body (plan item 7; ADR 0052)
+// ----------------------------------------------------------------------------
+
+// paintRegions is the change every paint-integration test below is fed: one replacement with
+// context each side, whose two halves are told apart by their TEXT alone. That is what lets an
+// assertion name the reading it is looking at without measuring a single column — the split
+// reading puts the removed line and its replacement on ONE row, and the stacked reading never
+// does, whatever the numbers, the gutter and the wrap are doing.
+func paintRegions() []domain.EditRegion {
+	return []domain.EditRegion{{
+		BeforeStart: 12, AfterStart: 12,
+		Leading:  []string{"func paint() {"},
+		Removed:  []string{"  return errNarrow"},
+		Inserted: []string{"  return errWide"},
+		Trailing: []string{"}"},
+	}}
+}
+
+// paintsSplit reports which reading a painted body is: true when some row carries BOTH halves of
+// the replacement, which only two panes can do.
+func paintsSplit(rows []string) bool {
+	for _, row := range rows {
+		if strings.Contains(row, "errNarrow") && strings.Contains(row, "errWide") {
+			return true
+		}
+	}
+	return false
+}
+
+// carriesBothHalves reports whether the body shows the whole change at all — the removed line and
+// its replacement, on one row or on two. Neither reading may lose a line: the width chooses the
+// arrangement and never the content.
+func carriesBothHalves(rows []string) bool {
+	var removed, inserted bool
+	for _, row := range rows {
+		removed = removed || strings.Contains(row, "errNarrow")
+		inserted = inserted || strings.Contains(row, "errWide")
+	}
+	return removed && inserted
+}
+
+// editWithRegions is an edit call whose result recorded regions, the block every paint path below
+// is asked to paint. The block is left COLLAPSED — each test opens it, since the reading is only
+// ever a question about an expanded body.
+func editWithRegions(regions []domain.EditRegion) *transcript {
+	tr := &transcript{}
+	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "single_find_and_replace",
+		Arguments: []byte(`{"path":"main.go","oldText":"  return errNarrow","newText":"  return errWide"}`)}})
+	tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c1",
+		Content: "replaced text in main.go", Summary: domain.EditRegions{Regions: regions}}})
+	return tr
+}
+
+// openBodyRows is what an EXPANDED single block painted BENEATH its branch row: its body, less the
+// see-less footer every open block closes with (seeLessFooter). The header and the branch row are
+// the two rows above it, whichever reading filled the body.
+func openBodyRows(t *testing.T, tr *transcript, width int) []string {
+	t.Helper()
+	rows := strings.Split(renderPlain(tr, width), "\n")
+	if len(rows) < 4 {
+		t.Fatalf("block painted %d rows at width %d, want a header, a branch, a body and a footer:\n%s",
+			len(rows), width, strings.Join(rows, "\n"))
+	}
+	if got, want := rows[len(rows)-1], seeLessFooterLine(t, width); got != want {
+		t.Fatalf("last row = %q, want the see-less footer %q", got, want)
+	}
+	return rows[2 : len(rows)-1]
+}
+
+// TestSplitDiffPaintsInAnExpandedBlockWhereItFits is the paint integration for the ungrouped block: one
+// body, two readings, and the width alone chooses between them (ADR 0052 §3). A wide terminal puts
+// the removed line and its replacement side by side; the same block in eighty columns falls back to
+// the stacked rows the same regions already built, and neither loses a line.
+func TestSplitDiffPaintsInAnExpandedBlockWhereItFits(t *testing.T) {
+	t.Parallel()
+
+	tr := editWithRegions(paintRegions())
+	if !tr.setExpanded(0, true) {
+		t.Fatal("setup: entries[0] is not a toggleable block")
+	}
+
+	wide := openBodyRows(t, tr, 140)
+	if !paintsSplit(wide) {
+		t.Errorf("at 140 columns the body is not two panes:\n%s", strings.Join(wide, "\n"))
+	}
+	if !carriesBothHalves(wide) {
+		t.Errorf("the split body lost a half of the change:\n%s", strings.Join(wide, "\n"))
+	}
+
+	narrow := openBodyRows(t, tr, 80)
+	if paintsSplit(narrow) {
+		t.Errorf("at 80 columns the body painted two panes; the panes would be under %d columns each:\n%s",
+			splitPaneMinCols, strings.Join(narrow, "\n"))
+	}
+	if !carriesBothHalves(narrow) {
+		t.Errorf("the stacked body lost a half of the change:\n%s", strings.Join(narrow, "\n"))
+	}
+}
+
+// The flip is the COMPOSER's own width rule, asked at the width the body actually gets — the
+// block's width less the indent it hangs at. Asserting the two agree across the boundary is what
+// keeps the painter's arithmetic from drifting from splitDiffFits: an indent the paint spends but
+// the question does not would flip the reading one column early and overrun the block.
+func TestSplitDiffPaintFlipsWhereTheComposerSaysItDoes(t *testing.T) {
+	t.Parallel()
+
+	th := newTheme(scheme.Default())
+	regions := paintRegions()
+	indent := th.measure.Width(branchMarker(true))
+	tr := editWithRegions(regions)
+	if !tr.setExpanded(0, true) {
+		t.Fatal("setup: entries[0] is not a toggleable block")
+	}
+
+	var flips int
+	for width := 80; width <= 130; width++ {
+		want := splitDiffFits(regions, width-indent)
+		if got := paintsSplit(openBodyRows(t, tr, width)); got != want {
+			t.Fatalf("at %d columns the body painted split=%v, want %v — splitDiffFits over the %d "+
+				"columns left of the %d-cell indent", width, got, want, width-indent, indent)
+		}
+		if width > 80 && want != splitDiffFits(regions, width-1-indent) {
+			flips++
+		}
+	}
+	if flips != 1 {
+		t.Errorf("the reading flipped %d times over 80..130 columns, want exactly one boundary in the "+
+			"range — the assertion above would otherwise be vacuous", flips)
+	}
+}
+
+// A block with NO regions paints exactly what it painted before the split reading existed, at any
+// width: the argument-derived body of a result that recorded nothing (ratified call 9). The pin is
+// at 140 columns, where a body WITH regions would have painted panes.
+func TestSplitDiffLeavesARegionlessBodyUntouched(t *testing.T) {
+	t.Parallel()
+
+	tr := &transcript{}
+	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "single_find_and_replace",
+		Arguments: []byte(`{"path":"main.go","oldText":"a := 1","newText":"a := 2"}`)}})
+	tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c1", Content: "replaced text in main.go"}})
+	if !tr.setExpanded(0, true) {
+		t.Fatal("setup: entries[0] is not a toggleable block")
+	}
+
+	want := []string{"    - a := 1", "    + a := 2"}
+	if got := openBodyRows(t, tr, 140); !reflect.DeepEqual(got, want) {
+		t.Errorf("summary-less body at 140 columns:\n--- got ---\n%s\n--- want ---\n%s",
+			strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+// TestSplitDiffPaintsInATargetlessBlock is the shape with no leader row: a bare
+// git_diff_range names neither base nor head, so its target resolves empty (refRangeTarget) and its
+// lines ARE the block's branches. Its body takes the same two readings at the same widths — without
+// this arm the very same diff would paint panes with its refs named and stacked rows without them
+// — and the branch list's own framing survives the swap: the summary still closes it, since it has
+// no leader row to ride.
+func TestSplitDiffPaintsInATargetlessBlock(t *testing.T) {
+	t.Parallel()
+
+	tr := &transcript{}
+	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "git_diff_range", Arguments: []byte(`{}`)}})
+	tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c1",
+		Content: "-  return errNarrow\n+  return errWide",
+		Summary: domain.EditRegions{Regions: paintRegions()}}})
+	if !tr.setExpanded(0, true) {
+		t.Fatal("setup: entries[0] is not a toggleable block")
+	}
+
+	body := func(width int) []string {
+		t.Helper()
+		rows := strings.Split(renderPlain(tr, width), "\n")
+		if got, want := rows[len(rows)-1], seeLessFooterLine(t, width); got != want {
+			t.Fatalf("last row at %d columns = %q, want the see-less footer %q", width, got, want)
+		}
+		return rows[1 : len(rows)-1]
+	}
+
+	wide := body(140)
+	if !paintsSplit(wide) {
+		t.Errorf("at 140 columns the targetless body is not two panes:\n%s", strings.Join(wide, "\n"))
+	}
+	if last := wide[len(wide)-1]; !strings.HasPrefix(last, "  "+glyphBranchLast+" ") {
+		t.Errorf("the split branch list ends in %q, want the summary still closing it on its own branch",
+			last)
+	}
+	if narrow := body(80); paintsSplit(narrow) {
+		t.Errorf("at 80 columns the targetless body painted two panes:\n%s", strings.Join(narrow, "\n"))
+	}
+}

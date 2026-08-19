@@ -35,7 +35,9 @@ import (
 // The block's state reaches BOTH shapes. An expanded call lays out every line the entry retained,
 // soft-wrapping whatever is overlong, and counts nothing — the see-less footer closes it
 // instead (seeLessFooter), which is where the pointer of a reader who has just read to the end of a
-// body already is. A COLLAPSED targeted call is the row budget's (layout.md, "Collapsed and expanded
+// body already is. Where that call recorded Edit regions and the row is wide enough for them, the
+// body lays out as two panes instead of as those lines (splitBody): the ARRANGEMENT is the width's
+// to choose at every paint, and neither shape above changes by it. A COLLAPSED targeted call is the row budget's (layout.md, "Collapsed and expanded
 // blocks"): its branch is the ONE leader row (leaderRow), no body line is painted at all, and the
 // slot on that row counts the body WHOLE — the sketch's "+5 more lines" over a five-line output,
 // riding the outcome it already carries (collapsedRemainder). So a collapsed block of that shape
@@ -55,7 +57,7 @@ func renderToolBranch(th theme, tv toolView, marker string, width int, expanded 
 	if tv.Target == "" {
 		if expanded {
 			var out blockPaint
-			rows := renderDetails(th, branchDetails(tv), width)
+			rows := renderBranchList(th, tv, width)
 			out.add(rows, toggle)
 			out.add(seeLessFooter(th, rows, width, toggle), toggle)
 			return out
@@ -74,7 +76,10 @@ func renderToolBranch(th theme, tv toolView, marker string, width int, expanded 
 	}
 	out.add([]string{row}, toggle)
 	if expanded {
-		body := renderSubDetails(th, tv.Details.all(), indent, width)
+		body, split := splitBody(th, tv, strings.Repeat(" ", indent), width)
+		if !split {
+			body = renderSubDetails(th, tv.Details.all(), indent, width)
+		}
 		out.add(body, toggle)
 		out.add(seeLessFooter(th, body, width, toggle), toggle)
 	}
@@ -269,6 +274,31 @@ func branchDetails(tv toolView) []detailLine {
 	return append(out, tv.Summary.detailLine)
 }
 
+// renderBranchList is what the EXPANDED targetless shape paints beneath its header — the branch
+// list of [branchDetails], or the SPLIT reading of the body with that list's one non-body line
+// still closing it.
+//
+// The shape is reachable by a diff-bodied call whose target resolves empty — a bare
+// `git_diff_range` with neither base nor head is the common one (refRangeTarget) — and without
+// this arm that call would keep the stacked reading at every width while the same diff with its
+// refs named painted panes. Only the BODY chooses the reading: the summary has no leader row to
+// ride in this shape and closes the branch list instead (branchDetails), which is as true of a
+// body in two panes as of one in branch lines, so it keeps its ┕ under the panes.
+//
+// The panes hang at the branch marker's width in blanks rather than off ┝/┕ markers of their own:
+// a marker per PHYSICAL row would mark a wrapped continuation as a branch, and the split reading's
+// rows are not lines of the body but its arrangement.
+func renderBranchList(th theme, tv toolView, width int) []string {
+	rows, split := splitBody(th, tv, strings.Repeat(" ", th.measure.Width(branchMarker(true))), width)
+	if !split {
+		return renderDetails(th, branchDetails(tv), width)
+	}
+	if tv.Summary.Text == "" {
+		return rows
+	}
+	return append(rows, renderDetails(th, []detailLine{tv.Summary.detailLine}, width)...)
+}
+
 // branchMarker is the tree marker leading a branch line: ┕ closes a block, ┝ continues it. Its
 // display width is also the sub-content indent, so detail text laid out beneath a branch lines
 // up with the target on it.
@@ -322,6 +352,40 @@ func renderSubDetails(th theme, details []detailLine, indent, width int) []strin
 		out = append(out, hangingWrap(th, detailStyle(th, d.Kind, true), pad, d.Text, width)...)
 	}
 	return out
+}
+
+// splitBody is the SPLIT reading of an expanded call's body — the recorded Edit regions as two
+// panes (splitDiffRows) laid out under prefix in width columns — and false when this body does not
+// take that reading at all: no regions were recorded, so the block keeps whatever body it was
+// presented with (ratified call 9, ADR 0052), or the panes would be too narrow to be worth the
+// arrangement (splitDiffFits) and the stacked rows the same regions already built are the reading.
+//
+// It is the ONE place any paint path chooses between the two readings, and every path asks it with
+// the width IT holds, at the moment it paints: the choice is a property of this body at this width
+// and is kept nowhere, so a resize re-flows the wrap and can flip the reading with no state to
+// keep in step (ADR 0052 §3). The three paths a diff-bodied block can reach differ only in what
+// they hang the body under — an ungrouped call's blank indent, the targetless shape's, an open
+// member's │ gutter — so the prefix is the parameter and the decision is not.
+//
+// The prefix is measured off the width before the panes are composed and painted in the detail
+// tone, exactly as the detail-line painters spend it (renderSubDetails, gutteredWrap), so a split
+// body starts in the column its stacked twin would have and the row still ends inside the width it
+// was given.
+func splitBody(th theme, tv toolView, prefix string, width int) (rows []string, split bool) {
+	inner := width - th.measure.Width(prefix)
+	if !splitDiffFits(tv.Regions, inner) {
+		return nil, false
+	}
+	panes := splitDiffRows(th, tv.Regions, inner)
+	if len(panes) == 0 {
+		return nil, false
+	}
+	pad := th.toolDetail.Render(prefix)
+	out := make([]string, len(panes))
+	for i, row := range panes {
+		out[i] = pad + row
+	}
+	return out, true
 }
 
 // toolCallRun returns the consecutive tool-call entries starting at entries[i] that fold into one

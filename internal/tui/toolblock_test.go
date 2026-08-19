@@ -434,3 +434,47 @@ func TestExpandedMemberGutterIsNotTheSubAgentRail(t *testing.T) {
 		t.Errorf("row %q lost the run's own rail; the fixture no longer nests the group", row)
 	}
 }
+
+// TestSplitDiffPaintsUnderAnOpenMembersGutter is plan item 7's third paint path: the body an open
+// GROUP member buys reads the same two ways as an ungrouped block's, chosen against the member's
+// own room. The panes hang under the member's │ gutter like every other line of that body, so the
+// open member still reads as one thing rather than as a row followed by loose panes — and the frame
+// around them (the ▼ leader row, the see-less row, the sibling still closed) is untouched by the
+// swap. This path carries the unspanned sub-agent group member too (renderGroupMember).
+func TestSplitDiffPaintsUnderAnOpenMembersGutter(t *testing.T) {
+	t.Parallel()
+
+	tr := &transcript{}
+	for _, id := range []string{"c1", "c2"} {
+		tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: id, Tool: "single_find_and_replace",
+			Arguments: []byte(`{"path":"main.go","oldText":"  return errNarrow","newText":"  return errWide"}`)}})
+		tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: id,
+			Content: "replaced text in main.go", Summary: domain.EditRegions{Regions: paintRegions()}}})
+	}
+	if !tr.setExpanded(1, true) {
+		t.Fatal("setup: entries[1] is not a toggleable block")
+	}
+
+	wide := strings.Split(renderPlain(tr, 140), "\n")
+	if !paintsSplit(wide) {
+		t.Errorf("the open member's body at 140 columns is not two panes:\n%s", strings.Join(wide, "\n"))
+	}
+	for _, row := range wide {
+		if strings.Contains(row, "errNarrow") && !strings.HasPrefix(row, memberGutter) {
+			t.Errorf("a pane row hangs outside the member's gutter %q: %q", memberGutter, row)
+		}
+	}
+	for _, frame := range []string{
+		groupMemberLine("  " + glyphBranch + " main.go ⋯ +1 −1"), // the sibling is still closed
+		memberEdgeRow(t, memberGutter, promptSeeLess, 140),       // and the open one still closes
+	} {
+		if !strings.Contains(strings.Join(wide, "\n"), frame) {
+			t.Errorf("the split body cost the member its frame row %q:\n%s", frame, strings.Join(wide, "\n"))
+		}
+	}
+
+	if narrow := strings.Split(renderPlain(tr, 80), "\n"); paintsSplit(narrow) {
+		t.Errorf("the open member's body at 80 columns painted two panes; its room leaves each under "+
+			"%d columns:\n%s", splitPaneMinCols, strings.Join(narrow, "\n"))
+	}
+}
