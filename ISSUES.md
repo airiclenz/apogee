@@ -55,6 +55,36 @@ the other direction too: `hook-mutation-api.md` and `technical-design.md` both n
 
 ---
 
+### `git_diff_range` drops the whole diff to plain rendering when git quotes a path
+
+**Status:** [ ] open 2026-08-19 — residual of
+`docs/plans/2026-08-19 - 03 - split-diff-display-plan.md` item 9, which added the recovery.
+
+The file-section walk matches a section header against
+`^diff --git a/(.+) b/(.+)$` (`internal/tui/toolpresent.go:2584`). Git QUOTES a path holding a
+space or a non-ASCII byte — it prints `diff --git "a/my file.go" "b/my file.go"` — and that line
+fails the pattern, so `gitDiffWalk.take` returns false (`internal/tui/toolpresent.go:2659`). The
+walk is all-or-nothing by design (`gitDiffFileSections`, `internal/tui/toolpresent.go:2628`), so
+ONE such path costs the whole body its Split/Stacked reading, including the other files' sections,
+and it falls back to the plain uncoloured output.
+
+---
+
+### ADR 0052 §1 still describes MERGED context, not the tiling rule that shipped
+
+**Status:** [ ] open 2026-08-19 — residual of
+`docs/plans/2026-08-19 - 03 - split-diff-display-plan.md` item 2, whose NOTES record the owner's
+2026-08-19 decision superseding the ratified merge wording.
+
+The ADR says each region carries "up to **three** merged unchanged context lines each side"
+(`docs/adr/0052-diff-bodies-render-as-split-diffs-fed-by-tool-recorded-edit-regions.md:39-40`).
+What shipped is the tiling rule: neighbours within the gap stay SEPARATE regions whose context
+ranges tile the interior lines without overlap, and the renderers omit the `⋯` separator between
+contiguous regions so the paint matches a merge. The amendment is recorded only in the plan's
+item 2 NOTES; the ADR that ratifies the decision does not carry it.
+
+---
+
 ## Parked / deferred work
 
 Live, deliberately deferred work only. Each entry records *enough* design that we don't re-derive
