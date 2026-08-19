@@ -6,7 +6,7 @@
   </picture>
 </p>
 
-A **terminal coding agent**, built for **smaller local models** — <br>
+A **terminal coding agent**, built for **smaller local models**<br>
 while working even better with bigger ones.
 
 <p align="center">
@@ -14,7 +14,7 @@ while working even better with bigger ones.
 </p>
 
 Apogee is a single, cross-platform tool that drops into any IDE's integrated 
-terminal — or any standalone terminal — on Windows, macOS, and Linux. It runs
+terminal - or any standalone terminal - on Windows, macOS, and Linux. It runs
 against any OpenAI-compatible endpoint: a local LLM server (llama.cpp, Ollama,
 LM Studio, vLLM) keeps your code on your machine and needs no API key, and a
 keyed one — a remote vLLM, an OpenAI-compatible cloud provider — is one
