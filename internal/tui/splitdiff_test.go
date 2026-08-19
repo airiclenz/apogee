@@ -223,9 +223,11 @@ func TestSplitDiffRowsRuleOnlyWhereRegionsDoNotMeet(t *testing.T) {
 	}
 }
 
-// The marker travels with its line's COLOUR while the number beside it stays chrome: that is what
-// keeps the glyph the change's palette-proof signal rather than a second thing the diff colour has
-// to carry (ratified calls 6 and 7).
+// The marker rides its line's BAND while the number beside it stays chrome: the glyph sits inside
+// the banded run rather than outside it, which is what keeps it the change's palette-proof signal —
+// a mark that reads on a monochrome pipe and on a terminal that drops backgrounds alike (ADR 0052's
+// 2026-08-19 amendment, which supersedes the "the marker travels with the TEXT's colour" rationale
+// of ratified calls 6 and 7).
 func TestSplitDiffRowsColourTheMarkerWithItsLine(t *testing.T) {
 	t.Parallel()
 
@@ -236,10 +238,10 @@ func TestSplitDiffRowsColourTheMarkerWithItsLine(t *testing.T) {
 	regions := []domain.EditRegion{{BeforeStart: 7, AfterStart: 7, Removed: []string{"gone"}, Inserted: []string{"here"}}}
 
 	row := splitDiffRows(th, regions, 100)[0]
-	if want := th.diffRemoved.Render(stackedRemovedMarker + "gone"); !strings.Contains(row, want) {
+	if want := detailStyle(th, detailDiffRemoved, true).Render(stackedRemovedMarker + "gone"); !strings.Contains(row, want) {
 		t.Errorf("the removed pane does not carry %q as one styled run: %q", want, row)
 	}
-	if want := th.diffAdded.Render(stackedInsertedMarker + "here"); !strings.Contains(row, want) {
+	if want := detailStyle(th, detailDiffAdded, true).Render(stackedInsertedMarker + "here"); !strings.Contains(row, want) {
 		t.Errorf("the inserted pane does not carry %q as one styled run: %q", want, row)
 	}
 	if want := th.toolDetail.Render("7 "); !strings.Contains(row, want) {

@@ -146,11 +146,13 @@ type theme struct {
 	// them apart in each direction their terminal calls "brighter" (design call 9 of
 	// docs/plans/"2026-08-06 - 03"; TestBuiltinSchemesKeepBothMutedStepsDistinct).
 	//
-	// It is the PLAIN detail tone alone — a diff line keeps diffAdded / diffRemoved in both states,
-	// since its colour carries meaning rather than emphasis — and the chrome a block wears
-	// (toolIndicator, the remainder marker, the open member's gutter) stays dim in both, because the
-	// affordances are not what the reader opened the block for (detailStyle). The outcome slot is
-	// not on this ramp at all: it takes the marker role, which has a step of its own for the open
+	// EVERY detail line rides this ramp, a diff line included: a diff line's text is the plain tone
+	// of its state like any other, and what says added or removed is the BAND under it (diffAdded /
+	// diffRemoved), which is constant across the two states. Colour-as-meaning and tone-as-emphasis
+	// sit on two different surfaces, so neither has to borrow the other's channel (detailStyle). The
+	// chrome a block wears (toolIndicator, the remainder marker, the open member's gutter) stays dim
+	// in both, because the affordances are not what the reader opened the block for. The outcome slot
+	// is not on this ramp at all: it takes the marker role, which has a step of its own for the open
 	// state (toolMarkerBright, summaryStyle).
 	toolDetailBright lipgloss.Style
 	toolLeader       lipgloss.Style // the ⋯ run carrying a tool row's eye from its target to the outcome slot at the row's edge (its own `tool-leader` role, seeded from `muted`): chrome like the ▶ it runs up to, so the dots never read as content — and its own role so a scheme can damp them without moving the indicator with them
@@ -170,13 +172,21 @@ type theme struct {
 	// how something came out. It is a foreground alone, with no bold weight, because the mark is a
 	// small punctuation of a row the reader is skimming rather than a verdict shouted at them; the
 	// red that DOES shout belongs to a failure, which wears no glyph of its own (design call 6).
-	successMark  lipgloss.Style
-	skillAccent  lipgloss.Style // an invoked "/id" token INSIDE a sent user block (violet on the block's own dark-gray field): skillToken's transcript twin, and the whole of what now says a message invoked a skill
-	skillToken   lipgloss.Style // a RESOLVING inline "/id" token in the prompt box (violet on the box's black)
-	fileToken    lipgloss.Style // a RESOLVING inline "@path" token in the prompt box (the scheme's `file-ref` role on the box's black — a pale green under `dark`, an olive one under `light`)
-	selection    lipgloss.Style // the prompt's mouse drag-selection highlight (white on blue)
-	diffAdded    lipgloss.Style // a "+" diff detail line (reserved)
-	diffRemoved  lipgloss.Style // a "-" diff detail line (reserved)
+	successMark lipgloss.Style
+	skillAccent lipgloss.Style // an invoked "/id" token INSIDE a sent user block (violet on the block's own dark-gray field): skillToken's transcript twin, and the whole of what now says a message invoked a skill
+	skillToken  lipgloss.Style // a RESOLVING inline "/id" token in the prompt box (violet on the box's black)
+	fileToken   lipgloss.Style // a RESOLVING inline "@path" token in the prompt box (the scheme's `file-ref` role on the box's black — a pale green under `dark`, an olive one under `light`)
+	selection   lipgloss.Style // the prompt's mouse drag-selection highlight (white on blue)
+	// diffAdded and diffRemoved are the BACKGROUND BANDS an added / a removed diff body line sits
+	// on (the scheme's `diff-add-bg` / `diff-del-bg` roles) — a background and nothing else, on
+	// purpose: detailStyle composes the band under the plain detail tone of the block's state, so the
+	// text of a diff line reads exactly like the text around it and the band alone carries which way
+	// the line went. A foreground here would put the signal back on the glyphs and make the tone step
+	// an open block takes fight with it. The `-`/`+` marker column is inside the banded run, a glyph
+	// signal riding the band rather than a coloured mark of its own (ADR 0052's 2026-08-19 amendment);
+	// the band's full-row width is the painters' business (wrap.go, splitdiff.go).
+	diffAdded    lipgloss.Style
+	diffRemoved  lipgloss.Style
 	errorText    lipgloss.Style // a recovered-fault notice
 	noteText     lipgloss.Style // a neutral note (cancelled, approval record) + a presentation's status line
 	queuedText   lipgloss.Style // a staged-interjection strip row: faint on black, painted edge to edge so the strip reads as one band (its own role, deliberately not statusBar's)
@@ -284,8 +294,8 @@ func newTheme(s scheme.Scheme) theme {
 		surface        = lipgloss.Color(s.Surface)
 		muted          = lipgloss.Color(s.Muted)
 		openDetail     = lipgloss.Color(s.MutedBright)
-		diffAdd        = lipgloss.Color(s.DiffAdd)
-		diffDel        = lipgloss.Color(s.DiffDel)
+		diffAddBg      = lipgloss.Color(s.DiffAddBg)
+		diffDelBg      = lipgloss.Color(s.DiffDelBg)
 		errFg          = lipgloss.Color(s.Error)
 		successFg      = lipgloss.Color(s.Success)
 		warningFg      = lipgloss.Color(s.Warning)
@@ -336,8 +346,8 @@ func newTheme(s scheme.Scheme) theme {
 		skillToken:   lipgloss.NewStyle().Foreground(skill).Background(surface),
 		fileToken:    lipgloss.NewStyle().Foreground(fileRef).Background(surface),
 		selection:    lipgloss.NewStyle().Foreground(userText).Background(selectionFill),
-		diffAdded:    lipgloss.NewStyle().Foreground(diffAdd),
-		diffRemoved:  lipgloss.NewStyle().Foreground(diffDel),
+		diffAdded:    lipgloss.NewStyle().Background(diffAddBg),
+		diffRemoved:  lipgloss.NewStyle().Background(diffDelBg),
 		errorText:    lipgloss.NewStyle().Foreground(errFg).Bold(true),
 		noteText:     lipgloss.NewStyle().Foreground(muted),
 		queuedText:   lipgloss.NewStyle().Foreground(muted).Background(surface),

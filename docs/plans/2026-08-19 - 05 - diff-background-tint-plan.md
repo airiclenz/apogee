@@ -135,7 +135,26 @@ unchanged.
 
 **Commit:** `feat(scheme): add diff-add-bg and diff-del-bg background roles`
 
-## 3. Diff styles become background tints; text follows the state tone
+## 3. Diff styles become background tints; text follows the state tone — ✅ DONE (2026-08-19)
+
+NOTES (2026-08-19): four files beyond the item's Files list were touched, each because this change made a
+sentence in them false: `internal/tui/doc.go` ("the diff colours stay where they were" — the band does,
+the text no longer), `layout.md`'s "A change is coloured the one way" paragraph, and
+`docs/layout/split-diff-layout.md`'s pane/colour/example bullets. Prose only, no code or behaviour beyond
+the item.
+NOTES (2026-08-19): `theme_test.go` was not in the enumerated set either, but its role-sampling table pinned
+`diffAdded`/`diffRemoved` as FOREGROUNDS; it now samples them as backgrounds and its distinct-value scheme
+fixture gains `DiffAddBg`/`DiffDelBg`.
+NOTES (2026-08-19): `gofmt` re-aligned the five theme-struct field lines above `diffAdded` (successMark …
+selection) because the new doc comment splits their alignment group. Whitespace only, gofmt's call.
+NOTES (2026-08-19): `TestDiffLinesKeepTheirColourInBothBlockStates` and
+`TestSplitDiffRowsColourTheMarkerWithItsLine` keep their names — both still describe the new contract (the
+BAND is what is kept in both states; the marker is still coloured with its line, now inside the band) — and
+their bodies and comments were rewritten to it. The item's requested unit test landed as
+`TestDetailStyleBandsTheDiffKindsUnderTheStateTone`.
+NOTES (2026-08-19): the `## [Unreleased]` entry item 2 landed claims the `diff-add` / `diff-del` foreground
+pair "keeps everything it already colours, markers and `+8 −3` summaries included". That is no longer true
+of any of it — see the DEFER line — so the clause is worth dropping when this item's entry is applied.
 
 **Source:** ratified calls 1, 5. Depends on item 2.
 

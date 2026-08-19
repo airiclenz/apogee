@@ -2,12 +2,12 @@ package tui
 
 import (
 	"fmt"
+	"image/color"
 	"reflect"
 	"strconv"
 	"strings"
 	"testing"
 
-	lipgloss "charm.land/lipgloss/v2"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/scheme"
 )
@@ -95,8 +95,8 @@ func TestRenderMultiDetailStandalone(t *testing.T) {
 }
 
 // A diff call is the summary-and-body shape layout.md sketches: the diffstat fills the outcome
-// slot on the path's leader row and the coloured body hangs beneath it. The body keeps its red/green
-// colouring, which — together with having a body at all — is why it can never fold into a group.
+// slot on the path's leader row and the banded body hangs beneath it. The body keeps its red/green
+// bands, which — together with having a body at all — is why it can never fold into a group.
 // Asserted expanded, because a collapsed diff paints no body line at all (collapsedBodyRows) and
 // there would be no colour to see.
 func TestRenderDiffDetailStandalone(t *testing.T) {
@@ -122,11 +122,11 @@ func TestRenderDiffDetailStandalone(t *testing.T) {
 
 	th := newTheme(scheme.Default())
 	lines := tr.renderLines(th, 80)
-	if got, want := lines[2], th.diffRemoved.Render("    1 - a removed line"); got != want {
-		t.Errorf("removed line = %q; want the diffRemoved style %q", got, want)
+	if got, want := lines[2], detailStyle(th, detailDiffRemoved, true).Render("    1 - a removed line"); got != want {
+		t.Errorf("removed line = %q; want the removed band under the open tone %q", got, want)
 	}
-	if got, want := lines[3], th.diffAdded.Render("    1 + an added line"); got != want {
-		t.Errorf("added line = %q; want the diffAdded style %q", got, want)
+	if got, want := lines[3], detailStyle(th, detailDiffAdded, true).Render("    1 + an added line"); got != want {
+		t.Errorf("added line = %q; want the added band under the open tone %q", got, want)
 	}
 }
 
@@ -427,27 +427,25 @@ func TestExpandedBlockLiftsItsDetailTone(t *testing.T) {
 	})
 }
 
-// …and the tone step is the PLAIN detail's alone: a diff line is red or green because of which way
-// it went, and layering an emphasis step onto that would give the same colour two meanings. The two
-// states are asked of the two painters that draw a targetless branch list — the collapsed one under
-// the row budget (clipDetails) and the open one (renderDetails) — over the same line, so the
-// comparison is of paint rather than of the style table. The plain case is the control: the same
-// pair of painters must NOT agree there, or the diff assertion would hold by the tone step having
-// gone missing altogether.
+// …and the tone step reaches EVERY detail line, a diff line included: what a diff line does not
+// take from the state is its BAND, which says which way the line went and is the same collapsed and
+// open. The two states are asked of the two painters that draw a targetless branch list — the
+// collapsed one under the row budget (clipDetails) and the open one (renderDetails) — over the same
+// line, so the comparison is of paint rather than of the style table. Both halves are asserted on
+// every kind: the paints must differ (the tone step is there) and each must be exactly what
+// detailStyle hands out for that state (the band is under it, and under nothing else).
 func TestDiffLinesKeepTheirColourInBothBlockStates(t *testing.T) {
 	th := newTheme(scheme.Default())
 	if !colorActive(th) {
 		t.Skip("no colour profile in this environment; the SGR assertion would be vacuous")
 	}
 	cases := []struct {
-		name     string
-		kind     detailKind
-		wantSame bool
-		style    lipgloss.Style
+		name string
+		kind detailKind
 	}{
-		{name: "an added line keeps its green", kind: detailDiffAdded, wantSame: true, style: th.diffAdded},
-		{name: "a removed line keeps its red", kind: detailDiffRemoved, wantSame: true, style: th.diffRemoved},
-		{name: "a plain line takes the state's tone", kind: detailPlain, wantSame: false, style: th.toolDetail},
+		{name: "an added line keeps its turquoise band", kind: detailDiffAdded},
+		{name: "a removed line keeps its red band", kind: detailDiffRemoved},
+		{name: "a plain line stands on no band", kind: detailPlain},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -457,11 +455,56 @@ func TestDiffLinesKeepTheirColourInBothBlockStates(t *testing.T) {
 			if len(closed) != 1 || len(open) != 1 {
 				t.Fatalf("the painters spent %d and %d rows on one line; want one each", len(closed), len(open))
 			}
-			if same := closed[0] == open[0]; same != tc.wantSame {
-				t.Errorf("closed = %q, open = %q; want the two paints same=%v", closed[0], open[0], tc.wantSame)
+			if closed[0] == open[0] {
+				t.Errorf("closed and open paint identically (%q); want the open tone a step out of the collapsed dim", closed[0])
 			}
-			if want := tc.style.Render(strip(closed[0])); closed[0] != want {
-				t.Errorf("closed paint = %q; want the kind's own style %q", closed[0], want)
+			for _, state := range []struct {
+				name     string
+				row      string
+				expanded bool
+			}{
+				{name: "closed", row: closed[0], expanded: false},
+				{name: "open", row: open[0], expanded: true},
+			} {
+				if want := detailStyle(th, tc.kind, state.expanded).Render(strip(state.row)); state.row != want {
+					t.Errorf("%s paint = %q; want the kind's style for that state %q", state.name, state.row, want)
+				}
+			}
+			if closedBand, openBand := detailStyle(th, tc.kind, false).GetBackground(),
+				detailStyle(th, tc.kind, true).GetBackground(); closedBand != openBand {
+				t.Errorf("the band moves with the state: closed %v, open %v; want one band in both", closedBand, openBand)
+			}
+		})
+	}
+}
+
+// detailStyle is the seam the assertion above reaches through, so it is pinned on its own terms:
+// a diff kind hands back the state's PLAIN tone as its foreground — the same style a context line
+// gets — with the kind's band added underneath, and nothing else moves between the two states. A
+// regression that put the direction back on the glyphs would show up here as a foreground that is
+// neither `muted` nor `muted-bright`.
+func TestDetailStyleBandsTheDiffKindsUnderTheStateTone(t *testing.T) {
+	th := newTheme(scheme.Default())
+	cases := []struct {
+		name string
+		kind detailKind
+		band color.Color
+	}{
+		{name: "added", kind: detailDiffAdded, band: th.diffAdded.GetBackground()},
+		{name: "removed", kind: detailDiffRemoved, band: th.diffRemoved.GetBackground()},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, expanded := range []bool{false, true} {
+				got := detailStyle(th, tc.kind, expanded)
+				if want := detailTone(th, expanded).GetForeground(); got.GetForeground() != want {
+					t.Errorf("expanded=%v: foreground = %v; want the state's plain tone %v",
+						expanded, got.GetForeground(), want)
+				}
+				if got.GetBackground() != tc.band {
+					t.Errorf("expanded=%v: background = %v; want the kind's band %v",
+						expanded, got.GetBackground(), tc.band)
+				}
 			}
 		})
 	}

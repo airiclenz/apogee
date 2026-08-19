@@ -14,10 +14,9 @@ point is a **minor** bump, not a breaking change.
   vocabulary (ADR 0040), taking it to 31 roles: the background a diff body line sits on, shipped
   as dark `#0e3b34` / `#42181d` and light `#d9f2ec` / `#fbe4e6` — quiet washes out of the same
   turquoise and red families as the `diff-add` / `diff-del` foreground pair, so the pairing still
-  survives red-green-weak vision once the band rather than the text carries the signal. The
-  foreground pair keeps everything it already colours, markers and `+8 −3` summaries included, and
-  a scheme file of your own that names neither new key stays exactly as valid as it was: an omitted
-  role has always kept its default, silently.
+  survives red-green-weak vision once the band rather than the text carries the signal. A scheme
+  file of your own that names neither new key stays exactly as valid as it was: an omitted role has
+  always kept its default, silently.
 
 - **A split diff survives a reload.** A resumed session used to bring a diff-bodied block back as
   stacked rows even where the live one had painted two panes: the record carried the rendered rows
@@ -222,6 +221,17 @@ point is a **minor** bump, not a breaking change.
   The `[P2] Undo all agent changes` entry is removed from `ISSUES.md` — this plan shipped it.
 
 ### Changed
+
+- **A diff line's colour moved to the background.** An added or a removed line no longer paints its
+  text turquoise or red: it wears the same detail tone as every other line of its block — the
+  collapsed dim, the brighter step once you open it — and sits on a quiet BAND that says which way
+  it went (`diff-add-bg` / `diff-del-bg`). The band is the same in both states, because which way a
+  line went is not a thing an opened block says more loudly; the tone step and the direction now
+  have a surface each instead of sharing one. The `-`/`+` markers are unchanged and still carry the
+  change on their own, glyphs riding the band, so nothing is lost on a monochrome pipe or a
+  copy-paste (ADR 0052's 2026-08-19 amendment supersedes the split-diff plan's "the marker travels
+  with the text's colour"). The band runs the full row width in a following change; this one moves
+  the signal.
 
 - **A "+" line is turquoise now, and the ✓ beside it.** Both shipped schemes move `diff-add` out of
   green — dark `#2dd4bf`, light `#0f766e` — and leave `diff-del` red, so the one pairing a diff body

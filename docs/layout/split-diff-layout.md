@@ -21,10 +21,11 @@ are untouched.
 - **Width rule, per pane.** Split paints only when each pane gives the code
   ≥ 40 columns after its number gutter and 2-column marker. Named constant;
   in practice terminals ≥ ~100 columns. Below it: Stacked.
-- **Panes.** Left = before (its own line numbers; removed rows wear `-` and
-  `diff-del` red). Right = after (its numbers; added rows wear `+` and
-  `diff-add` turquoise). Context rows appear in both panes, unmarked, in the
-  expanded body's open tone.
+- **Panes.** Left = before (its own line numbers; removed rows wear `-` and sit
+  on a `diff-del-bg` red band). Right = after (its numbers; added rows wear `+`
+  and sit on a `diff-add-bg` turquoise band). A banded row's TEXT keeps the
+  expanded body's open tone, like the context rows, which appear in both panes
+  unmarked and unbanded.
 - **Alignment.** Within a region the removed block and the inserted block start
   on the same row; the shorter side pads with blank rows. Discontiguous regions
   are separated by one damped `⋯` rule row spanning both panes.
@@ -45,9 +46,11 @@ are untouched.
   `muted`. Marker column: `-` / `+` on the first row of a changed line, blank
   on context and continuations.
 - **Color never carries a change alone.** The markers are the palette-proof
-  signal; `diff-add` is turquoise (not green) in both shipped schemes so the
-  pairing with red survives red-green-weak vision. `success` sits in the same
-  turquoise family, a visible step from `diff-add`.
+  signal, glyphs riding the band rather than coloured marks of their own;
+  `diff-add-bg` is turquoise (not green) in both shipped schemes so the pairing
+  with red survives red-green-weak vision, as does the `diff-add` / `diff-del`
+  foreground pair the bands are drawn from. `success` sits in the same turquoise
+  family, a visible step from `diff-add`.
 - **Sources.** Edit tools: recorded Edit regions (typed summary, apply-time).
   `view_diff`: numbers counted from line 1 over its whole-file body, then
   trimmed to regions — expanded `view_diff` no longer paints the entire file.
@@ -71,8 +74,9 @@ are untouched.
     see less…
 ```
 
-- row 90: one removed line left (red), its replacement right (turquoise) wraps
-  to a continuation row — no number, no marker — and the left pane pads.
+- row 90: one removed line left (red band), its replacement right (turquoise
+  band) wraps to a continuation row — no number, no marker — and the left pane
+  pads.
 - the `⋯` rule row separates two regions whose context does not touch.
 - numbers drift apart across the rule (before 204 / after 205): each pane
   numbers its own file.

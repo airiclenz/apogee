@@ -497,18 +497,26 @@ func clipDetails(th theme, details []detailLine, width int) (lines []string, cli
 	return out, clipped
 }
 
-// detailStyle maps a detail kind and its block's STATE to a style: plain detail takes the tone of
-// the state (detailTone); the diff kinds are red/green in both, because their colour says which way
-// a line went and an emphasis step layered onto that would be a second thing the same colour means
-// (view_diff's body is their producer — diffBody).
+// detailStyle maps a detail kind and its block's STATE to a style. EVERY kind takes the plain tone
+// of the state (detailTone); a diff kind adds the band its direction wears under that tone — the
+// turquoise `diff-add-bg` or the red `diff-del-bg` (th.diffAdded / th.diffRemoved, backgrounds
+// alone). The two channels answer two different questions and so cannot crowd each other: the tone
+// says how loudly the block is speaking, which is a function of the state, and the band says which
+// way the line went, which is not — the band is identical collapsed and expanded (view_diff's body
+// is their producer — diffBody).
+//
+// The style is what the painters band a full row with: a background reaching the wrap rail or the
+// pane edge (gutteredWrap/hangingWrap/clipWrap, splitCell.paint), which is why the diff kinds carry
+// their colour as a background here rather than as a foreground on the glyphs.
 func detailStyle(th theme, kind detailKind, expanded bool) lipgloss.Style {
+	tone := detailTone(th, expanded)
 	switch kind {
 	case detailDiffAdded:
-		return th.diffAdded
+		return tone.Background(th.diffAdded.GetBackground())
 	case detailDiffRemoved:
-		return th.diffRemoved
+		return tone.Background(th.diffRemoved.GetBackground())
 	default:
-		return detailTone(th, expanded)
+		return tone
 	}
 }
 

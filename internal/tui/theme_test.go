@@ -46,6 +46,7 @@ func TestNewThemeTakesItsColoursFromTheScheme(t *testing.T) {
 		PromptToggle: "#101010", ToolMarker: "#111111", Gauge: "#121212", Selection: "#131313",
 		Spinner1: "#141414", Spinner2: "#151515", Spinner3: "#161616", Spinner4: "#171717",
 		ToolLeader: "#1a1a1a", ToolMarkerBright: "#1b1b1b", Warning: "#1c1c1c",
+		DiffAddBg: "#1d1d1d", DiffDelBg: "#1e1e1e",
 	}
 	th := newTheme(s)
 
@@ -76,9 +77,11 @@ func TestNewThemeTakesItsColoursFromTheScheme(t *testing.T) {
 		{"fileToken fg", th.fileToken.GetForeground(), s.FileRef},
 		// A border slot, which lipgloss keeps apart from the foreground.
 		{"inputBorder border fg", th.inputBorder.GetBorderTopForeground(), s.Chrome},
-		// The roles that are easiest to cross, because their dark values coincide today.
-		{"diffAdded fg", th.diffAdded.GetForeground(), s.DiffAdd},
-		{"diffRemoved fg", th.diffRemoved.GetForeground(), s.DiffDel},
+		// The roles that are easiest to cross, because their dark values coincide today. They are
+		// sampled on the BACKGROUND slot: a diff line's direction is a band under plain-tone text,
+		// so a foreground here would be the old contract leaking back (detailStyle).
+		{"diffAdded bg", th.diffAdded.GetBackground(), s.DiffAddBg},
+		{"diffRemoved bg", th.diffRemoved.GetBackground(), s.DiffDelBg},
 		// The tool header's own role and the code role it used to borrow: sampled together, because
 		// keeping them apart is the whole reason `tool-header` exists.
 		{"toolLabel fg", th.toolLabel.GetForeground(), s.ToolHeader},

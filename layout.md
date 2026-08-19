@@ -699,9 +699,12 @@ they join. And the `see less…` an open block closes on is the prompt block's o
 act: one vocabulary for "close this".
 
 **A change is coloured the one way wherever a block shows one.** Every body that carries a change
-paints its `+ ` lines in `diff-add` and its `- ` lines in `diff-del`, context plain, whether the
-lines came from a diff's own hunks, an edit's replacements or a write's written content — one
-reading for "added" and one for "removed", so a reader never learns the pair twice.
+lays its `+ ` lines on a `diff-add-bg` band and its `- ` lines on a `diff-del-bg` band, context
+plain, whether the lines came from a diff's own hunks, an edit's replacements or a write's written
+content — one reading for "added" and one for "removed", so a reader never learns the pair twice.
+The signal is the BACKGROUND: the text of a diff line wears the same detail tone as every other
+line of its block, collapsed or open, and the band under it — the same band in both states — is
+what says which way the line went.
 
 **Blank lines.** Exactly one empty line between blocks, never more. Assistant text is trimmed
 of its leading and trailing blank lines, and interior runs of two or more blank lines collapse

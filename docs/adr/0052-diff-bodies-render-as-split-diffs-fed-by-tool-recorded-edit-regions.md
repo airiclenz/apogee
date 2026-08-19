@@ -105,3 +105,34 @@ The split diff is an enhancement over recorded data, never a prerequisite.
   turquoise family.
 - The stacked rows stay the codec's `Details` payload, so scrollback replayed on an older build
   keeps its shape — the same additive rule every codec field change has followed.
+
+## Amendment (2026-08-19) — the change is a background band, not coloured text
+
+Decision 4 above ("Color never carries a change alone") stands in full, and this amendment moves
+the surface it is painted on. A diff body line no longer carries `diff-add` / `diff-del` as its
+TEXT colour. It carries a **background band** — the new `diff-add-bg` / `diff-del-bg` roles,
+turquoise and red out of the same two families — while its text wears the plain detail tone of
+its block's state, exactly like every other detail line (`detailStyle`, `internal/tui/toolbranch.go`).
+The band is the same in both states: the tone step an opened block takes says how loudly the block
+is speaking, the band says which way the line went, and after this they no longer share a channel.
+
+The contract, in four parts:
+
+- **The band carries the signal; the text does not.** Diff-line text is `detailTone`'s collapsed
+  `muted` or expanded `muted-bright`, the same as context lines and plain detail.
+- **The band is full width.** It runs from the marker column to the pane edge in the Split diff and
+  to the wrap rail in the Stacked and flat readings — under a short line's trailing space and under
+  a wrapped continuation row's text alike — so a region reads as a block rather than as a ragged run
+  of tinted words.
+- **The gutter stays chrome.** Line numbers, the gutter columns and a continuation row's
+  gutter-width leading spaces stay `muted` and OUTSIDE the band.
+- **The marker is a glyph signal on the band.** The implementing plan's ratified calls 6 and 7
+  (`docs/plans/archived/2026-08-19 - 03 - split-diff-display-plan.md`) put the `-`/`+` marker in the
+  TEXT's colour so it would travel with the line's meaning. That rationale is **superseded**: the
+  marker sits inside the banded run and reads against it, and decision 4's palette-proof guarantee
+  now rests on the glyph plus the band rather than on the glyph plus a foreground.
+
+Two new scheme keys land with it (`diff-add-bg`, `diff-del-bg`), additive in ADR 0040's sense — an
+omitted key keeps the built-in default, so no user scheme file broke. The `diff-add` / `diff-del`
+foreground roles are unchanged and keep their vocabulary place; the bands are their quiet
+counterparts, not their replacements.

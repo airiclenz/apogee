@@ -585,8 +585,8 @@
 // that does not: it belongs to the collapsed paint, so a click there only ever opens. Whichever
 // shape it is, opening also lifts the block's TEXT a step out of the collapsed dim
 // ([detailTone], the scheme's `muted-bright` role) while the chrome around it — indicator, marker,
-// gutter — and the diff colours stay where they were, so what brightens is exactly what the
-// reader opened the block to read.
+// gutter — and the BAND a diff line sits on stay where they were, so what brightens is exactly what
+// the reader opened the block to read.
 // A scheduled Firing borrows that whole shape
 // through the same painter under a leading glyph of its own — ⟳ rather than the star
 // ([blockState]'s glyph override, whose zero value is the star; schedule.go, layout.md's "The firing
