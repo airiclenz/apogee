@@ -10,6 +10,17 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **A click in the band the `/inspect` pane grows into now falls through instead of being swallowed.**
+  The `/usage` report and the `/inspect` pane are the one pair that can be up together, and they share
+  one bottom-anchored slot: dismissing the report under a click grew the pane UPWARD — past the rows
+  the report was drawn on, whenever it was drawn shorter than its grant — before the pane resolved its
+  own rectangle, so the regrown box claimed a point the human had aimed at the blank gap row above the
+  report. The whole `handleMouseClick` dispatch chain now answers every geometry question from ONE
+  pre-click frame — the Model value as it stood when the button went down (the Model is a value,
+  ADR 0011, so the copy is the snapshot) — while every state predicate and every mutation stays on the
+  live model. A click landing where a dismissed pane was drawn now only dismisses: it is never claimed
+  by the box that grew there, and it names no transcript row the pre-click frame did not show at that Y.
+
 - **The Inspector's "no response recorded" note no longer lands under a request whose reply the
   ring did record.** The note's successor rule now applies within one wire stream — the
   `(depth, callID)` pair every event carries — so a parallel fan-out's interleaved records are no

@@ -23,17 +23,6 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 
 ## Open defects
 
-### Run residuals — open (2026-08-18, open-defects plan)
-
-The still-open findings that run left, under the conventions' actionability bar.
-
-- [P] A click in the band the inspector box grows into is swallowed instead of falling through.
-  Both report panes can be up together and the transcript-side slot is bottom-anchored, so
-  `handleUsageClick` dismissing `/usage` (`internal/tui/mouse.go:393`) grows the inspector box
-  UPWARD before `handleInspectorClick` (`internal/tui/mouse.go:1449`) resolves its rect
-  (`inspectorPaneRect`, `internal/tui/mouse.go:1395`) against the already-changed model. The fix
-  is resolving both rects from one pre-click frame.
-
 ## Parked / deferred work
 
 Live, deliberately deferred work only. Each entry records *enough* design that we don't re-derive

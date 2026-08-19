@@ -2483,7 +2483,10 @@ func (o frameOverlays) transcriptRows(budget int) int {
 
 // frameOverlays renders every overlay block of the frame as the Model stands. It is a pure function
 // of the Model — nothing here mutates and nothing depends on the frame being composed — so View and
-// the mouse mapping may each call it and are guaranteed the same answer.
+// the mouse mapping may each call it and are guaranteed the same answer. That guarantee is per Model
+// VALUE and says nothing across two of them, which is exactly why the click chain snapshots one: a
+// dismissal mid-chain yields a different model, and every rect asked of it after that would be a
+// different frame's (handleMouseClick, mouse.go).
 func (m Model) frameOverlays() frameOverlays {
 	var o frameOverlays
 	if m.state == stateAwaitingApproval && m.pending != nil {

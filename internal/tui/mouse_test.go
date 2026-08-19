@@ -3353,3 +3353,124 @@ func TestInspectorWheelScrollsTheRecords(t *testing.T) {
 		}
 	}
 }
+
+// ----------------------------------------------------------------------------
+// Mouse across the two panes that share the slot (mouse.go, handleMouseClick)
+// ----------------------------------------------------------------------------
+
+// bothPanesModel opens the /usage report and the /inspect pane TOGETHER — the one pair the frame
+// draws in the same bottom-anchored slot — over a transcript long enough that the rows either pane
+// gives back name real content. records sizes the ring, which is what decides how far the pane
+// regrows once the report above it goes: many records and it takes the whole slot back, one and it
+// stays about the height it already had.
+func bothPanesModel(t *testing.T, records int) Model {
+	t.Helper()
+	m := usageModel(t, mainTotals, 8192)
+	for i := range 20 {
+		m.transcript.addUser(fmt.Sprintf("prompt %d", i), nil)
+	}
+	m.opts.Inspector = true
+	for i := range records {
+		m = m.foldEvent(wireEvent(domain.WireDirectionRequest, fmt.Sprintf(`{"n":%d}`, i), i, 0))
+	}
+	m.inspector = inspectorPane{open: true}
+	m.refreshViewport()
+	m.layout()
+	return m
+}
+
+// A click in the band the /inspect pane grows into dismisses and nothing more. The slot is
+// bottom-anchored, so dropping the report grows the pane UPWARD — past the rows the report was drawn
+// on, since it was drawn shorter than its grant — and the chain asked the pre-click frame rather
+// than the model the dismissal left: the blank gap row above the report is neither the regrown box's
+// nor the transcript's.
+func TestClickInTheBandTheInspectorGrowsIntoFallsThrough(t *testing.T) {
+	m := bothPanesModel(t, 30)
+	usageTop, _, ok := m.usagePaneRect()
+	if !ok {
+		t.Fatal("the report is not on the frame")
+	}
+	preTop, _, ok := m.inspectorPaneRect()
+	if !ok {
+		t.Fatal("the pane is not on the frame")
+	}
+	postTop, _, ok := m.dismissUsage().inspectorPaneRect()
+	if !ok {
+		t.Fatal("the pane leaves the frame when the report above it is dismissed")
+	}
+	y := usageTop - gapHeight // the blank gap row: no pane's, and no transcript row either
+	if y < postTop || y >= preTop {
+		t.Fatalf("precondition: the gap row %d is outside the band [%d,%d) the pane regrows into",
+			y, postTop, preTop)
+	}
+
+	after := step(t, m, leftClick(10, y))
+
+	if after.usagePane.open {
+		t.Error("the click in the band left the report up")
+	}
+	if after.inspector.open {
+		t.Error("the regrown /inspect pane claimed a click aimed at the gap row above the report")
+	}
+	if after.transcriptSel.active {
+		t.Errorf("the click armed a transcript selection the pre-click frame showed no row for: %+v",
+			after.transcriptSel)
+	}
+	if after.sel.active {
+		t.Errorf("the click armed a prompt selection: %+v", after.sel)
+	}
+}
+
+// Inside the pane's PRE-CLICK rectangle the click is still the pane's: the report above it is
+// dismissed under the same press — a click outside the report always dismisses it — and the box that
+// answers is the one the human aimed at.
+func TestClickInsideTheInspectorSurvivesTheReportDismissal(t *testing.T) {
+	m := bothPanesModel(t, 30)
+	paneTop, h, ok := m.inspectorPaneRect()
+	if !ok {
+		t.Fatal("the pane is not on the frame")
+	}
+
+	after := step(t, m, leftClick(10, paneTop+h/2))
+
+	if !after.inspector.open {
+		t.Error("a click inside the /inspect pane closed it")
+	}
+	if after.usagePane.open {
+		t.Error("the click left the report up; a click outside the report dismisses it")
+	}
+	if after.sel.active || after.transcriptSel.active {
+		t.Errorf("the click armed a selection beneath the pane: prompt %+v, transcript %+v",
+			after.sel, after.transcriptSel)
+	}
+}
+
+// A row the pre-click frame drew as chrome names no transcript line, whatever the frame left by the
+// dismissal maps it to. Over a ring too short for the pane to regrow into them, the rows both panes
+// give back go to the TRANSCRIPT — so the gap row above the report becomes a content row in the
+// model the rest of the chain runs on, and selecting there would copy a line the human never saw at
+// that Y.
+func TestClickOnAVacatedRowSelectsNoTranscriptLine(t *testing.T) {
+	m := bothPanesModel(t, 1)
+	usageTop, _, ok := m.usagePaneRect()
+	if !ok {
+		t.Fatal("the report is not on the frame")
+	}
+	y := usageTop - gapHeight
+	if _, _, ok := m.pointTranscriptRow(10, y); ok {
+		t.Fatalf("precondition: the pre-click frame already names a transcript row at y=%d", y)
+	}
+	if _, _, ok := m.dismissUsage().dismissInspector().pointTranscriptRow(10, y); !ok {
+		t.Fatalf("precondition: y=%d is no transcript row once both panes are dismissed either", y)
+	}
+
+	after := step(t, m, leftClick(10, y))
+
+	if after.usagePane.open || after.inspector.open {
+		t.Errorf("the click left a pane up: report %v, inspector %v", after.usagePane.open, after.inspector.open)
+	}
+	if after.transcriptSel.active {
+		t.Errorf("the click selected a transcript row the pre-click frame drew as chrome: %+v",
+			after.transcriptSel)
+	}
+}

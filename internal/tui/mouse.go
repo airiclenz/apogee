@@ -380,17 +380,28 @@ func selectionText(value string, a, b int) string {
 //
 // The pane is asked FIRST because it is drawn over the transcript, and only for its own rows: it takes
 // no more of the frame than its list needs, so the transcript above it keeps its pointer.
+//
+// Every GEOMETRY question the chain asks is put to the PRE-CLICK frame — pre below, the Model value as
+// it stood when the button went down (the Model is a value, ADR 0011, so the copy is the snapshot) —
+// while every state predicate and every mutation runs on the live model. The distinction is load-bearing
+// because a dismissal re-lays the frame under the very click that caused it: the transcript-side slot is
+// bottom-anchored (frameOverlays.transcriptRows), so dropping the /usage report grows the /inspect pane
+// UPWARD, and the transcript grows back down into whatever neither pane takes. Asked of the mutated
+// model, the next rect in the chain is a frame the human never clicked on. So a click landing where a
+// dismissed pane WAS drawn only dismisses: it is never claimed by the box that grew there, and it never
+// names a transcript row the pre-click frame did not show at that Y.
 func (m Model) handleMouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
 	if msg.Button != tea.MouseLeft {
 		return m, nil
 	}
-	if next, claimed := m.handleSettingsClick(msg); claimed {
+	pre := m // the frame the click was aimed at; every rect below is resolved against it
+	if next, claimed := m.handleSettingsClick(pre, msg); claimed {
 		return next, nil
 	}
 	m.settings.sel = promptSel{} // the pane did not claim this click: its highlight goes, as the other two would
 	// The /usage report is asked next and answers in a different currency: a click on it is swallowed,
 	// and a click anywhere else DISMISSES it and then goes on to whatever it named (handleUsageClick).
-	usage, claimed := m.handleUsageClick(msg)
+	usage, claimed := m.handleUsageClick(pre, msg)
 	if claimed {
 		return usage, nil
 	}
@@ -398,13 +409,13 @@ func (m Model) handleMouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
 	// The /inspect pane answers in the same currency (handleInspectorClick), and it is the one pane
 	// that can be up BESIDE the report — View draws it under the report, in the same slot — so it is
 	// asked right after it, in the order the two are drawn in.
-	inspector, claimed := m.handleInspectorClick(msg)
+	inspector, claimed := m.handleInspectorClick(pre, msg)
 	if claimed {
 		return inspector, nil
 	}
 	m = inspector
 	if m.inputEditable() {
-		if visRow, visCol, ok := m.pointInputRow(msg.X, msg.Y); ok {
+		if visRow, visCol, ok := pre.pointInputRow(msg.X, msg.Y); ok {
 			m.transcriptSel = transcriptSel{} // the prompt claims it: drop any transcript selection
 			m.dropRecall()                    // a click IN the box is acting in it: the arrows go back to the caret
 			off := m.caretTo(visRow, visCol)
@@ -416,7 +427,7 @@ func (m Model) handleMouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 	}
-	if line, col, ok := m.pointTranscriptRow(msg.X, msg.Y); ok {
+	if line, col, ok := pre.pointTranscriptRow(msg.X, msg.Y); ok {
 		m.sel = promptSel{} // the transcript claims it: drop any prompt selection
 		m.transcriptSel = transcriptSel{
 			active: true,
@@ -991,12 +1002,15 @@ func (m Model) settingsTextCaretAt(p settingsTextPaint, x, y int) (int, bool) {
 // the glyph under the pointer and arms a collapsed selection there, exactly as a click in the value
 // buffer does. claimed is false off the field's own lines, which leaves the pane's chrome — and the
 // transcript above a short pane — to whoever else wants the click.
-func (m Model) handleSettingsTextClick(msg tea.MouseClickMsg) (Model, bool) {
-	paint, ok := m.settingsTextPaint()
+//
+// pre is the pre-click frame the field's own geometry is read from (handleMouseClick); the caret and
+// the selection are seated on the live model.
+func (m Model) handleSettingsTextClick(pre Model, msg tea.MouseClickMsg) (Model, bool) {
+	paint, ok := pre.settingsTextPaint()
 	if !ok {
 		return m, false
 	}
-	off, ok := m.settingsTextCaretAt(paint, msg.X, msg.Y)
+	off, ok := pre.settingsTextCaretAt(paint, msg.X, msg.Y)
 	if !ok {
 		return m, false
 	}
@@ -1080,11 +1094,15 @@ func (m Model) highlightSettingsText(view string, place popupPlacement) string {
 // the surface the keyboard is already on. The converse is the caller's, and it is the half a live
 // selection makes silent: a click the pane does NOT claim drops the pane's own span, or the field's
 // highlight would keep answering every motion and every release taken elsewhere on the frame.
-func (m Model) handleSettingsClick(msg tea.MouseClickMsg) (Model, bool) {
+//
+// pre is the pre-click frame the pane's rows are placed from (handleMouseClick). It is the same value
+// as the receiver while this is the FIRST handler in the chain, and it is written down anyway: the one
+// invariant the chain holds is that no rect in it is ever read off a model a dismissal has moved.
+func (m Model) handleSettingsClick(pre Model, msg tea.MouseClickMsg) (Model, bool) {
 	if m.settings.kind == settingsTextEditor {
-		return m.handleSettingsTextClick(msg) // the field IS the pane there: its own geometry answers
+		return m.handleSettingsTextClick(pre, msg) // the field IS the pane there: its own geometry answers
 	}
-	paint, ok := m.settingsPaint()
+	paint, ok := pre.settingsPaint()
 	if !ok {
 		return m, false
 	}
@@ -1098,7 +1116,7 @@ func (m Model) handleSettingsClick(msg tea.MouseClickMsg) (Model, bool) {
 		if display != paint.display.selected {
 			break // another row: the buffer stays where it is, and the click is swallowed
 		}
-		off := m.settingsCaretAt(max(0, msg.X-m.settingsValueX(paint.display)))
+		off := pre.settingsCaretAt(max(0, msg.X-pre.settingsValueX(paint.display)))
 		m.settings.editor.caretToRune(off)
 		m.settings.sel = promptSel{active: true, anchorOff: off, headOff: off}
 	case m.settings.kind == settingsKeyList:
@@ -1334,8 +1352,11 @@ func (m Model) usageWindow() (usageWindow, bool) {
 // nothing happens — a report has nothing to click ON, and swallowing the press is what keeps it from
 // arming a drag across the transcript underneath — and outside it the report is dismissed and the
 // click goes on to name whatever it landed on. claimed says only which of the two it was.
-func (m Model) handleUsageClick(msg tea.MouseClickMsg) (Model, bool) {
-	y0, h, ok := m.usagePaneRect()
+//
+// The box is the one pre drew — the pre-click frame (handleMouseClick) — and the dismissal is applied
+// to the live receiver.
+func (m Model) handleUsageClick(pre Model, msg tea.MouseClickMsg) (Model, bool) {
+	y0, h, ok := pre.usagePaneRect()
 	if !ok {
 		return m, false
 	}
@@ -1380,9 +1401,14 @@ func (m Model) usageWheel(msg tea.MouseWheelMsg) (Model, bool) {
 //
 // The two panes are the only ones in the frame that can be up TOGETHER (View), and the report is
 // asked first (handleMouseClick), so a click on this pane dismisses the report before it reaches
-// here. That order is the safe one: the slot is bottom-anchored (frameOverlays.transcriptRows), so
-// this pane's bottom edge is fixed and losing the report above it can only grow the box UPWARD — a
-// point inside the box the human clicked is still inside the box that answers.
+// here. What makes that order safe is the PRE-CLICK frame, not the geometry: the slot is
+// bottom-anchored (frameOverlays.transcriptRows), so this pane's bottom edge is fixed and losing the
+// report above it grows the box UPWARD — by MORE rows than the report was drawn on whenever the
+// report was drawn shorter than its grant (frameRowPlan), because the whole grant goes back into the
+// division. Resolved against the already-dismissed model, the regrown box would swallow a click the
+// human aimed at the gap row or the transcript above it. So the rect this handler tests is the one
+// the frame drew when the button went down, and a click in the band the box grew into falls through
+// to the dismissal it was aimed at.
 
 // inspectorPaneRect is where the open /inspect pane is drawn: the screen row its top border lands on
 // and how many rows it takes. ok is false when it is not on the frame at all — closed, or given way
@@ -1446,8 +1472,11 @@ func (m Model) inspectorWindow() (inspectorWindow, bool) {
 // keeps it from arming a drag across the transcript underneath — and outside it the pane is
 // dismissed and the click goes on to name whatever it landed on. claimed says only which of the two
 // it was.
-func (m Model) handleInspectorClick(msg tea.MouseClickMsg) (Model, bool) {
-	y0, h, ok := m.inspectorPaneRect()
+//
+// The box is the one pre drew — the pre-click frame (handleMouseClick) — which is what keeps a click
+// in the band this pane REGROWS into, once the report above it is dismissed, out of its rectangle.
+func (m Model) handleInspectorClick(pre Model, msg tea.MouseClickMsg) (Model, bool) {
+	y0, h, ok := pre.inspectorPaneRect()
 	if !ok {
 		return m, false
 	}

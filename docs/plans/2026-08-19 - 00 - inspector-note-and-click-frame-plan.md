@@ -110,7 +110,21 @@ go vet ./internal/tui/ && go test ./internal/tui/
 
 ---
 
-## 2. Resolve mouse-click geometry against the pre-click frame
+## 2. Resolve mouse-click geometry against the pre-click frame — ✅ DONE (2026-08-19)
+
+NOTES (2026-08-19): the item's Files line omits `internal/tui/model.go`, but the item text asks for the
+added line on the `frameOverlays` purity comment there, so that file is in the change set.
+NOTES (2026-08-19): the pre-click value is threaded as an extra `pre Model` parameter on
+`handleSettingsClick`, `handleSettingsTextClick`, `handleUsageClick` and `handleInspectorClick` (the
+shape the item left to the implementer); `pointInputRow` and `pointTranscriptRow` are called on `pre`
+directly from `handleMouseClick`. For the settings pair `pre` is still the receiver's own value — that
+handler runs before any mutation — and it is written down anyway so the chain holds one invariant.
+NOTES (2026-08-19): removing the last bullet leaves the standing `## Open defects` H2 with no content;
+the item asked only for the `### Run residuals …` H3 and its one-line intro to go, and the Conventions
+section declares that H2 as one of the file's two permanent sections, so it stays.
+NOTES (2026-08-19): the out-of-scope check on the wheel chain was made — `settingsWheel`, `usageWheel`
+and `inspectorWheel` swallow or pass a notch and dismiss nothing, so there is no wheel-side dismissal
+to defer.
 
 Depends on item 1 (both items edit the same `ISSUES.md` section; this one removes its remainder).
 
