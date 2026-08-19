@@ -23,25 +23,6 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 
 ## Open defects
 
-### No test drives `move_file`'s copy-then-remove fallback route
-
-**Status:** [P] open 2026-08-19 — residual of the undo plan (item 3), verified manually during the
-run. Planned 2026-08-19:
-`docs/plans/2026-08-19 - 02 - issues-defects-and-ledger-slimming-plan.md` item 2.
-
-`move` (`internal/tools/file_ops.go:203`) has two routes — the `SafeRename` fast path and the
-`SafeCopyFileFrom` + `SafeRemove` fallback, which an approved escape (ADR 0049) makes the real
-route — and item 3 requires both to journal identically. The suite pins only the rename path:
-`TestMoveFileJournalsBothEnds` (`internal/tools/undo_journal_test.go:384`) and
-`TestMoveFileClobberingJournalsThePreImage` (`internal/tools/undo_journal_test.go:414`) both move
-within the workspace. The one fallback-adjacent test asserts only that the fallback must NOT run
-for an unpermitted refusal (`internal/tools/file_ops_test.go:584`). Neither the fallback landing
-successfully nor the split failure the same doc comment describes — the copy landing while the
-removal is refused, which must record the destination alone
-(`internal/tools/file_ops.go:226`) — is covered.
-
----
-
 ## Parked / deferred work
 
 Live, deliberately deferred work only. Each entry records *enough* design that we don't re-derive

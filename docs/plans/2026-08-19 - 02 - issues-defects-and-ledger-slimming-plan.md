@@ -98,7 +98,13 @@ implements (ratified call 1), then remove the defect entry.
 
 ---
 
-## 2. Pin `move_file`'s copy-then-remove fallback in tests, close defect 2
+## 2. Pin `move_file`'s copy-then-remove fallback in tests, close defect 2 — ✅ DONE (2026-08-19)
+
+NOTES (2026-08-19): both deliverables landed in `internal/tools/undo_journal_test.go` and `internal/tools/file_ops_test.go` was left untouched — each test's binding assertion is the journal's record shape, which is that file's stated subject, and splitting one scenario's fixture across two files would have duplicated it.
+
+NOTES (2026-08-19): the split failure is induced by a filesystem arrangement (the source's parent directory chmod'd 0555 so the unlink is refused), the item's explicitly-allowed mechanical choice; it skips on Windows and when running as root, where the write bit does not bind.
+
+NOTES (2026-08-19): the fallback calls `security.SafeCopyFile`, not `SafeCopyFileFrom` as the item's text says — `SafeCopyFile` is that function's equal-roots wrapper, so the route is the one the item names.
 
 **What:** Add the two missing tests the defect entry names, both driving the fallback route in
 `move` (`internal/tools/file_ops.go`) — the route an approved escape (ADR 0049) makes the real

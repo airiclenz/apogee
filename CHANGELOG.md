@@ -170,6 +170,10 @@ point is a **minor** bump, not a breaking change.
   lexical-fence rationale; the rationale itself stays at `journalTarget`'s doc comment. No behavior
   change.
 
+- Tests: `move_file`'s copy-then-remove fallback is now pinned on both routes — an approved
+  out-of-workspace escape (ADR 0049) journals the same two records the rename path leaves, and a
+  split failure (copy landed, removal refused) journals the destination alone.
+
 ## [0.15.0] — 2026-08-16
 
 ### Added

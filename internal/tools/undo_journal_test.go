@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
@@ -288,6 +289,37 @@ func journalledChanges(t *testing.T, tool domain.Tool, args map[string]any) (*un
 	return journal, step.Changes
 }
 
+// journalledEscape is journalledChanges for an APPROVED out-of-workspace call (ADR 0049): the
+// permit rides on the same context as the journal, because a record that must carry a permit can
+// only be written by a call that actually ran under one.
+func journalledEscape(t *testing.T, target string, tool domain.Tool, args map[string]any) (*undo.Journal, []undo.Change) {
+	t.Helper()
+
+	journal := undo.New()
+	result := runWrite(t, undo.WithJournal(escapePermit(target), journal), tool, args)
+	if result.IsError {
+		t.Fatalf("the approved escape was refused: %q", result.Content)
+	}
+
+	step, ok := journal.Preview()
+	if !ok {
+		t.Fatal("the mutation left no undo step")
+	}
+	return journal, step.Changes
+}
+
+// lockDirectory makes dir readable and traversable but not writable, so an unlink INSIDE it is
+// refused while every other half of the move still works. The permissions are put back before the
+// temp tree is torn down, since a read-only directory would defeat that cleanup too.
+func lockDirectory(t *testing.T, dir string) {
+	t.Helper()
+
+	if err := os.Chmod(dir, 0o555); err != nil {
+		t.Fatalf("chmod %s: %v", dir, err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+}
+
 // assertChange fails unless the change at index i names path and plans action.
 func assertChange(t *testing.T, changes []undo.Change, i int, path string, action undo.Action) {
 	t.Helper()
@@ -436,6 +468,99 @@ func TestMoveFileClobberingJournalsThePreImage(t *testing.T) {
 	}
 	if got, _ := readOrAbsent(t, destination); got != "displaced bytes" {
 		t.Errorf("destination after undo = %q, want the displaced bytes back", got)
+	}
+}
+
+// TestMoveFileFallbackJournalsBothEndsLikeTheRename drives the route an approved escape
+// (ADR 0049) makes the real one. One rename is one syscall through one pinned root, so it can
+// never span the workspace fence and a permitted target outside it; the copy-then-remove pair is
+// the only way that move can happen. The pair is a different pair of syscalls, not a different
+// contract: it must leave the SAME two records the rename leaves — the source with the pre-image
+// bytes and no post-image, the destination the move created — and the destination's record must
+// carry the permit, or the undo could not reach back out to take it away.
+func TestMoveFileFallbackJournalsBothEndsLikeTheRename(t *testing.T) {
+	t.Parallel()
+
+	root := tempRoot(t)
+	source := filepath.Join(root, "from.txt")
+	destination := filepath.Join(tempRoot(t), "landed.txt")
+	writeFixtureFile(t, source, "moved bytes")
+
+	journal, changes := journalledEscape(t, destination, NewMoveFile(root), map[string]any{
+		"source": "from.txt", "destination": destination,
+	})
+	if len(changes) != 2 {
+		t.Fatalf("the fallback recorded %d changes, want both ends: %+v", len(changes), changes)
+	}
+	assertChange(t, changes, 0, source, undo.ActionRestore)
+	assertChange(t, changes, 1, destination, undo.ActionDelete)
+
+	revertCleanly(t, journal)
+
+	if got, exists := readOrAbsent(t, source); !exists || got != "moved bytes" {
+		t.Errorf("source after undo = %q (exists %v), want the moved bytes back", got, exists)
+	}
+	if _, exists := readOrAbsent(t, destination); exists {
+		t.Error("destination still exists after undo, want the fallback's own file removed")
+	}
+}
+
+// TestMoveFileFallbackSplitFailureJournalsTheDestinationAlone pins the fallback's own failure
+// mode, the one the rename cannot have: its two halves can land apart. With the copy landed and
+// the removal refused — here by a source directory the process may read but not write — the file
+// really is at both ends, so the journal records the destination ALONE. A source record here
+// would promise to put back a file that never left, and the undo would then write over the
+// source it was meant to rescue.
+func TestMoveFileFallbackSplitFailureJournalsTheDestinationAlone(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("a read-only directory does not refuse an unlink on Windows")
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores a directory's missing write bit")
+	}
+	t.Parallel()
+
+	root := tempRoot(t)
+	locked := filepath.Join(root, "locked")
+	source := filepath.Join(locked, "from.txt")
+	destination := filepath.Join(tempRoot(t), "landed.txt")
+	writeFixtureFile(t, source, "moved bytes")
+	lockDirectory(t, locked)
+
+	journal := undo.New()
+	result := runWrite(t, undo.WithJournal(escapePermit(destination), journal), NewMoveFile(root),
+		map[string]any{"source": "locked/from.txt", "destination": destination})
+
+	if !result.IsError {
+		t.Fatalf("a refused removal must be reported to the model, got %q", result.Content)
+	}
+	if !strings.Contains(result.Content, "could not remove the source") {
+		t.Errorf("failure = %q, want it to name the half that did not happen", result.Content)
+	}
+	if got, _ := readOrAbsent(t, destination); got != "moved bytes" {
+		t.Errorf("destination = %q, want the copy that did land", got)
+	}
+	if got, exists := readOrAbsent(t, source); !exists || got != "moved bytes" {
+		t.Errorf("source = %q (exists %v), want it still in place", got, exists)
+	}
+
+	step, ok := journal.Preview()
+	if !ok {
+		t.Fatal("the half that landed left no undo step")
+	}
+	if len(step.Changes) != 1 {
+		t.Fatalf("the split failure recorded %d changes, want the destination alone: %+v",
+			len(step.Changes), step.Changes)
+	}
+	assertChange(t, step.Changes, 0, destination, undo.ActionDelete)
+
+	revertCleanly(t, journal)
+
+	if _, exists := readOrAbsent(t, destination); exists {
+		t.Error("destination still exists after undo, want the copy that landed taken back")
+	}
+	if got, _ := readOrAbsent(t, source); got != "moved bytes" {
+		t.Errorf("source after undo = %q, want it untouched throughout", got)
 	}
 }
 
