@@ -559,7 +559,26 @@ update any test that pins the old hex values.
 
 No dependencies. (May run any time; listed late so the palette lands with its feature.)
 
-## 12. Docs: tool-layout pointers and the IDEAS closure
+## 12. Docs: tool-layout pointers and the IDEAS closure — ✅ DONE (2026-08-19)
+
+NOTES (2026-08-19): `IDEAS.md` was edited as the item asks — the `[P]` split-diff item is
+removed — but the file is GITIGNORED (`.gitignore:10`), so it cannot be staged and is left out
+of the FILES list above: a bare `git add IDEAS.md` errors and would break the item's commit.
+The commit is `docs/layout/tool-layout.md` alone; the IDEAS.md change is real in the working
+tree and is what the item's second acceptance grep reads.
+NOTES (2026-08-19): the item's second acceptance criterion — `grep -ci "diff" IDEAS.md` reports
+0 — cannot reach 0 and reports 1: the file's own CONVENTIONS prose (IDEAS.md:8, "how an item's
+text and its landed change differ") matches case-insensitively on the word "differ". No diff
+ITEM remains; `grep -ciw "diff" IDEAS.md` reports 0. The conventions prose was left untouched —
+rewording it is not this item's scope and would damage the file's own rules text.
+NOTES (2026-08-19): the `multi_find_and_replace` stat cell was amended to `+A −R` per this
+dispatch's binding DECISION (item 5 landed the typed stat), with the argument-derived
+`N changes` kept in the cell as the no-regions fallback, which is what item 5's own note records.
+NOTES (2026-08-19): `git_diff_range`'s pointer cell also names its per-file-section header row
+(ratified call 10, landed by item 9) — the one way that row's body differs from the other four.
+NOTES (2026-08-19): no CHANGELOG entry — this item ships no user-visible behavior, and the
+IDEAS closure's trail is the run's existing `[Unreleased]` entries, exactly as the item's text
+says ("the run's CHANGELOG entries are the closed trail").
 
 **What:**
 - `docs/layout/tool-layout.md`: the per-tool table's five diff rows

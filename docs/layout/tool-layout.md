@@ -267,9 +267,9 @@ its body whole while collapsed, and it appears only when the two differ.
 |---|---|---|---|---|
 | read_file | Read | path (`:12–80` when ranged, `· locate "…"` when set) | `N lines` | the located lines (`Located "…" on lines: …`) when locate is set, else — |
 | write_file | Write | path | `N lines` | the written content |
-| edit_existing_file | Edit | path | `+A −R` | diff of the change |
-| single_find_and_replace | Replace | path | `+A −R` | diff of the change |
-| multi_find_and_replace | Replace | path | `N changes` | diff of the changes |
+| edit_existing_file | Edit | path | `+A −R` | split/stacked diff, see `split-diff-layout.md` |
+| single_find_and_replace | Replace | path | `+A −R` | split/stacked diff, see `split-diff-layout.md` |
+| multi_find_and_replace | Replace | path | `+A −R` (`N changes` when the result records no regions) | split/stacked diff, see `split-diff-layout.md` |
 | copy_file | Copy | source `→` destination | — | full paths |
 | move_file | Move | source `→` destination | — | full paths |
 | delete_file | Delete | path | — | — |
@@ -283,8 +283,8 @@ its body whole while collapsed, and it appears only when the two differ.
 | git_log | Git log | ref | `N commits` | one line per commit |
 | git_branch | Git branch | action + branch name | — | command output |
 | git_commit | Git commit | message subject | short hash | full message + committed files |
-| git_diff_range | Git diff | `base..head` | `+A −R` | stat list / diff |
-| view_diff | Diff preview | path | `+A −R` | the diff |
+| git_diff_range | Git diff | `base..head` | `+A −R` | split/stacked diff, one header row per file section, see `split-diff-layout.md` |
+| view_diff | Diff preview | path | `+A −R` | split/stacked diff, see `split-diff-layout.md` |
 | diagnostics | Diagnostics | path | `N issues` / `clean` | one line per issue |
 | http_request | HTTP | METHOD + URL | `status · size` | response headers + body head |
 | web_fetch | Fetch | URL | size | extracted text head |
@@ -294,6 +294,18 @@ its body whole while collapsed, and it appears only when the two differ.
 | sub_agent | Sub-agent | its name (task head fallback) | `scheduled` before it starts, else `N steps · done/failed` | task text + result summary |
 
 Notes:
+- **2026-08-19** — the five diff-bodied rows above now render through
+  `split-diff-layout.md` (Split diff where the width allows, Stacked diff below
+  it), delivered by
+  `docs/plans/2026-08-19 - 03 - split-diff-display-plan.md` and ratified by
+  ADR 0052. Three things read differently than this table did before:
+  `git_diff_range`'s body is parsed and coloured — it was plain, uncoloured tool
+  output — and a body the parser cannot read in full falls back to that plain
+  rendering; expanded `view_diff` no longer paints the whole file, it
+  paints the changed regions with up to 3 context lines each side (ADR 0052 §2,
+  deliberate); and `multi_find_and_replace`'s stat moved from `N changes` to
+  `+A −R`, because the tool now records Edit regions and the slot reads their
+  stat, keeping the argument-derived `N changes` only when a result carries none.
 - git_commit never promotes its one-line output into the slot at any width: the
   line repeats the subject the row already leads with, so the slot holds the
   short hash above and the line lays out in the body.
