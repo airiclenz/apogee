@@ -214,7 +214,7 @@ to the loading rules this record decides:
   warm orange `#FFB050` (`51e9f65`), so a synthesized `+N more lines` marker never reads as a line
   of the body it counts.
 - **`tool-header`** is a role the pre-record palette had no counterpart for: added as the 25th key
-  of what is a 29-key vocabulary today (the four roles after it are recorded in the 2026-08-15
+  of what is a 31-key vocabulary today (the roles after it are recorded in the 2026-08-15
   amendment below), by `docs/plans/2026-08-08 - 00 - tool-header-color-role-plan.md`, to split the
   tool-call header label and the sub-agent rail off the `code` role they used to borrow. It landed
   carrying the old `#f0883e` (`4c3b8b9`) and ships `#FFD060`, a gold (`4b7a120`).
@@ -236,9 +236,16 @@ The amendment above carries the role trail only as far as `tool-header`, the 25t
 roles have landed since, each one additive in exactly the sense this record decides — a new key an
 absent scheme file silently inherits (decision 3), so no user scheme broke on any of them — and
 each one either splitting a tone off a role that used to carry two meanings or naming a meaning the
-palette had no word for. The vocabulary stands at **29 keys** at HEAD, which is what
-`internal/scheme/scheme.go`'s `Scheme` struct declares and `roleKeys` derives; the four are recorded
-here in landing order.
+palette had no word for. The vocabulary stands at **31 keys** at HEAD, which is what
+`internal/scheme/scheme.go`'s `Scheme` struct declares and `roleKeys` derives: these four take it to
+29, and two more followed in the same additive sense — `diff-add-bg` and `diff-del-bg`, the
+background band a diff BODY line sits on, split off the `diff-add` / `diff-del` foreground pair so
+the added/removed signal rides the band (letting the text keep the plain detail tone of its block
+state and the band run the full row width) while that pair keeps the markers, the stat summaries and
+every other use of diff colour outside a body line. They landed together as the 30th and 31st keys
+(`c4adb46`), shipping `#0e3b34` / `#42181d` in `dark` and `#d9f2ec` / `#fbe4e6` in `light` — both
+bands quiet and in their foreground role's hue family, so the turquoise-vs-red pairing still survives
+red-green-weak vision. The four this amendment records follow in landing order.
 
 - **`tool-leader`** is the dotted `⋯` run carrying the eye from a tool row's target to the outcome
   slot right-aligned at the row's edge — split off `muted`, the tone the `▶`/`▼` indicator beside it
