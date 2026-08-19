@@ -79,7 +79,12 @@ Author calls (plan author, 2026-08-19, each forced or strongly constrained by th
 
 ---
 
-## 1. The `internal/undo` journal library
+## 1. The `internal/undo` journal library — ✅ DONE (2026-08-19)
+
+NOTES (2026-08-19): `Record` takes a `Mutation` struct that adds `Root`, `Permitted` (ADR 0049) and `Perm` to the plan's record shape — `security.SafeWriteFile`/`SafeRemove` demand the fenced root and the permit, which the item authorises adapting for.
+NOTES (2026-08-19): the record takes the post-image BYTES and hashes them internally rather than a caller-supplied `PostHash`, so every call site hashes the same way; the stored field is the plan's `[32]byte`.
+NOTES (2026-08-19): the current-state read-back uses `security.SafeReadFile` pinned at the workspace root, or — for an approved out-of-workspace target, since security's read primitives take no permit by design — at the target's own parent directory; an unopenable fence root is read as "absent", which errs toward skipping.
+NOTES (2026-08-19): unstated details settled here — constructor is `undo.New()`; `Revert` on an empty journal returns the `ErrNothingToUndo` sentinel; a per-path restore/removal that FAILS is reported as a skip carrying the refusal instead of aborting the revert; a `Revert` closes the current group so the next `Record` starts a new one.
 
 **What:** New package `internal/undo` — one deep module, no wiring, no engine imports.
 

@@ -8,6 +8,22 @@ point is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+### Added
+
+- **A per-exchange pre-image journal (`internal/undo`), the mechanism behind the coming `/undo`.**
+  Every mutation the write funnel performs can now be recorded as the bytes it replaced (the
+  pre-image) plus a SHA-256 of what it left, grouped per Exchange — one instruction to the agent,
+  however many tool calls it took. Groups materialize lazily, so an Exchange that wrote nothing
+  never becomes a step the human has to walk past, and one entry per path per group (first
+  pre-image wins, last post-state wins) encodes create, overwrite, delete and both halves of a
+  move without a per-verb case. `Preview` classifies the top group against the filesystem as it is
+  now — restore, delete, or skip — and `Revert` executes it through the same fenced primitives the
+  tools write through (`security.SafeWriteFile` / `SafeRemove`), so an undo can never reach further
+  than the write it reverses. A file the human edited after the agent wrote it is skipped with a
+  reason rather than overwritten; a generation stamp lets a caller prove the journal has not moved
+  between a preview and its confirmation. The journal is per process and in memory only, holds no
+  redo, and is not yet wired to the engine or the TUI.
+
 ### Fixed
 
 - **A click in the band the `/inspect` pane grows into now falls through instead of being swallowed.**
