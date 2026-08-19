@@ -128,7 +128,13 @@ increments; concurrent `Record` from multiple goroutines is race-clean.
 
 ---
 
-## 2. Engine owns the journal; the main write funnel records pre-images
+## 2. Engine owns the journal; the main write funnel records pre-images — ✅ DONE (2026-08-19)
+
+NOTES (2026-08-19): the journal reaches the funnel through a new context seam, `internal/undo/context.go` (`WithJournal` / `FromContext`) — the same shape `ConfinementBox` and the write-escape permit already use, which the item's "the same way the ConfinementBox already reaches a tool call" text asks for. It is the threading file the `undo` package needed; item 1's "no wiring" stands for `journal.go` itself, which is untouched.
+NOTES (2026-08-19): the journal is installed on the execution context in `executeTool` (dispatch.go) for EVERY call rather than only for workspace-scoped writers — that is what keeps the coverage boundary the funnel itself rather than a second list of tools kept in dispatch.
+NOTES (2026-08-19): a record's `Path` is the path the argument NAMES (root-joined and cleaned), not its symlink-resolved twin, because `internal/security`'s fenced primitives relativise lexically against the workspace root — a resolved path would be refused as an escape on any host whose root is reached through a symlink (macOS `/tmp`). The approved out-of-workspace escape is the one exception and records the resolved permitted target, recognised by exactly the test `escapeTargetPin` uses.
+NOTES (2026-08-19): a pre-image that cannot be READ for any reason other than the file being absent is not journalled at all (the write still proceeds) — recording a guessed pre-image would make a later undo destroy content instead of restoring it.
+NOTES (2026-08-19): `Agent.journal` is documented as optional (nil = nothing recording) and the one `BeginGroup` site guards for nil, so a hand-built `Agent` value cannot panic in the loop.
 
 Depends on item 1.
 

@@ -24,6 +24,13 @@ point is a **minor** bump, not a breaking change.
   between a preview and its confirmation. The journal is per process and in memory only, holds no
   redo, and is not yet wired to the engine or the TUI.
 
+- **Undo journal capture: the engine now owns one in-memory `undo.Journal` for its lifetime**
+  and opens a new group at every Exchange boundary (an interjection joins the group already
+  open). The shared write funnel records a pre-image before each mutation and commits the
+  record only after the write succeeds, so `write_file`, `edit_existing_file`,
+  `single_find_and_replace` and `multi_find_and_replace` are all covered at one seam. The
+  journal is live host state and is never serialized into a session snapshot.
+
 ### Fixed
 
 - **A click in the band the `/inspect` pane grows into now falls through instead of being swallowed.**

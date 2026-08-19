@@ -2,11 +2,13 @@ package tools
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/security"
+	"github.com/airiclenz/apogee/internal/undo"
 )
 
 // Path-safety is consolidated into the shared internal/security guard (P3.6 / D6):
@@ -59,8 +61,19 @@ func confinementBox(ctx context.Context) *domain.ConfinementBox {
 // every ordinary call, so the workspace root alone bounds the write exactly as it always did,
 // and otherwise the ONE resolved path the operator was shown and approved — which security
 // re-resolves the argument against before anything lands.
+//
+// It is also where the undo journal takes its pre-image (ADR 0051): the bytes this write is
+// about to replace are read BEFORE the mutation and recorded only AFTER it succeeded, so a
+// refused write journals nothing. Because every content-writing verb — write_file,
+// edit_existing_file, single_find_and_replace, multi_find_and_replace — reaches the filesystem
+// through here, that is one capture site rather than four.
 func safeWriteFile(ctx context.Context, input, root string, data []byte, perm os.FileMode) error {
-	return security.SafeWriteFile(root, input, data, perm, writeEscapeTarget(ctx))
+	pre := capturePreImage(ctx, input, root)
+	if err := security.SafeWriteFile(root, input, data, perm, writeEscapeTarget(ctx)); err != nil {
+		return err
+	}
+	pre.commit(data, true, perm)
+	return nil
 }
 
 // safeReadFile reads input within root through the shared TOCTOU-safe guard, with the
@@ -189,4 +202,115 @@ func escapeTargetPin(ctx context.Context, input, root string) (pinInput, pinRoot
 		return "", "", true
 	}
 	return filepath.Base(target.Real), parent, false
+}
+
+// ----------------------------------------------------------------------------
+// The undo journal (ADR 0051)
+// ----------------------------------------------------------------------------
+//
+// `/undo` restores what the agent's writes replaced, and the only bytes that can do that are
+// the ones that were there BEFORE the write. So the funnel reads them on the way in, holds
+// them while the mutation runs, and hands them to the journal only once the mutation has
+// actually landed. The two halves are deliberately separate calls: everything that could go
+// wrong — a fence refusal, a symlinked parent, a full disk — happens between them, and each
+// of those must leave the journal untouched, because a record claiming a change that never
+// happened would make a later undo write stale bytes over a file nobody edited.
+//
+// Nothing here is a precondition of the write. A call outside an engine, or under an engine
+// that keeps no journal, produces a nil preImage whose commit does nothing, and the mutation
+// behaves byte-for-byte as it did before this existed.
+
+// preImage is one pending journal record: what a mutation is about to replace, plus the
+// fencing context (root and approved-escape permit) a revert has to go back through to reach
+// the same file the write reached. It exists only between the capture and the commit.
+type preImage struct {
+	journal   *undo.Journal
+	root      string
+	path      string
+	permitted string
+	data      []byte
+	existed   bool
+}
+
+// capturePreImage reads the current bytes of the file a mutation of input under root is about
+// to change, through the same fence THAT mutation writes through (readWriteTarget, which
+// follows an approved escape to its permitted target and nowhere else).
+//
+// It answers nil — journal nothing — in three cases: no journal is recording, the argument
+// names no inspectable target, or the current bytes could not be read for any reason OTHER
+// than the file being absent. The last one is the load-bearing refusal: a pre-image that is a
+// guess would make a later undo destroy content rather than restore it, so an unreadable
+// target is left out of the journal entirely and the write proceeds unchanged.
+func capturePreImage(ctx context.Context, input, root string) *preImage {
+	journal := undo.FromContext(ctx)
+	if journal == nil {
+		return nil
+	}
+	path, permitted := journalTarget(ctx, input, root)
+	if path == "" {
+		return nil
+	}
+
+	data, err := readWriteTarget(ctx, input, root)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	return &preImage{
+		journal:   journal,
+		root:      root,
+		path:      path,
+		permitted: permitted,
+		data:      data,
+		existed:   err == nil,
+	}
+}
+
+// commit records the completed mutation against the pre-image this value captured. Call it
+// ONLY after the mutation succeeded — that ordering is the whole reason capture and commit are
+// two calls. post is the content the mutation left and exists says whether it left any (false
+// for a removal); perm is the mode a restore recreates an absent file with.
+//
+// A nil receiver is the "nothing is recording" case and does nothing, so a caller journals by
+// writing one unconditional line rather than by branching around the journal.
+func (p *preImage) commit(post []byte, exists bool, perm os.FileMode) {
+	if p == nil {
+		return
+	}
+	p.journal.Record(undo.Mutation{
+		Root:       p.root,
+		Path:       p.path,
+		Permitted:  p.permitted,
+		Perm:       perm,
+		Pre:        p.data,
+		PreExisted: p.existed,
+		Post:       post,
+		PostExists: exists,
+	})
+}
+
+// journalTarget answers the pair a journal record identifies this mutation by: the absolute
+// path that IS the record's identity, and the approved-escape permit a revert must carry to
+// reach it (empty for every ordinary write).
+//
+// The ordinary answer is the path the argument NAMES, root-joined and cleaned — not its
+// symlink-resolved twin — because that is the spelling internal/security's fenced primitives
+// take: they relativise it against the workspace root lexically, so a revert handed a resolved
+// path would be refused as an escape on any host whose root is itself reached through a
+// symlink (macOS /tmp). The approved escape is the one exception and takes the RESOLVED path,
+// because that is what the permit names and what the approval pane disclosed (ADR 0049) — and
+// it is recognised by exactly the test escapeTargetPin uses, so a record can never claim a
+// permit the write itself did not run under.
+func journalTarget(ctx context.Context, input, root string) (path, permitted string) {
+	target, ok := resolveTargetUnbounded(input, root)
+	if !ok {
+		return "", ""
+	}
+	permitted = writeEscapeTarget(ctx)
+	if permitted == "" || target.Real != filepath.Clean(permitted) {
+		return target.Named, ""
+	}
+	if _, err := resolveInRoot(input, root); err == nil {
+		return target.Named, ""
+	}
+	return target.Real, permitted
 }

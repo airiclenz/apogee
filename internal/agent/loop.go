@@ -76,6 +76,15 @@ func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 		// user message is appended) and flip inExchange (turn.go). The reorder of inExchange ahead
 		// of the Append is inert — no reader runs between the two.
 		a.turns.openExchange()
+		// And open the undo group this Exchange's writes will accumulate into (ADR 0051). It
+		// only MARKS the boundary — the group materializes on the first write after it, so an
+		// Exchange that changes no file never becomes an undo step the human has to walk past.
+		// This is the one site that opens one, which is what makes an interjection join the
+		// Exchange it steered rather than start a new step (ADR 0025 — it commits mid-Exchange
+		// and never reaches here), and what keeps a continuation Turn inside the same group.
+		if a.journal != nil {
+			a.journal.BeginGroup()
+		}
 		// Order: attached-skill blocks → @file-ref blocks → the user's text. Skills are
 		// per-turn instructions, so prepending them scopes them to this one message (the right
 		// semantics; it avoids a skill leaking into every later turn as a system-prompt edit).

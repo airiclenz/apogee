@@ -18,6 +18,7 @@ import (
 	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/security"
 	"github.com/airiclenz/apogee/internal/tools"
+	"github.com/airiclenz/apogee/internal/undo"
 )
 
 var (
@@ -117,6 +118,7 @@ func newAgent(cfg domain.Config, up provider.Responder) (*Agent, error) {
 		tracker:            newSelfRegulator(),
 		tokens:             apogeectx.NewTokenEstimator(),
 		prompts:            domain.NewPromptSlot(), // the one prompt surface this Agent tree queues on
+		journal:            undo.New(),             // the per-Exchange undo record, empty and per-process (ADR 0051)
 		now:                time.Now,               // the request-render clock for the system prompt's {{datetime}}
 	}
 	// Fill the context-file cache for this session's first boundary: construction. Every later

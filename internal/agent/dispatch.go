@@ -12,6 +12,7 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/security"
 	"github.com/airiclenz/apogee/internal/tools"
+	"github.com/airiclenz/apogee/internal/undo"
 )
 
 // dispatchOutcome reports whether a Turn's tool dispatch ran to completion or was cut short
@@ -771,6 +772,15 @@ func (a *Agent) executeTool(ctx context.Context, turn int, tool domain.Tool, cal
 		// is exactly the "fall back to the task" signal the prompt reads.
 		ctx = domain.WithSubAgentName(ctx, a.name)
 	}
+
+	// Install the undo journal for EVERY call (ADR 0051), the same way the box and the permit
+	// reach a tool: the shared write funnel is one os.Root-pinned rule with no engine of its
+	// own, so the thing it records into has to ride the execution context. Installing it
+	// unconditionally is what makes the coverage boundary the FUNNEL rather than a list kept
+	// here — a tool that writes through it is journalled, and a tool that reaches the
+	// filesystem some other way (a subprocess, an MCP server, a third-party tool) records
+	// nothing precisely because it never asks. A nil journal installs nothing.
+	ctx = undo.WithJournal(ctx, a.journal)
 
 	if box != nil {
 		// Install the Confinement handle so the subprocess tool confines the command it

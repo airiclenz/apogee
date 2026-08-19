@@ -49,4 +49,5 @@
 // Files:
 //   - doc.go — this map and the package's rationale.
 //   - journal.go — the Journal and its record, preview, and revert surface.
+//   - context.go — the context seam the engine hands the journal to the write funnel through.
 package undo

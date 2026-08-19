@@ -11,6 +11,7 @@ import (
 	"github.com/airiclenz/apogee/internal/processing"
 	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/security"
+	"github.com/airiclenz/apogee/internal/undo"
 )
 
 // ----------------------------------------------------------------------------
@@ -185,6 +186,14 @@ type Agent struct {
 	// nested agents all speak from the same bytes. It is not serialized: the resolved-live
 	// posture of ADR 0023 §6 means a resumed session re-reads the CURRENT files.
 	contextFiles []contextFile
+
+	// journal is the per-Exchange pre-image record behind the human's `/undo` (ADR 0051):
+	// what every funnel write replaced, grouped by the Exchange that caused it. It is LIVE
+	// HOST STATE, not session state (ADR 0022 §8) — in memory, for this process only, never
+	// serialized — so a resumed session starts with an empty one and cannot revert an earlier
+	// process's writes. newAgent always supplies it; a nil journal is the honest encoding of an
+	// engine that records nothing, and every reader treats it as such rather than as an error.
+	journal *undo.Journal
 
 	conv         domain.Conversation // serializable conversation state (ADR 0001)
 	pendingInput *domain.UserInput   // queued by Submit, consumed by the next Step

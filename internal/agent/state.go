@@ -43,6 +43,13 @@ import (
 // re-confirms allow-for-session grants rather than silently carrying a prior process's write
 // authorizations — the safer default for a human-in-the-loop gate. This is v1; a later schema
 // that needs the cache adds it under a new SessionVersion.
+//
+// The undo journal (Agent.journal, ADR 0051) is on that withheld list for a stronger reason
+// than any of the above: it is LIVE HOST STATE, not session state (ADR 0022 §8). Its records
+// describe files as this process left them, and a snapshot restored on another machine — or
+// on this one after the workspace moved on — would hand the human pre-images to write over
+// bytes that are no longer the agent's. So a resumed Session starts with an empty journal and
+// `/undo` reaches back no further than the current process.
 type agentState struct {
 	Conversation  *domain.Conversation `json:"conversation"`
 	TurnIndex     int                  `json:"turnIndex"`
