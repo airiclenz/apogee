@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -450,6 +451,18 @@ type toolPresenter struct {
 	// argBody's instead.
 	body func(res domain.ToolResult) []detailLine
 
+	// regions RECOVERS the Edit regions of a diff the tool PRINTED rather than recorded. The two
+	// diff-READING tools apply nothing, so they have no apply time to record a change at (ADR 0052
+	// §2) — but their output carries the positions anyway, view_diff's as a whole-file diff whose
+	// lines can simply be counted from 1, so this hook cuts that output into the same
+	// three-context regions an edit tool attaches and the block gets both readings of its diff
+	// like every other diff-bodied one (toolView.Regions).
+	//
+	// It is TOTAL: output it cannot walk yields NO regions rather than a guess, which leaves
+	// standing whatever the tool's own body hook rendered — the plain reading such a result had
+	// before this existed (ratified call 9).
+	regions func(res domain.ToolResult) []domain.EditRegion
+
 	// argBody renders the body from the call's OWN ARGUMENTS, at the moment the call is
 	// presented: before any result exists, and never touching one. The edit tools and write_file
 	// set it, because what such a call puts in a file is already in the request — the block can
@@ -562,12 +575,13 @@ var toolRegistry = map[string]toolPresenter{
 		argBody: fileEditBody,    // a patch's hunks, or full replacement content as + lines
 	},
 	"view_diff": {
-		label:  "Diff Preview",
-		verb:   "diffing",
-		target: stringArg("path"),
-		detail: firstLineDetail, // floor; the "No changes detected" sentinel renders here too
-		stat:   diffStatStat,
-		body:   viewDiffBody, // the coloured diff beneath a domain.DiffStat branch line
+		label:   "Diff Preview",
+		verb:    "diffing",
+		target:  stringArg("path"),
+		detail:  firstLineDetail, // floor; the "No changes detected" sentinel renders here too
+		stat:    diffStatStat,
+		body:    viewDiffBody,    // the plain floor: a body carrying no tags to walk
+		regions: viewDiffRegions, // the whole-file diff, cut into numbered regions
 	},
 	"copy_file": {
 		label:  "Copy",
@@ -1134,6 +1148,12 @@ func countPhrase(text string) (n int, noun string, ok bool) {
 // extractor reads the result alone. An unknown tool's result is shown raw as body lines, so
 // nothing is ever silently dropped.
 //
+// A diff-bodied result then hands its body over to the change's own rows: the Edit regions the
+// tool RECORDED while it applied that change, or — for a tool that applies nothing and merely
+// PRINTS a diff — the regions this package recovers from that output (toolPresenter.regions).
+// Neither reaches every result, and one that yields no regions at all keeps the body the layers
+// above gave it.
+//
 // The first two layers WORD the summary themselves — an "error: …" line, a typed phrase — so both
 // mark it as the block's own (namedSummary). Both prose layers hand their outcome's mark straight
 // through, because an extractor is the one thing that may promote the tool's output onto the branch
@@ -1154,6 +1174,8 @@ func (tv *toolView) enrichWithResult(result domain.ToolResult, ws workspaceRoot)
 	tv.absorbProse(p, known, result)
 	if regions, ok := recordedRegions(result); ok {
 		tv.absorbRegions(regions)
+	} else if known && p.regions != nil {
+		tv.showRegions(p.regions(result))
 	}
 	// The request-derived stat is re-applied because the prose layers may have written over it
 	// with a result sentence; it is the same phrase the call was presented with, so a block does
@@ -1247,9 +1269,29 @@ func recordedRegions(res domain.ToolResult) (domain.EditRegions, bool) {
 // the change that LANDED, with the line numbers and the context the arguments never held. Keeping
 // both would show the same edit twice, and the recorded one is the one that happened.
 func (tv *toolView) absorbRegions(regions domain.EditRegions) {
-	tv.Regions = regions.Regions
-	tv.Details = newToolBody(stackedDiffLines(regions.Regions))
+	tv.showRegions(regions.Regions)
 	tv.diffStat, tv.hasDiffStat = regions.Stat(), true
+}
+
+// showRegions puts a set of Edit regions on the view and REPLACES its body with the rows they
+// render as (stackedDiffLines). It is the half both sources of regions share — the tool's own
+// record and this package's recovery — so which of the two a diff block got cannot change what its
+// body reads like.
+//
+// The regions are kept BESIDE those rows rather than only as rows: the split reading composes them
+// into two panes at paint time, where the width is known (splitDiffRows), and rows cannot be
+// un-stacked back into that. What the recorded half adds and this does not is the typed diffstat,
+// which is a fact about the change only the tool that applied it counted.
+//
+// An empty set changes nothing at all, which is the fallback both sources fall to and the one
+// answer they must give alike: an edit whose pair was over the diff budget, a printed diff whose
+// output carried no tags to walk. Such a block keeps the body it already had (ratified call 9).
+func (tv *toolView) showRegions(regions []domain.EditRegion) {
+	if len(regions) == 0 {
+		return
+	}
+	tv.Regions = regions
+	tv.Details = newToolBody(stackedDiffLines(regions))
 }
 
 // applyStat settles the right-hand outcome slot from a stat hook's answer (toolPresenter.stat).
@@ -2076,6 +2118,11 @@ func commitDetail(content string) toolOutcome {
 // viewDiffBody is view_diff's body hook: the coloured diff read off the result's prose, which is
 // where that tool's body lives (diffBody). The result-shaped signature is the registry's
 // (toolPresenter.body) — read_file's body is read off its typed summary instead.
+//
+// It is now that tool's FLOOR rather than its usual reading: a body whose lines carry the diff's
+// tags is walked into Edit regions and painted as their rows instead (viewDiffRegions), and what
+// still renders from here is the output that carries none — the over-budget diffstat-only
+// sentence, which is prose about a diff rather than one.
 func viewDiffBody(res domain.ToolResult) []detailLine {
 	return diffBody(res.Content)
 }
@@ -2131,6 +2178,191 @@ func diffBody(content string) []detailLine {
 		body = append(body, detailLine{Kind: kind, Text: clipDetail(ln)})
 	}
 	return body
+}
+
+// diffRegionContext is how many unchanged lines a RECOVERED region carries each side of its
+// change. Three is the ratified figure and necessarily the same three an edit tool records
+// (internal/tools' editRegionContext, ADR 0052): the two are one layout — a recovered region
+// paints through the very rows a recorded one does (stackedDiffLines) — so a reader must not be
+// able to tell which kind of diff block they are looking at by counting its context.
+const diffRegionContext = 3
+
+// The two-cell tags a rendered line diff wears down its left edge: context, removal, addition.
+// Reading them is exact because internal/tools' unifiedLineDiff puts EVERY line behind one of
+// them and emits no "+++ b/…" file header, so a file line that itself begins with "+" always
+// arrives behind a tag of its own.
+//
+// They are the same two cells the stacked reading paints as its marker column
+// (stackedContextMarker and its pair) and are kept apart from them deliberately: these three are
+// what a tool's output IS, those three are what this package DRAWS, and the day either side moves
+// the other must not follow it silently.
+const (
+	diffContextTag = "  "
+	diffRemovedTag = "- "
+	diffAddedTag   = "+ "
+)
+
+// viewDiffRegions recovers the Edit regions of view_diff's body. That tool applies nothing, so
+// there is no apply time for it to record them at (ADR 0052 §2) — but what it prints is a
+// WHOLE-FILE diff, every line of both files tagged and none of them elided, so the numbers a
+// region needs are simply the lines counted from 1. The result-shaped signature is the registry's
+// (toolPresenter.regions).
+//
+// Expanded view_diff therefore stops painting the whole file: it shows the changed regions with
+// three lines of context each side, exactly as an edit block shows them. That is the ratified
+// behaviour change and not a truncation — the diff the MODEL reads is untouched, and the slot's
+// diffstat still counts the whole of it (diffStatStat).
+func viewDiffRegions(res domain.ToolResult) []domain.EditRegion {
+	return taggedDiffRegions(res.Content)
+}
+
+// taggedDiffRegions cuts a tagged line diff into regions, walking it once and counting each file's
+// lines from 1. It is the recovery half of the builder internal/tools runs over the two TEXTS at
+// apply time (editRegions), and it answers exactly as that one does: one region per run of
+// consecutive changed lines, up to diffRegionContext unchanged lines of context each side, and
+// neighbouring changes left as SEPARATE regions whose context tiles the lines between them without
+// overlap — the earlier region takes up to three of them as trailing context and the later takes
+// what is left. Two regions that end up meeting are painted with no elision rule between them
+// (regionsMeet), so the reading is the one a merge would have given.
+//
+// Removed and Inserted hold changed lines only, so the regions add up to the diffstat the tool
+// counted over the same operations — this walk re-derives the POSITIONS the rendered diff dropped,
+// never the counts, which stay the tool's (domain.DiffStat).
+//
+// It is total and all-or-nothing: a line carrying none of the three tags says this output is not a
+// rendered diff at all — the "No changes detected" sentinel, the over-budget diffstat-only
+// sentence — and NO regions come back, which leaves the whole body rendering plain (diffBody)
+// rather than half-walked.
+func taggedDiffRegions(content string) []domain.EditRegion {
+	cutter := diffRegionCutter{beforeLine: 1, afterLine: 1}
+	for _, line := range splitLines(strings.TrimRight(content, "\n")) {
+		tag, text, ok := diffTagOf(line)
+		if !ok {
+			return nil
+		}
+		cutter.take(tag, text)
+	}
+	return cutter.finish()
+}
+
+// diffTagOf splits a rendered diff line into the tag it carries and the file line behind it. A
+// line too short to carry one, or carrying anything else, is not a diff line — which includes the
+// single empty line an empty body splits into, so prose and emptiness fail the same way.
+func diffTagOf(line string) (tag, text string, ok bool) {
+	const cells = len(diffContextTag) // one width for all three, which is what makes this a slice
+	if len(line) < cells {
+		return "", "", false
+	}
+	switch tag := line[:cells]; tag {
+	case diffContextTag, diffRemovedTag, diffAddedTag:
+		return tag, line[cells:], true
+	}
+	return "", "", false
+}
+
+// diffRegionCutter is the state of one walk down a tagged diff: the line the walk has reached in
+// each file, the region being built, and the unchanged lines seen since that region's last changed
+// line — lines whose role is not settled yet, because how many of them arrive before the next
+// change is what says whether they are all this region's trailing context or only the first three
+// are, with the rest falling to the next region's leading context.
+type diffRegionCutter struct {
+	regions []domain.EditRegion
+
+	// open is the region under construction, nil between regions.
+	open *domain.EditRegion
+
+	// beforeLine and afterLine are the 1-based lines the next tagged line of each kind sits on.
+	beforeLine int
+	afterLine  int
+
+	unchanged []string
+}
+
+// take folds one tagged line into the walk, advancing the counter of each file that line occupies
+// a line of: a context line advances both, a removal only the before file, an insertion only the
+// after file.
+func (c *diffRegionCutter) take(tag, text string) {
+	if tag == diffContextTag {
+		c.unchanged = append(c.unchanged, text)
+		c.beforeLine++
+		c.afterLine++
+		return
+	}
+
+	c.reachChange()
+	if tag == diffRemovedTag {
+		c.open.Removed = append(c.open.Removed, text)
+		c.beforeLine++
+		return
+	}
+	c.open.Inserted = append(c.open.Inserted, text)
+	c.afterLine++
+}
+
+// reachChange readies an open region for a changed line. A change that follows the previous one
+// with no unchanged line between them continues the same region; any unchanged line at all ends
+// that region and opens the next, the two sharing out the lines between them.
+func (c *diffRegionCutter) reachChange() {
+	switch {
+	case c.open == nil:
+		c.begin()
+	case len(c.unchanged) > 0:
+		c.end()
+		c.begin()
+	}
+}
+
+// begin opens a region at the position the walk has reached, backing its start lines up over the
+// leading context it takes — whatever the previous region left behind, or the run before the first
+// change. Fewer lines are available at the head of a file, and the start lines then stop where the
+// file does.
+func (c *diffRegionCutter) begin() {
+	leading := lastLines(c.unchanged, diffRegionContext)
+	c.open = &domain.EditRegion{
+		BeforeStart: c.beforeLine - len(leading),
+		AfterStart:  c.afterLine - len(leading),
+		Leading:     leading,
+	}
+	c.unchanged = nil
+}
+
+// end closes the open region with the trailing context it takes from the unchanged lines that
+// follow it, and files it. It CONSUMES the lines it takes: what remains is what a following region
+// may claim as its leading context, so no line is ever context for two regions at once.
+func (c *diffRegionCutter) end() {
+	trailing := firstLines(c.unchanged, diffRegionContext)
+	c.open.Trailing = trailing
+	c.regions = append(c.regions, *c.open)
+	c.open = nil
+	c.unchanged = c.unchanged[len(trailing):]
+}
+
+// finish ends the walk, closing a region the last line left open, and returns the regions — none
+// at all when the diff carried no changed line.
+func (c *diffRegionCutter) finish() []domain.EditRegion {
+	if c.open != nil {
+		c.end()
+	}
+	return c.regions
+}
+
+// firstLines returns a copy of the first count lines, or of all of them when there are fewer. The
+// copy is the point: a region outlives the walk — it is kept on the view for the session — and
+// must not hold the walk's own buffer, where the lines it did not take would be retained with it.
+func firstLines(lines []string, count int) []string {
+	if len(lines) > count {
+		lines = lines[:count]
+	}
+	return slices.Clone(lines)
+}
+
+// lastLines returns a copy of the last count lines, or of all of them when there are fewer — the
+// mirror of firstLines, and a copy for the same reason.
+func lastLines(lines []string, count int) []string {
+	if len(lines) > count {
+		lines = lines[len(lines)-count:]
+	}
+	return slices.Clone(lines)
 }
 
 // editPair is one changed region an edit call ASKS FOR: the lines it removes and the lines it

@@ -172,7 +172,7 @@ func TestToolCardBodyKeepsTheSpellingOfWhatItQuotes(t *testing.T) {
 		name string
 		call domain.ToolCall
 		res  domain.ToolResult
-		want []string // the body, line for line, exactly as the tool wrote it
+		want []string // the body, line for line, every path in it spelled as the tool wrote it
 	}{
 		{
 			name: "a diff hunk quoting a workspace path",
@@ -183,9 +183,9 @@ func TestToolCardBodyKeepsTheSpellingOfWhatItQuotes(t *testing.T) {
 				`+ 	"/home/me/proj/config/prod.yaml")`,
 			}, "\n"), Summary: domain.DiffStat{Added: 1, Removed: 1}},
 			want: []string{
-				`  cfg, err := load(`,
-				`- 	"/home/me/proj/config/dev.yaml")`,
-				`+ 	"/home/me/proj/config/prod.yaml")`,
+				`1   cfg, err := load(`,
+				`2 - 	"/home/me/proj/config/dev.yaml")`,
+				`2 + 	"/home/me/proj/config/prod.yaml")`,
 			},
 		},
 		{
@@ -211,7 +211,7 @@ func TestToolCardBodyKeepsTheSpellingOfWhatItQuotes(t *testing.T) {
 				body = append(body, d.Text)
 			}
 			if strings.Join(body, "\n") != strings.Join(tc.want, "\n") {
-				t.Errorf("body = %q, want it verbatim: %q", body, tc.want)
+				t.Errorf("body = %q, want the paths in it verbatim: %q", body, tc.want)
 			}
 		})
 	}

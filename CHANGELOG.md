@@ -10,6 +10,21 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **`view_diff` bodies are the change, not the file.** The diff-preview tool applies nothing, so no
+  tool records its Edit regions — but what it prints is a whole-file diff, and the renderer now walks
+  that output once, counting each file's lines from 1, and cuts it into exactly the regions an edit
+  tool records at apply time (ADR 0052 §2): the changed lines with up to three unchanged lines of
+  context each side, neighbouring changes left as separate regions whose context tiles the lines
+  between them without overlap, and both files' absolute numbers carried so a region reads correctly
+  wherever an insertion has drifted the after file past the before one. An expanded `view_diff` block
+  therefore stops painting the whole file as context and shows the same numbered body every other
+  diff block shows — stacked where the block is narrow, two panes where the width allows — with the
+  `⋯` rule standing only where lines of the file are genuinely left uncovered. The recovery is
+  all-or-nothing: output carrying none of the diff's tags is not a rendered diff, so the "No changes
+  detected" sentinel and the over-budget diffstat-only sentence keep the plain rendering they always
+  had, and the branch slot's `+A −R` is untouched throughout — it is still the tool's own typed
+  diffstat, counted over the whole diff rather than over what the body shows.
+
 - **Expanded diff bodies paint as two panes where the width allows.** The Split diff composer that
   landed pure and unpainted is now wired into every expanded body path a diff-bodied block can
   reach: the ungrouped call's body under its branch, the TARGETLESS block whose lines are its own

@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"reflect"
 	"strconv"
 	"strings"
@@ -111,8 +112,8 @@ func TestRenderDiffDetailStandalone(t *testing.T) {
 	want := strings.Join([]string{
 		"✦ Diff Preview",
 		leaderEdgeRow("  ┕ main.go ⋯ +1 −1", glyphExpanded),
-		"    - a removed line",
-		"    + an added line",
+		"    1 - a removed line",
+		"    1 + an added line",
 		seeLessFooterLine(t, 80),
 	}, "\n")
 	if got := renderPlain(tr, 80); got != want {
@@ -121,10 +122,10 @@ func TestRenderDiffDetailStandalone(t *testing.T) {
 
 	th := newTheme(scheme.Default())
 	lines := tr.renderLines(th, 80)
-	if got, want := lines[2], th.diffRemoved.Render("    - a removed line"); got != want {
+	if got, want := lines[2], th.diffRemoved.Render("    1 - a removed line"); got != want {
 		t.Errorf("removed line = %q; want the diffRemoved style %q", got, want)
 	}
-	if got, want := lines[3], th.diffAdded.Render("    + an added line"); got != want {
+	if got, want := lines[3], th.diffAdded.Render("    1 + an added line"); got != want {
 		t.Errorf("added line = %q; want the diffAdded style %q", got, want)
 	}
 }
@@ -150,10 +151,10 @@ func TestRenderDiffMatchesLayoutSketch(t *testing.T) {
 	want := strings.Join([]string{
 		"✦ Diff Preview",
 		leaderEdgeRow("  ┕ main.go ⋯ +2 −2", glyphExpanded),
-		"    - a code line that has been removed",
-		"    - a second removed line",
-		"    + a new code line",
-		"    + a second new line",
+		"    1 - a code line that has been removed",
+		"    2 - a second removed line",
+		"    1 + a new code line",
+		"    2 + a second new line",
 		seeLessFooterLine(t, 80),
 	}, "\n")
 	if got := renderPlain(tr, 80); got != want {
@@ -264,10 +265,13 @@ func TestCollapsedPaintTruncatesRetainedBodies(t *testing.T) {
 // reads (layout.md, "Collapsed and expanded blocks").
 func TestExpandedBlockPaintsItsWholeBody(t *testing.T) {
 	diffContent := func(n int) string { return strings.TrimSuffix(strings.Repeat("+ added\n", n), "\n") }
+	// The body is the diff's own regions now, so every row carries the after-file line it sits on,
+	// right-aligned into one gutter for the whole body (stackedDiffLines).
 	paintedDiff := func(n int) []string {
+		gutter := len(strconv.Itoa(n))
 		out := make([]string, 0, n)
 		for i := 0; i < n; i++ {
-			out = append(out, "    + added")
+			out = append(out, fmt.Sprintf("    %*d + added", gutter, i+1))
 		}
 		return out
 	}

@@ -669,7 +669,9 @@ func TestPresentToolCallOutcomeSplit(t *testing.T) {
 			result: domain.ToolResult{CallID: "5", Content: "  ctx\n- old line\n+ new line",
 				Summary: domain.DiffStat{Added: 1, Removed: 1}},
 			wantSummary: "+1 −1",
-			wantBody:    []string{"  ctx", "- old line", "+ new line"},
+			// The body is the diff's own regions: the context line at its before-file number, then
+			// the change at the numbers each side of it sits on (viewDiffRegions).
+			wantBody: []string{"1   ctx", "2 - old line", "2 + new line"},
 		},
 	}
 	for _, tc := range cases {
@@ -1249,6 +1251,224 @@ func TestViewDiffNoChangesRendersAsProse(t *testing.T) {
 	}
 	if tv.Details.len() != 0 {
 		t.Errorf("the no-changes sentinel must hang nothing beneath the branch: %+v", tv.Details)
+	}
+}
+
+// viewDiffCard is a view_diff block with the printed diff its result carried, enriched exactly as
+// the transcript enriches one. The diffstat rides along because the tool always reports one beside
+// a rendered diff, and the recovery must not be reading the body it fills.
+func viewDiffCard(t *testing.T, diff []string, stat domain.DiffStat) toolView {
+	t.Helper()
+
+	tv := presentToolCall(domain.ToolCall{ID: "1", Tool: "view_diff", Arguments: []byte(`{"path":"main.go"}`)}, "", workspaceRoot{})
+	tv.enrichWithResult(domain.ToolResult{CallID: "1", Content: strings.Join(diff, "\n"), Summary: stat}, workspaceRoot{})
+	return tv
+}
+
+// regionText spells one Edit region the way these tests read it: the line it starts on in each
+// file, then the four groups of lines it holds. It is a STRING because a nil group and an empty one
+// are the same region — what a region says is which lines it holds, and neither of those holds any.
+func regionText(r domain.EditRegion) string {
+	return fmt.Sprintf("@%d/%d leading%v removed%v inserted%v trailing%v",
+		r.BeforeStart, r.AfterStart, r.Leading, r.Removed, r.Inserted, r.Trailing)
+}
+
+// regionsText spells a whole set of them, one per line.
+func regionsText(regions []domain.EditRegion) string {
+	out := make([]string, 0, len(regions))
+	for _, r := range regions {
+		out = append(out, regionText(r))
+	}
+	return strings.Join(out, "\n")
+}
+
+// TestViewDiffRecoversItsRegions pins the recovery ADR 0052 §2 ratified. view_diff applies nothing,
+// so no tool records its regions — but it prints a WHOLE-FILE diff, and walking that output counts
+// each file's lines from 1, which is every position a region needs.
+//
+// What comes back must be what an edit tool would have recorded over the same change: up to three
+// unchanged lines of context each side and no more, neighbouring changes left as separate regions
+// whose context TILES the lines between them without overlap, and absolute numbers that drift apart
+// wherever an insertion has pushed the after file past the before one.
+//
+// The rows the block paints follow from that, and the elision rule is the reading of it: `⋯` stands
+// between two regions with lines of the file left uncovered between them, and never between two
+// that meet — regions cut apart only because each change gets its own record must paint exactly as
+// the one region they describe together (regionsMeet).
+func TestViewDiffRecoversItsRegions(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name     string
+		diff     []string
+		stat     domain.DiffStat
+		want     []domain.EditRegion
+		wantRule bool // an elision rule painted between two of the regions
+	}{
+		{
+			// The fourth line of context each side is dropped: a region is the change and its
+			// three, which is what ends this block painting the file it was given.
+			name: "a change mid-file keeps three lines of context each side",
+			diff: []string{
+				"  one", "  two", "  three", "  four",
+				"- five", "+ FIVE",
+				"  six", "  seven", "  eight", "  nine",
+			},
+			stat: domain.DiffStat{Added: 1, Removed: 1},
+			want: []domain.EditRegion{{
+				BeforeStart: 2, AfterStart: 2,
+				Leading:  []string{"two", "three", "four"},
+				Removed:  []string{"five"},
+				Inserted: []string{"FIVE"},
+				Trailing: []string{"six", "seven", "eight"},
+			}},
+		},
+		{
+			// Nothing to back up over: the region starts where the file does, and the numbers say 1
+			// rather than underflowing past it.
+			name: "a change at the head of the file has no leading context",
+			diff: []string{"- one", "+ ONE", "  two", "  three"},
+			stat: domain.DiffStat{Added: 1, Removed: 1},
+			want: []domain.EditRegion{{
+				BeforeStart: 1, AfterStart: 1,
+				Removed:  []string{"one"},
+				Inserted: []string{"ONE"},
+				Trailing: []string{"two", "three"},
+			}},
+		},
+		{
+			// Seven unchanged lines between the changes: three go to each region and the eighth
+			// line of the file is covered by neither, which is exactly what the rule says.
+			name: "two changes with a line uncovered between them are ruled apart",
+			diff: []string{
+				"  a1", "  a2", "  a3", "  a4",
+				"- old", "+ new",
+				"  b1", "  b2", "  b3", "  b4", "  b5", "  b6", "  b7",
+				"- old2", "+ new2",
+				"  c1",
+			},
+			stat: domain.DiffStat{Added: 2, Removed: 2},
+			want: []domain.EditRegion{
+				{
+					BeforeStart: 2, AfterStart: 2,
+					Leading:  []string{"a2", "a3", "a4"},
+					Removed:  []string{"old"},
+					Inserted: []string{"new"},
+					Trailing: []string{"b1", "b2", "b3"},
+				},
+				{
+					BeforeStart: 10, AfterStart: 10,
+					Leading:  []string{"b5", "b6", "b7"},
+					Removed:  []string{"old2"},
+					Inserted: []string{"new2"},
+					Trailing: []string{"c1"},
+				},
+			},
+			wantRule: true,
+		},
+		{
+			// Six unchanged lines: the two regions' context covers every one of them and they come
+			// out ADJACENT, so the rows run on with nothing between them.
+			name: "neighbouring changes tile the lines between them and paint end to end",
+			diff: []string{
+				"  a1", "  a2", "  a3",
+				"- old", "+ new",
+				"  g1", "  g2", "  g3", "  g4", "  g5", "  g6",
+				"- old2", "+ new2",
+				"  z1",
+			},
+			stat: domain.DiffStat{Added: 2, Removed: 2},
+			want: []domain.EditRegion{
+				{
+					BeforeStart: 1, AfterStart: 1,
+					Leading:  []string{"a1", "a2", "a3"},
+					Removed:  []string{"old"},
+					Inserted: []string{"new"},
+					Trailing: []string{"g1", "g2", "g3"},
+				},
+				{
+					BeforeStart: 8, AfterStart: 8,
+					Leading:  []string{"g4", "g5", "g6"},
+					Removed:  []string{"old2"},
+					Inserted: []string{"new2"},
+					Trailing: []string{"z1"},
+				},
+			},
+		},
+		{
+			// The inserted line belongs to the after file only, so every region past it sits one
+			// line further down there than in the before file — the numbers a whole-file walk is
+			// counted for, and the reason a region carries both.
+			name: "an insertion drifts the after numbers past the before ones",
+			diff: []string{
+				"  one",
+				"+ added",
+				"  two", "  three", "  four", "  five", "  six", "  seven", "  eight",
+				"- nine", "+ NINE",
+				"  ten",
+			},
+			stat: domain.DiffStat{Added: 2, Removed: 1},
+			want: []domain.EditRegion{
+				{
+					BeforeStart: 1, AfterStart: 1,
+					Leading:  []string{"one"},
+					Inserted: []string{"added"},
+					Trailing: []string{"two", "three", "four"},
+				},
+				{
+					BeforeStart: 6, AfterStart: 7,
+					Leading:  []string{"six", "seven", "eight"},
+					Removed:  []string{"nine"},
+					Inserted: []string{"NINE"},
+					Trailing: []string{"ten"},
+				},
+			},
+			wantRule: true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			tv := viewDiffCard(t, tc.diff, tc.stat)
+
+			if got, want := regionsText(tv.Regions), regionsText(tc.want); got != want {
+				t.Errorf("regions:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+			}
+			rule := false
+			for _, d := range tv.Details.all() {
+				rule = rule || strings.Contains(d.Text, glyphLeaderDot)
+			}
+			if rule != tc.wantRule {
+				t.Errorf("elision rule painted = %v, want %v — a rule claims lines the regions left uncovered", rule, tc.wantRule)
+			}
+			if got, want := len(tv.Details.all()), len(stackedDiffLines(tc.want)); got != want {
+				t.Errorf("body has %d rows, want the %d the regions render as", got, want)
+			}
+		})
+	}
+}
+
+// TestViewDiffUntaggedBodyRendersPlain: the recovery is all-or-nothing. A result whose lines carry
+// none of the diff's tags is not a rendered diff — the over-budget diffstat-only sentence is prose
+// ABOUT one — so no region is cut from it and the body renders exactly as it did before this
+// existed: the tool's own lines, plain (diffBody). Half a walk would be worse than none, because
+// the numbers it invented would look like the file's.
+func TestViewDiffUntaggedBodyRendersPlain(t *testing.T) {
+	t.Parallel()
+
+	const sentence = "Diff too large to render: 4000 x 4000 lines exceeds the 4000000-cell diff budget. Diffstat only: +12 -9."
+	tv := viewDiffCard(t, []string{sentence}, domain.DiffStat{Added: 12, Removed: 9})
+
+	if len(tv.Regions) != 0 {
+		t.Errorf("regions = %v, want none from a body carrying no tags", tv.Regions)
+	}
+	body := tv.Details.all()
+	if len(body) != 1 || body[0].Text != sentence || body[0].Kind != detailPlain {
+		t.Errorf("body = %+v, want the one plain line the tool wrote", body)
+	}
+	if want := "+12 −9"; tv.Summary.Text != want {
+		t.Errorf("slot = %q, want the tool's own typed diffstat %q", tv.Summary.Text, want)
 	}
 }
 

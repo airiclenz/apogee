@@ -420,7 +420,25 @@ with an existing-fixture assertion); shape budgets in `toolshape_test.go` still 
 
 Depends on items 5 and 6.
 
-## 8. TUI: view_diff recovers regions
+## 8. TUI: view_diff recovers regions — ✅ DONE (2026-08-19)
+
+NOTES (2026-08-19): the recovery is reached through a NEW registry hook (`toolPresenter.regions`) rather than
+through the existing `body` hook, which the item's text points at: a body hook returns lines only, and this item
+must also set `tv.Regions` for the split reading to compose at paint time. `body: viewDiffBody` stays registered
+as the untagged floor, so a result that is prose about a diff renders exactly as before. Item 5's `absorbRegions`
+was split — the shared half is now `toolView.showRegions` (regions + stacked body), and the typed-diffstat half
+stays with the RECORDED regions alone, so `view_diff`'s slot and the run aggregate keep reading the tool's own
+`domain.DiffStat` (the item's "the slot's stat is untouched").
+NOTES (2026-08-19): the item's Files list names only `toolpresent.go` and its test, but three existing view_diff
+fixtures pinned the un-numbered body and had to be re-worded with this change: `TestRenderDiffDetailStandalone`,
+`TestRenderDiffMatchesLayoutSketch` and `TestExpandedBlockPaintsItsWholeBody` (`toolbranch_test.go`), and the diff
+row of `TestToolCardBodyKeepsTheSpellingOfWhatItQuotes` (`workspacepath_test.go`, where the claim is that the PATHS
+in a body are not shortened — still asserted, now behind the number gutter). `internal/tui/doc.go` was edited for
+one clause too: its post-v0.8 narration said `diffBody` draws view_diff's coloured body, which this item makes
+false. No other file touched.
+NOTES (2026-08-19): the item cites ratified call 3's merge wording; built per the owner's binding amendment
+(neighbours TILE, never merge) exactly as items 2 and 5–7 did, so a recovered region set and a recorded one are
+indistinguishable to `stackedDiffLines` and `regionsMeet` decides the `⋯` rule for both.
 
 **What:** In `internal/tui/toolpresent.go`, rework `viewDiffBody`
 (`toolpresent.go:1954`) / `diffBody` (`toolpresent.go:1995`): `view_diff`'s body is a
