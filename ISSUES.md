@@ -23,6 +23,43 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 
 ## Open defects
 
+### The undo journal records the NAMED path, while its docs and ADR 0051 say "resolved"
+
+**Status:** open 2026-08-19 — residual of the undo plan
+(`docs/plans/archived/2026-08-19 - 01 - undo-agent-changes-plan.md`, items 2 / 5 / 6).
+
+`journalTarget` (`internal/tools/path_safety.go:350`) records `target.Named` — the root-joined,
+cleaned argument with nothing followed (`internal/tools/workspace_scoped.go:36`) — for every
+ordinary in-workspace write (`internal/tools/path_safety.go:357`, `:360`). Only an approved
+out-of-workspace escape records `target.Real` (`internal/tools/path_safety.go:362`). Four places
+state the opposite rule: `Mutation`'s doc — "Path is the mutation's RESOLVED absolute path"
+(`internal/undo/journal.go:102`); `Preview`'s doc — "Paths are the resolved absolute ones, which is
+what makes the preview the disclosure surface the human authorises the revert from"
+(`internal/undo/journal.go:240`); the TUI listing's — "the resolved path"
+(`internal/tui/undo.go:133`); and ADR 0051 — the preview "always shows **resolved** paths"
+(`docs/adr/0051-undo-is-a-per-exchange-in-memory-pre-image-journal.md:96`, and "names every
+resolved path before anything moves" at `:152`). Which of the two is the intended rule is the call
+to make first; the other side then follows it.
+
+---
+
+### No test drives `move_file`'s copy-then-remove fallback route
+
+**Status:** open 2026-08-19 — residual of the undo plan (item 3), verified manually during the run.
+
+`move` (`internal/tools/file_ops.go:203`) has two routes — the `SafeRename` fast path and the
+`SafeCopyFileFrom` + `SafeRemove` fallback, which an approved escape (ADR 0049) makes the real
+route — and item 3 requires both to journal identically. The suite pins only the rename path:
+`TestMoveFileJournalsBothEnds` (`internal/tools/undo_journal_test.go:384`) and
+`TestMoveFileClobberingJournalsThePreImage` (`internal/tools/undo_journal_test.go:414`) both move
+within the workspace. The one fallback-adjacent test asserts only that the fallback must NOT run
+for an unpermitted refusal (`internal/tools/file_ops_test.go:584`). Neither the fallback landing
+successfully nor the split failure the same doc comment describes — the copy landing while the
+removal is refused, which must record the destination alone
+(`internal/tools/file_ops.go:226`) — is covered.
+
+---
+
 ## Parked / deferred work
 
 Live, deliberately deferred work only. Each entry records *enough* design that we don't re-derive
