@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -12,10 +13,18 @@ import (
 // /inspect — the raw-protocol pane and its ring (inspector.go)
 // ----------------------------------------------------------------------------
 
-// wireEvent is one captured half of an Upstream round-trip, as the engine reports it.
+// wireEvent is one captured half of an Upstream round-trip, as the engine reports it — from the
+// top-level agent, which was spawned by no call and so carries no call id.
 func wireEvent(direction, payload string, turn, depth int) domain.WireEvent {
+	return wireEventOfCall(direction, payload, turn, depth, "")
+}
+
+// wireEventOfCall is the same half stamped with the spawning call id of the agent that emitted it:
+// the other half of the (depth, callID) wire stream the Inspector pairs a request to its reply
+// within.
+func wireEventOfCall(direction, payload string, turn, depth int, callID string) domain.WireEvent {
 	return domain.WireEvent{
-		EventBase: domain.EventBase{Turn: turn, Depth: depth},
+		EventBase: domain.EventBase{Turn: turn, Depth: depth, CallID: callID},
 		Direction: direction,
 		Payload:   payload,
 	}
@@ -217,6 +226,102 @@ func TestInspectorSaysNothingWhenTheReplyWasRecorded(t *testing.T) {
 		if row[0] == inspectorNoReplyRow {
 			t.Errorf("row %d names an unrecorded reply for a request the ring answered", i)
 		}
+	}
+}
+
+// recordsWithNoReplyNote reports the index of every RECORD the pane draws the unrecorded-reply note
+// under, counting records by the heading row each one opens with.
+func recordsWithNoReplyNote(t *testing.T, m Model) []int {
+	t.Helper()
+	rows, kinds := m.inspectorRows()
+	var noted []int
+	record := -1
+	for i, row := range rows {
+		switch {
+		case kinds[i] == popupRowHeading:
+			record++
+		case row[0] == inspectorNoReplyRow:
+			noted = append(noted, record)
+		}
+	}
+	return noted
+}
+
+// TestInspectorPairsTheNoteByWireStream pins the pairing rule the flat log needed once runs go
+// concurrent: the successor that settles whether a request went unanswered is the next record of
+// the SAME wire stream — the (depth, callID) pair — and never just the next record of the ring,
+// which in a fan-out belongs to somebody else.
+func TestInspectorPairsTheNoteByWireStream(t *testing.T) {
+	const (
+		parent  = "" // depth 0 was spawned by no call
+		child   = "call-child"
+		sibling = "call-sibling"
+	)
+
+	cases := []struct {
+		name   string
+		events []domain.Event
+		want   []int
+	}{
+		{
+			name: "a fan-out that answered both calls notes neither",
+			events: []domain.Event{
+				wireEventOfCall(domain.WireDirectionRequest, `{"a":1}`, 1, 0, parent),
+				wireEventOfCall(domain.WireDirectionRequest, `{"b":2}`, 1, 1, child),
+				wireEventOfCall(domain.WireDirectionResponse, `{"c":3}`, 1, 1, child),
+				wireEventOfCall(domain.WireDirectionResponse, `{"d":4}`, 1, 0, parent),
+			},
+			want: nil,
+		},
+		{
+			name: "the delegate answered while the parent's call is still out",
+			events: []domain.Event{
+				wireEventOfCall(domain.WireDirectionRequest, `{"a":1}`, 1, 0, parent),
+				wireEventOfCall(domain.WireDirectionRequest, `{"b":2}`, 1, 1, child),
+				wireEventOfCall(domain.WireDirectionResponse, `{"c":3}`, 1, 1, child),
+			},
+			want: nil,
+		},
+		{
+			name: "concurrent siblings at one depth are told apart by call id",
+			events: []domain.Event{
+				wireEventOfCall(domain.WireDirectionRequest, `{"a":1}`, 1, 1, child),
+				wireEventOfCall(domain.WireDirectionRequest, `{"b":2}`, 1, 1, sibling),
+				wireEventOfCall(domain.WireDirectionResponse, `{"c":3}`, 1, 1, sibling),
+				wireEventOfCall(domain.WireDirectionResponse, `{"d":4}`, 1, 1, child),
+			},
+			want: nil,
+		},
+		{
+			name: "two calls of one stream still note the first",
+			events: []domain.Event{
+				wireEventOfCall(domain.WireDirectionRequest, `{"a":1}`, 1, 1, child),
+				wireEventOfCall(domain.WireDirectionRequest, `{"b":2}`, 2, 1, child),
+			},
+			want: []int{0},
+		},
+		{
+			name: "a parent that asks again across a fan-out is noted",
+			events: []domain.Event{
+				wireEventOfCall(domain.WireDirectionRequest, `{"a":1}`, 1, 0, parent),
+				wireEventOfCall(domain.WireDirectionRequest, `{"b":2}`, 1, 1, child),
+				wireEventOfCall(domain.WireDirectionResponse, `{"c":3}`, 1, 1, child),
+				wireEventOfCall(domain.WireDirectionRequest, `{"d":4}`, 2, 0, parent),
+			},
+			want: []int{0},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := inspectorModel(t, tc.events...)
+
+			noted := recordsWithNoReplyNote(t, m)
+
+			if !slices.Equal(noted, tc.want) {
+				t.Errorf("the note lands under records %v, want %v", noted, tc.want)
+			}
+		})
 	}
 }
 

@@ -27,13 +27,6 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 
 The still-open findings that run left, under the conventions' actionability bar.
 
-- [P] The Inspector's unrecorded-reply note can land under the wrong request in a parallel
-  fan-out. `hasUnrecordedReply` (`internal/tui/inspector.go:329`) settles the question by the
-  IMMEDIATE successor only, and the ring is filled in arrival order by the one writer `foldWire`
-  (`internal/tui/inspector.go:138`) — so a depth-0 fan-out interleaves runs: for
-  `[req d0, req d1, resp d1, resp d0]` the note is drawn under the d0 request whose reply IS
-  recorded. Pairing a request to its answer by depth/turn is what the successor-only rule cannot
-  do.
 - [P] A click in the band the inspector box grows into is swallowed instead of falling through.
   Both report panes can be up together and the transcript-side slot is bottom-anchored, so
   `handleUsageClick` dismissing `/usage` (`internal/tui/mouse.go:393`) grows the inspector box

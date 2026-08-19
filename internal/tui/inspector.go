@@ -41,8 +41,12 @@ import (
 // worse than one that cuts a long line off at the border.
 
 // wireRecord is one half of one Upstream round-trip as the Inspector holds it: which half, the
-// Turn and depth of the agent that made the call, and the payload — escape-stripped and
-// pretty-printed ONCE, when the event was folded.
+// Turn, depth and spawning call id of the agent that made the call, and the payload —
+// escape-stripped and pretty-printed ONCE, when the event was folded.
+//
+// depth and callID together name the WIRE STREAM the half belongs to (domain.EventBase): a
+// fan-out interleaves runs in one ring, and the call id is what separates two siblings a shared
+// depth would braid. Turn orders the halves inside a stream; it does not identify one.
 //
 // The lines are kept formatted rather than raw for one reason: the pane re-derives its rows on
 // every frame, and a frame is painted for every streamed token, so parsing twenty JSON bodies per
@@ -53,6 +57,7 @@ type wireRecord struct {
 	direction string
 	turn      int
 	depth     int
+	callID    string
 	lines     []string
 	hidden    int
 }
@@ -99,9 +104,9 @@ const inspectorDisarmedRow = "capture is off — set ui.inspector: true, then re
 // been made yet, which is a wait rather than a thing to fix.
 const inspectorEmptyRow = "armed — the next model call lands here"
 
-// inspectorNoReplyRow is what stands under a request the ring holds no answer for once a LATER
-// record has landed: the reply was not RECORDED, which is a different fact from the reply not
-// arriving. A non-streaming success body is decoded straight off the connection and never captured
+// inspectorNoReplyRow is what stands under a request the ring holds no answer for once a later
+// record of the SAME wire stream has landed (hasUnrecordedReply): the reply was not RECORDED, which
+// is a different fact from the reply not arriving. A non-streaming success body is decoded straight off the connection and never captured
 // (the provider's pinned design, internal/provider/wire.go), so a gap here is the recorder's
 // silence and not the Upstream's — and a flat log that left the reader to infer it from absence
 // reads as a lost response every time the stream was off.
@@ -151,6 +156,7 @@ func (m Model) foldWire(e domain.Event) Model {
 		direction: we.Direction,
 		turn:      we.Turn,
 		depth:     we.Depth,
+		callID:    we.CallID,
 		lines:     lines,
 		hidden:    hidden,
 	})
@@ -320,20 +326,35 @@ func (m Model) inspectorRows() ([]popupRow, []popupRowKind) {
 }
 
 // hasUnrecordedReply says whether the record at index i is a request the ring will never show an
-// answer for: it is a request, a LATER record exists, and that record is not a response. The
-// successor is what settles it — the ring is filled in arrival order by the one writer (foldWire),
-// so the half that follows a request is its own answer or nothing.
+// answer for. The successor rule that settles it applies WITHIN one wire stream — the pair
+// (depth, callID), the run identity every event carries (domain.EventBase) — and never across the
+// whole ring: the ring is filled in arrival order by the one writer (foldWire), so a fan-out
+// interleaves runs and the half that merely follows a request may belong to a sibling and say
+// nothing about it. Inside a stream the halves stay in round-trip order, so the record that
+// follows a request THERE is its own answer or nothing.
 //
-// The NEWEST record never qualifies, whatever it is: its call may still be in flight, and a pane
-// that called a live request unanswered would be wrong for exactly as long as the answer took.
+// A request its stream has not gone past never qualifies: its call may still be in flight, and a
+// pane that called a live request unanswered would be wrong for exactly as long as the answer
+// took. Turn is no part of the key — it orders records inside a stream, and two concurrent runs
+// share it.
+//
+// Accepted residual: UNROUTED concurrent sub-agents speak over their parent's connection, whose
+// tap is bound to the parent (internal/agent/construct.go, internal/agent/subagent.go), so their
+// records carry the parent's (depth, callID) and braid into one stream — the note can still land
+// under the wrong request of such a pair. No field on the event separates them; a ROUTED spawn
+// (ADR 0045) builds its own client and tap and is separated.
 func hasUnrecordedReply(records []wireRecord, i int) bool {
-	if records[i].direction != domain.WireDirectionRequest {
+	rec := records[i]
+	if rec.direction != domain.WireDirectionRequest {
 		return false
 	}
-	if i+1 >= len(records) {
-		return false
+	for _, next := range records[i+1:] {
+		if next.depth != rec.depth || next.callID != rec.callID {
+			continue
+		}
+		return next.direction != domain.WireDirectionResponse
 	}
-	return records[i+1].direction != domain.WireDirectionResponse
+	return false
 }
 
 // wireRecordHeader names one record: which half of the round-trip it is and which Turn made it,

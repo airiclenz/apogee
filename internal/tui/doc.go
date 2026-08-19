@@ -667,7 +667,8 @@
 // esc its only key; inspector.go the /inspect raw-protocol pane and the bounded ring behind it —
 // the request bodies and response payloads the engine reports as domain.WireEvents while
 // `ui.inspector` arms the capture, folded beside the transcript rather than into it (a wire record
-// is not a conversation entry) and shown in the /usage report's shape; popup.go the one bordered pane every overlay — those three, the autocomplete
+// is not a conversation entry), shown in the /usage report's shape and paired request-to-reply
+// within one (depth, callID) wire stream, since the one ring interleaves every run's traffic; popup.go the one bordered pane every overlay — those three, the autocomplete
 // dropdown, the ask and approval prompts — is painted through; logo.go the embedded start-up wordmark;
 // actuation.go the launcher-verb latch and the folds that close one out (ADR 0029) — at most one
 // world-changing call in flight per address, narrated while it blocks, with the next Beat rather

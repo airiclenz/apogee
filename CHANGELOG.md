@@ -10,6 +10,12 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **The Inspector's "no response recorded" note no longer lands under a request whose reply the
+  ring did record.** The note's successor rule now applies within one wire stream — the
+  `(depth, callID)` pair every event carries — so a parallel fan-out's interleaved records are no
+  longer braided into one sequence. Unrouted concurrent sub-agents share their parent's client and
+  wire tap and therefore its stream key; that residual is documented at the pairing function.
+
 - **`TestResolvedPathRidesTheCallAndTheApproval`'s "a path that names its own target discloses
   nothing" case no longer fails on macOS.** The case asserts that an ordinary write — one whose
   argument names its own target — carries no `ResolvedPath` disclosure, but it took its workspace

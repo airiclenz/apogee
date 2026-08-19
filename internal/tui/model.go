@@ -140,7 +140,10 @@ type Model struct {
 	inspector inspectorPane
 
 	// wire is the Inspector's bounded ring: the most recent maxWireRecords halves of an Upstream
-	// round-trip, as the fold recorded them (foldWire). It sits BESIDE the transcript rather than in
+	// round-trip, as the fold recorded them (foldWire). Each half carries the wire stream it came
+	// from — the (depth, callID) pair of the agent that made the call — because the one ring holds
+	// every run's traffic interleaved, and that pair is what pairs a request to its own reply
+	// (hasUnrecordedReply). It sits BESIDE the transcript rather than in
 	// it — a wire record is not a conversation entry and must not disturb entry folding — and it is
 	// rebuilt rather than appended into, so it rides safely in the value-copied Model (ADR 0011). It
 	// is empty on every run that leaves `ui.inspector` off, where the engine emits no WireEvents at
