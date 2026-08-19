@@ -6,8 +6,7 @@
   </picture>
 </p>
 
-A **terminal coding agent**, built for **smaller local models**<br>
-while working even better with bigger ones.
+A **terminal coding agent**, built for **smaller local models** - while working even better with bigger ones.
 
 <p align="center">
   <img src="graphics/demo.gif" alt="Apogee finding and fixing a failing Go test against a local model, with a follow-up instruction queued mid-run and delivered at the next tool boundary">

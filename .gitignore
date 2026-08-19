@@ -7,6 +7,7 @@
 /apogee.exe
 *.test
 *.out
+IDEAS.md
 
 # Release archives staged by `make dist` — published as GitHub release assets, never committed
 /dist/
