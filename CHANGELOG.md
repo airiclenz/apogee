@@ -174,6 +174,11 @@ point is a **minor** bump, not a breaking change.
   out-of-workspace escape (ADR 0049) journals the same two records the rename path leaves, and a
   split failure (copy landed, removal refused) journals the destination alone.
 
+- Docs: moved the 2026-08-11 audit-triage note and the 2026-08-12 hostile-bytes closeout narration
+  out of `ISSUES.md` into `docs/reviews/archived/2026-08-11 - 01 - external-audit-triage.md`
+  (new "Addendum" section), leaving a five-line pointer in the *Deferred security-review Lows*
+  entry and correcting the stale triage-doc path (missing `archived/` segment).
+
 ## [0.15.0] — 2026-08-16
 
 ### Added

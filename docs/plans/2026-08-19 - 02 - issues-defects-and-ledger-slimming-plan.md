@@ -135,7 +135,9 @@ is the starting point.
 
 ---
 
-## 3. Relocate the security-Lows triage and closeout narration into the triage review doc
+## 3. Relocate the security-Lows triage and closeout narration into the triage review doc — ✅ DONE (2026-08-19)
+
+NOTES (2026-08-19): the relocated triage note's self-citation of the triage doc was kept verbatim with only its `archived/` prefix fixed (author call 3 forbids rewording), so it now reads as a self-reference inside its new home.
 
 **What:** Move the two completed-run narration blocks out of the *Deferred security-review Lows*
 entry in `ISSUES.md`, verbatim (author calls 2 and 3), into
