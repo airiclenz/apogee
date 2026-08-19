@@ -70,8 +70,11 @@ as the behavioral oracle, not the TDD. On send the webview posts `{text, skillId
     [ADR 0025](docs/adr/0025-interjections-commit-at-the-between-steps-boundary.md) §6 still
     defers the user-after-tool wire risk to this layer by name.
 
-- **[P2] Undo all agent changes** — batch revert of a session's file writes (document that
-  terminal side-effects are not undone, as the extension does).
+- [P] **[P2] Undo all agent changes** — batch revert of a session's file writes (document that
+  terminal side-effects are not undone, as the extension does). Planned 2026-08-19:
+  `docs/plans/2026-08-19 - 01 - undo-agent-changes-plan.md` (per-exchange undo stack; the
+  extension turned out to have no implementation to port — the TDD claim is stale, verified
+  against the apogee-code source repo at v0.2.58 and head).
 
 **Related (parked below):** per-tool approval overrides (`toolApprovalOverrides`:
 automatic/ask-first/excluded) — apogee-code surfaces this in config; apogee has the internal
