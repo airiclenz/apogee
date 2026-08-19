@@ -146,16 +146,35 @@ type wireSkillSpan struct {
 // same rule and carries omitempty — only a sub_agent head ever fills it, so no other record's blob
 // grows a byte, and a blob written before it decodes with no prompt, which is the shape every such
 // record was written under.
+//
+// Regions travel because they are the CHANGE ITSELF rather than a rendering of it (toolView.Regions,
+// domain.EditRegion — ADR 0052 §5). Details keeps carrying the stacked rows, so a diff block replays
+// its body without them; what cannot be replayed without them is the SPLIT reading, which is composed
+// at paint time where the width is known and has nothing to compose from once the regions are gone. A
+// resumed session would paint every block it had split as stacked rows instead — the scrollback
+// changing shape across a restart, the same thing Solo, Stat and Task are each here to prevent.
+// RegionFiles rides beside them on the same rule: it is the file each region was cut from, one name
+// per region and ALIGNED index-for-index with Regions, and it is how a diff spanning several files
+// keeps its per-file header rows (regionFileSections). A record that lost it degrades to one nameless
+// section — a missing header, never a wrong body — which is why the two are one decision and not two.
+//
+// Both members are ADDITIVE within transcriptVersion and need no bump, on the wireEntry rule: they
+// take omitempty, so every record that is not diff-bodied writes exactly the bytes it wrote before
+// (TestTranscriptCodecGoldenV1), an older build ignores members it cannot place, and a blob written
+// before them decodes with no regions and paints the stacked rows its Details already hold — which is
+// the reading every such record was written under.
 type wireToolView struct {
-	Label   string            `json:"label,omitempty"`
-	Verb    string            `json:"verb,omitempty"`
-	Target  string            `json:"target,omitempty"`
-	Name    string            `json:"name,omitempty"`
-	Solo    bool              `json:"solo,omitempty"`
-	Stat    string            `json:"stat,omitempty"`
-	Task    string            `json:"task,omitempty"`
-	Summary wireBranchSummary `json:"summary"`
-	Details []wireDetailLine  `json:"details,omitempty"`
+	Label       string            `json:"label,omitempty"`
+	Verb        string            `json:"verb,omitempty"`
+	Target      string            `json:"target,omitempty"`
+	Name        string            `json:"name,omitempty"`
+	Solo        bool              `json:"solo,omitempty"`
+	Stat        string            `json:"stat,omitempty"`
+	Task        string            `json:"task,omitempty"`
+	Summary     wireBranchSummary `json:"summary"`
+	Details     []wireDetailLine  `json:"details,omitempty"`
+	Regions     []wireEditRegion  `json:"regions,omitempty"`
+	RegionFiles []string          `json:"regionFiles,omitempty"`
 }
 
 // wireDetailLine is the serialized form of a [detailLine]. Kind is stored as its underlying
@@ -189,6 +208,29 @@ type wireDetailLine struct {
 type wireBranchSummary struct {
 	wireDetailLine
 	Quoted bool `json:"quoted,omitempty"`
+}
+
+// wireEditRegion is the serialized form of a [domain.EditRegion]: one changed region of a diff — the
+// lines it removed and the lines it inserted, the unchanged context bracketing them, and the 1-based
+// line the region starts on in the before and in the after file.
+//
+// The domain type is MIRRORED here rather than serialized straight, unlike the view field that holds
+// it (toolView.Regions reuses the domain type because the facts are the tool's). What a session
+// record looks like on disk is this file's decision, and a member added to domain.EditRegion must not
+// change the wire form without someone choosing it here — the same reason every other struct in this
+// file is a mirror.
+//
+// Every member takes omitempty. The two starts are 1-based, so the zero they omit is a value no
+// region carries, and an omitted number decodes to that same zero either way; an absent line slice
+// and an empty one are the same fact — no lines there — so a region comes back rendering exactly as
+// it was written.
+type wireEditRegion struct {
+	BeforeStart int      `json:"beforeStart,omitempty"`
+	AfterStart  int      `json:"afterStart,omitempty"`
+	Leading     []string `json:"leading,omitempty"`
+	Removed     []string `json:"removed,omitempty"`
+	Inserted    []string `json:"inserted,omitempty"`
+	Trailing    []string `json:"trailing,omitempty"`
 }
 
 // wirePresented is the serialized form of a [presentedView]. Method is stored as its domain
@@ -357,6 +399,24 @@ func toWireToolView(tv toolView) *wireToolView {
 			w.Details = append(w.Details, wireDetailLine{Kind: int(d.Kind), Text: d.Text})
 		}
 	}
+	// The regions ride BESIDE the rows they were rendered into, not instead of them: Details keeps
+	// the stacked reading an older build replays as it stands, and these carry the change a split
+	// reading has to be re-composed from at paint time. The file names travel with them because they
+	// only mean anything beside them — one name per region, in the regions' own order.
+	if len(tv.Regions) > 0 {
+		w.Regions = make([]wireEditRegion, 0, len(tv.Regions))
+		for _, r := range tv.Regions {
+			w.Regions = append(w.Regions, wireEditRegion{
+				BeforeStart: r.BeforeStart,
+				AfterStart:  r.AfterStart,
+				Leading:     r.Leading,
+				Removed:     r.Removed,
+				Inserted:    r.Inserted,
+				Trailing:    r.Trailing,
+			})
+		}
+		w.RegionFiles = tv.RegionFiles
+	}
 	return w
 }
 
@@ -496,6 +556,26 @@ func fromWireToolView(w *wireToolView, done bool) toolView {
 			lines = append(lines, detailLine{Kind: detailKind(d.Kind), Text: d.Text})
 		}
 		tv.Details = newToolBody(lines)
+	}
+	// The regions come back as the domain type the view carries, and the names with them — a record
+	// that has no regions annotates nothing, so its names (if a hand-written blob carried any) are
+	// dropped rather than left to line up against nothing. A record from before they rode the wire
+	// takes this branch not at all and replays the stacked rows above, which is how it was written.
+	// sanitize below escape-strips the region lines and the names with every other display field:
+	// they are tool-recorded FILE CONTENT off disk, which is exactly what that seam is for.
+	if len(w.Regions) > 0 {
+		regions := make([]domain.EditRegion, 0, len(w.Regions))
+		for _, r := range w.Regions {
+			regions = append(regions, domain.EditRegion{
+				BeforeStart: r.BeforeStart,
+				AfterStart:  r.AfterStart,
+				Leading:     r.Leading,
+				Removed:     r.Removed,
+				Inserted:    r.Inserted,
+				Trailing:    r.Trailing,
+			})
+		}
+		tv.Regions, tv.RegionFiles = regions, w.RegionFiles
 	}
 	tv.sanitize()
 	return tv

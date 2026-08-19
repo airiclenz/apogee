@@ -494,7 +494,11 @@ to plain rendering; a malformed body falls back wholesale.
 
 Depends on items 5 and 7.
 
-## 10. Codec: regions travel additively
+## 10. Codec: regions travel additively — ✅ DONE (2026-08-19)
+
+NOTES (2026-08-19): the item names `toolView.Regions` alone, but `RegionFiles` — landed by item 9, the file each region was cut from, aligned index-for-index with `Regions` — is display state of exactly the same class and rides the wire with it as a second additive member (`regionFiles,omitempty`), per this dispatch's binding context and item 9's own closing note. Without it a decoded multi-file git diff loses its header rows in the SPLIT reading only.
+NOTES (2026-08-19): `wireEditRegion` mirrors `domain.EditRegion` with omitempty on every member, so an EMPTY (non-nil) line slice decodes as nil — the same fact, no lines, and the same rendering. The two starts are 1-based, so the zero omitempty drops is a value no real region carries.
+NOTES (2026-08-19): the round-trip extension adds a SECOND tool card to `mixedEntries` (a two-file `git_diff_range` block built through `showFileRegions`) rather than hanging regions on the existing `read_file` card — the fixture's own stated rule is that it must describe a view the presenter really produces. The `wireToolView` member census in `transcriptcodec_test.go` gained the two new names, which is the decision that census exists to force.
 
 **What:** In `internal/tui/transcriptcodec.go`, persist `toolView.Regions` as a new
 ADDITIVE field on `wireToolView` (`transcriptcodec.go:149-159`) — e.g.

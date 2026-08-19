@@ -20,6 +20,7 @@ import (
 // mixedEntries is a scrollback covering every persisted entry kind and the tricky corners a
 // resume must repaint exactly: the skill tokens LOCATED on a user send, a nested (depth>0) assistant block,
 // an enriched tool-call card (summary + coloured details + done, carrying its unexported name),
+// a diff-bodied card whose recorded Edit regions ride beside the rows they were rendered into,
 // a standalone tool result, a recovered error, a neutral note, and a presented document with a
 // domain Method. It is the fixture behind the round-trip and exclusion tests.
 //
@@ -38,10 +39,34 @@ func mixedEntries() []entry {
 		}),
 	}
 	toolCard.sanitize()
+	// The diff card is the other tool shape a record has to bring back whole: a diff-bodied block
+	// carrying the change the tool RECORDED (toolView.Regions) beside the stacked rows it was painted
+	// as, and the file each region was cut from — the multi-file case, which is the only one whose
+	// names are filled. It is written by the one seam that writes them (showFileRegions) for the
+	// reason above: a literal would describe a view the presenter never produces.
+	diffCard := toolView{
+		Label: "Git Diff", Verb: "diffing", Target: "main..HEAD", name: "git_diff_range",
+		Summary: namedSummary(detailLine{Text: "2 files"}),
+	}
+	diffCard.showFileRegions([]diffFileRegions{
+		{File: "a.go", Regions: []domain.EditRegion{{
+			BeforeStart: 10, AfterStart: 10,
+			Leading:  []string{"func main() {"},
+			Removed:  []string{"\tprintln(\"old\")"},
+			Inserted: []string{"\tprintln(\"new\")"},
+			Trailing: []string{"}"},
+		}}},
+		{File: "b.go", Regions: []domain.EditRegion{{
+			BeforeStart: 1, AfterStart: 1,
+			Inserted: []string{"package b"},
+		}}},
+	})
+	diffCard.sanitize()
 	return []entry{
 		{kind: entryUser, text: "/reviewer read main.go", skillSpans: []skillSpan{{start: 0, end: 9}}},
 		{kind: entryAssistant, text: "Reading it now.", depth: 1},
 		{kind: entryToolCall, callID: "c1", done: true, tool: toolCard},
+		{kind: entryToolCall, callID: "c2", done: true, tool: diffCard},
 		{kind: entryToolResult, text: "error: boom", depth: 2},
 		{kind: entryError, text: "loop: recovered fault"},
 		{kind: entryNote, text: "cancelled"},
@@ -1039,7 +1064,10 @@ func TestTranscriptCodecPersistsANamedDelegationAsItsTarget(t *testing.T) {
 		if got := fields(wireEntry{}); !slices.Equal(got, wantEntry) {
 			t.Errorf("wireEntry members = %v, want %v — widening the wire needs its own decision", got, wantEntry)
 		}
-		wantTool := []string{"Label", "Verb", "Target", "Name", "Solo", "Stat", "Task", "Summary", "Details"}
+		wantTool := []string{
+			"Label", "Verb", "Target", "Name", "Solo", "Stat", "Task", "Summary", "Details",
+			"Regions", "RegionFiles",
+		}
 		if got := fields(wireToolView{}); !slices.Equal(got, wantTool) {
 			t.Errorf("wireToolView members = %v, want %v — widening the wire needs its own decision", got, wantTool)
 		}
@@ -1180,6 +1208,120 @@ func TestTranscriptCodecRoundTripsTheSpawningCallID(t *testing.T) {
 		if got[0].depth != 1 || got[0].text != "child answer" {
 			t.Errorf("the rest of the legacy entry decoded as %+v, want the nested block unchanged", got[0])
 		}
+	})
+}
+
+// TestTranscriptCodecRoundTripsRecordedRegions pins the half of a diff-bodied block its Details
+// cannot bring back. The stacked rows travel as they always did, so an older build replays the body
+// unchanged (ADR 0052 §5) — but the SPLIT reading is composed at paint time, from the regions
+// themselves, and a record that dropped them would replay as stacked rows a block the live session
+// had split: the scrollback changing shape across a restart, which is what the round trip exists to
+// prevent.
+//
+// The file names ride with them for the multi-file case: one name per region, in the regions' own
+// order, which is what either reading regroups into per-file sections (regionFileSections). Both
+// members are ADDITIVE, so the two halves that matter are asserted beside the round trip — a record
+// written before them decodes with no regions and still paints the rows it was written as, and the
+// region lines arrive escape-stripped like every other text off disk.
+func TestTranscriptCodecRoundTripsRecordedRegions(t *testing.T) {
+	t.Parallel()
+
+	t.Run("the regions and the file each was cut from survive the round trip", func(t *testing.T) {
+		tv := toolView{
+			Label: "Git Diff", Verb: "diffing", Target: "main..HEAD", name: "git_diff_range",
+			Summary: namedSummary(detailLine{Text: "+2 −1"}),
+		}
+		tv.showFileRegions([]diffFileRegions{
+			{File: "a.go", Regions: []domain.EditRegion{{
+				BeforeStart: 10, AfterStart: 10,
+				Leading:  []string{"func main() {"},
+				Removed:  []string{"\told()"},
+				Inserted: []string{"\tnew()"},
+				Trailing: []string{"}"},
+			}}},
+			{File: "b.go", Regions: []domain.EditRegion{{
+				BeforeStart: 1, AfterStart: 1,
+				Inserted: []string{"package b"},
+			}}},
+		})
+		tv.sanitize()
+
+		tr := &transcript{entries: []entry{{kind: entryToolCall, callID: "d1", done: true, tool: tv}}}
+		data, err := encodeTranscript(tr)
+		if err != nil {
+			t.Fatalf("encodeTranscript: %v", err)
+		}
+		if want := `"regionFiles":["a.go","b.go"]`; !strings.Contains(string(data), want) {
+			t.Errorf("wire blob does not carry %s:\n%s", want, data)
+		}
+		if want := `"beforeStart":10`; !strings.Contains(string(data), want) {
+			t.Errorf("wire blob does not carry the region's before-file line (%s):\n%s", want, data)
+		}
+
+		got, err := decodeTranscript(data)
+		if err != nil {
+			t.Fatalf("decodeTranscript: %v", err)
+		}
+		if len(got) != 1 {
+			t.Fatalf("decoded %d entries; want the one diff card", len(got))
+		}
+		if !reflect.DeepEqual(got[0].tool.Regions, tv.Regions) {
+			t.Errorf("replayed regions:\n got = %+v\nwant = %+v", got[0].tool.Regions, tv.Regions)
+		}
+		if !slices.Equal(got[0].tool.RegionFiles, tv.RegionFiles) {
+			t.Errorf("replayed region files = %v; want %v — the split reading loses its headers without them",
+				got[0].tool.RegionFiles, tv.RegionFiles)
+		}
+		if got[0].tool.Details.len() != tv.Details.len() {
+			t.Errorf("replayed body = %d rows; want %d — Details keeps carrying the stacked reading",
+				got[0].tool.Details.len(), tv.Details.len())
+		}
+	})
+
+	t.Run("a record written before the members decodes with no regions and keeps its rows", func(t *testing.T) {
+		data := []byte(`{"version":1,"entries":[` +
+			`{"kind":"toolCall","callID":"c1","done":true,"tool":{"label":"Edit","verb":"editing",` +
+			`"target":"main.go","name":"edit_existing_file","summary":{"text":"+1 −1"},` +
+			`"details":[{"kind":2,"text":"- old()"},{"kind":1,"text":"+ new()"}]}}` +
+			`]}`)
+		got, err := decodeTranscript(data)
+		if err != nil {
+			t.Fatalf("decodeTranscript: %v", err)
+		}
+		if got[0].tool.Regions != nil || got[0].tool.RegionFiles != nil {
+			t.Errorf("legacy record decoded with regions %+v / files %v; want neither",
+				got[0].tool.Regions, got[0].tool.RegionFiles)
+		}
+		if got[0].tool.Details.len() != 2 {
+			t.Errorf("legacy body = %d rows; want the 2 it was written with — a region-less record still paints stacked",
+				got[0].tool.Details.len())
+		}
+	})
+
+	t.Run("region lines and file names are escape-stripped on the way in", func(t *testing.T) {
+		data := []byte(`{"version":1,"entries":[` +
+			`{"kind":"toolCall","callID":"c1","done":true,"tool":{"label":"Git Diff","verb":"diffing",` +
+			`"target":"main..HEAD","name":"git_diff_range","summary":{"text":"+1 −1"},` +
+			`"regions":[{"beforeStart":1,"afterStart":1,` +
+			`"leading":["\u001b[31mctx"],"removed":["\u001b[1mold()"],"inserted":["new()\u0007"],` +
+			`"trailing":["\u001b[0m}"]}],` +
+			`"regionFiles":["\u001b[7ma.go"]}}` +
+			`]}`)
+		got, err := decodeTranscript(data)
+		if err != nil {
+			t.Fatalf("decodeTranscript: %v", err)
+		}
+		if len(got[0].tool.Regions) != 1 {
+			t.Fatalf("decoded %d regions; want 1", len(got[0].tool.Regions))
+		}
+		region := got[0].tool.Regions[0]
+		for _, line := range slices.Concat(region.Leading, region.Removed, region.Inserted, region.Trailing) {
+			assertNoESC(t, line)
+		}
+		if got := region.Inserted[0]; strings.ContainsRune(got, '\a') {
+			t.Errorf("inserted line = %q; a control byte survived the strip", got)
+		}
+		assertNoESC(t, got[0].tool.RegionFiles[0])
 	})
 }
 

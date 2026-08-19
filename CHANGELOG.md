@@ -10,6 +10,17 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **A split diff survives a reload.** A resumed session used to bring a diff-bodied block back as
+  stacked rows even where the live one had painted two panes: the record carried the rendered rows
+  and not the change they were rendered from, and the split reading is composed at paint time, from
+  the change itself. The Edit regions a block was painted from now travel with it — the removed and
+  the inserted lines, the unchanged context bracketing them, and the line each region sits on in the
+  before and in the after file — and beside them the file each region was cut from, which is what a
+  multi-file `git_diff_range` body keeps its per-file header rows by. Both are additive on the
+  transcript's own rule (ADR 0052 §5): no version bump, a block with no regions writes not one extra
+  byte, an older build ignores what it cannot place, and a record written before this decodes with no
+  regions and paints the stacked rows its body always carried.
+
 - **`git_diff_range` bodies are the change, file by file.** The diff-range tool applies nothing
   either, and what it prints is git's own unified diff — which, unlike `view_diff`'s whole-file
   body, elides everything between its hunks. The renderer now walks that output, taking each
