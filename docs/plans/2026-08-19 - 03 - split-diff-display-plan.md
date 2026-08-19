@@ -187,7 +187,21 @@ several (or merged) regions; failure paths carry no summary.
 
 Depends on item 2.
 
-## 4. Tools: edit_existing_file records regions
+## 4. Tools: edit_existing_file records regions — ✅ DONE (2026-08-19)
+
+NOTES (2026-08-19): the item's Tests list asks for "a patch that resolves via fuzzy matching still
+reports the regions of what actually landed", but no fuzzy matcher exists — `applyPatch`
+(`file_edit.go`) locates a hunk by `strings.Index` of its joined old lines, verbatim. The nearest
+true behaviour was pinned instead, in `TestEditExistingFile_RegionsFollowWhereThePatchLanded`: a
+hunk whose old text REPEATS in the file lands on the first occurrence, not necessarily the one the
+model pictured, and the regions report that landing site because they are cut from the read/written
+pair and never from the patch's own account of itself.
+NOTES (2026-08-19): the item's Files list names only `file_edit.go` and its test, but
+`internal/tools/doc.go` had to be edited too — its "Exactly EIGHT built-ins attach one" count and
+its list of tools that deliberately attach nothing both became false the moment
+`edit_existing_file` attached `EditRegions`. The count is now NINE and `edit_existing_file` moved
+out of the "quoting a fixed one-line sentence" list into the attaching one, beside the
+find-replace pair (item 3 made the same edit for its two tools). No other file touched.
 
 **What:** In `internal/tools/file_edit.go`, both forms (the `*** Begin Patch` hunk
 form, `file_edit.go:108`, and the full-content form, `file_edit.go:114`) compute

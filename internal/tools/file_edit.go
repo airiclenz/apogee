@@ -57,6 +57,13 @@ func (t *EditExistingFile) workspaceWriteTarget(call domain.ToolCall) (writeTarg
 // file (a non-matching hunk leaves the file untouched); otherwise content fully replaces
 // the file. A missing file, a path escape, oversized content, or a non-applying patch are
 // reported as IsError results, not Go errors.
+//
+// Both forms carry the Edit regions of what landed as their domain.ToolSummary (okEditRegions,
+// regions.go) — the structured half a host paints the Split diff from (ADR 0052). They are cut
+// from the file as it was READ against the file as WRITTEN, so a patch whose hunks the applier
+// placed somewhere other than where the model pictured them reports where they actually landed,
+// and a full replacement reports only the lines that differ rather than the whole file. The
+// prose sentence the model reads is unchanged by that, and a failure carries no summary at all.
 func (t *EditExistingFile) Execute(ctx context.Context, call domain.ToolCall) (domain.ToolResult, error) {
 	if err := ctx.Err(); err != nil {
 		return domain.ToolResult{}, err
@@ -105,13 +112,14 @@ func (t *EditExistingFile) Execute(ctx context.Context, call domain.ToolCall) (d
 		if len(hunks) > 1 {
 			suffix = "s"
 		}
-		return okResult(call.ID, fmt.Sprintf("applied patch to %s (%d hunk%s)%s", args.Path, len(hunks), suffix, resolved)), nil
+		content := fmt.Sprintf("applied patch to %s (%d hunk%s)%s", args.Path, len(hunks), suffix, resolved)
+		return okEditRegions(call.ID, content, string(original), patched), nil
 	}
 
 	if err := safeWriteFile(ctx, args.Path, t.root, []byte(args.Content), 0o644); err != nil {
 		return errorResult(call.ID, err.Error()), nil
 	}
-	return okResult(call.ID, "updated "+args.Path+resolved), nil
+	return okEditRegions(call.ID, "updated "+args.Path+resolved, string(original), args.Content), nil
 }
 
 // ----------------------------------------------------------------------------

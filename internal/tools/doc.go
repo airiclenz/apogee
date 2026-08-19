@@ -18,13 +18,14 @@
 // prose half, written for the MODEL, and its wording is free to change. A domain.ToolSummary
 // attached beside it (okSummary, tools.go) is the structured half, written for a HOST — the
 // TUI's tool card today, a headless or bench renderer later — carrying as data the facts the
-// tool already computed for its own header. Exactly EIGHT built-ins attach one: read_file
+// tool already computed for its own header. Exactly NINE built-ins attach one: read_file
 // (ReadSpan), write_file (WroteBytes), list_dir (ListedEntries), grep (MatchedLines),
-// view_diff (DiffStat), web_search (SearchHits), and single_find_and_replace and
-// multi_find_and_replace (EditRegions, the changed regions of the edit they just applied) — the
+// view_diff (DiffStat), web_search (SearchHits), and the three edit tools
+// single_find_and_replace, multi_find_and_replace and edit_existing_file (EditRegions, the
+// changed regions of the edit they just applied) — the
 // ones whose outcome a host would otherwise have to re-derive from the sentence. The rest
 // deliberately do not, and that is not an omission to fill in later: quoting a fixed one-line
-// sentence (edit_existing_file, web_fetch, http_request, ask_user, present_document) or compressing
+// sentence (web_fetch, http_request, ask_user, present_document) or compressing
 // free-form output to a first line plus a count (terminal, python_exec, the git tools,
 // diagnostics, sub_agent) is RENDERING, not scavenging — there is no re-derived fact there for a
 // type to fix. A summary is optional by construction, so ADR 0002's open extension point is

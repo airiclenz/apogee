@@ -10,6 +10,17 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **`edit_existing_file` records its Edit regions at apply time.** Both forms of the tool — the
+  `*** Begin Patch` hunk form and the full-content replacement — now attach the
+  `domain.EditRegions` summary of what they actually wrote, through the same shared
+  `okEditRegions` helper the find-and-replace pair returns through. The regions are cut from the
+  file as it was READ against the file as WRITTEN, so a patch whose hunks the text-locating
+  applier placed somewhere other than where the model pictured them reports where they actually
+  landed, and a full-content replacement reports only the lines that differ rather than the whole
+  file. The prose sentence the model reads is byte-for-byte unchanged, a refused patch still
+  carries no summary, and content that writes the same bytes back attaches none either — the
+  signal a host reads to keep its argument-derived list (ADR 0052). No view consumes it yet.
+
 - **The two find-and-replace tools record their Edit regions at apply time.**
   `single_find_and_replace` and `multi_find_and_replace` now attach the `domain.EditRegions`
   summary of what they actually wrote — the changed regions with their line numbers and up to

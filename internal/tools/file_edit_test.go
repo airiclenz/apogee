@@ -2,10 +2,14 @@ package tools
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/airiclenz/apogee/internal/domain"
 )
 
 // patchTestFile is the original content the patch-mode vectors edit (ported from the
@@ -354,4 +358,193 @@ func mustRead(t *testing.T, path string) []byte {
 		t.Fatalf("read %s: %v", filepath.Base(path), err)
 	}
 	return got
+}
+
+// A patch of two hunks summarises the file's whole change: one region per hunk, each numbered
+// where it landed in the file rather than where the hunk sat in the patch — and the prose
+// sentence the MODEL reads stays byte-for-byte what it was before regions existed.
+func TestEditExistingFile_PatchRecordsARegionPerHunk(t *testing.T) {
+	t.Parallel()
+
+	root := tempRoot(t)
+	var lines []string
+	for i := 1; i <= 20; i++ {
+		lines = append(lines, fmt.Sprintf("l%02d", i))
+	}
+	writeTempFile(t, root, "patch.txt", strings.Join(lines, "\n")+"\n")
+
+	patch := strings.Join([]string{
+		"*** Begin Patch",
+		"*** Update File: patch.txt",
+		"@@",
+		"-l03",
+		"+L03",
+		"@@",
+		"-l15",
+		"+L15",
+		"*** End Patch",
+	}, "\n")
+
+	result, err := NewEditExistingFile(root).Execute(context.Background(),
+		callWith(t, "c1", map[string]any{"path": "patch.txt", "content": patch}))
+	if err != nil {
+		t.Fatalf("Execute returned a Go error: %v", err)
+	}
+	if result.Content != "applied patch to patch.txt (2 hunks)" {
+		t.Errorf("content = %q, want the unchanged prose sentence", result.Content)
+	}
+
+	want := []domain.EditRegion{
+		{
+			BeforeStart: 1,
+			AfterStart:  1,
+			Leading:     []string{"l01", "l02"},
+			Removed:     []string{"l03"},
+			Inserted:    []string{"L03"},
+			Trailing:    []string{"l04", "l05", "l06"},
+		},
+		{
+			BeforeStart: 12,
+			AfterStart:  12,
+			Leading:     []string{"l12", "l13", "l14"},
+			Removed:     []string{"l15"},
+			Inserted:    []string{"L15"},
+			Trailing:    []string{"l16", "l17", "l18"},
+		},
+	}
+	regions := editRegionsOf(t, result)
+	if !reflect.DeepEqual(regions.Regions, want) {
+		t.Errorf("regions = %+v, want %+v", regions.Regions, want)
+	}
+	if stat := regions.Stat(); stat.Added != 2 || stat.Removed != 2 {
+		t.Errorf("Stat() = %+v, want 2 added and 2 removed", stat)
+	}
+}
+
+// The full-content form summarises the DIFFERENCE between the file it read and the content it
+// wrote, not the content itself: a whole-file replacement that touches one line comes back as one
+// region, the same regions editRegions cuts from that pair.
+func TestEditExistingFile_FullReplacementRecordsEditRegions(t *testing.T) {
+	t.Parallel()
+
+	root := tempRoot(t)
+	const before = "l1\nl2\nl3\nl4\nl5\nl6\nl7\nl8\nl9\n"
+	const after = "l1\nl2\nl3\nl4\nL5\nl6\nl7\nl8\nl9\n"
+	writeTempFile(t, root, "whole.txt", before)
+
+	result, err := NewEditExistingFile(root).Execute(context.Background(),
+		callWith(t, "c1", map[string]any{"path": "whole.txt", "content": after}))
+	if err != nil {
+		t.Fatalf("Execute returned a Go error: %v", err)
+	}
+	if result.Content != "updated whole.txt" {
+		t.Errorf("content = %q, want the unchanged prose sentence", result.Content)
+	}
+
+	want := []domain.EditRegion{{
+		BeforeStart: 2,
+		AfterStart:  2,
+		Leading:     []string{"l2", "l3", "l4"},
+		Removed:     []string{"l5"},
+		Inserted:    []string{"L5"},
+		Trailing:    []string{"l6", "l7", "l8"},
+	}}
+	got := editRegionsOf(t, result).Regions
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("regions = %+v, want %+v", got, want)
+	}
+	if regions := editRegions(before, after); !reflect.DeepEqual(got, regions.Regions) {
+		t.Errorf("regions = %+v, want editRegions of the two contents %+v", got, regions.Regions)
+	}
+}
+
+// The applier locates a hunk by its text, so a hunk whose old text repeats lands on the FIRST
+// occurrence — not necessarily the one the model pictured. The regions report what actually
+// landed, because they are cut from the file as read against the file as written and never from
+// the patch's own account of itself.
+func TestEditExistingFile_RegionsFollowWhereThePatchLanded(t *testing.T) {
+	t.Parallel()
+
+	root := tempRoot(t)
+	writeTempFile(t, root, "repeat.txt", "head\nsame\ntail\nsame\nend\n")
+
+	patch := strings.Join([]string{
+		"*** Begin Patch",
+		"*** Update File: repeat.txt",
+		"@@",
+		"-same",
+		"+SAME",
+		"*** End Patch",
+	}, "\n")
+
+	result, err := NewEditExistingFile(root).Execute(context.Background(),
+		callWith(t, "c1", map[string]any{"path": "repeat.txt", "content": patch}))
+	if err != nil {
+		t.Fatalf("Execute returned a Go error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("unexpected tool error: %q", result.Content)
+	}
+
+	want := []domain.EditRegion{{
+		BeforeStart: 1,
+		AfterStart:  1,
+		Leading:     []string{"head"},
+		Removed:     []string{"same"},
+		Inserted:    []string{"SAME"},
+		Trailing:    []string{"tail", "same", "end"},
+	}}
+	if got := editRegionsOf(t, result).Regions; !reflect.DeepEqual(got, want) {
+		t.Errorf("regions = %+v, want the change at the first occurrence %+v", got, want)
+	}
+}
+
+// No summary rides along unless regions were actually cut. A refused patch wrote nothing, so
+// there is nothing to paint; content equal to what the file already held wrote the same bytes
+// back, and an empty EditRegions would claim the edit changed nothing rather than letting the
+// card fall back to its argument-derived list.
+func TestEditExistingFile_NoRegionsNoSummary(t *testing.T) {
+	t.Parallel()
+
+	const original = "l1\nl2\nl3\n"
+	cases := []struct {
+		name    string
+		content string
+		wantErr bool
+	}{
+		{
+			name:    "a hunk that matches nothing",
+			content: "*** Begin Patch\n*** Update File: edit.txt\n@@\n-absent\n+x\n*** End Patch",
+			wantErr: true,
+		},
+		{
+			name:    "a patch carrying no hunk at all",
+			content: "*** Begin Patch\n*** Update File: edit.txt\n*** End Patch",
+			wantErr: true,
+		},
+		{
+			name:    "content equal to what the file already held",
+			content: original,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			root := tempRoot(t)
+			writeTempFile(t, root, "edit.txt", original)
+
+			result, err := NewEditExistingFile(root).Execute(context.Background(),
+				callWith(t, "c1", map[string]any{"path": "edit.txt", "content": tc.content}))
+			if err != nil {
+				t.Fatalf("Execute returned a Go error: %v", err)
+			}
+			if result.IsError != tc.wantErr {
+				t.Fatalf("IsError = %v, want %v (content: %q)", result.IsError, tc.wantErr, result.Content)
+			}
+			if result.Summary != nil {
+				t.Errorf("result carries a %T summary, want none", result.Summary)
+			}
+		})
+	}
 }
