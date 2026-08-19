@@ -15,6 +15,7 @@ var (
 	_ ToolSummary = MatchedLines{}
 	_ ToolSummary = DiffStat{}
 	_ ToolSummary = SearchHits{}
+	_ ToolSummary = EditRegions{}
 )
 
 func TestToolSummaryVariantsAreSealed(t *testing.T) {
@@ -30,9 +31,10 @@ func TestToolSummaryVariantsAreSealed(t *testing.T) {
 		MatchedLines{},
 		DiffStat{},
 		SearchHits{},
+		EditRegions{},
 	}
 
-	const want = 6
+	const want = 7
 	if len(variants) != want {
 		t.Fatalf("ToolSummary variants = %d, want %d", len(variants), want)
 	}
@@ -74,5 +76,85 @@ func TestToolResultZeroValueHasNoSummary(t *testing.T) {
 	}
 	if result.Summary != nil {
 		t.Errorf("Summary = %#v, want nil", result.Summary)
+	}
+}
+
+// Stat is the single derivation of an edit's +A −R pair: it counts the changed lines the
+// regions carry and nothing else, so the context lines bracketing a region — which a reader
+// sees but the edit never touched — stay out of the count.
+func TestEditRegionsStat(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		regions EditRegions
+		want    DiffStat
+	}{
+		{
+			name:    "zero value counts nothing",
+			regions: EditRegions{},
+			want:    DiffStat{},
+		},
+		{
+			name: "one region counts its changed lines, not its context",
+			regions: EditRegions{Regions: []EditRegion{{
+				BeforeStart: 8,
+				AfterStart:  8,
+				Leading:     []string{"ctx one", "ctx two", "ctx three"},
+				Removed:     []string{"old one", "old two"},
+				Inserted:    []string{"new one"},
+				Trailing:    []string{"ctx four", "ctx five"},
+			}}},
+			want: DiffStat{Added: 1, Removed: 2},
+		},
+		{
+			name: "several regions sum, insertion-only and deletion-only included",
+			regions: EditRegions{Regions: []EditRegion{
+				{
+					BeforeStart: 1,
+					AfterStart:  1,
+					Removed:     []string{"old one", "old two"},
+					Inserted:    []string{"new one", "new two", "new three"},
+				},
+				{
+					BeforeStart: 40,
+					AfterStart:  41,
+					Leading:     []string{"ctx"},
+					Inserted:    []string{"added one", "added two"},
+				},
+				{
+					BeforeStart: 90,
+					AfterStart:  93,
+					Removed:     []string{"dropped"},
+					Trailing:    []string{"ctx"},
+				},
+			}},
+			want: DiffStat{Added: 5, Removed: 3},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := tc.regions.Stat()
+
+			if got != tc.want {
+				t.Errorf("Stat() = %+v, want %+v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestEditRegionsZeroValueHasNoRegions(t *testing.T) {
+	t.Parallel()
+
+	var zero EditRegions
+
+	if zero.Regions != nil {
+		t.Errorf("zero EditRegions Regions = %#v, want nil", zero.Regions)
+	}
+	if got := zero.Stat(); got != (DiffStat{}) {
+		t.Errorf("zero EditRegions Stat() = %+v, want the zero DiffStat", got)
 	}
 }

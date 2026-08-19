@@ -10,6 +10,18 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **`domain.EditRegions`, the Tool summary variant the coming Split diff is painted from.**
+  An edit tool can now record what it applied as data rather than leave a view to guess it from
+  the call's arguments: each `EditRegion` carries the removed and inserted lines, up to three
+  unchanged context lines each side, and the 1-based line the region starts on in the before and
+  after file. Neighbouring changes whose context would touch are recorded merged, so a consumer
+  paints regions end to end without de-duplicating. `EditRegions.Stat()` is the one derivation of
+  the `+A −R` pair — context lines never count — so every consumer reads the same number instead
+  of recounting. The variant is sealed like the six before it (unexported marker method, additive,
+  re-exported from the root facade) and rides the Tool summary contract unchanged: display data,
+  never sent to the model, never persisted in the session record (ADR 0052). Nothing produces or
+  consumes it yet.
+
 - **A per-exchange pre-image journal (`internal/undo`), the mechanism behind the coming `/undo`.**
   Every mutation the write funnel performs can now be recorded as the bytes it replaced (the
   pre-image) plus a SHA-256 of what it left, grouped per Exchange — one instruction to the agent,

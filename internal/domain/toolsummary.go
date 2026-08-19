@@ -34,7 +34,7 @@ package domain
 // session written before a variant existed reopens unchanged.
 
 // ToolSummary is the sealed sum type of the structured outcomes a tool may report
-// alongside its prose Content. The variants are the six below; the marker method is
+// alongside its prose Content. The variants are the seven below; the marker method is
 // unexported, so no package outside internal/* can add one.
 type ToolSummary interface {
 	isToolSummary() // sealing marker; carries no data
@@ -85,6 +85,56 @@ func (MatchedLines) isToolSummary() {}
 type DiffStat struct{ Added, Removed int }
 
 func (DiffStat) isToolSummary() {}
+
+// EditRegion is one changed region of an applied edit: the lines the edit removed and the
+// lines it inserted, with up to three unchanged lines of context each side. The tool counts
+// all of it from the operations it applied, at the moment it holds both sides of the change
+// in hand — a view that recovered the same facts later would have to re-read the file and
+// would race the next edit (ADR 0052).
+//
+// Neighbouring changes whose context ranges would touch are recorded MERGED into one
+// region, so Leading and Trailing never overlap between regions and a consumer can paint
+// them end to end without de-duplicating lines.
+type EditRegion struct {
+	// BeforeStart is the 1-based line the region starts on in the BEFORE file, leading
+	// context included; AfterStart is the same line in the AFTER file. With no leading
+	// context — a region at the head of the file — that is the first changed line.
+	BeforeStart int
+	AfterStart  int
+
+	// Leading and Trailing are the unchanged lines bracketing the change, at most three
+	// each and fewer at the head or tail of a file, where there are no more to give.
+	Leading []string
+	// Removed and Inserted are the region's changed lines, in file order. A pure insertion
+	// leaves Removed empty; a pure deletion leaves Inserted empty.
+	Removed  []string
+	Inserted []string
+	Trailing []string
+}
+
+// EditRegions is the three edit tools' outcome — edit_existing_file, single_find_and_replace
+// and multi_find_and_replace: every changed region of the edit just applied, in file order.
+// It rides the Tool summary contract unchanged, which is to say it is DISPLAY DATA — never
+// sent to the model, never persisted in the session record — and it is what the Split diff
+// and its Stacked reading are painted from (ADR 0052). A result carrying no regions, because
+// the pair was over budget to diff or because an embedder's own tool attached nothing,
+// renders the argument-derived list exactly as before.
+type EditRegions struct{ Regions []EditRegion }
+
+func (EditRegions) isToolSummary() {}
+
+// Stat returns these regions' diffstat: Added and Removed summed over every region's
+// inserted and removed lines. It is the ONE derivation of that pair — the card's +A −R slot
+// and the tests read it here instead of each recounting the regions — so what counts as a
+// changed line moves in a single place. The zero EditRegions yields the zero DiffStat.
+func (e EditRegions) Stat() DiffStat {
+	var stat DiffStat
+	for _, region := range e.Regions {
+		stat.Added += len(region.Inserted)
+		stat.Removed += len(region.Removed)
+	}
+	return stat
+}
 
 // SearchHits is web_search's outcome: how many structured results the search returned.
 type SearchHits struct{ Count int }

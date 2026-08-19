@@ -60,7 +60,16 @@ author, same date* follow directly from those answers):
 
 ---
 
-## 1. Domain: the EditRegions tool summary
+## 1. Domain: the EditRegions tool summary — ✅ DONE (2026-08-19)
+
+NOTES (2026-08-19): the item's Files list names only the two `internal/domain` files, but the
+variant would then be unnameable by an embedder and `toolsummary.go`'s own "the root facade
+re-exports every one" would be false; added the two-line `EditRegion` / `EditRegions` aliases to
+`apogee.go` beside the other summary aliases. No other file touched.
+NOTES (2026-08-19): `internal/domain/doc.go` already reads "ToolSummary and its seven variants"
+(written ahead of this plan, as CONTEXT.md's "nine built-ins" was) — it is correct as of this
+item, so it was left untouched. `internal/tools/doc.go`'s "exactly SIX built-ins attach one" is
+still true until item 3 makes a tool attach the new variant, so it stays for that item.
 
 **What:** Add the sealed `domain.ToolSummary` variant carrying Edit regions to
 `internal/domain/toolsummary.go`, beside `DiffStat`:
@@ -180,8 +189,25 @@ Depends on item 2.
   when the result's summary is `domain.EditRegions`, set `tv.Regions` and REPLACE the
   call-time argBody lines with `stackedDiffLines`. No summary → argBody lines stay,
   exactly as today (ratified call 9).
+- Region text crosses the display seam like every other producer string: extend
+  `toolView.sanitize()` (`toolpresent.go:839`) to strip the new `Regions` field's
+  lines (`Leading`/`Removed`/`Inserted`/`Trailing`) — regions carry tool-recorded
+  FILE CONTENT, which is exactly what the escape-strip seam exists for. Add a
+  structural guard test asserting every string-carrying field of `toolView` is
+  reached by `sanitize` (the member-list idiom `transcriptcodec_test.go` already
+  uses for the wire structs), so the next field cannot slip past the seam silently.
 - The three edit tools' `+A −R` slot reads `EditRegions.Stat()` via a `stat:` hook,
-  falling back to the existing `argStat` when no summary arrived.
+  falling back to the existing `argStat` when no summary arrived. Keep the stat
+  TYPED beside its text: when a summary supplied it, `toolView` carries the
+  `domain.DiffStat` value, and the run-aggregate summer (`sumDiffCounts`,
+  `toolpresent.go:960`) prefers typed values over re-parsing `+A −R` display text
+  (`parseDiffCounts` stays as the fallback for text-only producers) — this feature
+  must not become the inverse parser's sixth input.
+
+NOTES (2026-08-19, owner-authorized pre-run amendment): the sanitize bullet and the
+typed-stat sentence were added from the TUI architecture review
+(`docs/reviews/2026-08-19 - 00 - tui-architecture-review.md`, Candidate 5 and the
+sanitize row of §Smaller findings) before execution started.
 
 **Files:** `internal/tui/toolpresent.go`, `internal/tui/toolpresent_test.go`
 
@@ -189,7 +215,11 @@ Depends on item 2.
 layout doc's stacked sketch (numbers, markers, `⋯` separator, gutter width); a result
 without a summary keeps the argument-derived body verbatim (pin against the existing
 `TestEditCallsCarryTheirChangedLines` fixtures); the slot reads the summary's stat and
-falls back to argStat without one.
+falls back to argStat without one; a region whose lines carry ANSI escapes or control
+characters paints stripped; the structural sanitize-coverage guard fails when a
+string-carrying `toolView` field is not reached by the strip; a run of edit blocks
+sums its `+A −R` aggregate from typed stats (assert `parseDiffCounts` is not what fed
+the sum — e.g. via a spelling the parser would reject).
 
 **Acceptance:** `go test ./internal/tui/ -run 'Stacked|Edit|ToolStat' && go build ./internal/tui/`
 
@@ -235,25 +265,46 @@ Depends on item 1 (the domain type only — parallel-safe beside item 5: disjoin
 
 ## 7. TUI: paint integration — split where it fits
 
-**What:** Wire the composer into BOTH expanded body paint paths, choosing per paint:
-regions present AND `splitDiffFits` → `splitDiffRows`; otherwise the existing
-detail-line painting (whose lines are already the stacked reading after item 5).
+**What:** Wire the composer into ALL THREE expanded body paint paths a diff-bodied
+block can reach, choosing per paint: regions present AND `splitDiffFits` →
+`splitDiffRows`; otherwise the existing detail-line painting (whose lines are already
+the stacked reading after item 5).
 
 - Targeted branch: `renderToolBranch` → the `renderSubDetails` call
   (`toolbranch.go:77`).
-- Grouped expanded member: `renderExpandedMember` (`toolblock.go:351`).
+- Targetless expanded branch: `renderToolBranch`'s `tv.Target == ""` arm
+  (`toolbranch.go:58`, the `renderDetails` call). Reachable by any diff-bodied call
+  whose target resolves empty — the common case is a bare `git_diff_range` with no
+  `base` and no `head`, where `refRangeTarget` returns `""` (`toolpresent.go:1666`).
+  Only the body chooses split; the branch-list framing around it stays.
+- Grouped expanded member: `renderExpandedMember` (`toolblock.go:351`). This one
+  path also covers unspanned sub-agent group members, which route through
+  `renderGroupMember` → `renderExpandedMember` (`subagentblock.go:417`).
+
+Deliberately NOT wired: the spanned sub-agent member loop
+(`renderSubAgentMemberRows`, `subagentblock.go:424`) — it paints the `sub_agent`
+call's own report body, and `sub_agent` is not a diff-bodied tool, so no region can
+reach it. (Its near-duplicate body loop is a separate deepening finding — review
+Candidate 4 — not this plan's concern.)
 
 The decision is made at paint time against the width parameter each path already
 holds, so a resize re-flows and can flip the reading (ADR 0052 §3). No change to
 collapsed painting.
 
+NOTES (2026-08-19, owner-authorized pre-run amendment): the targetless arm was added
+and the sub-agent exclusion recorded, from the TUI architecture review
+(`docs/reviews/2026-08-19 - 00 - tui-architecture-review.md`, Candidate 4) — without
+it a bare `git_diff_range` would keep the stacked reading at every width while the
+same diff with refs named paints split.
+
 **Files:** `internal/tui/toolbranch.go`, `internal/tui/toolblock.go`,
 `internal/tui/toolbranch_test.go`, `internal/tui/toolblock_test.go`
 
 **Tests:** an expanded edit block at 140 columns paints two panes; the same block at
-80 columns paints the stacked rows; a grouped expanded member does the same; blocks
-without regions paint exactly as before (pin with an existing-fixture assertion);
-shape budgets in `toolshape_test.go` still hold.
+80 columns paints the stacked rows; a grouped expanded member does the same; a
+TARGETLESS expanded block carrying regions (a bare `git_diff_range`) paints split at
+140 columns and stacked at 80; blocks without regions paint exactly as before (pin
+with an existing-fixture assertion); shape budgets in `toolshape_test.go` still hold.
 
 **Acceptance:** `go test ./internal/tui/ -run 'ToolBranch|ToolBlock|Shape|SplitDiff' && go build ./internal/tui/`
 

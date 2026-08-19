@@ -333,6 +333,14 @@ type MatchedLines = domain.MatchedLines
 // DiffStat is view_diff's summary: the lines the diff adds and removes.
 type DiffStat = domain.DiffStat
 
+// EditRegion is one changed region of an applied edit: its removed and inserted lines with
+// up to three unchanged context lines each side, and the line it starts on in each side.
+type EditRegion = domain.EditRegion
+
+// EditRegions is the three edit tools' summary: every changed region of the applied edit,
+// in file order, with Stat reporting the lines it adds and removes.
+type EditRegions = domain.EditRegions
+
 // SearchHits is web_search's summary: the number of structured results returned.
 type SearchHits = domain.SearchHits
 
