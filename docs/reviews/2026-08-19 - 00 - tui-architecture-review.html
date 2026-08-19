@@ -226,7 +226,7 @@ flowchart TD
           <li>~40 duplicated lines converge</li>
           <li>locality: body layout bugs land once</li>
         </ul>
-        <div class="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">ADR 0052 / plan “2026-08-19 - 03 - split-diff-display-plan” is in flight and touches these exact files. Cheapest moment for this candidate is <b>before or inside that plan</b>; afterwards it becomes a repair.</div>
+        <div class="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800"><b>Amended 2026-08-19 (same day):</b> the plan's item 7 was amended pre-run — the real reachable miss was the <i>targetless</i> arm (a bare <code class="font-mono">git_diff_range</code>); the sub-agent member loop can never hold a diff body (it paints the <code class="font-mono">sub_agent</code> call's own report) and is recorded as a deliberate exclusion. The time-critical half of this card is resolved; what remains is the deepening itself (one body painter behind the five frames), best done <b>after</b> the plan lands. Canonical detail: the .md beside this file.</div>
       </article>
 
       <!-- ============ 5. TYPED STATS ============ -->
@@ -559,7 +559,7 @@ flowchart LR
       <!-- ================= TOP RECOMMENDATION ================= -->
       <section id="top-recommendation" class="rounded-xl border-2 border-emerald-600 bg-emerald-50/60 p-6 space-y-3">
         <h2 class="font-serif text-2xl">Top recommendation</h2>
-        <p class="text-sm max-w-3xl"><b>Start with candidate <a href="#c4" class="text-emerald-700 underline">4 — the body painter</a>, this week,</b> because it is small (~5 call sites) and time-critical: the in-flight split-diff plan (ADR 0052) will otherwise land its rendering rule in 2 of the 5 body paint paths, and the same diff will render differently depending on where it sits. Do candidate <a href="#c5" class="text-emerald-700 underline">5</a> (typed stats) in the same pass — the plan adds a sixth stat producer through the hand-written parser.</p>
+        <p class="text-sm max-w-3xl"><b>Amended 2026-08-19 (same day): run the amended split-diff plan first.</b> The plan (2026-08-19 - 03) was amended pre-run to absorb the time-critical parts of candidates <a href="#c4" class="text-emerald-700 underline">4</a> and <a href="#c5" class="text-emerald-700 underline">5</a>: item 7 now wires the targetless paint arm, item 5 routes region text through the sanitize seam (with a structural coverage test) and keeps the aggregate stat typed. The remaining deepenings — one body painter behind the five frames, the full typed-stat value — follow after the plan lands.</p>
         <p class="text-sm max-w-3xl">The <b>biggest single win</b> is candidate <a href="#c1" class="text-emerald-700 underline">1 — the list surface</a>: one deep module replacing 6–8 hand-copied state machines, and the reason 13,400 lines of test must drive a whole Model to check what an arrow key does. Candidates <a href="#c6" class="text-emerald-700 underline">6</a> and <a href="#c7" class="text-emerald-700 underline">7</a> (the model.go / toolpresent.go file splits) are zero-risk pure moves that can land any quiet afternoon and pay for themselves in navigation immediately.</p>
       </section>
 

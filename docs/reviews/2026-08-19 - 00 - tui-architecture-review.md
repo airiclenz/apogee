@@ -204,12 +204,22 @@ loop → closing row, differing only in the closer). The shared primitive chain 
 (`toolRowCells` → `leaderRow` → `indicatorRow` → `gutteredWrap` → `seeLessRow`,
 blockstate.go predicates, wrap.go rails) is healthy — the duplication is one level up.
 
-**Why now.** The split-diff plan (ADR 0052) item 7 wires its composer into **two** of the
-five paths (toolbranch.go:77 and toolblock.go:351, named in the plan) and not
-toolbranch.go:58 or subagentblock.go:424. After item 7 lands as written, an expanded
-*targetless* diff block and an expanded diff inside a sub-agent member silently keep the
-stacked reading while their siblings split — the same diff renders differently depending
-on where it sits. That is the deletion test failing in advance.
+**Why now.** The split-diff plan (ADR 0052) item 7 as first written wired its composer
+into **two** of the five paths (toolbranch.go:77 and toolblock.go:351) and not
+toolbranch.go:58 or subagentblock.go:424 — the same diff would render differently
+depending on where it sits.
+
+**Correction (2026-08-19, verified during plan amendment).** Two of the review's five
+sites turned out not to be reachable by a diff body: `subagentblock.go:424` paints the
+`sub_agent` call's own report (never a diff-bodied tool), and unspanned sub-agent members
+route through `renderGroupMember` → `renderExpandedMember`, which item 7 already wired.
+The one REAL miss was the targetless expanded arm (`toolbranch.go:58`) — reachable by a
+bare `git_diff_range`, whose `refRangeTarget` returns `""` with no base/head. The plan
+was amended the same day (item 7 NOTES: the targetless arm added, the sub-agent
+exclusion recorded; item 5 NOTES: sanitize + typed stat), so **the time-critical half of
+this candidate is resolved**. What remains of Candidate 4 is the deepening itself: the
+frame decision still lives at five sites, and the toolblock/subagentblock member loops
+stay near-verbatim duplicates.
 
 **Deepened shape.** One body painter: (detail lines, frame spec, width) → rows. The
 split-vs-stacked decision, the wrap, and the tone are made once; the five sites call it.
@@ -217,10 +227,10 @@ split-vs-stacked decision, the wrap, and the tone are made once; the five sites 
 **Win.** ~40 duplicated lines converge; ADR 0052's rendering rule lands in 1 place instead
 of 2-of-5; body-layout bugs get locality.
 
-**Sequencing.** Do **before or inside** the split-diff plan. Afterwards it becomes a
-repair. If the plan has already run when you read this: check whether toolbranch.go:58 and
-subagentblock.go:424 render regions as split diffs; if not, this candidate is now a bug
-fix, not just a deepening.
+**Sequencing.** Superseded by the correction above: the plan amendment already carries
+the user-visible half. The remaining deepening (one body painter behind the five frames)
+is best done **after** the plan lands, folding the plan's per-path wiring into the one
+painter.
 
 ---
 
@@ -525,10 +535,15 @@ of it.
 
 ## Recommended sequence
 
-1. **Candidate 4 + 5 now** — small, and time-critical against the in-flight split-diff
-   plan (2026-08-19 - 03). Together: one body painter + typed stats, then the plan's items
-   5/7/8/9 land in one place. Add the sanitize structural test (Smaller findings row 4) in
-   the same pass — ADR 0052 item 5 adds a field through that hole.
+*(Amended 2026-08-19, same day: the split-diff plan was amended pre-run — item 7 now
+wires the targetless arm, item 5 carries the sanitize seam + structural test and the
+typed aggregate stat. That absorbs the time-critical parts of Candidates 4 and 5 and
+the sanitize smaller-finding. Step 1 below is therefore: run the amended plan first.)*
+
+1. **Run the amended split-diff plan** (2026-08-19 - 03). The rest of Candidates 4 and 5
+   — one body painter behind the five frames, the full typed-stat value replacing
+   `parseDiffCounts`/`countPhrase` — follow after it lands, folding the plan's per-path
+   wiring into one painter.
 2. **Candidates 6 + 7** — zero-risk pure file moves (model.go and toolpresent.go splits +
    the sanitize.go rehome). Land any quiet afternoon; every later candidate benefits from
    the navigation.
