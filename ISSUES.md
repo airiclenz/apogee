@@ -25,8 +25,10 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 
 ### The undo journal records the NAMED path, while its docs and ADR 0051 say "resolved"
 
-**Status:** open 2026-08-19 — residual of the undo plan
-(`docs/plans/archived/2026-08-19 - 01 - undo-agent-changes-plan.md`, items 2 / 5 / 6).
+**Status:** [P] open 2026-08-19 — residual of the undo plan
+(`docs/plans/archived/2026-08-19 - 01 - undo-agent-changes-plan.md`, items 2 / 5 / 6). Planned
+2026-08-19: `docs/plans/2026-08-19 - 02 - issues-defects-and-ledger-slimming-plan.md` item 1
+(ratified: the NAMED path is the intended rule; the docs follow the code).
 
 `journalTarget` (`internal/tools/path_safety.go:350`) records `target.Named` — the root-joined,
 cleaned argument with nothing followed (`internal/tools/workspace_scoped.go:36`) — for every
@@ -45,7 +47,9 @@ to make first; the other side then follows it.
 
 ### No test drives `move_file`'s copy-then-remove fallback route
 
-**Status:** open 2026-08-19 — residual of the undo plan (item 3), verified manually during the run.
+**Status:** [P] open 2026-08-19 — residual of the undo plan (item 3), verified manually during the
+run. Planned 2026-08-19:
+`docs/plans/2026-08-19 - 02 - issues-defects-and-ledger-slimming-plan.md` item 2.
 
 `move` (`internal/tools/file_ops.go:203`) has two routes — the `SafeRename` fast path and the
 `SafeCopyFileFrom` + `SafeRemove` fallback, which an approved escape (ADR 0049) makes the real
