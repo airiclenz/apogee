@@ -103,7 +103,28 @@ zero stat.
 
 **Commit:** `feat(domain): add EditRegions tool summary for split-diff rendering`
 
-## 2. Tools: one shared region builder
+## 2. Tools: one shared region builder — ✅ DONE (2026-08-19)
+
+NOTES (2026-08-19): ratified call 3's literal "regions ... merge into one" wording is SUPERSEDED
+for the whole plan by the owner's decision of 2026-08-19: neighbours within the ≤ 6-line gap
+stay SEPARATE regions whose context ranges TILE the interior lines without overlap — the earlier
+region takes up to 3 of them as `Trailing`, the later takes the remainder as `Leading`, and a
+gap of ≤ 6 always splits cleanly. `Removed`/`Inserted` stay changed-only, so
+`EditRegions.Stat()` matches `unifiedLineDiff` exactly, and `domain.EditRegion` is NOT changed.
+Consequence for later items: the renderers (items 5 and 6) must omit the `⋯` separator between
+regions that are contiguous in line numbering (`next.BeforeStart == prev.BeforeStart +
+len(Leading)+len(Removed)+len(Trailing)`), so the painted result is identical to a merge.
+NOTES (2026-08-19): attempt 1's `TestEditRegions_MergesNeighboursWithinTheGap` was rewritten as
+`TestEditRegions_NeighboursTileTheirContext` — gaps of 3, 6 and 7 unchanged lines, each with an
+explicit adjacency assertion — and `TestEditRegions_StatMatchesTheLineDiff` was added to pin the
+count parity with `unifiedLineDiff` that the decision turns on. The `editRegionMergeGap`
+constant is gone: nothing branches on the gap width any more, the tiling falls out of
+`editRegionContext` alone.
+NOTES (2026-08-19): the item's Files list names only `regions.go` and `regions_test.go`, but
+`internal/tools/doc.go` had to be edited too — its package map must name every non-test file and
+`TestDocMapNamesEveryFile` (`internal/tools/docmap_test.go`) fails otherwise. The spine count
+moved from five files to six and `regions.go` got its one-line role, worded for the tiling rule.
+No other file touched.
 
 **What:** New file `internal/tools/regions.go`: ONE function
 `editRegions(oldText, newText string) domain.EditRegions` that every edit tool calls —

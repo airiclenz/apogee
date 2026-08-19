@@ -217,7 +217,7 @@
 //
 // # The package spine, one line each
 //
-// Five files register no tool. tools.go is the shared toolSpec (name, description, JSON
+// Six files register no tool. tools.go is the shared toolSpec (name, description, JSON
 // schema) every built-in embeds, the size ceilings they all read, and the result helpers —
 // including okSummary, which attaches the structured half. registry.go is HostTools and the
 // two assemblers, NewDefaultRegistry and NewDefaultRegistryWithHost, that turn the built-ins
@@ -232,7 +232,12 @@
 // host mounts, returning the matched root so a caller pins every later fenced operation to it.
 // workspace_scoped.go is the
 // unexported workspaceScopedWriter marker and the write-target resolvers that say WHICH
-// argument a given writer lands on.
+// argument a given writer lands on. regions.go is the one Edit-region builder the three edit
+// tools share — editRegions, which cuts diff.go's line-diff operations into the changed regions
+// with their line numbers and up to three context lines each side, tiled so neighbouring regions
+// never claim the same line twice (ADR 0052) — kept here rather than in any one tool's file
+// precisely because a per-tool copy could drift on what a region is while painting into the same
+// body.
 //
 // And doc.go this map.
 package tools

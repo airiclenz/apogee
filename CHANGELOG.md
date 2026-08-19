@@ -10,17 +10,34 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **`editRegions`, the one Edit-region builder the three edit tools share.** `internal/tools` can
+  now cut a before/after pair into the Edit regions `domain.EditRegions` carries, derived from the
+  line diff's OPERATIONS rather than from rendered diff text — one builder for all three edit
+  tools, so two edit blocks can never disagree about what a region is while painting into the same
+  body. Each run of consecutive changed lines becomes one region with up to three unchanged context
+  lines each side, and neighbouring regions TILE the lines between them rather than overlap or
+  merge: the earlier takes up to three of them as its trailing context, the later takes what is
+  left as its leading context. A gap of at most six lines is therefore covered end to end and the
+  two regions come out adjacent in line numbering, which is what a renderer reads to decide that no
+  elision separator belongs between them. `Removed` and `Inserted` hold changed lines only, so
+  `EditRegions.Stat()` equals the diffstat the same pair's unified diff counts, line for line.
+  Identical inputs and a pair whose LCS table would exceed the diff budget both yield no regions —
+  the renderer's argument-derived fallback — and the over-budget pair allocates nothing
+  proportional to the table it refuses. Nothing calls it yet.
+
 - **`domain.EditRegions`, the Tool summary variant the coming Split diff is painted from.**
   An edit tool can now record what it applied as data rather than leave a view to guess it from
   the call's arguments: each `EditRegion` carries the removed and inserted lines, up to three
   unchanged context lines each side, and the 1-based line the region starts on in the before and
-  after file. Neighbouring changes whose context would touch are recorded merged, so a consumer
-  paints regions end to end without de-duplicating. `EditRegions.Stat()` is the one derivation of
-  the `+A −R` pair — context lines never count — so every consumer reads the same number instead
-  of recounting. The variant is sealed like the six before it (unexported marker method, additive,
-  re-exported from the root facade) and rides the Tool summary contract unchanged: display data,
-  never sent to the model, never persisted in the session record (ADR 0052). Nothing produces or
-  consumes it yet.
+  after file. Neighbouring changes stay SEPARATE regions whose context tiles the lines between
+  them — the earlier takes up to three of them as its trailing context, the later takes what is
+  left as its leading context — so a gap of at most six lines is covered end to end, the two
+  regions come out adjacent in line numbering, and no line is context for two regions at once.
+  `EditRegions.Stat()` is the one derivation of the `+A −R` pair — context lines never count —
+  so every consumer reads the same number instead of recounting. The variant is sealed like the
+  six before it (unexported marker method, additive, re-exported from the root facade) and rides
+  the Tool summary contract unchanged: display data, never sent to the model, never persisted in
+  the session record (ADR 0052). Nothing produces or consumes it yet.
 
 - **A per-exchange pre-image journal (`internal/undo`), the mechanism behind the coming `/undo`.**
   Every mutation the write funnel performs can now be recorded as the bytes it replaced (the
