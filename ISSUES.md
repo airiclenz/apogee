@@ -23,28 +23,6 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 
 ## Open defects
 
-### The undo journal records the NAMED path, while its docs and ADR 0051 say "resolved"
-
-**Status:** [P] open 2026-08-19 — residual of the undo plan
-(`docs/plans/archived/2026-08-19 - 01 - undo-agent-changes-plan.md`, items 2 / 5 / 6). Planned
-2026-08-19: `docs/plans/2026-08-19 - 02 - issues-defects-and-ledger-slimming-plan.md` item 1
-(ratified: the NAMED path is the intended rule; the docs follow the code).
-
-`journalTarget` (`internal/tools/path_safety.go:350`) records `target.Named` — the root-joined,
-cleaned argument with nothing followed (`internal/tools/workspace_scoped.go:36`) — for every
-ordinary in-workspace write (`internal/tools/path_safety.go:357`, `:360`). Only an approved
-out-of-workspace escape records `target.Real` (`internal/tools/path_safety.go:362`). Four places
-state the opposite rule: `Mutation`'s doc — "Path is the mutation's RESOLVED absolute path"
-(`internal/undo/journal.go:102`); `Preview`'s doc — "Paths are the resolved absolute ones, which is
-what makes the preview the disclosure surface the human authorises the revert from"
-(`internal/undo/journal.go:240`); the TUI listing's — "the resolved path"
-(`internal/tui/undo.go:133`); and ADR 0051 — the preview "always shows **resolved** paths"
-(`docs/adr/0051-undo-is-a-per-exchange-in-memory-pre-image-journal.md:96`, and "names every
-resolved path before anything moves" at `:152`). Which of the two is the intended rule is the call
-to make first; the other side then follows it.
-
----
-
 ### No test drives `move_file`'s copy-then-remove fallback route
 
 **Status:** [P] open 2026-08-19 — residual of the undo plan (item 3), verified manually during the

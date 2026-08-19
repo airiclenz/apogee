@@ -93,7 +93,8 @@ whole revert.
 **6 — The restore is human-initiated, so an approved out-of-workspace write is journaled and put
 back like any other.** [ADR 0049](0049-an-approved-write-escape-executes-through-a-permit-pinned-to-the-disclosed-target.md)
 puts its gate between the *model* and danger; `/undo` is a human typing a command about their own
-workspace, and the preview — which always shows **resolved** paths, never abbreviated — is the
+workspace, and the preview — which always shows the journal's **recorded absolute** paths, never
+abbreviated (see the 2026-08-19 amendment for which absolute path a record carries) — is the
 disclosure surface they authorize it from. Restores and removals go through the same fenced
 primitives the funnel wrote through (`security.SafeWriteFile` / `SafeRemove`), so an undo
 inherits every symlink and traversal refusal the original write met and can never reach further
@@ -149,7 +150,7 @@ state a human has to model for a feature whose whole value is being obvious.
 ## Consequences
 
 - The human has a real way back from a bad Exchange that does not touch what they wrote
-  themselves, and a preview that names every resolved path before anything moves.
+  themselves, and a preview that names every recorded path in full before anything moves.
 - The coverage boundary is a property of the funnel, so it holds automatically for tools added
   later — and the uncovered classes (subprocess, git checkout, MCP, embedder-registered) are a
   documented contract rather than an omission. A future MCP or subprocess undo would need its own
@@ -162,3 +163,31 @@ state a human has to model for a feature whose whole value is being obvious.
   on `apogee.go` until an embedder asks for one.
 - The generation guard makes the two-step protocol safe at the quiescent boundary only; the
   Driver's idle-only command gate is the enforcement, and both engine methods document it.
+
+## Amendment (2026-08-19) — a record's identity is the NAMED path; only an approved escape records the resolved one
+
+Decision 6 and the consequence above described the preview as showing **resolved** paths, and
+`internal/undo`'s own docs said the same of `Mutation.Path`. The recorder never did that. `journalTarget`
+(`internal/tools/path_safety.go`) fills the field with `target.Named` — the path the argument NAMES,
+root-joined and cleaned, with nothing followed — for every ordinary in-workspace write, and takes
+`target.Real` only when the write ran under an approved out-of-workspace permit. The docs stated a rule the
+code does not implement; this amendment records that the CODE is the intended rule and the docs follow it,
+with no behavior change.
+
+The named path is load-bearing rather than incidental. `internal/security`'s fenced primitives — the ones a
+restore or removal goes back through — relativise a path against the workspace root *lexically*. Hand them a
+symlink-resolved twin and the revert is refused as an escape on any host whose root is itself reached through
+a symlink (macOS `/tmp` is the everyday case). Recording what the write NAMED is therefore what keeps a
+revert able to reach exactly as far as the write reached, which is decision 6's own promise.
+
+The approved escape is the one exception, and it points the other way for the same reason:
+[ADR 0049](0049-an-approved-write-escape-executes-through-a-permit-pinned-to-the-disclosed-target.md) pins the
+permit to the RESOLVED target, and that target is what the approval pane disclosed to the human. A record of
+such a write carries the permit's resolved path so the revert runs under the same permit the write did — and
+it is recognised by exactly the test the permit pin uses, so a record can never claim a permit its write did
+not run under.
+
+So the preview's disclosure claim stands with one word corrected: it names the journal's recorded absolute
+addresses — root-joined named paths, and for an escape the permit-pinned resolved one — never abbreviated.
+The rationale lives at `journalTarget`'s doc comment; the docs here and in `internal/undo` point at it rather
+than restating it.

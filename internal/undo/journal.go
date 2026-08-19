@@ -100,8 +100,11 @@ type Report struct {
 // Root is the workspace root the mutation was fenced against and Permitted is the one
 // approved out-of-workspace target it carried (ADR 0049), or empty — together they let
 // a revert reach exactly as far as the original write reached and no further. Path is
-// the mutation's RESOLVED absolute path: it is the identity of the record, the thing a
-// preview discloses, and the key a group merges on.
+// the identity of the record — the thing a preview discloses and the key a group merges
+// on. For an ordinary write it is the path the argument NAMED, root-joined and cleaned
+// with nothing followed; only an approved escape records the permit's RESOLVED target,
+// the one the approval pane disclosed (ADR 0049). Why the ordinary case must not resolve
+// is stated once, at journalTarget in internal/tools — the recorder that fills this field.
 //
 // Pre/PreExisted are the state before the mutation; Post/PostExists the state after.
 // Only Pre is kept whole — Post is reduced to a hash, since it is only ever compared.
@@ -237,8 +240,9 @@ func (j *Journal) Generation() uint64 {
 // exchange replaced or deleted existing content, delete when the exchange created the
 // file, and skip when the file no longer matches what the agent left — a hash mismatch,
 // a file that has since been deleted, or one that has since reappeared. Paths are the
-// resolved absolute ones, which is what makes the preview the disclosure surface the
-// human authorises the revert from.
+// journal's recorded absolute addresses — a root-joined named path for an ordinary write,
+// the permit-pinned resolved target for an approved escape — which is what makes the
+// preview the disclosure surface the human authorises the revert from.
 func (j *Journal) Preview() (Step, bool) {
 	j.mu.Lock()
 	defer j.mu.Unlock()

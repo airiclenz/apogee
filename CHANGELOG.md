@@ -162,6 +162,14 @@ point is a **minor** bump, not a breaking change.
   after the work it interrupted and is never railed into a delegate's run (contrast a presented
   document, which carries the delegate's identity and goes inside).
 
+- Documentation: corrected the undo journal's path rule everywhere the docs claimed the opposite of
+  the code. `Mutation.Path`, `Journal.Preview`, the TUI's `/undo` listing and package header, and
+  ADR 0051 now state that a record's identity is the path the argument NAMED (root-joined, cleaned,
+  nothing followed) for an ordinary write, and only an approved escape records the permit's resolved
+  target (ADR 0049). ADR 0051 gains a dated Amendment (2026-08-19) recording the correction and the
+  lexical-fence rationale; the rationale itself stays at `journalTarget`'s doc comment. No behavior
+  change.
+
 ## [0.15.0] — 2026-08-16
 
 ### Added

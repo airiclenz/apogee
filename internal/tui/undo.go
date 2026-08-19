@@ -16,10 +16,10 @@ import (
 //
 // The command is the human end of the pre-image journal (ADR 0051): the engine records what every
 // funnel write overwrote, and this is the only surface that puts any of it back. Two steps, no
-// modal — a preview note that discloses the RESOLVED path of every file the revert would touch,
-// and a `/undo confirm` that executes exactly the step the human just read. The generation stamped
-// on that preview travels back with the confirmation, so a journal that moved in between earns a
-// fresh preview instead of a revert nobody authorised (ratified call 7).
+// modal — a preview note that discloses the journal's recorded absolute path for every file the
+// revert would touch, and a `/undo confirm` that executes exactly the step the human just read.
+// The generation stamped on that preview travels back with the confirmation, so a journal that
+// moved in between earns a fresh preview instead of a revert nobody authorised (ratified call 7).
 //
 // The disclosure is the authorization surface, which is why the preview never abbreviates a path
 // and never hides a skip: a file the human edited since the agent wrote it is left alone, and the
@@ -130,7 +130,8 @@ func undoReportNote(report undo.Report) string {
 }
 
 // undoPathLine renders one path row, shared by the preview and the report so the two read as one
-// listing: the verb in a fixed column, the resolved path, and — for a skip — the reason after it.
+// listing: the verb in a fixed column, the journal's recorded absolute path — named, or an approved
+// escape's permit-pinned target — and, for a skip, the reason after it.
 func undoPathLine(action undo.Action, path, reason string) string {
 	line := fmt.Sprintf("  %-7s %s", action, path)
 	if reason != "" {
