@@ -43,9 +43,13 @@ func splitPlain(rows []string) []string {
 
 // The wide reading of the layout doc's own sketch, row for row: two panes under one number gutter,
 // the removed line left and its replacement right on the SAME row, the replacement wrapping onto a
-// continuation row that carries neither number nor marker while the left pane pads to keep the
-// divider in one column, one ⋯ rule where the two regions do not meet, and each pane numbering its
-// own file across it (before 204 against after 205).
+// continuation row that carries neither number nor marker, one ⋯ rule where the two regions do not
+// meet, and each pane numbering its own file across it (before 204 against after 205).
+//
+// EITHER pane squares its filled rows to the pane's width now, which is what carries a band to the
+// pane's edge (ratified call 2 of docs/plans/"2026-08-19 - 05") — so the trailing blanks below are
+// the tint's own field on a changed row and an invisible pad on a context one, and the divider
+// stands in the column it always did.
 func TestSplitDiffRowsPaintsTheLayoutSketch(t *testing.T) {
 	t.Parallel()
 
@@ -53,15 +57,15 @@ func TestSplitDiffRowsPaintsTheLayoutSketch(t *testing.T) {
 	got := splitPlain(splitDiffRows(th, sketchRegions(), 100))
 
 	want := []string{
-		" 88   func paint(w int) error {                  │  88   func paint(w int) error {",
-		" 89     if w < minWidth {                        │  89     if w < minWidth {",
+		" 88   func paint(w int) error {                  │  88   func paint(w int) error {                 ",
+		" 89     if w < minWidth {                        │  89     if w < minWidth {                       ",
 		` 90 -     return errNarrow                       │  90 +     return fmt.Errorf("width %d under %d",`,
-		"                                                 │       w, minWidth)",
-		" 91     }                                        │  91     }",
+		"                                                 │       w, minWidth)                              ",
+		" 91     }                                        │  91     }                                       ",
 		strings.Repeat(glyphLeaderDot, 99),
-		"204     return nil                               │ 205     return nil",
-		"205 - }                                          │ 206 +   }",
-		"                                                 │ 207 + ",
+		"204     return nil                               │ 205     return nil                              ",
+		"205 - }                                          │ 206 +   }                                       ",
+		"                                                 │ 207 +                                           ",
 	}
 	if len(got) != len(want) {
 		t.Fatalf("painted %d rows, want %d:\n%s", len(got), len(want), strings.Join(got, "\n"))
@@ -112,10 +116,10 @@ func TestSplitDiffRowsPadTheSideWithNoLines(t *testing.T) {
 
 	rows := splitPlain(splitDiffRows(th, regions, 100))
 	want := []string{
-		"12   before                                      │ 12   before",
-		"                                                 │ 13 + added one",
-		"                                                 │ 14 + added two",
-		"13   after                                       │ 15   after",
+		"12   before                                      │ 12   before                                     ",
+		"                                                 │ 13 + added one                                  ",
+		"                                                 │ 14 + added two                                  ",
+		"13   after                                       │ 15   after                                      ",
 	}
 	if len(rows) != len(want) {
 		t.Fatalf("painted %d rows, want %d:\n%s", len(rows), len(want), strings.Join(rows, "\n"))
@@ -163,6 +167,11 @@ func TestSplitDiffContinuationRowsCarryNoNumberOrMarker(t *testing.T) {
 // The panes stay row-aligned however the wrapping alternates between them: the divider stands in
 // one column down the whole body, and no row overruns the width it was composed for (layout.md's
 // absolute cap).
+//
+// The band changed nothing here, and that is the point of asserting it: a filled cell squares itself
+// to the pane now, banded or plain, so every row still ends either at the divider — where the right
+// pane has nothing — or at both panes and the rule between them, and the divider column is the one
+// it always was.
 func TestSplitDiffRowsStayAlignedWhenEitherSideWraps(t *testing.T) {
 	t.Parallel()
 
@@ -186,6 +195,11 @@ func TestSplitDiffRowsStayAlignedWhenEitherSideWraps(t *testing.T) {
 		}
 		if col := th.measure.Width(row[:idx]); col != wantCol {
 			t.Errorf("row %d puts the divider in column %d, want %d: %q", i, col, wantCol, row)
+		}
+		full := splitPaneCells(width)*2 + splitDividerCells
+		if w := th.measure.Width(row); w != full && w != wantCol+1 {
+			t.Errorf("row %d is %d columns, want the full %d — or %d where the right pane has nothing: %q",
+				i, w, full, wantCol+1, row)
 		}
 	}
 }
@@ -227,7 +241,8 @@ func TestSplitDiffRowsRuleOnlyWhereRegionsDoNotMeet(t *testing.T) {
 // the banded run rather than outside it, which is what keeps it the change's palette-proof signal —
 // a mark that reads on a monochrome pipe and on a terminal that drops backgrounds alike (ADR 0052's
 // 2026-08-19 amendment, which supersedes the "the marker travels with the TEXT's colour" rationale
-// of ratified calls 6 and 7).
+// of ratified calls 6 and 7). The band it opens runs on to the pane's edge, which the two tests
+// below pin on the pane painter itself.
 func TestSplitDiffRowsColourTheMarkerWithItsLine(t *testing.T) {
 	t.Parallel()
 
@@ -236,16 +251,99 @@ func TestSplitDiffRowsColourTheMarkerWithItsLine(t *testing.T) {
 		t.Skip("no-colour profile: there is no styling to assert")
 	}
 	regions := []domain.EditRegion{{BeforeStart: 7, AfterStart: 7, Removed: []string{"gone"}, Inserted: []string{"here"}}}
+	code := splitCodeCells(100, splitNumberGutter(splitRowPlan(regions)))
 
 	row := splitDiffRows(th, regions, 100)[0]
-	if want := detailStyle(th, detailDiffRemoved, true).Render(stackedRemovedMarker + "gone"); !strings.Contains(row, want) {
-		t.Errorf("the removed pane does not carry %q as one styled run: %q", want, row)
-	}
-	if want := detailStyle(th, detailDiffAdded, true).Render(stackedInsertedMarker + "here"); !strings.Contains(row, want) {
-		t.Errorf("the inserted pane does not carry %q as one styled run: %q", want, row)
+	for _, banded := range []struct {
+		pane, marker, text string
+		kind               detailKind
+	}{
+		{pane: "removed", marker: stackedRemovedMarker, text: "gone", kind: detailDiffRemoved},
+		{pane: "inserted", marker: stackedInsertedMarker, text: "here", kind: detailDiffAdded},
+	} {
+		want := detailStyle(th, banded.kind, true).
+			Render(squareLine(th.measure, banded.marker+banded.text, splitMarkerCells+code))
+		if !strings.Contains(row, want) {
+			t.Errorf("the %s pane does not carry %q as one styled run: %q", banded.pane, want, row)
+		}
 	}
 	if want := th.toolDetail.Render("7 "); !strings.Contains(row, want) {
 		t.Errorf("the number gutter is not painted in the muted role: %q", row)
+	}
+}
+
+// A short line's band runs to the pane's EDGE rather than to its last glyph (ratified call 2 of
+// docs/plans/"2026-08-19 - 05"): the tint is where the change is said now, and a band that stopped
+// at the text would say nothing under the trailing space — which on a pane of code is most of the
+// row. The pad has to sit INSIDE the SGR run, because a styled row closes with a reset and spaces
+// appended after it would show the terminal's own background through the very band they were added
+// to fill; the number gutter stays OUTSIDE it, chrome (ratified call 3).
+func TestSplitCellPaintBandsAShortLineToThePaneEdge(t *testing.T) {
+	t.Parallel()
+
+	const gutter, code = 4, 40
+	th := newTheme(scheme.Default())
+	if !colorActive(th) {
+		t.Skip("no-colour profile: there is no band to assert")
+	}
+	cell := splitCell{number: 90, marker: stackedRemovedMarker, kind: detailDiffRemoved, text: "gone"}
+
+	rows := cell.paint(th, gutter, code)
+	if len(rows) != 1 {
+		t.Fatalf("paint spent %d rows on one short line, want one", len(rows))
+	}
+	if got, want := th.measure.Width(rows[0]), gutter+splitMarkerCells+code; got != want {
+		t.Errorf("the row is %d columns, want the whole pane's %d: %q", got, want, strip(rows[0]))
+	}
+	if strings.HasSuffix(rows[0], " ") {
+		t.Errorf("the row ends in a bare space: the pad fell outside the band: %q", rows[0])
+	}
+	number := th.toolDetail.Render(" 90 ") // three right-aligned digit columns, then the parting space
+	if !strings.HasPrefix(rows[0], number) {
+		t.Errorf("the row does not open with the chrome number %q: %q", number, rows[0])
+	}
+	want := detailStyle(th, detailDiffRemoved, true).
+		Render(squareLine(th.measure, stackedRemovedMarker+"gone", splitMarkerCells+code))
+	if got := strings.TrimPrefix(rows[0], number); got != want {
+		t.Errorf("the banded run = %q, want the marker and its text filled to the pane edge %q", got, want)
+	}
+}
+
+// A continuation row is banded from the SAME column its first row is — the marker's — while the
+// gutter-width blanks standing in for the number stay chrome (ratified calls 2 and 3). The marker
+// column is inside the band on both, which is what makes a wrapped line one unbroken block of tint
+// instead of a band that steps right on every row after the first.
+func TestSplitCellPaintKeepsContinuationGuttersChrome(t *testing.T) {
+	t.Parallel()
+
+	const gutter, code = 4, 10
+	th := newTheme(scheme.Default())
+	if !colorActive(th) {
+		t.Skip("no-colour profile: there is no band to assert")
+	}
+	cell := splitCell{number: 90, marker: stackedInsertedMarker, kind: detailDiffAdded,
+		text: "alpha beta gamma delta"}
+
+	rows := cell.paint(th, gutter, code)
+	lines := wrapText(th, cell.text, code)
+	if len(lines) < 2 {
+		t.Fatalf("the fixture wrapped to %d lines, want a continuation row to check", len(lines))
+	}
+	if len(rows) != len(lines) {
+		t.Fatalf("paint spent %d rows on %d wrapped lines, want one each", len(rows), len(lines))
+	}
+	band := detailStyle(th, detailDiffAdded, true)
+	for i, line := range lines[1:] {
+		want := strings.Repeat(" ", gutter) +
+			band.Render(squareLine(th.measure, strings.Repeat(" ", splitMarkerCells)+line, splitMarkerCells+code))
+		if rows[i+1] != want {
+			t.Errorf("continuation row %d = %q, want bare gutter columns and a band from the marker column %q",
+				i+1, rows[i+1], want)
+		}
+		if got, want := th.measure.Width(rows[i+1]), gutter+splitMarkerCells+code; got != want {
+			t.Errorf("continuation row %d is %d columns, want the whole pane's %d: %q",
+				i+1, got, want, strip(rows[i+1]))
+		}
 	}
 }
 

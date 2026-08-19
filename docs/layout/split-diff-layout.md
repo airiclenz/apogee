@@ -25,7 +25,9 @@ are untouched.
   on a `diff-del-bg` red band). Right = after (its numbers; added rows wear `+`
   and sit on a `diff-add-bg` turquoise band). A banded row's TEXT keeps the
   expanded body's open tone, like the context rows, which appear in both panes
-  unmarked and unbanded.
+  unmarked and unbanded. The band runs from the marker column to that pane's
+  EDGE — under a short line's trailing space and under a continuation row's text
+  alike — while the number gutter beside it stays chrome.
 - **Alignment.** Within a region the removed block and the inserted block start
   on the same row; the shorter side pads with blank rows. Discontiguous regions
   are separated by one damped `⋯` rule row spanning both panes.

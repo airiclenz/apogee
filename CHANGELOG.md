@@ -222,6 +222,19 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **A split diff's band now reaches the edge of its pane.** The two-pane reading was the one frame
+  the full-width rule did not touch: it paints its own rows rather than going through a wrap rail,
+  so a changed line's tint still stopped at the last glyph while every stacked and flat body around
+  it had already squared up. Each pane now fills a line out to the pane's edge from INSIDE the
+  style, on the first row and on every wrapped continuation alike, and the band opens at the marker
+  column on both — so a wrapped line is one unbroken block of colour instead of a band that steps
+  right on every row after the first. The number gutter beside it stays chrome, outside the tint,
+  as it does in every other frame. Filling is now the cell's own business rather than the row's:
+  the right pane squares up exactly as the left one always did, which is what lets its band reach
+  the edge, and the divider between them stands in the column it always stood in — measured, as
+  before, in the width authority's measure (ADR 0030), so a wide glyph in the code cannot walk it
+  sideways.
+
 - **A diff line's band now runs the full width of its block, and only under the line's own text.**
   The tint used to stop at the last glyph, so a body of unequal lines came out with a ragged right
   edge and a short line said nothing at all in the columns past its text — the very columns the

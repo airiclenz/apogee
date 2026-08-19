@@ -224,7 +224,22 @@ the style; a plain style's output is unchanged; a wide-glyph line pads correctly
 
 **Commit:** `feat(tui): tint stacked diff rows to the full wrap width`
 
-## 5. Full-width tint in the split view
+## 5. Full-width tint in the split view — ✅ DONE (2026-08-19)
+
+NOTES (2026-08-19): the item's Files list names splitdiff.go and splitdiff_test.go; two prose files were
+touched beyond it because this change makes a sentence in each incomplete. `docs/layout/split-diff-layout.md`'s
+**Panes** bullet named the band but not the columns it covers, and `layout.md`'s "A change is coloured the one
+way" paragraph sent the band to "the block's own wrap rail", which is not where it stops in the split reading —
+one clause each, prose only.
+NOTES (2026-08-19): the item's third requested test ("the divider column lands exactly where it does today")
+landed as two added assertions inside the existing `TestSplitDiffRowsStayAlignedWhenEitherSideWraps` rather than
+as a new test: that test already pins the divider column at every row of a body that wraps on both sides, so a
+second one would have restated it. What was genuinely new — every row now ends either at the divider or at the
+full composed width, because a filled right pane squares up too — was added there.
+NOTES (2026-08-19): the item's requested short-line and continuation-row tests landed as
+`TestSplitCellPaintBandsAShortLineToThePaneEdge` and `TestSplitCellPaintKeepsContinuationGuttersChrome`, both
+against `splitCell.paint` directly. `TestSplitDiffRowsColourTheMarkerWithItsLine` keeps its name and its subject
+(the marker inside the band, the number outside it) with its expectation widened to the filled band.
 
 **Source:** ratified calls 2, 3. Depends on item 3.
 

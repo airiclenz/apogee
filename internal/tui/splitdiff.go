@@ -210,8 +210,10 @@ func splitCodeCells(width, gutter int) int {
 
 // paint renders one logical row as the physical rows it takes: one per wrapped line of the taller
 // side, with the shorter side padding to keep both panes level (docs/layout/split-diff-layout.md,
-// "Wrap, don't clip"). The left pane is padded out to the pane width so the divider stands in one
-// column down the whole body; the right pane is not, so no row ends in trailing blanks.
+// "Wrap, don't clip"). A FILLED cell squares its own rows to the pane (splitCell.paint), so the
+// divider stands in one column down the whole body and a tinted row's band reaches the pane's edge;
+// what is left here is the PAD cell — the row where this pane has no line at all — which fills its
+// columns with untinted blanks, because a pad is the absence of a line rather than a blank one.
 //
 // The rule row spans both panes and the divider between them, because what it stands for — the
 // lines elided between two regions — happened in both files at once.
@@ -227,7 +229,7 @@ func (r splitRow) paint(th theme, gutter, code int) []string {
 	for i := range max(len(left), len(right)) {
 		row := strings.Repeat(" ", pane)
 		if i < len(left) {
-			row = splitPad(th, left[i], pane)
+			row = left[i]
 		}
 		row += divider
 		if i < len(right) {
@@ -238,14 +240,26 @@ func (r splitRow) paint(th theme, gutter, code int) []string {
 	return out
 }
 
-// paint renders one pane's cell as its own physical rows: the first carries the number and the
-// marker, and every continuation row carries neither — a wrapped line is one line, and a second
-// number or a second marker would claim it was two. A pad cell paints nothing at all and leaves
-// the caller to fill its columns.
+// paint renders one pane's cell as its own physical rows, each exactly one pane wide: the first
+// carries the number and the marker, and every continuation row carries neither — a wrapped line is
+// one line, and a second number or a second marker would claim it was two. A pad cell paints
+// nothing at all and leaves the caller to fill its columns.
 //
-// The number wears the muted role and the marker travels with the TEXT's colour, which is what
-// makes the marker the change's palette-proof signal: it is styled as the line it belongs to,
-// while the gutter around it stays chrome (ratified calls 6 and 7).
+// The number wears the muted role OUTSIDE the band and the marker rides INSIDE it, so a diff line's
+// tint runs from the marker column to the pane's edge on the first row and on every continuation
+// row alike, while the number gutter beside it stays chrome (ratified calls 2 and 3 of
+// docs/plans/"2026-08-19 - 05"). The marker is a glyph signal ON the band rather than a colour of
+// its own — the mark that still reads on a monochrome pipe and on a terminal that drops backgrounds
+// — which is ADR 0052's 2026-08-19 amendment superseding the "the marker travels with the TEXT's
+// colour" rationale of its ratified calls 6 and 7.
+//
+// The row is squared to the pane HERE rather than by the caller, because how a filled cell spends
+// its columns is now the cell's own business: renderToRail fills a BANDED style out to the code
+// rail from inside the style — blanks appended after it would show the terminal's own background
+// through the very band they were added to fill — and squareLine takes a plain row the rest of the
+// way, so the divider stands in one column whether the row is tinted or not. Both count in the
+// width authority's measure (ADR 0030), so the escapes a style left in the row cost nothing and a
+// wide glyph costs the cells the painter will actually spend on it.
 func (c splitCell) paint(th theme, gutter, code int) []string {
 	if !c.filled() {
 		return nil
@@ -254,22 +268,12 @@ func (c splitCell) paint(th theme, gutter, code int) []string {
 	lines := wrapText(th, c.text, code)
 	out := make([]string, 0, len(lines))
 	for i, ln := range lines {
+		number, band := strings.Repeat(" ", gutter), strings.Repeat(" ", splitMarkerCells)+ln
 		if i == 0 {
-			out = append(out, th.toolDetail.Render(fmt.Sprintf("%*d ", gutter-1, c.number))+style.Render(c.marker+ln))
-			continue
+			number, band = th.toolDetail.Render(fmt.Sprintf("%*d ", gutter-1, c.number)), c.marker+ln
 		}
-		out = append(out, strings.Repeat(" ", gutter+splitMarkerCells)+style.Render(ln))
+		row := number + renderToRail(th, style, band, splitMarkerCells+code)
+		out = append(out, squareLine(th.measure, row, gutter+splitMarkerCells+code))
 	}
 	return out
-}
-
-// splitPad fills a painted pane row out to the pane's width. It measures through the width
-// authority, so the escapes a style left in the row cost nothing and the padding is counted in the
-// measure the painter draws in (ADR 0030) — a row padded by byte length would put the divider one
-// column off per wide glyph in the code.
-func splitPad(th theme, row string, pane int) string {
-	if gap := pane - th.measure.Width(row); gap > 0 {
-		return row + strings.Repeat(" ", gap)
-	}
-	return row
 }
