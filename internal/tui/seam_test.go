@@ -10,6 +10,7 @@ import (
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/session"
+	"github.com/airiclenz/apogee/internal/undo"
 )
 
 // ----------------------------------------------------------------------------
@@ -134,6 +135,12 @@ type fakeEngine struct {
 	contextReports int                       // how many times ContextFilesReport was read (once per session boundary)
 
 	interjected []domain.UserInput // records Interject calls (the worker's between-Steps delivery), in order
+
+	undoStep    undo.Step   // the step UndoPreview answers with; the zero value plus undoStepOK false is "nothing to undo"
+	undoStepOK  bool        // whether UndoPreview reports a step at all
+	undoReport  undo.Report // the report a permitted UndoRevert returns
+	undoErr     error       // the refusal UndoRevert returns instead (a stale generation, an empty journal)
+	undoReverts []uint64    // records the generations UndoRevert was called with, in order
 
 	submitFn    func(domain.UserInput) error
 	stepFn      func(ctx context.Context, call int) (domain.StepResult, error)
@@ -294,6 +301,23 @@ func (f *fakeEngine) ConfineToWorkspace() bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.confine
+}
+
+// UndoPreview answers with the step the test scripted, so a /undo preview note can be asserted
+// without a journal behind it.
+func (f *fakeEngine) UndoPreview() (undo.Step, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.undoStep, f.undoStepOK
+}
+
+// UndoRevert records the generation the confirm quoted — the stale-preview guard's whole input —
+// and answers with the scripted report or refusal.
+func (f *fakeEngine) UndoRevert(generation uint64) (undo.Report, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.undoReverts = append(f.undoReverts, generation)
+	return f.undoReport, f.undoErr
 }
 
 // SetEffortOverride records the level the /effort command drove and swaps the live override, so a

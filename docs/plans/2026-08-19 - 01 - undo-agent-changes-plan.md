@@ -208,7 +208,12 @@ parent's current group.
 
 ---
 
-## 4. The engine surface the driver calls
+## 4. The engine surface the driver calls — ✅ DONE (2026-08-19)
+
+NOTES (2026-08-19): the stale-generation sentinel is `undo.ErrStaleGeneration`, defined in `internal/undo` rather than in `internal/agent` — production `internal/tui` must recognise the refusal with `errors.Is`, and the undo package is the one vocabulary both sides already share through `undo.Step`/`undo.Report`; putting it on the engine would have made the renderer import `internal/agent` and break its "only internal/domain plus the narrow Engine" dependency stance.
+NOTES (2026-08-19): `cmd/apogee/wire_engine.go` is not on the item's Files list but had to be extended — `lateEngine` is a production `tui.Engine` implementation, so the interface change breaks it exactly as it breaks the test fakes. Unbound it answers "nothing to undo" (no writes have happened) rather than `errNoServerBound`, since `/undo` has no business with the upstream.
+NOTES (2026-08-19): the generation guard is a read-then-revert pair on the engine, as the item's text asks, so it is atomic only at the quiescent boundary; both methods document that boundary and name the Driver's idle-only command gate as the enforcement.
+NOTES (2026-08-19): `fakeEngine` in `internal/tui/seam_test.go` gained scriptable answers (step/ok, report/error) and a record of the generations `UndoRevert` was called with — the minimum that makes it a fake rather than a stub returning zero values; item 5's tests drive it.
 
 Depends on item 2.
 

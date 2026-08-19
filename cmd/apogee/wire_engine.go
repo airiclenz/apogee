@@ -16,6 +16,7 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/session"
 	"github.com/airiclenz/apogee/internal/tui"
+	"github.com/airiclenz/apogee/internal/undo"
 )
 
 // ----------------------------------------------------------------------------
@@ -398,6 +399,27 @@ func (e *lateEngine) ConfineToWorkspace() bool {
 		return agent.ConfineToWorkspace()
 	}
 	return confine
+}
+
+// UndoPreview describes what `/undo` would put back, or reports nothing to undo while the session
+// is unbound — an unbound holder has run no tool call, so there is no write to reverse.
+func (e *lateEngine) UndoPreview() (undo.Step, bool) {
+	agent := e.bound()
+	if agent == nil {
+		return undo.Step{}, false
+	}
+	return agent.UndoPreview()
+}
+
+// UndoRevert executes the previewed step against the bound Agent's journal. Unbound it answers
+// undo.ErrNothingToUndo rather than errNoServerBound: nothing was written, so the honest refusal is
+// the empty journal's and not "pick a server" — /undo has no business with the upstream.
+func (e *lateEngine) UndoRevert(generation uint64) (undo.Report, error) {
+	agent := e.bound()
+	if agent == nil {
+		return undo.Report{}, undo.ErrNothingToUndo
+	}
+	return agent.UndoRevert(generation)
 }
 
 // SetEffortOverride states the session's Thinking effort (the /effort command, ADR 0050), remembered

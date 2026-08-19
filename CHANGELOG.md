@@ -42,6 +42,9 @@ point is a **minor** bump, not a breaking change.
   journal instead of one of its own and opens no group of its own, so delegated writes join the Exchange
   the human started and a single `/undo` takes back the whole instruction, however wide the fan-out.
 
+- **Engine surface for undo: `UndoPreview` / `UndoRevert` on the Agent (and on the TUI's `Engine`
+  seam)**, with a stale-generation refusal that leaves the journal and the workspace untouched.
+
 ### Fixed
 
 - **A click in the band the `/inspect` pane grows into now falls through instead of being swallowed.**

@@ -23,6 +23,14 @@ const defaultRestorePerm os.FileMode = 0o644
 // rather than reading the message.
 var ErrNothingToUndo = errors.New("undo: nothing to undo")
 
+// ErrStaleGeneration refuses a revert whose quoted generation no longer matches the
+// journal's (ADR 0051, ratified call 7): the journal moved between the preview a human
+// read and the confirmation they gave, so the step they authorised is no longer the step
+// that would run. It is the guard's typed refusal, defined here — beside the [Step] and
+// [Report] both sides of the confirmation already speak — so a Driver can recognise it
+// with errors.Is without importing the engine.
+var ErrStaleGeneration = errors.New("undo: the journal moved since the preview")
+
 // Action is what a revert will do to one recorded path.
 type Action int
 

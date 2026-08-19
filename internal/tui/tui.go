@@ -16,6 +16,7 @@ import (
 	"github.com/airiclenz/apogee/internal/scheme"
 	"github.com/airiclenz/apogee/internal/session"
 	"github.com/airiclenz/apogee/internal/skills"
+	"github.com/airiclenz/apogee/internal/undo"
 )
 
 // SkillCatalog is the read-only view of the discovered skills the TUI needs: the full sorted
@@ -188,6 +189,24 @@ type Engine interface {
 	// status report renders it, and /confine off|on reads it to say whether the line changed
 	// anything. Goroutine-safe like SetMode, though the UI calls it only at idle.
 	ConfineToWorkspace() bool
+	// UndoPreview describes what `/undo` would put back: the top un-undone Exchange group,
+	// classified against the files as they are now — restore, delete, or skip with a reason for
+	// each, at resolved absolute paths, since that listing is the disclosure the human authorises
+	// the revert from (ADR 0051). It reports false when there is nothing to undo, which an engine
+	// whose process made no writes also answers — the journal is memory, not storage, so a resumed
+	// session cannot reach an earlier process's writes. It touches no file and does not move the
+	// journal. Called only at idle: the command is idle-only precisely because a running Step is
+	// writing into the group this describes.
+	UndoPreview() (undo.Step, bool)
+	// UndoRevert executes the group UndoPreview described and reports what it restored, removed,
+	// and skipped. generation is the stamp that preview carried, handed back as proof the human is
+	// confirming the step they were shown: a journal that moved since refuses with
+	// undo.ErrStaleGeneration and touches nothing, which is the /undo confirm re-preview path, and
+	// an empty journal answers undo.ErrNothingToUndo. A path whose content no longer matches what
+	// the agent wrote is skipped with its reason rather than overwritten. It MUTATES the workspace,
+	// so like ClearContext it is called only at idle (no worker running) — the idle-only command
+	// gate is what makes the read-then-revert pair safe.
+	UndoRevert(generation uint64) (undo.Report, error)
 	// SetEffortOverride states THIS session's Thinking effort (CONTEXT: Thinking effort) — the level
 	// layered ABOVE the bound model profile's own `thinking.effort:` (ADR 0050), and the engine half
 	// of the /effort command. The zero value CLEARS the override, so the profile's setting stands

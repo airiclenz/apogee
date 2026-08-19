@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"slices"
 	"sync"
 	"time"
@@ -435,6 +436,46 @@ func (a *Agent) SetConfineToWorkspace(confine bool) {
 	a.confineMu.Lock()
 	a.confineToWorkspace = confine
 	a.confineMu.Unlock()
+}
+
+// UndoPreview describes what the human's next undo would put back: the top un-undone Exchange
+// group, classified against the files as they are NOW (restore / delete / skip, with resolved
+// paths — the disclosure the human authorises the revert from), together with the journal
+// generation [Agent.UndoRevert] must quote back. It reports false when nothing is left to undo,
+// which is also what an engine built without a journal answers.
+//
+// It is the engine half of `/undo` (ADR 0051). Like Snapshot it is valid at a QUIESCENT boundary
+// only — between Steps, with no worker driving the loop — because a Step in flight is writing
+// into the very group this describes; the Driver's idle-only command gate is the enforcement.
+// It changes nothing on disk and does not move the journal, so previewing twice is free.
+func (a *Agent) UndoPreview() (undo.Step, bool) {
+	if a.journal == nil {
+		return undo.Step{}, false
+	}
+	return a.journal.Preview()
+}
+
+// UndoRevert executes the top un-undone Exchange group — the one [Agent.UndoPreview] just
+// described — and reports what it restored, removed, and skipped. generation is the stamp that
+// preview carried: it refuses with [undo.ErrStaleGeneration], touching nothing, when the journal
+// has moved since (ADR 0051, ratified call 7), so a human always confirms the step they were
+// shown rather than whatever the journal happens to hold by the time they answer. A journal with
+// nothing left to undo answers [undo.ErrNothingToUndo].
+//
+// It carries UndoPreview's boundary rule for the same reason, and more sharply: the generation is
+// read and the revert runs as two calls, so only a quiescent engine makes the pair atomic. Paths
+// whose current content no longer matches what the agent wrote are SKIPPED with a reason rather
+// than overwritten — the human's own edit outranks the undo — and the group is popped either way,
+// so a repeated undo walks further back instead of retrying a skip.
+func (a *Agent) UndoRevert(generation uint64) (undo.Report, error) {
+	if a.journal == nil {
+		return undo.Report{}, undo.ErrNothingToUndo
+	}
+	if live := a.journal.Generation(); live != generation {
+		return undo.Report{}, fmt.Errorf("%w: previewed at generation %d, journal is at %d",
+			undo.ErrStaleGeneration, generation, live)
+	}
+	return a.journal.Revert()
 }
 
 // SetBypass switches Bypass — Mechanisms off, structure on (ADR 0006) — on or off for the rest
