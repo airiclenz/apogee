@@ -31,7 +31,7 @@ func detailsText(tv toolView) string {
 // "running <raw name>") with its arguments shown verbatim (the approval surface never hides
 // the model's request).
 //
-// The seven summary-bearing tools carry the domain.ToolSummary their tool now attaches, so
+// The nine summary-bearing tools carry the domain.ToolSummary their tool now attaches, so
 // the line comes from the typed outcome rather than from the prose beside it; the "no summary"
 // rows pin the D6 floor, where the same result with no summary degrades to its verbatim first
 // line instead of to a raw dump. Every wantDetail here is unchanged from when the view parsed
@@ -1753,4 +1753,481 @@ func TestRunAggregate(t *testing.T) {
 			}
 		}
 	})
+}
+
+// ----------------------------------------------------------------------------
+// Recorded Edit regions — the stacked reading, the slot, and the strip
+// ----------------------------------------------------------------------------
+
+// TestStackedDiffLinesRendersTheLayoutSketch pins the stacked reading against the sketch in
+// docs/layout/split-diff-layout.md, which is the layout's authority: per region the leading
+// context, the removed lines behind `-` at their BEFORE numbers, the inserted lines behind `+` at
+// their AFTER numbers, then the trailing context — one right-aligned number gutter sized for the
+// whole body, and the damped `⋯` rule standing between two regions whose lines do not meet.
+//
+// The numbers drifting apart across the rule (before 204, after 205) is the fact the gutter exists
+// for: each side numbers its own file, and a body that renumbered them to agree would be showing a
+// file neither the model nor the disk has.
+func TestStackedDiffLinesRendersTheLayoutSketch(t *testing.T) {
+	t.Parallel()
+
+	regions := []domain.EditRegion{
+		{
+			BeforeStart: 88, AfterStart: 88,
+			Leading:  []string{"func paint(w int) error {", "  if w < minWidth {"},
+			Removed:  []string{"    return errNarrow"},
+			Inserted: []string{`    return fmt.Errorf("width %d under %d", w, minWidth)`},
+			Trailing: []string{"  }"},
+		},
+		{
+			BeforeStart: 204, AfterStart: 205,
+			Leading:  []string{"  return nil"},
+			Removed:  []string{"}"},
+			Inserted: []string{"  }", ""},
+		},
+	}
+
+	got := stackedDiffLines(regions)
+
+	want := []detailLine{
+		{Text: " 88   func paint(w int) error {"},
+		{Text: " 89     if w < minWidth {"},
+		{Kind: detailDiffRemoved, Text: " 90 -     return errNarrow"},
+		{Kind: detailDiffAdded, Text: ` 90 +     return fmt.Errorf("width %d under %d", w, minWidth)`},
+		{Text: " 91     }"},
+		{Text: strings.Repeat("⋯", stackedRegionRuleCells)},
+		{Text: "204     return nil"},
+		{Kind: detailDiffRemoved, Text: "205 - }"},
+		{Kind: detailDiffAdded, Text: "206 +   }"},
+		{Kind: detailDiffAdded, Text: "207 + "},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("stacked rows =\n%s\nwant\n%s", detailDump(got), detailDump(want))
+	}
+}
+
+// Two regions that MEET in the before file's numbering are painted end to end, with no rule between
+// them. A tool records neighbouring changes as separate regions whose context tiles the lines
+// between them without overlap (domain.EditRegion), so the rows already run continuously — a rule
+// there would claim an elision that never happened, and the split reading of the same body would
+// then differ from a body a merge would have produced.
+func TestStackedDiffLinesElidesOnlyBetweenRegionsThatDoNotMeet(t *testing.T) {
+	t.Parallel()
+
+	// The first region spans before-lines 10..14 (one leading, one removed, three trailing), so a
+	// neighbour starting at 15 meets it and one starting at 16 does not.
+	meeting := []domain.EditRegion{
+		{BeforeStart: 10, AfterStart: 10, Leading: []string{"a"}, Removed: []string{"b"}, Inserted: []string{"B"},
+			Trailing: []string{"c", "d", "e"}},
+		{BeforeStart: 15, AfterStart: 15, Leading: []string{"f", "g"}, Removed: []string{"h"}, Inserted: []string{"H"}},
+	}
+	for _, line := range stackedDiffLines(meeting) {
+		if strings.Contains(line.Text, "⋯") {
+			t.Errorf("a rule was drawn between regions that meet: %q", line.Text)
+		}
+	}
+
+	parted := []domain.EditRegion{meeting[0], meeting[1]}
+	parted[1].BeforeStart, parted[1].AfterStart = 16, 16
+	// Six rows for the first region — one leading, one removed, one inserted, three trailing — so
+	// the rule stands on the seventh, between the regions rather than inside either.
+	if got := stackedDiffLines(parted); !strings.Contains(got[6].Text, "⋯") {
+		t.Errorf("rows = %q, want the rule between two regions that do not meet", detailTexts(got))
+	}
+}
+
+// The gutter is sized for the WHOLE body and right-aligns every number in it, so a body whose
+// numbers span two widths reads as one column. A one-digit body spends one cell, not three.
+func TestStackedDiffLinesSizesOneGutterForTheBody(t *testing.T) {
+	t.Parallel()
+
+	narrow := stackedDiffLines([]domain.EditRegion{{BeforeStart: 1, AfterStart: 1, Removed: []string{"x"}, Inserted: []string{"y"}}})
+	if want := []string{"1 - x", "1 + y"}; !slices.Equal(detailTexts(narrow), want) {
+		t.Errorf("single-digit body = %q, want %q — the gutter is the widest number, not a fixed width", detailTexts(narrow), want)
+	}
+
+	wide := stackedDiffLines([]domain.EditRegion{{BeforeStart: 9, AfterStart: 9, Leading: []string{"ctx"},
+		Removed: []string{"x"}, Inserted: []string{"y", "z"}}})
+	if want := []string{" 9   ctx", "10 - x", "10 + y", "11 + z"}; !slices.Equal(detailTexts(wide), want) {
+		t.Errorf("body spanning two widths = %q, want %q", detailTexts(wide), want)
+	}
+}
+
+// No regions is no body — which is what lets a call that recorded none keep the argument-derived
+// lines it was presented with (ratified call 9).
+func TestStackedDiffLinesWithoutRegionsRendersNothing(t *testing.T) {
+	t.Parallel()
+
+	if got := stackedDiffLines(nil); got != nil {
+		t.Errorf("stackedDiffLines(nil) = %+v, want no body at all", got)
+	}
+}
+
+// TestEditResultReplacesTheArgumentBodyWithItsRecordedRegions pins the hand-over the enrichment
+// path makes: the body an edit block is PRESENTED with is the change the model asked for, read off
+// its own arguments, and the body it KEEPS is the change that landed — numbered, with context, as
+// the tool recorded it while it held both sides of the file.
+func TestEditResultReplacesTheArgumentBodyWithItsRecordedRegions(t *testing.T) {
+	t.Parallel()
+
+	call := domain.ToolCall{ID: "1", Tool: "single_find_and_replace",
+		Arguments: []byte(`{"path":"main.go","oldText":"a := 1","newText":"a := 2"}`)}
+	tv := presentToolCall(call, "", workspaceRoot{})
+	if want := []string{"- a := 1", "+ a := 2"}; !slices.Equal(detailTexts(tv.Details.all()), want) {
+		t.Fatalf("presented body = %q, want the argument-derived pair %q", detailTexts(tv.Details.all()), want)
+	}
+
+	tv.enrichWithResult(domain.ToolResult{CallID: "1", Content: "replaced text in main.go",
+		Summary: domain.EditRegions{Regions: []domain.EditRegion{{
+			BeforeStart: 6, AfterStart: 6,
+			Leading:  []string{"func main() {"},
+			Removed:  []string{"\ta := 1"},
+			Inserted: []string{"\ta := 2"},
+			Trailing: []string{"}"},
+		}}}}, workspaceRoot{})
+
+	want := []string{"6   func main() {", "7 - \ta := 1", "7 + \ta := 2", "8   }"}
+	if !slices.Equal(detailTexts(tv.Details.all()), want) {
+		t.Errorf("enriched body = %q, want the recorded regions as stacked rows %q", detailTexts(tv.Details.all()), want)
+	}
+	if len(tv.Regions) != 1 {
+		t.Errorf("view kept %d regions, want the one the tool recorded — the split reading composes them at paint time", len(tv.Regions))
+	}
+}
+
+// A result carrying NO summary leaves the argument-derived body exactly as it was: the block renders
+// as it did before regions existed (ratified call 9, and the fixtures of
+// TestEditCallsCarryTheirChangedLines).
+func TestEditResultWithoutRegionsKeepsTheArgumentBody(t *testing.T) {
+	t.Parallel()
+
+	call := domain.ToolCall{ID: "1", Tool: "single_find_and_replace",
+		Arguments: []byte(`{"path":"main.go","oldText":"a := 1","newText":"a := 2"}`)}
+	tv := presentToolCall(call, "", workspaceRoot{})
+	tv.enrichWithResult(domain.ToolResult{CallID: "1", Content: "replaced text in main.go"}, workspaceRoot{})
+
+	if want := []string{"- a := 1", "+ a := 2"}; !slices.Equal(changedBody(t, tv), want) {
+		t.Errorf("body = %q, want the argument-derived pair %q verbatim", changedBody(t, tv), want)
+	}
+	if tv.Regions != nil || tv.hasDiffStat {
+		t.Errorf("a summary-less result left regions=%+v hasDiffStat=%v, want neither", tv.Regions, tv.hasDiffStat)
+	}
+}
+
+// An over-budget edit reports a summary with no regions in it (internal/tools), which is the same
+// nothing as no summary at all: the block keeps the body and the slot it was presented with rather
+// than emptying both.
+func TestEditResultWithEmptyRegionsKeepsTheArgumentBody(t *testing.T) {
+	t.Parallel()
+
+	call := domain.ToolCall{ID: "1", Tool: "single_find_and_replace",
+		Arguments: []byte(`{"path":"main.go","oldText":"a := 1","newText":"a := 2"}`)}
+	tv := presentToolCall(call, "", workspaceRoot{})
+	tv.enrichWithResult(domain.ToolResult{CallID: "1", Content: "replaced text in main.go",
+		Summary: domain.EditRegions{}}, workspaceRoot{})
+
+	if want := []string{"- a := 1", "+ a := 2"}; !slices.Equal(changedBody(t, tv), want) {
+		t.Errorf("body = %q, want the argument-derived pair %q", changedBody(t, tv), want)
+	}
+	if got, want := tv.Summary.Text, "+1 −1"; got != want {
+		t.Errorf("slot = %q, want the argument-derived %q", got, want)
+	}
+}
+
+// TestEditSlotPrefersTheRecordedRegionsStat pins the outcome slot's two readings for all three edit
+// tools: the diffstat of what LANDED once the tool recorded it, and the argument-derived one it was
+// presented with when nothing did. The recorded reading is the summary's own derivation
+// (domain.EditRegions.Stat), so the slot and the rows beneath it are two readings of one count.
+func TestEditSlotPrefersTheRecordedRegionsStat(t *testing.T) {
+	t.Parallel()
+
+	regions := domain.EditRegions{Regions: []domain.EditRegion{
+		{BeforeStart: 1, AfterStart: 1, Removed: []string{"a"}, Inserted: []string{"A", "B"}},
+		{BeforeStart: 9, AfterStart: 10, Removed: []string{"c"}, Inserted: []string{"C"}},
+	}}
+
+	cases := []struct {
+		name        string
+		args        string
+		wantArgStat string
+	}{
+		{
+			name:        "single_find_and_replace",
+			args:        `{"path":"main.go","oldText":"a","newText":"A"}`,
+			wantArgStat: "+1 −1",
+		},
+		{
+			name:        "multi_find_and_replace",
+			args:        `{"path":"main.go","replacements":[{"oldText":"a","newText":"A"},{"oldText":"c","newText":"C"}]}`,
+			wantArgStat: "2 changes",
+		},
+		{
+			name:        "edit_existing_file",
+			args:        `{"path":"main.go","content":"A\nB"}`,
+			wantArgStat: "+2 −0",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name+": the recorded regions word the slot", func(t *testing.T) {
+			t.Parallel()
+			call := domain.ToolCall{ID: "1", Tool: tc.name, Arguments: []byte(tc.args)}
+			tv := presentToolCall(call, "", workspaceRoot{})
+			tv.enrichWithResult(domain.ToolResult{CallID: "1", Content: "done", Summary: regions}, workspaceRoot{})
+
+			if got, want := tv.Summary.Text, "+3 −2"; got != want {
+				t.Errorf("slot = %q, want %q — the diffstat of what landed", got, want)
+			}
+			if !tv.hasDiffStat || tv.diffStat != (domain.DiffStat{Added: 3, Removed: 2}) {
+				t.Errorf("typed stat = %+v (present %v), want the summary's own {3 2}", tv.diffStat, tv.hasDiffStat)
+			}
+		})
+
+		t.Run(tc.name+": no regions falls back to the argument stat", func(t *testing.T) {
+			t.Parallel()
+			call := domain.ToolCall{ID: "1", Tool: tc.name, Arguments: []byte(tc.args)}
+			tv := presentToolCall(call, "", workspaceRoot{})
+			tv.enrichWithResult(domain.ToolResult{CallID: "1", Content: "done"}, workspaceRoot{})
+
+			if got := tv.Summary.Text; got != tc.wantArgStat {
+				t.Errorf("slot = %q, want the argument-derived %q", got, tc.wantArgStat)
+			}
+		})
+	}
+}
+
+// TestRunAggregateSumsTypedDiffStats pins which reading the run aggregate adds up. A member whose
+// stat came from a typed summary hands over the NUMBERS it holds; only a member that has nothing
+// but a phrase is read back out of it (parseDiffCounts). The typed members below are spelled with
+// an ASCII hyphen, which that parser refuses — so a sum that lands could only have come from the
+// typed values, and one that regressed to parsing would come back blank.
+func TestRunAggregateSumsTypedDiffStats(t *testing.T) {
+	t.Parallel()
+
+	t.Run("typed members sum without their wording being read", func(t *testing.T) {
+		t.Parallel()
+		if _, _, ok := parseDiffCounts("+2 -1"); ok {
+			t.Fatal("the fixture spelling parses; it must be one the inverse parser refuses")
+		}
+		run := []toolView{
+			{Summary: namedSummary(detailLine{Text: "+2 -1"}), diffStat: domain.DiffStat{Added: 2, Removed: 1}, hasDiffStat: true},
+			{Summary: namedSummary(detailLine{Text: "+6 -2"}), diffStat: domain.DiffStat{Added: 6, Removed: 2}, hasDiffStat: true},
+		}
+		if got, want := runAggregate(run).Text, "+8 −3"; got != want {
+			t.Errorf("aggregate = %q, want %q summed from the typed stats", got, want)
+		}
+	})
+
+	t.Run("a text-only run still sums through the parser", func(t *testing.T) {
+		t.Parallel()
+		run := []toolView{
+			{Summary: namedSummary(detailLine{Text: "+2 −1"})},
+			{Summary: namedSummary(detailLine{Text: "+6 −2"})},
+		}
+		if got, want := runAggregate(run).Text, "+8 −3"; got != want {
+			t.Errorf("aggregate = %q, want %q — the phrase stays the floor for producers with no typed value", got, want)
+		}
+	})
+
+	t.Run("a member with neither reading does not sum", func(t *testing.T) {
+		t.Parallel()
+		run := []toolView{
+			{Summary: namedSummary(detailLine{Text: "+2 -1"}), diffStat: domain.DiffStat{Added: 2, Removed: 1}, hasDiffStat: true},
+			{Summary: namedSummary(detailLine{Text: "replaced text in main.go"})},
+		}
+		if got := runAggregate(run).Text; got != "" {
+			t.Errorf("aggregate = %q, want blank — a run only sums where every member carries a diffstat", got)
+		}
+	})
+}
+
+// A region's lines are tool-recorded FILE CONTENT — a malicious repo owns every byte of them — and
+// both readings of the body paint straight from them, so they cross the display seam like every
+// other producer string: the rows are stripped, and so are the regions the split composer will
+// read at paint time.
+func TestEditRegionsCrossTheEscapeSeamStripped(t *testing.T) {
+	t.Parallel()
+
+	const link = "\x1b]8;;http://evil.example\x07click me\x1b]8;;\x07"
+	call := domain.ToolCall{ID: "1", Tool: "single_find_and_replace",
+		Arguments: []byte(`{"path":"main.go","oldText":"a","newText":"b"}`)}
+	tv := presentToolCall(call, "", workspaceRoot{})
+	tv.enrichWithResult(domain.ToolResult{CallID: "1", Content: "replaced text in main.go",
+		Summary: domain.EditRegions{Regions: []domain.EditRegion{{
+			BeforeStart: 1, AfterStart: 1,
+			Leading:  []string{link},
+			Removed:  []string{"a\x1b[31m"},
+			Inserted: []string{"b\x7f"},
+			Trailing: []string{"tail‮"},
+		}}}}, workspaceRoot{})
+
+	for _, line := range tv.Details.all() {
+		if strings.ContainsRune(line.Text, 0x1b) || strings.ContainsRune(line.Text, 0x7f) || strings.ContainsRune(line.Text, 0x202e) {
+			t.Errorf("stacked row %q still carries a control character", line.Text)
+		}
+	}
+	region := tv.Regions[0]
+	for _, side := range [][]string{region.Leading, region.Removed, region.Inserted, region.Trailing} {
+		for _, text := range side {
+			if strings.ContainsRune(text, 0x1b) || strings.ContainsRune(text, 0x7f) || strings.ContainsRune(text, 0x202e) {
+				t.Errorf("retained region line %q still carries a control character", text)
+			}
+		}
+	}
+	if got, want := region.Inserted[0], "b"; got != want {
+		t.Errorf("stripped inserted line = %q, want %q — the DEL is dropped and nothing else is", got, want)
+	}
+}
+
+// The strip COPIES the regions rather than rewriting them where they lie: the slices arrive on the
+// tool's own result and are shared with the value the engine holds, so a seam that wrote through
+// them would rewrite the engine's data from the display side.
+func TestSanitizeLeavesTheResultsOwnRegionsAlone(t *testing.T) {
+	t.Parallel()
+
+	summary := domain.EditRegions{Regions: []domain.EditRegion{{
+		BeforeStart: 1, AfterStart: 1, Removed: []string{"a\x1b[31m"}, Inserted: []string{"b"},
+	}}}
+	call := domain.ToolCall{ID: "1", Tool: "single_find_and_replace",
+		Arguments: []byte(`{"path":"main.go","oldText":"a","newText":"b"}`)}
+	tv := presentToolCall(call, "", workspaceRoot{})
+	tv.enrichWithResult(domain.ToolResult{CallID: "1", Content: "done", Summary: summary}, workspaceRoot{})
+
+	if got, want := summary.Regions[0].Removed[0], "a\x1b[31m"; got != want {
+		t.Errorf("the result's own region line is now %q, want %q — the display seam rewrote the engine's value", got, want)
+	}
+}
+
+// sanitizeExemptToolViewMembers names the toolView members the escape strip deliberately does not
+// reach, each with the reason it need not. It is the other half of the guard below: a member that
+// carries display text is either stripped or listed here, so the next one added cannot slip past
+// the seam by nobody noticing.
+var sanitizeExemptToolViewMembers = map[string]string{
+	"name":    "the registry lookup key, never rendered — Label carries the displayed copy of it, and Label is stripped",
+	"argStat": "a phrase the presenter COMPOSES out of its own counts (a diffstat, a plural), never a producer's text; it reaches the screen through Summary, which is stripped",
+	"args":    "the parsed request, display state's raw material and never painted: every line built from it is a body line, and the seam strips those",
+}
+
+// TestToolViewSanitizeReachesEveryStringMember is the structural guard on the tool card's escape
+// seam. Every member of toolView that can hold a string holds untrusted text sooner or later — a
+// hostile model owns the arguments, a malicious repo owns file content and command output — and the
+// seam strips on every producer's behalf rather than asking two dozen extractors to remember
+// (toolView.sanitize).
+//
+// The guard is in two passes over the fixture, and the first is what keeps it from rotting: a
+// member the fixture does not fill with an escape fails just as loudly as one the strip does not
+// reach, so adding a field to toolView forces a decision — fill it and be stripped, or be named in
+// sanitizeExemptToolViewMembers with the reason. It is the member-census idiom the wire structs are
+// held to (transcriptcodec_test.go), turned on the seam instead of on the format.
+func TestToolViewSanitizeReachesEveryStringMember(t *testing.T) {
+	t.Parallel()
+
+	const dirty = "\x1b]8;;http://evil.example\x07text"
+	tv := toolView{
+		Label:   dirty,
+		Verb:    dirty,
+		Target:  dirty,
+		Summary: namedSummary(detailLine{Text: dirty}),
+		Details: newToolBody([]detailLine{{Text: dirty}}),
+		Regions: []domain.EditRegion{{
+			BeforeStart: 1, AfterStart: 1,
+			Leading: []string{dirty}, Removed: []string{dirty}, Inserted: []string{dirty}, Trailing: []string{dirty},
+		}},
+		stat:      dirty,
+		argStat:   dirty,
+		name:      dirty,
+		agentName: dirty,
+		task:      dirty,
+	}
+
+	typ := reflect.TypeOf(tv)
+	guarded := make([]int, 0, typ.NumField())
+	for i := range typ.NumField() {
+		field := typ.Field(i)
+		if _, exempt := sanitizeExemptToolViewMembers[field.Name]; exempt || !typeCarriesString(field.Type) {
+			continue
+		}
+		if !valueHasEscape(reflect.ValueOf(tv).Field(i)) {
+			t.Errorf("toolView member %q can hold display text but the fixture does not fill it with an escape — fill it, or record in sanitizeExemptToolViewMembers why the strip need not reach it", field.Name)
+			continue
+		}
+		guarded = append(guarded, i)
+	}
+
+	tv.sanitize()
+
+	for _, i := range guarded {
+		if valueHasEscape(reflect.ValueOf(tv).Field(i)) {
+			t.Errorf("toolView member %q is not reached by sanitize; a repo that owns its text owns the rest of the frame", typ.Field(i).Name)
+		}
+	}
+}
+
+// typeCarriesString reports whether a value of this type can hold a string anywhere inside it —
+// directly, or through a slice, array, pointer, map or struct member. An interface member counts:
+// what it will hold is not knowable here, so it must be decided about rather than assumed empty.
+func typeCarriesString(typ reflect.Type) bool {
+	switch typ.Kind() {
+	case reflect.String, reflect.Interface:
+		return true
+	case reflect.Slice, reflect.Array, reflect.Pointer:
+		return typeCarriesString(typ.Elem())
+	case reflect.Map:
+		return typeCarriesString(typ.Key()) || typeCarriesString(typ.Elem())
+	case reflect.Struct:
+		for i := range typ.NumField() {
+			if typeCarriesString(typ.Field(i).Type) {
+				return true
+			}
+		}
+		return false
+	default:
+		return false
+	}
+}
+
+// valueHasEscape reports whether any string inside a value still carries an ESC byte. It reads
+// unexported members through reflection, which is allowed as long as nothing asks for their
+// interface — every leaf here is read as a string.
+func valueHasEscape(val reflect.Value) bool {
+	switch val.Kind() {
+	case reflect.String:
+		return strings.ContainsRune(val.String(), 0x1b)
+	case reflect.Pointer:
+		return !val.IsNil() && valueHasEscape(val.Elem())
+	case reflect.Slice, reflect.Array:
+		for i := range val.Len() {
+			if valueHasEscape(val.Index(i)) {
+				return true
+			}
+		}
+		return false
+	case reflect.Struct:
+		for i := range val.NumField() {
+			if valueHasEscape(val.Field(i)) {
+				return true
+			}
+		}
+		return false
+	default:
+		return false
+	}
+}
+
+// detailTexts is a body's lines as plain strings, for assertions that are about the rows' text
+// rather than about which half of the outcome they landed in.
+func detailTexts(lines []detailLine) []string {
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		out = append(out, line.Text)
+	}
+	return out
+}
+
+// detailDump renders a body one line per row, kind and text, so a failed golden comparison reads.
+func detailDump(lines []detailLine) string {
+	var b strings.Builder
+	for _, line := range lines {
+		fmt.Fprintf(&b, "  %d %q\n", line.Kind, line.Text)
+	}
+	return b.String()
 }

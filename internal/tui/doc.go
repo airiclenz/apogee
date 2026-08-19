@@ -608,7 +608,7 @@
 // before. The wording stays the view's own; that several lines read like the tool's own header is
 // what made "the rendered output does not change, byte for byte" a checkable oracle for the
 // change, not a contract, and this package may reword without touching a tool.
-// toolsummary_pin_test.go executes all seven summary-bearing tools for real and asserts the
+// toolsummary_pin_test.go executes all nine summary-bearing tools for real and asserts the
 // rendered line — the cross-package pin the old regexes never had.
 //
 // The rest of the package, one line each, so this narration names every file in it: tui.go is the

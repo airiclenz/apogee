@@ -45,10 +45,12 @@ const ddgPinPage = `<!DOCTYPE html>
 </body></html>`
 
 // pinFileBody is the workspace file the read/open/diff/grep cases work on: three lines, with
-// "func main" on the third, so every expected number below is readable from here.
+// "func main" on the third, so every expected number below is readable from here. The three
+// edit cases each get their OWN copy of it, because they write: one case's apply must not move
+// the numbers another case reads.
 const pinFileBody = "package main\n\nfunc main() {}"
 
-// TestToolSummariesRenderThroughThePresenter executes each of the seven summary-bearing tools
+// TestToolSummariesRenderThroughThePresenter executes each of the nine summary-bearing tools
 // for real and pins the card line the presenter renders from its outcome. Both halves are
 // asserted: that the tool attached a summary at all, and that the view words it the way it
 // always has (the D4 oracle — this card reshaped a seam, it did not change the UI).
@@ -60,6 +62,9 @@ func TestToolSummariesRenderThroughThePresenter(t *testing.T) {
 	}
 	writePinFile(t, filepath.Join(root, "sub", "a.txt"), "a")
 	writePinFile(t, filepath.Join(root, "sub", "b.txt"), "b")
+	writePinFile(t, filepath.Join(root, "single.go"), pinFileBody)
+	writePinFile(t, filepath.Join(root, "multi.go"), pinFileBody)
+	writePinFile(t, filepath.Join(root, "patch.go"), pinFileBody)
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -109,10 +114,31 @@ func TestToolSummariesRenderThroughThePresenter(t *testing.T) {
 			args: `{"query":"golang docs"}`,
 			want: "2 results",
 		},
+		{
+			// The three edit tools word their slot from the regions the APPLY recorded
+			// (editRegionsStat), not from the arguments — so these three rows are also the
+			// pin that the tools keep attaching domain.EditRegions at all.
+			name: "single_find_and_replace",
+			tool: tools.NewSingleFindReplace(root),
+			args: `{"path":"single.go","oldText":"func main","newText":"func other"}`,
+			want: "+1 −1",
+		},
+		{
+			name: "multi_find_and_replace",
+			tool: tools.NewMultiFindReplace(root),
+			args: `{"path":"multi.go","replacements":[{"oldText":"package main","newText":"package other"},{"oldText":"func main","newText":"func other"}]}`,
+			want: "+2 −2", // the regions, not the argument-derived "2 changes"
+		},
+		{
+			name: "edit_existing_file",
+			tool: tools.NewEditExistingFile(root),
+			args: `{"path":"patch.go","content":"package main\n\nfunc other() {}"}`,
+			want: "+1 −1", // a full replacement reports only the line that differs
+		},
 	}
 
-	if len(cases) != 6 {
-		t.Fatalf("the pin covers %d tools, want all 6 summary-bearing ones", len(cases))
+	if len(cases) != 9 {
+		t.Fatalf("the pin covers %d tools, want all 9 summary-bearing ones", len(cases))
 	}
 
 	for _, tc := range cases {
@@ -141,7 +167,10 @@ func TestToolSummariesRenderThroughThePresenter(t *testing.T) {
 // The presenter names the tool the summary came from: every case above uses the tool's own
 // registry key, so a summary can never render under the wrong label.
 func TestToolSummaryPinUsesRegisteredToolNames(t *testing.T) {
-	for _, name := range []string{"read_file", "write_file", "list_dir", "grep", "view_diff", "web_search"} {
+	for _, name := range []string{
+		"read_file", "write_file", "list_dir", "grep", "view_diff", "web_search",
+		"single_find_and_replace", "multi_find_and_replace", "edit_existing_file",
+	} {
 		if _, ok := toolRegistry[name]; !ok {
 			t.Errorf("%s reports a summary but has no registry entry", name)
 		}

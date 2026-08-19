@@ -10,6 +10,25 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **Edit blocks paint the change that LANDED, numbered.** A card whose tool recorded Edit regions
+  (`domain.EditRegions`) now shows them as the numbered **Stacked diff** the layout spec draws
+  (`docs/layout/split-diff-layout.md`): per region its context, its removed lines behind `-` at
+  their before-file numbers, its inserted lines behind `+` at their after-file numbers, one
+  right-aligned number gutter for the whole body, and a damped `⋯` rule only where two regions do
+  not meet in the file's numbering — regions that meet paint end to end, exactly as one merged
+  region would. `stackedDiffLines` is the one builder of those rows, which the two diff tools will
+  render through as well. The body a call was PRESENTED with — the `-`/`+` list read off its own
+  arguments — is replaced when the recorded regions arrive and kept verbatim when none do, so a
+  tool that recorded nothing renders exactly as it did before. The three edit tools' outcome slot
+  now words its `+A −R` from `EditRegions.Stat()` where a result carried regions, falling back to
+  the argument-derived phrase where it did not, and it carries that diffstat TYPED beside the text
+  so a run of edit blocks sums its aggregate from the numbers rather than parsing its own wording
+  back out of them. Region lines are tool-recorded file content and cross the display seam
+  escape-stripped like every other producer string, with a new structural guard test holding the
+  strip to every string-carrying member of the tool card. The cross-package pin that runs real tools
+  through the presenter now covers the three edit tools too, so their `+A −R` is held from the apply
+  that records the regions all the way to the line the card paints.
+
 - **`edit_existing_file` records its Edit regions at apply time.** Both forms of the tool — the
   `*** Begin Patch` hunk form and the full-content replacement — now attach the
   `domain.EditRegions` summary of what they actually wrote, through the same shared

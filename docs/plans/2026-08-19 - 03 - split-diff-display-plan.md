@@ -221,7 +221,34 @@ fuzzy matching still reports the regions of what actually landed.
 
 Depends on item 2.
 
-## 5. TUI: consume EditRegions — stacked rows and the stat
+## 5. TUI: consume EditRegions — stacked rows and the stat — ✅ DONE (2026-08-19)
+
+NOTES (2026-08-19): the item text says "the three edit tools' `+A −R` slot reads `EditRegions.Stat()`",
+so all three got the `stat:` hook — which moves `multi_find_and_replace`'s slot from the ratified
+per-tool table's `N changes` to `+A −R` once a result carries regions (before that, and on a result
+that recorded none, the argument-derived `N changes` still stands). The table's stat cell for that
+row in `docs/layout/tool-layout.md` needs the same amendment; item 12 owns that file and is not yet
+done, so it is left for it.
+NOTES (2026-08-19): the guard test could not be written as the item words it — `toolView.argStat` is
+a string member `sanitize` does not reach, so "every string-carrying field is reached" fails as
+stated. The test is the member-CENSUS idiom instead: a named exemption map
+(`sanitizeExemptToolViewMembers`) records `name`, `argStat` and `args` with the reason each need not
+be stripped, and every other string-carrying member must be both filled with an escape by the
+fixture and stripped by the seam — so a new member cannot slip past without someone deciding.
+NOTES (2026-08-19): the `⋯` rule is drawn at a fixed 8 cells (`stackedRegionRuleCells`) rather than
+spanning the body: these are detail lines, built with no width in hand, and a run sized for a wide
+block would wrap onto a second row in a narrow one. The split composer (item 6) paints its own
+full-width rule, where the width is known.
+NOTES (2026-08-19): the strip COPIES the regions (`strippedRegions`) instead of rewriting them in
+place as the body's own strip does — the slices arrive on the tool's result and are shared with the
+value the engine holds, so writing through them would have a display seam rewrite the engine's data.
+Pinned by `TestSanitizeLeavesTheResultsOwnRegionsAlone`.
+NOTES (2026-08-19): the cross-package pin (`toolsummary_pin_test.go`) now executes the three edit
+tools for real as well, so the `+A −R` these cards show is pinned end to end — tool apply through
+`EditRegions.Stat()` to the rendered slot — and a tool that stops recording regions fails in the
+package that renders them. Its count guard and the stale "seven summary-bearing tools" wording in
+`internal/tui/doc.go` and `internal/tui/toolpresent_test.go` now read nine, which is the real count
+(`okSummary` has nine callers). Each edit case gets its own fixture copy, because those three write.
 
 **What:** In `internal/tui/toolpresent.go`:
 

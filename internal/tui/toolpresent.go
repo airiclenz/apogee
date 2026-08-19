@@ -191,6 +191,22 @@ type toolView struct {
 	// painter's cap rather than anything decided here.
 	Details toolBody
 
+	// Regions is the change itself, as the tool that applied it RECORDED it (domain.EditRegion,
+	// ADR 0052): the removed and inserted lines of each changed region with up to three unchanged
+	// lines of context each side, and the line numbers they sit on in the before and the after
+	// file. The domain type is carried as it stands rather than mirrored here, because the facts
+	// are the tool's and a second shape of them would be a second thing to keep true.
+	//
+	// It is the structured half of the same body Details already holds in rows: the stacked
+	// reading is built from these regions (stackedDiffLines) and the split reading composes them
+	// into two panes at paint time, where the width is known. A view with no regions — a tool
+	// that recorded none, a result that carried no summary — keeps whatever body it was presented
+	// with, which is the argument-derived -/+ list this block always showed.
+	//
+	// The lines are tool-recorded FILE CONTENT, so they are display text like every other string
+	// here and are escape-stripped with them (sanitize).
+	Regions []domain.EditRegion
+
 	// stat is the other reading of a PROMOTED outcome: the presenter's own typed phrase for the
 	// fact the quoted Summary spells out in the tool's words ("1 line"), carried beside it so the
 	// painter can choose between the two by measure (promotable, demoted). It is empty on every
@@ -209,6 +225,18 @@ type toolView struct {
 	// It holds the ANSWER rather than the arguments it was read from, which is what keeps a
 	// write_file's whole file content out of the view for the life of the session.
 	argStat string
+
+	// diffStat is the slot's diffstat as a NUMBER PAIR, kept beside the phrase that spells it out,
+	// and hasDiffStat says a typed summary supplied it. Only a tool that reported one sets them
+	// (absorbRegions): a slot worded from arguments or from a tool's prose has no typed reading and
+	// leaves them zero.
+	//
+	// They exist so the run aggregate can ADD the members of a run up without reading its own
+	// wording back out of them (sumDiffCounts): parseDiffCounts is the inverse of one spelling, and
+	// a feature that hands the summer a fact it already holds typed must not become that parser's
+	// next input. The parser stays the floor for the producers that have only text.
+	diffStat    domain.DiffStat
+	hasDiffStat bool
 
 	name string
 
@@ -511,6 +539,7 @@ var toolRegistry = map[string]toolPresenter{
 		verb:    "editing",
 		target:  stringArg("path"),
 		detail:  firstLineDetail,       // "replaced text in <path>"
+		stat:    editRegionsStat,       // "+A −R" off the regions the apply recorded, once they land
 		argStat: singleReplacementStat, // "+A −R", counted off the pair the call asks for
 		argBody: singleReplacementBody, // the one oldText → newText pair, as -/+ lines
 	},
@@ -519,6 +548,7 @@ var toolRegistry = map[string]toolPresenter{
 		verb:    "editing",
 		target:  stringArg("path"),
 		detail:  firstLineDetail,      // "applied N replacements to <path>"
+		stat:    editRegionsStat,      // "+A −R" off the regions the apply recorded, once they land
 		argStat: multiReplacementStat, // "N changes" — one per replacement the call lists
 		argBody: multiReplacementBody, // one -/+ pair per replacement, in argument order
 	},
@@ -527,6 +557,7 @@ var toolRegistry = map[string]toolPresenter{
 		verb:    "editing",
 		target:  stringArg("path"),
 		detail:  firstLineDetail, // "applied patch to <path> (N hunks)" / "updated <path>"
+		stat:    editRegionsStat, // "+A −R" off the regions the apply recorded, once they land
 		argStat: fileEditStat,    // "+A −R", counted off the patch (or content) the call sends
 		argBody: fileEditBody,    // a patch's hunks, or full replacement content as + lines
 	},
@@ -845,6 +876,32 @@ func (tv *toolView) sanitize() {
 	tv.Summary.Text = stripEscapes(tv.Summary.Text)
 	tv.stat = stripEscapes(tv.stat)
 	tv.Details.stripEscapes()
+	tv.Regions = strippedRegions(tv.Regions)
+}
+
+// strippedRegions is the strip run over the lines a set of Edit regions carries — the region half
+// of the seam above, and the reason it exists at all: a region holds tool-recorded FILE CONTENT,
+// which a malicious repo owns every byte of, and both readings of the body paint straight from it
+// (stackedDiffLines, and the split composer at paint time).
+//
+// It COPIES rather than rewriting in place, unlike the body's own strip: the slices arrive on the
+// tool's result (domain.EditRegions) and are shared with the value the engine holds, so writing
+// through them would have a display seam rewrite the engine's own data. The copy is bounded — a
+// region is a handful of lines — and the whole region is copied by value first, so a field added to
+// domain.EditRegion travels rather than being silently dropped here.
+func strippedRegions(regions []domain.EditRegion) []domain.EditRegion {
+	if len(regions) == 0 {
+		return regions
+	}
+	out := make([]domain.EditRegion, len(regions))
+	for i, region := range regions {
+		region.Leading = stripEscapesAll(region.Leading)
+		region.Removed = stripEscapesAll(region.Removed)
+		region.Inserted = stripEscapesAll(region.Inserted)
+		region.Trailing = stripEscapesAll(region.Trailing)
+		out[i] = region
+	}
+	return out
 }
 
 // promotable says whether the outcome slot holds a PROMOTED line the guard may still take back: a
@@ -962,20 +1019,36 @@ func statPhrase(tv toolView) (string, bool) {
 // sumDiffCounts adds a run of diffstats up: "+2 −1" and "+6 −2" make "+8 −3". Every member must
 // carry one, so a run where a single call errored or is still open does not sum — and does not need
 // to, since a failure is counted by the branch above it (runAggregate).
+//
+// What a member is asked for is its NUMBERS, not its wording (memberDiffCounts): a block whose stat
+// came from a typed summary hands them over as it holds them, and only a member that has nothing
+// but the phrase is read back out of it.
 func sumDiffCounts(views []toolView) (string, bool) {
 	added, removed := 0, 0
 	for _, tv := range views {
-		text, ok := statPhrase(tv)
-		if !ok {
-			return "", false
-		}
-		a, r, ok := parseDiffCounts(text)
+		a, r, ok := memberDiffCounts(tv)
 		if !ok {
 			return "", false
 		}
 		added, removed = added+a, removed+r
 	}
 	return diffCounts(added, removed), true
+}
+
+// memberDiffCounts is one member's diffstat as a number pair, in the order the two readings are
+// trusted: the typed value a summary supplied (toolView.diffStat), else the phrase in the slot
+// parsed back (parseDiffCounts, the floor for every producer that only ever had text).
+//
+// The slot must still hold the presenter's OWN typed phrase either way (statPhrase): a promoted
+// line is the tool's words, and a run that promoted one is not summing its members' stats at all.
+func memberDiffCounts(tv toolView) (added, removed int, ok bool) {
+	if _, ok := statPhrase(tv); !ok {
+		return 0, 0, false
+	}
+	if tv.hasDiffStat {
+		return tv.diffStat.Added, tv.diffStat.Removed, true
+	}
+	return parseDiffCounts(tv.Summary.Text)
 }
 
 // parseDiffCounts reads a diffstat back out of the phrase diffCounts wrote — the one direction the
@@ -1079,6 +1152,9 @@ func (tv *toolView) enrichWithResult(result domain.ToolResult, ws workspaceRoot)
 	}
 	p, known := toolRegistry[tv.name]
 	tv.absorbProse(p, known, result)
+	if regions, ok := recordedRegions(result); ok {
+		tv.absorbRegions(regions)
+	}
 	// The request-derived stat is re-applied because the prose layers may have written over it
 	// with a result sentence; it is the same phrase the call was presented with, so a block does
 	// not change what its slot says when its result lands.
@@ -1143,6 +1219,37 @@ func (tv *toolView) absorbProse(p toolPresenter, known bool, result domain.ToolR
 		lines = append(lines, detailLine{Text: ln})
 	}
 	tv.Details = tv.Details.with(lines)
+}
+
+// recordedRegions is the Edit regions a tool RECORDED on its result, and whether it recorded any
+// (domain.EditRegions, attached at apply time by the three edit tools). It is the one reading of
+// that summary — the stat hook and the enrichment path both ask here — so what counts as "this
+// result has regions" cannot come to mean two things.
+//
+// A summary with an empty region list answers false, exactly as no summary at all does: an edit
+// whose change could not be cut into regions (an over-budget pair, internal/tools) has nothing to
+// paint and nothing to count, and the block keeps the argument-derived body and slot it was
+// presented with (ratified call 9).
+func recordedRegions(res domain.ToolResult) (domain.EditRegions, bool) {
+	v, ok := res.Summary.(domain.EditRegions)
+	if !ok || len(v.Regions) == 0 {
+		return domain.EditRegions{}, false
+	}
+	return v, true
+}
+
+// absorbRegions folds an edit tool's recorded regions into the view: the regions themselves (which
+// the split reading composes at paint time), the stacked rows they render as, and the typed
+// diffstat the slot and the run aggregate read.
+//
+// The body is REPLACED rather than grown. What the call was presented with is the change the model
+// ASKED for, read off its own arguments before any result existed (argBody); what arrives here is
+// the change that LANDED, with the line numbers and the context the arguments never held. Keeping
+// both would show the same edit twice, and the recorded one is the one that happened.
+func (tv *toolView) absorbRegions(regions domain.EditRegions) {
+	tv.Regions = regions.Regions
+	tv.Details = newToolBody(stackedDiffLines(regions.Regions))
+	tv.diffStat, tv.hasDiffStat = regions.Stat(), true
 }
 
 // applyStat settles the right-hand outcome slot from a stat hook's answer (toolPresenter.stat).
@@ -1262,6 +1369,24 @@ func diffStatStat(res domain.ToolResult) (string, bool) {
 		return "", false
 	}
 	return diffCounts(v.Added, v.Removed), true
+}
+
+// editRegionsStat words the three edit tools' slot as the diffstat of what LANDED, summed over the
+// regions the tool recorded while it held both sides of the file (domain.EditRegions.Stat — the one
+// derivation of that pair, so the slot and the rows beneath it cannot disagree).
+//
+// It is the result half of a slot the REQUEST already worded: an edit's argument-derived diffstat
+// is on the view from the moment the call is announced (toolView.argStat), and a result that
+// recorded no regions leaves it standing. What the two say differs where it matters — the arguments
+// know what was asked for, the regions know what the file took — and the landed reading wins once
+// it exists.
+func editRegionsStat(res domain.ToolResult) (string, bool) {
+	regions, ok := recordedRegions(res)
+	if !ok {
+		return "", false
+	}
+	stat := regions.Stat()
+	return diffCounts(stat.Added, stat.Removed), true
 }
 
 // diffCounts is the house spelling of a diffstat — "+8 −3", with the table's typographic minus
@@ -2073,6 +2198,134 @@ func appendTagged(body []detailLine, lines []string, tag string, kind detailKind
 		body = append(body, detailLine{Kind: kind, Text: clipDetail(tag + ln)})
 	}
 	return body
+}
+
+// The marker column of the stacked reading: two cells, the same width in every row, carrying `-` on
+// a removed line, `+` on an inserted one and nothing on context (docs/layout/split-diff-layout.md).
+// The glyphs are the change's palette-proof signal — colour never carries it alone (ratified call 6)
+// — and they are the very tags the argument-derived body already writes (changedLines), so the two
+// bodies an edit block can show read as one thing.
+const (
+	stackedRemovedMarker  = "- "
+	stackedInsertedMarker = "+ "
+	stackedContextMarker  = "  "
+)
+
+// stackedRegionRuleCells is how wide the damped `⋯` rule between two regions is drawn. The rule
+// stands for the lines elided between them, and it is a fixed short run rather than one spanning
+// the body: these are detail lines, built with no width in hand — the block's width is the
+// painter's, settled at paint time — and a run long enough to fill a wide block would wrap onto a
+// second row in a narrow one, which is a rule that reads as two.
+const stackedRegionRuleCells = 8
+
+// stackedDiffLines renders recorded Edit regions as the STACKED reading of a diff body: per region
+// its leading context, its removed lines behind `-` at their before-file numbers, its inserted
+// lines behind `+` at their after-file numbers, then its trailing context — the layout
+// docs/layout/split-diff-layout.md sketches, and the reading a body falls back to at every width
+// the split panes do not fit (ratified call 5).
+//
+// It is the ONE builder of those rows. Every block that has regions renders through it — the three
+// edit tools, whose tools record them at apply time, and the two diff tools, whose renderers
+// recover them — so the narrow reading of a diff cannot come to differ per tool.
+//
+// The number gutter is sized once for the whole body and right-aligned, so the numbers line up
+// down the block however far apart the regions are. Context rows carry the BEFORE file's number:
+// the column then reads as one file's numbering, with the inserted lines — which have no before
+// line at all — marked as the exceptions they are. Wrapping is nobody's business here: a row too
+// wide for the block wraps at paint time through the same machinery every other detail line does
+// (hangingWrap), and the per-line clip is the 160-rune ceiling they all answer to (clipDetail).
+//
+// No regions is no body, which is what leaves a call with nothing recorded showing the
+// argument-derived lines it was presented with (ratified call 9).
+func stackedDiffLines(regions []domain.EditRegion) []detailLine {
+	rows := stackedRows(regions)
+	if len(rows) == 0 {
+		return nil
+	}
+	gutter := stackedGutter(rows)
+	out := make([]detailLine, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, row.line(gutter))
+	}
+	return out
+}
+
+// stackedRow is one row of the stacked reading before the body's gutter width is known: the line
+// number it shows, the marker column it wears, the colour its kind gives it, and its text. A row
+// with number 0 shows no number and no marker — the `⋯` rule between two regions is the only such
+// row — which is what lets the sizing pass below ignore it without a second shape.
+type stackedRow struct {
+	number int
+	marker string
+	kind   detailKind
+	text   string
+}
+
+// line is the row as a detail line, its number right-aligned into a gutter of the given width. The
+// composed text is clipped like every other detail line, and clipping the whole row rather than its
+// text alone is deliberate: the cut takes the tail, so the number and the marker always survive it.
+func (r stackedRow) line(gutter int) detailLine {
+	if r.number == 0 {
+		return detailLine{Kind: r.kind, Text: r.text}
+	}
+	return detailLine{Kind: r.kind, Text: clipDetail(fmt.Sprintf("%*d %s%s", gutter, r.number, r.marker, r.text))}
+}
+
+// stackedRows lays the regions out as unsized rows, in file order, with the `⋯` rule laid between
+// two regions that do NOT meet in the file's numbering (regionsMeet). Regions that DO meet are
+// painted end to end with nothing between them: a tool records neighbouring changes as separate
+// regions whose context tiles the lines between them without overlap (domain.EditRegion), so the
+// rows already run continuously and a rule there would claim an elision that did not happen.
+func stackedRows(regions []domain.EditRegion) []stackedRow {
+	rows := make([]stackedRow, 0, len(regions)*4)
+	for i, region := range regions {
+		if i > 0 && !regionsMeet(regions[i-1], region) {
+			rows = append(rows, stackedRow{text: strings.Repeat(glyphLeaderDot, stackedRegionRuleCells)})
+		}
+		before, after := region.BeforeStart, region.AfterStart
+		for _, text := range region.Leading {
+			rows = append(rows, stackedRow{number: before, marker: stackedContextMarker, text: text})
+			before, after = before+1, after+1
+		}
+		for _, text := range region.Removed {
+			rows = append(rows, stackedRow{number: before, marker: stackedRemovedMarker, kind: detailDiffRemoved, text: text})
+			before++
+		}
+		for _, text := range region.Inserted {
+			rows = append(rows, stackedRow{number: after, marker: stackedInsertedMarker, kind: detailDiffAdded, text: text})
+			after++
+		}
+		for _, text := range region.Trailing {
+			rows = append(rows, stackedRow{number: before, marker: stackedContextMarker, text: text})
+			before++
+		}
+	}
+	return rows
+}
+
+// regionsMeet reports whether the later of two regions starts on the very line the earlier one
+// ends: its BeforeStart against the earlier region's own span in the before file, which is its
+// context and its removed lines (an inserted line occupies no line of that file).
+//
+// It is the elision question and nothing else. Two regions that meet were cut apart only because
+// each change gets its own record; painted end to end they read exactly as one region would, which
+// is what the tiling rule was chosen to make true (domain.EditRegion).
+func regionsMeet(prev, next domain.EditRegion) bool {
+	return next.BeforeStart == prev.BeforeStart+len(prev.Leading)+len(prev.Removed)+len(prev.Trailing)
+}
+
+// stackedGutter is how many cells the body's number column takes: the digits of the widest number
+// any of its rows shows. One width for the whole body is what makes the numbers a column rather
+// than a ragged edge, and it is measured over the rows themselves so a region whose after-file
+// numbers have drifted past its before-file ones widens it like any other.
+func stackedGutter(rows []stackedRow) int {
+	widest := 0
+	for _, row := range rows {
+		if row.number > widest {
+			widest = row.number
+		}
+	}
+	return len(strconv.Itoa(widest))
 }
 
 // singleReplacementBody derives single_find_and_replace's changed lines from its own arguments:
