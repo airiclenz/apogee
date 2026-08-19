@@ -34,7 +34,16 @@ type Scheme struct {
 
 	DiffAdd string `yaml:"diff-add"` // diff "+" lines
 	DiffDel string `yaml:"diff-del"` // diff "-" lines
-	Error   string `yaml:"error"`    // recovered-fault notices
+	// DiffAddBg and DiffDelBg are the background band a diff BODY line carries. The
+	// added/removed signal rides that band so the text itself can wear the plain detail tone of
+	// its block state, like every other detail line, and so the band can run the full width of
+	// the row rather than stopping where the text does. They do not replace the foreground pair
+	// above: `diff-add` / `diff-del` keep the markers, the stat summaries and every other use of
+	// diff colour outside a diff body line. A scheme keeps both bands quiet and in the same hue
+	// families as that pair, so the turquoise-vs-red pairing still survives red-green-weak vision.
+	DiffAddBg string `yaml:"diff-add-bg"` // the band an added diff body line sits on
+	DiffDelBg string `yaml:"diff-del-bg"` // the band a removed diff body line sits on
+	Error     string `yaml:"error"`       // recovered-fault notices
 	// Success is Error's counterpart at the other end of an outcome: the tone a marker wears
 	// to say a thing came off. Its first consumer is the ✓ on a finished sub-agent
 	// (docs/layout/tool-layout.md), but the role is named for the meaning rather than that

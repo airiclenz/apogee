@@ -10,6 +10,15 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **Two new colour roles carry the diff band.** `diff-add-bg` and `diff-del-bg` join the scheme
+  vocabulary (ADR 0040), taking it to 31 roles: the background a diff body line sits on, shipped
+  as dark `#0e3b34` / `#42181d` and light `#d9f2ec` / `#fbe4e6` — quiet washes out of the same
+  turquoise and red families as the `diff-add` / `diff-del` foreground pair, so the pairing still
+  survives red-green-weak vision once the band rather than the text carries the signal. The
+  foreground pair keeps everything it already colours, markers and `+8 −3` summaries included, and
+  a scheme file of your own that names neither new key stays exactly as valid as it was: an omitted
+  role has always kept its default, silently.
+
 - **A split diff survives a reload.** A resumed session used to bring a diff-bodied block back as
   stacked rows even where the live one had painted two panes: the record carried the rendered rows
   and not the change they were rendered from, and the split reading is composed at paint time, from

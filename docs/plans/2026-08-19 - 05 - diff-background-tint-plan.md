@@ -104,7 +104,13 @@ and `ls docs/plans/ | grep -c split-diff` prints 0.
 
 **Commit:** `chore(plans): gate the diff background tint on the landed split-diff plan`
 
-## 2. Add the diff-add-bg / diff-del-bg scheme roles
+## 2. Add the diff-add-bg / diff-del-bg scheme roles — ✅ DONE (2026-08-19)
+
+NOTES (2026-08-19): the role count is stated in prose in three places the role-table test pins by
+name (README.md, layout.md, newTheme's comment in internal/tui/theme.go); adding two roles moves it
+29 → 31, so those three lines are updated here even though the item's Files list names only the
+four scheme-package files. Comment text only — no code or style change in theme.go, which item 3
+owns.
 
 **Source:** ratified call 4.
 

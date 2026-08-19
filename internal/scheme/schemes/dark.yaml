@@ -24,6 +24,8 @@ muted-bright: "#b2b2b2" # the muted tone one step up: the text of an EXPANDED to
 # --- semantic ----------------------------------------------------------------------
 diff-add: "#2dd4bf"    # diff "+" lines — turquoise, not green, so the pairing with the red `diff-del` survives red-green-weak vision
 diff-del: "#f85149"    # diff "-" lines
+diff-add-bg: "#0e3b34" # the band an added diff body line sits on — the signal moved to the background, so the text over it keeps the plain detail tone; a deep turquoise out of `diff-add`'s family, quiet enough to read muted text against
+diff-del-bg: "#42181d" # the band a removed diff body line sits on — `diff-add-bg`'s counterpart in `diff-del`'s red, so the turquoise-vs-red pairing survives red-green-weak vision down here in the bands too
 error: "#f85149"       # recovered-fault notices
 success: "#5eead4"     # the ✓ on a finished sub-agent and any other "this came off" marker — error's counterpart, and a step brighter than `diff-add` in the same turquoise family so a marker never reads as a diff line
 warning: "#d7af5f"     # a condition worth noticing that is not a fault (the status line's quiet qualifier before the activity clock) — a desaturated gold pitched between `muted` and `error`: read past the dim, short of the alarm
