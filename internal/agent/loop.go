@@ -82,7 +82,12 @@ func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 		// This is the one site that opens one, which is what makes an interjection join the
 		// Exchange it steered rather than start a new step (ADR 0025 — it commits mid-Exchange
 		// and never reaches here), and what keeps a continuation Turn inside the same group.
-		if a.journal != nil {
+		//
+		// Depth 0 only: a delegated child shares its parent's journal (newChildAgent) and its
+		// Exchange is not one the human opened — it runs INSIDE the parent's. Letting it mark a
+		// boundary would split one instruction's writes across two undo steps, so the human would
+		// have to `/undo` twice to take back work they asked for once (ADR 0051, ratified call 8).
+		if a.journal != nil && a.depth == 0 {
 			a.journal.BeginGroup()
 		}
 		// Order: attached-skill blocks → @file-ref blocks → the user's text. Skills are

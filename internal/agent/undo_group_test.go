@@ -3,9 +3,10 @@ package agent
 // The undo journal's Exchange grouping (ADR 0051). `/undo` reverts one INSTRUCTION's worth of
 // writes, and the engine's whole contribution to that promise is where it calls BeginGroup: a
 // new user input opens a group, an interjection joins the group already open (ADR 0025 — it
-// commits mid-Exchange), and every funnel write in between lands in that one group. This test
-// drives the real loop with the real write_file tool, so it also pins the threading that gets
-// the journal from the engine to the funnel.
+// commits mid-Exchange), and every funnel write in between lands in that one group — a
+// delegated child's writes included, since a sub-agent shares its parent's journal and opens no
+// group of its own. These tests drive the real loop with the real write_file and sub_agent
+// tools, so they also pin the threading that gets the journal from the engine to the funnel.
 
 import (
 	"context"
@@ -114,4 +115,50 @@ func assertChangedPaths(t *testing.T, changes []undo.Change, want []string, what
 			t.Errorf("%s change %d path = %q, want %q", what, i, change.Path, want[i])
 		}
 	}
+}
+
+// TestDelegationWritesJoinTheParentGroup: a delegation is work the human asked for in the
+// CURRENT Exchange, so a child's writes belong to that Exchange's undo step. This drives a real
+// sub_agent call whose child writes a file of its own and asks for ONE group holding both files
+// — the parent's write and the child's, in the order they happened. A child journalling into an
+// instance of its own would leave its file out of every preview the human can reach, and a child
+// opening a GROUP of its own would split one instruction across two `/undo` presses.
+func TestDelegationWritesJoinTheParentGroup(t *testing.T) {
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("resolve the temp root: %v", err)
+	}
+
+	cfg := configWithTools(&recordingSink{}, tools.NewSubAgent(), tools.NewWriteFile(root))
+	cfg.Mode = domain.ModeAllowEdits // auto-approves the workspace-scoped writes at both depths
+	cfg.WorkspaceDir = root
+
+	responder := &scriptedResponder{scripts: [][]provider.Delta{
+		toolCallScript("c1", "write_file", `{"path":"parent.txt","content":"p"}`),
+		toolCallScript("c2", tools.SubAgentToolName, subAgentArgs("write the child's file")),
+		toolCallScript("c3", "write_file", `{"path":"child.txt","content":"c"}`), // the child's Turn 0
+		contentScript("child done"), // the child's Turn 1, its final message
+		contentScript("parent done"),
+	}}
+	a, err := newAgent(cfg, responder)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	if err := a.Submit(domain.UserInput{Text: "write both files"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if _, err := a.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	step, ok := a.journal.Preview()
+	if !ok {
+		t.Fatal("the delegating Exchange left no undo step")
+	}
+	if step.Ordinal != 1 {
+		t.Errorf("step ordinal = %d, want 1 (the delegation opens no group of its own)", step.Ordinal)
+	}
+	assertChangedPaths(t, step.Changes,
+		[]string{filepath.Join(root, "parent.txt"), filepath.Join(root, "child.txt")},
+		"the delegating Exchange")
 }

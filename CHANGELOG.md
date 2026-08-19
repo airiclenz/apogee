@@ -31,6 +31,17 @@ point is a **minor** bump, not a breaking change.
   `single_find_and_replace` and `multi_find_and_replace` are all covered at one seam. The
   journal is live host state and is never serialized into a session snapshot.
 
+- **Undo journal capture reaches the byte-moving verbs, and delegations share the parent's journal.**
+  `copy_file` now records its destination (the clobbered pre-image with `overwrite: true`, pre-absent
+  otherwise), `move_file` records both ends as two entries — the source with its pre-image bytes and
+  post-absent, the destination with whatever it replaced — identically on the rename fast path and the
+  copy-then-remove fallback, and `delete_file` records the bytes it is about to unlink together with the
+  mode the file carried, so a restored script keeps its executable bit. Each half commits only after that
+  half of the mutation actually landed, so a refusal journals nothing and a split move (the copy landing
+  while the removal is refused) records the destination alone. A `sub_agent` child is handed the PARENT's
+  journal instead of one of its own and opens no group of its own, so delegated writes join the Exchange
+  the human started and a single `/undo` takes back the whole instruction, however wide the fan-out.
+
 ### Fixed
 
 - **A click in the band the `/inspect` pane grows into now falls through instead of being swallowed.**

@@ -312,6 +312,15 @@ func (a *Agent) newChildAgent(spawnCallID, task, name string) (*Agent, error) {
 	// built — and "identity once there" (a routed child's delegations go to the same server) is
 	// exactly what one shared latch gives for free.
 	child.delegation = a.delegation
+	// The undo journal is shared by HANDLE too, and for a reason of its own (ADR 0051, ratified
+	// call 8): a delegation is work the human asked for in the CURRENT Exchange, so the files a
+	// child writes are files that Exchange changed and belong in its undo step. Handing the child
+	// its own journal — which newAgent just built — would strand its writes in a journal nothing
+	// can reach, and `/undo` would silently leave delegated work in place. The journal is
+	// mutex-guarded, which is what makes one instance safe for a fan-out of siblings writing at
+	// once (ADR 0039); the child never opens a GROUP of its own (loop.go), so its records join
+	// the parent's current one however deep the delegation nests.
+	child.journal = a.journal
 	return child, nil
 }
 

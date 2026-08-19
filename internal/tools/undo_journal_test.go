@@ -1,15 +1,18 @@
 package tools
 
-// The write funnel's undo capture (ADR 0051). Every content-writing verb reaches the
-// filesystem through safeWriteFile, so these tests ask that ONE seam the three questions the
+// The tools' undo capture (ADR 0051), in two halves. Every content-writing verb reaches the
+// filesystem through safeWriteFile, so the first half asks that ONE seam the three questions the
 // journal's usefulness rests on: does each verb leave exactly one record for the path it
 // touched, does that record hold the bytes that were there before (a revert puts them back),
-// and does a write that never landed leave the journal untouched.
+// and does a write that never landed leave the journal untouched. The byte-moving verbs —
+// copy_file, move_file, delete_file — do not reach that seam, so the second half asks the same
+// questions of each of their own capture sites, plus the record SHAPES only they produce.
 
 import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
@@ -257,5 +260,276 @@ func TestWriteFunnelWritesWithoutAJournal(t *testing.T) {
 	}
 	if got, _ := readOrAbsent(t, filepath.Join(root, "plain.txt")); got != "written" {
 		t.Errorf("file content = %q, want %q", got, "written")
+	}
+}
+
+// ----------------------------------------------------------------------------
+// The byte-moving verbs (item 3)
+// ----------------------------------------------------------------------------
+//
+// copy_file, move_file and delete_file never reach safeWriteFile, so each captures its own
+// pre-image at its own mutation site and each has a record SHAPE the funnel's tests cannot
+// pin: a copy journals one end, a move journals two, and a delete journals the bytes that
+// stop existing. These tests read those shapes off the preview and then prove them by
+// reverting — the only check that cares whether the recorded bytes are the real ones.
+
+// journalledChanges runs one tool under a fresh journal and returns the preview's changes,
+// failing the test unless the call succeeded and the journal recorded something.
+func journalledChanges(t *testing.T, tool domain.Tool, args map[string]any) (*undo.Journal, []undo.Change) {
+	t.Helper()
+
+	journal := undo.New()
+	runJournalledWrite(t, journal, tool, args)
+
+	step, ok := journal.Preview()
+	if !ok {
+		t.Fatal("the mutation left no undo step")
+	}
+	return journal, step.Changes
+}
+
+// assertChange fails unless the change at index i names path and plans action.
+func assertChange(t *testing.T, changes []undo.Change, i int, path string, action undo.Action) {
+	t.Helper()
+
+	if i >= len(changes) {
+		t.Fatalf("journal holds %d changes, want at least %d: %+v", len(changes), i+1, changes)
+	}
+	if changes[i].Path != path {
+		t.Errorf("change %d path = %q, want %q", i, changes[i].Path, path)
+	}
+	if changes[i].Action != action {
+		t.Errorf("change %d action = %v (%s), want %v", i, changes[i].Action, changes[i].Reason, action)
+	}
+}
+
+// revertCleanly reverts the top group and fails on any skip — a skip here would mean the
+// recorded post-state disagreed with the file the tool actually left.
+func revertCleanly(t *testing.T, journal *undo.Journal) undo.Report {
+	t.Helper()
+
+	report, err := journal.Revert()
+	if err != nil {
+		t.Fatalf("Revert: %v", err)
+	}
+	if len(report.Skipped) != 0 {
+		t.Fatalf("revert skipped %+v, want nothing skipped", report.Skipped)
+	}
+	return report
+}
+
+// TestCopyFileJournalsTheDestinationOnly: a copy mutates one file, so it records one — the
+// destination — and the undo of a copy that CREATED its destination removes it again while the
+// undo of one that clobbered puts the clobbered bytes back. Either way the source is untouched
+// and unrecorded, which is what "a copy's source is a read" means to the journal.
+func TestCopyFileJournalsTheDestinationOnly(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name       string
+		destBefore string // empty means the destination does not exist yet
+		destExists bool
+		wantAction undo.Action
+		overwrite  bool
+	}{
+		{name: "creating the destination", wantAction: undo.ActionDelete},
+		{
+			name:       "clobbering the destination",
+			destBefore: "displaced",
+			destExists: true,
+			overwrite:  true,
+			wantAction: undo.ActionRestore,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			root := tempRoot(t)
+			source := filepath.Join(root, "src.txt")
+			destination := filepath.Join(root, "dst.txt")
+			writeFixtureFile(t, source, "payload")
+			if tc.destExists {
+				writeFixtureFile(t, destination, tc.destBefore)
+			}
+
+			journal, changes := journalledChanges(t, NewCopyFile(root, nil), map[string]any{
+				"source": "src.txt", "destination": "dst.txt", "overwrite": tc.overwrite,
+			})
+			if len(changes) != 1 {
+				t.Fatalf("a copy recorded %d changes, want the destination alone: %+v", len(changes), changes)
+			}
+			assertChange(t, changes, 0, destination, tc.wantAction)
+
+			revertCleanly(t, journal)
+
+			got, exists := readOrAbsent(t, destination)
+			if exists != tc.destExists {
+				t.Fatalf("destination exists after undo = %v, want %v", exists, tc.destExists)
+			}
+			if got != tc.destBefore {
+				t.Errorf("destination after undo = %q, want the pre-image %q", got, tc.destBefore)
+			}
+			if got, _ := readOrAbsent(t, source); got != "payload" {
+				t.Errorf("source after undo = %q, want it untouched", got)
+			}
+		})
+	}
+}
+
+// TestMoveFileJournalsBothEnds is the plan's move round-trip: a move changes two files, so it
+// records two, and undoing it restores the source and removes the destination. The record order
+// is the order the writes happened — source first — so the preview reads like the move did.
+func TestMoveFileJournalsBothEnds(t *testing.T) {
+	t.Parallel()
+
+	root := tempRoot(t)
+	source := filepath.Join(root, "from.txt")
+	destination := filepath.Join(root, "to.txt")
+	writeFixtureFile(t, source, "moved bytes")
+
+	journal, changes := journalledChanges(t, NewMoveFile(root), map[string]any{
+		"source": "from.txt", "destination": "to.txt",
+	})
+	if len(changes) != 2 {
+		t.Fatalf("a move recorded %d changes, want both ends: %+v", len(changes), changes)
+	}
+	assertChange(t, changes, 0, source, undo.ActionRestore)
+	assertChange(t, changes, 1, destination, undo.ActionDelete)
+
+	revertCleanly(t, journal)
+
+	if got, exists := readOrAbsent(t, source); !exists || got != "moved bytes" {
+		t.Errorf("source after undo = %q (exists %v), want the moved bytes back", got, exists)
+	}
+	if _, exists := readOrAbsent(t, destination); exists {
+		t.Error("destination still exists after undo, want the move's own file removed")
+	}
+}
+
+// TestMoveFileClobberingJournalsThePreImage: a move onto an occupied destination replaces
+// bytes that were there first, so the destination's record carries THEM — the undo has to put
+// two files back, not one.
+func TestMoveFileClobberingJournalsThePreImage(t *testing.T) {
+	t.Parallel()
+
+	root := tempRoot(t)
+	source := filepath.Join(root, "from.txt")
+	destination := filepath.Join(root, "to.txt")
+	writeFixtureFile(t, source, "moved bytes")
+	writeFixtureFile(t, destination, "displaced bytes")
+
+	journal, changes := journalledChanges(t, NewMoveFile(root), map[string]any{
+		"source": "from.txt", "destination": "to.txt", "overwrite": true,
+	})
+	if len(changes) != 2 {
+		t.Fatalf("a move recorded %d changes, want both ends: %+v", len(changes), changes)
+	}
+	assertChange(t, changes, 0, source, undo.ActionRestore)
+	assertChange(t, changes, 1, destination, undo.ActionRestore)
+
+	revertCleanly(t, journal)
+
+	if got, _ := readOrAbsent(t, source); got != "moved bytes" {
+		t.Errorf("source after undo = %q, want the moved bytes back", got)
+	}
+	if got, _ := readOrAbsent(t, destination); got != "displaced bytes" {
+		t.Errorf("destination after undo = %q, want the displaced bytes back", got)
+	}
+}
+
+// TestDeleteFileJournalsThePreImage: the journal's copy of a deleted file is the only one left,
+// so this asserts the whole of it — the bytes AND the mode. A 0755 script restored 0644 is a
+// broken restore, which is the same failure the family already refuses to make on a copy.
+func TestDeleteFileJournalsThePreImage(t *testing.T) {
+	t.Parallel()
+
+	root := tempRoot(t)
+	path := filepath.Join(root, "script.sh")
+	writeFixtureFile(t, path, "#!/bin/sh\necho hi\n")
+	if err := os.Chmod(path, 0o755); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+
+	journal, changes := journalledChanges(t, NewDeleteFile(root), map[string]any{"path": "script.sh"})
+	if len(changes) != 1 {
+		t.Fatalf("a delete recorded %d changes, want exactly 1: %+v", len(changes), changes)
+	}
+	assertChange(t, changes, 0, path, undo.ActionRestore)
+	if _, exists := readOrAbsent(t, path); exists {
+		t.Fatal("the file survived delete_file")
+	}
+
+	revertCleanly(t, journal)
+
+	got, exists := readOrAbsent(t, path)
+	if !exists {
+		t.Fatal("the deleted file was not restored")
+	}
+	if got != "#!/bin/sh\necho hi\n" {
+		t.Errorf("restored content = %q, want the pre-image", got)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat the restored file: %v", err)
+	}
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o755 {
+		t.Errorf("restored mode = %v, want the mode the file carried (0755)", info.Mode().Perm())
+	}
+}
+
+// TestFileOpsJournalNothingWhenRefused closes the ordering contract for the three verbs the
+// funnel's own test cannot reach: a refusal is not a mutation, so it leaves the journal — and
+// its generation, which a pending preview is validated against — exactly as it found it.
+func TestFileOpsJournalNothingWhenRefused(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name    string
+		newTool func(root string) domain.Tool
+		args    map[string]any
+	}{
+		{
+			name:    "copy_file onto an occupied destination",
+			newTool: func(root string) domain.Tool { return NewCopyFile(root, nil) },
+			args:    map[string]any{"source": "src.txt", "destination": "taken.txt"},
+		},
+		{
+			name:    "move_file onto an occupied destination",
+			newTool: func(root string) domain.Tool { return NewMoveFile(root) },
+			args:    map[string]any{"source": "src.txt", "destination": "taken.txt"},
+		},
+		{
+			name:    "delete_file on a path outside the workspace",
+			newTool: func(root string) domain.Tool { return NewDeleteFile(root) },
+			args:    map[string]any{"path": "../escaped.txt"},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			root := tempRoot(t)
+			writeFixtureFile(t, filepath.Join(root, "src.txt"), "payload")
+			writeFixtureFile(t, filepath.Join(root, "taken.txt"), "occupied")
+
+			journal := undo.New()
+			result, err := tc.newTool(root).Execute(
+				undo.WithJournal(context.Background(), journal), callWith(t, "c1", tc.args))
+			if err != nil {
+				t.Fatalf("Execute returned error: %v", err)
+			}
+			if !result.IsError {
+				t.Fatalf("the refusal did not happen: %q", result.Content)
+			}
+			if step, ok := journal.Preview(); ok {
+				t.Fatalf("a refused mutation left an undo step: %+v", step.Changes)
+			}
+			if got := journal.Generation(); got != 0 {
+				t.Errorf("generation = %d after a refused mutation, want 0", got)
+			}
+		})
 	}
 }

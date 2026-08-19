@@ -193,6 +193,9 @@ type Agent struct {
 	// serialized — so a resumed session starts with an empty one and cannot revert an earlier
 	// process's writes. newAgent always supplies it; a nil journal is the honest encoding of an
 	// engine that records nothing, and every reader treats it as such rather than as an error.
+	// A delegated child is handed the PARENT's instance rather than its own (newChildAgent), so
+	// the whole tree's writes land in one Exchange's undo step; only the depth-0 Agent opens a
+	// group on it (loop.go).
 	journal *undo.Journal
 
 	conv         domain.Conversation // serializable conversation state (ADR 0001)

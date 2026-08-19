@@ -170,7 +170,12 @@ new group while an interjection does not (agent-level test at the state seam).
 
 ---
 
-## 3. Copy, move, and delete capture; delegations share the journal
+## 3. Copy, move, and delete capture; delegations share the journal — ✅ DONE (2026-08-19)
+
+NOTES (2026-08-19): the delegation seam is `newChildAgent` in `internal/agent/subagent.go`, not the prepare seam at `dispatch.go:236` the item names — `prepareDelegation` constructs no child; `newChildAgent` is where every other shared handle (the Delegation latch, the guards, the context-file cache) is threaded, so the journal is threaded beside them.
+NOTES (2026-08-19): `internal/agent/loop.go` was also touched: sharing one journal means the child's own Exchange open would have marked a group boundary on it, splitting one instruction across two undo steps, so `BeginGroup` is now depth-0 only.
+NOTES (2026-08-19): `internal/tools/path_safety.go` is not on the item's Files list but carries the shared capture pair the three new sites use, and was extended rather than duplicated: `capturePreImage` now also records the pre-image's file MODE, `commit` takes no `perm` argument (the journal consults a mode only to recreate a file a revert RESTORES, which happens only when the pre-image existed, so the pre-image's own mode is the only answer that can be right), and a new `commitReadBack` reads the post-image back from the file the mutation left — the form copy and move need, since neither ever holds the bytes it lands.
+NOTES (2026-08-19): a read-back that fails journals NOTHING, the same refusal an unreadable pre-image already gets — a guessed post-hash would turn every later undo of that path into a conflict it never had.
 
 Depends on item 2.
 

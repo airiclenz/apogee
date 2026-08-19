@@ -72,7 +72,7 @@ func safeWriteFile(ctx context.Context, input, root string, data []byte, perm os
 	if err := security.SafeWriteFile(root, input, data, perm, writeEscapeTarget(ctx)); err != nil {
 		return err
 	}
-	pre.commit(data, true, perm)
+	pre.commit(data, true)
 	return nil
 }
 
@@ -223,13 +223,19 @@ func escapeTargetPin(ctx context.Context, input, root string) (pinInput, pinRoot
 // preImage is one pending journal record: what a mutation is about to replace, plus the
 // fencing context (root and approved-escape permit) a revert has to go back through to reach
 // the same file the write reached. It exists only between the capture and the commit.
+//
+// input is the argument the mutation NAMED, kept beside the resolved path because a read-back
+// (commitReadBack) has to go through the same fence the mutation did, and that fence is chosen
+// from the argument rather than from its resolution (escapeTargetPin).
 type preImage struct {
 	journal   *undo.Journal
 	root      string
+	input     string
 	path      string
 	permitted string
 	data      []byte
 	existed   bool
+	perm      os.FileMode
 }
 
 // capturePreImage reads the current bytes of the file a mutation of input under root is about
@@ -255,24 +261,46 @@ func capturePreImage(ctx context.Context, input, root string) *preImage {
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
-	return &preImage{
+	captured := &preImage{
 		journal:   journal,
 		root:      root,
+		input:     input,
 		path:      path,
 		permitted: permitted,
 		data:      data,
 		existed:   err == nil,
 	}
+	if captured.existed {
+		captured.perm = currentPerm(ctx, input, root)
+	}
+	return captured
+}
+
+// currentPerm answers the mode bits the file at input carries right now, read through the same
+// fence its bytes were, or 0 when it cannot be stat'd — the journal then falls back to its own
+// default mode. It is advisory: the mode is consulted only to recreate a file a revert RESTORES,
+// so being wrong about it costs a restored file its executable bit and nothing more.
+func currentPerm(ctx context.Context, input, root string) os.FileMode {
+	info, err := statWriteTarget(ctx, input, root)
+	if err != nil {
+		return 0
+	}
+	return info.Mode().Perm()
 }
 
 // commit records the completed mutation against the pre-image this value captured. Call it
 // ONLY after the mutation succeeded — that ordering is the whole reason capture and commit are
 // two calls. post is the content the mutation left and exists says whether it left any (false
-// for a removal); perm is the mode a restore recreates an absent file with.
+// for a removal).
+//
+// The record's restore mode is the PRE-IMAGE's own, never one the caller supplies: the journal
+// consults that mode only to recreate a file a revert RESTORES, and a revert restores only a
+// path whose pre-image existed — so the mode that file already carried is the only answer that
+// can be right, for a deletion and an overwrite alike.
 //
 // A nil receiver is the "nothing is recording" case and does nothing, so a caller journals by
 // writing one unconditional line rather than by branching around the journal.
-func (p *preImage) commit(post []byte, exists bool, perm os.FileMode) {
+func (p *preImage) commit(post []byte, exists bool) {
 	if p == nil {
 		return
 	}
@@ -280,12 +308,31 @@ func (p *preImage) commit(post []byte, exists bool, perm os.FileMode) {
 		Root:       p.root,
 		Path:       p.path,
 		Permitted:  p.permitted,
-		Perm:       perm,
+		Perm:       p.perm,
 		Pre:        p.data,
 		PreExisted: p.existed,
 		Post:       post,
 		PostExists: exists,
 	})
+}
+
+// commitReadBack records the completed mutation with its post-image READ BACK from the file the
+// mutation left behind — the form the two byte-moving verbs need, since copy_file and move_file
+// never hold in memory the bytes they land. The read goes through the same fence the mutation
+// wrote through, so it sees exactly the file the mutation wrote.
+//
+// A read-back that fails journals NOTHING, for the same reason an unreadable pre-image does: a
+// post-hash that is a guess describes a file the record does not actually match, and every later
+// undo of that path would be refused as a conflict it never had.
+func (p *preImage) commitReadBack(ctx context.Context) {
+	if p == nil {
+		return
+	}
+	data, err := readWriteTarget(ctx, p.input, p.root)
+	if err != nil {
+		return
+	}
+	p.commit(data, true)
 }
 
 // journalTarget answers the pair a journal record identifies this mutation by: the absolute

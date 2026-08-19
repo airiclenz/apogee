@@ -88,10 +88,16 @@ func (t *DeleteFile) Execute(ctx context.Context, call domain.ToolCall) (domain.
 	// (the link's target survives), which is the direction a security surface errs in and the one
 	// the gate already took (resolvedTargetNote, ResolvedWriteTarget).
 	resolved := resolvedTargetNote(args.Path, t.root)
+	// Read the bytes before the unlink, for the plainest reason in the family: afterwards there
+	// are none. This pre-image IS the file (ADR 0051) — the journal's copy is the only one left
+	// once SafeRemove returns, and it is what `/undo` writes back, with the mode the file
+	// carried rather than a default one.
+	pre := capturePreImage(ctx, args.Path, t.root)
 
 	if err := security.SafeRemove(t.root, args.Path, writeEscapeTarget(ctx)); err != nil {
 		return errorResult(call.ID, err.Error()), nil
 	}
+	pre.commit(nil, false)
 	return okResult(call.ID, "deleted "+args.Path+resolved), nil
 }
 

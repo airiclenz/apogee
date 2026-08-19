@@ -96,7 +96,9 @@
 // copy_file and move_file (2026-08-10) are the P3.7 family's move-bytes-that-already-exist half:
 // two write tools taking a source and a destination instead of a path and a payload. Both refuse
 // an occupied destination unless the call passes overwrite (a silent clobber is the one mistake a
-// model cannot undo), both refuse a directory at either end (a recursive copy is a different tool
+// model cannot take back — the undo journal below is the HUMAN's lever, never the model's, and it
+// still cannot tell an intended clobber from an accident), both refuse a directory at either end
+// (a recursive copy is a different tool
 // with a different blast radius), and both go through internal/security's os.Root-pinned
 // primitives — SafeCopyFileFrom for the copy, SafeRename plus SafeCopyFile and SafeRemove for the
 // move — so the fence is decided at OPERATION time at BOTH ends, never on a re-walked path string.
@@ -110,7 +112,13 @@
 // write here; a move renames, falling back to copy-then-remove for a filesystem that cannot
 // rename across the two paths. They carry the workspaceScopedWriter marker, and it resolves their
 // DESTINATION — where the write lands — because the source is fenced by the operation itself
-// (destinationArgWriteTarget, workspace_scoped.go).
+// (destinationArgWriteTarget, workspace_scoped.go). Neither reaches safeWriteFile, so each takes
+// its own undo pre-image at its own mutation site through the pair that funnel uses
+// (capturePreImage/commit, path_safety.go — ADR 0051): copy_file journals its DESTINATION alone,
+// since a copy's source is a read, and move_file journals BOTH ends as two records — the source
+// post-absent, the destination holding the moved bytes — identically on the rename fast path and
+// the copy-then-remove fallback. Each half commits only once THAT half landed, which is what lets
+// a split move (the copy landing, the removal refused) record the destination and nothing else.
 //
 // delete_file (2026-08-10) closes that family with its remove-bytes half: one path, files only (a
 // directory is a different blast radius), removed through SafeRemove's pinned os.Root so the fence
@@ -120,7 +128,10 @@
 // catastrophic — and deleting one workspace file is an ordinary refactoring step, the near-miss the
 // shipped rules deliberately do not fire on. The wiring that matters is structural and already
 // there: `path` is not a payloadKey, so the credential/persistence rules inspect a delete_file
-// target and hard-refuse it in every mode, ahead of the ladder.
+// target and hard-refuse it in every mode, ahead of the ladder. It journals the bytes it is about
+// to unlink, with the mode the file carried, because that copy is the only one left the moment
+// SafeRemove returns — the model-facing description still says there is no undo, and from the
+// MODEL's side that stays true: `/undo` is a human command and no tool exposes it (ADR 0051).
 //
 // run_tests (2026-08-10) asks diagnostics' question of the whole project instead of one file:
 // it DETECTS the runner from project markers — go.mod ⇒ `go test`, a pytest config ⇒ `pytest`,
