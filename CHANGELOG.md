@@ -55,6 +55,19 @@ point is a **minor** bump, not a breaking change.
   still filling; with nothing recorded it says so and states that the journal is per-process, so an
   empty answer on a resumed session cannot be mistaken for a lost one.
 
+- **`/undo` is documented and the decision recorded.**
+  [ADR 0051](docs/adr/0051-undo-is-a-per-exchange-in-memory-pre-image-journal.md) ratifies the
+  design: the per-Exchange stack, the pre-image + post-hash record shape, capture at the shared
+  write funnel as the coverage boundary itself, skip-on-conflict (the human's own later edit
+  outranks the undo), the human-initiated restore that includes an approved out-of-workspace path,
+  the two-step confirm with its generation guard, and in-memory-per-process with no redo — plus the
+  rejected alternatives (an on-disk journal, reconstruction from the session record, a git-based
+  revert, one whole-session revert, an undo tool for the model) and why each was refused. README
+  gains the `/undo` command row and a section saying in the human's own words what it covers, what
+  a skip means, and what is NOT undone (subprocess writes, git checkouts, MCP and embedder tools,
+  and anything written before this process started). `CONTEXT.md` gains the **Undo journal** term.
+  The `[P2] Undo all agent changes` entry is removed from `ISSUES.md` — this plan shipped it.
+
 ### Fixed
 
 - **A click in the band the `/inspect` pane grows into now falls through instead of being swallowed.**

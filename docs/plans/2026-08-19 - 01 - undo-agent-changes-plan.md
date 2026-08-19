@@ -286,7 +286,10 @@ while the model works (idle-only gate).
 
 ---
 
-## 6. ADR 0051, README, CONTEXT.md, and the ISSUES.md close
+## 6. ADR 0051, README, CONTEXT.md, and the ISSUES.md close — ✅ DONE (2026-08-19)
+
+NOTES (2026-08-19): the README prose landed as a `### Undoing the agent's file writes — /undo` subsection rather than a bare paragraph, so the new command-table row can link to it the way the `/settings` row links to its own subsection; the content is the paragraph the item asks for.
+NOTES (2026-08-19): the `Undo journal` term sits at the END of CONTEXT.md's `### Turns and stepping` section (after `Prompt recall`) rather than adjacent to `Exchange` — the item's "beside the Session/Exchange terms" is honoured by section, and inserting mid-section would have reordered existing entries.
 
 Depends on items 3 and 5.
 

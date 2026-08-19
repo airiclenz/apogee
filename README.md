@@ -264,6 +264,7 @@ a typo is visible before you send.
 | `/clear` (or `/new`) | Close this session into history and start a fresh one | — |
 | `/compact` | Summarise the conversation to reclaim context | — |
 | `/continue` | Ask the model to keep going | — |
+| `/undo` | Put back the files the agent wrote in the last exchange — bare previews it, `/undo confirm` applies it — see [below](#undoing-the-agents-file-writes--undo) | — |
 | `/sessions` | Browse saved sessions — resume, rename, or delete | — |
 | `/rename` | Rename this session — `/rename <name>` sets it, bare `/rename` asks the model for one | — |
 | `/model` | Switch model — the Launch profiles [llama-launcher](#local-servers--llama-launcher) defines when one is configured, what this server serves when not; picker, or `/model <name>` | — |
@@ -293,6 +294,28 @@ readline redraw: it forces a full repaint, which is the way back from a terminal
 has smeared or eaten part of the frame. It sends nothing, edits nothing and interrupts
 nothing — the only thing it takes with it is a mouse drag-selection's highlight, which
 every keypress drops.
+
+### Undoing the agent's file writes — `/undo`
+
+`/undo` takes back the files the agent wrote, **one exchange at a time** — one instruction
+you gave, however many tool calls it took, sub-agents included. Bare `/undo` only
+**previews**: it names the exchange and every file the revert would touch, at its full
+resolved path, each marked *restore*, *delete* (the agent created it, so putting things
+back means removing it) or *skip*; `/undo confirm` then applies exactly the step you just
+read, and anything else leaves your files alone. Repeat it to walk further back. A file
+you edited yourself after the agent wrote it is **skipped**, not overwritten — your edit
+wins, the rest of the exchange is still put back, and the note says which files were left
+and why. There is no redo.
+
+Two limits are worth knowing before you rely on it. The journal is **memory, not storage**:
+it starts empty each time apogee launches, so a resumed session cannot put back writes made
+before that run — `/undo` says so rather than pretending there was nothing to undo. And it
+covers only the writes apogee's own file tools make (`write_file`, the edit and
+find-and-replace verbs, `copy_file`, `move_file`, `delete_file`). Everything else that can
+change your workspace is **not** undone: whatever a `terminal`, Python or test-runner
+command wrote, git working-tree changes from a branch checkout, and writes by MCP servers
+or other tools an embedder added. `/undo` is idle-only — it waits until the model has
+finished.
 
 ### The settings screen — `/settings`
 
