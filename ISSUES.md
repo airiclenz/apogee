@@ -85,6 +85,22 @@ item 2 NOTES; the ADR that ratifies the decision does not carry it.
 
 ---
 
+### The stacked frame's line NUMBER rides inside the diff band, not the chrome gutter
+
+**Status:** [ ] open 2026-08-19 — residual of
+`docs/plans/2026-08-19 - 05 - diff-background-tint-plan.md`, whose ratified call 3 ("the gutter
+stays chrome" — line numbers untinted) is still unmet for the stacked frame. No item of that plan
+owns it.
+
+`stackedRow.line` (`internal/tui/toolpresent.go:2813`) composes the right-aligned number, the marker
+and the text into the detail line's single `Text` field, so the number sits inside the very string
+the tinted style paints and the band runs under it. No wrap-rail change can hold it out — the rail
+receives one opaque string and cannot tell the number from the text — so the fix has to split the
+number off the styled text before the row reaches the style seam. The marker is *meant* to ride the
+band (same plan, item 3's amendment to ADR 0052); only the number is the miss.
+
+---
+
 ## Parked / deferred work
 
 Live, deliberately deferred work only. Each entry records *enough* design that we don't re-derive
@@ -754,3 +770,25 @@ way it is (its doc comment carries the reasoning). The open question is whether 
 worth showing for work that never ran and, if it is, where it goes on an *unframed* block — the
 task's first line already rides the header as the name fallback, so a second rendering of the prompt
 beneath it has to earn its rows. Settle that before touching either path.
+
+---
+
+### The `diff-add` / `diff-del` FOREGROUND roles now have no consumer
+
+**Status:** parked 2026-08-19 — residual of
+`docs/plans/2026-08-19 - 05 - diff-background-tint-plan.md`, which moved diff body lines onto the
+new `diff-add-bg` / `diff-del-bg` bands. That plan's Out of scope explicitly bars renaming or
+removing the foreground pair, so this state is deferred by decision rather than overlooked. It
+needs an owner call.
+
+The two diff-line styles were the only readers of the pair, and they read the bands now. Nothing in
+the shipped code reads `Scheme.DiffAdd` / `Scheme.DiffDel` (`internal/scheme/scheme.go:35-36`) — the
+sole remaining reference is the role-table test (`internal/scheme/scheme_test.go:23-24`), and the
+`+8 −3` stat slot paints with the marker role, not with this pair. The two roles therefore stand as
+scheme vocabulary with no consumer: still parsed, still documented, still honoured in a user's
+scheme file, but painting nothing.
+
+The pair's own doc comment (`internal/scheme/scheme.go:40-42`) asserts the opposite — that
+`diff-add` / `diff-del` "keep the markers, the stat summaries and every other use of diff colour
+outside a diff body line" — so whichever way the call goes (retire the roles, or give them back a
+consumer), that comment moves with it.
