@@ -306,7 +306,25 @@ the sum — e.g. via a spelling the parser would reject).
 Depends on item 1. (Items 3–4 make the summaries real but this item's tests construct
 results directly; no dependency on them.)
 
-## 6. TUI: the pure split composer
+## 6. TUI: the pure split composer — ✅ DONE (2026-08-19)
+
+NOTES (2026-08-19): the item's Files list names only `splitdiff.go` and its test, but
+`internal/tui/doc.go` had to be edited too — its package map must name every non-test file and
+`TestDocMapNamesEveryFile` (`internal/tui/docmap_test.go`) fails otherwise. One clause was added
+naming `splitdiff.go` and stating that the reading stays the painter's choice; nothing else in
+doc.go was touched, and the count claim in the neighbouring "renderer is nine files" sentence was
+deliberately left alone (that sentence narrates the render.go file MOVE, which this file is not
+part of).
+NOTES (2026-08-19): the pane divider glyph is a const in `splitdiff.go` (`splitPaneDivider`) rather
+than in theme.go beside the other `│` glyphs — the item asks for the module to be deep and
+self-contained, and theme.go's own glyph block already keeps the identically shaped rail, table and
+scrollbar glyphs apart by MEANING rather than sharing one const.
+NOTES (2026-08-19): the item's fit formula is implemented with the separating space counted into
+the number gutter (`splitNumberGutter` = digits + 1) and the divider costing three cells (the glyph
+plus one blank column each side), which is the sketch's own spacing; `splitDiffRows` additionally
+paints nothing at a width leaving the code column under one cell, so no row it returns can overrun
+the width it was given (layout.md's absolute cap) — the 40-column reading choice stays
+`splitDiffFits`'s alone.
 
 **What:** New file `internal/tui/splitdiff.go`: a PURE composition module, no paint
 integration yet — both paint paths in item 7 call this one composer.

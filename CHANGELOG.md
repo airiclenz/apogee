@@ -10,6 +10,21 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **The Split diff composer: recorded Edit regions as two panes.** `internal/tui` can now arrange
+  the Edit regions a tool recorded into the wide reading the layout spec draws
+  (`docs/layout/split-diff-layout.md`): the before file down the left pane and the after file down
+  the right, each numbering its own file, removed lines behind `-` and inserted lines behind `+`
+  starting on the SAME row with the shorter side padding, context in both panes, and one damped `⋯`
+  rule only where two regions do not meet in the file's numbering — the very predicate the stacked
+  reading elides by, so the two arrangements of one body claim the same elisions. A line too wide
+  for its pane wraps rather than clips, its continuation rows carrying no number and no marker while
+  the other pane pads, so the divider stands in one column down the whole body. The width rule is a
+  property of the body rather than a terminal threshold: `splitDiffFits` measures the number gutter
+  from the regions themselves and reports whether each pane can still give the code
+  `splitPaneMinCols` (40) columns, asked again at every paint so a resize can flip the reading. The
+  module is pure composition — regions and a width in, styled rows out, wrapped through the one
+  width authority — and nothing paints it yet.
+
 - **Edit blocks paint the change that LANDED, numbered.** A card whose tool recorded Edit regions
   (`domain.EditRegions`) now shows them as the numbered **Stacked diff** the layout spec draws
   (`docs/layout/split-diff-layout.md`): per region its context, its removed lines behind `-` at

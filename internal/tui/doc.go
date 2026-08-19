@@ -717,6 +717,13 @@
 // "next row, same column" by into CR LF — returning the restore closure that gives the shell back
 // the console mode it lent (ADR 0038), altscreen_other.go being the never-nil no-op restore that
 // stands in where there is no console mode word to lend;
+// splitdiff.go the SPLIT reading of a diff body — the Edit regions a tool recorded
+// (domain.EditRegion) arranged as two panes, each numbering its own file, with the width rule
+// that says whether that reading fits at all ([splitDiffFits], splitPaneMinCols) and the gutter,
+// wrap and padding that keep the two panes level (ADR 0052, docs/layout/split-diff-layout.md);
+// it composes rows and paints no block, so WHICH reading a body gets — these panes or the
+// stacked rows toolpresent.go builds from the same regions — stays the painter's choice, made
+// per paint against the width it holds;
 // the renderer itself is nine files rather than one, split along the seams the painters already
 // had once the tool-display overhaul grew render.go past the house ~400-line guideline — a pure
 // file move, nothing renamed and nothing reworded: render.go keeps the transcript walk
