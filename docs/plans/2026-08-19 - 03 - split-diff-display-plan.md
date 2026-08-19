@@ -523,7 +523,22 @@ byte-identical.
 
 Depends on item 5.
 
-## 11. Schemes: the turquoise palette
+## 11. Schemes: the turquoise palette — ✅ DONE (2026-08-19)
+
+NOTES (2026-08-19): the item names the two `success` comments alone, but the `diff-add` comments
+(`dark.yaml:24`, `light.yaml:23`) read `# diff "+" lines` and nothing else — which would leave the
+shipped files with no reason on record for why "+" stopped being green, and a user editing their own
+scheme would read the turquoise as arbitrary. Each got one clause naming the red-green-weak pairing
+with `diff-del`, which is this file's own convention: every retuned role's comment carries its reason.
+NOTES (2026-08-19): `dark.yaml`'s header claim — "the palette apogee has always drawn with ... apart
+from three roles retuned for legibility while the scheme system was being built (`code`,
+`tool-header` and `tool-marker`)" — became false the moment this item retuned two more, so it gained a
+clause naming the pair and its reason. `light.yaml`'s header makes no such claim and was left alone.
+NOTES (2026-08-19): no test or non-test Go file pinned the old hex values (`#3fb950`, `#56d364`,
+`#1a7f37`, `#116329` appear in no `.go` file), so no test needed updating; the distinctness suites
+pass unchanged. The two remaining mentions outside the schemes — ADR 0040's seed-value paragraph and
+the v0.8-era CHANGELOG entry that shipped `success` — are dated records of earlier decisions and were
+deliberately left as written.
 
 **What:** In `internal/scheme/schemes/dark.yaml` and `light.yaml` (ratified call 7):
 dark `diff-add: "#2dd4bf"`, `success: "#5eead4"`; light `diff-add: "#0f766e"`,

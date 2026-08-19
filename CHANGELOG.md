@@ -212,6 +212,19 @@ point is a **minor** bump, not a breaking change.
   and anything written before this process started). `CONTEXT.md` gains the **Undo journal** term.
   The `[P2] Undo all agent changes` entry is removed from `ISSUES.md` — this plan shipped it.
 
+### Changed
+
+- **A "+" line is turquoise now, and the ✓ beside it.** Both shipped schemes move `diff-add` out of
+  green — dark `#2dd4bf`, light `#0f766e` — and leave `diff-del` red, so the one pairing a diff body
+  leans on hardest survives red-green-weak vision (ADR 0052 §4; the markers still carry the change on
+  their own, so the color is never the only signal). `success`, the ✓ on a finished sub-agent and
+  every other "this came off" marker, follows `diff-add` into the turquoise family and keeps the
+  visible step its comment always promised — dark `#5eead4`, a step brighter, light `#115e59`, a rung
+  darker — so a marker still never reads as a diff line, and the whole UI now speaks one pairing:
+  turquoise for came-in and came-off, red for went-out and failed. No new scheme keys, no other role
+  retuned, and a scheme of your own that names `diff-add` or `success` keeps overriding both exactly
+  as before.
+
 ### Fixed
 
 - **A click in the band the `/inspect` pane grows into now falls through instead of being swallowed.**
