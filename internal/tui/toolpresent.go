@@ -208,6 +208,20 @@ type toolView struct {
 	// here and are escape-stripped with them (sanitize).
 	Regions []domain.EditRegion
 
+	// RegionFiles is the file each of Regions was cut from, one entry per region and ALIGNED
+	// index-for-index with it. It is how a diff that spans SEVERAL files is carried — a printed
+	// git diff does (ratified call 10) — and it annotates the regions rather than re-grouping
+	// them: the change itself keeps one home, and either reading regroups the two back into the
+	// file sections it paints (regionFileSections, diffFileRegions).
+	//
+	// It is empty for every source that names no file: the three edit tools, whose block's own row
+	// already names the file they wrote, and view_diff's whole-file body. Such a body paints
+	// exactly as it did before file sections existed — no header row over it.
+	//
+	// The names are tool output like the region lines beside them, and are escape-stripped with
+	// them (sanitize).
+	RegionFiles []string
+
 	// stat is the other reading of a PROMOTED outcome: the presenter's own typed phrase for the
 	// fact the quoted Summary spells out in the tool's words ("1 line"), carried beside it so the
 	// painter can choose between the two by measure (promotable, demoted). It is empty on every
@@ -454,14 +468,21 @@ type toolPresenter struct {
 	// regions RECOVERS the Edit regions of a diff the tool PRINTED rather than recorded. The two
 	// diff-READING tools apply nothing, so they have no apply time to record a change at (ADR 0052
 	// §2) — but their output carries the positions anyway, view_diff's as a whole-file diff whose
-	// lines can simply be counted from 1, so this hook cuts that output into the same
-	// three-context regions an edit tool attaches and the block gets both readings of its diff
-	// like every other diff-bodied one (toolView.Regions).
+	// lines can simply be counted from 1 and git_diff_range's in the `@@` header each of git's own
+	// hunks opens with, so this hook cuts that output into the same three-context regions an edit
+	// tool attaches and the block gets both readings of its diff like every other diff-bodied one
+	// (toolView.Regions).
 	//
 	// It is TOTAL: output it cannot walk yields NO regions rather than a guess, which leaves
 	// standing whatever the tool's own body hook rendered — the plain reading such a result had
 	// before this existed (ratified call 9).
-	regions func(res domain.ToolResult) []domain.EditRegion
+	//
+	// It answers in FILE SECTIONS, because a printed diff need not be about one file:
+	// git_diff_range's spans every file the range touched and each of them numbers its own lines,
+	// so a section names the file its regions were cut from and the block paints that name over
+	// them (ratified call 10). The one section a whole-file view_diff yields names none — that
+	// block's own row already says which file it read.
+	regions func(res domain.ToolResult) []diffFileRegions
 
 	// argBody renders the body from the call's OWN ARGUMENTS, at the moment the call is
 	// presented: before any result exists, and never touching one. The edit tools and write_file
@@ -637,11 +658,12 @@ var toolRegistry = map[string]toolPresenter{
 		stat:   commitHashStat,
 	},
 	"git_diff_range": {
-		label:  "Git Diff",
-		verb:   "diffing",
-		target: refRangeTarget,
-		detail: outputDetail,
-		stat:   diffLinesStat, // "+A −R", counted off the unified diff the tool printed
+		label:   "Git Diff",
+		verb:    "diffing",
+		target:  refRangeTarget,
+		detail:  outputDetail,        // the plain floor: output this package cannot walk as a diff
+		stat:    diffLinesStat,       // "+A −R", counted off the unified diff the tool printed
+		regions: gitDiffRangeRegions, // git's own diff, cut into numbered regions file by file
 	},
 	"git_status": {
 		label: "Git Status",
@@ -860,7 +882,8 @@ func (tv *toolView) shortenPaths(ws workspaceRoot) {
 
 // sanitize escape-strips every DISPLAY field of the view — label, verb, target, a delegation's name
 // and its retained prompt (toolView.task), the one-line
-// summary, the typed stat standing by to replace it (toolView.stat) and each detail line — so no
+// summary, the typed stat standing by to replace it (toolView.stat), each detail line, and the Edit
+// regions a diff body paints from together with the file names over them — so no
 // ESC byte from a tool call or its result can reach the
 // terminal (stripEscapes). It is the tool card's security seam, run on the way out of
 // presentToolCall and of enrichWithResult (finishDisplay) rather than left to the two dozen target
@@ -891,6 +914,7 @@ func (tv *toolView) sanitize() {
 	tv.stat = stripEscapes(tv.stat)
 	tv.Details.stripEscapes()
 	tv.Regions = strippedRegions(tv.Regions)
+	tv.RegionFiles = stripEscapesAll(tv.RegionFiles)
 }
 
 // strippedRegions is the strip run over the lines a set of Edit regions carries — the region half
@@ -1175,7 +1199,7 @@ func (tv *toolView) enrichWithResult(result domain.ToolResult, ws workspaceRoot)
 	if regions, ok := recordedRegions(result); ok {
 		tv.absorbRegions(regions)
 	} else if known && p.regions != nil {
-		tv.showRegions(p.regions(result))
+		tv.showFileRegions(p.regions(result))
 	}
 	// The request-derived stat is re-applied because the prose layers may have written over it
 	// with a result sentence; it is the same phrase the call was presented with, so a block does
@@ -1286,12 +1310,94 @@ func (tv *toolView) absorbRegions(regions domain.EditRegions) {
 // An empty set changes nothing at all, which is the fallback both sources fall to and the one
 // answer they must give alike: an edit whose pair was over the diff budget, a printed diff whose
 // output carried no tags to walk. Such a block keeps the body it already had (ratified call 9).
+//
+// It is the ONE-SECTION case of showFileRegions below, where the work happens: a set of regions
+// with no file name over it is exactly what an edit tool records and what a whole-file view_diff
+// yields, and a diff that names its files is the same thing several times over.
 func (tv *toolView) showRegions(regions []domain.EditRegion) {
+	tv.showFileRegions([]diffFileRegions{{Regions: regions}})
+}
+
+// diffFileRegions is one FILE's part of a printed diff: the path the tool named that file by, and
+// the Edit regions cut from its hunks. It is what the recovery hook answers in
+// (toolPresenter.regions) and what both readings of such a body are painted from, section by
+// section — a muted header row naming the file, then that file's regions beneath it (ratified
+// call 10).
+//
+// The path is empty when the output names no file: view_diff prints one file's diff and never says
+// which, and an edit tool's recorded regions arrive here as one nameless section too. A nameless
+// section paints no header, which is what makes a printed diff of a single file read exactly like
+// the change an edit block shows.
+type diffFileRegions struct {
+	File    string
+	Regions []domain.EditRegion
+}
+
+// showFileRegions is the ONE writer of a view's regions and of the body they render as. It flattens
+// the sections it is given onto the view — the regions themselves, the file name each was cut from
+// beside them (toolView.RegionFiles) — and REPLACES the body with the stacked rows of every
+// section in turn, each behind its file's header row where the section names one.
+//
+// The stacked rows are built per SECTION rather than over the flattened whole, which is what keeps
+// two files' numbers from being read as one file's: each file sizes its own number gutter, and the
+// elision rule between two regions is only ever asked within a file (stackedDiffLines).
+//
+// A section with no regions is skipped and a set with no regions at all changes nothing, which is
+// the fallback every source shares (showRegions).
+func (tv *toolView) showFileRegions(sections []diffFileRegions) {
+	var (
+		regions []domain.EditRegion
+		files   []string
+		named   bool
+		body    []detailLine
+	)
+	for _, section := range sections {
+		if len(section.Regions) == 0 {
+			continue
+		}
+		if section.File != "" {
+			named = true
+			body = append(body, detailLine{Text: clipDetail(section.File)})
+		}
+		body = append(body, stackedDiffLines(section.Regions)...)
+		for range section.Regions {
+			files = append(files, section.File)
+		}
+		regions = append(regions, section.Regions...)
+	}
 	if len(regions) == 0 {
 		return
 	}
-	tv.Regions = regions
-	tv.Details = newToolBody(stackedDiffLines(regions))
+	tv.Regions, tv.Details = regions, newToolBody(body)
+	if named {
+		tv.RegionFiles = files
+	}
+}
+
+// regionFileSections regroups a view's flattened regions into the file sections they were cut from,
+// which is what the SPLIT reading paints them by (splitBody): the stacked rows were composed when
+// the regions landed, but the panes are composed at paint time, where the width is known, and they
+// need the same section boundaries.
+//
+// A view whose names are missing or do not line up with its regions is one nameless section — the
+// three edit tools and view_diff leave the names empty, and a decoded record that lost them (the
+// names are display state, not the change) must still paint the change rather than nothing.
+func regionFileSections(regions []domain.EditRegion, files []string) []diffFileRegions {
+	if len(regions) == 0 {
+		return nil
+	}
+	if len(files) != len(regions) {
+		return []diffFileRegions{{Regions: regions}}
+	}
+	sections := make([]diffFileRegions, 0, 1)
+	for i, region := range regions {
+		if i == 0 || files[i] != files[i-1] {
+			sections = append(sections, diffFileRegions{File: files[i]})
+		}
+		last := &sections[len(sections)-1]
+		last.Regions = append(last.Regions, region)
+	}
+	return sections
 }
 
 // applyStat settles the right-hand outcome slot from a stat hook's answer (toolPresenter.stat).
@@ -2212,8 +2318,16 @@ const (
 // three lines of context each side, exactly as an edit block shows them. That is the ratified
 // behaviour change and not a truncation — the diff the MODEL reads is untouched, and the slot's
 // diffstat still counts the whole of it (diffStatStat).
-func viewDiffRegions(res domain.ToolResult) []domain.EditRegion {
-	return taggedDiffRegions(res.Content)
+//
+// It answers as ONE nameless section (diffFileRegions): view_diff diffs a single file and its
+// output never names it, so there is nothing for a header row to say that the block's own row does
+// not already say better.
+func viewDiffRegions(res domain.ToolResult) []diffFileRegions {
+	regions := taggedDiffRegions(res.Content)
+	if len(regions) == 0 {
+		return nil
+	}
+	return []diffFileRegions{{Regions: regions}}
 }
 
 // taggedDiffRegions cuts a tagged line diff into regions, walking it once and counting each file's
@@ -2337,6 +2451,22 @@ func (c *diffRegionCutter) end() {
 	c.unchanged = c.unchanged[len(trailing):]
 }
 
+// hunk moves the walk to the lines a new hunk states each file resumes at, closing whatever region
+// the previous hunk left open first. It is what a diff with ELISIONS in it needs and a whole-file
+// one never asks for (taggedDiffRegions counts from 1 and never jumps).
+//
+// The unchanged lines it had not yet placed are DROPPED rather than carried over: git elided
+// everything between the two hunks, so a line before that gap can be no region's leading context
+// after it — the closing region takes its three as trailing context and the rest are simply lines
+// this reading does not show.
+func (c *diffRegionCutter) hunk(before, after int) {
+	if c.open != nil {
+		c.end()
+	}
+	c.unchanged = nil
+	c.beforeLine, c.afterLine = before, after
+}
+
 // finish ends the walk, closing a region the last line left open, and returns the regions — none
 // at all when the diff carried no changed line.
 func (c *diffRegionCutter) finish() []domain.EditRegion {
@@ -2430,6 +2560,190 @@ func appendTagged(body []detailLine, lines []string, tag string, kind detailKind
 		body = append(body, detailLine{Kind: kind, Text: clipDetail(tag + ln)})
 	}
 	return body
+}
+
+// ----------------------------------------------------------------------------
+// git_diff_range — the regions of git's own unified diff
+// ----------------------------------------------------------------------------
+
+// The line shapes git's unified diff is built out of. A file section opens on
+// "diff --git a/<path> b/<path>", and a hunk within it opens on "@@ -a,b +c,d @@" — which is where
+// this recovery gets its numbers, git having ELIDED everything between one hunk and the next. The
+// no-newline marker is git's note ABOUT the line above it rather than a line of either file.
+const (
+	gitDiffFilePrefix = "diff --git "
+	gitDiffHunkPrefix = "@@"
+	gitDiffNoNewline  = `\ No newline at end of file`
+)
+
+// The two headers this recovery reads rather than skips: the file a section is about (the b-side
+// path — the name the change left the file under) and the lines each side of a hunk resumes at. A
+// count of 1 is written without its comma, which is why the counts are optional here; they are not
+// read at all, because what a hunk holds is the lines it then prints.
+var (
+	gitDiffFilePattern = regexp.MustCompile(`^diff --git a/(.+) b/(.+)$`)
+	gitDiffHunkPattern = regexp.MustCompile(`^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@`)
+)
+
+// gitDiffHeaderPrefixes are the extended-header lines a TEXTUAL diff carries between its file line
+// and its first hunk: the blob index, the mode lines, and the two "---"/"+++" names. They say
+// nothing this recovery needs — every number it wants is in a hunk header — so they are recognised
+// and skipped.
+//
+// What is deliberately NOT here is any header saying the section carries no text to paint:
+// "Binary files … differ", a rename's "similarity index" and "rename from"/"rename to", a "GIT
+// binary patch". A line none of these prefixes claims stops the walk dead (gitDiffFileSections),
+// so such a body keeps the plain output rendering it had before this existed — which is the honest
+// answer for it: git said something about that file this reading cannot show.
+var gitDiffHeaderPrefixes = []string{
+	"index ", "--- ", "+++ ", "old mode ", "new mode ", "new file mode ", "deleted file mode ",
+}
+
+// gitDiffRangeRegions recovers the Edit regions of git_diff_range's output. That tool applies
+// nothing either, so it has no apply time to record a change at (ADR 0052 §2) — and what it prints
+// is git's own unified diff, which unlike view_diff's whole-file body shows only the neighbourhood
+// of each change. The numbers therefore come from the "@@" header each hunk opens with, which is
+// exactly what those headers are for. The result-shaped signature is the registry's
+// (toolPresenter.regions).
+//
+// The answer is one section per file the range touched (ratified call 10): git's output spans
+// files, each numbering its own lines, and the block paints a muted row naming the file over that
+// file's regions.
+func gitDiffRangeRegions(res domain.ToolResult) []diffFileRegions {
+	return gitDiffFileSections(res.Content)
+}
+
+// gitDiffFileSections walks git's unified output into those sections. It shares its cutter with the
+// walk down a whole-file diff (taggedDiffRegions), so a region recovered here and a region
+// recovered there are the same thing and paint through the same rows: one region per run of
+// consecutive changed lines, up to diffRegionContext unchanged lines of context each side, and
+// neighbouring changes left as separate regions whose context tiles the lines between them.
+//
+// It is TOTAL and ALL-OR-NOTHING. A line no rule above claims — a binary section's "Binary files …
+// differ", a rename's "similarity index", the columns of a `--stat` call, the "No differences
+// found" sentinel, a warning that reached the output — returns NO sections at all, and the whole
+// body then renders as the plain output it always did (outputDetail). So does a file section that
+// yielded no region: a body painted with one of its files silently missing is exactly the
+// half-parsed mix the fallback exists to avoid.
+func gitDiffFileSections(content string) []diffFileRegions {
+	var walk gitDiffWalk
+	for _, line := range splitLines(strings.TrimRight(content, "\n")) {
+		if !walk.take(line) {
+			return nil
+		}
+	}
+	if !walk.closeFile() {
+		return nil
+	}
+	return walk.sections
+}
+
+// gitDiffWalk is the state of one walk down a printed git diff: the sections closed so far, the
+// file the open one is about, and the region cutter filling it. inHunk is what tells a header line
+// from a line of file content — the two are told apart by WHERE they stand, since a hunk's content
+// lines can spell anything at all behind their one-cell tag.
+type gitDiffWalk struct {
+	sections []diffFileRegions
+	file     string
+	open     bool
+	inHunk   bool
+	cutter   diffRegionCutter
+}
+
+// take folds one line of the output into the walk and reports whether it belonged to a diff at all.
+// A false answer is final: the caller abandons the whole reading rather than skipping the line.
+func (w *gitDiffWalk) take(line string) bool {
+	switch {
+	case strings.HasPrefix(line, gitDiffFilePrefix):
+		m := gitDiffFilePattern.FindStringSubmatch(line)
+		return m != nil && w.startFile(m[2])
+	case !w.open:
+		return false
+	case strings.HasPrefix(line, gitDiffHunkPrefix):
+		return w.startHunk(line)
+	case w.inHunk:
+		return w.takeHunkLine(line)
+	default:
+		return gitDiffHeaderLine(line)
+	}
+}
+
+// startFile closes the section the walk was in and opens one for path.
+func (w *gitDiffWalk) startFile(path string) bool {
+	if !w.closeFile() {
+		return false
+	}
+	w.file, w.open, w.inHunk, w.cutter = path, true, false, diffRegionCutter{}
+	return true
+}
+
+// closeFile files the open section and reports whether it held a change to paint. A section that
+// yielded no region — a rename, a mode change, a binary file — fails the walk instead of being
+// dropped, because dropping it would show a diff of fewer files than the tool printed.
+func (w *gitDiffWalk) closeFile() bool {
+	if !w.open {
+		return true
+	}
+	regions := w.cutter.finish()
+	if len(regions) == 0 {
+		return false
+	}
+	w.sections = append(w.sections, diffFileRegions{File: w.file, Regions: regions})
+	return true
+}
+
+// startHunk reads the two starting lines off a hunk header and moves the cutter to them. A "@@"
+// line that is not a hunk header is not something this reading can place, so it fails the walk.
+func (w *gitDiffWalk) startHunk(line string) bool {
+	m := gitDiffHunkPattern.FindStringSubmatch(line)
+	if m == nil {
+		return false
+	}
+	before, err := strconv.Atoi(m[1])
+	if err != nil {
+		return false
+	}
+	after, err := strconv.Atoi(m[2])
+	if err != nil {
+		return false
+	}
+	w.cutter.hunk(before, after)
+	w.inHunk = true
+	return true
+}
+
+// takeHunkLine folds one line of a hunk's body into the cutter. git tags such a line in ONE cell —
+// a space, a "-" or a "+" — where the diff internal/tools renders tags in two (diffContextTag), so
+// the tag is translated here and the cutter goes on reading a single shape of them.
+//
+// The no-newline marker is skipped rather than counted: it is a note about the line above it, and
+// taking it for a line of the file would push every number after it one out.
+func (w *gitDiffWalk) takeHunkLine(line string) bool {
+	if line == gitDiffNoNewline {
+		return true
+	}
+	switch {
+	case strings.HasPrefix(line, " "):
+		w.cutter.take(diffContextTag, line[1:])
+	case strings.HasPrefix(line, "-"):
+		w.cutter.take(diffRemovedTag, line[1:])
+	case strings.HasPrefix(line, "+"):
+		w.cutter.take(diffAddedTag, line[1:])
+	default:
+		return false
+	}
+	return true
+}
+
+// gitDiffHeaderLine reports whether a line standing between a file's "diff --git" line and its
+// first hunk is one of the extended headers this reading skips (gitDiffHeaderPrefixes).
+func gitDiffHeaderLine(line string) bool {
+	for _, prefix := range gitDiffHeaderPrefixes {
+		if strings.HasPrefix(line, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // The marker column of the stacked reading: two cells, the same width in every row, carrying `-` on

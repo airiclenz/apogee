@@ -906,3 +906,70 @@ func TestSplitDiffPaintsInATargetlessBlock(t *testing.T) {
 		t.Errorf("at 80 columns the targetless body painted two panes:\n%s", strings.Join(narrow, "\n"))
 	}
 }
+
+// TestSplitDiffPaintsAFileHeaderPerSection is the multi-file shape (ratified call 10): a printed
+// git diff spans every file the range touched, so each file's regions are painted under a muted row
+// naming it. The block's target is the REF RANGE, so that row is the only place the file is named —
+// without it a reader would be looking at numbered panes of an unnamed file.
+//
+// Both readings carry the sections, in git's order, with each file's change under its own header:
+// the width chooses the arrangement of a body and never what it says.
+func TestSplitDiffPaintsAFileHeaderPerSection(t *testing.T) {
+	t.Parallel()
+
+	tr := &transcript{}
+	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "git_diff_range",
+		Arguments: []byte(`{"base":"main","head":"HEAD"}`)}})
+	tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c1", Content: strings.Join([]string{
+		"diff --git a/alpha.go b/alpha.go",
+		"index 1111111..2222222 100644",
+		"--- a/alpha.go",
+		"+++ b/alpha.go",
+		"@@ -10,3 +10,3 @@",
+		" one",
+		"-  return errNarrow",
+		"+  return errWide",
+		"diff --git a/beta.go b/beta.go",
+		"index 4444444..5555555 100644",
+		"--- a/beta.go",
+		"+++ b/beta.go",
+		"@@ -100,3 +100,3 @@",
+		" alpha",
+		"-beta",
+		"+BETA",
+	}, "\n")}})
+	if !tr.setExpanded(0, true) {
+		t.Fatal("setup: entries[0] is not a toggleable block")
+	}
+
+	rowIndex := func(rows []string, want string) int {
+		for i, row := range rows {
+			if strings.TrimSpace(row) == want {
+				return i
+			}
+		}
+		return -1
+	}
+	for _, width := range []int{140, 80} {
+		rows := openBodyRows(t, tr, width)
+		if got, want := paintsSplit(rows), width == 140; got != want {
+			t.Fatalf("at %d columns the body painted split=%v, want %v:\n%s",
+				width, got, want, strings.Join(rows, "\n"))
+		}
+		alpha, beta := rowIndex(rows, "alpha.go"), rowIndex(rows, "beta.go")
+		if alpha < 0 || beta < 0 || alpha > beta {
+			t.Fatalf("at %d columns the file headers stand at rows %d and %d, want both painted in "+
+				"git's own order:\n%s", width, alpha, beta, strings.Join(rows, "\n"))
+		}
+		change := -1
+		for i, row := range rows {
+			if strings.Contains(row, "errWide") {
+				change = i
+			}
+		}
+		if change < alpha || change > beta {
+			t.Errorf("at %d columns alpha.go's change is on row %d, want it under its own header (%d) "+
+				"and above beta.go's (%d):\n%s", width, change, alpha, beta, strings.Join(rows, "\n"))
+		}
+	}
+}

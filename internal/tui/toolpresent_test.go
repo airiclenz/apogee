@@ -2352,11 +2352,12 @@ func TestToolViewSanitizeReachesEveryStringMember(t *testing.T) {
 			BeforeStart: 1, AfterStart: 1,
 			Leading: []string{dirty}, Removed: []string{dirty}, Inserted: []string{dirty}, Trailing: []string{dirty},
 		}},
-		stat:      dirty,
-		argStat:   dirty,
-		name:      dirty,
-		agentName: dirty,
-		task:      dirty,
+		RegionFiles: []string{dirty},
+		stat:        dirty,
+		argStat:     dirty,
+		name:        dirty,
+		agentName:   dirty,
+		task:        dirty,
 	}
 
 	typ := reflect.TypeOf(tv)
@@ -2430,6 +2431,228 @@ func valueHasEscape(val reflect.Value) bool {
 		return false
 	default:
 		return false
+	}
+}
+
+// gitDiffCard is a git_diff_range block whose result is the diff git printed, run through the same
+// enrichment the transcript puts a real one through.
+func gitDiffCard(t *testing.T, output []string) toolView {
+	t.Helper()
+
+	tv := presentToolCall(domain.ToolCall{ID: "1", Tool: "git_diff_range",
+		Arguments: []byte(`{"base":"main","head":"HEAD"}`)}, "", workspaceRoot{})
+	tv.enrichWithResult(domain.ToolResult{CallID: "1", Content: strings.Join(output, "\n")}, workspaceRoot{})
+	return tv
+}
+
+// TestGitDiffRangeRecoversARegionPerFileSection pins the recovery ratified call 10 asks for. git
+// prints a diff that SPANS files and elides everything between its hunks, so neither the file a
+// line belongs to nor the number it sits on can be counted from the body the way view_diff's can —
+// both are read off git's own headers, the "diff --git" line and the "@@" line.
+//
+// The body that comes back is one section per file: a muted row naming the file, then that file's
+// regions beneath it. Each section sizes its OWN number gutter (alpha's two digits, beta's three),
+// which is what keeps two files' numbering from being read as one file's.
+func TestGitDiffRangeRecoversARegionPerFileSection(t *testing.T) {
+	t.Parallel()
+
+	tv := gitDiffCard(t, []string{
+		"diff --git a/alpha.go b/alpha.go",
+		"index 1111111..2222222 100644",
+		"--- a/alpha.go",
+		"+++ b/alpha.go",
+		"@@ -10,7 +10,7 @@ func alpha() {",
+		" one", " two", " three",
+		"-four",
+		"+FOUR",
+		" five", " six", " seven",
+		"diff --git a/beta.go b/beta.go",
+		"index 4444444..5555555 100644",
+		"--- a/beta.go",
+		"+++ b/beta.go",
+		"@@ -100,4 +100,5 @@",
+		" alpha",
+		"-beta",
+		"+BETA",
+		"+extra",
+		" gamma",
+	})
+
+	wantRegions := []domain.EditRegion{
+		{
+			BeforeStart: 10, AfterStart: 10,
+			Leading:  []string{"one", "two", "three"},
+			Removed:  []string{"four"},
+			Inserted: []string{"FOUR"},
+			Trailing: []string{"five", "six", "seven"},
+		},
+		{
+			BeforeStart: 100, AfterStart: 100,
+			Leading:  []string{"alpha"},
+			Removed:  []string{"beta"},
+			Inserted: []string{"BETA", "extra"},
+			Trailing: []string{"gamma"},
+		},
+	}
+	if got, want := regionsText(tv.Regions), regionsText(wantRegions); got != want {
+		t.Errorf("regions:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+	if got, want := tv.RegionFiles, []string{"alpha.go", "beta.go"}; !slices.Equal(got, want) {
+		t.Errorf("region files = %v, want %v — one per region, naming the section it was cut from", got, want)
+	}
+
+	want := []detailLine{
+		{Text: "alpha.go"},
+		{Text: "10   one"},
+		{Text: "11   two"},
+		{Text: "12   three"},
+		{Kind: detailDiffRemoved, Text: "13 - four"},
+		{Kind: detailDiffAdded, Text: "13 + FOUR"},
+		{Text: "14   five"},
+		{Text: "15   six"},
+		{Text: "16   seven"},
+		{Text: "beta.go"},
+		{Text: "100   alpha"},
+		{Kind: detailDiffRemoved, Text: "101 - beta"},
+		{Kind: detailDiffAdded, Text: "101 + BETA"},
+		{Kind: detailDiffAdded, Text: "102 + extra"},
+		{Text: "102   gamma"},
+	}
+	if got, want := detailDump(tv.Details.all()), detailDump(want); got != want {
+		t.Errorf("body:\n--- got ---\n%s--- want ---\n%s", got, want)
+	}
+	if want := "+3 −2"; tv.Summary.Text != want {
+		t.Errorf("slot = %q, want %q — the diffstat still counts the whole printed diff", tv.Summary.Text, want)
+	}
+}
+
+// TestGitDiffRangeSeparatesTheHunksOfOneFile: git elides the lines between two hunks, so the two
+// are separate regions with the elision rule between them — the numbers jump, and nothing may claim
+// the lines that jump covers. The no-newline marker is git's note about the line above it rather
+// than a line of either file, so counting it would push every number after it one out.
+func TestGitDiffRangeSeparatesTheHunksOfOneFile(t *testing.T) {
+	t.Parallel()
+
+	tv := gitDiffCard(t, []string{
+		"diff --git a/only.go b/only.go",
+		"index 1111111..2222222 100644",
+		"--- a/only.go",
+		"+++ b/only.go",
+		"@@ -1,3 +1,3 @@",
+		" head",
+		"-old",
+		"+new",
+		"@@ -40,3 +40,3 @@",
+		" far",
+		"-there",
+		"+here",
+		"\\ No newline at end of file",
+	})
+
+	wantRegions := []domain.EditRegion{
+		{BeforeStart: 1, AfterStart: 1, Leading: []string{"head"}, Removed: []string{"old"}, Inserted: []string{"new"}},
+		{BeforeStart: 40, AfterStart: 40, Leading: []string{"far"}, Removed: []string{"there"}, Inserted: []string{"here"}},
+	}
+	if got, want := regionsText(tv.Regions), regionsText(wantRegions); got != want {
+		t.Errorf("regions:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+	if got, want := tv.RegionFiles, []string{"only.go", "only.go"}; !slices.Equal(got, want) {
+		t.Errorf("region files = %v, want %v — both hunks belong to the one file git named", got, want)
+	}
+
+	want := []detailLine{
+		{Text: "only.go"},
+		{Text: " 1   head"},
+		{Kind: detailDiffRemoved, Text: " 2 - old"},
+		{Kind: detailDiffAdded, Text: " 2 + new"},
+		{Text: strings.Repeat(glyphLeaderDot, stackedRegionRuleCells)},
+		{Text: "40   far"},
+		{Kind: detailDiffRemoved, Text: "41 - there"},
+		{Kind: detailDiffAdded, Text: "41 + here"},
+	}
+	if got, want := detailDump(tv.Details.all()), detailDump(want); got != want {
+		t.Errorf("body:\n--- got ---\n%s--- want ---\n%s", got, want)
+	}
+}
+
+// TestGitDiffRangeFallsBackToPlainOutputWholesale: the recovery is TOTAL and all-or-nothing. A line
+// it cannot place — a binary section, a rename, a malformed hunk header, the columns of a --stat
+// call — leaves the WHOLE body rendering as the plain output it always did, never a mix of walked
+// and quoted. A section that parsed but held no change counts as unwalkable too: a body painted
+// with one of its files silently missing would show a smaller diff than the tool printed.
+func TestGitDiffRangeFallsBackToPlainOutputWholesale(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name   string
+		output []string
+	}{
+		{
+			name: "a binary section says nothing this reading can paint",
+			output: []string{
+				"diff --git a/logo.png b/logo.png",
+				"index 1111111..2222222 100644",
+				"Binary files a/logo.png and b/logo.png differ",
+			},
+		},
+		{
+			name: "a rename-only section carries no hunk at all",
+			output: []string{
+				"diff --git a/old.go b/new.go",
+				"similarity index 100%",
+				"rename from old.go",
+				"rename to new.go",
+			},
+		},
+		{
+			name: "one unwalkable section takes the walkable one with it",
+			output: []string{
+				"diff --git a/alpha.go b/alpha.go",
+				"index 1111111..2222222 100644",
+				"--- a/alpha.go",
+				"+++ b/alpha.go",
+				"@@ -1,2 +1,2 @@",
+				" one", "-two", "+TWO",
+				"diff --git a/logo.png b/logo.png",
+				"Binary files a/logo.png and b/logo.png differ",
+			},
+		},
+		{
+			name: "a malformed hunk header places nothing",
+			output: []string{
+				"diff --git a/alpha.go b/alpha.go",
+				"--- a/alpha.go",
+				"+++ b/alpha.go",
+				"@@ nonsense @@",
+				" one", "-two", "+TWO",
+			},
+		},
+		{
+			name: "a --stat call prints columns rather than a diff",
+			output: []string{
+				" alpha.go | 2 +-",
+				" 1 file changed, 1 insertion(+), 1 deletion(-)",
+			},
+		},
+		{
+			name:   "the no-differences sentinel is prose about a diff",
+			output: []string{"No differences found"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			tv := gitDiffCard(t, tc.output)
+			if len(tv.Regions) != 0 || tv.RegionFiles != nil {
+				t.Fatalf("regions=%v files=%v, want neither — a body this reading cannot walk whole is not walked at all",
+					tv.Regions, tv.RegionFiles)
+			}
+			plain := outputDetail(strings.Join(tc.output, "\n"))
+			if got, want := detailDump(tv.Details.all()), detailDump(plain.Details); got != want {
+				t.Errorf("body:\n--- got ---\n%s--- want (the plain output rendering) ---\n%s", got, want)
+			}
+		})
 	}
 }
 

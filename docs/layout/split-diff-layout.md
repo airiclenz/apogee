@@ -32,8 +32,16 @@ are untouched.
   continuation rows carry no number and no marker. Both panes stay row-aligned
   (the other side pads). Wrapping is computed at paint time against the width
   authority (ADR 0030), so a resize re-flows and can flip the reading.
+- **File sections.** A body whose diff spans several files (`git_diff_range`
+  prints one) paints one muted header row naming the file above that file's
+  regions, in the order the tool printed them — in BOTH readings. A body that
+  names no file (the edit tools, `view_diff`) paints no such row. Output the
+  renderer cannot walk whole — a binary or rename-only section, a `--stat` or
+  `--name-only` call, git's "No differences found" — keeps the plain output
+  rendering it always had, in whole and never mixed with parsed sections.
 - **Gutters.** The number gutter is as wide as the widest number shown in that
-  body, right-aligned. Numbers, the gutter, and the center divider `│` wear
+  body — in a multi-file body, in that file's section, since each file numbers
+  its own lines — right-aligned. Numbers, the gutter, and the center divider `│` wear
   `muted`. Marker column: `-` / `+` on the first row of a changed line, blank
   on context and continuations.
 - **Color never carries a change alone.** The markers are the palette-proof
@@ -43,8 +51,9 @@ are untouched.
 - **Sources.** Edit tools: recorded Edit regions (typed summary, apply-time).
   `view_diff`: numbers counted from line 1 over its whole-file body, then
   trimmed to regions — expanded `view_diff` no longer paints the entire file.
-  `git_diff_range`: numbers from git's `@@` headers. No summary → the old
-  argument-derived `-`/`+` list, unchanged.
+  `git_diff_range`: numbers from git's `@@` headers, one section per file its
+  `diff --git` lines name. No summary → the old argument-derived `-`/`+` list,
+  unchanged.
 
 ## Split diff (wide)
 

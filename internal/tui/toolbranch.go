@@ -371,12 +371,25 @@ func renderSubDetails(th theme, details []detailLine, indent, width int) []strin
 // tone, exactly as the detail-line painters spend it (renderSubDetails, gutteredWrap), so a split
 // body starts in the column its stacked twin would have and the row still ends inside the width it
 // was given.
+//
+// A body whose regions came from a diff spanning SEVERAL files is composed section by section, each
+// under a muted row naming its file (ratified call 10) — the same header the stacked reading of it
+// already carries, so the two readings of one printed diff say the same things in the same order.
+// The header is truncated to the width rather than wrapped: it names a file, and a name broken over
+// two rows would read as two of them. Whether the panes fit is asked ONCE over all the regions, so
+// a body cannot paint half in panes and half stacked.
 func splitBody(th theme, tv toolView, prefix string, width int) (rows []string, split bool) {
 	inner := width - th.measure.Width(prefix)
 	if !splitDiffFits(tv.Regions, inner) {
 		return nil, false
 	}
-	panes := splitDiffRows(th, tv.Regions, inner)
+	var panes []string
+	for _, section := range regionFileSections(tv.Regions, tv.RegionFiles) {
+		if section.File != "" {
+			panes = append(panes, th.toolDetail.Render(truncateToWidth(th, section.File, inner)))
+		}
+		panes = append(panes, splitDiffRows(th, section.Regions, inner)...)
+	}
 	if len(panes) == 0 {
 		return nil, false
 	}

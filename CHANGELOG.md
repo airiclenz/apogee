@@ -10,6 +10,22 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **`git_diff_range` bodies are the change, file by file.** The diff-range tool applies nothing
+  either, and what it prints is git's own unified diff — which, unlike `view_diff`'s whole-file
+  body, elides everything between its hunks. The renderer now walks that output, taking each
+  region's numbers from the `@@ -a,b +c,d @@` header its hunk opens with and each file from the
+  `diff --git` line above it, and cuts exactly the regions an edit tool records at apply time: the
+  changed lines with up to three unchanged lines of context each side, neighbouring changes left as
+  separate regions whose context tiles the lines between them, and the `⋯` rule standing only where
+  lines are genuinely left uncovered — which, between two hunks, is always. A body spanning several
+  files paints as several sections, each under one muted row naming its file (ratified call 10) and
+  each numbering its own lines, in both readings: stacked where the block is narrow, two panes where
+  the width allows. That block's body used to be plain uncoloured output. The reading is total and
+  all-or-nothing — a binary or rename-only section, a `--stat` or `--name-only` call, git's "No
+  differences found", anything the walk cannot place leaves the WHOLE body rendering as the plain
+  output it always did, never a mix of parsed and quoted sections — and the branch slot's `+A −R` is
+  untouched throughout, still counted off every tagged line the tool printed.
+
 - **`view_diff` bodies are the change, not the file.** The diff-preview tool applies nothing, so no
   tool records its Edit regions — but what it prints is a whole-file diff, and the renderer now walks
   that output once, counting each file's lines from 1, and cuts it into exactly the regions an edit

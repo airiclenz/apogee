@@ -603,7 +603,9 @@
 // that changed. A tool now attaches a sealed [domain.ToolSummary] beside its prose Content and
 // the registry's per-tool stat hook words it, with [viewDiffRegions] cutting view_diff's printed
 // diff into the numbered regions its coloured body paints beneath that stat ([diffBody] staying
-// the plain floor for output that carries no diff tags to walk). What the registry keeps is presentation vocabulary — label,
+// the plain floor for output that carries no diff tags to walk) and [gitDiffRangeRegions] doing the
+// same for the diff git prints, one section per file it spans, over the plain output rendering that
+// stays that block's own floor. What the registry keeps is presentation vocabulary — label,
 // verb, target, stat — plus the detail extractor that stays the FLOOR for a result carrying no summary:
 // a third-party tool, or any built-in that attaches none, still renders its first line exactly as
 // before. The wording stays the view's own; that several lines read like the tool's own header is
