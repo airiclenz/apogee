@@ -226,6 +226,177 @@ func TestHangingWrapCollapsesTheHangItCannotHold(t *testing.T) {
 }
 
 // ----------------------------------------------------------------------------
+// The full-width band (renderToRail)
+// ----------------------------------------------------------------------------
+
+// A style that carries a BACKGROUND is filled out to its wrap rail, on the first row and on every
+// wrapped continuation alike: that is how a diff line's tint reaches the block's edge under a short
+// line's trailing space instead of stopping at the last glyph (ratified calls 2 and 6 of
+// docs/plans/"2026-08-19 - 05"). The pad has to sit INSIDE the SGR run — a styled line closes with a
+// reset, so spaces appended after it would show the terminal's own background through the very band
+// they were added to fill — which is what the reset-at-the-end assertion below pins.
+//
+// The rails are asserted TOGETHER because they are one rule: every one of them bands the TEXT to the
+// room its chrome prefix leaves and the two tile the block width between them, so the assertion is
+// on the row's total either way — and a caller changing one rail alone is exactly the drift this
+// holds shut.
+func TestWrapRailsFillABandedStyleToTheRail(t *testing.T) {
+	t.Parallel()
+
+	const width = 24
+	const marker = "┝ "
+	const text = "alpha beta gamma delta epsilon" // longer than the rail: it wraps
+
+	th := newTheme(scheme.Default())
+	band := detailStyle(th, detailDiffAdded, true)
+
+	rails := map[string][]string{
+		"hangingWrap":  hangingWrap(th, band, marker, text, width),
+		"gutteredWrap": gutteredWrap(th, band, marker, marker, text, width),
+	}
+	clipped, _ := clipWrap(th, band, marker, text, width, 1)
+	rails["clipWrap"] = clipped
+
+	for name, lines := range rails {
+		if len(lines) == 0 {
+			t.Fatalf("%s returned no lines", name)
+		}
+		for i, ln := range lines {
+			if got := th.measure.Width(ln); got != width {
+				t.Errorf("%s line %d is %d cells wide; want the full %d-cell rail (%q)",
+					name, i, got, width, strip(ln))
+			}
+			if strings.HasSuffix(ln, " ") {
+				t.Errorf("%s line %d ends in a bare space: the pad fell outside the band (%q)", name, i, ln)
+			}
+		}
+	}
+}
+
+// The gutter beside a banded line stays CHROME (ratified call 3): gutteredWrap paints its marker and
+// its continuation gutter in the detail tone and starts the band after them, so the band is the
+// text's field and never the frame's. The row still totals the block width — the prefix and the band
+// tile it exactly once between them, which is the arithmetic the rail assertion above depends on.
+func TestGutteredWrapKeepsItsPrefixOutsideTheBand(t *testing.T) {
+	t.Parallel()
+
+	const width = 24
+	const marker, gutter = "┝ ", "│ "
+
+	th := newTheme(scheme.Default())
+	band := detailStyle(th, detailDiffAdded, true)
+
+	lines := gutteredWrap(th, band, marker, gutter, "alpha beta gamma delta epsilon", width)
+	if len(lines) < 2 {
+		t.Fatalf("gutteredWrap produced %d lines; want a wrapped body to check a continuation row", len(lines))
+	}
+	for i, prefix := range []string{marker, gutter} {
+		if want := th.toolDetail.Render(prefix); !strings.HasPrefix(lines[i], want) {
+			t.Errorf("line %d = %q; want it to open with the chrome prefix %q", i, lines[i], want)
+		}
+		if strings.HasPrefix(lines[i], band.Render(prefix)) {
+			t.Errorf("line %d opens with the prefix inside the band; the gutter is chrome: %q", i, lines[i])
+		}
+	}
+}
+
+// The hanging prefix beside a banded line stays CHROME (ratified call 3): hangingWrap and its
+// row-capped twin clipWrap paint the marker — and the blank indent under it on every continuation
+// row — with the band's background CLEARED, then band the text alone out to the rail left of it, so
+// the ┝/┕ branch glyph and the column beneath it read as the frame they are rather than as part of
+// the change. It is the same division gutteredWrap draws above, which is what makes the band the
+// text's field in every stacked and flat frame rather than in one of them.
+func TestHangingRailsKeepTheirPrefixOutsideTheBand(t *testing.T) {
+	t.Parallel()
+
+	const width = 24
+	const marker = "┝ "
+	const indent = "  " // the blank hanging indent every continuation row leads with
+	const text = "alpha beta gamma delta epsilon"
+
+	th := newTheme(scheme.Default())
+	band := detailStyle(th, detailDiffAdded, true)
+	chrome := band.Background(lipgloss.NoColor{})
+
+	lines := hangingWrap(th, band, marker, text, width)
+	if len(lines) < 2 {
+		t.Fatalf("hangingWrap produced %d lines; want a wrapped body to check a continuation row", len(lines))
+	}
+	clipped, _ := clipWrap(th, band, marker, text, width, 1)
+	if len(clipped) != 1 {
+		t.Fatalf("clipWrap spent %d rows on a one-row budget; want one", len(clipped))
+	}
+
+	for _, tc := range []struct {
+		name   string
+		row    string
+		prefix string
+	}{
+		{name: "hangingWrap first row", row: lines[0], prefix: marker},
+		{name: "hangingWrap continuation", row: lines[1], prefix: indent},
+		{name: "clipWrap first row", row: clipped[0], prefix: marker},
+	} {
+		// The row is asserted WHOLE: the prefix in one unbanded run and everything after it — the
+		// text and the pad that fills it to the rail — in one banded run, so a pad that leaked into
+		// the chrome or a prefix that fell inside the band both read as a mismatch here.
+		banded := strings.TrimPrefix(strip(tc.row), tc.prefix)
+		if want := chrome.Render(tc.prefix) + band.Render(banded); tc.row != want {
+			t.Errorf("%s = %q; want a chrome prefix beside the band %q", tc.name, tc.row, want)
+		}
+	}
+}
+
+// A style with NO background is untouched by the rule — it renders the very bytes it rendered before
+// the band existed. That is what keeps every non-diff wrap in the transcript out of this change, and
+// it is asserted on the bytes rather than on the stripped text because a pad inside a foreground-only
+// style would be invisible to the eye and still wrong.
+func TestWrapRailsLeaveAPlainStyleAlone(t *testing.T) {
+	t.Parallel()
+
+	const width = 24
+	const marker = "┝ "
+
+	th := newTheme(scheme.Default())
+	prefixed := hangingPrefixes(th, marker, "alpha beta gamma delta epsilon", width)
+	lines := hangingWrap(th, th.toolDetail, marker, "alpha beta gamma delta epsilon", width)
+
+	for i, ln := range lines {
+		if want := th.toolDetail.Render(prefixed[i]); ln != want {
+			t.Errorf("plain line %d = %q; want the unpadded render %q", i, ln, want)
+		}
+	}
+}
+
+// The pad is counted in the WIDTH AUTHORITY's measure (ADR 0030), not in runes or bytes: a CJK glyph
+// costs two cells, so a line of them takes half as many pad spaces as its rune count would suggest.
+// Counting it any other way overshoots the rail and the viewport folds the banded row into two.
+func TestWrapRailsPadWideGlyphsInTheAuthoritysMeasure(t *testing.T) {
+	t.Parallel()
+
+	const width = 20
+	const text = "日本語" // three glyphs, six cells
+
+	for _, pm := range paintMethods {
+		t.Run(pm.name, func(t *testing.T) {
+			t.Parallel()
+			th := newTheme(scheme.Default())
+			th.measure = widthAuthority{method: pm.method}
+
+			lines := hangingWrap(th, detailStyle(th, detailDiffRemoved, true), "", text, width)
+			if len(lines) != 1 {
+				t.Fatalf("hangingWrap(%q) returned %d lines; want one", text, len(lines))
+			}
+			if got := th.measure.Width(lines[0]); got != width {
+				t.Errorf("banded CJK line is %d cells; want the %d-cell rail", got, width)
+			}
+			if got, want := strip(lines[0]), text+strings.Repeat(" ", width-th.measure.Width(text)); got != want {
+				t.Errorf("banded CJK line = %q; want %q (pad measured in cells, not runes)", got, want)
+			}
+		})
+	}
+}
+
+// ----------------------------------------------------------------------------
 // The row-capped clip (clipWrap)
 // ----------------------------------------------------------------------------
 

@@ -371,7 +371,12 @@ func renderExpandedMember(th theme, tv toolView, marker, gutter string, width, r
 // gutteredWrap is hangingWrap with a CONTINUATION prefix of its own: the first row leads with
 // marker and every row after it with gutter, where hangingWrap would indent them by the marker's
 // width in blanks. The prefixes are painted in the detail tone and the wrapped text in its own
-// style, so a diff line keeps its red or green while the gutter beside it stays chrome.
+// style, so a diff line's band starts where the gutter beside it ends and the gutter stays chrome
+// (ratified call 3 of docs/plans/"2026-08-19 - 05").
+//
+// Its rail is therefore the room LEFT of the prefix, not the block width: a banded style fills out
+// to the same column the wrap broke at (renderToRail), so the two prefixes and the band tile the
+// row exactly once between them.
 //
 // Both prefixes are measured, and the text is wrapped to the room left by the FIRST of them, so a
 // gutter that is not the marker's width would still leave every row the same text column. Today
@@ -387,18 +392,19 @@ func gutteredWrap(th theme, style lipgloss.Style, marker, gutter, text string, w
 	if collapsed {
 		mw = 0
 	}
-	rows := wrapText(th, text, max(1, width-mw))
+	rail := max(1, width-mw)
+	rows := wrapText(th, text, rail)
 	out := make([]string, len(rows))
 	for i, ln := range rows {
 		if collapsed {
-			out[i] = style.Render(ln)
+			out[i] = renderToRail(th, style, ln, rail)
 			continue
 		}
 		prefix := gutter
 		if i == 0 {
 			prefix = marker
 		}
-		out[i] = th.toolDetail.Render(prefix) + style.Render(ln)
+		out[i] = th.toolDetail.Render(prefix) + renderToRail(th, style, ln, rail)
 	}
 	return out
 }

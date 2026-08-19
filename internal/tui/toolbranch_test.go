@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	lipgloss "charm.land/lipgloss/v2"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/scheme"
 )
@@ -120,13 +121,30 @@ func TestRenderDiffDetailStandalone(t *testing.T) {
 		t.Errorf("diff block mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
 	}
 
+	// The band is FULL WIDTH and the hang beside it is CHROME: the tint runs on to the block's wrap
+	// rail rather than stopping at the last glyph — so a body of unequal lines reads as one field
+	// with a straight right edge and a short line's trailing space says added/removed like the rest
+	// of it — while the four columns the body hangs under stay in the plain detail tone (ratified
+	// calls 2 and 3 of docs/plans/"2026-08-19 - 05"; renderHangingRow).
+	const width = 80
+	const hang = "    " // the body hangs under the leader row's "  ┕ "
 	th := newTheme(scheme.Default())
-	lines := tr.renderLines(th, 80)
-	if got, want := lines[2], detailStyle(th, detailDiffRemoved, true).Render("    1 - a removed line"); got != want {
-		t.Errorf("removed line = %q; want the removed band under the open tone %q", got, want)
-	}
-	if got, want := lines[3], detailStyle(th, detailDiffAdded, true).Render("    1 + an added line"); got != want {
-		t.Errorf("added line = %q; want the added band under the open tone %q", got, want)
+	lines := tr.renderLines(th, width)
+	for _, tc := range []struct {
+		row  int
+		kind detailKind
+		text string
+	}{
+		{2, detailDiffRemoved, "1 - a removed line"},
+		{3, detailDiffAdded, "1 + an added line"},
+	} {
+		band := detailStyle(th, tc.kind, true)
+		want := band.Background(lipgloss.NoColor{}).Render(hang) +
+			band.Render(squareLine(th.measure, tc.text, width-th.measure.Width(hang)))
+		if got := lines[tc.row]; got != want {
+			t.Errorf("line %d = %q; want the band under the open tone beside a chrome hang %q",
+				tc.row, got, want)
+		}
 	}
 }
 
@@ -450,6 +468,7 @@ func TestDiffLinesKeepTheirColourInBothBlockStates(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			line := []detailLine{{Kind: tc.kind, Text: "+ added"}}
+			branch := branchMarker(true) // one line, so it is the list's last: the ┕ elbow
 			closed, _ := clipDetails(th, line, 40)
 			open := renderDetails(th, line, 40)
 			if len(closed) != 1 || len(open) != 1 {
@@ -466,7 +485,16 @@ func TestDiffLinesKeepTheirColourInBothBlockStates(t *testing.T) {
 				{name: "closed", row: closed[0], expanded: false},
 				{name: "open", row: open[0], expanded: true},
 			} {
-				if want := detailStyle(th, tc.kind, state.expanded).Render(strip(state.row)); state.row != want {
+				style := detailStyle(th, tc.kind, state.expanded)
+				plain := strip(state.row)
+				want := style.Render(plain) // an unbanded kind is painted in one run, branch glyph and all
+				if tc.kind != detailPlain {
+					// A banded kind splits at the branch glyph: the ┕ stays chrome and the text alone
+					// carries the band out to the rail left of it (renderHangingRow, ratified call 3).
+					want = style.Background(lipgloss.NoColor{}).Render(branch) +
+						style.Render(strings.TrimPrefix(plain, branch))
+				}
+				if state.row != want {
 					t.Errorf("%s paint = %q; want the kind's style for that state %q", state.name, state.row, want)
 				}
 			}

@@ -222,6 +222,20 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **A diff line's band now runs the full width of its block, and only under the line's own text.**
+  The tint used to stop at the last glyph, so a body of unequal lines came out with a ragged right
+  edge and a short line said nothing at all in the columns past its text — the very columns the
+  signal had just been moved onto. Every wrap rail in the transcript now fills a line out to its
+  rail INSIDE the style whenever the style carries a background: the first row and every wrapped
+  continuation of it reach the same column, under trailing space and continuation text alike. The
+  chrome that leads the row is held OUTSIDE the band — an open member's `│` gutter, a branch list's
+  `┝`/`┕` elbow, the blank indent a continuation row hangs under — so the band starts where the text
+  does and reads as the text's field rather than the frame's. The pad is counted in the width
+  authority's measure (ADR 0030), so a wide glyph costs the two cells the painter spends on it, and
+  it is laid down before the style is past the line, so it sits inside the colour run rather than
+  showing the terminal's own background through the gap. A style with no background renders the
+  bytes it always did, which is what keeps every other wrapped surface in the transcript out of this.
+
 - **A diff line's colour moved to the background.** An added or a removed line no longer paints its
   text turquoise or red: it wears the same detail tone as every other line of its block — the
   collapsed dim, the brighter step once you open it — and sits on a quiet BAND that says which way

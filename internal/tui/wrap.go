@@ -13,15 +13,89 @@ import (
 // hangingWrap word-wraps text under a leading marker, then styles each physical line: the
 // marker leads the first line and a same-width blank indent leads every continuation line, so
 // a wrapped block stays aligned under its marker (the ✦/┝ hanging indent of layout.md). The
-// style colours the whole line; widths are ANSI-agnostic, so styling never perturbs the
+// style colours the line's text; widths are ANSI-agnostic, so styling never perturbs the
 // soft-wrap arithmetic.
+//
+// Its rail is the block's own width, and a BANDED style is filled out to it with its hanging prefix
+// held outside the band (renderHangingRow): a diff line's tint reaches the same column on a two-word
+// line as on a full one, and the marker column beside it stays chrome.
 func hangingWrap(th theme, style lipgloss.Style, marker, text string, width int) []string {
 	prefixed := hangingPrefixes(th, marker, text, width)
+	pw := hangPrefixWidth(th, marker, width)
 	out := make([]string, len(prefixed))
 	for i, ln := range prefixed {
-		out[i] = style.Render(ln)
+		out[i] = renderHangingRow(th, style, ln, pw, width)
 	}
 	return out
+}
+
+// wrapRail is the column a wrap's own lines are held to: the width it was given, floored at the one
+// column wrapText floors its limit at, so a rail asked of a zero-width block still matches the line
+// that block produced rather than cutting it back to nothing.
+func wrapRail(width int) int { return max(1, width) }
+
+// renderToRail renders ONE wrapped line on style, padding it out to rail columns inside that style
+// when — and only when — the style carries a background. It is the one rule every wrap rail in this
+// package inherits, which is what lets the diff band reach the block's edge with no call site
+// knowing anything about diffs (ratified call 6 of docs/plans/"2026-08-19 - 05"; the six detailStyle
+// painters are unchanged).
+//
+// The BACKGROUND is what the question asks, not the kind of line: a band that stopped at the last
+// glyph would draw a ragged right edge down a body of unequal lines and would say nothing under a
+// short line's trailing space, where the whole point of moving the diff signal off the text was to
+// give it a surface that is there whether or not the line has glyphs in that column (ratified call
+// 2). A style with no background has no such surface, so it renders exactly what it rendered before
+// this rule existed — byte-identical, which is what keeps every non-diff wrap in the transcript out
+// of this change.
+//
+// The pad is measured in the width authority (squareLine over th.measure, ADR 0030), and the line
+// is padded BEFORE the style is past it: the escapes a styled line would carry cost nothing in the
+// count, and a wide glyph costs the two cells the painter will actually spend on it. Padding after
+// the style would put the spaces outside the SGR run — bare cells showing the terminal's own
+// background through the very band they were added to fill.
+func renderToRail(th theme, style lipgloss.Style, line string, rail int) string {
+	if style.GetBackground() == (lipgloss.NoColor{}) {
+		return style.Render(line)
+	}
+	return style.Render(squareLine(th.measure, line, rail))
+}
+
+// hangPrefixWidth is the column cost of the prefix hangingPrefixes puts on every row it returns:
+// the marker's own width, or 0 in the narrow case where the marker is shed whole and the text wraps
+// flat (hangCollapses). It asks the same oracle on the same two arguments the prefixing asked, so
+// the split below can never claim a column the prefix does not occupy.
+func hangPrefixWidth(th theme, marker string, width int) int {
+	mw := th.measure.Width(marker)
+	if hangCollapses(width, mw) {
+		return 0
+	}
+	return mw
+}
+
+// renderHangingRow renders ONE pw-prefixed row from hangingPrefixes, on style, held to a
+// width-column rail.
+//
+// A plain style paints the row whole, exactly as it always did. A BANDED style splits the hanging
+// prefix off first — the marker on the first row, the blank indent under it on every continuation —
+// paints that prefix with the band's background CLEARED, and fills only the text out to the rail
+// left of it. It is the division gutteredWrap already draws between its gutter and its text, and it
+// is what ratified call 3 of docs/plans/"2026-08-19 - 05" asks of every frame: the band is the
+// TEXT's field, so the ┝/┕ branch glyph and the blank column beneath it stay chrome rather than
+// reading as part of the change. Prefix and band tile the row exactly once between them, so a banded
+// row still measures the full width.
+//
+// The prefix is cut in the width authority's measure (ADR 0030) — the measure hangingPrefixes laid
+// it down in — rather than by byte count, so a marker glyph wider than one cell is cut at the column
+// it actually occupies. A row the clip already re-cut into its own prefix (fitClipTail at a width
+// barely wider than the marker) keeps whatever is left as the prefix and bands the remainder: the
+// split is a measure, not a parse, and it cannot address a column the row does not have.
+func renderHangingRow(th theme, style lipgloss.Style, row string, pw, width int) string {
+	if pw == 0 || style.GetBackground() == (lipgloss.NoColor{}) {
+		return renderToRail(th, style, row, wrapRail(width))
+	}
+	prefix := th.measure.Truncate(row, pw, "")
+	return style.Background(lipgloss.NoColor{}).Render(prefix) +
+		renderToRail(th, style, strings.TrimPrefix(row, prefix), wrapRail(width-pw))
 }
 
 // hangCollapses reports whether a block width columns wide is too narrow to hold an mw-column
@@ -71,8 +145,9 @@ func hangingPrefixes(th theme, marker, text string, width int) []string {
 const clipTail = " …"
 
 // clipWrap is hangingWrap under a row budget. It wraps and styles exactly as hangingWrap does —
-// the same hangingPrefixes path, so the same wrapText, the same expandTabs and the same hanging
-// continuation indent — and then keeps at most maxRows physical rows, ending the last kept row in
+// the same hangingPrefixes path, so the same wrapText, the same expandTabs, the same hanging
+// continuation indent and the same banded rail (renderToRail) — and then keeps at most maxRows
+// physical rows, ending the last kept row in
 // clipTail when it dropped any. Handed text that fits, it returns hangingWrap's own lines and
 // clipped false, so a caller can reach for it unconditionally.
 //
@@ -94,9 +169,10 @@ func clipWrap(th theme, style lipgloss.Style, marker, text string, width, maxRow
 		prefixed = prefixed[:maxRows]
 		prefixed[maxRows-1] = fitClipTail(th, prefixed[maxRows-1], width)
 	}
+	pw := hangPrefixWidth(th, marker, width)
 	out := make([]string, len(prefixed))
 	for i, ln := range prefixed {
-		out[i] = style.Render(ln)
+		out[i] = renderHangingRow(th, style, ln, pw, width)
 	}
 	return out, clipped
 }

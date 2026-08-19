@@ -704,7 +704,12 @@ plain, whether the lines came from a diff's own hunks, an edit's replacements or
 content — one reading for "added" and one for "removed", so a reader never learns the pair twice.
 The signal is the BACKGROUND: the text of a diff line wears the same detail tone as every other
 line of its block, collapsed or open, and the band under it — the same band in both states — is
-what says which way the line went.
+what says which way the line went. The band runs **full width**: it carries on past the last glyph
+to the block's own wrap rail, under a short line's trailing space and under a wrapped line's
+continuation rows alike, so a body of unequal lines reads as one field with a straight right edge.
+The chrome beside it is not banded — an open member's `│` gutter, a branch list's `┝`/`┕` elbow and
+the blank indent every continuation row hangs under all stay in the detail tone, so the band starts
+where the text does: it is the text's field and never the frame's.
 
 **Blank lines.** Exactly one empty line between blocks, never more. Assistant text is trimmed
 of its leading and trailing blank lines, and interior runs of two or more blank lines collapse

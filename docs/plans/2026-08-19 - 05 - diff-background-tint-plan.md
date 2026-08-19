@@ -183,7 +183,25 @@ states and the state's plain tone as foreground.
 
 **Commit:** `feat(tui): diff lines carry a background tint with plain-tone text`
 
-## 4. Full-width tint in the stacked and flat frames
+## 4. Full-width tint in the stacked and flat frames — ✅ DONE (2026-08-19)
+
+NOTES (2026-08-19): `gutteredWrap` is in `internal/tui/toolblock.go`, not in wrap.go as the item's text has
+it; it was edited there and takes the shared rule from the wrap.go helper (`renderToRail`). No move — the
+plan's own sequencing note asks for the anchor to be the function name.
+NOTES (2026-08-19): the hanging rails (`hangingWrap`, `clipWrap`) split their prefix off exactly as
+`gutteredWrap` does — `renderHangingRow` renders the marker / blank indent with the band's background
+cleared and bands only the text, to the rail left of the prefix. Without the split the ┝/┕ branch glyph
+and the hanging indent were painted inside the band, which ratified call 3 rules out.
+NOTES (2026-08-19): no golden expectation needed updating. `renderPlain` (transcript_test.go) strips ANSI
+AND trims trailing spaces, so every stacked/flat plain golden is blind to the pad; the two styled
+expectations that pinned the old un-split, un-filled band — `TestRenderDiffDetailStandalone` and
+`TestDiffLinesKeepTheirColourInBothBlockStates` — were rewritten to the full-width contract.
+NOTES (2026-08-19): `layout.md` was touched beyond the item's Files list — its "A change is coloured the one
+way" paragraph described the band without stating its width or naming the chrome it stops at, which the
+full-width rule makes an omission rather than a description. Four sentences, prose only.
+NOTES (2026-08-19): in the stacked frame the line NUMBER rides inside the band, not beside it: it is
+composed into `detailLine.Text` by `stackedRow.line` (toolpresent.go) long before any wrap rail sees the
+row, so no change in wrap.go can hold it out. See the DEFER line.
 
 **Source:** ratified calls 2, 3, 6. Depends on item 3.
 
