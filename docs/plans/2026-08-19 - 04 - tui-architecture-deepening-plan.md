@@ -715,7 +715,17 @@ internal/tui/doc.go
 
 **Commit:** `refactor(tui): give entryKind a behaviour table with a completeness test`
 
-## 24. Name the sub-agent run-head predicates
+## 24. Name the sub-agent run-head predicates — ✅ DONE (2026-08-20)
+
+NOTES (2026-08-20): `internal/tui/toolview.go` is outside the item's Files line, for the one reason the change created — the codec's "third derivation" is asked of a decoded `toolView`, before any entry exists, so the NAME half of the rule became `toolView.headsRun()` and lives in the file that bears the type's name (item 23's house rule); `entry.headsRun()` is the kind plus that card rule, so the two can never disagree about what a delegation is.
+
+NOTES (2026-08-20): the three predicates are methods on `entry` and stayed in `transcript.go` — where the promoted `headsSubAgentRun` already lived and where `entry` is declared — rather than moving beside `subAgentToolName` in `subagentblock.go`: the const is read from `transcript.go` today already, and the scrollback model and the codec must not read a RENDERER file for a fact they both ask.
+
+NOTES (2026-08-20): the `!done`-vs-phase distinction is stated on `opensRun` (why openness reads the call's own pairing), and `subAgentReported`'s doc — the site the review cites — was left as written, because it explains why THAT predicate reads the phase and is the other question's own home. The two now name each other, so the distinction is remembered once per question instead of at each call site.
+
+NOTES (2026-08-20): two sites keep a conjunct of their own on purpose. `subAgentGist` still stops its walk at the most recent OPEN tool call whatever tool it is and only then asks `e.headsRun()` — folding it into `opensRun()` would walk PAST a non-delegation and change the answer. `transcript.continuesOpenRun` still reads `subAgentHeads(entries, head) && !entries[head].done` because it asks the open-head question of a POSITION that may be -1, which is the bounds-checked form `subAgentHeads` exists for.
+
+NOTES (2026-08-20): the item's Files line names no test file; the three predicates' unit tests landed in the existing `transcript_test.go` (`TestRunHeadPredicates`), beside the code they pin, per the `{source}_test.go` convention rather than as a new file. No existing test expectation changed.
 
 **Source:** review §Candidate 11, "Related (do together)". Depends on item 23.
 

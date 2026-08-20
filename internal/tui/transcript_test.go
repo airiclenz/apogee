@@ -2902,3 +2902,84 @@ func TestSubAgentUsageFoldsTheChildsRunningTotals(t *testing.T) {
 		}
 	})
 }
+
+// TestRunHeadPredicates pins the three questions the package asks of a sub-agent run head against
+// the conjuncts the twelve call sites used to spell inline, so a site can no longer quietly ask a
+// narrower or a wider one than it means: [entry.headsRun] is the kind AND the retained tool name,
+// [entry.opensRun] narrows that by the CALL's own pairing, and [entry.headsRunFor] narrows it by
+// the spawning call id.
+func TestRunHeadPredicates(t *testing.T) {
+	t.Parallel()
+
+	// A run head as every site meets one: a committed sub_agent call, still open, carrying the id
+	// its run is named by. Each case says only what it changes about that.
+	head := func(mutate func(*entry)) entry {
+		e := entry{kind: entryToolCall, callID: "s1", tool: toolView{Label: "Sub-Agent", name: subAgentToolName}}
+		if mutate != nil {
+			mutate(&e)
+		}
+		return e
+	}
+
+	t.Run("headsRun is the kind and the retained name", func(t *testing.T) {
+		t.Parallel()
+
+		for _, tc := range []struct {
+			name string
+			e    entry
+			want bool
+		}{
+			{"a sub_agent call block", head(nil), true},
+			{"a call to any other tool", head(func(e *entry) { e.tool.name = "read_file" }), false},
+			{"an entry of another kind carrying the name", head(func(e *entry) { e.kind = entryAssistant }), false},
+			{"a third-party tool wearing the label", head(func(e *entry) { e.tool.name = "delegate" }), false},
+			{"a delegation whose label was changed", head(func(e *entry) { e.tool.Label = "Delegate" }), true},
+			{"a delegation already over", head(func(e *entry) { e.done = true }), true},
+		} {
+			if got := tc.e.headsRun(); got != tc.want {
+				t.Errorf("%s: headsRun() = %v, want %v", tc.name, got, tc.want)
+			}
+		}
+	})
+
+	t.Run("opensRun reads the call's pairing and never the child's phase", func(t *testing.T) {
+		t.Parallel()
+
+		for _, tc := range []struct {
+			name string
+			e    entry
+			want bool
+		}{
+			{"an open head", head(nil), true},
+			{"a head whose result was paired in", head(func(e *entry) { e.done = true }), false},
+			{"a head whose child reported but whose result has not landed", head(func(e *entry) { e.phase = domain.SubAgentFinished }), true},
+			{"a head running", head(func(e *entry) { e.phase = domain.SubAgentStarted }), true},
+			{"an open call to another tool", head(func(e *entry) { e.tool.name = "read_file" }), false},
+		} {
+			if got := tc.e.opensRun(); got != tc.want {
+				t.Errorf("%s: opensRun() = %v, want %v", tc.name, got, tc.want)
+			}
+		}
+	})
+
+	t.Run("headsRunFor narrows by the spawning call id", func(t *testing.T) {
+		t.Parallel()
+
+		for _, tc := range []struct {
+			name  string
+			e     entry
+			spawn string
+			want  bool
+		}{
+			{"the head the id names", head(nil), "s1", true},
+			{"a sibling delegation", head(func(e *entry) { e.callID = "s2" }), "s1", false},
+			{"a call to another tool carrying the id", head(func(e *entry) { e.tool.name = "read_file" }), "s1", false},
+			{"an id asked of a head that carries none", head(func(e *entry) { e.callID = "" }), "", true},
+			{"a named head asked for no id at all", head(nil), "", false},
+		} {
+			if got := tc.e.headsRunFor(tc.spawn); got != tc.want {
+				t.Errorf("%s: headsRunFor(%q) = %v, want %v", tc.name, tc.spawn, got, tc.want)
+			}
+		}
+	})
+}

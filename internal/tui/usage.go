@@ -195,7 +195,7 @@ func (m Model) usageRows() []popupRow {
 func (m Model) usageSubAgentRows() (rows []popupRow, total usageTotals) {
 	for i := range m.transcript.entries {
 		head := m.transcript.entries[i]
-		if head.kind != entryToolCall || head.tool.name != subAgentToolName || head.usage.Calls <= 0 {
+		if !head.headsRun() || head.usage.Calls <= 0 {
 			continue
 		}
 		name, _ := clipCells(m.th, usageIndent+usageAgentName(head), usageNameCells)

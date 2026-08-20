@@ -518,6 +518,16 @@ type toolView struct {
 	args map[string]any
 }
 
+// headsRun reports whether this card is a delegation's — the sub_agent call whose block heads a run
+// ([entry.headsRun] is the same question asked of the entry that carries the card). It matches the
+// RETAINED tool name rather than the "Sub-Agent" label for [subAgentSpan]'s reason: a relabelling
+// must not switch the rule off, and a third-party tool that happens to share the label must not
+// switch it on. That the answer is knowable from the name alone is what lets a decoded record
+// re-derive its own solo mark rather than trust one the wire may predate (fromWireToolView).
+func (tv toolView) headsRun() bool {
+	return tv.name == subAgentToolName
+}
+
 // toolOutcome is what a prose extractor returns: the one-line Summary that fills the branch
 // row's outcome slot, and the Details body laid out beneath it. Either half may be empty
 // — a fixed result sentence is summary-only ("HTTP 200 OK") and multi-line free-form output is

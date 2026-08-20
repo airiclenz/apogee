@@ -598,7 +598,7 @@ func fromWireToolView(w *wireToolView, done bool) toolView {
 	// same name the presenter uses (askUserToolName), so the two rules cannot drift apart.
 	//
 	// Nothing else is re-derived here; every other Solo is a result-time verdict decode cannot reach.
-	if tv.name == subAgentToolName || (tv.name == askUserToolName && done && len(w.Details) > 0) {
+	if tv.headsRun() || (tv.name == askUserToolName && done && len(w.Details) > 0) {
 		tv.solo = true
 	}
 	if len(w.Details) > 0 {

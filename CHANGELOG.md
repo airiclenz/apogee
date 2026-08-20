@@ -222,6 +222,20 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **The sub-agent run head is one question with a name (`internal/tui/transcript.go`).** "Is this
+  entry the call block a delegation's run hangs off" was spelled inline twelve times across four
+  files — the kind, the retained tool name, and whichever of `done` or the spawning call id that
+  site also cared about — while the one predicate that had been extracted had a single caller. Three
+  named questions replace them all: `headsRun` (the head itself), `opensRun` (a head whose result
+  has not been paired in yet) and `headsRunFor` (the head one spawning call id names), with the
+  name half of the rule sitting on the tool card as `toolView.headsRun` — which is the form the
+  transcript codec re-derives a replayed record's solo mark through. The `done`-versus-phase
+  distinction each `!done` site had to remember — a delegate that reported first is still an OPEN
+  head until its siblings' results burst in beside its own (ADR 0039) — is written once now, on
+  `opensRun`, beside the pointer to `subAgentReported`, which is the question that reads the phase
+  instead. New unit tests pin all three predicates against the conjuncts the sites used to spell.
+  Behaviour-preserving throughout; nothing the user sees changed.
+
 - **`entryKind` answers for itself (`internal/tui/entrykind.go`).** Six kind-keyed rules lived in
   four files and had to be remembered together: the wire name map and its inverse in the transcript
   codec, the block-state gate and the host-note test in the scrollback model, the paint cache's

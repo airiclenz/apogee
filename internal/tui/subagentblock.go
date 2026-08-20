@@ -26,7 +26,7 @@ const subAgentToolName = "sub_agent"
 // tool block with nothing behind it, and renderView paints it as one.
 func subAgentSpan(entries []entry, i int) int {
 	head := entries[i]
-	if head.kind != entryToolCall || head.tool.name != subAgentToolName {
+	if !head.headsRun() {
 		return 0
 	}
 	n := 0
@@ -55,7 +55,7 @@ func subAgentSpan(entries []entry, i int) int {
 // that faulted before its first event — is framed by neither answer, and must not be: a frame opened
 // there would enclose nothing at all, and the next block would close it again in the very next row.
 func subAgentFramed(head entry, span int) bool {
-	if head.kind != entryToolCall || head.tool.name != subAgentToolName {
+	if !head.headsRun() {
 		return false
 	}
 	return span > 0 || (head.expanded && !head.done)
@@ -100,7 +100,7 @@ func insideCollapsedRun(entries []entry, run runRef) bool {
 // runHead finds the sub_agent call block that opened the run spawn names.
 func runHead(entries []entry, spawn string) (entry, bool) {
 	for i := len(entries) - 1; i >= 0; i-- {
-		if h := entries[i]; h.kind == entryToolCall && h.callID == spawn && h.tool.name == subAgentToolName {
+		if h := entries[i]; h.headsRunFor(spawn) {
 			return h, true
 		}
 	}
@@ -116,8 +116,7 @@ func insideCollapsedRunAtDepth(entries []entry, depth int) bool {
 	for level := depth - 1; level >= 0; level-- {
 		for i := len(entries) - 1; i >= 0; i-- {
 			head := entries[i]
-			if head.kind != entryToolCall || head.done ||
-				head.depth != level || head.tool.name != subAgentToolName {
+			if !head.opensRun() || head.depth != level {
 				continue
 			}
 			if !head.expanded {
@@ -364,7 +363,7 @@ const scheduledSummary = "scheduled"
 // same life — and being framed and being scheduled are mutually exclusive by construction, which is
 // what keeps the queued row out of the reading that would draw it a frame (renderSubAgentGroup).
 func subAgentScheduled(head entry, span int) bool {
-	if head.kind != entryToolCall || head.tool.name != subAgentToolName {
+	if !head.headsRun() {
 		return false
 	}
 	return head.phase != domain.SubAgentStarted && !subAgentReported(head) && !subAgentFramed(head, span)
@@ -572,7 +571,7 @@ func subAgentGist(head entry, span []entry) string {
 	}
 	for i := len(span) - 1; i >= 0; i-- {
 		if e := span[i]; e.kind == entryToolCall && !e.done {
-			if e.tool.name == subAgentToolName {
+			if e.headsRun() {
 				return delegatingSummary
 			}
 			return ""

@@ -307,7 +307,7 @@ func (t *transcript) runEnd(spawn string) int {
 		return len(t.entries)
 	}
 	for i := len(t.entries) - 1; i >= 0; i-- {
-		if h := t.entries[i]; h.kind == entryToolCall && h.callID == spawn && h.tool.name == subAgentToolName {
+		if h := t.entries[i]; h.headsRunFor(spawn) {
 			return i + 1 + subAgentSpan(t.entries, i)
 		}
 	}
@@ -358,7 +358,7 @@ func (t *transcript) continuesOpenRun(e entry, at int) bool {
 	switch {
 	case e.depth > 0:
 		head = enclosingBlock(t.entries, at, e.depth)
-	case headsSubAgentRun(e):
+	case e.headsRun():
 		head = prevSiblingAt(t.entries, at, e.depth)
 	}
 	return subAgentHeads(t.entries, head) && !t.entries[head].done
@@ -406,7 +406,7 @@ func (t *transcript) runName(spawn string) string {
 		return ""
 	}
 	for i := len(t.entries) - 1; i >= 0; i-- {
-		if h := t.entries[i]; h.kind == entryToolCall && h.callID == spawn && h.tool.name == subAgentToolName {
+		if h := t.entries[i]; h.headsRunFor(spawn) {
 			return h.tool.agentName
 		}
 	}
@@ -890,7 +890,7 @@ func childWindow(usage domain.UsageEvent, sessionWindow int) int {
 func (t *transcript) openSubAgentHead(callID string, depth int) *entry {
 	for i := len(t.entries) - 1; i >= 0; i-- {
 		head := &t.entries[i]
-		if head.kind != entryToolCall || head.done || head.tool.name != subAgentToolName {
+		if !head.opensRun() {
 			continue
 		}
 		if callID != "" {
@@ -1004,7 +1004,7 @@ func (t *transcript) finalizeNarration(run runRef) {
 // head is the run's own call block, taken by value: place may insert, and an insertion invalidates
 // every pointer into the entries slice.
 func (t *transcript) closeRun(head entry) {
-	if head.kind != entryToolCall || head.tool.name != subAgentToolName {
+	if !head.headsRun() {
 		return
 	}
 	run := runRef{depth: head.depth + 1, spawn: head.callID}
@@ -1101,7 +1101,7 @@ func (t *transcript) addToolResult(result domain.ToolResult, run runRef) {
 func (t *transcript) addSubAgentPhase(e domain.SubAgentPhaseEvent) {
 	for i := len(t.entries) - 1; i >= 0; i-- {
 		en := &t.entries[i]
-		if en.kind != entryToolCall || en.tool.name != subAgentToolName || en.callID != e.CallID {
+		if !en.headsRunFor(e.CallID) {
 			continue
 		}
 		en.phase = e.Phase
@@ -1344,15 +1344,39 @@ type subAgentBlock struct {
 // hangs off. An index outside the list answers false, which is what lets callers hand it the result
 // of a walk that may have found nothing.
 func subAgentHeads(entries []entry, i int) bool {
-	return i >= 0 && i < len(entries) && headsSubAgentRun(entries[i])
+	return i >= 0 && i < len(entries) && entries[i].headsRun()
 }
 
-// headsSubAgentRun is [subAgentHeads] asked of an entry rather than of a position — what place asks
-// of an entry it has not committed yet. It matches the retained tool name for [subAgentSpan]'s
-// reason: a relabelling must not switch the rule off, and a third-party tool sharing the
-// "Sub-Agent" label must not switch it on.
-func headsSubAgentRun(e entry) bool {
-	return e.kind == entryToolCall && e.tool.name == subAgentToolName
+// headsRun reports whether e is a delegation's call block — the head a sub-agent run hangs off, and
+// the entry every other question about a run is asked of ([subAgentSpan], [subAgentFramed],
+// [subAgentReported]). It is [subAgentHeads] asked of an entry rather than of a position — what
+// place asks of an entry it has not committed yet — and it reads the card's own rule
+// ([toolView.headsRun]), so the block and the entry carrying it can never disagree about what a
+// delegation is.
+func (e entry) headsRun() bool {
+	return e.kind == entryToolCall && e.tool.headsRun()
+}
+
+// opensRun is [entry.headsRun] narrowed to a run still OPEN, and reading `done` for that — rather
+// than the phase [subAgentReported] reads — is the whole of the distinction. The sites asking this
+// are asking whether the CALL is still waiting for its result: the head a delegated reading folds
+// into (openSubAgentHead), the enclosing run a streaming preview would be drawn inside
+// (insideCollapsedRunAtDepth). A child's own FINISHED phase does not
+// close that question — in a fan-out the results burst together once every child has joined (ADR
+// 0039 decision 4), so a member that reported first is still an unpaired head for as long as its
+// slowest sibling runs, and it is exactly that head a late reading, or an entry arriving beneath
+// it, still belongs to. "Has this delegation reported?" is the other question and has an answer of
+// its own ([subAgentReported]); neither may be spelled with the other's conjunct.
+func (e entry) opensRun() bool {
+	return e.headsRun() && !e.done
+}
+
+// headsRunFor reports whether e is the head of the run the sub_agent call callID opened — what a
+// walk asks when it is looking for one NAMED run rather than for any. The id is compared as given:
+// a caller handing it an empty one matches a head that carries none, exactly as the inline
+// comparison it replaces did.
+func (e entry) headsRunFor(callID string) bool {
+	return e.headsRun() && e.callID == callID
 }
 
 // subAgentGroup is the group entries[i] opens, or nil when it opens none: the adjacent delegations
