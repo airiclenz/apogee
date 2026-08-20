@@ -2,7 +2,6 @@ package tui
 
 import (
 	tea "charm.land/bubbletea/v2"
-	lipgloss "charm.land/lipgloss/v2"
 )
 
 // ----------------------------------------------------------------------------
@@ -230,21 +229,9 @@ func (m Model) reportKey(r reportKind, msg tea.KeyPressMsg) (bool, tea.Model, te
 // Where a report is drawn, and what the pointer does there
 // ----------------------------------------------------------------------------
 
-// transcriptSlotPanes is the transcript-side overlay slot in View's own stacking order (model.go):
-// the approval-or-ask prompt, the /sessions browser, the /model | /server picker, the /settings pane,
-// then the two reports that close it. Every rectangle in the slot begins below the blocks BEFORE it in
-// this run, so the order is stated HERE, once — the two `above` slices this replaced already differed
-// by one element, and the next pane to join the slot would have had to be remembered into both.
-//
-// It is a list of its own rather than a reading of the framePane constants, whose order is the order
-// panes GIVE WAY in (framePane) — a different question that happens to have the same answer today. The
-// autocomplete dropdown and the staged band are in the OTHER slot, above the input box, and are no
-// part of this arithmetic.
-var transcriptSlotPanes = []framePane{panePrompt, paneBrowser, panePicker, paneSettings, paneUsage, paneInspector}
-
 // block is the rendered block of one pane of the frame, "" when that pane is not on it. It is what
-// lets the slot's order be WALKED (transcriptSlotPanes) instead of re-listed field by field at every
-// rectangle in it.
+// lets the slot's order be WALKED (transcriptSlotPanes, model.go) instead of re-listed field by field
+// at every rectangle in it.
 func (o frameOverlays) block(p framePane) string {
 	switch p {
 	case panePrompt:
@@ -269,8 +256,9 @@ func (o frameOverlays) block(p framePane) string {
 // many rows it takes. ok is false when it is not on the frame at all — closed, or given way to a
 // window too short to seat it (frameRowPlan).
 //
-// It is settingsPaneRect (mouse.go) with the run of blocks above it read off the slot's own stated
-// order rather than listed here, which is what makes the same body answer for both reports.
+// It is settingsPaneRect (mouse.go) asking the frame's published geometry under a different pane name:
+// the slot is walked ONCE, by the composer that draws it (stackTranscriptSlot, model.go), so the same
+// body answers for both reports and for every other tenant of the slot.
 func (m Model) reportPaneRect(r reportKind) (y0, h int, ok bool) {
 	if !m.reportState(r).open {
 		// Asked before the frame is composed, because every click and every wheel notch asks: with no
@@ -278,21 +266,7 @@ func (m Model) reportPaneRect(r reportKind) (y0, h int, ok bool) {
 		// put a render on the path of a click the pane has no part in.
 		return 0, 0, false
 	}
-	ov := m.frameOverlays()
-	self := ov.block(r.pane())
-	if self == "" {
-		return 0, 0, false
-	}
-	y0 = ov.transcriptRows(m.transcriptBudget()) + gapHeight
-	for _, p := range transcriptSlotPanes {
-		if p == r.pane() {
-			break
-		}
-		if above := ov.block(p); above != "" {
-			y0 += lipgloss.Height(above)
-		}
-	}
-	return y0, lipgloss.Height(self), true
+	return m.frameSpans().pane(r.pane())
 }
 
 // reportWindow is the row window a report is showing as the frame DREW it: which rows of its list the

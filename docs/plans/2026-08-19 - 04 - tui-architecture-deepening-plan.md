@@ -591,7 +591,11 @@ internal/tui/settingsapply.go, internal/tui/doc.go
 
 **Commit:** `refactor(tui): split settings.go along its surface seams`
 
-## 20. The frame publishes its geometry once
+## 20. The frame publishes its geometry once — ✅ DONE (2026-08-20)
+
+NOTES (2026-08-20): moved `transcriptSlotPanes` from reportpane.go to model.go beside `View`, per the item's "stacking order is stated once, in View", carrying View's per-pane placement prose onto the list; `frameOverlays.block` stays in reportpane.go.
+
+NOTES (2026-08-20): two files beyond the item's list — doc.go (its map claimed the slot's order is stated in reportpane.go) and mouse_test.go (two added guard tests: published spans equal a fresh composition, and the click chain never carries its frame back to Bubble Tea). No existing test changed.
 
 **Source:** review §Candidate 3. Depends on item 13.
 

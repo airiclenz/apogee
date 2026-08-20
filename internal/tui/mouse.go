@@ -382,8 +382,9 @@ func selectionText(value string, a, b int) string {
 // no more of the frame than its list needs, so the transcript above it keeps its pointer.
 //
 // Every GEOMETRY question the chain asks is put to the PRE-CLICK frame — pre below, the Model value as
-// it stood when the button went down (the Model is a value, ADR 0011, so the copy is the snapshot) —
-// while every state predicate and every mutation runs on the live model. The distinction is load-bearing
+// it stood when the button went down (the Model is a value, ADR 0011, so the copy is the snapshot),
+// carrying that frame's published spans so the chain composes it once and reads it thereafter — while
+// every state predicate and every mutation runs on the live model. The distinction is load-bearing
 // because a dismissal re-lays the frame under the very click that caused it: the transcript-side slot is
 // bottom-anchored (frameOverlays.transcriptRows), so dropping the /usage report grows the /inspect pane
 // UPWARD, and the transcript grows back down into whatever neither pane takes. Asked of the mutated
@@ -394,7 +395,10 @@ func (m Model) handleMouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
 	if msg.Button != tea.MouseLeft {
 		return m, nil
 	}
-	pre := m // the frame the click was aimed at; every rect below is resolved against it
+	// The frame the click was aimed at, carrying its geometry with it: the composition happens once
+	// here, and every rect below is a READ of it rather than a fresh render of every overlay
+	// ([Model.withFrameSpans], model.go).
+	pre := m.withFrameSpans()
 	if next, claimed := m.handleSettingsClick(pre, msg); claimed {
 		return next, nil
 	}
@@ -746,12 +750,11 @@ func transcriptSelectionText(measure widthAuthority, lines []string, a, b conten
 // and how many rows the pane takes. ok is false when it is not on the frame at all — closed, or given
 // way to a window too short to seat it (settingsGiveWayNote).
 //
-// The row is derived from the frame's OWN stacking rather than counted up from the bottom the way the
-// input box is (inputContentRect): View draws the transcript first, then the single blank gap row, then
-// the transcript-side overlay slot this pane shares with the approval prompt, the browser and the
-// picker. Every one of those terms is named here — the slot's other tenants included, though none of
-// them can be open beside this pane today — because an omitted term is exactly the off-by-one that puts
-// the click on the wrong row.
+// The row is READ off the frame's own stacking rather than counted up from the bottom the way the
+// input box is (inputContentRect): the frame publishes where every pane of the transcript-side slot
+// landed while it composes them (stackTranscriptSlot, model.go), and this is a lookup into that. No
+// term of the sum is restated here, because an omitted term is exactly the off-by-one that puts the
+// click on the wrong row — and the slot has gained tenants since this pane joined it.
 func (m Model) settingsPaneRect() (y0, h int, ok bool) {
 	if !m.settings.open {
 		// Asked before the frame is composed, because every click and every wheel notch asks: with no
@@ -759,17 +762,7 @@ func (m Model) settingsPaneRect() (y0, h int, ok bool) {
 		// a render on the path of a click the pane has no part in.
 		return 0, 0, false
 	}
-	ov := m.frameOverlays()
-	if ov.settings == "" {
-		return 0, 0, false
-	}
-	y0 = ov.transcriptRows(m.transcriptBudget()) + gapHeight
-	for _, above := range []string{ov.prompt, ov.browser, ov.picker} {
-		if above != "" {
-			y0 += lipgloss.Height(above)
-		}
-	}
-	return y0, lipgloss.Height(ov.settings), true
+	return m.frameSpans().pane(paneSettings)
 }
 
 // settingsPaint is the open key list as it was DRAWN this frame: the display rows the pane composed,

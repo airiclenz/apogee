@@ -3474,3 +3474,52 @@ func TestClickOnAVacatedRowSelectsNoTranscriptLine(t *testing.T) {
 			after.transcriptSel)
 	}
 }
+
+// ----------------------------------------------------------------------------
+// The frame's published geometry (model.go, frameSpans)
+// ----------------------------------------------------------------------------
+
+// TestPublishedFrameSpansMatchAFreshComposition pins the one thing publishing the geometry onto the
+// pre-gesture snapshot is allowed to change: nothing. A Model carrying a composed frame answers every
+// rectangle exactly as the same Model composing one on demand does — otherwise the saving would have
+// bought a click a frame of its own.
+func TestPublishedFrameSpansMatchAFreshComposition(t *testing.T) {
+	m := bothPanesModel(t, 30)
+
+	published := m.withFrameSpans()
+	for p := framePane(0); p < paneKinds; p++ {
+		wantY, wantH, wantOK := m.frameSpans().pane(p)
+		gotY, gotH, gotOK := published.frameSpans().pane(p)
+		if gotY != wantY || gotH != wantH || gotOK != wantOK {
+			t.Errorf("pane %d reads (%d, %d, %v) off the published frame, want (%d, %d, %v)",
+				p, gotY, gotH, gotOK, wantY, wantH, wantOK)
+		}
+	}
+}
+
+// TestTheClickChainKeepsItsFrameToItself is the other half of that bargain. The published spans
+// describe ONE frame and are exactly as current as the gesture aimed at it, so they ride the pre-click
+// snapshot and nothing else: a model that carried them back to Bubble Tea would answer the NEXT click
+// with the geometry of a frame the human is no longer looking at.
+func TestTheClickChainKeepsItsFrameToItself(t *testing.T) {
+	m := bothPanesModel(t, 30)
+	usageTop, _, ok := m.usagePaneRect()
+	if !ok {
+		t.Fatal("the report is not on the frame")
+	}
+
+	for _, tc := range []struct {
+		name string
+		y    int
+	}{
+		{"a click the report claims", usageTop},
+		{"a click that falls through to the transcript", 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			after := step(t, m, leftClick(10, tc.y))
+			if after.spans.composed {
+				t.Error("the model returned to Bubble Tea carries the click's frame onward")
+			}
+		})
+	}
+}

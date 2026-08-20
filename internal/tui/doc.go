@@ -634,7 +634,8 @@
 // into Update; approver.go and asker.go the two cross-goroutine rendezvous that park a Step on a
 // human ([uiApprover] on an approval decision, [uiAsker] on a typed answer); worker.go the
 // cancellable engine driver; model.go the [Model] itself — the lifecycle state machine, the
-// layout, the status line and the footer; sessionsave.go the record-write cluster lifted out of
+// layout, the frame's one stacking order and the block spans View publishes while walking it
+// ([frameSpans], read by every pane rectangle), the status line and the footer; sessionsave.go the record-write cluster lifted out of
 // model.go (ADR 0043) — the assembled [savePayload], the per-Turn and idle saves, and the
 // single-flight queue that orders every Save, Rename, Delete, Rotate and Activate against one
 // another (the Model still owns the three fields it latches on); approval.go the approval-decision
@@ -733,8 +734,9 @@
 // within one (depth, callID) wire stream, since the one ring interleaves every run's traffic;
 // reportpane.go the pane both of those two ARE — the reportPane value ({open, top}), the key
 // contract, the dismiss, the budget→render path and the whole mouse family (rect, window, click,
-// wheel), written once and named twice, with the transcript-side slot's stacking order stated there
-// as the one list every rectangle in it walks rather than re-listed per rect; popup.go the one bordered pane every overlay — those three, the autocomplete
+// wheel), written once and named twice, with every rectangle in the transcript-side slot a lookup
+// into the geometry View publishes while it stacks that slot (model.go) rather than a prefix sum of
+// its own; popup.go the one bordered pane every overlay — those three, the autocomplete
 // dropdown, the ask and approval prompts — is painted through; logo.go the embedded start-up wordmark;
 // actuation.go the launcher-verb latch and the folds that close one out (ADR 0029) — at most one
 // world-changing call in flight per address, narrated while it blocks, with the next Beat rather

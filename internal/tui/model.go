@@ -350,6 +350,13 @@ type Model struct {
 	// it names through a scroll or a stream — refreshViewport keeps it standing on a real click
 	// surface (blockCursor.clamp) exactly as it keeps the map above it honest.
 	cursor blockCursor
+	// spans is the geometry of the frame a pointer gesture was aimed at: where each boxed overlay of
+	// the transcript-side slot landed, published onto the pre-gesture snapshot ([Model.withFrameSpans])
+	// so every rectangle the gesture asks for is a READ of one composition rather than a composition
+	// of its own. The zero value carries no frame and composes on demand ([Model.frameSpans]). A bool
+	// and a fixed-size array of plain ints, so it rides the value-copied Model with no exception to
+	// ADR 0011's copy rule.
+	spans frameSpans
 }
 
 // newModel builds the initial idle Model. parent is the program context the worker derives
@@ -1907,6 +1914,134 @@ func (m Model) transcriptRows() int {
 	return m.frameOverlays().transcriptRows(m.transcriptBudget())
 }
 
+// transcriptSlotPanes is the frame's transcript-side overlay slot, in the ONE order View stacks it:
+// the approval-or-ask prompt, the /sessions browser, the /model | /server picker, the /settings pane,
+// then the two reports that close it. Every rectangle in the slot begins below the blocks BEFORE it in
+// this run, so the order is stated HERE, once: View walks it to paint (stackTranscriptSlot) and every
+// rect the pointer asks is a lookup into what that walk published (frameSpans). The two hand-written
+// `above` slices this replaced already differed by one element, and View's own appends were a third
+// statement of the same order — a pane that joined the frame without joining all three was a bug none
+// of them could be read to find.
+//
+// The order is not arbitrary, and each position is a decision:
+//
+// The /sessions browser and the /model | /server picker take the approval/ask prompt's position
+// because none of them co-occur — both overlays are idle-only and modal, and the prompts belong to
+// busy states.
+//
+// The /settings pane shares that position too, and on every window it is seated in it is the only
+// thing in the slot: its verb is idle-only and it swallows every key, so no prompt, browser, picker or
+// dropdown can be up beside it. What differs is its height — it was granted the transcript's whole
+// budget (frameRowPlan), so the block above it is usually nothing at all.
+//
+// The /usage report is the one pane here that CAN be up beside another: its verb is whileRunning, so
+// it opens over an approval or ask prompt the run is blocked on. It goes near the end of the slot —
+// nearest the chrome — so the surface the human is answering keeps the position it has when the report
+// is not up. The /inspect pane closes the slot under the report it is shaped after, for that same
+// reason: its verb is whileRunning as well, and the surface being answered keeps its position when the
+// raw-protocol view is opened over it.
+//
+// It is a list of its own rather than a reading of the framePane constants, whose order is the order
+// panes GIVE WAY in (framePane) — a different question that happens to have the same answer today. The
+// autocomplete dropdown and the staged band are in the OTHER slot, above the input box, and are no
+// part of this arithmetic.
+var transcriptSlotPanes = []framePane{panePrompt, paneBrowser, panePicker, paneSettings, paneUsage, paneInspector}
+
+// blockSpan is where one block of the composed frame landed: the screen row its first line is drawn on
+// and how many rows it takes, so the block owns the rows [y0, y0+rows). The zero value says the block
+// is not on the frame at all.
+type blockSpan struct {
+	y0   int // the screen row the block's first line is drawn on
+	rows int // how many rows it takes; zero means it is not on this frame
+}
+
+// frameSpans is the geometry of ONE composed frame: where each boxed overlay of the transcript-side
+// slot landed, indexed by its framePane. It is what View knows while stacking the blocks and used to
+// throw away — three near-identical prefix sums re-derived it, one per pane, on every click and every
+// wheel notch, each of them re-rendering every overlay of the frame to do so.
+//
+// It is a bool and a fixed-size ARRAY of plain ints: it copies with the Model by value and holds no
+// pointer, no map and no no-copy type, so no two Model values can share a byte of it (ADR 0011).
+//
+// composed separates "no pane is on the frame" from "this value was never composed" — the spans alone
+// cannot tell those apart, and the difference is what lets a snapshot carry a drawn frame's geometry
+// ([Model.withFrameSpans]) while every other Model composes its own rather than answering from a frame
+// that was never drawn.
+//
+// The autocomplete dropdown's entry is always the zero span: it is in the other slot, hugging the
+// input box, and no pointer addresses it by rectangle.
+type frameSpans struct {
+	composed bool
+	panes    [paneKinds]blockSpan
+}
+
+// pane reports where the named pane is drawn: the screen row its top border lands on and how many rows
+// it takes. ok is false when it is not on this frame at all — closed, or given way to a window too
+// short to seat it (frameRowPlan) — which is the answer every rectangle in the package hands back.
+func (s frameSpans) pane(p framePane) (y0, h int, ok bool) {
+	span := s.panes[p]
+	if span.rows == 0 {
+		return 0, 0, false
+	}
+	return span.y0, span.rows, true
+}
+
+// stackTranscriptSlot appends the open panes of the transcript-side slot to rows, in the order the
+// frame states for it (transcriptSlotPanes), and reports where each of them landed. y0 is the screen
+// row the first block of the slot starts on: the rows the transcript kept plus the frame's single
+// blank gap row, which falls ABOVE the slot rather than below it.
+//
+// It is the frame's one composition of that slot, and it publishes the geometry instead of discarding
+// it. View paints the blocks it returns; every rect the pointer asks — the /settings pane's, either
+// report's — is a lookup into the spans ([Model.frameSpans]). So the rows a pane is DRAWN on and the
+// rows a click may address are the same rows by construction, rather than by two arithmetics that
+// agree today.
+//
+// A closed pane contributes nothing: it takes no rows, goes on no frame, and keeps the zero span —
+// the same answer as a pane the window was too short to seat (frameRowPlan), which is right, because
+// neither is on the frame and the pointer has nothing to name in either case.
+func stackTranscriptSlot(rows []string, ov frameOverlays, y0 int) ([]string, frameSpans) {
+	spans := frameSpans{composed: true}
+	for _, p := range transcriptSlotPanes {
+		block := ov.block(p)
+		if block == "" {
+			continue
+		}
+		h := lipgloss.Height(block)
+		spans.panes[p] = blockSpan{y0: y0, rows: h}
+		y0 += h
+		rows = append(rows, block)
+	}
+	return rows, spans
+}
+
+// frameSpans is where the frame this Model composes draws each of its boxed overlays. A Model a
+// pointer gesture has published its frame onto answers from that value; every other one composes the
+// overlays and walks the slot here — WITHOUT painting the transcript, which no rectangle depends on
+// and every press would otherwise pay for.
+func (m Model) frameSpans() frameSpans {
+	if m.spans.composed {
+		return m.spans
+	}
+	ov := m.frameOverlays()
+	_, spans := stackTranscriptSlot(nil, ov, ov.transcriptRows(m.transcriptBudget())+gapHeight)
+	return spans
+}
+
+// withFrameSpans returns this Model carrying the geometry of the frame it composes, so the rectangles
+// a pointer gesture asks of it are reads of ONE composition instead of one composition each: a click
+// arriving with the /settings pane up rendered every overlay of the frame three times over before it
+// found the row it landed on.
+//
+// It is put on the pre-gesture SNAPSHOT only (handleMouseClick, mouse.go) and never on the Model that
+// goes back to Bubble Tea. The value describes one frame and is exactly as current as the gesture that
+// was aimed at it: a model carrying it into the next Update would answer the next click with the
+// geometry of a frame the human is no longer looking at.
+func (m Model) withFrameSpans() Model {
+	m.spans = m.frameSpans()
+	return m
+}
+
 // frameBlocks is the most blocks one frame stacks — the transcript, the seven overlays, the blank
 // gap row, the ▔ hairline, the status line, the input box, the footer, and the ▁ hairline — so the
 // frame's slice is allocated once at its worst case.
@@ -1949,9 +2084,10 @@ func (m Model) View() tea.View {
 	// measure this very shrink instead of compounding it. At zero rows the transcript is off the
 	// frame entirely — the overlays took the whole budget, a draft grew the box into it, or the
 	// window is too short to pay for a transcript row at all (transcriptBudget).
-	if h := ov.transcriptRows(m.transcriptBudget()); h > 0 {
+	transcriptHeight := ov.transcriptRows(m.transcriptBudget())
+	if transcriptHeight > 0 {
 		vp := m.viewport
-		vp.SetHeight(h)
+		vp.SetHeight(transcriptHeight)
 		body := m.applyStickyHeader(vp.View())
 		body = m.highlightTranscript(body)  // overlay any transcript drag-selection on the composed rows
 		body = m.highlightBlockCursor(body) // and the keyboard cursor's bar (blockcursor.go — they never coexist)
@@ -1969,39 +2105,12 @@ func (m Model) View() tea.View {
 	// frame spends exactly one gap row, so the row arithmetic (frameFixedRows, transcriptBudget)
 	// does not know or care which side of the slot it falls on.
 	rows = append(rows, "")
-	if ov.prompt != "" {
-		rows = append(rows, ov.prompt)
-	}
-	// The /sessions browser and the /model | /server picker share the approval/ask prompt's slot
-	// (none of them co-occur — both overlays are idle-only and modal, the prompts belong to busy
-	// states).
-	if ov.browser != "" {
-		rows = append(rows, ov.browser)
-	}
-	if ov.picker != "" {
-		rows = append(rows, ov.picker)
-	}
-	// The /settings pane shares that slot too, and on every window it is seated in it is the only
-	// thing in it: its verb is idle-only and it swallows every key, so no prompt, browser, picker or
-	// dropdown can be up beside it. What differs is its height — it was granted the transcript's
-	// whole budget (frameRowPlan), so the block above it is usually nothing at all.
-	if ov.settings != "" {
-		rows = append(rows, ov.settings)
-	}
-	// The /usage report shares the slot as well, and it is the one pane there that can be up beside
-	// another: its verb is whileRunning, so it can be opened over an approval or ask prompt the run
-	// is blocked on. It goes last in the slot — nearest the chrome — so the surface the human is
-	// answering keeps the position it has when the report is not up.
-	if ov.usage != "" {
-		rows = append(rows, ov.usage)
-	}
-	// The /inspect pane closes the slot, under the report it is shaped after: its verb is
-	// whileRunning too, so it is the other pane that can be up beside a prompt the run is blocked on,
-	// and the surface the human is answering keeps its position when the raw-protocol view is opened
-	// over it.
-	if ov.inspector != "" {
-		rows = append(rows, ov.inspector)
-	}
+	// Then the transcript-side overlay slot — the approval or ask prompt, the /sessions browser, the
+	// picker, the /settings pane and the two reports — stacked in the one order the frame states for
+	// it and starting directly below that gap row. The walk also PUBLISHES where each pane landed;
+	// View has no use for the spans because it is painting, and the pointer reads them off the same
+	// composition rather than re-deriving a prefix sum per pane (transcriptSlotPanes, frameSpans).
+	rows, _ = stackTranscriptSlot(rows, ov, transcriptHeight+gapHeight)
 	// Then the ▔ top-edge hairline capping the chrome, the status line, the autocomplete overlay
 	// (when open), the input box, the footer, and the ▁ hairline closing the screen under it.
 	rows = append(rows, m.topRule(), m.statusLine())

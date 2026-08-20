@@ -222,6 +222,18 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **The frame publishes where each pane landed (`internal/tui/model.go`).** `View`'s composer knew
+  every block's row span while stacking it and threw it away, so three near-identical prefix sums in
+  the pointer code rebuilt it — one per pane, on every click and every wheel notch, each re-rendering
+  every overlay of the frame to do so. The transcript-side slot is now stacked ONCE, in the single
+  order the frame states for it (`transcriptSlotPanes`, now beside `View` with the placement reasons
+  that were scattered through its appends), and that walk publishes each pane's `[y0, y0+h)` span.
+  The /settings pane's rectangle and both reports' are lookups into it rather than three sums that
+  merely agreed with each other. A pointer gesture also composes the frame once instead of once per
+  rectangle: the pre-click snapshot carries the geometry it was aimed at — a plain bool and a
+  fixed-size array of ints, so the value-copied `Model` needs no exception to ADR 0011 — and the
+  chain reads it thereafter. Behaviour-preserving: every mouse hit-test passes unchanged.
+
 - **`settings.go` is three files along its own seams.** The /settings pane was 2,482 lines because
   five clusters with nothing in common but the pane struct hung off it. Two files' worth moved out.
   `settingswatcher.go` is now the two ways the config file changes from OUTSIDE the pane — a row's ⏎
