@@ -101,6 +101,74 @@ band (same plan, item 3's amendment to ADR 0052); only the number is the miss.
 
 ---
 
+### Two shipped comments still point at the home their subject left
+
+**Status:** [ ] open 2026-08-20 — residual of
+`docs/plans/archived/2026-08-19 - 04 - tui-architecture-deepening-plan.md` items 21 and 33, which
+moved the code each comment describes without repointing the comment.
+
+- `internal/tui/prompteditor.go:83` — the `keyDisambiguation` field doc says the flag is set from
+  `tea.KeyboardEnhancementsMsg` "(the arm in model.go)". That arm (`internal/tui/model.go:757`) now
+  only delegates; the setter is `foldKeyboardEnhancements`, in this very file
+  (`internal/tui/prompteditor.go:258`). `internal/tui/doc.go:306` already names the new home, so the
+  two sites disagree.
+- `internal/tui/model.go:364` — the `lineTargets` field doc credits "(render.go)" with "what each
+  line is to a motionless click". That vocabulary is `lineTarget`/`lineMark`, which item 33 moved to
+  `internal/tui/blocktarget.go:47`. The other pointer in the same file (`internal/tui/model.go:1832`)
+  is correct — `render.go` is still the PRODUCER — so only the vocabulary reference is wrong.
+
+---
+
+### ADR 0053's adoption note credits the approval and ask panes with `clampSelection`
+
+**Status:** [ ] open 2026-08-20 — residual of
+`docs/plans/archived/2026-08-19 - 04 - tui-architecture-deepening-plan.md` item 17, which wrote the
+note.
+
+The note says the two decision panes "take `move`, `clampSelection` and `highlight` **without
+`key`**" (`docs/adr/0053-popup-surfaces-embed-one-list-surface.md:120`). Neither pane calls
+`clampSelection`: the approval menu takes `move` (`internal/tui/approval.go:91`, `:94`) and
+`highlight` (`:108`, `:287`), and the ask_user offering the same pair (`internal/tui/ask.go:70`,
+`:73`, `:83`, `:114`, `:318`). Their row sets are fixed for the pane's lifetime, so there is nothing
+to clamp against — the code is right and the prose overclaims. The correction is either dropping the
+verb from the list or stating why these two do not need it.
+
+---
+
+### A session saved before the typed stat value replays with blank type-row totals
+
+**Status:** [ ] open 2026-08-20 — residual of
+`docs/plans/archived/2026-08-19 - 04 - tui-architecture-deepening-plan.md` item 12, which persisted
+the typed value for records written from then on but left the ones already on disk without it.
+
+`fromWireStatValue` answers `plainStat(text)` for a record carrying no `statValue`
+(`internal/tui/transcriptcodec.go:270`) — every session file written before 113b3078. A plain value
+does not sum (`statValue.sums`, `internal/tui/toolview.go:219`), so `sumStats` bails on the first
+member (`internal/tui/toolview.go:897`) and `runAggregate` hands back the empty summary
+(`internal/tui/toolview.go:865`): the grouped type row of a replayed multi-call run shows an empty
+slot. The deleted `sumCountPhrases`/`parseDiffCounts` used to read that total back out of the
+members' wording, so the same file read differently before the change. Only runs of two or more
+members are affected, and only records already on disk. Either the decode falls back to re-deriving
+the value from the phrase when the field is absent, or the one-way break is accepted and written
+down.
+
+---
+
+### `sessionBrowser` derives the visible list twice per frame
+
+**Status:** [ ] open 2026-08-20 — residual of
+`docs/plans/archived/2026-08-19 - 04 - tui-architecture-deepening-plan.md` item 15, which split
+`unfilteredRows` out of `filteredView` and left the caller's own call standing.
+
+`filteredView` calls `b.visible(workspace)` (`internal/tui/sessions.go:198`) and then calls
+`unfilteredRows`, which calls it again (`internal/tui/sessions.go:213`). Unless the pane is showing
+all workspaces, `visible` allocates and fills a fresh `[]session.Meta` over the whole store on every
+call (`internal/tui/sessions.go:164-175`), so an open browser walks and copies the store twice per
+frame. Passing the visible slice into `unfilteredRows`, or having it answer both halves, removes the
+duplicate without touching the seam item 15 created.
+
+---
+
 ## Parked / deferred work
 
 Live, deliberately deferred work only. Each entry records *enough* design that we don't re-derive
