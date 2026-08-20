@@ -45,7 +45,10 @@
 
 ---
 
-## 1. Delete the dead Config.SessionsDir field
+## 1. Delete the dead Config.SessionsDir field — ✅ DONE (2026-08-20)
+
+NOTES (2026-08-20): the item named four files, but `SessionsDir` was also written by two more test sites the plan did not list (`cmd/apogee/schedule_test.go` x2, `benchreadiness_test.go` x4); they had to go or the packages would not compile.
+NOTES (2026-08-20): prose corrected as the item allows — `internal/session/store.go` now says "the sessions root its caller resolves", `cmd/apogee/wire_live.go` and one `benchreadiness_test.go` comment say "sessions root" instead of naming the deleted field.
 
 **Source:** review defect d; ratified call 5.
 

@@ -163,7 +163,6 @@ func (w *rootWiring) resolveConfig() error {
 		Presenter:    w.bridge.Presenter(),
 		ConfigDir:    w.roots.config,
 		LibraryDir:   w.roots.library,
-		SessionsDir:  w.roots.sessions,
 		WorkspaceDir: w.roots.workspace,
 		// The host's real Confiner backend for this OS (landlock on Linux, seatbelt on macOS,
 		// denyConfiner elsewhere — confinement-execution-contract §2.6). It is no longer

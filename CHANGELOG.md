@@ -767,6 +767,12 @@ point is a **minor** bump, not a breaking change.
   retuned, and a scheme of your own that names `diff-add` or `success` keeps overriding both exactly
   as before.
 
+### Removed
+
+- Removed the dead `Config.SessionsDir` field: nothing read it — the session store already takes
+  its root as an explicit argument — so the two production write sites and the prose that named the
+  field are gone.
+
 ### Fixed
 
 - **A click in the band the `/inspect` pane grows into now falls through instead of being swallowed.**

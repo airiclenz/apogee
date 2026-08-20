@@ -159,7 +159,6 @@ func TestScheduleFiringRunsAgainstTheCurrentBinding(t *testing.T) {
 		WorkspaceDir: roots.workspace,
 		ConfigDir:    roots.config,
 		LibraryDir:   roots.library,
-		SessionsDir:  roots.sessions,
 	}
 	base.Tools = registryWithMCP(roots.workspace, base, []apogee.Tool{sessionOnlyTool{}})
 
@@ -553,7 +552,6 @@ func newScheduleHarness(t *testing.T, endpoint string) *scheduleHarness {
 			WorkspaceDir: roots.workspace,
 			ConfigDir:    roots.config,
 			LibraryDir:   roots.library,
-			SessionsDir:  roots.sessions,
 		},
 		roots:   roots,
 		live:    newLiveSettings(config.Options{}, nil),

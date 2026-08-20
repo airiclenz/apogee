@@ -145,7 +145,7 @@ type Record struct {
 	Session       domain.Session  `json:"session"`
 }
 
-// Store persists session Records as id-addressed files under a directory (SessionsDir). It
+// Store persists session Records as id-addressed files under a directory (the sessions root its caller resolves). It
 // owns the on-disk format and naming so its callers — the composition root's host adapter,
 // the history browser — never duplicate that knowledge. Writes are atomic (temp file +
 // rename), so a crash never leaves a truncated record behind, and serialized (mu), so two

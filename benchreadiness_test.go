@@ -366,7 +366,6 @@ func TestBenchReadinessContract(t *testing.T) {
 		Tools:            paddedRegistry(t, mechRoots.workspace),
 		WorkspaceDir:     mechRoots.workspace,
 		LibraryDir:       mechRoots.library,
-		SessionsDir:      mechRoots.sessions,
 	})
 	if err != nil {
 		t.Fatalf("New (mechanisms-on arm): %v", err)
@@ -389,7 +388,6 @@ func TestBenchReadinessContract(t *testing.T) {
 		Tools:            paddedRegistry(t, bypassRoots.workspace),
 		WorkspaceDir:     bypassRoots.workspace,
 		LibraryDir:       bypassRoots.library,
-		SessionsDir:      bypassRoots.sessions,
 	})
 	if err != nil {
 		t.Fatalf("New (Bypass arm): %v", err)
@@ -453,7 +451,7 @@ func TestBenchReadinessContract(t *testing.T) {
 		t.Errorf("Bypass arm's LibraryDir = %d entries (err %v), want 0 (Library inert under Bypass)", len(entries), err)
 	}
 
-	// Snapshot both arms, and prove a host-persisted session lands under the arm's own SessionsDir.
+	// Snapshot both arms, and prove a host-persisted session lands under the arm's own sessions root.
 	snapMech, err := mechArm.Snapshot()
 	if err != nil {
 		t.Fatalf("Snapshot (mechanisms-on): %v", err)
@@ -515,7 +513,6 @@ func resumeFork(t *testing.T, endpoint string, snap apogee.Session, token string
 		Tools:        tools.NewDefaultRegistry(roots.workspace),
 		WorkspaceDir: roots.workspace,
 		LibraryDir:   roots.library,
-		SessionsDir:  roots.sessions,
 	}, snap)
 	if err != nil {
 		t.Fatalf("Resume fork %q: %v", token, err)
@@ -550,7 +547,6 @@ func hermeticArm(t *testing.T, enable []apogee.MechanismID) (*apogee.Agent, erro
 		EnableMechanisms: enable,
 		WorkspaceDir:     t.TempDir(),
 		LibraryDir:       t.TempDir(),
-		SessionsDir:      t.TempDir(),
 	})
 }
 

@@ -377,7 +377,6 @@ func runHeadless(cmd *cobra.Command, args []string, opts *config.Options, noSave
 		Bypass:       opts.Bypass,
 		ConfigDir:    roots.config,
 		LibraryDir:   roots.library,
-		SessionsDir:  roots.sessions,
 		WorkspaceDir: roots.workspace,
 		// Confiner and posture as the session's, so an Auto run here is fenced by the same box
 		// an Auto session would be. Whether this host may run Auto unattended at all is the

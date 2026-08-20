@@ -412,7 +412,7 @@ func TestHeadlessComposesTheRunnerSpec(t *testing.T) {
 	if cfg.Confiner == nil {
 		t.Error("no Confiner was wired; the run would not be fenced")
 	}
-	if cfg.WorkspaceDir == "" || cfg.SessionsDir == "" || cfg.ConfigDir == "" {
+	if cfg.WorkspaceDir == "" || cfg.ConfigDir == "" {
 		t.Errorf("the state roots did not reach the Config: %+v", cfg)
 	}
 }

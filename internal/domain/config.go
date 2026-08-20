@@ -105,9 +105,8 @@ type Config struct {
 
 	// Injected state roots — no implicit ~/.apogee (ADR 0001). The bench points
 	// these at ephemeral dirs so sim runs never touch the production Library.
-	LibraryDir  string
-	SessionsDir string
-	ConfigDir   string
+	LibraryDir string
+	ConfigDir  string
 
 	// WorkspaceDir is the sandbox root the built-in file tools are scoped to when
 	// Config.Tools is nil. Empty ⇒ no default tools are wired (the host must inject
