@@ -5,6 +5,10 @@ package main
 // Which server this session runs on and when the wiring hears that something changed: the entry a
 // startup selection collapses to, the single step that turns any entry — startup or human-picked —
 // into a bound session, and the wait the renderer's config-reload chain parks on.
+//
+// At the end of the file, the same seam as the renderer sees it: serverHost, this binary's
+// [tui.ServerHost] — the six Upstream acts the projection hands over as one named capability
+// (ADR 0054) rather than as six bare funcs.
 
 import (
 	"context"
@@ -13,6 +17,7 @@ import (
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/heartbeat"
 	"github.com/airiclenz/apogee/internal/session"
+	"github.com/airiclenz/apogee/internal/tui"
 )
 
 // startupEntry re-assembles the server selection resolved (ADR 0036) from the flattened fields it
@@ -162,3 +167,56 @@ func awaitConfigChangeOn(w *config.Watcher) func(context.Context) bool {
 		}
 	}
 }
+
+// serverHost is this binary's [tui.ServerHost]: the six acts over the one Upstream this session is
+// on — what it can move to, the two verbs that move or first bind it, the choice each move records,
+// and the observation the display lives off (ADR 0054). It holds the wiring itself rather than six
+// closures over it, because every act reads live state the wiring owns: the holder the switch
+// re-points, the resolved options the list is projected from, and the binding the rebind starts from.
+//
+// Every act is one of the verbs above or beside it (wire_verbs.go), unchanged by the regrouping —
+// they run where they always ran, refuse what they always refused, and answer what they always
+// answered. This value is only where the renderer's six names meet them.
+type serverHost struct{ w *rootWiring }
+
+// Acts is all four: this binary observes for the life of the session, owns the resolution and the
+// engine mutators a rebind needs, and wires both server verbs whatever the config says. The degrades
+// [tui.ServerActs] exists for are a Driver's composition (ADR 0031), never this one's — a session
+// with no Monitor YET is the pre-bound start, which the renderer already knows about
+// ([tui.Options.Prebound]) and issues no beat in.
+func (h serverHost) Acts() tui.ServerActs {
+	return tui.ServerActs{CanObserve: true, CanRebind: true, CanSwitch: true, CanBind: true}
+}
+
+// Beat observes the server this session is on RIGHT NOW: it goes through the holder, so the
+// observation follows the session onto another server without the seam — or the renderer — changing
+// shape, and the wrapper reads the slot count off the same observation on its way past.
+func (h serverHost) Beat(ctx context.Context) heartbeat.Beat { return h.w.beat(ctx) }
+
+// Rebind re-resolves the per-model bindings for an observed change — the composition root's half of
+// ADR 0024's split, run on the Update goroutine at the quiescent boundary the renderer picked.
+func (h serverHost) Rebind(model string, contextWindow int) (tui.RebindResult, error) {
+	return h.w.rebind(model, contextWindow)
+}
+
+// List projects the switchable servers from the HOLDER on every ask rather than from a snapshot, so
+// a `servers:` block the human edits mid-session (ADR 0037) is offered by the picker and by the
+// settings pane's server row the moment the edit lands — the same list, in the same order, that the
+// two verbs below resolve a name against. It can be EMPTY (a pre-bound start on a config that lists
+// nothing), which is exactly "nothing to switch to" without a special case.
+func (h serverHost) List() []tui.ServerChoice { return serverChoices(h.w.live.choices(h.w.opts)) }
+
+// Switch moves the whole session onto the named entry: the provider client re-pointed, a Monitor for
+// the new server installed, the session record restamped (sessionMover.move).
+func (h serverHost) Switch(name string) (tui.ServerSwitchResult, error) {
+	return h.w.switchServer(name)
+}
+
+// Bind is the same move one step lower down (ADR 0036 decisions 3, 4 and 7): the session has no
+// engine at all, so the named entry gets one constructed on it. It refuses a second bind.
+func (h serverHost) Bind(name string) (tui.ServerSwitchResult, error) { return h.w.bindServer(name) }
+
+// RecordChoice persists the entry this session should start on next time (ADR 0036 decision 2), and
+// answers whether it wrote: a name in no `servers:` entry is skipped silently, which only this layer
+// can tell.
+func (h serverHost) RecordChoice(name string) (bool, error) { return h.w.recordServerChoice(name) }

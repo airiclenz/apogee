@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"reflect"
@@ -600,10 +601,99 @@ func siblingSwitch() *fakeSwitch {
 	}}
 }
 
-// staticServers is the [Options.Servers] provider a test that never changes its list wires: the same
+// staticServers is the [ServerHost.List] answer a test that never changes its list wires: the same
 // choices every time it is asked, which is what a session whose `servers:` block nobody edits has.
 func staticServers(servers []ServerChoice) func() []ServerChoice {
 	return func() []ServerChoice { return servers }
+}
+
+// fakeServerHost is the per-family stand-in for [ServerHost] (ADR 0054 decision 6): one func per act,
+// and the DOCUMENTED unwired answer for every act a test leaves nil. That is what keeps the
+// per-member degrades provable one at a time — "this session can list servers but cannot move onto
+// one", "the display is frozen because nothing applies what a beat observes" — without a fake per
+// combination of wired halves.
+//
+// It is a pointer receiver because the spies behind its funcs are, and because [serverSeams] adds one
+// member at a time to a host a helper wired before it.
+type fakeServerHost struct {
+	list     func() []ServerChoice
+	switchTo func(name string) (ServerSwitchResult, error)
+	bind     func(name string) (ServerSwitchResult, error)
+	record   func(name string) (bool, error)
+	beat     func(context.Context) heartbeat.Beat
+	rebind   func(model string, window int) (RebindResult, error)
+}
+
+// Acts reports exactly the members this fake was wired with, so one nil func is one per-member
+// degrade and a bare &fakeServerHost{} is the wired host that can do nothing at all.
+func (h *fakeServerHost) Acts() ServerActs {
+	return ServerActs{
+		CanObserve: h.beat != nil,
+		CanRebind:  h.rebind != nil,
+		CanSwitch:  h.switchTo != nil,
+		CanBind:    h.bind != nil,
+	}
+}
+
+// Beat answers the zero Beat when nothing was wired; CanObserve is false then, so nothing asks it.
+func (h *fakeServerHost) Beat(ctx context.Context) heartbeat.Beat {
+	if h.beat == nil {
+		return heartbeat.Beat{}
+	}
+	return h.beat(ctx)
+}
+
+// Rebind answers with an error when nothing was wired; CanRebind is false then, so nothing asks it.
+func (h *fakeServerHost) Rebind(model string, window int) (RebindResult, error) {
+	if h.rebind == nil {
+		return RebindResult{}, errors.New("this host does not rebind")
+	}
+	return h.rebind(model, window)
+}
+
+// List answers with no servers — the "nothing to switch to" degrade, which `/server` words itself.
+func (h *fakeServerHost) List() []ServerChoice {
+	if h.list == nil {
+		return nil
+	}
+	return h.list()
+}
+
+// Switch answers with an error, the only way an act with a result can say it cannot act.
+func (h *fakeServerHost) Switch(name string) (ServerSwitchResult, error) {
+	if h.switchTo == nil {
+		return ServerSwitchResult{}, errors.New("this host does not switch servers")
+	}
+	return h.switchTo(name)
+}
+
+// Bind answers as Switch does, and a pre-bound session then stays pre-bound.
+func (h *fakeServerHost) Bind(name string) (ServerSwitchResult, error) {
+	if h.bind == nil {
+		return ServerSwitchResult{}, errors.New("this host does not bind servers")
+	}
+	return h.bind(name)
+}
+
+// RecordChoice answers "not recorded, and nothing went wrong" — the silent skip a name no `servers:`
+// entry holds earns, and the whole answer of a host that records nothing.
+func (h *fakeServerHost) RecordChoice(name string) (bool, error) {
+	if h.record == nil {
+		return false, nil
+	}
+	return h.record(name)
+}
+
+// serverSeams is the [ServerHost] fake opts carries, created on the spot when it carries none. Every
+// test wires the family through it so a helper that adds one member — wireHeartbeat's beat over a
+// list its caller wired — finds the members that are already there instead of replacing them.
+func serverSeams(opts *Options) *fakeServerHost {
+	host, ok := opts.Server.(*fakeServerHost)
+	if !ok {
+		host = &fakeServerHost{}
+		opts.Server = host
+	}
+	return host
 }
 
 // remoteWindow is the `context-window:` pin the fake switch reports back — GLOBAL config, so it
@@ -641,8 +731,8 @@ func (f *fakeSwitch) switchTo(name string) (ServerSwitchResult, error) {
 func seededServers(t *testing.T, sw *fakeSwitch) (Model, *fakeRebind) {
 	t.Helper()
 	opts := testOpts
-	opts.Servers = staticServers(twoServers)
-	opts.SwitchServer = sw.switchTo
+	seams := serverSeams(&opts)
+	seams.list, seams.switchTo = staticServers(twoServers), sw.switchTo
 	return seededPicker(t, opts)
 }
 
@@ -830,9 +920,8 @@ func TestServerSwitchHappyPath(t *testing.T) {
 func seededServersRecording(t *testing.T, sw *fakeSwitch, rec *fakeRecorder) (Model, *fakeRebind) {
 	t.Helper()
 	opts := testOpts
-	opts.Servers = staticServers(twoServers)
-	opts.SwitchServer = sw.switchTo
-	opts.RecordServerChoice = rec.record
+	seams := serverSeams(&opts)
+	seams.list, seams.switchTo, seams.record = staticServers(twoServers), sw.switchTo, rec.record
 	return seededPicker(t, opts)
 }
 
@@ -841,9 +930,8 @@ func seededServersRecording(t *testing.T, sw *fakeSwitch, rec *fakeRecorder) (Mo
 func seededSiblings(t *testing.T, sw *fakeSwitch, rec *fakeRecorder) (Model, *fakeRebind) {
 	t.Helper()
 	opts := testOpts
-	opts.Servers = staticServers(siblingServers)
-	opts.SwitchServer = sw.switchTo
-	opts.RecordServerChoice = rec.record
+	seams := serverSeams(&opts)
+	seams.list, seams.switchTo, seams.record = staticServers(siblingServers), sw.switchTo, rec.record
 	return seededPicker(t, opts)
 }
 
@@ -998,12 +1086,11 @@ func TestServerSwitchRetiresTheOldChain(t *testing.T) {
 func TestServerSwitchBlocksSendsUntilTheFirstBind(t *testing.T) {
 	sw := &fakeSwitch{}
 	opts := testOpts
-	opts.Servers = staticServers(twoServers)
-	opts.SwitchServer = sw.switchTo
 	rb := &fakeRebind{}
 	eng := &fakeEngine{}
-	opts.Rebind = rb.rebind
-	opts.Heartbeat = (&fakeHeartbeat{}).beat
+	seams := serverSeams(&opts)
+	seams.list, seams.switchTo = staticServers(twoServers), sw.switchTo
+	seams.rebind, seams.beat = rb.rebind, (&fakeHeartbeat{}).beat
 	m := newTestModelEng(t, eng, opts)
 	m = foldBeatMsg(t, m, twoModelBeat())
 
@@ -1125,12 +1212,12 @@ func TestServerCommandAnswersWithoutSwitching(t *testing.T) {
 		}{
 			{name: "empty list", opts: func() Options {
 				o := testOpts
-				o.SwitchServer = (&fakeSwitch{}).switchTo
+				serverSeams(&o).switchTo = (&fakeSwitch{}).switchTo
 				return o
 			}()},
 			{name: "unwired seam", opts: func() Options {
 				o := testOpts
-				o.Servers = staticServers(twoServers)
+				serverSeams(&o).list = staticServers(twoServers)
 				return o
 			}()},
 		} {
@@ -1153,8 +1240,8 @@ func TestServerCommandIsIdleOnly(t *testing.T) {
 	}
 	sw := &fakeSwitch{}
 	opts := testOpts
-	opts.Servers = staticServers(twoServers)
-	opts.SwitchServer = sw.switchTo
+	seams := serverSeams(&opts)
+	seams.list, seams.switchTo = staticServers(twoServers), sw.switchTo
 	m := newTestModelEng(t, &fakeEngine{}, opts)
 	m, _ = typeCommand(t, m, "open the exchange")
 	if m.state != stateRunning {

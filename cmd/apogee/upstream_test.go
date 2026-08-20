@@ -37,7 +37,17 @@ func upstreamServer(t *testing.T, modelID string, window int) *httptest.Server {
 	return srv
 }
 
-// The holder is what makes "the same two seams" true across a server switch: Options.Heartbeat is
+// serverActsOf is what the projected [tui.ServerHost] says it performs, with an unwired seam
+// answering the zero value — the shape every "is it wired" assertion in this package reads now that
+// the six Upstream funcs are one interface (ADR 0054).
+func serverActsOf(opts tui.Options) tui.ServerActs {
+	if opts.Server == nil {
+		return tui.ServerActs{}
+	}
+	return opts.Server.Acts()
+}
+
+// The holder is what makes "the same two seams" true across a server switch: [tui.ServerHost.Beat] is
 // wired to its Beat once and for the life of the session, so replacing the Monitor behind it must
 // be all it takes to observe another server. The two fake servers advertise different models, so
 // only the swap can explain a changed ActiveModel.
@@ -259,25 +269,25 @@ func TestRunRootSwitchServerRepointsTheSession(t *testing.T) {
 		{Name: "workstation", Endpoint: first.URL},
 		{Name: "second", Endpoint: second.URL},
 	}
-	choices := rec.opts.Servers()
+	choices := rec.opts.Server.List()
 	if len(choices) != len(wantChoices) {
-		t.Fatalf("tui.Options.Servers() = %+v; want %+v", choices, wantChoices)
+		t.Fatalf("tui.ServerHost.List() = %+v; want %+v", choices, wantChoices)
 	}
 	for i := range wantChoices {
 		if choices[i] != wantChoices[i] {
 			t.Errorf("Servers()[%d] = %+v; want %+v", i, choices[i], wantChoices[i])
 		}
 	}
-	if rec.opts.Heartbeat == nil || rec.opts.SwitchServer == nil {
+	if acts := serverActsOf(rec.opts); !acts.CanObserve || !acts.CanSwitch {
 		t.Fatal("the composition root left an upstream seam unwired")
 	}
-	if beat := rec.opts.Heartbeat(context.Background()); beat.ActiveModel != "model-a" {
+	if beat := rec.opts.Server.Beat(context.Background()); beat.ActiveModel != "model-a" {
 		t.Fatalf("beat before the switch = %+v; want model-a from the startup server", beat)
 	}
 
-	result, err := rec.opts.SwitchServer("second")
+	result, err := rec.opts.Server.Switch("second")
 	if err != nil {
-		t.Fatalf("SwitchServer: %v", err)
+		t.Fatalf("Switch: %v", err)
 	}
 	if result.Endpoint != second.URL || result.HostAlias != "second" {
 		t.Errorf("result = %+v; want the second server's endpoint and its name as the alias", result)
@@ -287,7 +297,7 @@ func TestRunRootSwitchServerRepointsTheSession(t *testing.T) {
 	}
 	// The seam the renderer keeps calling now observes the other server: the Monitor was swapped
 	// behind it, key and hint and all.
-	if beat := rec.opts.Heartbeat(context.Background()); beat.ActiveModel != "model-b" {
+	if beat := rec.opts.Server.Beat(context.Background()); beat.ActiveModel != "model-b" {
 		t.Errorf("beat after the switch = %+v; want model-b — the holder did not follow the switch", beat)
 	}
 
@@ -338,13 +348,13 @@ func TestRunRootRecordServerChoiceWritesOnlyConfiguredNames(t *testing.T) {
 	if err := runRoot(context.Background(), opts, rec.launch); err != nil {
 		t.Fatalf("runRoot: %v", err)
 	}
-	if rec.opts.RecordServerChoice == nil {
-		t.Fatal("the composition root left the recording seam unwired")
+	if rec.opts.Server == nil {
+		t.Fatal("the composition root left the Upstream seam unwired")
 	}
 	configPath := filepath.Join(configHome, "config.yaml")
 
 	// The ephemeral startup row: switchable, and deliberately not writable-back — it names no entry.
-	if saved, err := rec.opts.RecordServerChoice("workstation"); saved || err != nil {
+	if saved, err := rec.opts.Server.RecordChoice("workstation"); saved || err != nil {
 		t.Errorf("recording the synthesized row = (%v, %v); want (false, nil) — a silent skip", saved, err)
 	}
 	if _, err := os.Stat(configPath); !os.IsNotExist(err) {
@@ -352,7 +362,7 @@ func TestRunRootRecordServerChoiceWritesOnlyConfiguredNames(t *testing.T) {
 	}
 
 	// A configured entry: the choice is written, through the same splice writer every other key uses.
-	if saved, err := rec.opts.RecordServerChoice("second"); !saved || err != nil {
+	if saved, err := rec.opts.Server.RecordChoice("second"); !saved || err != nil {
 		t.Fatalf("recording a configured entry = (%v, %v); want (true, nil)", saved, err)
 	}
 	data, err := os.ReadFile(configPath)
@@ -372,7 +382,7 @@ func TestRunRootRecordServerChoiceWritesOnlyConfiguredNames(t *testing.T) {
 	if err := os.Mkdir(configPath, 0o755); err != nil {
 		t.Fatalf("stage the unwritable config: %v", err)
 	}
-	if saved, err := rec.opts.RecordServerChoice("second"); saved || err == nil {
+	if saved, err := rec.opts.Server.RecordChoice("second"); saved || err == nil {
 		t.Errorf("recording onto an unwritable config = (%v, %v); want (false, an error)", saved, err)
 	}
 }
@@ -746,9 +756,9 @@ func TestRunRootSwitchServerUnknownNameTouchesNothing(t *testing.T) {
 		t.Fatalf("runRoot: %v", err)
 	}
 
-	result, err := rec.opts.SwitchServer("typo")
+	result, err := rec.opts.Server.Switch("typo")
 	if err == nil {
-		t.Fatal("SwitchServer with an unknown name returned no error")
+		t.Fatal("Switch with an unknown name returned no error")
 	}
 	if result != (tui.ServerSwitchResult{}) {
 		t.Errorf("a refused switch still returned %+v; want the zero result", result)
@@ -758,7 +768,7 @@ func TestRunRootSwitchServerUnknownNameTouchesNothing(t *testing.T) {
 			t.Errorf("error %q does not mention %q", err, want)
 		}
 	}
-	if beat := rec.opts.Heartbeat(context.Background()); beat.ActiveModel != "model-a" {
+	if beat := rec.opts.Server.Beat(context.Background()); beat.ActiveModel != "model-a" {
 		t.Errorf("beat after the refused switch = %+v; want the unchanged model-a", beat)
 	}
 }

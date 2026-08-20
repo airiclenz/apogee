@@ -15,7 +15,7 @@ import (
 )
 
 // upstreamHolder owns the CURRENT heartbeat Monitor and is the reason a server switch needs no new
-// seam on the renderer's side: [tui.Options.Heartbeat] keeps its one signature and is wired to the
+// seam on the renderer's side: [tui.ServerHost.Beat] keeps its one signature and is wired to the
 // holder's Beat, so swapping which server is observed is a composition-root move the TUI never sees
 // (ADR 0024's two seams, split by job). A Monitor is per-SERVER — it holds the endpoint and the key
 // it was built with — so a switch replaces the whole Monitor rather than mutating one, honouring
@@ -89,7 +89,7 @@ func (h *upstreamHolder) Bind(endpoint, apiKey, model string, monitor *heartbeat
 }
 
 // Beat observes whichever Upstream is current when the beat starts. It is the value wired into
-// [tui.Options.Heartbeat], so the TUI's unchanged one-beat-per-Interval cadence follows the session
+// [tui.ServerHost.Beat], so the TUI's unchanged one-beat-per-Interval cadence follows the session
 // across a server switch without knowing one happened.
 //
 // With nothing bound yet there is nothing to observe, and the zero Beat is what that says: no

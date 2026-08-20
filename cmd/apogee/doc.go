@@ -48,8 +48,9 @@
 // prompt-recall hosts plus the resume resolution a --resume/--continue start goes
 // through; wire_engine.go Agent construction through the public surface and the
 // late-bound engine that stands in until a server is picked; wire_server.go the entry a
-// startup selection collapses to, the one step that binds any entry to a session, and
-// the config-change wait the reload chain parks on.
+// startup selection collapses to, the one step that binds any entry to a session, the
+// config-change wait the reload chain parks on, and the [tui.ServerHost] the six Upstream
+// acts cross to the renderer as.
 //
 // The config cluster is no longer here: the schema, the precedence, the key registry, the
 // splice writer, the legacy fold, the watcher and the [config.Options] the flags bind to all

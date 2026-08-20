@@ -222,6 +222,24 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **The Upstream seam is one named host interface (`internal/tui/tui.go`, ADR 0054).** `Options`
+  carried six one-purpose bare `func` fields for what is one thing a host either has or has not —
+  `Heartbeat` / `Rebind` and `Servers` / `SwitchServer` / `BindServer` / `RecordServerChoice` — so
+  the `/server` verb, the pre-bound ask and the heartbeat's whole tick chain each read their own
+  nil check for the same question. They are `ServerHost` now, declared beside `SettingsHost` and
+  `SchemeHost`: `Beat`, `Rebind`, `List`, `Switch`, `Bind`, `RecordChoice`, with one doc comment
+  stating what the family is and who owns what behind it, and `Options` down from 58 fields to 53.
+  The composition root implements it with one adapter over the verbs that already existed
+  (`cmd/apogee/wire_server.go`), and the renderer's tests get one fake for the family, wired one act
+  at a time, in place of five fields set individually. The nil-means-unwired contract is preserved
+  whole: a nil host is the pre-heartbeat, pre-ADR-0036 renderer, `List` says a wired host has
+  nothing to offer by naming nothing and `RecordChoice` by answering false, and the four acts the
+  renderer decides ABOUT before it performs one — is anything observing, can a change be applied,
+  can this session switch, can a pre-bound session bind — are reported by `Acts() ServerActs`
+  rather than attempted, because calling to find out would BE the act (ADR 0054 decision 3a).
+  Behaviour is unchanged: every degrade the six nil funcs produced is produced by the nil host, by
+  an act's own answer, or by a flag, and the whole suite passes with no expectation changed.
+
 - **The settings and colour-scheme seams are named host interfaces (`internal/tui/tui.go`, ADR
   0054).** `Options` carried seven one-purpose bare `func` fields for two families — `SettingsRows`
   / `WriteSetting` / `ResetSetting` / `ApplySetting`, and `ListSchemes` / `ResolveScheme` /

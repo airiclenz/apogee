@@ -1368,7 +1368,7 @@ func TestPaintedPreboundFactsRideTheStatusLine(t *testing.T) {
 			})
 			t.Run("nothing configured", func(t *testing.T) {
 				opts := preboundOpts(PreboundNoServers, "")
-				opts.Servers = nil
+				serverSeams(&opts).list = nil
 				opts.Settings = fakeSettingsHost{rows: func() []SettingRow { return settingsTestRows(6) }}
 				m := newTestModelEng(t, &fakeEngine{}, opts)
 				m = step(t, m, keyEsc()) // close the pane the guidance opened with

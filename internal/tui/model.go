@@ -122,7 +122,7 @@ type Model struct {
 
 	// picker is the shared single-select overlay's state (picker.go): which offering it lists and
 	// which row is highlighted. Its rows are derived at render time from the state they describe —
-	// the /model picker reads hb.models live, the /server picker opts.Servers — so the value itself
+	// the /model picker reads hb.models live, the /server picker opts.Server — so the value itself
 	// is three plain values and its zero value is "closed", the sessionBrowser posture (ADR 0011).
 	// It is driven only at idle.
 	picker picker
@@ -192,7 +192,7 @@ type Model struct {
 
 	// hb is the upstream heartbeat's state — the tick chain's generation, the offline debounce,
 	// and what the last landed beat observed (see heartbeatState). Plain values and one slice, so
-	// it is safe inside the value-copied Model (ADR 0011). It stays zero when Options.Heartbeat is
+	// it is safe inside the value-copied Model (ADR 0011). It stays zero when the Upstream seam is
 	// unwired, and every reader treats that zero value as "no monitor, nothing to say".
 	hb heartbeatState
 
@@ -386,7 +386,7 @@ func newModel(parent context.Context, eng Engine, opts Options, notify func(tea.
 	// Arm the heartbeat's tick chain when the monitor is wired: generation 1 is the chain Init's
 	// first beat belongs to. An unwired seam leaves it at 0 — the generation no beat ever carries,
 	// so a stray Msg cannot be folded into a Model that monitors nothing.
-	if opts.Heartbeat != nil {
+	if m.observesUpstream() {
 		m.hb.gen = 1
 	}
 
@@ -2413,7 +2413,7 @@ func (m Model) upstreamSegments() []string {
 	if label := m.actuationLabel(); label != "" {
 		return []string{label}
 	}
-	if m.opts.Model == "" && m.opts.Heartbeat != nil {
+	if m.opts.Model == "" && m.observesUpstream() {
 		return []string{connectingLabel}
 	}
 	return []string{displayModel(m.opts.Model)}

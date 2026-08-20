@@ -64,8 +64,8 @@ type heartbeatState struct {
 
 // rebindIntent is one captured binding change: the model the last beat observed the server to be
 // serving, the window it reported for it, and whether the beat that saw it was the session's first
-// contact. It is what the deferred apply stashes and what the [Options.Rebind] seam is called with
-// — plain values, so the value-copied Model carries it safely. It is the OBSERVATION, not the
+// contact. It is what the deferred apply stashes and what the [ServerHost.Rebind] seam is called
+// with — plain values, so the value-copied Model carries it safely. It is the OBSERVATION, not the
 // binding: what the binary makes of it (a pinned window outranking the observed one) comes back in
 // the [RebindResult].
 type rebindIntent struct {
@@ -99,18 +99,29 @@ func offlineNote(failure string) string {
 	return "server offline — " + failure
 }
 
+// observesUpstream reports whether anything watches this session's server ([ServerActs.CanObserve]).
+// It is the one question every heartbeat gate asks, and it is asked rather than beaten for, because
+// an unobserved session is not an offline one — no tick chain is opened, no beat is folded, nothing
+// is refused, and the footer keeps what launch gave it.
+func (m Model) observesUpstream() bool { return m.serverActs().CanObserve }
+
+// appliesRebinds reports whether an observed change can be acted on at all ([ServerActs.CanRebind]).
+// False is the display-frozen heartbeat: the beats still land and still light the offline state, but
+// nothing captures a change and nothing claims a binding moved.
+func (m Model) appliesRebinds() bool { return m.serverActs().CanRebind }
+
 // heartbeatLive reports whether gen belongs to the current tick chain of a WIRED monitor — the
 // guard both heartbeat Msgs pass through. An unwired Model (gen 0) folds nothing, so a stray beat
 // can never flip a TUI that monitors nothing into an offline state it can never leave.
 func (m Model) heartbeatLive(gen int) bool {
-	return m.opts.Heartbeat != nil && gen == m.hb.gen
+	return m.observesUpstream() && gen == m.hb.gen
 }
 
 // beatCmd runs one observation off the Update loop and reports it as a beatMsg stamped with the
 // CURRENT generation. It captures the program context, so a shutdown cancels a beat still in
-// flight, and the seam func by value — no pointer into the value-copied Model (the saveCmd
-// posture). It returns nil when the monitor is unwired, which is what makes Init's tea.Batch
-// collapse to the focus Cmd alone.
+// flight, and the seam itself by value — an interface header, no pointer into the value-copied
+// Model (the saveCmd posture). It returns nil when the monitor is unwired, which is what makes
+// Init's tea.Batch collapse to the focus Cmd alone.
 //
 // It CONTINUES a chain and never opens one: Init issues the session's first beat on the generation
 // newModel armed, and the tick fold issues the next one of the chain that scheduled the tick.
@@ -122,13 +133,12 @@ func (m Model) heartbeatLive(gen int) bool {
 // beat would report an unreachable server and paint the session offline against an endpoint nobody
 // has named yet. The chain opens with the bind's own armBeat instead.
 func (m Model) beatCmd() tea.Cmd {
-	observe := m.opts.Heartbeat
-	if observe == nil || m.prebound() {
+	if !m.observesUpstream() || m.prebound() {
 		return nil
 	}
-	ctx, gen := m.parent, m.hb.gen
+	observe, ctx, gen := m.opts.Server, m.parent, m.hb.gen
 	return func() tea.Msg {
-		return beatMsg{gen: gen, beat: observe(ctx)}
+		return beatMsg{gen: gen, beat: observe.Beat(ctx)}
 	}
 }
 
@@ -232,7 +242,7 @@ func (m Model) foldBeat(beat heartbeat.Beat) (Model, bool) {
 // into the intent rather than re-derived here, so the deferred path words itself exactly like the
 // immediate one — by construction, whenever the change is finally applied.
 func (m Model) observeBinding(beat heartbeat.Beat, firstContact bool) (Model, bool) {
-	if m.opts.Rebind == nil {
+	if !m.appliesRebinds() {
 		return m, false // a display-frozen heartbeat: nothing to apply a change through
 	}
 	changed := beat.ActiveModel != m.hb.observedModel ||
@@ -259,8 +269,8 @@ func (m Model) observeBinding(beat heartbeat.Beat, firstContact bool) (Model, bo
 	return m.applyRebind(intent)
 }
 
-// applyRebind re-resolves the bindings for one captured change through the [Options.Rebind] seam and
-// folds the answer into the display: the model and window the binary actually BOUND, the start-up
+// applyRebind re-resolves the bindings for one captured change through the [ServerHost.Rebind] seam
+// and folds the answer into the display: the model and window the binary actually BOUND, the start-up
 // box restated in place, the note that says what moved, and any notices the resolution produced. It
 // reports whether it wrote to the view.
 //
@@ -274,10 +284,10 @@ func (m Model) observeBinding(beat heartbeat.Beat, firstContact bool) (Model, bo
 // monitor beats every ten seconds, and a transcript repeating the same refusal at that rate would
 // bury the conversation it is meant to annotate (the saveFailing fail-once posture).
 func (m Model) applyRebind(intent rebindIntent) (Model, bool) {
-	rebind := m.opts.Rebind
-	if rebind == nil {
+	if !m.appliesRebinds() {
 		return m, false
 	}
+	rebind := m.opts.Server.Rebind
 	oldModel, oldWindow := m.opts.Model, m.opts.ContextWindow
 
 	result, err := rebind(intent.model, intent.window)
@@ -398,7 +408,7 @@ func windowWord(n int) string {
 }
 
 // foldServerSwitch folds a COMMITTED server switch (`/server`, picker.go) into the display. It is
-// reached only after [Options.SwitchServer] has returned successfully, so the engine is already
+// reached only after [ServerHost.Switch] has returned successfully, so the engine is already
 // pointed at the new endpoint and nothing here can fail: every statement below describes a world
 // that is already true. from is the label the footer used for the server being left, captured by
 // the caller before the Options move.
@@ -496,7 +506,7 @@ func (m Model) foldBeatFailure(failure string) (Model, bool) {
 // With the monitor unwired it is always false: nothing observes the server, so the TUI has no
 // standing to refuse anything (and every pre-heartbeat test keeps its behaviour).
 func (m Model) blockedUpstream() bool {
-	return m.opts.Heartbeat != nil && (m.hb.offline || m.opts.Model == "")
+	return m.observesUpstream() && (m.hb.offline || m.opts.Model == "")
 }
 
 // upstreamBlockNote words the refusal blockedUpstream produced: offline names the endpoint and,

@@ -62,6 +62,17 @@ an `ok bool`: false is "this host cannot resolve live", the caller keeps the pal
 row says the new scheme applies at the next start. Nothing about the sentences the human reads
 changed.
 
+**3a — An act the renderer decides ABOUT is reported, not attempted.** Some acts cannot say it in
+their own answer at all, because the caller has to know before it calls: whether anything observes
+the Upstream decides whether a tick chain opens, whether a rebind is possible decides whether an
+observed change is captured, and whether a switch or a bind exists decides whether a picker is
+raised. Calling to find out would BE the act. Such a family carries one report of what it performs —
+`ServerHost.Acts() ServerActs`, four bools, zero value = unwired — asked wherever the per-func nil
+check was. Its zero value is also what a nil host answers, so one shape covers the family and the
+member and no caller writes two checks. A host claiming an act is taken at its word, exactly as
+decision 3 takes `Apply`'s silent success. Acts whose own answer already IS the degrade — a list
+that names nothing, a recording that says it wrote nothing — get no flag.
+
 **4 — The composition root implements the interface with a value that holds what the acts need.**
 `settingsHost` holds the resolved options, the config path, the external-edit baseline and the apply
 dispatcher; `schemeHost` holds the schemes folder. They are adapters with behaviour, not structs of
@@ -94,6 +105,7 @@ with a single adapter. The test is whether the acts share a subject AND a wiring
 - `Options` lost seven fields and gained two, 63 down to 58; the ~120 lines of field documentation
   they carried moved onto the two interfaces without losing a sentence of it.
 - The remaining func families named by the review — server, launcher, heartbeat — are the same
-  refactor and are sequenced as later items of the same plan. This record is what they follow.
+  refactor and are sequenced as later items of the same plan. This record is what they follow. The
+  first of them, `ServerHost` (server ×4 + heartbeat ×2), is what decision 3a was written from.
 - Behaviour is unchanged by construction: every degrade the nil funcs produced is produced by a nil
   host or by the act's own answer, and the whole existing suite passes with no expectation changed.

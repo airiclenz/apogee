@@ -837,8 +837,8 @@ func TestAcceptServerRunsItAndOpensThePicker(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			sw := &fakeSwitch{}
 			opts := testOpts
-			opts.Servers = staticServers(twoServers)
-			opts.SwitchServer = sw.switchTo
+			seams := serverSeams(&opts)
+			seams.list, seams.switchTo = staticServers(twoServers), sw.switchTo
 			m := newTestModelEng(t, &fakeEngine{}, opts)
 			m.input.SetValue("/serv")
 			m.autocomplete = m.computeAutocomplete(m.caretByteOffset())

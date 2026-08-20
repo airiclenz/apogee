@@ -185,11 +185,11 @@ func TestRootStartsWithNoModelAndNoServer(t *testing.T) {
 	if rec.opts.Model != "" {
 		t.Errorf("tui.Options.Model = %q; want \"\" — nothing may be invented before the first beat", rec.opts.Model)
 	}
-	if rec.opts.Heartbeat == nil {
-		t.Error("tui.Options.Heartbeat is nil; the upstream monitor was not wired")
+	if acts := serverActsOf(rec.opts); !acts.CanObserve {
+		t.Error("tui.ServerActs.CanObserve is false; the upstream monitor was not wired")
 	}
-	if rec.opts.Rebind == nil {
-		t.Error("tui.Options.Rebind is nil; the rebind closure was not wired")
+	if acts := serverActsOf(rec.opts); !acts.CanRebind {
+		t.Error("tui.ServerActs.CanRebind is false; the rebind closure was not wired")
 	}
 }
 
@@ -227,11 +227,11 @@ func TestRootStartsPreboundWhenNothingIsChosen(t *testing.T) {
 		t.Errorf("tui.Options.Prebound = %+v; want %+v", rec.opts.Prebound, want)
 	}
 	// The list it will ask WITH survived the refusal, and so did the seam that ends it.
-	if choices := rec.opts.Servers(); len(choices) != 1 || choices[0].Name != "laptop" {
-		t.Errorf("tui.Options.Servers() = %+v; want the configured list", choices)
+	if choices := rec.opts.Server.List(); len(choices) != 1 || choices[0].Name != "laptop" {
+		t.Errorf("tui.ServerHost.List() = %+v; want the configured list", choices)
 	}
-	if rec.opts.BindServer == nil {
-		t.Error("tui.Options.BindServer is nil; the pre-bound session cannot bind the server it picks")
+	if acts := serverActsOf(rec.opts); !acts.CanBind {
+		t.Error("tui.ServerActs.CanBind is false; the pre-bound session cannot bind the server it picks")
 	}
 }
 

@@ -153,7 +153,7 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	//
 	// It is held rather than passed directly, because a Monitor is per-SERVER (endpoint and key
 	// alike) and a `/server` switch replaces the whole thing. The holder is what keeps that a
-	// composition-root move: Options.Heartbeat below is wired to holder.Beat, one signature for the
+	// composition-root move: the renderer's Beat act is wired to holder.Beat, one signature for the
 	// life of the session, and the renderer never learns which Monitor answered. It starts empty
 	// for the same reason the engine holder above does — the bind step is what fills both.
 	w.holder = newUpstreamHolder()

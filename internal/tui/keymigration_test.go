@@ -110,7 +110,7 @@ func TestKeyMigrationGivesWayToThePreboundAsk(t *testing.T) {
 	opts := preboundOpts(PreboundFirstBoot, "")
 	opts.KeyMigration = KeyMigrationOffer{StoreName: "macOS Keychain", Entries: []string{"workstation"}}
 	opts.MigrateKey, opts.KeepPlaintextKey = w.migrate, w.keep
-	opts.BindServer = (&fakeBind{}).bind
+	serverSeams(&opts).bind = (&fakeBind{}).bind
 
 	m := newTestModelEng(t, &fakeEngine{}, opts)
 

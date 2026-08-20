@@ -16,7 +16,7 @@ import (
 // one Driver that can ASK rather than refuse (the non-interactive drivers keep their hard error,
 // because they have nobody to ask). The engine is not merely unbound here, it does not EXIST:
 // construction still needs an endpoint (ADR 0024), it simply happens later, through
-// [Options.BindServer].
+// [ServerHost.Bind].
 //
 // The state is [Options.Prebound] and it is cleared by exactly one event — a successful bind — so
 // "is there an engine" is one comparison ([Model.prebound]) rather than a flag anyone can forget to
@@ -135,7 +135,7 @@ func (m *Model) openPrebound() {
 // With nothing configured there is nothing to re-open, so the guidance note is the whole answer.
 func (m Model) preboundRefusal() (tea.Model, tea.Cmd) {
 	m.transcript.addNote(preboundNotice(m.opts.Prebound))
-	if len(m.servers()) > 0 && m.opts.BindServer != nil {
+	if len(m.servers()) > 0 && m.serverActs().CanBind {
 		m.picker = picker{open: true, kind: pickerServer,
 			listSurface: listSurface{listCursor: listCursor{selected: m.currentServerRow()}}}
 	}
@@ -144,23 +144,23 @@ func (m Model) preboundRefusal() (tea.Model, tea.Cmd) {
 }
 
 // bindToServer is the pre-bound half of [Model.switchToServer]: the accept path of the same picker,
-// on a session that has no engine to move. It constructs one ([Options.BindServer], synchronously on
+// on a session that has no engine to move. It constructs one ([ServerHost.Bind], synchronously on
 // the Update loop like the switch, opening no connection of its own) and folds the result exactly as
 // a switch is folded, because what the display has to adopt is the same in both cases.
 //
 // The seam is validate-then-commit, so an error means nothing was constructed and the session is
 // still pre-bound — the note is the whole answer, and the fact on the status line still says so.
 func (m Model) bindToServer(choice ServerChoice) (tea.Model, tea.Cmd) {
-	if m.opts.BindServer == nil {
+	if !m.serverActs().CanBind {
 		return m.pickerNote(noBindSeamNote)
 	}
-	result, err := m.opts.BindServer(choice.Name)
+	result, err := m.opts.Server.Bind(choice.Name)
 	if err != nil {
 		return m.pickerNote("could not bind server: " + stripEscapes(err.Error()))
 	}
 	// The recording runs BEFORE the fold and the fold states it, so the human reads one line about one
 	// act rather than a line and a footnote about the same one (ADR 0036 decision 2).
-	record := recordServerChoice(m.opts.RecordServerChoice, choice.Name)
+	record := recordServerChoice(m.opts.Server, choice.Name)
 	// The state is over the moment the engine exists, and it is cleared BEFORE the fold: the beat the
 	// fold arms is issued only for a bound session (beatCmd).
 	m.opts.Prebound = PreboundStart{}
@@ -249,13 +249,14 @@ func (r choiceRecord) warn(t *transcript) {
 // renderer's, and the answer comes back as the saved flag rather than being guessed at here.
 //
 // A failed write is a warning and nothing more: the session already moved, and the recording is
-// best-effort persistence of something that is already true. An unwired seam records nothing and
-// says nothing — that is the pre-ADR-0036 behaviour, and every hand-built Options has it.
-func recordServerChoice(record func(name string) (bool, error), name string) choiceRecord {
-	if record == nil || name == "" {
+// best-effort persistence of something that is already true. An unwired host records nothing and
+// says nothing — that is the pre-ADR-0036 behaviour, and every hand-built Options has it — and so
+// does a wired one that answers false ([ServerHost.RecordChoice]: a name no `servers:` entry holds).
+func recordServerChoice(host ServerHost, name string) choiceRecord {
+	if host == nil || name == "" {
 		return choiceRecord{}
 	}
-	saved, err := record(name)
+	saved, err := host.RecordChoice(name)
 	if err != nil {
 		return choiceRecord{warning: "could not record the server choice: " + stripEscapes(err.Error())}
 	}

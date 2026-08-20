@@ -420,7 +420,7 @@
 // prompt or an ask_user question re-arms the chain.
 //
 // The upstream heartbeat is the package's SECOND tick chain, and it deliberately reuses the
-// first one's shape. [Options.Heartbeat] is a narrow func seam the binary backs with an
+// first one's shape. [ServerHost.Beat] is a narrow seam the binary backs with an
 // internal/heartbeat monitor — this package imports that one for the Beat value and the Interval
 // cadence, never internal/provider (ADR 0010) — and the Model owns only WHEN: [Model.Init] fires
 // the first beat immediately, because startup discovery IS that beat now (the binary paints before
@@ -446,7 +446,7 @@
 // since the Exchange that just completed was allowed to start. An unwired seam arms no chain, folds
 // nothing and blocks nothing, which is exactly the pre-heartbeat renderer.
 //
-// What a beat DOES about a changed upstream is the second seam, [Options.Rebind], and the split
+// What a beat DOES about a changed upstream is the second act, [ServerHost.Rebind], and the split
 // between the two is the design: the heartbeat seam observes, the rebind seam applies, and the
 // binary owns everything in between — re-resolving the per-model system prompt (ADR 0023), the
 // validated set (ADR 0016), the mechanisms registry and the compaction budget, then driving
@@ -463,11 +463,11 @@
 // "connecting" box at the top of its scrollback), and words the change once: connected / model
 // changed / context window changed, a refusal noted once per distinct target, and nothing at all
 // when a pin means nothing visible moved or when the session's FIRST beat lands clean (the restated
-// box is already saying it). A nil seam is a display-frozen heartbeat — the offline state and the
+// box is already saying it). A host that cannot rebind is a display-frozen heartbeat — the offline state and the
 // model list still live, no binding ever does.
 //
 // A SERVER switch (`/server`) is the same machinery one level up, and ADR 0024's "cold start, late
-// seed and mid-session switch are ONE code path" is what makes it small. [Options.SwitchServer] is
+// seed and mid-session switch are ONE code path" is what makes it small. [ServerHost.Switch] is
 // the binary's half — it re-points the provider client, swaps in a Monitor for the new server, and
 // returns the display facts — while [Model.foldServerSwitch] is this package's: the Options adopt
 // the endpoint, the alias and the surviving window pin, the model is UNBOUND (the footer says
@@ -501,14 +501,14 @@
 // because that orchestration is shared with the heartbeat and a rebind the beat merely OBSERVED is
 // news about the server rather than a choice — recording there would write config nobody asked for.
 // /server is the SAME overlay
-// over [Options.Servers] (one pickerKind, no callback field on the value-copied state), with the
+// over [ServerHost.List] (one pickerKind, no callback field on the value-copied state), with the
 // current row marked by entry NAME rather than by id (the name is the entry's identity, ADR 0036
 // decision 1, so a sibling entry sharing an endpoint is a switchable row of its own) and the accept
-// calling SwitchServer instead of
+// calling Switch instead of
 // applyRebind; both verbs also take their choice as an argument ("/model <id>", "/server <name>"),
 // both are idle-only by the commandSpecs table, and /server's whole degrade ladder is one line —
 // an unwired seam and an empty list are the same situation for the human. A committed switch is also
-// a CHOICE (ADR 0036): the name goes to [Options.RecordServerChoice], which writes it as the entry
+// a CHOICE (ADR 0036): the name goes to [ServerHost.RecordChoice], which writes it as the entry
 // the next session starts on when the binary recognises it as a configured one and skips it silently
 // otherwise — the renderer offers every name and believes the answer, stating the recording at the
 // end of the move's own note and a failed write as a footnote under it (prebound.go).
@@ -518,9 +518,9 @@
 // this run starts on — none recorded, the recorded one gone, or nothing configured — and the TUI is
 // the one Driver that can ASK rather than refuse, so [Options.Prebound] carries the reason and the
 // same /server picker comes up under a notice saying why. Its accept goes one level lower than a
-// switch's: [Options.BindServer] CONSTRUCTS the engine that does not exist yet
+// switch's: [ServerHost.Bind] CONSTRUCTS the engine that does not exist yet
 // ([Model.bindToServer]), the display adopts the result exactly as it adopts a move, and the name is
-// handed to [Options.RecordServerChoice] as the one the next session starts on. Nothing else about
+// handed to [ServerHost.RecordChoice] as the one the next session starts on. Nothing else about
 // the state is a new surface: no beat goes out while there is nothing to observe, a typed message
 // re-opens the ask instead of reaching the absent engine, the reason with nothing to pick opens
 // /settings instead, and the status line carries the standing fact that outlives the esc closing

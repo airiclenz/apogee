@@ -55,7 +55,7 @@ func (f *fakeHeartbeat) count() int {
 // wireHeartbeat builds a ready, idle model over opts with hb wired into the monitor seam.
 func wireHeartbeat(t *testing.T, opts Options, hb *fakeHeartbeat) Model {
 	t.Helper()
-	opts.Heartbeat = hb.beat
+	serverSeams(&opts).beat = hb.beat
 	return newTestModelEng(t, &fakeEngine{}, opts)
 }
 
@@ -104,7 +104,7 @@ func (f *fakeRebind) rebind(model string, window int) (RebindResult, error) {
 // wireRebind builds a ready, idle model with BOTH upstream seams wired: hb observes, rb applies.
 func wireRebind(t *testing.T, opts Options, hb *fakeHeartbeat, rb *fakeRebind) Model {
 	t.Helper()
-	opts.Rebind = rb.rebind
+	serverSeams(&opts).rebind = rb.rebind
 	return wireHeartbeat(t, opts, hb)
 }
 
@@ -422,7 +422,7 @@ func TestSubmitBlockedOfflineKeepsInput(t *testing.T) {
 	t.Parallel()
 
 	opts := testOpts
-	opts.Heartbeat = (&fakeHeartbeat{}).beat
+	serverSeams(&opts).beat = (&fakeHeartbeat{}).beat
 	eng := &fakeEngine{}
 	m := newTestModelEng(t, eng, opts)
 	m = foldBeatMsg(t, m, downBeat("connection refused"))

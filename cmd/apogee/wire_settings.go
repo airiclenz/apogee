@@ -488,7 +488,7 @@ type settingsApplier struct {
 	// binding reads the Upstream binding as it stands now; wired to upstreamHolder.Binding. Its Model
 	// is what a rebind must be driven FOR — an empty one means nothing is bound yet.
 	binding func() upstreamBinding
-	// rebind is [tui.Options.Rebind]'s own closure: the per-model re-resolution, which reads live
+	// rebind is [tui.ServerHost.Rebind]'s own closure: the per-model re-resolution, which reads live
 	// through rebindInputs and commits through the engine's idle-only Rebind.
 	rebind func(model string, window int) (tui.RebindResult, error)
 	// configPath is the config.yaml this session resolved — re-read whole for the keys whose value is

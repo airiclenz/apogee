@@ -239,7 +239,8 @@ func TestActuationLatchRefusesEveryMoveWhileHeld(t *testing.T) {
 	fake := newLauncher()
 	m, rb := wireLauncher(t, fake)
 	sw := &fakeSwitch{}
-	m.opts.Servers, m.opts.SwitchServer = staticServers(twoServers), sw.switchTo
+	seams := serverSeams(&m.opts)
+	seams.list, seams.switchTo = staticServers(twoServers), sw.switchTo
 	eng := m.eng.(*fakeEngine)
 	m, _ = startLoad(t, m, "alpha")
 	want := "profile load in flight — alpha"
@@ -581,7 +582,7 @@ func TestProfileLoadMoveRecordsNoStartupChoice(t *testing.T) {
 	opts.LoadProfile = fake.load
 	opts.UnloadServer = fake.act
 	opts.StopServer = fake.act
-	opts.RecordServerChoice = rec.record
+	serverSeams(&opts).record = rec.record
 	m, _ := seededPicker(t, opts)
 	m, cmd := startLoad(t, m, "beta")
 

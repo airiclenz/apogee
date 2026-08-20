@@ -717,16 +717,16 @@ func (m Model) settingsSwitchServer(row SettingRow, name string) (tea.Model, tea
 		m.settings.failure = settingFailure{}
 		return m.switchToServer(choice)
 	}
-	if m.opts.SwitchServer == nil {
+	if !m.serverActs().CanSwitch {
 		return m.settingsFailed(row, noServerSwitchNote)
 	}
 	from := hostDisplay(m.opts) // the label the footer used for the old server, captured before it moves
-	result, err := m.opts.SwitchServer(choice.Name)
+	result, err := m.opts.Server.Switch(choice.Name)
 	if err != nil {
 		return m.settingsFailed(row, stripEscapes(err.Error()))
 	}
 	m = m.recordSettingEdit(settingEdit{path: row.Path, value: choice.Name})
-	return m.foldServerSwitch(from, result, recordServerChoice(m.opts.RecordServerChoice, choice.Name))
+	return m.foldServerSwitch(from, result, recordServerChoice(m.opts.Server, choice.Name))
 }
 
 // settingsFailed puts msg on row as this pane's one failure slot and repaints — the outcome shape

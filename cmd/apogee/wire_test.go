@@ -127,10 +127,10 @@ func TestRunRootThreadsContextWindow(t *testing.T) {
 			if rec.opts.ContextWindow != tt.contextWindow {
 				t.Errorf("tui.Options.ContextWindow = %d; want the threaded %d", rec.opts.ContextWindow, tt.contextWindow)
 			}
-			if rec.opts.Rebind == nil {
-				t.Fatal("tui.Options.Rebind is nil; the composition root did not wire the rebind closure")
+			if !serverActsOf(rec.opts).CanRebind {
+				t.Fatal("tui.ServerActs.CanRebind is false; the composition root did not wire the rebind closure")
 			}
-			result, err := rec.opts.Rebind("fake", tt.observed)
+			result, err := rec.opts.Server.Rebind("fake", tt.observed)
 			if err != nil {
 				t.Fatalf("Rebind: %v", err)
 			}
@@ -1304,7 +1304,7 @@ func TestRunRootBindsADeterminedStartupBeforeLaunch(t *testing.T) {
 	if _, err := rec.engine.Snapshot(); err != nil {
 		t.Errorf("Snapshot on the launched engine: %v; want a constructed Agent behind the seam", err)
 	}
-	if beat := rec.opts.Heartbeat(context.Background()); !beat.Reachable || beat.ActiveModel != "model-a" {
+	if beat := rec.opts.Server.Beat(context.Background()); !beat.Reachable || beat.ActiveModel != "model-a" {
 		t.Errorf("beat = %+v; want the startup server's Monitor, installed before launch", beat)
 	}
 }
@@ -1366,17 +1366,17 @@ func TestRunRootStartsPreboundWithoutAnEngine(t *testing.T) {
 			if rec.engine.InExchange() {
 				t.Error("InExchange = true with nothing bound")
 			}
-			beat := rec.opts.Heartbeat(context.Background())
+			beat := rec.opts.Server.Beat(context.Background())
 			if beat.Reachable || beat.Failure != "" || beat.ActiveModel != "" || len(beat.AvailableModels) != 0 {
 				t.Errorf("beat = %+v; want the zero Beat — there is no server to observe yet", beat)
 			}
 			// And the way out is wired: the picker's rows are the configured list (no synthesized
 			// row, because no ephemeral startup exists) and BindServer is what ends the state.
-			if choices := rec.opts.Servers(); len(choices) != len(tt.servers) {
-				t.Errorf("tui.Options.Servers() = %+v; want the configured list %+v", choices, tt.servers)
+			if choices := rec.opts.Server.List(); len(choices) != len(tt.servers) {
+				t.Errorf("tui.ServerHost.List() = %+v; want the configured list %+v", choices, tt.servers)
 			}
-			if rec.opts.BindServer == nil {
-				t.Error("tui.Options.BindServer is nil; the pre-bound session has no way to bind one")
+			if !serverActsOf(rec.opts).CanBind {
+				t.Error("tui.ServerActs.CanBind is false; the pre-bound session has no way to bind one")
 			}
 		})
 	}
@@ -1408,16 +1408,16 @@ func TestBindServerConstructsOnceAndFlipsBothSeams(t *testing.T) {
 
 	// A name no entry carries is resolved before anything is constructed, so the session stays
 	// exactly as unbound as it was.
-	if _, err := rec.opts.BindServer("nope"); err == nil {
+	if _, err := rec.opts.Server.Bind("nope"); err == nil {
 		t.Error("BindServer accepted a name no entry carries")
 	}
 	if _, err := rec.engine.Snapshot(); !errors.Is(err, errNoServerBound) {
 		t.Errorf("Snapshot err = %v after a failed bind; want errNoServerBound", err)
 	}
 
-	result, err := rec.opts.BindServer("laptop")
+	result, err := rec.opts.Server.Bind("laptop")
 	if err != nil {
-		t.Fatalf("BindServer: %v", err)
+		t.Fatalf("Bind: %v", err)
 	}
 	if result.Endpoint != first.URL || result.HostAlias != "laptop" {
 		t.Errorf("result = %+v; want the entry's endpoint and its name as the alias", result)
@@ -1430,23 +1430,23 @@ func TestBindServerConstructsOnceAndFlipsBothSeams(t *testing.T) {
 	if _, err := rec.engine.Snapshot(); err != nil {
 		t.Errorf("Snapshot after the bind: %v; want a constructed Agent", err)
 	}
-	if beat := rec.opts.Heartbeat(context.Background()); !beat.Reachable || beat.ActiveModel != "model-a" {
+	if beat := rec.opts.Server.Beat(context.Background()); !beat.Reachable || beat.ActiveModel != "model-a" {
 		t.Errorf("beat after the bind = %+v; want model-a from the bound server's Monitor", beat)
 	}
 
 	// Exactly once: a second bind is refused, and nothing moved — the session is still on the
 	// server it bound, which is what `/server` (SwitchServer) exists to change.
-	if _, err := rec.opts.BindServer("workstation"); !errors.Is(err, errAlreadyBound) {
+	if _, err := rec.opts.Server.Bind("workstation"); !errors.Is(err, errAlreadyBound) {
 		t.Errorf("second BindServer err = %v; want errAlreadyBound", err)
 	}
-	if beat := rec.opts.Heartbeat(context.Background()); beat.ActiveModel != "model-a" {
+	if beat := rec.opts.Server.Beat(context.Background()); beat.ActiveModel != "model-a" {
 		t.Errorf("beat after the refused second bind = %+v; want the first server still observed", beat)
 	}
 	// And the switch that IS the right verb still works over the same list.
-	if _, err := rec.opts.SwitchServer("workstation"); err != nil {
+	if _, err := rec.opts.Server.Switch("workstation"); err != nil {
 		t.Fatalf("SwitchServer after a bind: %v", err)
 	}
-	if beat := rec.opts.Heartbeat(context.Background()); beat.ActiveModel != "model-b" {
+	if beat := rec.opts.Server.Beat(context.Background()); beat.ActiveModel != "model-b" {
 		t.Errorf("beat after the switch = %+v; want model-b", beat)
 	}
 }
@@ -2771,7 +2771,7 @@ func TestSwitchServerFollowsTheEntrysLauncher(t *testing.T) {
 	if rec.opts.LauncherEnabled() {
 		t.Fatal("LauncherEnabled() = true on a startup entry that names no launcher")
 	}
-	if _, err := rec.opts.SwitchServer("local"); err != nil {
+	if _, err := rec.opts.Server.Switch("local"); err != nil {
 		t.Fatalf("SwitchServer(local): %v", err)
 	}
 	if !rec.opts.LauncherEnabled() {
@@ -2784,7 +2784,7 @@ func TestSwitchServerFollowsTheEntrysLauncher(t *testing.T) {
 	}
 
 	// A switch that resolves to nothing moved no session, so it installs nothing either.
-	if _, err := rec.opts.SwitchServer("nope"); err == nil {
+	if _, err := rec.opts.Server.Switch("nope"); err == nil {
 		t.Fatal("SwitchServer accepted a name no entry carries")
 	}
 	if !rec.opts.LauncherEnabled() {
@@ -2793,7 +2793,7 @@ func TestSwitchServerFollowsTheEntrysLauncher(t *testing.T) {
 
 	// Leaving turns it off again: the remote server has no launcher in front of it, and `/model`
 	// there must fall back to what that server advertises.
-	if _, err := rec.opts.SwitchServer("remote"); err != nil {
+	if _, err := rec.opts.Server.Switch("remote"); err != nil {
 		t.Fatalf("SwitchServer(remote): %v", err)
 	}
 	if rec.opts.LauncherEnabled() {
@@ -2830,8 +2830,8 @@ func TestBindServerInstallsTheEntrysLauncher(t *testing.T) {
 	if rec.opts.LauncherEnabled() {
 		t.Fatal("LauncherEnabled() = true before anything was bound")
 	}
-	if _, err := rec.opts.BindServer("local"); err != nil {
-		t.Fatalf("BindServer: %v", err)
+	if _, err := rec.opts.Server.Bind("local"); err != nil {
+		t.Fatalf("Bind: %v", err)
 	}
 	if !rec.opts.LauncherEnabled() {
 		t.Error("LauncherEnabled() = false after binding the launcher-fronted entry")
@@ -3346,7 +3346,7 @@ func TestApplySettingRefusesEveryKeyItCannotReach(t *testing.T) {
 	}
 }
 
-// rebindProbe stands in for the composition root's own rebind closure ([tui.Options.Rebind]): it
+// rebindProbe stands in for the composition root's own rebind closure ([tui.ServerHost.Rebind]): it
 // records what the dispatcher drove it with, so the rebind-RIDING keys can be told apart from the
 // pushed ones without an Agent or a server behind either.
 type rebindProbe struct {
@@ -4464,7 +4464,7 @@ func TestStartupBindHonoursTheEntrysContextWindow(t *testing.T) {
 			}
 			// And the first beat cannot undo it: the rebind that observation drives re-resolves the
 			// pin off the same latch, so a server advertising 131,072 does not displace it.
-			result, err := rec.opts.Rebind("fake", 131072)
+			result, err := rec.opts.Server.Rebind("fake", 131072)
 			if err != nil {
 				t.Fatalf("Rebind: %v", err)
 			}

@@ -37,7 +37,7 @@ import (
 // model measures as "nothing new" rather than as a fresh change to bind back.
 //
 // /server is the same overlay over a different question, and its accept is the same shape one level
-// up: the binary moves the whole Upstream behind the unchanged seams ([Options.SwitchServer]) and
+// up: the binary moves the whole Upstream behind the unchanged seams ([ServerHost.Switch]) and
 // the TUI folds what came back ([Model.foldServerSwitch]) — a fresh heartbeat generation, no model
 // bound, and the new server's very first beat completing the move through that same rebind path.
 //
@@ -72,7 +72,7 @@ type pickerKind int
 
 const (
 	pickerModel        pickerKind = iota // the models the Upstream advertises — /model without a launcher
-	pickerServer                         // the servers config.yaml names — /server, over m.opts.Servers
+	pickerServer                         // the servers config.yaml names — /server, over m.opts.Server
 	pickerLoad                           // the Launch profiles the launcher defines — /model with one
 	pickerCycle                          // how often a new Schedule fires — /schedule's first popup
 	pickerScheduleMode                   // the mode that Schedule's Firings run in — /schedule's second
@@ -250,13 +250,13 @@ func (m Model) offeredModels() []heartbeat.ModelSummary {
 // us, and a Launch profile is read from a config file rather than observed (pickLaunchProfile).
 func (m Model) modelSwitchBlocked() (string, bool) {
 	switch {
-	case m.opts.Heartbeat == nil:
+	case !m.observesUpstream():
 		return "/model needs the upstream monitor — not wired", true
 	case m.hb.offline:
 		// The offline facts are already worded once (the endpoint, and why the last beat failed);
 		// saying them a second way here would only invite the two to drift.
 		return m.upstreamBlockNote(), true
-	case m.opts.Rebind == nil:
+	case !m.appliesRebinds():
 		return "model switching is unavailable — the display is read-only", true
 	case len(m.hb.models) == 0:
 		return "the server has not advertised any models yet", true
@@ -278,7 +278,7 @@ func (m Model) runServerCommand(args []string) (tea.Model, tea.Cmd) {
 		return m.pickerNote(serverUsage)
 	}
 	servers := m.servers()
-	if m.opts.SwitchServer == nil || len(servers) == 0 {
+	if !m.serverActs().CanSwitch || len(servers) == 0 {
 		return m.pickerNote(noServersNote)
 	}
 	if len(args) == 1 {
@@ -294,16 +294,26 @@ func (m Model) runServerCommand(args []string) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// servers is the switchable Upstreams as they stand RIGHT NOW ([Options.Servers], a provider): the
-// one read every surface that offers a server goes through, so the picker, the pre-bound ask and the
+// servers is the switchable Upstreams as they stand RIGHT NOW ([ServerHost.List], asked per draw):
+// the one read every surface that offers a server goes through, so the picker, the pre-bound ask and the
 // settings pane's popup all offer what the `servers:` block says at the moment they are drawn rather
 // than what it said at launch. An unwired provider is an empty list — the nil-seam degrade every
 // other seam takes.
 func (m Model) servers() []ServerChoice {
-	if m.opts.Servers == nil {
+	if m.opts.Server == nil {
 		return nil
 	}
-	return m.opts.Servers()
+	return m.opts.Server.List()
+}
+
+// serverActs is what the Upstream host says it can do ([ServerHost.Acts]), with the unwired host
+// answering for a nil one: the zero [ServerActs] is "none of it", so every gate reads one flag
+// instead of a nil check and a call.
+func (m Model) serverActs() ServerActs {
+	if m.opts.Server == nil {
+		return ServerActs{}
+	}
+	return m.opts.Server.Acts()
 }
 
 // serverNamed is the choice called name, and whether the list still holds one — the resolution both
@@ -344,7 +354,7 @@ func serverNameList(servers []ServerChoice) string {
 
 // switchToServer is the accept path both forms of /server share — a highlighted row and
 // "/server <name>". It closes the overlay, asks the binary to move the session
-// ([Options.SwitchServer], synchronously on the Update loop: it mutates the engine and constructs a
+// ([ServerHost.Switch], synchronously on the Update loop: it mutates the engine and constructs a
 // client, and opens no connection of its own), and folds what came back.
 //
 // The seam is validate-then-commit all the way down, so an error means nothing moved and the note
@@ -373,7 +383,7 @@ func (m Model) switchToServer(choice ServerChoice) (tea.Model, tea.Cmd) {
 		m.transcript.addNote("already on " + choice.Name + " (" + choice.Endpoint + ")")
 		// The recording is stated on a line of its own here, where the move's own note (which carries
 		// it as savedChoiceClause) is not there to hang it on.
-		record := recordServerChoice(m.opts.RecordServerChoice, choice.Name)
+		record := recordServerChoice(m.opts.Server, choice.Name)
 		if record.saved {
 			m.transcript.addNote(serverSavedNote)
 		}
@@ -382,7 +392,7 @@ func (m Model) switchToServer(choice ServerChoice) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	from := hostDisplay(m.opts) // the label the footer used for the old server, captured before it moves
-	result, err := m.opts.SwitchServer(choice.Name)
+	result, err := m.opts.Server.Switch(choice.Name)
 	if err != nil {
 		m.transcript.addNote("could not switch server: " + err.Error())
 		m.layout()
@@ -390,8 +400,8 @@ func (m Model) switchToServer(choice ServerChoice) (tea.Model, tea.Cmd) {
 	}
 	// The move is now true, so it is also the choice this human should not have to make again: the
 	// name goes to the recording seam, which writes it when it belongs to a configured entry and
-	// skips it silently when it does not (ADR 0036 decision 2, [Options.RecordServerChoice]).
-	return m.foldServerSwitch(from, result, recordServerChoice(m.opts.RecordServerChoice, choice.Name))
+	// skips it silently when it does not (ADR 0036 decision 2, [ServerHost.RecordChoice]).
+	return m.foldServerSwitch(from, result, recordServerChoice(m.opts.Server, choice.Name))
 }
 
 // serverSavedNote is what a RECORDED re-selection says: the `server:` key now names the entry this
@@ -637,8 +647,8 @@ func (m Model) acceptPicker() (tea.Model, tea.Cmd) {
 		picked := m.offeredModels()[offered]
 		return m.bindPickedModel(picked.ID, picked.ContextWindow)
 	case pickerServer:
-		// The one kind whose list is a PROVIDER (Options.Servers): the rows are re-read here rather
-		// than trusted from the frame that drew them, so a `servers:` block that shrank under the
+		// The one kind whose list is asked per draw (ServerHost.List): the rows are re-read here
+		// rather than trusted from the frame that drew them, so a `servers:` block that shrank under the
 		// open overlay costs the accept and not the process.
 		servers := m.servers()
 		if offered >= len(servers) {

@@ -1473,7 +1473,8 @@ func TestFrameNeverExceedsTheTerminalHeight(t *testing.T) {
 			}},
 		{"server picker", false, "host-00", func(o frameOverlays) string { return o.picker },
 			func(t *testing.T, width, height, draft int) Model {
-				m := withDraft(t, modelWithOverlayRoomAt(t, width, height, Options{Workspace: "/ws/a", Servers: staticServers(servers)}), draft)
+				m := withDraft(t, modelWithOverlayRoomAt(t, width, height,
+					Options{Workspace: "/ws/a", Server: &fakeServerHost{list: staticServers(servers)}}), draft)
 				m.picker = picker{open: true, kind: pickerServer}
 				return m
 			}},

@@ -781,7 +781,17 @@ exercised; `go test ./cmd/apogee` covers the wiring.
 
 **Commit:** `refactor(tui): fold the settings and scheme option funcs into named host interfaces`
 
-## 26. Options: server and heartbeat funcs become ServerHost
+## 26. Options: server and heartbeat funcs become ServerHost — ✅ DONE (2026-08-20)
+
+NOTES (2026-08-20): the item's "nil-means-unwired preserved; audit every call site" could not land as item 25's shape alone. Four of the six acts are decided ABOUT before they are performed — `Heartbeat != nil` armed the tick chain in `newModel` and gated `blockedUpstream`, `Rebind != nil` decided whether an observed change was CAPTURED at all and worded `/model`'s "the display is read-only" rung, `SwitchServer != nil` refused `/server` up front (`TestServerCommand…/no servers configured/unwired seam` pins that an unwired switch and an empty list are ONE sentence), `BindServer != nil` gated the pre-bound picker and `noBindSeamNote`. Calling to find out would BE the act, so the interface carries `Acts() ServerActs` (four bools; zero value = unwired, which is also what a nil host answers) and each old nil check became one flag read. `List` and `RecordChoice` need no flag: no servers and `false` already ARE their degrades. Production answers all four true.
+
+NOTES (2026-08-20): `docs/adr/0054-*.md` was edited outside the item's Files line — decision **3a** records the "reported, not attempted" rule above, and one consequence line names `ServerHost` as what it was written from. It is the record item 27 (LauncherHost) follows, and its decision 3 as written ("expressed where the act is") would otherwise be the only guidance for a family whose acts cannot say it.
+
+NOTES (2026-08-20): the adapter lives in `cmd/apogee/wire_server.go`, as the item's Files line says, rather than in `wire_options.go` beside item 25's two (ADR 0054 decision 4). It holds the wiring itself instead of what the acts need, because every act already IS a verb on the wiring (`wire_verbs.go`: `beat`, `rebind`, `switchServer`, `bindServer`, `recordServerChoice`) — none of them moved, and the value is only where the renderer's six names meet them.
+
+NOTES (2026-08-20): eleven files outside the item's Files line carry one changed prose pointer each — `internal/tui/{doc,model,settings,prebound,listsurface}.go` and `cmd/apogee/{doc,upstream,wire_live,wire_settings,wire_options}.go` name these seams in prose. `docs/adr/0028` names `Options.Heartbeat` / `Options.Rebind` / `Options.SwitchServer` inside its own Decision narration and was left as written (item 8's LIVE pointer vs HISTORICAL record boundary), as were the CHANGELOG's past entries and the pinned review.
+
+NOTES (2026-08-20): no new test file. The per-family fake is `fakeServerHost` (picker_test.go) — one func per act, the documented unwired answer for any act a test leaves nil, and `Acts()` derived from which funcs are wired, so one nil func is one provable per-member degrade. It is reached through `serverSeams(&opts)`, which finds the host already on the Options instead of replacing it (`wireHeartbeat` adds a beat over a list its caller wired); `cmd/apogee` gets `serverActsOf` for its "is it wired" assertions. Every changed test line is wiring FORM or a failure MESSAGE naming the seam: no expectation was changed, added, removed or weakened.
 
 **Source:** review §Candidate 9. Depends on items 2 and 25.
 

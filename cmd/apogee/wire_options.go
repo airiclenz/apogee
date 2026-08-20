@@ -76,39 +76,21 @@ func (w *rootWiring) options() tui.Options {
 		ConfigHome:    w.roots.config,
 		ContextWindow: w.live.window(),
 		HostAlias:     w.opts.HostAlias,
-		// The two upstream seams (ADR 0024): the monitor observes on the TUI's cadence, and the
-		// verb applies what the observation implies. Wiring both is what makes the display live.
-		// Heartbeat goes through the holder, so the observation follows the session onto another
-		// server without the seam — or the renderer — changing shape; the wrapper reads the
-		// slot count off the same observation on its way past.
-		Heartbeat: w.beat,
-		Rebind:    w.rebind,
-		// The `/server` half: the servers this session can move to (display and identity only —
-		// the keys and hints stay here) and the one verb that moves it. Both are always wired;
-		// the list is the `servers:` block verbatim, plus the one row an ephemeral
-		// `--endpoint`/`APOGEE_ENDPOINT` start synthesizes for itself (upstreamChoices). It can
-		// therefore be EMPTY — a pre-bound start on a config that lists nothing — which is
-		// exactly "nothing to switch to" without a special case.
+		// The whole Upstream seam as one named capability (ADR 0054, wire_server.go): the servers
+		// this session can move to, the two verbs that move or first bind it, the recording each
+		// move makes for the next session, and the two ADR 0024 acts that keep the display live —
+		// the monitor observing on the TUI's cadence and the verb applying what it implies.
 		//
-		// Projected from the HOLDER on every ask rather than snapshotted at launch, so a `servers:`
-		// block the human edits mid-session (ADR 0037) is offered by the picker and by the settings
-		// pane's server row the moment the edit lands — the same list the two verbs above resolve
-		// a name against, in the same order.
-		Servers:      func() []tui.ServerChoice { return serverChoices(w.live.choices(w.opts)) },
-		SwitchServer: w.switchServer,
-		// The pre-bound half of the same list (ADR 0036 decisions 3, 4 and 7): why this session has
-		// no upstream yet — first boot, a `server:` naming an entry that is gone, or nothing
-		// configured at all — and the seam that ends it. Both are always wired; on the ordinary start Prebound
-		// is the zero value, which says the engine was constructed before the program began and
-		// leaves every flow below exactly as it was.
-		Prebound:   w.opts.Prebound,
-		BindServer: w.bindServer,
-		// The persistence half of both verbs (ADR 0036 decision 2): every deliberate move onto a
-		// configured entry — the first-boot choice included — records that entry as the one the next
-		// session starts on, so the question is asked once. Moves onto anything the file does not
-		// list are skipped silently, which is what keeps an override or a profile load from becoming
-		// config nobody wrote.
-		RecordServerChoice: w.recordServerChoice,
+		// It is always wired and every act inside it always answers, which is what makes the
+		// degrades [tui.ServerHost] documents this binary's to have none of: what a Driver composes
+		// deliberately (ADR 0031), a full apogee session simply has.
+		Server: serverHost{w: w},
+		// Why this session may have no upstream yet — first boot, a `server:` naming an entry that
+		// is gone, or nothing configured at all (ADR 0036 decisions 3, 4 and 7). On the ordinary
+		// start it is the zero value, which says the engine was constructed before the program began
+		// and leaves every flow below exactly as it was; the seam that ENDS the state is
+		// [tui.ServerHost.Bind] above.
+		Prebound: w.opts.Prebound,
 		// And the same persistence one rung in, for the model rather than for the server
 		// (`remember-model:`): an explicit `/model` pick becomes the `model:` key on the entry the
 		// session is on, so that server comes back on it. Always wired — the toggle is read inside,

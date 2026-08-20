@@ -38,7 +38,7 @@ func (f *fakeBind) bind(name string) (ServerSwitchResult, error) {
 }
 
 // fakeRecorder stands in for the splice writer behind either recording seam —
-// [Options.RecordServerChoice] and [Options.RecordModelChoice] take the same shape because they are
+// [ServerHost.RecordChoice] and [Options.RecordModelChoice] take the same shape because they are
 // one feature seen from the two things a session records. saved is what it reports having done: true
 // is the binary's answer for a choice the file can carry, and the zero value is its silent skip for
 // one it cannot.
@@ -59,7 +59,7 @@ func (f *fakeRecorder) record(name string) (bool, error) {
 func preboundOpts(reason PreboundReason, name string) Options {
 	opts := testOpts
 	opts.Endpoint, opts.HostAlias, opts.Model, opts.ContextWindow = "", "", "", 0
-	opts.Servers = staticServers(twoServers)
+	serverSeams(&opts).list = staticServers(twoServers)
 	opts.Prebound = PreboundStart{Reason: reason, Name: name}
 	return opts
 }
@@ -70,11 +70,9 @@ func preboundModel(t *testing.T, reason PreboundReason, name string,
 ) (Model, *fakeEngine) {
 	t.Helper()
 	opts := preboundOpts(reason, name)
-	opts.SwitchServer = (&fakeSwitch{}).switchTo
-	opts.BindServer = bind.bind
-	opts.RecordServerChoice = rec.record
-	opts.Heartbeat = (&fakeHeartbeat{}).beat
-	opts.Rebind = (&fakeRebind{}).rebind
+	seams := serverSeams(&opts)
+	seams.switchTo, seams.bind, seams.record = (&fakeSwitch{}).switchTo, bind.bind, rec.record
+	seams.beat, seams.rebind = (&fakeHeartbeat{}).beat, (&fakeRebind{}).rebind
 	eng := &fakeEngine{}
 	return newTestModelEng(t, eng, opts), eng
 }
@@ -307,8 +305,8 @@ func TestPreboundRefusesTheExchangeVerbs(t *testing.T) {
 // there is nothing in it — and the guidance rides the status line.
 func TestPreboundNoServersOpensSettings(t *testing.T) {
 	opts := preboundOpts(PreboundNoServers, "")
-	opts.Servers = nil
-	opts.BindServer = (&fakeBind{}).bind
+	seams := serverSeams(&opts)
+	seams.list, seams.bind = nil, (&fakeBind{}).bind
 	opts.Settings = fakeSettingsHost{rows: func() []SettingRow { return settingsTestRows(6) }}
 	m := newTestModelEng(t, &fakeEngine{}, opts)
 
@@ -329,8 +327,8 @@ func TestPreboundNoServersOpensSettings(t *testing.T) {
 // nothing.
 func TestPreboundNoServersGuidesWithoutAPane(t *testing.T) {
 	opts := preboundOpts(PreboundNoServers, "")
-	opts.Servers = nil
-	opts.BindServer = (&fakeBind{}).bind
+	seams := serverSeams(&opts)
+	seams.list, seams.bind = nil, (&fakeBind{}).bind
 	eng := &fakeEngine{}
 	m := newTestModelEng(t, eng, opts)
 

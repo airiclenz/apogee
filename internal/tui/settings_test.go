@@ -788,7 +788,7 @@ func TestSettingsPaneEnumSubListCommitsAndBacksOut(t *testing.T) {
 
 // settingsServerRow is the `server:` row as the registry describes it (internal/config/registry.go): a
 // row picked from a sub-list like an enum, but with no vocabulary of its own — what it may hold is
-// whatever [Options.Servers] answers with — and whose ⏎ is the `/server` switch rather than a write.
+// whatever [ServerHost.List] answers with — and whose ⏎ is the `/server` switch rather than a write.
 func settingsServerRow() SettingRow {
 	return SettingRow{
 		Path: "server", Section: "Upstream", Kind: SettingServer, Value: "test-host",
@@ -807,7 +807,8 @@ func settingsServerModel(t *testing.T, servers func() []ServerChoice, sw *fakeSw
 		rows:  func() []SettingRow { return rows },
 		write: log.write, reset: log.reset, apply: log.apply,
 	}
-	opts.Servers, opts.SwitchServer = servers, sw.switchTo
+	seams := serverSeams(&opts)
+	seams.list, seams.switchTo = servers, sw.switchTo
 	return openSettingsPane(t, newTestModelEng(t, &fakeEngine{}, opts))
 }
 

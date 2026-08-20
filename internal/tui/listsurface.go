@@ -292,7 +292,7 @@ type pickerView struct {
 
 // offeringIndex maps the highlighted FILTERED row back to its place in the full list, and reports
 // false when there is nothing to take: a filter matching no row, or a list that emptied under the
-// open pane. Callers whose list can move between the two reads of one keypress (the Options.Servers
+// open pane. Callers whose list can move between the two reads of one keypress (the ServerHost.List
 // provider, the live Schedules) still bounds-check what comes back against a fresh read — this
 // answers where the human aimed, not what is still there.
 func (v pickerView) offeringIndex(selected int) (int, bool) {

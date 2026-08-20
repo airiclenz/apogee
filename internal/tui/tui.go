@@ -229,6 +229,147 @@ type SchemeHost interface {
 	Export(name string) (path string, err error)
 }
 
+// ServerHost is the Upstream seam whole: the servers this session can be on, the two ways it
+// arrives on one, the choice it records for the next session, and the observation that says what the
+// server it is on is actually serving — one host capability rather than six bare funcs (ADR 0054).
+// It is defined here like [SettingsHost], so the renderer selects a server and folds a beat while
+// the composition root owns every endpoint, key, discovery hint and window pin behind them.
+//
+// The split is the same for all six acts: the TUI owns WHEN — the human's pick at idle, the cadence
+// of the tick chain, the quiescent boundary a rebind waits for (ADR 0024) — and the host owns WHAT,
+// because every input to that decision is config the renderer never reads.
+//
+// A nil host means the Upstream seam is unwired whole: nothing to switch to, no way to bind,
+// nothing observing, and nothing recorded — the pre-heartbeat, pre-ADR-0036 behaviour every
+// hand-built test Options has. A host that IS wired but cannot do one of the six says so where the
+// act is: List answers with no servers and RecordChoice with false, which are already exactly the
+// degrades those two have. The other four are acts the renderer decides ABOUT before it decides to
+// perform one — a cadence to open, a picker to raise, a ladder rung to word — so it asks
+// [ServerHost.Acts] first, and a host answering true there is taken at its word.
+type ServerHost interface {
+	// Acts says which of the four askable acts this host performs. It is asked wherever the old
+	// per-func nil checks were, and for the same reason they could not become "call it and see": an
+	// unobserved session is not one whose server is unreachable, a display-frozen heartbeat must not
+	// capture a change it cannot apply, and `/server` refuses up front rather than opening a picker
+	// whose accept could move nothing.
+	Acts() ServerActs
+
+	// Beat is one observation of the Upstream: is the server reachable, which model is it
+	// serving, in which context window, and what else does it advertise (internal/heartbeat). The
+	// binary backs it with a live heartbeat.Monitor; the TUI owns only the CADENCE and the
+	// consequences — it fires one beat from Init, re-arms heartbeat.Interval after each LANDED beat
+	// (so beats can never overlap), renders the offline state, and refuses a send while the server
+	// is not there to answer it. A beat is never an error: an unreachable server is a finding the
+	// Beat itself carries, which is why the seam returns no error.
+	//
+	// It is called from a Cmd goroutine rather than from Update, and only while [ServerActs.CanObserve]
+	// says something is watching at all.
+	Beat(ctx context.Context) heartbeat.Beat
+
+	// Rebind re-resolves and applies the per-model bindings after the heartbeat observed the
+	// upstream serving a different model — or the same model in a different window. The binary owns
+	// the resolution (the per-model system prompt, ADR 0023; the validated set, ADR 0016; the
+	// mechanisms registry and the compaction budget) and the engine mutators; the TUI owns only
+	// WHEN, which is the whole of its half: at idle the moment the beat lands, or deferred to the
+	// exchange-terminal fold when a worker owns the engine — the quiescent boundary Agent.Rebind
+	// demands (ADR 0024). It returns what was actually BOUND, which is not always what was observed
+	// (a `context-window:` pin outranks the server's window), plus any notices to surface.
+	Rebind(model string, contextWindow int) (RebindResult, error)
+
+	// List names the upstream servers this session can be switched to — the `/server` picker's
+	// rows and the `/settings` server row's popup, in the order the binary assembled them: every
+	// `servers:` entry from config.yaml, preceded by the endpoint this session started on whenever
+	// no entry already names it (so the way back is always offered). It is display and identity
+	// only; what a switch actually needs to talk to a server stays in the binary, behind Switch.
+	//
+	// It is asked on every ask rather than snapshotted, the [SettingsHost.Rows] posture: the
+	// `servers:` block is itself something the human can change mid-session (ADR 0037's `$EDITOR`
+	// jump), so the list is drawn from what the file says at the moment it is drawn rather than from
+	// what it said at launch — an entry added a moment ago is offered without restarting apogee.
+	//
+	// Nothing named ⇒ nothing to switch to, and `/server` says so rather than opening an empty
+	// overlay.
+	List() []ServerChoice
+
+	// Switch moves the whole session to the server named name: the binary re-points the
+	// provider client at that endpoint with that key (Agent.SwitchUpstream), swaps in a heartbeat
+	// Monitor for it, and restamps the session record. The split is Rebind's exactly — the TUI owns
+	// only WHEN, and here that is an explicit act by the human at idle — because every input to the
+	// move (the endpoint, the per-server key, that server's discovery hint, the window pin) is
+	// config the binary owns.
+	//
+	// The TUI calls it synchronously on the Update loop: it mutates the engine and constructs a
+	// client, and opens no connection of its own — the new server is DISCOVERED by the first beat
+	// of the swapped-in Monitor, and the ordinary rebind path binds what that beat reports. The
+	// switch therefore lands with NO model bound, which is why the result carries no model: the
+	// display says "connecting…" for one beat, exactly as it does on a cold start.
+	//
+	// An error means nothing moved (the engine's own switch is validate-then-commit, and an
+	// unresolvable name never reaches it), so the caller surfaces it as a note and leaves the
+	// session where it was — which is also how a host that cannot switch at all answers.
+	Switch(name string) (ServerSwitchResult, error)
+
+	// Bind constructs the session's engine on the named `servers:` entry — the pre-bound
+	// half of Switch, and the only seam that can end the pre-bound state. It answers with the
+	// same [ServerSwitchResult] a switch does, so the display adopts a first binding exactly as it
+	// adopts a move.
+	//
+	// It binds ONCE: a session that already has an engine is answered with an error naming
+	// Switch's own verb, because a second construction would leave the first engine running
+	// with nothing holding it. Like Switch it is called synchronously on the Update loop and
+	// opens no connection of its own — the first beat of the Monitor it installs is what discovers
+	// the server. A host that cannot bind answers through the same error, and a pre-bound session
+	// then has no way out of the pre-bound state; the binary always wires it beside Switch.
+	Bind(name string) (ServerSwitchResult, error)
+
+	// RecordChoice persists the entry this session starts on NEXT time — the `server:` key
+	// ADR 0036 decision 2 records on every move to a configured entry. The renderer calls it with the
+	// name it just bound or switched to and knows nothing else about it: whether that name belongs to
+	// a configured entry (and is therefore worth writing) is the binary's question, because only the
+	// binary can tell a configured row from the synthesized one an override startup earns.
+	//
+	// It answers whether it WROTE, which is what lets the renderer state the recording beside the
+	// move ("· server: saved") without claiming one for the moves the binary skips: a name in no
+	// `servers:` entry is skipped silently, and false with no error is exactly that outcome — the
+	// answer a host that records nothing gives for every name, leaving every switch session-scoped,
+	// which is the behaviour this key was introduced to replace.
+	//
+	// It is best-effort persistence of something that ALREADY happened: the session moved before this
+	// is called and stays moved whatever it answers, so an error is a note and never an undo. Like
+	// [SettingsHost.Write] it is synchronous — one small file, spliced and renamed — and called on the
+	// Update loop.
+	RecordChoice(name string) (recorded bool, err error)
+}
+
+// ServerActs is a [ServerHost]'s own answer to which of its acts it actually performs — the
+// per-member half of the nil-means-unwired contract (ADR 0054 decision 3), for the four acts whose
+// absence the renderer has to know about BEFORE it acts rather than after. The zero value is the
+// unwired host, which is what a nil [Options.Server] answers with, so one shape covers both
+// granularities and no caller writes two checks.
+//
+// The other two acts need no flag: [ServerHost.List] says it by naming no servers, and
+// [ServerHost.RecordChoice] by answering false, which are the same answers those acts give for a
+// list that is empty and a name no `servers:` entry holds.
+type ServerActs struct {
+	// CanObserve is whether anything watches this session's Upstream at all. False opens no tick
+	// chain, folds no beat, refuses no send and leaves the footer with what launch gave it — the
+	// pre-heartbeat renderer. [ServerHost.Beat] cannot say it: an unreachable server is a finding a
+	// beat CARRIES, never a statement that nobody is looking.
+	CanObserve bool
+	// CanRebind is whether an observed change can be acted on. False is the display-frozen
+	// heartbeat: beats still land and still light the offline state, but nothing is captured,
+	// nothing moves, and `/model` says the display is read-only.
+	CanRebind bool
+	// CanSwitch is whether this session can move to another server at all. False is one situation
+	// with an empty list for the human — there is nowhere to go — and `/server` says so with one
+	// sentence rather than opening an overlay it cannot honour.
+	CanSwitch bool
+	// CanBind is whether a PRE-BOUND session can leave that state (ADR 0036 decision 3). False
+	// leaves the notice and the guidance without the picker they would otherwise open, and answers
+	// an accept that reached the seam some other way with a note.
+	CanBind bool
+}
+
 // ----------------------------------------------------------------------------
 // The engine seam (phase-2 detail plan §3 C5)
 // ----------------------------------------------------------------------------
@@ -589,7 +730,7 @@ type Options struct {
 	// all apply the same way (decision 5).
 	//
 	// The Model owns the cadence and the consequences and nothing else, exactly as it does for
-	// [Heartbeat]: one wait is opened at Init, each landed report re-reads through [ReloadConfig],
+	// [ServerHost.Beat]: one wait is opened at Init, each landed report re-reads through [ReloadConfig],
 	// journals and applies what came back through the same two homes an in-pane commit uses, and opens
 	// the next wait. WHICH file is watched, how, and how often is the binary's alone.
 	//
@@ -665,67 +806,15 @@ type Options struct {
 	// binary said so.
 	AutoTitle bool
 
-	// Heartbeat is one observation of the Upstream: is the server reachable, which model is it
-	// serving, in which context window, and what else does it advertise (internal/heartbeat). The
-	// binary backs it with a live heartbeat.Monitor; the TUI owns only the CADENCE and the
-	// consequences — it fires one beat from Init, re-arms heartbeat.Interval after each LANDED beat
-	// (so beats can never overlap), renders the offline state, and refuses a send while the server
-	// is not there to answer it. A beat is never an error: an unreachable server is a finding the
-	// Beat itself carries, which is why the seam returns no error.
+	// Server is the whole Upstream seam as one named capability (ADR 0054): which servers this
+	// session can be on, the two verbs that put it on one, the choice each move records for the next
+	// session, and the observation that says what the server it is on is actually serving. The six
+	// acts were six bare funcs and are one interface for the reason [SettingsHost] is: they are faces
+	// of one thing a host either has or has not — an Upstream it owns the endpoints, keys and pins
+	// of — and the renderer drives all six the same way, owning WHEN and never WHAT.
 	//
-	// nil ⇒ unwired: no tick chain starts, no beat is ever folded, nothing is ever blocked, and the
-	// footer keeps the launch-time display — exactly the pre-heartbeat behaviour, which is what
-	// every hand-built test Options relies on. It is a func rather than an interface for the same
-	// reason SaveHostAcknowledgement is: the TUI needs one call, not a type.
-	Heartbeat func(context.Context) heartbeat.Beat
-
-	// Rebind re-resolves and applies the per-model bindings after the heartbeat observed the
-	// upstream serving a different model — or the same model in a different window. The binary owns
-	// the resolution (the per-model system prompt, ADR 0023; the validated set, ADR 0016; the
-	// mechanisms registry and the compaction budget) and the engine mutators; the TUI owns only
-	// WHEN, which is the whole of its half: at idle the moment the beat lands, or deferred to the
-	// exchange-terminal fold when a worker owns the engine — the quiescent boundary Agent.Rebind
-	// demands (ADR 0024). It returns what was actually BOUND, which is not always what was observed
-	// (a `context-window:` pin outranks the server's window), plus any notices to surface.
-	//
-	// nil ⇒ a display-frozen heartbeat: beats still light the offline state and refresh the
-	// advertised model list, but no binding ever moves and no note claims one did. It is a func
-	// rather than an interface for the same reason Heartbeat is: the TUI needs one call, not a type.
-	Rebind func(model string, contextWindow int) (RebindResult, error)
-
-	// Servers are the upstream servers this session can be switched to — the `/server` picker's
-	// rows and the `/settings` server row's popup, in the order the binary assembled them: every
-	// `servers:` entry from config.yaml, preceded by the endpoint this session started on whenever
-	// no entry already names it (so the way back is always offered). It is display and identity
-	// only; what a switch actually needs to talk to a server stays in the binary, behind
-	// SwitchServer.
-	//
-	// A PROVIDER rather than a slice, the [SettingsHost.Rows] posture: the `servers:` block is itself
-	// something the human can change mid-session (ADR 0037's `$EDITOR` jump), so the list is asked
-	// for every time one is drawn rather than frozen at launch — an entry added a moment ago is
-	// offered without restarting apogee.
-	//
-	// nil, or an empty answer ⇒ nothing to switch to, and `/server` says so rather than opening an
-	// empty overlay.
-	Servers func() []ServerChoice
-
-	// SwitchServer moves the whole session to the server named name: the binary re-points the
-	// provider client at that endpoint with that key (Agent.SwitchUpstream), swaps in a heartbeat
-	// Monitor for it, and restamps the session record. The split is Rebind's exactly — the TUI owns
-	// only WHEN, and here that is an explicit act by the human at idle — because every input to the
-	// move (the endpoint, the per-server key, that server's discovery hint, the window pin) is
-	// config the binary owns.
-	//
-	// The TUI calls it synchronously on the Update loop: it mutates the engine and constructs a
-	// client, and opens no connection of its own — the new server is DISCOVERED by the first beat
-	// of the swapped-in Monitor, and the ordinary rebind path binds what that beat reports. The
-	// switch therefore lands with NO model bound, which is why the result carries no model: the
-	// display says "connecting…" for one beat, exactly as it does on a cold start.
-	//
-	// An error means nothing moved (the engine's own switch is validate-then-commit, and an
-	// unresolvable name never reaches it), so the caller surfaces it as a note and leaves the
-	// session where it was. nil ⇒ switching is unwired, and `/server` degrades to a note.
-	SwitchServer func(name string) (ServerSwitchResult, error)
+	// nil ⇒ unwired whole, and every degrade that follows from it is [ServerHost]'s to state.
+	Server ServerHost
 
 	// Prebound says this session started with NO upstream bound, and why (ADR 0036 decisions 3, 4
 	// and 7). The zero value is the ordinary start — the binary determined a startup server and the
@@ -734,24 +823,9 @@ type Options struct {
 	// A non-zero Reason means there is no engine yet: the binary could not tell which server to
 	// start on, and the TUI is the one Driver that can ASK rather than refuse (the non-interactive
 	// drivers keep their hard error, because they have nobody to ask). Engine calls are answered
-	// with a "no server is bound" error until BindServer below lands one, so the renderer's job is
+	// with a "no server is bound" error until [ServerHost.Bind] lands one, so the renderer's job is
 	// to reach that seam before anything needs the engine.
 	Prebound PreboundStart
-
-	// BindServer constructs the session's engine on the named `servers:` entry — the pre-bound
-	// half of SwitchServer, and the only seam that can end the pre-bound state. It answers with the
-	// same [ServerSwitchResult] a switch does, so the display adopts a first binding exactly as it
-	// adopts a move.
-	//
-	// It binds ONCE: a session that already has an engine is answered with an error naming
-	// SwitchServer's own verb, because a second construction would leave the first engine running
-	// with nothing holding it. Like SwitchServer it is called synchronously on the Update loop and
-	// opens no connection of its own — the first beat of the Monitor it installs is what discovers
-	// the server.
-	//
-	// nil ⇒ unwired, and a pre-bound session has no way out of the pre-bound state; the binary
-	// always wires it beside SwitchServer.
-	BindServer func(name string) (ServerSwitchResult, error)
 
 	// KeyMigration is the start-up key-migration offer this session should raise, if any (ADR 0047,
 	// keymigration.go): which `servers:` entries were found carrying a plaintext `api-key:` line
@@ -785,25 +859,6 @@ type Options struct {
 	// cannot be recorded, the nil-seam degrade every seam here takes.
 	KeepPlaintextKey func(entry string) (path string, err error)
 
-	// RecordServerChoice persists the entry this session starts on NEXT time — the `server:` key
-	// ADR 0036 decision 2 records on every move to a configured entry. The renderer calls it with the
-	// name it just bound or switched to and knows nothing else about it: whether that name belongs to
-	// a configured entry (and is therefore worth writing) is the binary's question, because only the
-	// binary can tell a configured row from the synthesized one an override startup earns.
-	//
-	// It answers whether it WROTE, which is what lets the renderer state the recording beside the
-	// move ("· server: saved") without claiming one for the moves the binary skips: a name in no
-	// `servers:` entry is skipped silently, and false with no error is exactly that outcome.
-	//
-	// It is best-effort persistence of something that ALREADY happened: the session moved before this
-	// is called and stays moved whatever it answers, so an error is a note and never an undo. Like
-	// [SettingsHost.Write] it is synchronous — one small file, spliced and renamed — and called on the Update
-	// loop.
-	//
-	// nil ⇒ nothing is recorded and every switch is session-scoped, which is exactly the behaviour
-	// this key was introduced to replace; every hand-built Options keeps it.
-	RecordServerChoice func(name string) (recorded bool, err error)
-
 	// RecordModelChoice persists the model this session just bound as the one its server comes back on
 	// NEXT time — the `model:` key of the `servers:` entry the session is on, written only while the
 	// `remember-model:` toggle is on. The renderer calls it with the id the human picked and knows
@@ -817,7 +872,7 @@ type Options struct {
 	// it must not turn that observation into config nobody wrote. The `--model`/`APOGEE_MODEL` startup
 	// overrides record nothing for the same reason — they are facts about one invocation.
 	//
-	// It answers whether it WROTE, exactly as [Options.RecordServerChoice] does, which is what lets the
+	// It answers whether it WROTE, exactly as [ServerHost.RecordChoice] does, which is what lets the
 	// renderer state the recording without claiming one for the picks the binary skips: the toggle off,
 	// a session on no configured entry, and a session on a LAUNCHER-FRONTED entry — whose `model:` is a
 	// deliberately empty discovery hint, that class of server remembering its choice as a Launch profile
@@ -825,8 +880,8 @@ type Options struct {
 	//
 	// It is best-effort persistence of something that ALREADY happened: the session is bound before this
 	// is called and stays bound whatever it answers, so an error is a note and never an undo. Like
-	// RecordServerChoice it is synchronous — one small file, spliced and renamed — and called on the
-	// Update loop.
+	// [ServerHost.RecordChoice] it is synchronous — one small file, spliced and renamed — and called
+	// on the Update loop.
 	//
 	// nil ⇒ nothing is recorded and every pick is session-scoped, which is the behaviour this key was
 	// introduced to replace; every hand-built Options keeps it.
@@ -845,7 +900,7 @@ type Options struct {
 	// pointer's home is the ACTUATING entry either way — the one whose `llama-launcher:` key this
 	// session's launcher path follows — which only the binary holds.
 	//
-	// It answers whether it WROTE, exactly as [Options.RecordServerChoice] does: the toggle off, and an
+	// It answers whether it WROTE, exactly as [ServerHost.RecordChoice] does: the toggle off, and an
 	// actuating entry that cannot be identified, are both false with no error, and the renderer then
 	// claims no recording.
 	//
@@ -1025,8 +1080,8 @@ type RebindResult struct {
 }
 
 // ServerChoice is one upstream server the `/server` picker offers. Name does four jobs with one
-// value — it labels the row, it is the name SwitchServer is called with, it becomes the footer's
-// host alias once the session is on that server, and it is the identity the picker marks the
+// value — it labels the row, it is the name [ServerHost.Switch] is called with, it becomes the
+// footer's host alias once the session is on that server, and it is the identity the picker marks the
 // CURRENT row by — because the name IS the entry's identity in the binary's `servers:` list, the
 // single definition of what servers exist: the alias of the server you are on is the name you call
 // it (ADR 0036 decision 1). That last job is a string-equality against [Options.HostAlias], which is
@@ -1249,10 +1304,10 @@ const (
 	// free to mean a newline — the one edit idiom in this pane whose keys are not the list's.
 	SettingText SettingKind = "text"
 	// SettingServer is the `server:` row: an enum whose vocabulary is not in the row at all but in
-	// Servers above, because what this key may hold is whatever THIS config's `servers:` block
+	// [ServerHost.List], because what this key may hold is whatever THIS config's `servers:` block
 	// names — a list the human can change mid-session. It picks from the same sub-list an enum
 	// does and never opens a text buffer, and its ⏎ is a SWITCH rather than a write: the session
-	// moves (SwitchServer) and the move records the choice (RecordServerChoice, ADR 0036
+	// moves ([ServerHost.Switch]) and the move records the choice ([ServerHost.RecordChoice], ADR 0036
 	// decision 2), which is this key's whole persistence.
 	SettingServer SettingKind = "server"
 )
@@ -1310,7 +1365,7 @@ type SettingRow struct {
 	Source     SettingSource
 	SourceName string
 
-	EnumValues  []string // the closed vocabulary, non-empty exactly for [SettingEnum] ([SettingServer] reads Options.Servers instead)
+	EnumValues  []string // the closed vocabulary, non-empty exactly for [SettingEnum] ([SettingServer] reads ServerHost.List instead)
 	Editable    bool     // this pane may write the key — and, since ADR 0037, apply it on the same ⏎
 	Masked      bool     // Value is a mask, not the value (api-key)
 	EditPointer string   // where a non-Editable key is edited instead; "" exactly when Editable
