@@ -1607,7 +1607,7 @@ func stripEscapesAll(xs []string) []string {
 // DISPLAY seam rather than an input one, over the same three characters, and it exists because all
 // three reach it: stripEscapes deliberately KEEPS the newline and the tab, and the callers that
 // hand this a model's own bytes unstripped — a skill's display name and summary (skills.go), a
-// pop-up title, a tool-argument label (toolpresent.go) — let the carriage return through as well.
+// pop-up title, a tool-argument label (toolargs.go) — let the carriage return through as well.
 // On a surface that paints one row per line (popupBodyWrapped), a string that keeps its newlines
 // paints as many rows as it likes, and a tab is the same forgery sideways. Nothing measures a tab:
 // lipgloss counts it as one cell while the terminal expands it to the next tab stop, so a field

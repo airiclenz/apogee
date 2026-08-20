@@ -222,6 +222,31 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **`toolpresent.go`'s tail splits into `internal/tui/toolargs.go` and
+  `internal/tui/textutil.go`, and the file is deleted.** The last two modules in it had nothing to
+  do with each other: the JSON-argument display module — `argumentDetails`' labelled lines, the
+  last-wins duplicate-key reading, the per-value line cap and `resolvedPathNote` — is now
+  `toolargs.go`, the one rendering both the approval prompt and an unregistered call's transcript
+  block read; the generic text helpers (`clipDetail`/`clipRunes` and the flood bound
+  `detailClipRunes` states, `plural`, `firstLine`, `splitLines`), called from seven files that
+  share nothing else, are now `textutil.go`. Both spans are byte-identical moves; only each new
+  file's header banner is new text. That closes the four-seam split ADR 0043 asked for: the 2,514
+  lines that were `toolpresent.go` are now `toolview.go`, `toolregistry.go`, `diffbody.go`,
+  `toolargs.go` and `textutil.go`, and `doc.go`'s file map names the two new ones.
+- **Every prose pointer that still named the deleted file now names its real home.** The file's
+  deletion staled pointers written long before this plan, so they are corrected in the same commit:
+  `approval.go` and `paint_test.go` at `detailLine` and the promoted outcome slot (→ `toolview.go`),
+  `toolsummary_pin_test.go`, `activity.go`, `markdown.go` and three `doc.go` sentences at the stat
+  hooks, the registry and their pure/table-testable posture (→ `toolregistry.go`), `transcript.go`,
+  `popup.go` and `internal/agent/resolution_test.go` at the argument label, the value cap and the
+  duplicate-key reading (→ `toolargs.go`), `paint_test.go` at `detailClipRunes` (→ `textutil.go`),
+  `toolshape_test.go` at the files that decide a call's on-screen shape, and the four `ISSUES.md`
+  pointers into the git-diff walk and the stacked row (→ `diffbody.go`, with fresh line numbers).
+  ADR 0052 gains a dated amendment recording that its `changedLines` pointer now reads
+  `diffbody.go`; ADR 0011's 2026-07-25 note says inline that the presenter it names was split and
+  deleted. Historical records — the changelog's own past entries, archived plans, and the saved
+  reviews pinned at a commit — keep the name they were written with.
+
 - **The diff-body cluster moves out of `toolpresent.go` into `internal/tui/diffbody.go`.** The
   last of the four modules that shared one file name (ADR 0043), moved verbatim beside
   `splitdiff.go`, the composer that reads the same regions the wide way. What moves is every BODY

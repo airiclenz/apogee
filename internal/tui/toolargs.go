@@ -6,50 +6,36 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"strconv"
 	"strings"
 )
 
-// detailClipRunes caps one detail/target line so a minified blob or a wall-of-text report cannot
-// flood the transcript (the renderer soft-wraps, so an uncapped line becomes many rows).
+// ----------------------------------------------------------------------------
+// Argument display — a call's own JSON, read the way a human decides on it
+// ----------------------------------------------------------------------------
 //
-// The cap is a FLOOD bound and it is deliberately spent in RUNES, not in the cells the screen
-// bills. No rune paints more than two cells, so 160 runes buy at most 320 cells and therefore at
-// most twice the rows the same 160 runes of ASCII take — a wall of double-width text costs scroll,
-// never content. Cell-exactness is the STATUS LINE's requirement, not the transcript's: that row is
-// shared with the context gauge, so an over-wide left slot pushes something the reader needs off the
-// screen — which is why that row carries the tool's verb alone now (toolActivityVerb, activity.go)
-// rather than a target it would have to cap in cells through the width authority. The
-// transcript shares nothing — a wide line wraps onto rows of its own and the block behind it paints
-// lower down, whole. TestPaintedWideDetailLineWrapsWithoutDisplacement (paint_test.go) is the probe
-// that measured all three of those claims and the pin that keeps them true.
-const detailClipRunes = 160
-
-// clipDetail truncates s to detailClipRunes runes with an ellipsis.
-func clipDetail(s string) string {
-	return clipRunes(s, detailClipRunes)
-}
-
-// clipRunes truncates s to n runes with an ellipsis, counting runes rather than bytes so a
-// multi-byte path is not cut mid-character. Its callers are clipDetail and the approval pane's
-// Sub-agent line (approvalTaskClipRunes), and in both the rune spend is settled at the caller
-// rather than being a shortfall to be swept: see detailClipRunes for why the transcript's bound is
-// allowed to be a rune count where the status line's is not.
-func clipRunes(s string, n int) string {
-	r := []rune(s)
-	if len(r) <= n {
-		return s
-	}
-	return string(r[:n]) + "…"
-}
-
-// plural renders "1 result" / "3 results" — count plus the word, naively pluralised.
-func plural(n int, word string) string {
-	if n == 1 {
-		return strconv.Itoa(n) + " " + word
-	}
-	return strconv.Itoa(n) + " " + word + "s"
-}
+// This file holds the ONE rendering of a tool call's ARGUMENTS (ADR 0043). [argumentDetails]
+// turns the caller's json.RawMessage into labelled [detailLine]s — one `name:` line per argument
+// with the value's own real lines hanging beneath it — and both surfaces that show a call's raw
+// arguments read that rendering rather than formatting the bytes themselves: the approval prompt
+// a human authorises a call on (approval.go) and the transcript block that records a call no
+// presenter recognises (presentToolCall, toolview.go). One call is spelled one way wherever it
+// appears. [parseArgs] is the same bytes read the other way, as the generic map the registry's
+// target extractors pick a field out of (toolregistry.go).
+//
+// It is DISPLAY-ONLY and it is a decision surface, which together are the whole design. What the
+// tool receives is the caller's bytes, untouched by anything here; what the screen gets is bounded
+// and disambiguated so an approval cannot be given on a reading the executor will not act on —
+// [orderedArgs] and [lastWins] show the duplicate key the executor will really run and say the
+// earlier ones existed, [argumentValueLines] caps one value so it cannot evict its siblings while
+// keeping the value's LAST line as well as its head, and every argument-derived line sits at
+// [argumentValueIndent] so nothing the model wrote can paint where a label of the surface's own
+// lives. Each of those rules states its own reasoning at the declaration below.
+//
+// [resolvedPathNote] is that discipline over the one target fact the ENGINE settles rather than
+// the bytes — where a path argument actually resolved to — worded once for every surface that
+// discloses it.
+//
+// Pure: no lipgloss, no I/O, nothing that knows a block, an entry or a fold state.
 
 // parseArgs decodes a tool call's JSON arguments into a generic map for the target
 // extractors. Malformed or empty arguments decode to nil, which the extractors tolerate (a
@@ -320,17 +306,4 @@ func elideValueLines(lines []string) []string {
 	out = append(out, popupElisionMarker(hidden))
 	out = append(out, lines[len(lines)-tail:]...)
 	return out
-}
-
-// firstLine returns the first line of s (without its newline), or s when it has none.
-func firstLine(s string) string {
-	if i := strings.IndexByte(s, '\n'); i >= 0 {
-		return s[:i]
-	}
-	return s
-}
-
-// splitLines splits s on newlines into its physical lines.
-func splitLines(s string) []string {
-	return strings.Split(s, "\n")
 }

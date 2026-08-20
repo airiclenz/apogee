@@ -254,7 +254,12 @@ the same commit.
 
 **Commit:** `refactor(tui): move the diff-body cluster into diffbody.go`
 
-## 8. Split toolpresent.go's tail and delete the file
+## 8. Split toolpresent.go's tail and delete the file — ✅ DONE (2026-08-20)
+
+NOTES (2026-08-20): the item names only the two new files, but the deleted file's name survived in prose across the repo, so the DECISION's sweep landed in this commit: eleven source/test comments, three `doc.go` narration sentences, four `ISSUES.md` pointers and two ADRs. The boundary drawn — and the reason `grep -r toolpresent` is not empty — is LIVE pointer vs HISTORICAL record: anything a reader follows to navigate today's code was corrected; the CHANGELOG's past entries (which this run may never edit), `docs/plans/archived/*`, and `docs/reviews/*` (whose evidence is explicitly pinned at commit `030ab021`) were left as written, since rewriting them would falsify the record rather than fix a pointer.
+NOTES (2026-08-20): both new files open with a header banner of their own — the only text in either that is not moved verbatim — following items 5 and 7's precedent, since every sibling file in the cluster carries one. The moved spans were verified line-for-line identical to the deleted file's; only its `package`/`import` clause and three separator blank lines did not travel.
+NOTES (2026-08-20): the item leaves "anything still left" to be filed "by its banner", but item 6 moved the file's only banner, so the tail was filed by module instead: `parseArgs` went to `toolargs.go` (it is the same argument bytes read as a map for the registry's target extractors) and `resolvedPathNote` too (it words one argument-derived target fact, and both surfaces that disclose it already read `toolargs.go` for the arguments beside it).
+NOTES (2026-08-20): `toolpresent_test.go` keeps its name — the item says test files stay put — so the package now holds a suite named after a file that no longer exists; `toolshape_test.go`'s naming rationale was reworded to say so rather than to hide it.
 
 **Source:** review §Candidate 7, span 5. Depends on item 7.
 

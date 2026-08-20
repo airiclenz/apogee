@@ -19,7 +19,7 @@
 //
 // P2.7 (the pre-Phase-3 TUI presentation pass) reshapes the look to layout.md and splits the
 // rendering into reusable seams the Phase-3 tool fan-out and sub-agent work extend rather than
-// rework: [theme] holds the palette, glyphs, and styles; toolpresent.go turns a tool call+result
+// rework: [theme] holds the palette, glyphs, and styles; toolview.go turns a tool call+result
 // into a compact [toolView], keyed by an OPEN, name-keyed registry of presentation vocabulary
 // (each later tool adds one entry; where a card's facts come from is the tool-summary paragraph
 // below); render.go is the line-oriented renderer (the full-width user block, ✦ assistant/tool
@@ -215,7 +215,7 @@
 // common markdown subset in assistant text (**bold**, <u>underline</u> — the one HTML pair, since
 // markdown spells no underline of its own — # headings, `inline`/fenced code, bullet/
 // numbered lists, GFM pipe tables) into styled physical lines — a spare, pure, lipgloss-only
-// renderer matching toolpresent.go's posture, with render.go still owning the marker and depth
+// renderer matching toolregistry.go's posture, with render.go still owning the marker and depth
 // framing. Tables are the one construct with a file of their own, mdtable.go: it parses the block
 // and lays it out as aligned columns ruled by a faint │ and, horizontally, by one ─ under the header
 // and another between each pair of adjacent body rows — every rule crossing every divider at a ┼,
@@ -354,7 +354,7 @@
 // submit, /compact, the stop key, the worker's terminal Msg — set it directly. It adds no
 // lifecycle state: compacting and stopping are activities, not uiStates, so the ADR 0011 state
 // machine is untouched and only statusLine's running branch consults it. The per-tool verb it
-// renders comes from the same open registry toolpresent.go already keys by tool name.
+// renders comes from the same open registry toolregistry.go already keys by tool name.
 //
 // The same file carries the STALL GUARD, which answers the half of that question a phrase alone
 // cannot: whether anything is still coming. [Model.lastEvent] is when the engine was last heard
@@ -595,7 +595,7 @@
 // entryToolCall (ADR 0033). TestTranscriptLayoutGolden pins the whole rendered scrollback.
 //
 // A card's FACTS arrive as data; only its WORDING is this package's (post-v0.8 architecture
-// deepening, review candidate 03). toolpresent.go used to reconstruct what a tool had done by
+// deepening, review candidate 03). The tool presenter used to reconstruct what a tool had done by
 // pattern-matching the free-text result the tool wrote for the MODEL — five regexes and the five
 // extractors around them, over seven of the registry's 21 entries. That was a cross-package
 // contract with no type (this package does not import internal/tools), so a wording change over
@@ -736,19 +736,17 @@
 // "next row, same column" by into CR LF — returning the restore closure that gives the shell back
 // the console mode it lent (ADR 0038), altscreen_other.go being the never-nil no-op restore that
 // stands in where there is no console mode word to lend;
-// toolview.go the tool CARD itself and the lifecycle that fills it, lifted out of toolpresent.go
-// (ADR 0043) beside toolregistry.go, which holds the presentation vocabulary the lifecycle reads
-// — the [toolView] a call becomes, with the [detailLine]s a [detailKind] colours and the
-// [toolBody] carrying them, built by [presentToolCall] the moment the call is seen (its body
+// toolview.go the tool CARD itself and the lifecycle that fills it (ADR 0043), beside
+// toolregistry.go, which holds the presentation vocabulary the lifecycle reads — the [toolView] a
+// call becomes, with the [detailLine]s a [detailKind] colours and the [toolBody] carrying them, built by [presentToolCall] the moment the call is seen (its body
 // included, for the tools whose ARGUMENTS already say what the call will change) and completed by
 // [toolView.enrichWithResult] when the result lands, both leaving through
 // [toolView.finishDisplay] so the escape-strip ([toolView.sanitize]) and the workspace-relative
 // spelling of the paths a card NAMES ([toolView.shortenPaths]) hold for every card rather than per
 // producer, plus the run aggregation over them ([runAggregate]) that words what a whole GROUP of
 // calls did out of what its members already say;
-// toolregistry.go that vocabulary itself, lifted out of the same file in the same split (ADR
-// 0043) — the OPEN, name-keyed [toolRegistry] whose one entry per tool carries its label, its
-// active verb, the extractor that reads the target off the call's arguments, the prose detail
+// toolregistry.go that vocabulary itself, split off beside it (ADR 0043) — the OPEN, name-keyed
+// [toolRegistry] whose one entry per tool carries its label, its active verb, the extractor that reads the target off the call's arguments, the prose detail
 // extractor that stays the floor for a result carrying no typed summary, and the body renderers
 // ([toolPresenter]), so a new tool is one entry rather than a control-flow statement to grow; and
 // the per-tool hooks those entries point at — the stat that words the right-hand outcome slot off
@@ -761,15 +759,28 @@
 // it composes rows and paints no block, so WHICH reading a body gets — these panes or the
 // stacked rows diffbody.go builds from the same regions — stays the painter's choice, made
 // per paint against the width it holds;
-// diffbody.go those bodies themselves — every row a change-shaped call renders, lifted out of
-// toolpresent.go (ADR 0043) beside that composer: the three edit tools' bodies derived from the
-// call's own ARGUMENTS ([changedLines] over [editPair]s), with no file read and nothing guessed,
+// diffbody.go those bodies themselves — every row a change-shaped call renders (ADR 0043), beside
+// that composer: the three edit tools' bodies derived from the call's own ARGUMENTS ([changedLines] over [editPair]s), with no file read and nothing guessed,
 // and the two diff tools' regions walked back out of the output they print instead
 // ([viewDiffRegions] through [diffRegionCutter]; [gitDiffRangeRegions] through [gitDiffWalk],
 // which reads its numbers off the hunk headers git ELIDES the gaps between); plus
 // [stackedDiffLines], the one builder of the narrow reading, so that reading cannot come to
 // differ per tool, and [viewDiffBody], the coloured prose that is view_diff's floor once its
 // output carries no tags at all;
+// toolargs.go the ONE rendering of a call's own ARGUMENTS, which both surfaces that show them
+// read rather than formatting the bytes themselves (ADR 0043) — [argumentDetails]' labelled
+// lines, one `name:` per argument with the value's real lines hanging beneath it, showing a
+// repeated key as the last-wins reading the executor will actually run ([orderedArgs],
+// [lastWins]) instead of in wire order, capping one value so a long `content` cannot evict the
+// `path:` beside it and keeping that value's LAST line as well as its head ([argumentValueLines]),
+// and hanging every argument-derived line at [argumentValueIndent] so nothing a model wrote can
+// paint where a label of the surface's own lives; plus [resolvedPathNote], the one wording every
+// decision surface discloses a redirected path with, and [parseArgs], the same bytes as the map
+// the registry's target extractors read a field out of;
+// textutil.go the generic text helpers none of that display owns alone — [clipDetail] and
+// [clipRunes], the flood bound they spend in runes rather than in the cells the screen bills
+// ([detailClipRunes], which states why and names the probe that measured it), [plural]'s naive
+// count and [firstLine] / [splitLines];
 // the renderer itself is nine files rather than one, split along the seams the painters already
 // had once the tool-display overhaul grew render.go past the house ~400-line guideline — a pure
 // file move, nothing renamed and nothing reworded: render.go keeps the transcript walk

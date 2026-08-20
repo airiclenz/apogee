@@ -212,8 +212,10 @@ changes; the idle-only list is unchanged (ADR 0024 added `Rebind` to it), and th
 invariant is untouched — a message typed while a worker runs is *staged*, never submitted.
 
 **Note (2026-07-25) — "thin renderer" now holds for tool outcomes too: the view reads a typed
-summary instead of re-deriving one from prose.** Until this date `internal/tui/toolpresent.go`
-reconstructed *what a tool had done* by pattern-matching the free-text result string the tool wrote
+summary instead of re-deriving one from prose.** Until this date the tool presenter — then
+`internal/tui/toolpresent.go`, split along its seams and deleted on 2026-08-20 (ADR 0043), its
+vocabulary now in `internal/tui/toolregistry.go` — reconstructed *what a tool had done* by
+pattern-matching the free-text result string the tool wrote
 for the **model** — five regexes and the five extractors around them, across seven of the
 registry's 21 entries. That was agent knowledge in the renderer wearing a rendering costume: a
 stringly-typed cross-package contract with no type (the TUI does not import `internal/tools`), so a

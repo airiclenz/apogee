@@ -1221,7 +1221,7 @@ func popupBodyLineCount(th theme, body string, width int) int {
 //
 // It is shared rather than inlined because both places that elide a block on a decision surface
 // must elide it the same way: the pane's body (popupBodyLines) and one argument's value
-// (argumentValueLines, toolpresent.go).
+// (argumentValueLines, toolargs.go).
 func elisionSplit(n, maxRows int) (head, tail, hidden int) {
 	if maxRows <= 0 || n <= maxRows {
 		return n, 0, 0

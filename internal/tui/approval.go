@@ -353,7 +353,7 @@ func mcpServerGrantNote(serverGrant bool, alias string) string {
 // was read in.
 //
 // One tool-presentation vocabulary paints both surfaces: the block is built from the same
-// [detailLine] values a transcript block is, in toolpresent.go, rather than from a second formatter
+// [detailLine] values a transcript block is, in toolview.go, rather than from a second formatter
 // living here.
 func approvalArgsBlock(req domain.ApprovalRequest) string {
 	details := argumentDetails(req.Arguments)

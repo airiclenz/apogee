@@ -14,8 +14,8 @@ import (
 // Diff bodies — the rows a change renders as, and where their regions come from
 // ----------------------------------------------------------------------------
 //
-// This file holds every BODY a change-shaped tool call renders, lifted out of toolpresent.go
-// (ADR 0043) beside splitdiff.go, which composes the wide reading of the very same regions.
+// This file holds every BODY a change-shaped tool call renders (ADR 0043), beside splitdiff.go,
+// which composes the wide reading of the very same regions.
 // toolregistry.go keys the hooks below by tool name; nothing here knows a block, an entry or a
 // fold state.
 //

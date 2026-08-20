@@ -18,7 +18,7 @@ import (
 // ----------------------------------------------------------------------------
 //
 // The view renders a typed domain.ToolSummary instead of parsing the prose a tool wrote for
-// the model (toolpresent.go). That removes the silent-degradation failure mode the regexes
+// the model (toolregistry.go). That removes the silent-degradation failure mode the regexes
 // had — but only if the tools keep ATTACHING their summaries, and nothing in internal/tui
 // can see whether they do: the package's production code depends on internal/domain alone.
 //

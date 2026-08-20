@@ -22,7 +22,7 @@ import (
 // ADR 0011 state machine is untouched: statusLine still switches on m.state and only the
 // running branch consults the activity.
 //
-// This file is pure — no lipgloss, no I/O — the toolpresent.go discipline, so the whole
+// This file is pure — no lipgloss, no I/O — the toolregistry.go discipline, so the whole
 // vocabulary is table-testable (activity_test.go); statusLine owns the styling. activity is a
 // plain value type reached by the value-copied Model, so it must never hold a strings.Builder
 // or any other self-pointer no-copy type (ADR 0011; doc.go; TestModelNoBuilderByValue).

@@ -1,8 +1,8 @@
 // toolshape_test.go is named for its subject, not for a source file: a deliberate exception to the
 // coding-standards Go rule that a suite is named `{source}_test.go` (ratified 2026-08-15). Its
 // subject is cross-file behaviour — the shape a tool call takes on screen — decided together by
-// toolblock.go, toolbranch.go, render.go and toolpresent.go, each of which already has the 1:1
-// suite its own name would claim.
+// toolblock.go, toolbranch.go, render.go and toolview.go, each of which already has a suite of its
+// own (the tool card's is toolpresent_test.go, which kept its name through the ADR 0043 split).
 
 package tui
 

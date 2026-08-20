@@ -11,9 +11,9 @@ import (
 // The tool card — the value type, and the lifecycle that fills it
 // ----------------------------------------------------------------------------
 //
-// This file holds the CARD a tool call becomes and the two moments that fill it, lifted out of
-// toolpresent.go (ADR 0043) which keeps the presentation vocabulary itself — the labels, verbs,
-// targets and per-tool hooks the lifecycle here reads out of the registry.
+// This file holds the CARD a tool call becomes and the two moments that fill it (ADR 0043);
+// toolregistry.go keeps the presentation vocabulary itself — the labels, verbs, targets and
+// per-tool hooks the lifecycle here reads out of the registry.
 //
 // The card is [toolView]: the friendly label for the header line (✦ Read), the target that leads
 // the branch beneath it, the one-line summary the branch row seats in its right-aligned outcome

@@ -61,10 +61,10 @@ the other direction too: `hook-mutation-api.md` and `technical-design.md` both n
 `docs/plans/2026-08-19 - 03 - split-diff-display-plan.md` item 9, which added the recovery.
 
 The file-section walk matches a section header against
-`^diff --git a/(.+) b/(.+)$` (`internal/tui/toolpresent.go:2584`). Git QUOTES a path holding a
+`^diff --git a/(.+) b/(.+)$` (`internal/tui/diffbody.go:377`). Git QUOTES a path holding a
 space or a non-ASCII byte — it prints `diff --git "a/my file.go" "b/my file.go"` — and that line
-fails the pattern, so `gitDiffWalk.take` returns false (`internal/tui/toolpresent.go:2659`). The
-walk is all-or-nothing by design (`gitDiffFileSections`, `internal/tui/toolpresent.go:2628`), so
+fails the pattern, so `gitDiffWalk.take` returns false (`internal/tui/diffbody.go:448`). The
+walk is all-or-nothing by design (`gitDiffFileSections`, `internal/tui/diffbody.go:421`), so
 ONE such path costs the whole body its Split/Stacked reading, including the other files' sections,
 and it falls back to the plain uncoloured output.
 
@@ -92,7 +92,7 @@ item 2 NOTES; the ADR that ratifies the decision does not carry it.
 stays chrome" — line numbers untinted) is still unmet for the stacked frame. No item of that plan
 owns it.
 
-`stackedRow.line` (`internal/tui/toolpresent.go:2813`) composes the right-aligned number, the marker
+`stackedRow.line` (`internal/tui/diffbody.go:606`) composes the right-aligned number, the marker
 and the text into the detail line's single `Text` field, so the number sits inside the very string
 the tinted style paints and the band runs under it. No wrap-rail change can hold it out — the rail
 receives one opaque string and cannot tell the number from the text — so the fix has to split the

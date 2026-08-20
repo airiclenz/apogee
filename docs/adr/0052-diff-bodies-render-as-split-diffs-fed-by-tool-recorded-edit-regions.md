@@ -13,7 +13,7 @@ near-neighbours. The sketch (`docs/layout/siff-layout.md`, retired into
 falling back to a vertical list where the terminal is narrow.
 
 Two facts about the codebase bound the design. First, an edit block's body is **derived from the
-call's arguments alone** (`changedLines`, `internal/tui/toolpresent.go`): no file is read, no
+call's arguments alone** (`changedLines`, `internal/tui/diffbody.go`): no file is read, no
 token is spent — and therefore no line numbers and no unchanged context exist anywhere in the
 view. Second, of the five diff-bodied blocks (`edit_existing_file`, `single_find_and_replace`,
 `multi_find_and_replace`, `view_diff`, `git_diff_range`), only the last two carry position data a
@@ -136,3 +136,13 @@ Two new scheme keys land with it (`diff-add-bg`, `diff-del-bg`), additive in ADR
 omitted key keeps the built-in default, so no user scheme file broke. The `diff-add` / `diff-del`
 foreground roles are unchanged and keep their vocabulary place; the bands are their quiet
 counterparts, not their replacements.
+
+## Amendment (2026-08-20) — the diff bodies moved out of `toolpresent.go`
+
+The Context above pointed `changedLines` at `internal/tui/toolpresent.go`. That file has since
+been split along its four seams and deleted (ADR 0043;
+`docs/plans/2026-08-19 - 04 - tui-architecture-deepening-plan.md`, items 5–8): the whole diff-body
+cluster — `changedLines` over the edit tools' arguments, the `view_diff` and `git_diff_range`
+region recovery, and the stacked rows — now lives in `internal/tui/diffbody.go`, beside
+`splitdiff.go`, which composes the Split reading decision 3 picks by width. The pointer in Context
+is updated to match. Pure file moves: no decision recorded here changes.

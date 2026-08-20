@@ -965,7 +965,7 @@ func TestPaintedTabBearingToolTargetKeepsTheGauge(t *testing.T) {
 
 // THE PROBE the rune-vs-cell issue asked for on the transcript side, landed as the pin: a detail
 // line of double-width text spends the SAME cap in runes that the status line now spends in cells
-// (detailClipRunes = 160, toolpresent.go), and that is deliberate here. This test is what turns
+// (detailClipRunes = 160, textutil.go), and that is deliberate here. This test is what turns
 // "SUSPECTED, UNPROBED" into a measured bound.
 //
 // The status line had to become cell-honest because its row is SHARED — an over-wide left slot
@@ -1047,7 +1047,7 @@ func paintedDetailRows(t *testing.T, method ansi.Method, fill string) paintedDet
 		ID: "c1", Tool: "terminal", Arguments: []byte(`{"command":"go test ./..."}`)}})
 	m.transcript.apply(domain.ToolResultEvent{Result: domain.ToolResult{
 		// A SECOND line keeps the flood a body: a one-line output is promoted into the branch
-		// row's outcome slot instead (toolpresent.go), and a leader row never wraps.
+		// row's outcome slot instead (toolview.go), and a leader row never wraps.
 		CallID: "c1", Content: strings.Repeat(fill, detailClipRunes+40) + "\ntail"}})
 	m.transcript.apply(domain.ToolCallEvent{Call: domain.ToolCall{
 		ID: "c2", Tool: "read_file", Arguments: []byte(`{"path":"neighbour.go"}`)}})
