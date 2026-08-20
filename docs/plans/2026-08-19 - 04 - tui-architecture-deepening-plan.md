@@ -167,7 +167,13 @@ commit.
 
 **Commit:** `refactor(tui): move box/join paint primitives into boxdraw.go`
 
-## 5. Move the tool card type and view lifecycle into toolview.go
+## 5. Move the tool card type and view lifecycle into toolview.go — ✅ DONE (2026-08-20)
+
+NOTES (2026-08-20): the item names the first banner section and the view-lifecycle section; the file's
+own header banner (`Tool presentation (P2.7 …)`) stayed in toolpresent.go because the last third of it
+narrates the registry and the stat hooks, which stay there for items 6 and 8. toolview.go opens with a
+new banner of its own naming the card and the two lifecycle moments — the only text in the new file that
+is not moved verbatim.
 
 **Source:** review §Candidate 7, spans 1 and 3. Depends on item 1.
 

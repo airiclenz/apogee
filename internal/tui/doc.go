@@ -736,6 +736,16 @@
 // "next row, same column" by into CR LF — returning the restore closure that gives the shell back
 // the console mode it lent (ADR 0038), altscreen_other.go being the never-nil no-op restore that
 // stands in where there is no console mode word to lend;
+// toolview.go the tool CARD itself and the lifecycle that fills it, lifted out of toolpresent.go
+// (ADR 0043) which keeps the presentation vocabulary the lifecycle reads — the [toolView] a call
+// becomes, with the [detailLine]s a [detailKind] colours and the [toolBody] carrying them, built
+// by [presentToolCall] the moment the call is seen (its body included, for the tools whose
+// ARGUMENTS already say what the call will change) and completed by [toolView.enrichWithResult]
+// when the result lands, both leaving through [toolView.finishDisplay] so the escape-strip
+// ([toolView.sanitize]) and the workspace-relative spelling of the paths a card NAMES
+// ([toolView.shortenPaths]) hold for every card rather than per producer, plus the run
+// aggregation over them ([runAggregate]) that words what a whole GROUP of calls did out of what
+// its members already say;
 // splitdiff.go the SPLIT reading of a diff body — the Edit regions a tool recorded
 // (domain.EditRegion) arranged as two panes, each numbering its own file, with the width rule
 // that says whether that reading fits at all ([splitDiffFits], splitPaneMinCols) and the gutter,

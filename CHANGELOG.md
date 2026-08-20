@@ -222,6 +222,22 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **The tool card and the lifecycle that fills it move out of `toolpresent.go` into
+  `internal/tui/toolview.go`.** The first two of the four modules that shared one file name (ADR
+  0043), moved verbatim as two contiguous spans anchored on the file's own section banners. The
+  card value type comes first — `toolView` itself, the `detailLine`s a `detailKind` colours, the
+  `toolBody` that carries them, the `branchSummary` that says whether the outcome slot holds the
+  view's own wording or a line the tool printed (quoted), and the `toolOutcome` a prose extractor
+  returns. The view lifecycle follows: `presentToolCall`, which builds the header the moment a
+  call is seen (and, for the tools whose arguments already say what the call will change, its body
+  too), `enrichWithResult`, which absorbs the result when it lands, the `finishDisplay` pair both
+  leave through — `sanitize` for the escape-strip and `shortenPaths` for the workspace-relative
+  spelling of the paths a card names — and the run aggregation above them (`runAggregate` and the
+  sums under it). `toolpresent.go` keeps the presentation vocabulary the lifecycle reads: the
+  presenter registry and the per-tool stat/target/body hooks, and finishes at 2291 lines, down from
+  3313. No signature changed, no call site moved, and the test files stay where they are.
+  `doc.go`'s file map gains the new file's line. No behaviour change.
+
 - **The box and join paint primitives move out of `model.go` into `internal/tui/boxdraw.go`.** The
   sixth concern carved off the coordinator file (ADR 0043), and the one that sits beside `wrap.go`
   because it is the same kind of thing: the low-level primitives every painted surface finishes in.
