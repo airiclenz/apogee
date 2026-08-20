@@ -186,7 +186,9 @@ NOTES (2026-08-20): the formatter's kill-path bound changed from `gate.timeout` 
 
 **Commit:** `fix(mechanisms): route the autofix formatter through the tools subprocess funnel`
 
-## 8. Memoise the git filter-driver probe
+## 8. Memoise the git filter-driver probe — ✅ DONE (2026-08-20)
+
+NOTES (2026-08-20): the item's text names only the added-mid-session direction of the staleness; the cache is symmetrical, so the code comment and the CHANGELOG also state the removed-mid-session direction (a removed driver keeps refusing until restart).
 
 **Source:** review defect c.
 

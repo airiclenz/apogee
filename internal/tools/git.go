@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
@@ -163,8 +164,11 @@ func gitProgram(ctx context.Context, root string) (gitPath, refusal string, ok b
 // ordinary failed outcome — non-zero exit, the model-facing sentence as its output — so every
 // caller's existing "git ... failed" branch surfaces it verbatim, with no signature for a
 // future git tool to forget to handle.
+//
+// The probe behind that refusal is memoised per repository root (filterDriverProbes), so it costs
+// its two subprocesses once per root rather than on every git call.
 func runGit(ctx context.Context, gitPath, root string, timeout time.Duration, gitArgs ...string) (subprocessResult, error) {
-	drivers, err := repoLocalFilterDrivers(ctx, gitPath, root)
+	drivers, err := probeFilterDrivers(ctx, gitPath, root)
 	if err != nil {
 		return subprocessResult{}, err
 	}
@@ -214,6 +218,44 @@ var gitFilterConfigScopes = []string{"--local", "--worktree"}
 // maxNamedFilterDrivers caps how many config keys a refusal names, so a repository that defines
 // a thousand drivers cannot turn the refusal sentence into the whole result.
 const maxNamedFilterDrivers = 5
+
+// filterDriverProbes memoises the repo-local filter-driver probe for the process lifetime, keyed
+// by the git binary and the repository root together — the same root probed with a different git
+// is a different question, and a Driver may hold several roots at once. Each value is the probed
+// name slice, which every reader treats as read-only.
+//
+// Why memoise at all: runGit is the choke point EVERY git tool call passes through, and the probe
+// costs two subprocesses of its own — so probing per call tripled the process cost of every git
+// tool (one git_commit ran its four real git commands behind twelve git processes).
+//
+// The accepted staleness, deliberate: a repository's config is probed once per root and never
+// re-read. A filter driver added to that config after the first probe is not refused until apogee
+// restarts, and one removed keeps refusing just as long. The threat this refusal answers is an
+// attacker-AUTHORED checkout — hostile in its config before apogee ever opens it — not a config
+// edited underneath a running session, so a per-session answer is the right granularity.
+//
+// Two goroutines probing the same not-yet-probed root both run the probe and store the same
+// answer; the duplicated work is wasted, never the outcome.
+var filterDriverProbes sync.Map
+
+// probeFilterDrivers returns repoLocalFilterDrivers' answer for the repository at root, reaching
+// git only the first time it is asked about a given (gitPath, root) pair.
+//
+// A FAILED probe is never cached. Its error is the runSubprocess contract's — ctx cancellation or
+// a confinement-unavailable demotion — which says nothing about the repository, so caching it
+// would let one cancelled Turn refuse every later git call on that root.
+func probeFilterDrivers(ctx context.Context, gitPath, root string) ([]string, error) {
+	key := gitPath + "\x00" + root
+	if cached, ok := filterDriverProbes.Load(key); ok {
+		return cached.([]string), nil
+	}
+	names, err := repoLocalFilterDrivers(ctx, gitPath, root)
+	if err != nil {
+		return nil, err
+	}
+	filterDriverProbes.Store(key, names)
+	return names, nil
+}
 
 // repoLocalFilterDrivers lists the repo-local config names defining a filter-driver command for
 // the repository at root, by asking git itself rather than parsing .git/config — git is the only

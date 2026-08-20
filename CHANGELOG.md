@@ -775,6 +775,19 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **A git tool no longer re-asks the repository about filter drivers on every call.** `runGit` is
+  the choke point every git tool passes through, and it probed the repository's own config for a
+  filter driver — two `git config` subprocesses, one per scope — before each and every invocation,
+  so a single `git_commit` ran its four real git commands behind twelve git processes. The probe is
+  memoised now, keyed by the git binary and the repository root together, so it costs its two
+  subprocesses once per root and a repeated call reuses the answer; two roots stay independent, and
+  a probe that FAILED (ctx cancellation, a confinement-unavailable demotion) is never cached, so one
+  cancelled Turn cannot refuse every later git call on that root. The refusal itself is unchanged in
+  what it refuses and what it says. The accepted staleness, documented at the code: a repository's
+  config is read once per root and not re-read, so a filter driver added to it mid-session is not
+  refused until apogee restarts and one removed keeps refusing just as long — the threat the refusal
+  answers is an attacker-authored checkout, hostile in its config before apogee ever opens it.
+
 - **A hook's subprocess is guarded like a tool's.** `autofix`'s external formatter was the one
   command apogee spawned outside the execution funnel: it inherited the whole environment,
   `APOGEE_API_KEY` included, with no process-tree teardown, no output cap and no timeout ceiling.

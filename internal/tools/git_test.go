@@ -1367,3 +1367,52 @@ func TestRunGit_AppliesHardeningToEveryInvocation(t *testing.T) {
 		t.Errorf("env = %q, want GIT_CONFIG_NOSYSTEM=1", got)
 	}
 }
+
+// TestRunGit_MemoisesTheFilterDriverProbePerRoot pins the probe's cost model: the repo-local
+// filter-driver probe runs once per repository root — not once per git call — and one root's
+// cached answer never stands in for another's. A fake git logs every invocation it receives, so
+// what is counted is the real subprocess count rather than a proxy for it.
+func TestRunGit_MemoisesTheFilterDriverProbePerRoot(t *testing.T) {
+	posixScriptHost(t)
+
+	dir := t.TempDir()
+	invocations := filepath.Join(dir, "invocations")
+	fakeGit := filepath.Join(dir, "fake-git")
+	script := "#!/bin/sh\necho \"$*\" >> \"" + invocations + "\"\n"
+	if err := os.WriteFile(fakeGit, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake git: %v", err)
+	}
+	firstRoot, secondRoot := t.TempDir(), t.TempDir()
+	runIn := func(root string) {
+		t.Helper()
+		if _, err := runGit(context.Background(), fakeGit, root, gitTimeout, "status"); err != nil {
+			t.Fatalf("runGit err = %v", err)
+		}
+	}
+
+	runIn(firstRoot)
+	runIn(firstRoot)
+	runIn(secondRoot)
+
+	logged, err := os.ReadFile(invocations)
+	if err != nil {
+		t.Fatalf("read invocation log: %v", err)
+	}
+	probes, calls := 0, 0
+	for _, line := range strings.Split(strings.TrimSpace(string(logged)), "\n") {
+		switch {
+		case strings.Contains(line, "--get-regexp"):
+			probes++
+		case strings.Contains(line, "status"):
+			calls++
+		}
+	}
+
+	wantProbes := len(gitFilterConfigScopes) * 2
+	if probes != wantProbes {
+		t.Errorf("probe invocations = %d, want %d (one per config scope per root; the repeat call on the first root must reuse the memoised answer)", probes, wantProbes)
+	}
+	if calls != 3 {
+		t.Errorf("git calls = %d, want 3 (memoising the probe must not swallow a real invocation)", calls)
+	}
+}
