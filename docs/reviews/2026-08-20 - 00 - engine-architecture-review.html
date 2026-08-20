@@ -1,0 +1,603 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Architecture review — apogee engine — 2026-08-20</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+  mermaid.initialize({ startOnLoad: true, theme: "neutral", securityLevel: "loose" });
+</script>
+<style>
+  .seam { stroke-dasharray: 4 4; }
+  .leak { stroke: #dc2626; }
+  .deep { background: linear-gradient(135deg, #0f172a, #1e293b); }
+  .band { border-left-width: 4px; }
+  pre.mermaid { display: flex; justify-content: center; }
+</style>
+</head>
+<body class="bg-stone-50 text-slate-900 font-sans">
+<main class="max-w-5xl mx-auto px-6 py-12 space-y-12">
+
+<header class="space-y-3">
+  <h1 class="font-serif text-3xl">Architecture review — apogee engine</h1>
+  <p class="text-sm text-slate-500">2026-08-20 · scope: everything except <span class="font-mono">internal/tui</span> (reviewed 2026-08-19; its deepening plan landed in v0.15.8)</p>
+  <div class="flex flex-wrap gap-4 text-xs text-slate-600 border border-slate-200 rounded-lg bg-white px-4 py-3">
+    <span><span class="inline-block w-3 h-3 border-2 border-slate-500 align-middle mr-1"></span> module</span>
+    <span><span class="inline-block w-6 border-t-2 border-dashed border-slate-400 align-middle mr-1"></span> seam</span>
+    <span><span class="inline-block w-6 border-t-2 border-red-600 align-middle mr-1"></span> leakage</span>
+    <span><span class="inline-block w-3 h-3 deep align-middle mr-1"></span> deep module</span>
+    <span class="ml-auto">badges: <span class="bg-emerald-100 text-emerald-800 px-1.5 rounded">Strong</span> <span class="bg-amber-100 text-amber-800 px-1.5 rounded">Worth exploring</span> <span class="bg-slate-200 text-slate-700 px-1.5 rounded">Speculative</span></span>
+  </div>
+</header>
+
+<section id="candidates" class="space-y-10">
+
+<!-- ══════════════════════ 1 ══════════════════════ -->
+<article id="c1" class="rounded-xl border border-slate-200 bg-white p-6 space-y-4">
+  <div class="flex items-baseline gap-3 flex-wrap">
+    <h2 class="font-serif text-xl">1 — One Mechanism runner behind one hook-fire seam</h2>
+    <span class="bg-emerald-100 text-emerald-800 text-xs px-2 py-0.5 rounded">Strong</span>
+    <span class="bg-slate-100 text-slate-600 text-xs px-2 py-0.5 rounded">in-process</span>
+  </div>
+  <p class="font-mono text-sm text-slate-600">internal/agent/hookrun.go (355) · internal/domain/mechanism.go (359) · internal/domain/tools.go:174-194</p>
+
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="rounded-lg border border-slate-200 p-4">
+      <p class="text-xs uppercase tracking-wider text-slate-400 mb-3">Before — five hand-written runners</p>
+      <div class="space-y-1.5 text-xs">
+        <div class="band border-red-400 bg-red-50 px-3 py-1.5">pre-request runner · own acted probe (Revision)</div>
+        <div class="band border-red-400 bg-red-50 px-3 py-1.5">post-response runner · own acted probe (Revision)</div>
+        <div class="band border-red-400 bg-red-50 px-3 py-1.5">history-rewrite runner · <span class="text-red-700">no LoopView at all</span></div>
+        <div class="band border-red-400 bg-red-50 px-3 py-1.5">pre-tool-exec runner · bespoke callSnapshot/callChanged</div>
+        <div class="band border-red-400 bg-red-50 px-3 py-1.5">post-tool-result runner · bespoke DeepEqual probe <span class="text-red-700">(panicked in prod, hotfixed)</span></div>
+        <p class="text-slate-400 pt-1">× 2 — each repeated for the experimental-hook list. 218 of 355 lines are the same seven steps.</p>
+      </div>
+    </div>
+    <div class="rounded-lg border border-slate-200 p-4">
+      <p class="text-xs uppercase tracking-wider text-slate-400 mb-3">After — one deep runner</p>
+      <div class="deep text-white rounded-md px-3 py-3 text-xs space-y-1">
+        <p class="uppercase tracking-wider">runHooks — ordered → gate → bracket → fire → book</p>
+        <p class="text-slate-300">one Revision() bracket · one recover boundary · one booking path</p>
+      </div>
+      <div class="grid grid-cols-5 gap-1 mt-2 text-[10px] text-center text-slate-500">
+        <div class="border border-slate-200 rounded px-1 py-1">pre-req</div>
+        <div class="border border-slate-200 rounded px-1 py-1">post-resp</div>
+        <div class="border border-slate-200 rounded px-1 py-1">hist-rw</div>
+        <div class="border border-slate-200 rounded px-1 py-1">pre-tool</div>
+        <div class="border border-slate-200 rounded px-1 py-1">post-tool</div>
+      </div>
+      <p class="text-[10px] text-slate-400 mt-1 text-center">five thin adapters; tool stages gain revision-bearing working values</p>
+    </div>
+  </div>
+
+  <p><strong>Problem.</strong> Every hook point re-implements the fire protocol, and the two tool-stage hooks lack a <code class="text-sm">Revision()</code> counter — so their hand-rolled acted probes diverged and one shipped a production panic (commit <span class="font-mono text-sm">558cd073</span>). The hotfix comment at <span class="font-mono text-sm">hookrun.go:315-318</span> promises a "Mechanism-runner consolidation" that exists in no plan, no ADR, no ISSUES entry.</p>
+  <p><strong>Solution.</strong> Give <code class="text-sm">ToolCall</code>/<code class="text-sm">ToolResult</code> revision-bearing edit values like the three the other hooks already have, then collapse the ten loops into one generic runner with five adapters.</p>
+  <ul class="list-disc pl-5 text-sm space-y-0.5">
+    <li>locality: acted-probe bugs die once</li>
+    <li>leverage: one runner, five hook points</li>
+    <li>the DeepEqual bug class disappears</li>
+    <li>tests: 25-cell table replaces 2-of-5 coverage</li>
+    <li>honours the orphaned HOTFIX promise</li>
+  </ul>
+  <div class="bg-amber-50 border border-amber-200 rounded px-3 py-2 text-sm text-amber-900">The 2026-07-24 review marked this module "leave alone" — that verdict pre-dates the panic and the orphaned hotfix by five weeks. ADR 0003 fixes the registry and ordering, not the runner count; no conflict.</div>
+  <p class="text-sm text-slate-500">Companion (do together): <span class="font-mono">Ordered(at)</span> re-runs a full topological sort on <em>every dispatch</em> (~23 sorts per Turn with a full catalogue); the registry is declared read-only once the engine has it, so freeze the order at construction.</p>
+</article>
+
+<!-- ══════════════════════ 2 ══════════════════════ -->
+<article id="c2" class="rounded-xl border border-slate-200 bg-white p-6 space-y-4">
+  <div class="flex items-baseline gap-3 flex-wrap">
+    <h2 class="font-serif text-xl">2 — The config key copy chain becomes registry-driven resolution</h2>
+    <span class="bg-emerald-100 text-emerald-800 text-xs px-2 py-0.5 rounded">Strong</span>
+    <span class="bg-slate-100 text-slate-600 text-xs px-2 py-0.5 rounded">in-process</span>
+  </div>
+  <p class="font-mono text-sm text-slate-600">internal/config/config.go (2,790) · options.go (300) · registry.go (629) · cmd/apogee/settingsrows.go · settingsedit.go · wire_settings.go</p>
+
+  <div class="rounded-lg border border-slate-200 p-4">
+    <p class="text-xs uppercase tracking-wider text-slate-400 mb-2">Before — one key, four structs, three hand-written projections, four more per-key tables</p>
+    <pre class="mermaid">
+flowchart LR
+  FC["fileConfig<br/>27 fields"] -->|"layer()  99 lines"| L["Layer<br/>27 fields"]
+  L -->|"ResolveSettings  76 lines"| S["Settings<br/>27 fields"]
+  S -->|"ApplyConfig  30 lines"| O["Options<br/>48 fields"]
+  O -.-> V["settingValues<br/>38 closures"]
+  O -.-> ST["settingStructures<br/>7 closures"]
+  O -.-> AP["applySettingFor<br/>20 case arms"]
+  O -.-> AL["settingsApplyLocal<br/>7 cases"]
+  classDef leak stroke:#dc2626,stroke-width:2px;
+  class FC,L,S,V,ST,AP,AL leak
+    </pre>
+  </div>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="rounded-lg border border-slate-200 p-4 text-sm">
+      <p class="text-xs uppercase tracking-wider text-slate-400 mb-2">One bool, traced (<span class="font-mono normal-case">remember-model</span>)</p>
+      <p class="text-slate-600">9 files, <span class="text-red-700 font-semibold">12+ edit sites</span>: Settings field, Layer field, fileConfig field, layer() line, ResolveSettings line, ApplyConfig line, registry row, Options field, defaults template, value formatter, apply case, wiring. Only <span class="font-semibold">1 of the 4 structs</span> has a completeness guard — a key forgotten in <span class="font-mono">layer()</span> compiles and resolves to zero forever.</p>
+    </div>
+    <div class="rounded-lg border border-slate-200 p-4">
+      <p class="text-xs uppercase tracking-wider text-slate-400 mb-2">After — the registry row carries its accessors</p>
+      <div class="deep text-white rounded-md px-3 py-3 text-xs space-y-1">
+        <p class="uppercase tracking-wider">key registry — one row per key</p>
+        <p class="text-slate-300">path · kind · default · fromFile · fromEnv · fromFlag · overlay · read · structure</p>
+      </div>
+      <p class="text-[11px] text-slate-500 mt-2">Resolution = one loop over rows. <span class="font-mono">Settings</span> and <span class="font-mono">Layer</span> dissolve into <span class="font-mono">Options</span>; the four per-key tables in the binary become projections of the row. The shape already exists — <span class="font-mono">multiSourceKey</span> does this for 3 of 38 keys, and the code comments name the refactor.</p>
+    </div>
+  </div>
+
+  <p><strong>Problem.</strong> ~335 lines of the config package do nothing but carry field X one struct further, and each of the four per-key tables in <span class="font-mono text-sm">cmd/apogee</span> restates the same 38 paths — the settings reload even diffs painted display rows because no "compare two resolved configs" operation exists.</p>
+  <p><strong>Solution.</strong> Extend <code class="text-sm">multiSourceKey</code> to all 38 rows so the registry row is the whole projection; adding a key becomes a fileConfig field plus one row.</p>
+  <ul class="list-disc pl-5 text-sm space-y-0.5">
+    <li>leverage: one row, every layer</li>
+    <li>locality: forgotten-key bugs unrepresentable</li>
+    <li>interface shrinks: Settings and Layer deleted</li>
+    <li>tests: per-key drift guards become unnecessary</li>
+  </ul>
+  <div class="bg-amber-50 border border-amber-200 rounded px-3 py-2 text-sm text-amber-900">ADR 0035/0037/0041 (persist, live-apply, watch) are untouched — this deepens resolution, not persistence. ADR 0043's registry⇄config coupling note already anticipates it.</div>
+</article>
+
+<!-- ══════════════════════ 3 ══════════════════════ -->
+<article id="c3" class="rounded-xl border border-slate-200 bg-white p-6 space-y-4">
+  <div class="flex items-baseline gap-3 flex-wrap">
+    <h2 class="font-serif text-xl">3 — The write fence becomes a value, and every mutation takes one funnel</h2>
+    <span class="bg-emerald-100 text-emerald-800 text-xs px-2 py-0.5 rounded">Strong</span>
+    <span class="bg-slate-100 text-slate-600 text-xs px-2 py-0.5 rounded">in-process</span>
+  </div>
+  <p class="font-mono text-sm text-slate-600">internal/security/safeio.go (691) · pathsafety.go · writepermit.go · internal/tools/path_safety.go (363) · delete_file.go · file_ops.go</p>
+
+  <div class="rounded-lg border border-slate-200 p-4">
+    <p class="text-xs uppercase tracking-wider text-slate-400 mb-2">Before — seven free functions over bare strings, plus a re-ordering alias layer, plus three hand-woven mutation sites</p>
+    <pre class="mermaid">
+flowchart LR
+  subgraph tools ["internal/tools"]
+    W["4 content writers"] --> F["safeWriteFile<br/>(the one real funnel)"]
+    D["delete_file"] -->|"own capture/commit"| SEC
+    C["copy_file"] -->|"own capture/commit"| SEC
+    M["move_file<br/>5-branch commit"] -->|"own capture/commit"| SEC
+    A["alias layer<br/>resolveInRoot / safeReadFile / safeOpen<br/>(re-orders args back)"]
+  end
+  F --> SEC["security.Safe*<br/>ResolveInRoot(input,root)<br/>SafeWriteFile(root,input,…,permitted)<br/>SafeCopyFileFrom(5 strings)"]
+  A --> SEC
+  classDef leak stroke:#dc2626,stroke-width:2px;
+  class D,C,M,A,SEC leak
+    </pre>
+  </div>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="rounded-lg border border-slate-200 p-4 text-sm text-slate-600">
+      <p class="text-xs uppercase tracking-wider text-slate-400 mb-2">The evidence</p>
+      <p>Argument order flips between <span class="font-mono">ResolveInRoot(input, root)</span> and <span class="font-mono">SafeWriteFile(root, input, …)</span>; <span class="font-mono">SafeCopyFileFrom</span> takes five consecutive strings, four of them paths — the compiler can catch nothing. The permit rides as a trailing string through four signatures. <span class="font-mono">capturePreImage</span> ×4 sites, <span class="font-mono">commit</span> ×8, <span class="font-mono">writeEscapeTarget</span> ×4, disclosure note ×7 — "a refused write journals nothing" is eight promises, not one.</p>
+    </div>
+    <div class="rounded-lg border border-slate-200 p-4">
+      <p class="text-xs uppercase tracking-wider text-slate-400 mb-2">After — one fence, one mutation protocol</p>
+      <div class="deep text-white rounded-md px-3 py-3 text-xs space-y-1">
+        <p class="uppercase tracking-wider">security.Fence{root, permit}</p>
+        <p class="text-slate-300">Read · Open · Stat · Write · Remove · Rename · CopyFrom · <span class="text-emerald-300">Mutate(spec, fn)</span></p>
+        <p class="text-slate-300">Mutate owns: permit check → disclosure → pre-image → primitive → commit-if-landed</p>
+      </div>
+      <p class="text-[11px] text-slate-500 mt-2">One path string per call; the permit is a property of the fence you were handed; the tools alias layer is deleted; the three hand-woven verbs call the funnel like the four writers already do.</p>
+    </div>
+  </div>
+
+  <p><strong>Problem.</strong> The fence's interface is nearly as wide as its implementation — seven signatures in three inconsistent argument orders, a pass-through alias layer that exists only to re-order them, and the undo/permit/disclosure protocol re-derived at three mutation sites outside the funnel.</p>
+  <p><strong>Solution.</strong> A fenced-root value with per-verb methods and one <code class="text-sm">Mutate</code> that owns the whole write protocol; tools keep only their own wording.</p>
+  <ul class="list-disc pl-5 text-sm space-y-0.5">
+    <li>interface shrinks; permit stops travelling positionally</li>
+    <li>locality: undo-journal invariant lives once</li>
+    <li>tests: permit table at the fence, not per tool</li>
+    <li>~60 lines of protocol deleted from three tools</li>
+  </ul>
+  <div class="bg-amber-50 border border-amber-200 rounded px-3 py-2 text-sm text-amber-900">ADR 0049's "permit is asked first, on the resolved path" and ADR 0051's journal-at-the-funnel are both easier to state on a Fence — no conflict.</div>
+</article>
+
+<!-- ══════════════════════ 4 ══════════════════════ -->
+<article id="c4" class="rounded-xl border border-slate-200 bg-white p-6 space-y-4">
+  <div class="flex items-baseline gap-3 flex-wrap">
+    <h2 class="font-serif text-xl">4 — One Binding for "the resolved binding to an Upstream"</h2>
+    <span class="bg-emerald-100 text-emerald-800 text-xs px-2 py-0.5 rounded">Strong</span>
+    <span class="bg-slate-100 text-slate-600 text-xs px-2 py-0.5 rounded">in-process</span>
+  </div>
+  <p class="font-mono text-sm text-slate-600">internal/agent/rebind.go (RebindSpec, UpstreamSpec) · delegationtarget.go (DelegationTarget) · subagent.go · cmd/apogee/headless.go:342-431</p>
+
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="rounded-lg border border-slate-200 p-4">
+      <p class="text-xs uppercase tracking-wider text-slate-400 mb-3">Before — three sibling structs, three zero-value dialects</p>
+      <div class="space-y-2 text-xs">
+        <div class="border-2 border-red-300 rounded p-2">
+          <p class="font-semibold text-slate-700">RebindSpec</p>
+          <p class="text-slate-500">MaxOutputTokens <span class="font-mono">*int</span> — <span class="text-red-700">nil = keep</span></p>
+        </div>
+        <div class="border-2 border-red-300 rounded p-2">
+          <p class="font-semibold text-slate-700">UpstreamSpec</p>
+          <p class="text-slate-500">MaxOutputTokens <span class="font-mono">int</span> — <span class="text-red-700">0 = clear</span></p>
+        </div>
+        <div class="border-2 border-red-300 rounded p-2">
+          <p class="font-semibold text-slate-700">DelegationTarget</p>
+          <p class="text-slate-500">ContextWindow <span class="font-mono">int</span> — <span class="text-red-700">0 = keep parent's</span></p>
+        </div>
+        <p class="text-slate-400">Same three numbers; a caller must know which sibling it holds to know what zero means. Each has exactly <em>one</em> production construction site — three hypothetical seams.</p>
+      </div>
+    </div>
+    <div class="rounded-lg border border-slate-200 p-4">
+      <p class="text-xs uppercase tracking-wider text-slate-400 mb-3">After — one value, one optional convention, one apply</p>
+      <div class="deep text-white rounded-md px-3 py-3 text-xs space-y-1">
+        <p class="uppercase tracking-wider">Binding</p>
+        <p class="text-slate-300">endpoint · key · model · window · output cap · reserve share · profile</p>
+        <p class="text-slate-300">apply(*Config) — one documented optionality rule</p>
+      </div>
+      <p class="text-[11px] text-slate-500 mt-2">Rebind, SwitchUpstream and the routed spawn each become validate → apply → commit. <span class="font-mono">headless.go</span> stops unpacking a RebindSpec field-by-field into a Config — the two were always two shapes of one resolution.</p>
+    </div>
+  </div>
+
+  <p><strong>Problem.</strong> The engine spells "what this session is bound to" three ways with contradictory zero-value contracts, applied by hand at three sites — a seam leak a maintainer must simply know.</p>
+  <p><strong>Solution.</strong> One <code class="text-sm">Binding</code> value with a single apply method feeds Rebind, SwitchUpstream, routed spawns and Config construction.</p>
+  <ul class="list-disc pl-5 text-sm space-y-0.5">
+    <li>locality: window/cap/reserve rules in one table</li>
+    <li>the inconsistency itself becomes a visible test row</li>
+    <li>six scattered inheritance tests collapse to one</li>
+  </ul>
+  <div class="bg-amber-50 border border-amber-200 rounded px-3 py-2 text-sm text-amber-900">ADR 0024/0028/0045 define <em>policies</em>, not struct counts; ADR 0031 holds — the Binding is still computed whole by the Driver.</div>
+</article>
+
+<!-- ══════════════════════ 5 ══════════════════════ -->
+<article id="c5" class="rounded-xl border border-slate-200 bg-white p-6 space-y-4">
+  <div class="flex items-baseline gap-3 flex-wrap">
+    <h2 class="font-serif text-xl">5 — One Config projection for every Driver</h2>
+    <span class="bg-emerald-100 text-emerald-800 text-xs px-2 py-0.5 rounded">Strong</span>
+    <span class="bg-slate-100 text-slate-600 text-xs px-2 py-0.5 rounded">in-process</span>
+  </div>
+  <p class="font-mono text-sm text-slate-600">cmd/apogee/wire_boot.go:114-250 · headless.go:342-431 · schedule.go:80-101</p>
+
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="rounded-lg border border-slate-200 p-4">
+      <p class="text-xs uppercase tracking-wider text-slate-400 mb-3">Before — two 24-field literals, 23 fields identical</p>
+      <div class="flex gap-2 text-[10px]">
+        <div class="flex-1 border-2 border-red-300 rounded p-2 space-y-0.5">
+          <p class="font-semibold text-xs text-slate-700 mb-1">wire_boot.go (TUI)</p>
+          <div class="bg-red-100 rounded px-1">23 shared fields + comments</div>
+          <div class="bg-slate-100 rounded px-1">Approver · Asker · Events · Presenter</div>
+        </div>
+        <div class="flex-1 border-2 border-red-300 rounded p-2 space-y-0.5">
+          <p class="font-semibold text-xs text-slate-700 mb-1">headless.go</p>
+          <div class="bg-red-100 rounded px-1">23 shared fields + comments (copied)</div>
+          <div class="bg-slate-100 rounded px-1">delegates pinned by run.Once</div>
+        </div>
+      </div>
+      <p class="text-[11px] text-slate-400 mt-2">Drift already visible: the nested ContextConfig reads <span class="font-mono">opts.ContextWindow</span> on one path and <span class="font-mono">spec.MaxContextTokens</span> + a locally recomputed reserve on the other.</p>
+    </div>
+    <div class="rounded-lg border border-slate-200 p-4">
+      <p class="text-xs uppercase tracking-wider text-slate-400 mb-3">After — one projection, per-Driver delegates on top</p>
+      <div class="deep text-white rounded-md px-3 py-3 text-xs space-y-1">
+        <p class="uppercase tracking-wider">engineConfig(opts, roots, binding, skills, confiner)</p>
+        <p class="text-slate-300">→ the host-agnostic apogee.Config, once</p>
+      </div>
+      <div class="grid grid-cols-3 gap-1 mt-2 text-[10px] text-center text-slate-500">
+        <div class="border border-slate-200 rounded px-1 py-1">TUI + delegates</div>
+        <div class="border border-slate-200 rounded px-1 py-1">headless</div>
+        <div class="border border-slate-200 rounded px-1 py-1">Schedule Firing</div>
+      </div>
+    </div>
+  </div>
+
+  <p><strong>Problem.</strong> The Options→Config projection is duplicated 23 fields deep across Drivers; the deletion test fails outright — either literal survives with 23/24 of the other's knowledge.</p>
+  <p><strong>Solution.</strong> One pure projection function; each Driver sets only its own delegates — the move <code class="text-sm">internal/run</code> already made for the <em>run</em> half, applied to the <em>config</em> half.</p>
+  <ul class="list-disc pl-5 text-sm space-y-0.5">
+    <li>leverage: one projection, three Drivers (a daemon becomes cheap)</li>
+    <li>tests: table-testable in ten lines vs 35 whole-root boots</li>
+    <li>"headless ≡ TUI resolution" becomes assertable</li>
+  </ul>
+  <div class="bg-amber-50 border border-amber-200 rounded px-3 py-2 text-sm text-amber-900">ADR 0031 actively argues for this; ADR 0043's wire-file split stays — this adds the projection seam the split never created.</div>
+</article>
+
+<!-- ══════════════════════ 6 ══════════════════════ -->
+<article id="c6" class="rounded-xl border border-slate-200 bg-white p-6 space-y-4">
+  <div class="flex items-baseline gap-3 flex-wrap">
+    <h2 class="font-serif text-xl">6 — The live session setting becomes a declared policy, not prose</h2>
+    <span class="bg-emerald-100 text-emerald-800 text-xs px-2 py-0.5 rounded">Strong</span>
+    <span class="bg-slate-100 text-slate-600 text-xs px-2 py-0.5 rounded">in-process</span>
+  </div>
+  <p class="font-mono text-sm text-slate-600">internal/agent/agent.go (39 field lines, 8 mutexes) · subagent.go:178-337 · cmd/apogee/wire_engine.go (498)</p>
+
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="rounded-lg border border-slate-200 p-4">
+      <p class="text-xs uppercase tracking-wider text-slate-400 mb-3">Before — interface as wide as the implementation</p>
+      <div class="flex gap-3 items-end justify-center h-44">
+        <div class="flex flex-col items-center">
+          <div class="w-24 bg-red-200 border border-red-400 rounded-t" style="height:120px"></div>
+          <div class="w-24 bg-slate-300 border border-slate-400 rounded-b" style="height:130px"></div>
+          <p class="text-[10px] text-slate-500 mt-1 text-center">7 single-scalar mutexes<br/>28 setter/getter bodies<br/>22-line prose taxonomy</p>
+        </div>
+        <p class="text-[11px] text-slate-500 max-w-[14rem]">Adding one setting = six files, each with an unchecked judgement call: inherit-live vs isolate in <span class="font-mono">newChildAgent</span>, remember vs no-op vs refuse in <span class="font-mono">lateEngine</span>, plus TUI method + root alias. Measured ripple: 5–7 files per real setting.</p>
+      </div>
+    </div>
+    <div class="rounded-lg border border-slate-200 p-4">
+      <p class="text-xs uppercase tracking-wider text-slate-400 mb-3">After — short interface, tall implementation</p>
+      <div class="flex gap-3 items-end justify-center h-44">
+        <div class="flex flex-col items-center">
+          <div class="w-24 bg-emerald-200 border border-emerald-400 rounded-t" style="height:28px"></div>
+          <div class="w-24 deep rounded-b" style="height:130px"></div>
+          <p class="text-[10px] text-slate-500 mt-1 text-center">liveField[T] + declared<br/>inherit / bind policies</p>
+        </div>
+        <p class="text-[11px] text-slate-500 max-w-[14rem]"><span class="font-mono">newChildAgent</span> becomes a loop over declared policies; <span class="font-mono">lateEngine</span>'s 15 pure forwarders and hand-ordered Bind replay become a table replayed in insertion order. A setting that forgets its policy fails to compile.</p>
+      </div>
+    </div>
+  </div>
+
+  <p><strong>Problem.</strong> The three call classes (idle-only / between-Steps / anytime-safe) and the Sub-agent inherit-vs-isolate rules exist only as comments — ~120 lines of prose over ~40 lines of assignment in <span class="font-mono text-sm">subagent.go</span> — and <span class="font-mono text-sm">lateEngine</span> restates the remember/no-op/refuse policy 29 times, with a hand-ordered replay a forgotten setter silently drops.</p>
+  <p><strong>Solution.</strong> A small settings module holding value + lock + declared inheritance and bind policies; the child spawn and the pre-bind replay become loops over the declaration.</p>
+  <ul class="list-disc pl-5 text-sm space-y-0.5">
+    <li>locality: the class taxonomy becomes a type</li>
+    <li>tests: one inheritance table replaces 1,300+ lines across 5 files</li>
+    <li>"every remembered edit reaches the Agent" — one exhaustive loop</li>
+  </ul>
+  <div class="bg-amber-50 border border-amber-200 rounded px-3 py-2 text-sm text-amber-900">ADR 0013 fixes <em>what</em> a child inherits, not how it's threaded; ADR 0037 is served better by declared policy. Same medicine as ADR 0054's Options groups, one layer down.</div>
+</article>
+
+<!-- ══════════════════════ 7 ══════════════════════ -->
+<article id="c7" class="rounded-xl border border-slate-200 bg-white p-6 space-y-4">
+  <div class="flex items-baseline gap-3 flex-wrap">
+    <h2 class="font-serif text-xl">7 — Tool vocabulary gets one owner (and the roster stops being copied)</h2>
+    <span class="bg-emerald-100 text-emerald-800 text-xs px-2 py-0.5 rounded">Strong</span>
+    <span class="bg-slate-100 text-slate-600 text-xs px-2 py-0.5 rounded">in-process</span>
+  </div>
+  <p class="font-mono text-sm text-slate-600">internal/tools/registry.go:224 · internal/mechanisms/decompose.go:122 · robustness.go:75 · offramps.go · historyhints.go · toolloop.go</p>
+
+  <div class="rounded-lg border border-slate-200 p-4">
+    <p class="text-xs uppercase tracking-wider text-slate-400 mb-2">Before — the roster leaks as hand-maintained copies; the vocabulary hides inside two Mechanism files</p>
+    <pre class="mermaid">
+flowchart LR
+  R["tools.KnownToolNames<br/>(the roster)"] -. only config reads it .-> CFG["internal/config"]
+  W4["wave4WriteTools<br/>in decompose.go<br/>(a 680-line Mechanism)"] -->|read by| M8["8 mechanism files"]
+  WT["writeToolNames + 2 semantics<br/>in robustness.go"] --> M8
+  RT["readToolNames in offramps.go"] --> M8
+  LT["listToolNames in historyhints.go"] --> M8
+  R -.->|"never consulted"| W4
+  DEFECT["copy_file · move_file · delete_file<br/>missing since 2026-08-10:<br/>isFileMutatingTool = false"]
+  W4 --- DEFECT
+  classDef leak stroke:#dc2626,stroke-width:2px;
+  class W4,WT,RT,LT,DEFECT leak
+    </pre>
+  </div>
+  <div class="grid md:grid-cols-2 gap-4 text-sm">
+    <div class="rounded-lg border border-slate-200 p-4 text-slate-600">
+      <p class="text-xs uppercase tracking-wider text-slate-400 mb-2">The cost, measured</p>
+      <p>Understanding <em>one</em> Mechanism (<span class="font-mono">read_loop</span>, 227 lines) end-to-end takes 6 files inside the package and 12 overall, because its vocabulary is homed in five files — two of them other Mechanisms. And the roster copy already drifted: three write tools shipped 2026-08-10 are invisible to the whole history family.</p>
+    </div>
+    <div class="rounded-lg border border-slate-200 p-4">
+      <p class="text-xs uppercase tracking-wider text-slate-400 mb-2">After</p>
+      <div class="deep text-white rounded-md px-3 py-3 text-xs space-y-1">
+        <p class="uppercase tracking-wider">tools exports its classification</p>
+        <p class="text-slate-300">WriteToolNames() · ReadToolNames() — computed where the roster lives</p>
+      </div>
+      <div class="deep text-white rounded-md px-3 py-3 text-xs space-y-1 mt-2">
+        <p class="uppercase tracking-wider">mechanisms/toolvocab.go</p>
+        <p class="text-slate-300">roster ∪ foreign spellings · both write semantics, named · prompts.go owns the embed</p>
+      </div>
+    </div>
+  </div>
+
+  <p><strong>Problem.</strong> Knowledge only <span class="font-mono text-sm">internal/tools</span> has is restated as literals in three packages, and the mechanisms package's shared vocabulary lives inside two Mechanism implementations — the deletion test says the sets earn their keep, but their five homes don't.</p>
+  <p><strong>Solution.</strong> Tools exports the classification it already computes; mechanisms compose it with the foreign spellings (genuinely their business) in one vocabulary file.</p>
+  <ul class="list-disc pl-5 text-sm space-y-0.5">
+    <li>a 2-month silent drift becomes a build failure</li>
+    <li>locality: both write semantics named, side by side</li>
+    <li>doc.go's 34-line plumbing apology shrinks to two lines</li>
+  </ul>
+</article>
+
+<!-- ══════════════════════ 8 ══════════════════════ -->
+<article id="c8" class="rounded-xl border border-slate-200 bg-white p-6 space-y-4">
+  <div class="flex items-baseline gap-3 flex-wrap">
+    <h2 class="font-serif text-xl">8 — internal/config stops linking the renderer</h2>
+    <span class="bg-emerald-100 text-emerald-800 text-xs px-2 py-0.5 rounded">Strong</span>
+    <span class="bg-slate-100 text-slate-600 text-xs px-2 py-0.5 rounded">in-process</span>
+  </div>
+  <p class="font-mono text-sm text-slate-600">internal/config/registry.go:16 · config.go:24 · options.go:11 → internal/tui (99,530 lines)</p>
+
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="rounded-lg border border-slate-200 p-4">
+      <p class="text-xs uppercase tracking-wider text-slate-400 mb-2">Before</p>
+      <pre class="mermaid">
+flowchart LR
+  CFG["internal/config<br/>15k lines"] ==>|"11 sites, ~40 lines of vocabulary"| TUI["internal/tui<br/>99,530 lines<br/>renderer · scheduler · tool registry"]
+  D["a daemon or bench<br/>resolving config.yaml"] --> CFG
+  classDef leak stroke:#dc2626,stroke-width:3px;
+  class TUI leak
+      </pre>
+    </div>
+    <div class="rounded-lg border border-slate-200 p-4">
+      <p class="text-xs uppercase tracking-wider text-slate-400 mb-2">After</p>
+      <pre class="mermaid">
+flowchart LR
+  CFG["internal/config"] --> V["PreboundStart · SpinnerStyle · CursorShape<br/>~60-line leaf home (domain or uivocab)"]
+  TUI["internal/tui"] --> V
+  D["daemon / bench"] --> CFG
+      </pre>
+    </div>
+  </div>
+
+  <p><strong>Problem.</strong> The imported surface is two enums and a two-field struct — yet <span class="font-mono text-sm">go list -deps ./internal/config</span> returns 21 internal packages, so anything that reads a config file links the alternate-screen renderer, defeating the package doc's own stated purpose ("a bench harness or a daemon resolving the same file has the same needs").</p>
+  <p><strong>Solution.</strong> Move the ~40 lines of vocabulary to a leaf package; tui consumes it.</p>
+  <ul class="list-disc pl-5 text-sm space-y-0.5">
+    <li>cheap, mechanical, high leverage</li>
+    <li><span class="font-mono">go test ./internal/config</span> stops compiling 99k lines</li>
+    <li>the daemon Driver (ADR 0034) stops inheriting a terminal</li>
+  </ul>
+  <div class="bg-amber-50 border border-amber-200 rounded px-3 py-2 text-sm text-amber-900">Not an ADR violation (ADR 0043 allows sibling imports) — but it defeats that ADR's stated motivation; worth an amendment note when done.</div>
+</article>
+
+<!-- ══════════════════════ 9 ══════════════════════ -->
+<article id="c9" class="rounded-xl border border-slate-200 bg-white p-6 space-y-4">
+  <div class="flex items-baseline gap-3 flex-wrap">
+    <h2 class="font-serif text-xl">9 — One verified config-write transaction</h2>
+    <span class="bg-emerald-100 text-emerald-800 text-xs px-2 py-0.5 rounded">Strong</span>
+    <span class="bg-slate-100 text-slate-600 text-xs px-2 py-0.5 rounded">in-process</span>
+  </div>
+  <p class="font-mono text-sm text-slate-600">internal/config/configsplice.go · configwrite*.go (4 files) · configmigrate.go — 2,743 lines</p>
+
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="rounded-lg border border-slate-200 p-4">
+      <p class="text-xs uppercase tracking-wider text-slate-400 mb-3">Before — ADR 0035's pipeline, written out six times</p>
+      <div class="space-y-1.5 text-xs">
+        <div class="band border-red-400 bg-red-50 px-3 py-1">scalar set / reset · verifiedSplice</div>
+        <div class="band border-red-400 bg-red-50 px-3 py-1">mechanism list · verifiedMechanismSplice</div>
+        <div class="band border-red-400 bg-red-50 px-3 py-1">server entry setting · inline verify</div>
+        <div class="band border-red-400 bg-red-50 px-3 py-1">key source · verifiedEntrySplice</div>
+        <div class="band border-red-400 bg-red-50 px-3 py-1">host acknowledgement · hostsAppended</div>
+        <div class="band border-red-400 bg-red-50 px-3 py-1">legacy fold · verifyFold</div>
+        <p class="text-slate-400 pt-1">Each: validate → read/seed → locate → splice → re-parse & verify → atomic write. The bodies are 90% the same 40 lines; one writer's comment cites another as its template.</p>
+      </div>
+    </div>
+    <div class="rounded-lg border border-slate-200 p-4">
+      <p class="text-xs uppercase tracking-wider text-slate-400 mb-3">After — one transaction, six thin writers</p>
+      <div class="deep text-white rounded-md px-3 py-3 text-xs space-y-1">
+        <p class="uppercase tracking-wider">edit(path, locate, splice, verify)</p>
+        <p class="text-slate-300">owns read · seed · parse · splice · re-parse · atomic write</p>
+      </div>
+      <div class="grid grid-cols-3 gap-1 mt-2 text-[10px] text-center text-slate-500">
+        <div class="border border-slate-200 rounded px-1 py-1">scalar</div>
+        <div class="border border-slate-200 rounded px-1 py-1">list item</div>
+        <div class="border border-slate-200 rounded px-1 py-1">map key</div>
+      </div>
+      <p class="text-[10px] text-slate-400 mt-1 text-center">one changedOnlyAt predicate per container shape</p>
+    </div>
+  </div>
+
+  <p><strong>Problem.</strong> Each writer's interface is one Save function, but behind every one sits the same 40-line transaction — the atomicity/mode-preservation/re-parse-refusal properties are re-tested five times against five copies (2,335 lines of tests).</p>
+  <p><strong>Solution.</strong> One transaction module owning the pipeline; writers reduce to their locate + splice + verify triple.</p>
+  <ul class="list-disc pl-5 text-sm space-y-0.5">
+    <li>ADR 0035 becomes a module, not a habit</li>
+    <li>one property suite instead of five</li>
+    <li>the next writer costs a triple, not 400 lines</li>
+  </ul>
+</article>
+
+<!-- ══════════════════════ 10 ══════════════════════ -->
+<article id="c10" class="rounded-xl border border-slate-200 bg-white p-6 space-y-4">
+  <div class="flex items-baseline gap-3 flex-wrap">
+    <h2 class="font-serif text-xl">10 — Probe's terminal session gets its second adapter</h2>
+    <span class="bg-emerald-100 text-emerald-800 text-xs px-2 py-0.5 rounded">Strong</span>
+    <span class="bg-slate-100 text-slate-600 text-xs px-2 py-0.5 rounded">mock</span>
+  </div>
+  <p class="font-mono text-sm text-slate-600">internal/probe/terminal.go (1,167 — 29% of the package) · terminal_test.go (295)</p>
+
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="rounded-lg border border-slate-200 p-4">
+      <p class="text-xs uppercase tracking-wider text-slate-400 mb-3">Before — a seam with one adapter</p>
+      <div class="text-xs space-y-2">
+        <div class="border border-slate-300 rounded p-2">GatherTerminal — DSR-CPR, DECRPM, tab stops, wrap, 10 capability probes</div>
+        <div class="border-t-2 border-dashed border-slate-400 relative"><span class="absolute -top-2 left-2 bg-white px-1 text-[10px] text-slate-400">TerminalInputs (the seam — already right)</span></div>
+        <div class="border border-slate-300 rounded p-2 mt-3">the real tty — <em>the only adapter</em></div>
+        <p class="text-red-700">25 functions at 0.0% coverage — every measure* section. Package: 58.7% vs 88–95% everywhere else in scope. A mis-parsed reply is a wrong <em>verdict</em>, not a crash.</p>
+      </div>
+    </div>
+    <div class="rounded-lg border border-slate-200 p-4">
+      <p class="text-xs uppercase tracking-wider text-slate-400 mb-3">After — two adapters = a real seam</p>
+      <div class="text-xs space-y-2">
+        <div class="deep text-white rounded p-2">GatherTerminal (unchanged)</div>
+        <div class="border-t-2 border-dashed border-slate-400"></div>
+        <div class="grid grid-cols-2 gap-2 mt-3">
+          <div class="border border-slate-300 rounded p-2">real tty</div>
+          <div class="border border-emerald-400 bg-emerald-50 rounded p-2">fakeTerminal — scripted replies, one table row per real terminal (xterm, kitty, tmux, Windows Terminal)</div>
+        </div>
+        <p class="text-slate-500">Each terminal row becomes a regression pin; the Mismatch() exit contract gains its first non-trivial assertion.</p>
+      </div>
+    </div>
+  </div>
+
+  <p><strong>Problem.</strong> The injection seam was built for testability and production is its only adapter — 1,167 lines of escape-sequence protocol sit untested behind it, in the command whose whole job is telling the user the truth about their terminal.</p>
+  <p><strong>Solution.</strong> Not a refactor — a second adapter: a scripted fake terminal that makes GatherTerminal table-testable end to end. Test debt, not design debt.</p>
+  <ul class="list-disc pl-5 text-sm space-y-0.5">
+    <li>the interface is the test surface — finally used as one</li>
+    <li>25 functions leave 0%</li>
+  </ul>
+</article>
+
+</section>
+
+<!-- ══════════════════════ worth exploring ══════════════════════ -->
+<section id="worth-exploring" class="space-y-4">
+  <h2 class="font-serif text-2xl">Worth exploring — smaller, mostly independent</h2>
+  <div class="grid md:grid-cols-2 gap-4 text-sm">
+    <div class="rounded-lg border border-slate-200 bg-white p-4 space-y-1">
+      <p class="font-semibold">The Execute preamble, once <span class="bg-amber-100 text-amber-800 text-xs px-1.5 rounded ml-1">Worth exploring</span></p>
+      <p class="text-slate-600">32 copies of the ctx check, 26 decodes, 21 hand-written required-checks across the built-in tools. A package-internal generic <span class="font-mono">execute[A]</span> keeps ADR 0002's public Tool interface untouched and unlocks the roster-wide invariant test (bad arg ⇒ IsError; cancelled ctx ⇒ Go error) that today holds for 4 of 25 tools.</p>
+    </div>
+    <div class="rounded-lg border border-slate-200 bg-white p-4 space-y-1">
+      <p class="font-semibold">validated.Resolve — one call, not a five-call protocol <span class="bg-amber-100 text-amber-800 text-xs px-1.5 rounded ml-1">Worth exploring</span></p>
+      <p class="text-slate-600">The caller must order Shipped→LoadUserDir→Merge→Match→Validate and widen the package's 3-case decision to its own 7-case one. One <span class="font-mono">Resolve(Inputs) Decision</span> moves the ladder behind the seam; <span class="font-mono">cmd/apogee</span> keeps only the notice wording. ADR 0015/0016 hold.</p>
+    </div>
+    <div class="rounded-lg border border-slate-200 bg-white p-4 space-y-1">
+      <p class="font-semibold">The presentation ladder moves into internal/present <span class="bg-amber-100 text-amber-800 text-xs px-1.5 rounded ml-1">Worth exploring</span></p>
+      <p class="text-slate-600">The 43-line climb policy — including the security-relevant rung-1/rung-2 extension crossing on <span class="font-mono">.pdf</span> — lives in the TUI, above the 3,297 lines it decides between. A <span class="font-mono">present.Ladder</span> keeps the host in charge (ADR 0019) and makes a headless rung-0 Presenter a struct literal.</p>
+    </div>
+    <div class="rounded-lg border border-slate-200 bg-white p-4 space-y-1">
+      <p class="font-semibold">One idle-only guard <span class="bg-amber-100 text-amber-800 text-xs px-1.5 rounded ml-1">Worth exploring</span></p>
+      <p class="text-slate-600">Nine call sites hand-write the in-Exchange gate with four different error spellings. An <span class="font-mono">atIdle(reason)</span> guard gives the call class one implementation and makes the door list enumerable in one table test. Implements ADR 0007/0037 rather than conflicting.</p>
+    </div>
+    <div class="rounded-lg border border-slate-200 bg-white p-4 space-y-1">
+      <p class="font-semibold">domain/hooks.go splits; the seam comment becomes true <span class="bg-amber-100 text-amber-800 text-xs px-1.5 rounded ml-1">Worth exploring</span></p>
+      <p class="text-slate-600">985 lines, four primary types — and a comment claiming the engine-seam surface is "not re-exported", while the root's type aliases export all 14 Request and 19 Conversation methods. Split by concern (ADR 0043's own rule) and decide the seam's public status honestly.</p>
+    </div>
+    <div class="rounded-lg border border-slate-200 bg-white p-4 space-y-1">
+      <p class="font-semibold">One subprocess spawner for tools and Mechanisms <span class="bg-amber-100 text-amber-800 text-xs px-1.5 rounded ml-1">Worth exploring</span></p>
+      <p class="text-slate-600"><span class="font-mono">runSubprocess</span> is the deep funnel (Confinement handoff, env scrub, teardown); <span class="font-mono">autofix</span>'s formatter reimplements the handoff and skips the rest — inheriting <span class="font-mono">APOGEE_API_KEY</span> and reaping nothing. Route it through the funnel; three protections gained for free.</p>
+    </div>
+    <div class="rounded-lg border border-slate-200 bg-white p-4 space-y-1">
+      <p class="font-semibold">processing sheds its double switch <span class="bg-amber-100 text-amber-800 text-xs px-1.5 rounded ml-1">Worth exploring</span></p>
+      <p class="text-slate-600">Model profile → parser goes through two switches over two spellings of one enum; 15 exported symbols have zero callers outside the package, and the "emit and parse can't drift" guarantee holds only because both sides ignore the same config field. Fold the switch into <span class="font-mono">ParserFor</span>, unexport the rest, and the emit/parse pairing becomes a statable invariant.</p>
+    </div>
+    <div class="rounded-lg border border-slate-200 bg-white p-4 space-y-1">
+      <p class="font-semibold">Retire a Confiner in one place <span class="bg-amber-100 text-amber-800 text-xs px-1.5 rounded ml-1">Worth exploring</span></p>
+      <p class="text-slate-600">Both Drivers do the same anonymous-interface Close dance; a third that forgets it leaves mandatory labels on the user's disk. One <span class="font-mono">platform.RetireConfiner</span> honours the recorded decision (no teardown method on the public interface, ADR 0010) while deleting the duplication it created.</p>
+    </div>
+  </div>
+  <p class="text-sm text-slate-500">Speculative, recorded but not recommended without a grill: regrouping <span class="font-mono">domain.Config</span>'s 34 fields (a public-API break under ADR 0010's stability rule); a <span class="font-mono">title.Namer</span> folding the naming call behind the sanitiser; re-homing model identity across five packages (the 2026-07-24 review examined and refuted this — the one new fact, the mirrored <span class="font-mono">ProbeBatteryVersion</span> constant, is not enough to reopen it).</p>
+</section>
+
+<!-- ══════════════════════ defects ══════════════════════ -->
+<section id="defects" class="rounded-xl border border-red-200 bg-red-50 p-6 space-y-3">
+  <h2 class="font-serif text-2xl text-red-900">Defects tripped over — not this review's job</h2>
+  <p class="text-sm text-red-900">Exploration surfaced these while measuring; they belong to <span class="font-mono">/code-audit</span> (or a quick fix pass), not to a deepening plan. The first two look live.</p>
+  <ul class="list-disc pl-5 text-sm text-red-950 space-y-1">
+    <li><span class="font-mono">mechanisms/decompose.go:122</span> — <span class="font-mono">wave4WriteTools</span> omits <span class="font-mono">copy_file</span>/<span class="font-mono">move_file</span>/<span class="font-mono">delete_file</span> (shipped 2026-08-10): the history family treats three write tools as non-writes.</li>
+    <li><span class="font-mono">mechanisms/autofix.go:288</span> — the external formatter runs with no <span class="font-mono">cmd.Env</span> scrub (inherits <span class="font-mono">APOGEE_API_KEY</span>) and no process-group teardown.</li>
+    <li><span class="font-mono">tools/git.go:166</span> — the filter-driver probe is not memoised; one <span class="font-mono">git_commit</span> can cost 12 git subprocesses.</li>
+    <li><span class="font-mono">domain/config.go:109</span> — <span class="font-mono">Config.SessionsDir</span>: written at two production sites, read by nothing.</li>
+    <li><span class="font-mono">domain/hooks.go:22-27</span> — the "not re-exported by the root facade" claim is false (type aliases export every method).</li>
+    <li><span class="font-mono">domain.ConfinementBox</span> hand-assembled from the same three Config fields at three sites; a fourth that forgets <span class="font-mono">NetworkAllow</span> is a silent confinement hole.</li>
+    <li><span class="font-mono">agent/agent.go:288</span> — <span class="font-mono">Close()</span> is a stale no-op; SwitchUpstream and routed spawns now build real provider clients it never touches.</li>
+    <li><span class="font-mono">context.HistoryExceedsAllocation</span> — exported, tested, zero production callers; and <span class="font-mono">loop.go</span> calls both spellings of <span class="font-mono">PromptChars</span> in one file.</li>
+    <li>Config-load validation covers one of a Model profile's four axes — a typo'd <span class="font-mono">tool-call-format</span> surfaces as a failed Rebind at the first Beat, naming no config key.</li>
+    <li><span class="font-mono">mechanisms/catalogue.go:208</span> — <span class="font-mono">buildFrom</span> hands out descriptor/ordering slices shared with the static catalogue map (<span class="font-mono">Descriptors()</span> clones; this path doesn't).</li>
+    <li>Zero-coverage decision branches: decompose's prose fallback, readloop's greenfield trigger (<span class="font-mono">listResultEmpty</span>).</li>
+    <li>Doc drift: ADR 0002 "seven" vs <span class="font-mono">tools/doc.go</span> "nine" vs <span class="font-mono">tui/toolregistry.go</span> "six" Tool-summary carriers; <span class="font-mono">run.Spec.Config</span>'s Events comment contradicts the package doc.</li>
+  </ul>
+</section>
+
+<!-- ══════════════════════ healthy ══════════════════════ -->
+<section id="healthy" class="space-y-3">
+  <h2 class="font-serif text-2xl">Verified healthy — do not re-litigate</h2>
+  <ul class="list-disc pl-5 text-sm space-y-1 text-slate-700">
+    <li><span class="font-mono">internal/agent/resolution.go</span> — the Resolution as a pure function over a precomputed fact set is "extracted for testability" done right; dispatch executes, never decides.</li>
+    <li><span class="font-mono">turnLifecycle</span> + <span class="font-mono">ExchangeView</span> — ADR 0017 delivered, including the honestly-recorded abort-rollback fallback.</li>
+    <li>The root facade <span class="font-mono">apogee.go</span> — 576 lines, all one-liners, drift-guarded; ADR 0010 intact.</li>
+    <li><span class="font-mono">internal/schedule</span> and <span class="font-mono">internal/run</span> — small interfaces, real concurrency ownership, two genuine adapters each; ADR 0031/0033 landed correctly.</li>
+    <li><span class="font-mono">internal/undo</span> — five methods over 417 lines of merge/conflict/staleness rules; textbook depth.</li>
+    <li><span class="font-mono">tools/network.go</span> — the one network funnel with a marker obtainable only by embedding it; three adapters, one seam. (The write axis should copy this — candidate 3's sibling: the 7 hand-written <span class="font-mono">workspaceScopedWriter</span> methods can be conferred by embedding, −80 lines.)</li>
+    <li><span class="font-mono">internal/platform/host.go</span> — one behaviour table, both OS rule sets compiled everywhere, Windows quoting testable from Linux.</li>
+    <li><span class="font-mono">internal/config/configwatch.go</span>, <span class="font-mono">keyresolve.go</span>, <span class="font-mono">internal/profiles</span>, <span class="font-mono">internal/keystore</span>, <span class="font-mono">internal/scheme</span>, <span class="font-mono">internal/skills</span>, <span class="font-mono">internal/mcp</span>, <span class="font-mono">internal/present</span>'s Opener/DocServer, <span class="font-mono">internal/library</span>'s Store — deep behind small interfaces; leave alone.</li>
+  </ul>
+</section>
+
+<!-- ══════════════════════ top recommendation ══════════════════════ -->
+<section id="top-recommendation" class="rounded-xl deep text-white p-8 space-y-3">
+  <h2 class="font-serif text-2xl">Top recommendation</h2>
+  <p class="text-lg"><a href="#c1" class="underline decoration-emerald-400 underline-offset-4">Candidate 1 — One Mechanism runner behind one hook-fire seam.</a></p>
+  <p class="text-slate-300 text-sm max-w-3xl">It is the only candidate with a shipped panic in its history and a load-bearing HOTFIX comment promising exactly this consolidation — a promise no plan owns. The scope is bounded (one file plus two domain working values), it deepens the seam every Mechanism crosses, and it unlocks the 25-cell acted-probe table the self-regulation story rests on. Second in line: <a href="#c2" class="underline decoration-emerald-400 underline-offset-4">candidate 2</a> — the config copy chain is the largest day-to-day friction (12+ edit sites per key) and candidates 8 and 9 fold naturally into its wake.</p>
+</section>
+
+<footer class="text-xs text-slate-400 pt-4 border-t border-slate-200">
+  Vocabulary: module · interface · implementation · depth · seam · adapter · leverage · locality — per the review skill's LANGUAGE.md. Domain terms per CONTEXT.md. Evidence gathered 2026-08-20 by four parallel exploration passes over internal/{agent, domain, run, schedule, session}, internal/{tools, security, undo, mcp, platform}, internal/{config, provider, processing, profiles, heartbeat, context, keystore, …}, internal/{mechanisms, library, probe, present, skills, title, validated, scheme}.
+</footer>
+
+</main>
+</body>
+</html>
