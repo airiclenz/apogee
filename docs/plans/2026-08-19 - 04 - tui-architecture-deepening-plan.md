@@ -280,7 +280,13 @@ internal/tui/textutil.go, internal/tui/doc.go
 
 **Commit:** `refactor(tui): split toolpresent.go's tail into toolargs.go and textutil.go`
 
-## 9. Rehome the escape-stripping security seam into sanitize.go
+## 9. Rehome the escape-stripping security seam into sanitize.go — ✅ DONE (2026-08-20)
+
+NOTES (2026-08-20): the moved span is verbatim — `stripEscapes`, `bidiControl` and `stripEscapesAll` with their full doc comments, diffed line-for-line against `HEAD:internal/tui/transcript.go`. The only text in `sanitize.go` that did not travel is its header banner and `package`/`import` clause, following items 5, 7 and 8's precedent, since every sibling file in the package carries a banner of its own. `transcript.go` keeps the "Formatting helpers" banner for the five helpers still under it (`flattenField`, `blankLine`, `trimBlankLines`, `trimTrailingBlankLines`, `prettyJSON`).
+
+NOTES (2026-08-20): the item asks the invariant wording to point at the new home, and `doc.go`'s invariant paragraph named no file at all before this — it described the seams that strip, never where the strip itself lived. One sentence was added naming `sanitize.go` as that home; the rest of the paragraph is untouched.
+
+NOTES (2026-08-20): no live prose pointer elsewhere ties the seam to `transcript.go`. The repo-wide grep hits are all HISTORICAL record on item 8's boundary — `CHANGELOG.md`'s past entries, `docs/plans/archived/*`, `docs/reviews/archived/*` and the review pinned at commit `030ab021` — and were left as written; the five live Go comments naming `transcript.go` all point at the scrollback model, which did not move.
 
 **Source:** review §Candidate 7 ("also misfiled").
 

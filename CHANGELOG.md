@@ -222,6 +222,16 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **The escape-stripping security seam is its own file, `internal/tui/sanitize.go`.** `stripEscapes`,
+  the batch form `stripEscapesAll` and the `bidiControl` set they drop beside the control characters
+  were filed under `transcript.go`'s "Formatting helpers" banner, which is where they grew up rather
+  than where they belong: nineteen files in the package call them, the scrollback is only one of
+  those callers, and nothing in the three functions knows a transcript, an entry or a `Model`. They
+  now sit in a file of their own, as the package's second invariant — untrusted text is
+  escape-stripped at the SEAM it enters the view through, never at each producer — deserves. A
+  byte-identical move: only the new file's header banner is new text, no call site changed, the
+  tests stay where they are, and `doc.go`'s file map and that invariant both point at the new home.
+
 - **`toolpresent.go`'s tail splits into `internal/tui/toolargs.go` and
   `internal/tui/textutil.go`, and the file is deleted.** The last two modules in it had nothing to
   do with each other: the JSON-argument display module — `argumentDetails`' labelled lines, the

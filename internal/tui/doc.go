@@ -781,6 +781,11 @@
 // [clipRunes], the flood bound they spend in runes rather than in the cells the screen bills
 // ([detailClipRunes], which states why and names the probe that measured it), [plural]'s naive
 // count and [firstLine] / [splitLines];
+// sanitize.go the escape-stripping security seam every one of those surfaces passes untrusted text
+// through before a cell of it is painted (ADR 0043) — [stripEscapes], the batch form
+// [stripEscapesAll] a request's choices are sanitized in one call by, and [bidiControl], the
+// reordering characters that go with the control ones; it is the invariant stated at the end of
+// this file, given the file of its own that a seam referenced from two dozen call sites earns;
 // the renderer itself is nine files rather than one, split along the seams the painters already
 // had once the tool-display overhaul grew render.go past the house ~400-line guideline — a pure
 // file move, nothing renamed and nothing reworded: render.go keeps the transcript walk
@@ -828,7 +833,10 @@
 // [toolView.finishDisplay], which presentToolCall and enrichWithResult both leave through) for the
 // tool card and everything derived from it (toolActivityVerb, the gist), and each popupRow
 // builder for the overlays, since the popup module strips
-// nothing and truncates ANSI-preservingly. stripEscapes is idempotent and allocation-free on text
+// nothing and truncates ANSI-preservingly. The strip itself lives in sanitize.go — [stripEscapes],
+// its batch form [stripEscapesAll] and the [bidiControl] set they drop beside the control
+// characters — which is where a seam that needs one goes to read the rule. stripEscapes is
+// idempotent and allocation-free on text
 // with nothing to rewrite — no control character, no DEL, no bidi formatting character, no invalid
 // UTF-8 byte — so a producer that also strips costs nothing. TestTranscriptStripsTerminalEscapes and its siblings pin every
 // one of those paths.
