@@ -222,6 +222,19 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **`settings.go` is three files along its own seams.** The /settings pane was 2,482 lines because
+  five clusters with nothing in common but the pane struct hung off it. Two files' worth moved out.
+  `settingswatcher.go` is now the two ways the config file changes from OUTSIDE the pane — a row's ⏎
+  opening the human's own editor on that key's line, foreground or detached, and the binary's watcher
+  reporting a save made anywhere else — one round trip with two triggers, both re-reading through the
+  same seam and both landing through the same apply loop. `settingsapply.go` is what a committed key
+  then does: the armed reset, the write, the live-apply router that turns a persisted value into an
+  effect, and the session's edit journal a row's ` *` marker is read off. What stays in `settings.go`
+  is the pane itself — its kinds, its keys, its targets and its rendering — and the display projection
+  stays in `cmd/apogee` (ADR 0035/0037), untouched. A byte-identical move: the two moved spans were
+  diffed line-for-line against the file they left, no call site changed, no test changed, and only
+  the two new files' header banners and `doc.go`'s two new map lines are new text.
+
 - Merged the /settings pane's two twin pairs (`internal/tui/settings.go`). The enum vocabulary and the
   Mechanism catalogue paint through one sub-list painter that states the pane, the title, the body
   naming the key, the menu shape and the row window once — each content passes only its rows and its

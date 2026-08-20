@@ -561,7 +561,17 @@ TrimSpace vs ctrl+s + TrimRight, both preserved exactly — merge policy).
 
 **Commit:** `refactor(tui): merge the settings enum/mechanism and buffer/text twins`
 
-## 19. Split settings.go along its surface seams
+## 19. Split settings.go along its surface seams — ✅ DONE (2026-08-20)
+
+NOTES (2026-08-20): both moved spans are byte-identical, diffed line-for-line against `HEAD:internal/tui/settings.go`; `settings.go`'s own diff is 675 deleted lines and zero added ones (669 moved plus the six import lines the move made unused — `errors`, `fmt`, `os/exec`, `time`, and the `domain` import). The only text in either new file that did not travel is its `package`/`import` clause and its header banner, following items 5, 7, 8 and 9's precedent, since every sibling file in the package carries one.
+
+NOTES (2026-08-20): the item names five clusters for two files; the boundaries drawn are the review's own spans widened at three places, each because leaving the piece behind would have split a chain across the two files. `settingRowOf` rode with the watcher (the review's watcher span stops one function short of it) — its own doc calls it "the lookup both halves of the round trip need" and its three callers are all in the moved clusters. `applyReloaded` likewise sits between the two moved clusters at the pin and is called only from them. And `settingsWrite`/`settingsPersist`/`settingsApplied` — the persist step between the armed reset and the live-apply router the item does name — moved with them, because `settingsApplied` IS the join of two of the three named clusters (it calls `settingsApplyLive` and `recordSettingEdit`) and leaving it behind would have put the pipeline's middle in one file and both its ends in the other.
+
+NOTES (2026-08-20): the `settingKey*` const block moved too. It sits inside the moved contiguous span and its doc is written from the apply's side ("the renderer-owned keys settingsApplyLocal puts into effect itself"), but it is genuinely shared — four of its readers are pane-core (`settingsEnter`, `settingsToggleMechanism`, `settingsVocabulary`, `settingsMechanisms`) and one is `colorscheme.go`. Same package, so no call site changed either way.
+
+NOTES (2026-08-20): the armed reset's TARGET and PREDICATES (`settingsResetTarget`, `settingsResettable`, `settingsResetKind`) stayed in `settings.go` rather than following the three verbs. They sit inside the pane's target/predicate group and are written as the parallel of `settingsEnumTarget`, `settingsMechanismTarget`, `settingsBufferTarget` and `settingsBufferable`, which all stay — moving three of nine would have fragmented a group the pane core reads as one.
+
+NOTES (2026-08-20): `model.go` is outside the item's Files line and two of its comments were corrected in the same commit because this move is what staled them — the `settingsEditedMsg` and `configChangedMsg` Update arms both pointed a reader at `(settings.go)` for the fold they call, and both folds are now in `settingswatcher.go`. Nothing else in the repo carries a live pointer at the moved code: every other `settings.go` mention in source or docs names the pane, its rows or its keys, which did not move.
 
 **Source:** review §Candidate 12 (file split). Depends on item 18.
 

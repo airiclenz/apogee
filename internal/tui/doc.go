@@ -711,7 +711,18 @@
 // opens an enum's value sub-list or a string's caret buffer; backspace arms a reset a ⏎ confirms)
 // while the binary owns the file AND what a key may hold: a value it refuses comes back as an error
 // the row carries, with the buffer still open to correct. `mode` is the one edit that also applies
-// live, through the Engine.SetMode seam Shift+Tab drives (ADR 0035); and
+// live, through the Engine.SetMode seam Shift+Tab drives (ADR 0035);
+// settingswatcher.go the two ways that same file changes from OUTSIDE the pane — a row's ⏎ opening
+// the human's own editor on the key's line (foreground, which suspends the program; detached, which
+// does not) and the binary's config watcher reporting a save made anywhere else — one round trip with
+// two triggers, both re-reading through [Options.ReloadConfig] and both landing through the one apply
+// loop, so a key edited in a terminal editor cannot take a different path from the same key edited in
+// a GUI one (ADR 0041); settingsapply.go what a committed key then DOES — the armed reset (the one
+// commit whose value is "remove the line"), the write, the live-apply router that turns a persisted
+// value into an effect (the renderer-owned keys applied in-package because there is no engine on the
+// other side of them, every other key out through the binary's dispatcher, which owns the schema —
+// ADR 0037 decision 2), and the session's edit journal the row's edit marker and the value an edit
+// starts from are both read off; and
 // usage.go the /usage report — one row per agent of what this session has SPENT, read off the
 // per-agent totals the folds already keep (the Model's for the main agent, each run head's for a
 // delegate) rather than summed here, and the lightest pane in the frame: no filter, no selection,

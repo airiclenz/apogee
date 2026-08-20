@@ -882,8 +882,8 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 
 	case settingsEditedMsg:
 		// The external editor the /settings pane suspended into has exited: re-read the config the
-		// human just edited and apply every key that came back different (settings.go). Nothing else
-		// moves — the program was paused, not stopped, and the pane is still the screen.
+		// human just edited and apply every key that came back different (settingswatcher.go). Nothing
+		// else moves — the program was paused, not stopped, and the pane is still the screen.
 		return m.foldSettingsEdit(msg)
 
 	case settingsDetachedMsg:
@@ -896,8 +896,8 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		// The config file changed on disk, whoever changed it — the detached editor above, another
 		// window's, or a second terminal's (ADR 0041 decision 3). Re-read it, apply every key that came
 		// back different through the journal and the dispatcher a pane edit uses, and open the next
-		// wait (settings.go). Nothing else moves: nobody pressed anything, so the screen is whatever it
-		// already was.
+		// wait (settingswatcher.go). Nothing else moves: nobody pressed anything, so the screen is
+		// whatever it already was.
 		return m.foldConfigChanged(msg)
 
 	case sessionListMsg:
