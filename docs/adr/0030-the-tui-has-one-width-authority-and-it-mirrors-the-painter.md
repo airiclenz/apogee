@@ -102,15 +102,17 @@ using.** Owner's call, 2026-07-31: measurement must always match what gets paint
    Consequences bullet.)*
 6. **Widget mirrors are the deliberate exception: their oracle is the widget, never the
    painter.** `wrapRowStarts`/`runesWidth` (`inputaccent.go`), `cellToRuneOffset` (`mouse.go`) and
-   `inputContentRows` (`render.go`) mirror third-party widgets' internal math — the textarea wraps
-   with `uniseg.StringWidth`, the viewport soft-wraps with `ansi.StringWidth`, and neither moves
-   when the painter does. *(`wrappedOffset` (`render.go`), the viewport mirror this list also
-   named, was deleted 2026-08-03 with the submit-time jump-to-top that was its sole consumer; the
-   rule is unchanged, and every live mirror is now the textarea's.)* They measure the way their
-   widget measures, down to the one term where the textarea itself weighs a rune with
-   go-runewidth (`textarea.go:1838-1839`, `lastCharLen`). The dividing line, stated at each
-   site: a mirror's **rows** are the widget's — only it decides which runes it put on which line
-   — while the **columns** within a row address cells the painter has already drawn, so those
+   `inputContentRows` (`inputaccent.go`) mirror third-party widgets' internal math — the textarea
+   wraps with `uniseg.StringWidth`, the viewport soft-wraps with `ansi.StringWidth`, and neither
+   moves when the painter does. *(Amended 2026-08-20: `inputContentRows` was written in `render.go`,
+   moved to `chromelayout.go` with the render split, and now sits beside the other textarea mirrors
+   this list names; the rule and the list are unchanged.)* *(`wrappedOffset` (`render.go`), the
+   viewport mirror this list also named, was deleted 2026-08-03 with the submit-time jump-to-top
+   that was its sole consumer; the rule is unchanged, and every live mirror is now the textarea's.)*
+   They measure the way their widget measures, down to the one term where the textarea itself weighs
+   a rune with go-runewidth (`textarea.go:1838-1839`, `lastCharLen`). The dividing line, stated at
+   each site: a mirror's **rows** are the widget's — only it decides which runes it put on which
+   line — while the **columns** within a row address cells the painter has already drawn, so those
    are the authority's.
 7. **The cap is enforced, not assumed.** `wrapText` hard-breaks any line the wrapper still
    returned over the limit. Upstream's breakpoint branch (`x/ansi@v0.11.7/wrap.go:406-419`, and

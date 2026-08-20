@@ -6,19 +6,20 @@ import (
 )
 
 // ----------------------------------------------------------------------------
-// Text utilities — the clip, the count and the line split every surface shares
+// Text utilities — the clip, the count, the line split and the clamp every surface shares
 // ----------------------------------------------------------------------------
 //
-// This file holds the generic text helpers the package spells ONCE (ADR 0043), and it holds them
+// This file holds the generic helpers the package spells ONCE (ADR 0043), and it holds them
 // apart from the tool display they grew up in because not one of them knows a tool call:
 // [clipDetail] and [clipRunes] bound how much of a single line reaches the screen, [plural] words
-// a count, and [firstLine] / [splitLines] cut a string into the physical lines a row-per-line
-// surface paints.
+// a count, [firstLine] / [splitLines] cut a string into the physical lines a row-per-line
+// surface paints, and [clampInt] holds an index or a size inside the range its surface allows.
 //
 // They are pure — no lipgloss, no I/O, no Model — and they are called from every display seam in
 // the package: the transcript and its tool cards, the per-tool registry hooks, the diff bodies,
-// the approval pane, the skills and schedule surfaces. A helper that belonged to one of those
-// would have moved with it; these are the ones that belong to all of them.
+// the approval pane, the skills and schedule surfaces, plus every caret, scroll and selection
+// arithmetic that spends the clamp. A helper that belonged to one of those would have moved with
+// it; these are the ones that belong to all of them.
 //
 // Where a bound is spent in RUNES rather than in the cells the screen bills is a decision and not
 // an oversight — [detailClipRunes] states it, and names the probe that measured it.
@@ -83,4 +84,15 @@ func firstLine(s string) string {
 // splitLines splits s on newlines into its physical lines.
 func splitLines(s string) []string {
 	return strings.Split(s, "\n")
+}
+
+// clampInt clamps n to [lo, hi].
+func clampInt(n, lo, hi int) int {
+	if n < lo {
+		return lo
+	}
+	if n > hi {
+		return hi
+	}
+	return n
 }

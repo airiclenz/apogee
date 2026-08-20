@@ -1045,7 +1045,13 @@ calls it with its two conflated counts pulled apart. Rendering byte-identical.
 
 **Commit:** `refactor(tui): compute scrollbar thumb geometry in one function`
 
-## 36. Dissolve chromelayout.go
+## 36. Dissolve chromelayout.go — ✅ DONE (2026-08-20)
+
+NOTES (2026-08-20): `clampInt`'s destination was the item's stated mechanical choice — `textutil.go`, the package's declared home for the pure helpers it spells ONCE (ADR 0043); its banner and intro widened from "text helpers" to "helpers" to cover a numeric clamp, and doc.go's textutil line with them.
+
+NOTES (2026-08-20): ADR 0030 §6 named `render.go` for `inputContentRows` (stale since the render split moved it to chromelayout.go), so the amendment note both corrects the file and records the two hops; the mirror list and the rule itself are unchanged.
+
+NOTES (2026-08-20): `internal/tui/chromelayout_test.go` — the `inputContentRows` suite and its widget oracle — was left exactly where it is: the item's Files line names only chromelayout.go for deletion, renaming files is out of scope, and it follows the precedent item 8 set when `toolpresent.go` was deleted and `toolpresent_test.go` stayed. The docmap guard covers non-test files only, so nothing enforces a rename either way.
 
 **Source:** review §Smaller findings, row 10.
 

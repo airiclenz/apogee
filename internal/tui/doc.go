@@ -679,7 +679,10 @@
 // width.go the display-width authority the theme carries — one measure for the
 // whole TUI, and it is whichever one the painter itself is using; inputaccent.go the
 // resolve-gated inline accents the prompt box paints its
-// "/id" and @file tokens with; transcript.go the append-only scrollback model, entrykind.go the
+// "/id" and @file tokens with, and — beside them, since they answer to the same oracle — the
+// textarea mirrors ADR 0030 §6 exempts from that authority: [wrapRowStarts] and [runesWidth],
+// [sanitizeInputLine], and [inputContentRows], the row count the prompt box is sized to;
+// transcript.go the append-only scrollback model, entrykind.go the
 // [entryKind] enum beside the behaviour table every kind-keyed rule outside the paint switch reads
 // — what a kind is called on the wire, whether it owns a block state, whether it is a host note,
 // whether it may be cached, whether its header blinks, whether it heads a prompt — so a new kind is
@@ -827,10 +830,11 @@
 // paint where a label of the surface's own lives; plus [resolvedPathNote], the one wording every
 // decision surface discloses a redirected path with, and [parseArgs], the same bytes as the map
 // the registry's target extractors read a field out of;
-// textutil.go the generic text helpers none of that display owns alone — [clipDetail] and
+// textutil.go the generic helpers none of that display owns alone — [clipDetail] and
 // [clipRunes], the flood bound they spend in runes rather than in the cells the screen bills
 // ([detailClipRunes], which states why and names the probe that measured it), [plural]'s naive
-// count and [firstLine] / [splitLines];
+// count, [firstLine] / [splitLines] and [clampInt], the range bound every caret, scroll and
+// selection arithmetic in the package spends;
 // sanitize.go the escape-stripping security seam every one of those surfaces passes untrusted text
 // through before a cell of it is painted (ADR 0043) — [stripEscapes], the batch form
 // [stripEscapesAll] a request's choices are sanitized in one call by, and [bidiControl], the
@@ -863,8 +867,6 @@
 // [drawTitledBox]), the two joins that stack the frame and hang the transcript's scrollbar in
 // the painter's own measure rather than lipgloss's ([Model.joinFrame], [Model.joinScrollbar]) and
 // the one thumb geometry both scroll bars are placed from ([scrollbarThumb]);
-// and chromelayout.go the two frame-arithmetic helpers
-// ([inputContentRows], [clampInt]) the input box and the overlays size themselves with;
 // and doc.go this narration.
 //
 // Invariant — the value-copied Model holds no self-referential no-copy type by value.

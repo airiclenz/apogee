@@ -222,6 +222,17 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **chromelayout.go dissolves into its two real homes (`internal/tui`).** The file held one ADR 0030
+  widget mirror and one generic integer clamp — nothing the two share — so neither could be found
+  where a reader would look for it. `inputContentRows` now sits beside the other textarea mirrors it
+  answers to the same oracle as (`inputaccent.go`, next to `wrapRowStarts`, whose row count it sums),
+  with its declared-mirror comment intact and the two cross-file references it traded with
+  `wrapRowStarts` and `sanitizeInputLine` corrected — both had gone stale, one naming `render.go` for
+  a function that left it two splits ago. `clampInt` joins the package's other spelled-once generic
+  helpers in `textutil.go`. chromelayout.go is deleted, doc.go's file map drops its line and names
+  both helpers where they now live, and ADR 0030 §6's mirror list carries a dated amendment putting
+  `inputContentRows` at its real file. No behaviour, no call site and no test changed.
+
 - **One thumb geometry behind both scroll bars (`internal/tui/boxdraw.go`).** The transcript's
   gutter and the popup panes' overflow bar sized and placed their thumbs with two copies of the same
   arithmetic, and the transcript's copy conflated the two counts a scroll bar carries — the rows the

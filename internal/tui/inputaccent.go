@@ -200,7 +200,7 @@ func inputCellSpans(measure widthAuthority, value string, width, from, to int) [
 // content REACHES the width gains one trailing row, the seat the widget keeps for a caret past a
 // full line.
 //
-// Its row COUNT — len(starts) — is what sizes the prompt box: inputContentRows (render.go) is the
+// Its row COUNT — len(starts) — is what sizes the prompt box: [inputContentRows] below is the
 // sum of this over the value's logical lines, which is the widget's own decomposition
 // (totalVisualLines). So the box's height and the rows an accent lands on come off one ruler.
 //
@@ -257,6 +257,58 @@ func wrapRowStarts(line []rune, width int) []int {
 	return starts
 }
 
+// inputContentRows reports how many visual rows the input value occupies at innerWidth, mirroring
+// the textarea's own wrap so the box sizes to exactly what the widget draws. It is the sum over
+// logical lines of [wrapRowStarts]' row count — the widget's own decomposition, which
+// wraps each logical line independently and adds the counts (its totalVisualLines,
+// bubbles/v2@v2.1.0/textarea/textarea.go:1666-1674). Delegating means the box's HEIGHT and the rows
+// the accent pass paints on are read off one ruler; they used to be two separate derivations of the
+// widget's wrap, and this one was an approximation (ansi.Wordwrap + ansi.Hardwrap) that disagreed
+// with the widget on roughly 41% of prompt-shaped drafts, mostly by under-counting — "hello world"
+// at width 5 is four widget rows and the old count said three.
+//
+// The trailing row a width-filling line keeps for a caret past its last cell comes with the mirror.
+// Under-counting it leaves the box one row too short at a width-fill boundary — the source of the
+// prompt-box scroll artifact the layout re-seat then can no longer reach (fixed in a7afbf1; its
+// regression is [TestPromptScrollClampedWhileGrowing]). An empty value is one row.
+//
+// The count is deliberately unclamped: [promptEditor.rows] holds it to [minInputRows, maxInputRows],
+// and past that cap the widget scrolls internally rather than the box growing further.
+//
+// TABs are the widget's four spaces here too: wrapRowStarts sanitises each line the way the
+// textarea's own sanitizer did before it measures (sanitizeInputLine — which drops utf8.RuneError
+// and the other control runes with the same authority), so this count inherits that with the rest of
+// the wrap.
+//
+// A bare '\r' is a row boundary here for the same reason: the widget's sanitizer rewrites EVERY '\r'
+// AND every '\n' as one newline before it splits into logical rows
+// (bubbles/v2@v2.1.0/internal/runeutil/runeutil.go:68-76, textarea.go:504, :519-529), so a CR the
+// widget received is a boundary it drew, and splitting on '\n' alone sized the box a row short for
+// such a value. That per-rune rewrite is also why "\r\n" is mirrored as TWO boundaries rather than
+// one: the widget's own answer for "a\r\nb" is three rows, and a mirror answers to the widget rather
+// than to what a line ending ought to mean (ADR 0030 §6). No draft reaches this with a CR today —
+// every caller hands over the widget's already-sanitised value — so the fold is fidelity for a value
+// arriving from anywhere else, not a live fix.
+//
+// WIDGET MIRROR — deliberately NOT the width authority. This is one of the package's mirrors of a
+// third-party widget's internal math, and a mirror's oracle is the widget, never apogee's
+// painter-facing measure (width.go): the textarea wraps with uniseg.StringWidth
+// (bubbles/v2@v2.1.0/textarea/textarea.go:1805-1852), which is what wrapRowStarts measures with
+// (runesWidth) and is grapheme-clustered, unlike ansi.WcWidth. Sizing the box in the painter's
+// measure would size it to something the widget never draws. The same rule governs the caret
+// mirrors beside it here and in mouse.go.
+func inputContentRows(value string, innerWidth int) int {
+	if innerWidth < 1 {
+		innerWidth = 1
+	}
+	total := 0
+	// ReplaceAll returns value untouched when it holds no CR, so the frame path pays nothing.
+	for _, line := range strings.Split(strings.ReplaceAll(value, "\r", "\n"), "\n") {
+		total += len(wrapRowStarts([]rune(line), innerWidth))
+	}
+	return total
+}
+
 // runesWidth is the display width of a rune run measured the way the textarea measures its own
 // content — uniseg.StringWidth over the whole run, so a grapheme cluster counts once, as the cells
 // the widget believes it drew. It is the forward half of the cell↔rune mapping [cellToRuneOffset]
@@ -297,7 +349,7 @@ const inputTabCells = 4
 // into logical rows (bubbles/v2@v2.1.0/textarea/textarea.go:504, :519-529), so a '\r' has already
 // become a row boundary rather than a rune inside a row, and the callers split the value on that
 // boundary before they get here — [inputCellSpans] on '\n', which is all the widget's own value can
-// carry, and inputContentRows (chromelayout.go) on either, since a value handed to it need not have
+// carry, and [inputContentRows] on either, since a value handed to it need not have
 // come from the widget at all. That the widget's value is
 // sanitised on every write path at all is argued once, from the caret's side, at [cellToRuneOffset]
 // (mouse.go).
