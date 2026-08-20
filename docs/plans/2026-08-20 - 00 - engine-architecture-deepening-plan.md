@@ -62,7 +62,9 @@ NOTES (2026-08-20): prose corrected as the item allows — `internal/session/sto
 
 **Commit:** `refactor(domain): drop the dead Config.SessionsDir field`
 
-## 2. Correct the stale "not re-exported" claim in hooks.go
+## 2. Correct the stale "not re-exported" claim in hooks.go — ✅ DONE (2026-08-20)
+
+NOTES (2026-08-20): The item's text names `Defer` / `TakeDeferred` among the "named constructors" that are facade-absent. They are methods on `*Conversation` (hooks.go:861, :875), so the `apogee.Conversation` alias carries them — as it carries `Request.State` and `Conversation.Messages`. Writing them as facade-absent would have replaced one false claim with another, so the new comment names only the three package-level constructors as facade-absent and says explicitly that the method half of the seam travels with the aliases. Verified: `apogee.go` re-exports none of `NewRequest` / `NewResponse` / `NewConversation`.
 
 **Source:** review defect e.
 

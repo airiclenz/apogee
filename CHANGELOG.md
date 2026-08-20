@@ -775,6 +775,11 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- Corrected the engine-seam comment in `internal/domain/hooks.go`: it claimed Request/Response/Conversation
+  are deliberately not re-exported by the root facade, which has been false since `apogee.go` aliased all
+  three. The comment now states what is actually facade-absent — the package-level constructors
+  `NewRequest`, `NewResponse` and `NewConversation`.
+
 - **A click in the band the `/inspect` pane grows into now falls through instead of being swallowed.**
   The `/usage` report and the `/inspect` pane are the one pair that can be up together, and they share
   one bottom-anchored slot: dismissing the report under a click grew the pane UPWARD — past the rows
