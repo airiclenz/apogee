@@ -959,7 +959,9 @@ internal/tui/userblock.go
 
 **Commit:** `refactor(tui): paint from a stated input record so paintKey stays complete by construction`
 
-## 32. One resolver for block shape, span, and closure in renderView
+## 32. One resolver for block shape, span, and closure in renderView — ✅ DONE (2026-08-20)
+
+NOTES (2026-08-20): `appendBlock`, the two-line wrapper the five branches used to reach `appendJoined` by, went with the chain — the resolved block now carries its own `closes` answer, leaving the wrapper one caller (the streaming preview), which calls `appendJoined` directly.
 
 **Source:** review §Smaller findings, row 6. Depends on item 31.
 

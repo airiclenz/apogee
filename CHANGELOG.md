@@ -222,6 +222,20 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **One resolver answers what block starts here (`internal/tui/render.go`).** `renderView` was a
+  245-line function whose middle was a five-branch shape chain, each branch ending in index
+  advancement it wrote by hand — `i += span`, `i += calls - 1`, `i = grp[end].at` — which made
+  "skip a block, or paint it twice" a mistake five separate lines could make, in the one place
+  nothing downstream could notice it. The shape question is asked once now, by `resolveBlock`, and
+  answered by a `resolvedBlock`: the shape the paint key names, the records the key covers and the
+  painter reads, the closure that draws it, and the index the walk resumes at — the step past a
+  folded run or an elided span stated in the same breath as the span it was resolved from, by the
+  code that resolved it. The walk that remains is a loop of five lines: resolve, key, append, and
+  step to `next`. The shape enum stays where the cache defines it and now names its one producer,
+  so the enum and the decision that picks from it cannot drift apart. Nothing the human sees
+  changes: the transcript golden test and the cache's cold-render mutation matrix pass with no
+  expectation touched.
+
 - **The painters take a stated input record (`internal/tui/paintcache.go`).** What one block's paint
   depends on was a contract kept by memory: the paint cache is sound only while its key names every
   input, and the five painter files read raw `entry` values — so a painter that began reading one

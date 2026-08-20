@@ -49,8 +49,10 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
-// blockShape names which of [transcript.renderView]'s four painter branches produced a paint — the
-// branch itself, not anything derived from it.
+// blockShape names which shape [transcript.resolveBlock] answered with for a block — the shape
+// itself, not anything derived from it. Every value is spent by that one resolver, as the shape
+// field of the [resolvedBlock] it returns, so the enum and the decision that picks from it cannot
+// drift apart.
 //
 // It was redundant when there were three, and deliberately kept: a head that changed branches also
 // changed the length of its span, so the flags string already differed (a sub-agent call whose first

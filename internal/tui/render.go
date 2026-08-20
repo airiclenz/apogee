@@ -190,8 +190,8 @@ func (t *transcript) renderView(th theme, width int, blink bool) renderedTranscr
 	// span: the ┊ closing that span when another grouped sub-agent follows it, and the ordinary railed
 	// spacer when nothing of the list does — the spec draws no closer after a group's last member, nor
 	// after a lone delegation, which has no list to resume (docs/layout/tool-layout.md, "Grouped
-	// Sub-agents"). Only the caller placing the block below knows which, so every other kind of block
-	// goes through appendBlock and answers no.
+	// Sub-agents"). Only the block being placed knows which, so the answer rides the block
+	// [transcript.resolveBlock] resolved; the streaming preview, which resumes no list, answers no.
 	appendJoined := func(isUser, closes bool, depth, head int, block blockPaint) {
 		if len(lines) > 0 {
 			lines = append(lines, railJoin(th, prevBlockDepth, depth, closes))
@@ -214,9 +214,6 @@ func (t *transcript) renderView(th theme, width int, blink bool) renderedTranscr
 			targets = append(targets, target)
 		}
 		prevBlockDepth = depth
-	}
-	appendBlock := func(isUser bool, depth, head int, block blockPaint) {
-		appendJoined(isUser, false, depth, head, block)
 	}
 
 	// Drop memoised paints for entries the transcript no longer has (paintcache.go). It runs
@@ -248,10 +245,10 @@ func (t *transcript) renderView(th theme, width int, blink bool) renderedTranscr
 			text:  previewTail(t.pending),
 			depth: t.pendingRun.depth,
 		}, width, blink)
-		appendBlock(false, t.pendingRun.depth, at, preview)
+		appendJoined(false, false, t.pendingRun.depth, at, preview)
 	}
 
-	for i := 0; i < len(t.entries); i++ {
+	for i := 0; i < len(t.entries); {
 		// The preview is painted the moment the walk reaches its run's end. The test is >= rather
 		// than == because the walk SKIPS index ranges — a collapsed run's span, a folded tool run's
 		// members — and a preview whose index fell inside one would otherwise never be painted.
@@ -260,165 +257,247 @@ func (t *transcript) renderView(th theme, width int, blink bool) renderedTranscr
 			previewAt = -1
 		}
 		// The entry the walk stands on, stated once as the record the painters read ([paintInput]):
-		// every branch below hands THAT to its painter and to its key, so what a block paints and
-		// what its memo names are one value (paintcache.go). The entries themselves stay with the
-		// walk, which is the only part that needs them — where a block ENDS is a question about the
-		// list (subAgentGroupAt, subAgentSpan, toolSuperGroup, toolCallRun), never about a paint.
+		// the resolver hands THAT to its painter and to its key, so what a block paints and what its
+		// memo names are one value (paintcache.go). The entries themselves stay with the walk, which
+		// is the only part that needs them — where a block ENDS is a question about the list
+		// (subAgentGroupAt, subAgentSpan, toolSuperGroup, toolCallRun), never about a paint.
 		in := t.entries[i].painted()
-		// A descent used to be announced here by a label block of its own. Nothing announces it now:
-		// the delegation's own header row opens the frame with ┌─┶ and the rail runs down the span
-		// from there (docs/layout/tool-layout.md, "Grouped Sub-agents"), so a label saying the same
-		// thing one row lower was the run introducing itself twice.
-		//
-		// Adjacent delegations fold into ONE "✦ Sub-Agent (N)" list (subAgentGroupAt), asked first
-		// because every member of one is also a run head and would otherwise take the branch below
-		// as a block of its own. The question is asked at every member and not only at the first:
-		// an OPEN member's span is painted by this same walk, so the list resumes in a second block
-		// of the same shape after it, headerless, its rows still counted against the whole group.
-		//
-		// The walk covers the members whose rows this block paints and stops at the first open one,
-		// leaving i on that member so the loop steps into its span exactly as it does under a lone
-		// expanded delegation. A collapsed member's span is skipped whole, by the rule below.
-		if grp, pos, ok := subAgentGroupAt(t.entries, i); ok {
-			end := len(grp) - 1
-			for k := pos; k < len(grp); k++ {
-				if t.entries[grp[k].at].expanded {
-					end = k
-					break
-				}
-			}
-			// The key covers this block's members and everything still ahead of them in the group:
-			// the header's star asks the whole list whether any delegate is still working, and a
-			// member's row changes shape the moment its delegation grows a span to reveal, so a key
-			// stopping at the last row it paints would serve a stale one (paintcache.go).
-			tail := grp[len(grp)-1]
-			cover := tail.at + 1 + tail.span - i
-			// One record per covered entry, stated once and read by both the key and the rows: a
-			// member's own record sits at its offset from the head and its span is the records behind
-			// it, so what the paint reads is exactly what the key named (paintcache.go).
-			ins := paintInputs(t.entries[i : i+cover])
-			members := make([]subAgentMember, 0, end-pos+1)
-			for k := pos; k <= end; k++ {
-				at := grp[k].at - i
-				members = append(members, subAgentMember{
-					head:   ins[at],
-					span:   ins[at+1 : at+1+grp[k].span],
-					offset: at,
-					last:   k == len(grp)-1,
-				})
-			}
-			// count opens the header, and only the group's FIRST block carries one.
-			count := 0
-			if pos == 0 {
-				count = len(grp)
-			}
-			key := blockKey(shapeSubAgentGroup, ins, th, width, blink, anyOpenCall(ins))
-			// pos > 0 is this block RESUMING a list whose earlier rows an expanded member's span
-			// interrupted — precisely the spec's "another grouped sub-agent follows the expanded one",
-			// and so the one seam in the whole transcript that closes with a ┊.
-			appendJoined(false, pos > 0, in.depth, i, t.paintBlock(i, key, func() blockPaint {
-				return renderSubAgentGroup(th, count, members, railedWidth(width, in.depth),
-					blockState{live: key.live, blink: blink}).railed(th, in.depth)
-			}))
-			// A block ending on an OPEN member does not end the run: that member's span follows,
-			// railed one level deeper, and the separator between the two belongs to THAT rail
-			// rather than to the group's own depth. Without it the frame would break for one blank
-			// row directly under the ┌─┶ that opened it (railJoin reads this as the join's left
-			// half).
-			if i = grp[end].at; !t.entries[i].expanded {
-				i += grp[end].span
-			} else {
-				prevBlockDepth = in.depth + 1
-			}
-		} else if span := subAgentSpan(t.entries, i); subAgentFramed(in, span) {
-			// A sub-agent run is ONE block while it is collapsed (layout.md): its head paints with the
-			// cascading summary and the whole span is then skipped outright, which is what elides the
-			// inner blocks and every rail and spacer among them — nothing is painted and afterwards
-			// taken back. Expanded, only the head is painted here — in the ┌─┶ frame a grouped
-			// delegation's open row opens (renderSubAgentRun, design call 3) — and the loop walks into
-			// the span exactly as it always has, so every inner block keeps its OWN state and a nested
-			// run collapses inside an expanded parent by this same rule, at every depth.
-			// The paint covers the head AND its span: the collapsed summary counts the work behind
-			// the header (subAgentSummary) and the star asks the span whether anything is still open,
-			// so a nested entry arriving or landing its result is a different block (paintcache.go).
-			//
-			// An OPEN delegation reaches this branch with a span of nothing (subAgentFramed): its
-			// frame is drawn live, and prevBlockDepth below hands the join the level the frame stands
-			// at, which is what lays the streaming preview inside the rail rather than flat beside it
-			// (design call 4). A run reaching this branch closes with no ┊ at all: the closer belongs to
-			// a list resuming after one of its members, and a delegation standing here stands alone.
-			ins := paintInputs(t.entries[i : i+span+1])
-			key := blockKey(shapeSubAgentRun, ins, th, width, blink,
-				!subAgentReported(in) || anyOpenCall(ins[1:]))
-			appendBlock(false, in.depth, i, t.paintBlock(i, key, func() blockPaint {
-				return renderSubAgentRun(th, ins[0], ins[1:], width, blink)
-			}))
-			if !in.expanded {
-				i += span
-			} else {
-				prevBlockDepth = in.depth + 1 // the head's span continues the rail beneath it
-			}
-		} else if sup := toolSuperGroup(t.entries, i); len(sup) > 0 {
-			// Adjacent runs of DIFFERENT tools fold under one umbrella (toolSuperGroup, item 5), which
-			// is asked FIRST because a same-label run inside one is a row of it rather than a block of
-			// its own. The question is only ever asked here, at a block head — the loop's index is one
-			// by construction, since every branch either advances by a single entry or skips a whole
-			// block — and toolSuperGroup is only correct there: asked mid-run it would answer with a
-			// partial first run.
-			//
-			// The umbrella covers its calls and nothing else (superGroup.calls), so the walk steps
-			// over exactly them. Its per-entry state is in the paint key already: blockKey spans the
-			// whole umbrella and spanFlags packs both levels — a member's expanded at bit 0 and a run
-			// head's typeExpanded at bit 2 — so opening either level is a different key and a fresh
-			// paint (paintcache.go).
-			calls := sup.calls()
-			ins := paintInputs(t.entries[i : i+calls])
-			key := blockKey(shapeToolSuper, ins, th, width, blink, anyOpenCall(ins))
-			appendBlock(false, in.depth, i, t.paintBlock(i, key, func() blockPaint {
-				return renderSuperGroup(th, superRunViews(ins, sup), railedWidth(width, in.depth),
-					blockState{live: key.live, blink: blink}).railed(th, in.depth)
-			}))
-			i += calls - 1
-		} else if run := toolCallRun(t.entries, i); len(run) > 1 {
-			// Consecutive same-label tool calls fold into one block at render time, so a batch of
-			// reads is one header plus one leader row per file. The entry list is untouched: a
-			// call that arrives mid-stream joins its group on the next repaint for free, and a run
-			// is same-depth by construction, so the label logic above fires exactly as before.
-			//
-			// The group's liveness is the group's, not its head's: a batch of reads whose first call
-			// has landed and whose last has not is still working, and the one star over them all says
-			// so. The run is entries[i:i+len(run)] by construction (toolCallRun walks adjacent
-			// entries forward), so the views' own entries are what the rule reads — and the same
-			// construction is what lets the members' EXPANDED flags be read off the run in view order
-			// and their rows be marked back by offset (blockPaint.addFor).
-			//
-			// Every one of those flags is in the paint key already: blockKey spans the whole run and
-			// spanFlags packs expanded at bit 0 of each covered entry, so opening the tenth member of a
-			// group is a different key and a fresh paint (paintcache.go).
-			key := blockKey(shapeToolRun, run, th, width, blink, anyOpenCall(run))
-			block := t.paintBlock(i, key, func() blockPaint {
-				return renderToolBlock(th, toolViews(run), railedWidth(width, in.depth), blockState{
-					expanded: in.expanded,
-					live:     key.live,
-					blink:    blink,
-					members:  memberFlags(run),
-				}).railed(th, in.depth)
-			})
-			appendBlock(false, in.depth, i, block)
-			i += len(run) - 1
-		} else {
-			// Which kinds can still be waiting, and which head a prompt stop, are the kind's own
-			// answers (entrykind.go); everything else keys as settled and marks no stop.
-			key := blockKey(shapeEntry, []paintInput{in}, th, width, blink, in.kind.hasLiveStar() && !in.done)
-			appendBlock(in.kind.isUserPrompt(), in.depth, i, t.paintBlock(i, key, func() blockPaint {
-				return renderEntryLines(th, in, width, blink)
-			}))
+		// One question, asked once: what block starts here? The answer carries its shape, the records
+		// it covers, its paint and the index the walk resumes at ([resolvedBlock]), so the step past a
+		// folded run or a collapsed span is stated by the code that resolved that span rather than by
+		// a per-branch `i += …` — the one arithmetic in the renderer whose off-by-one would silently
+		// skip a block or paint it twice.
+		block := t.resolveBlock(th, i, in, width, blink)
+		key := blockKey(block.shape, block.ins, th, width, blink, block.live)
+		appendJoined(block.isUser, block.closes, in.depth, i, t.paintBlock(i, key, block.draw))
+		// A block ending on an OPEN span does not end the run: that span follows, railed one level
+		// deeper, and the separator between the two belongs to THAT rail rather than to the block's
+		// own depth. Without it the frame would break for one blank row directly under the ┌─┶ that
+		// opened it (railJoin reads this as the join's left half).
+		if block.openTail {
+			prevBlockDepth = in.depth + 1
 		}
+		i = block.next
 	}
 	if previewAt >= 0 {
 		paintPreview(len(t.entries))
 	}
 	return renderedTranscript{lines: lines, userBlocks: userBlocks, targets: targets}
+}
+
+// resolvedBlock is the answer to "what block starts at this entry?": everything
+// [transcript.renderView] needs to lay one block down and step past it, resolved together — the
+// shape that draws it, the records that shape covers, the paint itself, and where the walk resumes.
+//
+// The last of those is why the record exists. The advancement used to be hand-written inside each
+// branch of the shape chain (`i += span`, `i += calls-1`, `i = grp[end].at`), which made the walk's
+// one silent failure — skipping a block, or painting it twice — something five separate lines could
+// cause. Here the span a shape resolved and the step past it are stated in the same breath, by the
+// code that resolved the span.
+type resolvedBlock struct {
+	shape blockShape        // which painter draws it, as the paint key names the branch (paintcache.go)
+	ins   []paintInput      // the records the key names and the painter reads, the block's head first
+	live  bool              // whether the block still holds an open call — each shape's own rule (blockState.live)
+	draw  func() blockPaint // the paint, called only when the cache misses (transcript.paintBlock)
+
+	next   int  // where the walk resumes: past the block's own entries, and past a collapsed span's elided ones
+	isUser bool // the block is a user prompt, and so a sticky-header section (userBlock)
+	closes bool // the seam ABOVE this block closes a delegation's span with a ┊ (appendJoined, railJoin)
+	// openTail says the block ends on an OPEN span the walk is about to step INTO: that span is
+	// railed one level deeper than the block's own depth, so the seam below joins from there rather
+	// than from the depth this block stood at.
+	openTail bool
+}
+
+// resolveBlock answers what block starts at entry index head, whose painter record is in. It is the
+// renderer's ONE block-shape decision, and the only place a shape's span is turned into a step: the
+// folded shapes are asked for in the order their containment demands — a grouped delegation list
+// before its members, an umbrella before the same-label runs inside it — and an entry heading none
+// of them is a block of its own.
+//
+// It reads the entry LIST, because where a block ends is a question about the list (subAgentGroupAt,
+// subAgentSpan, toolSuperGroup, toolCallRun); everything it hands back speaks in paint records
+// instead, which is what keeps a painter to what it needs to draw and nothing it could write through
+// (paintcache.go, ADR 0011).
+func (t *transcript) resolveBlock(th theme, head int, in paintInput, width int, blink bool) resolvedBlock {
+	// A descent used to be announced by a label block of its own. Nothing announces it now: the
+	// delegation's own header row opens the frame with ┌─┶ and the rail runs down the span from there
+	// (docs/layout/tool-layout.md, "Grouped Sub-agents"), so a label saying the same thing one row
+	// lower was the run introducing itself twice.
+	//
+	// Adjacent delegations fold into ONE "✦ Sub-Agent (N)" list (subAgentGroupAt), asked first
+	// because every member of one is also a run head and would otherwise resolve as a block of its
+	// own below. The question is asked at every member and not only at the first: an OPEN member's
+	// span is painted by the same walk, so the list resumes in a second block of the same shape after
+	// it, headerless, its rows still counted against the whole group.
+	//
+	// The block covers the members whose rows it paints and stops at the first open one, resuming the
+	// walk ON that member so it steps into its span exactly as it does under a lone expanded
+	// delegation. A collapsed member's span is skipped whole, by the rule below.
+	if grp, pos, ok := subAgentGroupAt(t.entries, head); ok {
+		end := len(grp) - 1
+		for k := pos; k < len(grp); k++ {
+			if t.entries[grp[k].at].expanded {
+				end = k
+				break
+			}
+		}
+		// The key covers this block's members and everything still ahead of them in the group:
+		// the header's star asks the whole list whether any delegate is still working, and a
+		// member's row changes shape the moment its delegation grows a span to reveal, so a key
+		// stopping at the last row it paints would serve a stale one (paintcache.go).
+		tail := grp[len(grp)-1]
+		cover := tail.at + 1 + tail.span - head
+		// One record per covered entry, stated once and read by both the key and the rows: a
+		// member's own record sits at its offset from the head and its span is the records behind
+		// it, so what the paint reads is exactly what the key named (paintcache.go).
+		ins := paintInputs(t.entries[head : head+cover])
+		members := make([]subAgentMember, 0, end-pos+1)
+		for k := pos; k <= end; k++ {
+			at := grp[k].at - head
+			members = append(members, subAgentMember{
+				head:   ins[at],
+				span:   ins[at+1 : at+1+grp[k].span],
+				offset: at,
+				last:   k == len(grp)-1,
+			})
+		}
+		// count opens the header, and only the group's FIRST block carries one.
+		count := 0
+		if pos == 0 {
+			count = len(grp)
+		}
+		live := anyOpenCall(ins)
+		// The walk resumes ON the member the block stopped at when that member is open — its span
+		// follows as blocks of its own — and past that member's whole span when it is collapsed,
+		// which is what elides it.
+		open := t.entries[grp[end].at].expanded
+		next := grp[end].at + 1
+		if !open {
+			next += grp[end].span
+		}
+		return resolvedBlock{
+			shape: shapeSubAgentGroup,
+			ins:   ins,
+			live:  live,
+			draw: func() blockPaint {
+				return renderSubAgentGroup(th, count, members, railedWidth(width, in.depth),
+					blockState{live: live, blink: blink}).railed(th, in.depth)
+			},
+			next: next,
+			// pos > 0 is this block RESUMING a list whose earlier rows an expanded member's span
+			// interrupted — precisely the spec's "another grouped sub-agent follows the expanded one",
+			// and so the one seam in the whole transcript that closes with a ┊.
+			closes:   pos > 0,
+			openTail: open,
+		}
+	}
+	// A sub-agent run is ONE block while it is collapsed (layout.md): its head paints with the
+	// cascading summary and the whole span is then skipped outright, which is what elides the
+	// inner blocks and every rail and spacer among them — nothing is painted and afterwards
+	// taken back. Expanded, only the head is painted here — in the ┌─┶ frame a grouped
+	// delegation's open row opens (renderSubAgentRun, design call 3) — and the walk steps into
+	// the span exactly as it always has, so every inner block keeps its OWN state and a nested
+	// run collapses inside an expanded parent by this same rule, at every depth.
+	// The paint covers the head AND its span: the collapsed summary counts the work behind
+	// the header (subAgentSummary) and the star asks the span whether anything is still open,
+	// so a nested entry arriving or landing its result is a different block (paintcache.go).
+	//
+	// An OPEN delegation reaches this branch with a span of nothing (subAgentFramed): its
+	// frame is drawn live, and openTail hands the seam below the level the frame stands at,
+	// which is what lays the streaming preview inside the rail rather than flat beside it
+	// (design call 4). A run reaching this branch closes with no ┊ at all: the closer belongs to
+	// a list resuming after one of its members, and a delegation standing here stands alone.
+	if span := subAgentSpan(t.entries, head); subAgentFramed(in, span) {
+		ins := paintInputs(t.entries[head : head+span+1])
+		live := !subAgentReported(in) || anyOpenCall(ins[1:])
+		next := head + 1
+		if !in.expanded {
+			next += span // a collapsed run's span is elided whole; an open one's is walked into
+		}
+		return resolvedBlock{
+			shape: shapeSubAgentRun,
+			ins:   ins,
+			live:  live,
+			draw: func() blockPaint {
+				return renderSubAgentRun(th, ins[0], ins[1:], width, blink)
+			},
+			next:     next,
+			openTail: in.expanded,
+		}
+	}
+	// Adjacent runs of DIFFERENT tools fold under one umbrella (toolSuperGroup, item 5), which
+	// is asked before the same-label run because a same-label run inside one is a row of it rather
+	// than a block of its own. The question is only ever asked at a block head — the walk's index is
+	// one by construction, since every shape either advances by a single entry or steps over a whole
+	// block — and toolSuperGroup is only correct there: asked mid-run it would answer with a
+	// partial first run.
+	//
+	// The umbrella covers its calls and nothing else (superGroup.calls), so the walk steps
+	// over exactly them. Its per-entry state is in the paint key already: blockKey spans the
+	// whole umbrella and spanFlags packs both levels — a member's expanded at bit 0 and a run
+	// head's typeExpanded at bit 2 — so opening either level is a different key and a fresh
+	// paint (paintcache.go).
+	if sup := toolSuperGroup(t.entries, head); len(sup) > 0 {
+		calls := sup.calls()
+		ins := paintInputs(t.entries[head : head+calls])
+		live := anyOpenCall(ins)
+		return resolvedBlock{
+			shape: shapeToolSuper,
+			ins:   ins,
+			live:  live,
+			draw: func() blockPaint {
+				return renderSuperGroup(th, superRunViews(ins, sup), railedWidth(width, in.depth),
+					blockState{live: live, blink: blink}).railed(th, in.depth)
+			},
+			next: head + calls,
+		}
+	}
+	// Consecutive same-label tool calls fold into one block at render time, so a batch of
+	// reads is one header plus one leader row per file. The entry list is untouched: a
+	// call that arrives mid-stream joins its group on the next repaint for free, and a run
+	// is same-depth by construction, so the label logic above fires exactly as before.
+	//
+	// The group's liveness is the group's, not its head's: a batch of reads whose first call
+	// has landed and whose last has not is still working, and the one star over them all says
+	// so. The run is entries[head:head+len(run)] by construction (toolCallRun walks adjacent
+	// entries forward), so the views' own entries are what the rule reads — and the same
+	// construction is what lets the members' EXPANDED flags be read off the run in view order
+	// and their rows be marked back by offset (blockPaint.addFor).
+	//
+	// Every one of those flags is in the paint key already: blockKey spans the whole run and
+	// spanFlags packs expanded at bit 0 of each covered entry, so opening the tenth member of a
+	// group is a different key and a fresh paint (paintcache.go).
+	if run := toolCallRun(t.entries, head); len(run) > 1 {
+		live := anyOpenCall(run)
+		return resolvedBlock{
+			shape: shapeToolRun,
+			ins:   run,
+			live:  live,
+			draw: func() blockPaint {
+				return renderToolBlock(th, toolViews(run), railedWidth(width, in.depth), blockState{
+					expanded: in.expanded,
+					live:     live,
+					blink:    blink,
+					members:  memberFlags(run),
+				}).railed(th, in.depth)
+			},
+			next: head + len(run),
+		}
+	}
+	// One entry, one block. Which kinds can still be waiting, and which head a prompt stop, are the
+	// kind's own answers (entrykind.go); everything else keys as settled and marks no stop.
+	live := in.kind.hasLiveStar() && !in.done
+	return resolvedBlock{
+		shape: shapeEntry,
+		ins:   []paintInput{in},
+		live:  live,
+		draw: func() blockPaint {
+			return renderEntryLines(th, in, width, blink)
+		},
+		next:   head + 1,
+		isUser: in.kind.isUserPrompt(),
+	}
 }
 
 // renderLines is the line slice alone — the viewport content and the substring-test surface — at
