@@ -222,6 +222,17 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- Adopted the shared list cursor in the two decision panes — the approval menu and the ask_user
+  offering (`internal/tui/listsurface.go`, ADR 0053): the last two non-wrapping arrow idioms the
+  review counted are gone, and with them five hand-written clamps around the highlight. Both
+  selections are `listCursor` values now, walked with `listStopsAtEnds` — the stated argument that
+  says, at the call site, why a security surface does not let ↑ on the first row jump to Cancel.
+  They take the walk and the clamp WITHOUT the module's key contract, because both panes are
+  soft-modal: the transcript stays scrollable under the approval prompt and the answer box stays
+  typeable under the question, so which keys each claims stays its own switch's. Behaviour-preserving
+  — every key both panes answered, they answer exactly as before, and no key they ignored became
+  theirs.
+
 - Adopted the shared list surface in the /settings pane (its key list and both value sub-lists) and in
   the "/" | "@" autocomplete dropdown (`internal/tui/listsurface.go`, ADR 0053): the wrap-arrow idiom
   written four more times, a third `clampSelection`, a second clamp-to-highlight and three more copies

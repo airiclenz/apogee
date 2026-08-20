@@ -771,8 +771,8 @@ func TestModelApprovalIgnoresOtherKeys(t *testing.T) {
 	if m.pending == nil {
 		t.Error("pending approval cleared by a non-decision key")
 	}
-	if m.approvalSel != 0 {
-		t.Errorf("a non-menu key moved the pointer to row %d", m.approvalSel)
+	if m.approvalSel.selected != 0 {
+		t.Errorf("a non-menu key moved the pointer to row %d", m.approvalSel.selected)
 	}
 }
 
@@ -940,14 +940,14 @@ func TestModelApprovalArrowsClampWithoutWrapping(t *testing.T) {
 	m, _ := newApprovalModel(t, domain.ApprovalRequest{Tool: "write_file", Reason: "write"})
 
 	m = step(t, m, keyUp())
-	if m.approvalSel != 0 {
-		t.Errorf("↑ on the first row moved to %d; the menu must not wrap", m.approvalSel)
+	if m.approvalSel.selected != 0 {
+		t.Errorf("↑ on the first row moved to %d; the menu must not wrap", m.approvalSel.selected)
 	}
 	for range len(approvalMenu) + 2 {
 		m = step(t, m, keyDown())
 	}
-	if want := len(approvalMenu) - 1; m.approvalSel != want {
-		t.Errorf("↓ past the last row selects %d, want it clamped to %d", m.approvalSel, want)
+	if want := len(approvalMenu) - 1; m.approvalSel.selected != want {
+		t.Errorf("↓ past the last row selects %d, want it clamped to %d", m.approvalSel.selected, want)
 	}
 
 	// A fresh request opens on Allow again rather than inheriting where the last one was left.
@@ -955,8 +955,8 @@ func TestModelApprovalArrowsClampWithoutWrapping(t *testing.T) {
 		Request: domain.ApprovalRequest{Tool: "run_terminal_command"},
 		Reply:   make(chan domain.ApprovalDecision, 1),
 	})
-	if m.approvalSel != 0 {
-		t.Errorf("a new request opened on row %d, want the menu reset to Allow", m.approvalSel)
+	if m.approvalSel.selected != 0 {
+		t.Errorf("a new request opened on row %d, want the menu reset to Allow", m.approvalSel.selected)
 	}
 }
 
@@ -2219,11 +2219,11 @@ func TestModelAskArrowsWithTextKeepSelection(t *testing.T) {
 		Choices:  []string{"alpha", "beta", "gamma"},
 	})
 	m = typeInput(t, m, "x")
-	before := m.askSel
+	before := m.askSel.selected
 	m = step(t, m, keyDown())
 	m = step(t, m, keyUp())
-	if m.askSel != before {
-		t.Errorf("askSel moved to %d while text was in the input; want unchanged %d", m.askSel, before)
+	if m.askSel.selected != before {
+		t.Errorf("askSel moved to %d while text was in the input; want unchanged %d", m.askSel.selected, before)
 	}
 }
 

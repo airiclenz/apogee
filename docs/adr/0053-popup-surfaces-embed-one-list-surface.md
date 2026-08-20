@@ -114,6 +114,16 @@ Decisions 1–8 stand as written for a filtering list; decision 1's "two values"
 the surface and one in the cursor, and decision 8's "every list embeds" is "embeds the one of the two
 its pane is". `Model` measured **104,592 bytes before and after** item 16, which is decision 9 held.
 
+**Adoption note (2026-08-20, item 17).** The two DECISION panes take the cursor a third way, and
+decisions 4, 7 and 8 read this way for them. The approval menu (`approval.go`) and the ask_user
+offering (`ask.go`) have no pane struct to embed it in — their state IS the `Model`'s own — so they
+**name** it (`m.approvalSel`, `m.askSel`), and they take `move`, `clampSelection` and `highlight`
+**without `key`**: both panes are soft-modal, so every key they do not claim has somewhere else to be
+(the transcript under the approval prompt, the answer box under the question), and which keys they
+claim is a fact about the surface underneath them rather than about lists. Each says it at its own
+switch. What decision 4 promised is delivered whole — `listStopsAtEnds` is a stated argument at both
+call sites now, and the two non-wrapping arrow idioms the review counted are gone.
+
 The render call split the same way, for the same reason: `renderList` takes a pane's own body block
 (the /settings sub-list's question — the pane it replaced is where the human read the key's name),
 and `renderFilterList` fills that block with the filter line, its label and its two pads before

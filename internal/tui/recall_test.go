@@ -457,12 +457,12 @@ func TestRecallSkipsAskAnswers(t *testing.T) {
 
 	m = step(t, m, keyDown())
 	assertBox(t, m, "", false) // the arrows are the choice highlight's here, not the walk's
-	if m.askSel != 1 {
-		t.Errorf("askSel = %d after ↓ at the ask, want 1 — recall must not have taken the key", m.askSel)
+	if m.askSel.selected != 1 {
+		t.Errorf("askSel = %d after ↓ at the ask, want 1 — recall must not have taken the key", m.askSel.selected)
 	}
 	m = step(t, m, keyUp())
-	if m.askSel != 0 {
-		t.Errorf("askSel = %d after ↑ at the ask, want 0", m.askSel)
+	if m.askSel.selected != 0 {
+		t.Errorf("askSel = %d after ↑ at the ask, want 0", m.askSel.selected)
 	}
 	assertBox(t, m, "", false)
 

@@ -23,7 +23,9 @@ import (
 // the five lists above adopt the module without adopting a text widget none of them types into: a
 // lineEditor is a textarea, thousands of bytes in a Model copied on every Update, and a surface
 // handed to a pane that never filters would multiply exactly the field this module must not
-// (ADR 0053 decision 9).
+// (ADR 0053 decision 9). The two DECISION panes — the approval menu and the ask_user offering —
+// take less again: the cursor's walk and its clamp without its key contract, for the reason its own
+// doc gives.
 //
 // What a list surface is, stated once:
 //
@@ -43,6 +45,10 @@ import (
 //     an open list, which is what makes every letter the filter's. A list with NO filter hands its
 //     letters back instead, and the pane says what that means: the /settings key list swallows them
 //     (it is modal too), while the dropdown gives them to the chat box it is completing a token in.
+//     That is a fact about the list OVERLAYS. The two decision panes that borrow the cursor alone
+//     are SOFT-modal — the transcript stays scrollable under the approval prompt, the answer box
+//     stays typeable under the question — so they claim their arrows and leave every other key to
+//     the surface it belonged to (listCursor).
 //   - What ↑/↓ do at the ENDS is a parameter and not a rule (listWrap) — the panes already disagree
 //     and each keeps the answer it had.
 //   - The filter LINE is the surface's, not the painter's spec. Its label, its caret, its two
@@ -68,8 +74,11 @@ const (
 
 // listWrap says what ↑ on the first row and ↓ on the last one do. It is a PARAMETER rather than a
 // rule because the panes already answer it differently and every one of them keeps the answer it
-// had (the deepening plan's merge policy, 2026-08-19): the picker and the /sessions browser wrap
-// around, while the approval and ask selections stop at the ends.
+// had (the deepening plan's merge policy, 2026-08-19): the four list OVERLAYS wrap around — the
+// picker, the /sessions browser, the /settings lists and the dropdown — while the two DECISION
+// panes, the approval menu and the ask_user offering, stop at the ends. Stopping is the answer a
+// surface a decision is taken on wants: ↑ on the first row jumping to the last one is the
+// difference between a stray keypress and the Cancel row (approval.go).
 type listWrap bool
 
 const (
@@ -86,6 +95,13 @@ const (
 // It is eight bytes, deliberately: a pane that never filters adopts the clamp, the wrap rule and the
 // key contract without adopting a text widget with them (ADR 0053 decision 9). A pane that DOES
 // filter holds a [listSurface], which is this value plus the field.
+//
+// The two DECISION panes take it a third way. The approval menu (approval.go) and the ask_user
+// offering (ask.go) have no pane struct to embed it in — their state IS the Model's own — so they
+// NAME it (m.approvalSel, m.askSel) and take the walk, the clamp and the −1 WITHOUT the key
+// contract below: they are soft-modal, so which keys they claim is a fact about the surface
+// underneath them rather than about lists, and each says it at its own switch (the deepening plan's
+// merge policy, 2026-08-19).
 type listCursor struct {
 	// selected indexes the rows the pane actually PAINTS — for a filtering list, the filtered view —
 	// and is clamped rather than trusted, because the list underneath it can change while the overlay
@@ -169,10 +185,12 @@ func (l listCursor) highlight(n int) int {
 }
 
 // key routes one keypress through the cursor at l over a list of n painted rows, and reports what it
-// did (listVerdict). It is the key contract EVERY list in the package shares — the whole of it for a
-// list that does not filter, and the floor [Model.listKey] adds the typing keys to for one that
-// does: esc closes, ↑/↓ (and ^p/^n) move the highlight by this pane's wrap rule, ⏎ takes the
+// did (listVerdict). It is the key contract every list OVERLAY in the package shares — the whole of
+// it for a list that does not filter, and the floor [Model.listKey] adds the typing keys to for one
+// that does: esc closes, ↑/↓ (and ^p/^n) move the highlight by this pane's wrap rule, ⏎ takes the
 // highlighted row where there is one, and every other key goes back to the pane (listUnclaimed).
+// The two soft-modal decision panes take [listCursor.move] and [listCursor.highlight] without this
+// contract, and the type's own doc says why.
 //
 // The selection is re-clamped BEFORE anything else, because the rows underneath can have changed
 // since the last key — a beat carrying a shorter offering, a deleted session, a config key the

@@ -58,16 +58,25 @@ func approvalMenuKeys() map[string]domain.ApprovalDecision {
 // so the transcript is still reachable now that ↑/↓ belong to the menu. The decision's transcript
 // record arrives for free as the loop's observational ApprovalEvent (C3; P2.3), so this renders the
 // prompt's resolution, not the record.
+//
+// The WALK is the package's shared one ([listCursor.move] with listStopsAtEnds, listsurface.go):
+// stopping at the ends is this pane's own answer to "what does ↓ do at the bottom" and it keeps it —
+// on a security surface, ↑ on the first row jumping to Cancel is the difference between a stray
+// keypress and a stopped run. Which KEYS the menu claims stays this switch's, deliberately, rather
+// than the cursor's full key contract ([listCursor.key]): that contract belongs to the MODAL list
+// overlays, where every unclaimed key is swallowed, and this prompt is soft-modal — esc and ⏎ are
+// claimed upstream (handleKey) and everything else has somewhere else to be, the transcript. So the
+// menu claims ↑/↓ and the decision letters and nothing more.
 func (m Model) handleApprovalKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if decision, ok := approvalKeys[msg.String()]; ok && m.pending != nil {
 		return m.sendApproval(decision)
 	}
 	switch msg.String() {
 	case "up":
-		m.approvalSel = clampInt(m.approvalSel-1, 0, len(approvalMenu)-1)
+		m.approvalSel.move(-1, len(approvalMenu), listStopsAtEnds)
 		return m, nil
 	case "down":
-		m.approvalSel = clampInt(m.approvalSel+1, 0, len(approvalMenu)-1)
+		m.approvalSel.move(1, len(approvalMenu), listStopsAtEnds)
 		return m, nil
 	}
 	return m.scrollViewport(msg)
@@ -81,7 +90,7 @@ func (m Model) resolveApproval() (tea.Model, tea.Cmd) {
 	if m.pending == nil {
 		return m, nil
 	}
-	opt := approvalMenu[clampInt(m.approvalSel, 0, len(approvalMenu)-1)]
+	opt := approvalMenu[m.approvalSel.highlight(len(approvalMenu))]
 	if opt.cancels {
 		m.stopWorker()
 		return m, nil
@@ -260,7 +269,7 @@ func (m Model) approvalPrompt(req domain.ApprovalRequest) string {
 		rows:          rows,
 		menuRows:      true,
 		rowPadAbove:   true, // the one blank line between the body and the menu; the mockup closes on the border
-		selected:      clampInt(m.approvalSel, 0, len(rows)-1),
+		selected:      m.approvalSel.highlight(len(rows)),
 		maxRows:       rowsShown,
 		scrollbar:     m.popupScrollbarOn(),
 	}

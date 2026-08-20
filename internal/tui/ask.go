@@ -20,7 +20,7 @@ import (
 func (m Model) foldAskRequest(msg askReqMsg) (tea.Model, tea.Cmd) {
 	m.state = stateAwaitingAsk
 	m.pendingAsk = &msg
-	m.askSel = 0 // first choice pre-selected while the input is empty (D5); no-op when there are no choices
+	m.askSel = listCursor{} // first choice pre-selected while the input is empty (D5); no-op when there are no choices
 	// A multi-select question opens with nothing ticked and a checked set sized to its
 	// offering; a single-select one carries no checked set at all.
 	m.askChecked = nil
@@ -52,6 +52,14 @@ func (m Model) foldAskRequest(msg askReqMsg) (tea.Model, tea.Cmd) {
 // ([Model.usageKey], [Model.inspectorKey]): the prompt is soft-modal, so every key it does not act
 // on goes where it always went. ⏎ is not its key — the enter switch in handleKey sends the answer
 // through [Model.submitAnswer] — and esc is the frame's own cancel.
+//
+// The WALK is the package's shared one ([listCursor.move] with listStopsAtEnds, listsurface.go), so
+// this offering and the approval menu answer "what does ↓ do at the bottom" through the same code
+// they always answered it the same way in. Which KEYS it claims stays this switch's, deliberately,
+// rather than the cursor's full key contract ([listCursor.key]): that contract belongs to the MODAL
+// list overlays, which swallow everything they do not claim, and this pane's whole point is that it
+// claims as little as possible — the box below is still a text box the human may start typing an
+// answer into at any moment.
 func (m Model) askChoiceKey(msg tea.KeyPressMsg) (bool, tea.Model, tea.Cmd) {
 	if m.state != stateAwaitingAsk || m.pendingAsk == nil ||
 		len(m.pendingAsk.Request.Choices) == 0 || m.input.Value() != "" {
@@ -59,14 +67,10 @@ func (m Model) askChoiceKey(msg tea.KeyPressMsg) (bool, tea.Model, tea.Cmd) {
 	}
 	switch msg.String() {
 	case "up":
-		if m.askSel > 0 {
-			m.askSel--
-		}
+		m.askSel.move(-1, len(m.pendingAsk.Request.Choices), listStopsAtEnds)
 		return true, m, nil
 	case "down":
-		if m.askSel < len(m.pendingAsk.Request.Choices)-1 {
-			m.askSel++
-		}
+		m.askSel.move(1, len(m.pendingAsk.Request.Choices), listStopsAtEnds)
 		return true, m, nil
 	case "space":
 		// ␣ ticks and un-ticks the highlighted row — but ONLY on a multi-select question,
@@ -74,7 +78,9 @@ func (m Model) askChoiceKey(msg tea.KeyPressMsg) (bool, tea.Model, tea.Cmd) {
 		// nothing to toggle, so the key falls through to the textarea below and opens a
 		// free-text answer with a space exactly as it always did.
 		if m.pendingAsk.Request.MultiSelect {
-			if sel := min(max(m.askSel, 0), len(m.askChecked)-1); sel >= 0 {
+			// A checked set shorter than the offering ticks nothing rather than panicking, which is
+			// what the −1 [listCursor.highlight] answers for an empty one buys here.
+			if sel := m.askSel.highlight(len(m.askChecked)); sel >= 0 {
 				m.askChecked[sel] = !m.askChecked[sel]
 			}
 			return true, m, nil
@@ -105,7 +111,7 @@ func (m Model) submitAnswer() (tea.Model, tea.Cmd) {
 		if ticked := m.checkedLabels(); len(ticked) > 0 {
 			answer = strings.Join(ticked, "\n")
 		} else {
-			sel := min(max(m.askSel, 0), len(choices)-1) // defensive clamp; routing keeps it in range
+			sel := m.askSel.highlight(len(choices)) // defensive clamp; routing keeps it in range
 			answer = stripEscapes(choices[sel])
 		}
 	} else {
@@ -304,7 +310,7 @@ func (m Model) askPrompt(req domain.AskRequest) string {
 	selected := -1
 	hint := "type your answer below · ⏎ send · ⇧⏎/⌥⏎ newline · esc cancel"
 	if choicesShown {
-		selected = min(max(m.askSel, 0), len(req.Choices)-1) // clamp: routing keeps it in range, this is defensive
+		selected = m.askSel.highlight(len(req.Choices)) // clamp: routing keeps it in range, this is defensive
 		hint = "↑↓ select · ⏎ send · type for a custom answer · esc cancel"
 		if req.MultiSelect {
 			// The toggle is the one key this pane has that the single-select one has not, so it is

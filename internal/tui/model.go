@@ -201,7 +201,13 @@ type Model struct {
 	cancel     context.CancelFunc // non-nil while a worker runs; the stop key calls it (C4)
 	pending    *approvalReqMsg    // the in-flight Approval while awaitingApproval (P2.4 acts on it)
 	pendingAsk *askReqMsg         // the in-flight ask_user question while awaitingAsk (P3.11)
-	askSel     int                // the highlighted ask_user choice index while awaitingAsk (D5); bare int, no no-copy type (ADR 0011)
+	// askSel is where the ask_user offering's highlight stands while awaitingAsk (D5): the row ↑/↓
+	// walk and ⏎ sends, pre-selected on the first choice while the answer box is empty. It is the
+	// shared [listCursor] (listsurface.go, ADR 0053) rather than a bare int, so the clamp, the
+	// non-wrapping arrows and the "nothing to highlight" −1 are the package's one answer rather than
+	// this pane's own arithmetic — eight bytes with no no-copy type, riding the value-copied Model
+	// exactly as the int did (ADR 0011).
+	askSel listCursor
 	// askChecked is the ticked set of a MULTI-SELECT ask_user question: one bool per offered
 	// choice, ␣-toggled on the highlighted row, and nil for a single-select question — which has
 	// no checked set at all, so every single-select path stays exactly what it always was. It is
@@ -211,10 +217,13 @@ type Model struct {
 	// that produced it.
 	askChecked []bool
 	// approvalSel is the highlighted approvalMenu row while awaitingApproval: the row ↑/↓ move and
-	// ⏎ takes. It resets to 0 — Allow, the mockup's default — on every incoming request rather than
-	// persisting across them, because a menu that remembers where the last decision was left points
-	// at Deny for a call the human has not read yet. A bare int, no no-copy type (ADR 0011).
-	approvalSel int
+	// ⏎ takes. It resets to its zero value — Allow, the mockup's default — on every incoming request
+	// rather than persisting across them, because a menu that remembers where the last decision was
+	// left points at Deny for a call the human has not read yet. It is the shared [listCursor]
+	// (listsurface.go, ADR 0053), so the clamp and the non-wrapping arrows are the package's own;
+	// eight bytes with no no-copy type, riding the value-copied Model exactly as the bare int did
+	// (ADR 0011).
+	approvalSel listCursor
 	// askDraft holds what was in the input box when an ask_user question BORROWED it: the question
 	// empties the box for the answer (D5 pre-selects the first choice on an empty box), and an
 	// unsent message the human was part-way through typing is not the question's to throw away.
@@ -712,9 +721,9 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		// on msg.Reply (the C3 rendezvous; P2.4).
 		m.state = stateAwaitingApproval
 		m.pending = &msg
-		m.approvalSel = 0       // the menu opens on Allow for every request (docs/layout/user-questions-layout.md)
-		m.dismissAutocomplete() // a stale menu never shares the frame with a decision surface
-		m.layout()              // the pane the decision turns on outranks the draft's extra rows
+		m.approvalSel = listCursor{} // the menu opens on Allow for every request (docs/layout/user-questions-layout.md)
+		m.dismissAutocomplete()      // a stale menu never shares the frame with a decision surface
+		m.layout()                   // the pane the decision turns on outranks the draft's extra rows
 		return m, nil
 
 	case askReqMsg:

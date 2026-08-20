@@ -698,7 +698,9 @@
 // listsurface.go the surface that overlay, the /sessions browser, the /settings key list with its
 // two sub-lists and the "/" | "@" dropdown all ARE underneath their own wording — the [listCursor]
 // value ({selected}) every one of them embeds and the key contract it carries (arrows by a per-pane
-// wrap rule, esc, the ⏎ that lands on a row), the [listSurface] the two that FILTER embed instead
+// wrap rule, esc, the ⏎ that lands on a row), which the two soft-modal DECISION panes (approval.go,
+// ask.go) borrow the walk and the clamp of without the contract, the [listSurface] the two that
+// FILTER embed instead
 // (that cursor plus the field typed into it, and the keys that type), the filter that prunes the
 // rows and maps a highlight back to what it names, and the one budget→render call behind every list
 // pane — a pane's own body block, or the filter line and its two blanks (ADR 0053);
