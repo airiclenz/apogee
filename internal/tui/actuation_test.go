@@ -127,7 +127,98 @@ func (f *fakeLauncher) listCount() int {
 	return f.lists
 }
 
-// wireLauncher builds a ready, idle model with the heartbeat, the rebind AND the four launcher seams
+// fakeLauncherHost is the per-family stand-in for [LauncherHost] (ADR 0054 decision 6): one func per
+// act, and the DOCUMENTED unwired answer for every act a test leaves nil. That is what keeps the
+// per-member degrades provable one at a time — "the launcher is here but this host answers no boot
+// restore", "it lists profiles and records nothing" — without a fake per combination of wired halves.
+//
+// It is a pointer receiver for [fakeServerHost]'s reasons: the spies behind its funcs are, and
+// [launcherSeams] adds one member at a time to a host a helper wired before it.
+type fakeLauncherHost struct {
+	enabled  func() bool
+	profiles func() ([]LaunchProfileChoice, error)
+	load     func(name string, progress func(step string)) (ProfileLoadResult, error)
+	unload   func(endpoint string) (ActuationResult, error)
+	stop     func(endpoint string) (ActuationResult, error)
+	record   func(profile string) (bool, error)
+	restore  func() (ProfileRestore, error)
+}
+
+// Acts reports the one flag [LauncherActs] carries, from the member behind it: a fake with no restore
+// func answers no start-up check at all, which is the posture of every hand-built Options.
+func (h *fakeLauncherHost) Acts() LauncherActs { return LauncherActs{CanRestore: h.restore != nil} }
+
+// Enabled answers TRUE when nothing was wired: a host that cannot tell is not evidence that the
+// integration is off, and the verbs are let through to answer for themselves.
+func (h *fakeLauncherHost) Enabled() bool {
+	if h.enabled == nil {
+		return true
+	}
+	return h.enabled()
+}
+
+// Profiles answers [ErrNoLauncher] when nothing was wired — "there is no launcher here", which
+// `/model` reads as "offer the models the server itself advertises".
+func (h *fakeLauncherHost) Profiles() ([]LaunchProfileChoice, error) {
+	if h.profiles == nil {
+		return nil, ErrNoLauncher
+	}
+	return h.profiles()
+}
+
+// Load answers as Profiles does, and nothing is activated.
+func (h *fakeLauncherHost) Load(name string, progress func(step string)) (ProfileLoadResult, error) {
+	if h.load == nil {
+		return ProfileLoadResult{}, ErrNoLauncher
+	}
+	return h.load(name, progress)
+}
+
+// Unload and Stop answer as Load does, and the server is left exactly as it was.
+func (h *fakeLauncherHost) Unload(endpoint string) (ActuationResult, error) {
+	if h.unload == nil {
+		return ActuationResult{}, ErrNoLauncher
+	}
+	return h.unload(endpoint)
+}
+
+func (h *fakeLauncherHost) Stop(endpoint string) (ActuationResult, error) {
+	if h.stop == nil {
+		return ActuationResult{}, ErrNoLauncher
+	}
+	return h.stop(endpoint)
+}
+
+// RecordProfile answers "not recorded, and nothing went wrong" — the silent skip the toggle off
+// earns, and the whole answer of a host that records nothing.
+func (h *fakeLauncherHost) RecordProfile(profile string) (bool, error) {
+	if h.record == nil {
+		return false, nil
+	}
+	return h.record(profile)
+}
+
+// Restore answers "do nothing, say nothing"; Acts reports false for it, so nothing asks.
+func (h *fakeLauncherHost) Restore() (ProfileRestore, error) {
+	if h.restore == nil {
+		return ProfileRestore{}, nil
+	}
+	return h.restore()
+}
+
+// launcherSeams is the [LauncherHost] fake opts carries, created on the spot when it carries none —
+// [serverSeams] for this family, so a test that adds the recording or the boot check to a host
+// launcherOpts already wired finds the members that are there instead of replacing them.
+func launcherSeams(opts *Options) *fakeLauncherHost {
+	host, ok := opts.Launcher.(*fakeLauncherHost)
+	if !ok {
+		host = &fakeLauncherHost{}
+		opts.Launcher = host
+	}
+	return host
+}
+
+// wireLauncher builds a ready, idle model with the heartbeat, the rebind AND the launcher host
 // wired, one beat folded — the state a human is in when they type /model on a launcher host.
 func wireLauncher(t *testing.T, fake *fakeLauncher) (Model, *fakeRebind) {
 	t.Helper()
@@ -135,15 +226,13 @@ func wireLauncher(t *testing.T, fake *fakeLauncher) (Model, *fakeRebind) {
 }
 
 // launcherOpts is the seam wiring alone, separated from the model build so a test can say what the
-// integration ANSWERS before the session starts: since `llama-launcher:` became editable the seams
-// are wired for the life of the session and the on/off answer moved inside them (ADR 0037), so
-// "wired" and "on" are two different things a test may need to set apart.
+// integration ANSWERS before the session starts: since `llama-launcher:` became editable the host is
+// wired for the life of the session and the on/off answer moved inside it (ADR 0037), so "wired" and
+// "on" are two different things a test may need to set apart.
 func launcherOpts(fake *fakeLauncher) Options {
 	opts := testOpts
-	opts.LaunchProfiles = fake.list
-	opts.LoadProfile = fake.load
-	opts.UnloadServer = fake.act
-	opts.StopServer = fake.act
+	host := launcherSeams(&opts)
+	host.profiles, host.load, host.unload, host.stop = fake.list, fake.load, fake.act, fake.act
 	return opts
 }
 
@@ -308,7 +397,7 @@ func TestActuationBlockNoteNamesTheVerb(t *testing.T) {
 	}
 
 	m, _ = wireLauncher(t, newLauncher())
-	m2, _ := m.startServerActuation(verbStop, m.opts.StopServer)
+	m2, _ := m.startServerActuation(verbStop)
 	if got, want := m2.(Model).actuationBlockNote(), "stop-server in flight"; got != want {
 		t.Errorf("stop block note = %q, want %q", got, want)
 	}
@@ -350,7 +439,7 @@ func TestActuationFooterNarratesTheVerb(t *testing.T) {
 	}
 
 	m, _ = wireLauncher(t, newLauncher())
-	stopping, _ := m.startServerActuation(verbStop, m.opts.StopServer)
+	stopping, _ := m.startServerActuation(verbStop)
 	if got := stopping.(Model).upstreamSegments(); len(got) != 1 || got[0] != "stop-server…" {
 		t.Errorf("upstream segments = %v, want the stop verb named", got)
 	}
@@ -577,11 +666,7 @@ func TestProfileLoadMoveRecordsNoStartupChoice(t *testing.T) {
 	fake := newLauncher()
 	fake.follows(ServerSwitchResult{Endpoint: "http://localhost:8081", HostAlias: "beta"}, nil)
 	rec := &fakeRecorder{saved: true} // would report a write if it were ever called
-	opts := testOpts
-	opts.LaunchProfiles = fake.list
-	opts.LoadProfile = fake.load
-	opts.UnloadServer = fake.act
-	opts.StopServer = fake.act
+	opts := launcherOpts(fake)
 	serverSeams(&opts).record = rec.record
 	m, _ := seededPicker(t, opts)
 	m, cmd := startLoad(t, m, "beta")
@@ -778,7 +863,7 @@ func TestProfileLoadPanicReleasesTheLatch(t *testing.T) {
 func recordingLoad(t *testing.T, fake *fakeLauncher, rec *fakeRecorder) Model {
 	t.Helper()
 	opts := launcherOpts(fake)
-	opts.RecordLaunchProfile = rec.record
+	launcherSeams(&opts).record = rec.record
 	m, _ := seededPicker(t, opts)
 	return m
 }
@@ -945,7 +1030,7 @@ func TestServerActuationNotesEveryStep(t *testing.T) {
 			m, _ := wireLauncher(t, fake)
 			notesBefore := len(noteTexts(m))
 
-			started, cmd := m.startServerActuation(verbStop, m.opts.StopServer)
+			started, cmd := m.startServerActuation(verbStop)
 			m, cmd = driveActuation(t, started.(Model), cmd)
 
 			if m.actuation.inFlight {
@@ -1022,7 +1107,7 @@ func TestUnloadAndStopActOnTheSessionsServer(t *testing.T) {
 
 			unloader, stopper := newLauncher(), newLauncher()
 			m, _ := wireLauncher(t, newLauncher())
-			m.opts.UnloadServer, m.opts.StopServer = unloader.act, stopper.act
+			launcherSeams(&m.opts).unload, launcherSeams(&m.opts).stop = unloader.act, stopper.act
 
 			m, cmd := typeCommand(t, m, tc.line)
 
@@ -1220,7 +1305,7 @@ func TestUnloadAndStopWithTheLauncherSwitchedOff(t *testing.T) {
 
 	fake := newLauncher()
 	opts := launcherOpts(fake)
-	opts.LauncherEnabled = func() bool { return false }
+	launcherSeams(&opts).enabled = func() bool { return false }
 	m, _ := seededPicker(t, opts)
 
 	for _, line := range []string{"/unload-model", "/stop-server"} {
@@ -1280,7 +1365,7 @@ func TestStopThenBeatFailuresCrossOffline(t *testing.T) {
 func restoreOpts(fake *fakeLauncher, answer ProfileRestore, err error) (Options, *int) {
 	opts := launcherOpts(fake)
 	asks := 0
-	opts.RestoreProfile = func() (ProfileRestore, error) {
+	launcherSeams(&opts).restore = func() (ProfileRestore, error) {
 		asks++
 		return answer, err
 	}
@@ -1452,7 +1537,7 @@ func TestStartupRestoreIsSilentWhenUnwired(t *testing.T) {
 	t.Parallel()
 
 	fake := newLauncher()
-	m, _ := seededPicker(t, launcherOpts(fake)) // launcher wired, RestoreProfile nil
+	m, _ := seededPicker(t, launcherOpts(fake)) // launcher wired, the restore member nil
 
 	if cmd := m.restoreCmd(); cmd != nil {
 		t.Error("an unwired restore seam still issued a start-up Cmd")

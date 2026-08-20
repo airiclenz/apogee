@@ -542,10 +542,10 @@ func TestRunRootRecordLaunchProfileWritesOntoTheActuatingEntry(t *testing.T) {
 		if err := runRoot(context.Background(), opts, rec.launch); err != nil {
 			t.Fatalf("runRoot: %v", err)
 		}
-		if rec.opts.RecordLaunchProfile == nil {
-			t.Fatal("the composition root left the profile-recording seam unwired")
+		if rec.opts.Launcher == nil {
+			t.Fatal("the composition root left the launcher host — and with it the profile recording — unwired")
 		}
-		return rec.opts.RecordLaunchProfile, configPath
+		return rec.opts.Launcher.RecordProfile, configPath
 	}
 
 	// assertUnwritten is what both skips have in common: the seam said no, and the file the human wrote
@@ -714,11 +714,11 @@ func TestRunRootRememberModelTogglesLive(t *testing.T) {
 			LlamaLauncher: filepath.Join(t.TempDir(), "llama-launcher.yaml"),
 		})
 
-		if saved, err := opts.RecordLaunchProfile("gpt-oss-20b"); saved || err != nil {
+		if saved, err := opts.Launcher.RecordProfile("gpt-oss-20b"); saved || err != nil {
 			t.Fatalf("recording with the toggle off = (%v, %v); want (false, nil)", saved, err)
 		}
 		flip(t, opts, "true")
-		if saved, err := opts.RecordLaunchProfile("gpt-oss-20b"); !saved || err != nil {
+		if saved, err := opts.Launcher.RecordProfile("gpt-oss-20b"); !saved || err != nil {
 			t.Fatalf("recording after the flip = (%v, %v); want (true, nil)", saved, err)
 		}
 		data, err := os.ReadFile(configPath)

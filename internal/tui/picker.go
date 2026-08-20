@@ -170,8 +170,8 @@ const (
 const noServersNote = "no servers configured — add a servers: block to config.yaml"
 
 // runModelCommand drives the /model verb — the one "serve me something else" verb — in both its
-// forms and over both its offerings. Which offering answers is decided ONCE, here, by whether the
-// launcher seams are wired: with a launcher, the Launch profiles it defines are what this host can
+// forms and over both its offerings. Which offering answers is decided ONCE, here, by whether a
+// launcher host is wired: with a launcher, the Launch profiles it defines are what this host can
 // be made to serve, and that supersedes the advertised list rather than sitting beside it (the
 // owner's decision, 2026-07-29 — the two lists describe the same world, and a verb per list made the
 // smaller one the default answer). Without a launcher, what the server already advertises is all
@@ -183,7 +183,7 @@ func (m Model) runModelCommand(args []string) (tea.Model, tea.Cmd) {
 	if len(args) > 1 {
 		return m.pickerNote(modelUsage)
 	}
-	if m.opts.LaunchProfiles != nil && m.opts.LoadProfile != nil {
+	if m.opts.Launcher != nil {
 		return m.pickLaunchProfile(args)
 	}
 	return m.pickAdvertisedModel(args)
@@ -447,12 +447,12 @@ const noProfilesNote = "no launch profiles defined — add profiles to the llama
 // included; apogee adds no policy of its own). Two things can be missing instead: the config the
 // seam reads, and the profiles it was supposed to hold. Each is one sentence and no overlay.
 func (m Model) pickLaunchProfile(args []string) (tea.Model, tea.Cmd) {
-	profiles, err := m.opts.LaunchProfiles()
+	profiles, err := m.opts.Launcher.Profiles()
 	if errors.Is(err, ErrNoLauncher) {
 		// The integration is wired but switched OFF right now — `llama-launcher: off`, or a key the
 		// pane cleared mid-session (ADR 0037). That is not a failure of /model: it is the host having
-		// no launcher, which is answered by the models the server itself advertises. The seam-nil
-		// branch above says the same thing about a host that never wired one.
+		// no launcher, which is answered by the models the server itself advertises. The nil-host
+		// branch above says the same thing about a machine that never wired one.
 		return m.pickAdvertisedModel(args)
 	}
 	if err != nil {

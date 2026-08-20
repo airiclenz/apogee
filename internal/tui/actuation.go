@@ -121,15 +121,26 @@ const noLauncherNote = "llama-launcher not configured — set llama-launcher: in
 // sentence to the human.
 var ErrNoLauncher = errors.New(noLauncherNote)
 
-// launcherOff reports the integration being switched off on a host whose seams ARE wired — the
-// state ADR 0037 created by making `llama-launcher:` editable mid-session. It is asked BEFORE the
+// launcherOff reports the integration being switched off on a host that IS wired — the state
+// ADR 0037 created by making `llama-launcher:` editable mid-session. It is asked BEFORE the
 // actuation latch is taken, because a refusal that travels back through the pump is a refusal the
 // footer narrates first: the human watches "unloading…" appear and vanish for a verb that never
-// ran, where an unwired seam answered instantly. A seam that cannot answer — a nil
-// [Options.LauncherEnabled] — is not evidence of anything, so the verb goes ahead and reports for
-// itself.
+// ran, where an unwired seam answered instantly. A host that cannot answer says true
+// ([LauncherHost.Enabled]) — being unable to tell is not evidence of anything — so the verb goes
+// ahead and reports for itself, and a nil host is not asked at all: its own absence is the same
+// sentence, said by the caller.
 func (m Model) launcherOff() bool {
-	return m.opts.LauncherEnabled != nil && !m.opts.LauncherEnabled()
+	return m.opts.Launcher != nil && !m.opts.Launcher.Enabled()
+}
+
+// launcherActs is what the launcher host says the renderer has to know before it acts
+// ([LauncherHost.Acts]), with the unwired host answering for a nil one: the zero [LauncherActs] is
+// "none of it", so the one gate that reads it reads a flag instead of a nil check and a call.
+func (m Model) launcherActs() LauncherActs {
+	if m.opts.Launcher == nil {
+		return LauncherActs{}
+	}
+	return m.opts.Launcher.Acts()
 }
 
 // stopHeading is the line `/stop-server` puts ABOVE the launcher's recorded steps. The steps are
@@ -225,26 +236,47 @@ func (m Model) holdActuation(verb, profile string) Model {
 // to follow the profile, and the beat after it is what binds.
 func (m Model) startProfileLoad(name string) (tea.Model, tea.Cmd) {
 	m.picker = picker{}
-	load := m.opts.LoadProfile
-	if load == nil {
+	host := m.opts.Launcher
+	if host == nil {
 		return m.pickerNote(noLauncherNote) // unreachable through the command; the seam is checked first
 	}
 	m = m.holdActuation(verbLoad, name)
 	m.layout() // the footer's model slot now says "loading <name>…"
 	return m, m.actuationCmds(func(progress func(string)) actuationEvent {
-		result, err := load(name, progress)
+		result, err := host.Load(name, progress)
 		return actuationEvent{load: result, err: err}
 	})
 }
 
+// endpointActuation is the host's own verb for one of the two acts that address the server this
+// session is ON rather than a named profile — `/unload-model`'s and `/stop-server`'s halves of
+// ADR 0029 D3. It answers nil for a host that is not there at all, which is the absent-seam shape
+// the caller's refusal already reads, and for a verb that is neither of the two, which no caller
+// passes.
+func (m Model) endpointActuation(verb string) func(endpoint string) (ActuationResult, error) {
+	if m.opts.Launcher == nil {
+		return nil
+	}
+	switch verb {
+	case verbUnload:
+		return m.opts.Launcher.Unload
+	case verbStop:
+		return m.opts.Launcher.Stop
+	}
+	return nil
+}
+
 // startServerActuation is the same entry point for the two verbs that act on the server this
-// session is talking to rather than on a named profile (`/unload-model`, `/stop-server`). The
-// endpoint is read HERE, on the Update loop, so the verb acts on the server the session is on at the
-// moment the human asked — not on wherever it may have moved to by the time the call returns.
-func (m Model) startServerActuation(verb string, act func(endpoint string) (ActuationResult, error)) (tea.Model, tea.Cmd) {
+// session is talking to rather than on a named profile (`/unload-model`, `/stop-server`). It takes
+// the verb alone and resolves the act from it (endpointActuation), because the two acts are members
+// of one host now rather than two fields a caller can hand over. The endpoint is read HERE, on the
+// Update loop, so the verb acts on the server the session is on at the moment the human asked — not
+// on wherever it may have moved to by the time the call returns.
+func (m Model) startServerActuation(verb string) (tea.Model, tea.Cmd) {
 	// Both shapes of "there is no launcher here" are answered on this keypress and without the latch:
-	// a seam that was never wired, and one that is wired but switched off (launcherOff). They say the
+	// a host that was never wired, and one that is wired but switched off (launcherOff). They say the
 	// same sentence because they are the same fact to the human.
+	act := m.endpointActuation(verb)
 	if act == nil || m.launcherOff() {
 		return m.pickerNote(noLauncherNote)
 	}
@@ -449,7 +481,7 @@ const launchProfileSavedNote = "launch-profile: saved — apogee loads it at the
 // Update (ADR 0011), so the notes have to land on the CALLER's own copy — and it lays nothing out:
 // both call sites are mid-fold and repaint on their way out.
 func (m *Model) recordLoadedProfile(profile string) {
-	record := recordLaunchProfile(m.opts.RecordLaunchProfile, profile)
+	record := recordLaunchProfile(m.opts.Launcher, profile)
 	if record.saved {
 		m.transcript.addNote(launchProfileSavedNote)
 	}
@@ -462,13 +494,13 @@ func (m *Model) recordLoadedProfile(profile string) {
 // key — and whether the toggle allows writing it at all — are questions only the binary can settle.
 //
 // A failed write is a warning and nothing more: the launcher has already loaded the profile, and the
-// recording is best-effort persistence of something that is already true. An unwired seam records
+// recording is best-effort persistence of something that is already true. An unwired host records
 // nothing and says nothing, which is the pre-remember-model behaviour every hand-built Options has.
-func recordLaunchProfile(record func(profile string) (bool, error), profile string) choiceRecord {
-	if record == nil || profile == "" {
+func recordLaunchProfile(host LauncherHost, profile string) choiceRecord {
+	if host == nil || profile == "" {
 		return choiceRecord{}
 	}
-	saved, err := record(profile)
+	saved, err := host.RecordProfile(profile)
 	if err != nil {
 		return choiceRecord{warning: "could not record the launch profile: " + stripEscapes(err.Error())}
 	}
@@ -482,7 +514,7 @@ func recordLaunchProfile(record func(profile string) (bool, error), profile stri
 // A session whose server is launcher-fronted and whose entry names a `launch-profile:` opens by making
 // the world serve that profile again — but only while nothing is serving already, and only while the
 // launcher still defines it. Both are facts about the LAUNCHER's world, so the whole decision belongs
-// to the binary ([Options.RestoreProfile]) and exactly one of three answers lands here: load this, say
+// to the binary ([LauncherHost.Restore]) and exactly one of three answers lands here: load this, say
 // this, do nothing.
 //
 // The actuation itself is the ordinary one. A restore reaches [Model.startProfileLoad] exactly as
@@ -500,17 +532,18 @@ type restoreMsg struct {
 }
 
 // restoreCmd asks the binary what this start-up owes a recorded `launch-profile:`, off the Update
-// loop — the seam reads a config file and probes for servers. It captures the seam func by value, so
-// no pointer into the value-copied Model crosses the goroutine (the beatCmd posture), and returns nil
-// when the seam is unwired, which is what lets [Model.Init]'s tea.Batch collapse to exactly what it
-// collapsed to before this existed.
+// loop — the seam reads a config file and probes for servers. It captures the host by value, so no
+// pointer into the value-copied Model crosses the goroutine (the beatCmd posture), and returns nil
+// for a host that does not answer this check at all ([LauncherActs.CanRestore], which a nil host
+// answers false), which is what lets [Model.Init]'s tea.Batch collapse to exactly what it collapsed
+// to before this existed.
 func (m Model) restoreCmd() tea.Cmd {
-	ask := m.opts.RestoreProfile
-	if ask == nil {
+	if !m.launcherActs().CanRestore {
 		return nil
 	}
+	host := m.opts.Launcher
 	return func() tea.Msg {
-		restore, err := ask()
+		restore, err := host.Restore()
 		return restoreMsg{restore: restore, err: err}
 	}
 }
@@ -542,7 +575,8 @@ func (m Model) foldRestore(msg restoreMsg) (tea.Model, tea.Cmd) {
 }
 
 // restorable reports whether the session is still in the state the restore was decided FOR: no
-// launcher verb in flight, no picker open over the transcript, and a load seam to actuate through.
+// launcher verb in flight, no picker open over the transcript, and a launcher host to actuate
+// through.
 func (m Model) restorable() bool {
-	return m.opts.LoadProfile != nil && !m.actuation.inFlight && !m.picker.open
+	return m.opts.Launcher != nil && !m.actuation.inFlight && !m.picker.open
 }

@@ -17,8 +17,9 @@ import (
 
 // This file is the ONLY place in apogee that imports the llama-launcher facade (ADR 0029 D1):
 // the dependency stops at the composition root, and everything above it — the engine, the
-// renderer — sees closures behind nil-degrading seams instead of a launcher type. Keeping the
-// import to one file is what makes that boundary checkable by reading rather than by trust.
+// renderer — sees one nil-degrading host seam (launcherHost, at the end of this file) instead of a
+// launcher type. Keeping the import to one file is what makes that boundary checkable by reading
+// rather than by trust.
 //
 // Module mechanics, settled 2026-07-28 (ADR 0029 D7): the requirement is a TAGGED release
 // (≥ v1.6.1, the first that compiles on linux and windows as well as darwin) and never a
@@ -512,8 +513,9 @@ func dialAddr(addr string) string {
 
 // launcherWiring is the composition root's half of the launcher seams: the bridge this file owns
 // (the ops and the resolved config path) plus the session move, because activating a Launch profile
-// is the one thing that can end in one. wire.go builds a single value and hands its four methods to
-// internal/tui as closures, so the renderer sees func values and never the library.
+// is the one thing that can end in one. wire.go builds a single value, and launcherHost at the end
+// of this file is where its methods meet the renderer's names, so internal/tui sees one interface
+// and never the library.
 //
 // The bodies live here rather than in wire.go because they name facade types — RunningInstance,
 // StopResult, ResolvedProfile — and this file is the only place in apogee that may (see the header).
@@ -548,7 +550,7 @@ func (w launcherWiring) enabled() (string, error) {
 	return path, nil
 }
 
-// on is [tui.Options.LauncherEnabled]: enabled()'s question without the path, for the one caller
+// on is [tui.LauncherHost.Enabled]: enabled()'s question without the path, for the one caller
 // that has to ask it BEFORE it commits to anything — the renderer's pre-latch check on
 // `/unload-model` and `/stop-server` (actuation.go). It is answerable on the Update loop because the
 // answer is one atomic load: no config is read here, which is the whole difference between this and
@@ -558,7 +560,7 @@ func (w launcherWiring) on() bool {
 	return err == nil
 }
 
-// profiles is [tui.Options.LaunchProfiles]: the row assembly above, projected onto the renderer's
+// profiles is [tui.LauncherHost.Profiles]: the row assembly above, projected onto the renderer's
 // type. A fresh config read every call is the point (ADR 0029 D4) — the picker opens on what the
 // launcher's config says now, not on what it said at launch.
 //
@@ -589,7 +591,7 @@ func (w launcherWiring) profiles() ([]tui.LaunchProfileChoice, error) {
 	return choices, nil
 }
 
-// load is [tui.Options.LoadProfile], the composite verb of ADR 0029 D2: activate the Launch profile,
+// load is [tui.LauncherHost.Load], the composite verb of ADR 0029 D2: activate the Launch profile,
 // then decide whether the session has to follow it — and, when it does, resolve the move it would
 // take WITHOUT performing it (see the move's own note below).
 //
@@ -722,7 +724,7 @@ func (startupTimeout) Is(target error) bool { return target == tui.ErrStartupTim
 
 func (e startupTimeout) Unwrap() error { return e.error }
 
-// unload is [tui.Options.UnloadServer]: free the model of the server this session is talking to. On a
+// unload is [tui.LauncherHost.Unload]: free the model of the server this session is talking to. On a
 // MANAGED backend the launcher's own semantic is a full stop (the model is baked into the process
 // arguments), which is why the projected result keeps ServerStopped — the note has to be able to say
 // which of the two things happened.
@@ -735,7 +737,7 @@ func (w launcherWiring) unload(endpoint string) (tui.ActuationResult, error) {
 	return actuationResult(instance, res, err)
 }
 
-// stop is [tui.Options.StopServer]: stop the server at the session's endpoint outright, whether or
+// stop is [tui.LauncherHost.Stop]: stop the server at the session's endpoint outright, whether or
 // not the launcher started it (its ADR-0001). Afterwards the heartbeat's existing offline handling
 // owns the display — this verb reports only what it did.
 func (w launcherWiring) stop(endpoint string) (tui.ActuationResult, error) {
@@ -806,7 +808,7 @@ func actuationResult(on *llamalauncher.RunningInstance, res *llamalauncher.StopR
 // The start-up restore — remember-model's boot half
 // ----------------------------------------------------------------------------
 
-// restore is [tui.Options.RestoreProfile]: what this start-up owes the `launch-profile:` its server
+// restore is [tui.LauncherHost.Restore]: what this start-up owes the `launch-profile:` its server
 // was left on. It is the read-side twin of recordLaunchProfile — that seam writes the pointer on a
 // committed load, this one decides what to do with it on the next boot — and it answers with a
 // decision rather than with facts, because every question it settles is one only this layer can ask.
@@ -909,3 +911,62 @@ func restoreYieldNote(profile, serving string) string {
 	}
 	return "the launcher is already serving " + serving + " — " + profile + " not restored"
 }
+
+// ----------------------------------------------------------------------------
+// The same seams as the renderer sees them (ADR 0054)
+// ----------------------------------------------------------------------------
+
+// launcherHost is this binary's [tui.LauncherHost]: the seven acts over the one llama-launcher this
+// session may be fronted by — what it can be made to serve, the verb that makes it, the two that
+// free or stop the server the session is on, the on/off question they ask first, the pointer a
+// committed load records, and the boot check that acts on it (ADR 0054). It holds the wiring itself
+// rather than seven closures over it, the [serverHost] posture: every act reads live state the
+// wiring owns — the launcher path holder the session's server moves, the `servers:` list the
+// recording addresses, and the ops behind them all.
+//
+// Every act is one of the methods above or in wire_verbs.go, unchanged by the regrouping — they read
+// what they always read, refuse what they always refused, and answer what they always answered. This
+// value is only where the renderer's seven names meet them.
+type launcherHost struct{ w *rootWiring }
+
+// Acts is the one flag [tui.LauncherActs] carries: this binary answers the boot restore, because the
+// whole ladder behind it — the toggle, the pointer, the launcher's own config, the discovery sweep —
+// is knowledge only this layer has. The false answer is a Driver's composition (ADR 0031), never
+// this one's; a session with nothing to restore is told so by restore() itself.
+func (h launcherHost) Acts() tui.LauncherActs { return tui.LauncherActs{CanRestore: true} }
+
+// Enabled is the pre-latch question: is the integration on for the server this session is on right
+// now? One atomic load, answerable on the Update loop.
+func (h launcherHost) Enabled() bool { return h.w.launcherSeams.on() }
+
+// Profiles reads the launcher's config FRESH and projects its rows (ADR 0029 D4).
+func (h launcherHost) Profiles() ([]tui.LaunchProfileChoice, error) {
+	return h.w.launcherSeams.profiles()
+}
+
+// Load activates a Launch profile and resolves the move it implies without performing it — the
+// composite verb of ADR 0029 D2, blocking, run under the renderer's actuation latch.
+func (h launcherHost) Load(name string, progress func(string)) (tui.ProfileLoadResult, error) {
+	return h.w.launcherSeams.load(name, progress)
+}
+
+// Unload frees the model of the server at endpoint, and Stop stops that server outright (ADR 0029
+// D3). Both refuse an endpoint this launcher does not manage rather than guessing an address.
+func (h launcherHost) Unload(endpoint string) (tui.ActuationResult, error) {
+	return h.w.launcherSeams.unload(endpoint)
+}
+
+func (h launcherHost) Stop(endpoint string) (tui.ActuationResult, error) {
+	return h.w.launcherSeams.stop(endpoint)
+}
+
+// RecordProfile persists the `launch-profile:` of the ACTUATING entry (wire_verbs.go), and answers
+// whether it wrote: the toggle off, and an entry the list no longer carries, are silent falses only
+// this layer can tell apart from a failure.
+func (h launcherHost) RecordProfile(profile string) (bool, error) {
+	return h.w.recordLaunchProfile(profile)
+}
+
+// Restore is the boot half of `remember-model:`: what this start-up owes the profile its server was
+// last left on, decided here and actuated by the renderer through the ordinary `/model` latch.
+func (h launcherHost) Restore() (tui.ProfileRestore, error) { return h.w.launcherSeams.restore() }

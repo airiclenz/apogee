@@ -158,7 +158,7 @@ deeper into a list entry, the same shape
   `internal/config/options.go`, `internal/config/registry.go`, `internal/config/defaults/config.yaml`);
   the entry-scoped writer (`internal/config/configwrite.go`, one concern per package,
   [ADR 0043](0043-files-split-by-concern-and-config-gets-a-package.md)); the three seams
-  `RecordModelChoice`, `RecordLaunchProfile` and `RestoreProfile` with the `ProfileRestore` answer
+  `RecordModelChoice`, `LauncherHost.RecordProfile` and `LauncherHost.Restore` with the `ProfileRestore` answer
   (`internal/tui/tui.go`), called at the explicit-pick site (`internal/tui/picker.go`), at the two
   load-commit folds and in the boot fold (`internal/tui/actuation.go`); their implementations and the
   restore's whole decision ladder in the composition root (`cmd/apogee/wire_verbs.go`,

@@ -370,6 +370,169 @@ type ServerActs struct {
 	CanBind bool
 }
 
+// LauncherHost is the llama-launcher seam whole: the Launch profiles this machine can be made to
+// serve, the verb that activates one, the two verbs that free or stop the server the session is on,
+// the pointer a committed load records for the next session, and the boot check that acts on that
+// pointer — one host capability rather than seven bare funcs (ADR 0054). It is defined here like
+// [ServerHost], so the renderer offers rows and narrates an actuation while the composition root
+// owns every config path, address and library type behind them — ADR 0029 D1's rule that no
+// launcher vocabulary reaches this package.
+//
+// The split is [ServerHost]'s exactly: the TUI owns WHEN — the human's pick at idle, the actuation
+// latch that serializes every blocking verb, the one boot check [Model.Init] issues — and the host
+// owns WHAT, because the launcher's config, the discovery sweep it drives and the addresses they
+// imply are things the renderer never reads.
+//
+// A nil host means the integration is not configured on this machine (`llama-launcher: off`, or
+// auto-detect found no launcher config): `/model` then offers what the server itself advertises,
+// `/unload-model` and `/stop-server` degrade to a note naming the key, no load is recorded and no
+// boot restore is attempted. One answer covers the whole family because these seams were always
+// wired together or not at all — the posture of every hand-built Options, and of every Driver that
+// is not the interactive TUI.
+//
+// A host that IS wired says the rest for itself, in two different ways. Whether the integration is
+// on RIGHT NOW moved INSIDE the seams when `llama-launcher:` became live-editable (ADR 0037): the
+// key belongs to a `servers:` entry, so enablement follows the session's server, and every verb
+// answers [ErrNoLauncher] while it is off — the same sentence the nil host above says. Whether this
+// host performs the boot restore AT ALL is the one thing a caller must know BEFORE it calls, since
+// Init either issues that Cmd or does not, so it is reported by [LauncherHost.Acts] instead
+// (ADR 0054 decision 3a).
+type LauncherHost interface {
+	// Acts says which of this host's acts the renderer has to know about before it performs one.
+	// It is asked where the per-func nil check was, and for the same reason it could not become
+	// "call it and see": issuing the call IS the act.
+	Acts() LauncherActs
+
+	// Enabled reports whether the llama-launcher integration is switched ON right now. Since
+	// `llama-launcher:` became editable mid-session (ADR 0037) the verbs below can be wired for the
+	// life of the session with the answer moving INSIDE them, so "is there a launcher here" is no
+	// longer a question one check settles once — and the two actuation verbs have to settle it
+	// BEFORE they take the latch, or a session with no launcher shows a frame of "unloading…" in the
+	// footer on its way to the same refusal.
+	//
+	// It is the cheap, synchronous half of the check every verb makes again for itself: answerable
+	// on the Update loop from what the binary already holds, never a config read or a dial.
+	//
+	// A host that cannot answer says true — being unable to tell is not evidence that the
+	// integration is off, and the verbs are then let through to answer for themselves, which is the
+	// right posture for a Driver whose seams cannot change their mind.
+	Enabled() bool
+
+	// Profiles lists the Launch profiles the launcher's config defines — what `/model` offers on a
+	// host with a launcher, re-read FRESH every time the picker opens (ADR 0029 D4), so a profile
+	// added in the launcher's own TUI a moment ago is offered here without restarting apogee. The
+	// binary owns the read because it is the only layer that knows the launcher exists at all; the
+	// renderer receives rows it can label and pick from, and nothing else.
+	//
+	// The error is the one failure that sinks the list — no config at a configured path, a config
+	// that will not parse — and reaches the human as a one-line note rather than an overlay. A single
+	// profile that cannot be resolved is NOT that failure: it is simply absent from the rows, because
+	// one moved model file must not cost the user their other nine profiles.
+	//
+	// [ErrNoLauncher] is the integration being off rather than a failure of the list, and `/model`
+	// reads it as "offer the models the server itself advertises".
+	Profiles() ([]LaunchProfileChoice, error)
+
+	// Load activates the named Launch profile and reports what the session must adopt — the
+	// composite verb of ADR 0029 D2. The binary drives the launcher (a BLOCKING call: up to ~30 s
+	// waiting for health, plus a stop escalation when a restart displaces an occupant, and minutes
+	// for a large model), then decides whether the session has to move at all: a profile that
+	// resolves to the endpoint this session is already on moves nothing — no Move in the result, and
+	// the next beat observes the new model and rebinds through the ordinary path — while one that
+	// resolves elsewhere is FOLLOWED with the same fold `/server` performs, reported as a resolved
+	// [ProfileLoadResult.Move] the completion fold commits and hands to that fold. No result here is
+	// ever a binding; only a [ServerHost.Beat] binds (ADR 0029 D1).
+	//
+	// Because it blocks, the TUI runs it on a Cmd goroutine and holds the actuation latch across it —
+	// that latch is also the per-address serialization the launcher's contract demands of its caller.
+	// progress receives the launcher's lifecycle steps one call per step, ON THE CALLING GOROUTINE, so
+	// the TUI pumps them into the transcript rather than rendering from them; nil is safe.
+	Load(name string, progress func(step string)) (ProfileLoadResult, error)
+
+	// Unload frees the model of the server this session is talking to, and Stop stops that server
+	// outright (ADR 0029 D3). Both take the session's endpoint rather than reading one: the renderer
+	// is the side that knows which server the session is on — it may have moved since launch — while
+	// the binary is the side that knows which addresses the launcher's config implies. An endpoint the
+	// launcher does not manage comes back as an error naming it; neither verb ever guesses an address
+	// to act on, because the one mistake available here stops somebody else's server.
+	//
+	// Both BLOCK for the stop escalation (~20 s worst case) and run under Load's latch, for the same
+	// serialization reason. The result carries the steps taken EVEN WHEN the error is non-nil — how
+	// far a stop got before it failed is exactly what the human needs to know — so the caller renders
+	// the steps first and the error after.
+	Unload(endpoint string) (ActuationResult, error)
+	Stop(endpoint string) (ActuationResult, error)
+
+	// RecordProfile persists the Launch profile a load just COMMITTED as the one this server comes
+	// back on NEXT time — the `launch-profile:` key of a launcher-fronted `servers:` entry, written
+	// only while the `remember-model:` toggle is on. It is the launcher class's half of what
+	// [Options.RecordModelChoice] does for a plain multi-model server: that class remembers a wire
+	// model id, this one remembers the profile that loads one, and no entry carries both — a
+	// launcher-fronted `model:` is a deliberately empty discovery hint.
+	//
+	// The renderer calls it with the profile name the load activated and knows nothing else about it.
+	// WHICH entry the pointer belongs on is the binary's question in a stronger sense than it is for
+	// [Options.RecordModelChoice]: a load can move the session onto a server no `servers:` entry
+	// names, and the pointer's home is the ACTUATING entry either way — the one whose
+	// `llama-launcher:` key this session's launcher path follows — which only the binary holds.
+	//
+	// It answers whether it WROTE, exactly as [ServerHost.RecordChoice] does: the toggle off, and an
+	// actuating entry that cannot be identified, are both false with no error, and the renderer then
+	// claims no recording. A host that records nothing answers that way for every profile, leaving
+	// every load session-scoped, which is the behaviour this key was introduced to replace.
+	//
+	// Only a COMMITTED load reaches it. A load that failed, one whose health wait timed out, and one the
+	// session could not follow record nothing, because this key names what the launcher was made to
+	// serve rather than what somebody asked for. `/unload-model` and `/stop-server` leave it exactly
+	// where it is: freeing the GPU now is not the same as forgetting which model this server runs.
+	//
+	// It is best-effort persistence of something that ALREADY happened, and like the two seams it
+	// sits beside it is synchronous — one small file, spliced and renamed — and called on the Update
+	// loop, so an error is a note and never an undo.
+	RecordProfile(profile string) (recorded bool, err error)
+
+	// Restore asks the binary, ONCE at start-up, what to do about a `launch-profile:` the session's
+	// server was last left on — the boot half of `remember-model:`, whose recording half is
+	// [LauncherHost.RecordProfile]. [Model.Init] issues it as one Cmd beside the first beat, so it is
+	// answered off the Update loop: answering it re-reads the launcher's config and probes for running
+	// servers, neither of which may block the paint. A host that does not answer it at all says so
+	// through [LauncherActs.CanRestore], and no Cmd goes out.
+	//
+	// Every question behind the answer is the binary's — whether the toggle is on, whether the
+	// actuating entry carries a pointer at all, whether the launcher still defines that profile, and
+	// whether anything is already serving under that launcher. What crosses the seam is a DECISION:
+	// load this, say this, or do nothing. The renderer acts on it through the very latch a human's
+	// `/model` pick takes ([Model.startProfileLoad]), which is what keeps the restore one more
+	// actuation rather than a second way to bind — the latch blocks what it always blocks, a beat
+	// landing in its shadow is stashed rather than driven into the engine, and the completion fold
+	// commits whatever moved and fires the beat that binds (ADR 0029 D5).
+	//
+	// The error is the one failure worth a line: a launcher config that could not be read at the path
+	// the entry names. It reaches the transcript as a note and is fatal to nothing — the session is
+	// bound to whatever start-up bound it, and a restore that did not happen costs a sentence rather
+	// than a server.
+	Restore() (ProfileRestore, error)
+}
+
+// LauncherActs is a [LauncherHost]'s own answer to the acts whose absence the renderer has to know
+// about BEFORE it acts rather than after — the per-member half of the nil-means-unwired contract
+// (ADR 0054 decision 3a), and [ServerActs]' counterpart for this family. The zero value is the
+// unwired host, which is what a nil [Options.Launcher] answers with, so one shape covers both
+// granularities and no caller writes two checks.
+//
+// One act needs a flag and the other six do not. The four verbs say it in their own answers
+// ([ErrNoLauncher], the very sentence an absent launcher earns), [LauncherHost.RecordProfile] says
+// it by answering false, and [LauncherHost.Enabled] is a report rather than an act.
+type LauncherActs struct {
+	// CanRestore is whether this host answers the start-up restore check at all. False issues no
+	// start-up Cmd, so [Model.Init]'s batch collapses to exactly what it held before the boot restore
+	// existed — the posture of every hand-built Options and of every Driver that is not the
+	// interactive TUI, which builds no Model and could not reach the seam anyway.
+	// [LauncherHost.Restore] cannot say it: "nothing to restore" is a decision the host MADE, never a
+	// statement that it makes none.
+	CanRestore bool
+}
+
 // ----------------------------------------------------------------------------
 // The engine seam (phase-2 detail plan §3 C5)
 // ----------------------------------------------------------------------------
@@ -887,126 +1050,17 @@ type Options struct {
 	// introduced to replace; every hand-built Options keeps it.
 	RecordModelChoice func(model string) (recorded bool, err error)
 
-	// RecordLaunchProfile persists the Launch profile a load just COMMITTED as the one this server comes
-	// back on NEXT time — the `launch-profile:` key of a launcher-fronted `servers:` entry, written only
-	// while the `remember-model:` toggle is on. It is the launcher class's half of what
-	// [Options.RecordModelChoice] does for a plain multi-model server: that class remembers a wire model
-	// id, this one remembers the profile that loads one, and no entry carries both — a launcher-fronted
-	// `model:` is a deliberately empty discovery hint.
+	// Launcher is the llama-launcher seam whole ([LauncherHost]): the Launch profiles this machine
+	// defines, the verb that activates one, the two that free or stop the server this session is on,
+	// the `launch-profile:` a committed load records, and the boot check that acts on that pointer.
+	// The seven acts were seven bare funcs and are one interface for the reason [ServerHost] is:
+	// they are faces of one capability a host either has or does not have (ADR 0054), and this
+	// family in particular was always wired together or not at all.
 	//
-	// The renderer calls it with the profile name the load activated and knows nothing else about it.
-	// WHICH entry the pointer belongs on is the binary's question in a stronger sense than it is for the
-	// two seams above: a load can move the session onto a server no `servers:` entry names, and the
-	// pointer's home is the ACTUATING entry either way — the one whose `llama-launcher:` key this
-	// session's launcher path follows — which only the binary holds.
-	//
-	// It answers whether it WROTE, exactly as [ServerHost.RecordChoice] does: the toggle off, and an
-	// actuating entry that cannot be identified, are both false with no error, and the renderer then
-	// claims no recording.
-	//
-	// Only a COMMITTED load reaches it. A load that failed, one whose health wait timed out, and one the
-	// session could not follow record nothing, because this key names what the launcher was made to
-	// serve rather than what somebody asked for. `/unload-model` and `/stop-server` leave it exactly
-	// where it is: freeing the GPU now is not the same as forgetting which model this server runs.
-	//
-	// It is best-effort persistence of something that ALREADY happened, and like the two seams above it
-	// is synchronous — one small file, spliced and renamed — and called on the Update loop, so an error
-	// is a note and never an undo.
-	//
-	// nil ⇒ nothing is recorded and every load is session-scoped, which is the behaviour this key was
-	// introduced to replace; every hand-built Options keeps it.
-	RecordLaunchProfile func(profile string) (recorded bool, err error)
-
-	// LaunchProfiles lists the Launch profiles the launcher's config defines — what `/model` offers on
-	// a host with a launcher, re-read FRESH every time the picker opens (ADR 0029 D4), so a profile
-	// added in the launcher's own TUI a moment ago is offered here without restarting apogee. The
-	// binary owns the read because it is the only layer that knows the launcher exists at all; the
-	// renderer receives rows it can label and pick from, and nothing else.
-	//
-	// The error is the one failure that sinks the list — no config at a configured path, a config
-	// that will not parse — and reaches the human as a one-line note rather than an overlay. A single
-	// profile that cannot be resolved is NOT that failure: it is simply absent from the rows, because
-	// one moved model file must not cost the user their other nine profiles.
-	//
-	// nil ⇒ the llama-launcher integration is not configured on this host (`llama-launcher: off`, or
-	// auto-detect found no launcher config): `/model` then offers what the server itself advertises,
-	// and `/unload-model`/`/stop-server` degrade to a note naming the key. The four launcher seams
-	// are wired together or not at all, so one nil check speaks for all of them.
-	LaunchProfiles func() ([]LaunchProfileChoice, error)
-
-	// LoadProfile activates the named Launch profile and reports what the session must adopt — the
-	// composite verb of ADR 0029 D2. The binary drives the launcher (a BLOCKING call: up to ~30 s
-	// waiting for health, plus a stop escalation when a restart displaces an occupant, and minutes
-	// for a large model), then decides whether the session has to move at all: a profile that
-	// resolves to the endpoint this session is already on moves nothing — no Move in the result, and
-	// the next beat observes the new model and rebinds through the ordinary path — while one that
-	// resolves elsewhere is FOLLOWED with the same fold `/server` performs, reported as a resolved
-	// [ProfileLoadResult.Move] the completion fold commits and hands to that fold. No result here is
-	// ever a binding; only a Beat binds (ADR 0029 D1).
-	//
-	// Because it blocks, the TUI runs it on a Cmd goroutine and holds the actuation latch across it —
-	// that latch is also the per-address serialization the launcher's contract demands of its caller.
-	// progress receives the launcher's lifecycle steps one call per step, ON THE CALLING GOROUTINE, so
-	// the TUI pumps them into the transcript rather than rendering from them; nil is safe.
-	//
-	// nil ⇒ unwired; see LaunchProfiles.
-	LoadProfile func(name string, progress func(step string)) (ProfileLoadResult, error)
-
-	// UnloadServer frees the model of the server this session is talking to, and StopServer stops
-	// that server outright (ADR 0029 D3). Both take the session's endpoint rather than reading one:
-	// the renderer is the side that knows which server the session is on — it may have moved since
-	// launch — while the binary is the side that knows which addresses the launcher's config implies.
-	// An endpoint the launcher does not manage comes back as an error naming it; neither verb ever
-	// guesses an address to act on, because the one mistake available here stops somebody else's
-	// server.
-	//
-	// Both BLOCK for the stop escalation (~20 s worst case) and run under LoadProfile's latch, for
-	// the same serialization reason. The result carries the steps taken EVEN WHEN the error is
-	// non-nil — how far a stop got before it failed is exactly what the human needs to know — so the
-	// caller renders the steps first and the error after.
-	//
-	// nil ⇒ unwired; see LaunchProfiles.
-	UnloadServer func(endpoint string) (ActuationResult, error)
-	StopServer   func(endpoint string) (ActuationResult, error)
-
-	// LauncherEnabled reports whether the llama-launcher integration is switched ON right now. Since
-	// `llama-launcher:` became editable mid-session (ADR 0037) the four seams above can be wired for
-	// the life of the session with the answer moving INSIDE them, so "is there a launcher here" is no
-	// longer a question a nil check settles once — and the two actuation verbs have to settle it
-	// BEFORE they take the latch, or a session with no launcher shows a frame of "unloading…" in the
-	// footer on its way to the same refusal.
-	//
-	// It is the cheap, synchronous half of the check every verb makes again for itself: answerable
-	// on the Update loop from what the binary already holds, never a config read or a dial.
-	//
-	// nil ⇒ unknown, and the verbs are let through to answer for themselves — the posture of every
-	// hand-built Options, and the right one for a Driver whose seams cannot change their mind.
-	LauncherEnabled func() bool
-
-	// RestoreProfile asks the binary, ONCE at start-up, what to do about a `launch-profile:` the
-	// session's server was last left on — the boot half of `remember-model:`, whose recording half is
-	// [Options.RecordLaunchProfile]. [Model.Init] issues it as one Cmd beside the first beat, so it is
-	// answered off the Update loop: answering it re-reads the launcher's config and probes for running
-	// servers, neither of which may block the paint.
-	//
-	// Every question behind the answer is the binary's — whether the toggle is on, whether the
-	// actuating entry carries a pointer at all, whether the launcher still defines that profile, and
-	// whether anything is already serving under that launcher. What crosses the seam is a DECISION:
-	// load this, say this, or do nothing. The renderer acts on it through the very latch a human's
-	// `/model` pick takes ([Model.startProfileLoad]), which is what keeps the restore one more
-	// actuation rather than a second way to bind — the latch blocks what it always blocks, a beat
-	// landing in its shadow is stashed rather than driven into the engine, and the completion fold
-	// commits whatever moved and fires the beat that binds (ADR 0029 D5).
-	//
-	// The error is the one failure worth a line: a launcher config that could not be read at the path
-	// the entry names. It reaches the transcript as a note and is fatal to nothing — the session is
-	// bound to whatever start-up bound it, and a restore that did not happen costs a sentence rather
-	// than a server.
-	//
-	// nil ⇒ no restore is ever attempted. That is every hand-built Options, and every Driver that is
-	// not the interactive TUI: a headless run builds no Model, so this seam has no caller there and
-	// the boot restore is unreachable by construction.
-	RestoreProfile func() (ProfileRestore, error)
+	// nil ⇒ the integration is not configured on this host, and every degrade that follows from it —
+	// `/model` falling back to the advertised models, the one sentence both actuation verbs answer
+	// with, a load nobody records and a start-up that restores nothing — is [LauncherHost]'s to state.
+	Launcher LauncherHost
 
 	// Schedules is the scheduler this session's Schedules live in (the [Scheduler] seam the binary
 	// backs with a live schedule.Scheduler); nil ⇒ scheduling is unwired and both verbs say so.
@@ -1167,7 +1221,7 @@ type KeyMigrationOffer struct {
 // LaunchProfileChoice is one Launch profile `/model` offers (CONTEXT.md: a Launch profile
 // is the LAUNCH-side description of a model — model file, server, flags — owned by the launcher's
 // config, opposite the request-side Model profile). Name does two jobs with one value, the
-// [ServerChoice] shape: it labels the row, and it is the name [Options.LoadProfile] is called with.
+// [ServerChoice] shape: it labels the row, and it is the name [LauncherHost.Load] is called with.
 // Everything else is what the choice is made on and is display only.
 //
 // It carries the launcher's facts PROJECTED, never a launcher type — the same posture that keeps
@@ -1209,7 +1263,7 @@ type ProfileLoadResult struct {
 	Notices []string // launcher notices to surface as transcript notes, in order
 }
 
-// ProfileRestore is the start-up restore check's answer ([Options.RestoreProfile]): the one Launch
+// ProfileRestore is the start-up restore check's answer ([LauncherHost.Restore]): the one Launch
 // profile this session opens by loading, or the one line saying why it is not loading one.
 //
 // The two fields are alternatives, and the ZERO value is the ordinary answer — `remember-model:` off,

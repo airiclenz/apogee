@@ -222,6 +222,27 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **The llama-launcher seam is one named host interface (`internal/tui/tui.go`, ADR 0054).**
+  `Options` carried seven one-purpose bare `func` fields for what is one thing a machine either has
+  or has not — `LaunchProfiles` / `LoadProfile` / `UnloadServer` / `StopServer` /
+  `LauncherEnabled` / `RecordLaunchProfile` / `RestoreProfile` — so `/model`'s choice of offering,
+  both actuation verbs, the load recording and the boot restore each read their own nil check for
+  the one question "is there a launcher here". They are `LauncherHost` now, declared beside
+  `ServerHost`, `SettingsHost` and `SchemeHost`: `Enabled`, `Profiles`, `Load`, `Unload`, `Stop`,
+  `RecordProfile`, `Restore`, with one doc comment stating what the family is and who owns what
+  behind it, and `Options` down from 53 fields to 47. The composition root implements it with one
+  adapter over the verbs that already existed (`cmd/apogee/launcher.go`), and the renderer's tests
+  get one fake for the family, wired one act at a time, in place of seven fields set individually.
+  The nil-means-unwired contract is preserved whole: a nil host is a machine with no launcher —
+  `/model` offers what the server itself advertises, both actuation verbs answer the one sentence
+  naming the key, nothing is recorded and no boot restore is attempted — a wired host says the
+  integration being switched off from inside each verb (`ErrNoLauncher`, ADR 0037), and the one act
+  the renderer decides ABOUT before it performs one — does this host answer the start-up restore at
+  all — is reported by `Acts() LauncherActs` rather than attempted, because issuing the Cmd would BE
+  the act (ADR 0054 decision 3a). Behaviour is unchanged: every degrade the seven nil funcs produced
+  is produced by the nil host, by an act's own answer, or by that flag, and the whole suite passes
+  with no expectation changed.
+
 - **The Upstream seam is one named host interface (`internal/tui/tui.go`, ADR 0054).** `Options`
   carried six one-purpose bare `func` fields for what is one thing a host either has or has not —
   `Heartbeat` / `Rebind` and `Servers` / `SwitchServer` / `BindServer` / `RecordServerChoice` — so

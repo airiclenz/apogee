@@ -809,7 +809,19 @@ cmd/apogee/wire_server.go
 
 **Commit:** `refactor(tui): fold the server and heartbeat option funcs into a ServerHost interface`
 
-## 27. Options: the launcher family becomes LauncherHost
+## 27. Options: the launcher family becomes LauncherHost — ✅ DONE (2026-08-20)
+
+NOTES (2026-08-20): `LauncherActs` carries exactly ONE flag where `ServerActs` carries four, and the interface's own doc says why. Six of the seven acts say their degrade in their own answer (ADR 0054 decision 3): the four verbs with `ErrNoLauncher` — already their answer for the integration being switched off — and `RecordProfile` with `false, nil`, while `Enabled` is a report rather than an act. `Restore` is the one that cannot: `restoreCmd` decides whether to ISSUE the start-up Cmd at all, and "nothing to restore" is a decision the host MADE rather than a statement that it makes none. `TestStartupRestoreIsSilentWhenUnwired` pins that boundary (a launcher-wired session whose restore member is absent issues no Cmd, so `Init`'s batch collapses to what it held before the feature existed), so the flag is what keeps that expectation unchanged.
+
+NOTES (2026-08-20): `Model.startServerActuation` lost its `act` parameter and now takes the verb alone, resolving the seam through the new `Model.endpointActuation` — the two endpoint verbs are members of one host rather than two fields a caller can hand over, and `commandrun.go` cannot name a method on a possibly-nil interface. The nil branch it guards is unchanged in meaning (a host that is not there answers the same sentence as one switched off) and the three test call sites changed in wiring form only.
+
+NOTES (2026-08-20): `Enabled`'s old "nil ⇒ unknown, let the verbs through" is now stated as the ANSWER a host that cannot tell gives — true — because a wired interface always has the method. `launcherOff()` reads `Launcher != nil && !Launcher.Enabled()`, so the nil host, the host answering false and the host answering true all behave exactly as their func-shaped predecessors did; `fakeLauncherHost` answers true for a nil member, which is what keeps `TestUnloadAndStopWithTheLauncherSwitchedOff` and its unwired sibling apart.
+
+NOTES (2026-08-20): the adapter lives in `cmd/apogee/launcher.go`, as the item's Files line says, and holds the wiring (`launcherHost struct{ w *rootWiring }`, the `serverHost` posture) rather than seven closures — six acts are `launcherWiring`'s own methods and the seventh is `wire_verbs.go`'s `recordLaunchProfile`, none of which moved. `ADR 0054` was NOT edited: item 27 introduces no new rule, it follows decision 3a, which item 26 wrote for it.
+
+NOTES (2026-08-20): six files outside the item's Files line carry the call sites and one changed prose pointer each — `internal/tui/{actuation,picker,commandrun,doc}.go` hold every reader of these seams, and `cmd/apogee/{doc,wire_live}.go` name them in prose. `docs/adr/0048` names two of the renamed seams in its live **Realisations** pointer list and was updated for that reason (item 8's LIVE pointer vs HISTORICAL record boundary); `docs/adr/0029`'s `LoadProfile` mentions are the LIBRARY's own API name and were left as written, as were the CHANGELOG's past entries, the archived plans and the pinned review.
+
+NOTES (2026-08-20): no new test file. The per-family fake is `fakeLauncherHost` (actuation_test.go) — one func per act, the documented unwired answer for any act a test leaves nil, and `Acts()` derived from whether the restore member is wired, so one nil func is one provable per-member degrade. It is reached through `launcherSeams(&opts)`, `serverSeams`' twin, which finds the host already on the Options instead of replacing it. Every changed test line is wiring FORM or a failure MESSAGE naming the seam it drives; the single collapse is `wire_test.go`'s five-member "is it wired" map, which becomes one non-nil-host check — the same claim at the family's granularity (ADR 0054 decision 2). No expectation was changed, added, removed or weakened.
 
 **Source:** review §Candidate 9. Depends on item 25.
 

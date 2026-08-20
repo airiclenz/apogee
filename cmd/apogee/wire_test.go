@@ -2703,23 +2703,18 @@ func TestRunRootWiresTheLauncherSeamsForTheWholeSession(t *testing.T) {
 				t.Fatalf("runRoot: %v", err)
 			}
 
-			for member, wired := range map[string]bool{
-				"LaunchProfiles":  rec.opts.LaunchProfiles != nil,
-				"LoadProfile":     rec.opts.LoadProfile != nil,
-				"UnloadServer":    rec.opts.UnloadServer != nil,
-				"StopServer":      rec.opts.StopServer != nil,
-				"LauncherEnabled": rec.opts.LauncherEnabled != nil,
-			} {
-				if !wired {
-					t.Errorf("tui.Options.%s is nil; want every launcher seam wired for the session", member)
-				}
+			// One check for the whole family now that the seams are one interface (ADR 0054): the
+			// members were always wired together or not at all, so a non-nil host is exactly what
+			// "every launcher seam wired for the session" used to mean member by member.
+			if rec.opts.Launcher == nil {
+				t.Fatal("tui.Options.Launcher is nil; want the launcher host wired for the session")
 			}
 
-			// The fifth seam is the same fact asked without a verb: it is what lets the two actuation
+			// Enabled is the same fact asked without a verb: it is what lets the two actuation
 			// verbs refuse a switched-off session on the keypress, before the latch and the footer's
 			// "unloading…" frame.
-			if got := rec.opts.LauncherEnabled(); got != tt.enabled {
-				t.Errorf("LauncherEnabled() = %v; want the integration reported %v", got, tt.enabled)
+			if got := rec.opts.Launcher.Enabled(); got != tt.enabled {
+				t.Errorf("Launcher.Enabled() = %v; want the integration reported %v", got, tt.enabled)
 			}
 
 			if !tt.probeVerbs {
@@ -2728,12 +2723,12 @@ func TestRunRootWiresTheLauncherSeamsForTheWholeSession(t *testing.T) {
 			// What the seams SAY is where off and on differ now. A named config that is not there
 			// fails as the launcher's own missing-file error, which is emphatically not the
 			// integration being off.
-			_, err := rec.opts.LaunchProfiles()
+			_, err := rec.opts.Launcher.Profiles()
 			if got := errors.Is(err, tui.ErrNoLauncher); got == tt.enabled {
-				t.Errorf("LaunchProfiles error = %v (ErrNoLauncher = %v); want enabled = %v", err, got, tt.enabled)
+				t.Errorf("Launcher.Profiles error = %v (ErrNoLauncher = %v); want enabled = %v", err, got, tt.enabled)
 			}
-			if _, err := rec.opts.UnloadServer(upstream.URL); errors.Is(err, tui.ErrNoLauncher) == tt.enabled {
-				t.Errorf("UnloadServer error = %v; want the integration reported %v", err, tt.enabled)
+			if _, err := rec.opts.Launcher.Unload(upstream.URL); errors.Is(err, tui.ErrNoLauncher) == tt.enabled {
+				t.Errorf("Launcher.Unload error = %v; want the integration reported %v", err, tt.enabled)
 			}
 		})
 	}
@@ -2768,27 +2763,27 @@ func TestSwitchServerFollowsTheEntrysLauncher(t *testing.T) {
 		t.Fatalf("runRoot: %v", err)
 	}
 
-	if rec.opts.LauncherEnabled() {
-		t.Fatal("LauncherEnabled() = true on a startup entry that names no launcher")
+	if rec.opts.Launcher.Enabled() {
+		t.Fatal("Launcher.Enabled() = true on a startup entry that names no launcher")
 	}
 	if _, err := rec.opts.Server.Switch("local"); err != nil {
 		t.Fatalf("SwitchServer(local): %v", err)
 	}
-	if !rec.opts.LauncherEnabled() {
-		t.Error("LauncherEnabled() = false after switching onto the launcher-fronted entry")
+	if !rec.opts.Launcher.Enabled() {
+		t.Error("Launcher.Enabled() = false after switching onto the launcher-fronted entry")
 	}
 	// And it is THAT entry's config the verbs now read: the file is not there, so the launcher's own
 	// missing-file error names it — which is emphatically not the integration being off.
-	if _, err := rec.opts.LaunchProfiles(); !strings.Contains(fmt.Sprint(err), launcherYAML) {
-		t.Errorf("LaunchProfiles error = %v; want the entry's own config path %q named", err, launcherYAML)
+	if _, err := rec.opts.Launcher.Profiles(); !strings.Contains(fmt.Sprint(err), launcherYAML) {
+		t.Errorf("Launcher.Profiles error = %v; want the entry's own config path %q named", err, launcherYAML)
 	}
 
 	// A switch that resolves to nothing moved no session, so it installs nothing either.
 	if _, err := rec.opts.Server.Switch("nope"); err == nil {
 		t.Fatal("SwitchServer accepted a name no entry carries")
 	}
-	if !rec.opts.LauncherEnabled() {
-		t.Error("LauncherEnabled() = false after a REFUSED switch; the session never left the launcher's server")
+	if !rec.opts.Launcher.Enabled() {
+		t.Error("Launcher.Enabled() = false after a REFUSED switch; the session never left the launcher's server")
 	}
 
 	// Leaving turns it off again: the remote server has no launcher in front of it, and `/model`
@@ -2796,11 +2791,11 @@ func TestSwitchServerFollowsTheEntrysLauncher(t *testing.T) {
 	if _, err := rec.opts.Server.Switch("remote"); err != nil {
 		t.Fatalf("SwitchServer(remote): %v", err)
 	}
-	if rec.opts.LauncherEnabled() {
-		t.Error("LauncherEnabled() = true after switching back to an entry that names no launcher")
+	if rec.opts.Launcher.Enabled() {
+		t.Error("Launcher.Enabled() = true after switching back to an entry that names no launcher")
 	}
-	if _, err := rec.opts.LaunchProfiles(); !errors.Is(err, tui.ErrNoLauncher) {
-		t.Errorf("LaunchProfiles error = %v; want tui.ErrNoLauncher off the launcher's server", err)
+	if _, err := rec.opts.Launcher.Profiles(); !errors.Is(err, tui.ErrNoLauncher) {
+		t.Errorf("Launcher.Profiles error = %v; want tui.ErrNoLauncher off the launcher's server", err)
 	}
 }
 
@@ -2827,17 +2822,17 @@ func TestBindServerInstallsTheEntrysLauncher(t *testing.T) {
 		t.Fatalf("runRoot: %v", err)
 	}
 
-	if rec.opts.LauncherEnabled() {
-		t.Fatal("LauncherEnabled() = true before anything was bound")
+	if rec.opts.Launcher.Enabled() {
+		t.Fatal("Launcher.Enabled() = true before anything was bound")
 	}
 	if _, err := rec.opts.Server.Bind("local"); err != nil {
 		t.Fatalf("Bind: %v", err)
 	}
-	if !rec.opts.LauncherEnabled() {
-		t.Error("LauncherEnabled() = false after binding the launcher-fronted entry")
+	if !rec.opts.Launcher.Enabled() {
+		t.Error("Launcher.Enabled() = false after binding the launcher-fronted entry")
 	}
-	if _, err := rec.opts.LaunchProfiles(); !strings.Contains(fmt.Sprint(err), launcherYAML) {
-		t.Errorf("LaunchProfiles error = %v; want the bound entry's own config path %q named", err, launcherYAML)
+	if _, err := rec.opts.Launcher.Profiles(); !strings.Contains(fmt.Sprint(err), launcherYAML) {
+		t.Errorf("Launcher.Profiles error = %v; want the bound entry's own config path %q named", err, launcherYAML)
 	}
 }
 

@@ -82,7 +82,8 @@
 // command about to be persisted, then the entry rewrite;
 // launcher.go the only file
 // importing the llama-launcher facade, kept behind
-// the nil-degrading actuation seams (ADR 0029); schedule.go the scheduler's three
+// the nil-degrading [tui.LauncherHost] the seven launcher acts cross to the renderer as
+// (ADR 0029, ADR 0054); schedule.go the scheduler's three
 // composition seams — what a Firing runs against, when it may start, where it narrates
 // (ADR 0033).
 //

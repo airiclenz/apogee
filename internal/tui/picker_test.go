@@ -1616,9 +1616,7 @@ func TestModelPickerOffersProfilesWhileOffline(t *testing.T) {
 // in a blocking launcher verb that changes the server the running Exchange is talking to.
 func TestModelCommandIsIdleOnlyWithTheLauncher(t *testing.T) {
 	fake := newLauncher()
-	opts := testOpts
-	opts.LaunchProfiles = fake.list
-	opts.LoadProfile = fake.load
+	opts := launcherOpts(fake)
 	m := newTestModelEng(t, &fakeEngine{}, opts)
 	m, _ = typeCommand(t, m, "open the exchange")
 	if m.state != stateRunning {

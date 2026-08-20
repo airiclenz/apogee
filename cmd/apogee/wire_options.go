@@ -98,30 +98,18 @@ func (w *rootWiring) options() tui.Options {
 		// key can honestly record: an unlisted server, or a launcher-fronted entry, whose model is
 		// chosen by loading a Launch profile instead.
 		RecordModelChoice: w.recordModelChoice,
-		// And the same persistence for the OTHER class of server: a committed profile load becomes the
-		// `launch-profile:` key on the entry whose launcher this session actuates through, so that
-		// server comes back on the profile rather than on a wire model id it never names. Always wired
-		// for RecordModelChoice's reason — the toggle is read inside — and skipped silently while there
-		// is no actuating entry to record onto.
-		RecordLaunchProfile: w.recordLaunchProfile,
-		// The `/model`-over-profiles, `/unload-model`, `/stop-server` half (ADR 0029): browse the
-		// launcher's profiles, activate one — following it onto another server when it lives
-		// there — and free or stop the server this session is on. All four are wired for the life of
-		// the session and report tui.ErrNoLauncher while the integration is off, because `off` is now
-		// a value the human can change from inside the program (ADR 0037).
-		LaunchProfiles: w.launcherSeams.profiles,
-		LoadProfile:    w.launcherSeams.load,
-		UnloadServer:   w.launcherSeams.unload,
-		StopServer:     w.launcherSeams.stop,
-		// And the cheap question the two actuation verbs ask before they latch: is the integration on
-		// right now? It is one atomic load rather than a verb, so the refusal a switched-off session
-		// gets is synchronous — no "unloading…" frame for a verb that never runs.
-		LauncherEnabled: w.launcherSeams.on,
-		// And the boot half of remembering (`remember-model:`), asked once from the TUI's Init: should
-		// this session open by loading the Launch profile its server was left on? The whole decision is
-		// made here — toggle, pointer, whether the launcher still defines it, whether anything is
-		// already serving — and the renderer actuates the answer through the ordinary `/model` latch.
-		RestoreProfile: w.launcherSeams.restore,
+		// The whole llama-launcher seam as one named capability (ADR 0054, launcher.go): the
+		// `/model`-over-profiles, `/unload-model` and `/stop-server` half of ADR 0029 — browse the
+		// launcher's profiles, activate one, following it onto another server when it lives there,
+		// and free or stop the server this session is on — plus the cheap on/off question the two
+		// actuation verbs ask before they latch, the `launch-profile:` a committed load records, and
+		// the boot check the TUI's Init asks once.
+		//
+		// It is always wired here and reports tui.ErrNoLauncher from inside while the integration is
+		// off, because `off` is a value the human can change from inside the program (ADR 0037): the
+		// nil-host degrade tui.LauncherHost documents is what a Driver composes (ADR 0031), never
+		// this binary's.
+		Launcher: launcherHost{w: w},
 		// The resolved `ui:` block: which animation paints the status-line spinner, whether its
 		// colour loop runs, whether the transcript's scroll bar is painted at all, and how long the
 		// engine may go silent before the status line reports the quiet. Independent values, resolved

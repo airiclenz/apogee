@@ -251,12 +251,13 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	}
 	w.launcherPath = newLauncherPath(startPath, startEntry)
 
-	// The llama-launcher seams (ADR 0029 D1): four closures over the bridge in launcher.go, which is
-	// the only file that names the library. An entry's `llama-launcher:` value resolves HERE, at the
+	// The llama-launcher seams (ADR 0029 D1): the bridge in launcher.go, which is the only file that
+	// names the library, and which the projection hands the renderer as one tui.LauncherHost
+	// (launcherHost, ADR 0054). An entry's `llama-launcher:` value resolves HERE, at the
 	// layer that knows the launcher — into the path holder above, which is where "is the integration
-	// on" lives. The four members are wired UNCONDITIONALLY for that reason and answer
+	// on" lives. The members are wired UNCONDITIONALLY for that reason and answer
 	// tui.ErrNoLauncher while the holder is empty, which the renderer reads as the host having no
-	// launcher — the same degrade the nil seams used to express, now able to change its mind when
+	// launcher — the same degrade a nil host expresses, now able to change its mind when
 	// the session moves to another server.
 	//
 	// The toggle rides in as a closure over the LIVE holder, not as the bool the launch snapshot froze:
