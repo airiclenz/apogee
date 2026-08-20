@@ -81,6 +81,31 @@ func (w widthAuthority) observe(report tea.ModeReportMsg) widthAuthority {
 	return w
 }
 
+// foldModeReport folds one terminal mode report into the model: the width authority observes it,
+// the diag log records what it made of the measure, and a measure that MOVED re-lays the frame out.
+//
+// This is the Update loop's only reader of the message. Exactly one of the mode queries bubbletea
+// sends at start-up concerns the layout: mode 2027 (Unicode core). bubbletea acts on that answer by
+// switching the PAINTER to ansi.GraphemeWidth and then passes the same message on to Update
+// (bubbletea/v2@v2.0.7/tea.go:786-798), so this fold is the only place apogee can learn which
+// measure its own output is about to be painted in. The width authority follows it — measuring in a
+// method the painter did not choose is precisely the defect it exists to close. Nothing else in the
+// program reads this message; before the authority there was no arm for it and it fell through to
+// the input widget, which ignores it.
+func (m Model) foldModeReport(msg tea.ModeReportMsg) (tea.Model, tea.Cmd) {
+	before := m.th.measure
+	m.th.measure = m.th.measure.observe(msg)
+	// What the report MADE of the measure, beside the report itself — Update's observation point
+	// records the mode number and value, and this is the consequence a rendering bug is
+	// actually argued from (diagnostics.go). Change-suppressed, so only the one report that
+	// moves it writes a line.
+	m.diag.record(diagWidthMethod, widthMethodName(m.th.measure.Method()))
+	if m.th.measure != before && m.ready {
+		m.layout() // the measure moved: re-wrap and repaint everything against the new one
+	}
+	return m, nil
+}
+
 // The measurement operations. Each one is the authority's stand-in for the package-level ansi
 // function of the same name, with the same signature and the same semantics — the only
 // difference being that the method is the authority's rather than a hard-wired

@@ -641,71 +641,22 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		return m, nil
 
 	case tea.ModeReportMsg:
-		// The terminal answered one of the mode queries bubbletea sends at start-up. Exactly one
-		// of them concerns the layout: mode 2027 (Unicode core). bubbletea acts on that answer by
-		// switching the PAINTER to ansi.GraphemeWidth and then passes the same message on to
-		// Update (bubbletea/v2@v2.0.7/tea.go:786-798), so this is the only place apogee can learn
-		// which measure its own output is about to be painted in. The width authority follows it —
-		// measuring in a method the painter did not choose is precisely the defect it exists to
-		// close (width.go). Nothing else in the program reads this message; before the authority
-		// there was no case for it and it fell through to the input widget, which ignores it.
-		before := m.th.measure
-		m.th.measure = m.th.measure.observe(msg)
-		// What the report MADE of the measure, beside the report itself — the diag log records
-		// the mode number and value above, and this is the consequence a rendering bug is
-		// actually argued from (diagnostics.go). Change-suppressed, so only the one report that
-		// moves it writes a line.
-		m.diag.record(diagWidthMethod, widthMethodName(m.th.measure.Method()))
-		if m.th.measure != before && m.ready {
-			m.layout() // the measure moved: re-wrap and repaint everything against the new one
-		}
-		return m, nil
+		// The terminal answered one of the mode queries bubbletea sends at start-up: the width
+		// authority takes the one that concerns the layout, and the frame follows it (width.go).
+		return m.foldModeReport(msg)
 
 	case tea.KeyboardEnhancementsMsg:
-		// The terminal answered bubbletea's kitty-keyboard query — sent on the first frame and
-		// again whenever the enhancements or the screen switch
-		// (bubbletea/v2@v2.0.8/cursed_renderer.go:378-393), so a capable terminal is heard from
-		// within the first frames and one that is not simply never sends this. Non-zero flags mean
-		// key disambiguation is on, which is the ONLY condition under which ⇧⏎ arrives as anything
-		// other than a plain ⏎; the prompt legend is the one thing that must not claim the chord
-		// before then (prompteditor.go). Nothing else in the program reads this message — like the
-		// mode report above it is consumed here rather than falling through to the input widget,
-		// which ignores it.
-		m.setKeyDisambiguation(msg.SupportsKeyDisambiguation())
-		return m, nil
+		// The terminal answered bubbletea's kitty-keyboard query: the prompt legend learns whether
+		// ⇧⏎ can arrive as a chord of its own (prompteditor.go).
+		return m.foldKeyboardEnhancements(msg)
 
 	case tea.KeyPressMsg:
 		return m.handleKey(msg)
 
 	case tea.PasteMsg:
-		// Bracketed paste (default-on in bubbletea v2) is an edit, so it must run the same
-		// post-edit refresh a keypress does — without it a multi-line paste renders unwrapped
-		// until the next key, the autocomplete overlay is computed from stale input, and a live
-		// drag-selection's cached cell offsets no longer match the value (a later copy would take
-		// the wrong runes). It lands wherever the box is editable — including while a worker runs,
-		// where the pasted text is staged as an interjection (ADR 0025) — and is dropped at the
-		// inert states, exactly as keys are. Mirrors handleKey's edit path.
-		//
-		// The /settings pane is asked FIRST and for the same reason handleKey asks it first: while it
-		// is open it is the surface the human is typing at, and the box below is one they cannot see
-		// (settings.go).
-		if next, cmd, claimed := m.settingsPaste(msg); claimed {
-			return next, cmd
-		}
-		if !m.inputEditable() {
-			return m, nil
-		}
-		m.sel = promptSel{} // the value is about to change; drop the selection before its coords go stale
-		m.dropRecall()      // a paste is an edit: the recalled entry is now the human's own draft
-		var cmd tea.Cmd
-		m.input, cmd = m.input.Update(msg)
-		if m.state == stateIdle || m.state == stateRunning {
-			var reload tea.Cmd
-			m, reload = m.recomputeAutocomplete() // re-derive the overlay from the pasted-into input
-			cmd = tea.Batch(cmd, reload)          // a "/" menu the paste opened owes a catalog re-scan, off the loop
-		}
-		m.layout() // re-flow: the box auto-grows as the pasted text wraps to more rows
-		return m, cmd
+		// Bracketed paste is an edit: the /settings pane takes it first, and otherwise it runs the
+		// same post-edit refresh a keypress does (prompteditor.go).
+		return m.foldPaste(msg)
 
 	case ctrlCResetMsg:
 		// The Ctrl+C quit window elapsed without a second press: disarm the gesture so the
@@ -723,15 +674,9 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		return m, nil
 
 	case approvalReqMsg:
-		// The worker's Approver hands the gate to the Update loop; this case records the
-		// request and switches state. View renders the prompt and handleApprovalKey replies
-		// on msg.Reply (the C3 rendezvous; P2.4).
-		m.state = stateAwaitingApproval
-		m.pending = &msg
-		m.approvalSel = listCursor{} // the menu opens on Allow for every request (docs/layout/user-questions-layout.md)
-		m.dismissAutocomplete()      // a stale menu never shares the frame with a decision surface
-		m.layout()                   // the pane the decision turns on outranks the draft's extra rows
-		return m, nil
+		// The worker's Approver hands the gate to the Update loop: record the request and switch
+		// state (approval.go).
+		return m.foldApprovalRequest(msg)
 
 	case askReqMsg:
 		// The worker's Asker hands a free-text question to the Update loop; record it, switch
@@ -749,18 +694,9 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		return m, nil
 
 	case routingNoticeMsg:
-		// The composition root's second heartbeat reporting that delegations changed destination
-		// (ADR 0045 §4). Like the schedule Event above it is a record and not a gate — one note, no
-		// state transition, no engine call — because routing is a fact about the OTHER server and
-		// this session's conversation carries on regardless.
-		//
-		// The note is EPHEMERAL, like the "context: …" line: the routing state is re-derived from
-		// live beats every time a session starts or resumes, so a stored "routing to grunt" is a
-		// claim about a server nobody has beaten since — and five resumes would keep five of them
-		// (addEphemeralNote).
-		m.transcript.addEphemeralNote(msg.note)
-		m.refreshViewport()
-		return m, nil
+		// The composition root's second heartbeat reporting that delegations changed destination:
+		// one ephemeral note, no state transition (heartbeat.go).
+		return m.foldRoutingNotice(msg)
 
 	case presentedMsg:
 		// The worker's Presenter finished walking the ladder and hands the Update loop rung 0
@@ -781,72 +717,19 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		return m.flushAfterCompletion(cmd)
 
 	case cancelledMsg:
-		// The worker cancelled at a quiescent boundary and has returned, so the engine is the
-		// Update loop's to touch again (C1). Discard the interrupted Exchange so the engine
-		// leaves its open-Exchange state: without this the Agent stays inExchange after a cancel
-		// and the next /clear or message is rejected with ErrInputPending — the post-Esc wedge.
-		// The visible transcript is untouched (the "cancelled" note and any streamed partial
-		// stay in scrollback); only the model's memory drops the scrapped Exchange.
-		//
-		// A stop is NOT a completion, so a staged queue is held rather than flushed: Esc stops
-		// everything, including what was waiting to go out (ADR 0025). The note says so once, and
-		// ⏎ on the empty box is what sends it afterwards.
-		//
-		// "Held" covers exactly what the worker never DELIVERED. A row it did deliver was dropped
-		// from the conversation by the AbortExchange above and stays dropped — sent is sent (owner
-		// ruling 2026-08-03): it is not the queue's to hold back, and the ⧖ block beside the
-		// "cancelled" note is the visible record of the model having read it before the Exchange was
-		// scrapped, not a claim that it is still waiting to go out.
-		m.eng.AbortExchange()
-		m.transcript.addNote("cancelled")
-		cmd := m.finishWorker(stateIdle)
-		m.noteHeldQueue()
-		m.refreshViewport()
-		return m, cmd
+		// The worker cancelled at a quiescent boundary and has returned, so the engine is the Update
+		// loop's to touch again (C1): discard the interrupted Exchange and hold whatever was staged.
+		return m.foldCancelled()
 
 	case errMsg:
-		// A loop-level fault also returns the engine to the Update loop (C1), so — exactly as on
-		// a cancel — discard the interrupted Exchange. Today Step never returns a mid-Exchange
-		// error (a fault surfaces as an ErrorEvent at a boundary), so this is a no-op guard, not a
-		// live path; but the moment Step *can* fault mid-Exchange, the engine would stay inExchange
-		// and the next /clear or message would be rejected with ErrInputPending — the same post-Esc
-		// wedge cancelledMsg already prevents. AbortExchange is a safe no-op at a quiescent boundary.
-		//
-		// A fault is not a completion either, so — exactly as on a cancel — a staged queue is held
-		// and noted rather than flushed: sending the human's remarks into the wreckage of a failed
-		// Exchange is not what they asked for (ADR 0025). Dismissing the error takes one ⏎ and
-		// sending the held queue the next.
-		m.eng.AbortExchange()
-		m.lastErr = msg.Err
-		m.transcript.addError("loop", msg.Err.Error(), runRef{})
-		cmd := m.finishWorker(stateErrored)
-		m.noteHeldQueue()
-		m.refreshViewport()
-		return m, cmd
+		// A loop-level fault also returns the engine to the Update loop (C1): discard the
+		// interrupted Exchange, record the error, and hold whatever was staged.
+		return m.foldLoopError(msg)
 
 	case compactDoneMsg:
-		// The /compact worker returned (startCompact). On success the history shrank, so reset the
-		// gauge to hidden — the next Turn's UsageEvent re-measures the smaller fill (foldStats). A
-		// skip (conversation too small to fold) touched nothing, so leave the gauge as it was and
-		// say so plainly rather than claiming a compaction. A failure surfaces its reason as a note.
-		// Either way the worker is done: return to idle.
-		//
-		// A compaction that LANDED is a natural completion, so it flushes like an Exchange does: a
-		// row typed while /compact ran had no Exchange to be interjected into (the /compact worker
-		// drives none, so it carries no mailbox) and has been waiting for exactly this boundary.
-		// Only a stop or a fault holds — a cancelled compaction returns cancelledMsg, not this Msg.
-		switch {
-		case msg.Err != nil:
-			m.transcript.addNote("compact: " + msg.Err.Error())
-		case msg.Skipped:
-			m.transcript.addNote("nothing to compact")
-		default:
-			m.ctxUsed = 0
-			m.transcript.addNote("context compacted")
-		}
-		cmd := m.finishWorker(stateIdle)
-		m.refreshViewport()
-		return m.flushAfterCompletion(cmd)
+		// The /compact worker returned (startCompact): note what it did, return to idle, and flush a
+		// queue the compaction was a natural completion for (commandrun.go).
+		return m.foldCompactDone(msg)
 
 	case interjectedMsg:
 		// The worker committed staged rows into the open Exchange at the boundary it just passed
@@ -941,46 +824,14 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		return m, nil
 
 	case spinnerTickMsg:
-		// Keep the chain alive only while running, and only for the current generation: dropping
-		// the tick when idle lets the chain die naturally, and dropping a tick from a previous arm
-		// means a re-arm (an approval answered, an ask replied to) cannot leave two chains running
-		// and double the frame rate (spinner.go).
-		if m.state != stateRunning || msg.gen != m.spin.gen {
-			return m, nil
-		}
-		wasBlink := m.spin.blink()
-		m.spin.frame++
-		if m.spin.blink() != wasBlink && m.transcript.hasOpenToolCall() {
-			// The frame the status line spins on is also the LIVE STAR's clock: a block still holding
-			// an open call paints its header glyph from this frame's blink phase (layout.md, "The live
-			// star"; blockState.star), so the flip needs a repaint the tick did not use to do. It is
-			// asked for only on the tick that actually FLIPS the phase, and only while something is
-			// open — every other tick paints byte-identically, and re-rendering the whole scrollback
-			// ten to twenty times a second for an identical result would be work for its own sake, and
-			// would put the keep-if-unchanged rule (refreshViewport) between the human and every
-			// drag-selection they hold through a turn. A selection spanning a header that DOES flip is
-			// dropped, which is that same rule doing its ordinary job on a line that changed.
-			m.refreshViewport()
-		}
-		return m, m.spin.tick()
+		// One frame of the running spinner's chain: advance it and re-arm, or let a retired chain
+		// die (spinner.go).
+		return m.foldSpinnerTick(msg)
 
 	case beatMsg:
-		// One observation of the Upstream landed (beatCmd). Fold what it says, then re-arm the
-		// chain from HERE — Interval after the beat landed, never on a fixed clock — so the next
-		// beat cannot overlap this one. A beat from a retired chain is inert, like a spinner tick.
-		if !m.heartbeatLive(msg.gen) {
-			return m, nil
-		}
-		next, noted := m.foldBeat(msg.beat)
-		if noted {
-			// Only a beat that MOVED something — the offline state, or a binding — repaints: a beat
-			// that changed nothing has nothing to draw, so re-rendering the whole transcript every
-			// ten seconds would be work for its own sake. (It no longer costs a live drag-selection:
-			// a repaint that appends a note leaves the spanned lines alone, and refreshViewport's
-			// keep-if-unchanged rule keeps the selection through it. Economy, not correctness.)
-			next.refreshViewport()
-		}
-		return next, next.beatTick()
+		// One observation of the Upstream landed (beatCmd): fold what it says and re-arm the chain
+		// from here (heartbeat.go).
+		return m.foldBeatMsg(msg)
 
 	case actuationMsg:
 		// One item off the in-flight launcher verb's pump (actuation.go): a narration step to note
@@ -1003,27 +854,9 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		return m, m.beatCmd()
 
 	case tea.MouseWheelMsg:
-		// The wheel scrolls the transcript in every state — unlike the ordinary keyboard path,
-		// which is state-gated (idle/ask/running feed the input; only PgUp/PgDn scroll from the
-		// keyboard everywhere). Mouse reporting is enabled in View
-		// (MouseModeCellMotion); the viewport's own Update turns the wheel into a scroll.
-		// A notch over the open /settings pane walks its key list instead (mouse.go): the pane is what
-		// is under the pointer there, and the transcript keeps every notch outside it.
-		if next, handled := m.settingsWheel(msg); handled {
-			return next, nil
-		}
-		// A notch over the open /usage report scrolls its row list the same way, for the same reason
-		// (mouse.go) — the two panes never share a frame, so the order between them is arbitrary.
-		if next, handled := m.usageWheel(msg); handled {
-			return next, nil
-		}
-		// A notch over the open /inspect pane scrolls its record list on the same terms (mouse.go).
-		// It is asked after the report because it is drawn under it, and the two rectangles never
-		// overlap, so only one of them can hold the pointer.
-		if next, handled := m.inspectorWheel(msg); handled {
-			return next, nil
-		}
-		return m.scrollViewport(msg)
+		// A notch goes to whichever open pane is under the pointer, and to the transcript
+		// everywhere else (mouse.go).
+		return m.foldMouseWheel(msg)
 
 	case tea.MouseClickMsg:
 		// A left-click starts a selection — in the prompt (positioning the caret) or the
@@ -1045,21 +878,9 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		return m, nil
 
 	default:
-		// Other Bubble Tea Msgs belong to the widgets; route them to the focused input so it
-		// sees its own (a focus/blur report, say). The cursor is no longer among them: with the
-		// virtual cursor retired no blink Msg is ever scheduled, and the real cursor is placed
-		// by View rather than driven by a Msg chain.
-		//
-		// "The focused input" is the /settings field while the pane has one open, and this arm is the
-		// only route such a field can be reached by: the clipboard reply its own ctrl+v asks for is a
-		// Msg of the widget package's own unexported type, which no switch above can name
-		// (settingsEditorMsg, lineEditor.editMsg).
-		if next, cmd, claimed := m.settingsEditorMsg(msg); claimed {
-			return next, cmd
-		}
-		var cmd tea.Cmd
-		m.input, cmd = m.input.Update(msg)
-		return m, cmd
+		// Every other Bubble Tea Msg belongs to a widget: route it to the focused input, which is
+		// the /settings field while the pane has one open (prompteditor.go).
+		return m.foldWidgetMsg(msg)
 	}
 }
 
@@ -1070,6 +891,136 @@ const ctrlCQuitWindow = time.Second
 // ctrlCResetMsg disarms the Ctrl+C quit gesture once the window elapses, clearing the
 // "press ctrl+c again to quit" hint when the human does not follow through.
 type ctrlCResetMsg struct{}
+
+// keyClaimant is one surface's answer to "is this keypress yours?" — the unit [keyClaimOrder]
+// states the overlay precedence in, so the order is a list to read rather than a run of hand-written
+// guards to trace.
+type keyClaimant struct {
+	// name is the surface as the precedence documentation names it. It is what
+	// TestKeyClaimOrderMatchesTheDocumentedPrecedence reads, and it is why an entry can be pinned
+	// without calling it.
+	name string
+	// open reports whether the surface is up and entitled to be asked at all — the state gate the
+	// hand-written guard carried in its `if`. A nil open means "always ask": the surface's own claim
+	// function is then the whole test, which is what a pane that is closed answers false to anyway.
+	open func(Model) bool
+	// claim asks the surface for the key and reports whether it took it. It returns the Model to
+	// carry on with: the surface's own when it claimed, and — for the one walker below that leaves
+	// state behind on the way past — the walked one even when it did not.
+	claim func(Model, tea.KeyPressMsg) (Model, tea.Cmd, bool)
+}
+
+// modalClaim adapts a MODAL surface's key handler — one that swallows every key it does not act on
+// — to the claimant contract: while the surface is open every key is its own, so the claim is total.
+//
+// The type assertion is this package's own contract rather than a hope: every key handler in it
+// returns the [Model] it was handed, widened to tea.Model only because that is what Update returns.
+func modalClaim(key func(Model, tea.KeyPressMsg) (tea.Model, tea.Cmd)) func(Model, tea.KeyPressMsg) (Model, tea.Cmd, bool) {
+	return func(m Model, msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
+		next, cmd := key(m, msg)
+		return next.(Model), cmd, true
+	}
+}
+
+// paneClaim adapts a SOFT-MODAL surface's key handler — one that claims the few keys it acts on and
+// lets every other key go where it always went — to the claimant contract.
+//
+// A pane that did not claim keeps nothing: the Model it returns on that path is dropped, exactly as
+// the hand-written `if handled` guards dropped it. Only the walker below is trusted with state it
+// did not claim for.
+func paneClaim(key func(Model, tea.KeyPressMsg) (bool, tea.Model, tea.Cmd)) func(Model, tea.KeyPressMsg) (Model, tea.Cmd, bool) {
+	return func(m Model, msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
+		handled, next, cmd := key(m, msg)
+		if !handled {
+			return m, nil, false
+		}
+		return next.(Model), cmd, true
+	}
+}
+
+// keyClaimOrder is the overlay precedence [Model.handleKey] walks, top rung first: the modal
+// overlays that own the keyboard while they are up, then the two report panes that claim only their
+// own keys, then the transcript's block cursor — and only then the frame's own verbs, the state-gated
+// switches in handleKey itself.
+//
+// The order is load-bearing, which is why it is data: every entry states what its surface claims and
+// why it can neither rise nor fall in the list, and TestKeyClaimOrderMatchesTheDocumentedPrecedence
+// fails if the sequence changes. Adding a surface is one entry here plus its key contract in its own
+// file — never another `if` in handleKey.
+var keyClaimOrder = []keyClaimant{
+	{
+		// The /sessions browser is a modal overlay (idle only): while open it claims every keypress —
+		// selection, resume, delete-confirm, rename edit, and esc to close (sessions.go) — before the
+		// normal input routing below, exactly as the autocomplete overlay claims its keys first.
+		name:  "sessions browser",
+		open:  func(m Model) bool { return m.state == stateIdle && m.sessionBrowser.open },
+		claim: modalClaim(Model.sessionBrowserKey),
+	},
+	{
+		// The /settings pane is modal in the same way and for a stronger reason: it is the frame's one
+		// FULL-HEIGHT pane (frameRowPlan), so the input box behind it is a box the human cannot read —
+		// a keystroke falling through to it would edit an invisible draft. Idle-only, like its verb
+		// (commandSpecs), and it swallows every key it does not act on (settings.go).
+		name:  "settings pane",
+		open:  Model.settingsOwnsInput,
+		claim: modalClaim(Model.settingsKey),
+	},
+	{
+		// The picker is the browser's simpler sibling and claims keys the same way: while it is open the
+		// selection, the accept and esc are all its own (picker.go). It claims them in BOTH live states,
+		// because /schedule opens its cycle and mode popups mid-Exchange as well — the verb is
+		// whileRunning (commandSpecs), and an overlay that renders without taking keys would be a modal
+		// the human cannot answer. The older kinds are unaffected: their verbs are idle-only, and a
+		// picker cannot be open when a worker STARTS, since it owns ⏎ for as long as it is up.
+		name:  "picker",
+		open:  func(m Model) bool { return (m.state == stateIdle || m.state == stateRunning) && m.picker.open },
+		claim: modalClaim(Model.pickerKey),
+	},
+	{
+		// While the autocomplete overlay is open, it claims the navigation, accept, and dismiss keys —
+		// including enter and tab — before the normal routing below. Any other key returns
+		// handled=false and falls through to edit the input (which re-derives it). Every region opens
+		// in BOTH states (computeAutocomplete), so an interjection reaches a file, a skill and a
+		// reporting command as easily as a submitted message does; the per-command while-running policy
+		// is applied at accept (commandRunnable), not by hiding the menu.
+		name:  "autocomplete overlay",
+		open:  func(m Model) bool { return (m.state == stateIdle || m.state == stateRunning) && m.autocomplete.active },
+		claim: paneClaim(Model.autocompleteKey),
+	},
+	{
+		// The /usage report claims esc and the four keys that scroll it, and nothing else (usage.go). It
+		// is not modal — it says something rather than asking, so the box behind it stays live and every
+		// other key goes where it always went — and the claim sits below the overlays above precisely
+		// because they ARE modal: a pane that owns the keyboard answers its own esc first. Below the
+		// dropdown for the same reason one rung down: a menu a keystroke opened is dismissed by the esc
+		// the human means for it.
+		//
+		// It must stay ABOVE the transcript's PgUp/PgDn interception in handleKey, which claims those two
+		// keys in every state: the pane is what the human is reading, and a page key that scrolled the
+		// conversation hidden BEHIND the report would move the one list they cannot see.
+		name:  "usage report",
+		claim: paneClaim(Model.usageKey),
+	},
+	{
+		// The /inspect pane claims the same five keys on the same terms (inspector.go): not modal, so
+		// every key it does not act on goes where it always went, and below the modal overlays above
+		// because a pane that owns the keyboard answers its own esc first. It sits beside the report it
+		// is shaped after — the two are never open together in practice and their claims are disjoint
+		// while one of them is closed, so the order between THEM decides nothing.
+		name:  "inspector pane",
+		claim: paneClaim(Model.inspectorKey),
+	},
+	{
+		// The transcript's modal block cursor claims its keys last of the claimants and ahead of the
+		// switches in handleKey, because two of them — ⏎ and esc — are the frame's own verbs and the mode
+		// exists to borrow them (blockcursor.go, design call 7). It is entered by ⌥↑/⌥↓ and left by esc
+		// or by typing, and the typing case is why its Model is taken whether or not the key was claimed:
+		// the printable key that ends the walk goes on to the prompt box with the mode already off. It is
+		// the one claimant whose unclaimed Model is kept, which is what [keyClaimant.claim] documents.
+		name:  "block cursor",
+		claim: Model.blockCursorKey,
+	},
+}
 
 // handleKey routes a keypress against the current state. Esc cancels an in-flight worker (and
 // is otherwise a no-op); Ctrl+C twice within ctrlCQuitWindow quits; Ctrl+L forces a full repaint
@@ -1099,75 +1050,20 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	rec := m.recall
 	m.dropRecall()
 
-	// The /sessions browser is a modal overlay (idle only): while open it claims every keypress —
-	// selection, resume, delete-confirm, rename edit, and esc to close (sessions.go) — before the
-	// normal input routing below, exactly as the autocomplete overlay claims its keys first.
-	if m.state == stateIdle && m.sessionBrowser.open {
-		return m.sessionBrowserKey(msg)
-	}
-
-	// The /settings pane is modal in the same way and for a stronger reason: it is the frame's one
-	// FULL-HEIGHT pane (frameRowPlan), so the input box behind it is a box the human cannot read —
-	// a keystroke falling through to it would edit an invisible draft. Idle-only, like its verb
-	// (commandSpecs), and it swallows every key it does not act on (settings.go).
-	if m.settingsOwnsInput() {
-		return m.settingsKey(msg)
-	}
-
-	// The picker is the browser's simpler sibling and claims keys the same way: while it is open the
-	// selection, the accept and esc are all its own (picker.go). It claims them in BOTH live states,
-	// because /schedule opens its cycle and mode popups mid-Exchange as well — the verb is
-	// whileRunning (commandSpecs), and an overlay that renders without taking keys would be a modal
-	// the human cannot answer. The older kinds are unaffected: their verbs are idle-only, and a
-	// picker cannot be open when a worker STARTS, since it owns ⏎ for as long as it is up.
-	if (m.state == stateIdle || m.state == stateRunning) && m.picker.open {
-		return m.pickerKey(msg)
-	}
-
-	// While the autocomplete overlay is open, it claims the navigation, accept, and dismiss keys —
-	// including enter and tab — before the normal routing below. Any other key returns
-	// handled=false and falls through to edit the input (which re-derives it). Every region opens
-	// in BOTH states (computeAutocomplete), so an interjection reaches a file, a skill and a
-	// reporting command as easily as a submitted message does; the per-command while-running policy
-	// is applied at accept (commandRunnable), not by hiding the menu.
-	if (m.state == stateIdle || m.state == stateRunning) && m.autocomplete.active {
-		if handled, nm, cmd := m.autocompleteKey(msg); handled {
-			return nm, cmd
+	// The overlay claim order. Each surface in [keyClaimOrder] is asked, in that order, whether the
+	// keypress is its own; the first one that claims it answers, and nothing further down the list
+	// ever sees the key. The order is load-bearing — it is stated once, as data, with each entry
+	// carrying the reason it sits where it does — and a claimant that did not claim still hands back
+	// the Model, because one of them leaves state behind on the way past.
+	for _, claimant := range keyClaimOrder {
+		if claimant.open != nil && !claimant.open(m) {
+			continue
 		}
-	}
-
-	// The /usage report claims esc and the four keys that scroll it, and nothing else (usage.go). It
-	// is not modal — it says something rather than asking, so the box behind it stays live and every
-	// other key goes where it always went — and the claim sits below the overlays above precisely
-	// because they ARE modal: a pane that owns the keyboard answers its own esc first. Below the
-	// dropdown for the same reason one rung down: a menu a keystroke opened is dismissed by the esc
-	// the human means for it.
-	//
-	// It must stay ABOVE the transcript's PgUp/PgDn interception further down, which claims those two
-	// keys in every state: the pane is what the human is reading, and a page key that scrolled the
-	// conversation hidden BEHIND the report would move the one list they cannot see.
-	if handled, next, cmd := m.usageKey(msg); handled {
-		return next, cmd
-	}
-
-	// The /inspect pane claims the same five keys on the same terms (inspector.go): not modal, so
-	// every key it does not act on goes where it always went, and below the modal overlays above
-	// because a pane that owns the keyboard answers its own esc first. It sits beside the report it
-	// is shaped after — the two are never open together in practice and their claims are disjoint
-	// while one of them is closed, so the order between THEM decides nothing.
-	if handled, next, cmd := m.inspectorKey(msg); handled {
-		return next, cmd
-	}
-
-	// The transcript's modal block cursor claims its keys here, ahead of the switch below, because
-	// two of them — ⏎ and esc — are the frame's own verbs and the mode exists to borrow them
-	// (blockcursor.go, design call 7). It is entered by ⌥↑/⌥↓ and left by esc or by typing, and the
-	// typing case is why the next Model is taken whether or not the key was claimed: the printable
-	// key that ends the walk goes on to the prompt box below with the mode already off.
-	walked, cursorCmd, cursorTook := m.blockCursorKey(msg)
-	m = walked
-	if cursorTook {
-		return m, cursorCmd
+		next, cmd, claimed := claimant.claim(m, msg)
+		m = next
+		if claimed {
+			return m, cmd
+		}
 	}
 
 	switch msg.String() {
@@ -1530,6 +1426,58 @@ func (m *Model) finishWorker(next uiState) tea.Cmd {
 		return m.saveAtIdle()
 	}
 	return nil
+}
+
+// foldCancelled folds the worker's return from a cancel: the interrupted Exchange is discarded,
+// the "cancelled" note lands, and a staged queue is held rather than flushed.
+//
+// The worker cancelled at a quiescent boundary and has returned, so the engine is the Update loop's
+// to touch again (C1). Discard the interrupted Exchange so the engine leaves its open-Exchange
+// state: without this the Agent stays inExchange after a cancel and the next /clear or message is
+// rejected with ErrInputPending — the post-Esc wedge. The visible transcript is untouched (the
+// "cancelled" note and any streamed partial stay in scrollback); only the model's memory drops the
+// scrapped Exchange.
+//
+// A stop is NOT a completion, so a staged queue is held rather than flushed: Esc stops everything,
+// including what was waiting to go out (ADR 0025). The note says so once, and ⏎ on the empty box is
+// what sends it afterwards.
+//
+// "Held" covers exactly what the worker never DELIVERED. A row it did deliver was dropped from the
+// conversation by the AbortExchange below and stays dropped — sent is sent (owner ruling
+// 2026-08-03): it is not the queue's to hold back, and the ⧖ block beside the "cancelled" note is
+// the visible record of the model having read it before the Exchange was scrapped, not a claim that
+// it is still waiting to go out.
+func (m Model) foldCancelled() (tea.Model, tea.Cmd) {
+	m.eng.AbortExchange()
+	m.transcript.addNote("cancelled")
+	cmd := m.finishWorker(stateIdle)
+	m.noteHeldQueue()
+	m.refreshViewport()
+	return m, cmd
+}
+
+// foldLoopError folds a loop-level fault: the interrupted Exchange is discarded, the error is
+// recorded for the errored state, and a staged queue is held rather than flushed.
+//
+// A loop-level fault returns the engine to the Update loop (C1), so — exactly as on a cancel —
+// discard the interrupted Exchange. Today Step never returns a mid-Exchange error (a fault surfaces
+// as an ErrorEvent at a boundary), so this is a no-op guard, not a live path; but the moment Step
+// *can* fault mid-Exchange, the engine would stay inExchange and the next /clear or message would
+// be rejected with ErrInputPending — the same post-Esc wedge foldCancelled already prevents.
+// AbortExchange is a safe no-op at a quiescent boundary.
+//
+// A fault is not a completion either, so — exactly as on a cancel — a staged queue is held and
+// noted rather than flushed: sending the human's remarks into the wreckage of a failed Exchange is
+// not what they asked for (ADR 0025). Dismissing the error takes one ⏎ and sending the held queue
+// the next.
+func (m Model) foldLoopError(msg errMsg) (tea.Model, tea.Cmd) {
+	m.eng.AbortExchange()
+	m.lastErr = msg.Err
+	m.transcript.addError("loop", msg.Err.Error(), runRef{})
+	cmd := m.finishWorker(stateErrored)
+	m.noteHeldQueue()
+	m.refreshViewport()
+	return m, cmd
 }
 
 // quit ends the program. On a clean quit — idle or errored, where the worker has already

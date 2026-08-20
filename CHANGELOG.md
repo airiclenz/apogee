@@ -222,6 +222,23 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **Every substantial `Update` arm now delegates, and the key-claim order is a list rather than a run
+  of guards (`internal/tui/model.go`).** Six arms already handed their message to a named fold in the
+  file that owns the concern; twelve more inlined twenty to thirty lines of state machine in the
+  switch itself. Those twelve now read `return m.foldX(msg)` too, with the fold — and the reasoning
+  that explains it — living beside the code it belongs to: the mode report with the width authority,
+  the paste, the widget fall-through and the keyboard-enhancement report with the prompt editor, the
+  approval request with the approval pane, the beat and the routing notice with the heartbeat, the
+  compaction with the command runner, the spinner tick with the spinner, the wheel with the pointer
+  code, and the cancel and the loop fault beside the worker lifecycle they close. `Update` is 262
+  lines rather than 459, and every arm now reads as what it is: a statement of which fold owns this
+  message. One rung down, `handleKey`'s seven sequential "does
+  overlay X claim this key?" guards — whose order is load-bearing and was stated only across seventy
+  lines of comment — became one ordered list of claimants (`keyClaimOrder`), each entry carrying the
+  reason it sits where it does, walked by one loop (272 → 192). A pane that does not claim still
+  keeps nothing, and the block cursor still keeps the walk it leaves behind, exactly as the guards
+  arranged; a new test pins the sequence, so a reorder can no longer happen by accident.
+
 - **The frame publishes where each pane landed (`internal/tui/model.go`).** `View`'s composer knew
   every block's row span while stacking it and threw it away, so three near-identical prefix sums in
   the pointer code rebuilt it — one per pane, on every click and every wheel notch, each re-rendering

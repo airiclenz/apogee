@@ -303,7 +303,7 @@
 // and everywhere else the terminal folds the chord into a plain ⏎ — which is a SEND, so advertising
 // it unconditionally promises a newline and delivers a sent message. idlePlaceholder therefore names
 // ⌥⏎ alone and idleShiftPlaceholder names ⇧⏎/⌥⏎, idleLegend() picks between them off the editor's own
-// keyDisambiguation flag, and the tea.KeyboardEnhancementsMsg arm in model.go sets that flag when the
+// keyDisambiguation flag, and the tea.KeyboardEnhancementsMsg fold in prompteditor.go sets that flag when the
 // terminal answers bubbletea's query — repainting an already-drawn idle legend in place, since capable
 // terminals answer a few frames after the first one is on screen. The startup default is the
 // pessimistic form: a terminal that never answers keeps the ⌥⏎-only legend, which is the honest

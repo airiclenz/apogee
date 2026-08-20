@@ -50,6 +50,21 @@ func approvalMenuKeys() map[string]domain.ApprovalDecision {
 	return keys
 }
 
+// foldApprovalRequest folds the worker's approval request into the view: record the request,
+// switch state, and open the menu on Allow.
+//
+// The worker's Approver hands the gate to the Update loop; this fold records the request and
+// switches state. View renders the prompt and handleApprovalKey replies on msg.Reply (the C3
+// rendezvous; P2.4).
+func (m Model) foldApprovalRequest(msg approvalReqMsg) (tea.Model, tea.Cmd) {
+	m.state = stateAwaitingApproval
+	m.pending = &msg
+	m.approvalSel = listCursor{} // the menu opens on Allow for every request (docs/layout/user-questions-layout.md)
+	m.dismissAutocomplete()      // a stale menu never shares the frame with a decision surface
+	m.layout()                   // the pane the decision turns on outranks the draft's extra rows
+	return m, nil
+}
+
 // handleApprovalKey resolves a pending Approval while awaitingApproval. A decision key sends
 // its verdict back over the rendezvous reply channel (sendApproval); ↑/↓ move the menu's highlight,
 // clamped and non-wrapping, the way the ask prompt's choice arrows move (D5), leaving ⏎ to take

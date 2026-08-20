@@ -157,6 +157,25 @@ func (m Model) beatTick() tea.Cmd {
 	return tea.Tick(heartbeat.Interval, func(time.Time) tea.Msg { return heartbeatTickMsg{gen: gen} })
 }
 
+// foldBeatMsg folds one landed observation of the Upstream and re-arms the chain from HERE —
+// Interval after the beat landed, never on a fixed clock — so the next beat cannot overlap this one.
+// A beat from a retired chain is inert, like a spinner tick.
+func (m Model) foldBeatMsg(msg beatMsg) (tea.Model, tea.Cmd) {
+	if !m.heartbeatLive(msg.gen) {
+		return m, nil
+	}
+	next, noted := m.foldBeat(msg.beat)
+	if noted {
+		// Only a beat that MOVED something — the offline state, or a binding — repaints: a beat
+		// that changed nothing has nothing to draw, so re-rendering the whole transcript every
+		// ten seconds would be work for its own sake. (It no longer costs a live drag-selection:
+		// a repaint that appends a note leaves the spanned lines alone, and refreshViewport's
+		// keep-if-unchanged rule keeps the selection through it. Economy, not correctness.)
+		next.refreshViewport()
+	}
+	return next, next.beatTick()
+}
+
 // foldBeat folds one landed observation into the heartbeat state and reports whether it changed
 // what the view shows (so the caller repaints only when there is something new to see). Two things
 // can move: the offline state, and — through [Model.observeBinding] — the bindings themselves.
@@ -500,4 +519,21 @@ func (m Model) upstreamBlockNote() string {
 		note += ": " + m.hb.lastFailure
 	}
 	return note
+}
+
+// foldRoutingNotice folds one change of the Sub-agent server's routing state into the transcript
+// as a single ephemeral note.
+//
+// It is the composition root's second heartbeat reporting that delegations changed destination
+// (ADR 0045 §4). Like a schedule Event it is a record and not a gate — one note, no state
+// transition, no engine call — because routing is a fact about the OTHER server and this session's
+// conversation carries on regardless.
+//
+// The note is EPHEMERAL, like the "context: …" line: the routing state is re-derived from live
+// beats every time a session starts or resumes, so a stored "routing to grunt" is a claim about a
+// server nobody has beaten since — and five resumes would keep five of them (addEphemeralNote).
+func (m Model) foldRoutingNotice(msg routingNoticeMsg) (tea.Model, tea.Cmd) {
+	m.transcript.addEphemeralNote(msg.note)
+	m.refreshViewport()
+	return m, nil
 }

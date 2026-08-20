@@ -1264,3 +1264,28 @@ func (m Model) highlightTranscript(view string) string {
 	}
 	return strings.Join(lines, "\n")
 }
+
+// foldMouseWheel routes one wheel notch: to whichever open pane holds the pointer, and to the
+// transcript everywhere else.
+//
+// The wheel scrolls the transcript in every state — unlike the ordinary keyboard path, which is
+// state-gated (idle/ask/running feed the input; only PgUp/PgDn scroll from the keyboard everywhere).
+// Mouse reporting is enabled in View (MouseModeCellMotion); the viewport's own Update turns the
+// wheel into a scroll.
+func (m Model) foldMouseWheel(msg tea.MouseWheelMsg) (tea.Model, tea.Cmd) {
+	if next, handled := m.settingsWheel(msg); handled {
+		return next, nil
+	}
+	// A notch over the open /usage report scrolls its row list the same way, for the same reason
+	// (mouse.go) — the two panes never share a frame, so the order between them is arbitrary.
+	if next, handled := m.usageWheel(msg); handled {
+		return next, nil
+	}
+	// A notch over the open /inspect pane scrolls its record list on the same terms (mouse.go).
+	// It is asked after the report because it is drawn under it, and the two rectangles never
+	// overlap, so only one of them can hold the pointer.
+	if next, handled := m.inspectorWheel(msg); handled {
+		return next, nil
+	}
+	return m.scrollViewport(msg)
+}

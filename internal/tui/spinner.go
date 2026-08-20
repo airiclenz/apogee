@@ -405,3 +405,30 @@ func (s spinnerAnim) tick() tea.Cmd {
 // spinnerTickMsg advances the spinner one frame. gen names the chain that scheduled it; the
 // Update loop drops any tick that does not carry the live generation.
 type spinnerTickMsg struct{ gen int }
+
+// foldSpinnerTick folds one frame of the spinner chain: advance the animation, repaint the live
+// star on the ticks that flip its blink phase, and re-arm.
+//
+// The chain is kept alive only while running, and only for the current generation: dropping the tick
+// when idle lets the chain die naturally, and dropping a tick from a previous arm means a re-arm (an
+// approval answered, an ask replied to) cannot leave two chains running and double the frame rate.
+func (m Model) foldSpinnerTick(msg spinnerTickMsg) (tea.Model, tea.Cmd) {
+	if m.state != stateRunning || msg.gen != m.spin.gen {
+		return m, nil
+	}
+	wasBlink := m.spin.blink()
+	m.spin.frame++
+	if m.spin.blink() != wasBlink && m.transcript.hasOpenToolCall() {
+		// The frame the status line spins on is also the LIVE STAR's clock: a block still holding
+		// an open call paints its header glyph from this frame's blink phase (layout.md, "The live
+		// star"; blockState.star), so the flip needs a repaint the tick did not use to do. It is
+		// asked for only on the tick that actually FLIPS the phase, and only while something is
+		// open — every other tick paints byte-identically, and re-rendering the whole scrollback
+		// ten to twenty times a second for an identical result would be work for its own sake, and
+		// would put the keep-if-unchanged rule (refreshViewport) between the human and every
+		// drag-selection they hold through a turn. A selection spanning a header that DOES flip is
+		// dropped, which is that same rule doing its ordinary job on a line that changed.
+		m.refreshViewport()
+	}
+	return m, m.spin.tick()
+}

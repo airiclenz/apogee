@@ -244,3 +244,71 @@ func (e *promptEditor) reset() {
 func (e promptEditor) rows(innerWidth int) int {
 	return clampInt(inputContentRows(e.input.Value(), innerWidth), minInputRows, maxInputRows)
 }
+
+// foldKeyboardEnhancements folds the terminal's answer to bubbletea's kitty-keyboard query into
+// the prompt editor: non-zero flags mean key disambiguation is on.
+//
+// The query is sent on the first frame and again whenever the enhancements or the screen switch
+// (bubbletea/v2@v2.0.8/cursed_renderer.go:378-393), so a capable terminal is heard from within the
+// first frames and one that is not simply never sends this. Non-zero flags mean key disambiguation
+// is on, which is the ONLY condition under which ⇧⏎ arrives as anything other than a plain ⏎; the
+// prompt legend is the one thing that must not claim the chord before then (idleLegend). Nothing
+// else in the program reads this message — like the mode report it is consumed by its fold rather
+// than falling through to the input widget, which ignores it.
+func (m Model) foldKeyboardEnhancements(msg tea.KeyboardEnhancementsMsg) (tea.Model, tea.Cmd) {
+	m.setKeyDisambiguation(msg.SupportsKeyDisambiguation())
+	return m, nil
+}
+
+// foldPaste folds one bracketed paste into whichever surface is being typed at: the /settings pane
+// first, then the prompt box wherever it is editable.
+//
+// Bracketed paste (default-on in bubbletea v2) is an edit, so it must run the same post-edit
+// refresh a keypress does — without it a multi-line paste renders unwrapped until the next key, the
+// autocomplete overlay is computed from stale input, and a live drag-selection's cached cell
+// offsets no longer match the value (a later copy would take the wrong runes). It lands wherever
+// the box is editable — including while a worker runs, where the pasted text is staged as an
+// interjection (ADR 0025) — and is dropped at the inert states, exactly as keys are. Mirrors
+// handleKey's edit path.
+//
+// The /settings pane is asked FIRST and for the same reason handleKey asks it first: while it is
+// open it is the surface the human is typing at, and the box below is one they cannot see
+// (settings.go).
+func (m Model) foldPaste(msg tea.PasteMsg) (tea.Model, tea.Cmd) {
+	if next, cmd, claimed := m.settingsPaste(msg); claimed {
+		return next, cmd
+	}
+	if !m.inputEditable() {
+		return m, nil
+	}
+	m.sel = promptSel{} // the value is about to change; drop the selection before its coords go stale
+	m.dropRecall()      // a paste is an edit: the recalled entry is now the human's own draft
+	var cmd tea.Cmd
+	m.input, cmd = m.input.Update(msg)
+	if m.state == stateIdle || m.state == stateRunning {
+		var reload tea.Cmd
+		m, reload = m.recomputeAutocomplete() // re-derive the overlay from the pasted-into input
+		cmd = tea.Batch(cmd, reload)          // a "/" menu the paste opened owes a catalog re-scan, off the loop
+	}
+	m.layout() // re-flow: the box auto-grows as the pasted text wraps to more rows
+	return m, cmd
+}
+
+// foldWidgetMsg routes a Msg no arm of [Model.Update] names to the focused input widget, so it
+// sees its own (a focus/blur report, say).
+//
+// The cursor is no longer among them: with the virtual cursor retired no blink Msg is ever
+// scheduled, and the real cursor is placed by View rather than driven by a Msg chain.
+//
+// "The focused input" is the /settings field while the pane has one open, and this fold is the only
+// route such a field can be reached by: the clipboard reply its own ctrl+v asks for is a Msg of the
+// widget package's own unexported type, which no arm of the switch can name (settingsEditorMsg,
+// lineEditor.editMsg).
+func (m Model) foldWidgetMsg(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if next, cmd, claimed := m.settingsEditorMsg(msg); claimed {
+		return next, cmd
+	}
+	var cmd tea.Cmd
+	m.input, cmd = m.input.Update(msg)
+	return m, cmd
+}

@@ -394,3 +394,30 @@ func (m Model) runCommand(parsed parsedInput) (tea.Model, tea.Cmd) {
 	}
 	return m, nil
 }
+
+// foldCompactDone folds the /compact worker's terminal Msg: note what the fold did, return to
+// idle, and flush anything staged while it ran.
+//
+// On success the history shrank, so reset the gauge to hidden — the next Turn's UsageEvent
+// re-measures the smaller fill (foldStats). A skip (conversation too small to fold) touched nothing,
+// so leave the gauge as it was and say so plainly rather than claiming a compaction. A failure
+// surfaces its reason as a note. Either way the worker is done: return to idle.
+//
+// A compaction that LANDED is a natural completion, so it flushes like an Exchange does: a row typed
+// while /compact ran had no Exchange to be interjected into (the /compact worker drives none, so it
+// carries no mailbox) and has been waiting for exactly this boundary. Only a stop or a fault holds —
+// a cancelled compaction returns cancelledMsg, not this Msg.
+func (m Model) foldCompactDone(msg compactDoneMsg) (tea.Model, tea.Cmd) {
+	switch {
+	case msg.Err != nil:
+		m.transcript.addNote("compact: " + msg.Err.Error())
+	case msg.Skipped:
+		m.transcript.addNote("nothing to compact")
+	default:
+		m.ctxUsed = 0
+		m.transcript.addNote("context compacted")
+	}
+	cmd := m.finishWorker(stateIdle)
+	m.refreshViewport()
+	return m.flushAfterCompletion(cmd)
+}

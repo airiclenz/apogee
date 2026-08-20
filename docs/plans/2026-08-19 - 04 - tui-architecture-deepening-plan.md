@@ -616,7 +616,19 @@ already reads the painter's `lineTargets` — leave it alone.
 
 **Commit:** `refactor(tui): publish frame block spans from View instead of re-deriving pane rects`
 
-## 21. Every Update arm delegates; the key-claim order becomes data
+## 21. Every Update arm delegates; the key-claim order becomes data — ✅ DONE (2026-08-20)
+
+NOTES (2026-08-20): the item's "~10+ lines" was drawn on the arm as PRINTED — its narration plus its body — which is how the review measures the arms it names (`askReqMsg` 721-746, `compactDoneMsg` 833-855, `spinnerTickMsg` 949-971). Twelve arms qualify and were converted: `tea.ModeReportMsg`, `tea.KeyboardEnhancementsMsg`, `tea.PasteMsg`, `approvalReqMsg`, `routingNoticeMsg`, `cancelledMsg`, `errMsg`, `compactDoneMsg`, `spinnerTickMsg`, `beatMsg`, `tea.MouseWheelMsg` and `default`. The twelve arms under the threshold (`tea.WindowSizeMsg`, `ctrlCResetMsg`, `eventMsg`, `scheduleEventMsg`, `presentedMsg`, `exchangeDoneMsg`, `interjectedMsg`, `skillsReloadedMsg`, `skillsRescannedMsg`, `recallLoadedMsg`, `heartbeatTickMsg`, `flashClearMsg`) stay inline, and the fifteen that already delegate were not touched — they are the shape being applied.
+
+NOTES (2026-08-20): each converted arm's narration moved onto its fold's doc comment and the arm keeps a two-line summary naming the file the fold lives in, which is the shape the fifteen delegating arms already had. That is what the review's "Update ~477 → ~120" measures; carrying the full prose along to the arm would have shrunk nothing. `Update` is 262 lines and `handleKey` 192. Every moved BODY is byte-identical: a normalised diff of the whole change shows no removed code line that does not reappear, except the seventeen lines of `handleKey`'s guard block, which is the half the item replaces with data.
+
+NOTES (2026-08-20): `internal/tui/ask.go` is on the item's Files line but needed no change — the ask arm's fold (`foldAskRequest`) landed with item 3. `askChoiceKey` deliberately stays where item 3 put it, below the two `msg.String()` switches, and is NOT in the claimant list: the list is walked before the frame's own verbs, so hoisting the ask's choice keys into it would change which surface claims a key, and the plan forbids that.
+
+NOTES (2026-08-20): seven claimants, not the review's eight. The pre-switch block holds seven guards today — sessions browser, settings pane, picker, autocomplete overlay, /usage report, /inspect pane, block cursor — and all seven are in `keyClaimOrder` in exactly that order, with each guard's own comment as its entry's documentation. The state gate each guard carried in its `if` is the entry's `open` field; a nil `open` is a surface whose own key contract is the whole test, which is the two report panes' shape and the block cursor's.
+
+NOTES (2026-08-20): `foldCancelled` takes no message. `cancelledMsg` carries no fields the arm read, so the arm reads `return m.foldCancelled()` — the shape `m.foldSkillsReloaded()` already had in this switch — rather than passing a value nothing looks at.
+
+NOTES (2026-08-20): files beyond the item's line, each for one reason the change itself created — `width.go`, `prompteditor.go`, `approval.go`, `commandrun.go`, `spinner.go` and `mouse.go` are the concern files receiving folds, which the item's Files line asks the implementer to enumerate; `doc.go` had one stale clause (its prompt-legend narration said the `tea.KeyboardEnhancementsMsg` arm in `model.go` sets the disambiguation flag — the fold that sets it is in `prompteditor.go`); and the tests the item asks for landed in new `internal/tui/keyclaim_test.go` (items 11, 13 and 15's precedent), which is a concern-named test file like `mode_test.go` and `seam_test.go` beside it. No existing test changed.
 
 **Source:** review §Candidate 8. Depends on items 2 and 3.
 
