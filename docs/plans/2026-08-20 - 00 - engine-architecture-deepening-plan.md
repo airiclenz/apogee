@@ -108,7 +108,28 @@ NOTES (2026-08-20): the item allowed cloning `Ordering`'s slices "if they share 
 
 **Commit:** `docs: align Tool-summary carrier counts and the run Events wrapping claim`
 
-## 5. wave4WriteTools learns the three 2026-08-10 write tools
+## 5. wave4WriteTools learns the three 2026-08-10 write tools — ✅ DONE (2026-08-20)
+
+NOTES (2026-08-20): the item named three files; `internal/mechanisms/robustness.go` had to change
+too — `isFileMutatingTool`'s doc comment enumerates the apogee half of the set ("edit_existing_file,
+single_find_and_replace, multi_find_and_replace; names verified against internal/tools") and this
+item's change falsified that list. The comment now names all six and cites the new pin. No code
+change in that file.
+
+NOTES (2026-08-20): the drift pin lives in `decompose_test.go` (where `wave4WriteTools` is defined)
+rather than `robustness_test.go`; `robustness_test.go` got the table the item asks for, as a pin on
+the SPLIT between the package's two write-detection semantics — `isFileMutatingTool` must count the
+trio, `isWriteTool` must not, since a move or a delete carries no file payload to syntax-check.
+
+NOTES (2026-08-20): the pin derives its candidate set from code rather than a hand-copied roster —
+it walks `tools.DefaultToolsWithHost` and skips every `domain.IsReadOnly` tool, so only the
+write-capable half needs classifying, and a new read-only built-in needs no test edit at all. Two
+test-local tables split that half: `workspaceWritingBuiltins` (mirroring `internal/tools`'
+unexported `workspaceScopedWriter` marker set) and `writeCapableNonFileBuiltins` (subprocess, git,
+network and sub_agent). An unclassified write-capable built-in fails the test by default.
+
+NOTES (2026-08-20): all three new pins were mutation-checked — removing `copy_file` from
+`wave4WriteTools` fails the drift pin, the decompose stand-down table and the semantics table.
 
 **Source:** review defect a.
 

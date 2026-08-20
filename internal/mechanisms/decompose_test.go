@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/tools"
 )
 
 // complexMultiStep scores "complex" in decomposeAssessComplexity (3 numbered steps → +4; the
@@ -231,20 +232,135 @@ func TestDecomposeCollapseSparesTheLiveAskAcrossAnInterjection(t *testing.T) {
 }
 
 // Once the model has written a file, decompose stops steering — no continuation, no step hint
-// (apogee-sim: return once HasWrittenFiles).
+// (apogee-sim: return once HasWrittenFiles). Every spelling in wave4WriteTools counts as that write,
+// the file-operation trio (copy_file / move_file / delete_file) included: moving or deleting bytes
+// that exist is the model acting on the workspace just as much as writing new ones is, so the same
+// stand-down applies.
 func TestDecomposeSkipsAfterWrite(t *testing.T) {
+	t.Parallel()
+	for _, tool := range []string{
+		"write_file", "edit_existing_file", "copy_file", "move_file", "delete_file",
+	} {
+		t.Run(tool, func(t *testing.T) {
+			t.Parallel()
+			req := shaperRequest([]domain.Message{
+				{Role: domain.RoleSystem, Content: "SYS"},
+				{Role: domain.RoleAssistant, ToolCalls: []domain.ToolCall{{ID: "c1", Tool: tool, Arguments: []byte(`{"path":"x.go","content":"package x"}`)}}},
+				{Role: domain.RoleTool, ToolCallID: "c1", Content: "ok"},
+				{Role: domain.RoleUser, Content: complexMultiStep},
+			}, oneTool)
+			before := req.Revision()
+			if err := (decomposeMechanism{}).PreRequest(context.Background(), req); err != nil {
+				t.Fatalf("PreRequest: %v", err)
+			}
+			if req.Revision() != before {
+				t.Errorf("decompose steered a prompt after the model had already called %s", tool)
+			}
+		})
+	}
+}
+
+// Control for the table above: a tool call that mutates nothing leaves decompose steering, so the
+// stand-down each write spelling produces is the write's doing and not the mere presence of a call.
+func TestDecomposeStillSteersAfterARead(t *testing.T) {
 	t.Parallel()
 	req := shaperRequest([]domain.Message{
 		{Role: domain.RoleSystem, Content: "SYS"},
-		{Role: domain.RoleAssistant, ToolCalls: []domain.ToolCall{{ID: "c1", Tool: "write_file", Arguments: []byte(`{"path":"x.go","content":"package x"}`)}}},
-		{Role: domain.RoleTool, ToolCallID: "c1", Content: "ok"},
+		{Role: domain.RoleAssistant, ToolCalls: []domain.ToolCall{{ID: "c1", Tool: "read_file", Arguments: []byte(`{"path":"x.go"}`)}}},
+		{Role: domain.RoleTool, ToolCallID: "c1", Content: "package x"},
 		{Role: domain.RoleUser, Content: complexMultiStep},
 	}, oneTool)
 	before := req.Revision()
 	if err := (decomposeMechanism{}).PreRequest(context.Background(), req); err != nil {
 		t.Fatalf("PreRequest: %v", err)
 	}
-	if req.Revision() != before {
-		t.Fatal("decompose steered a prompt after the model had already written a file")
+	if req.Revision() == before {
+		t.Fatal("decompose stood down after a read_file; only a write ends its steering")
+	}
+}
+
+// workspaceWritingBuiltins names the registered built-ins whose EXECUTION mutates a named workspace
+// file — internal/tools' workspaceScopedWriter set, mirrored here because that marker is unexported.
+// Every one of them must appear in wave4WriteTools, or the whole history family (read_repeat,
+// read_loop, cached_content_intercept, error_enrichment, the off-ramps, greenfield detection) treats
+// a real write as a non-write, which is exactly how copy_file, move_file and delete_file went
+// unnoticed from 2026-08-10 until this pin.
+var workspaceWritingBuiltins = map[string]bool{
+	"write_file":              true,
+	"edit_existing_file":      true,
+	"single_find_and_replace": true,
+	"multi_find_and_replace":  true,
+	"copy_file":               true,
+	"move_file":               true,
+	"delete_file":             true,
+}
+
+// writeCapableNonFileBuiltins names the registered built-ins that are write-CAPABLE (they gate
+// through Approval) yet mutate no workspace file a NAME can classify: the subprocess tools, whose
+// effect is whatever command the model composed; the two git tools that write .git rather than the
+// worktree; the network tools; and the sub_agent recursion point. They belong OUT of
+// wave4WriteTools — counting them would make "the model has written a file" true for a web_search.
+var writeCapableNonFileBuiltins = map[string]bool{
+	"terminal":     true,
+	"python_exec":  true,
+	"run_tests":    true,
+	"git_branch":   true,
+	"git_commit":   true,
+	"web_fetch":    true,
+	"http_request": true,
+	"web_search":   true,
+	"sub_agent":    true,
+}
+
+// stubAsker and stubPresenter are non-nil host delegates: the registry omits ask_user and
+// present_document when either is nil, and the pin below wants the whole roster, not one Driver's.
+type stubAsker struct{}
+
+func (stubAsker) Ask(context.Context, domain.AskRequest) (domain.AskAnswer, error) {
+	return domain.AskAnswer{}, nil
+}
+
+type stubPresenter struct{}
+
+func (stubPresenter) Present(context.Context, domain.PresentRequest) (domain.PresentOutcome, error) {
+	return domain.PresentOutcome{}, nil
+}
+
+// The drift pin defect (a) closes: wave4WriteTools is the history family's single source for "did
+// this call mutate a file", but nothing tied it to the tool menu it describes, so the file-operation
+// trio was registered in internal/tools without ever reaching it. Walk the REGISTERED built-ins, and
+// require every write-capable one to be classified — a workspace file writer that wave4WriteTools
+// must contain, or a documented non-writer it must not. A new write tool in internal/tools now fails
+// this test until someone answers the question for it.
+//
+// The sim spellings in wave4WriteTools (write_to_file, editFile, …) name no registered tool; the pin
+// walks the menu, never the map, so those stay additive.
+func TestWave4WriteToolsCoversEveryWorkspaceWritingBuiltin(t *testing.T) {
+	t.Parallel()
+	menu := tools.DefaultToolsWithHost("", tools.HostTools{Asker: stubAsker{}, Presenter: stubPresenter{}})
+	if len(menu) != len(tools.KnownToolNames()) {
+		t.Fatalf("menu has %d tools, KnownToolNames %d: the pin is not walking the whole roster", len(menu), len(tools.KnownToolNames()))
+	}
+
+	for _, tool := range menu {
+		name := tool.Name()
+		if domain.IsReadOnly(tool) {
+			if workspaceWritingBuiltins[name] {
+				t.Errorf("%q is declared ReadOnly but classified as a workspace file writer", name)
+			}
+			continue
+		}
+		switch {
+		case workspaceWritingBuiltins[name]:
+			if !wave4WriteTools[name] {
+				t.Errorf("%q mutates workspace files but is missing from wave4WriteTools; the history family would read its writes as non-writes", name)
+			}
+		case writeCapableNonFileBuiltins[name]:
+			if wave4WriteTools[name] {
+				t.Errorf("%q mutates no named workspace file but sits in wave4WriteTools", name)
+			}
+		default:
+			t.Errorf("built-in %q is write-capable but classified by neither table; decide whether it mutates workspace files and add it to workspaceWritingBuiltins (and wave4WriteTools) or to writeCapableNonFileBuiltins", name)
+		}
 	}
 }

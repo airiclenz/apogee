@@ -775,6 +775,19 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **`copy_file`, `move_file` and `delete_file` finally count as writes.** The three file-operation
+  tools registered on 2026-08-10 never reached `wave4WriteTools`, the single set the whole history
+  family asks "did the model write a file?" — so copying, moving or deleting a file read as no
+  action at all: `decompose` kept steering as if nothing had been produced, `error_enrichment`
+  skipped their repeated failures, `read_repeat` and `cached_content_intercept` still treated a read
+  of a since-deleted file as current, and a workspace the model had already changed still counted as
+  greenfield. Every consumer of the set counts the three now. The path-keyed half of that family
+  reads only `path`-style arguments, so a copy's or a move's `destination` stays invisible to it —
+  the tool-name checks above are unaffected. A new drift pin walks the registered built-in menu and
+  fails when a write-capable tool is classified by neither table, so the next write tool added to
+  `internal/tools` cannot land as a silent non-write; the foreign apogee-sim spellings in the set
+  stay additive, since the pin walks the menu and never the map.
+
 - Corrected three stale claims about which tools carry a typed summary and how a Firing's event sink
   is installed. `internal/tui/toolregistry.go` said six tools report a `domain.ToolSummary` and named
   only `read_file`, `write_file`, `list_dir`, `grep`, `view_diff` and `web_search`; the three edit

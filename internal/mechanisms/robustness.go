@@ -89,8 +89,9 @@ func isWriteTool(name string) bool { return writeToolNames[name] }
 
 // isFileMutatingTool reports whether name mutated a file / was a write action — semantic (b) of this
 // package's two write-detection semantics (see writeToolNames for (a)). It is the apogee-complete
-// superset: apogee-sim's writeToolNames UNION apogee's own edit tools (edit_existing_file,
-// single_find_and_replace, multi_find_and_replace; names verified against internal/tools), reusing
+// superset: apogee-sim's writeToolNames UNION apogee's own write tools (edit_existing_file,
+// single_find_and_replace, multi_find_and_replace, copy_file, move_file, delete_file; names
+// verified against internal/tools, and pinned to its registered menu there), reusing
 // wave4WriteTools (decompose.go) as the single source of that superset. The history-family
 // Mechanisms — read_repeat, read_loop, cached_content_intercept, error_enrichment,
 // tool_loop_interceptor, the off-ramps, and deriveWriteTarget — use it so their write-since /

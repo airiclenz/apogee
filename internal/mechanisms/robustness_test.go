@@ -113,3 +113,40 @@ func TestWave1DeterministicOrder(t *testing.T) {
 		}
 	}
 }
+
+// The two write-detection semantics part company on apogee's own write tools, and the file-operation
+// trio (copy_file / move_file / delete_file) is the sharpest case: moving or deleting a file mutates
+// the workspace — semantic (b), isFileMutatingTool, must count it — but the call carries no file
+// payload to syntax-check or format, so semantic (a), isWriteTool, must not. A trio member counted by
+// (a) would send syntax and autofix hunting for content that is not there; one missed by (b) leaves
+// the whole history family reading a real write as a non-write (defect a).
+func TestWriteDetectionSemanticsSplitOnApogeeWriteTools(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		tool      string
+		mutating  bool // semantic (b): did this call mutate a file?
+		fullWrite bool // semantic (a): does this call carry a full file payload?
+	}{
+		{"write_file", true, true},               // the sim spelling both semantics share
+		{"edit_existing_file", true, false},      // fragment payload — (b) only
+		{"single_find_and_replace", true, false}, // patch payload — (b) only
+		{"multi_find_and_replace", true, false},  // patch payload — (b) only
+		{"copy_file", true, false},               // 2026-08-10 trio: bytes move, no payload
+		{"move_file", true, false},               //
+		{"delete_file", true, false},             //
+		{"read_file", false, false},              // reads mutate nothing
+		{"list_dir", false, false},               //
+		{"terminal", false, false},               // effects are the model's command, not a named write
+	}
+	for _, c := range cases {
+		t.Run(c.tool, func(t *testing.T) {
+			t.Parallel()
+			if got := isFileMutatingTool(c.tool); got != c.mutating {
+				t.Errorf("isFileMutatingTool(%q) = %v, want %v", c.tool, got, c.mutating)
+			}
+			if got := isWriteTool(c.tool); got != c.fullWrite {
+				t.Errorf("isWriteTool(%q) = %v, want %v", c.tool, got, c.fullWrite)
+			}
+		})
+	}
+}
