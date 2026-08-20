@@ -421,10 +421,12 @@ func renderSubAgentMemberRows(th theme, tv toolView, marker string, width, room 
 		return []string{indicatorRow(th, row, width, glyphCollapsed)}, true
 	}
 	out := []string{indicatorRow(th, row, width, glyphExpanded)}
-	for _, d := range tv.Details.all() {
-		out = append(out, gutteredWrap(th, detailStyle(th, d.Kind, true), memberGutter, memberGutter,
-			d.Text, room)...)
-	}
+	// The member gutter is the ordinary open member's frame (openMemberFrame), and the body under it
+	// is painted through the same painter. It is the frame ALONE that is shared: this row's report is
+	// the sub_agent call's own and no Edit region can reach it, so the split reading has nothing to
+	// offer here and is not asked for (paintToolBody, renderExpandedMember).
+	rows, _ := openMemberFrame(memberGutter).paint(th, tv.Details.all(), room)
+	out = append(out, rows...)
 	// The span this row opened begins with the prompt the delegate was handed, exactly as a lone
 	// run's does (renderSubAgentRun): folding changes the frame around a delegation and never what
 	// the delegation shows of itself.

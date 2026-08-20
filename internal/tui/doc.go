@@ -806,7 +806,13 @@
 // walk with the member rows they paint; toolleader.go the leader row, the dotted leader and the
 // promote-guard that flexes it; blockstate.go the [blockState] a painter is told and the
 // predicates that decide what a collapsed block hides; toolbranch.go the ┝/┕ branch rows and the
-// detail lines beneath them; wrap.go the hanging-wrap, clip and depth-rail primitives every
+// detail lines beneath them; toolbody.go the ONE painter those bodies are all drawn by — the
+// [bodyFrame] value each of the five framing paths states its own frame in (what leads a detail
+// line, what continues it, which tone it takes, how many rows one line may spend) and
+// [bodyFrame.paint], which spends the wrap primitives per line in that shape; plus [paintToolBody],
+// which puts ADR 0052's reading rule in front of that painter so the split-vs-stacked choice
+// ([splitBody]) is made in ONE place rather than at each path that can reach it;
+// wrap.go the hanging-wrap, clip and depth-rail primitives every
 // painter above shares; boxdraw.go the box and join primitives beside it, lifted out of model.go
 // (ADR 0043) — the width-authority squaring a painted row is finished with ([squareLine],
 // [squareOnField]), the four-sided border the two boxed surfaces are drawn in ([drawBox],

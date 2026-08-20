@@ -350,7 +350,7 @@ func renderGroupMember(th theme, tv toolView, marker, gutter string, width, room
 // own constant so the transcript has one vocabulary for "close this" (design call 7).
 //
 // The body it buys is the split reading where the member's own room allows it and the detail lines
-// otherwise (splitBody) — the same choice the ungrouped block makes, asked here against room
+// otherwise (paintToolBody) — the same choice the ungrouped block makes, asked here against room
 // rather than the block's width, since the indicator field an open member holds clear is width the
 // panes never had. This path also carries the UNSPANNED sub-agent group member
 // (renderGroupMember, subagentblock.go); the spanned member loop is deliberately not wired, as it
@@ -358,13 +358,7 @@ func renderGroupMember(th theme, tv toolView, marker, gutter string, width, room
 func renderExpandedMember(th theme, tv toolView, marker, gutter string, width, room int) []string {
 	row := leaderRow(th, tv, marker, room, true, noRemainder)
 	out := []string{indicatorRow(th, row, width, glyphExpanded)}
-	if panes, split := splitBody(th, tv, gutter, room); split {
-		out = append(out, panes...)
-	} else {
-		for _, d := range tv.Details.all() {
-			out = append(out, gutteredWrap(th, detailStyle(th, d.Kind, true), gutter, gutter, d.Text, room)...)
-		}
-	}
+	out = append(out, paintToolBody(th, tv, tv.Details.all(), openMemberFrame(gutter), room)...)
 	return append(out, seeLessRow(th, gutter, width))
 }
 

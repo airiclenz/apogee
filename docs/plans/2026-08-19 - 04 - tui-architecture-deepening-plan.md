@@ -325,7 +325,13 @@ the hooks.
 
 **Commit:** `docs(tui): correct doc.go's ADR 0011 narration about residual prose parsing`
 
-## 11. One body painter behind the five tool-body frames
+## 11. One body painter behind the five tool-body frames — ✅ DONE (2026-08-20)
+
+NOTES (2026-08-20): the item's Files line names `internal/tui/diffbody.go`, but nothing in it needed changing — it produces BODIES (the recorded and recovered regions, the stacked rows built from them) and never the frames those bodies are drawn in, and no prose in it pointed at code this item moved.
+NOTES (2026-08-20): `splitBody` moved from `toolbranch.go` into `toolbody.go` (same-package move, body verbatim; two sentences of its doc comment reworded because the move staled them — it named `renderSubDetails`/`gutteredWrap` as "the detail-line painters" and narrated the three call sites it no longer has). It IS the split-vs-stacked decision the item asks to fold into the painter, so putting it beside the painter is what makes `toolbody.go` the single home of ADR 0052's rendering rule; its only caller is now `paintToolBody`.
+NOTES (2026-08-20): `renderSubDetails` changed signature from `(th, details, indent, width)` to `(th, tv, indent, width)` — folding its path's split wiring in requires the call's recorded regions, and `renderToolBranch` is its only caller. `renderDetails` and `clipDetails` deliberately kept theirs: `blockstate.go` and `toolbranch_test.go` call them and are outside this item's scope. They therefore paint through the frame's own painter (`bodyFrame.paint`) while the three split-capable paths go through `paintToolBody` — which is also the honest split, since neither of those two ever had a reading to choose (`clipDetails` is the collapsed shape; `renderDetails` is spent on the summary line that closes a split body, which is not a body line).
+NOTES (2026-08-20): four frame constructors, not five — `renderExpandedMember` and `renderSubAgentMemberRows` frame a body identically (`openMemberFrame`, differing only in the gutter string their caller holds) and differ solely in the reading they ask for, which the sub-agent site's comment states. The new test still pins all five SITES separately, each against the primitive calls its own loop used to make.
+NOTES (2026-08-20): the item's Files line names no test file; the tests it asks for landed in new `internal/tui/toolbody_test.go` (`TestEveryToolBodyFrameKeepsItsOwnFraming` over the five sites, plus `TestTheToolBodyFramesStayDistinct` so a merge that collapsed two frames into one could not pass by collapsing both sides of a per-frame pin).
 
 **Source:** review §Candidate 4 (the remaining deepening; the time-critical half landed
 with the split-diff plan). Depends on items 1 and 7.

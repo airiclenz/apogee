@@ -222,6 +222,20 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **One painter draws all five tool-body frames.** The rows a call's detail lines become were laid
+  out by five hand-written loops — the targetless shape's ┝/┕ branch list open (`renderDetails`) and
+  collapsed (`clipDetails`), an ungrouped call's body at its branch marker's indent
+  (`renderSubDetails`), an open group member's under its │ gutter (`renderExpandedMember`) and an
+  open sub-agent member's under the same (`renderSubAgentMemberRows`) — each spending the same three
+  wrap primitives in its own way, and three of them separately deciding whether the call's recorded
+  Edit regions should be read as two panes instead (ADR 0052). Each frame is now a value
+  (`bodyFrame`) stating what leads a detail line, what continues it, which tone it takes and how many
+  rows one line may spend, and one painter behind them spends the primitives in that shape; the
+  split-vs-stacked choice is made once in front of that painter (`paintToolBody`) rather than at each
+  path that can reach it, so a sixth path cannot arrive with a sixth answer. Nothing on screen
+  changes — every frame keeps its exact lead, gutter, indent, clip and tone, and a new per-frame test
+  pins each of the five against the primitive calls its own loop used to make.
+
 - **`doc.go` stops claiming the tool cards read no prose at all.** The narration of the post-v0.8
   presenter deepening — facts arrive as data, only the wording is the view's — read as if the
   free-text parsing it replaced had gone entirely, while `toolregistry.go` has always been honest

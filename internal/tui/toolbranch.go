@@ -76,10 +76,7 @@ func renderToolBranch(th theme, tv toolView, marker string, width int, expanded 
 	}
 	out.add([]string{row}, toggle)
 	if expanded {
-		body, split := splitBody(th, tv, strings.Repeat(" ", indent), width)
-		if !split {
-			body = renderSubDetails(th, tv.Details.all(), indent, width)
-		}
+		body := renderSubDetails(th, tv, indent, width)
 		out.add(body, toggle)
 		out.add(seeLessFooter(th, body, width, toggle), toggle)
 	}
@@ -289,14 +286,7 @@ func branchDetails(tv toolView) []detailLine {
 // a marker per PHYSICAL row would mark a wrapped continuation as a branch, and the split reading's
 // rows are not lines of the body but its arrangement.
 func renderBranchList(th theme, tv toolView, width int) []string {
-	rows, split := splitBody(th, tv, strings.Repeat(" ", th.measure.Width(branchMarker(true))), width)
-	if !split {
-		return renderDetails(th, branchDetails(tv), width)
-	}
-	if tv.Summary.Text == "" {
-		return rows
-	}
-	return append(rows, renderDetails(th, []detailLine{tv.Summary.detailLine}, width)...)
+	return paintToolBody(th, tv, branchDetails(tv), expandedBranchFrame(), width)
 }
 
 // branchMarker is the tree marker leading a branch line: ┕ closes a block, ┝ continues it. Its
@@ -338,67 +328,17 @@ func paintRowMarker(th theme, marker string, expanded bool) string {
 	return detailTone(th, expanded).Render(marker)
 }
 
-// renderSubDetails lays a call's detail lines out beneath its branch line, indented to the
-// branch marker's width and styled by kind, so they read as that branch's content rather than
-// as siblings of it.
+// renderSubDetails lays a call's body out beneath its branch line, indented to the branch marker's
+// width and styled by kind, so it reads as that branch's content rather than as siblings of it. It
+// is one of the five frames the shared body painter draws (subDetailFrame), and it asks that painter
+// for the READING too: the two panes where the call recorded Edit regions this width has room for,
+// and the detail lines otherwise (paintToolBody).
 //
 // It is the EXPANDED paint's alone — a collapsed block paints no body line at all
-// (collapsedBodyRows) — so its lines take the open tone outright rather than through a parameter
-// that could only ever be true (detailStyle).
-func renderSubDetails(th theme, details []detailLine, indent, width int) []string {
-	pad := strings.Repeat(" ", indent)
-	out := make([]string, 0, len(details))
-	for _, d := range details {
-		out = append(out, hangingWrap(th, detailStyle(th, d.Kind, true), pad, d.Text, width)...)
-	}
-	return out
-}
-
-// splitBody is the SPLIT reading of an expanded call's body — the recorded Edit regions as two
-// panes (splitDiffRows) laid out under prefix in width columns — and false when this body does not
-// take that reading at all: no regions were recorded, so the block keeps whatever body it was
-// presented with (ratified call 9, ADR 0052), or the panes would be too narrow to be worth the
-// arrangement (splitDiffFits) and the stacked rows the same regions already built are the reading.
-//
-// It is the ONE place any paint path chooses between the two readings, and every path asks it with
-// the width IT holds, at the moment it paints: the choice is a property of this body at this width
-// and is kept nowhere, so a resize re-flows the wrap and can flip the reading with no state to
-// keep in step (ADR 0052 §3). The three paths a diff-bodied block can reach differ only in what
-// they hang the body under — an ungrouped call's blank indent, the targetless shape's, an open
-// member's │ gutter — so the prefix is the parameter and the decision is not.
-//
-// The prefix is measured off the width before the panes are composed and painted in the detail
-// tone, exactly as the detail-line painters spend it (renderSubDetails, gutteredWrap), so a split
-// body starts in the column its stacked twin would have and the row still ends inside the width it
-// was given.
-//
-// A body whose regions came from a diff spanning SEVERAL files is composed section by section, each
-// under a muted row naming its file (ratified call 10) — the same header the stacked reading of it
-// already carries, so the two readings of one printed diff say the same things in the same order.
-// The header is truncated to the width rather than wrapped: it names a file, and a name broken over
-// two rows would read as two of them. Whether the panes fit is asked ONCE over all the regions, so
-// a body cannot paint half in panes and half stacked.
-func splitBody(th theme, tv toolView, prefix string, width int) (rows []string, split bool) {
-	inner := width - th.measure.Width(prefix)
-	if !splitDiffFits(tv.Regions, inner) {
-		return nil, false
-	}
-	var panes []string
-	for _, section := range regionFileSections(tv.Regions, tv.RegionFiles) {
-		if section.File != "" {
-			panes = append(panes, th.toolDetail.Render(truncateToWidth(th, section.File, inner)))
-		}
-		panes = append(panes, splitDiffRows(th, section.Regions, inner)...)
-	}
-	if len(panes) == 0 {
-		return nil, false
-	}
-	pad := th.toolDetail.Render(prefix)
-	out := make([]string, len(panes))
-	for i, row := range panes {
-		out[i] = pad + row
-	}
-	return out, true
+// (collapsedBodyRows) — so its frame carries the open tone outright rather than a parameter that
+// could only ever be true (bodyFrame.expanded).
+func renderSubDetails(th theme, tv toolView, indent, width int) []string {
+	return paintToolBody(th, tv, tv.Details.all(), subDetailFrame(indent), width)
 }
 
 // toolCallRun returns the consecutive tool-call entries starting at entries[i] that fold into one
@@ -466,20 +406,21 @@ func renderOrphanResult(th theme, text string, width int, expanded bool) blockPa
 // out beneath it (renderToolBranch).
 //
 // Like renderSubDetails it is the EXPANDED paint — the collapsed twin of this shape is clipDetails,
-// under the row budget and in the dim tone — so its lines take the open tone outright.
+// under the row budget and in the dim tone — so its frame carries the open tone outright
+// (expandedBranchFrame). It paints the lines it is HANDED and asks nothing about which reading the
+// body takes: renderBranchList asks that once for the whole shape, and the one line this is spent
+// on again beneath a split body is the summary rather than a body line (summaryBranchRows).
 func renderDetails(th theme, details []detailLine, width int) []string {
-	var out []string
-	for i, d := range details {
-		out = append(out, hangingWrap(th, detailStyle(th, d.Kind, true), branchMarker(i == len(details)-1), d.Text, width)...)
-	}
-	return out
+	rows, _ := expandedBranchFrame().paint(th, details, width)
+	return rows
 }
 
-// clipDetails is renderDetails under the collapsed block's row budget: every branch line gets
-// collapsedBranchRows rows and the clip takes the rest (clipWrap, which ends a cut row in " …"), so
-// a collapsed targetless block spends as many rows on its branch list as the cap left it lines. It
-// is what keeps that shape inside the four-row budget the targeted one is held to — unclipped, one
-// argument blob's first line soft-wrapped the block as tall as the terminal was narrow.
+// clipDetails is renderDetails under the collapsed block's row budget, and the same painter draws
+// both (collapsedBranchFrame): every branch line gets collapsedBranchRows rows and the clip takes
+// the rest (clipWrap, which ends a cut row in " …"), so a collapsed targetless block spends as many
+// rows on its branch list as the cap left it lines. It is what keeps that shape inside the four-row
+// budget the targeted one is held to — unclipped, one argument blob's first line soft-wrapped the
+// block as tall as the terminal was narrow.
 //
 // It REPORTS the cut because whether a collapsed targetless block hides anything is width-dependent
 // once its lines can be cut, and the indicator, the click target and the paint all have to agree
@@ -487,14 +428,7 @@ func renderDetails(th theme, details []detailLine, width int) []string {
 // row is one row in both states, so the target it clips hides nothing (leaderRow). The rule asks the
 // clipper that paints the shape, so it cannot drift from what is on screen.
 func clipDetails(th theme, details []detailLine, width int) (lines []string, clipped bool) {
-	out := make([]string, 0, len(details))
-	for i, d := range details {
-		rows, cut := clipWrap(th, detailStyle(th, d.Kind, false), branchMarker(i == len(details)-1), d.Text,
-			width, collapsedBranchRows)
-		out = append(out, rows...)
-		clipped = clipped || cut
-	}
-	return out, clipped
+	return collapsedBranchFrame().paint(th, details, width)
 }
 
 // detailStyle maps a detail kind and its block's STATE to a style. EVERY kind takes the plain tone
