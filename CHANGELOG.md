@@ -775,6 +775,16 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- Tests: the two uncovered branches the review tripped over are pinned. `decomposeExtractStep`'s
+  prose fallback — the path a prompt with no numbered steps takes — now has a table driving the
+  first-action-sentence extraction and both of its bail-outs (no sentence carries action intent; the
+  action sentence IS the opening sentence, leaving no context to frame it), including that the
+  fallback is not step-indexed. And `listResultEmpty`, the only gate on greenfield detection's list
+  arm, is pinned across all four empty spellings case- and padding-insensitively, across the whole
+  five-spelling list-tool family, and on the in-flight listing it deliberately reads as non-empty —
+  with an end-to-end pair showing the gate deciding whether one failed read fires the blunt
+  greenfield hint (threshold 1) or stays silent (threshold 2).
+
 - **`copy_file`, `move_file` and `delete_file` finally count as writes.** The three file-operation
   tools registered on 2026-08-10 never reached `wave4WriteTools`, the single set the whole history
   family asks "did the model write a file?" — so copying, moving or deleting a file read as no

@@ -364,3 +364,73 @@ func TestWave4WriteToolsCoversEveryWorkspaceWritingBuiltin(t *testing.T) {
 		}
 	}
 }
+
+// A prompt with no numbered steps falls back to the first ACTION sentence: the opening sentence
+// becomes the context and the action sentence becomes the single step, reported as step 0 of 1.
+// The fallback extracts nothing in two cases — no sentence carries action intent (a description, or
+// an action verb inside a question), and the action sentence IS the opening sentence, which would
+// leave the step with no context to frame it and the prompt no simpler than it already is.
+func TestDecomposeExtractStepProseFallback(t *testing.T) {
+	t.Parallel()
+	const prose = "The parser lives in `lexer.go`. Please update the tokenizer to handle escaped strings."
+	const wantProse = "The parser lives in `lexer.go`.\n\n" +
+		"Your next step: Please update the tokenizer to handle escaped strings."
+
+	cases := []struct {
+		name      string
+		msg       string
+		completed int
+		want      string // "" means: the fallback bails out and extracts nothing
+	}{
+		{
+			name: "opening sentence frames the first action sentence",
+			msg:  prose,
+			want: wantProse,
+		},
+		{
+			// The fallback is not step-indexed: it has one step to offer and offers it again.
+			name:      "completed steps do not advance the single fallback step",
+			msg:       prose,
+			completed: 3,
+			want:      wantProse,
+		},
+		{
+			name: "a description carries no action intent",
+			msg:  "This module is quite old. Nobody remembers who owns it.",
+		},
+		{
+			name: "an action verb inside a question is not an action sentence",
+			msg:  "The loader is slow.\nWhat should I change in the tokenizer?",
+		},
+		{
+			name: "a lone action sentence has no context to frame it",
+			msg:  "Update the tokenizer to handle escaped strings.",
+		},
+		{
+			name: "an opening action sentence has no context to frame it either",
+			msg:  "Update the tokenizer. Then run the tests.",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, stepIdx, total, ok := decomposeExtractStep(tc.msg, tc.completed)
+
+			if ok != (tc.want != "") {
+				t.Fatalf("extracted = %v, want %v (simplified %q)", ok, tc.want != "", got)
+			}
+			if got != tc.want {
+				t.Errorf("simplified =\n%q\nwant\n%q", got, tc.want)
+			}
+			wantTotal := 0
+			if ok {
+				wantTotal = 1
+			}
+			if stepIdx != 0 || total != wantTotal {
+				t.Errorf("step = %d of %d, want 0 of %d", stepIdx, total, wantTotal)
+			}
+		})
+	}
+}

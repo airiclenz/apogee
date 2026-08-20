@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/domain/domaintest"
 )
 
 // fireReadLoop runs read_loop's pre-request hook once against a request over msgs and reports
@@ -140,5 +141,101 @@ func TestReadLoopInertWithoutLoop(t *testing.T) {
 	}
 	if fired, _ := fireReadLoop(t, msgs); fired {
 		t.Error("a single successful read is not a loop; read_loop must be inert")
+	}
+}
+
+// listCall is a directory-listing call in one of the list-family spellings — the only tool class
+// greenfield detection reads through listResultEmpty.
+func listCall(id, tool, path string) domain.ToolCall {
+	return domaintest.Call(id, tool, map[string]string{"path": path})
+}
+
+// greenfieldAfterListing reports how the greenfield scan reads a conversation whose single listing
+// came back as content (or, when omitted, has no result yet).
+func greenfieldAfterListing(tool, content string, omit bool) bool {
+	msgs := []domain.Message{
+		userMsg("create app.go"),
+		assistantCall(listCall("l1", tool, ".")),
+	}
+	if !omit {
+		msgs = append(msgs, toolResult("l1", content))
+	}
+	return isGreenfieldContext(scanView(msgs))
+}
+
+// listResultEmpty is the only gate on greenfield detection's list arm. A listing that came back
+// empty — in any of the four shapes tools spell "nothing here", case- and padding-insensitively —
+// leaves the workspace looking greenfield; a listing with entries flips it. A listing with no
+// result yet counts as non-empty: missing the greenfield signal is the cheaper mistake than
+// mis-firing the blunt hint on a call still in flight.
+func TestGreenfieldListingGate(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name    string
+		content string
+		omit    bool // build the call with no paired result at all
+		want    bool
+	}{
+		{name: "no content at all", want: true},
+		{name: "empty json array", content: "[]", want: true},
+		{name: "padded empty json array", content: "  []\n", want: true},
+		{name: "empty-directory wording", content: "`.` is an empty directory", want: true},
+		{name: "upper-cased no-files wording", content: "NO FILES MATCH THE PATTERN", want: true},
+		{name: "a listing with entries", content: "app.go\nmain.go", want: false},
+		{name: "a listing still in flight", omit: true, want: false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := greenfieldAfterListing("list_dir", tc.content, tc.omit); got != tc.want {
+				t.Errorf("greenfield = %v, want %v for a listing result %q (omitted: %v)", got, tc.want, tc.content, tc.omit)
+			}
+		})
+	}
+
+	// The gate reads the whole list-spelling family, not just the snake_case spelling above: a
+	// camelCase menu must reach the same verdict, or greenfield detection silently ignores the
+	// listing and calls a populated workspace empty.
+	t.Run("every list spelling gates the same", func(t *testing.T) {
+		t.Parallel()
+		for _, spelling := range listSpellings {
+			if !greenfieldAfterListing(spelling, "[]", false) {
+				t.Errorf("%s: an empty listing should keep the workspace greenfield", spelling)
+			}
+			if greenfieldAfterListing(spelling, "app.go\nmain.go", false) {
+				t.Errorf("%s: a listing with entries should flip greenfield off", spelling)
+			}
+		}
+	})
+}
+
+// What the gate decides, the model sees: an empty listing keeps the workspace greenfield, so ONE
+// failed read is enough for the blunt greenfield hint (threshold 1); a listing with entries proves
+// the workspace exists, so the same single miss is legitimate "check then create" and stays silent
+// until a second miss (threshold 2).
+func TestReadLoopGreenfieldHintFollowsTheListingGate(t *testing.T) {
+	t.Parallel()
+	history := func(listing string) []domain.Message {
+		return []domain.Message{
+			userMsg("create app.go"),
+			assistantCall(listCall("l1", "list_dir", ".")),
+			toolResult("l1", listing),
+			assistantCall(readCall("r1", "app.go")),
+			toolResult("r1", "file not found: app.go"),
+		}
+	}
+
+	fired, hint := fireReadLoop(t, history("[]"))
+	if !fired {
+		t.Fatal("an empty listing plus one failed read should fire the greenfield hint")
+	}
+	if !strings.Contains(hint, "workspace is empty") {
+		t.Errorf("greenfield hint = %q, want the empty-workspace phrasing", hint)
+	}
+
+	if fired, hint := fireReadLoop(t, history("app.go\nmain.go")); fired {
+		t.Errorf("a listing with entries must flip greenfield off, leaving one miss below threshold: %q", hint)
 	}
 }

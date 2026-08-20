@@ -143,7 +143,16 @@ NOTES (2026-08-20): all three new pins were mutation-checked — removing `copy_
 
 **Commit:** `fix(mechanisms): count copy_file, move_file and delete_file as write tools`
 
-## 6. Cover the decompose prose fallback and the readloop greenfield trigger
+## 6. Cover the decompose prose fallback and the readloop greenfield trigger — ✅ DONE (2026-08-20)
+
+NOTES (2026-08-20): the item's Tests line asks for the greenfield table only; two small additions
+serve the same gate and stayed in the named file — a subtest looping `listSpellings` (the gate reads
+`isListTool` over the whole family, so a camelCase menu must reach the same verdict) and a two-case
+end-to-end assertion through the `read_loop` hook, so the coverage is anchored to observable hook
+behaviour and not only to the unexported scan.
+NOTES (2026-08-20): mutation-checked both suites — breaking `listResultEmpty`'s missing-result and
+lower-casing behaviour, and dropping `decomposeExtractStep`'s `ctx == first` bail-out, each failed
+exactly the rows meant to catch it.
 
 **Source:** review defect k. Files overlap item 5 — runs after it.
 
