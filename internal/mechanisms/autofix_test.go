@@ -537,3 +537,26 @@ func TestAutofixRefusesAFormatterInsideTheWritableBox(t *testing.T) {
 		t.Errorf("python ladder = %d rung(s), want 1 for a formatter outside the box", len(rungs))
 	}
 }
+
+// TestAutofixScrubsApogeeCredentialsFromTheFormatter pins that the formatter rung spawns through
+// internal/tools' subprocess funnel (tools.RunHookSubprocess) rather than an exec.Command of its
+// own. The funnel's credential scrub is the observable: a formatter that echoes the variables back
+// into its output sees apogee's own key EMPTY while an ordinary variable still arrives, which no
+// hand-rolled spawn inheriting os.Environ() could produce.
+func TestAutofixScrubsApogeeCredentialsFromTheFormatter(t *testing.T) {
+	// Not parallel: t.Setenv.
+	t.Setenv("APOGEE_API_KEY", "sk-secret-value")
+	t.Setenv("APOGEE_TEST_ENDPOINT", "http://192.0.2.1:1111")
+
+	echoing := formatterScript(t, `printf 'x = (1)  # key:%s endpoint:%s\n' "$APOGEE_API_KEY" "$APOGEE_TEST_ENDPOINT"`+"\n")
+	hook := buildAutofix(t, resolveOnly("black", echoing))
+	resp := responseWith(nil, writeCall("c1", "script.py", brokenPy))
+
+	if decision := firePermitted(t, hook, resp, nil); decision.Action != domain.ActionIntercept {
+		t.Fatalf("Action = %q, want %q (the formatter repaired the payload)", decision.Action, domain.ActionIntercept)
+	}
+	want := "x = (1)  # key: endpoint:http://192.0.2.1:1111\n"
+	if got := contentArg(t, resp.ToolCalls()[0].Arguments); got != want {
+		t.Errorf("content = %q, want %q — apogee's key must not reach the formatter", got, want)
+	}
+}

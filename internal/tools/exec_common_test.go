@@ -173,3 +173,81 @@ func TestSubprocessEnvAppendsExtrasAfterTheScrub(t *testing.T) {
 		t.Errorf("last entry = %q, want the extra last so it wins over an inherited spelling", got)
 	}
 }
+
+// TestRunHookSubprocessScrubsApogeeCredentials pins the reason the exported door exists at all: a
+// hook that spawns must not hand apogee's own key to the child. The check is made from INSIDE the
+// process — what the child can actually read — rather than off the spec, and the control variable
+// proves the scrub is a subtraction rather than an empty environment.
+func TestRunHookSubprocessScrubsApogeeCredentials(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell canary; the scrub it pins is platform-independent")
+	}
+	// Not parallel: t.Setenv.
+	t.Setenv("APOGEE_API_KEY", "sk-secret-value")
+	t.Setenv("APOGEE_TEST_ENDPOINT", "http://192.0.2.1:1111")
+
+	out, err := RunHookSubprocess(
+		context.Background(),
+		[]string{"/bin/sh", "-c", `printf 'key=[%s] endpoint=[%s]' "$APOGEE_API_KEY" "$APOGEE_TEST_ENDPOINT"`},
+		"",
+		30*time.Second,
+		"",
+	)
+	if err != nil {
+		t.Fatalf("RunHookSubprocess: %v", err)
+	}
+	if want := "key=[] endpoint=[http://192.0.2.1:1111]"; out != want {
+		t.Errorf("child saw %q, want %q — apogee's key must not reach a hook's subprocess", out, want)
+	}
+}
+
+// TestRunHookSubprocessReturnsStdoutAloneAndFeedsStdin pins the payload contract the execution
+// tools do NOT have: the caller reads the child's stdout as data, so a diagnostic must never be
+// spliced into it. Interleaving here would put the warning line into the file autofix writes back.
+func TestRunHookSubprocessReturnsStdoutAloneAndFeedsStdin(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell canary; the stream split it pins is platform-independent")
+	}
+	t.Parallel()
+
+	out, err := RunHookSubprocess(
+		context.Background(),
+		[]string{"/bin/sh", "-c", `echo "warning: noisy formatter" >&2; cat`},
+		"",
+		30*time.Second,
+		"payload\n",
+	)
+	if err != nil {
+		t.Fatalf("RunHookSubprocess: %v", err)
+	}
+	if out != "payload\n" {
+		t.Errorf("stdout = %q, want the stdin payload alone — stderr must not be interleaved into it", out)
+	}
+}
+
+// TestRunHookSubprocessFailsOnANonZeroExit pins that a caller reading stdout as data gets ONE
+// failure signal: a clean non-zero exit is a normal result to an execution tool (the model reads
+// the code) but is "no usable output" here, and the diagnostics say which command complained.
+func TestRunHookSubprocessFailsOnANonZeroExit(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell canary; the exit handling it pins is platform-independent")
+	}
+	t.Parallel()
+
+	out, err := RunHookSubprocess(
+		context.Background(),
+		[]string{"/bin/sh", "-c", `echo "cannot parse input" >&2; exit 3`},
+		"",
+		30*time.Second,
+		"",
+	)
+	if err == nil {
+		t.Fatalf("RunHookSubprocess err = nil, want a non-zero exit reported as an error (out = %q)", out)
+	}
+	if out != "" {
+		t.Errorf("stdout = %q, want it empty on a failed run", out)
+	}
+	if !strings.Contains(err.Error(), "cannot parse input") {
+		t.Errorf("err = %v, want the command's diagnostics quoted", err)
+	}
+}

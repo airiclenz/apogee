@@ -1,7 +1,6 @@
 package mechanisms
 
 import (
-	"bytes"
 	"context"
 	"go/format"
 	"os/exec"
@@ -10,6 +9,7 @@ import (
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/security"
+	"github.com/airiclenz/apogee/internal/tools"
 )
 
 // autofix registers the formatter-repair Mechanism's catalogue row (Phase-4 item 5). Default-off
@@ -279,45 +279,28 @@ var externalFormatters = []struct {
 }
 
 // runExternalFormatter runs the construction-resolved formatter at cmdPath over content via
-// stdin, returning the formatted output. The FIRE's ctx bounds the run — a user cancel stops an
-// in-flight formatter instead of leaving the loop waiting on it — narrowed by gate.timeout, and
-// when the permit carries a box the command is confined before it runs. ok is false when the box
-// cannot be established, when the subprocess fails or times out, or when it produced empty output:
-// every failure mode degrades silently to "leave the payload as-is" (standing requirement #2), and
-// a refused confinement NEVER degrades to running unconfined.
+// stdin, returning the formatted output. It spawns through internal/tools' subprocess funnel
+// (tools.RunHookSubprocess) rather than an exec.Command of its own, so the one subprocess this
+// package launches carries every protection the execution tools' do: apogee's API key is scrubbed
+// out of the child environment, the process TREE is torn down when the run ends, the output is
+// capped, and the timeout is clamped. The FIRE's ctx bounds the run — a user cancel stops an
+// in-flight formatter instead of leaving the loop waiting on it — narrowed by gate.timeout.
+//
+// The permit's box reaches the funnel the way every subprocess site names one: on the context
+// (confinement-execution-contract §2.2). A permit carrying no box authorises an unfenced spawn, so
+// nothing is installed and the funnel runs the command as-is; a box with no Confiner behind it is
+// broken wiring and the funnel refuses the run. ok is false when the box cannot be established,
+// when the subprocess fails or times out, or when it produced empty output: every failure mode
+// degrades silently to "leave the payload as-is" (standing requirement #2), and a refused
+// confinement NEVER degrades to running unconfined.
 func runExternalFormatter(ctx context.Context, cmdPath string, spec formatterSpec, gate spawnGate, content string) (string, bool) {
-	runCtx, cancel := context.WithTimeout(ctx, gate.timeout)
-	defer cancel()
-
-	cmd := exec.CommandContext(runCtx, cmdPath, spec.args...)
-	cmd.Stdin = strings.NewReader(content)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	// The ctx deadline bounds the PROCESS, not the wait. A wrapper-shaped formatter — a `.cmd` or
-	// `.exe` shim re-execing an interpreter, any shell wrapper — can leave a grandchild holding the
-	// pipes it inherited after the wrapper itself is killed, and cmd.Run() would then block on the
-	// output copy indefinitely, freezing the single-goroutine loop. WaitDelay bounds that kill path.
-	cmd.WaitDelay = gate.timeout
-
-	// Establish the permit's box BEFORE the command runs (confinement-execution-contract §2.2:
-	// Confine prepares cmd and returns). A nil backend, or domain.ErrConfinementUnavailable from one
-	// that cannot establish the box here, skips the rung — the ladder falls through to "leave the
-	// payload as-is" rather than spawning outside the box the permit named.
 	if conf := gate.confinement; conf != nil {
-		if conf.Confiner == nil {
-			return content, false
-		}
-		if err := conf.Confiner.Confine(runCtx, conf.Box, cmd); err != nil {
-			return content, false
-		}
+		ctx = domain.WithConfinement(ctx, *conf)
 	}
 
-	if err := cmd.Run(); err != nil {
-		return content, false
-	}
-	out := stdout.String()
-	if strings.TrimSpace(out) == "" {
+	argv := append([]string{cmdPath}, spec.args...)
+	out, err := tools.RunHookSubprocess(ctx, argv, "", gate.timeout, content)
+	if err != nil || strings.TrimSpace(out) == "" {
 		return content, false
 	}
 	return out, true

@@ -51,6 +51,13 @@ type subprocessSpec struct {
 	// because a test suite needs the toolchain variables its user's shell has but no subprocess
 	// of the model's needs apogee's key.
 	env []string
+	// splitStdout asks for the child's standard output to be captured ON ITS OWN
+	// (subprocessResult.stdout) instead of interleaved with stderr. A caller that CONSUMES the
+	// output as a payload sets it — the autofix formatter reads the reformatted file off
+	// stdout, and a diagnostic spliced into the middle of that would be written to the user's
+	// file as if it were code. The execution tools leave it false: they SHOW the model what a
+	// command printed, and the interleaved order is the truthful one there.
+	splitStdout bool
 	// cmdline, when non-empty, is the verbatim process command line to launch argv with
 	// instead of letting os/exec join it (platform.Shell.CommandLine). It is empty on
 	// POSIX and for any argv that is a real argv; a tool handing a SHELL LINE to
@@ -159,8 +166,13 @@ func isApogeeSecretEnv(entry string) bool {
 
 // subprocessResult is the captured outcome of one subprocess execution.
 type subprocessResult struct {
-	// combinedOutput is stdout and stderr interleaved (capped), what the model reads.
+	// combinedOutput is stdout and stderr interleaved (capped), what the model reads. A spec
+	// that split the streams (splitStdout) leaves it holding stderr ALONE — that caller took
+	// the child's stdout as data, so what remains here is only what the command complained.
 	combinedOutput string
+	// stdout is the child's standard output alone (capped), captured only when the spec set
+	// splitStdout; it is empty for every caller that reads combinedOutput.
+	stdout string
 	// exitCode is the process exit status; 0 on success, the child's code on a clean
 	// non-zero exit, and -1 when the process was killed by a signal (e.g. a timeout).
 	exitCode int
@@ -228,10 +240,17 @@ func runSubprocess(ctx context.Context, spec subprocessSpec) (subprocessResult, 
 	if spec.stdin != "" {
 		cmd.Stdin = strings.NewReader(spec.stdin)
 	}
-	var out cappedBuffer
+	// One capped buffer takes everything the child prints, so a runaway command cannot exhaust
+	// memory through its output. A spec that split the streams gets a second one: stdout becomes
+	// the caller's payload and `out` is left holding the diagnostics alone.
+	var out, stdoutOnly cappedBuffer
 	out.limit = maxSubprocessOutputBytes
 	cmd.Stdout = &out
 	cmd.Stderr = &out
+	if spec.splitStdout {
+		stdoutOnly.limit = maxSubprocessOutputBytes
+		cmd.Stdout = &stdoutOnly
+	}
 
 	// Wire the process-tree teardown BEFORE confining: the Confiner only appends to
 	// SysProcAttr (Setpgid on POSIX, Token on Windows) and never touches cmd.Cancel, so the
@@ -269,7 +288,7 @@ func runSubprocess(ctx context.Context, spec subprocessSpec) (subprocessResult, 
 		return subprocessResult{}, ctx.Err()
 	}
 
-	res := subprocessResult{combinedOutput: out.String()}
+	res := subprocessResult{combinedOutput: out.String(), stdout: stdoutOnly.String()}
 	res.timedOut = runCtx.Err() == context.DeadlineExceeded
 	res.exitCode = exitCodeOf(cmd, runErr)
 	// exec.ErrWaitDelay is not an *exec.ExitError, so exitCodeOf falls through to the leader's
@@ -281,6 +300,80 @@ func runSubprocess(ctx context.Context, spec subprocessSpec) (subprocessResult, 
 		res.exitCode = -1
 	}
 	return res, nil
+}
+
+// maxSubprocessErrorExcerptBytes caps how much of a failed command's diagnostics RunHookSubprocess
+// quotes back in its error, so a noisy failure cannot drag the whole capped buffer into a log line.
+const maxSubprocessErrorExcerptBytes = 256
+
+// RunHookSubprocess runs argv as one subprocess through the SAME funnel every execution tool goes
+// through (runSubprocess) and returns what the command wrote to standard output. It is the door a
+// HOOK spawns through — a Mechanism runs outside the per-call Resolution and carries a
+// domain.SubprocessPermit instead (docs/design/confinement-execution-contract.md §10) — so its
+// subprocess gets every protection a tool's does rather than a hand-rolled exec.Command that has
+// none: the credential scrub (subprocessEnv — apogee's own key never reaches a child), the §2.4
+// process-tree teardown, the output cap, the timeout clamp, and the confinement handoff, which
+// fails CLOSED: a handle on ctx carrying no Confiner refuses the run rather than running unfenced.
+//
+// The funnel itself stays unexported; this is the whole of its outside surface. The caller
+// installs its permit's box on ctx (domain.WithConfinement) before calling — no handle means an
+// unfenced run, which is exactly what a permit carrying no box authorises. dir empty runs in
+// apogee's own working directory. timeout zero takes the funnel's default and a timeout past the
+// ceiling is clamped to it. stdin empty gives the child no input.
+//
+// The scrub it applies is subprocessEnv's fixed half — apogee's own credentials — because a hook
+// has no host handle to read the operator-configured secret names from (HostTools.SecretEnvVars);
+// those variables still reach a hook's child, as they do any program the operator launches.
+//
+// The returned output is the child's stdout ALONE, never interleaved with its diagnostics, so a
+// caller consuming it as a payload gets exactly the bytes the command produced. err is non-nil for
+// a cancelled context, a refused confinement, a timeout, a wedged output drain and any non-zero
+// exit: to a caller reading stdout as data every one of those means "no usable output", and the
+// message quotes the command's diagnostics to say which.
+func RunHookSubprocess(
+	ctx context.Context,
+	argv []string,
+	dir string,
+	timeout time.Duration,
+	stdin string,
+) (string, error) {
+	res, err := runSubprocess(ctx, subprocessSpec{
+		argv:        argv,
+		dir:         dir,
+		timeout:     timeout,
+		stdin:       stdin,
+		env:         subprocessEnv(nil),
+		splitStdout: true,
+	})
+	if err != nil {
+		return "", err
+	}
+
+	// argv is known non-empty here: runSubprocess refuses an empty one above.
+	switch {
+	case res.timedOut:
+		return "", fmt.Errorf("apogee: %s timed out%s", argv[0], diagnosticsExcerpt(res.combinedOutput))
+	case res.drainWedged:
+		return "", fmt.Errorf("apogee: %s left its output pipe held open%s", argv[0], diagnosticsExcerpt(res.combinedOutput))
+	case res.exitCode != 0:
+		return "", fmt.Errorf("apogee: %s exited %d%s", argv[0], res.exitCode, diagnosticsExcerpt(res.combinedOutput))
+	}
+	return res.stdout, nil
+}
+
+// diagnosticsExcerpt renders a failed command's stderr for an error message: a bounded TAIL —
+// a failing command's last line is the one naming the failure — or nothing at all when the
+// command was silent. The cut is made byte-wise and then swept of the partial rune it may have
+// left at the front, so the excerpt is always valid UTF-8.
+func diagnosticsExcerpt(diagnostics string) string {
+	trimmed := strings.TrimSpace(diagnostics)
+	if trimmed == "" {
+		return ""
+	}
+	if len(trimmed) > maxSubprocessErrorExcerptBytes {
+		trimmed = "…" + strings.ToValidUTF8(trimmed[len(trimmed)-maxSubprocessErrorExcerptBytes:], "")
+	}
+	return ": " + trimmed
 }
 
 // exitCodeOf extracts the process exit code from a finished cmd: the child's code on a clean

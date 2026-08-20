@@ -775,6 +775,22 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **A hook's subprocess is guarded like a tool's.** `autofix`'s external formatter was the one
+  command apogee spawned outside the execution funnel: it inherited the whole environment,
+  `APOGEE_API_KEY` included, with no process-tree teardown, no output cap and no timeout ceiling.
+  The hook-time permit (confinement-execution-contract §10) had closed the *authorisation* hole in
+  August and left every other guard on the tool side of the fence. The formatter now spawns through
+  `tools.RunHookSubprocess`, one exported door onto the same funnel every execution tool goes
+  through, so apogee's own key is scrubbed out of the child, the whole process group is reaped when
+  the run ends — a wrapper-shaped formatter's grandchild included — the output is capped and the
+  timeout is clamped. The funnel itself stays unexported and the door returns the child's standard
+  output *alone*, never interleaved with its diagnostics, so a warning line can no longer be written
+  into the file being repaired. The permit's own contract is unchanged: a box on the context is
+  established before the command runs, a box whose backend cannot establish it skips the rung, and
+  neither ever falls back to an unfenced spawn. One residual stays open — the operator-configured
+  `api-key-env` names (ADR 0047) are still inherited by a hook's child, because a Mechanism has no
+  host handle to read those names from.
+
 - Tests: the two uncovered branches the review tripped over are pinned. `decomposeExtractStep`'s
   prose fallback — the path a prompt with no numbered steps takes — now has a table driving the
   first-action-sentence extraction and both of its bail-outs (no sentence carries action intent; the

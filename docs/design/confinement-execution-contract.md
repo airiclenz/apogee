@@ -964,3 +964,29 @@ and the experimental hooks (`runPostResponseHooks`, `internal/agent/hookrun.go`)
 pre-tool-exec and post-tool-result get no permit, which under §10.2 keeps their existing "may not
 spawn" posture — the intended one. Widening to another hook point is a deliberate act: install the
 permit there and record the row here.
+
+### 10.5 The hook spawns through the tools funnel (amendment, 2026-08-20)
+
+§10.1–10.4 settle *whether* a hook may spawn and *inside which box*; they never said *through what*.
+The answer was "its own `exec.Command`", and the 2026-08-20 engine-architecture review found what
+that cost: `autofix`'s formatter inherited `os.Environ()` — `APOGEE_API_KEY` included — with no
+process-group / Job-Object teardown, no output cap and no timeout clamp. The permit had closed the
+authorisation hole while every *other* execution guard stayed on the tool side of the fence.
+
+A hook now spawns through `tools.RunHookSubprocess` (`internal/tools/exec_common.go`), the single
+exported door onto the same `runSubprocess` funnel every execution tool goes through. The funnel
+itself stays unexported: the door takes only what a hook names (ctx, argv, dir, timeout, stdin) and
+returns the child's stdout alone, so a caller consuming the output as a payload — the formatter
+reads the reformatted file off stdout — never gets a diagnostic spliced into it.
+
+Two contracts are unchanged and one is narrowed:
+
+- §10.2's table still governs. The caller installs its permit's box with `domain.WithConfinement`
+  before calling, which is the same handle §2.2 hands a subprocess tool; no handle means the
+  unfenced grant, and a handle whose `Confiner` is nil fails **closed** inside the funnel.
+- §2.4's teardown, the output cap and the timeout clamp now apply to a hook's child exactly as to a
+  tool's — the teardown reaps the whole process group, so a wrapper-shaped formatter's grandchild
+  goes with it.
+- The credential scrub is `subprocessEnv`'s **fixed half** only: a hook has no host handle, so the
+  operator-configured `api-key-env` names (`HostTools.SecretEnvVars`, ADR 0047) are still inherited
+  by a hook's child. Closing that half needs the names to reach `internal/mechanisms`.

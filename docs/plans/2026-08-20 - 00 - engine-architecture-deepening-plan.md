@@ -166,7 +166,13 @@ exactly the rows meant to catch it.
 
 **Commit:** `test(mechanisms): cover the decompose prose fallback and readloop greenfield trigger`
 
-## 7. The autofix formatter runs through the subprocess funnel
+## 7. The autofix formatter runs through the subprocess funnel — ✅ DONE (2026-08-20)
+
+NOTES (2026-08-20): the item named four files; two more had to change. `internal/tools/doc.go` keeps the package file map (ADR 0043), so `exec_common.go`'s entry now names the exported door beside `runSubprocess`. `docs/design/confinement-execution-contract.md` gains a dated §10.5: §10 settles *whether* a hook may spawn and *inside which box* but never said *through what*, and that missing half is exactly this defect — the amendment records the funnel as the answer and states the one residual (the operator-configured `api-key-env` names are still inherited, since a hook has no host handle).
+
+NOTES (2026-08-20): the funnel needed one addition the item did not name — `subprocessSpec.splitStdout` plus `subprocessResult.stdout`. `runSubprocess` interleaves stdout and stderr into a single capped buffer, which is right for a tool that SHOWS the model what a command printed but corrupts a caller that CONSUMES stdout as a payload: `black` and `rustfmt` write warnings to stderr, and an interleaved capture would have written those lines into the user's file as code. The execution tools are untouched (the flag defaults false); only the new door sets it.
+
+NOTES (2026-08-20): the formatter's kill-path bound changed from `gate.timeout` (3s in production) to the funnel's fixed 5s `processWaitDelay`. `TestAutofixBoundsTheFormatterKillPath` still passes in milliseconds rather than seconds, because the funnel kills the whole process GROUP — the grandchild holding the pipe dies with the wrapper instead of holding the drain open, which the hand-rolled spawn never did.
 
 **Source:** review defect b; ratified call 6.
 
