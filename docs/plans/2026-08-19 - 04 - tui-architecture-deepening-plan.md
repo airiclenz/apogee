@@ -149,7 +149,7 @@ in the same commit.
 
 **Commit:** `refactor(tui): move the ask_user pane into ask.go beside approval.go`
 
-## 4. Move the box/join paint primitives into boxdraw.go
+## 4. Move the box/join paint primitives into boxdraw.go — ✅ DONE (2026-08-20)
 
 **Source:** review §Candidate 6, cluster 3.
 

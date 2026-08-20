@@ -754,7 +754,12 @@
 // promote-guard that flexes it; blockstate.go the [blockState] a painter is told and the
 // predicates that decide what a collapsed block hides; toolbranch.go the ┝/┕ branch rows and the
 // detail lines beneath them; wrap.go the hanging-wrap, clip and depth-rail primitives every
-// painter above shares; and chromelayout.go the two frame-arithmetic helpers
+// painter above shares; boxdraw.go the box and join primitives beside it, lifted out of model.go
+// (ADR 0043) — the width-authority squaring a painted row is finished with ([squareLine],
+// [squareOnField]), the four-sided border the two boxed surfaces are drawn in ([drawBox],
+// [drawTitledBox]) and the two joins that stack the frame and hang the transcript's scrollbar in
+// the painter's own measure rather than lipgloss's ([Model.joinFrame], [Model.joinScrollbar]);
+// and chromelayout.go the two frame-arithmetic helpers
 // ([inputContentRows], [clampInt]) the input box and the overlays size themselves with;
 // and doc.go this narration.
 //

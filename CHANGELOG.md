@@ -222,6 +222,20 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **The box and join paint primitives move out of `model.go` into `internal/tui/boxdraw.go`.** The
+  sixth concern carved off the coordinator file (ADR 0043), and the one that sits beside `wrap.go`
+  because it is the same kind of thing: the low-level primitives every painted surface finishes in.
+  Six functions moved verbatim as one contiguous span — `squareLine` and `squareOnField`, which
+  square a composed line to an exact painted width in the width authority's measure rather than
+  lipgloss's (ADR 0030); `drawBox` and `drawTitledBox`, the one border assembly the startup card and
+  the popup pane are both drawn in, title-in-border or not; and `joinScrollbar` and `joinFrame`, the
+  two joins that hang the transcript's gutter off its right edge and stack the frame's blocks into
+  the one string `View` hands bubbletea — each standing in for the lipgloss join it replaced, for
+  that same measure reason. Signatures are unchanged and no caller moved: `popup.go`,
+  `userblock.go`, `startupbox.go` and `View` call exactly what they called before. `model.go`
+  finishes at 3027 lines, down from 3187. `doc.go`'s file map gains the new file's line. No
+  behaviour change.
+
 - **The `ask_user` pane moves out of `model.go` into `internal/tui/ask.go`.** The fifth concern
   carved off the coordinator file (ADR 0043), shaped after `approval.go` next door: both halves of
   the surface in one file, so a choice can never be paintable and unreachable. The state half is
