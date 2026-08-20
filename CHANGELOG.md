@@ -222,6 +222,10 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- Named the TUI click-map module: the target kinds, the painter's relative `lineMark` and the
+  resolved `lineTarget` moved out of `render.go` into the new `internal/tui/blocktarget.go`, the
+  file its 737-line suite was already named for. Pure file move — no behaviour change.
+
 - **One resolver answers what block starts here (`internal/tui/render.go`).** `renderView` was a
   245-line function whose middle was a five-branch shape chain, each branch ending in index
   advancement it wrote by hand — `i += span`, `i += calls - 1`, `i = grp[end].at` — which made

@@ -547,7 +547,7 @@ func (m Model) handleMouseRelease(msg tea.MouseReleaseMsg) (tea.Model, tea.Cmd) 
 // (renderToolBlock, renderUserBlock). Inside a folded run every row of a member — its one collapsed
 // row, and, open, its leader row, its body and the see-less row closing it — is marked for that
 // member's OWN entry instead, so this same flip opens the third of ten reads and leaves the other
-// nine exactly where they were (render.go, lineMark). Adding a case per shape here would be a
+// nine exactly where they were (blocktarget.go, lineMark). Adding a case per shape here would be a
 // second accounting of what the painter already stated, and the two would drift.
 //
 // line is the PRESS's own content line, not the release point's, and THAT is what makes the toggle

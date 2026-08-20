@@ -979,7 +979,11 @@ per-branch advancement collapse to resolver + loop. Behaviour identical.
 
 **Commit:** `refactor(tui): resolve block shape, span and closure in one place in renderView`
 
-## 33. Name the click-map module: blocktarget.go
+## 33. Name the click-map module: blocktarget.go — ✅ DONE (2026-08-20)
+
+NOTES (2026-08-20): the moved primitives are the click-map VOCABULARY — `targetKind` with its four constants, `lineTarget` and `lineMark` (52 lines, matching the review's "~60 lines out of render.go"). `blockPaint` and its `add`/`addFor`/`join`/`railed` builders stayed in render.go: they are the paint vehicle that carries the marks, doc.go already names them there, and moving them would have doubled the item's size.
+
+NOTES (2026-08-20): two consumer comments the move made stale were repointed — `blockcursor.go` and `mouse.go` each named `render.go` as the home of `[lineTarget]` / `lineMark`. Comment text only, no code; the item's "consumers untouched" holds for code.
 
 **Source:** review §Smaller findings, row 7. Depends on item 32.
 

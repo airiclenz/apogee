@@ -260,14 +260,14 @@
 // (docs/layout/tool-layout.md, design call 7). ⌥↑/⌥↓ enter the walk and move it, plain ↑/↓ move
 // inside it, ⏎ opens or closes what the highlight stands on, and esc — or typing, which ends the
 // mode and still lands in the prompt — hands the keys back. It walks the PAINT'S OWN click map
-// ([lineTarget], render.go), collapsed to one stop per surface, so the levels a pointer can open are
-// exactly the stops a cursor has and "deepest visible" needs no second rule; ⏎ goes through the
-// mouse's own [Model.toggleBlockAt], so both ways in flip and anchor identically. The state is two
-// plain fields on the value-copied Model — on/off and the CONTENT line under the highlight — re-
-// seated against every fresh paint in [Model.refreshViewport] ([blockCursor.clamp]), suspended
-// (keys and highlight together) while an approval or ask prompt owns ↑/↓/⏎, and painted as the
-// theme's one selection field, which the drag-selection it replaces on entry can therefore never be
-// confused with.
+// ([lineTarget], blocktarget.go), collapsed to one stop per surface, so the levels a pointer can
+// open are exactly the stops a cursor has and "deepest visible" needs no second rule; ⏎ goes
+// through the mouse's own [Model.toggleBlockAt], so both ways in flip and anchor identically. The
+// state is two plain fields on the value-copied Model — on/off and the CONTENT line under the
+// highlight — re-seated against every fresh paint in [Model.refreshViewport] ([blockCursor.clamp]),
+// suspended (keys and highlight together) while an approval or ask prompt owns ↑/↓/⏎, and painted
+// as the theme's one selection field, which the drag-selection it replaces on entry can therefore
+// never be confused with.
 //
 // Module map — the input cluster has its own home (review candidate #3). prompteditor.go lifts the
 // loose input-side concerns the architecture review called one coherent concept — the textarea, the
@@ -830,11 +830,15 @@
 // [stripEscapesAll] a request's choices are sanitized in one call by, and [bidiControl], the
 // reordering characters that go with the control ones; it is the invariant stated at the end of
 // this file, given the file of its own that a seam referenced from two dozen call sites earns;
-// the renderer itself is nine files rather than one, split along the seams the painters already
+// the renderer itself is ten files rather than one, split along the seams the painters already
 // had once the tool-display overhaul grew render.go past the house ~400-line guideline — a pure
 // file move, nothing renamed and nothing reworded: render.go keeps the transcript walk
 // ([transcript.renderView], [renderEntryLines]) and the [blockPaint] click-mark primitive under
-// it; subagentblock.go the run span, its railed frame and the collapsed sub-agent umbrella;
+// it; blocktarget.go the click map that primitive states — the kinds a line can be to a pointer
+// ([targetKind]), the painter's own relative [lineMark] and the absolute [lineTarget] the walk
+// resolves it to, given the file of its own that the one accounting the mouse and the block cursor
+// both read had long earned (blocktarget_test.go is the suite named for it);
+// subagentblock.go the run span, its railed frame and the collapsed sub-agent umbrella;
 // userblock.go the full-width prompt block and its skill-span accents; startupbox.go the startup
 // banner beside the presented-block painter; toolblock.go the tool block, group and super-group
 // walk with the member rows they paint; toolleader.go the leader row, the dotted leader and the

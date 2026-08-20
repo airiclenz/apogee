@@ -18,7 +18,7 @@ import (
 // can claim any of them, and it is entered by a chord nothing else binds: ⌥↑ / ⌥↓.
 //
 // What it walks is not a second accounting of what is foldable. It is the paint's OWN click map
-// (render.go, [lineTarget]) — the very slice the mouse resolves a click against — so a row a
+// (blocktarget.go, [lineTarget]) — the very slice the mouse resolves a click against — so a row a
 // pointer can open is a row this cursor stops on, at whatever level the painter marked it: an
 // umbrella header, a type row, a group member, a single block. "Deepest visible level" needs no
 // rule of its own here, because the painter already marked each line for its deepest owner and a
