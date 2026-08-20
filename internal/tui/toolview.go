@@ -29,8 +29,8 @@ import (
 // [toolView.sanitize] escape-strips every string a hostile model or repo owns (doc.go's second
 // invariant) and [toolView.shortenPaths] spells the paths the card NAMES relative to the
 // workspace root. The run aggregation below them ([runAggregate] and the sums under it) is the
-// same card shape one level up: what a whole group of calls did, worded from what its members
-// already say.
+// same card shape one level up: what a whole group of calls did, ADDED from the typed values its
+// members carry ([statValue]) rather than read back out of the phrases they show.
 //
 // It stays pure — no lipgloss, no I/O — so it is trivially table-testable (TestPresentToolCall);
 // render.go owns the styling and the block shape.
@@ -73,6 +73,17 @@ type detailLine struct {
 type branchSummary struct {
 	detailLine
 	quoted bool
+
+	// stat is the ARITHMETIC the text spells out, for the summaries a presenter worded from a fact
+	// it had counted: a run's type row adds its members' stats up from these rather than reading its
+	// own wording back out of them (sumStats). It is empty on every other summary — a quoted
+	// promotion is the tool's words, a prose sentence counts nothing, and a call still in flight has
+	// no outcome at all — which is exactly the set a run may not sum.
+	//
+	// It always spells the text beside it (typedSummary), and stays in step with it through the
+	// display seams: only a phrase with no arithmetic can name a path or carry an ESC byte, and such
+	// a phrase reaches the slot as text with no value beside it.
+	stat statValue
 }
 
 // The wordings that mark an outcome as a FAILURE, whatever produced it: the "error: …" line a
@@ -96,6 +107,213 @@ func namedSummary(line detailLine) branchSummary {
 // one-line tool output promoted onto the branch — which no seam respells.
 func quotedSummary(line detailLine) branchSummary {
 	return branchSummary{detailLine: line, quoted: true}
+}
+
+// typedSummary is a summary the presenter worded from a [statValue] — a stat hook's counted noun or
+// diffstat — spelled once here so the slot's text and the arithmetic carried beside it cannot come
+// to say different things.
+//
+// Only a value with arithmetic is carried: a phrase with no sum in it ("exit 0", "clean", a short
+// hash, the table's blank `—`) reaches the slot as the text it is, which is what keeps the carried
+// value in step with the text through the display seams — those respell a plain phrase (a path
+// shortened out of it, an ESC byte stripped) and can touch neither a count's digits nor a
+// diffstat's.
+func typedSummary(v statValue) branchSummary {
+	line := detailLine{Text: v.spell()}
+	if !v.sums() {
+		return namedSummary(line)
+	}
+	return branchSummary{detailLine: line, stat: v}
+}
+
+// statKind says which reading a [statValue] carries. The three are exactly the shapes the
+// registry's stat hooks answer in (toolregistry.go).
+type statKind uint8
+
+const (
+	// statPlain is a phrase with no arithmetic — "exit 0", "PASS", "clean", "done", a short commit
+	// hash, and the empty string the table spells `—`. It says what it says and never joins a sum.
+	statPlain statKind = iota
+
+	// statCounted is a counted noun — "12 lines", "1 entries", "3 hits" — held as the number and the
+	// word beside it.
+	statCounted
+
+	// statDiffed is a diffstat — the added and removed line counts a slot spells "+8 −3".
+	statDiffed
+)
+
+// statValue is what a tool's outcome slot SAYS, held as the fact rather than as the sentence: the
+// registry's stat hooks answer in these, the view carries one beside every phrase they worded
+// (branchSummary.stat, toolView.stat), and a type row adds a whole run of them up (sumStats).
+// Spelling is the last step and happens in one place ([statValue.spell]) — the prose the slot shows
+// is this value's rendering and never an input to anything, so no summer has to read a wording back
+// out to get at the number under it.
+//
+// The counted variant keeps the noun AS ITS PRODUCER SPELLED IT rather than a stem to re-pluralise,
+// because the spellings are not all mechanical: list_dir has always read "1 entries" and git_status
+// "2 changed". A sum therefore carries both spellings it has seen — the first from a member counting
+// exactly one, the first from a member counting anything else — and picks between them by the
+// TOTAL's plurality, which is how a producer's fixed wording survives being added up.
+type statValue struct {
+	kind statKind
+
+	// text is the plain variant's phrase, and the only member a display seam may rewrite: a count's
+	// digits and a diffstat's numbers name no path and hold no ESC byte (stripped, shortened).
+	text string
+
+	// n is the count, and nounForOne / nounForMany the two spellings [statValue.spell] chooses
+	// between. A value straight from a producer fills exactly the one its own count asks for; a sum
+	// may hold both.
+	n           int
+	nounForOne  string
+	nounForMany string
+
+	// added and removed are the diffstat's two halves.
+	added   int
+	removed int
+}
+
+// plainStat is a slot phrase with no arithmetic. The empty string is the table's `—`: a slot
+// stated blank, not one left over from a prose sentence (toolView.applyStat).
+func plainStat(text string) statValue {
+	return statValue{kind: statPlain, text: text}
+}
+
+// countedStat is a count together with the noun its producer spells THIS count with — "1 entries"
+// and "2 changed" are as much a producer's word as "12 lines" is, so the word travels with the
+// number instead of being re-derived from a stem.
+func countedStat(n int, noun string) statValue {
+	v := statValue{kind: statCounted, n: n}
+	if n == 1 {
+		v.nounForOne = noun
+	} else {
+		v.nounForMany = noun
+	}
+	return v
+}
+
+// pluralStat is [plural]'s typed counterpart: a count spelled by the house rule (the bare word for
+// one, a trailing "s" for anything else), for the producers that word themselves that way. It goes
+// through [pluralNoun], the same rule plural itself spells, so a typed count and a phrase written
+// the old way cannot read differently.
+func pluralStat(n int, word string) statValue {
+	return countedStat(n, pluralNoun(n, word))
+}
+
+// diffedStat is a diffstat held as its two halves.
+func diffedStat(added, removed int) statValue {
+	return statValue{kind: statDiffed, added: added, removed: removed}
+}
+
+// diffCounts is the house spelling of a diffstat — "+8 −3", with the table's typographic minus
+// (U+2212) rather than a hyphen, so the two halves read as a matched pair at any weight. Every slot
+// that carries one is spelled here, through the value that holds it ([statValue.spell]).
+func diffCounts(added, removed int) string {
+	return "+" + strconv.Itoa(added) + " −" + strconv.Itoa(removed)
+}
+
+// sums says whether this value has arithmetic in it — whether a run of them adds up at all
+// ([statValue.add]). A plain phrase does not, which is what leaves a type row over "exit 0" and
+// "PASS" blank.
+func (v statValue) sums() bool {
+	return v.kind == statCounted || v.kind == statDiffed
+}
+
+// blank says the value words nothing at all — the zero value a view carries where no stat was ever
+// produced, and the empty phrase a deliberately blank slot is stated with.
+func (v statValue) blank() bool {
+	return v.kind == statPlain && v.text == ""
+}
+
+// spell writes the value out as the phrase the outcome slot shows. A count is spelled with the noun
+// its own plurality asks for, and falls back to the house plural only where no producer ever spelled
+// that plurality — two members counting one each, making a two nobody wrote a word for.
+func (v statValue) spell() string {
+	switch v.kind {
+	case statCounted:
+		if noun := v.noun(); noun != "" {
+			return strconv.Itoa(v.n) + " " + noun
+		}
+		return plural(v.n, v.stem())
+	case statDiffed:
+		return diffCounts(v.added, v.removed)
+	}
+	return v.text
+}
+
+// noun is the spelling this count's own plurality asks for, or "" where the value holds only the
+// other one.
+func (v statValue) noun() string {
+	if v.n == 1 {
+		return v.nounForOne
+	}
+	return v.nounForMany
+}
+
+// stem is the noun with a plural "s" trimmed off it: what two counts must share to be counting the
+// same thing ([statValue.add]), and the word the house rule re-pluralises where a sum has no
+// spelling of its own ([statValue.spell]).
+func (v statValue) stem() string {
+	if v.nounForOne != "" {
+		return strings.TrimSuffix(v.nounForOne, "s")
+	}
+	return strings.TrimSuffix(v.nounForMany, "s")
+}
+
+// add totals two stat values and reports whether they add up at all. Two diffstats always do, on
+// both halves. Two counts do where they count the SAME thing, judged on the noun with a plural "s"
+// trimmed off it, so "1 line" and "12 lines" add and "3 hits" beside "2 files" does not. Nothing
+// else adds — a plain phrase has no arithmetic, and two different readings are not one fact.
+//
+// The total keeps the FIRST spelling seen of each plurality, which is what makes a fold over a run
+// answer exactly what a scan of it would: the sum spells itself with the earliest member whose count
+// reads the way the total does.
+func (v statValue) add(w statValue) (statValue, bool) {
+	if v.kind != w.kind {
+		return statValue{}, false
+	}
+	switch v.kind {
+	case statCounted:
+		if v.stem() != w.stem() {
+			return statValue{}, false
+		}
+		sum := statValue{
+			kind:        statCounted,
+			n:           v.n + w.n,
+			nounForOne:  v.nounForOne,
+			nounForMany: v.nounForMany,
+		}
+		if sum.nounForOne == "" {
+			sum.nounForOne = w.nounForOne
+		}
+		if sum.nounForMany == "" {
+			sum.nounForMany = w.nounForMany
+		}
+		return sum, true
+	case statDiffed:
+		return diffedStat(v.added+w.added, v.removed+w.removed), true
+	}
+	return statValue{}, false
+}
+
+// stripped is the value's half of the card's escape-stripping seam (toolView.sanitize). Only a plain
+// phrase can hold an ESC byte: a count is digits and a noun this package spells, and a diffstat is
+// digits and two signs.
+func (v statValue) stripped() statValue {
+	if v.kind != statPlain {
+		return v
+	}
+	return plainStat(stripEscapes(v.text))
+}
+
+// shortened is the value's half of the shortening seam (toolView.shortenPaths), on the same rule:
+// only a plain phrase can name a path.
+func (v statValue) shortened(ws workspaceRoot) statValue {
+	if v.kind != statPlain {
+		return v
+	}
+	return plainStat(ws.shorten(v.text))
 }
 
 // toolBody is a tool call's retained body — the detail lines that lay out beneath its branch line.
@@ -210,9 +428,10 @@ type toolView struct {
 	// view whose summary the block worded itself — those have only one reading — and on a promotion
 	// the guard must never take back (promotedOutput).
 	//
-	// It is display text and travels the sanitize and shortening seams with the Summary it stands
-	// in for, because it reaches the very same slot.
-	stat string
+	// It travels the sanitize and shortening seams with the Summary it stands in for, because it
+	// reaches the very same slot — and a value with arithmetic in it passes through both untouched,
+	// having no path to spell and no ESC byte to lose (statValue.stripped, statValue.shortened).
+	stat statValue
 
 	// argStat is the slot phrase this call's own ARGUMENTS word (toolPresenter.argStat): a write's
 	// line count, an edit's diffstat. It is settled when the call is presented — the facts are in
@@ -221,19 +440,7 @@ type toolView struct {
 	//
 	// It holds the ANSWER rather than the arguments it was read from, which is what keeps a
 	// write_file's whole file content out of the view for the life of the session.
-	argStat string
-
-	// diffStat is the slot's diffstat as a NUMBER PAIR, kept beside the phrase that spells it out,
-	// and hasDiffStat says a typed summary supplied it. Only a tool that reported one sets them
-	// (absorbRegions): a slot worded from arguments or from a tool's prose has no typed reading and
-	// leaves them zero.
-	//
-	// They exist so the run aggregate can ADD the members of a run up without reading its own
-	// wording back out of them (sumDiffCounts): parseDiffCounts is the inverse of one spelling, and
-	// a feature that hands the summer a fact it already holds typed must not become that parser's
-	// next input. The parser stays the floor for the producers that have only text.
-	diffStat    domain.DiffStat
-	hasDiffStat bool
+	argStat statValue
 
 	name string
 
@@ -333,12 +540,12 @@ type toolOutcome struct {
 	Details []detailLine
 	Solo    bool
 
-	// Stat is the presenter's own typed phrase for the same fact the promoted Summary carries
+	// Stat is the presenter's own typed reading of the same fact the promoted Summary carries
 	// ("1 line") — what the outcome slot says INSTEAD when the row is too narrow to hold the
 	// promoted line without eating the target (the promote-guard, design call 5). It is the
-	// second half of a promotion and empty on every other outcome: a summary the block WORDED is
-	// already the typed phrase, so there is nothing to fall back to.
-	Stat string
+	// second half of a promotion and blank on every other outcome: a summary the block WORDED is
+	// already the typed value, so there is nothing to fall back to.
+	Stat statValue
 }
 
 // summaryOnly is the outcome of a tool whose whole result is one plain line in the PRESENTER's
@@ -362,11 +569,11 @@ func summaryOnly(text string) toolOutcome {
 // hands over both readings of its outcome — the line, and stat, its own typed phrase for the same
 // fact ("1 line") — and the painter picks by measure (toolView.demoted, guardRefuses in render.go).
 //
-// A promoter with no such phrase passes "" and its line is never taken back. The guard cannot
+// A promoter with no such reading passes the blank value and its line is never taken back. The guard cannot
 // demote what it has nothing to put in the slot's place, and ask_user is that case for a second
 // reason: its body is the RECORD of the exchange (askUserAnswerRecord), which the answer would be
 // repeated above rather than folded into.
-func promotedOutput(text, stat string) toolOutcome {
+func promotedOutput(text string, stat statValue) toolOutcome {
 	return toolOutcome{Summary: quotedSummary(detailLine{Text: text}), Stat: stat}
 }
 
@@ -449,7 +656,7 @@ func presentToolCall(call domain.ToolCall, resolved string, ws workspaceRoot) to
 	if p.argStat != nil {
 		if s, ok := p.argStat(args); ok {
 			tv.argStat = s
-			tv.Summary = namedSummary(detailLine{Text: s})
+			tv.Summary = typedSummary(s)
 		}
 	}
 	if p.outcome != nil {
@@ -511,7 +718,7 @@ func (tv *toolView) shortenPaths(ws workspaceRoot) {
 	// (toolView.demoted), by which point this seam has long run — so it is spelled here, with the
 	// summary it stands in for, rather than left to reach the screen as the only unshortened text
 	// the block ever wrote.
-	tv.stat = ws.shorten(tv.stat)
+	tv.stat = tv.stat.shortened(ws)
 }
 
 // sanitize escape-strips every DISPLAY field of the view — label, verb, target, a delegation's name
@@ -545,7 +752,7 @@ func (tv *toolView) sanitize() {
 	tv.agentName = stripEscapes(tv.agentName)
 	tv.task = stripEscapes(tv.task)
 	tv.Summary.Text = stripEscapes(tv.Summary.Text)
-	tv.stat = stripEscapes(tv.stat)
+	tv.stat = tv.stat.stripped()
 	tv.Details.stripEscapes()
 	tv.Regions = strippedRegions(tv.Regions)
 	tv.RegionFiles = stripEscapesAll(tv.RegionFiles)
@@ -582,7 +789,7 @@ func strippedRegions(regions []domain.EditRegion) []domain.EditRegion {
 // a promotion whose promoter offered no stat is one the guard was told to leave alone
 // (promotedOutput).
 func (tv toolView) promotable() bool {
-	return tv.stat != "" && tv.Summary.quoted && tv.Summary.Text != ""
+	return !tv.stat.blank() && tv.Summary.quoted && tv.Summary.Text != ""
 }
 
 // demoted is the view as it reads once the promote-guard refuses the promotion (design call 5): the
@@ -606,8 +813,8 @@ func (tv toolView) demoted() toolView {
 	lines := make([]detailLine, 0, tv.Details.len()+1)
 	lines = append(lines, tv.Summary.detailLine)
 	tv.Details = newToolBody(append(lines, tv.Details.all()...))
-	tv.Summary = namedSummary(detailLine{Text: tv.stat})
-	tv.stat = ""
+	tv.Summary = typedSummary(tv.stat)
+	tv.stat = statValue{}
 	return tv
 }
 
@@ -642,8 +849,8 @@ func runAggregate(views []toolView) branchSummary {
 	if n := failedCalls(views); n > 0 {
 		return namedSummary(detailLine{Text: plural(n, errorNoun)})
 	}
-	if text, ok := sumStats(views); ok {
-		return namedSummary(detailLine{Text: text})
+	if sum, ok := sumStats(views); ok {
+		return typedSummary(sum)
 	}
 	return branchSummary{}
 }
@@ -662,127 +869,42 @@ func failedCalls(views []toolView) int {
 	return n
 }
 
-// sumStats adds a run's typed stats up into one phrase, and reports whether they add up at all. Two
-// shapes sum, and they are the two shapes the registry's stat hooks actually write: a diffstat
-// ("+8 −3", diffCounts) and a counted noun ("12 lines", "4 entries", "2 hits"). Everything else —
-// "exit 0", "PASS", "clean", "done", a short hash — has no sum and comes back false, which the type
-// row prints as an empty slot.
+// sumStats adds a run's typed stats up into one value, and reports whether they add up at all. Two
+// shapes sum, and they are the two shapes the registry's stat hooks actually produce: a diffstat
+// (statDiffed) and a counted noun (statCounted). Everything else — "exit 0", "PASS", "clean",
+// "done", a short hash — has no arithmetic and comes back false, which the type row prints as an
+// empty slot.
 //
-// Only stats the presenter WORDED are summed (statPhrase): a promoted line is the tool's own text,
-// and one that happened to read "3 errors" or "12 lines" would otherwise be added into an arithmetic
-// it was never part of.
-func sumStats(views []toolView) (string, bool) {
-	if text, ok := sumDiffCounts(views); ok {
-		return text, true
+// It reads the members' VALUES and never their wording (branchSummary.stat), which is also what
+// keeps a promoted line out of the arithmetic: a line the tool printed carries no stat, and one that
+// happened to read "3 errors" or "12 lines" would otherwise be added into a sum it was never part
+// of. A call still in flight carries none either, so a run with an open member does not sum.
+func sumStats(views []toolView) (statValue, bool) {
+	if len(views) == 0 {
+		return statValue{}, false
 	}
-	return sumCountPhrases(views)
-}
-
-// statPhrase is one member's slot text WHEN it is the presenter's own typed phrase — the only kind
-// that may be summed. A quoted promotion, and a call still in flight with no slot at all, answer
-// false.
-func statPhrase(tv toolView) (string, bool) {
-	if tv.Summary.quoted || tv.Summary.Text == "" {
-		return "", false
+	total := views[0].Summary.stat
+	if !total.sums() {
+		return statValue{}, false
 	}
-	return tv.Summary.Text, true
-}
-
-// sumDiffCounts adds a run of diffstats up: "+2 −1" and "+6 −2" make "+8 −3". Every member must
-// carry one, so a run where a single call errored or is still open does not sum — and does not need
-// to, since a failure is counted by the branch above it (runAggregate).
-//
-// What a member is asked for is its NUMBERS, not its wording (memberDiffCounts): a block whose stat
-// came from a typed summary hands them over as it holds them, and only a member that has nothing
-// but the phrase is read back out of it.
-func sumDiffCounts(views []toolView) (string, bool) {
-	added, removed := 0, 0
-	for _, tv := range views {
-		a, r, ok := memberDiffCounts(tv)
+	for _, tv := range views[1:] {
+		sum, ok := total.add(tv.Summary.stat)
 		if !ok {
-			return "", false
+			return statValue{}, false
 		}
-		added, removed = added+a, removed+r
+		total = sum
 	}
-	return diffCounts(added, removed), true
-}
-
-// memberDiffCounts is one member's diffstat as a number pair, in the order the two readings are
-// trusted: the typed value a summary supplied (toolView.diffStat), else the phrase in the slot
-// parsed back (parseDiffCounts, the floor for every producer that only ever had text).
-//
-// The slot must still hold the presenter's OWN typed phrase either way (statPhrase): a promoted
-// line is the tool's words, and a run that promoted one is not summing its members' stats at all.
-func memberDiffCounts(tv toolView) (added, removed int, ok bool) {
-	if _, ok := statPhrase(tv); !ok {
-		return 0, 0, false
-	}
-	if tv.hasDiffStat {
-		return tv.diffStat.Added, tv.diffStat.Removed, true
-	}
-	return parseDiffCounts(tv.Summary.Text)
-}
-
-// parseDiffCounts reads a diffstat back out of the phrase diffCounts wrote — the one direction the
-// wording is ever read in, and deliberately anchored on that function's exact spelling (the ASCII
-// "+" and the U+2212 minus) so a change to how a diffstat is written cannot leave a summer quietly
-// parsing the old one.
-func parseDiffCounts(text string) (added, removed int, ok bool) {
-	head, tail, found := strings.Cut(text, " −")
-	if !found || !strings.HasPrefix(head, "+") {
-		return 0, 0, false
-	}
-	a, err := strconv.Atoi(strings.TrimPrefix(head, "+"))
-	if err != nil {
-		return 0, 0, false
-	}
-	r, err := strconv.Atoi(tail)
-	if err != nil {
-		return 0, 0, false
-	}
-	return a, r, true
-}
-
-// sumCountPhrases adds a run of counted nouns up. Every member must count the SAME thing, judged on
-// the noun with a plural "s" trimmed off it, so "1 line" and "12 lines" sum and "3 hits" beside
-// "2 files" does not.
-//
-// The total is then spelled the way the run's own members spell it: the noun is borrowed from a
-// member whose count has the same plurality as the total, which is what keeps a producer's fixed
-// spelling ("1 entries", "0 changed") intact instead of re-pluralising it into "1 entrie" or
-// "2 changeds". Only where no member shares the total's plurality — two ones making a two — does it
-// fall back to the naive plural, which is the very rule those members were written by.
-func sumCountPhrases(views []toolView) (string, bool) {
-	total, stem := 0, ""
-	for i, tv := range views {
-		text, ok := statPhrase(tv)
-		if !ok {
-			return "", false
-		}
-		n, noun, ok := countPhrase(text)
-		if !ok {
-			return "", false
-		}
-		if s := strings.TrimSuffix(noun, "s"); i == 0 {
-			stem = s
-		} else if s != stem {
-			return "", false
-		}
-		total += n
-	}
-	for _, tv := range views {
-		n, noun, _ := countPhrase(tv.Summary.Text)
-		if (n == 1) == (total == 1) {
-			return strconv.Itoa(total) + " " + noun, true
-		}
-	}
-	return plural(total, stem), true
+	return total, true
 }
 
 // countPhrase splits a counted noun into its number and its word — "12 lines" into 12 and "lines".
 // It is deliberately total and deliberately strict: a phrase that is not exactly an integer, one
 // space and one word is not a count, so "exit 0", "PASS", "a1b2c3d" and a promoted sentence all
 // answer false and reach the slot untouched.
+//
+// The stats themselves are typed and are never read back through here (sumStats). What is left is
+// the one reading that has only ever had the TEXT to go on: the failure test, which asks whether an
+// outcome — a member's or a whole run's — words itself as a count of errors (failedSummary).
 func countPhrase(text string) (n int, noun string, ok bool) {
 	num, rest, found := strings.Cut(text, " ")
 	if !found || rest == "" || strings.ContainsRune(rest, ' ') {
@@ -831,14 +953,14 @@ func (tv *toolView) enrichWithResult(result domain.ToolResult, ws workspaceRoot)
 	p, known := toolRegistry[tv.name]
 	tv.absorbProse(p, known, result)
 	if regions, ok := recordedRegions(result); ok {
-		tv.absorbRegions(regions)
+		tv.showRegions(regions.Regions)
 	} else if known && p.regions != nil {
 		tv.showFileRegions(p.regions(result))
 	}
 	// The request-derived stat is re-applied because the prose layers may have written over it
 	// with a result sentence; it is the same phrase the call was presented with, so a block does
 	// not change what its slot says when its result lands.
-	if tv.argStat != "" {
+	if !tv.argStat.blank() {
 		tv.applyStat(tv.argStat, true)
 	}
 	if known && p.stat != nil {
@@ -918,19 +1040,6 @@ func recordedRegions(res domain.ToolResult) (domain.EditRegions, bool) {
 	return v, true
 }
 
-// absorbRegions folds an edit tool's recorded regions into the view: the regions themselves (which
-// the split reading composes at paint time), the stacked rows they render as, and the typed
-// diffstat the slot and the run aggregate read.
-//
-// The body is REPLACED rather than grown. What the call was presented with is the change the model
-// ASKED for, read off its own arguments before any result existed (argBody); what arrives here is
-// the change that LANDED, with the line numbers and the context the arguments never held. Keeping
-// both would show the same edit twice, and the recorded one is the one that happened.
-func (tv *toolView) absorbRegions(regions domain.EditRegions) {
-	tv.showRegions(regions.Regions)
-	tv.diffStat, tv.hasDiffStat = regions.Stat(), true
-}
-
 // showRegions puts a set of Edit regions on the view and REPLACES its body with the rows they
 // render as (stackedDiffLines). It is the half both sources of regions share — the tool's own
 // record and this package's recovery — so which of the two a diff block got cannot change what its
@@ -938,8 +1047,15 @@ func (tv *toolView) absorbRegions(regions domain.EditRegions) {
 //
 // The regions are kept BESIDE those rows rather than only as rows: the split reading composes them
 // into two panes at paint time, where the width is known (splitDiffRows), and rows cannot be
-// un-stacked back into that. What the recorded half adds and this does not is the typed diffstat,
-// which is a fact about the change only the tool that applied it counted.
+// un-stacked back into that.
+//
+// The body it puts up is REPLACED rather than grown, which matters for the recorded half: what a
+// call was presented with is the change the model ASKED for, read off its own arguments before any
+// result existed (argBody), and what a record carries is the change that LANDED, with the line
+// numbers and the context the arguments never held. Keeping both would show the same edit twice.
+// The diffstat over those rows is not this function's business: the tool's own stat hook counts it
+// off the very same regions (editRegionsStat), so the rows and the number over them stay one
+// reading without either half telling the other.
 //
 // An empty set changes nothing at all, which is the fallback both sources fall to and the one
 // answer they must give alike: an edit whose pair was over the diff budget, a printed diff whose
@@ -1043,16 +1159,16 @@ func regionFileSections(regions []domain.EditRegion, files []string) []diffFileR
 //   - the slot already holds a PROMOTED line — the tool's own one-line output, quoted. It keeps
 //     the slot, because a line the tool printed says more than a phrase about it; the stat becomes
 //     the fallback the promote-guard swaps in on a row too narrow for both (design call 5).
-//   - otherwise the stat IS the slot, empty string included: the table's `—` is a blank slot with
+//   - otherwise the stat IS the slot, the blank value included: the table's `—` is a blank slot with
 //     the dots running to the `▶`, and it is stated rather than left over from a prose sentence.
-func (tv *toolView) applyStat(text string, ok bool) {
+func (tv *toolView) applyStat(v statValue, ok bool) {
 	if !ok {
 		return
 	}
 	if tv.Summary.quoted && tv.Summary.Text != "" {
-		tv.stat = text
+		tv.stat = v
 		return
 	}
-	tv.Summary = namedSummary(detailLine{Text: text})
-	tv.stat = ""
+	tv.Summary = typedSummary(v)
+	tv.stat = statValue{}
 }

@@ -58,10 +58,18 @@ func clipRunes(s string, n int) string {
 
 // plural renders "1 result" / "3 results" — count plus the word, naively pluralised.
 func plural(n int, word string) string {
+	return strconv.Itoa(n) + " " + pluralNoun(n, word)
+}
+
+// pluralNoun is the WORD alone that [plural] spells a count of n with — the bare word for one, a
+// trailing "s" for anything else. It is stated apart from the phrase so a count carried as a value
+// can be spelled by the very same rule without a phrase being built and taken apart again
+// (pluralStat, statValue.spell).
+func pluralNoun(n int, word string) string {
 	if n == 1 {
-		return strconv.Itoa(n) + " " + word
+		return word
 	}
-	return strconv.Itoa(n) + " " + word + "s"
+	return word + "s"
 }
 
 // firstLine returns the first line of s (without its newline), or s when it has none.

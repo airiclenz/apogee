@@ -752,7 +752,8 @@
 // [toolView.finishDisplay] so the escape-strip ([toolView.sanitize]) and the workspace-relative
 // spelling of the paths a card NAMES ([toolView.shortenPaths]) hold for every card rather than per
 // producer, plus the run aggregation over them ([runAggregate]) that words what a whole GROUP of
-// calls did out of what its members already say;
+// calls did by ADDING the typed stat values its members carry ([statValue]) rather than reading
+// their wording back out of the slots they show;
 // toolregistry.go that vocabulary itself, split off beside it (ADR 0043) — the OPEN, name-keyed
 // [toolRegistry] whose one entry per tool carries its label, its active verb, the extractor that reads the target off the call's arguments, the prose detail
 // extractor that stays the floor for a result carrying no typed summary, and the body renderers

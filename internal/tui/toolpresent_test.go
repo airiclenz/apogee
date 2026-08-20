@@ -681,8 +681,8 @@ func TestPresentToolCallOutcomeSplit(t *testing.T) {
 			if tv.Summary.Text != tc.wantSummary {
 				t.Errorf("summary = %q, want %q", tv.Summary.Text, tc.wantSummary)
 			}
-			if tv.stat != tc.wantStat {
-				t.Errorf("stat = %q, want %q", tv.stat, tc.wantStat)
+			if got := tv.stat.spell(); got != tc.wantStat {
+				t.Errorf("stat = %q, want %q", got, tc.wantStat)
 			}
 			body := make([]string, 0, tv.Details.len())
 			for _, d := range tv.Details.all() {
@@ -755,7 +755,7 @@ func TestPromotionCarriesBothReadingsOfTheOutcome(t *testing.T) {
 
 			if got := tc.view.promotable(); got != tc.wantPromotable {
 				t.Errorf("promotable = %v, want %v (stat %q, quoted %v)",
-					got, tc.wantPromotable, tc.view.stat, tc.view.Summary.quoted)
+					got, tc.wantPromotable, tc.view.stat.spell(), tc.view.Summary.quoted)
 			}
 
 			got := tc.view.demoted()
@@ -1541,17 +1541,17 @@ func TestToolStat(t *testing.T) {
 			if !known || (p.stat == nil && p.argStat == nil) {
 				t.Fatalf("%s has no stat hook — the table gives it a slot", tc.tool)
 			}
-			got, ok := "", false
+			got, ok := statValue{}, false
 			if p.argStat != nil {
 				got, ok = p.argStat(tc.args)
 			} else {
 				got, ok = p.stat(tc.result)
 			}
 			if ok != tc.wantOK {
-				t.Fatalf("%s stat ok = %v, want %v (got %q)", tc.tool, ok, tc.wantOK, got)
+				t.Fatalf("%s stat ok = %v, want %v (got %q)", tc.tool, ok, tc.wantOK, got.spell())
 			}
-			if ok && got != tc.want {
-				t.Errorf("%s stat = %q, want %q", tc.tool, got, tc.want)
+			if ok && got.spell() != tc.want {
+				t.Errorf("%s stat = %q, want %q", tc.tool, got.spell(), tc.want)
 			}
 		})
 	}
@@ -1887,47 +1887,71 @@ func detailLineTexts(lines []detailLine) []string {
 // The type row's aggregate (tool-display-overhaul plan, item 6)
 // ----------------------------------------------------------------------------
 
-// aggregated builds a run out of bare summaries — the presenter's own typed phrases — and returns
-// what its type row would say (runAggregate). The views carry nothing else because nothing else is
-// read: the aggregate is a function of the members' outcome slots alone.
-func aggregated(texts ...string) branchSummary {
-	views := make([]toolView, len(texts))
-	for i, text := range texts {
-		views[i] = toolView{Summary: namedSummary(detailLine{Text: text})}
-	}
+// aggregated returns what a run's type row would say (runAggregate). The members carry nothing but
+// their outcome slots because nothing else is read: the aggregate is a function of those alone.
+func aggregated(views ...toolView) branchSummary {
 	return runAggregate(views)
+}
+
+// statView is a run member whose slot the presenter WORDED from a stat value — the only kind a run
+// may add up (branchSummary.stat). The phrase in the slot is the value's own spelling, reached the
+// way a real presenter reaches it.
+func statView(v statValue) toolView {
+	return toolView{Summary: typedSummary(v)}
+}
+
+// proseView is a member whose slot is a SENTENCE rather than a counted fact — a failure line, a call
+// still in flight — so it carries no arithmetic for the aggregate to add.
+func proseView(text string) toolView {
+	return toolView{Summary: namedSummary(detailLine{Text: text})}
 }
 
 // TestRunAggregate is design call 10 in one table: a type row counts its run's FAILURES first, else
 // sums where the members' stats sum, else says nothing at all and lets the dots run to the ▶. Every
-// wording a registry stat hook writes is represented, because the summer reads those phrases back and
-// a hook that reworded its stat would show up here as a run that stopped adding up.
+// shape a registry stat hook produces is represented — the house plural, a producer's fixed spelling,
+// an invariant noun, a diffstat, a phrase with no arithmetic — because a hook that changed the shape
+// it answers in would show up here as a run that stopped adding up.
 func TestRunAggregate(t *testing.T) {
 	cases := []struct {
 		name string
-		run  []string
+		run  []toolView
 		want string
 	}{
-		{"a run of counted lines sums", []string{"5 lines", "9 lines"}, "14 lines"},
-		{"a singular member sums into a plural total", []string{"1 line", "2 lines"}, "3 lines"},
-		{"two singulars still make a plural", []string{"1 line", "1 line"}, "2 lines"},
-		{"a total of one keeps the singular", []string{"0 lines", "1 line"}, "1 line"},
-		{"a producer's fixed plural is kept", []string{"1 entries", "0 entries"}, "1 entries"},
-		{"an invariant noun is not re-pluralised", []string{"0 changed", "2 changed"}, "2 changed"},
-		{"diffstats sum on both halves", []string{"+2 −1", "+6 −2"}, "+8 −3"},
-		{"hits sum", []string{"3 hits", "1 hit"}, "4 hits"},
-		{"a failure is counted, not summed", []string{"5 lines", errorSummaryPrefix + "no such file"}, "1 error"},
-		{"failures are counted first and plural", []string{deniedSummary, cancelledSummary, "5 lines"}, "2 errors"},
-		{"different nouns do not sum", []string{"3 hits", "2 files"}, ""},
-		{"a stat with no arithmetic is blank", []string{"exit 0", "exit 0"}, ""},
-		{"a verdict is blank", []string{"PASS", "FAIL"}, ""},
-		{"a mixed run is blank", []string{"5 lines", "exit 0"}, ""},
-		{"an unfinished member is blank", []string{"5 lines", ""}, ""},
+		{"a run of counted lines sums",
+			[]toolView{statView(pluralStat(5, "line")), statView(pluralStat(9, "line"))}, "14 lines"},
+		{"a singular member sums into a plural total",
+			[]toolView{statView(pluralStat(1, "line")), statView(pluralStat(2, "line"))}, "3 lines"},
+		{"two singulars still make a plural",
+			[]toolView{statView(pluralStat(1, "line")), statView(pluralStat(1, "line"))}, "2 lines"},
+		{"a total of one keeps the singular",
+			[]toolView{statView(pluralStat(0, "line")), statView(pluralStat(1, "line"))}, "1 line"},
+		{"a producer's fixed plural is kept",
+			[]toolView{statView(countedStat(1, "entries")), statView(countedStat(0, "entries"))}, "1 entries"},
+		{"an invariant noun is not re-pluralised",
+			[]toolView{statView(countedStat(0, "changed")), statView(countedStat(2, "changed"))}, "2 changed"},
+		{"diffstats sum on both halves",
+			[]toolView{statView(diffedStat(2, 1)), statView(diffedStat(6, 2))}, "+8 −3"},
+		{"hits sum",
+			[]toolView{statView(pluralStat(3, "hit")), statView(pluralStat(1, "hit"))}, "4 hits"},
+		{"a failure is counted, not summed",
+			[]toolView{statView(pluralStat(5, "line")), proseView(errorSummaryPrefix + "no such file")}, "1 error"},
+		{"failures are counted first and plural",
+			[]toolView{proseView(deniedSummary), proseView(cancelledSummary), statView(pluralStat(5, "line"))}, "2 errors"},
+		{"different nouns do not sum",
+			[]toolView{statView(pluralStat(3, "hit")), statView(pluralStat(2, "file"))}, ""},
+		{"a stat with no arithmetic is blank",
+			[]toolView{statView(plainStat("exit 0")), statView(plainStat("exit 0"))}, ""},
+		{"a verdict is blank",
+			[]toolView{statView(plainStat("PASS")), statView(plainStat("FAIL"))}, ""},
+		{"a mixed run is blank",
+			[]toolView{statView(pluralStat(5, "line")), statView(plainStat("exit 0"))}, ""},
+		{"an unfinished member is blank",
+			[]toolView{statView(pluralStat(5, "line")), {}}, ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := aggregated(tc.run...).Text; got != tc.want {
-				t.Errorf("runAggregate(%q) = %q, want %q", tc.run, got, tc.want)
+				t.Errorf("runAggregate(%v) = %q, want %q", tc.run, got, tc.want)
 			}
 		})
 	}
@@ -1936,9 +1960,14 @@ func TestRunAggregate(t *testing.T) {
 	// so nothing is reworded and a lone failure keeps the sentence that says what went wrong instead
 	// of being counted as "1 error".
 	t.Run("a run of one is its own summary", func(t *testing.T) {
-		for _, text := range []string{"5 lines", "exit 0", errorSummaryPrefix + "no such file", ""} {
-			if got := aggregated(text).Text; got != text {
-				t.Errorf("runAggregate over one %q = %q, want it verbatim", text, got)
+		for _, tv := range []toolView{
+			statView(pluralStat(5, "line")),
+			statView(plainStat("exit 0")),
+			proseView(errorSummaryPrefix + "no such file"),
+			{},
+		} {
+			if got := aggregated(tv).Text; got != tv.Summary.Text {
+				t.Errorf("runAggregate over one %q = %q, want it verbatim", tv.Summary.Text, got)
 			}
 		}
 		quoted := toolView{Summary: quotedSummary(detailLine{Text: "all clear"})}
@@ -1951,7 +1980,7 @@ func TestRunAggregate(t *testing.T) {
 	// it was never part of — even when it happens to read exactly like one.
 	t.Run("a promoted line never sums", func(t *testing.T) {
 		run := []toolView{
-			{Summary: namedSummary(detailLine{Text: "5 lines"})},
+			statView(pluralStat(5, "line")),
 			{Summary: quotedSummary(detailLine{Text: "9 lines"})},
 		}
 		if got := runAggregate(run).Text; got != "" {
@@ -2129,8 +2158,13 @@ func TestEditResultWithoutRegionsKeepsTheArgumentBody(t *testing.T) {
 	if want := []string{"- a := 1", "+ a := 2"}; !slices.Equal(changedBody(t, tv), want) {
 		t.Errorf("body = %q, want the argument-derived pair %q verbatim", changedBody(t, tv), want)
 	}
-	if tv.Regions != nil || tv.hasDiffStat {
-		t.Errorf("a summary-less result left regions=%+v hasDiffStat=%v, want neither", tv.Regions, tv.hasDiffStat)
+	if tv.Regions != nil {
+		t.Errorf("a summary-less result left regions=%+v, want none — the tool recorded nothing", tv.Regions)
+	}
+	// The slot keeps the ARGUMENT's own diffstat, which is the reading the block was presented with:
+	// the landed one only exists where a tool recorded regions to count it off (editRegionsStat).
+	if got := tv.Summary.stat; got != diffedStat(1, 1) {
+		t.Errorf("slot stat = %+v, want the argument-derived {1 1}", got)
 	}
 }
 
@@ -2197,8 +2231,8 @@ func TestEditSlotPrefersTheRecordedRegionsStat(t *testing.T) {
 			if got, want := tv.Summary.Text, "+3 −2"; got != want {
 				t.Errorf("slot = %q, want %q — the diffstat of what landed", got, want)
 			}
-			if !tv.hasDiffStat || tv.diffStat != (domain.DiffStat{Added: 3, Removed: 2}) {
-				t.Errorf("typed stat = %+v (present %v), want the summary's own {3 2}", tv.diffStat, tv.hasDiffStat)
+			if got := tv.Summary.stat; got != diffedStat(3, 2) {
+				t.Errorf("typed stat = %+v, want the diffstat of the recorded regions", got)
 			}
 		})
 
@@ -2215,47 +2249,122 @@ func TestEditSlotPrefersTheRecordedRegionsStat(t *testing.T) {
 	}
 }
 
-// TestRunAggregateSumsTypedDiffStats pins which reading the run aggregate adds up. A member whose
-// stat came from a typed summary hands over the NUMBERS it holds; only a member that has nothing
-// but a phrase is read back out of it (parseDiffCounts). The typed members below are spelled with
-// an ASCII hyphen, which that parser refuses — so a sum that lands could only have come from the
-// typed values, and one that regressed to parsing would come back blank.
+// TestRunAggregateSumsTypedDiffStats pins WHICH reading the run aggregate adds up: the members' typed
+// values, never the phrases in their slots (sumStats). The fixtures below word themselves with an
+// ASCII hyphen, which is not how this package spells a diffstat at all — so a sum that lands in the
+// house spelling could only have come from the values, and a summer that had gone back to reading its
+// own wording would come back blank.
 func TestRunAggregateSumsTypedDiffStats(t *testing.T) {
 	t.Parallel()
 
+	// A slot worded one way over a value that says the same fact another: only the presenter builds
+	// these two together (typedSummary), so the test states the pair itself.
+	misspelled := func(text string, v statValue) toolView {
+		return toolView{Summary: branchSummary{detailLine: detailLine{Text: text}, stat: v}}
+	}
+
 	t.Run("typed members sum without their wording being read", func(t *testing.T) {
 		t.Parallel()
-		if _, _, ok := parseDiffCounts("+2 -1"); ok {
-			t.Fatal("the fixture spelling parses; it must be one the inverse parser refuses")
-		}
 		run := []toolView{
-			{Summary: namedSummary(detailLine{Text: "+2 -1"}), diffStat: domain.DiffStat{Added: 2, Removed: 1}, hasDiffStat: true},
-			{Summary: namedSummary(detailLine{Text: "+6 -2"}), diffStat: domain.DiffStat{Added: 6, Removed: 2}, hasDiffStat: true},
+			misspelled("+2 -1", diffedStat(2, 1)),
+			misspelled("+6 -2", diffedStat(6, 2)),
 		}
 		if got, want := runAggregate(run).Text, "+8 −3"; got != want {
 			t.Errorf("aggregate = %q, want %q summed from the typed stats", got, want)
 		}
 	})
 
-	t.Run("a text-only run still sums through the parser", func(t *testing.T) {
+	t.Run("a member with no typed reading does not sum", func(t *testing.T) {
 		t.Parallel()
 		run := []toolView{
-			{Summary: namedSummary(detailLine{Text: "+2 −1"})},
-			{Summary: namedSummary(detailLine{Text: "+6 −2"})},
-		}
-		if got, want := runAggregate(run).Text, "+8 −3"; got != want {
-			t.Errorf("aggregate = %q, want %q — the phrase stays the floor for producers with no typed value", got, want)
-		}
-	})
-
-	t.Run("a member with neither reading does not sum", func(t *testing.T) {
-		t.Parallel()
-		run := []toolView{
-			{Summary: namedSummary(detailLine{Text: "+2 -1"}), diffStat: domain.DiffStat{Added: 2, Removed: 1}, hasDiffStat: true},
-			{Summary: namedSummary(detailLine{Text: "replaced text in main.go"})},
+			misspelled("+2 -1", diffedStat(2, 1)),
+			proseView("replaced text in main.go"),
 		}
 		if got := runAggregate(run).Text; got != "" {
 			t.Errorf("aggregate = %q, want blank — a run only sums where every member carries a diffstat", got)
+		}
+	})
+}
+
+// TestStatValueAddsAndSpells is the typed stat value in one table: what two of them make when added,
+// and how the total spells itself. The two variants are pinned apart because they add on different
+// rules — a diffstat on both halves, a count only where the members count the same thing — and the
+// spellings are what the outcome slot actually shows, so every wording a producer writes is here.
+func TestStatValueAddsAndSpells(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a value spells the phrase its producer wrote", func(t *testing.T) {
+		t.Parallel()
+		for _, tc := range []struct {
+			value statValue
+			want  string
+		}{
+			{pluralStat(1, "line"), "1 line"},
+			{pluralStat(12, "line"), "12 lines"},
+			{pluralStat(0, "file"), "0 files"},
+			{countedStat(1, "entries"), "1 entries"},
+			{countedStat(2, "changed"), "2 changed"},
+			{diffedStat(8, 3), "+8 −3"},
+			{diffedStat(0, 0), "+0 −0"},
+			{plainStat("exit 0"), "exit 0"},
+			{plainStat(""), ""},
+			{statValue{}, ""},
+		} {
+			if got := tc.value.spell(); got != tc.want {
+				t.Errorf("spell(%+v) = %q, want %q", tc.value, got, tc.want)
+			}
+		}
+	})
+
+	t.Run("two values add where they say the same kind of thing", func(t *testing.T) {
+		t.Parallel()
+		for _, tc := range []struct {
+			name    string
+			a, b    statValue
+			want    string
+			wantSum bool
+		}{
+			{"counts add and re-pluralise", pluralStat(1, "line"), pluralStat(2, "line"), "3 lines", true},
+			{"a total of one keeps a member's singular", pluralStat(0, "line"), pluralStat(1, "line"), "1 line", true},
+			{"a plural nobody spelled falls back to the house rule", pluralStat(1, "line"), pluralStat(1, "line"), "2 lines", true},
+			{"a fixed spelling survives the sum", countedStat(1, "entries"), countedStat(0, "entries"), "1 entries", true},
+			{"diffstats add on both halves", diffedStat(2, 1), diffedStat(6, 2), "+8 −3", true},
+			{"different nouns are not one fact", pluralStat(3, "hit"), pluralStat(2, "file"), "", false},
+			{"two readings are not one fact", pluralStat(3, "hit"), diffedStat(1, 1), "", false},
+			{"a plain phrase has no arithmetic", plainStat("exit 0"), plainStat("exit 0"), "", false},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				sum, ok := tc.a.add(tc.b)
+				if ok != tc.wantSum {
+					t.Fatalf("add(%+v, %+v) ok = %v, want %v", tc.a, tc.b, ok, tc.wantSum)
+				}
+				if ok && sum.spell() != tc.want {
+					t.Errorf("sum = %q, want %q", sum.spell(), tc.want)
+				}
+			})
+		}
+	})
+
+	// A sum spells itself with the EARLIEST member whose count reads the way the total does, which is
+	// what makes a fold over a run answer what a scan of it would. The two spellings below are
+	// contrived — real producers agree with themselves — but the rule they pin is the one that keeps
+	// the fold and the scan the same function.
+	t.Run("a sum keeps the first spelling of its own plurality", func(t *testing.T) {
+		t.Parallel()
+		sum, ok := countedStat(2, "changed").add(countedStat(0, "changeds"))
+		if got, want := sum.spell(), "2 changed"; !ok || got != want {
+			t.Errorf("sum = %q (ok %v), want %q — the first spelling of the total's plurality", got, ok, want)
+		}
+	})
+
+	// The total's plurality is what chooses, not any member's: a run whose members counted many and
+	// one comes to a one, and the one's spelling is what the slot shows.
+	t.Run("a sum picks the spelling its own total asks for", func(t *testing.T) {
+		t.Parallel()
+		sum, ok := countedStat(0, "changed").add(countedStat(1, "changed"))
+		if got, want := sum.spell(), "1 changed"; !ok || got != want {
+			t.Errorf("sum = %q (ok %v), want %q", got, ok, want)
 		}
 	})
 }
@@ -2323,7 +2432,7 @@ func TestSanitizeLeavesTheResultsOwnRegionsAlone(t *testing.T) {
 // the seam by nobody noticing.
 var sanitizeExemptToolViewMembers = map[string]string{
 	"name":    "the registry lookup key, never rendered — Label carries the displayed copy of it, and Label is stripped",
-	"argStat": "a phrase the presenter COMPOSES out of its own counts (a diffstat, a plural), never a producer's text; it reaches the screen through Summary, which is stripped",
+	"argStat": "a value the presenter COMPOSES out of its own counts (a diffstat, a plural), never a producer's text; it reaches the screen through Summary, which is stripped",
 	"args":    "the parsed request, display state's raw material and never painted: every line built from it is a body line, and the seam strips those",
 }
 
@@ -2353,8 +2462,8 @@ func TestToolViewSanitizeReachesEveryStringMember(t *testing.T) {
 			Leading: []string{dirty}, Removed: []string{dirty}, Inserted: []string{dirty}, Trailing: []string{dirty},
 		}},
 		RegionFiles: []string{dirty},
-		stat:        dirty,
-		argStat:     dirty,
+		stat:        plainStat(dirty),
+		argStat:     plainStat(dirty),
 		name:        dirty,
 		agentName:   dirty,
 		task:        dirty,

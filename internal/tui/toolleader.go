@@ -296,9 +296,10 @@ func summaryStyle(th theme, s branchSummary, expanded bool) lipgloss.Style {
 // no verdict flag, and inventing one to be derived from the same words would be a second answer to a
 // question already settled at the presenter's seam.
 //
-// The aggregate is read through the very parser that wrote it (countPhrase), so the two cannot come
-// to disagree, and only a count of one or more reads as a failure — "0 errors" is a clean run, and
-// no aggregate says it anyway.
+// The aggregate is worded by the house plural (plural, runAggregate) and read back here by
+// countPhrase's strict split of that same "<n> <word>" shape, so the two cannot come to disagree,
+// and only a count of one or more reads as a failure — "0 errors" is a clean run, and no aggregate
+// says it anyway.
 func failedSummary(text string) bool {
 	if strings.HasPrefix(text, errorSummaryPrefix) ||
 		text == deniedSummary || text == cancelledSummary {

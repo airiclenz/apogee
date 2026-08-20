@@ -138,6 +138,13 @@ type wireSkillSpan struct {
 // rule: a blob written before it decodes with no stat, which is the reading every record was written
 // under, and such a promotion simply stays put.
 //
+// StatValue is the ARITHMETIC under that phrase (statValue), and it travels for a third-generation
+// version of the same reason: the phrase is what the slot shows, the value is what a run's type row
+// ADDS UP (sumStats), and a demoted member with only its wording left would drop out of its run's
+// sum — a resumed session's type row going blank where the live one totalled its calls. It is
+// written only where the phrase has arithmetic in it, so a verdict or an exit code grows no bytes,
+// and a blob written before it decodes to the phrase alone.
+//
 // Task travels because it is BODY, not lookup: a sub-agent run's expanded span opens with the
 // delegated prompt (toolView.task), and unlike every other body on this struct that text never came
 // from a result — it is the call's own argument, and the arguments are not on the wire. A record
@@ -170,6 +177,7 @@ type wireToolView struct {
 	Name        string            `json:"name,omitempty"`
 	Solo        bool              `json:"solo,omitempty"`
 	Stat        string            `json:"stat,omitempty"`
+	StatValue   *wireStatValue    `json:"statValue,omitempty"`
 	Task        string            `json:"task,omitempty"`
 	Summary     wireBranchSummary `json:"summary"`
 	Details     []wireDetailLine  `json:"details,omitempty"`
@@ -205,9 +213,72 @@ type wireDetailLine struct {
 // omitempty, so a summary in the block's own words writes nothing new and an older build ignores
 // what it does not know, while a blob written before it decodes with Quoted false — the mark every
 // such record was written under.
+// Stat rides beside them on the same rule and for the reason wireToolView.StatValue states: the
+// arithmetic a run's type row adds up lives under the phrase, not in it, and a record that came back
+// with the phrase alone would replay a group whose total had gone blank.
 type wireBranchSummary struct {
 	wireDetailLine
-	Quoted bool `json:"quoted,omitempty"`
+	Quoted bool           `json:"quoted,omitempty"`
+	Stat   *wireStatValue `json:"stat,omitempty"`
+}
+
+// wireStatValue is the serialized form of a [statValue] that HAS arithmetic — the counted noun or
+// the diffstat an outcome slot's phrase spells out. A phrase with none is the text it already is and
+// rides the wire as that text alone (wireBranchSummary.Text, wireToolView.Stat), so nothing here is
+// ever written for one.
+//
+// It is a mirror of the value rather than the value itself, on this file's standing rule: what a
+// session record looks like on disk is decided here, and a member added to the presenter's type must
+// not change the wire form without someone choosing it. Counted is the discriminator — the two
+// readings share no member, and a diffstat is the shape a record without it carries.
+//
+// The nouns travel as their PRODUCER spelled them ("1 entries", "2 changed"), which is what the value
+// itself carries and the only thing that lets a replayed run spell its total the way the live one
+// did. NounForOne and NounForMany are the spellings for a count of one and for any other count; a
+// record straight off a producer fills the one its own count asks for, a record of a summed run may
+// carry both.
+type wireStatValue struct {
+	Counted     bool   `json:"counted,omitempty"`
+	N           int    `json:"n,omitempty"`
+	NounForOne  string `json:"nounForOne,omitempty"`
+	NounForMany string `json:"nounForMany,omitempty"`
+	Added       int    `json:"added,omitempty"`
+	Removed     int    `json:"removed,omitempty"`
+}
+
+// toWireStatValue projects the arithmetic half of a stat value onto the wire, and answers nil for a
+// phrase that has none — the omitempty case every plain slot takes.
+func toWireStatValue(v statValue) *wireStatValue {
+	if !v.sums() {
+		return nil
+	}
+	if v.kind == statCounted {
+		return &wireStatValue{
+			Counted:     true,
+			N:           v.n,
+			NounForOne:  v.nounForOne,
+			NounForMany: v.nounForMany,
+		}
+	}
+	return &wireStatValue{Added: v.added, Removed: v.removed}
+}
+
+// fromWireStatValue reads that arithmetic back, falling back to the phrase as a plain value — which
+// is what a record written before the value rode the wire carries, and what every slot with no
+// arithmetic in it carries by rule.
+func fromWireStatValue(w *wireStatValue, text string) statValue {
+	if w == nil {
+		return plainStat(text)
+	}
+	if w.Counted {
+		return statValue{
+			kind:        statCounted,
+			n:           w.N,
+			nounForOne:  w.NounForOne,
+			nounForMany: w.NounForMany,
+		}
+	}
+	return diffedStat(w.Added, w.Removed)
 }
 
 // wireEditRegion is the serialized form of a [domain.EditRegion]: one changed region of a diff — the
@@ -381,16 +452,18 @@ func toWireSkillSpans(spans []skillSpan) []wireSkillSpan {
 // toWireToolView projects a toolView (its unexported name included) onto the wire.
 func toWireToolView(tv toolView) *wireToolView {
 	w := &wireToolView{
-		Label:  tv.Label,
-		Verb:   tv.Verb,
-		Target: tv.Target,
-		Name:   tv.name,
-		Solo:   tv.solo,
-		Stat:   tv.stat,
-		Task:   tv.task,
+		Label:     tv.Label,
+		Verb:      tv.Verb,
+		Target:    tv.Target,
+		Name:      tv.name,
+		Solo:      tv.solo,
+		Stat:      tv.stat.spell(),
+		StatValue: toWireStatValue(tv.stat),
+		Task:      tv.task,
 		Summary: wireBranchSummary{
 			wireDetailLine: wireDetailLine{Kind: int(tv.Summary.Kind), Text: tv.Summary.Text},
 			Quoted:         tv.Summary.quoted,
+			Stat:           toWireStatValue(tv.Summary.stat),
 		},
 	}
 	if tv.Details.len() > 0 {
@@ -513,14 +586,22 @@ func fromWireToolView(w *wireToolView, done bool) toolView {
 	summary := namedSummary(line)
 	if w.Summary.Quoted {
 		summary = quotedSummary(line)
+	} else if stat := fromWireStatValue(w.Summary.Stat, ""); stat.sums() {
+		// The slot's own arithmetic, so a replayed run's type row totals its members exactly as the
+		// live one did (sumStats). The TEXT stays the record's — decode never re-spells a phrase it
+		// was handed — and a record with no value carries none, which is a blank total rather than a
+		// wrong one.
+		summary.stat = stat
 	}
 	tv := toolView{
-		Label:   w.Label,
-		Verb:    w.Verb,
-		Target:  w.Target,
-		name:    stripEscapes(w.Name),
-		solo:    w.Solo,
-		stat:    w.Stat, // sanitize below strips it with the other display fields
+		Label:  w.Label,
+		Verb:   w.Verb,
+		Target: w.Target,
+		name:   stripEscapes(w.Name),
+		solo:   w.Solo,
+		// sanitize below strips the stat with the other display fields; a value with arithmetic in
+		// it has nothing to strip and comes back as the numbers it is.
+		stat:    fromWireStatValue(w.StatValue, w.Stat),
 		task:    w.Task, // ditto: a delegated prompt off disk is untrusted text like any other
 		Summary: summary,
 	}

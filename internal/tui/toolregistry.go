@@ -105,7 +105,7 @@ type toolPresenter struct {
 	// A stat never takes the slot back from a PROMOTED line: a one-line output that reached the
 	// slot as the tool's own words keeps it, and the stat becomes the phrase the promote-guard
 	// swaps in when the row is too narrow for both (toolView.stat, design call 5).
-	stat func(res domain.ToolResult) (string, bool)
+	stat func(res domain.ToolResult) (statValue, bool)
 
 	// argStat words the same slot from the call's OWN ARGUMENTS, at the moment the call is
 	// presented — the request half of the table's stat column, and argBody's counterpart: a
@@ -116,7 +116,7 @@ type toolPresenter struct {
 	// Its answer is kept on the view (toolView.argStat) rather than re-read later, so the
 	// arguments themselves need not be retained for the life of the session: a write's whole file
 	// content stays out of memory behind a field that only ever yields one short phrase.
-	argStat func(args map[string]any) (string, bool)
+	argStat func(args map[string]any) (statValue, bool)
 
 	// body renders the lines laid out BENEATH the branch when the result's typed summary supplied
 	// the branch line itself. It takes the whole result rather than its prose, because what such
@@ -423,73 +423,73 @@ var toolRegistry = map[string]toolPresenter{
 // target (a copy's two paths, a delete's one). The slot prints nothing and the dots run to the
 // `▶`. It is stated rather than left empty by omission, because omitting the hook would leave the
 // tool's prose sentence in a slot the table says is blank.
-func blankStat(domain.ToolResult) (string, bool) { return "", true }
+func blankStat(domain.ToolResult) (statValue, bool) { return plainStat(""), true }
 
 // readSpanStat words read_file's slot as the number of lines the call returned, counted off the
 // span the tool reports (domain.ReadSpan, 1-based and inclusive). A file with no lines at all
 // yields a span whose End precedes its Start, which is 0 lines rather than a negative count.
-func readSpanStat(res domain.ToolResult) (string, bool) {
+func readSpanStat(res domain.ToolResult) (statValue, bool) {
 	v, ok := res.Summary.(domain.ReadSpan)
 	if !ok {
-		return "", false
+		return statValue{}, false
 	}
 	n := v.End - v.Start + 1
 	if n < 0 {
 		n = 0
 	}
-	return plural(n, "line"), true
+	return pluralStat(n, "line"), true
 }
 
 // writtenLinesStat words write_file's slot as the number of lines the call WRITES, read off its
 // own content argument — the table asks for lines and the tool reports bytes (domain.WroteBytes),
 // and the request already holds the answer. It is the same reading the body takes (writtenLines),
 // so the two cannot disagree about what the call puts in the file.
-func writtenLinesStat(args map[string]any) (string, bool) {
+func writtenLinesStat(args map[string]any) (statValue, bool) {
 	content, ok := args["content"].(string)
 	if !ok {
-		return "", false
+		return statValue{}, false
 	}
-	return plural(len(editLines(content)), "line"), true
+	return pluralStat(len(editLines(content)), "line"), true
 }
 
 // listedEntriesStat words list_dir's slot as the directory's total entry count. "entries" is a
 // FIXED plural, deliberately not plural(): the card has always read "1 entries".
-func listedEntriesStat(res domain.ToolResult) (string, bool) {
+func listedEntriesStat(res domain.ToolResult) (statValue, bool) {
 	v, ok := res.Summary.(domain.ListedEntries)
 	if !ok {
-		return "", false
+		return statValue{}, false
 	}
-	return strconv.Itoa(v.Total) + " entries", true
+	return countedStat(v.Total, "entries"), true
 }
 
 // matchedLinesStat words grep's slot as its hit count. The table also asks for the number of FILES
 // those hits fall in; no result carries it (domain.MatchedLines is a total alone), so the slot
 // says the half that exists rather than a second number derived from a listing (design call 14).
-func matchedLinesStat(res domain.ToolResult) (string, bool) {
+func matchedLinesStat(res domain.ToolResult) (statValue, bool) {
 	v, ok := res.Summary.(domain.MatchedLines)
 	if !ok {
-		return "", false
+		return statValue{}, false
 	}
-	return plural(v.Total, "hit"), true
+	return pluralStat(v.Total, "hit"), true
 }
 
 // searchHitsStat words web_search's slot as its result count.
-func searchHitsStat(res domain.ToolResult) (string, bool) {
+func searchHitsStat(res domain.ToolResult) (statValue, bool) {
 	v, ok := res.Summary.(domain.SearchHits)
 	if !ok {
-		return "", false
+		return statValue{}, false
 	}
-	return plural(v.Count, "result"), true
+	return pluralStat(v.Count, "result"), true
 }
 
 // diffStatStat words view_diff's slot as the diffstat the tool counted off its own operations. A
 // "No changes detected" result carries no domain.DiffStat and so keeps its sentence.
-func diffStatStat(res domain.ToolResult) (string, bool) {
+func diffStatStat(res domain.ToolResult) (statValue, bool) {
 	v, ok := res.Summary.(domain.DiffStat)
 	if !ok {
-		return "", false
+		return statValue{}, false
 	}
-	return diffCounts(v.Added, v.Removed), true
+	return diffedStat(v.Added, v.Removed), true
 }
 
 // editRegionsStat words the three edit tools' slot as the diffstat of what LANDED, summed over the
@@ -501,21 +501,13 @@ func diffStatStat(res domain.ToolResult) (string, bool) {
 // recorded no regions leaves it standing. What the two say differs where it matters — the arguments
 // know what was asked for, the regions know what the file took — and the landed reading wins once
 // it exists.
-func editRegionsStat(res domain.ToolResult) (string, bool) {
+func editRegionsStat(res domain.ToolResult) (statValue, bool) {
 	regions, ok := recordedRegions(res)
 	if !ok {
-		return "", false
+		return statValue{}, false
 	}
 	stat := regions.Stat()
-	return diffCounts(stat.Added, stat.Removed), true
-}
-
-// diffCounts is the house spelling of a diffstat — "+8 −3", with the table's typographic minus
-// (U+2212) rather than a hyphen, so the two halves read as a matched pair at any weight. Every
-// slot that carries one goes through here: view_diff's typed stat, the edit tools' argument-
-// derived one, git_diff's counted one.
-func diffCounts(added, removed int) string {
-	return "+" + strconv.Itoa(added) + " −" + strconv.Itoa(removed)
+	return diffedStat(stat.Added, stat.Removed), true
 }
 
 // pairCounts totals what a set of edit pairs adds and removes — the same pairs the body renders
@@ -530,48 +522,48 @@ func pairCounts(pairs []editPair) (added, removed int) {
 
 // singleReplacementStat words single_find_and_replace's slot as the diffstat of the one pair the
 // call asks for. A call with neither side is not an edit at all and keeps its prose floor.
-func singleReplacementStat(args map[string]any) (string, bool) {
+func singleReplacementStat(args map[string]any) (statValue, bool) {
 	removed, _ := args["oldText"].(string)
 	inserted, _ := args["newText"].(string)
 	if removed == "" && inserted == "" {
-		return "", false
+		return statValue{}, false
 	}
 	a, r := pairCounts([]editPair{replacedText(removed, inserted)})
-	return diffCounts(a, r), true
+	return diffedStat(a, r), true
 }
 
 // multiReplacementStat words multi_find_and_replace's slot as the NUMBER OF CHANGES the call
 // lists, which is what the table asks of it — a batch's shape is how many edits it makes, and the
 // lines they touch are beneath (multiReplacementBody). Malformed arguments keep the prose floor.
-func multiReplacementStat(args map[string]any) (string, bool) {
+func multiReplacementStat(args map[string]any) (statValue, bool) {
 	list, ok := args["replacements"].([]any)
 	if !ok {
-		return "", false
+		return statValue{}, false
 	}
-	return plural(len(list), "change"), true
+	return pluralStat(len(list), "change"), true
 }
 
 // fileEditStat words edit_existing_file's slot as the diffstat of what the call sends: a patch's
 // hunks, or full replacement content that removes nothing and inserts the lot — the same two
 // readings its body takes (fileEditBody).
-func fileEditStat(args map[string]any) (string, bool) {
+func fileEditStat(args map[string]any) (statValue, bool) {
 	content, ok := args["content"].(string)
 	if !ok {
-		return "", false
+		return statValue{}, false
 	}
 	pairs := []editPair{replacedText("", content)}
 	if isPatchArgument(content) {
 		pairs = patchEditPairs(content)
 	}
 	a, r := pairCounts(pairs)
-	return diffCounts(a, r), true
+	return diffedStat(a, r), true
 }
 
 // exitCodeStat words the slot of the two tools that run a process. A non-zero exit is an ERROR
 // result (internal/tools: terminal and python_exec both flag it), which reads red from the error
 // layer above — so a result reaching here exited cleanly, and the slot says so. The table asks
 // for a duration beside it; no result carries one, so the code stands alone (design call 14).
-func exitCodeStat(domain.ToolResult) (string, bool) { return "exit 0", true }
+func exitCodeStat(domain.ToolResult) (statValue, bool) { return plainStat("exit 0"), true }
 
 // exitCodeMarker matches the "[exit code N]" line subprocessToolResult appends to a FAILED
 // subprocess result (internal/tools/terminal.go). It is anchored at the end of the output, where
@@ -600,13 +592,13 @@ func exitCodeFailure(content string) (string, string, bool) {
 // cleanStat words diagnostics' slot. Findings come back flagged as an error result, so a result
 // that reaches here found none — the table's `clean` half; its `N issues` half is the red error
 // line the failure layer already paints.
-func cleanStat(domain.ToolResult) (string, bool) { return "clean", true }
+func cleanStat(domain.ToolResult) (statValue, bool) { return plainStat("clean"), true }
 
 // delegationStat words a sub-agent's slot. A delegation that failed comes back as an error result
 // and reads red, so a result reaching here is one that finished. The table asks for a step count
 // beside the verdict; the engine exposes none on the result (design call 14), so the verdict
 // stands alone.
-func delegationStat(domain.ToolResult) (string, bool) { return "done", true }
+func delegationStat(domain.ToolResult) (statValue, bool) { return plainStat("done"), true }
 
 // testVerdictHead matches the verdict token run_tests opens its condensed report with — "PASS (go
 // test)", "FAIL (pytest) — 3 failing tests" — anchored at the start so a later line reading "FAIL"
@@ -616,12 +608,12 @@ var testVerdictHead = regexp.MustCompile(`^(PASS|FAIL)\b`)
 // testVerdictStat words run_tests' slot as its bare verdict. The table asks for a duration beside
 // it; the result carries none (design call 14), so the verdict stands alone. Output the tool
 // worded some other way keeps its own first line in the slot.
-func testVerdictStat(res domain.ToolResult) (string, bool) {
+func testVerdictStat(res domain.ToolResult) (statValue, bool) {
 	m := testVerdictHead.FindStringSubmatch(strings.TrimSpace(firstLine(res.Content)))
 	if m == nil {
-		return "", false
+		return statValue{}, false
 	}
-	return m[1], true
+	return plainStat(m[1]), true
 }
 
 // foundFilesHead matches the header find_files opens its listing with — "[12 files found, showing
@@ -630,20 +622,20 @@ var foundFilesHead = regexp.MustCompile(`^\[(\d+) files found\b`)
 
 // foundFilesStat words find_files' slot as that total, and reads the tool's own empty-result
 // sentence as the zero it states.
-func foundFilesStat(res domain.ToolResult) (string, bool) {
+func foundFilesStat(res domain.ToolResult) (statValue, bool) {
 	head := strings.TrimSpace(firstLine(res.Content))
 	if head == "No files found" {
-		return plural(0, "file"), true
+		return pluralStat(0, "file"), true
 	}
 	m := foundFilesHead.FindStringSubmatch(head)
 	if m == nil {
-		return "", false
+		return statValue{}, false
 	}
 	n, err := strconv.Atoi(m[1])
 	if err != nil {
-		return "", false
+		return statValue{}, false
 	}
-	return plural(n, "file"), true
+	return pluralStat(n, "file"), true
 }
 
 // gitStatusSection matches one section header of git_status' report — "Staged (3):" — whose count
@@ -653,35 +645,35 @@ var gitStatusSection = regexp.MustCompile(`(?m)^(?:Staged|Unstaged|Untracked) \(
 // changedFilesStat words git_status' slot as how many files the working tree has changed: the sum
 // of the three section counts, or the zero its clean-tree sentence states. A report in neither
 // shape keeps its prose floor.
-func changedFilesStat(res domain.ToolResult) (string, bool) {
+func changedFilesStat(res domain.ToolResult) (statValue, bool) {
 	if strings.Contains(res.Content, "Working tree clean") {
-		return "0 changed", true
+		return countedStat(0, "changed"), true
 	}
 	sections := gitStatusSection.FindAllStringSubmatch(res.Content, -1)
 	if len(sections) == 0 {
-		return "", false
+		return statValue{}, false
 	}
 	total := 0
 	for _, s := range sections {
 		n, err := strconv.Atoi(s[1])
 		if err != nil {
-			return "", false
+			return statValue{}, false
 		}
 		total += n
 	}
-	return strconv.Itoa(total) + " changed", true
+	return countedStat(total, "changed"), true
 }
 
 // commitCountStat words git_log's slot as how many commits it listed. The tool prints one line per
 // commit ("--format=%h %ad %s", a subject being single-line by construction), so the lines ARE the
 // count; its empty-result sentence states the zero.
-func commitCountStat(res domain.ToolResult) (string, bool) {
+func commitCountStat(res domain.ToolResult) (statValue, bool) {
 	trimmed := strings.TrimSpace(res.Content)
 	if trimmed == "" {
-		return "", false
+		return statValue{}, false
 	}
 	if trimmed == "No commits found" {
-		return plural(0, "commit"), true
+		return pluralStat(0, "commit"), true
 	}
 	n := 0
 	for _, ln := range splitLines(trimmed) {
@@ -689,7 +681,7 @@ func commitCountStat(res domain.ToolResult) (string, bool) {
 			n++
 		}
 	}
-	return plural(n, "commit"), true
+	return pluralStat(n, "commit"), true
 }
 
 // commitHashHead matches the short hash in either shape git_commit returns: the
@@ -717,15 +709,19 @@ func commitHashOf(content string) (string, bool) {
 // commitHashStat words git_commit's slot as that short hash — the one thing a later call needs and
 // the header line does not repeat. A result in another shape (nothing to commit, a hook's message)
 // keeps its prose floor.
-func commitHashStat(res domain.ToolResult) (string, bool) {
-	return commitHashOf(res.Content)
+func commitHashStat(res domain.ToolResult) (statValue, bool) {
+	hash, ok := commitHashOf(res.Content)
+	if !ok {
+		return statValue{}, false
+	}
+	return plainStat(hash), true
 }
 
 // diffLinesStat words git_diff_range's slot as the diffstat of the unified diff the tool printed,
 // counting the tagged lines and skipping the "+++"/"---" file headers that are not content. A call
 // asking for `--stat` or `--name-only` prints no tagged lines at all and keeps its prose floor,
 // which is the honest answer: that output states its own totals.
-func diffLinesStat(res domain.ToolResult) (string, bool) {
+func diffLinesStat(res domain.ToolResult) (statValue, bool) {
 	added, removed := 0, 0
 	for _, ln := range splitLines(res.Content) {
 		switch {
@@ -737,9 +733,9 @@ func diffLinesStat(res domain.ToolResult) (string, bool) {
 		}
 	}
 	if added == 0 && removed == 0 {
-		return "", false
+		return statValue{}, false
 	}
-	return diffCounts(added, removed), true
+	return diffedStat(added, removed), true
 }
 
 // ----------------------------------------------------------------------------
@@ -976,7 +972,7 @@ func firstLineDetail(content string) toolOutcome {
 // already holds every line the human typed, so there is neither a phrase worth swapping in nor a
 // body line to demote to (promotedOutput, askUserAnswerRecord).
 func quotedFirstLineDetail(content string) toolOutcome {
-	return promotedOutput(clipDetail(firstLine(content)), "")
+	return promotedOutput(clipDetail(firstLine(content)), statValue{})
 }
 
 // askUserAnswerRecord renders an ANSWERED ask_user call. The branch line is what it always was —
@@ -1141,7 +1137,7 @@ func outputDetail(content string) toolOutcome {
 		// The one-line half is a promotion the painter may still refuse, so the stat travels with
 		// it: the line count this output would have been summarised by had it come to two lines,
 		// which is exactly the shape the guard demotes it into (promotedOutput, design call 5).
-		return promotedOutput(body[0].Text, plural(len(body), "line"))
+		return promotedOutput(body[0].Text, pluralStat(len(body), "line"))
 	}
 	return toolOutcome{Details: body}
 }

@@ -212,8 +212,11 @@ func TestPromoteGuardHoldsFifteenCellsOfTarget(t *testing.T) {
 		output = "abc1234"
 		stat   = "1 line"
 	)
+	// The stat is the value its producer builds, spelled by the slot itself (statValue.spell) — the
+	// same "1 line" the const names, reached the way a real promotion reaches it.
+	statOfOneLine := pluralStat(1, "line")
 	th := newTheme(scheme.Default())
-	promoted := toolView{Label: "Terminal", Target: target, stat: stat,
+	promoted := toolView{Label: "Terminal", Target: target, stat: statOfOneLine,
 		Summary: quotedSummary(detailLine{Text: output})}
 
 	// The narrowest width at which the promoted line still leaves the target its floor: the room a
@@ -263,7 +266,7 @@ func TestPromoteGuardHoldsFifteenCellsOfTarget(t *testing.T) {
 		// reaches the slot at any width a terminal has, and the collapsed block counts it as the one
 		// body line it is — however many rows it would take to print.
 		name: "a monster one-line output stays a body",
-		view: toolView{Label: "Terminal", Target: target, stat: stat,
+		view: toolView{Label: "Terminal", Target: target, stat: statOfOneLine,
 			Summary: quotedSummary(detailLine{Text: strings.Repeat("x", 300)})},
 		width:    120,
 		wantSlot: stat, wantCount: "+1 more line",

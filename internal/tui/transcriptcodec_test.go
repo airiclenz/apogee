@@ -622,7 +622,7 @@ func TestTranscriptCodecRoundTripsTheQuotedSummaryMark(t *testing.T) {
 		if err != nil {
 			t.Fatalf("decodeTranscript: %v", err)
 		}
-		if len(got) != 1 || got[0].tool.stat != "exit 0" {
+		if len(got) != 1 || got[0].tool.stat.spell() != "exit 0" {
 			t.Fatalf("decoded %+v; want the one call with its typed stat", got)
 		}
 		// The fixture is only worth anything if the guard actually bites at this width.
@@ -1065,8 +1065,8 @@ func TestTranscriptCodecPersistsANamedDelegationAsItsTarget(t *testing.T) {
 			t.Errorf("wireEntry members = %v, want %v — widening the wire needs its own decision", got, wantEntry)
 		}
 		wantTool := []string{
-			"Label", "Verb", "Target", "Name", "Solo", "Stat", "Task", "Summary", "Details",
-			"Regions", "RegionFiles",
+			"Label", "Verb", "Target", "Name", "Solo", "Stat", "StatValue", "Task", "Summary",
+			"Details", "Regions", "RegionFiles",
 		}
 		if got := fields(wireToolView{}); !slices.Equal(got, wantTool) {
 			t.Errorf("wireToolView members = %v, want %v — widening the wire needs its own decision", got, wantTool)

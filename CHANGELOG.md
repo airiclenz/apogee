@@ -222,6 +222,16 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **A tool call's outcome stat is carried as a typed value.** The stat a card's outcome slot shows —
+  a counted noun or a diffstat (`statValue`) — now travels beside the phrase it spells, so a group's
+  type row ADDS its members' stats up instead of parsing the wording back out of their slots.
+  `parseDiffCounts`, `sumDiffCounts`, `sumCountPhrases` and `statPhrase` are gone, the registry's
+  stat hooks answer in values, and the value rides the session record so a resumed transcript totals
+  its runs exactly as the live one did. Rendered text is byte-identical. The record member is
+  additive on the transcript's own rule — no version bump, a slot with no arithmetic writes not one
+  extra byte — and a session written before this carries the phrases alone, so its grouped type rows
+  reopen with a blank total rather than one read back out of prose.
+
 - **One painter draws all five tool-body frames.** The rows a call's detail lines become were laid
   out by five hand-written loops — the targetless shape's ┝/┕ branch list open (`renderDetails`) and
   collapsed (`clipDetails`), an ungrouped call's body at its branch marker's indent
