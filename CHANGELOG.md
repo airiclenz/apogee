@@ -222,6 +222,15 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **One constructor builds the confinement box.** The box a subprocess is fenced to — the workspace
+  root, the extra writable paths a confined toolchain needs, and the per-project network allow-list —
+  was hand-assembled at three places out of the same three `Config` fields, and one of the three
+  quietly named only two of them. `Config.ConfinementBox()` is the single source now: both dispatch
+  sites take the full box from it, and the exec fence that deliberately wants no network list builds
+  the full box and clears that one field on the line below, so its divergence reads as a decision
+  rather than as a short literal. What each of the three boxes contains is unchanged; what changed
+  is that a fourth site can no longer open a confinement hole by forgetting a field in silence.
+
 - **The ask prompt's three popup flags become one named row style (`internal/tui`).** `popupSpec`
   carried `titleFromBody`, `rowGap` and `rowPadBelow` among the fields every pane sets, and exactly
   one caller ever set any of them — the ask prompt, which set all three, because they are one

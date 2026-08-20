@@ -202,7 +202,9 @@ NOTES (2026-08-20): the item's text names only the added-mid-session direction o
 
 **Commit:** `perf(tools): memoise the git filter-driver probe per repo root`
 
-## 9. One ConfinementBox constructor
+## 9. One ConfinementBox constructor — ✅ DONE (2026-08-20)
+
+NOTES (2026-08-20): `hookExecutionCtx`'s doc comment said the box "is built from the same three Config fields resolutionInput uses" — this item made that sentence describe code that no longer exists, so it now names `Config.ConfinementBox()` as the shared constructor. Prose only, in a file the item already names.
 
 **Source:** review defect f.
 

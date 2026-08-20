@@ -73,6 +73,22 @@ type ConfinementBox struct {
 	NetworkAllow  []string // per-project tightening; empty = network open (ADR 0012)
 }
 
+// ConfinementBox is the full box this Config declares: the workspace root a subprocess is fenced
+// to, the extra writable paths a confined toolchain needs, and the per-project network tightening
+// list (confinement-execution-contract §7). It is the single place those three Confine* fields are
+// folded into a box, so a new call site can no longer open a silent confinement hole by forgetting
+// one of them. The returned slices alias Config's — the box is read-only policy, never mutated by
+// its readers. A caller that wants a deliberately NARROWER box calls this and then clears the field
+// it does not want, keeping the divergence visible in one line (deriveDeps' exec fence,
+// internal/agent/construct.go, is the only such caller today).
+func (c Config) ConfinementBox() ConfinementBox {
+	return ConfinementBox{
+		WorkspaceRoot: c.WorkspaceDir,
+		WritablePaths: c.ConfineWritablePaths,
+		NetworkAllow:  c.ConfineNetworkAllow,
+	}
+}
+
 // Confinement is the handle a subprocess tool uses to confine the *exec.Cmd it builds:
 // the Confiner backend plus the box to confine to. The dispatch disposition installs it
 // into the Execute context (WithConfinement) for a subprocess tool the Auto disposition

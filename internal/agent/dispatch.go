@@ -415,11 +415,7 @@ func (a *Agent) resolutionInput(tool domain.Tool, call domain.ToolCall, guard se
 		writeEscapeTarget:      escape,
 		atDepthBound:           a.depth >= maxSubAgentDepth,
 		approverPresent:        a.cfg.Approver != nil,
-		box: domain.ConfinementBox{
-			WorkspaceRoot: a.cfg.WorkspaceDir,
-			WritablePaths: a.cfg.ConfineWritablePaths,
-			NetworkAllow:  a.cfg.ConfineNetworkAllow,
-		},
+		box:                    a.cfg.ConfinementBox(),
 	}
 }
 
@@ -440,8 +436,8 @@ func (a *Agent) resolutionInput(tool domain.Tool, call domain.ToolCall, guard se
 //
 // The mode is read through effectiveMode(), never Mode(), so a sub-agent whose parent has
 // tightened mid-delegation loses the permit exactly as it loses the matching tool verdict
-// (ADR 0013). The box is built from the same three Config fields resolutionInput uses, so a
-// hook-spawned process is fenced identically to a subprocess tool's.
+// (ADR 0013). The box comes from Config.ConfinementBox(), the same constructor resolutionInput
+// uses, so a hook-spawned process is fenced identically to a subprocess tool's.
 func (a *Agent) hookExecutionCtx(ctx context.Context) context.Context {
 	if a.effectiveMode() != domain.ModeAuto {
 		return ctx
@@ -455,11 +451,7 @@ func (a *Agent) hookExecutionCtx(ctx context.Context) context.Context {
 	return domain.WithSubprocessPermit(ctx, domain.SubprocessPermit{
 		Confinement: &domain.Confinement{
 			Confiner: a.cfg.Confiner,
-			Box: domain.ConfinementBox{
-				WorkspaceRoot: a.cfg.WorkspaceDir,
-				WritablePaths: a.cfg.ConfineWritablePaths,
-				NetworkAllow:  a.cfg.ConfineNetworkAllow,
-			},
+			Box:      a.cfg.ConfinementBox(),
 		},
 	})
 }

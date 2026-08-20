@@ -9,6 +9,7 @@ package domain
 
 import (
 	"context"
+	"reflect"
 	"testing"
 )
 
@@ -151,5 +152,50 @@ func TestWriteEscapePermitIsADistinctKey(t *testing.T) {
 	}
 	if _, ok := ConfinementFromContext(withEscape); ok {
 		t.Error("a write-escape permit surfaced as a Confinement handle; the keys must be distinct")
+	}
+}
+
+// TestConfigConfinementBox pins the mapping the constructor exists to own: every box field comes
+// from its Config counterpart, none is dropped and none is crossed with another. Hand-assembling
+// the box at each call site is what let a site forget NetworkAllow and open a silent confinement
+// hole, so this guard is what makes the one constructor trustworthy as the single source.
+func TestConfigConfinementBox(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		cfg  Config
+		want ConfinementBox
+	}{
+		{
+			name: "every confine field reaches the box",
+			cfg: Config{
+				WorkspaceDir:         "/work/space",
+				ConfineWritablePaths: []string{"/work/space/out", "/tmp/build"},
+				ConfineNetworkAllow:  []string{"example.test:443"},
+			},
+			want: ConfinementBox{
+				WorkspaceRoot: "/work/space",
+				WritablePaths: []string{"/work/space/out", "/tmp/build"},
+				NetworkAllow:  []string{"example.test:443"},
+			},
+		},
+		{
+			name: "an unconfigured Config names no fence",
+			cfg:  Config{},
+			want: ConfinementBox{},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			box := tc.cfg.ConfinementBox()
+
+			if !reflect.DeepEqual(box, tc.want) {
+				t.Errorf("ConfinementBox() = %+v, want %+v", box, tc.want)
+			}
+		})
 	}
 }

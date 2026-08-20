@@ -342,10 +342,12 @@ func deriveDeps(cfg domain.Config, needs mechanisms.DepNeeds) mechanisms.Deps {
 	// every run, not behind a needs flag: it costs nothing to carry, and a Mechanism that
 	// spawns must refuse a model-writable program even on a host that can establish no
 	// confinement box at all (internal/security.RefuseExecFromWritablePath).
-	deps.WritableBox = domain.ConfinementBox{
-		WorkspaceRoot: cfg.WorkspaceDir,
-		WritablePaths: cfg.ConfineWritablePaths,
-	}
+	// NetworkAllow is cleared deliberately: it names hosts a confined subprocess may REACH,
+	// which says nothing about the paths a program may be resolved FROM. Building the full box
+	// and clearing the one field keeps that divergence one visible line rather than a silently
+	// short literal.
+	deps.WritableBox = cfg.ConfinementBox()
+	deps.WritableBox.NetworkAllow = nil
 	if needs.Library {
 		store := library.NewStore(cfg.LibraryDir)
 		if err := store.Load(); err != nil {
