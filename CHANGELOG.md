@@ -222,6 +222,19 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **The /usage report and the /inspect pane are one pane now.** Both are the same read-only overlay —
+  a scrolled row list, esc closes it, a click outside dismisses it, a click inside is swallowed, the
+  wheel scrolls it — and it was written twice: two state structs, two key contracts, two dismisses,
+  two budget→render paths, and in `mouse.go` two copies each of the pane rectangle, the visible
+  window, the click and the wheel, whose comments said so ("It is usagePaneRect one slot further
+  down"). One `reportPane` value and one set of functions (`reportpane.go`) now answer for both,
+  parameterised by which report is being asked; `usage.go` and `inspector.go` keep what only they
+  know — their rows, their titles and their verbs — and name the shared body for their own pane. The
+  frame's transcript-side stacking order, which the two copies each hardcoded as an `above` slice
+  that already differed by one element, is stated once as the list every rectangle in that slot
+  walks, so the next pane to join the slot joins one list rather than being remembered into several.
+  Nothing on screen or under the pointer changes.
+
 - **A tool call's outcome stat is carried as a typed value.** The stat a card's outcome slot shows —
   a counted noun or a diffstat (`statValue`) — now travels beside the phrase it spells, so a group's
   type row ADDS its members' stats up instead of parsing the wording back out of their slots.

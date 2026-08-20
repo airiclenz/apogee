@@ -27,24 +27,17 @@ import (
 // take).
 //
 // It is the lightest pane in the frame: no filter, no selection, and the only keys it owns are esc
-// and the four that scroll it (usageKey). The verb is whileRunning — the pane reads Model state and
-// calls nothing — so it opens over a working agent, which is exactly when the question gets asked.
+// and the four that scroll it. The verb is whileRunning — the pane reads Model state and calls
+// nothing — so it opens over a working agent, which is exactly when the question gets asked.
 //
-// The POINTER does what the keyboard has no key for (mouse.go): a click outside the box dismisses
-// the report, and a click inside it is swallowed rather than starting a selection on the transcript
-// underneath. The wheel scrolls what ↑/↓ and the page keys scroll — a session that fanned out to
-// more delegates than the frame can seat rows for — through the same window and the same clamp, so
-// the two ways in can never disagree about which rows are on the screen. It is a scroll and not a
-// walk, because there is nothing here to select.
+// The PANE is not written here. A report — the key contract, the dismiss, the budget→render path and
+// the whole mouse family — is one shape the frame holds twice (reportpane.go, shared with the
+// /inspect view), so what is left in this file is the only thing that is this report's alone: what it
+// says. The entries below are that module's functions under this pane's own name.
 
-// usagePane is the /usage report overlay's state: whether it is up, and how far its row list is
-// scrolled. The rows themselves are derived at render time from the folds, so there is nothing here
-// to keep in step with them. Its zero value is "closed at the top", so it lives inline in the
-// value-copied Model like the picker and the settings pane (ADR 0011).
-type usagePane struct {
-	open bool
-	top  int // the first row the window shows (popupSpec.rowTop) — what the wheel and the scroll keys move
-}
+// usagePane is the /usage report overlay's state — a reportPane (reportpane.go) under the name of the
+// pane that keeps it: whether the report is up, and how far its row list is scrolled.
+type usagePane = reportPane
 
 // usageTitle names the pane, and usageHint spells the keys it owns.
 const (
@@ -99,118 +92,63 @@ func (m Model) runUsageCommand() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// usageKey is the pane's whole key contract: esc closes the report, ↑/↓ scroll it a row at a time
-// and pgup/pgdown a drawn window at a time. handled is false for every other key, because the pane
-// is NOT modal — it answers a question rather than asking one, so the box behind it stays live and a
-// printable key opens a message exactly as it would with no report up (handleKey).
-//
-// The rows it moves are the ones the frame DREW (usageWindow, mouse.go), which is what makes a key
-// and a wheel notch move the same list by the same arithmetic and stop at the same two ends: the
-// first row, and the last FULL window. A pane the frame could not seat claims neither key — there is
-// nothing on the screen for them to mean anything against, and swallowing pgup there would leave the
-// transcript unscrollable behind a report that is not drawn.
-func (m Model) usageKey(msg tea.KeyPressMsg) (bool, tea.Model, tea.Cmd) {
-	if !m.usagePane.open {
-		return false, m, nil
-	}
-	key := msg.String()
-	if key == "esc" {
-		next, cmd := m.closeUsagePane()
-		return true, next, cmd
-	}
-	step, byPage, scrolls := usageScrollStep(key)
-	if !scrolls {
-		return false, m, nil
-	}
-	win, drawn := m.usageWindow()
-	if !drawn {
-		return false, m, nil
-	}
-	shown := win.end - win.start
-	if byPage {
-		step *= max(1, shown)
-	}
-	m.usagePane.top = clampInt(win.start+step, 0, max(0, win.total-shown))
-	return true, m, nil
-}
-
-// usageScrollStep spells how far each scroll key moves the report: one row for the arrows, one
-// window for the page keys — byPage rather than a number, because how big a page is is the frame's
-// answer for this paint and not this table's. ok is false for every key the pane does not scroll on.
-func usageScrollStep(key string) (step int, byPage, ok bool) {
-	switch key {
-	case "up":
-		return -1, false, true
-	case "down":
-		return 1, false, true
-	case "pgup":
-		return -1, true, true
-	case "pgdown":
-		return 1, true, true
-	}
-	return 0, false, false
-}
-
-// closeUsagePane dismisses the report — the esc of the key contract above.
-func (m Model) closeUsagePane() (tea.Model, tea.Cmd) {
-	return m.dismissUsage(), nil
-}
-
-// dismissUsage takes the report off the frame and gives its rows back to the transcript. Both ways of
-// closing it spend this one — esc (closeUsagePane) and a click outside the box (handleUsageClick,
-// mouse.go) — so the two can never come apart, and neither can leave the scroll behind for the next
-// time the report is opened.
-func (m Model) dismissUsage() Model {
-	m.usagePane = usagePane{}
-	m.layout()
-	return m
-}
+// The report module's functions under this pane's name (reportpane.go). Each one is the shared body
+// with usageReport filled in: naming them here is what lets the frame, the keyboard and the pointer
+// go on addressing the /usage report as themselves while there is only one report left to maintain.
 
 // renderUsage paints the pane, or "" when it is closed or the frame cannot seat it.
-func (m Model) renderUsage() string {
-	if !m.usagePane.open {
-		return ""
-	}
-	spec, seated := m.usageSpec(m.usageRows())
-	if !seated {
-		return "" // the frame cannot seat this pane beside its siblings (frameRowPlan)
-	}
-	view, _ := renderPopupPlaced(m.th, spec, m.width)
-	return view
+func (m Model) renderUsage() string { return m.renderReport(usageReport) }
+
+// usageSpec composes the report's [popupSpec] for THIS frame out of rows its caller has already
+// composed — the pane's own entry into [Model.reportSpec], which the window and the paint reach
+// through [Model.reportContent] instead.
+func (m Model) usageSpec(rows []popupRow) (popupSpec, bool) {
+	return m.reportSpec(usageReport, usageContent(rows))
 }
 
-// usageSpec composes the report's [popupSpec] for THIS frame — the rows, the budget the frame granted
-// and the window the wheel scrolled to. ok is false when the frame cannot seat the pane at all.
-//
-// The rows are composed BEFORE the budget is asked for, because what the pane demands is what it has
-// to show — the same order every other overlay composes in (renderPicker, renderSessionBrowser). It
-// is a step of its own for the reason the /settings key list's is (settingsKeyListSpec): the painter
-// is not the composition's only reader, and the MOUSE has to be told about the very window that was
-// drawn (usageWindow, mouse.go) rather than a second derivation of it.
-func (m Model) usageSpec(rows []popupRow) (popupSpec, bool) {
+// usageKey is the pane's whole key contract: esc closes the report, ↑/↓ scroll it a row at a time and
+// pgup/pgdown a drawn window at a time (reportKey).
+func (m Model) usageKey(msg tea.KeyPressMsg) (bool, tea.Model, tea.Cmd) {
+	return m.reportKey(usageReport, msg)
+}
+
+// dismissUsage takes the report off the frame and gives its rows back to the transcript.
+func (m Model) dismissUsage() Model { return m.dismissReport(usageReport) }
+
+// usagePaneRect is where the open report is drawn: the screen row its top border lands on and how
+// many rows it takes.
+func (m Model) usagePaneRect() (y0, h int, ok bool) { return m.reportPaneRect(usageReport) }
+
+// usageWindow is the row window the report is showing as the frame DREW it.
+func (m Model) usageWindow() (reportWindow, bool) { return m.reportWindow(usageReport) }
+
+// handleUsageClick answers a left-click while the report is up: inside the box it is claimed and
+// nothing happens, outside it the report is dismissed and the click goes on.
+func (m Model) handleUsageClick(pre Model, msg tea.MouseClickMsg) (Model, bool) {
+	return m.handleReportClick(usageReport, pre, msg)
+}
+
+// usageWheel scrolls the report one row per notch while the pointer is over it.
+func (m Model) usageWheel(msg tea.MouseWheelMsg) (Model, bool) {
+	return m.reportWheel(usageReport, msg)
+}
+
+// usageContent is what the report tells the shared module about itself for one frame: its name, the
+// keys it spells, how tall it likes to be, the rows it was composed with, and — where there are none
+// — the one sentence it shows instead of them.
+func usageContent(rows []popupRow) reportContent {
 	body := ""
 	if len(rows) == 0 {
 		body = usageEmptyBody
 	}
-	maxBody, shown, seated := m.popupBudget(paneUsage, len(rows), maxUsageRows, popupChrome, popupFloor{})
-	if !seated {
-		return popupSpec{}, false
+	return reportContent{
+		title:  usageTitle,
+		hint:   usageHint,
+		rowCap: maxUsageRows,
+		body:   body,
+		rows:   rows,
+		kinds:  usageRowKinds(len(rows)),
 	}
-	return popupSpec{
-		title:       usageTitle,
-		body:        body,
-		maxBodyRows: maxBody,
-		rows:        rows,
-		rowKinds:    usageRowKinds(len(rows)),
-		selected:    -1, // a report has no selection: nothing here is chosen (the popup module's convention)
-		// The scroll is clamped to the LAST full window rather than to the last row: a report scrolled
-		// to its end shows a full pane of rows, and a stale offset — the grant shrank with the window,
-		// or a delegate row arrived — is corrected here rather than painting one row over an empty pane.
-		rowTop:    clampInt(m.usagePane.top, 0, max(0, len(rows)-shown)),
-		hint:      usageHint,
-		maxRows:   shown,
-		scrollbar: m.popupScrollbarOn(),
-	}, true
 }
 
 // usageRowKinds marks the first row as the column header and leaves every other row plain — the
@@ -227,7 +165,7 @@ func usageRowKinds(rows int) []popupRowKind {
 
 // usageRows composes the report: the column header, the main agent, every delegate that reported a
 // count, and — only where a delegate row stands — the session total. NOTHING at all when no agent
-// has reported, which is the empty state renderUsage words instead.
+// has reported, which is the empty state usageContent words instead.
 //
 // A delegate that reported no count is left out rather than shown as a row of blanks: a run whose
 // child never got a usage report back is a fact about the server, not a spend, and a row of empty

@@ -33,12 +33,16 @@ import (
 // row states the same rule from the other side). The ring survives /clear for the same reason
 // transcript.debug does — it is a diagnostic view of the RUN, not of the session's memory.
 //
-// The pane is the /usage report's shape: non-modal, scrollable, esc and the four scroll keys its
-// whole keyboard, rows derived at render time from the ring. Its rows are FLAT — one payload line
-// per row, elided at the pane's width like every other unwrapped row (popupRowBlocks) — rather
-// than wrapped: a single JSON line longer than the pane's whole row budget seats NOTHING when rows
-// wrap (popupRowWindowFrom), and a raw-protocol view that goes blank on a big request body is
-// worse than one that cuts a long line off at the border.
+// The pane is the /usage report's shape because it IS that shape: both are reportPanes
+// (reportpane.go), non-modal and scrollable, esc and the four scroll keys their whole keyboard, rows
+// derived at render time — from the ring here, from the folds there. What is written in this file is
+// the ring and what it says; the entries below are the shared module's functions under this pane's
+// own name.
+//
+// Its rows are FLAT — one payload line per row, elided at the pane's width like every other
+// unwrapped row (popupRowBlocks) — rather than wrapped: a single JSON line longer than the pane's
+// whole row budget seats NOTHING when rows wrap (popupRowWindowFrom), and a raw-protocol view that
+// goes blank on a big request body is worse than one that cuts a long line off at the border.
 
 // wireRecord is one half of one Upstream round-trip as the Inspector holds it: which half, the
 // Turn, depth and spawning call id of the agent that made the call, and the payload —
@@ -62,14 +66,9 @@ type wireRecord struct {
 	hidden    int
 }
 
-// inspectorPane is the /inspect overlay's state: whether it is up, and how far its row list is
-// scrolled. The rows themselves are derived at render time from the ring, so there is nothing here
-// to keep in step with them. Its zero value is "closed at the top", so it lives inline in the
-// value-copied Model like the usage report (ADR 0011).
-type inspectorPane struct {
-	open bool
-	top  int // the first row the window shows (popupSpec.rowTop) — what the scroll keys move
-}
+// inspectorPane is the /inspect overlay's state — a reportPane (reportpane.go) under the name of the
+// pane that keeps it: whether the pane is up, and how far its record list is scrolled.
+type inspectorPane = reportPane
 
 // inspectorTitle names the pane, and inspectorHint spells the keys it owns.
 const (
@@ -203,88 +202,60 @@ func prettyWireLine(line string) []string {
 	return strings.Split(buf.String(), "\n")
 }
 
-// inspectorKey is the pane's whole key contract: esc closes it, ↑/↓ scroll a row at a time and
-// pgup/pgdown a drawn window at a time. handled is false for every other key — the pane is NOT
-// modal (usage.go states the doctrine), so the box behind it stays live and a printable key opens a
-// message exactly as it would with no pane up.
-//
-// The arithmetic reads the window the pane was COMPOSED with rather than a second derivation of it:
-// the rows are flat, so the budget popupBudget granted is the row count on the screen, and the
-// clamped top is the one the painter will use — which is what lets the first ↑ after an open land
-// one row above the last window instead of somewhere in the middle of the ring.
-func (m Model) inspectorKey(msg tea.KeyPressMsg) (bool, tea.Model, tea.Cmd) {
-	if !m.inspector.open {
-		return false, m, nil
-	}
-	key := msg.String()
-	if key == "esc" {
-		return true, m.dismissInspector(), nil
-	}
-	// The scroll vocabulary is the /usage report's own table (usageScrollStep), spent rather than
-	// copied: the two panes answer to the same four keys with the same two step sizes, and a second
-	// table would be a place for them to drift apart one key at a time.
-	step, byPage, scrolls := usageScrollStep(key)
-	if !scrolls {
-		return false, m, nil
-	}
-	spec, seated := m.inspectorSpec()
-	if !seated {
-		return false, m, nil // nothing of the pane is on the screen for a key to move
-	}
-	shown := spec.maxRows
-	if byPage {
-		step *= max(1, shown)
-	}
-	m.inspector.top = clampInt(spec.rowTop+step, 0, max(0, len(spec.rows)-shown))
-	return true, m, nil
-}
-
-// dismissInspector takes the pane off the frame and gives its rows back to the transcript. The
-// scroll goes with it: the next /inspect opens on the newest record again, which is where the
-// question is asked from.
-func (m Model) dismissInspector() Model {
-	m.inspector = inspectorPane{}
-	m.layout()
-	return m
-}
+// The report module's functions under this pane's name (reportpane.go). Each one is the shared body
+// with inspectReport filled in: naming them here is what lets the frame, the keyboard and the pointer
+// go on addressing the /inspect pane as itself while there is only one report left to maintain.
 
 // renderInspector paints the pane, or "" when it is closed or the frame cannot seat it.
-func (m Model) renderInspector() string {
-	if !m.inspector.open {
-		return ""
-	}
-	spec, seated := m.inspectorSpec()
-	if !seated {
-		return "" // the frame cannot seat this pane beside its siblings (frameRowPlan)
-	}
-	return renderPopup(m.th, spec, m.width)
+func (m Model) renderInspector() string { return m.renderReport(inspectReport) }
+
+// inspectorSpec composes the pane's [popupSpec] for THIS frame — its rows, the budget the frame
+// granted and the window the scroll landed on ([Model.reportSpec]).
+func (m Model) inspectorSpec() (popupSpec, bool) {
+	return m.reportSpec(inspectReport, inspectContent(m.inspectorRows()))
 }
 
-// inspectorSpec composes the pane's [popupSpec] for THIS frame — the rows, the budget the frame
-// granted and the window the scroll landed on. ok is false when the frame cannot seat the pane at
-// all. It is a step of its own because the painter is not its only reader: the KEYS are budgeted
-// against the very window that was drawn (inspectorKey), rather than against a second guess at it.
-func (m Model) inspectorSpec() (popupSpec, bool) {
-	rows, kinds := m.inspectorRows()
-	maxBody, shown, seated := m.popupBudget(paneInspector, len(rows), maxInspectorRows, popupChrome, popupFloor{})
-	if !seated {
-		return popupSpec{}, false
+// inspectorKey is the pane's whole key contract: esc closes it, ↑/↓ scroll a row at a time and
+// pgup/pgdown a drawn window at a time (reportKey).
+func (m Model) inspectorKey(msg tea.KeyPressMsg) (bool, tea.Model, tea.Cmd) {
+	return m.reportKey(inspectReport, msg)
+}
+
+// dismissInspector takes the pane off the frame and gives its rows back to the transcript. The scroll
+// goes with it: the next /inspect opens on the newest record again, which is where the question is
+// asked from.
+func (m Model) dismissInspector() Model { return m.dismissReport(inspectReport) }
+
+// inspectorPaneRect is where the open pane is drawn: the screen row its top border lands on and how
+// many rows it takes.
+func (m Model) inspectorPaneRect() (y0, h int, ok bool) { return m.reportPaneRect(inspectReport) }
+
+// inspectorWindow is the row window the pane is showing as the frame DREW it.
+func (m Model) inspectorWindow() (reportWindow, bool) { return m.reportWindow(inspectReport) }
+
+// handleInspectorClick answers a left-click while the pane is up: inside the box it is claimed and
+// nothing happens, outside it the pane is dismissed and the click goes on.
+func (m Model) handleInspectorClick(pre Model, msg tea.MouseClickMsg) (Model, bool) {
+	return m.handleReportClick(inspectReport, pre, msg)
+}
+
+// inspectorWheel scrolls the record list one row per notch while the pointer is over it.
+func (m Model) inspectorWheel(msg tea.MouseWheelMsg) (Model, bool) {
+	return m.reportWheel(inspectReport, msg)
+}
+
+// inspectContent is what the pane tells the shared module about itself for one frame: its name, the
+// keys it spells, how tall it likes to be, and the record rows with the kinds composed beside them.
+// It words no empty state of its own — an empty ring is a ROW here, and which one depends on whether
+// anything is being captured at all (inspectorRows).
+func inspectContent(rows []popupRow, kinds []popupRowKind) reportContent {
+	return reportContent{
+		title:  inspectorTitle,
+		hint:   inspectorHint,
+		rowCap: maxInspectorRows,
+		rows:   rows,
+		kinds:  kinds,
 	}
-	return popupSpec{
-		title:       inspectorTitle,
-		maxBodyRows: maxBody,
-		rows:        rows,
-		rowKinds:    kinds,
-		selected:    -1, // a report has no selection: nothing here is chosen (the popup module's convention)
-		// Clamped to the LAST full window rather than to the last row, the /usage rule: it is what
-		// lands an opening /inspect on the newest record (runInspectCommand sets the top past the end),
-		// and it corrects a stale offset — the grant shrank, or a record arrived — rather than painting
-		// one row over an empty pane.
-		rowTop:    clampInt(m.inspector.top, 0, max(0, len(rows)-shown)),
-		hint:      inspectorHint,
-		maxRows:   shown,
-		scrollbar: m.popupScrollbarOn(),
-	}, true
 }
 
 // inspectorRows composes the report: for each record in the ring, oldest first, a header row naming
