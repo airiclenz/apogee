@@ -15,6 +15,39 @@ import (
 // /color-scheme — listing, switching, exporting
 // ----------------------------------------------------------------------------
 
+// fakeSchemeHost is the binary's colour-scheme seam, faked one member at a time, on
+// [fakeSettingsHost]'s terms: a member a test leaves nil answers exactly as an unwired one does —
+// nothing on offer, no live resolve (ok comes back false), and an export that says this build
+// cannot write scheme files. That per-member blank is how the nil-seam degrades [SchemeHost]
+// documents are provoked without a fake per combination.
+type fakeSchemeHost struct {
+	list    func() []string
+	resolve func(name string) (scheme.Scheme, []string)
+	export  func(name string) (string, error)
+}
+
+func (h fakeSchemeHost) List() []string {
+	if h.list == nil {
+		return nil
+	}
+	return h.list()
+}
+
+func (h fakeSchemeHost) Resolve(name string) (scheme.Scheme, []string, bool) {
+	if h.resolve == nil {
+		return scheme.Scheme{}, nil, false
+	}
+	s, warnings := h.resolve(name)
+	return s, warnings, true
+}
+
+func (h fakeSchemeHost) Export(name string) (string, error) {
+	if h.export == nil {
+		return "", errors.New(noSchemeExporterNote)
+	}
+	return h.export(name)
+}
+
 // colorSchemeOpts is the wiring every form of the verb reads: what can be switched to, what a name
 // resolves to, what the switch persists through, and where an export writes. Each test blanks the
 // seams it wants unwired, which is how the nil-seam degrades below are provoked.
@@ -22,11 +55,9 @@ func colorSchemeOpts(log *settingsWriteLog, list []string,
 	resolve func(string) (scheme.Scheme, []string), export func(string) (string, error)) Options {
 	opts := testOpts
 	opts.ColorSchemeName = "dark"
-	opts.ListSchemes = func() []string { return list }
-	opts.ResolveScheme = resolve
-	opts.ExportScheme = export
+	opts.Schemes = fakeSchemeHost{list: func() []string { return list }, resolve: resolve, export: export}
 	if log != nil {
-		opts.WriteSetting = log.write
+		opts.Settings = fakeSettingsHost{write: log.write}
 	}
 	return opts
 }
@@ -94,7 +125,7 @@ func TestColorSchemeCommandNamesAConfiguredSchemeThatIsNotOnOffer(t *testing.T) 
 // so instead of naming the built-ins it could not load either — the nil-seam degrade every provider
 // in [Options] takes.
 func TestColorSchemeCommandWithNoDiscoverySeam(t *testing.T) {
-	opts := testOpts // no ListSchemes, no ResolveScheme, no ExportScheme
+	opts := testOpts // no scheme host at all
 	m, _ := runColorSchemeLine(t, newTestModelEng(t, &fakeEngine{}, opts), "/color-scheme")
 
 	if note := colorSchemeNote(t, m); !strings.Contains(note, "no schemes are on offer") {

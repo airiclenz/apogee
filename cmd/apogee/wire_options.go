@@ -7,6 +7,11 @@ package main
 // the renderer never reads a file, parses a config name or learns a path. It is built at the launch
 // call and nowhere else, which is why it can be a plain method over the wiring: by the time it runs,
 // every field it names is filled.
+//
+// Below it, the host capabilities that projection names as INTERFACES rather than as bare funcs
+// (ADR 0054): settingsHost, the `/settings` pane's four acts over one config file, and schemeHost,
+// the three things this program does with the schemes folder. Each is one value the literal hands
+// over and one seam a renderer test fakes.
 
 import (
 	"os"
@@ -33,9 +38,10 @@ func (w *rootWiring) options() tui.Options {
 	configPath := filepath.Join(w.roots.config, "config.yaml")
 
 	// The apply dispatcher, built ahead of the literal rather than inside it, because TWO seams reach
-	// it now: the pane's own ⏎ (ApplySetting) and the Mechanism toggle, whose write is addressed by
-	// catalogue id and therefore cannot be handed to the pane's path-keyed pair — it persists and
-	// applies behind one call, through this same dispatcher's `mechanisms` arm (ADR 0037 decision 1).
+	// it now: the pane's own ⏎ ([tui.SettingsHost.Apply]) and the Mechanism toggle, whose write is
+	// addressed by catalogue id and therefore cannot be handed to the pane's path-keyed pair — it
+	// persists and applies behind one call, through this same dispatcher's `mechanisms` arm (ADR 0037
+	// decision 1).
 	applySetting := applySettingFor(settingsApplier{
 		engine:     w.engine,
 		live:       w.live,
@@ -155,18 +161,13 @@ func (w *rootWiring) options() tui.Options {
 		ColorScheme:         w.colorScheme,
 		ColorSchemeName:     w.opts.UI.ColorScheme,
 		ColorSchemeWarnings: w.colorSchemeWarnings,
-		// And the two that keep the scheme switchable from inside the program: what the picker
-		// offers, and the resolve behind an answer to it. Both read the folder on every ask, so a
-		// scheme file written or edited mid-session is offered and loaded without a restart.
-		ListSchemes: func() []string { return scheme.Discover(w.roots.schemes) },
-		ResolveScheme: func(name string) (scheme.Scheme, []string) {
-			return resolveColorScheme(name, w.roots.schemes)
-		},
-		// And the one seam that CREATES a scheme file: `/color-scheme export` copies a built-in into
-		// the same folder, which is what makes an embedded palette editable at all.
-		ExportScheme: func(name string) (string, error) { return scheme.Export(name, w.roots.schemes) },
+		// And what keeps the scheme switchable from inside the program: what the picker offers, the
+		// resolve behind an answer to it, and the export that CREATES a scheme file at all — one
+		// named capability over one folder (ADR 0054), read on every ask so a file written or edited
+		// mid-session is offered and loaded without a restart.
+		Schemes: schemeHost{folder: w.roots.schemes},
 		// The `cursor-shape:` key: the shape the REAL terminal cursor takes at the prompt caret
-		// (steady always — there is no blink key). Selected here, like the two above, so the
+		// (steady always — there is no blink key). Selected here, like the palette above, so the
 		// renderer never parses a config name.
 		CursorShape: cursorShape,
 		// The two hidden rendering-diagnostic seams (--tui-trace / --tui-diag), passed through as
@@ -202,44 +203,17 @@ func (w *rootWiring) options() tui.Options {
 		KeyMigration:     w.keyOffer,
 		MigrateKey:       w.keyMigrator(),
 		KeepPlaintextKey: w.plaintextKeyKeeper(),
-		// The `/settings` pane's rows: every key the registry describes, with the value THIS run
-		// resolved and the marker for a key an environment variable or a flag overrode
-		// (settingsRows.go). A provider rather than a slice because the pane derives its rows on
-		// every paint — the picker's convention — and it closes over the resolved opts because the
-		// pane reports the resolution THIS run made: a key persisted mid-session is applied by the
-		// dispatcher below and shown from the pane's own journal, marked ` *` (ADR 0037 decision 8).
-		SettingsRows: func() []tui.SettingRow { return settingsRows(w.opts) },
-		// The pane's write half: one key per deliberate edit, spliced into the same config.yaml the
-		// acknowledgement above records a host in (ADR 0035). The registry decides what may be
-		// written and the splice writer owns the file (internal/config/configwrite.go) — the renderer hands over a
-		// path and the value as the file spells it, and learns only whether it landed.
-		//
-		// Every landed write re-takes the external edit's baseline (ADR 0041 decision 8). The pane
-		// applies the key it just persisted in the same keypress, and the watcher below is looking at
-		// the very file this wrote: without the refresh, apogee's own write comes back a second later
-		// as somebody's edit and applies twice — which for `mcp-servers:` is a second dial of every
-		// server. A write that FAILED changed no file and refreshes nothing.
-		WriteSetting: func(key, value string) error {
-			if err := config.SaveConfigSetting(configPath, key, value); err != nil {
-				return err
-			}
-			w.externalEdits.refresh()
-			return nil
+		// The whole `/settings` seam as one named capability (ADR 0054): the rows the pane shows,
+		// the write and the reset that splice this run's config.yaml, and the apply that puts the
+		// key just persisted into effect. Everything behind it — the registry, the file format, the
+		// resolution onto a live engine seam — is this layer's, which is what keeps the pane an
+		// idiom over rows it did not compose.
+		Settings: settingsHost{
+			opts:       w.opts,
+			configPath: configPath,
+			edits:      w.externalEdits,
+			apply:      applySetting,
 		},
-		// Reset is the same write in reverse: the key's active line is REMOVED, so the value goes
-		// back to the binary's default rather than being pinned to today's spelling of it. It refreshes
-		// the same baseline for the same reason — a removed line is a change to the file like any other.
-		ResetSetting: func(key string) error {
-			if err := config.ResetConfigSetting(configPath, key); err != nil {
-				return err
-			}
-			w.externalEdits.refresh()
-			return nil
-		},
-		// And the apply half of the same keypress (ADR 0037): what the file now says, the session
-		// now runs. The dispatcher owns the resolution from a registry path and a file-spelled value
-		// onto a live engine seam — the renderer holds neither schema nor engine mutator.
-		ApplySetting: applySetting,
 		// The `mechanisms:` block's own two seams — the one row of the pane whose children are edited
 		// in a list rather than in the file. What the list OFFERS is the catalogue this build carries,
 		// sorted canonically, each id answered from the FILE's manual block (absent ⇒ off) rather than
@@ -333,9 +307,10 @@ func mechanismBlock(path string) map[string]bool {
 }
 
 // writeMechanismFor builds [tui.Options.WriteMechanism]: one line spliced into the `mechanisms:` block
-// and put in force on the same call. It is WriteSetting's shape one level in — the splice, the baseline
-// re-take and the live apply in the order they are there — with the apply reaching the dispatcher's
-// `mechanisms` arm, which re-reads the whole block exactly as it does after an edit made in $EDITOR.
+// and put in force on the same call. It is [settingsHost.Write]'s shape one level in — the splice,
+// the baseline re-take and the live apply in the order they are there — with the apply reaching the
+// dispatcher's `mechanisms` arm, which re-reads the whole block exactly as it does after an edit
+// made in $EDITOR.
 // The value handed to it is empty because that arm reads none: the block is a shape no single string
 // spells.
 //
@@ -358,3 +333,93 @@ func writeMechanismFor(
 		return true, err
 	}
 }
+
+// ----------------------------------------------------------------------------
+// The host capabilities Options names as interfaces (ADR 0054)
+// ----------------------------------------------------------------------------
+
+// settingsHost is this binary's [tui.SettingsHost]: the four acts of the `/settings` pane, which
+// are four faces of one config file — the rows it shows off the resolution THIS run made, the write
+// and the reset that splice that file, and the live apply of the key just persisted (ADR 0035, ADR
+// 0037). It holds what those acts need rather than four closures over the wiring, so the family
+// crosses to the renderer as one value and is faked in a test as one seam.
+type settingsHost struct {
+	// opts is the resolved snapshot the rows are projected from, so the pane reports the resolution
+	// THIS run made: a key persisted mid-session is applied by apply below and shown from the pane's
+	// own journal, marked ` *` (ADR 0037 decision 8).
+	opts config.Options
+	// configPath is the file both writes splice — the same config.yaml the host acknowledgement is
+	// recorded in and the watcher is looking at.
+	configPath string
+	// edits is the external-edit baseline every landed write re-takes (ADR 0041 decision 8).
+	edits *externalEdit
+	// apply is the live-apply dispatcher (wire_settings.go). It stays a func because the Mechanism
+	// toggle reaches the same dispatcher by catalogue id, on a path this seam has no method for.
+	apply func(key, value string) (string, error)
+}
+
+// Rows is every key the registry describes, with the value this run resolved and the marker for a
+// key an environment variable or a flag overrode (settingsrows.go). It is re-derived per ask because
+// the pane derives its rows on every paint — the picker's convention.
+func (h settingsHost) Rows() []tui.SettingRow { return settingsRows(h.opts) }
+
+// Write persists one key per deliberate edit, spliced into the config file (ADR 0035). The registry
+// decides what may be written and the splice writer owns the file (internal/config/configwrite.go) —
+// the renderer hands over a path and the value as the file spells it, and learns only whether it
+// landed.
+//
+// Every landed write re-takes the external edit's baseline (ADR 0041 decision 8). The pane applies
+// the key it just persisted in the same keypress, and the watcher is looking at the very file this
+// wrote: without the refresh, apogee's own write comes back a second later as somebody's edit and
+// applies twice — which for `mcp-servers:` is a second dial of every server. A write that FAILED
+// changed no file and refreshes nothing.
+func (h settingsHost) Write(key, value string) error {
+	if err := config.SaveConfigSetting(h.configPath, key, value); err != nil {
+		return err
+	}
+	h.edits.refresh()
+	return nil
+}
+
+// Reset is the same write in reverse: the key's active line is REMOVED, so the value goes back to
+// the binary's default rather than being pinned to today's spelling of it. It refreshes the same
+// baseline for the same reason — a removed line is a change to the file like any other.
+func (h settingsHost) Reset(key string) error {
+	if err := config.ResetConfigSetting(h.configPath, key); err != nil {
+		return err
+	}
+	h.edits.refresh()
+	return nil
+}
+
+// Apply is the apply half of the same keypress (ADR 0037): what the file now says, the session now
+// runs. The dispatcher owns the resolution from a registry path and a file-spelled value onto a live
+// engine seam — the renderer holds neither schema nor engine mutator.
+func (h settingsHost) Apply(key, value string) (string, error) { return h.apply(key, value) }
+
+// schemeHost is this binary's [tui.SchemeHost]: the schemes folder, and the three things the program
+// does with it (ADR 0040). All three read the folder on the ask rather than answering from a
+// snapshot, which is what lets a file the human writes mid-session be offered, loaded and shadowed
+// without a restart.
+type schemeHost struct {
+	// folder is the user's schemes directory — the one this run resolved (roots.schemes), never a
+	// path the renderer knows.
+	folder string
+}
+
+// List names every scheme that can be switched to: the built-ins plus every `*.yaml` in the folder,
+// a user file shadowing a built-in of the same name (ADR 0040 design call 6).
+func (h schemeHost) List() []string { return scheme.Discover(h.folder) }
+
+// Resolve turns one of those names back into a palette — the same call this binary made at boot
+// (wire_live.go), re-run so a switch re-READS the file. ok is always true: this host can always
+// resolve, because the load is forgiving and answers a defective file with warnings and a usable
+// palette rather than with a failure.
+func (h schemeHost) Resolve(name string) (scheme.Scheme, []string, bool) {
+	s, warnings := resolveColorScheme(name, h.folder)
+	return s, warnings, true
+}
+
+// Export copies a built-in into the same folder, which is what makes an embedded palette editable at
+// all — and never overwrites, so an export cannot destroy work in progress (design call 7).
+func (h schemeHost) Export(name string) (string, error) { return scheme.Export(name, h.folder) }

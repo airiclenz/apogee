@@ -746,7 +746,17 @@ internal/tui/usage.go, internal/tui/transcriptcodec.go
 
 **Commit:** `refactor(tui): name the sub-agent run-head predicates`
 
-## 25. Options: settings and scheme funcs become named interfaces; write ADR 0054
+## 25. Options: settings and scheme funcs become named interfaces; write ADR 0054 — ✅ DONE (2026-08-20)
+
+NOTES (2026-08-20): `SchemeHost.Resolve` gained a third return (`ok bool`) that the old `Options.ResolveScheme` func did not have. It is what preserves the per-member nil-seam degrade the item's "audit every call site's nil check" requires: `errNoSchemeResolver` ("the new scheme applies at the next start") is reachable for a host that CAN list but cannot resolve, which is a state `TestSettingsPaneSaysASchemeSwitchNeedsAResolver` pins — it needs the sub-list populated in order to answer it, so a whole-family nil could not express it. Production always answers `true` (the load is forgiving). Every other member's unwired answer fitted its existing signature: no rows, an error out of Write/Reset/Export, and an Apply that reports nothing.
+
+NOTES (2026-08-20): one contract nuance the regrouping moves, recorded because it is a difference in a degrade rather than only a refactor — a host that is WIRED but whose Apply does nothing now reports "already in effect", so a committed `mode` updates the footer's mirror, where a nil `ApplySetting` func returned before that line. Production wires all four acts and no test exercises it; the honest statement of the family-level contract is that a host claiming success is taken at its word, which is what `SettingsHost.Apply`'s doc and ADR 0054 decision 3 now say.
+
+NOTES (2026-08-20): both adapters live in `cmd/apogee/wire_options.go`, beside the projection that hands them over, rather than one per named file — `wire_settings.go` owns the live holder, the apply dispatcher and the per-model re-resolution, and none of those is the renderer-facing seam. It is on the item's Files line for the two prose pointers this rename staled (`applySettingFor`'s doc).
+
+NOTES (2026-08-20): three files outside the item's Files line were touched, each for one pointer this change staled — `internal/tui/{commandrun,keymigration,model,doc}.go` and `cmd/apogee/{wire,doc}.go` name the seams in prose, and `docs/adr/0037` names `Options.ApplySetting` in a live pointer sentence (item 8's LIVE pointer vs HISTORICAL record boundary: the CHANGELOG's past entries, the archived plans and the pinned review were left as written).
+
+NOTES (2026-08-20): no new test file. The item's "per-family fakes replace whole-Model construction" landed as `fakeSettingsHost` (settings_test.go) and `fakeSchemeHost` (colorscheme_test.go), used at every wiring site there is — 22 settings, 3 scheme; a pane test still opens a real pane, because that is what it asserts about. Every changed test line is wiring FORM or a failure MESSAGE naming the seam it drives: no expectation was changed, added, removed or weakened, except `wire_test.go`'s "the resolve seam is wired" assertion, which moved from a nil-func check onto the new `ok` return because that is where the same claim now lives.
 
 **Source:** review §Candidate 9.
 

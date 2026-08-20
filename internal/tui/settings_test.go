@@ -64,7 +64,9 @@ func settingsTestRows(n int) []SettingRow {
 func settingsModel(t *testing.T, rows []SettingRow) Model {
 	t.Helper()
 	opts := testOpts
-	opts.SettingsRows = func() []SettingRow { return rows }
+	opts.Settings = fakeSettingsHost{
+		rows: func() []SettingRow { return rows },
+	}
 	return newTestModelEng(t, &fakeEngine{}, opts)
 }
 
@@ -76,7 +78,7 @@ func settingsFrameModel(t *testing.T, width, height, n int) Model {
 	t.Helper()
 	rows := settingsTestRows(n)
 	rows[1].Value = "danger " + vs16Warning
-	opts := Options{Workspace: "/ws/a", SettingsRows: func() []SettingRow { return rows }}
+	opts := Options{Workspace: "/ws/a", Settings: fakeSettingsHost{rows: func() []SettingRow { return rows }}}
 	m := modelWithOverlayRoomAt(t, width, height, opts)
 	m.settings = settingsPane{open: true}
 	m.layout()
@@ -136,7 +138,9 @@ func TestSettingsCommandWithoutRowsNotesAndOpensNothing(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			opts := testOpts
 			if tc.wire {
-				opts.SettingsRows = func() []SettingRow { return tc.rows }
+				opts.Settings = fakeSettingsHost{
+					rows: func() []SettingRow { return tc.rows },
+				}
 			}
 			m := newTestModelEng(t, &fakeEngine{}, opts)
 			m.input.SetValue("/settings")
@@ -214,7 +218,9 @@ func TestSettingsPaneEscCloses(t *testing.T) {
 func TestSettingsPaneClampsSelectionToRowsThatShrank(t *testing.T) {
 	rows := settingsTestRows(6)
 	opts := testOpts
-	opts.SettingsRows = func() []SettingRow { return rows }
+	opts.Settings = fakeSettingsHost{
+		rows: func() []SettingRow { return rows },
+	}
 	m := openSettingsPane(t, newTestModelEng(t, &fakeEngine{}, opts))
 
 	for range 5 {
@@ -563,6 +569,49 @@ func TestSettingsGiveWayLeavesItsFactOnTheStatusLine(t *testing.T) {
 // Editing: bool toggle and enum sub-list, persisted per edit (ADR 0035)
 // ----------------------------------------------------------------------------
 
+// fakeSettingsHost is the binary's settings seam, faked one half at a time: each half is a func a
+// test wires, and a half left nil answers exactly as the contract says an unwired one does — no
+// rows to show, the nil-seam refusal out of either write, and an apply that reports the key already
+// in effect and moves nothing. That per-half blank is how the degrades [SettingsHost] documents are
+// provoked without a fake per combination of wired halves.
+//
+// rows is a provider rather than a slice because it is one on the real seam: a test that swaps the
+// list under an open pane is asserting that the pane re-derives, so the fake must ask again too.
+type fakeSettingsHost struct {
+	rows  func() []SettingRow
+	write func(path, value string) error
+	reset func(path string) error
+	apply func(path, value string) (string, error)
+}
+
+func (h fakeSettingsHost) Rows() []SettingRow {
+	if h.rows == nil {
+		return nil
+	}
+	return h.rows()
+}
+
+func (h fakeSettingsHost) Write(path, value string) error {
+	if h.write == nil {
+		return errors.New(noSettingsWriterNote)
+	}
+	return h.write(path, value)
+}
+
+func (h fakeSettingsHost) Reset(path string) error {
+	if h.reset == nil {
+		return errors.New(noSettingsWriterNote)
+	}
+	return h.reset(path)
+}
+
+func (h fakeSettingsHost) Apply(path, value string) (string, error) {
+	if h.apply == nil {
+		return "", nil
+	}
+	return h.apply(path, value)
+}
+
 // settingsWriteLog is the binary's write half, faked: what the pane asked to be persisted, in order,
 // plus the error the next write is refused with. A log is the whole of what this fake needs to be —
 // the pane never reads a value back, so there is no file for it to stand in for.
@@ -572,7 +621,7 @@ type settingsWriteLog struct {
 	err    error
 
 	// The apply half of the same keypress (ADR 0037): the dispatcher the binary wires behind
-	// [Options.ApplySetting], as a spy. applies records every key routed OUT of the renderer — the
+	// [SettingsHost.Apply], as a spy. applies records every key routed OUT of the renderer — the
 	// renderer-owned keys never reach it — note is the boundary sentence the seam hands back, and
 	// applyErr is an apply that failed AFTER the write landed.
 	applies   []settingEdit
@@ -580,7 +629,7 @@ type settingsWriteLog struct {
 	applyErr  error
 }
 
-// write and reset are the two [Options] seams. A refusal records nothing, exactly as a real refused
+// write and reset are the two [SettingsHost] seams. A refusal records nothing, exactly as a real refused
 // splice writes nothing: the assertion "the file is unchanged" is then the log's own emptiness.
 func (l *settingsWriteLog) write(path, value string) error {
 	if l.err != nil {
@@ -616,10 +665,10 @@ func settingsEditModel(t *testing.T, rows []SettingRow, log *settingsWriteLog) (
 	t.Helper()
 	eng := &fakeEngine{}
 	opts := testOpts
-	opts.SettingsRows = func() []SettingRow { return rows }
-	opts.WriteSetting = log.write
-	opts.ResetSetting = log.reset
-	opts.ApplySetting = log.apply
+	opts.Settings = fakeSettingsHost{
+		rows:  func() []SettingRow { return rows },
+		write: log.write, reset: log.reset, apply: log.apply,
+	}
 	return openSettingsPane(t, newTestModelEng(t, eng, opts)), eng
 }
 
@@ -754,8 +803,10 @@ func settingsServerModel(t *testing.T, servers func() []ServerChoice, sw *fakeSw
 	t.Helper()
 	rows := []SettingRow{settingsServerRow()}
 	opts := testOpts
-	opts.SettingsRows = func() []SettingRow { return rows }
-	opts.WriteSetting, opts.ResetSetting, opts.ApplySetting = log.write, log.reset, log.apply
+	opts.Settings = fakeSettingsHost{
+		rows:  func() []SettingRow { return rows },
+		write: log.write, reset: log.reset, apply: log.apply,
+	}
 	opts.Servers, opts.SwitchServer = servers, sw.switchTo
 	return openSettingsPane(t, newTestModelEng(t, &fakeEngine{}, opts))
 }
@@ -1402,7 +1453,9 @@ func TestSettingsPaneWriteErrorStaysOnTheRowAndChangesNothing(t *testing.T) {
 func TestSettingsPaneWithoutAWriterSaysSoOnTheRow(t *testing.T) {
 	rows := []SettingRow{settingsBoolRow()}
 	opts := testOpts
-	opts.SettingsRows = func() []SettingRow { return rows }
+	opts.Settings = fakeSettingsHost{
+		rows: func() []SettingRow { return rows },
+	}
 	m := openSettingsPane(t, newTestModelEng(t, &fakeEngine{}, opts))
 
 	m = step(t, m, keyEnter())
@@ -1453,8 +1506,10 @@ func TestSettingsEnumSubListFallsBackWhenItsKeyGoesAway(t *testing.T) {
 	rows := []SettingRow{settingsBoolRow(), settingsEnumRow()}
 	log := &settingsWriteLog{}
 	opts := testOpts
-	opts.SettingsRows = func() []SettingRow { return rows }
-	opts.WriteSetting = log.write
+	opts.Settings = fakeSettingsHost{
+		rows:  func() []SettingRow { return rows },
+		write: log.write,
+	}
 	m := openSettingsPane(t, newTestModelEng(t, &fakeEngine{}, opts))
 
 	m = step(t, m, keyDown())  // the enum row
@@ -1882,7 +1937,7 @@ func TestSettingsPaneMaskedRowBuffersVisiblyAndKeepsItsMask(t *testing.T) {
 }
 
 // Reset is two keypresses on purpose: backspace ARMS it and the hint line asks, ⏎ confirms, esc cancels.
-// What lands is ResetSetting — the key's line removed — and the row then reports the default it went back
+// What lands is [SettingsHost.Reset] — the key's line removed — and the row then reports the default it went back
 // to, on the same terms a write reports its value.
 func TestSettingsPaneResetArmsConfirmsAndCancels(t *testing.T) {
 	rows := []SettingRow{{
@@ -2082,9 +2137,10 @@ func TestSettingsSecondStepsFallBackWhenTheirKeyGoesAway(t *testing.T) {
 			rows := []SettingRow{settingsBoolRow(), settingsStringRow()}
 			log := &settingsWriteLog{}
 			opts := testOpts
-			opts.SettingsRows = func() []SettingRow { return rows }
-			opts.WriteSetting = log.write
-			opts.ResetSetting = log.reset
+			opts.Settings = fakeSettingsHost{
+				rows:  func() []SettingRow { return rows },
+				write: log.write, reset: log.reset,
+			}
 			m := openSettingsPane(t, newTestModelEng(t, &fakeEngine{}, opts))
 
 			m = step(t, m, keyDown()) // the string row
@@ -2414,10 +2470,10 @@ func (l *externalEditLog) reload() ([]AppliedSetting, error) {
 func externalEditModel(t *testing.T, rows []SettingRow, log *settingsWriteLog, edit *externalEditLog) Model {
 	t.Helper()
 	opts := testOpts
-	opts.SettingsRows = func() []SettingRow { return rows }
-	opts.WriteSetting = log.write
-	opts.ResetSetting = log.reset
-	opts.ApplySetting = log.apply
+	opts.Settings = fakeSettingsHost{
+		rows:  func() []SettingRow { return rows },
+		write: log.write, reset: log.reset, apply: log.apply,
+	}
 	opts.ExternalEditSpec = edit.spec
 	opts.ReloadConfig = edit.reload
 	return openSettingsPane(t, newTestModelEng(t, &fakeEngine{}, opts))
@@ -2474,7 +2530,9 @@ func TestSettingsPaneRefusesTheExternalEditMidRun(t *testing.T) {
 func TestSettingsPaneSaysWhenThereIsNoExternalEditor(t *testing.T) {
 	rows := []SettingRow{settingsStructuredRow()}
 	opts := testOpts
-	opts.SettingsRows = func() []SettingRow { return rows }
+	opts.Settings = fakeSettingsHost{
+		rows: func() []SettingRow { return rows },
+	}
 	m := openSettingsPane(t, newTestModelEng(t, &fakeEngine{}, opts))
 
 	next, cmd := stepCmd(t, m, keyEnter())
@@ -2692,10 +2750,10 @@ func TestSettingsPaneDetachedEditorReportsAStartItCouldNotMake(t *testing.T) {
 func configWatchModel(t *testing.T, rows []SettingRow, log *settingsWriteLog, edit *externalEditLog) Model {
 	t.Helper()
 	opts := testOpts
-	opts.SettingsRows = func() []SettingRow { return rows }
-	opts.WriteSetting = log.write
-	opts.ResetSetting = log.reset
-	opts.ApplySetting = log.apply
+	opts.Settings = fakeSettingsHost{
+		rows:  func() []SettingRow { return rows },
+		write: log.write, reset: log.reset, apply: log.apply,
+	}
 	opts.ReloadConfig = edit.reload
 	opts.AwaitConfigChange = func(context.Context) bool { return true }
 	return newTestModelEng(t, &fakeEngine{}, opts)
@@ -2817,7 +2875,9 @@ func TestConfigWatchNotesAFileThatKeepsFailingToParseExactlyOnce(t *testing.T) {
 // nothing about the session changes for it (ADR 0031's nil-seam degrade).
 func TestConfigWatchIsNotArmedWithoutTheSeam(t *testing.T) {
 	opts := testOpts
-	opts.SettingsRows = func() []SettingRow { return []SettingRow{settingsStructuredRow()} }
+	opts.Settings = fakeSettingsHost{
+		rows: func() []SettingRow { return []SettingRow{settingsStructuredRow()} },
+	}
 	m := newTestModelEng(t, &fakeEngine{}, opts)
 
 	if cmd := m.awaitConfigChange(); cmd != nil {
@@ -2858,10 +2918,11 @@ func settingsSchemeModel(t *testing.T, log *settingsWriteLog, list []string,
 	t.Helper()
 	rows := []SettingRow{settingsSchemeRow()}
 	opts := testOpts
-	opts.SettingsRows = func() []SettingRow { return rows }
-	opts.WriteSetting, opts.ResetSetting, opts.ApplySetting = log.write, log.reset, log.apply
-	opts.ListSchemes = func() []string { return list }
-	opts.ResolveScheme = resolve
+	opts.Settings = fakeSettingsHost{
+		rows:  func() []SettingRow { return rows },
+		write: log.write, reset: log.reset, apply: log.apply,
+	}
+	opts.Schemes = fakeSchemeHost{list: func() []string { return list }, resolve: resolve}
 	return openSettingsPane(t, newTestModelEng(t, &fakeEngine{}, opts))
 }
 
@@ -2890,13 +2951,15 @@ func TestSettingsPaneOffersTheSchemesTheSessionDiscovers(t *testing.T) {
 	}
 }
 
-// An unwired [Options.ListSchemes] leaves the row with nothing to offer, and a sub-list over an
+// An unwired [SchemeHost.List] leaves the row with nothing to offer, and a sub-list over an
 // empty vocabulary is a pane asking a question with no answers: ⏎ opens nothing at all, the same
 // degrade a `servers:` block that names nothing takes.
 func TestSettingsPaneSchemeRowOpensNothingWithoutADiscoverySeam(t *testing.T) {
 	rows := []SettingRow{settingsSchemeRow()}
 	opts := testOpts
-	opts.SettingsRows = func() []SettingRow { return rows }
+	opts.Settings = fakeSettingsHost{
+		rows: func() []SettingRow { return rows },
+	}
 	m := openSettingsPane(t, newTestModelEng(t, &fakeEngine{}, opts))
 
 	if opened := step(t, m, keyEnter()); opened.settings.kind != settingsKeyList {
@@ -2992,9 +3055,11 @@ func TestSettingsPaneSaysASchemeSwitchNeedsAResolver(t *testing.T) {
 	rows := []SettingRow{settingsSchemeRow()}
 	log := &settingsWriteLog{}
 	opts := testOpts
-	opts.SettingsRows = func() []SettingRow { return rows }
-	opts.WriteSetting, opts.ResetSetting, opts.ApplySetting = log.write, log.reset, log.apply
-	opts.ListSchemes = func() []string { return []string{"dark", "light"} }
+	opts.Settings = fakeSettingsHost{
+		rows:  func() []SettingRow { return rows },
+		write: log.write, reset: log.reset, apply: log.apply,
+	}
+	opts.Schemes = fakeSchemeHost{list: func() []string { return []string{"dark", "light"} }} // no resolve
 	m := openSettingsPane(t, newTestModelEng(t, &fakeEngine{}, opts))
 
 	switched := step(t, step(t, step(t, m, keyEnter()), keyDown()), keyEnter())
@@ -3081,7 +3146,9 @@ func settingsMechanismRow() SettingRow {
 func settingsMechanismModel(t *testing.T, rows []SettingRow, log *mechanismLog, edit *externalEditLog) Model {
 	t.Helper()
 	opts := testOpts
-	opts.SettingsRows = func() []SettingRow { return rows }
+	opts.Settings = fakeSettingsHost{
+		rows: func() []SettingRow { return rows },
+	}
 	if log != nil {
 		opts.ListMechanisms = log.list
 		opts.WriteMechanism = log.write
@@ -3194,7 +3261,9 @@ func TestSettingsMechanismSeamsDegradeWhenUnwired(t *testing.T) {
 
 	log := newMechanismLog("codeinfo")
 	opts := testOpts
-	opts.SettingsRows = func() []SettingRow { return rows }
+	opts.Settings = fakeSettingsHost{
+		rows: func() []SettingRow { return rows },
+	}
 	opts.ListMechanisms = log.list
 	readOnly := openSettingsPane(t, newTestModelEng(t, &fakeEngine{}, opts))
 
@@ -3277,7 +3346,9 @@ func TestSettingsMechanismListWindowsTheWholeCatalogue(t *testing.T) {
 	rows := []SettingRow{settingsMechanismRow()}
 	log := newMechanismLog(ids...)
 	opts := testOpts
-	opts.SettingsRows = func() []SettingRow { return rows }
+	opts.Settings = fakeSettingsHost{
+		rows: func() []SettingRow { return rows },
+	}
 	opts.ListMechanisms, opts.WriteMechanism = log.list, log.write
 	m := modelWithOverlayRoomAt(t, 80, 20, opts)
 	m.settings = settingsPane{open: true}

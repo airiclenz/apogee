@@ -46,7 +46,7 @@ func (m Model) runColorScheme(args colorSchemeArgs) (tea.Model, tea.Cmd) {
 
 // switchColorScheme persists the choice and puts it into effect, in that order — ADR 0037's
 // validate → persist → apply, which is the same order and the same two seams the settings pane's
-// picker uses ([Options.WriteSetting] then [Model.applyColorScheme]). Going through the pane's own
+// picker uses ([SettingsHost.Write] then [Model.applyColorScheme]). Going through the pane's own
 // path is the point: a scheme switched by command and one switched by picker must leave the file and
 // the screen saying the same thing, and there is exactly one way to do each half.
 //
@@ -54,12 +54,12 @@ func (m Model) runColorScheme(args colorSchemeArgs) (tea.Model, tea.Cmd) {
 // says why. An apply that fails after the write LANDED does not unwind it (ADR 0037 decision 1): the
 // file expresses the choice, the next start is drawn in it, and the note says so.
 func (m Model) switchColorScheme(name string) (tea.Model, tea.Cmd) {
-	if m.opts.WriteSetting == nil {
+	if m.opts.Settings == nil {
 		m.transcript.addError(colorSchemeSource, noSettingsWriterNote, runRef{})
 		m.layout()
 		return m, nil
 	}
-	if err := m.opts.WriteSetting(settingKeyColorScheme, name); err != nil {
+	if err := m.opts.Settings.Write(settingKeyColorScheme, name); err != nil {
 		m.transcript.addError(colorSchemeSource, err.Error(), runRef{})
 		m.layout()
 		return m, nil
@@ -79,16 +79,16 @@ func (m Model) switchColorScheme(name string) (tea.Model, tea.Cmd) {
 }
 
 // exportColorScheme writes an editable copy of a built-in into the human's schemes folder through
-// [Options.ExportScheme]. Success names the path written and the one-liner that loads it back;
+// [SchemeHost.Export]. Success names the path written and the one-liner that loads it back;
 // refusal — an unknown name, a file already there — is an error entry, because nothing happened and
 // a note would read like something had.
 func (m Model) exportColorScheme(name string) (tea.Model, tea.Cmd) {
-	if m.opts.ExportScheme == nil {
+	if m.opts.Schemes == nil {
 		m.transcript.addError(colorSchemeSource, noSchemeExporterNote, runRef{})
 		m.layout()
 		return m, nil
 	}
-	path, err := m.opts.ExportScheme(name)
+	path, err := m.opts.Schemes.Export(name)
 	if err != nil {
 		m.transcript.addError(colorSchemeSource, err.Error(), runRef{})
 		m.layout()
@@ -105,14 +105,14 @@ func (m Model) exportColorScheme(name string) (tea.Model, tea.Cmd) {
 const noSchemeExporterNote = "this build cannot write scheme files"
 
 // availableSchemes is what the session can switch to right now — the built-ins plus every file in
-// the schemes folder, re-read on every ask ([Options.ListSchemes]). Nil seam ⇒ nothing is offered,
+// the schemes folder, re-read on every ask ([SchemeHost.List]). Nil seam ⇒ nothing is offered,
 // which the listing reports rather than papering over with the built-in names: a build with no
 // discovery wired cannot switch to them either.
 func (m Model) availableSchemes() []string {
-	if m.opts.ListSchemes == nil {
+	if m.opts.Schemes == nil {
 		return nil
 	}
-	return m.opts.ListSchemes()
+	return m.opts.Schemes.List()
 }
 
 // currentSchemeName is the scheme this session is drawn in, as it is spelled in the config. Empty ⇒

@@ -520,10 +520,10 @@ type settingsApplier struct {
 	delegation *delegationWiring
 }
 
-// applySettingFor builds the [tui.Options.ApplySetting] dispatcher: the one place a key the pane has
+// applySettingFor builds the dispatcher behind [tui.SettingsHost.Apply]: the one place a key the pane has
 // just persisted becomes a call on a live seam (ADR 0037 decision 1's apply step). It is keyed by
 // REGISTRY PATH because that is the only name the renderer knows a setting by — the pane hands back
-// the same path and the same file-spelled value it handed [tui.Options.WriteSetting], and the
+// the same path and the same file-spelled value it handed [tui.SettingsHost.Write], and the
 // resolution from that string into whatever the seam takes happens here, where the schema lives
 // (ADR 0031: the engine is handed values, never config text).
 //

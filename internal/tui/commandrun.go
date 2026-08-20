@@ -273,7 +273,7 @@ func (m Model) runCommand(parsed parsedInput) (tea.Model, tea.Cmd) {
 
 	case "settings":
 		// Open the configuration pane over the binary's key registry (settings.go). Synchronous and
-		// idle-safe like /sessions: it reads one display seam ([Options.SettingsRows]) and drives no
+		// idle-safe like /sessions: it reads one display seam ([SettingsHost.Rows]) and drives no
 		// worker, no engine call and no file I/O of its own.
 		return m.runSettingsCommand()
 

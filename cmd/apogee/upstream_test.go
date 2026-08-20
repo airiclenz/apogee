@@ -644,7 +644,7 @@ func TestRunRootRememberModelTogglesLive(t *testing.T) {
 		if err := runRoot(context.Background(), opts, rec.launch); err != nil {
 			t.Fatalf("runRoot: %v", err)
 		}
-		if rec.opts.ApplySetting == nil {
+		if rec.opts.Settings == nil {
 			t.Fatal("the composition root left the live-apply dispatcher unwired")
 		}
 		return rec.opts, configPath
@@ -652,7 +652,7 @@ func TestRunRootRememberModelTogglesLive(t *testing.T) {
 
 	flip := func(t *testing.T, opts tui.Options, on string) {
 		t.Helper()
-		if _, err := opts.ApplySetting("remember-model", on); err != nil {
+		if _, err := opts.Settings.Apply("remember-model", on); err != nil {
 			t.Fatalf("apply remember-model=%s: %v", on, err)
 		}
 	}

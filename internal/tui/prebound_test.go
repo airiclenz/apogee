@@ -309,7 +309,7 @@ func TestPreboundNoServersOpensSettings(t *testing.T) {
 	opts := preboundOpts(PreboundNoServers, "")
 	opts.Servers = nil
 	opts.BindServer = (&fakeBind{}).bind
-	opts.SettingsRows = func() []SettingRow { return settingsTestRows(6) }
+	opts.Settings = fakeSettingsHost{rows: func() []SettingRow { return settingsTestRows(6) }}
 	m := newTestModelEng(t, &fakeEngine{}, opts)
 
 	if !m.settings.open {

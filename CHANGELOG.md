@@ -222,6 +222,24 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **The settings and colour-scheme seams are named host interfaces (`internal/tui/tui.go`, ADR
+  0054).** `Options` carried seven one-purpose bare `func` fields for two families — `SettingsRows`
+  / `WriteSetting` / `ResetSetting` / `ApplySetting`, and `ListSchemes` / `ResolveScheme` /
+  `ExportScheme` — so the seam between the binary and the renderer grew one field per host
+  capability, exactly as fast as the implementation behind it. They are `SettingsHost` and
+  `SchemeHost` now, declared beside the five interfaces (`Engine`, `SkillCatalog`, `SessionHost`,
+  `RecallHost`, `Scheduler`) that already proved the shape: one doc comment stating what the family
+  is and who owns what behind it, one per method, and `Options` down from 63 fields to 58. The
+  composition root implements them with two adapters that hold what the acts need — the resolved
+  options, the config path, the external-edit baseline and the apply dispatcher for the settings
+  side; the schemes folder for the other — instead of seven closures over the wiring
+  (`cmd/apogee/wire_options.go`), and the renderer's tests get one fake per family, wired one half
+  at a time, in place of seven fields set individually. The nil-means-unwired contract is preserved
+  whole: a nil host is the family unwired, and a wired host that cannot do one of the acts says so
+  in that act's own answer, so every degrade a `/settings` row or a `/color-scheme` line used to
+  print it still prints, word for word. Behaviour-preserving throughout; the whole existing suite
+  passes with no expectation changed.
+
 - **The sub-agent run head is one question with a name (`internal/tui/transcript.go`).** "Is this
   entry the call block a delegation's run hangs off" was spelled inline twelve times across four
   files — the kind, the retained tool name, and whichever of `done` or the spawning call id that

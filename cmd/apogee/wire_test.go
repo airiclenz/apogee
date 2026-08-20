@@ -612,13 +612,13 @@ func TestRunRootResolvesTheColorScheme(t *testing.T) {
 		if err := runRoot(context.Background(), opts, rec.launch); err != nil {
 			t.Fatalf("runRoot: %v", err)
 		}
-		if rec.opts.ListSchemes == nil || rec.opts.ResolveScheme == nil {
-			t.Fatal("the colour-scheme picker seams are unwired; the settings row could not switch anything")
+		if rec.opts.Schemes == nil {
+			t.Fatal("the colour-scheme host is unwired; the settings row could not switch anything")
 		}
 
 		// The folder does not even exist yet at launch: the built-ins are still offered.
-		if names := rec.opts.ListSchemes(); len(names) == 0 {
-			t.Fatal("ListSchemes offered nothing; the built-ins are always available")
+		if names := rec.opts.Schemes.List(); len(names) == 0 {
+			t.Fatal("Schemes.List offered nothing; the built-ins are always available")
 		}
 		if err := os.MkdirAll(filepath.Join(home, "schemes"), 0o700); err != nil {
 			t.Fatalf("create schemes dir: %v", err)
@@ -627,15 +627,18 @@ func TestRunRootResolvesTheColorScheme(t *testing.T) {
 			[]byte("error: \"#010203\"\nbackdrop: \"#ffffff\"\n"), 0o600); err != nil {
 			t.Fatalf("write scheme: %v", err)
 		}
-		if names := rec.opts.ListSchemes(); !slices.Contains(names, "mine") {
-			t.Errorf("ListSchemes = %v after the file was written; want it to name \"mine\"", names)
+		if names := rec.opts.Schemes.List(); !slices.Contains(names, "mine") {
+			t.Errorf("Schemes.List = %v after the file was written; want it to name \"mine\"", names)
 		}
 
 		// And resolving it reads that same file — with its unknown key rendered to a line the
 		// renderer prints rather than a scheme.Warning it would have to format.
-		s, warnings := rec.opts.ResolveScheme("mine")
+		s, warnings, ok := rec.opts.Schemes.Resolve("mine")
+		if !ok {
+			t.Fatal("the wired colour-scheme host cannot resolve; the settings row could not switch anything")
+		}
 		if s.Error != "#010203" {
-			t.Errorf("ResolveScheme(\"mine\").Error = %q; want the file's %q", s.Error, "#010203")
+			t.Errorf("Schemes.Resolve(\"mine\").Error = %q; want the file's %q", s.Error, "#010203")
 		}
 		if len(warnings) != 1 || !strings.Contains(warnings[0], "backdrop") {
 			t.Errorf("warnings = %v; want one rendered line naming the unknown key", warnings)
@@ -661,22 +664,22 @@ func TestRunRootResolvesTheColorScheme(t *testing.T) {
 		if err := runRoot(context.Background(), opts, rec.launch); err != nil {
 			t.Fatalf("runRoot: %v", err)
 		}
-		if rec.opts.ExportScheme == nil {
-			t.Fatal("the colour-scheme export seam is unwired; no scheme file could ever be edited")
+		if rec.opts.Schemes == nil {
+			t.Fatal("the colour-scheme host is unwired; no scheme file could ever be edited")
 		}
 
-		path, err := rec.opts.ExportScheme("dark")
+		path, err := rec.opts.Schemes.Export("dark")
 		if err != nil {
-			t.Fatalf("ExportScheme(\"dark\"): %v", err)
+			t.Fatalf("Schemes.Export(\"dark\"): %v", err)
 		}
 		if want := filepath.Join(home, "schemes", "dark.yaml"); path != want {
-			t.Errorf("ExportScheme wrote %q, want %q — the picker reads that folder", path, want)
+			t.Errorf("Schemes.Export wrote %q, want %q — the picker reads that folder", path, want)
 		}
-		if names := rec.opts.ListSchemes(); !slices.Contains(names, "dark") {
-			t.Errorf("ListSchemes = %v after the export; want the written copy to be offered", names)
+		if names := rec.opts.Schemes.List(); !slices.Contains(names, "dark") {
+			t.Errorf("Schemes.List = %v after the export; want the written copy to be offered", names)
 		}
 		// Never twice: an export that overwrote a scheme somebody had been editing would destroy it.
-		if _, err := rec.opts.ExportScheme("dark"); err == nil {
+		if _, err := rec.opts.Schemes.Export("dark"); err == nil {
 			t.Error("a second export overwrote the file; it must be refused")
 		}
 	})
@@ -4114,12 +4117,12 @@ func TestRunRootWiresTheLiveApplySeam(t *testing.T) {
 	if err := runRoot(context.Background(), opts, rec.launch); err != nil {
 		t.Fatalf("runRoot: %v", err)
 	}
-	if rec.opts.ApplySetting == nil {
-		t.Fatal("tui.Options.ApplySetting is nil; the composition root did not wire the dispatcher")
+	if rec.opts.Settings == nil {
+		t.Fatal("tui.Options.Settings is nil; the composition root did not wire the settings host")
 	}
-	note, err := rec.opts.ApplySetting("context-files.enable", "true")
+	note, err := rec.opts.Settings.Apply("context-files.enable", "true")
 	if err != nil {
-		t.Fatalf("ApplySetting: %v", err)
+		t.Fatalf("Settings.Apply: %v", err)
 	}
 	if note != contextFileNote {
 		t.Errorf("note = %q, want %q", note, contextFileNote)
@@ -4127,25 +4130,25 @@ func TestRunRootWiresTheLiveApplySeam(t *testing.T) {
 	// The two keys whose seam is a live OBJECT rather than an engine call — the tool registry the
 	// root holds and the shared skill Provider — so an unwired member would panic rather than
 	// degrade, and this is where the wiring is proved.
-	if _, err := rec.opts.ApplySetting("web-search-endpoint", "off"); err != nil {
-		t.Errorf("ApplySetting(web-search-endpoint): %v", err)
+	if _, err := rec.opts.Settings.Apply("web-search-endpoint", "off"); err != nil {
+		t.Errorf("Settings.Apply(web-search-endpoint): %v", err)
 	}
-	if _, err := rec.opts.ApplySetting("use-project-skills", "false"); err != nil {
-		t.Errorf("ApplySetting(use-project-skills): %v", err)
+	if _, err := rec.opts.Settings.Apply("use-project-skills", "false"); err != nil {
+		t.Errorf("Settings.Apply(use-project-skills): %v", err)
 	}
 	// And the third live object: the MCP connections. With no servers configured the reconnect dials
 	// a dormant set and swaps the registry around it, which is a no-op the session cannot tell from
 	// the outside — but an unwired holder would panic here rather than degrade quietly.
-	if _, err := rec.opts.ApplySetting("mcp-servers", "none"); err != nil {
-		t.Errorf("ApplySetting(mcp-servers): %v", err)
+	if _, err := rec.opts.Settings.Apply("mcp-servers", "none"); err != nil {
+		t.Errorf("Settings.Apply(mcp-servers): %v", err)
 	}
-	if _, err := rec.opts.ApplySetting("model-profiles", "1 model profile"); err != nil {
-		t.Errorf("ApplySetting(model-profiles): %v", err)
+	if _, err := rec.opts.Settings.Apply("model-profiles", "1 model profile"); err != nil {
+		t.Errorf("Settings.Apply(model-profiles): %v", err)
 	}
 	// `server` is the key with no dispatcher home BY DESIGN and permanently: its live apply is the
 	// picker's own switch (ADR 0037 decision 4), so a value arriving here is a value nothing can do
 	// anything with, and the refusal has to name it.
-	if _, err := rec.opts.ApplySetting("server", "anything"); err == nil {
+	if _, err := rec.opts.Settings.Apply("server", "anything"); err == nil {
 		t.Error("a key with no live seam applied silently; want a refusal naming it")
 	}
 }

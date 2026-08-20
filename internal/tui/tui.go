@@ -116,6 +116,119 @@ type Scheduler interface {
 	List() []schedule.Status
 }
 
+// SettingsHost is the `/settings` pane's whole seam: the rows it shows, the two writes a committed
+// row makes to the config file, and the live apply that puts a persisted key into effect on the
+// running session — ADR 0035's one key per deliberate edit and ADR 0037's validate → persist →
+// apply, named as one host capability rather than spelled as four bare funcs (ADR 0054). It is
+// defined here like [SessionHost], so the renderer stays unit-testable with a fake while the
+// composition root owns the key registry, the schema, the file format, and the resolution from a
+// file-spelled value onto whatever live seam the key moves.
+//
+// A nil host means `/settings` is unwired whole: the pane has nothing to show and says so, the
+// nil-seam degrade every seam in [Options] takes. A host that IS wired but cannot do one of the
+// four says so in that method's own answer — no rows, an error out of Write or Reset, an Apply
+// that reports nothing — so a Driver that persists without applying (ADR 0031) needs no second
+// interface to say it.
+type SettingsHost interface {
+	// Rows lists every config key the pane shows, in the order the config template presents them,
+	// as the binary resolved them THIS run (see [SettingRow]). It is asked on every paint rather
+	// than snapshotted, for the reason the picker's rows are derived at render time (picker.go):
+	// a row re-read after an edit reflects what the edit made of it, and a selection is clamped
+	// against rows that are current.
+	//
+	// The binary owns everything behind it — the key registry, the schema, the precedence that
+	// decided which source won, the masking of a secret — exactly as [Options.SaveHostAcknowledgement]
+	// owns the file format. No rows ⇒ `/settings` has nothing to show and says so.
+	Rows() []SettingRow
+
+	// Write persists one config key — the pane's whole write half (ADR 0035: one key per
+	// deliberate edit). path is the row's registry path ("ui.spinner") and value is the value as
+	// the file would spell it ("true", "32768", "ask-before"), which is exactly what
+	// [SettingRow.Value] and [SettingRow.EnumValues] carry: the renderer hands back a string it
+	// was given rather than a YAML fragment it composed, because the binary owns the file format
+	// and it alone knows whether the key may be written at all — the registry's editability, the
+	// splice, the verification and the atomic write are all behind this one call.
+	//
+	// It is synchronous like [Options.SaveHostAcknowledgement]: one small file, spliced and
+	// renamed, on a keypress the human is waiting on. An error is REPORTED, never swallowed — the
+	// pane shows it on the row and treats the key as unchanged — so a read-only config home
+	// surfaces as a refusal rather than as an edit that silently did not happen, and a host that
+	// cannot write at all says so through the same answer.
+	Write(path, value string) error
+
+	// Reset returns one config key to its default by REMOVING the file's line for it (ADR 0035)
+	// rather than writing today's spelling of the default into the file, so the key goes back to
+	// being described by the binary and documented by its commented example. A key the file does
+	// not set is already at its default: that is a no-op, not an error.
+	//
+	// Same contract as Write in every other respect — synchronous, path-addressed, errors reported.
+	Reset(path string) error
+
+	// Apply makes one persisted key take effect in the RUNNING session — the apply half of every
+	// `/settings` edit (ADR 0037 decision 1: validate → persist → apply, on the same ⏎). path and
+	// value are Write's, so the pane hands the apply exactly what it handed the write and no second
+	// spelling of a value exists; the binary resolves that string into whatever the engine seam
+	// takes (a mode, a bool, a name list) because it owns the schema, as it owns the file format
+	// behind Write.
+	//
+	// note is a short boundary sentence for a key that cannot land NOW and lands at a boundary the
+	// session will cross anyway — "applies at next clear" for the context files, whose prefix is
+	// frozen for the session on purpose (ADR 0026). Empty means it is already in effect, which is
+	// the answer for almost every key — and the answer a host with no live apply at all gives for
+	// every key, leaving the write to stand on its own: the degrade a bench or headless Driver
+	// composes deliberately (ADR 0031). It never defers to a restart: a key that could only take
+	// effect the next time the process starts has no business in this seam.
+	//
+	// An error is REPORTED and does not unwind the write (ADR 0037 decision 1): the file already
+	// expresses the intent, so the row says "saved — live apply failed: …" and a re-committed edit
+	// retries the apply.
+	Apply(path, value string) (note string, err error)
+}
+
+// SchemeHost is the colour-scheme seam the TUI drives: what can be switched TO right now, what one
+// of those names resolves to, and the export that makes an embedded palette editable at all (ADR
+// 0040), named as one host capability rather than as three bare funcs (ADR 0054). It is defined here
+// like [SettingsHost] and typed against internal/scheme, so the renderer
+// SELECTS a palette and never walks a directory or parses a file (ADR 0011's thin renderer), while
+// the composition root owns the schemes folder, the discovery and the shadowing rule.
+//
+// All three read that folder on every ask rather than answering from a snapshot: a scheme file the
+// human drops in or edits mid-session is offered by the picker the moment they open it and loaded
+// by the next switch, where a list captured at launch would go stale the first time they wrote one.
+//
+// A nil host means schemes are unwired: nothing is on offer, no live switch is possible, and no copy
+// can be written — the settings row still persists the key (the pane's write half is independent)
+// and the new scheme takes effect at the next start.
+type SchemeHost interface {
+	// List names every scheme that can be switched to — the built-ins plus every `*.yaml` in the
+	// schemes folder, a user file shadowing a built-in of the same name (ADR 0040 design call 6).
+	// Nothing named ⇒ the picker has no vocabulary and the row opens nothing.
+	List() []string
+
+	// Resolve turns one of those names back into a palette, warnings already rendered to lines —
+	// the same call the binary made at boot ([Options.ColorScheme]), re-run so a switch re-READS
+	// the file and an edited scheme lands on the next switch without a restart. Warnings are the
+	// forgiving load's only voice (ADR 0040 design call 8): the palette that comes back is always
+	// usable, so a defective key is a sentence in the transcript rather than a failure.
+	//
+	// ok is false when this host cannot resolve at all — the nil-host degrade, offered per member
+	// so a Driver may list the schemes without being able to switch to one. The caller then keeps
+	// the palette it has, and the row says the new scheme applies at the next start.
+	Resolve(name string) (s scheme.Scheme, warnings []string, ok bool)
+
+	// Export writes an editable copy of the named BUILT-IN scheme into the schemes folder and
+	// returns the path it wrote. It is the only way a scheme file comes into existence: the
+	// built-ins are embedded in the binary and never installed on disk (ADR 0040 design call 1), so
+	// without an export there is nothing to open in an editor and the shadowing rule has nothing to
+	// shadow with.
+	//
+	// It never overwrites (design call 7): an existing file is an error naming it, so an export can
+	// never destroy the scheme somebody has been working on. Every error — unknown name, file
+	// present, unwritable folder, or a host that cannot write scheme files at all — is REPORTED,
+	// because a silent export is indistinguishable from one that worked.
+	Export(name string) (path string, err error)
+}
+
 // ----------------------------------------------------------------------------
 // The engine seam (phase-2 detail plan §3 C5)
 // ----------------------------------------------------------------------------
@@ -337,40 +450,12 @@ type Options struct {
 	// ordinary run, where the scheme loaded cleanly.
 	ColorSchemeWarnings []string
 
-	// ListSchemes names every scheme that can be switched TO right now — the built-ins plus every
-	// `*.yaml` in the schemes folder, a user file shadowing a built-in of the same name (ADR 0040
-	// design call 6). It is a closure rather than a slice for the reason [Servers] is: a folder the
-	// human drops a file into mid-session is offered by the settings picker the moment they open it,
-	// and a list snapshotted at launch would go stale the first time they wrote a scheme. Discovery
-	// itself stays in the binary — the renderer never walks a directory (ADR 0011's thin renderer).
-	//
-	// nil ⇒ the picker has no vocabulary and the row opens nothing, the nil-seam degrade every
-	// provider here takes.
-	ListSchemes func() []string
-
-	// ResolveScheme turns one of those names back into a palette, warnings already rendered to
-	// lines — the same call the binary made at boot ([ColorScheme]), re-run so a switch re-READS the
-	// file and an edited scheme lands on the next switch without a restart. Warnings are the
-	// forgiving load's only voice (design call 8): the palette that comes back is always usable, so a
-	// defective key is a sentence in the transcript rather than a failure.
-	//
-	// nil ⇒ no live switch is possible; the settings row still persists the key (the pane's write
-	// half is independent) and the new scheme takes effect at the next start.
-	ResolveScheme func(name string) (scheme.Scheme, []string)
-
-	// ExportScheme writes an editable copy of the named BUILT-IN scheme into the schemes folder and
-	// returns the path it wrote. It is the only way a scheme file comes into existence: the built-ins
-	// are embedded in the binary and never installed on disk (ADR 0040 design call 1), so without an
-	// export there is nothing to open in an editor and the shadowing rule has nothing to shadow with.
-	//
-	// It never overwrites (design call 7): an existing file is an error naming it, so an export can
-	// never destroy the scheme somebody has been working on. Every error — unknown name, file
-	// present, unwritable folder — is REPORTED, the SaveHostAcknowledgement contract, because a
-	// silent export is indistinguishable from one that worked.
-	//
-	// nil ⇒ `/color-scheme export` says so and writes nothing, the nil-seam degrade every provider
-	// here takes.
-	ExportScheme func(name string) (path string, err error)
+	// Schemes is what keeps the palette switchable from inside the program: what the picker offers,
+	// the resolve behind an answer to it, and the export that creates a file to edit ([SchemeHost]).
+	// All three read the schemes folder on every ask, so a file written mid-session is offered and
+	// loaded without a restart. nil ⇒ schemes are unwired and each form says so, the nil-seam degrade
+	// every provider here takes.
+	Schemes SchemeHost
 
 	// Version is the resolved FULL build version (apogee.Version, read from the embedded VERSION
 	// file plus build provenance), read only by the /version command — it mirrors what --version
@@ -413,69 +498,19 @@ type Options struct {
 	// the binary's job (it owns the path and the file format), exactly like Save below.
 	SaveHostAcknowledgement func() (path string, err error)
 
-	// SettingsRows lists every config key the `/settings` pane shows, in the order the config
-	// template presents them, as the binary resolved them THIS run (see [SettingRow]). It is a
-	// provider rather than a slice for the reason the picker's rows are derived at render time
-	// (picker.go): the pane calls it each time it paints, so a row re-read after an edit reflects
-	// what the edit made of it and a selection is clamped against rows that are current.
-	//
-	// The binary owns everything behind it — the key registry, the schema, the precedence that
-	// decided which source won, the masking of a secret — exactly as SaveHostAcknowledgement owns
-	// the file format. nil ⇒ unwired: `/settings` has nothing to show and says so, the nil-seam
-	// degrade every other provider here takes.
-	SettingsRows func() []SettingRow
-
-	// WriteSetting persists one config key — the `/settings` pane's whole write half (ADR 0035:
-	// one key per deliberate edit). path is the row's registry path ("ui.spinner") and value is
-	// the value as the file would spell it ("true", "32768", "ask-before"), which is exactly what
-	// [SettingRow.Value] and [SettingRow.EnumValues] carry: the renderer hands back a string it
-	// was given rather than a YAML fragment it composed, because the binary owns the file format
-	// (the SaveHostAcknowledgement precedent) and it alone knows whether the key may be written
-	// at all — the registry's editability, the splice, the verification and the atomic write are
-	// all behind this one call.
-	//
-	// It is synchronous like SaveHostAcknowledgement: one small file, spliced and renamed, on a
-	// keypress the human is waiting on. An error is REPORTED, never swallowed — the pane shows it
-	// on the row and treats the key as unchanged — so a read-only config home surfaces as a
-	// refusal rather than as an edit that silently did not happen. nil ⇒ writing is unavailable
-	// and the pane says so, the nil-seam degrade every provider here takes.
-	WriteSetting func(path, value string) error
-
-	// ResetSetting returns one config key to its default by REMOVING the file's line for it (ADR
-	// 0035) rather than writing today's spelling of the default into the file, so the key goes
-	// back to being described by the binary and documented by its commented example. A key the
-	// file does not set is already at its default: that is a no-op, not an error.
-	//
-	// Same contract as WriteSetting in every other respect — synchronous, path-addressed,
-	// errors reported, nil ⇒ unavailable.
-	ResetSetting func(path string) error
-
-	// ApplySetting makes one persisted key take effect in the RUNNING session — the apply half of
-	// every `/settings` edit (ADR 0037 decision 1: validate → persist → apply, on the same ⏎). path
-	// and value are WriteSetting's, so the pane hands the apply exactly what it handed the write and
-	// no second spelling of a value exists; the binary resolves that string into whatever the engine
-	// seam takes (a mode, a bool, a name list) because it owns the schema, as it owns the file
-	// format behind WriteSetting.
-	//
-	// note is a short boundary sentence for a key that cannot land NOW and lands at a boundary the
-	// session will cross anyway — "applies at next clear" for the context files, whose prefix is
-	// frozen for the session on purpose (ADR 0026). Empty means it is already in effect, which is
-	// the answer for almost every key. It never defers to a restart: a key that could only take
-	// effect the next time the process starts has no business in this seam.
-	//
-	// An error is REPORTED and does not unwind the write (ADR 0037 decision 1): the file already
-	// expresses the intent, so the row says "saved — live apply failed: …" and a re-committed edit
-	// retries the apply. nil ⇒ no live apply at all: the pane persists and applies nothing, the
-	// degrade a bench or headless Driver composes deliberately (ADR 0031).
-	ApplySetting func(path, value string) (note string, err error)
+	// Settings is the `/settings` pane's seam onto the config file: the rows it shows, the write and
+	// the reset a committed row makes, and the live apply of the key it just persisted
+	// ([SettingsHost]). nil ⇒ the pane is unwired: it has nothing to show and says so, the nil-seam
+	// degrade every provider here takes.
+	Settings SettingsHost
 
 	// ListMechanisms names every catalogued Mechanism and says which of them the config file has
 	// switched ON — the vocabulary the `mechanisms` row's toggle sub-list is drawn from. It is a
-	// closure rather than a slice for [ListSchemes]' reason: the block it reports is one the human
+	// closure rather than a slice for [SchemeHost.List]' reason: the block it reports is one the human
 	// also edits by hand, so it is re-read on every ask and an edit made in the file shows up in an
 	// open sub-list rather than at the next start.
 	//
-	// WHICH ids exist is the binary's knowledge, exactly as the key registry behind [SettingsRows] is:
+	// WHICH ids exist is the binary's knowledge, exactly as the key registry behind [SettingsHost.Rows] is:
 	// the catalogue names them, an id the file's block does not carry is simply off, and the renderer
 	// parses no `mechanisms:` block to work either out.
 	//
@@ -484,7 +519,7 @@ type Options struct {
 	ListMechanisms func() []MechanismToggle
 
 	// WriteMechanism persists one Mechanism's on/off line and puts it in force — the sub-list's whole
-	// write half, and [WriteSetting] one level in: the `mechanisms:` block's children are the
+	// write half, and [SettingsHost.Write] one level in: the `mechanisms:` block's children are the
 	// catalogue's ids rather than registry keys, so the target is named by (id, enabled) while the
 	// splice, the verification and the atomic write stay behind the seam exactly as they do there.
 	//
@@ -498,10 +533,10 @@ type Options struct {
 	// the two outcomes an error alone conflates. false ⇒ the splice refused, so the file is what it
 	// was and the pane treats the Mechanism as unchanged; true ⇒ the line LANDED and only the live
 	// apply did not, so the file carries the flip while the session does not, and the pane says so in
-	// those words (the same sentence a persisted-but-unapplied [WriteSetting] key gets). A landed
+	// those words (the same sentence a persisted-but-unapplied [SettingsHost.Write] key gets). A landed
 	// call returns (true, nil); (false, nil) is not a thing the seam says.
 	//
-	// nil ⇒ toggling is unavailable and the pane says so, the same degrade [WriteSetting] takes.
+	// nil ⇒ toggling is unavailable and the pane says so, the same degrade [SettingsHost.Write] takes.
 	WriteMechanism func(id string, enabled bool) (saved bool, err error)
 
 	// ExternalEditSpec is the command line that opens the config file at path's own line — the
@@ -514,7 +549,7 @@ type Options struct {
 	// this environment names — the `editor` key, then $VISUAL, then $EDITOR, then the platform's own
 	// opener — with a line-jump argument passed only to the editors known to take one, and whether
 	// that program takes this terminal ([EditorCommand.Detached], ADR 0041 decision 6). The renderer
-	// receives a command it runs and nothing else, exactly as [WriteSetting] hands it a file format
+	// receives a command it runs and nothing else, exactly as [SettingsHost.Write] hands it a file format
 	// it never composes.
 	//
 	// An error is REPORTED on the row (an unreadable config, a file shape the parse refuses, a
@@ -532,7 +567,7 @@ type Options struct {
 	// the human's own text stays exactly as they left it, and the row that launched the edit carries
 	// the reason so they can go back in and fix it.
 	//
-	// What is returned is not yet in force — the pane applies each key through [ApplySetting] and
+	// What is returned is not yet in force — the pane applies each key through [SettingsHost.Apply] and
 	// its own renderer-local keys itself, the same two homes an in-pane commit uses (ADR 0037
 	// decision 1), so a key edited in the file and a key edited on the row land the same way. The
 	// keys the reload never reports are the confinement pair, fenced to `/confine` (ADR 0012), and
@@ -665,7 +700,7 @@ type Options struct {
 	// only; what a switch actually needs to talk to a server stays in the binary, behind
 	// SwitchServer.
 	//
-	// A PROVIDER rather than a slice, the SettingsRows posture: the `servers:` block is itself
+	// A PROVIDER rather than a slice, the [SettingsHost.Rows] posture: the `servers:` block is itself
 	// something the human can change mid-session (ADR 0037's `$EDITOR` jump), so the list is asked
 	// for every time one is drawn rather than frozen at launch — an entry added a moment ago is
 	// offered without restarting apogee.
@@ -736,7 +771,7 @@ type Options struct {
 	// It is the whole move: the store write, the read-back of the key through the very command it
 	// is about to persist, and only then the rewrite (ADR 0047's verify-before-rewrite). A failure
 	// anywhere in that sequence means the config file was left exactly as it was, and it is
-	// REPORTED — the WriteSetting contract — because a migration that silently did not happen
+	// REPORTED — the [SettingsHost.Write] contract — because a migration that silently did not happen
 	// leaves the human believing their key has moved.
 	//
 	// Synchronous, on the keypress that answered the offer, like every other config write here.
@@ -762,7 +797,7 @@ type Options struct {
 	//
 	// It is best-effort persistence of something that ALREADY happened: the session moved before this
 	// is called and stays moved whatever it answers, so an error is a note and never an undo. Like
-	// WriteSetting it is synchronous — one small file, spliced and renamed — and called on the Update
+	// [SettingsHost.Write] it is synchronous — one small file, spliced and renamed — and called on the Update
 	// loop.
 	//
 	// nil ⇒ nothing is recorded and every switch is session-scoped, which is exactly the behaviour

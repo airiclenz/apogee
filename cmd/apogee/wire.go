@@ -304,7 +304,7 @@ type stateRoots struct {
 
 // resolveColorScheme loads one colour scheme by name and renders whatever the load complained about
 // to plain lines. It is the single spelling of that pair for both the boot resolution and the live
-// switch seam ([tui.Options.ResolveScheme]), so a scheme picked at start-up and the same scheme
+// switch seam ([tui.SchemeHost.Resolve]), so a scheme picked at start-up and the same scheme
 // picked from the settings pane cannot answer differently — the same shadowing rule, the same
 // forgiving fallbacks, the same sentences.
 //

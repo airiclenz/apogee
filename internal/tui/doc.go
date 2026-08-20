@@ -710,9 +710,9 @@
 // rows and maps a highlight back to what it names, and the one budget→render call behind every list
 // pane — a pane's own body block, or the filter line and its two blanks (ADR 0053);
 // settings.go the /settings pane — the frame's one FULL-HEIGHT pane, listing every config key the
-// binary resolved this run over one display seam ([Options.SettingsRows]), claiming the whole
+// binary resolved this run over one display seam ([SettingsHost.Rows]), claiming the whole
 // transcript budget while it is open, and persisting ONE key per deliberate edit through
-// [Options.WriteSetting] / [Options.ResetSetting] — the renderer owning the idiom (⏎ toggles a bool,
+// [SettingsHost.Write] / [SettingsHost.Reset] — the renderer owning the idiom (⏎ toggles a bool,
 // opens an enum's value sub-list or a string's caret buffer; backspace arms a reset a ⏎ confirms)
 // while the binary owns the file AND what a key may hold: a value it refuses comes back as an error
 // the row carries, with the buffer still open to correct. `mode` is the one edit that also applies

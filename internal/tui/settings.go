@@ -16,7 +16,7 @@ import (
 // list of every config key with the value THIS run resolved for it, painted through the shared popup
 // module (renderPopup) and claiming every keypress while it is open (handleKey routes to
 // settingsKey first). What it lists comes from the binary's declarative key registry across ONE
-// seam ([Options.SettingsRows]) — the renderer holds no schema, reads no file and knows no
+// seam ([SettingsHost.Rows]) — the renderer holds no schema, reads no file and knows no
 // precedence, exactly as it holds no session format behind [Options.Sessions] (ADR 0011's thin
 // renderer).
 //
@@ -49,7 +49,7 @@ import (
 // every other overlay in the frame and differs only where it says something the others do not.
 //
 // And it WRITES, one key per deliberate edit (ADR 0035): ⏎ on a bool row toggles it, ⏎ on an enum row
-// opens the value sub-list, and what is committed goes out through [Options.WriteSetting] — the
+// opens the value sub-list, and what is committed goes out through [SettingsHost.Write] — the
 // binary's comment-preserving splice writer, never this package's idea of YAML. The renderer's whole
 // half of an edit is the ORDER (which key, which value) and what the row says afterwards. Nothing is
 // re-read to find out: the pane records what it persisted ([Model.settingEdits]) and marks the row,
@@ -58,7 +58,7 @@ import (
 //
 // And what is persisted is APPLIED, on the same ⏎ (ADR 0037 decision 1): the pane routes the key to
 // whatever puts it into effect — a field of its own for the keys whose effect is this screen, and
-// [Options.ApplySetting] for every key the engine or the composition root owns — so the session runs
+// [SettingsHost.Apply] for every key the engine or the composition root owns — so the session runs
 // what the file says the moment the file says it. A key that can only land at a boundary the session
 // will cross anyway says so on the row ("· applies at next clear"); a key that could only land at the
 // next start does not exist. What a row keeps afterwards is a ` *` (settingsEditMarker), which says
@@ -67,12 +67,12 @@ import (
 // A string or an int is edited in a BUFFER on its own row (the /sessions rename idiom): ⏎ opens it,
 // the row's value cell becomes what is being typed with a caret after it, ⏎ commits and esc
 // abandons. What a commit is checked against is the BINARY's business, exactly as the file format is
-// — [Options.WriteSetting] refuses a value the key cannot hold (a port outside its range, an
+// — [SettingsHost.Write] refuses a value the key cannot hold (a port outside its range, an
 // endpoint with no host) and the refusal lands on the row with the buffer still open, so the human
 // corrects what they typed rather than typing it again.
 //
 // And backspace UNSETS: it arms a reset on a row that has something to reset, the hint line asks for
-// a confirming ⏎, and what that ⏎ sends is [Options.ResetSetting] — the key's line REMOVED from the
+// a confirming ⏎, and what that ⏎ sends is [SettingsHost.Reset] — the key's line REMOVED from the
 // file rather than today's spelling of its default written into it (ADR 0035). The row then reports
 // the default it went back to, on exactly the terms a write reports its value — and the default is
 // APPLIED exactly as a written value is, so a reset cannot mean less to the session than a write.
@@ -286,7 +286,7 @@ const settingsUnsetValue = "unset"
 const settingsEditMarker = " *"
 
 // The value cells of a bool row, spelled as the config file spells them — the two strings ⏎ toggles
-// between and hands [Options.WriteSetting], which is the whole of what "the value as the file would
+// between and hands [SettingsHost.Write], which is the whole of what "the value as the file would
 // spell it" means for a bool (see [SettingRow.Value]).
 const (
 	settingTrue  = "true"
@@ -344,15 +344,15 @@ func (m Model) runSettingsCommand() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// settingRows is the pane's rows as they stand RIGHT NOW: what [Options.SettingsRows] answers, or
-// nothing at all when no provider is wired. Every reader goes through here — the open degrade, the
+// settingRows is the pane's rows as they stand RIGHT NOW: what [SettingsHost.Rows] answers, or
+// nothing at all when no host is wired. Every reader goes through here — the open degrade, the
 // key routing's clamp, the renderer — so the count the selection is clamped against and the list the
 // pane paints are the same derivation asked twice rather than two guesses at it.
 func (m Model) settingRows() []SettingRow {
-	if m.opts.SettingsRows == nil {
+	if m.opts.Settings == nil {
 		return nil
 	}
-	return m.opts.SettingsRows()
+	return m.opts.Settings.Rows()
 }
 
 // settingsKey routes a keypress while the pane is open (idle only, the verb's own policy): ↑/↓ move
@@ -644,7 +644,7 @@ func (m Model) settingsMechanismKey(msg tea.KeyPressMsg, toggles []MechanismTogg
 
 // settingsToggleMechanism flips one Mechanism through [Options.WriteMechanism] — persisted AND put in
 // force behind that single seam, rather than through the pane's own write-then-apply pair: a
-// Mechanism id is not a registry key, so there is no path for [Options.ApplySetting] to be handed and
+// Mechanism id is not a registry key, so there is no path for [SettingsHost.Apply] to be handed and
 // no second door to keep in step with this one.
 //
 // The outcomes are settingsPersist's, minus the one this act does not have — and the seam's `saved`
@@ -681,7 +681,7 @@ func (m Model) settingsToggleMechanism(toggle MechanismToggle) (tea.Model, tea.C
 
 // settingsSwitchServer answers the `server` row's popup, and what it does is the whole of `/server`
 // (ADR 0037 decision 4): the session MOVES to the chosen entry, and the move records that entry as
-// the one the next session starts on — which is this key's entire persistence, so no WriteSetting
+// the one the next session starts on — which is this key's entire persistence, so no [SettingsHost.Write]
 // call stands behind this row (ADR 0036 decision 2).
 //
 // Two of the outcomes are the picker's own and are delegated rather than restated, so a switch driven
@@ -1026,7 +1026,7 @@ func settingsPickable(row SettingRow) bool {
 // static table ([SettingServer]).
 //
 // The colour-scheme row is the `server` row's twin here and diverges the same way: its values are the
-// built-ins plus whatever `*.yaml` files the human's schemes folder holds right now ([Options.ListSchemes]),
+// built-ins plus whatever `*.yaml` files the human's schemes folder holds right now ([SchemeHost.List]),
 // which no static table can name either. It reaches the pane as an ordinary enum (cmd/apogee's
 // settingKind) because picking one is picking a value from a list — only where the list COMES from
 // differs — so it is matched on its path rather than on a kind of its own.
@@ -1036,10 +1036,10 @@ func settingsPickable(row SettingRow) bool {
 // value the frame the human answered was showing.
 func (m Model) settingsVocabulary(row SettingRow) []string {
 	if row.Path == settingKeyColorScheme {
-		if m.opts.ListSchemes == nil {
+		if m.opts.Schemes == nil {
 			return nil // unwired: the row opens nothing rather than offering an empty list
 		}
-		return m.opts.ListSchemes()
+		return m.opts.Schemes.List()
 	}
 	if row.Kind != SettingServer {
 		return row.EnumValues

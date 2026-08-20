@@ -127,7 +127,7 @@ func keyMigrationRows(storeName string) []popupRow {
 // acceptKeyMigration answers the open offer and moves to the next entry in the round.
 //
 // Each answer is one seam call and one note, and the note is the whole feedback: these seams are
-// synchronous file work on a keypress the human is waiting on (the WriteSetting contract), and an
+// synchronous file work on a keypress the human is waiting on (the [SettingsHost.Write] contract), and an
 // error is REPORTED rather than swallowed, because a migration that silently did not happen leaves
 // the human believing their key has moved.
 //

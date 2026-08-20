@@ -128,7 +128,7 @@ func TestWatchedConfigReportsNothingForApogeesOwnWrite(t *testing.T) {
 	if err := config.SaveConfigSetting(c.path, "auto-title", "false"); err != nil {
 		t.Fatalf("SaveConfigSetting: %v", err)
 	}
-	c.edits.refresh() // what tui.Options.WriteSetting does the moment the write lands
+	c.edits.refresh() // what tui.SettingsHost.Write does the moment the write lands
 
 	applied, err := c.reload(t, "apogee's own write")
 	if err != nil {
@@ -172,8 +172,8 @@ func TestRunRootWiresTheConfigWatch(t *testing.T) {
 	}
 
 	// The pane's own write applies the key itself, so the baseline must move with it.
-	if err := rec.opts.WriteSetting("auto-title", "false"); err != nil {
-		t.Fatalf("WriteSetting: %v", err)
+	if err := rec.opts.Settings.Write("auto-title", "false"); err != nil {
+		t.Fatalf("Settings.Write: %v", err)
 	}
 	applied, err := rec.opts.ReloadConfig()
 	if err != nil {

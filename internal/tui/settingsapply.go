@@ -67,7 +67,7 @@ func (m Model) settingsResetKey(msg tea.KeyPressMsg, row SettingRow) (tea.Model,
 	return m, nil
 }
 
-// settingsReset returns one key to its default through [Options.ResetSetting] — the key's line REMOVED
+// settingsReset returns one key to its default through [SettingsHost.Reset] — the key's line REMOVED
 // from the file rather than the default written into it (ADR 0035), so the value goes back to being
 // described by the binary and documented by its commented example.
 //
@@ -77,12 +77,12 @@ func (m Model) settingsResetKey(msg tea.KeyPressMsg, row SettingRow) (tea.Model,
 // value is (settingsApplied). The armed state ends either way: the question was answered.
 func (m Model) settingsReset(row SettingRow) (tea.Model, tea.Cmd) {
 	m.settings.kind = settingsKeyList
-	if m.opts.ResetSetting == nil {
+	if m.opts.Settings == nil {
 		m.settings.failure = settingFailure{path: row.Path, msg: noSettingsWriterNote}
 		m.layout()
 		return m, nil
 	}
-	if err := m.opts.ResetSetting(row.Path); err != nil {
+	if err := m.opts.Settings.Reset(row.Path); err != nil {
 		m.settings.failure = settingFailure{path: row.Path, msg: err.Error()}
 		m.layout()
 		return m, nil
@@ -92,7 +92,7 @@ func (m Model) settingsReset(row SettingRow) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-// settingsWrite persists one key through [Options.WriteSetting] and records what became of it. It is
+// settingsWrite persists one key through [SettingsHost.Write] and records what became of it. It is
 // synchronous, the SaveHostAcknowledgement posture: one small file, spliced and renamed, on a keypress
 // the human is waiting on — a Cmd would only let the pane repaint a row whose value had not landed yet.
 //
@@ -115,11 +115,11 @@ func (m Model) settingsWrite(row SettingRow, value string) (tea.Model, tea.Cmd) 
 // refused toggle has nothing to keep. It does not lay out: the caller does, once, after it has finished
 // deciding what the pane is now doing.
 func (m Model) settingsPersist(row SettingRow, value string) (Model, tea.Cmd, bool) {
-	if m.opts.WriteSetting == nil {
+	if m.opts.Settings == nil {
 		m.settings.failure = settingFailure{path: row.Path, msg: noSettingsWriterNote}
 		return m, nil, false
 	}
-	if err := m.opts.WriteSetting(row.Path, value); err != nil {
+	if err := m.opts.Settings.Write(row.Path, value); err != nil {
 		m.settings.failure = settingFailure{path: row.Path, msg: err.Error()}
 		return m, nil, false
 	}
@@ -171,7 +171,7 @@ func (m Model) settingsApplied(row SettingRow, edit settingEdit) (Model, tea.Cmd
 //
 //   - the keys whose whole effect is on THIS screen (settingsApplyLocal) are applied here, because
 //     there is no engine on the other side of them to ask;
-//   - every other key goes out through [Options.ApplySetting], the binary's dispatcher, which owns
+//   - every other key goes out through [SettingsHost.Apply], the binary's dispatcher, which owns
 //     the schema and therefore is the only thing that can turn the file's spelling of a value into
 //     whatever the engine seam behind it takes (ADR 0037 decision 2).
 //
@@ -181,16 +181,16 @@ func (m Model) settingsApplied(row SettingRow, edit settingEdit) (Model, tea.Cmd
 // A local apply may also hand back a Cmd and a note of its own, which is why the local branch no
 // longer returns an empty note: a colour-scheme switch that loaded with warnings says so on the row
 // (settingsApplyLocal) through the same slot "applies at next clear" uses, and asks for the repaint
-// its new palette needs. The seam's own keys are unchanged — [Options.ApplySetting] returns a note
+// its new palette needs. The seam's own keys are unchanged — [SettingsHost.Apply] returns a note
 // and never a Cmd, because what it moves is on the far side of the renderer.
 func (m Model) settingsApplyLive(path, value string) (Model, string, tea.Cmd, error) {
 	if applied, note, cmd, ok, err := m.settingsApplyLocal(path, value); ok {
 		return applied, note, cmd, err
 	}
-	if m.opts.ApplySetting == nil {
+	if m.opts.Settings == nil {
 		return m, "", nil, nil // no live apply wired: the write stands on its own (ADR 0031's nil-seam degrade)
 	}
-	note, err := m.opts.ApplySetting(path, value)
+	note, err := m.opts.Settings.Apply(path, value)
 	if err != nil {
 		return m, "", nil, err
 	}
@@ -202,7 +202,7 @@ func (m Model) settingsApplyLive(path, value string) (Model, string, tea.Cmd, er
 
 // settingsApplyLocal applies the keys the RENDERER itself owns — the ones whose entire effect is a
 // field on this Model — and reports whether the key was one of them. They are named rather than
-// derived because what makes a key local is that nothing behind [Options.ApplySetting] would have
+// derived because what makes a key local is that nothing behind [SettingsHost.Apply] would have
 // anything to do with it: routing them out to the binary and back would only give the pane a longer
 // way to reach its own state.
 //
@@ -284,7 +284,7 @@ func parseStallAfter(value string) (time.Duration, error) {
 //
 // It re-RESOLVES rather than reading a palette off the Options, so a scheme file the human has just
 // edited lands on the next switch: the seam reads the folder every time it is asked
-// ([Options.ResolveScheme]), which is the whole of what apogee offers instead of watching the file.
+// ([SchemeHost.Resolve]), which is the whole of what apogee offers instead of watching the file.
 // The load is forgiving, so a resolve that warned still produces a usable palette — the warnings
 // become transcript notes (design call 11) and the row says how many, through the same slot a
 // boundary note uses.
@@ -303,10 +303,13 @@ func parseStallAfter(value string) (time.Duration, error) {
 // The Cmd is tea.ClearScreen: the terminal still holds the previous palette's scrollback and
 // backgrounds outside the frame apogee repaints, so the screen is cleared and drawn again whole.
 func (m *Model) applyColorScheme(name string) (string, tea.Cmd, error) {
-	if m.opts.ResolveScheme == nil {
+	if m.opts.Schemes == nil {
 		return "", nil, errNoSchemeResolver
 	}
-	s, warnings := m.opts.ResolveScheme(name)
+	s, warnings, ok := m.opts.Schemes.Resolve(name)
+	if !ok {
+		return "", nil, errNoSchemeResolver
+	}
 	m.th = newTheme(s)
 	fillInput(&m.input, m.th.surface)
 	m.transcript.paints.clear()
@@ -318,7 +321,7 @@ func (m *Model) applyColorScheme(name string) (string, tea.Cmd, error) {
 	return colorSchemeWarningNote(len(warnings)), tea.ClearScreen, nil
 }
 
-// errNoSchemeResolver is what an unwired [Options.ResolveScheme] costs: the key is persisted and the
+// errNoSchemeResolver is what an unwired [SchemeHost.Resolve] costs: the key is persisted and the
 // row says the switch could not happen now, which is the honest sentence — the scheme IS in the file
 // and the next start will be drawn in it.
 var errNoSchemeResolver = errors.New("no colour-scheme resolver is wired; the new scheme applies at the next start")

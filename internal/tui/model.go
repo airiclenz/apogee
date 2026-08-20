@@ -128,7 +128,7 @@ type Model struct {
 	picker picker
 
 	// settings is the /settings pane's state (settings.go): whether it is open and which config key
-	// is highlighted. Its rows are derived at render time from [Options.SettingsRows], so the value
+	// is highlighted. Its rows are derived at render time from [SettingsHost.Rows], so the value
 	// itself is two plain values and its zero value is "closed" — the picker posture (ADR 0011). It
 	// is driven only at idle, and it is the frame's one full-height pane (frameRowPlan).
 	settings settingsPane

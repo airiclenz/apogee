@@ -34,7 +34,8 @@
 // them to the config watcher and the out-of-band work; wire_verbs.go the composition
 // root's own verbs — the rebind, the beat wrapper, and the three ways a session arrives
 // on or records an Upstream; wire_options.go the projection of all of it onto
-// tui.Options, the renderer's whole view of this host.
+// tui.Options, the renderer's whole view of this host, and the two host capabilities
+// that view names as interfaces rather than as bare funcs (ADR 0054).
 //
 // The seams those phases build, split off by concern (ADR 0043): wire_settings.go the
 // live settings holder, the dispatcher a committed /settings key is applied through,

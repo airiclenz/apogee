@@ -103,7 +103,7 @@ rides **one** generic idle-only `SwapTools`; a second registry-mutation path may
 The seams are engine methods taking resolved values, not config paths: the composition root reads
 files, resolves precedence and validates; the engine is handed a struct. That is ADR 0031's
 wire-silence and its benchable-all-the-way-up invariant doing their job — a bench or daemon Driver
-gets live reconfiguration from the same doors, and the TUI's `Options.ApplySetting` seam nil-degrades
+gets live reconfiguration from the same doors, and the TUI's `SettingsHost.Apply` seam degrades
 to persist-only for a Driver that wants no live apply at all.
 
 **3. Keys whose effect is a prefix land at the next natural boundary, and the row says which.**
