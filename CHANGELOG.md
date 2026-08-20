@@ -222,6 +222,18 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **The ask prompt's three popup flags become one named row style (`internal/tui`).** `popupSpec`
+  carried `titleFromBody`, `rowGap` and `rowPadBelow` among the fields every pane sets, and exactly
+  one caller ever set any of them — the ask prompt, which set all three, because they are one
+  drawing: a question, its answers a blank line apart, and the block closed above the border. They
+  are now one `popupRowStyle` value the pane passes as `rowStyle`, declared once beside the pane as
+  `askRowStyle`; the spec is three fields lighter and its zero value is still every other pane's
+  unbroken list. The style also states what a gap COSTS (`gapLines`), which retires `askRowGap`: the
+  budget arithmetic that books the offering ahead of the composition and the composition itself now
+  read that one blank line off the same value. `rowPadAbove` stays a spec field — it is the one part
+  of the shape the approval menu asks for too. Rendering is byte-identical and no test expectation
+  moved.
+
 - **chromelayout.go dissolves into its two real homes (`internal/tui`).** The file held one ADR 0030
   widget mirror and one generic integer clamp — nothing the two share — so neither could be found
   where a reader would look for it. `inputContentRows` now sits beside the other textarea mirrors it

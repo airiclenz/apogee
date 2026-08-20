@@ -40,8 +40,8 @@ import (
 //   - A row is ONE painted line unless the spec asks for more: popupSpec.wrapRows word-wraps a row
 //     too wide for the pane onto continuation lines indented under its own first cell
 //     (popupRowIndent) — plus, where the row is columned, under its LAST column
-//     (popupRowHangingIndent) — instead of eliding its tail, popupSpec.rowGap sets consecutive rows one
-//     blank line apart, and popupSpec.rowPadAbove/rowPadBelow set one blank line above the block
+//     (popupRowHangingIndent) — instead of eliding its tail, popupRowStyle.gap sets consecutive rows one
+//     blank line apart, and popupSpec.rowPadAbove/popupRowStyle.padBelow set one blank line above the block
 //     and one below it — each end asked for on its own, because the two decision surfaces do not
 //     ask for the same shape. All of them are opt-in, and all are paid for out of the SAME row
 //     budget: the window is measured in painted LINES (popupRowWindow), a row is seated only when
@@ -116,7 +116,7 @@ const popupChrome = 4
 // so its floor is its two borders and its hint row — one row less than popupChrome. Its only
 // production caller draws no title at ALL: the ask prompt's name went into the question itself
 // (layout.md), so an empty title leaves the top border plain, and the border carries the question's
-// own lead only on the windows that seat no line of it (popupSpec.titleFromBody). Either way the
+// own lead only on the windows that seat no line of it (popupRowStyle.titleFromBody). Either way the
 // name costs no content row, which is the whole of what this constant states. It is the chrome such
 // a pane hands [Model.popupBudget], which is what spends the freed row on the pane's own content
 // instead of leaving it unclaimed. The frame's per-pane floor stays popupChrome
@@ -189,7 +189,7 @@ const (
 // maxBodyRows (an empty body adds no rows); rows are the escape-stripped cell rows the module
 // aligns into columns; selected indexes rows (−1 = no highlight); maxRows caps the scroll window
 // around the selection, in the LINES that window paints — the same number as rows until wrapRows or
-// rowGap makes a row cost more than one. The two caps read the same way: negative shows everything, and ZERO shows
+// the row style's gap makes a row cost more than one. The two caps read the same way: negative shows everything, and ZERO shows
 // nothing — a window with no rows left to spare saying so (popupBudget) rather than the pane
 // quietly showing all of them. Zero is the reading that keeps a pane inside the shortest window it
 // can be drawn in at all, where its border, title and hint are the whole budget — and where a
@@ -207,21 +207,9 @@ const (
 // says: the elision marker rides the border title exactly as it rides the title row
 // (popupTitleLine), so a pane cannot go quiet about content it hid by moving its name into the frame.
 //
-// titleFromBody is the identity a pane keeps when its body IS its heading and the window seats no
-// line of that body. The ask prompt is that pane: it draws no title, because the question says what
-// a heading over it would (docs/layout/user-questions-layout.md) — but a question is BODY, and on the
-// shortest windows the single body row a pane is granted goes to the elision marker, which left the
-// box carrying a count and a key hint and nothing at all about what the live ⏎ would answer. Its
-// identity had become a number. With this set, the lead of the body falls back INTO the top border
-// there — the same place a titled pane's name already rides (titleInBorder) — and only there: at
-// every height where one line of the body is on the screen the pane composes exactly as it did, so
-// the untitled top border stays the normal appearance of a surface whose first body line is its
-// heading.
-//
-// It requires titleInBorder, and that is the whole of why it costs nothing: the top border is drawn
-// at every height, so a name spliced into it claims no row. A fallback title on a pane that draws
-// title ROWS would claim the row the budget had just refused it, which is the one thing shrinking may
-// never do.
+// An empty title on such a pane can still be named on the shortest windows, out of the body it
+// already draws — see popupRowStyle.titleFromBody, which is the row style's because the panes that
+// ask for it are the panes whose rows are the answers to that body.
 //
 // menuRows paints the row list as a MENU rather than as a list with a cursor in it: the selected row
 // is glyphUser plus its label lit in the accent (th.popupAccent), every other row is
@@ -247,30 +235,26 @@ const (
 // against half a sentence, so a surface that asks in sentences wraps them; every other pane keeps
 // the one-line row and the elision that has always fitted it.
 //
-// rowGap sets consecutive rows one blank line apart. It is what keeps a wrapped list READABLE: once
-// a row can be three lines long, the only thing telling the eye where one option ends and the next
-// begins is the marker column, and a blank line says it without being read. A list whose every row
-// is one line needs none of that and pays no line for it.
+// rowStyle is the whole of what a pane asking in SENTENCES draws differently from one listing names:
+// the blank line between two answers, the blank line closing the offering above the border, and the
+// identity such a pane keeps on the windows that seat none of its question (popupRowStyle). It is
+// ONE named style rather than three loose flags because those three are one decision about one
+// surface — the mockup of a prose question box — and a caller that could take two of them and leave
+// the third would be offering a shape nothing draws. The zero value is the unbroken list every other
+// pane has always drawn.
 //
 // rowPadAbove sets the row BLOCK one blank line off what stands above it. It is what tells the eye
 // that the rows are a MENU rather than more of the prose above them: on a decision surface the body
 // asks and the rows answer, and unbroken they read as one paragraph whose last lines happen to start
-// with a glyph. It is a separate flag from rowGap because the two say different things — the gap
+// with a glyph. It is a separate flag from the style's gap because the two say different things — the gap
 // divides the options from EACH OTHER, the pad divides the offering from the pane — and the approval
 // menu asks for the second without the first, its four one-line options staying adjacent as the
-// mockup draws them.
+// mockup draws them. That is also why it stays a field of the SPEC while the closing blank rides the
+// style: this one opening blank is the one thing of the shape two panes ask for.
 //
-// rowPadBelow closes the block with a blank line above the bottom border, and it is its OWN flag
-// because the mockup does not spend it on both surfaces (docs/layout/user-questions-layout.md): the
-// ask box closes its offering, the approval box ends on its last decision. That is the mockup being
-// consistent rather than arbitrary — the ask box's answers are already a blank line apart, so a
-// block ending flush against the border would read as one option crowded where its siblings are not,
-// while the approval's four adjacent rows end where the last of them does. Two flags rather than one
-// derived from rowGap, because that is a coincidence of these two panes and not a rule: a caller
-// says what its surface looks like instead of inferring it.
-//
-// Either pad is drawn only out of the lines the seated rows LEFT OVER (popupRowLines), so it never
-// pushes an option out of the window: a short pane loses its breathing room rather than a decision.
+// Either pad (rowPadAbove, popupRowStyle.padBelow) is drawn only out of the lines the seated rows
+// LEFT OVER (popupRowLines), so it never pushes an option out of the window: a short pane loses its
+// breathing room rather than a decision.
 //
 // bodyPadAbove and bodyPadBelow are those same blank lines one block up: they set the BODY off what
 // stands above and below it, for a pane whose body is neither a caption nor the thing being decided
@@ -318,7 +302,6 @@ const (
 type popupSpec struct {
 	title         string
 	titleInBorder bool
-	titleFromBody bool
 	body          string
 	bodyLead      string
 	maxBodyRows   int
@@ -328,14 +311,66 @@ type popupSpec struct {
 	rowKinds      []popupRowKind
 	menuRows      bool
 	wrapRows      bool
-	rowGap        bool
+	rowStyle      popupRowStyle
 	rowPadAbove   bool
-	rowPadBelow   bool
 	selected      int
 	rowTop        int
 	hint          string
 	maxRows       int
 	scrollbar     bool
+}
+
+// popupRowStyle is how a pane that asks in SENTENCES draws its row list — the ask prompt's shape
+// (askRowStyle, ask.go), and the zero value is every other pane's. The three parts travel together
+// because the mockup they come from is one drawing (docs/layout/user-questions-layout.md): a
+// question, its answers a blank line apart, and the block closed above the border. So a surface
+// names the shape ONCE instead of assembling it out of three loose flags on the spec, where the
+// three parts of one pane's look sat among fields every other pane also sets.
+//
+// gap sets consecutive rows one blank line apart. It is what keeps a wrapped list READABLE: once
+// a row can be three lines long, the only thing telling the eye where one option ends and the next
+// begins is the marker column, and a blank line says it without being read. A list whose every row
+// is one line needs none of that and pays no line for it.
+//
+// padBelow closes the block with a blank line above the bottom border, and it is separate from the
+// spec's own rowPadAbove because the mockup does not spend the two on the same surfaces: the ask box
+// closes its offering, the approval box ends on its last decision. That is the mockup being
+// consistent rather than arbitrary — the ask box's answers are already a blank line apart, so a
+// block ending flush against the border would read as one option crowded where its siblings are not,
+// while the approval's four adjacent rows end where the last of them does. It is stated rather than
+// derived from gap, because that pairing is a coincidence of these two panes and not a rule: a
+// caller says what its surface looks like instead of inferring it.
+//
+// titleFromBody is the identity a pane keeps when its body IS its heading and the window seats no
+// line of that body. The ask prompt is that pane: it draws no title, because the question says what
+// a heading over it would (docs/layout/user-questions-layout.md) — but a question is BODY, and on the
+// shortest windows the single body row a pane is granted goes to the elision marker, which left the
+// box carrying a count and a key hint and nothing at all about what the live ⏎ would answer. Its
+// identity had become a number. With this set, the lead of the body falls back INTO the top border
+// there — the same place a titled pane's name already rides (popupSpec.titleInBorder) — and only
+// there: at every height where one line of the body is on the screen the pane composes exactly as it
+// did, so the untitled top border stays the normal appearance of a surface whose first body line is
+// its heading.
+//
+// It requires popupSpec.titleInBorder, and that is the whole of why it costs nothing: the top border
+// is drawn at every height, so a name spliced into it claims no row. A fallback title on a pane that
+// draws title ROWS would claim the row the budget had just refused it, which is the one thing
+// shrinking may never do.
+type popupRowStyle struct {
+	gap           bool
+	padBelow      bool
+	titleFromBody bool
+}
+
+// gapLines is what ONE separator between two adjacent rows costs this style, in the painted lines
+// the row budget is spent in (popupRowBlockLines). A pane measuring what its offering will cost
+// before the block is composed and the composition itself both read the figure off the same style,
+// so the two can never disagree about what a gap is worth.
+func (s popupRowStyle) gapLines() int {
+	if !s.gap {
+		return 0
+	}
+	return 1
 }
 
 // rowKind is what row i of the spec is: what rowKinds says, or plain where it says nothing. Every
@@ -361,7 +396,7 @@ func (s popupSpec) rowKind(i int) popupRowKind {
 // a description wrapped differently than it guessed.
 //
 // Mapping a line back to a row is a subtraction only where every row is ONE line — a spec with
-// neither popupSpec.wrapRows nor popupSpec.rowGap, which is what the /settings key list is. A spec
+// neither popupSpec.wrapRows nor a row style's gap, which is what the /settings key list is. A spec
 // whose rows cost more than a line each maps through blocks instead: the lines each row was composed
 // into, in order, so the caller walks the window counting the heights the painter actually drew. The
 // /settings multi-line field is that caller (settingsTextPaint) — its rows are the prompt's lines and
@@ -627,12 +662,12 @@ type popupRowBlock struct {
 // moves through a long list. Every composed line is truncated to inner, so a wide row can never
 // wrap the box.
 //
-// A row is one line unless the spec asks for more (popupSpec.wrapRows, popupSpec.rowGap), and then
+// A row is one line unless the spec asks for more (popupSpec.wrapRows, popupRowStyle.gap), and then
 // the window is spent in LINES: a row is seated only when every line of it fits, and each separator
 // between two seated rows costs a line of the same budget. Whole rows or none of them, because half
 // an option on the screen is worse than the scroll that reaches the whole of it.
 //
-// The pad around the block (popupSpec.rowPadAbove, rowPadBelow) is spent LAST, out of the lines the
+// The pad around the block (popupSpec.rowPadAbove, popupRowStyle.padBelow) is spent LAST, out of the lines the
 // seated window left over, and BOTH ends are dropped together where they do not cover it — a pane
 // that keeps one blank and drops the other would move the block rather than tighten it. That order
 // is the priority the pane is budgeted on (popupBudget): the rows are what the human acts on and the
@@ -708,11 +743,8 @@ func popupRowLinesAt(th theme, spec popupSpec, inner int, blackFill lipgloss.Sty
 	blocks := popupRowBlocks(th, spec.rows, spec.wrapRows, inner)
 	heights := popupRowHeights(blocks)
 
-	gap := 0
-	if spec.rowGap {
-		gap = 1
-	}
-	padAbove, padBelow := spec.rowPadAbove, spec.rowPadBelow
+	gap := spec.rowStyle.gapLines()
+	padAbove, padBelow := spec.rowPadAbove, spec.rowStyle.padBelow
 	capLines := spec.maxRows
 	if capLines < 0 {
 		// Negative spends whatever the whole list needs.
@@ -1265,7 +1297,7 @@ func popupElisionMarkerFitting(th theme, hidden, budget int) string {
 
 // popupHeading is the name popupTitleLine composes its row — or, for a title-in-border spec, its top
 // border — around: the spec's own title, or, on a pane whose body is its heading
-// (popupSpec.titleFromBody), the lead of that body on the windows that seated no line of it.
+// (popupRowStyle.titleFromBody), the lead of that body on the windows that seated no line of it.
 //
 // WHICH windows those are is read off the composed block rather than re-derived from the budget the
 // block was composed against, because the block is where the two things that decide it meet: the
@@ -1280,7 +1312,7 @@ func popupElisionMarkerFitting(th theme, hidden, budget int) string {
 // question identifies itself, and a heading that kept the body's own line breaks would spend that
 // width on the layout of prose that is not being shown.
 func popupHeading(spec popupSpec, body []string, hiddenBody int) string {
-	if spec.title != "" || !spec.titleFromBody || !spec.titleInBorder {
+	if spec.title != "" || !spec.rowStyle.titleFromBody || !spec.titleInBorder {
 		return spec.title
 	}
 	if hiddenBody == 0 || len(body) > 1 {
@@ -1343,7 +1375,7 @@ func popupTitleLine(th theme, title string, hidden, inner int) string {
 // painted LINES fit inside budget lines together, gap lines apart, scrolled to keep the selection
 // roughly centred so a long list never overflows the pane. heights holds every row's line count in
 // order — one apiece until popupSpec.wrapRows makes some of them taller — and gap is the separator
-// popupSpec.rowGap asks for, 0 when it asks for none.
+// popupRowStyle.gap asks for, 0 when it asks for none.
 //
 // It counts LINES rather than rows because that is what the pane is short of: the budget it is
 // handed (popupSpec.maxRows) comes from a frame allocation measured in terminal rows (popupBudget),

@@ -1213,7 +1213,7 @@ func TestRenderPopupTitleFromBody(t *testing.T) {
 	base := func() popupSpec {
 		return popupSpec{
 			titleInBorder: true,
-			titleFromBody: true,
+			rowStyle:      popupRowStyle{titleFromBody: true},
 			body:          lead + " of the resolution pipeline, now that the gate has moved?",
 			maxBodyRows:   -1,
 			rows:          singleCellRows([]string{"first row", "second row"}),
@@ -1227,7 +1227,7 @@ func TestRenderPopupTitleFromBody(t *testing.T) {
 		t.Parallel()
 		spec := base()
 		off := spec
-		off.titleFromBody = false
+		off.rowStyle.titleFromBody = false
 		on := strip(renderPopup(th, spec, width))
 		if got := strip(renderPopup(th, off, width)); on != got {
 			t.Errorf("the flag changed a pane whose body is on the screen:\nwith:\n%s\n\nwithout:\n%s", on, got)
@@ -1288,7 +1288,7 @@ func TestRenderPopupTitleFromBody(t *testing.T) {
 		spec.titleInBorder = false
 		on := popupLines(renderPopup(th, spec, width))
 		off := spec
-		off.titleFromBody = false
+		off.rowStyle.titleFromBody = false
 		if got := popupLines(renderPopup(th, off, width)); len(on) != len(got) {
 			t.Fatalf("the pane is %d rows with the flag and %d without it", len(on), len(got))
 		}
@@ -1483,7 +1483,7 @@ func popupWrapSpec() popupSpec {
 		}),
 		menuRows: true,
 		wrapRows: true,
-		rowGap:   true,
+		rowStyle: popupRowStyle{gap: true},
 		selected: 2,
 		maxRows:  -1,
 	}
@@ -1515,7 +1515,7 @@ func TestRenderPopupWrappedRowsHangUnderTheirMarker(t *testing.T) {
 	for _, ln := range lines[1 : len(lines)-1] { // the content rows, borders excluded
 		content := popupContent(ln)
 		if content == "" {
-			continue // a rowGap separator
+			continue // a row-gap separator
 		}
 		if !strings.HasPrefix(content, glyphUser) && !strings.HasPrefix(content, glyphMenuUnselected) {
 			if !strings.HasPrefix(content, strings.Repeat(" ", popupRowIndent)) ||
@@ -1551,7 +1551,7 @@ func TestRenderPopupWrappedColumnedRowsHangUnderTheirLastColumn(t *testing.T) {
 		},
 		menuRows: true,
 		wrapRows: true,
-		rowGap:   true,
+		rowStyle: popupRowStyle{gap: true},
 		selected: 0,
 		maxRows:  -1,
 	}
@@ -1573,7 +1573,7 @@ func TestRenderPopupWrappedColumnedRowsHangUnderTheirLastColumn(t *testing.T) {
 		content := popupContent(ln)
 		switch {
 		case content == "":
-			continue // a rowGap separator
+			continue // a row-gap separator
 		case strings.HasPrefix(content, glyphUser), strings.HasPrefix(content, glyphMenuUnselected):
 			// A row's FIRST line: the marker, then the checkbox at the one column.
 			if box := lipgloss.Width(content[:strings.Index(content, "[")]); box != popupRowIndent {
@@ -1594,7 +1594,7 @@ func TestRenderPopupWrappedColumnedRowsHangUnderTheirLastColumn(t *testing.T) {
 	}
 }
 
-// rowGap sets consecutive rows one blank line apart and nothing else: no separator opens the list
+// popupRowStyle.gap sets consecutive rows one blank line apart and nothing else: no separator opens the list
 // and none closes it, where the box's own padding already stands. With the flag off the list is the
 // unbroken block it has always been.
 func TestRenderPopupRowGapSeparatesRowsOnly(t *testing.T) {
@@ -1608,7 +1608,7 @@ func TestRenderPopupRowGapSeparatesRowsOnly(t *testing.T) {
 	}
 
 	spec := base
-	spec.rowGap = true
+	spec.rowStyle.gap = true
 	lines := popupLines(renderPopup(th, spec, 40))
 	if got, want := len(lines), 2+len(spec.rows)+2; got != want {
 		t.Fatalf("gapped list is %d lines, want %d (3 rows + 2 separators + 2 borders):\n%s",
@@ -1623,11 +1623,11 @@ func TestRenderPopupRowGapSeparatesRowsOnly(t *testing.T) {
 	}
 
 	if got, want := len(popupLines(renderPopup(th, base, 40))), 2+len(base.rows); got != want {
-		t.Errorf("rowGap off is %d lines, want %d: the list gained a separator it did not ask for", got, want)
+		t.Errorf("gap off is %d lines, want %d: the list gained a separator it did not ask for", got, want)
 	}
 }
 
-// rowPadAbove and rowPadBelow set the row BLOCK one blank line off what stands above it and below
+// rowPadAbove and the row style's padBelow set the row BLOCK one blank line off what stands above it and below
 // it, EACH END ON ITS OWN — the ask box asks for both, the approval box for the opening one alone
 // (docs/layout/user-questions-layout.md) — and neither puts a line between rows that did not ask for
 // a gap. The pad is also the LAST thing the row budget pays for: it is the only part of the block
@@ -1673,7 +1673,7 @@ func TestRenderPopupRowPadSurroundsTheBlock(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			spec := base
-			spec.rowPadAbove, spec.rowPadBelow, spec.maxRows = tc.above, tc.below, tc.maxRows
+			spec.rowPadAbove, spec.rowStyle.padBelow, spec.maxRows = tc.above, tc.below, tc.maxRows
 			lines := popupLines(renderPopup(th, spec, 40))
 			flat := strip(strings.Join(lines, "\n"))
 			if got := contentBlanks(lines); !slices.Equal(got, tc.want) {
@@ -1777,16 +1777,16 @@ func TestRenderPopupWrapAndGapOffAreUnchanged(t *testing.T) {
 
 	spec := popupTitleSpec()
 	spec.wrapRows = false
-	spec.rowGap = false
-	spec.rowPadAbove, spec.rowPadBelow = false, false
+	spec.rowStyle.gap = false
+	spec.rowPadAbove, spec.rowStyle.padBelow = false, false
 	if off := strip(renderPopup(th, spec, 40)); off != popupTitleRowGolden {
 		t.Errorf("flags off drifted from the list rendering:\ngot:\n%s\n\nwant:\n%s", off, popupTitleRowGolden)
 	}
 
 	long := popupWrapSpec()
 	long.wrapRows = false
-	long.rowGap = false
-	long.rowPadAbove, long.rowPadBelow = false, false
+	long.rowStyle.gap = false
+	long.rowPadAbove, long.rowStyle.padBelow = false, false
 	lines := popupLines(renderPopup(th, long, 48))
 	if got, want := len(lines), 2+len(long.rows); got != want {
 		t.Fatalf("flags off rendered %d lines, want %d (one line a row):\n%s",

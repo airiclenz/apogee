@@ -1828,7 +1828,7 @@ func askModelPaneLines(t *testing.T, m Model) []string {
 // the rest, one blank line between each pair and one setting the block off above and below — this
 // box closes its offering, unlike the approval box's adjacent decisions. The spacing is asserted
 // line by line because it is the mockup's own, not a default: the pane draws each of those blanks
-// itself, out of a budget that books them (popupSpec.rowGap, rowPadAbove, rowPadBelow). The title
+// itself, out of a budget that books them (popupRowStyle.gap/padBelow, popupSpec.rowPadAbove). The title
 // row is the row this buys back: a heading
 // reading "the assistant is asking:" over a question the human is already reading said nothing the
 // question did not, and on a twelve-row terminal it cost a row of the question itself.
@@ -1859,7 +1859,7 @@ func TestModelAskPromptMenuChrome(t *testing.T) {
 		t.Errorf("the line between the options = %q, want it blank:\n%s", sep, got)
 	}
 	// …and the block is set off from the question above it and closed below the last option
-	// (popupSpec.rowPadAbove/rowPadBelow, the mockup's own spacing): with prose on both sides of the
+	// (popupSpec.rowPadAbove and popupRowStyle.padBelow, the mockup's own spacing): with prose on both sides of the
 	// join, the marker column alone is what tells the first answer from the last line of the question.
 	if sep := strings.TrimSpace(strings.Trim(rows[first-1], "│")); sep != "" {
 		t.Errorf("the line between the question and the first option = %q, want it blank:\n%s", sep, got)
@@ -1944,7 +1944,7 @@ func TestModelAskPromptClipsAnEssayLengthSubAgentTask(t *testing.T) {
 // deciding. The ask box says it with the question, and the question is BODY — so on the windows that
 // grant the body a single row and spend that row on the "… (+N more lines)" marker, the box was a
 // count and a key hint while the approval box beside it still named its tool in the border. There the
-// question falls back INTO the border (popupSpec.titleFromBody) and takes the count with it, and only
+// question falls back INTO the border (popupRowStyle.titleFromBody) and takes the count with it, and only
 // there: with any line of the question on a content row the border is the unbroken one the mockup
 // draws (TestModelAskPromptMenuChrome), which the last subtest pins at a window with room to spare.
 func TestModelAskNamesItselfWhereTheQuestionHasNoRow(t *testing.T) {
@@ -2090,7 +2090,7 @@ func TestModelAskQuestionKeepsItsFloorOnARoomyWindow(t *testing.T) {
 // line kept back for the body — which is what the arithmetic below states: an answer was on the
 // screen exactly where the pane's granted rows past its chrome covered that answer's height with the
 // body's line still set aside. Where even that could not seat one, the pane owes its identity to the
-// border instead (popupSpec.titleFromBody), and the floor does not change which case a height is in.
+// border instead (popupRowStyle.titleFromBody), and the floor does not change which case a height is in.
 func TestModelAskQuestionFloorGivesWayToTheAnswers(t *testing.T) {
 	const lead = "how should I continue"
 	// One long answer, so the offering's irreducible claim is three lines rather than one — the case

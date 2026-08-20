@@ -185,9 +185,14 @@ func (m *Model) restoreAskDraft() {
 // on the offering, which is what a human counts it in.
 const maxAskChoiceRows = 8
 
-// askRowGap is the one blank line the ask prompt's rowGap sets between two adjacent options — the
-// separator's own cost, which the pane's line budget has to pay for as well as its rows.
-const askRowGap = 1
+// askRowStyle is the shape this pane draws its offering in, stated once for the two places that
+// have to agree about it: the spec the box is painted from, and the budget arithmetic that books
+// what the offering will cost before a line of it is composed (askPrompt). It is the question
+// surface's whole row shape — the blank line between two adjacent answers (whose own cost the line
+// budget pays for as well as its rows), the blank line closing the block above the border, and the
+// fallback that puts the question's lead on the top border where the window seats no line of it
+// (popupRowStyle).
+var askRowStyle = popupRowStyle{gap: true, padBelow: true, titleFromBody: true}
 
 // askQuestionFloor is how many lines of the QUESTION this pane keeps before its answers claim the
 // rest of the window (popupFloor.body). Rows-first is the budget's standing rule and the right one
@@ -258,9 +263,9 @@ func askChoiceRows(labels []string, multi bool, checked []bool) []popupRow {
 // (popupTitleBorderChrome), one row less than it used to draw. The choices are a MENU like the
 // approval prompt's — ❯ on the answer the ⏎ would send, · on the rest — and they WRAP with a blank
 // line between them, because an ask_user choice is prose written for this one question and a
-// decision must not be taken against half a sentence (popupSpec.menuRows, wrapRows, rowGap). One
+// decision must not be taken against half a sentence (popupSpec.menuRows, wrapRows, askRowStyle's gap). One
 // more blank line sets the offering off from the question above it and another closes it below
-// (popupSpec.rowPadAbove/rowPadBelow, both, as the mockup draws this box): with wrapped prose on both
+// (popupSpec.rowPadAbove and askRowStyle's padBelow, both, as the mockup draws this box): with wrapped prose on both
 // sides of the join, the marker column alone is what distinguishes the first answer from the last
 // line of the question, and an offering whose answers are a blank line apart would otherwise crowd
 // its last one against the border.
@@ -298,7 +303,7 @@ func askChoiceRows(labels []string, multi bool, checked []bool) []popupRow {
 // question has a floor: the windows whose grant past this pane's chrome is the offering's anchor
 // row and a single line, so the floor is clamped back to that line and a question longer than the
 // pane is wide has nothing to put on it — the question falls back into the top border instead
-// (popupSpec.titleFromBody). Dropping the title was the right call because the question says what a
+// (askRowStyle's titleFromBody). Dropping the title was the right call because the question says what a
 // heading would; a pane showing NEITHER says nothing, and a decision surface whose whole identity has
 // become a count is the case the approval prompt does not have — its tool name is on the border at
 // every height it is drawn at. The fallback costs no row (the border is drawn anyway) and applies
@@ -337,7 +342,7 @@ func (m Model) askPrompt(req domain.AskRequest) string {
 	//
 	// Both row figures are in the LINES the window will paint, not in choices: an option may now wrap
 	// onto two or three lines, every adjacent pair is a blank line apart and the block itself is set
-	// off by one more above and below (popupSpec.rowPadAbove/rowPadBelow), so a pane asking for one row
+	// off by one more above and below (popupSpec.rowPadAbove and askRowStyle's padBelow), so a pane asking for one row
 	// per choice would promise three answers and paint ten. maxAskChoiceRows stays a cap on the
 	// OFFERING — in this budget, what that many options and their separators cost — because a cap read
 	// as eight LINES would scroll five one-line choices, the top of the schema's own 2-5 range, on a
@@ -347,9 +352,9 @@ func (m Model) askPrompt(req domain.AskRequest) string {
 	// than on a narrower one composed for the arithmetic.
 	rows := askChoiceRows(stripEscapesAll(req.Choices), req.MultiSelect, m.askChecked)
 	heights := popupWrappedRowHeights(m.th, rows, m.width)
-	askPad := popupRowPadLines(true, true)
-	wanted := popupRowBlockLines(heights, askRowGap, askPad)
-	capped := popupRowBlockLines(heights[:min(len(heights), maxAskChoiceRows)], askRowGap, askPad)
+	askPad := popupRowPadLines(true, askRowStyle.padBelow)
+	wanted := popupRowBlockLines(heights, askRowStyle.gapLines(), askPad)
+	capped := popupRowBlockLines(heights[:min(len(heights), maxAskChoiceRows)], askRowStyle.gapLines(), askPad)
 	floor := popupFloor{
 		body: min(askQuestionFloor, popupBodyLineCount(m.th, question, m.width)),
 		rows: askAnchorRowLines(selected, heights),
@@ -361,19 +366,20 @@ func (m Model) askPrompt(req domain.AskRequest) string {
 
 	spec := popupSpec{
 		titleInBorder: true, // no title at all: an empty one leaves the top border unbroken…
-		titleFromBody: true, // …except where the window seats no line of the question to be named by
 		body:          question,
 		maxBodyRows:   maxBodyRows,
 		rows:          rows,
 		menuRows:      true,
 		wrapRows:      true,
-		rowGap:        true,
-		rowPadAbove:   true, // the blank line under the question…
-		rowPadBelow:   true, // …and the one closing the offering above the border
-		selected:      selected,
-		hint:          hint,
-		maxRows:       rowLines,
-		scrollbar:     m.popupScrollbarOn(),
+		// …and the question surface's own row shape: the blank line between two answers, the one
+		// closing the offering above the border, and the question's lead on that unbroken border where
+		// the window seats no line of it (askRowStyle).
+		rowStyle:    askRowStyle,
+		rowPadAbove: true, // the blank line under the question
+		selected:    selected,
+		hint:        hint,
+		maxRows:     rowLines,
+		scrollbar:   m.popupScrollbarOn(),
 	}
 	return renderPopup(m.th, spec, m.width)
 }

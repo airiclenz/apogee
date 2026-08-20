@@ -3140,7 +3140,7 @@ func (m Model) frameRowPlan(open framePaneSet) frameRowPlan {
 // hint alone keeps one — its only caller is the ask prompt, which draws no title at ALL, its name
 // having gone into the question itself (layout.md), so what titleInBorder buys there is a top
 // border left plain by an empty title, carrying the question only at the heights that seat no line
-// of it (popupSpec.titleFromBody); and popupBorderChrome where neither row is drawn — the approval
+// of it (popupRowStyle.titleFromBody); and popupBorderChrome where neither row is drawn — the approval
 // prompt's tool name does ride its top border and its shortcut letters are written beside the
 // options they take, so its two borders are its whole frame (approvalPrompt). Each spends the row
 // it saved on the pane's own content rather than leaving it unclaimed. chrome is also what "seated"
@@ -3162,7 +3162,7 @@ func (m Model) frameRowPlan(open framePaneSet) frameRowPlan {
 // title (popupTitleLine). A popupTitleBorderChrome pane keeps one body line, so the ask prompt's
 // question holds a row while an offering with no window left rides the border instead — and where the
 // question is too long for that one row, the row goes to the marker and the question falls back onto
-// the border beside it (popupSpec.titleFromBody), because a pane's identity may shrink to its lead
+// the border beside it (popupRowStyle.titleFromBody), because a pane's identity may shrink to its lead
 // but never to a count. A popupBorderChrome pane keeps two, one body line and one
 // row, so the approval menu is in neither case: its count stays in its body and a decision stays on
 // the screen. Shrinking costs the prose, and the rows outside the window, but never the fact that

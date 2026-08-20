@@ -1072,7 +1072,13 @@ internal/tui/doc.go, plus clampInt's destination file
 
 **Commit:** `refactor(tui): dissolve chromelayout.go into its two real homes`
 
-## 37. Fold the ask-only popupSpec fields into one named row style
+## 37. Fold the ask-only popupSpec fields into one named row style — ✅ DONE (2026-08-20)
+
+NOTES (2026-08-20): the fold is a named STRUCT value (`popupRowStyle{gap, padBelow, titleFromBody}`, passed as `askRowStyle`) rather than a named enum constant, because popup_test.go exercises each part on its own — the pad table covers all four rowPadAbove/rowPadBelow combinations — and a two-valued enum could not express those cases without rewriting what the tests cover, which the plan's standing requirements forbid.
+
+NOTES (2026-08-20): the item's Files line named popup.go and ask.go; approval.go, model.go, popup_test.go, model_test.go and sessions_test.go also changed — the tests for the mechanical field rename they need to compile (expectations untouched), the rest for doc comments that named the three removed fields and would otherwise be dangling references.
+
+NOTES (2026-08-20): `askRowGap` is deleted, its doc folded into `askRowStyle` — keeping a second statement of "the ask gap is one line" beside the style would have re-created the duplication this item removes.
 
 **Source:** review §Smaller findings, watch item. Depends on items 3 and 17.
 

@@ -1745,7 +1745,7 @@ func TestDecisionSurfaceStaysOnTheFrame(t *testing.T) {
 		// The ask prompt has no title any more (askPrompt): the QUESTION is its identity, so the probe
 		// is the lead of it — and unlike a title, a question is body, which the shortest windows grant
 		// no room at all. There the question falls back onto the pane's own top border
-		// (popupSpec.titleFromBody) rather than being stated as a count, so this pane owes the probe on
+		// (popupRowStyle.titleFromBody) rather than being stated as a count, so this pane owes the probe on
 		// the same terms the approval prompt does: on EVERY window it is drawn in, the human can read
 		// what the live ⏎ would answer.
 		{"ask prompt", "a long explanation", func(t *testing.T, m Model, draft int) Model {

@@ -152,7 +152,7 @@ func (m Model) sendApproval(decision domain.ApprovalDecision) (tea.Model, tea.Cm
 // (popupSpec.rowPadAbove), because that is
 // the break that matters, between what the human is deciding about and what the decisions are. It is
 // the ONLY blank the pane spends: the menu's four options are adjacent to each other and the last of
-// them ends the box, so nothing separates Cancel from the bottom border (rowPadBelow stays off, and
+// them ends the box, so nothing separates Cancel from the bottom border (popupRowStyle.padBelow stays off, and
 // the mockup draws it that way). The blank is booked out of the pane's own row budget below, and it
 // gives way before an option does on a window too short for both.
 //
