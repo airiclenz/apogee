@@ -238,7 +238,25 @@ NOTES (2026-08-20): `Client.Close` reaps idle connections through the client's `
 
 **Commit:** `fix(agent): close provider clients on Close and SwitchUpstream`
 
-## 11. Drop the dead HistoryExceedsAllocation shim; one PromptChars spelling
+## 11. Drop the dead HistoryExceedsAllocation shim; one PromptChars spelling — ✅ DONE (2026-08-20)
+
+NOTES (2026-08-20): the item named four files; the moved test lands in a fifth,
+`internal/domain/budget_test.go`. `PromptChars` lives in `internal/domain/budget.go` and had NO
+test there, so retargeting its test inside `internal/context` would have left the measure covered
+from a package that no longer calls it — the test moved down to sit beside the function instead.
+Mutation-checked: dropping the tool-menu term from `domain.PromptChars` fails it.
+
+NOTES (2026-08-20): the item says "move or retarget" the shim's tests at the domain method;
+`TestHistoryExceedsAllocation` was DELETED rather than moved, because
+`internal/domain/budget_test.go`'s `TestBudgetHistoryExceedsAllocation` — which its own comment
+says "transliterates the context-level trigger cases onto the domain compare" — already carries all
+six of its cases (0, -5, 100, 200, 99, empty history), verified one by one, plus an
+uncalibrated-ratio case the context copy had no way to express. Moving it would have layered a
+duplicate on an existing pin.
+
+NOTES (2026-08-20): the package-doc sentence the item asks to fix is longer than the one it
+replaces, so its paragraph in `internal/context/doc.go` re-wrapped by three lines; no other prose
+in that comment changed.
 
 **Source:** review defect h.
 

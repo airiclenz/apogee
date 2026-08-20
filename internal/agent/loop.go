@@ -624,7 +624,7 @@ func (a *Agent) streamResponse(ctx context.Context, turn int, req *domain.Reques
 				// smoothed), so LoopView.Budget() tracks the real tokenizer instead of a fixed
 				// guess (TDD §8 #8, plan item 8).
 				st := req.State()
-				a.tokens.Calibrate(apogeectx.PromptChars(st.Messages, st.Tools), u.PromptTokens)
+				a.tokens.Calibrate(domain.PromptChars(st.Messages, st.Tools), u.PromptTokens)
 				// Surface the server's token accounting so a streaming observer can light up
 				// the context-usage gauge and time the completion for a tokens/sec readout. A
 				// server that omits usage sends no Usage here, so no event fires (events.go).

@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -66,5 +67,25 @@ func TestBudgetHistoryExceedsAllocation(t *testing.T) {
 				t.Errorf("%+v.HistoryExceedsAllocation(msgs) = %v, want %v", tc.budget, got, tc.want)
 			}
 		})
+	}
+}
+
+// TestPromptChars_CountsContentToolArgsAndMenu proves the char measure sums message contents,
+// tool-call arguments, and the tool menu's names/descriptions/schemas — the same components on both
+// sides of the ratio.
+func TestPromptChars_CountsContentToolArgsAndMenu(t *testing.T) {
+	t.Parallel()
+	msgs := []Message{
+		{Role: RoleUser, Content: "abcde"}, // 5
+		{Role: RoleAssistant, ToolCalls: []ToolCall{
+			{Tool: "read", Arguments: json.RawMessage(`{"p":"x"}`)}, // 4 + 9 = 13
+		}},
+	}
+	tools := []ToolDef{
+		{Name: "read", Description: "reads", Schema: json.RawMessage(`{}`)}, // 4 + 5 + 2 = 11
+	}
+
+	if got := PromptChars(msgs, tools); got != 5+13+11 {
+		t.Errorf("PromptChars = %d, want %d", got, 5+13+11)
 	}
 }

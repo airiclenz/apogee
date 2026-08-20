@@ -778,6 +778,19 @@ point is a **minor** bump, not a breaking change.
 
 ### Removed
 
+- **`internal/context` no longer keeps a second spelling of the Budget's history compare.** The
+  package exported `HistoryExceedsAllocation`, a two-line delegate onto
+  `domain.Budget.HistoryExceedsAllocation` that no production code had called since the pure
+  arithmetic moved down to `domain` — the automatic Compaction trigger reads the domain method
+  directly, through the same Budget view the hooks see. It is gone, and with it the `PromptChars`
+  delegate beside it, whose last production caller was the loop's usage calibration; that call site
+  now names `domain.PromptChars`, the spelling the same file already used twice elsewhere, so the
+  one character measure has one name everywhere in the engine. The package doc, which credited the
+  deleted delegate with being the automatic trigger's decision, now names the domain method and the
+  engine that reads it. Nothing about the trigger, the compare or the measure changes: the compare
+  keeps its pin on the domain method, and the character measure's test moves down beside the
+  function it measures.
+
 - Removed the dead `Config.SessionsDir` field: nothing read it — the session store already takes
   its root as an explicit argument — so the two production write sites and the prose that named the
   field are gone.

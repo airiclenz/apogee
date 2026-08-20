@@ -157,33 +157,6 @@ func (e *TokenEstimator) Calibrate(promptChars, reportedPromptTokens int) {
 	e.charsPerToken = e.charsPerToken*(1-calibrationWeight) + sample*calibrationWeight
 }
 
-// PromptChars re-exports domain.PromptChars at its original home: the stable character measure
-// of a request's prompt used both as the calibration sample (Calibrate) and as the basis for a
-// token estimate (EstimateTokens). The measure itself moved to internal/domain (ADR 0010's
-// lowest-layer rule — it reads only domain types); this delegate keeps the existing callers and
-// tests unchanged.
-func PromptChars(msgs []domain.Message, tools []domain.ToolDef) int {
-	return domain.PromptChars(msgs, tools)
-}
-
-// HistoryExceedsAllocation reports whether the estimated token size of msgs (the conversation
-// history the reducers reclaim) has outgrown historyBudget — the Budget's History allocation. It
-// is the signal the automatic Compaction trigger fires on (CONTEXT: Compaction, "the default
-// reducer ... when the conversation exceeds a threshold"; Phase-4 item 9): the loop calls it at a
-// quiescent boundary and folds the history when it reports true. The measure runs the whole
-// conversation through the calibrated estimator (PromptChars omits the tool menu — that is not
-// history) so it tracks the model's real tokenizer, and it is deliberately conservative: comparing
-// the whole conversation against the History slice trips slightly before the prompt would overflow.
-// A non-positive historyBudget (the window is unknown, so Allocate returned a zero Allocation)
-// never trips — there is no basis to bound HERE; the engine's trigger substitutes a conservative
-// ceiling before calling in (internal/agent, ADR 0018), the same way the fold budgets its own
-// transcript rather than rendering everything.
-// It builds on the single domain compare (domain.Budget.HistoryExceedsAllocation), so it can
-// never disagree with a hook reading the same Budget.
-func HistoryExceedsAllocation(historyBudget int, e *TokenEstimator, msgs []domain.Message) bool {
-	return domain.Budget{CharsPerToken: e.ratio(), History: historyBudget}.HistoryExceedsAllocation(msgs)
-}
-
 // clampFloat bounds v to [lo, hi].
 func clampFloat(v, lo, hi float64) float64 {
 	if v < lo {
