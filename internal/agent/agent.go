@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"io"
 	"slices"
 	"sync"
 	"time"
@@ -54,6 +55,14 @@ type Agent struct {
 	registry *domain.MechanismRegistry // catalogued + experimental hooks driving the loop
 	tools    *domain.ToolRegistry      // resolved tool set (Config.Tools, or the default registry)
 	guards   security.Guards           // always-on, mode-independent guardrails (dangerous-action + circuit-breaker + audit, D6)
+
+	// ownsUpstream says whether THIS Agent dialled the client in upstream and is therefore the one
+	// allowed to tear it down. New, Resume, SwitchUpstream and a ROUTED spawn each build a client of
+	// their own and set it; a plain spawn speaks over the PARENT's client (newChildAgent) and leaves
+	// it false, as does the fake Responder a test injects through newAgent. Close and SwitchUpstream
+	// consult it before closing, so a shared client outlives every child that borrowed it and is
+	// closed exactly once — by its owner.
+	ownsUpstream bool
 
 	// textParser and stripper are the parse-seam collaborators selected from cfg.Profile at
 	// construction (processing.ParserFor): the text-format tool-call parser recovers a call from
@@ -268,6 +277,7 @@ func New(cfg domain.Config) (*Agent, error) {
 	if err != nil {
 		return nil, err
 	}
+	a.ownsUpstream = true // this Agent dialled that client, so Close is the one that tears it down
 	tap.bind(a)
 	return a, nil
 }
@@ -283,16 +293,37 @@ func Resume(cfg domain.Config, snap domain.Session) (*Agent, error) {
 	if err != nil {
 		return nil, err
 	}
+	a.ownsUpstream = true // as in New: a resumed session dials its own client and owns it
 	tap.bind(a)
 	return a, nil
 }
 
-// Close releases the Agent's resources. Because tools are stateless across Turns
-// (ADR 0008), there is no live tool state to flush — Close tears down the provider
-// client, any MCP connections, and the log sink. The Phase-0 slice holds no such live
-// resources (the responder is in-process and hermetic), so Close is a no-op today; it
-// exists now so embedders write the correct lifecycle before Phase 1 adds real teardown.
-func (a *Agent) Close() error { return nil }
+// Close releases the Agent's resources. Because tools are stateless across Turns (ADR 0008),
+// there is no live tool state to flush; what Close tears down is the provider client — but only
+// the one this Agent OWNS, meaning the client New, Resume, SwitchUpstream or a routed spawn
+// dialled for it (ownsUpstream). A sub-agent speaking over its PARENT's client closes nothing, so
+// the session's connection survives every delegation that borrowed it, and an in-process
+// Responder injected through the internal seam has no connection to close at all.
+//
+// It is idempotent, and it does not end the Agent: closing a client only returns its idle
+// sockets, so a later request dials again. The other live resources of a running session — MCP
+// connections and the log sink — belong to the host that wired them, and cmd/apogee closes both
+// alongside this call rather than through it.
+func (a *Agent) Close() error { return a.closeOwnedUpstream(a.upstream) }
+
+// closeOwnedUpstream tears down up when this Agent owns it and it actually holds a connection —
+// the io.Closer seam provider.Client satisfies and no in-process fake does. It is the single
+// teardown path: Close applies it to the current Upstream, SwitchUpstream to the one it retires.
+func (a *Agent) closeOwnedUpstream(up provider.Responder) error {
+	if !a.ownsUpstream {
+		return nil
+	}
+	closer, ok := up.(io.Closer)
+	if !ok {
+		return nil
+	}
+	return closer.Close()
+}
 
 // ----------------------------------------------------------------------------
 // Stepping & Turns (ADR 0007)

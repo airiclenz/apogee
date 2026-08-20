@@ -169,7 +169,10 @@ func NewClient(baseURL, model string, opts ...Option) *Client {
 	return c
 }
 
-var _ Responder = (*Client)(nil)
+var (
+	_ Responder = (*Client)(nil)
+	_ io.Closer = (*Client)(nil)
+)
 
 // SetModel rebinds the model id this Client sends on the wire — and hints Discover with —
 // for every subsequent request. It exists because the Upstream's loaded model can change
@@ -193,6 +196,27 @@ func (c *Client) activeModel() string {
 	c.modelMu.RLock()
 	defer c.modelMu.RUnlock()
 	return c.model
+}
+
+// Close releases the connections this Client is holding to the Upstream: the keep-alive sockets
+// its HTTP client left idle after earlier requests. It is the teardown half of NewClient, and the
+// seam Agent.Close and Agent.SwitchUpstream reach for when they retire a client they own — a
+// switched-away or finished session must not pin sockets to a server nobody will speak to again.
+//
+// It never fails (the nil return is the io.Closer shape, not a promise the caller must check),
+// it is safe to call twice, and it does not invalidate the Client: requests in flight are
+// untouched — CloseIdleConnections only reaps IDLE sockets — and a later request simply dials
+// again. Concurrency follows the type's contract: closing while another goroutine is mid-Respond
+// or mid-Stream is allowed and costs that call nothing.
+//
+// One caveat about reach: a Client built without WithHTTPClient uses net/http's shared
+// DefaultTransport, so Close reaps the idle sockets in THAT pool rather than in a pool of its own.
+// This is safe by construction (idle only, and every holder re-dials on demand) but it is not
+// confined to this Client. Pass WithHTTPClient carrying a Transport of its own where a private
+// connection pool matters.
+func (c *Client) Close() error {
+	c.httpClient.CloseIdleConnections()
+	return nil
 }
 
 // Respond performs one non-streaming round-trip and assembles the reply. A non-2xx

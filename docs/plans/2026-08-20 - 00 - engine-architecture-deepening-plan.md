@@ -218,7 +218,13 @@ NOTES (2026-08-20): `hookExecutionCtx`'s doc comment said the box "is built from
 
 **Commit:** `refactor(domain): build ConfinementBox through one constructor`
 
-## 10. Agent.Close and SwitchUpstream tear down provider clients
+## 10. Agent.Close and SwitchUpstream tear down provider clients — ✅ DONE (2026-08-20)
+
+NOTES (2026-08-20): tests placed by the package's own file-per-concern split rather than by the item's Files line — `switchupstream_test.go` (its doc says it owns SwitchUpstream coverage) instead of `rebind_test.go`, and `routedspawn_test.go` (its doc says it owns routed-spawn construction, and it already carries the `routingParent`/`routedTarget`/`spawn` helpers) instead of folding the routed case into `subagent_test.go`, which keeps the shared-client test as the item names. The shared `closingResponder` fake went to `harness_test.go`, where the package's other fakes live.
+
+NOTES (2026-08-20): `runSubAgent` gained one `defer sub.Close()`. The item's own defect statement includes "routed spawns build clients nothing closes", and without a caller a routed child's client would still be closed by nobody — the delegation scope is the only one that knows the child is finished. It is a no-op for an unrouted child (ownsUpstream false).
+
+NOTES (2026-08-20): `Client.Close` reaps idle connections through the client's `http.Client`, which by default (no `WithHTTPClient`) is net/http's shared `DefaultTransport` — so the reach is process-wide, though idle-only and therefore safe. Documented on `Close` rather than giving every Client a private Transport, which would make each short-lived client (probe, title, heartbeat) hold its own pool for the full IdleConnTimeout.
 
 **Source:** review defect g; ratified call 9.
 

@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/provider"
 )
 
 // routedTarget is the usable Sub-agent server these tests route to: another box, another model,
@@ -441,5 +442,39 @@ func TestLatchSwapReachesOnlyLaterSpawns(t *testing.T) {
 	if after.cfg.Model != parent.cfg.Model || after.upstream != parent.upstream {
 		t.Errorf("child spawned AFTER the clearing push = model %q, want the parent's %q on the parent's Upstream",
 			after.cfg.Model, parent.cfg.Model)
+	}
+}
+
+// TestRoutedSpawnClosesItsOwnClient: the client a routed spawn DIALS is the child's own, so the
+// child is the one that tears it down — nothing else holds it, and the parent's Close must not be
+// made responsible for a connection to a server the session never spoke to. Ownership and the
+// teardown it authorises are both asserted: the flag alone would not prove Close reaches the wire.
+func TestRoutedSpawnClosesItsOwnClient(t *testing.T) {
+	t.Parallel()
+
+	parent := routingParent(t)
+	parent.SetDelegationTarget(routedTarget())
+
+	child := spawn(t, parent)
+
+	if _, ok := child.upstream.(*provider.Client); !ok {
+		t.Fatalf("routed child Upstream = %T, want the client the spawn dialled", child.upstream)
+	}
+	if !child.ownsUpstream {
+		t.Fatal("routed child does not own the client it dialled — nothing would ever close it")
+	}
+	if parent.ownsUpstream {
+		t.Error("routing gave the parent ownership of a client it did not build")
+	}
+
+	// The real client's Close is invisible from here (it reaps idle sockets), so stand a counting
+	// closer in its place to watch the teardown the ownership flag authorises actually fire.
+	dialled := &closingResponder{}
+	child.upstream = dialled
+	if err := child.Close(); err != nil {
+		t.Fatalf("routed child Close: %v", err)
+	}
+	if dialled.closes != 1 {
+		t.Errorf("routed child Close closed its client %d times, want exactly 1", dialled.closes)
 	}
 }

@@ -76,6 +76,23 @@ func (r blockingResponder) Stream(ctx context.Context, _ provider.Request) iter.
 	}
 }
 
+// closingResponder is echoResponder plus the io.Closer seam the real provider client satisfies:
+// it counts teardowns so the client-lifecycle tests can prove WHO closed an Upstream and how
+// often (Agent.Close, SwitchUpstream retiring a replaced client, and the child that must close
+// nothing because it only borrowed its parent's). A pointer receiver so closes survives the call.
+type closingResponder struct {
+	closes int
+}
+
+func (r *closingResponder) Stream(context.Context, provider.Request) iter.Seq[provider.Delta] {
+	return streamReply("")
+}
+
+func (r *closingResponder) Close() error {
+	r.closes++
+	return nil
+}
+
 // firingHook is a no-op experimental pre-request hook that records that it fired.
 type firingHook struct {
 	fired *bool

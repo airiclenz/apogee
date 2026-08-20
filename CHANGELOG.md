@@ -784,6 +784,17 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **A retired provider client is now closed.** `Agent.Close` was a no-op whose comment predated
+  real clients: a `/server` switch overwrote the session's Upstream without teardown, and a routed
+  delegation dialled a client of its own that nothing ever released — both left idle sockets pinned
+  to servers the session would never speak to again. `provider.Client` gains a `Close` that reaps
+  those idle connections (requests in flight are untouched; a later request simply dials again),
+  and the Agent now tracks which client it OWNS: the one `New`, `Resume`, `SwitchUpstream` or a
+  routed spawn dialled for it. `Close` tears that one down, `SwitchUpstream` tears down the client
+  it replaces, and a routed child's client dies with its delegation. A sub-agent that merely speaks
+  over its parent's connection owns nothing and closes nothing, so a delegation can no longer pull
+  the session's own connection out from under it.
+
 - **A git tool no longer re-asks the repository about filter drivers on every call.** `runGit` is
   the choke point every git tool passes through, and it probed the repository's own config for a
   filter driver — two `git config` subprocesses, one per scope — before each and every invocation,

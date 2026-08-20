@@ -356,3 +356,45 @@ func assertUpstreamUnmoved(t *testing.T, a *Agent, apiKey string) {
 		t.Error("a refused SwitchUpstream still swapped in a real provider client")
 	}
 }
+
+// TestSwitchUpstreamClosesTheClientItReplaces: a switch is the moment the retired client becomes
+// unreachable, so the session tears it down — but only when it OWNS it. A session speaking over a
+// client somebody else built (a shared one, ownsUpstream false) leaves it running, and the client
+// the switch dials is owned in its turn, so the next switch retires it the same way.
+func TestSwitchUpstreamClosesTheClientItReplaces(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		owns       bool
+		wantCloses int
+	}{
+		{name: "owned client is torn down", owns: true, wantCloses: 1},
+		{name: "shared client is left running", owns: false, wantCloses: 0},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			retired := &closingResponder{}
+			a, err := newAgent(baseConfig(&recordingSink{}), retired)
+			if err != nil {
+				t.Fatalf("newAgent: %v", err)
+			}
+			a.ownsUpstream = tc.owns
+
+			if err := a.SwitchUpstream(UpstreamSpec{Endpoint: "http://new.local:1234"}); err != nil {
+				t.Fatalf("SwitchUpstream: %v", err)
+			}
+			if retired.closes != tc.wantCloses {
+				t.Errorf("retired client closed %d times, want %d", retired.closes, tc.wantCloses)
+			}
+			if !a.ownsUpstream {
+				t.Error("the session does not own the client the switch dialled — nothing would ever close it")
+			}
+			if _, ok := a.upstream.(*provider.Client); !ok {
+				t.Errorf("Upstream = %T after the switch, want the fresh *provider.Client", a.upstream)
+			}
+		})
+	}
+}

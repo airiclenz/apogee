@@ -89,6 +89,10 @@ func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall) (domain.T
 	if err != nil {
 		return errorToolResult(call.ID, "could not construct sub-agent: "+err.Error()), dispatchDone
 	}
+	// The delegation is the child's whole life, so this scope is the only one that knows when a
+	// ROUTED child's own client stops being needed — nothing else holds the child to close it later.
+	// For an unrouted child, which borrowed the parent's client, Close is a no-op (ownsUpstream).
+	defer func() { _ = sub.Close() }()
 
 	if err := sub.Submit(domain.UserInput{Text: args.Task}); err != nil {
 		return errorToolResult(call.ID, "could not start sub-agent: "+err.Error()), dispatchDone
@@ -232,6 +236,9 @@ func (a *Agent) newChildAgent(spawnCallID, task, name string) (*Agent, error) {
 	// parent — so tap stays nil there and binding it is a no-op (wireTap).
 	var tap *wireTap
 	upstream := a.upstream
+	// ownsUpstream travels with the client below: a routed spawn DIALS one and hands the child the
+	// right to tear it down, an unrouted spawn borrows the session's and hands over nothing.
+	ownsUpstream := false
 	if target := a.delegationTarget(); target != nil {
 		childCfg.Endpoint = target.Endpoint
 		childCfg.APIKey = target.APIKey
@@ -273,12 +280,16 @@ func (a *Agent) newChildAgent(spawnCallID, task, name string) (*Agent, error) {
 		opts, tap = armWireCapture(childCfg)
 		upstream = provider.NewClient(target.Endpoint, target.Model,
 			append(opts, provider.WithAPIKey(target.APIKey))...)
+		ownsUpstream = true
 	}
 
 	child, err := newAgent(childCfg, upstream)
 	if err != nil {
 		return nil, err
 	}
+	// A routed child closes the client it dialled; an unrouted one must never close the session's
+	// out from under the parent that is still speaking over it (Agent.Close).
+	child.ownsUpstream = ownsUpstream
 	// The child's token estimator needs no reset for a routed spawn — the reason SwitchUpstream and
 	// Rebind reset theirs (a chars→token calibration that described the departed model) cannot
 	// arise here: newAgent seeds every child with a fresh apogeectx.NewTokenEstimator, and

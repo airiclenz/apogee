@@ -859,3 +859,44 @@ func TestSubAgent_NamedDelegationStillReportsBack(t *testing.T) {
 		t.Errorf("named sub_agent result = %q, want the child's final message", res.Content)
 	}
 }
+
+// TestUnroutedChildNeverClosesTheParentsClient: an unrouted spawn BORROWS the session's Upstream,
+// so the child owns nothing and its Close leaves the connection the parent is still speaking over
+// exactly as it was. The parent remains the one owner, and its own Close is what finally tears the
+// client down — the whole point of tracking ownership rather than closing whatever is in hand.
+func TestUnroutedChildNeverClosesTheParentsClient(t *testing.T) {
+	t.Parallel()
+
+	shared := &closingResponder{}
+	parent, err := newAgent(subAgentConfig(&recordingSink{}, domain.ModeAskBefore), shared)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	parent.ownsUpstream = true // what New does for a session that dialled its own client
+
+	child, err := parent.newChildAgent("c1", "summarise the repo", "")
+	if err != nil {
+		t.Fatalf("newChildAgent: %v", err)
+	}
+	if child.upstream != provider.Responder(shared) {
+		t.Fatalf("unrouted child Upstream = %T, want the parent's shared responder", child.upstream)
+	}
+	if child.ownsUpstream {
+		t.Error("unrouted child claims to own the parent's client")
+	}
+
+	if err := child.Close(); err != nil {
+		t.Fatalf("child Close: %v", err)
+	}
+	if shared.closes != 0 {
+		t.Fatalf("the child closed the parent's client %d times, want 0 — the session still speaks over it",
+			shared.closes)
+	}
+
+	if err := parent.Close(); err != nil {
+		t.Fatalf("parent Close: %v", err)
+	}
+	if shared.closes != 1 {
+		t.Errorf("the owning parent closed its client %d times, want exactly 1", shared.closes)
+	}
+}

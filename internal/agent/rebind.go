@@ -294,6 +294,9 @@ type UpstreamSpec struct {
 // What resets, with Rebind's own rationale: the token estimator (its chars→token calibration
 // described a model this session no longer speaks to) and the compaction saturation latch (it was
 // judged against a window that is no longer bound).
+// What is TORN DOWN: the client being replaced, when this session owns it (ratified call 9) — the
+// switch is the point where it becomes unreachable, and nothing else would ever close it. The new
+// client is owned in its turn, so a later switch, or Close, retires it the same way.
 func (a *Agent) SwitchUpstream(spec UpstreamSpec) error {
 	if a.turns.inExchange {
 		return domain.ErrInputPending
@@ -310,7 +313,15 @@ func (a *Agent) SwitchUpstream(spec UpstreamSpec) error {
 	// speak over the new connection.
 	opts, tap := armWireCapture(a.cfg)
 	tap.bind(a)
+	// The retired client goes down with the server it dialled: a switch is the one moment where a
+	// client this session OWNS stops being reachable, so skipping the teardown would strand its
+	// idle sockets to the old server for the rest of the session. A client shared from a parent is
+	// left running — it is not this Agent's to close. The error is dropped deliberately rather than
+	// swallowed: the switch has already committed above, and provider teardown reports nothing a
+	// caller could act on (Client.Close always succeeds), so surfacing it would say the move failed.
+	_ = a.closeOwnedUpstream(a.upstream)
 	a.upstream = provider.NewClient(spec.Endpoint, "", append(opts, provider.WithAPIKey(spec.APIKey))...)
+	a.ownsUpstream = true
 	a.cfg.Endpoint = spec.Endpoint
 	a.cfg.APIKey = spec.APIKey
 	a.cfg.Model = ""
