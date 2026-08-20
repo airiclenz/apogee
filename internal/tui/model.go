@@ -2299,11 +2299,11 @@ func (m Model) applyStickyHeader(view string) string {
 
 // renderScrollbar draws the one-column gutter reserved at the transcript's right edge (layout).
 // When the content overflows the viewport it shows a thumb sized to the visible fraction and
-// positioned by the scroll percent; when everything fits it is blank, so the bar appears only
-// while there is something to scroll. Thumb and track are the same axis in two weights
-// (glyphScrollThumb / glyphScrollTrack, theme.go), so the column reads as one line that thickens
-// where the view sits. The returned block is exactly vp.Height() rows tall so it lines up with the
-// viewport view it is joined to.
+// positioned by the window's own offset (scrollbarThumb, boxdraw.go); when everything fits it is
+// blank, so the bar appears only while there is something to scroll. Thumb and track are the same
+// axis in two weights (glyphScrollThumb / glyphScrollTrack, theme.go), so the column reads as one
+// line that thickens where the view sits. The returned block is exactly vp.Height() rows tall so it
+// lines up with the viewport view it is joined to.
 //
 // It takes the viewport it is drawing FOR rather than reading the Model's, because the frame is
 // composed at the height the overlays leave (transcriptRows) on a local copy: sizing the thumb
@@ -2322,8 +2322,10 @@ func (m Model) renderScrollbar(vp viewport.Model) string {
 		}
 		return strings.Join(rows, "\n")
 	}
-	thumb := max(1, h*h/total)
-	pos := int(vp.ScrollPercent() * float64(h-thumb)) // 0 (top) … h-thumb (bottom)
+	// A painted line of this bar IS a transcript line, so the window over the content and the height
+	// the bar is drawn at are the same count here; the shared geometry takes the two apart for the
+	// popup bar, where one row can cost several lines.
+	pos, thumb := scrollbarThumb(vp.YOffset(), h, total, h) // pos: 0 (top) … h-thumb (bottom)
 	for i := range rows {
 		if i >= pos && i < pos+thumb {
 			rows[i] = m.th.scrollThumb.Render(glyphScrollThumb)

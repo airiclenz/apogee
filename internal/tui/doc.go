@@ -860,8 +860,9 @@
 // painter above shares; boxdraw.go the box and join primitives beside it, lifted out of model.go
 // (ADR 0043) — the width-authority squaring a painted row is finished with ([squareLine],
 // [squareOnField]), the four-sided border the two boxed surfaces are drawn in ([drawBox],
-// [drawTitledBox]) and the two joins that stack the frame and hang the transcript's scrollbar in
-// the painter's own measure rather than lipgloss's ([Model.joinFrame], [Model.joinScrollbar]);
+// [drawTitledBox]), the two joins that stack the frame and hang the transcript's scrollbar in
+// the painter's own measure rather than lipgloss's ([Model.joinFrame], [Model.joinScrollbar]) and
+// the one thumb geometry both scroll bars are placed from ([scrollbarThumb]);
 // and chromelayout.go the two frame-arithmetic helpers
 // ([inputContentRows], [clampInt]) the input box and the overlays size themselves with;
 // and doc.go this narration.

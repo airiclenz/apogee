@@ -222,6 +222,17 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **One thumb geometry behind both scroll bars (`internal/tui/boxdraw.go`).** The transcript's
+  gutter and the popup panes' overflow bar sized and placed their thumbs with two copies of the same
+  arithmetic, and the transcript's copy conflated the two counts a scroll bar carries — the rows the
+  window shows and the lines the bar is painted in, which coincide in the transcript and do not in a
+  popup, where one row can cost several lines. Both bars now ask one `scrollbarThumb(start, window,
+  total, height)`, which keeps those counts apart, and the transcript passes its own pair explicitly
+  rather than folding them into a scroll percent. The placement is the same arithmetic it always
+  was, computed in integers end to end: the transcript's position no longer round-trips through
+  `viewport.ScrollPercent`'s float, so at the rare offset where that float truncated a row early the
+  thumb now sits where the exact division puts it. The scroll-bar suites pass unchanged.
+
 - **One parked-call helper behind both human gates (`internal/tui/parkedcall.go`).**
   `uiApprover.Approve` and `uiAsker.Ask` were structurally identical rendezvous bodies — make a
   buffered reply channel, send the envelope through the late-bound program, select on the reply

@@ -123,6 +123,35 @@ func drawTitledBox(measure widthAuthority, style lipgloss.Style, content []strin
 	return append(rows, bottom.Render(border.BottomLeft+strings.Repeat(border.Bottom, span)+border.BottomRight))
 }
 
+// scrollbarThumb places the position marker on a scroll bar: given the window a surface shows
+// (start, window) over the whole list (total) and the height the bar is painted at, it answers where
+// the thumb starts and how many painted lines it spans. Both bars are placed from it — the
+// transcript's gutter ([Model.renderScrollbar]) and a popup row block's overflow bar
+// (popupRowScrollbar).
+//
+// The two counts a scroll bar conflates are separate parameters here, because a painted LINE of the
+// bar is not always a ROW of the list. In the transcript a line is a row and the two coincide; a
+// popup row can cost several lines. So the thumb is SIZED from the row counts — the seated window
+// over the whole list — and DRAWN in the bar's painted lines. The window's position maps the same
+// way: start over the rows the list cannot show at once, onto the lines the thumb leaves free. That
+// puts the thumb flush at the top with the first row seated and flush at the bottom with the last
+// one, at every height in between the surface can be drawn at, and never smaller than one line, so a
+// list long enough to round the thumb away still shows where the view sits.
+//
+// A window that shows the whole list, or a bar with no lines to paint, has no position to describe:
+// the answer is a zero-length thumb. Callers paint that case themselves — a blank gutter, an
+// unbarred block — before they ever ask.
+func scrollbarThumb(start, window, total, height int) (pos, size int) {
+	if height <= 0 || window <= 0 || window >= total {
+		return 0, 0
+	}
+	size = clampInt(height*window/total, 1, height)
+	// start is clamped the way the viewport clamps its own scroll percent: a window reported past the
+	// end of the list seats the thumb flush at the bottom rather than off the end of the bar.
+	pos = clampInt(start, 0, total-window) * (height - size) / (total - window) // 0 … height-size
+	return pos, size
+}
+
 // joinScrollbar hangs the scroll-bar gutter off the right edge of the transcript body: every body
 // row is squared to the viewport's width first (squareLine), then its bar cell is appended.
 //

@@ -676,12 +676,10 @@ func popupRowLines(th theme, spec popupSpec, inner int, blackFill lipgloss.Style
 // much as the rows themselves — so the bar reads as one stroke down the block's right edge rather
 // than as a dashed one.
 //
-// The arithmetic is the transcript's (Model.renderScrollbar) with the two counts it conflates pulled
-// apart: there a painted line IS a row, here a row can cost several, so the thumb is sized from the
-// ROW counts — the seated window over the whole list — and drawn in the block's painted LINES. The
-// window's position maps the same way, start over the rows the list cannot show at once onto the
-// lines the thumb leaves free, which puts the thumb flush at the top with the first row seated and
-// flush at the bottom with the last one, at every height in between the pane can be drawn at.
+// The geometry is the shared one (scrollbarThumb, boxdraw.go), which the transcript's gutter is
+// placed from too. It is asked with the two counts a bar conflates pulled apart: there a painted line
+// IS a row, here a row can cost several, so the thumb is sized from the ROW counts — the seated
+// window over the whole list — and drawn in the block's painted LINES.
 func popupRowScrollbar(th theme, block popupRowBlock, rows, rowInner int, blackFill lipgloss.Style) popupRowBlock {
 	h, shown := len(block.lines), block.end-block.start
 	if h == 0 || shown <= 0 || shown >= rows {
@@ -689,8 +687,7 @@ func popupRowScrollbar(th theme, block popupRowBlock, rows, rowInner int, blackF
 		// the narrower composition: either way there is no window to describe.
 		return block
 	}
-	thumb := clampInt(h*shown/rows, 1, h)
-	pos := block.start * (h - thumb) / (rows - shown) // 0 (top) … h-thumb (bottom)
+	pos, thumb := scrollbarThumb(block.start, shown, rows, h) // pos: 0 (top) … h-thumb (bottom)
 	for i, line := range block.lines {
 		cell := th.scrollTrack.Render(glyphScrollTrack)
 		if i >= pos && i < pos+thumb {

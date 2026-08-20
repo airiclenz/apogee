@@ -1023,7 +1023,11 @@ helper.
 
 **Commit:** `refactor(tui): share one parked-call helper and name the cross-goroutine idioms`
 
-## 35. One scrollbar thumb-geometry function
+## 35. One scrollbar thumb-geometry function — ✅ DONE (2026-08-20)
+
+NOTES (2026-08-20): the item says "Rendering byte-identical", and it is not quite — the transcript's old position went through `viewport.ScrollPercent()`'s float before truncating, which disagrees with the shared integer division at rare offsets (brute force over height ≤ 80, total ≤ 3000, every offset: ~4.2k mismatches out of ~3.6e8 combinations, e.g. height 23 / total 265 / offset 165 → old 14, new 15, exact 15 — the float always landed the row early). Adopted the integer general case as the item directs ("popup.go's version is the general case … the transcript … calls it with its two conflated counts pulled apart"); every existing test passes unchanged and no golden pins a thumb row.
+
+NOTES (2026-08-20): took the item's stated mechanical choice and put `scrollbarThumb` in boxdraw.go beside `joinScrollbar` rather than in popup.go, so the transcript's model.go does not reach into the popup file for arithmetic; doc.go's boxdraw.go line gained the symbol (no new file, so the doc map is otherwise unchanged).
 
 **Source:** review §Smaller findings, row 9.
 
