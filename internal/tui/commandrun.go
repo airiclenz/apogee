@@ -216,12 +216,13 @@ func (m Model) runCommand(parsed parsedInput) (tea.Model, tea.Cmd) {
 	}
 
 	// /continue and /compact are the two commands that open an Exchange, so they answer to the
-	// heartbeat exactly as a typed message does (blockedUpstream). The purely local verbs below —
+	// heartbeat exactly as a typed message does (blockedUpstream). Which verbs those are is the
+	// table's own commandSpec.opensExchange, not a name list here: the purely local verbs below —
 	// /clear, /sessions, /version, /confine, /server — stay live while the server is away (moving to
 	// another server is the one useful thing to do with an unreachable one); /model consults the
 	// heartbeat itself, because "which models are served" is a question only a reachable server can
 	// answer (modelSwitchBlocked owns that ladder).
-	if m.blockedUpstream() && (parsed.command == "continue" || parsed.command == "compact") {
+	if m.blockedUpstream() && parsed.opensExchange() {
 		m.transcript.addNote(m.upstreamBlockNote())
 		m.layout()
 		return m, nil
@@ -292,7 +293,7 @@ func (m Model) runCommand(parsed parsedInput) (tea.Model, tea.Cmd) {
 		// List, switch or export a colour scheme (colorscheme.go, ADR 0040). Synchronous and
 		// idle-safe like /settings, whose write and apply seams the switch form reuses in full: no
 		// engine call and no worker, only one config key and — for the export — one file.
-		return m.runColorScheme(parsed.colorScheme)
+		return m.runColorScheme(verbArgsOf[colorSchemeArgs](parsed))
 
 	case "rename":
 		// Name THIS session: take the argument as the title, or — bare — ask the model for one
@@ -377,20 +378,20 @@ func (m Model) runCommand(parsed parsedInput) (tea.Model, tea.Cmd) {
 	case "confine":
 		// Report or swap the blast radius. Synchronous and idle-safe like /clear: no upstream
 		// call is involved, only the engine's live flag and (for --save) one config write.
-		return m.runConfine(parsed.confine)
+		return m.runConfine(verbArgsOf[confineArgs](parsed))
 
 	case "effort":
 		// Report or move this session's Thinking effort (ADR 0050). Synchronous like /confine and
 		// safe mid-Exchange for the reason /confine's status form is: the engine door it drives is
 		// goroutine-safe and is read when the NEXT request is built, never during the one in flight.
-		return m.runEffort(parsed.effort)
+		return m.runEffort(verbArgsOf[effortArgs](parsed))
 
 	case "undo":
 		// Preview, or execute, the revert of the last exchange's file writes (undo.go, ADR 0051).
 		// Synchronous like /confine — the engine call is a journal read or a batch of restores, no
 		// upstream and no worker — but idle-only where /confine's report is not: it WRITES to the
 		// workspace, and the group it reverts is the one a running Step is still filling.
-		return m.runUndo(parsed.undo)
+		return m.runUndo(verbArgsOf[undoAction](parsed))
 	}
 	return m, nil
 }

@@ -31,11 +31,12 @@ const (
 // for every takesArgs verb (nil for the rest, which ignore what follows them, as they always
 // have); rest carries the SAME arguments unsplit — the line's raw tail, for the one verb whose
 // argument is prose rather than tokens (/schedule's prompt, which must reach the model spaced and
-// lined as it was typed); confine carries the dedicated argument parse of a /confine line (zero value — a status
-// report — for every other verb); colorScheme carries the same for a /color-scheme line (zero value — a
-// listing — for every other verb); effort carries the same for an /effort line (zero value — a
-// resolution report — for every other verb); undo carries the same for an /undo line (zero value —
-// a preview — for every other verb); and err is set when a
+// lined as it was typed); verbArgs carries the dedicated argument parse of a verb that declares a
+// grammar of its own — ONE opaque value rather than one typed field per such verb, produced by that
+// verb's commandSpec.parseArgs hook and read back through [verbArgsOf], which answers the zero value
+// of the type asked for on every line the hook did not run for (that zero value IS each grammar's
+// bare form: a status report for /confine, a listing for /color-scheme, a resolution report for
+// /effort, a preview for /undo, so no reader needs to test which verb it holds); and err is set when a
 // recognised verb was given arguments it does not understand. An arguments error stays a
 // kindCommand: the router reports the usage line rather than sending the line to the agent or
 // silently doing nothing. For kindMessage, text is the line (trimmed, with @tokens and "/id"
@@ -46,28 +47,25 @@ const (
 // text is the lone token as typed (leading slash included) — the refusal note names it back
 // (unknownSlashNote) and nothing else on the value is set.
 type parsedInput struct {
-	kind        inputKind
-	command     string
-	args        []string
-	rest        string
-	confine     confineArgs
-	colorScheme colorSchemeArgs
-	effort      effortArgs
-	undo        undoAction
-	err         error
-	text        string
-	fileRefs    []string
-	skillIDs    []string
-	skillSpans  []skillSpan
+	kind       inputKind
+	command    string
+	args       []string
+	rest       string
+	verbArgs   any
+	err        error
+	text       string
+	fileRefs   []string
+	skillIDs   []string
+	skillSpans []skillSpan
 }
 
 // commandSpec is one verb of the "/" namespace: what the parser does with it and what the
 // dropdown shows for it. name is the verb without its leading slash; summary is the one-line
-// description the dropdown displays beside it. The four flags say how the verb behaves:
+// description the dropdown displays beside it. The six flags say how the verb behaves:
 //
 //   - takesArgs — the verb reads what follows it, and parseInput hands it the tokens in
-//     parsedInput.args. The two verbs whose grammar is richer than a token list — /confine and
-//     /color-scheme — keep their dedicated parses (parseConfine, parseColorScheme) on top of them;
+//     parsedInput.args. A verb whose grammar is richer than a token list declares that grammar on
+//     the same row, as the parseArgs hook below, and gets its dedicated parse on top of the tokens;
 //     every non-takesArgs verb ignores surplus tokens, as it always has. It is also what the
 //     dropdown reads to COMPLETE such a verb rather than run it
 //     (acceptAutocomplete), unless the row also carries runsBareAtAccept: firing a verb that is not
@@ -94,6 +92,27 @@ type parsedInput struct {
 //     spend a walk step on a keystroke the human can retype. Every other sent line — messages,
 //     Interjections, every other whole-line /command — stays recallable (parsedInput.recallable is
 //     where the flag is read).
+//   - opensExchange — running this verb opens an Exchange with the model, so it answers to the
+//     heartbeat exactly as a typed message does: /continue and /compact are refused with
+//     upstreamBlockNote while there is nothing to send to (parsedInput.opensExchange is where the
+//     flag is read). Every other verb is purely local and stays live while the server is away —
+//     switching to another server is the one useful thing to do with an unreachable one — and
+//     /model consults the heartbeat itself, because "which models are served" is a question only a
+//     reachable server can answer (modelSwitchBlocked owns that ladder).
+//   - touchesServer — the verb switches the session's server or actuates it, so the actuation latch
+//     refuses it while a launcher verb is in flight: the server is mid-restart, and there is nothing
+//     stable to switch (actuationBlocked, ADR 0029 D5). The latch refuses the opensExchange pair for
+//     the neighbouring reason — there is nothing to send to — so it reads the two flags together
+//     rather than keeping a verb list of its own, and a future verb that opens an Exchange is
+//     latched by declaring that one flag.
+//
+// parseArgs is the verb's own grammar, for the rows whose arguments are richer than a token list.
+// parseInput calls it with the verb's tokens and puts what it returns on parsedInput.verbArgs,
+// whole and opaque; runCommand reads it back as its own type through [verbArgsOf]. A nil hook means
+// the verb has no grammar beyond the tokens themselves (parsedInput.args) or the line's raw tail
+// (parsedInput.rest — /schedule's prompt), which is every other row. A hook that cannot parse what
+// it was given returns its own zero value beside an error carrying the usage line, and the router
+// reports that line rather than driving the verb.
 type commandSpec struct {
 	name             string
 	summary          string
@@ -101,6 +120,17 @@ type commandSpec struct {
 	runsBareAtAccept bool
 	whileRunning     bool
 	noRecall         bool
+	opensExchange    bool
+	touchesServer    bool
+	parseArgs        func([]string) (any, error)
+}
+
+// verbGrammar adapts one verb's own parse — a function from argument tokens to that verb's argument
+// type — into the commandSpec.parseArgs hook's opaque shape, so a row can name its grammar directly
+// (parseArgs: verbGrammar(parseConfine)) instead of wrapping it by hand. It is the write side of the
+// one opaque args value; [verbArgsOf] is the read side, and the two are inverse.
+func verbGrammar[T any](parse func([]string) (T, error)) func([]string) (any, error) {
+	return func(args []string) (any, error) { return parse(args) }
 }
 
 // commandSpecs is THE registry of "/" verbs, in display order (alphabetical — see below): one table
@@ -186,24 +216,24 @@ type commandSpec struct {
 // quietly un-sorting the menu.
 var commandSpecs = []commandSpec{
 	{name: "clear", summary: "reset the model's memory of this session", noRecall: true},
-	{name: "color-scheme", summary: "list, switch or export the screen's colour schemes", takesArgs: true},
-	{name: "compact", summary: "summarise the conversation to reclaim context"},
-	{name: "confine", summary: "report or change auto mode's blast radius", takesArgs: true, whileRunning: true},
-	{name: "continue", summary: "ask the model to keep going"},
-	{name: "effort", summary: "set how hard the model thinks — off, low, medium, high, or auto", takesArgs: true, whileRunning: true},
+	{name: "color-scheme", summary: "list, switch or export the screen's colour schemes", takesArgs: true, parseArgs: verbGrammar(parseColorScheme)},
+	{name: "compact", summary: "summarise the conversation to reclaim context", opensExchange: true},
+	{name: "confine", summary: "report or change auto mode's blast radius", takesArgs: true, whileRunning: true, parseArgs: verbGrammar(parseConfine)},
+	{name: "continue", summary: "ask the model to keep going", opensExchange: true},
+	{name: "effort", summary: "set how hard the model thinks — off, low, medium, high, or auto", takesArgs: true, whileRunning: true, parseArgs: verbGrammar(parseEffort)},
 	{name: "inspect", summary: "show the recent raw request and response traffic", whileRunning: true, noRecall: true},
-	{name: "model", summary: "switch model — the launcher's profiles, or what the server serves", takesArgs: true, runsBareAtAccept: true},
+	{name: "model", summary: "switch model — the launcher's profiles, or what the server serves", takesArgs: true, runsBareAtAccept: true, touchesServer: true},
 	{name: "new", summary: "start a fresh conversation (same as /clear)", noRecall: true},
 	{name: "rename", summary: "rename this session (bare = ask the model)", takesArgs: true},
 	{name: "schedule", summary: "run a prompt on a cycle (bare = list what is live)", takesArgs: true, whileRunning: true},
 	{name: "schedule-stop", summary: "take a schedule off the clock", whileRunning: true},
-	{name: "server", summary: "switch to another configured server", takesArgs: true, runsBareAtAccept: true},
+	{name: "server", summary: "switch to another configured server", takesArgs: true, runsBareAtAccept: true, touchesServer: true},
 	{name: "sessions", summary: "browse, resume, rename or delete saved sessions"},
 	{name: "settings", summary: "view the configuration this session resolved", noRecall: true},
 	{name: "skills", summary: "list the available skills", whileRunning: true},
-	{name: "stop-server", summary: "stop the server this session is on"},
-	{name: "undo", summary: "put back the files the last exchange wrote (bare = preview)", takesArgs: true},
-	{name: "unload-model", summary: "free the model of the server this session is on"},
+	{name: "stop-server", summary: "stop the server this session is on", touchesServer: true},
+	{name: "undo", summary: "put back the files the last exchange wrote (bare = preview)", takesArgs: true, parseArgs: verbGrammar(parseUndo)},
+	{name: "unload-model", summary: "free the model of the server this session is on", touchesServer: true},
 	{name: "usage", summary: "session token usage — main agent and every sub-agent", whileRunning: true, noRecall: true},
 	{name: "version", summary: "show the apogee version", whileRunning: true},
 }
@@ -222,19 +252,16 @@ func parseInput(raw string, known func(string) bool) parsedInput {
 	if cmd, rest, ok := matchCommand(trimmed); ok {
 		parsed := parsedInput{kind: kindCommand, command: cmd}
 		args := strings.Fields(rest)
-		if spec, found := commandByName(cmd); found && spec.takesArgs {
-			// A verb that does not read its arguments carries neither form (commandSpec).
-			parsed.args, parsed.rest = args, rest
-		}
-		switch cmd {
-		case "confine":
-			parsed.confine, parsed.err = parseConfine(args)
-		case "color-scheme":
-			parsed.colorScheme, parsed.err = parseColorScheme(args)
-		case "effort":
-			parsed.effort, parsed.err = parseEffort(args)
-		case "undo":
-			parsed.undo, parsed.err = parseUndo(args)
+		if spec, found := commandByName(cmd); found {
+			if spec.takesArgs {
+				// A verb that does not read its arguments carries neither form (commandSpec).
+				parsed.args, parsed.rest = args, rest
+			}
+			if spec.parseArgs != nil {
+				// The verb's own grammar, declared on its row: the parse travels whole and opaque,
+				// so this layer never learns which verbs have one (commandSpec.parseArgs).
+				parsed.verbArgs, parsed.err = spec.parseArgs(args)
+			}
 		}
 		return parsed
 	}
@@ -306,6 +333,17 @@ func commandByName(name string) (commandSpec, bool) {
 	return commandSpec{}, false
 }
 
+// verbArgsOf reads the opaque argument parse back as the type the verb's own grammar produced. A
+// line whose verb declares no grammar — and a line asked for a type other than the one its hook
+// returned — yields that type's zero value, which is deliberate: every grammar here words its BARE
+// form as its zero value (confineStatus, a scheme listing, a resolution report, an /undo preview),
+// so a reader can ask without first testing which verb it holds. It is the read side of
+// parsedInput.verbArgs; [verbGrammar] is the write side.
+func verbArgsOf[T any](p parsedInput) T {
+	value, _ := p.verbArgs.(T)
+	return value
+}
+
 // safeWhileRunning reports whether this parsed command LINE may be driven while a worker works.
 // It is the whole of the per-command policy, in one pure place both ⏎ (stageInterjection) and the
 // dropdown's accept (acceptAutocomplete) read, so the menu's "— idle only" tag and what the key
@@ -323,7 +361,17 @@ func commandByName(name string) (commandSpec, bool) {
 // mistyped /confine earns its usage line mid-run exactly as it does at idle.
 func (p parsedInput) safeWhileRunning() bool {
 	spec, ok := commandByName(p.command)
-	return ok && spec.whileRunning && p.confine.action == confineStatus
+	return ok && spec.whileRunning && verbArgsOf[confineArgs](p).action == confineStatus
+}
+
+// opensExchange reports whether driving this parsed command LINE would open an Exchange with the
+// model. It is the one place commandSpec.opensExchange is read on the send path — the heartbeat's
+// gate in runCommand — so /continue and /compact answer to an unreachable server exactly as a typed
+// message does. A verb the table does not carry opens nothing, for the same reason a missing spec
+// reads not-safe-while-running: the table is the authority.
+func (p parsedInput) opensExchange() bool {
+	spec, ok := commandByName(p.command)
+	return ok && spec.opensExchange
 }
 
 // recallable reports whether this parsed command LINE is recorded as a recallable prompt. It is

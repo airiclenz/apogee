@@ -651,7 +651,15 @@ order matches the documented precedence.
 
 **Commit:** `refactor(tui): delegate every Update arm to concern folds and table the key-claim order`
 
-## 22. The command table absorbs its satellite lists
+## 22. The command table absorbs its satellite lists — ✅ DONE (2026-08-20)
+
+NOTES (2026-08-20): `touchesServer` is carried by the FOUR verbs that switch or actuate the server (/model, /server, /stop-server, /unload-model), not by all six names the latch used to list, and `actuationBlocked` reads `spec.opensExchange || spec.touchesServer`. Stating the /continue and /compact pair on two flags would be a fact one row could lose without the other noticing, and deriving it is what makes a future Exchange-opening verb latched by the one flag it already declares — which is the drift the item exists to end. The six blocked names are unchanged and are now pinned by name in `TestTheActuationLatchRefusesExactlyTheServerAndExchangeVerbs`.
+
+NOTES (2026-08-20): the item's structural test — "every arg-taking spec has a `parseArgs` hook" — cannot hold on the table as it stands, and the true statement was pinned instead. Four of the eight `takesArgs` verbs have no grammar of their own: /model, /server and /rename read the plain token list, and /schedule reads the line's RAW TAIL, which a `func([]string) (any, error)` hook cannot produce at all. `TestOnlyTheGrammarVerbsCarryAParseArgsHook` pins what is real — a hook only ever sits on a row the parser hands arguments to, every hook words its BARE form as a report rather than an error (which is what lets `verbArgsOf` answer a zero value for a line the hook never ran for), and the set carrying one is named, exactly the switch that was deleted, so a fifth grammar is a deliberate edit at that line rather than a silent one.
+
+NOTES (2026-08-20): 14 test lines changed ACCESSOR FORM only — `got.confine` → `verbArgsOf[confineArgs](got)` and its three siblings, in `command_test.go` and `undo_test.go` — because the four typed fields became one opaque value. No expectation was changed, weakened, added or removed, and no existing test file gained a test.
+
+NOTES (2026-08-20): `doc.go` was deliberately left untouched. Its command.go narration calls /confine "one of the two argument-taking verbs with a grammar of its own (/color-scheme is the other)", which is a count staled by the items that added /effort and /undo, not by this move — everything the sentence says about how a grammar is READ is still true. Pre-existing debt this change merely makes easier to see (the table now declares four hooks), so it is reported rather than fixed here.
 
 **Source:** review §Candidate 10 + Appendix B (the literal-scatter map).
 

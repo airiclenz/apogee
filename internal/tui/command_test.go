@@ -125,16 +125,16 @@ func TestParseEffortVocabulary(t *testing.T) {
 				if !strings.Contains(got.err.Error(), effortUsage) {
 					t.Errorf("error %q does not teach the vocabulary %q", got.err, effortUsage)
 				}
-				if got.effort != (effortArgs{}) {
-					t.Errorf("effort = %+v on a rejected line, want the zero value", got.effort)
+				if effort := verbArgsOf[effortArgs](got); effort != (effortArgs{}) {
+					t.Errorf("effort = %+v on a rejected line, want the zero value", effort)
 				}
 				return
 			}
 			if got.err != nil {
 				t.Fatalf("parseInput(%q).err = %v, want none", c.line, got.err)
 			}
-			if got.effort != c.want {
-				t.Errorf("parseInput(%q).effort = %+v, want %+v", c.line, got.effort, c.want)
+			if effort := verbArgsOf[effortArgs](got); effort != c.want {
+				t.Errorf("parseInput(%q).effort = %+v, want %+v", c.line, effort, c.want)
 			}
 		})
 	}
@@ -343,6 +343,84 @@ func TestOnlyResetAndPureUIVerbsAreNotRecallable(t *testing.T) {
 
 	if want := []string{"clear", "inspect", "new", "settings", "usage"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("noRecall verbs = %v, want exactly %v — every other sent line stays recallable", got, want)
+	}
+}
+
+// Drift guard on the Exchange gate: exactly /continue and /compact open an Exchange with the model,
+// so exactly those two answer to an unreachable server the way a typed message does (runCommand
+// reads the flag through parsedInput.opensExchange). It replaced a name comparison written in
+// commandrun.go, where forgetting a verb failed nothing a human could see — the verb simply ran
+// into a dead upstream — so the set is pinned by name here rather than by count.
+func TestOnlyTheCannedTurnAndCompactionOpenAnExchange(t *testing.T) {
+	var got []string
+	for _, spec := range commandSpecs {
+		if spec.opensExchange {
+			got = append(got, spec.name)
+		}
+	}
+
+	if want := []string{"compact", "continue"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("opensExchange verbs = %v, want exactly %v — every other verb is purely local", got, want)
+	}
+}
+
+// Drift guard on the server set and on the latch that reads it. actuationBlocked used to carry a
+// six-name list of its own, pinned by nothing: a verb added to the namespace and forgotten there
+// ran straight into a server mid-restart and said nothing about it. Both halves are pinned — the
+// flag's own set, and the six verbs the latch refuses because of the two flags together — because
+// the second is the one a reader of the latch actually asks about.
+func TestTheActuationLatchRefusesExactlyTheServerAndExchangeVerbs(t *testing.T) {
+	var touching []string
+	for _, spec := range commandSpecs {
+		if spec.touchesServer {
+			touching = append(touching, spec.name)
+		}
+	}
+	if want := []string{"model", "server", "stop-server", "unload-model"}; !reflect.DeepEqual(touching, want) {
+		t.Errorf("touchesServer verbs = %v, want exactly %v", touching, want)
+	}
+
+	var blocked []string
+	for _, spec := range commandSpecs {
+		if actuationBlocked(spec.name) {
+			blocked = append(blocked, spec.name)
+		}
+	}
+	want := []string{"compact", "continue", "model", "server", "stop-server", "unload-model"}
+	if !reflect.DeepEqual(blocked, want) {
+		t.Errorf("latch-blocked verbs = %v, want exactly %v — everything else stays live", blocked, want)
+	}
+
+	if actuationBlocked("no-such-verb") {
+		t.Error("the latch blocked a name the table does not carry, want it live: the table is the authority")
+	}
+}
+
+// Structural guard on the grammar hook. A verb whose arguments are richer than a token list
+// declares its own parse on its own row (commandSpec.parseArgs) instead of in a second switch keyed
+// by name, and three things follow. A hook only ever sees arguments the parser hands over, so a
+// hook on a row that does not take arguments is dead code. Every grammar here words its BARE form
+// as a report rather than an error, which is what lets verbArgsOf answer the zero value for a line
+// the hook never ran for. And the set carrying one is named: it is exactly the switch that was
+// deleted, so a fifth grammar is a deliberate edit at this line rather than a silent one.
+func TestOnlyTheGrammarVerbsCarryAParseArgsHook(t *testing.T) {
+	var got []string
+	for _, spec := range commandSpecs {
+		if spec.parseArgs == nil {
+			continue
+		}
+		got = append(got, spec.name)
+
+		if !spec.takesArgs {
+			t.Errorf("/%s carries a parseArgs hook but not takesArgs — the parser would never call it", spec.name)
+		}
+		if _, err := spec.parseArgs(nil); err != nil {
+			t.Errorf("/%s bare = %v, want no error — a bare grammar verb reports, it does not refuse", spec.name, err)
+		}
+	}
+
+	if want := []string{"color-scheme", "confine", "effort", "undo"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("verbs with a grammar of their own = %v, want exactly %v", got, want)
 	}
 }
 
@@ -691,8 +769,8 @@ func TestParseInputConfineGrammar(t *testing.T) {
 			if got.err != nil {
 				t.Fatalf("parseInput(%q).err = %v, want nil", c.in, got.err)
 			}
-			if got.confine != c.want {
-				t.Errorf("parseInput(%q).confine = %+v, want %+v", c.in, got.confine, c.want)
+			if confine := verbArgsOf[confineArgs](got); confine != c.want {
+				t.Errorf("parseInput(%q).confine = %+v, want %+v", c.in, confine, c.want)
 			}
 		})
 	}
@@ -724,8 +802,8 @@ func TestParseInputConfineArgumentErrors(t *testing.T) {
 			if !strings.Contains(got.err.Error(), confineUsage) {
 				t.Errorf("parseInput(%q).err = %q, want it to carry %q", c.in, got.err, confineUsage)
 			}
-			if got.confine != (confineArgs{}) {
-				t.Errorf("parseInput(%q).confine = %+v, want the zero value on an error", c.in, got.confine)
+			if confine := verbArgsOf[confineArgs](got); confine != (confineArgs{}) {
+				t.Errorf("parseInput(%q).confine = %+v, want the zero value on an error", c.in, confine)
 			}
 		})
 	}
@@ -760,8 +838,8 @@ func TestParseInputColorSchemeArguments(t *testing.T) {
 			if got.err != nil {
 				t.Fatalf("parseInput(%q).err = %v, want nil", c.in, got.err)
 			}
-			if got.colorScheme != c.want {
-				t.Errorf("parseInput(%q).colorScheme = %+v, want %+v", c.in, got.colorScheme, c.want)
+			if scheme := verbArgsOf[colorSchemeArgs](got); scheme != c.want {
+				t.Errorf("parseInput(%q).colorScheme = %+v, want %+v", c.in, scheme, c.want)
 			}
 		})
 	}
@@ -790,8 +868,8 @@ func TestParseInputColorSchemeArgumentErrors(t *testing.T) {
 			if !strings.Contains(got.err.Error(), colorSchemeUsage) {
 				t.Errorf("parseInput(%q).err = %q, want it to carry %q", c.in, got.err, colorSchemeUsage)
 			}
-			if got.colorScheme != (colorSchemeArgs{}) {
-				t.Errorf("parseInput(%q).colorScheme = %+v, want the zero value on an error", c.in, got.colorScheme)
+			if scheme := verbArgsOf[colorSchemeArgs](got); scheme != (colorSchemeArgs{}) {
+				t.Errorf("parseInput(%q).colorScheme = %+v, want the zero value on an error", c.in, scheme)
 			}
 		})
 	}

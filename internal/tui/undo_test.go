@@ -76,8 +76,8 @@ func TestUndoParsesItsTwoForms(t *testing.T) {
 				}
 				return
 			}
-			if parsed.undo != c.want {
-				t.Errorf("action = %v, want %v", parsed.undo, c.want)
+			if action := verbArgsOf[undoAction](parsed); action != c.want {
+				t.Errorf("action = %v, want %v", action, c.want)
 			}
 		})
 	}

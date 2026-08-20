@@ -171,15 +171,15 @@ func unloadOutcome(res ActuationResult) string {
 }
 
 // actuationBlocked reports whether command is one of the verbs the latch refuses while it is held:
-// the two that open an Exchange (a typed message is the third path and is gated in submit) and the
-// four that switch or actuate. Everything else — scrollback, /clear, /sessions, /version, /confine —
+// the ones that open an Exchange (a typed message is the third path and is gated in submit) and the
+// ones that switch or actuate the session's server. Both sets are read off the "/" table's own flags
+// (commandSpec.opensExchange, commandSpec.touchesServer) rather than named here, so a verb cannot be
+// added to the namespace and forgotten by the latch — which used to fail silently, the verb running
+// into a server mid-restart. Everything else — scrollback, /clear, /sessions, /version, /confine —
 // stays live, because none of them touches the server being worked on.
 func actuationBlocked(command string) bool {
-	switch command {
-	case "unload-model", "stop-server", "model", "server", "continue", "compact":
-		return true
-	}
-	return false
+	spec, ok := commandByName(command)
+	return ok && (spec.opensExchange || spec.touchesServer)
 }
 
 // actuationBlockNote words that refusal. A load names the profile it is waiting on — that is the

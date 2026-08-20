@@ -222,6 +222,22 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **The "/" table carries its own behavioural policies (`internal/tui/command.go`).** Three facts
+  about a verb lived as string lists somewhere else: which verbs open an Exchange (a
+  `continue`/`compact` comparison in the command runner), which verbs touch the server (a hardcoded
+  six-name list in the actuation latch), and which verbs have an argument grammar of their own (a
+  second switch beside the parser, keyed by name all over again). All three are now declared on the
+  verb's own row — `opensExchange`, `touchesServer`, and a `parseArgs` hook — and each satellite
+  reads the table instead of naming verbs. The latch reads the two flags together, so a future verb
+  that opens an Exchange is refused mid-restart by declaring the one flag it already needs rather
+  than by being remembered in a second place. `parsedInput` carries ONE opaque argument value in
+  place of one typed field per arg-taking verb: the four verbs with a grammar (`/confine`,
+  `/color-scheme`, `/effort`, `/undo`) put their parse on it whole, and the runner reads it back as
+  its own type. Adding a verb that opens an Exchange or moves the server used to cost nine or ten
+  edits and failed silently when the ninth was forgotten — the verb ran into a dead upstream or a
+  held latch and nothing said so; it costs three now, and three new tests pin each set by name where
+  nothing pinned them before. Behaviour of all 21 verbs is unchanged.
+
 - **Every substantial `Update` arm now delegates, and the key-claim order is a list rather than a run
   of guards (`internal/tui/model.go`).** Six arms already handed their message to a named fold in the
   file that owns the concern; twelve more inlined twenty to thirty lines of state machine in the
