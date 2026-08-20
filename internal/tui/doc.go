@@ -638,7 +638,15 @@
 // reset, [Model.launchExchange]'s worker start) beside the refusals an unrunnable line meets
 // ([Model.refuseUnknownSlash], [Model.refuseIdleOnlyCommand]) and the [Model.commandRunnable] gate
 // both invocation routes share, while the parse that classifies the line stays in command.go and
-// [Model.submit] stays with the input concern; theme.go the palette, the
+// [Model.submit] stays with the input concern; heartbeat.go the fourth cluster lifted out of
+// model.go beside them (ADR 0043) — the upstream heartbeat end to end (ADR 0024): the
+// [heartbeatState] the footer and the send gate read, the tick chain that keeps it current
+// ([Model.beatCmd], [Model.armBeat], [Model.beatTick]), the folds a beat, a failure or a
+// /server switch lands in ([Model.foldBeat], [Model.foldBeatFailure], [Model.foldServerSwitch]),
+// the re-binding an advertised model earns at a quiescent boundary ([rebindIntent],
+// [Model.observeBinding], [Model.applyRebind], [Model.applyPendingRebind]) and the
+// [Model.blockedUpstream] refusal the offline state is spent on (the Model still owns the
+// [heartbeatState] field itself); theme.go the palette, the
 // marker glyphs, and the
 // lipgloss styles, with colorscheme.go the routing half of the `/color-scheme` verb that swaps
 // that palette under the running frame (status, pick, and the `export` that is the only way to

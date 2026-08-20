@@ -222,6 +222,21 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **The upstream-heartbeat cluster moves out of `model.go` into `internal/tui/heartbeat.go`.**
+  The fourth concern carved off the coordinator file (ADR 0043), after the record-write, approval
+  and command-running clusters before it: the 492 contiguous lines that hold the heartbeat end to
+  end (ADR 0024) — `heartbeatState` and `rebindIntent`, the offline-debounce threshold and the
+  notes it words (`offlineNote`, `onlineNote`, `rebindNote`, `rebindFailNote`, `windowWord`,
+  `serverSwitchNote`, `unknownWindowNote`), the tick chain (`heartbeatLive`, `beatCmd`, `armBeat`,
+  `beatTick`), the folds a beat, a failure or a `/server` switch lands in (`foldBeat`,
+  `foldBeatFailure`, `foldServerSwitch`), the re-binding an advertised model earns at a quiescent
+  boundary (`observeBinding`, `applyRebind`, `applyPendingRebind`) and the send gate the offline
+  state is spent on (`blockedUpstream`, `upstreamBlockNote`) — now sit in one file named for what
+  they are. A pure same-package move: not one line of the cluster is reworded or reordered, the
+  section banner travels with it, every call site is untouched, and `model.go`'s import of
+  `internal/heartbeat` goes with the code that used it. `model.go` finishes at 3537 lines, down
+  from 4031. `doc.go`'s file map gains the new file's line. No behaviour change.
+
 - **A split diff's band now reaches the edge of its pane.** The two-pane reading was the one frame
   the full-width rule did not touch: it paints its own rows rather than going through a wrap rail,
   so a changed line's tint still stopped at the last glyph while every stacked and flat body around

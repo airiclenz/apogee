@@ -93,7 +93,13 @@ and `ls docs/plans/ | grep -c split-diff` prints 0.
 
 **Commit:** `chore(plans): gate tui deepening on the landed split-diff plan`
 
-## 2. Move the heartbeat cluster into heartbeat.go
+## 2. Move the heartbeat cluster into heartbeat.go — ✅ DONE (2026-08-20)
+
+NOTES (2026-08-20): the item lists `foldBeatFailure` and `blockedUpstream` but not their
+neighbours inside the same contiguous span — the whole span between the worker-lifecycle and
+layout banners moved as the item's "and the rest of the contiguous cluster" clause directs,
+which additionally carries `heartbeatLive`, `offlineFailureThreshold`, `onlineNote`,
+`rebindFailNote`, `unknownWindowNote`, `windowWord`, `serverSwitchNote` and `upstreamBlockNote`.
 
 **Source:** review §Candidate 6, cluster 1.
 
