@@ -75,7 +75,7 @@ throughout — nothing in this plan changes what the user sees or how the TUI be
 
 ---
 
-## 1. Verify the split-diff plan is archived
+## 1. Verify the split-diff plan is archived — ✅ DONE (2026-08-20)
 
 **What:** Confirm `docs/plans/archived/` contains
 `2026-08-19 - 03 - split-diff-display-plan.md` and that it is gone from `docs/plans/`.
