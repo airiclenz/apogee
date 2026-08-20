@@ -21,7 +21,8 @@ import (
 //
 // The wire structs mirror [entry] and its views with exported fields, and the entry kind is
 // serialized as a STRING enum rather than the [entryKind] iota, so a future reordering of those
-// constants can never re-interpret an old file. Decode is defensive: a session file is untrusted
+// constants can never re-interpret an old file — the strings themselves are the behaviour table's
+// persistedName column (entrykind.go), and a kind with none is simply never written. Decode is defensive: a session file is untrusted
 // disk input, so every text field is re-run through stripEscapes on the way back in (defence in
 // depth — a tampered file cannot smuggle a terminal escape sequence into the transcript), a
 // version newer than this build is refused (ErrTranscriptVersion), and a malformed blob returns
@@ -315,37 +316,6 @@ type wirePresented struct {
 	Reason   string `json:"reason,omitempty"`
 }
 
-// entryKindNames maps each persisted entry kind to its stable wire string. entryStartup is
-// deliberately absent: the start-up box is opening chrome re-seeded fresh on resume, never
-// serialized (encodeTranscript skips any kind with no name here), and a "startup" string on
-// decode is unknown and skipped — symmetric.
-//
-// A new name here is ADDITIVE within transcriptVersion and needs no bump (the wireEnvelope rule):
-// an older build simply does not find the string and skips that entry, exactly as it skips a
-// "future-variant" today. "schedule" — the firing block — joined v1 on those terms.
-var entryKindNames = map[entryKind]string{
-	entryUser:        "user",
-	entryAssistant:   "assistant",
-	entryToolCall:    "toolCall",
-	entryToolResult:  "toolResult",
-	entryError:       "error",
-	entryNote:        "note",
-	entryPresented:   "presented",
-	entryInterjected: "interjected",
-	entrySchedule:    "schedule",
-}
-
-// entryKindByName is the decode-side inverse of entryKindNames, built once at init so decode is
-// a map lookup. An unrecognised kind string (a future variant, or the excluded "startup") is not
-// found and its entry is skipped rather than failing the whole replay.
-var entryKindByName = func() map[string]entryKind {
-	m := make(map[string]entryKind, len(entryKindNames))
-	for k, name := range entryKindNames {
-		m[name] = k
-	}
-	return m
-}()
-
 // encodeTranscript serializes a transcript's committed entries into the versioned wire blob.
 // Only committed entries are written, and only the persisted ones: the one-time start-up box
 // (entryStartup) is skipped — it is re-seeded fresh on resume — display-only entries
@@ -363,8 +333,8 @@ func encodeTranscript(t *transcript) ([]byte, error) {
 		if e.ephemeral {
 			continue // display-only: re-derived at startup/resume, so persisting it only accumulates
 		}
-		name, ok := entryKindNames[e.kind]
-		if !ok {
+		name := e.kind.persistedName()
+		if name == "" {
 			continue // entryStartup (or any future non-persisted kind): opening chrome, not conversation
 		}
 		env.Entries = append(env.Entries, toWireEntry(e, name))

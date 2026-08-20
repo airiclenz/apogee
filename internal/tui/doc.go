@@ -673,8 +673,12 @@
 // width.go the display-width authority the theme carries — one measure for the
 // whole TUI, and it is whichever one the painter itself is using; inputaccent.go the
 // resolve-gated inline accents the prompt box paints its
-// "/id" and @file tokens with; transcript.go the append-only scrollback model and transcriptcodec.go its
-// versioned wire form inside a saved session record; sessions.go the /sessions history browser;
+// "/id" and @file tokens with; transcript.go the append-only scrollback model, entrykind.go the
+// [entryKind] enum beside the behaviour table every kind-keyed rule outside the paint switch reads
+// — what a kind is called on the wire, whether it owns a block state, whether it is a host note,
+// whether it may be cached, whether its header blinks, whether it heads a prompt — so a new kind is
+// a const row and its table row, then a case in [renderEntryLines]; and transcriptcodec.go the
+// versioned wire form of that scrollback inside a saved session record; sessions.go the /sessions history browser;
 // schedule.go the /schedule surface — the status note, the cycle/mode/stop pickers and the notices
 // the scheduler's own Events become, with every when-and-how decision left to internal/schedule,
 // plus the one thing this package publishes rather than renders: [Options.ReportActivity], the

@@ -117,12 +117,6 @@ type paintKey struct {
 	fills string
 }
 
-// cacheable reports whether a block with this key may be stored at all. Exactly one kind may not:
-// [transcript.refreshStartup] rewrites the start-up box's facts in place without touching a single
-// field the key reads, so a cached box would keep saying "connecting" after the model bound late.
-// The box is one small block at the very top of the scrollback and is not what the cache is for.
-func (k paintKey) cacheable() bool { return k.kind != entryStartup }
-
 // spanFlags packs the per-entry view state the painters read — expanded, done, the type row's own
 // typeExpanded, and a delegation's lifecycle phase — into one comparable string, one byte per entry.
 // The phase takes two bits rather than one because it has three states and each is a different paint:
@@ -311,7 +305,7 @@ func (t *transcript) blockKey(shape blockShape, head, n int, th theme, width int
 // call — the markdown parse, the styling, the wrap — is not made at all on a hit, which is the
 // entire point.
 func (t *transcript) paintBlock(head int, key paintKey, draw func() blockPaint) blockPaint {
-	if !key.cacheable() {
+	if !key.kind.cacheable() {
 		t.paints.miss()
 		return draw()
 	}

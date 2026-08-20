@@ -88,23 +88,6 @@ type parkedText struct {
 	text string
 }
 
-// entryKind tags a transcript entry so the renderer can prefix and style it. The set
-// mirrors the C6 entry kinds (user / assistant / tool call+result / error / note).
-type entryKind int
-
-const (
-	entryUser entryKind = iota
-	entryAssistant
-	entryToolCall
-	entryToolResult
-	entryError
-	entryNote
-	entryPresented
-	entryStartup
-	entryInterjected
-	entrySchedule
-)
-
 // entry is one committed line-block in the transcript. text is the body (for the text
 // kinds); depth is the sub-agent nesting level (Phase 3). A tool call carries its
 // presentation view and a callID so the paired result can be folded into the same block:
@@ -140,7 +123,7 @@ const (
 // their results already, so a resumed session reads their doneness off the pairing exactly as it did
 // before the phase existed.
 //
-// expanded is the block's VIEW state and nothing else (the kinds hasBlockState admits, setExpanded
+// expanded is the block's VIEW state and nothing else (the kinds carriesBlockState admits, setExpanded
 // its one writer): false — the zero value, and therefore the default for every entry however it was
 // born, folded mid-flight or replayed from a record — is the collapsed, compact paint; true paints
 // the block's retained body in full (layout.md, "Collapsed and expanded blocks"). It sits beside done
@@ -387,7 +370,7 @@ func (t *transcript) continuesOpenRun(e entry, at int) bool {
 // the ones place has to step over. A note carrying a run — an approval or a fired Mechanism inside
 // a delegation — is that run's own record and stays exactly where its run puts it.
 func isHostNote(e entry) bool {
-	return (e.kind == entryNote || e.kind == entrySchedule) && e.depth == 0 && e.spawnCallID == ""
+	return e.kind.isHostNote() && e.depth == 0 && e.spawnCallID == ""
 }
 
 // enclosingBlock is the index of the nearest block SHALLOWER than depth before at — the delegation
@@ -1147,32 +1130,8 @@ func (t *transcript) hasOpenToolCall() bool {
 	return false
 }
 
-// hasBlockState reports whether an entry kind owns a collapsed/expanded block state — the gate
-// setExpanded and toggleExpanded both answer through. Five kinds do: a tool call, a stray result
-// (entryToolResult) and a scheduled
-// Firing (entrySchedule), whose retained bodies are capped when the block is collapsed — the stray
-// result and the Firing are painted by the same block painter, so they collapse and expand by the
-// tool block's rule — and
-// the human's own two voices — the prompt
-// (entryUser) and the interjection (entryInterjected), which read as one block and collapse by one
-// rule — whose bodies collapse to a fixed row count when they run long (layout.md, "Collapsed and
-// expanded blocks"). Every other kind — an assistant answer, a note, the start-up box — paints one
-// way whatever is asked of it, so a click on it keeps its selection meaning.
-//
-// It is a fact about the KIND and never about the block's size: an over-long prompt and a one-word
-// one answer alike, because whether a body is big enough to hide anything is measured at paint time
-// against the current width, and any answer kept here would be stale by the next resize.
-func hasBlockState(kind entryKind) bool {
-	switch kind {
-	case entryToolCall, entryToolResult, entrySchedule, entryUser, entryInterjected:
-		return true
-	default:
-		return false
-	}
-}
-
 // setExpanded puts one block into the collapsed or the expanded paint and reports whether it found
-// a block to set. index addresses t.entries, and only a kind hasBlockState admits carries one:
+// a block to set. index addresses t.entries, and only a kind carriesBlockState admits carries one:
 // every other kind paints one way whatever is asked of it, and an index outside the slice is a
 // caller resolving a click against a paint the transcript has already grown past. Both answer false
 // and change nothing, because this sits on the repaint path where a panic is the whole session.
@@ -1196,7 +1155,7 @@ func hasBlockState(kind entryKind) bool {
 // the gate is about which kinds OWN a block state, so a resize can change whether a body collapses
 // without the transcript ever hearing about it.
 func (t *transcript) setExpanded(index int, expanded bool) bool {
-	if index < 0 || index >= len(t.entries) || !hasBlockState(t.entries[index].kind) {
+	if index < 0 || index >= len(t.entries) || !t.entries[index].kind.carriesBlockState() {
 		return false
 	}
 	t.entries[index].expanded = expanded

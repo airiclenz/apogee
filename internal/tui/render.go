@@ -399,10 +399,10 @@ func (t *transcript) renderView(th theme, width int, blink bool) renderedTranscr
 			appendBlock(false, e.depth, i, block)
 			i += len(run) - 1
 		} else {
-			// A tool call is the only single-entry kind with a live star, and entrySchedule paints
-			// static by construction (renderEntryLines), so everything else keys as settled.
-			key := t.blockKey(shapeEntry, i, 1, th, width, blink, e.kind == entryToolCall && !e.done)
-			appendBlock(e.kind == entryUser, e.depth, i, t.paintBlock(i, key, func() blockPaint {
+			// Which kinds can still be waiting, and which head a prompt stop, are the kind's own
+			// answers (entrykind.go); everything else keys as settled and marks no stop.
+			key := t.blockKey(shapeEntry, i, 1, th, width, blink, e.kind.hasLiveStar() && !e.done)
+			appendBlock(e.kind.isUserPrompt(), e.depth, i, t.paintBlock(i, key, func() blockPaint {
 				return renderEntryLines(th, e, width, blink)
 			}))
 		}

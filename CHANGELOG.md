@@ -222,6 +222,19 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **`entryKind` answers for itself (`internal/tui/entrykind.go`).** Six kind-keyed rules lived in
+  four files and had to be remembered together: the wire name map and its inverse in the transcript
+  codec, the block-state gate and the host-note test in the scrollback model, the paint cache's
+  cacheability gate, and the renderer's two inline comparisons for the live star and the prompt
+  stop. They are one behaviour table on the kind now — `persistedName`, `carriesBlockState`,
+  `isHostNote`, `cacheable`, `hasLiveStar`, `isUserPrompt` — and each site asks the kind rather than
+  comparing against it. The enum moved into that same file, so a new entry kind is a const row with
+  its table row beside it plus a case in the paint switch, which stays a switch because a painter is
+  code and not a fact. A new structural test parses the const block off disk and fails on any kind
+  with no row, the way `TestFoldEventCoversEveryEventVariant` already did for Event variants, and a
+  second pins that no two kinds claim the same wire string. The codec's documented unknown-kind
+  degrade path is untouched and nothing the user sees changed.
+
 - **The "/" table carries its own behavioural policies (`internal/tui/command.go`).** Three facts
   about a verb lived as string lists somewhere else: which verbs open an Exchange (a
   `continue`/`compact` comparison in the command runner), which verbs touch the server (a hardcoded

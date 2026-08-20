@@ -815,8 +815,8 @@ func TestScheduleFiringIsNoToolCall(t *testing.T) {
 		t.Error("hasOpenToolCall = true, want an open Firing to be no tool call of this session's")
 	}
 	index := len(m.transcript.entries) - 1
-	if !hasBlockState(entrySchedule) {
-		t.Fatal("hasBlockState(entrySchedule) = false, want the block to collapse and expand")
+	if !entrySchedule.carriesBlockState() {
+		t.Fatal("entrySchedule.carriesBlockState() = false, want the block to collapse and expand")
 	}
 	if !m.transcript.toggleExpanded(index) || !m.transcript.entries[index].expanded {
 		t.Error("toggling the firing block did not expand it")

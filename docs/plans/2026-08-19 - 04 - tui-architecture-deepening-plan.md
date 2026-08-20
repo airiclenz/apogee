@@ -683,7 +683,15 @@ unchanged.
 
 **Commit:** `refactor(tui): fold exchange/server/grammar policies into commandSpec`
 
-## 23. entryKind answers for itself, with a completeness test
+## 23. entryKind answers for itself, with a completeness test — ✅ DONE (2026-08-20)
+
+NOTES (2026-08-20): moved the `entryKind` type and its const block out of transcript.go into the new entrykind.go — the item named only the table. The item's own claim that "enum row + painter case remain the two edit points for a new kind" only holds when the const row and its table row sit side by side, and the house rule puts a type in the file that bears its name.
+
+NOTES (2026-08-20): the table carries two columns beyond the four the item names — `hasLiveStar` and `isUserPrompt`. Neither of the four covers render.go's tail classification (`e.kind == entryToolCall && !e.done`, `e.kind == entryUser`), which the item lists among the six predicates to collapse.
+
+NOTES (2026-08-20): `hasBlockState(kind)` is gone, replaced by the column name the item binds (`kind.carriesBlockState()`); its call site in schedule_test.go and three prose references were respelled. No test expectation changed.
+
+NOTES (2026-08-20): added a second small guard, `TestEntryKindPersistedNamesAreUnique`, beyond the completeness test the item asks for — the decode-side inverse map is only faithful while no two kinds claim one wire string.
 
 **Source:** review §Candidate 11 + Appendix C (the decision-site map).
 

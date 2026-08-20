@@ -479,7 +479,7 @@ func TestTranscriptCodecExcludesEphemeral(t *testing.T) {
 // TestTranscriptCodecExcludesExpandedState proves the fourth exclusion, and the one the wire form
 // gets for free: a block's expanded state is the VIEW's alone (layout.md, "Collapsed and expanded
 // blocks"), so an expanded block is stored exactly as a collapsed one and a resumed session paints
-// everything collapsed. It holds for every kind that OWNS the state (hasBlockState), which is why
+// everything collapsed. It holds for every kind that OWNS the state (carriesBlockState), which is why
 // the fixture's user send is opened here beside its tool call: a prompt deliberately expanded in one
 // session comes back collapsed in the next, like every over-threshold prompt of a replayed
 // transcript. The blocks themselves must still round-trip whole — the state is excluded, not the
