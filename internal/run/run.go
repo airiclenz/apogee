@@ -25,8 +25,10 @@ var ErrMode = errors.New("apogee: a firing runs in plan or auto mode only")
 // knows the binding a Firing should run against; Once overrides just the delegates that
 // assume a human (see the package doc).
 type Spec struct {
-	// Config is the agent construction surface. Its Approver, Asker, Presenter and Events
-	// fields are replaced by Once; everything else is used as given.
+	// Config is the agent construction surface. Its Approver, Asker and Presenter fields are
+	// replaced by Once; its Events sink is WRAPPED, not replaced — Once's eventTap forwards
+	// every Event on to it (nil ⇒ discarded) while catching what the Result cannot recover
+	// once the run is over. Everything else is used as given.
 	Config domain.Config
 
 	// Prompt is the single user message the Firing submits.

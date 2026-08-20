@@ -174,8 +174,9 @@ const askUserToolName = "ask_user"
 // the engine cannot supply without growing a wire (design call 14) is a hook returning false,
 // which leaves the tool's own prose floor in the slot rather than inventing a number.
 //
-// Every detail extractor here renders PROSE. The six tools that report a typed summary
-// (read_file, write_file, list_dir, grep, view_diff, web_search) word their slot
+// Every detail extractor here renders PROSE. The nine tools that report a typed summary
+// (read_file, write_file, list_dir, grep, view_diff, web_search, and the three edit tools
+// single_find_and_replace, multi_find_and_replace and edit_existing_file) word their slot
 // from that summary through their stat hook, and keep firstLineDetail as the floor for a result
 // that carries none — a degraded card is that tool's own first line, never a file dumped into the
 // transcript. The rest quote their fixed sentence or hand free-form output (a command run, a

@@ -94,7 +94,7 @@ NOTES (2026-08-20): the item allowed cloning `Ordering`'s slices "if they share 
 
 **Commit:** `fix(mechanisms): clone catalogue descriptors in buildFrom`
 
-## 4. Align the Tool-summary carrier counts and the run Events comment
+## 4. Align the Tool-summary carrier counts and the run Events comment — ✅ DONE (2026-08-20)
 
 **Source:** review defect l.
 

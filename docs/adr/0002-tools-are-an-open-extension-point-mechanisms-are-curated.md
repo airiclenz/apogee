@@ -43,3 +43,12 @@ this change — it simply cannot mint a new *variant*, which is the same trade `
 makes. That asymmetry is smaller than the Mechanism one above and is accepted for the same
 reason: the variants are a rendering vocabulary we are not ready to freeze as third-party
 surface, and opening it later is easy.
+
+## Amendment (2026-08-20) — the count is nine, not seven
+
+The 2026-07-25 note above says *"seven built-ins attach one"*. That was the count on the day it was
+written; the three edit tools (`single_find_and_replace`, `multi_find_and_replace`,
+`edit_existing_file`) have since attached `EditRegions` (ADR 0052), so **nine** built-ins attach a
+typed summary today: `read_file`, `write_file`, `list_dir`, `grep`, `view_diff`, `web_search` and
+those three. Nothing else in the decision changes — `Summary` nil is still the normal case for a
+tool, and the count is a fact about the built-in set, not part of the contract.

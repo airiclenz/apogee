@@ -775,6 +775,18 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- Corrected three stale claims about which tools carry a typed summary and how a Firing's event sink
+  is installed. `internal/tui/toolregistry.go` said six tools report a `domain.ToolSummary` and named
+  only `read_file`, `write_file`, `list_dir`, `grep`, `view_diff` and `web_search`; the three edit
+  tools (`single_find_and_replace`, `multi_find_and_replace`, `edit_existing_file`) have attached
+  `EditRegions` since ADR 0052, so the comment now names all nine — the count `internal/tools/doc.go`
+  already stated. ADR 0002's 2026-07-25 note still said "seven built-ins attach one" and gains a short
+  dated amendment recording the growth to nine; its decision is unchanged. And `internal/run/run.go`'s
+  `Spec.Config` comment claimed the `Events` sink is *replaced* by `Once` alongside the Approver,
+  Asker and Presenter — it is *wrapped*: `eventTap` forwards every Event on to the caller's sink
+  (nil ⇒ discarded) while catching what the `Result` cannot recover afterwards, exactly as the package
+  doc and the tap already say.
+
 - **`mechanisms.Build` no longer hands out catalogue-aliased metadata.** The Mechanism it returned
   carried `Descriptor.IncompatibleWith`/`Requires` and `Ordering.Before`/`After` slice headers shared
   with the static catalogue row, so a caller mutating what it got back rewrote the catalogue for every
