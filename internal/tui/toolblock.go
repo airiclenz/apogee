@@ -263,20 +263,24 @@ func typeRowPaint(th theme, views []toolView) func(string) string {
 }
 
 // superRunViews is the umbrella's paint input: each of its runs as the views it folds plus the view
-// state of the row and its members ([toolRunView]). The state is COPIED out of the entries, like
-// memberFlags and for its reason — a painter is handed what it needs to draw and nothing it could
+// state of the row and its members ([toolRunView]), read off the records the umbrella's own entries
+// were stated as ([paintInput]) — the discipline memberFlags followed field by field, now the
+// record's for every field at once: a painter is handed what it needs to draw and nothing it could
 // write through (ADR 0011).
-func superRunViews(entries []entry, g superGroup) []toolRunView {
+//
+// ins holds the umbrella's entries in order and nothing else, so the runs are walked by RUNNING
+// OFFSET rather than by the absolute index they name: every member of every run is one entry and the
+// runs are adjacent by construction (superGroup.calls), which is the same fact the caller's own walk
+// steps over the umbrella by.
+func superRunViews(ins []paintInput, g superGroup) []toolRunView {
 	runs := make([]toolRunView, 0, len(g))
+	at := 0
 	for _, r := range g {
-		span := entries[r.at : r.at+r.n]
-		views := make([]toolView, len(span))
-		for i := range span {
-			views[i] = span[i].tool
-		}
+		span := ins[at : at+r.n]
+		at += r.n
 		runs = append(runs, toolRunView{
-			views:    views,
-			expanded: entries[r.at].typeExpanded,
+			views:    toolViews(span),
+			expanded: span[0].typeExpanded,
 			members:  memberFlags(span),
 		})
 	}

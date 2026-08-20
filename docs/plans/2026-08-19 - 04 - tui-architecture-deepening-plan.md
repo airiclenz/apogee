@@ -931,7 +931,13 @@ enumerates by grep; read only the touched functions)
 
 **Commit:** `refactor(tui): name the uiState predicates`
 
-## 31. Painters take a stated input record
+## 31. Painters take a stated input record — ✅ DONE (2026-08-20)
+
+NOTES (2026-08-20): two files beyond the item's list changed because the signature change reached them — blockstate.go (`anyOpenCall` / `memberFlags` now take `[]paintInput`) and doc.go (one clause of the package map pointing at the record; no file added or deleted, so the ADR 0043 map is otherwise unchanged).
+
+NOTES (2026-08-20): `toolCallRun` now returns the run's `[]paintInput` rather than `[]toolView` (`toolViews` extracts the views at paint time) — that is what gives toolbranch.go the record without moving the run-finding walk; its existing tests read `len()`/nil and were untouched. Three test files needed call-site updates only (`renderEntryLines` / `renderUserBlock` literals); no test expectation changed.
+
+NOTES (2026-08-20): the walk keeps reading entries — where a block ENDS is a question about the list (`subAgentSpan`, `subAgentGroupAt`, `toolSuperGroup`, `sameLabelRun`) — and only what is downstream of a block's boundaries takes the record; the boundary is stated in `paintInput`'s doc and at the walk.
 
 **Source:** review §Smaller findings, row 5. Depends on item 23.
 

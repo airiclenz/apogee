@@ -16,6 +16,11 @@ import (
 // the two are the same voice and so share one shape, and the glyph is the whole of the
 // difference the reader needs.
 //
+// It takes the sent block's own paint input rather than the entry: the text, where its skill tokens
+// sit in that text, and whether the block is open are exactly the three facts it reads, and the
+// record is what states that they are all it may (paintcache.go). The marker stays a parameter —
+// which VOICE is speaking is the caller's, and the two callers differ only in it (renderEntryLines).
+//
 // A body that soft-wraps past promptCollapsedRows rows COLLAPSES to that many, the last of them
 // truncated to make room for the right-aligned see-more marker counting what is left behind
 // (promptSeeMore). expanded is the entry's own view state (transcript.setExpanded) and opens the
@@ -36,13 +41,13 @@ import (
 // The mark is state-INDEPENDENT for the tool block's reason: an expanded prompt keeps it, which is
 // the click that closes it again. A body inside the cap marks nothing at all, so a click on an
 // ordinary prompt keeps its selection meaning.
-func renderUserBlock(th theme, marker, text string, spans []skillSpan, width int, expanded bool) blockPaint {
+func renderUserBlock(th theme, marker string, in paintInput, width int) blockPaint {
 	// The spans are stated in the text's OWN offsets, so they are re-based before the text is
 	// expanded, and the expanded text is what both the wrap and the accent map are handed — a block
 	// whose rows held spaces where the spans still counted a tab would light up the wrong run
 	// (expandTabs).
-	spans = expandTabsInSpans(text, spans)
-	text = expandTabs(text)
+	spans := expandTabsInSpans(in.text, in.skillSpans)
+	text, expanded := expandTabs(in.text), in.expanded
 	var out []string
 	trailer := ""
 	collapsible := false

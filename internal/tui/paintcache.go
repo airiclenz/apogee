@@ -69,11 +69,91 @@ const (
 	shapeSubAgentGroup                   // renderSubAgentGroup — the folded list of adjacent delegations
 )
 
+// entryState is the half of one entry a painter reads that MOVES: the view flags a click flips, the
+// pairing that lands a result, and the reading a delegation folds in while its child works. It is
+// stated apart from the content beside it because it is exactly the half [paintKey] has to name —
+// the cache's whole safety argument (the banner above) is that everything ELSE a painter reads is
+// immutable once committed, so a fact landing here is a fact the key packs (spanFlags, spanFills)
+// and a fact landing beside it in [paintInput] is one the transcript's append-only shape covers.
+type entryState struct {
+	expanded     bool                 // view-only block state: false = collapsed (entry.expanded)
+	done         bool                 // the call has been paired with its result (entry.done)
+	typeExpanded bool                 // view-only state of the type row this entry heads in a super-group
+	phase        domain.SubAgentPhase // a delegation head's lifecycle phase, as its child reported it
+
+	// the head of a sub-agent run only: the child's frozen context reading and the model it ran on
+	// where that was not the session's own (entry.ctxUsed, entry.ctxLimit, entry.ctxModel)
+	ctxUsed  int
+	ctxLimit int
+	ctxModel string
+}
+
+// paintInput is one entry as a PAINTER may see it: exactly the fields the block painters are
+// allowed to read, and never the entry itself — the entries backing array is shared by every copy
+// of the Model (ADR 0011), so a painter is handed what it needs to draw and nothing it could write
+// through — the discipline memberFlags and superRunViews already followed one field at a time, now
+// stated once for every field a painter has.
+//
+// The line it draws is the one [transcript.renderView] already stands on: the WALK reads the entries
+// — where a block ends is a question about the list (subAgentGroupAt, subAgentSpan, toolSuperGroup,
+// sameLabelRun) — and everything downstream of a block's boundaries reads this record instead.
+//
+// It is also what turns [paintKey]'s completeness from a remembered rule into a compile-visible
+// decision. A painter can paint no fact that is not stated here, and a fact stated here arrives
+// through [entry.painted]'s unkeyed literal, which stops compiling until the new field is filled in
+// — at the one place where "does this move?" has to be answered, next to the two halves that answer
+// it: content the append-only rule covers, state the key must pack.
+type paintInput struct {
+	kind       entryKind
+	depth      int
+	text       string
+	tool       toolView
+	skillSpans []skillSpan
+	presented  presentedView
+	startup    startupView
+
+	// the mutable half, EMBEDDED so a painter reads in.expanded exactly as it read e.expanded and
+	// the key can be derived from precisely this much of the record
+	entryState
+}
+
+// painted states one entry as the painters' input record. The literal is deliberately UNKEYED: a
+// field added to either record fails to compile here until it is stated, which is the mechanism the
+// record exists for (see [paintInput]).
+func (e entry) painted() paintInput {
+	return paintInput{
+		e.kind, e.depth, e.text, e.tool, e.skillSpans, e.presented, e.startup,
+		entryState{e.expanded, e.done, e.typeExpanded, e.phase, e.ctxUsed, e.ctxLimit, e.ctxModel},
+	}
+}
+
+// paintInputs states a whole block's entries as the painters' input records, in the order the block
+// covers them. [transcript.renderView] builds one of these per block and hands the SAME value to
+// [blockKey] and to the painter, so what the key names and what the paint reads cannot part company.
+func paintInputs(entries []entry) []paintInput {
+	ins := make([]paintInput, len(entries))
+	for i := range entries {
+		ins[i] = entries[i].painted()
+	}
+	return ins
+}
+
+// headsRun is [entry.headsRun] asked of the record instead of the entry — the same two fields, read
+// where a painter can reach them, so the block and the entry carrying it cannot disagree about what
+// a delegation is.
+func (in paintInput) headsRun() bool {
+	return in.kind == entryToolCall && in.tool.headsRun()
+}
+
 // paintKey is everything one block's paint depends on besides the immutable content of its
 // entries. Two renders that compute the same key MUST produce the same lines and the same target
 // marks; a field missing here is a stale paint on screen, so the list is deliberately generous —
 // depth and kind are derivable from the entries the key already covers, and are named anyway
 // because the cost of naming them is a struct field and the cost of omitting one is a wrong frame.
+//
+// Its per-entry terms are derived from [paintInput] and from nothing else (blockKey, spanFlags,
+// spanFills): the record states what a painter may read, so "is this list complete?" is answered by
+// reading one struct rather than by remembering what five painter files touch.
 //
 // It is a comparable struct compared with ==: every field is a scalar or a string, which is what
 // lets the whole check be one equality test rather than a walk.
@@ -119,7 +199,9 @@ type paintKey struct {
 
 // spanFlags packs the per-entry view state the painters read — expanded, done, the type row's own
 // typeExpanded, and a delegation's lifecycle phase — into one comparable string, one byte per entry.
-// The phase takes two bits rather than one because it has three states and each is a different paint:
+// Those four are the flag-shaped fields of [entryState] — the record's own statement of what one
+// entry can move — and the readings beside them are packed by [spanFills], having values rather than
+// bits. The phase takes two bits rather than one because it has three states and each is a different paint:
 // a delegation not yet started, one running, and one whose child has reported ahead of the group's
 // result burst (entry.phase). Every per-entry view FACT
 // belongs here, whether or not a painter reads it yet: a state a key ignores is a stale paint served
@@ -131,20 +213,20 @@ type paintKey struct {
 // rather than a missed optimisation. A one-entry span (the
 // overwhelmingly common case) converts through the runtime's single-byte string table and so costs
 // no allocation.
-func spanFlags(entries []entry) string {
-	b := make([]byte, len(entries))
-	for i := range entries {
+func spanFlags(ins []paintInput) string {
+	b := make([]byte, len(ins))
+	for i := range ins {
 		var f byte
-		if entries[i].expanded {
+		if ins[i].expanded {
 			f |= 1
 		}
-		if entries[i].done {
+		if ins[i].done {
 			f |= 2
 		}
-		if entries[i].typeExpanded {
+		if ins[i].typeExpanded {
 			f |= 4
 		}
-		switch entries[i].phase {
+		switch ins[i].phase {
 		case domain.SubAgentStarted:
 			f |= 8
 		case domain.SubAgentFinished:
@@ -168,10 +250,10 @@ func spanFlags(entries []entry) string {
 //
 // The overwhelmingly common block carries no reading anywhere (only a delegation's head does), and
 // answers "" without allocating.
-func spanFills(entries []entry) string {
+func spanFills(ins []paintInput) string {
 	var b []byte
-	for i := range entries {
-		e := entries[i]
+	for i := range ins {
+		e := ins[i]
 		if e.ctxUsed <= 0 && e.ctxLimit <= 0 && e.ctxModel == "" {
 			continue
 		}
@@ -281,22 +363,26 @@ func (c *paintCache) clear() {
 	clear(c.rows)
 }
 
-// blockKey builds the key for the block headed by entries[head] and covering n entries — the head
-// alone for an ordinary entry, the whole folded run or the head plus its sub-agent span otherwise.
+// blockKey builds the key for the block these records are the input of — ins[0] alone for an
+// ordinary entry, the whole folded run or the head plus its sub-agent span otherwise. It takes the
+// very value the painter is handed ([paintInputs]) and reads nothing else about the transcript,
+// which is what makes "the key names every input" checkable by reading one record rather than by
+// remembering what five painter files touch.
+//
 // live is the caller's because it is the PAINTER's own liveness rule and each branch has a
-// different one (blockState.live); everything else is read off the entries and the frame.
-func (t *transcript) blockKey(shape blockShape, head, n int, th theme, width int, blink, live bool) paintKey {
+// different one (blockState.live); everything else is read off the records and the frame.
+func blockKey(shape blockShape, ins []paintInput, th theme, width int, blink, live bool) paintKey {
 	return paintKey{
 		shape:   shape,
-		kind:    t.entries[head].kind,
-		depth:   t.entries[head].depth,
+		kind:    ins[0].kind,
+		depth:   ins[0].depth,
 		width:   width,
 		measure: th.measure,
-		span:    n,
+		span:    len(ins),
 		live:    live,
 		blink:   blink && live, // a settled block's paint does not depend on the phase; folding it in anyway would miss on every phase flip
-		flags:   spanFlags(t.entries[head : head+n]),
-		fills:   spanFills(t.entries[head : head+n]),
+		flags:   spanFlags(ins),
+		fills:   spanFills(ins),
 	}
 }
 

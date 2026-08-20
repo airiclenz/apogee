@@ -222,6 +222,21 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **The painters take a stated input record (`internal/tui/paintcache.go`).** What one block's paint
+  depends on was a contract kept by memory: the paint cache is sound only while its key names every
+  input, and the five painter files read raw `entry` values — so a painter that began reading one
+  more field of an entry was a stale paint on screen, with nothing but a comment and a hand-written
+  mutation list to catch it. The painters take `paintInput` now, a record stating exactly the fields
+  a painter may read, split along the line the cache's own safety argument draws: the content the
+  transcript's append-only rule already covers, and the `entryState` half that MOVES — expanded,
+  done, the type row's own flag, a delegation's phase, its frozen context reading — from which the
+  key derives its per-entry terms and from nothing else. `renderView` states each block's entries as
+  records once and hands that one value to the key and to the painter, so what the memo names and
+  what the paint reads cannot part company, and painting a new fact now means adding a field to the
+  record — which stops compiling at the single conversion site until it is said which half the field
+  belongs in. Nothing the human sees changes: the transcript golden tests and the cache's own
+  cold-render mutation matrix pass with no expectation touched.
+
 - **The UI's lifecycle states answer for themselves.** `uiState` was a bare int the package
   compared open-coded, and the sets those comparisons meant were named nowhere: "idle or running"
   — the two states where the prompt is the human's own to compose in — was spelled inline at eight

@@ -28,7 +28,7 @@ func TestUserBlockRowsAreOneSquareLineEach(t *testing.T) {
 			th := newTheme(scheme.Default())
 			th.measure = widthAuthority{method: pm.method}
 
-			paint := renderUserBlock(th, glyphUser+" ", text, nil, width, true)
+			paint := renderUserBlock(th, glyphUser+" ", paintInput{text: text, entryState: entryState{expanded: true}}, width)
 			if len(paint.lines) == 0 {
 				t.Fatalf("the user block rendered nothing at all")
 			}

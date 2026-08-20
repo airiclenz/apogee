@@ -408,7 +408,7 @@ func TestPreviewUnderTheBoundIsUnchanged(t *testing.T) {
 	if got, want := previewTail(text), trimTrailingBlankLines(text); got != want {
 		t.Errorf("previewTail cut a sub-bound buffer:\n--- got ---\n%q\n--- want ---\n%q", got, want)
 	}
-	want := renderEntryLines(th, entry{kind: entryAssistant, text: trimTrailingBlankLines(text)}, 80, false).lines
+	want := renderEntryLines(th, paintInput{kind: entryAssistant, text: trimTrailingBlankLines(text)}, 80, false).lines
 	if got := streamingPreview(text).renderLines(th, 80); !slices.Equal(got, want) {
 		t.Errorf("preview frame changed for a sub-bound buffer:\n--- got ---\n%s\n--- want ---\n%s",
 			strings.Join(got, "\n"), strings.Join(want, "\n"))
@@ -422,7 +422,7 @@ func TestPreviewOfAnEmptyBufferKeepsItsMarker(t *testing.T) {
 	tr := &transcript{streaming: true}
 
 	got := tr.renderLines(th, 80)
-	want := renderEntryLines(th, entry{kind: entryAssistant}, 80, false).lines
+	want := renderEntryLines(th, paintInput{kind: entryAssistant}, 80, false).lines
 	if !slices.Equal(got, want) || len(got) != 1 {
 		t.Errorf("empty preview paints %d line(s) %q, want the lone marker %q", len(got), got, want)
 	}

@@ -243,7 +243,7 @@ func (t *transcript) renderView(th theme, width int, blink bool) renderedTranscr
 		// The live buffer is painted at the depth that FILLED it (transcript.pendingRun), like every
 		// committed block above: its own rail is what says which run is talking, and a delegate that
 		// streams before producing any entry needs nothing else to announce the level.
-		preview := renderEntryLines(th, entry{
+		preview := renderEntryLines(th, paintInput{
 			kind:  entryAssistant,
 			text:  previewTail(t.pending),
 			depth: t.pendingRun.depth,
@@ -259,7 +259,12 @@ func (t *transcript) renderView(th theme, width int, blink bool) renderedTranscr
 			paintPreview(i)
 			previewAt = -1
 		}
-		e := t.entries[i]
+		// The entry the walk stands on, stated once as the record the painters read ([paintInput]):
+		// every branch below hands THAT to its painter and to its key, so what a block paints and
+		// what its memo names are one value (paintcache.go). The entries themselves stay with the
+		// walk, which is the only part that needs them — where a block ENDS is a question about the
+		// list (subAgentGroupAt, subAgentSpan, toolSuperGroup, toolCallRun), never about a paint.
+		in := t.entries[i].painted()
 		// A descent used to be announced here by a label block of its own. Nothing announces it now:
 		// the delegation's own header row opens the frame with ┌─┶ and the rail runs down the span
 		// from there (docs/layout/tool-layout.md, "Grouped Sub-agents"), so a label saying the same
@@ -282,13 +287,23 @@ func (t *transcript) renderView(th theme, width int, blink bool) renderedTranscr
 					break
 				}
 			}
+			// The key covers this block's members and everything still ahead of them in the group:
+			// the header's star asks the whole list whether any delegate is still working, and a
+			// member's row changes shape the moment its delegation grows a span to reveal, so a key
+			// stopping at the last row it paints would serve a stale one (paintcache.go).
+			tail := grp[len(grp)-1]
+			cover := tail.at + 1 + tail.span - i
+			// One record per covered entry, stated once and read by both the key and the rows: a
+			// member's own record sits at its offset from the head and its span is the records behind
+			// it, so what the paint reads is exactly what the key named (paintcache.go).
+			ins := paintInputs(t.entries[i : i+cover])
 			members := make([]subAgentMember, 0, end-pos+1)
 			for k := pos; k <= end; k++ {
-				at := grp[k].at
+				at := grp[k].at - i
 				members = append(members, subAgentMember{
-					head:   t.entries[at],
-					span:   t.entries[at+1 : at+1+grp[k].span],
-					offset: at - i,
+					head:   ins[at],
+					span:   ins[at+1 : at+1+grp[k].span],
+					offset: at,
 					last:   k == len(grp)-1,
 				})
 			}
@@ -297,20 +312,13 @@ func (t *transcript) renderView(th theme, width int, blink bool) renderedTranscr
 			if pos == 0 {
 				count = len(grp)
 			}
-			// The key covers this block's members and everything still ahead of them in the group:
-			// the header's star asks the whole list whether any delegate is still working, and a
-			// member's row changes shape the moment its delegation grows a span to reveal, so a key
-			// stopping at the last row it paints would serve a stale one (paintcache.go).
-			tail := grp[len(grp)-1]
-			cover := tail.at + 1 + tail.span - i
-			key := t.blockKey(shapeSubAgentGroup, i, cover, th, width, blink,
-				anyOpenCall(t.entries[i:i+cover]))
+			key := blockKey(shapeSubAgentGroup, ins, th, width, blink, anyOpenCall(ins))
 			// pos > 0 is this block RESUMING a list whose earlier rows an expanded member's span
 			// interrupted — precisely the spec's "another grouped sub-agent follows the expanded one",
 			// and so the one seam in the whole transcript that closes with a ┊.
-			appendJoined(false, pos > 0, e.depth, i, t.paintBlock(i, key, func() blockPaint {
-				return renderSubAgentGroup(th, count, members, railedWidth(width, e.depth),
-					blockState{live: key.live, blink: blink}).railed(th, e.depth)
+			appendJoined(false, pos > 0, in.depth, i, t.paintBlock(i, key, func() blockPaint {
+				return renderSubAgentGroup(th, count, members, railedWidth(width, in.depth),
+					blockState{live: key.live, blink: blink}).railed(th, in.depth)
 			}))
 			// A block ending on an OPEN member does not end the run: that member's span follows,
 			// railed one level deeper, and the separator between the two belongs to THAT rail
@@ -320,9 +328,9 @@ func (t *transcript) renderView(th theme, width int, blink bool) renderedTranscr
 			if i = grp[end].at; !t.entries[i].expanded {
 				i += grp[end].span
 			} else {
-				prevBlockDepth = e.depth + 1
+				prevBlockDepth = in.depth + 1
 			}
-		} else if span := subAgentSpan(t.entries, i); subAgentFramed(e, span) {
+		} else if span := subAgentSpan(t.entries, i); subAgentFramed(in, span) {
 			// A sub-agent run is ONE block while it is collapsed (layout.md): its head paints with the
 			// cascading summary and the whole span is then skipped outright, which is what elides the
 			// inner blocks and every rail and spacer among them — nothing is painted and afterwards
@@ -339,15 +347,16 @@ func (t *transcript) renderView(th theme, width int, blink bool) renderedTranscr
 			// at, which is what lays the streaming preview inside the rail rather than flat beside it
 			// (design call 4). A run reaching this branch closes with no ┊ at all: the closer belongs to
 			// a list resuming after one of its members, and a delegation standing here stands alone.
-			key := t.blockKey(shapeSubAgentRun, i, span+1, th, width, blink,
-				!subAgentReported(e) || anyOpenCall(t.entries[i+1:i+1+span]))
-			appendBlock(false, e.depth, i, t.paintBlock(i, key, func() blockPaint {
-				return renderSubAgentRun(th, e, t.entries[i+1:i+1+span], width, blink)
+			ins := paintInputs(t.entries[i : i+span+1])
+			key := blockKey(shapeSubAgentRun, ins, th, width, blink,
+				!subAgentReported(in) || anyOpenCall(ins[1:]))
+			appendBlock(false, in.depth, i, t.paintBlock(i, key, func() blockPaint {
+				return renderSubAgentRun(th, ins[0], ins[1:], width, blink)
 			}))
-			if !e.expanded {
+			if !in.expanded {
 				i += span
 			} else {
-				prevBlockDepth = e.depth + 1 // the head's span continues the rail beneath it
+				prevBlockDepth = in.depth + 1 // the head's span continues the rail beneath it
 			}
 		} else if sup := toolSuperGroup(t.entries, i); len(sup) > 0 {
 			// Adjacent runs of DIFFERENT tools fold under one umbrella (toolSuperGroup, item 5), which
@@ -363,11 +372,11 @@ func (t *transcript) renderView(th theme, width int, blink bool) renderedTranscr
 			// head's typeExpanded at bit 2 — so opening either level is a different key and a fresh
 			// paint (paintcache.go).
 			calls := sup.calls()
-			key := t.blockKey(shapeToolSuper, i, calls, th, width, blink,
-				anyOpenCall(t.entries[i:i+calls]))
-			appendBlock(false, e.depth, i, t.paintBlock(i, key, func() blockPaint {
-				return renderSuperGroup(th, superRunViews(t.entries, sup), railedWidth(width, e.depth),
-					blockState{live: key.live, blink: blink}).railed(th, e.depth)
+			ins := paintInputs(t.entries[i : i+calls])
+			key := blockKey(shapeToolSuper, ins, th, width, blink, anyOpenCall(ins))
+			appendBlock(false, in.depth, i, t.paintBlock(i, key, func() blockPaint {
+				return renderSuperGroup(th, superRunViews(ins, sup), railedWidth(width, in.depth),
+					blockState{live: key.live, blink: blink}).railed(th, in.depth)
 			}))
 			i += calls - 1
 		} else if run := toolCallRun(t.entries, i); len(run) > 1 {
@@ -386,24 +395,23 @@ func (t *transcript) renderView(th theme, width int, blink bool) renderedTranscr
 			// Every one of those flags is in the paint key already: blockKey spans the whole run and
 			// spanFlags packs expanded at bit 0 of each covered entry, so opening the tenth member of a
 			// group is a different key and a fresh paint (paintcache.go).
-			key := t.blockKey(shapeToolRun, i, len(run), th, width, blink,
-				anyOpenCall(t.entries[i:i+len(run)]))
+			key := blockKey(shapeToolRun, run, th, width, blink, anyOpenCall(run))
 			block := t.paintBlock(i, key, func() blockPaint {
-				return renderToolBlock(th, run, railedWidth(width, e.depth), blockState{
-					expanded: e.expanded,
+				return renderToolBlock(th, toolViews(run), railedWidth(width, in.depth), blockState{
+					expanded: in.expanded,
 					live:     key.live,
 					blink:    blink,
-					members:  memberFlags(t.entries[i : i+len(run)]),
-				}).railed(th, e.depth)
+					members:  memberFlags(run),
+				}).railed(th, in.depth)
 			})
-			appendBlock(false, e.depth, i, block)
+			appendBlock(false, in.depth, i, block)
 			i += len(run) - 1
 		} else {
 			// Which kinds can still be waiting, and which head a prompt stop, are the kind's own
 			// answers (entrykind.go); everything else keys as settled and marks no stop.
-			key := t.blockKey(shapeEntry, i, 1, th, width, blink, e.kind.hasLiveStar() && !e.done)
-			appendBlock(e.kind.isUserPrompt(), e.depth, i, t.paintBlock(i, key, func() blockPaint {
-				return renderEntryLines(th, e, width, blink)
+			key := blockKey(shapeEntry, []paintInput{in}, th, width, blink, in.kind.hasLiveStar() && !in.done)
+			appendBlock(in.kind.isUserPrompt(), in.depth, i, t.paintBlock(i, key, func() blockPaint {
+				return renderEntryLines(th, in, width, blink)
 			}))
 		}
 	}
@@ -473,11 +481,11 @@ func previewTail(s string) string {
 	return s[cut+1 : end]
 }
 
-// renderEntryLines renders one committed entry into its physical lines, framed for its
-// sub-agent depth, plus what each of those lines is to a click. The user prompt is a full-width
-// block; everything else hangs off a marker. A Depth > 0 entry is wrapped to the narrower column
-// left of its rail gutter, then each line is prefixed by the rail (P3.14) so the nested block
-// reads as a framed sub-section.
+// renderEntryLines renders one committed entry — stated as the record of what a painter may read of
+// it ([paintInput]) — into its physical lines, framed for its sub-agent depth, plus what each of
+// those lines is to a click. The user prompt is a full-width block; everything else hangs off a
+// marker. A Depth > 0 entry is wrapped to the narrower column left of its rail gutter, then each
+// line is prefixed by the rail (P3.14) so the nested block reads as a framed sub-section.
 //
 // Four kinds carry a click surface, for the one reason: they have two states to toggle between. A
 // tool call, a scheduled Firing and a stray result share ONE block painter and so one click
@@ -488,28 +496,28 @@ func previewTail(s string) string {
 // whatever is asked of it, and a click there keeps its selection meaning. blink narrows further
 // still — a tool call is the only entry that can still be WAITING for something, so it is the only
 // header with a star to blink (layout.md, "The live star").
-func renderEntryLines(th theme, e entry, width int, blink bool) blockPaint {
-	inner := railedWidth(width, e.depth)
-	switch e.kind {
+func renderEntryLines(th theme, in paintInput, width int, blink bool) blockPaint {
+	inner := railedWidth(width, in.depth)
+	switch in.kind {
 	case entryUser:
-		return renderUserBlock(th, glyphUser+" ", e.text, e.skillSpans, inner, e.expanded).railed(th, e.depth)
+		return renderUserBlock(th, glyphUser+" ", in, inner).railed(th, in.depth)
 	case entryInterjected:
 		// The human's mid-Exchange remark: the same block the prompt gets — it is the same voice —
 		// under the ⧖ marker that says it arrived while the model was already working (ADR 0025).
 		// Its skill tokens light up the sent block's way, for the same reason: a skill rides an
 		// interjection (ADR 0027), and the record of what the model was given must not depend on
 		// whether the remark was delivered mid-run or flushed into a new Exchange.
-		return renderUserBlock(th, glyphInterject+" ", e.text, e.skillSpans, inner, e.expanded).railed(th, e.depth)
+		return renderUserBlock(th, glyphInterject+" ", in, inner).railed(th, in.depth)
 	case entryAssistant:
 		marker := glyphAssistant + " "
-		body := renderMarkdownBody(th, e.text, inner-th.measure.Width(marker))
-		return plainPaint(railLines(th, withMarker(th, marker, body), e.depth))
+		body := renderMarkdownBody(th, in.text, inner-th.measure.Width(marker))
+		return plainPaint(railLines(th, withMarker(th, marker, body), in.depth))
 	case entryToolCall:
-		return renderToolBlock(th, []toolView{e.tool}, inner, blockState{
-			expanded: e.expanded,
-			live:     !e.done,
+		return renderToolBlock(th, []toolView{in.tool}, inner, blockState{
+			expanded: in.expanded,
+			live:     !in.done,
 			blink:    blink,
-		}).railed(th, e.depth)
+		}).railed(th, in.depth)
 	case entrySchedule:
 		// A Firing wears the tool block's shape under the /sessions tag's ⟳ (layout.md, "The firing
 		// block"), so one Firing reads the same in the chat and in the browser. live and blink stay
@@ -517,20 +525,20 @@ func renderEntryLines(th theme, e entry, width int, blink bool) blockPaint {
 		// this session's Exchange and the session is idle while a Firing runs, so an animated header
 		// here would claim work is happening in this session. What says the run is going is the
 		// block's own static summary (schedule.go, scheduleRunningSummary).
-		return renderToolBlock(th, []toolView{e.tool}, inner, blockState{
-			expanded: e.expanded,
+		return renderToolBlock(th, []toolView{in.tool}, inner, blockState{
+			expanded: in.expanded,
 			glyph:    scheduleTagGlyph,
-		}).railed(th, e.depth)
+		}).railed(th, in.depth)
 	case entryToolResult:
-		return renderOrphanResult(th, e.text, inner, e.expanded).railed(th, e.depth)
+		return renderOrphanResult(th, in.text, inner, in.expanded).railed(th, in.depth)
 	case entryError:
-		return plainPaint(railLines(th, hangingWrap(th, th.errorText, glyphAssistant+" ", e.text, inner), e.depth))
+		return plainPaint(railLines(th, hangingWrap(th, th.errorText, glyphAssistant+" ", in.text, inner), in.depth))
 	case entryNote:
-		return plainPaint(railLines(th, hangingWrap(th, th.noteText, "· ", e.text, inner), e.depth))
+		return plainPaint(railLines(th, hangingWrap(th, th.noteText, "· ", in.text, inner), in.depth))
 	case entryPresented:
-		return plainPaint(railLines(th, renderPresentedBlock(th, e.presented, inner), e.depth))
+		return plainPaint(railLines(th, renderPresentedBlock(th, in.presented, inner), in.depth))
 	case entryStartup:
-		return plainPaint(railLines(th, renderStartupBox(th, e.startup, inner), e.depth))
+		return plainPaint(railLines(th, renderStartupBox(th, in.startup, inner), in.depth))
 	default:
 		return blockPaint{}
 	}

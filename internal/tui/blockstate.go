@@ -103,23 +103,24 @@ func stateIndicator(expanded bool) string {
 // transcript.hasOpenToolCall's rule read over one block's own entries instead of over the whole
 // scrollback: the status line asks whether ANYTHING is still running, a header asks whether the
 // work behind THAT star is.
-func anyOpenCall(entries []entry) bool {
-	for i := range entries {
-		if entries[i].kind == entryToolCall && !entries[i].done {
+func anyOpenCall(ins []paintInput) bool {
+	for i := range ins {
+		if ins[i].kind == entryToolCall && !ins[i].done {
 			return true
 		}
 	}
 	return false
 }
 
-// memberFlags is a grouped block's per-member view state, read off the run's own entries in view
-// order (blockState.members). It is a copy rather than the entries themselves because a painter is
-// handed what it needs to draw and nothing it could write through: the flag is owned by the shared
-// entries backing array and moved only by transcript.setExpanded (ADR 0011).
-func memberFlags(entries []entry) []bool {
-	flags := make([]bool, len(entries))
-	for i := range entries {
-		flags[i] = entries[i].expanded
+// memberFlags is a grouped block's per-member view state, read off the run's own paint inputs in
+// view order (blockState.members). It is a copy rather than the entries themselves because a painter
+// is handed what it needs to draw and nothing it could write through: the flag is owned by the
+// shared entries backing array and moved only by transcript.setExpanded (ADR 0011) — the very rule
+// [paintInput] now states for every field at once.
+func memberFlags(ins []paintInput) []bool {
+	flags := make([]bool, len(ins))
+	for i := range ins {
+		flags[i] = ins[i].expanded
 	}
 	return flags
 }

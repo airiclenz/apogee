@@ -54,7 +54,7 @@ func subAgentSpan(entries []entry, i int) int {
 // A delegation that is OVER and left nothing behind it — a child refused at the depth bound, one
 // that faulted before its first event — is framed by neither answer, and must not be: a frame opened
 // there would enclose nothing at all, and the next block would close it again in the very next row.
-func subAgentFramed(head entry, span int) bool {
+func subAgentFramed(head paintInput, span int) bool {
 	if !head.headsRun() {
 		return false
 	}
@@ -156,7 +156,7 @@ func insideCollapsedRunAtDepth(entries []entry, depth int) bool {
 // already reported over a call that never got its result leaves work still standing behind the
 // star. Either way the block still contains an open call, which is exactly what layout.md makes the
 // star's rule.
-func renderSubAgentRun(th theme, head entry, span []entry, width int, blink bool) blockPaint {
+func renderSubAgentRun(th theme, head paintInput, span []paintInput, width int, blink bool) blockPaint {
 	// Both readings word the same <tool-top-level-details>; what the fold takes is the report BODY
 	// under it, and nothing else (expandedSubAgentView).
 	view := collapsedSubAgentView(head, span)
@@ -221,13 +221,14 @@ func subAgentPromptRows(th theme, task string, width int) []string {
 // indexes are what a click resolves through and the entries are what is drawn, so the two shapes
 // are kept apart rather than one being made to serve both (renderView builds these).
 //
-// It carries the head and its span rather than a finished view for [renderSubAgentRun]'s reason:
-// what a COLLAPSED delegation's row says is derived from both (subAgentSummary), and deriving it
-// inside the painter is what keeps the work behind the paint cache instead of on every frame.
+// It carries the head and its span as the painters' input records ([paintInput]) rather than as a
+// finished view, for [renderSubAgentRun]'s reason: what a COLLAPSED delegation's row says is derived
+// from both (subAgentSummary), and deriving it inside the painter is what keeps the work behind the
+// paint cache instead of on every frame.
 type subAgentMember struct {
-	head   entry   // the delegation's own call entry: its view, and its expanded state
-	span   []entry // the run nested beneath it; empty for a delegation that produced none
-	offset int     // the member's entry, as an offset from the block's head (blockPaint.addFor)
+	head   paintInput   // the delegation's own call entry: its view, and its expanded state
+	span   []paintInput // the run nested beneath it; empty for a delegation that produced none
+	offset int          // the member's entry, as an offset from the block's head (blockPaint.addFor)
 
 	// last marks the GROUP's final member, whose row closes the list with ┕. It is the group's
 	// answer and not the block's: a group interrupted by an open delegation's span paints its
@@ -321,7 +322,7 @@ func renderSubAgentGroup(th theme, count int, members []subAgentMember, width in
 // the row (collapsedSubAgentView): that one folds the report's gist behind a count of the work, and
 // failedSummary anchors its prefix at the start of the text, so asking it there would answer "not a
 // failure" for every failed delegation in a group.
-func subAgentFinished(head entry) bool {
+func subAgentFinished(head paintInput) bool {
 	return subAgentReported(head) && !failedSummary(head.tool.Summary.Text)
 }
 
@@ -336,7 +337,7 @@ func subAgentFinished(head entry) bool {
 // done is still an answer and not merely a fallback: it is the only one a REPLAYED record carries,
 // and the only one a phase-less producer ever emits (a hand-built test transcript, a session written
 // before the event existed). Reading either is what lets one rule serve both.
-func subAgentReported(head entry) bool {
+func subAgentReported(head paintInput) bool {
 	return head.done || head.phase == domain.SubAgentFinished
 }
 
@@ -362,7 +363,7 @@ const scheduledSummary = "scheduled"
 // one rule serve every producer — the discipline subAgentReported follows for the other end of the
 // same life — and being framed and being scheduled are mutually exclusive by construction, which is
 // what keeps the queued row out of the reading that would draw it a frame (renderSubAgentGroup).
-func subAgentScheduled(head entry, span int) bool {
+func subAgentScheduled(head paintInput, span int) bool {
 	if !head.headsRun() {
 		return false
 	}
@@ -382,7 +383,7 @@ func subAgentScheduled(head entry, span int) bool {
 //
 // The summary is NOT marked quoted (branchSummary): the word is apogee's own about a delegation, not
 // a line the child produced, and the mark is a statement about where the text came from.
-func scheduledSubAgentView(head entry) toolView {
+func scheduledSubAgentView(head paintInput) toolView {
 	view := head.tool
 	view.Summary = branchSummary{detailLine: detailLine{Text: scheduledSummary}}
 	view.Details = toolBody{} // the zero body: nothing to lay out, and so nothing to expand for
@@ -445,7 +446,7 @@ func renderSubAgentMemberRows(th theme, tv toolView, marker string, width, room 
 //
 // The copy is a paint-time act on facts the entry keeps whole, which is why the body it lays out is
 // the report the delegation actually returned.
-func expandedSubAgentView(head entry, span []entry) toolView {
+func expandedSubAgentView(head paintInput, span []paintInput) toolView {
 	view := head.tool
 	view.Summary = subAgentSummary(head, span)
 	return view
@@ -459,7 +460,7 @@ func expandedSubAgentView(head entry, span []entry) toolView {
 // renderSubAgentGroup): grouping changes the frame a delegation is drawn in, and a second wording
 // of "what does a collapsed delegation say" would part company with this one — taking the per-child
 // live tail a fan-out is observed through (ADR 0039) with it.
-func collapsedSubAgentView(head entry, span []entry) toolView {
+func collapsedSubAgentView(head paintInput, span []paintInput) toolView {
 	view := expandedSubAgentView(head, span)
 	view.Details = toolBody{} // the zero body: no lines, and so nothing to lay out beneath
 	return view
@@ -492,7 +493,7 @@ func collapsedSubAgentView(head entry, span []entry) toolView {
 // is last, after the gist, because it is the rarest cell on the row: it appears only while routing
 // is on AND the target is bound to another model, so a reader who sees it is reading a line they
 // already know to be unusual — where the count and the fill are on every row and earn the left.
-func subAgentSummary(head entry, span []entry) branchSummary {
+func subAgentSummary(head paintInput, span []paintInput) branchSummary {
 	calls := 0
 	for i := range span {
 		if span[i].kind == entryToolCall {
@@ -517,7 +518,7 @@ func subAgentSummary(head entry, span []entry) branchSummary {
 // already made by the time anything is painted and this seam only has to spell it — in the footer's
 // own language (displayModel), so the one model on screen and the other are read the same way rather
 // than one showing a bare name and the other a weights path.
-func subAgentModel(head entry) string {
+func subAgentModel(head paintInput) string {
 	return displayModel(head.ctxModel)
 }
 
@@ -530,7 +531,7 @@ func subAgentModel(head entry) string {
 // status gauge hides itself on the very same condition rather than showing one. That is also what a
 // run whose child never reported paints — and what a session recorded before the reading existed
 // decodes to (transcriptcodec.go), so nothing needs a migration to look right.
-func subAgentFill(head entry) string {
+func subAgentFill(head paintInput) string {
 	if head.ctxUsed <= 0 || head.ctxLimit <= 0 {
 		return ""
 	}
@@ -559,7 +560,7 @@ const delegatingSummary = "delegating"
 // the moment the grandchild calls a tool of its own that call is the newest, the word goes, and the
 // row is back to its count — so the cell names the nearest live fact or nothing at all, never a
 // stale one.
-func subAgentGist(head entry, span []entry) string {
+func subAgentGist(head paintInput, span []paintInput) string {
 	if subAgentReported(head) {
 		if head.tool.Summary.Text != "" {
 			return head.tool.Summary.Text
