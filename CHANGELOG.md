@@ -775,6 +775,11 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **`mechanisms.Build` no longer hands out catalogue-aliased metadata.** The Mechanism it returned
+  carried `Descriptor.IncompatibleWith`/`Requires` and `Ordering.Before`/`After` slice headers shared
+  with the static catalogue row, so a caller mutating what it got back rewrote the catalogue for every
+  later build. The metadata is cloned on the way out now, exactly as `Descriptors()` already did.
+
 - Corrected the engine-seam comment in `internal/domain/hooks.go`: it claimed Request/Response/Conversation
   are deliberately not re-exported by the root facade, which has been false since `apogee.go` aliased all
   three. The comment now states what is actually facade-absent — the package-level constructors

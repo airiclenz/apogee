@@ -78,7 +78,9 @@ NOTES (2026-08-20): The item's text names `Defer` / `TakeDeferred` among the "na
 
 **Commit:** `docs(domain): correct the stale not-re-exported claim in hooks.go`
 
-## 3. buildFrom clones descriptors like Descriptors() already does
+## 3. buildFrom clones descriptors like Descriptors() already does — ✅ DONE (2026-08-20)
+
+NOTES (2026-08-20): the item allowed cloning `Ordering`'s slices "if they share backing the same way" — they did, so `buildFrom` now routes through both `cloneDescriptor` and a new `cloneOrdering` twin. The doc comments on `Build` and `buildFrom` were updated to state the clone guarantee (they previously only promised the joined row).
 
 **Source:** review defect j.
 

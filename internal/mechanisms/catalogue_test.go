@@ -96,6 +96,62 @@ func TestBuildFromConstructorErrorPropagates(t *testing.T) {
 	}
 }
 
+// What buildFrom hands out carries CLONED metadata slices, exactly as Descriptors() does: a caller
+// that mutates a built Mechanism's IncompatibleWith/Requires or Before/After cannot reach back
+// through the aliased slice header into the static catalogue row. Without the clone the two builds
+// below would see each other's writes.
+func TestBuildFromClonesDescriptorAndOrderingSlices(t *testing.T) {
+	t.Parallel()
+	const id domain.MechanismID = "fake"
+	table := map[domain.MechanismID]row{
+		id: {
+			descriptor: domain.MechanismDescriptor{
+				ID:               id,
+				IncompatibleWith: []domain.MechanismID{"rival"},
+				Requires:         []domain.MechanismID{"prereq"},
+			},
+			ordering:  domain.OrderingConstraints{Before: []domain.MechanismID{"later"}, After: []domain.MechanismID{"earlier"}},
+			construct: func(Deps) (any, error) { return fakeMechanism{id: id}, nil },
+		},
+	}
+
+	built, err := buildFrom(table, id, Deps{})
+	if err != nil {
+		t.Fatalf("buildFrom(%q): %v", id, err)
+	}
+	built.Descriptor.IncompatibleWith[0] = "tampered"
+	built.Descriptor.Requires[0] = "tampered"
+	built.Ordering.Before[0] = "tampered"
+	built.Ordering.After[0] = "tampered"
+
+	stored := table[id]
+	if got := stored.descriptor.IncompatibleWith; !slices.Equal(got, []domain.MechanismID{"rival"}) {
+		t.Errorf("catalogue row IncompatibleWith = %v; want it untouched by the caller's mutation", got)
+	}
+	if got := stored.descriptor.Requires; !slices.Equal(got, []domain.MechanismID{"prereq"}) {
+		t.Errorf("catalogue row Requires = %v; want it untouched by the caller's mutation", got)
+	}
+	if got := stored.ordering.Before; !slices.Equal(got, []domain.MechanismID{"later"}) {
+		t.Errorf("catalogue row Ordering.Before = %v; want it untouched by the caller's mutation", got)
+	}
+	if got := stored.ordering.After; !slices.Equal(got, []domain.MechanismID{"earlier"}) {
+		t.Errorf("catalogue row Ordering.After = %v; want it untouched by the caller's mutation", got)
+	}
+
+	// A second build is unaffected too — the row is still pristine, so every caller gets the
+	// declared metadata rather than the previous caller's edits.
+	second, err := buildFrom(table, id, Deps{})
+	if err != nil {
+		t.Fatalf("buildFrom(%q) second call: %v", id, err)
+	}
+	if got := second.Descriptor.IncompatibleWith; !slices.Equal(got, []domain.MechanismID{"rival"}) {
+		t.Errorf("second build IncompatibleWith = %v; want %v", got, []domain.MechanismID{"rival"})
+	}
+	if got := second.Ordering.Before; !slices.Equal(got, []domain.MechanismID{"later"}) {
+		t.Errorf("second build Ordering.Before = %v; want %v", got, []domain.MechanismID{"later"})
+	}
+}
+
 // The production catalogue carries the ported Mechanisms and only those: Wave 1 registered
 // validate/syntax/autofix (item 5) and the empty_response_recovery/tool_use_enforcer off-ramps
 // (item 6), Wave 2 added the truncate_history history-rewrite (item 7), item 9 added the

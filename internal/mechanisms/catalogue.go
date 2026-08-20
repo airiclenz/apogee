@@ -141,7 +141,9 @@ func registerIn(table map[domain.MechanismID]row, r row) {
 
 // Build constructs the catalogued Mechanism identified by id, injecting deps (D3), and returns it
 // as the registry holds it: the row's descriptor and ordering joined with the hook the row's
-// constructor built. This is the SINGLE place a Mechanism's metadata and its behaviour are joined,
+// constructor built. The metadata is copied with its slice fields cloned, exactly as Descriptors()
+// clones what it harvests, so a caller cannot mutate the catalogue's rows through what it gets
+// back. This is the SINGLE place a Mechanism's metadata and its behaviour are joined,
 // so the two cannot drift. It is the seam the engine drives for each enabled `mechanisms:` ID. An
 // id absent from the catalogue is a loud error naming the known IDs and wrapping
 // domain.ErrUnknownMechanism (so callers can match it with errors.Is), so a typo'd config key
@@ -194,8 +196,21 @@ func cloneDescriptor(d domain.MechanismDescriptor) domain.MechanismDescriptor {
 	return d
 }
 
+// cloneOrdering returns a copy of o whose slice fields are independent of the source row — the
+// Ordering half of the same guarantee cloneDescriptor gives, so a caller mutating a built
+// Mechanism's Before/After cannot reach back into the static catalogue.
+func cloneOrdering(o domain.OrderingConstraints) domain.OrderingConstraints {
+	o.Before = slices.Clone(o.Before)
+	o.After = slices.Clone(o.After)
+	return o
+}
+
 // buildFrom is Build over an explicit table, so a test can exercise the lookup / unknown-id /
 // inject path against a fake row while the production catalogue is still empty.
+//
+// The metadata it hands out is cloned, exactly as Descriptors() clones what it harvests: a built
+// Mechanism's Descriptor and Ordering slices are independent of the table's row, so a caller
+// mutating them cannot reach back into the static catalogue.
 func buildFrom(table map[domain.MechanismID]row, id domain.MechanismID, deps Deps) (domain.RegisteredMechanism, error) {
 	r, ok := table[id]
 	if !ok {
@@ -205,7 +220,7 @@ func buildFrom(table map[domain.MechanismID]row, id domain.MechanismID, deps Dep
 	if err != nil {
 		return domain.RegisteredMechanism{}, err
 	}
-	return domain.RegisteredMechanism{Descriptor: r.descriptor, Ordering: r.ordering, Hook: hook}, nil
+	return domain.RegisteredMechanism{Descriptor: cloneDescriptor(r.descriptor), Ordering: cloneOrdering(r.ordering), Hook: hook}, nil
 }
 
 // knownIDs returns the table's IDs sorted by their canonical spelling (the stable order the
