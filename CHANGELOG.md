@@ -222,6 +222,21 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **The diff-body cluster moves out of `toolpresent.go` into `internal/tui/diffbody.go`.** The
+  last of the four modules that shared one file name (ADR 0043), moved verbatim beside
+  `splitdiff.go`, the composer that reads the same regions the wide way. What moves is every BODY
+  a change-shaped call renders: the three edit tools' bodies derived from the call's own arguments
+  (`changedLines` over `editPair`s — `singleReplacementBody`, `multiReplacementBody`,
+  `fileEditBody`, `writtenLines`, and the `*** Begin Patch` reader under them), the two diff
+  tools' regions walked back out of the output they print instead (`viewDiffRegions` through
+  `diffRegionCutter`; `gitDiffRangeRegions` through `gitDiffWalk`, which reads its numbers off the
+  hunk headers git elides the gaps between), `stackedDiffLines` and the `stackedRow` family that
+  build the narrow reading both readings share their regions with, and `viewDiffBody`, the
+  coloured prose that stays view_diff's floor for output carrying no tags. `toolpresent.go` is
+  left with its tail alone — the JSON-argument display module and the generic text utilities — at
+  336 lines, down from 1082. No signature changed, no call site moved, and the test files stay
+  where they are. `doc.go`'s file map gains the new file's line. No behaviour change.
+
 - **The presenter registry and the per-tool hooks move out of `toolpresent.go` into
   `internal/tui/toolregistry.go`.** The third and fourth of the four modules that shared one file
   name (ADR 0043), moved verbatim and never reshaped — the registry is the package's one open,

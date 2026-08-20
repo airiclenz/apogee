@@ -223,7 +223,19 @@ internal/tui/doc.go
 
 **Commit:** `refactor(tui): move the presenter registry and tool hooks into toolregistry.go`
 
-## 7. Move the diff-body cluster into diffbody.go
+## 7. Move the diff-body cluster into diffbody.go — ✅ DONE (2026-08-20)
+
+NOTES (2026-08-20): the item allows folding into the split-diff plan's existing composer file instead;
+the user ruled on 2026-08-20 that `diffbody.go` is created as its own file — `splitdiff.go` composes
+the wide reading only, and items 11 and 12 name `diffbody.go` by that name.
+NOTES (2026-08-20): the moved span is byte-identical, but the new file opens with a header banner of
+its own (the four sibling files all carry one, and item 6 left `toolpresent.go` with none) — the only
+text in `diffbody.go` that is not moved verbatim. The moved cluster's own `git_diff_range` banner
+travelled with it unchanged.
+NOTES (2026-08-20): two prose pointers at the moved code were corrected in the same commit because
+this move is what staled them — `splitdiff.go`'s header and `doc.go`'s splitdiff entry both said the
+stacked rows are built in `toolpresent.go`; both now say `diffbody.go`. `splitdiff.go` is outside the
+item's Files line for that one-word reason.
 
 **Source:** review §Candidate 7 ("diff bodies beside the split-diff plan's
 `splitdiff.go`"). Depends on item 6.

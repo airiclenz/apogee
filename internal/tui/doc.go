@@ -759,8 +759,17 @@
 // that says whether that reading fits at all ([splitDiffFits], splitPaneMinCols) and the gutter,
 // wrap and padding that keep the two panes level (ADR 0052, docs/layout/split-diff-layout.md);
 // it composes rows and paints no block, so WHICH reading a body gets — these panes or the
-// stacked rows toolpresent.go builds from the same regions — stays the painter's choice, made
+// stacked rows diffbody.go builds from the same regions — stays the painter's choice, made
 // per paint against the width it holds;
+// diffbody.go those bodies themselves — every row a change-shaped call renders, lifted out of
+// toolpresent.go (ADR 0043) beside that composer: the three edit tools' bodies derived from the
+// call's own ARGUMENTS ([changedLines] over [editPair]s), with no file read and nothing guessed,
+// and the two diff tools' regions walked back out of the output they print instead
+// ([viewDiffRegions] through [diffRegionCutter]; [gitDiffRangeRegions] through [gitDiffWalk],
+// which reads its numbers off the hunk headers git ELIDES the gaps between); plus
+// [stackedDiffLines], the one builder of the narrow reading, so that reading cannot come to
+// differ per tool, and [viewDiffBody], the coloured prose that is view_diff's floor once its
+// output carries no tags at all;
 // the renderer itself is nine files rather than one, split along the seams the painters already
 // had once the tool-display overhaul grew render.go past the house ~400-line guideline — a pure
 // file move, nothing renamed and nothing reworded: render.go keeps the transcript walk

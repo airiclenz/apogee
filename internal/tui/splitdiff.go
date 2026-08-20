@@ -13,7 +13,7 @@ import (
 // This file is the SPLIT reading of a diff body (ADR 0052, docs/layout/split-diff-layout.md):
 // the before file down the left pane, the after file down the right, each with its own line
 // numbers and its own marker column, parted by a damped divider. It is the wide twin of the
-// stacked reading toolpresent.go builds (stackedDiffLines) — the same regions, the same numbers,
+// stacked reading diffbody.go builds (stackedDiffLines) — the same regions, the same numbers,
 // the same context, arranged across instead of down.
 //
 // It is a PURE composition module: regions and a width in, styled rows out. Nothing here knows
