@@ -222,6 +222,24 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **The `ask_user` pane moves out of `model.go` into `internal/tui/ask.go`.** The fifth concern
+  carved off the coordinator file (ADR 0043), shaped after `approval.go` next door: both halves of
+  the surface in one file, so a choice can never be paintable and unreachable. The state half is
+  the fold that borrows the input box for a question (`foldAskRequest`, the `askReqMsg` arm's body
+  now named, with the arm reduced to the delegation the other folds already use), the keys the
+  offering claims while that box is still empty (`askChoiceKey` — ↑/↓ over the choices and ␣ on a
+  multi-select row, previously written inline in `handleKey`), and the reply path that hands the
+  answer back and gives the box up (`submitAnswer`, `checkedLabels`, `restoreAskDraft`). The paint
+  half is the pane itself (`askPrompt`, `askChoiceRows`, the checkbox glyphs, and the row/line
+  budgeting around them — `maxAskChoiceRows`, `askRowGap`, `askQuestionFloor`,
+  `askAnchorRowLines`). Everything moved verbatim except the two call sites, which had to become
+  named methods for the move to happen at all: `askChoiceKey` states its guard as an early return
+  and reports whether it CLAIMED the key, the way `usageKey` and `inspectorKey` already do, so
+  `handleKey` reads the ask pane's claim in the same shape as its neighbours'. The `Model`'s own
+  fields (`pendingAsk`, `askSel`, `askChecked`, `askDraft`) stay in `model.go`. `model.go` finishes
+  at 3187 lines, down from 3537. `doc.go`'s file map gains the new file's line. No behaviour
+  change.
+
 - **The upstream-heartbeat cluster moves out of `model.go` into `internal/tui/heartbeat.go`.**
   The fourth concern carved off the coordinator file (ADR 0043), after the record-write, approval
   and command-running clusters before it: the 492 contiguous lines that hold the heartbeat end to

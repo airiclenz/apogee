@@ -121,7 +121,14 @@ the same commit.
 
 **Commit:** `refactor(tui): move the heartbeat/rebind cluster into heartbeat.go`
 
-## 3. Move the ask_user pane into ask.go
+## 3. Move the ask_user pane into ask.go — ✅ DONE (2026-08-20)
+
+NOTES (2026-08-20): the item's "ask key handling ... as a named method" needed a shape the inline
+block did not have — the block fell THROUGH to the input routing on any key it did not act on.
+`askChoiceKey` therefore returns `(bool, tea.Model, tea.Cmd)`, matching `usageKey`/`inspectorKey`'s
+existing claim signature, and `handleKey` keeps it in exactly the same position between the
+approval branch and the `inputEditable` block. Mutation-free on every unclaimed path, so the
+fall-through is byte-identical to before.
 
 **Source:** review §Candidate 6, cluster 2.
 

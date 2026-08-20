@@ -633,7 +633,15 @@
 // [Model.resolveApproval], [Model.sendApproval]) and the pane that paints it
 // ([Model.approvalPrompt] with its Sub-agent identity line and its argument block), so a row can
 // never be paintable and unreachable (the Model still owns the pending request and the menu
-// selection); commandrun.go the third cluster lifted out of model.go (ADR 0043) — what a
+// selection); ask.go the ask_user pane lifted out of model.go beside approval.go (ADR 0043) and
+// shaped like it, both halves in one file — the fold that borrows the input box for a question
+// ([Model.foldAskRequest]), the keys the offering claims while that box is still empty
+// ([Model.askChoiceKey]), the reply that sends the answer back and gives the box up
+// ([Model.submitAnswer], [Model.checkedLabels], [Model.restoreAskDraft]) and the pane that paints
+// the question with its choices ([Model.askPrompt], [askChoiceRows] and the row/line budgeting
+// around them), so a choice can never be paintable and unreachable (the Model still owns the
+// pending question, the highlight and the ticked set); commandrun.go the third cluster lifted out
+// of model.go (ADR 0043) — what a
 // recognised /command DOES ([Model.runCommand]'s switchboard, [Model.startNewSession]'s session
 // reset, [Model.launchExchange]'s worker start) beside the refusals an unrunnable line meets
 // ([Model.refuseUnknownSlash], [Model.refuseIdleOnlyCommand]) and the [Model.commandRunnable] gate
