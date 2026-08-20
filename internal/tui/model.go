@@ -197,10 +197,14 @@ type Model struct {
 	hb heartbeatState
 
 	// Lifecycle.
-	state      uiState
-	cancel     context.CancelFunc // non-nil while a worker runs; the stop key calls it (C4)
-	pending    *approvalReqMsg    // the in-flight Approval while awaitingApproval (P2.4 acts on it)
-	pendingAsk *askReqMsg         // the in-flight ask_user question while awaitingAsk (P3.11)
+	state  uiState
+	cancel context.CancelFunc // non-nil while a worker runs; the stop key calls it (C4)
+	// pendingDecision is the question this Exchange is blocked on and the payload that rides with
+	// it. It is EMBEDDED anonymously like liveStats above, so m.pending, m.pendingAsk and
+	// m.askChecked read exactly as they always did while the three of them gain one owner — and
+	// with it the one call that lets go of ALL of them when the Exchange ends (pendingDecision.reset,
+	// finishWorker), rather than a run of assignments a new payload can be left out of.
+	pendingDecision
 	// askSel is where the ask_user offering's highlight stands while awaitingAsk (D5): the row ↑/↓
 	// walk and ⏎ sends, pre-selected on the first choice while the answer box is empty. It is the
 	// shared [listCursor] (listsurface.go, ADR 0053) rather than a bare int, so the clamp, the
@@ -208,14 +212,6 @@ type Model struct {
 	// this pane's own arithmetic — eight bytes with no no-copy type, riding the value-copied Model
 	// exactly as the int did (ADR 0011).
 	askSel listCursor
-	// askChecked is the ticked set of a MULTI-SELECT ask_user question: one bool per offered
-	// choice, ␣-toggled on the highlighted row, and nil for a single-select question — which has
-	// no checked set at all, so every single-select path stays exactly what it always was. It is
-	// a bare []bool, no self-referential no-copy type, so it rides the value-copied Model
-	// (ADR 0011); the toggle writes it in place, which is safe because the slice is allocated
-	// fresh for each question (the askReqMsg fold) and no copy of the Model outlives the Update
-	// that produced it.
-	askChecked []bool
 	// approvalSel is the highlighted approvalMenu row while awaitingApproval: the row ↑/↓ move and
 	// ⏎ takes. It resets to its zero value — Allow, the mockup's default — on every incoming request
 	// rather than persisting across them, because a menu that remembers where the last decision was
@@ -289,14 +285,12 @@ type Model struct {
 	// above), never from these bytes.
 	reasoning reasoningTail
 
-	// Live stats folded from the engine's UsageEvent (server token accounting). ctxUsed is
-	// the latest top-level (Depth 0) total-token count, driving the context-usage gauge;
-	// genStart marks when the current Turn began streaming content (set on its first token,
-	// cleared on a re-stream or once usage lands) and tokPerSec is the last completion's
-	// throughput, timed against the Update clock. All value/zero-safe in the copied Model.
-	ctxUsed   int
-	genStart  time.Time
-	tokPerSec float64
+	// liveStats is what the status line reports about the conversation the session is holding right
+	// now: the context gauge's fill, the generation clock, and the last completion's throughput. It
+	// is EMBEDDED anonymously (the promptEditor posture), so m.ctxUsed, m.genStart and m.tokPerSec
+	// read exactly as they always did while the three of them gain one owner — and with it the one
+	// reset every session boundary spells out by hand (liveStats.reset).
+	liveStats
 
 	// usage is the MAIN agent's cumulative token accounting for the session — the latest reading
 	// its Depth-0 UsageEvents carried (usageTotals, fold.go), including the maintenance events the
@@ -357,6 +351,70 @@ type Model struct {
 	// and a fixed-size array of plain ints, so it rides the value-copied Model with no exception to
 	// ADR 0011's copy rule.
 	spans frameSpans
+}
+
+// liveStats is the reading the status line takes off the engine's UsageEvents for the conversation
+// that is live RIGHT NOW (server token accounting, folded in foldStats): ctxUsed is the latest
+// top-level (Depth 0) total-token count, driving the context-usage gauge; genStart marks when the
+// current Turn began streaming content (set on its first token, cleared on a re-stream or once usage
+// lands); tokPerSec is the last completion's throughput, timed against the Update clock. All three
+// are plain values, so the whole group rides the value-copied Model (ADR 0011).
+//
+// Its lifetime is one CONVERSATION, which is what separates it from [Model.usage] beside it: these
+// three describe the exchange history the engine is still carrying, so the boundaries that discard
+// that history WHOLE drop all three together (reset), while the cumulative accounting is the
+// session's own running total and outlives any single reading.
+type liveStats struct {
+	ctxUsed   int
+	genStart  time.Time
+	tokPerSec float64
+}
+
+// reset drops the whole live reading: the gauge goes dark, the generation clock stops and the
+// throughput is forgotten. It is what the two session boundaries call — /clear (startNewSession) and
+// a /sessions restore (resumeLoaded) — so neither has to keep the list of what "the stats fall with
+// the discarded conversation" means in its own body. A restore then relights ctxUsed from the record
+// it is reopening; /clear has nothing to reopen at and stays at zero. The partial boundaries stay
+// their own line: a compaction zeroes the gauge alone (foldCompactDone) and the end of an Exchange
+// the generation clock alone (finishWorker), because neither of them discards the conversation.
+//
+// It deliberately does NOT reach [Model.usage]: see the reset sites for the asymmetry that is.
+func (s *liveStats) reset() {
+	*s = liveStats{}
+}
+
+// pendingDecision is what the human owes an answer to while an Exchange is blocked, and everything
+// that rides with the question:
+//
+//   - pending is the in-flight Approval while awaitingApproval (P2.4 acts on it),
+//   - pendingAsk the in-flight ask_user question while awaitingAsk (P3.11),
+//   - askChecked the ticked set of a MULTI-SELECT ask_user question: one bool per offered choice,
+//     ␣-toggled on the highlighted row, and nil for a single-select question — which has no checked
+//     set at all, so every single-select path stays exactly what it always was.
+//
+// The state↔payload invariant lives where it always did (finishWorker and the two folds that open a
+// question): pending is non-nil exactly in stateAwaitingApproval, pendingAsk exactly in
+// stateAwaitingAsk. Grouping them changes none of that — it gives the FORGETTING one call site
+// instead of three assignments a fourth payload could quietly be left out of.
+//
+// Two pointers and a bare []bool, no self-referential no-copy type, so it rides the value-copied
+// Model (ADR 0011); the ␣ toggle writes askChecked in place, which is safe because the slice is
+// allocated fresh for each question (the askReqMsg fold) and no copy of the Model outlives the
+// Update that produced it.
+type pendingDecision struct {
+	pending    *approvalReqMsg
+	pendingAsk *askReqMsg
+	askChecked []bool
+}
+
+// reset lets go of the question and its payload together — the whole value, so a payload added to it
+// later is dropped by the same line that drops these three. It is the Exchange's own boundary
+// (finishWorker): a stop or a fault kills the question along with the worker that asked it, and no
+// path may leave a dead request or a dead checked set standing. The DRAFT the question borrowed the
+// input box from is not in here: handing that back is restoreAskDraft's, because it writes the box
+// rather than this value.
+func (d *pendingDecision) reset() {
+	*d = pendingDecision{}
 }
 
 // newModel builds the initial idle Model. parent is the program context the worker derives
@@ -442,19 +500,16 @@ func newModel(parent context.Context, eng Engine, opts Options, notify func(tea.
 }
 
 // replayResumed repaints a resumed session's scrollback beneath the fresh start-up box: it relights
-// the context gauge from the stored fill, decodes the stored transcript blob, and appends its
-// committed entries closed by a "resumed: <title>" note. A decode error or a legacy record whose
-// blob is empty (no scrollback was recorded) is never fatal — the view is left fresh and an honest
-// note says the model still remembers even though the scrollback could not be repainted. A session
-// restored mid-task (r.InExchange, set by the binary from the resumed Agent) closes with the
-// interrupted note, telling the human /continue picks the work back up — the same note the /sessions
-// browser appends on a mid-Exchange resume. A nil payload (a fresh start) is a no-op. It runs at
-// construction, before any WindowSizeMsg, so the replayed entries are present the first time the
-// viewport lays out.
+// the context gauge and the accounting from the stored record, then hands the stored blob to the
+// shared repaint (replayScrollback) that the /sessions restore uses too. A nil payload (a fresh
+// start) is a no-op. It runs at construction, before any WindowSizeMsg, so the replayed entries are
+// present the first time the viewport lays out.
 //
-// All three notices are added EPHEMERALLY (addEphemeralNote): each is derived here from the record
-// being resumed, so the next resume derives it again — persisting one would stack another copy into
-// the record on every reopen while telling a re-read nothing it does not already know.
+// This is the --resume HALF of resuming: the binary resolved the record before the Model existed, so
+// what arrives is a [ResumedSession] the host filled in — including its own reading of whether the
+// Agent it rebuilt is mid-Exchange. The /sessions half (resumeLoaded) reads the same three facts off
+// the record it just loaded and asks the live engine the same question, which is why only the
+// repaint below is shared and not this preamble.
 func (m *Model) replayResumed(r *ResumedSession) {
 	if r == nil {
 		return
@@ -469,14 +524,39 @@ func (m *Model) replayResumed(r *ResumedSession) {
 	// last took, so a resumed session reports its spend instead of starting from nothing. A record
 	// written before the feature carries zeros, which is exactly the nothing-reported state.
 	m.usage = usageTotals(r.Usage)
-	entries, err := decodeTranscript(r.Transcript)
+	m.replayScrollback(r.Transcript, r.Title, r.InExchange)
+}
+
+// replayScrollback repaints a stored session's scrollback into the view that is about to become it,
+// and closes it with the notes that say what was reopened. It decodes the opaque transcript blob and
+// appends its committed entries under a "resumed: <title>" note. A decode error or a legacy record
+// whose blob is empty (no scrollback was recorded) is never fatal — the view is left as the caller
+// seeded it and an honest note says the model still remembers even though the scrollback could not be
+// repainted. A session restored mid-task (inExchange) closes with the interrupted note, telling the
+// human /continue picks the work back up.
+//
+// It is the one repaint BOTH ways into a stored session run: --resume at construction (replayResumed,
+// reading the host's [ResumedSession]) and the /sessions browser's restore (resumeLoaded, reading the
+// record it just loaded). They differ in what they resolve the three arguments FROM, never in what
+// the human then sees — which is why the notes are worded once, here, rather than kept identical by
+// hand in two files. The caller has already reset the transcript and reseeded the start-up box: this
+// only appends beneath it.
+//
+// All three notices are added EPHEMERALLY (addEphemeralNote): each is derived here from the record
+// being resumed, so the next resume derives it again — persisting one would stack another copy into
+// the record on every reopen while telling a re-read nothing it does not already know.
+//
+// The title is untrusted disk input (no codec sanitizes a record's Meta on the way back in) and needs
+// no wrapping here: addEphemeralNote escape-strips at the seam.
+func (m *Model) replayScrollback(blob []byte, title string, inExchange bool) {
+	entries, err := decodeTranscript(blob)
 	if err != nil || len(entries) == 0 {
-		m.transcript.addEphemeralNote("resumed: " + r.Title + " (no scrollback recorded — the model still remembers)")
+		m.transcript.addEphemeralNote("resumed: " + title + " (no scrollback recorded — the model still remembers)")
 	} else {
 		m.transcript.replay(entries)
-		m.transcript.addEphemeralNote("resumed: " + r.Title)
+		m.transcript.addEphemeralNote("resumed: " + title)
 	}
-	if r.InExchange {
+	if inExchange {
 		m.transcript.addEphemeralNote(interruptedNote)
 	}
 }
@@ -497,7 +577,7 @@ func (m *Model) replayResumed(r *ResumedSession) {
 // the way to the terminal exactly as the start-up box strips its host and model.
 //
 // Every notice is added EPHEMERALLY (addEphemeralNote), for the same reason the resume notices are
-// (replayResumed): all of it is re-derived from the live workspace at each boundary — the files are
+// (replayScrollback): all of it is re-derived from the live workspace at each boundary — the files are
 // re-read and the report recomputed — so persisting it would tell a re-read nothing it will not work
 // out again while stacking another copy into the record on every startup and every resume. Context
 // files are session-scoped prompt data restored by re-reading (ADR 0026), so the record loses
@@ -1382,9 +1462,10 @@ func (m *Model) finishWorker(next uiState) tea.Cmd {
 		m.cancel() // release the worker's child context — un-cancelled it leaks per exchange
 	}
 	m.cancel = nil
-	m.pending = nil
-	m.pendingAsk = nil
-	m.askChecked = nil // and with it the ticked set: no path leaves a dead checked set standing
+	// The question this Exchange was blocked on dies with it — the Approval, the ask_user request,
+	// and the ticked set that rides with the latter: no path leaves a dead request or a dead checked
+	// set standing (pendingDecision.reset).
+	m.pendingDecision.reset()
 	// A question that dies with its Exchange — a stop, a fault — lets go of the box exactly as an
 	// answered one does, so the message it borrowed the box from comes back here too.
 	m.restoreAskDraft()

@@ -222,6 +222,26 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **Per-lifetime state resets itself, and a resumed session is repainted in one place**
+  (`internal/tui/model.go`). "Reset the session" was a hand-kept checklist: `finishWorker` spelled
+  out eleven fields of eight concerns, and `/clear` and a `/sessions` restore each kept their own
+  run of assignments for the same live reading. The two groups that fall together now say so
+  themselves — `liveStats` (the context gauge's fill, the generation clock, the last completion's
+  throughput) and `pendingDecision` (the in-flight Approval, the in-flight `ask_user` question and
+  the ticked set that rides with it), each a small value with its own `reset()`, embedded
+  anonymously so every existing reader (`m.ctxUsed`, `m.pending`, `m.askChecked`, …) reads exactly
+  as it did. The Exchange boundary and the two session boundaries call those resets instead of
+  listing fields, so a payload added to either group is dropped by the line that already drops the
+  rest. The byte-for-byte scrollback replay written twice — once for `--resume` at construction,
+  once for the `/sessions` restore — is one shared `replayScrollback` now, so both ways into a
+  stored session word the resume note, the no-scrollback degrade and the interrupted note
+  identically by construction rather than by hand. Nothing the human sees changes: the whole suite
+  passes with no test line and no expectation touched. The two asymmetries between the boundaries
+  are preserved exactly and each is now documented where the reset happens — `/clear` still leaves
+  the session's cumulative token accounting standing (recorded as a deferred defect, not endorsed),
+  and a restore still leaves `titleTouched` as it found it, which is what keeps the outgoing
+  session's late automatic title from naming the record just reopened.
+
 - **The llama-launcher seam is one named host interface (`internal/tui/tui.go`, ADR 0054).**
   `Options` carried seven one-purpose bare `func` fields for what is one thing a machine either has
   or has not — `LaunchProfiles` / `LoadProfile` / `UnloadServer` / `StopServer` /

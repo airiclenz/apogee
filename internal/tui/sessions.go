@@ -453,15 +453,15 @@ func (m Model) loadSession(id string) tea.Cmd {
 // fill, and re-arm the same field set startNewSession resets. A session restored mid-task gets the
 // interrupted note (item 8 supplies the step-only /continue drive that finishes it).
 //
-// The resume notices — "resumed: <title>", its no-scrollback degrade variant, and the interrupted
-// note — are ephemeral (addEphemeralNote): they are re-derived from the loaded record every time it
-// is opened, so the record itself must not carry them. The load/restore FAILURE notes above stay
-// persistent: they belong to the session that stays live, and they record something that happened
-// rather than something re-derived.
+// The repaint itself and the three resume notices are replayScrollback's, shared with the --resume
+// start (replayResumed) so both ways into a stored session say the same thing; that is also where
+// the notices' EPHEMERAL posture is written down. The load/restore FAILURE notes above are this
+// fold's own and stay persistent: they belong to the session that stays live, and they record
+// something that happened rather than something re-derived.
 //
-// The title those notices quote is untrusted disk input — no codec sanitizes a record's Meta on the
-// way back in, which is why sessionRowCells strips it too — and it needs no wrapping here: both
-// addNote and addEphemeralNote escape-strip at the seam.
+// The title is untrusted disk input — no codec sanitizes a record's Meta on the way back in, which
+// is why sessionRowCells strips it too — and it needs no wrapping here: both addNote and
+// addEphemeralNote escape-strip at the seam.
 func (m *Model) resumeLoaded(msg sessionLoadedMsg) tea.Cmd {
 	if msg.err != nil {
 		m.transcript.addNote("could not load session: " + msg.err.Error())
@@ -488,31 +488,33 @@ func (m *Model) resumeLoaded(msg sessionLoadedMsg) tea.Cmd {
 	// Saves now target a record that already HAS a name, so the automatic naming call is latched off
 	// for the rest of this session exactly as it is for a --resume start (replayResumed), and a title
 	// still waiting for an id is dropped: it was stashed for the session this restore just replaced.
+	//
+	// titleTouched is deliberately NOT re-armed here, where /clear does clear it: the flag's only
+	// effect is to DROP a late automatic title (never clobber), and the one automatic title that can
+	// still land after a restore is the outgoing session's own in-flight call — which must not name
+	// the record just reopened. Leaving a human's "I named a session" standing is the answer that
+	// keeps it from doing so, so the asymmetry with startNewSession is preserved as it stands.
 	m.autoTitleFired = true
 	m.pendingTitle = ""
 	title := msg.rec.Meta.Title
 	m.nameSession(title) // the frame follows the restore, as it follows every other naming route
 	m.transcript.reset()
 	m.transcript.addStartup(newStartupView(m.opts))
-	entries, decErr := decodeTranscript(msg.rec.Transcript)
-	if decErr != nil || len(entries) == 0 {
-		m.transcript.addEphemeralNote("resumed: " + title + " (no scrollback recorded — the model still remembers)")
-	} else {
-		m.transcript.replay(entries)
-		m.transcript.addEphemeralNote("resumed: " + title)
-	}
-	if m.eng.InExchange() {
-		m.transcript.addEphemeralNote(interruptedNote)
-	}
+	// Repaint the stored scrollback and say what was reopened, through the one repaint a --resume
+	// start goes through too (replayScrollback): the facts are read off the record just loaded and
+	// off the live engine, the wording of all three notices is the shared function's.
+	m.replayScrollback(msg.rec.Transcript, title, m.eng.InExchange())
 	// A successful restore starts a new session, so the engine re-read the workspace context files
 	// (the resolved-live posture: a resumed session speaks from the CURRENT files, not the ones its
 	// snapshot was taken under) — the notice says what it is now carrying.
 	m.noteContextFiles()
+	// The live reading belongs to the conversation that just went away, so it falls whole and the
+	// gauge is relit from the record — the same one call /clear makes, differing only in having a
+	// stored fill to reopen at (liveStats.reset).
+	m.liveStats.reset()
 	m.ctxUsed = msg.rec.Meta.CtxUsed          // relight the gauge near the resumed session's last fill
 	m.usage = usageTotals(msg.rec.Meta.Usage) // …and reopen its accounting where the record left it
-	m.tokPerSec = 0
-	m.genStart = time.Time{}
-	m.detached = false // re-arm follow-the-tail: the resumed view opens at its tail like a launch
+	m.detached = false                        // re-arm follow-the-tail: the resumed view opens at its tail like a launch
 	m.flash = ""
 	m.layout()
 	return cmd // the queued Activate, when this fold's schedule found the queue idle

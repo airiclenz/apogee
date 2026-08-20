@@ -839,7 +839,19 @@ that constructs Options' launcher fields
 
 **Commit:** `refactor(tui): fold the launcher option funcs into a LauncherHost interface`
 
-## 28. Per-lifetime state gets its own reset; one shared replay function
+## 28. Per-lifetime state gets its own reset; one shared replay function — ✅ DONE (2026-08-20)
+
+NOTES (2026-08-20): the SESSION-NAMING cluster (`autoTitleFired`, `titleTouched`, `pendingTitle`, `pendingSource`, `sessionName`) was deliberately NOT grouped into a value here, although `startNewSession` resets four of the five. Item 29 ("the session title gets one owner") introduces exactly that value with its `adopt`/`stash`/`flush`/`restash` verbs and its doc, so grouping it here would have been that item's work under this item's commit. What this item owes the cluster — the `titleTouched` asymmetry preserved and documented at the reset site — is delivered at `resumeLoaded`.
+
+NOTES (2026-08-20): the item's "four sites" are the review's — `finishWorker`, `startNewSession`, `resumeLoaded` and CONSTRUCTION. Construction calls no reset and needed none: a fresh `Model` is already the zero value both new types reset to, which is what makes "the zero value is the reset" true of them rather than a coincidence.
+
+NOTES (2026-08-20): `detached` and `flash` fall at both session boundaries too and were left as their own lines. They are two unrelated concerns that happen to fall together — follow-the-tail is the viewport's, the flash is the status line's, and each has other writers (`interject.go`, `mouse.go`, the scroll folds) — so a value holding the pair would be an extraction of incidental similarity rather than of one reason to change.
+
+NOTES (2026-08-20): `finishWorker` keeps `m.genStart = time.Time{}` and `foldCompactDone` keeps `m.ctxUsed = 0` as single lines rather than gaining methods of their own: neither boundary discards the conversation, so neither drops the whole live reading, and a one-field method per partial boundary would be indirection with nothing behind it. `liveStats.reset`'s doc names both so a reader meets the partial boundaries where the whole one is defined.
+
+NOTES (2026-08-20): three prose pointers were corrected in the same commit because this change is what staled them — `noteContextFiles`' "(replayResumed)" now names `replayScrollback`, which is where the ephemeral-notice reason moved; `replayResumed`'s and `resumeLoaded`'s docs both described the replay block they no longer hold and now point at the shared one, each keeping the half that is still its own (the host-resolved `ResumedSession` for one, the persistent failure notes for the other). `commandrun.go` also dropped its now-unused `time` import.
+
+NOTES (2026-08-20): the `usage` asymmetry the item names is a DEFECT, not a decision, and is deferred rather than fixed here (the item's own instruction). Evidence: the field's own doc calls it "the MAIN agent's cumulative token accounting for the session"; a `/sessions` restore DOES replace it; `/clear` mints a fresh Session record (the queued Rotate) and leaves it standing, so the fresh session's first save writes the closed session's totals into the new record (`sessionsave.go`'s `snapshotPayload`) and `/usage` reports them as the new session's spend — beside a sub-agent list that /clear DID empty, since those totals live on transcript run heads. Not in ISSUES.md.
 
 **Source:** review §Smaller findings, row 1. Depends on item 21 (the folds settle
 model.go's shape first).

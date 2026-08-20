@@ -1,8 +1,6 @@
 package tui
 
 import (
-	"time"
-
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/airiclenz/apogee/internal/domain"
@@ -151,9 +149,16 @@ func (m Model) startNewSession() (tea.Model, tea.Cmd) {
 	// outgoing input, not context — the human wrote them and has not unwritten them — so /clear
 	// drops what the model remembers and leaves what is still waiting to be sent.
 	m.detached = false // re-arm follow-the-tail: the fresh transcript opens at its tail like a launch
-	m.ctxUsed = 0      // the gauge and throughput fall with the discarded conversation…
-	m.tokPerSec = 0    // …the same reason compactDoneMsg zeroes them on a fold
-	m.genStart = time.Time{}
+	// The gauge, the generation clock and the throughput fall with the discarded conversation — the
+	// same reason compactDoneMsg zeroes the gauge on a fold.
+	//
+	// The CUMULATIVE accounting beside them (m.usage) does NOT fall with them: this boundary has
+	// never reset it, and the reset above deliberately does not reach it, so /clear leaves the
+	// session's token totals standing exactly as it always has. That asymmetry is preserved rather
+	// than endorsed — the fresh session inherits the closed one's spend, both in the /usage pane and
+	// in the record its first save writes — and it is recorded as a deferred defect (2026-08-20)
+	// rather than corrected here, because correcting it is a behaviour change.
+	m.liveStats.reset()
 	m.flash = "" // drop any transient copy note; a new session shows nothing stale
 	// The Rotate queued above opens a fresh Session record, and a fresh record names itself: unlatch
 	// the naming call, forget that the CLOSED session was named by hand, and drop any title still
