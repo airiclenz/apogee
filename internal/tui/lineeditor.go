@@ -53,8 +53,8 @@ type lineEditor struct {
 	// caret is the glyph [lineEditor.textWithCaret] draws where the caret stands, and it belongs to
 	// the FIELD rather than to whatever paints it: the four fields this package builds each answer
 	// "what does my caret look like" once, at construction, so no surface can paint one field's caret
-	// two ways (picker.go's filter and the /sessions browser's use pickerFilterCursor, the /sessions
-	// rename row sessionRenameCaret, the /settings value row settingsCaret).
+	// two ways (both overlay filters use pickerFilterCursor, listsurface.go; the /sessions rename row
+	// sessionRenameCaret, the /settings value row settingsCaret).
 	//
 	// A field whose surface seats the terminal's OWN cursor carries none — the chat box, where the
 	// caret is on the screen already (steadyCursor) — and textWithCaret then hands back the value

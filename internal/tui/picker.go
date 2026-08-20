@@ -25,7 +25,7 @@ import (
 //
 // Rows are DERIVED at render time from the state they describe, never captured at open. That is
 // what lets a beat landing under an open /model picker refresh the offering in place (the
-// selection is clamped, the sessionBrowser.clampSelection posture) instead of leaving the human
+// selection is clamped, [listSurface.clampSelection]) instead of leaving the human
 // choosing from a list the server has moved on from.
 //
 // The accept path is deliberately not a third way to bind: a picked model becomes a
@@ -81,26 +81,18 @@ const (
 )
 
 // picker is the overlay's inline state on the Model. Its zero value is "closed", so it lives inline
-// in the value-copied Model like sessionBrowser and autocompleteState (ADR 0011). selected indexes
-// the rows the current kind derives; it is clamped rather than trusted, because the list underneath
-// it can change while the overlay is open.
+// in the value-copied Model like sessionBrowser and autocompleteState (ADR 0011).
 type picker struct {
-	open     bool
-	kind     pickerKind
-	selected int
-	// filter is what the human has typed into the open overlay: the case-insensitive substring every
-	// row must carry to survive (pickerFilteredView). It is a [lineEditor] — the package's one text
-	// FIELD (lineeditor.go), so "what does backspace do here" is answered where every other field
-	// answers it — held BY VALUE as the Model holds the prompt's own and the /settings pane its value
-	// row's (ADR 0011): the widget carries no self-referential no-copy type, so the value-copied Model
-	// stays copyable.
+	open bool
+	kind pickerKind
+	// listSurface is the highlight and the filter — the state EVERY list overlay in the package keeps
+	// and the key contract that goes with it (listsurface.go, ADR 0053), embedded rather than
+	// re-declared so `m.picker.selected` and `m.picker.filter` still read as the pane's own while
+	// there is one answer to what ↑/↓, a typed letter and esc do inside a modal list.
 	//
-	// Its ZERO value is the inert widget a whole-struct reset leaves behind — a textarea nothing has
-	// focused, which answers "" and drops every key — so the zeroing every close and accept already
-	// does (`m.picker = picker{}`) still clears the filter, and no path can carry a stale one into the
-	// next open. The real field is built on the first key that reaches it (typeIntoOverlayFilter)
-	// rather than at each of the nine sites that open an overlay.
-	filter lineEditor
+	// selected indexes the FILTERED rows the current kind derives; it is clamped rather than trusted,
+	// because the list underneath it can change while the overlay is open.
+	listSurface
 	// profiles are the Launch-profile rows, and the one offering that is NOT derived at render time.
 	// The other two describe Model state (the advertised models, the configured servers) and so can be
 	// re-read every frame; a Launch profile lives in the launcher's config FILE, behind a seam that
@@ -295,7 +287,8 @@ func (m Model) runServerCommand(args []string) (tea.Model, tea.Cmd) {
 		return m.pickerNote(fmt.Sprintf(
 			"unknown server %q — configured: %s", args[0], serverNameList(servers)))
 	}
-	m.picker = picker{open: true, kind: pickerServer, selected: m.currentServerRow()}
+	m.picker = picker{open: true, kind: pickerServer,
+		listSurface: listSurface{selected: m.currentServerRow()}}
 	m.layout()
 	return m, nil
 }
@@ -602,83 +595,29 @@ func (m Model) pickerNote(note string) (tea.Model, tea.Cmd) {
 }
 
 // pickerKey routes a keypress while the picker is open (at idle, and — for /schedule's kinds, whose
-// verb is live mid-run — while a worker works): ↑/↓ move the highlight (wrapping,
-// the sessionBrowser posture), ⏎ takes the highlighted row, esc closes, and everything PRINTABLE
-// types — the key's runes extend the filter that prunes the rows (pickerFilteredView), with
-// backspace as its undo. It always fully consumes the key — the picker is modal.
+// verb is live mid-run — while a worker works). Every key of it is the shared list contract
+// (listKey, listsurface.go): ↑/↓ move the highlight (wrapping, the sessionBrowser posture), ⏎ takes
+// the highlighted row, esc closes, and everything PRINTABLE types — the key's runes extend the
+// filter that prunes the rows. It always fully consumes the key — the picker is modal, so a key the
+// surface hands back (listUnclaimed) is swallowed here rather than routed on.
 //
-// There is no activation key, deliberately (ratified 2026-08-06): the overlay is modal, so no letter
-// is a verb inside it and every one of them can be the filter's. That is also why esc still closes
-// OUTRIGHT with a filter set rather than clearing it first — one key, one meaning, so the legend's
-// "esc close" is never conditionally wrong, and backspace is the way back to a wider list.
-//
-// The count is re-derived and the selection re-clamped on every key, because the rows underneath can
-// have changed since the last one — and again after a key that MOVED the filter, because the rows it
-// leaves standing can be fewer than the highlight was pointing at.
+// What is left in this file is the two acts a picker's keys MEAN: closing the overlay clears the
+// half-built Schedule and the migration round with it (the whole-struct zeroing), and accepting
+// resolves the highlighted row through the kind that is open (acceptPicker).
 func (m Model) pickerKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	n := m.pickerCount()
-	m.picker.clampSelection(n)
-	switch msg.String() {
-	case "esc":
+	verdict, cmd := m.listKey(&m.picker.listSurface, msg, m.pickerOfferingRows(), listWrapsAround)
+	switch verdict {
+	case listCloses:
 		m.picker = picker{}
 		m.layout()
 		return m, nil
-	case "up", "ctrl+p":
-		if n > 0 {
-			m.picker.selected = (m.picker.selected - 1 + n) % n
-		}
-		return m, nil
-	case "down", "ctrl+n":
-		if n > 0 {
-			m.picker.selected = (m.picker.selected + 1) % n
-		}
-		return m, nil
-	case "enter":
-		if n == 0 {
-			return m, nil
-		}
+	case listAccepts:
 		return m.acceptPicker()
-	case "backspace":
-		var cmd tea.Cmd
-		m.picker.filter, cmd = m.typeIntoOverlayFilter(m.picker.filter, msg)
-		m.picker.clampSelection(m.pickerCount())
-		return m, cmd
+	case listSwallowed, listUnclaimed:
+		// Both end the same way here: the surface either spent the key or found no use for it, and a
+		// modal with no verbs of its own swallows whatever is left.
 	}
-	// Text carries the key's rune(s) only for PRINTABLE input — a modifier chord carries none
-	// (bubbletea's own contract) — so a chord that is not one of the verbs above is still swallowed
-	// whole by the modal rather than typed into the filter.
-	if msg.Text != "" {
-		var cmd tea.Cmd
-		m.picker.filter, cmd = m.typeIntoOverlayFilter(m.picker.filter, msg)
-		m.picker.clampSelection(m.pickerCount())
-		return m, cmd
-	}
-	return m, nil // any other key is swallowed by the modal
-}
-
-// typeIntoOverlayFilter hands one keystroke to a filtering overlay's filter field and returns the
-// field it left, with whatever Cmd the widget asked for. It is the door BOTH overlays that filter
-// type through — the picker and the /sessions browser — so the two answer "what does backspace do to
-// a filter" with the same field rather than each trimming a rune off a string of its own.
-//
-// Only the two keys the pane already routed here reach it: a printable keypress and backspace, both
-// landing at the end of the value where the caret stands. Everything else is still swallowed whole by
-// the modal above (pickerKey, sessionBrowserKey) — the field is what EDITS, never what decides which
-// keys are the overlay's.
-//
-// The field is BUILT here, on the first key that reaches it, rather than at each of the nine sites
-// that open an overlay: those assign the whole struct at once (`m.picker = picker{}`), and a filter
-// nobody has typed into holds nothing, paints nothing (overlayFilterLine) and prunes nothing
-// (filterPopupRows' identity view). The glyph is pickerFilterCursor for both, which is the caret the
-// shared filter line has always drawn.
-func (m Model) typeIntoOverlayFilter(filter lineEditor, msg tea.KeyPressMsg) (lineEditor, tea.Cmd) {
-	if !filter.isBuilt() {
-		filter = newPopupField(m.opts.CursorShape, m.th.surface, pickerFilterCursor, "")
-	}
-	// The Cmd is handed back rather than dropped, as the /settings buffer hands its own back
-	// (settingsBufferKey): a single-line field asks for none today, and swallowing one silently is how
-	// that stops being true unnoticed.
-	return filter, filter.editKey(msg)
+	return m, cmd
 }
 
 // acceptPicker resolves ⏎ on the highlighted row, by kind. The highlight indexes the FILTERED rows,
@@ -805,183 +744,39 @@ func (m Model) pickerCount() int {
 	return len(m.pickerFilteredView().rows)
 }
 
-// clampSelection keeps selected inside a row list that moved under the open overlay — a beat
-// carrying a shorter offering, say. An empty list pins the selection at zero (renderPicker shows no
-// highlight for it).
-func (p *picker) clampSelection(n int) {
-	switch {
-	case n == 0:
-		p.selected = 0
-	case p.selected >= n:
-		p.selected = n - 1
-	case p.selected < 0:
-		p.selected = 0
-	}
-}
-
-// pickerView is the overlay's FILTERED view of the open kind's offering, and the ONE seam its three
-// consumers share: the rows the pane paints (pickerRows), how many there are (pickerCount), and
-// which row ⏎ takes (acceptPicker). Deriving them once is what makes it impossible for the accept to
-// take a row the pane did not paint — offering carries, for each surviving row, the index it holds
-// in the kind's FULL offering, and every accept resolves that index against its own list rather than
-// indexing it with a filtered position.
-type pickerView struct {
-	rows     []popupRow
-	offering []int // offering[i] is where rows[i] sits in the unfiltered offering
-}
-
-// offeringIndex maps the highlighted FILTERED row back to its place in the kind's full offering, and
-// reports false when there is nothing to take: a filter matching no row, or an offering that emptied
-// under the open pane. Callers whose list can move between the two reads of one keypress (the
-// Options.Servers provider, the live Schedules) still bounds-check what comes back against a fresh
-// read — this answers where the human aimed, not what is still there.
-func (v pickerView) offeringIndex(selected int) (int, bool) {
-	if selected < 0 || selected >= len(v.offering) {
-		return 0, false
-	}
-	return v.offering[selected], true
-}
-
-// pickerFilteredView derives the open kind's rows and prunes them by the overlay's filter. It is
-// derived PER FRAME like the rows themselves, so a beat landing under an open filtered picker
-// re-derives the offering, re-applies the filter and re-clamps the selection in one move — the
-// unfiltered posture, unchanged.
+// pickerFilteredView derives the open kind's rows and prunes them by the overlay's filter
+// ([listSurface.view]). It is derived PER FRAME like the rows themselves, so a beat landing under an
+// open filtered picker re-derives the offering, re-applies the filter and re-clamps the selection in
+// one move — the unfiltered posture, unchanged.
 func (m Model) pickerFilteredView() pickerView {
-	return filterPopupRows(m.pickerOfferingRows(), m.picker.filter.value())
-}
-
-// filterPopupRows is the filter itself: the rows that survive it, and where each of them sat in the
-// unfiltered list. An EMPTY filter is the IDENTITY view — every row, at its own index — which is
-// what keeps every unfiltered behaviour (the clamp, the wrap, the accept target) exactly what it was
-// before a filter existed.
-func filterPopupRows(rows []popupRow, filter string) pickerView {
-	if filter == "" {
-		offering := make([]int, len(rows))
-		for i := range offering {
-			offering[i] = i
-		}
-		return pickerView{rows: rows, offering: offering}
-	}
-	view := pickerView{rows: make([]popupRow, 0, len(rows)), offering: make([]int, 0, len(rows))}
-	for i, row := range rows {
-		if !rowMatchesFilter(row, filter) {
-			continue
-		}
-		view.rows = append(view.rows, row)
-		view.offering = append(view.offering, i)
-	}
-	return view
-}
-
-// rowMatchesFilter reports whether one row survives filter: a case-insensitive substring test over
-// the row's cells joined with a single space. EVERY cell participates, the marker cells included —
-// filtering on "running" to find the live profiles is a legitimate thing to ask of a profile list —
-// and space is a filter character like any other, because the overlay is modal and space is no verb
-// inside it. Substring rather than prefix, and no ranking of any kind: the filter PRUNES the
-// offering and never reorders it, so no row can jump out from under the highlight mid-keystroke.
-func rowMatchesFilter(row popupRow, filter string) bool {
-	if filter == "" {
-		return true
-	}
-	return strings.Contains(strings.ToLower(strings.Join(row, " ")), strings.ToLower(filter))
+	return m.picker.view(m.pickerOfferingRows())
 }
 
 // ----------------------------------------------------------------------------
 // Rendering
 // ----------------------------------------------------------------------------
 
-// pickerFilterLead labels the line the overlay's filter is typed on. It is a LABEL rather than
-// prose, so the pane paints it as one (popupSpec.bodyLead, the /settings header's own idiom): the
-// eye finds the live line by its label and reads the human's own text after it.
-const pickerFilterLead = "filter: "
-
-// pickerFilterCursor closes that line. A block where the next keystroke will land, because the real
-// caret is in the prompt box below and stays there (a popup row has no seat for it — popup.go):
-// without it the line reads as a finished caption rather than as something being typed. U+258C LEFT
-// HALF BLOCK — one cell in either width method, like every other glyph the frame measures (theme.go).
+// renderPicker paints the open picker through the shared list surface (renderList, listsurface.go):
+// a titled, bordered pane spanning the full window width holding the filter line, the rows and a key
+// legend, the selected row highlighted. It returns "" when the picker is closed, so View treats it
+// exactly like the /sessions browser's slot.
 //
-// It is the glyph the filter FIELD is built with (typeIntoOverlayFilter) rather than a string this
-// file appends, so the caret stands where the caret stands ([lineEditor.textWithCaret]) — and both
-// filtering overlays draw the same one, which is what the shared line has always painted.
-const pickerFilterCursor = "▌"
-
-// overlayFilterLine is what a filtering overlay shows of its filter — "filter: qwen▌" — or nothing
-// at all while the filter is empty, which is what makes the line's presence the fact that filtering
-// is happening. The text is the human's own keystrokes rather than a foreign string, but it reaches
-// the popup module as BODY and that contract takes body escape-stripped (popup.go), so it is
-// stripped here like every other cell this file composes.
-//
-// It is one composer for both overlays that filter — the picker and the /sessions browser — because
-// the line is one line: two panes spelling it themselves would be two places for the label, the
-// cursor and the stripping to drift apart. The cursor arrives INSIDE the text now, where the field
-// draws it ([lineEditor.textWithCaret]), so the strip covers it too — harmlessly, since a block glyph
-// is no control character.
-func overlayFilterLine(filter lineEditor) string {
-	if filter.value() == "" {
-		return ""
-	}
-	return pickerFilterLead + stripEscapes(filter.textWithCaret())
-}
-
-// pickerFilterLine is that line for the OPEN picker (overlayFilterLine over its own filter).
-func (m Model) pickerFilterLine() string {
-	return overlayFilterLine(m.picker.filter)
-}
-
-// renderPicker paints the open picker through the shared popup module (renderPopup): a titled,
-// bordered pane spanning the full window width (m.width, flush with the input box below) holding the
-// rows and a key legend, the selected row highlighted. It returns "" when the picker is closed, so
-// View treats it exactly like the /sessions browser's slot.
-//
-// While a filter is being typed the pane grows one line for it, set off by a blank line at each end
-// (ratified 2026-08-06 — "not all bunched up"). All three lines are the module's BODY block, which
-// sits between the title and the rows and drops away entirely when the filter is empty: the text is
-// the body, and BOTH blanks are the body's own pads (popupSpec.bodyPadAbove, bodyPadBelow) rather
-// than one pad per neighbouring block. The lower blank has to belong to the body because the row
-// block's pads are spent out of the ROW window — and an offering longer than maxPickerRows fills that
-// window by definition, so a pad owned by the rows would be dropped exactly on the roomy terminals
-// where the pane has lines to spare, and dropped by taking a NINTH row past the pane's own taste.
-//
-// All three lines are BUDGETED and not merely drawn: the claim stated here is the wrapped filter line
-// plus its two blanks (popupFloor.body), so the pane paints what it asked the frame for. The claim is
-// also what decides the trade on a window too short for everything — it comes off the top of the
-// grant, so the ROWS shrink and the filter line stays. That is the right way round for the one line
-// the human is actively typing: a list you cannot see all of is still being narrowed, while a filter
-// you cannot see is a pane that has stopped explaining itself. The row demand and the row cap are
-// untouched by any of it — maxPickerRows rows is the taste with a filter open exactly as without.
+// What this file states is what only this pane knows — its slot in the frame, its name, its legend,
+// its taste in rows and the rows themselves. The filter line, its two blanks, the budget claim all
+// three cost and the trade on a window too short for everything are the surface's (renderList).
 func (m Model) renderPicker() string {
 	if !m.picker.open {
 		return ""
 	}
 	rows := m.pickerRows()
-	selected := -1 // no rows ⇒ no highlight (the popup module's own convention)
-	if len(rows) > 0 {
-		selected = clampInt(m.picker.selected, 0, len(rows)-1)
-	}
-	filter := m.pickerFilterLine()
-	claim := popupFloor{}
-	if filter != "" {
-		claim.body = popupBodyLineCount(m.th, filter, m.width) + popupBodyPadLines(true, true)
-	}
-	// maxPickerRows is the taste; popupBudget is the screen's answer to it, so a long offering on a
-	// short terminal shrinks the pane instead of pushing the input box off the frame (D2).
-	maxBody, shown, seated := m.popupBudget(panePicker, len(rows), maxPickerRows, popupChrome, claim)
-	if !seated {
-		return "" // the frame cannot seat this pane beside its siblings (frameRowPlan)
-	}
-	return renderPopup(m.th, popupSpec{
-		title:        m.pickerTitle(),
-		body:         filter,
-		bodyLead:     pickerFilterLead,
-		maxBodyRows:  maxBody,
-		bodyPadAbove: filter != "",
-		bodyPadBelow: filter != "",
-		rows:         rows,
-		selected:     selected,
-		hint:         pickerHintFor(m.picker.kind),
-		maxRows:      shown,
-		scrollbar:    m.popupScrollbarOn(),
-	}, m.width)
+	return m.renderList(m.picker.listSurface, listContent{
+		pane:     panePicker,
+		title:    m.pickerTitle(),
+		hint:     pickerHintFor(m.picker.kind),
+		rowCap:   maxPickerRows,
+		rows:     rows,
+		selected: m.picker.highlight(rows),
+	})
 }
 
 // pickerTitle names what is being switched and, for the model picker, on which host — the same

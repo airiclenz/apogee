@@ -33,24 +33,22 @@ type sessionBrowser struct {
 	open          bool
 	metas         []session.Meta
 	allWorkspaces bool
-	selected      int
 	confirming    bool
 	renaming      bool
 	// renameBuf is the inline title edit in progress: a [lineEditor] like the filter beside it, built
 	// on the title the armed row holds (sessionRenameKey's ctrl+r) and zeroed again the moment the
-	// edit commits or is abandoned.
+	// edit commits or is abandoned. It is the browser's OWN field and no part of the list surface
+	// below: a rename is a modal surface within the modal, and no filter is typed inside it.
 	renameBuf lineEditor
-	// filter is what the human has typed into the open browser: the case-insensitive substring every
-	// row must carry to survive (browserView), composed after the workspace view rather than beside
-	// it. It is a [lineEditor] — the package's one text FIELD (lineeditor.go) — held BY VALUE as the
-	// Model holds the prompt's own (ADR 0011): the widget carries no self-referential no-copy type, so
-	// the value-copied Model stays copyable.
+	// listSurface is the highlight and the filter — the state EVERY list overlay in the package keeps
+	// and the key contract that goes with it (listsurface.go, ADR 0053), embedded rather than
+	// re-declared so `m.sessionBrowser.selected` and `.filter` still read as the pane's own while the
+	// picker and this browser answer ↑/↓, a typed letter and esc with the same code.
 	//
-	// Its ZERO value is the inert widget a whole-struct reset leaves behind, so the zeroing every close
-	// already does (`m.sessionBrowser = sessionBrowser{}`) is still what clears it: no path can carry a
-	// stale filter into the next open. A re-LIST is deliberately not such a path — a delete or a
-	// rename refreshes the pane the human is still standing in, and it stays as they left it.
-	filter lineEditor
+	// The filter is composed after the workspace view rather than beside it (browserView), and a
+	// re-LIST is deliberately not a path that clears it — a delete or a rename refreshes the pane the
+	// human is still standing in, and it stays as they left it.
+	listSurface
 }
 
 // maxSessionRows caps how many session rows the overlay shows at once; a longer list scrolls a
@@ -181,7 +179,7 @@ func (b sessionBrowser) visible(workspace string) []session.Meta {
 // ^d act on. Deriving them once is what makes it impossible for a verb to reach a record the pane
 // did not paint — metas[i] is the record rows[i] describes — so a highlight is resolved against the
 // same list the painter used rather than against the unfiltered store (the pickerView posture,
-// picker.go).
+// listsurface.go).
 type browserView struct {
 	rows  []popupRow     // the surviving rows, in the store's own newest-first order
 	metas []session.Meta // metas[i] is the record rows[i] states
@@ -190,19 +188,15 @@ type browserView struct {
 // filteredView is the rows this browser shows RIGHT NOW: the workspace view (visible) pruned by the
 // overlay's own filter, composed in that order — the workspace scope decides which records exist for
 // this pane at all and the filter narrows what is left, so ^a widens the very list the typed text
-// narrows. The match is the picker's (rowMatchesFilter): a case-insensitive substring of the row's
-// display cells joined with one space, every cell participating.
+// narrows. The match is the shared surface's (rowMatchesFilter): a case-insensitive substring of
+// the row's display cells joined with one space, every cell participating.
 //
 // It is derived per frame and per keypress rather than captured at open, the picker's own posture:
 // the store can be re-listed under the open pane (a delete, a rename) and the relative times in the
 // cells move on their own.
 func (b sessionBrowser) filteredView(workspace string, now time.Time) browserView {
 	visible := b.visible(workspace)
-	rows := make([]popupRow, 0, len(visible))
-	for _, meta := range visible {
-		rows = append(rows, sessionRowCells(meta, workspace, b.allWorkspaces, now))
-	}
-	pruned := filterPopupRows(rows, b.filter.value())
+	pruned := b.view(b.unfilteredRows(workspace, now))
 	view := browserView{rows: pruned.rows, metas: make([]session.Meta, 0, len(pruned.offering))}
 	for _, i := range pruned.offering {
 		view.metas = append(view.metas, visible[i])
@@ -210,25 +204,43 @@ func (b sessionBrowser) filteredView(workspace string, now time.Time) browserVie
 	return view
 }
 
+// unfilteredRows composes one row per session the workspace view holds, BEFORE the filter prunes
+// them — the list the surface filters, clamps and windows against ([Model.listKey], listsurface.go).
+// It is the row half of filteredView, named on its own because a keypress needs the unfiltered list
+// to answer with: the surface owns the filter, so the count a key is clamped against and the count
+// it leaves behind must both be read off the SAME composition of the list.
+func (b sessionBrowser) unfilteredRows(workspace string, now time.Time) []popupRow {
+	visible := b.visible(workspace)
+	rows := make([]popupRow, 0, len(visible))
+	for _, meta := range visible {
+		rows = append(rows, sessionRowCells(meta, workspace, b.allWorkspaces, now))
+	}
+	return rows
+}
+
+// record is the session the highlight NAMES inside a row set the surface has already been clamped
+// against: the filter maps the highlighted painted row back to the record it describes
+// (pickerView.offeringIndex), exactly as the picker maps a row back to its offering. ok is false when
+// there is nothing to act on — a filter matching no row, or a list that emptied under the open pane.
+//
+// Every verb that reaches a session goes through it, which is what makes it impossible for ⏎, ^r or
+// ^d to touch a record the pane did not paint.
+func (b sessionBrowser) record(workspace string, rows []popupRow) (session.Meta, bool) {
+	i, ok := b.view(rows).offeringIndex(b.selected)
+	if !ok {
+		return session.Meta{}, false
+	}
+	visible := b.visible(workspace)
+	if i >= len(visible) {
+		return session.Meta{}, false
+	}
+	return visible[i], true
+}
+
 // sessionBrowserView is that view as of now — the one read every key route and the painter share, so
 // a verb and the pane can never disagree about which record the highlight names.
 func (m Model) sessionBrowserView() browserView {
 	return m.sessionBrowser.filteredView(m.opts.Workspace, time.Now())
-}
-
-// clampSelection keeps selected within the filtered row range after the list or the view changed
-// (a toggle, a delete, a keystroke that narrowed the filter). n is the count of the FILTERED view —
-// what the pane actually paints — so the highlight can never point past the last row on the screen.
-// An empty view pins the selection at zero.
-func (b *sessionBrowser) clampSelection(n int) {
-	switch {
-	case n == 0:
-		b.selected = 0
-	case b.selected >= n:
-		b.selected = n - 1
-	case b.selected < 0:
-		b.selected = 0
-	}
 }
 
 // sessionBrowserKey routes a keypress while the overlay is open (idle only). A live rename edit or
@@ -243,9 +255,11 @@ func (b *sessionBrowser) clampSelection(n int) {
 // deletes is the one that must never be reachable by typing. The delete-confirm's y/n and the whole
 // rename edit are untouched: they are modal surfaces of their own, and no filter is typed inside them.
 //
-// The count is re-derived and the selection re-clamped on every key — the rows underneath can have
-// changed since the last one — and again after a key that MOVED the filter, because the rows it
-// leaves standing can be fewer than the highlight was pointing at.
+// The rows are composed ONCE per keypress, unfiltered, and the surface does the rest: it filters,
+// clamps, moves and types against that one composition ([Model.listKey], listsurface.go), so the
+// count a key is clamped against and the count it leaves behind can never come from two different
+// readings of the store. A key the surface hands back (listUnclaimed) is this pane's own to answer,
+// and what it does not answer either is swallowed whole — the browser is modal.
 func (m Model) sessionBrowserKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.sessionBrowser.renaming {
 		return m.sessionRenameKey(msg)
@@ -253,70 +267,57 @@ func (m Model) sessionBrowserKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.sessionBrowser.confirming {
 		return m.sessionConfirmKey(msg)
 	}
-	view := m.sessionBrowserView()
-	n := len(view.metas)
-	m.sessionBrowser.clampSelection(n)
-	switch msg.String() {
-	case "esc":
+	rows := m.sessionBrowser.unfilteredRows(m.opts.Workspace, time.Now())
+	verdict, cmd := m.listKey(&m.sessionBrowser.listSurface, msg, rows, listWrapsAround)
+	switch verdict {
+	case listCloses:
 		m.sessionBrowser = sessionBrowser{}
 		m.layout()
 		return m, nil
-	case "up", "ctrl+p":
-		if n > 0 {
-			m.sessionBrowser.selected = (m.sessionBrowser.selected - 1 + n) % n
+	case listAccepts:
+		meta, ok := m.sessionBrowser.record(m.opts.Workspace, rows)
+		if !ok {
+			return m, nil
 		}
-		return m, nil
-	case "down", "ctrl+n":
-		if n > 0 {
-			m.sessionBrowser.selected = (m.sessionBrowser.selected + 1) % n
-		}
-		return m, nil
+		m.sessionBrowser = sessionBrowser{} // close; the resume runs when the record loads (sessionLoadedMsg)
+		m.layout()
+		return m, m.loadSession(meta.ID)
+	case listUnclaimed:
+		return m.sessionBrowserVerb(msg, rows)
+	case listSwallowed:
+		// The surface spent the key — an arrow, or a rune into the filter, whose Cmd rides back below.
+	}
+	return m, cmd
+}
+
+// sessionBrowserVerb answers the three keys that are this browser's alone and no list's — the chords
+// that widen the view, arm a delete and open a rename. They reach it only for a key the shared
+// surface did not claim, and every one of them resolves the highlight through the filter
+// (sessionBrowser.record) rather than against the unfiltered store. Any other key is swallowed: the
+// browser is modal, so a letter that is not the filter's is nothing at all.
+func (m Model) sessionBrowserVerb(msg tea.KeyPressMsg, rows []popupRow) (tea.Model, tea.Cmd) {
+	switch msg.String() {
 	case "ctrl+a":
 		// Toggle the current-workspace ⇄ all-workspaces view; the row set changes, so re-anchor
 		// the selection at the top rather than leave it pointing at a now-hidden row. The filter
 		// stands: it is what the human is looking FOR, and the toggle changes where they are looking.
 		m.sessionBrowser.allWorkspaces = !m.sessionBrowser.allWorkspaces
 		m.sessionBrowser.selected = 0
-		return m, nil
 	case "ctrl+d":
-		if n > 0 {
+		if _, ok := m.sessionBrowser.record(m.opts.Workspace, rows); ok {
 			m.sessionBrowser.confirming = true // arm the inline "delete? y/n" on the selected row
 		}
-		return m, nil
 	case "ctrl+r":
-		if n > 0 {
+		if meta, ok := m.sessionBrowser.record(m.opts.Workspace, rows); ok {
 			m.sessionBrowser.renaming = true
 			// The seed is a stored title, so it is escape-stripped on the way INTO the buffer: the
-			// rename row paints the buffer verbatim, and the commit below strips anyway — seeding it
-			// clean keeps what is being edited equal to what will be saved.
+			// rename row paints the buffer verbatim, and the commit strips anyway — seeding it clean
+			// keeps what is being edited equal to what will be saved.
 			m.sessionBrowser.renameBuf = newPopupField(m.opts.CursorShape, m.th.surface,
-				sessionRenameCaret, stripEscapes(view.metas[m.sessionBrowser.selected].Title))
+				sessionRenameCaret, stripEscapes(meta.Title))
 		}
-		return m, nil
-	case "enter":
-		if n == 0 {
-			return m, nil
-		}
-		id := view.metas[m.sessionBrowser.selected].ID
-		m.sessionBrowser = sessionBrowser{} // close; the resume runs when the record loads (sessionLoadedMsg)
-		m.layout()
-		return m, m.loadSession(id)
-	case "backspace":
-		var cmd tea.Cmd
-		m.sessionBrowser.filter, cmd = m.typeIntoOverlayFilter(m.sessionBrowser.filter, msg)
-		m.sessionBrowser.clampSelection(len(m.sessionBrowserView().metas))
-		return m, cmd
 	}
-	// Text carries the key's rune(s) only for PRINTABLE input — a modifier chord carries none
-	// (bubbletea's own contract) — so a chord that is not one of the verbs above is still swallowed
-	// whole by the modal rather than typed into the filter.
-	if msg.Text != "" {
-		var cmd tea.Cmd
-		m.sessionBrowser.filter, cmd = m.typeIntoOverlayFilter(m.sessionBrowser.filter, msg)
-		m.sessionBrowser.clampSelection(len(m.sessionBrowserView().metas))
-		return m, cmd
-	}
-	return m, nil // any other key is swallowed by the modal
+	return m, nil
 }
 
 // sessionConfirmKey resolves an armed delete confirm: y deletes the selected session, n or esc
@@ -531,9 +532,14 @@ func (m *Model) resumeLoaded(msg sessionLoadedMsg) tea.Cmd {
 // so View treats it like the approval-prompt slot.
 //
 // While a filter is being typed the pane grows one line for it, set off by a blank line at each end —
-// the picker's own line, budget and trade (renderPicker): the three lines are the module's BODY
-// block, both blanks are the body's own pads, and the whole claim comes off the top of the frame's
-// grant so a short window gives up ROWS before it gives up the line the human is typing.
+// the shared list surface's own line, budget and trade (renderList, listsurface.go): the three lines
+// are the module's BODY block, both blanks are the body's own pads, and the whole claim comes off the
+// top of the frame's grant so a short window gives up ROWS before it gives up the line the human is
+// typing. The row window is likewise the SCREEN's to grant and not the browser's to assume:
+// maxSessionRows is this overlay's own taste and [Model.popupBudget] cuts it down to what fits above
+// the input box (D2) — on a short terminal that is fewer rows, or none at all, and a window of none
+// is counted onto the title row (popupTitleLine) so a browser showing no sessions can be told apart
+// from a workspace that has none.
 func (m Model) renderSessionBrowser() string {
 	b := m.sessionBrowser
 	if !b.open {
@@ -543,46 +549,24 @@ func (m Model) renderSessionBrowser() string {
 	if b.allWorkspaces {
 		scope = "all workspaces"
 	}
-	filter := overlayFilterLine(b.filter)
-	spec := popupSpec{
-		title:        "saved sessions  (" + scope + ")",
-		body:         filter,
-		bodyLead:     pickerFilterLead,
-		bodyPadAbove: filter != "",
-		bodyPadBelow: filter != "",
-		hint:         sessionBrowserHint,
-		selected:     -1, // no rows ⇒ no highlight (the popup module's own convention)
-		scrollbar:    m.popupScrollbarOn(),
+	c := listContent{
+		pane:     paneBrowser,
+		title:    "saved sessions  (" + scope + ")",
+		hint:     sessionBrowserHint,
+		rowCap:   maxSessionRows,
+		selected: -1, // no rows ⇒ no highlight (the popup module's own convention)
 	}
 	if len(b.visible(m.opts.Workspace)) == 0 {
 		// An empty WORKSPACE view is a fact about the store, and a row of prose is how the pane states
 		// it. A filter that matched nothing is not the same thing and gets no such row: the visible
 		// filter line over an empty list already says why the pane is empty, and backspace is the way
-		// back (the picker's zero-match pane).
-		spec.rows = singleCellRows([]string{"no sessions in this workspace — press ^a to see all"})
+		// back (the picker's zero-match pane). Prose is not a choice, so the highlight stays off it.
+		c.rows = singleCellRows([]string{"no sessions in this workspace — press ^a to see all"})
 	} else {
-		spec.rows = sessionRows(b, m.opts.Workspace, time.Now())
-		if len(spec.rows) > 0 {
-			spec.selected = clampInt(b.selected, 0, len(spec.rows)-1)
-		}
+		c.rows = sessionRows(b, m.opts.Workspace, time.Now())
+		c.selected = b.highlight(c.rows)
 	}
-	claim := popupFloor{}
-	if filter != "" {
-		claim.body = popupBodyLineCount(m.th, filter, m.width) + popupBodyPadLines(true, true)
-	}
-	// The row window is the SCREEN's to grant, not the browser's to assume: maxSessionRows is this
-	// overlay's own taste, and popupBudget cuts it down to what the window can seat above the input
-	// box (D2) — on a short terminal that is fewer rows, or none at all. A window of none is the one
-	// case the pane has to speak up about: the module counts the dropped entries onto the title row
-	// (popupTitleLine), because a browser showing no sessions at all would otherwise be
-	// indistinguishable from a workspace that has none.
-	maxBody, maxRows, seated := m.popupBudget(paneBrowser, len(spec.rows), maxSessionRows, popupChrome, claim)
-	if !seated {
-		return "" // the frame cannot seat this pane beside its siblings (frameRowPlan)
-	}
-	spec.maxBodyRows = maxBody
-	spec.maxRows = maxRows
-	return renderPopup(m.th, spec, m.width)
+	return m.renderList(b.listSurface, c)
 }
 
 // sessionRows composes the row list the popup module paints: the filtered view's rows (browserView

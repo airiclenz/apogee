@@ -695,6 +695,11 @@
 // this package owns only WHEN (one load at start-up, one fire-and-forget append per send) while
 // internal/recall owns the file and cmd/apogee owns which directory and which workspace
 // ([Options.Recall]); picker.go the modal single-select overlay behind /model and /server;
+// listsurface.go the surface that overlay and the /sessions browser both ARE underneath their own
+// wording — the [listSurface] value ({selected, filter}) a pane embeds, the key contract every modal
+// list shares (arrows by a per-pane wrap rule, type-to-filter, esc, the ⏎ that lands on a row), the
+// filter that prunes the rows and maps a highlight back to what it names, and the one
+// budget→render call behind every list pane, filter line and its two blanks included (ADR 0053);
 // settings.go the /settings pane — the frame's one FULL-HEIGHT pane, listing every config key the
 // binary resolved this run over one display seam ([Options.SettingsRows]), claiming the whole
 // transcript budget while it is open, and persisting ONE key per deliberate edit through

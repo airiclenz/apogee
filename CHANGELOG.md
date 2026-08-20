@@ -222,6 +222,15 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- Introduced `listSurface`, the one list state and key contract every filtering overlay is built on
+  (`internal/tui/listsurface.go`, ADR 0053), and adopted it in the /model | /server picker (all seven
+  kinds) and the /sessions browser (all three modes). The clamp written twice, the wrap-arrow idiom
+  written four times, the type-to-filter block written twice byte-for-byte and the budget→render
+  boilerplate written twice collapse into one set; what ↑/↓ do at the ends of a list is now a stated
+  parameter instead of an idiom re-spelled per pane, and "↓ at the bottom of a filtered list" is
+  directly unit-testable. Each pane keeps its rows, its accept and its wording. Behaviour-preserving —
+  every pane answers every key exactly as it did.
+
 - Routed the picker's filter, the /sessions browser's filter and its inline rename buffer through
   `lineEditor`, the package's one text field: the hand-written rune backspace/append written five
   times is gone, and the caret glyph is now a per-field construction parameter (the filter line's
