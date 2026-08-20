@@ -269,7 +269,7 @@ func (m Model) reloadSkillsCmd() tea.Cmd {
 // after the human started arrowing down the list — a menu that jumped its highlight out from under
 // them would be a worse trade than the block it replaced.
 func (m *Model) foldSkillsReloaded() {
-	if !m.skillRegion || (m.state != stateIdle && m.state != stateRunning) {
+	if !m.skillRegion || !m.state.live() {
 		return
 	}
 	prev := m.autocomplete

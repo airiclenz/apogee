@@ -222,6 +222,19 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **The UI's lifecycle states answer for themselves.** `uiState` was a bare int the package
+  compared open-coded, and the sets those comparisons meant were named nowhere: "idle or running"
+  — the two states where the prompt is the human's own to compose in — was spelled inline at eight
+  sites across six files and named only in a comment ("BOTH live states"), and the same went for
+  the editable set the mouse and the keyboard arbitrate by and the blocked-on-a-decision set the
+  transcript cursor stands down for. Four predicates on the state say it once now — `live`,
+  `editable`, `decisionPending` and `busy`, each documented with the reason its members belong
+  together — and the inline spellings ask them instead, so a sixth state would be a compile-time
+  decision at four definitions rather than a hunt through nine files. The enum stays a bare int and
+  the state↔payload rules (an approval carries its `pending`, an ask its `pendingAsk`) stay written
+  out at their reads, where the pairing has to stay visible. Nothing the human sees changes: the
+  whole suite passes with no expectation touched.
+
 - **The session title has one owner (`internal/tui/autotitle.go`).** A title that resolves before
   the first Save has minted an id to rename is held until one exists, and that wait used to be a
   pair of bare `Model` fields written at eight sites across four files — the naming fold, the

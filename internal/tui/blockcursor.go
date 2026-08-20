@@ -95,7 +95,7 @@ func (c blockCursor) clamp(targets []lineTarget) blockCursor {
 // (highlightBlockCursor reads this too) and comes back on the line it was standing on once the
 // decision is taken, which is where the reader was before the run interrupted them.
 func (m Model) blockCursorOwnsKeys() bool {
-	return m.state != stateAwaitingApproval && m.state != stateAwaitingAsk
+	return !m.state.decisionPending()
 }
 
 // blockCursorKey is the mode's whole key contract. It returns the next Model whether or not it

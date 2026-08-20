@@ -122,7 +122,7 @@ func (m *Model) foldRecallLoaded(msg recallLoadedMsg) {
 // interjection) are in scope. stateAwaitingAsk deliberately is not: there ↑/↓ move the choice
 // highlight, and that guard runs earlier in handleKey.
 func (m Model) recallKey(msg tea.KeyPressMsg, prev promptRecall) (Model, bool) {
-	if m.state != stateIdle && m.state != stateRunning {
+	if !m.state.live() {
 		return m, false
 	}
 	switch msg.String() {

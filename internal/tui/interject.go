@@ -220,7 +220,7 @@ func (m Model) stageInterjection() (tea.Model, tea.Cmd) {
 // queue) and running (a live one). At an approval or an ask the box belongs to the decision in
 // front of it, and popping a queued message into the answer field would answer the wrong question.
 func (m Model) popInterjection() (Model, tea.Cmd, bool) {
-	if m.state != stateIdle && m.state != stateRunning {
+	if !m.state.live() {
 		return m, nil, false
 	}
 	n := len(m.pendingInterjections)

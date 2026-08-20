@@ -902,7 +902,17 @@ whole Model); existing autotitle tests pass unchanged.
 
 **Commit:** `refactor(tui): give the session title one owner with adopt/stash/flush verbs`
 
-## 30. Name the uiState predicates
+## 30. Name the uiState predicates — ✅ DONE (2026-08-20)
+
+NOTES (2026-08-20): the four names map to the four sets the call sites actually asked for — `live` = idle|running (the review's "BOTH live states", 8 inline spellings), `editable` = idle|ask|running (the state half of `Model.inputEditable`), `decisionPending` = approval|ask, `busy` = running|approval|ask (composed as `running || decisionPending()`). The item named the predicates but not their membership; this is the mapping the existing sites forced.
+
+NOTES (2026-08-20): `Model.busy()` was kept as a one-line delegate to `uiState.busy()` rather than rewritten at its 11 call sites — the item says name the predicates on the state, not rename the Model's existing spelling, and the set is now stated exactly once. `Model.inputEditable()` likewise keeps its name and adds only the focus half; its doc no longer restates the state list (it points at `uiState.editable`), since that duplication is the thing this item removes.
+
+NOTES (2026-08-20): `decisionPending` replaced exactly one inline site (`blockCursorOwnsKeys`). The approval/ask pairs in `frameOverlays` and `openPanes` and the two guards in `ask.go`/`model.go` were left as exact-state comparisons on purpose: each pairs its state with ITS OWN payload (`pending`, `pendingAsk`), which the item keeps where it is. The single-state checks (`settingsOwnsInput`, the spinner's `stateRunning`, the browser's `stateIdle`) are the "genuinely one-off" checks the item says to keep inline, as are the three `switch m.state` folds.
+
+NOTES (2026-08-20): the predicate names carry no `is`/`has` prefix, against the coding-standards boolean rule — the item's text names them literally, and the neighbours they join (`busy`, `inputEditable`, `headsRun`, `opensRun`) already read that way; a prefixed twin beside them would be the odd one out.
+
+NOTES (2026-08-20): no new tests. The item's Tests line asks only that the existing suite pass unchanged, and it does — `go test ./internal/tui` green with no expectation touched, `docmap_test.go` included (no file added or deleted, so `doc.go` needed no line).
 
 **Source:** review §Smaller findings, row 3.
 

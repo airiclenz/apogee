@@ -35,6 +35,35 @@ const (
 	stateErrored                         // the worker returned a loop-level error
 )
 
+// The four questions the rest of the package asks of a state. Each is a SET of states, and the SET
+// is what the call sites mean: spelled inline, the membership is restated at every site and drifts
+// the day a sixth state arrives. Naming them here does nothing else — the enum stays a bare int,
+// and the state↔payload invariants (pending in approval, pendingAsk at the ask) stay at their
+// reads, where the pairing has to be visible. A site that asks about ONE state still says so.
+
+// live reports whether the prompt is the human's own to compose in: idle (a message to send) and
+// running (one staged as an interjection, ADR 0025). The overlays that ride the input box — the
+// picker, the autocomplete dropdown, the prompt recall, the interjection queue — are open in
+// exactly these two states, which is the set the package's prose calls "BOTH live states".
+func (s uiState) live() bool { return s == stateIdle || s == stateRunning }
+
+// editable reports whether a keypress belongs to the textarea: the two live states plus the
+// borrowed answer box at an ask. At an approval and at errored the box is inert — a/d/s and
+// Enter-dismiss own the keyboard there. [Model.inputEditable] is this question plus the focus half.
+func (s uiState) editable() bool { return s.live() || s == stateAwaitingAsk }
+
+// decisionPending reports whether the run is blocked on the human: an approval menu, or an ask_user
+// question. Those two own ↑/↓ and ⏎ for their own rows, so a surface that would swallow either key
+// stands down while this holds.
+func (s uiState) decisionPending() bool {
+	return s == stateAwaitingApproval || s == stateAwaitingAsk
+}
+
+// busy reports whether a worker is in flight — running, or blocked on one of the two decisions.
+// These are the states in which a free submit is refused and the stop key cancels instead of
+// quitting; idle and errored are the two where the worker has unwound.
+func (s uiState) busy() bool { return s == stateRunning || s.decisionPending() }
+
 // Model is the Bubble Tea model: a thin renderer over the agent's Events that owns the
 // input box, the transcript viewport, and the status line. It holds the narrow [Engine]
 // and the display [Options] but no agent logic — it folds the five seam Msgs and
@@ -1053,7 +1082,7 @@ var keyClaimOrder = []keyClaimant{
 		// the human cannot answer. The older kinds are unaffected: their verbs are idle-only, and a
 		// picker cannot be open when a worker STARTS, since it owns ⏎ for as long as it is up.
 		name:  "picker",
-		open:  func(m Model) bool { return (m.state == stateIdle || m.state == stateRunning) && m.picker.open },
+		open:  func(m Model) bool { return m.state.live() && m.picker.open },
 		claim: modalClaim(Model.pickerKey),
 	},
 	{
@@ -1064,7 +1093,7 @@ var keyClaimOrder = []keyClaimant{
 		// reporting command as easily as a submitted message does; the per-command while-running policy
 		// is applied at accept (commandRunnable), not by hiding the menu.
 		name:  "autocomplete overlay",
-		open:  func(m Model) bool { return (m.state == stateIdle || m.state == stateRunning) && m.autocomplete.active },
+		open:  func(m Model) bool { return m.state.live() && m.autocomplete.active },
 		claim: paneClaim(Model.autocompleteKey),
 	},
 	{
@@ -1263,7 +1292,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			case "backspace", "delete":
 				m.deleteSelection(sel)
 				var reload tea.Cmd
-				if m.state == stateIdle || m.state == stateRunning {
+				if m.state.live() {
 					m, reload = m.recomputeAutocomplete() // the value changed: re-derive the overlay, as a typed edit does
 				}
 				m.layout() // re-flow: the box shrinks as the cut unwraps rows
@@ -1288,7 +1317,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		var cmd tea.Cmd
 		m.input, cmd = m.input.Update(msg)
-		if m.state == stateIdle || m.state == stateRunning {
+		if m.state.live() {
 			var reload tea.Cmd
 			m, reload = m.recomputeAutocomplete() // re-derive the overlay from the edited input
 			cmd = tea.Batch(cmd, reload)          // a "/" menu this keystroke opened owes a catalog re-scan, off the loop
@@ -1598,14 +1627,9 @@ func (m Model) quit() (tea.Model, tea.Cmd) {
 	return m, tea.Quit
 }
 
-// busy reports whether a worker is in flight (running, blocked on an Approval, or blocked on
-// an ask_user question) — the states in which a free submit is refused and the stop key
-// cancels instead of quitting.
-func (m Model) busy() bool {
-	return m.state == stateRunning ||
-		m.state == stateAwaitingApproval ||
-		m.state == stateAwaitingAsk
-}
+// busy reports whether a worker is in flight — [uiState.busy] asked of this Model's state. The
+// Model-level spelling is what the call sites read; the set itself is stated once, on the state.
+func (m Model) busy() bool { return m.state.busy() }
 
 // ----------------------------------------------------------------------------
 // Layout

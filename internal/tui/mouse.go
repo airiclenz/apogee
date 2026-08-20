@@ -137,13 +137,12 @@ type flashClearMsg struct{}
 const flashDuration = 2 * time.Second
 
 // inputEditable reports whether the prompt is live for the human to edit — the states in which a
-// keypress reaches the textarea and a mouse click positions the caret. Editability IS the rule:
-// idle (a message to send), awaitingAsk (the borrowed answer box), and running (a message staged
-// as an interjection, ADR 0025). At awaitingApproval and errored the box is inert — a/d/s and
-// Enter-dismiss own the keyboard there — so clicks fall through to the transcript arbitration.
+// keypress reaches the textarea and a mouse click positions the caret. Editability IS the rule,
+// and which states are editable is [uiState.editable]'s to say (model.go); what this adds is the
+// focus half. Where it does not hold the box is inert — a/d/s and Enter-dismiss own the keyboard
+// at an approval, ⏎ dismisses at errored — so clicks fall through to the transcript arbitration.
 func (m Model) inputEditable() bool {
-	return (m.state == stateIdle || m.state == stateAwaitingAsk || m.state == stateRunning) &&
-		m.input.Focused()
+	return m.state.editable() && m.input.Focused()
 }
 
 // inputContentRect returns the textarea text area's on-screen rectangle: the top-left cell
