@@ -1000,7 +1000,7 @@ untouched. doc.go line in the same commit.
 
 **Commit:** `refactor(tui): name the click-map module blocktarget.go`
 
-## 34. One parked-call helper; the cross-goroutine idioms get named
+## 34. One parked-call helper; the cross-goroutine idioms get named — ✅ DONE (2026-08-20)
 
 **Source:** review §Smaller findings, row 8.
 

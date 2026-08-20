@@ -632,7 +632,13 @@
 // [Bridge.NotifyRouting] beside it, the same way in for the Sub-agent server's routing state (ADR
 // 0045); sink.go the Event→Msg [teaSink]; messages.go the plain values those sends carry
 // into Update; approver.go and asker.go the two cross-goroutine rendezvous that park a Step on a
-// human ([uiApprover] on an approval decision, [uiAsker] on a typed answer); worker.go the
+// human ([uiApprover] on an approval decision, [uiAsker] on a typed answer); parkedcall.go the ONE
+// rendezvous body under both ([parkCall] — send, then block on a buffered reply until the human
+// answers or ctx ends, with the abandoned verdict the two disagree on passed in rather than
+// assumed), and the paragraph over it that names all three cross-goroutine idioms this package
+// uses — rendezvous, mailbox ([interjectBox]), fire-and-forget ([uiPresenter],
+// [Bridge.NotifySchedule], [Bridge.NotifyRouting]) — and separates them from ADR 0011's three
+// legality classes for touching the ENGINE; worker.go the
 // cancellable engine driver; model.go the [Model] itself — the lifecycle state machine, the
 // layout, the frame's one stacking order and the block spans View publishes while walking it
 // ([frameSpans], read by every pane rectangle), the status line and the footer; sessionsave.go the record-write cluster lifted out of

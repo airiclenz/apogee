@@ -3,6 +3,8 @@ package tui
 import (
 	"context"
 
+	tea "charm.land/bubbletea/v2"
+
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
@@ -22,20 +24,19 @@ type uiApprover struct {
 // uiApprover is the engine's Approver.
 var _ domain.Approver = (*uiApprover)(nil)
 
-// Approve hands req to the Update loop and waits for the human's decision. The reply channel
-// is buffered (cap 1) so the Update loop never blocks sending the decision, and so a reply
-// that arrives *after* a cancel is absorbed by the buffer rather than parking the UI — no
-// goroutine leak. A cancelled ctx (the user stopped the in-flight Exchange) unblocks this
-// human gate and returns ApprovalDeny with ctx.Err(); the engine then rolls the Turn back to
-// a quiescent boundary with StatusCancelled (ADR 0007). The deny is the safe verdict for an
-// abandoned request — but the cancellation, not the verdict, is what ends the Turn.
+// Approve hands req to the Update loop and waits for the human's decision, through the one
+// rendezvous body both human gates share ([parkCall], parkedcall.go — which is also where the
+// buffered-reply and no-leak reasoning lives).
+//
+// The abandoned verdict this gate chooses is ApprovalDeny, NOT the zero ApprovalDecision: a
+// cancelled ctx (the user stopped the in-flight Exchange) unblocks the gate with the safe
+// verdict for a request nobody is left to answer. It is the cancellation, not the verdict,
+// that ends the Turn (ADR 0007) — the deny simply refuses to let an abandoned request be read
+// as an allow.
 func (a *uiApprover) Approve(ctx context.Context, req domain.ApprovalRequest) (domain.ApprovalDecision, error) {
-	reply := make(chan domain.ApprovalDecision, 1) // buffered: the UI never blocks replying
-	a.prog.send(approvalReqMsg{Request: req, Reply: reply})
-	select {
-	case d := <-reply:
-		return d, nil
-	case <-ctx.Done():
-		return domain.ApprovalDeny, ctx.Err()
-	}
+	return parkCall(ctx, a.prog,
+		func(reply chan domain.ApprovalDecision) tea.Msg {
+			return approvalReqMsg{Request: req, Reply: reply}
+		},
+		domain.ApprovalDeny)
 }

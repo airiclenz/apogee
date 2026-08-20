@@ -222,6 +222,25 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **One parked-call helper behind both human gates (`internal/tui/parkedcall.go`).**
+  `uiApprover.Approve` and `uiAsker.Ask` were structurally identical rendezvous bodies — make a
+  buffered reply channel, send the envelope through the late-bound program, select on the reply
+  against `ctx.Done()` — copied twice, so the no-leak reasoning that makes both fail-safe had two
+  places to drift apart in. Both delegate to one generic `parkCall` now; the single thing the two
+  gates genuinely disagree on, the value an abandoned request settles on, is a parameter rather
+  than a copied literal, and each call site says why it chose what it chose (the approver denies,
+  because a request nobody is left to answer must not read as an allow; the asker returns an empty
+  answer, because a question has no safe default to substitute). Above the helper sits the
+  paragraph that names the three cross-goroutine idioms this package actually uses — rendezvous
+  (the two gates), mailbox (`interjectBox`), fire-and-forget (`uiPresenter`, `Bridge.NotifySchedule`,
+  `Bridge.NotifyRouting`) — states the one rule all three share (`programRef.send` blocks on the
+  Update loop, so no idiom may be used from inside it), and separates them from ADR 0011's three
+  legality classes for touching the *engine*, which are a different question with different
+  answers. The helper lives host-side, on the delegates, never on the value-typed `Model`. No
+  behaviour change: the existing approver and asker suites pass unchanged, and a new
+  `parkedcall_test.go` pins the helper's own interface — the reply it returns, the abandoned value
+  a cancel returns, and the buffered channel absorbing a reply that arrives after the caller gave up.
+
 - Named the TUI click-map module: the target kinds, the painter's relative `lineMark` and the
   resolved `lineTarget` moved out of `render.go` into the new `internal/tui/blocktarget.go`, the
   file its 737-line suite was already named for. Pure file move — no behaviour change.

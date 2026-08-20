@@ -3,6 +3,8 @@ package tui
 import (
 	"context"
 
+	tea "charm.land/bubbletea/v2"
+
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
@@ -24,19 +26,19 @@ type uiAsker struct {
 // uiAsker is the engine's Asker.
 var _ domain.Asker = (*uiAsker)(nil)
 
-// Ask hands req to the Update loop and waits for the human's typed answer. The reply channel
-// is buffered (cap 1) so the Update loop never blocks sending the answer, and so an answer
-// arriving after a cancel is absorbed by the buffer rather than parking the UI — no goroutine
-// leak. A cancelled ctx returns an empty AskAnswer and ctx.Err(); the engine then rolls the
-// Turn back to a quiescent boundary with StatusCancelled. This is fail-safe by construction:
-// it never hangs past ctx, so a non-interactive shutdown unblocks it.
+// Ask hands req to the Update loop and waits for the human's typed answer, through the one
+// rendezvous body both human gates share ([parkCall], parkedcall.go — which is also where the
+// buffered-reply and no-leak reasoning lives).
+//
+// The abandoned answer this gate chooses is the empty AskAnswer, which is the zero value here
+// rather than a named verdict: a question has no safe default to substitute, so an abandoned
+// one yields no text at all. The engine rolls the Turn back to a quiescent boundary with
+// StatusCancelled; fail-safe by construction, since the gate never hangs past ctx and a
+// non-interactive shutdown therefore unblocks it.
 func (a *uiAsker) Ask(ctx context.Context, req domain.AskRequest) (domain.AskAnswer, error) {
-	reply := make(chan domain.AskAnswer, 1) // buffered: the UI never blocks replying
-	a.prog.send(askReqMsg{Request: req, Reply: reply})
-	select {
-	case ans := <-reply:
-		return ans, nil
-	case <-ctx.Done():
-		return domain.AskAnswer{}, ctx.Err()
-	}
+	return parkCall(ctx, a.prog,
+		func(reply chan domain.AskAnswer) tea.Msg {
+			return askReqMsg{Request: req, Reply: reply}
+		},
+		domain.AskAnswer{})
 }
