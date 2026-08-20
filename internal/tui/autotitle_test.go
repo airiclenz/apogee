@@ -390,7 +390,7 @@ func TestAutoTitleDroppedAfterABrowserRename(t *testing.T) {
 	m = openBrowser(t, m)
 
 	m = step(t, m, keyCtrl('r'))
-	m.sessionBrowser.renameBuf = "my own name"
+	m.sessionBrowser.renameBuf.setValue("my own name")
 	m, cmd := stepCmd(t, m, keyEnter())
 	cmdMsg(cmd) // run the browser's rename+re-list off the loop
 	if !m.titleTouched {
@@ -1035,7 +1035,7 @@ func TestAutoTitleStashDroppedWhenAHumanNamesFirst(t *testing.T) {
 	// The human names a session by hand while the generated one waits for an id.
 	m = openBrowser(t, m)
 	m = step(t, m, keyCtrl('r'))
-	m.sessionBrowser.renameBuf = "my own name"
+	m.sessionBrowser.renameBuf.setValue("my own name")
 	m, cmd = stepCmd(t, m, keyEnter())
 	cmdMsg(cmd)
 	if !m.titleTouched {
@@ -1197,7 +1197,7 @@ func TestSessionNameGivesUpADroppedAutoTitle(t *testing.T) {
 	// about this session was named.
 	m = openBrowser(t, m)
 	m = step(t, m, keyCtrl('r'))
-	m.sessionBrowser.renameBuf = "some other session"
+	m.sessionBrowser.renameBuf.setValue("some other session")
 	m, cmd = stepCmd(t, m, keyEnter())
 	m = runWrites(t, m, cmd)
 	if m.sessionName != "a generated name" {

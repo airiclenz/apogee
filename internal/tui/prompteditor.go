@@ -157,8 +157,12 @@ func ParseCursorShape(s string) (tea.CursorShape, error) {
 // filled with the active scheme's `surface` tone, the terminal's own steady caret in the given
 // shape), given the chat box's own two differences from every other field in this package, and an
 // empty workspace file cache.
+//
+// It is the one field built with NO caret glyph ([lineEditor.caret]): the chat box is painted as
+// itself rather than into a popup row, so the caret the human sees is the terminal's own and there
+// is nothing for textWithCaret to draw.
 func newPromptEditor(shape tea.CursorShape, surface color.Color) promptEditor {
-	e := newLineEditor(shape, surface)
+	e := newLineEditor(shape, surface, "")
 	e.input.Placeholder = idlePlaceholder // the not-yet-negotiated legend; idleLegend upgrades it if the terminal answers
 	// Plain Enter submits (intercepted in handleKey), so the textarea's newline binding is
 	// repurposed: shift+enter works on terminals that support the Kitty keyboard protocol,

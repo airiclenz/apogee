@@ -89,11 +89,18 @@ type picker struct {
 	kind     pickerKind
 	selected int
 	// filter is what the human has typed into the open overlay: the case-insensitive substring every
-	// row must carry to survive (pickerFilteredView). A plain string, so the value-copied Model stays
-	// copyable (ADR 0011) — no strings.Builder can ever live here — and part of the overlay's own
-	// state, so the whole-struct zeroing every close and accept already does (`m.picker = picker{}`)
-	// is what clears it: no path can carry a stale filter into the next open.
-	filter string
+	// row must carry to survive (pickerFilteredView). It is a [lineEditor] — the package's one text
+	// FIELD (lineeditor.go), so "what does backspace do here" is answered where every other field
+	// answers it — held BY VALUE as the Model holds the prompt's own and the /settings pane its value
+	// row's (ADR 0011): the widget carries no self-referential no-copy type, so the value-copied Model
+	// stays copyable.
+	//
+	// Its ZERO value is the inert widget a whole-struct reset leaves behind — a textarea nothing has
+	// focused, which answers "" and drops every key — so the zeroing every close and accept already
+	// does (`m.picker = picker{}`) still clears the filter, and no path can carry a stale one into the
+	// next open. The real field is built on the first key that reaches it (typeIntoOverlayFilter)
+	// rather than at each of the nine sites that open an overlay.
+	filter lineEditor
 	// profiles are the Launch-profile rows, and the one offering that is NOT derived at render time.
 	// The other two describe Model state (the advertised models, the configured servers) and so can be
 	// re-read every frame; a Launch profile lives in the launcher's config FILE, behind a seam that
@@ -632,23 +639,46 @@ func (m Model) pickerKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		return m.acceptPicker()
 	case "backspace":
-		// By RUNE rather than by byte: the filter is the human's own text, and half a multi-byte
-		// character is not a state any list can be filtered by.
-		if runes := []rune(m.picker.filter); len(runes) > 0 {
-			m.picker.filter = string(runes[:len(runes)-1])
-			m.picker.clampSelection(m.pickerCount())
-		}
-		return m, nil
+		var cmd tea.Cmd
+		m.picker.filter, cmd = m.typeIntoOverlayFilter(m.picker.filter, msg)
+		m.picker.clampSelection(m.pickerCount())
+		return m, cmd
 	}
 	// Text carries the key's rune(s) only for PRINTABLE input — a modifier chord carries none
 	// (bubbletea's own contract) — so a chord that is not one of the verbs above is still swallowed
 	// whole by the modal rather than typed into the filter.
 	if msg.Text != "" {
-		m.picker.filter += msg.Text
+		var cmd tea.Cmd
+		m.picker.filter, cmd = m.typeIntoOverlayFilter(m.picker.filter, msg)
 		m.picker.clampSelection(m.pickerCount())
-		return m, nil
+		return m, cmd
 	}
 	return m, nil // any other key is swallowed by the modal
+}
+
+// typeIntoOverlayFilter hands one keystroke to a filtering overlay's filter field and returns the
+// field it left, with whatever Cmd the widget asked for. It is the door BOTH overlays that filter
+// type through — the picker and the /sessions browser — so the two answer "what does backspace do to
+// a filter" with the same field rather than each trimming a rune off a string of its own.
+//
+// Only the two keys the pane already routed here reach it: a printable keypress and backspace, both
+// landing at the end of the value where the caret stands. Everything else is still swallowed whole by
+// the modal above (pickerKey, sessionBrowserKey) — the field is what EDITS, never what decides which
+// keys are the overlay's.
+//
+// The field is BUILT here, on the first key that reaches it, rather than at each of the nine sites
+// that open an overlay: those assign the whole struct at once (`m.picker = picker{}`), and a filter
+// nobody has typed into holds nothing, paints nothing (overlayFilterLine) and prunes nothing
+// (filterPopupRows' identity view). The glyph is pickerFilterCursor for both, which is the caret the
+// shared filter line has always drawn.
+func (m Model) typeIntoOverlayFilter(filter lineEditor, msg tea.KeyPressMsg) (lineEditor, tea.Cmd) {
+	if !filter.isBuilt() {
+		filter = newPopupField(m.opts.CursorShape, m.th.surface, pickerFilterCursor, "")
+	}
+	// The Cmd is handed back rather than dropped, as the /settings buffer hands its own back
+	// (settingsBufferKey): a single-line field asks for none today, and swallowing one silently is how
+	// that stops being true unnoticed.
+	return filter, filter.editKey(msg)
 }
 
 // acceptPicker resolves ⏎ on the highlighted row, by kind. The highlight indexes the FILTERED rows,
@@ -817,7 +847,7 @@ func (v pickerView) offeringIndex(selected int) (int, bool) {
 // re-derives the offering, re-applies the filter and re-clamps the selection in one move — the
 // unfiltered posture, unchanged.
 func (m Model) pickerFilteredView() pickerView {
-	return filterPopupRows(m.pickerOfferingRows(), m.picker.filter)
+	return filterPopupRows(m.pickerOfferingRows(), m.picker.filter.value())
 }
 
 // filterPopupRows is the filter itself: the rows that survive it, and where each of them sat in the
@@ -866,10 +896,13 @@ func rowMatchesFilter(row popupRow, filter string) bool {
 const pickerFilterLead = "filter: "
 
 // pickerFilterCursor closes that line. A block where the next keystroke will land, because the real
-// caret is in the prompt box below and stays there (the filter lives in the overlay's own state, not
-// in the editor): without it the line reads as a finished caption rather than as something being
-// typed. U+258C LEFT HALF BLOCK — one cell in either width method, like every other glyph the frame
-// measures (theme.go).
+// caret is in the prompt box below and stays there (a popup row has no seat for it — popup.go):
+// without it the line reads as a finished caption rather than as something being typed. U+258C LEFT
+// HALF BLOCK — one cell in either width method, like every other glyph the frame measures (theme.go).
+//
+// It is the glyph the filter FIELD is built with (typeIntoOverlayFilter) rather than a string this
+// file appends, so the caret stands where the caret stands ([lineEditor.textWithCaret]) — and both
+// filtering overlays draw the same one, which is what the shared line has always painted.
 const pickerFilterCursor = "▌"
 
 // overlayFilterLine is what a filtering overlay shows of its filter — "filter: qwen▌" — or nothing
@@ -880,12 +913,14 @@ const pickerFilterCursor = "▌"
 //
 // It is one composer for both overlays that filter — the picker and the /sessions browser — because
 // the line is one line: two panes spelling it themselves would be two places for the label, the
-// cursor and the stripping to drift apart.
-func overlayFilterLine(filter string) string {
-	if filter == "" {
+// cursor and the stripping to drift apart. The cursor arrives INSIDE the text now, where the field
+// draws it ([lineEditor.textWithCaret]), so the strip covers it too — harmlessly, since a block glyph
+// is no control character.
+func overlayFilterLine(filter lineEditor) string {
+	if filter.value() == "" {
 		return ""
 	}
-	return pickerFilterLead + stripEscapes(filter) + pickerFilterCursor
+	return pickerFilterLead + stripEscapes(filter.textWithCaret())
 }
 
 // pickerFilterLine is that line for the OPEN picker (overlayFilterLine over its own filter).

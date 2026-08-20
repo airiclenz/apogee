@@ -49,6 +49,17 @@ type lineEditor struct {
 	// not cover it. The field keeps its own invariant rather than asking every caller to remember it
 	// (lineEditor.editMsg → flattenLine).
 	oneLine bool
+
+	// caret is the glyph [lineEditor.textWithCaret] draws where the caret stands, and it belongs to
+	// the FIELD rather than to whatever paints it: the four fields this package builds each answer
+	// "what does my caret look like" once, at construction, so no surface can paint one field's caret
+	// two ways (picker.go's filter and the /sessions browser's use pickerFilterCursor, the /sessions
+	// rename row sessionRenameCaret, the /settings value row settingsCaret).
+	//
+	// A field whose surface seats the terminal's OWN cursor carries none — the chat box, where the
+	// caret is on the screen already (steadyCursor) — and textWithCaret then hands back the value
+	// unchanged, which is the honest report for it.
+	caret string
 }
 
 // newLineEditor builds the part every text field in this package shares: a focused, solid-interior
@@ -58,11 +69,12 @@ type lineEditor struct {
 //
 // surface is the active scheme's field tone ([theme.surface]) the widget's four background slots are
 // painted with (fillInput): the textarea is Bubble Tea's, so the colour has to be handed to it
-// rather than looked up.
+// rather than looked up. caret is the glyph a popup-painted surface draws the caret with
+// ([lineEditor.caret]); a field the terminal's own cursor sits in passes "".
 //
 // The Focus Cmd is discarded: the focus STATE is what matters at construction, and a retired virtual
 // cursor has no blink to schedule, so that Cmd is nil anyway.
-func newLineEditor(shape tea.CursorShape, surface color.Color) lineEditor {
+func newLineEditor(shape tea.CursorShape, surface color.Color, caret string) lineEditor {
 	ta := textarea.New()
 	ta.Prompt = "" // the caller's own frame is the field's border; no inline prompt gutter (layout.md)
 	ta.ShowLineNumbers = false
@@ -70,7 +82,35 @@ func newLineEditor(shape tea.CursorShape, surface color.Color) lineEditor {
 	fillInput(&ta, surface)
 	steadyCursor(&ta, shape)
 	ta.Focus()
-	return lineEditor{input: ta}
+	return lineEditor{input: ta, caret: caret}
+}
+
+// newPopupField builds the field a POPUP-painted surface types into: a single-line [lineEditor]
+// drawing its caret as glyph and seeded with what that surface starts from, caret at the end of it.
+// It is the shared constructor of the four such fields this package builds — the picker's filter and
+// the /sessions browser's (typeIntoOverlayFilter), the /sessions rename row, the /settings value row
+// (newSettingsEditor) — because what each of them needs is these same three things and nothing else.
+//
+// Single-line is the whole configuration such a field takes: a popup row is ONE row, so there is no
+// second line to walk to, and ⏎ is then free to mean whatever the surface above says it means.
+// glyph rather than the terminal's real cursor for the popup module's own reason: it styles rows
+// whole and takes plain escape-free cells (popup.go, doc.go), so there is no seat on a popup row for
+// the real caret and the field reports where the next keystroke lands as a glyph instead
+// ([lineEditor.textWithCaret]).
+func newPopupField(shape tea.CursorShape, surface color.Color, glyph, seed string) lineEditor {
+	e := newLineEditor(shape, surface, glyph)
+	e.singleLine()
+	e.setValue(seed)
+	return e
+}
+
+// isBuilt reports whether this is a real field rather than the inert zero value a whole-struct reset
+// leaves behind (`m.picker = picker{}`, `m.settings.editor = lineEditor{}`). It is the focus flag
+// because focus is what construction grants and nothing in this package ever takes away: a zero
+// textarea answers "" and drops every key it is handed (its Update returns on !focus), so a surface
+// that builds its field lazily asks this before handing over a keystroke (typeIntoOverlayFilter).
+func (e lineEditor) isBuilt() bool {
+	return e.input.Focused()
 }
 
 // singleLine confines the editor to ONE line, which is two things at once. The widget's newline
@@ -207,16 +247,17 @@ func (e lineEditor) caretLine() int {
 	return e.input.Line()
 }
 
-// textWithCaret is the field as PLAIN TEXT with a caret glyph drawn into it at the caret's position.
+// textWithCaret is the field as PLAIN TEXT with the field's own caret glyph ([lineEditor.caret])
+// drawn into it at the caret's position.
 // It is what a surface that takes no styling of its own paints the field with: the popup module
 // styles rows whole and its cells must arrive as plain, escape-free text (popup.go, doc.go), so a
 // field drawn inside one cannot hand it the widget's own View — and the terminal's real cursor has
 // no seat on a popup row to be placed at either. A glyph AT the offset is then the honest report of
 // where the next keystroke lands, which is what the caret is for.
-func (e lineEditor) textWithCaret(caret string) string {
+func (e lineEditor) textWithCaret() string {
 	r := []rune(e.input.Value())
 	off := clampInt(e.caretRune(), 0, len(r))
-	return string(r[:off]) + caret + string(r[off:])
+	return string(r[:off]) + e.caret + string(r[off:])
 }
 
 // reseatCaret drives the textarea caret to an absolute visual (soft-wrapped) row through the

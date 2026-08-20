@@ -186,7 +186,7 @@ func TestKeyMigrationMoveCallsTheSeamAndAdvances(t *testing.T) {
 	if got := m.picker.migration; len(got) != 1 || got[0] != "laptop" {
 		t.Fatalf("queue = %v, want the pane to have moved on to laptop", got)
 	}
-	if got := m.picker.filter; got != "" {
+	if got := m.picker.filter.value(); got != "" {
 		t.Errorf("filter = %q, want the next question asked on a clean pane", got)
 	}
 	if note := lastNote(m); !strings.Contains(note, "macOS Keychain") ||

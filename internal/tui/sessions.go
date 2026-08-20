@@ -36,15 +36,21 @@ type sessionBrowser struct {
 	selected      int
 	confirming    bool
 	renaming      bool
-	renameBuf     string
+	// renameBuf is the inline title edit in progress: a [lineEditor] like the filter beside it, built
+	// on the title the armed row holds (sessionRenameKey's ctrl+r) and zeroed again the moment the
+	// edit commits or is abandoned.
+	renameBuf lineEditor
 	// filter is what the human has typed into the open browser: the case-insensitive substring every
 	// row must carry to survive (browserView), composed after the workspace view rather than beside
-	// it. A plain string, so the value-copied Model stays copyable (ADR 0011) — no strings.Builder can
-	// ever live here — and part of the overlay's own state, so the whole-struct zeroing every close
-	// already does (`m.sessionBrowser = sessionBrowser{}`) is what clears it: no path can carry a
+	// it. It is a [lineEditor] — the package's one text FIELD (lineeditor.go) — held BY VALUE as the
+	// Model holds the prompt's own (ADR 0011): the widget carries no self-referential no-copy type, so
+	// the value-copied Model stays copyable.
+	//
+	// Its ZERO value is the inert widget a whole-struct reset leaves behind, so the zeroing every close
+	// already does (`m.sessionBrowser = sessionBrowser{}`) is still what clears it: no path can carry a
 	// stale filter into the next open. A re-LIST is deliberately not such a path — a delete or a
 	// rename refreshes the pane the human is still standing in, and it stays as they left it.
-	filter string
+	filter lineEditor
 }
 
 // maxSessionRows caps how many session rows the overlay shows at once; a longer list scrolls a
@@ -58,6 +64,15 @@ const maxSessionRows = 8
 // that has to say the three verbs are chords now, because the letters they used to be are what the
 // filter is typed with (ratified 2026-08-06).
 const sessionBrowserHint = "type to filter · ↑/↓ select · ⏎ resume · ^r rename · ^d delete · ^a this/all · esc close"
+
+// sessionRenameCaret is the glyph the inline rename edit draws where the next keystroke lands. It is
+// this pane's own rather than the filter line's above it (pickerFilterCursor): the two are different
+// fields on the same overlay, and the rename row has always been the narrower bar — U+258F LEFT ONE
+// EIGHTH BLOCK, the glyph the /settings value row later borrowed from it (settingsCaret).
+//
+// A glyph rather than the terminal's own cursor for the popup module's reason: it styles rows whole
+// and takes plain cells, so there is no seat on a popup row for the real caret ([lineEditor.caret]).
+const sessionRenameCaret = "▏"
 
 // deleteConfirmCell is the inline "delete? y/n" an armed delete puts on the selected row (sessionRows)
 // — a CELL of its own past the message counts rather than a suffix glued to the last one, so arming
@@ -187,7 +202,7 @@ func (b sessionBrowser) filteredView(workspace string, now time.Time) browserVie
 	for _, meta := range visible {
 		rows = append(rows, sessionRowCells(meta, workspace, b.allWorkspaces, now))
 	}
-	pruned := filterPopupRows(rows, b.filter)
+	pruned := filterPopupRows(rows, b.filter.value())
 	view := browserView{rows: pruned.rows, metas: make([]session.Meta, 0, len(pruned.offering))}
 	for _, i := range pruned.offering {
 		view.metas = append(view.metas, visible[i])
@@ -274,7 +289,8 @@ func (m Model) sessionBrowserKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			// The seed is a stored title, so it is escape-stripped on the way INTO the buffer: the
 			// rename row paints the buffer verbatim, and the commit below strips anyway — seeding it
 			// clean keeps what is being edited equal to what will be saved.
-			m.sessionBrowser.renameBuf = stripEscapes(view.metas[m.sessionBrowser.selected].Title)
+			m.sessionBrowser.renameBuf = newPopupField(m.opts.CursorShape, m.th.surface,
+				sessionRenameCaret, stripEscapes(view.metas[m.sessionBrowser.selected].Title))
 		}
 		return m, nil
 	case "enter":
@@ -286,21 +302,19 @@ func (m Model) sessionBrowserKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.layout()
 		return m, m.loadSession(id)
 	case "backspace":
-		// By RUNE rather than by byte: the filter is the human's own text, and half a multi-byte
-		// character is not a state any list can be filtered by.
-		if runes := []rune(m.sessionBrowser.filter); len(runes) > 0 {
-			m.sessionBrowser.filter = string(runes[:len(runes)-1])
-			m.sessionBrowser.clampSelection(len(m.sessionBrowserView().metas))
-		}
-		return m, nil
+		var cmd tea.Cmd
+		m.sessionBrowser.filter, cmd = m.typeIntoOverlayFilter(m.sessionBrowser.filter, msg)
+		m.sessionBrowser.clampSelection(len(m.sessionBrowserView().metas))
+		return m, cmd
 	}
 	// Text carries the key's rune(s) only for PRINTABLE input — a modifier chord carries none
 	// (bubbletea's own contract) — so a chord that is not one of the verbs above is still swallowed
 	// whole by the modal rather than typed into the filter.
 	if msg.Text != "" {
-		m.sessionBrowser.filter += msg.Text
+		var cmd tea.Cmd
+		m.sessionBrowser.filter, cmd = m.typeIntoOverlayFilter(m.sessionBrowser.filter, msg)
 		m.sessionBrowser.clampSelection(len(m.sessionBrowserView().metas))
-		return m, nil
+		return m, cmd
 	}
 	return m, nil // any other key is swallowed by the modal
 }
@@ -351,15 +365,15 @@ func (m Model) sessionRenameKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
 		m.sessionBrowser.renaming = false
-		m.sessionBrowser.renameBuf = ""
+		m.sessionBrowser.renameBuf = lineEditor{}
 		return m, nil
 	case "enter":
 		// The filtered view again (browserView): the edit was opened on a painted row, so the commit
 		// lands on the record that row named rather than on the same index into the whole store.
 		view := m.sessionBrowserView()
-		title := stripEscapes(strings.TrimSpace(m.sessionBrowser.renameBuf))
+		title := stripEscapes(strings.TrimSpace(m.sessionBrowser.renameBuf.value()))
 		m.sessionBrowser.renaming = false
-		m.sessionBrowser.renameBuf = ""
+		m.sessionBrowser.renameBuf = lineEditor{}
 		if len(view.metas) == 0 || title == "" {
 			return m, nil
 		}
@@ -376,14 +390,12 @@ func (m Model) sessionRenameKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		cmd := m.renameSession(id, title) // queued: it mutates m
 		return m, cmd
 	case "backspace":
-		r := []rune(m.sessionBrowser.renameBuf)
-		if len(r) > 0 {
-			m.sessionBrowser.renameBuf = string(r[:len(r)-1])
-		}
-		return m, nil
+		cmd := m.sessionBrowser.renameBuf.editKey(msg)
+		return m, cmd
 	}
 	if msg.Text != "" { // a printable keypress carries its rune(s) in Text
-		m.sessionBrowser.renameBuf += msg.Text
+		cmd := m.sessionBrowser.renameBuf.editKey(msg)
+		return m, cmd
 	}
 	return m, nil
 }
@@ -589,7 +601,7 @@ func sessionRows(b sessionBrowser, workspace string, now time.Time) []popupRow {
 	for i, row := range view.rows {
 		switch {
 		case i == b.selected && b.renaming:
-			row = popupRow{"rename: " + b.renameBuf + "▏"}
+			row = popupRow{"rename: " + b.renameBuf.textWithCaret()}
 		case i == b.selected && b.confirming:
 			row = append(row, deleteConfirmCell)
 		}

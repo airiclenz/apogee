@@ -5018,15 +5018,17 @@ func TestPromptScrollReseatCannotSpin(t *testing.T) {
 		m      Model
 		before int
 	}
-	done := make(chan outcome, 1)
+	// By POINTER: the Model carries four text fields now (the chat box, the /settings value row and
+	// the two overlay filters) and a channel element may not exceed 64kB.
+	done := make(chan *outcome, 1)
 	go func() {
 		next, _ := m.Update(tea.PasteMsg{Content: value})
 		seeded := next.(Model)
 		before := seeded.input.Height()
 		next, _ = seeded.Update(keyRune('x'))
-		done <- outcome{next.(Model), before}
+		done <- &outcome{next.(Model), before}
 	}()
-	var got outcome
+	var got *outcome
 	select {
 	case got = <-done:
 	case <-time.After(reseatDeadline):

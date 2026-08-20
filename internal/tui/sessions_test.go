@@ -521,8 +521,8 @@ func TestSessionBrowserRenameCommits(t *testing.T) {
 		t.Fatal("^r did not open the rename edit")
 	}
 	// The edit pre-fills the current title so the human tweaks rather than retypes; append " v2".
-	if m.sessionBrowser.renameBuf != "old title" {
-		t.Fatalf("rename buffer = %q, want it pre-filled with the current title", m.sessionBrowser.renameBuf)
+	if m.sessionBrowser.renameBuf.value() != "old title" {
+		t.Fatalf("rename buffer = %q, want it pre-filled with the current title", m.sessionBrowser.renameBuf.value())
 	}
 	for _, r := range " v2" {
 		m = step(t, m, keyRune(r))
@@ -620,7 +620,7 @@ func TestBrowserRenameOfInactiveRowLeavesSessionName(t *testing.T) {
 
 	m = openBrowser(t, m)
 	m = step(t, m, keyCtrl('r'))
-	m.sessionBrowser.renameBuf = "an older task, renamed"
+	m.sessionBrowser.renameBuf.setValue("an older task, renamed")
 	m, cmd = stepCmd(t, m, keyEnter())
 	m = runWrites(t, m, cmd)
 
@@ -937,7 +937,7 @@ func TestSessionBrowserRenameSeedStripsEscapes(t *testing.T) {
 	m = openBrowser(t, m)
 
 	m = step(t, m, keyCtrl('r'))
-	if got, want := m.sessionBrowser.renameBuf, "reset c me"; got != want {
+	if got, want := m.sessionBrowser.renameBuf.value(), "reset c me"; got != want {
 		t.Errorf("rename buffer = %q, want the seed escape-stripped (%q)", got, want)
 	}
 	for i, ln := range layoutPopupRows(m.th, sessionRows(m.sessionBrowser, m.opts.Workspace, time.Now())) {
@@ -1000,6 +1000,13 @@ func TestSessionRowsConfirmIsItsOwnCell(t *testing.T) {
 	}
 }
 
+// renamedField is a rename buffer holding text, built as ^r builds it (newPopupField). The buffer is
+// a [lineEditor] rather than a string, so a test that seeds one on a bare sessionBrowser — with no
+// Model to read the cursor shape and the field tone off — still has to hand the pane a real field.
+func renamedField(text string) lineEditor {
+	return newPopupField(defaultCursorShape, lipgloss.Color(scheme.Default().Surface), sessionRenameCaret, text)
+}
+
 // An armed rename replaces the whole row with the single cell holding the edit buffer — the row
 // stops describing a session, so it keeps none of its columns.
 func TestSessionRowsRenameIsOneCell(t *testing.T) {
@@ -1007,7 +1014,7 @@ func TestSessionRowsRenameIsOneCell(t *testing.T) {
 	b := sessionBrowser{
 		open:      true,
 		renaming:  true,
-		renameBuf: "new title",
+		renameBuf: renamedField("new title"),
 		metas:     []session.Meta{{Title: "old title", UpdatedAt: now, UserMsgs: 1, Workspace: "/ws/a"}},
 	}
 
@@ -1051,8 +1058,8 @@ func TestSessionBrowserLettersTypeRatherThanAct(t *testing.T) {
 		}
 	}
 
-	if m.sessionBrowser.filter != "draft" {
-		t.Errorf("filter = %q, want the keys typed", m.sessionBrowser.filter)
+	if m.sessionBrowser.filter.value() != "draft" {
+		t.Errorf("filter = %q, want the keys typed", m.sessionBrowser.filter.value())
 	}
 	if b := m.sessionBrowser; b.confirming || b.renaming || b.allWorkspaces {
 		t.Errorf("browser = {confirming:%v renaming:%v all:%v}, want d/r/a to have typed rather than acted",
@@ -1067,15 +1074,15 @@ func TestSessionBrowserLettersTypeRatherThanAct(t *testing.T) {
 
 	// Backspace is the undo, one rune at a time, and the chords still fire while a filter is up.
 	m = step(t, m, tea.KeyPressMsg{Code: tea.KeyBackspace})
-	if m.sessionBrowser.filter != "draf" {
-		t.Errorf("filter = %q, want one rune trimmed", m.sessionBrowser.filter)
+	if m.sessionBrowser.filter.value() != "draf" {
+		t.Errorf("filter = %q, want one rune trimmed", m.sessionBrowser.filter.value())
 	}
 	m = step(t, m, keyCtrl('d'))
 	if !m.sessionBrowser.confirming {
 		t.Error("^d did not arm the delete confirm while a filter was up")
 	}
-	if m.sessionBrowser.filter != "draf" {
-		t.Errorf("filter = %q, want the chord to leave the filter alone", m.sessionBrowser.filter)
+	if m.sessionBrowser.filter.value() != "draf" {
+		t.Errorf("filter = %q, want the chord to leave the filter alone", m.sessionBrowser.filter.value())
 	}
 }
 
@@ -1100,9 +1107,9 @@ func TestSessionBrowserFilteredResumeOpensTheRowShown(t *testing.T) {
 	if msg.rec.Meta.ID != "audit" {
 		t.Errorf("resumed %q, want the filtered row's own record %q", msg.rec.Meta.ID, "audit")
 	}
-	if m.sessionBrowser.open || m.sessionBrowser.filter != "" {
+	if m.sessionBrowser.open || m.sessionBrowser.filter.value() != "" {
 		t.Errorf("browser = {open:%v filter:%q}, want the close to carry no filter into the next open",
-			m.sessionBrowser.open, m.sessionBrowser.filter)
+			m.sessionBrowser.open, m.sessionBrowser.filter.value())
 	}
 }
 
@@ -1133,10 +1140,10 @@ func TestSessionBrowserFilteredVerbsActOnTheRowShown(t *testing.T) {
 		m = typeIntoBrowser(t, m, "parser")
 
 		m = step(t, m, keyCtrl('r'))
-		if m.sessionBrowser.renameBuf != "fix the parser" {
-			t.Fatalf("rename buffer = %q, want the filtered row's own title", m.sessionBrowser.renameBuf)
+		if m.sessionBrowser.renameBuf.value() != "fix the parser" {
+			t.Fatalf("rename buffer = %q, want the filtered row's own title", m.sessionBrowser.renameBuf.value())
 		}
-		m.sessionBrowser.renameBuf = "fix the parser, properly"
+		m.sessionBrowser.renameBuf.setValue("fix the parser, properly")
 		m, cmd := stepCmd(t, m, keyEnter())
 		m = runWrites(t, m, cmd)
 
@@ -1197,8 +1204,8 @@ func TestSessionBrowserToggleRederivesTheFilteredView(t *testing.T) {
 	if len(view.metas) != 1 || view.metas[0].ID != "elsewhere" {
 		t.Fatalf("all-workspaces rows = %+v, want the one foreign session the filter matches", view.metas)
 	}
-	if m.sessionBrowser.filter != "another project" {
-		t.Errorf("filter = %q, want the toggle to widen the search rather than end it", m.sessionBrowser.filter)
+	if m.sessionBrowser.filter.value() != "another project" {
+		t.Errorf("filter = %q, want the toggle to widen the search rather than end it", m.sessionBrowser.filter.value())
 	}
 	m, cmd := stepCmd(t, m, keyEnter())
 	if msg, ok := cmdMsg(cmd).(sessionLoadedMsg); !ok || msg.rec.Meta.ID != "elsewhere" {

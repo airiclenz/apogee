@@ -1060,19 +1060,18 @@ func (m Model) settingsBufferSeed(row SettingRow) string {
 	return m.settingsPersistedValue(row)
 }
 
-// newSettingsEditor is the field a string or an int row is typed into: a single-line [lineEditor]
-// (lineeditor.go — the chat box's own field, minus the chat), seeded with what the key holds and with
-// the caret at the end of it, which is where a human correcting a port starts.
+// newSettingsEditor is the field a string or an int row is typed into: this pane's naming of the
+// popup-painted field every overlay here types into ([newPopupField], lineeditor.go — the chat box's
+// own field, minus the chat), seeded with what the key holds and with the caret at the end of it,
+// which is where a human correcting a port starts.
 //
 // Single-line is the whole configuration it needs: ⏎ then belongs to this pane (commit) rather than to
 // the widget, and a scalar config value has no second line to walk to. shape is the `cursor-shape`
 // key's selection, passed for the same reason the prompt takes it — the field is built the same way
-// wherever it is built.
+// wherever it is built. settingsCaret is this pane's own caret glyph, and the field carries it from
+// here on rather than being handed it again where the row is painted (settingsEditText).
 func newSettingsEditor(shape tea.CursorShape, surface color.Color, seed string) lineEditor {
-	e := newLineEditor(shape, surface)
-	e.singleLine()
-	e.setValue(seed)
-	return e
+	return newPopupField(shape, surface, settingsCaret, seed)
 }
 
 // settingsBufferKey routes a keypress in the string/int edit buffer: ⏎ commits, esc abandons, and
@@ -1154,9 +1153,11 @@ func (m Model) settingsTextValue(row SettingRow) string {
 //
 // It is left at the widget's own width, which is what makes ↑/↓ walk the prompt's LOGICAL lines: the
 // pane paints one line per line and wraps what does not fit (renderSettingsText), so a caret walking
-// the widget's idea of visual rows would step through wraps the pane never drew.
+// the widget's idea of visual rows would step through wraps the pane never drew. Multi-line is why it
+// is not a [newPopupField]; the caret glyph it carries is the buffer field's own (settingsCaret),
+// because both are painted into the same pane's rows.
 func newSettingsTextEditor(shape tea.CursorShape, surface color.Color, seed string) lineEditor {
-	e := newLineEditor(shape, surface)
+	e := newLineEditor(shape, surface, settingsCaret)
 	e.setValue(seed)
 	return e
 }
@@ -1994,7 +1995,7 @@ func (m Model) settingBufferCells(row SettingRow) popupRow {
 // (mouse.go). One string for the painter and the pointer, so the glyph the human clicks on is the
 // glyph the caret lands at.
 func (m Model) settingsEditText() string {
-	return stripEscapes(m.settings.editor.textWithCaret(settingsCaret))
+	return stripEscapes(m.settings.editor.textWithCaret())
 }
 
 // settingsPaneHint is the legend at the pane's foot: one per step, because the keys mean different
@@ -2305,7 +2306,7 @@ func (m Model) renderSettingsText(rows []SettingRow) string {
 // measures them back the other way (mouse.go) — so the glyph the human clicks on is the glyph the
 // caret lands at.
 func (m Model) settingsTextLines() []string {
-	lines := strings.Split(m.settings.editor.textWithCaret(settingsCaret), "\n")
+	lines := strings.Split(m.settings.editor.textWithCaret(), "\n")
 	for i, line := range lines {
 		lines[i] = stripEscapes(line)
 	}

@@ -283,12 +283,15 @@
 // duplicate that state (computeAutocomplete, acceptAutocomplete, insertSkillToken, highlightInput,
 // accentTokens, inputContentRect, the region-arbitrating mouse handlers). One level below it,
 // lineeditor.go holds what a text FIELD is — the textarea and that whole caret family — as
-// [lineEditor]: promptEditor embeds it, and the /settings value row builds a single-line one of its
-// own (settings.go), so a caret that moves correctly is written once and a config value never
-// inherits the chat box's vocabulary (recall, submit, the "/" and "@" overlays). A field painted
+// [lineEditor]: promptEditor embeds it, and every popup-painted surface that is typed into builds a
+// single-line one of its own ([newPopupField] — the /settings value row, the picker's filter and the
+// /sessions browser's, the /sessions rename row), so a caret that moves correctly is written once,
+// "what does backspace do" is answered once, and a config value never inherits the chat box's
+// vocabulary (recall, submit, the "/" and "@" overlays). A field painted
 // inside the popup module cannot use the widget's own View or the real terminal cursor — the module
 // styles rows whole and takes plain cells — so it renders through textWithCaret, a caret glyph AT
-// the offset. The Model stays the
+// the offset, and the glyph is the FIELD's own ([lineEditor.caret]) because the surfaces disagree on
+// it (the filter line's ▌, the rename row's and the value row's ▏). The Model stays the
 // coordinator that owns the lifecycle state machine, the transcript + render cache, the
 // stats/gauge, the theme, and the layout; the editor never touches the engine. The empty box's
 // invitation is state the Model SETS, not a render-time choice: setPlaceholder swaps the idle legend

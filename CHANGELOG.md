@@ -222,6 +222,12 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- Routed the picker's filter, the /sessions browser's filter and its inline rename buffer through
+  `lineEditor`, the package's one text field: the hand-written rune backspace/append written five
+  times is gone, and the caret glyph is now a per-field construction parameter (the filter line's
+  `▌`, the rename row's and the /settings value row's `▏`) instead of a string each painter appended.
+  Behaviour-preserving — every pane draws the caret it drew before.
+
 - **The /usage report and the /inspect pane are one pane now.** Both are the same read-only overlay —
   a scrolled row list, esc closes it, a click outside dismisses it, a click inside is swallowed, the
   wheel scrolls it — and it was written twice: two state structs, two key contracts, two dismisses,

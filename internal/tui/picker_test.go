@@ -1604,6 +1604,14 @@ func TestPickerFilterMatchesTheJoinedRowCells(t *testing.T) {
 	}
 }
 
+// typedFilter is an overlay filter holding text, built exactly as the first keystroke into an open
+// overlay builds it (typeIntoOverlayFilter). It exists for the tests that SEED a filter rather than
+// type one: the filter is a [lineEditor], and a field is a widget rather than a string, so a test
+// that is not about the typing still has to hand the pane a real one.
+func typedFilter(m Model, text string) lineEditor {
+	return newPopupField(m.opts.CursorShape, m.th.surface, pickerFilterCursor, text)
+}
+
 // pickerKindCase is one open picker of one kind, the filter that narrows it to a single row, and the
 // assertion that ⏎ took the thing THAT row named — the regression the whole seam exists for, since a
 // filtered highlight and an index into the unfiltered offering name different things.
@@ -1743,7 +1751,7 @@ func TestPickerFilteredViewAgreesOnRowsCountAndAccept(t *testing.T) {
 				t.Fatalf("precondition: the offering has %d rows, want a list the filter can prune", got)
 			}
 
-			m.picker.filter = tc.filter
+			m.picker.filter = typedFilter(m, tc.filter)
 
 			rows := m.pickerRows()
 			if len(rows) != 1 || rows[0][0] != tc.want {
@@ -1803,7 +1811,7 @@ func TestPickerFilterNarrowingClampsTheSelection(t *testing.T) {
 		t.Fatalf("precondition: selected = %d, want the second row", m.picker.selected)
 	}
 
-	m.picker.filter = "other" // one surviving row, and the highlight is past it
+	m.picker.filter = typedFilter(m, "other") // one surviving row, and the highlight is past it
 	m = step(t, m, keyDown())
 
 	if m.picker.selected != 0 {
@@ -1823,7 +1831,7 @@ func TestPickerFilterWithNoMatchesTakesNothing(t *testing.T) {
 	rb.calls = nil
 	m, _ = typeCommand(t, m, "/model")
 
-	m.picker.filter = "no-such-model"
+	m.picker.filter = typedFilter(m, "no-such-model")
 
 	if got := m.pickerCount(); got != 0 {
 		t.Errorf("count = %d, want 0", got)
@@ -1867,8 +1875,8 @@ func TestPickerTypingNarrowsTheRowsLive(t *testing.T) {
 
 	m = typeFilter(t, m, "third")
 
-	if m.picker.filter != "third" {
-		t.Errorf("filter = %q, want the keys typed", m.picker.filter)
+	if m.picker.filter.value() != "third" {
+		t.Errorf("filter = %q, want the keys typed", m.picker.filter.value())
 	}
 	if got := m.pickerCount(); got != 1 {
 		t.Fatalf("count = %d, want the one row %q leaves", got, "third")
@@ -1881,24 +1889,24 @@ func TestPickerTypingNarrowsTheRowsLive(t *testing.T) {
 	}
 
 	m = step(t, m, keyBackspace())
-	if m.picker.filter != "thir" || m.pickerCount() != 1 {
+	if m.picker.filter.value() != "thir" || m.pickerCount() != 1 {
 		t.Errorf("after one backspace: filter = %q, count = %d, want %q over one row",
-			m.picker.filter, m.pickerCount(), "thir")
+			m.picker.filter.value(), m.pickerCount(), "thir")
 	}
 	for range 4 {
 		m = step(t, m, keyBackspace())
 	}
-	if m.picker.filter != "" {
-		t.Errorf("filter = %q, want backspace to have emptied it", m.picker.filter)
+	if m.picker.filter.value() != "" {
+		t.Errorf("filter = %q, want backspace to have emptied it", m.picker.filter.value())
 	}
 	if got := m.pickerCount(); got != 2 {
 		t.Errorf("count = %d, want the whole offering back", got)
 	}
 
 	m = step(t, m, keyBackspace())
-	if !m.picker.open || m.picker.filter != "" {
+	if !m.picker.open || m.picker.filter.value() != "" {
 		t.Errorf("picker = {open:%v filter:%q}, want backspace on an empty filter to do nothing",
-			m.picker.open, m.picker.filter)
+			m.picker.open, m.picker.filter.value())
 	}
 }
 
@@ -1936,8 +1944,8 @@ func TestPickerEscClosesMidFilter(t *testing.T) {
 	if m.picker.open {
 		t.Error("esc with a filter set left the picker open")
 	}
-	if m.picker.filter != "" {
-		t.Errorf("filter = %q, want the closed overlay to carry none into the next open", m.picker.filter)
+	if m.picker.filter.value() != "" {
+		t.Errorf("filter = %q, want the closed overlay to carry none into the next open", m.picker.filter.value())
 	}
 	if len(rb.calls) != 0 {
 		t.Errorf("rebind calls = %+v, want none — esc moves nothing", rb.calls)
@@ -1952,20 +1960,20 @@ func TestPickerChordsMoveOrAreSwallowedRatherThanTyped(t *testing.T) {
 	m, _ = typeCommand(t, m, "/model")
 
 	m = step(t, m, tea.KeyPressMsg{Code: 'n', Mod: tea.ModCtrl})
-	if m.picker.selected != 1 || m.picker.filter != "" {
+	if m.picker.selected != 1 || m.picker.filter.value() != "" {
 		t.Errorf("after ctrl+n: selected = %d, filter = %q, want the highlight moved and nothing typed",
-			m.picker.selected, m.picker.filter)
+			m.picker.selected, m.picker.filter.value())
 	}
 	m = step(t, m, tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl})
-	if m.picker.selected != 0 || m.picker.filter != "" {
+	if m.picker.selected != 0 || m.picker.filter.value() != "" {
 		t.Errorf("after ctrl+p: selected = %d, filter = %q, want the highlight moved and nothing typed",
-			m.picker.selected, m.picker.filter)
+			m.picker.selected, m.picker.filter.value())
 	}
 
 	m = step(t, m, tea.KeyPressMsg{Code: 'w', Mod: tea.ModCtrl})
-	if !m.picker.open || m.picker.selected != 0 || m.picker.filter != "" {
+	if !m.picker.open || m.picker.selected != 0 || m.picker.filter.value() != "" {
 		t.Errorf("picker = {open:%v selected:%d filter:%q}, want an unrelated chord swallowed whole",
-			m.picker.open, m.picker.selected, m.picker.filter)
+			m.picker.open, m.picker.selected, m.picker.filter.value())
 	}
 	if got := m.pickerCount(); got != 2 {
 		t.Errorf("count = %d, want the unfiltered offering", got)
@@ -2007,8 +2015,8 @@ func TestPickerCycleAcceptClearsTheFilter(t *testing.T) {
 	if !m.picker.open || m.picker.kind != pickerScheduleMode {
 		t.Fatalf("picker = {open:%v kind:%v}, want the mode question up", m.picker.open, m.picker.kind)
 	}
-	if m.picker.filter != "" {
-		t.Errorf("filter = %q, want the cycle pane's filter cleared with the kind", m.picker.filter)
+	if m.picker.filter.value() != "" {
+		t.Errorf("filter = %q, want the cycle pane's filter cleared with the kind", m.picker.filter.value())
 	}
 	if got := m.pickerCount(); got != len(scheduleModes) {
 		t.Fatalf("count = %d, want every mode offered — a stale filter empties the second pane", got)
