@@ -222,6 +222,19 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **The session title has one owner (`internal/tui/autotitle.go`).** A title that resolves before
+  the first Save has minted an id to rename is held until one exists, and that wait used to be a
+  pair of bare `Model` fields written at eight sites across four files — the naming fold, the
+  save-complete flush, the failed-rename retry, `/clear` and a `/sessions` restore — with the rule
+  they all had to keep living in a comment block and nowhere in the code. `pendingTitle` is a
+  `titleStash` now: two fields and five verbs — `adopt` a title decided before there was a record,
+  `flush` it to the save that minted the id, `restash` one the rename could not write, `drop` one
+  the session it was made for has outlived, and `clobbered`, which is the never-clobber rule itself
+  — so an automatic title a human has since overruled is thrown away by the same line wherever the
+  stash is about to be honoured, rather than by a check re-typed at each site. The invariant is now
+  testable on its own, without a whole `Model`, and is. Nothing the human sees changes: every
+  existing naming test passes with no expectation touched.
+
 - **Per-lifetime state resets itself, and a resumed session is repainted in one place**
   (`internal/tui/model.go`). "Reset the session" was a hand-kept checklist: `finishWorker` spelled
   out eleven fields of eight concerns, and `/clear` and a `/sessions` restore each kept their own

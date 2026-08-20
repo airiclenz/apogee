@@ -210,8 +210,8 @@ func TestAutoTitleAppliesThroughRename(t *testing.T) {
 		t.Errorf("the quiet rename carried a re-list (%+v); it must add no UI chrome", done.list)
 	}
 	m = step(t, m, done)
-	if m.pendingTitle != "" {
-		t.Errorf("pendingTitle = %q, want empty (the title was applied, not stashed)", m.pendingTitle)
+	if m.pendingTitle.name != "" {
+		t.Errorf("pendingTitle = %q, want empty (the title was applied, not stashed)", m.pendingTitle.name)
 	}
 	want := []renameCall{{id: "s1", title: "Fix the broken parser"}}
 	if got := host.renamedTitles(); !reflect.DeepEqual(got, want) {
@@ -234,8 +234,8 @@ func TestAutoTitleStashedUntilTheFirstSave(t *testing.T) {
 	if cmd != nil {
 		t.Error("a title that arrived before any id dispatched a rename; there is nothing to rename")
 	}
-	if m.pendingTitle != "fix the broken parser" {
-		t.Fatalf("pendingTitle = %q, want the sanitized title stashed", m.pendingTitle)
+	if m.pendingTitle.name != "fix the broken parser" {
+		t.Fatalf("pendingTitle = %q, want the sanitized title stashed", m.pendingTitle.name)
 	}
 	if got := host.renamedTitles(); len(got) != 0 {
 		t.Fatalf("renames = %+v, want none before the record exists", got)
@@ -250,8 +250,8 @@ func TestAutoTitleStashedUntilTheFirstSave(t *testing.T) {
 		t.Fatal("the first successful save-complete dispatched no rename for the stashed title")
 	}
 	cmdMsg(cmd)
-	if m.pendingTitle != "" {
-		t.Errorf("pendingTitle = %q, want cleared once applied", m.pendingTitle)
+	if m.pendingTitle.name != "" {
+		t.Errorf("pendingTitle = %q, want cleared once applied", m.pendingTitle.name)
 	}
 	want := []renameCall{{id: "s1", title: "fix the broken parser"}}
 	if got := host.renamedTitles(); !reflect.DeepEqual(got, want) {
@@ -267,12 +267,12 @@ func TestAutoTitleStashSurvivesAFailedSave(t *testing.T) {
 	host := &fakeSessionHost{}
 	host.Activate(session.Meta{ID: "s1"})
 	m := newTitlingModel(t, host, &titleSeam{}, true)
-	m.pendingTitle = "fix the broken parser"
+	m.pendingTitle.adopt("fix the broken parser", titleAutomatic)
 
 	m, cmd := stepCmd(t, m, saveDoneMsg{Err: errors.New("disk full")})
 	cmdMsg(cmd)
-	if m.pendingTitle != "fix the broken parser" {
-		t.Errorf("pendingTitle = %q, want the stash held past a failed save", m.pendingTitle)
+	if m.pendingTitle.name != "fix the broken parser" {
+		t.Errorf("pendingTitle = %q, want the stash held past a failed save", m.pendingTitle.name)
 	}
 	if got := host.renamedTitles(); len(got) != 0 {
 		t.Errorf("renames = %+v, want none: the record was never written", got)
@@ -353,8 +353,8 @@ func TestTitleSurvivesARenameOfARecordNotOnDiskYet(t *testing.T) {
 		t.Fatal("a landed title with an active id dispatched no rename")
 	}
 	m = step(t, m, cmdMsg(cmd)) // the rename runs, hits ENOENT, and folds back
-	if m.pendingTitle != "fix the broken parser" || m.pendingSource != titleAutomatic {
-		t.Fatalf("stash = %q from %v, want the unwritable title held for the next save", m.pendingTitle, m.pendingSource)
+	if m.pendingTitle.name != "fix the broken parser" || m.pendingTitle.src != titleAutomatic {
+		t.Fatalf("stash = %q from %v, want the unwritable title held for the next save", m.pendingTitle.name, m.pendingTitle.src)
 	}
 
 	// The record reaches disk; the next successful save re-applies the title it could not write.
@@ -373,8 +373,8 @@ func TestTitleSurvivesARenameOfARecordNotOnDiskYet(t *testing.T) {
 	if got := host.renamedTitles(); !reflect.DeepEqual(got, want) {
 		t.Errorf("renames = %+v, want %+v (the failed write retried, not dropped)", got, want)
 	}
-	if m.pendingTitle != "" {
-		t.Errorf("pendingTitle = %q, want cleared once the retry landed", m.pendingTitle)
+	if m.pendingTitle.name != "" {
+		t.Errorf("pendingTitle = %q, want cleared once the retry landed", m.pendingTitle.name)
 	}
 }
 
@@ -402,8 +402,8 @@ func TestAutoTitleDroppedAfterABrowserRename(t *testing.T) {
 	if cmd != nil {
 		t.Error("a generated title was applied over a session the human had just named")
 	}
-	if m.pendingTitle != "" {
-		t.Errorf("pendingTitle = %q, want empty (the dropped title is not stashed either)", m.pendingTitle)
+	if m.pendingTitle.name != "" {
+		t.Errorf("pendingTitle = %q, want empty (the dropped title is not stashed either)", m.pendingTitle.name)
 	}
 	if got := host.renamedTitles(); !reflect.DeepEqual(got, before) {
 		t.Errorf("renames = %+v, want only the human's %+v", got, before)
@@ -437,8 +437,8 @@ func TestAutoTitleFailuresAreSilent(t *testing.T) {
 			if cmd != nil {
 				t.Error("a failed naming call dispatched a rename")
 			}
-			if m.pendingTitle != "" {
-				t.Errorf("pendingTitle = %q, want empty", m.pendingTitle)
+			if m.pendingTitle.name != "" {
+				t.Errorf("pendingTitle = %q, want empty", m.pendingTitle.name)
 			}
 			if got := host.renamedTitles(); len(got) != 0 {
 				t.Errorf("renames = %+v, want none", got)
@@ -467,9 +467,9 @@ func TestAutoTitleFiresAgainAfterNewSession(t *testing.T) {
 	m.titleTouched = true // a rename during the outgoing session must not follow it into the next
 
 	m, _ = sendPrompt(t, m, "/new")
-	if m.autoTitleFired || m.titleTouched || m.pendingTitle != "" {
+	if m.autoTitleFired || m.titleTouched || m.pendingTitle.name != "" {
 		t.Fatalf("/new left naming state behind: fired=%v touched=%v pending=%q",
-			m.autoTitleFired, m.titleTouched, m.pendingTitle)
+			m.autoTitleFired, m.titleTouched, m.pendingTitle.name)
 	}
 
 	m, cmd = sendPrompt(t, m, "the second task, described")
@@ -553,7 +553,7 @@ func TestAutoTitleLatchedByAResumedSession(t *testing.T) {
 	host := &fakeSessionHost{}
 	storeMeta(host, "s1", "an older task", "/ws", time.Now(), 0, nil)
 	m := newTitlingModel(t, host, &titleSeam{}, true)
-	m.pendingTitle = "a name for the session being replaced"
+	m.pendingTitle.adopt("a name for the session being replaced", titleAutomatic)
 
 	m = openBrowser(t, m)
 	m, cmd := stepCmd(t, m, keyEnter()) // ⏎ resumes: the load runs off the loop…
@@ -565,8 +565,8 @@ func TestAutoTitleLatchedByAResumedSession(t *testing.T) {
 	if !m.autoTitleFired {
 		t.Error("a resumed session left naming unlatched; it would rename a record that has a name")
 	}
-	if m.pendingTitle != "" {
-		t.Errorf("pendingTitle = %q, want dropped: it was stashed for the outgoing session", m.pendingTitle)
+	if m.pendingTitle.name != "" {
+		t.Errorf("pendingTitle = %q, want dropped: it was stashed for the outgoing session", m.pendingTitle.name)
 	}
 }
 
@@ -700,8 +700,8 @@ func TestRenameWithoutPersistenceSaysSo(t *testing.T) {
 	if got := lastNote(m); !strings.Contains(got, "not being saved") {
 		t.Errorf("note = %q, want it to say the session is not being saved", got)
 	}
-	if m.titleTouched || m.pendingTitle != "" {
-		t.Errorf("naming state moved: touched=%v pending=%q", m.titleTouched, m.pendingTitle)
+	if m.titleTouched || m.pendingTitle.name != "" {
+		t.Errorf("naming state moved: touched=%v pending=%q", m.titleTouched, m.pendingTitle.name)
 	}
 }
 
@@ -984,8 +984,8 @@ func TestRenameBeforeTheFirstSaveStashesTheName(t *testing.T) {
 	if cmd != nil {
 		t.Error("a rename dispatched one with no record to rename")
 	}
-	if m.pendingTitle != "the parser rewrite" || m.pendingSource != titleManual {
-		t.Fatalf("stash = %q from %v, want the typed title from the human", m.pendingTitle, m.pendingSource)
+	if m.pendingTitle.name != "the parser rewrite" || m.pendingTitle.src != titleManual {
+		t.Fatalf("stash = %q from %v, want the typed title from the human", m.pendingTitle.name, m.pendingTitle.src)
 	}
 	if !m.titleTouched {
 		t.Error("a stashed manual rename left titleTouched unset")
@@ -1009,8 +1009,8 @@ func TestRenameBeforeTheFirstSaveStashesTheName(t *testing.T) {
 	if got := host.renamedTitles(); !reflect.DeepEqual(got, want) {
 		t.Errorf("renames = %+v, want %+v (the human's stash flushes over the heuristic title)", got, want)
 	}
-	if m.pendingTitle != "" {
-		t.Errorf("pendingTitle = %q, want cleared once applied", m.pendingTitle)
+	if m.pendingTitle.name != "" {
+		t.Errorf("pendingTitle = %q, want cleared once applied", m.pendingTitle.name)
 	}
 }
 
@@ -1028,8 +1028,8 @@ func TestAutoTitleStashDroppedWhenAHumanNamesFirst(t *testing.T) {
 	if cmd != nil {
 		t.Fatal("a title that arrived before any id dispatched a rename")
 	}
-	if m.pendingTitle != "a generated name" || m.pendingSource != titleAutomatic {
-		t.Fatalf("stash = %q from %v, want the generated title from the naming call", m.pendingTitle, m.pendingSource)
+	if m.pendingTitle.name != "a generated name" || m.pendingTitle.src != titleAutomatic {
+		t.Fatalf("stash = %q from %v, want the generated title from the naming call", m.pendingTitle.name, m.pendingTitle.src)
 	}
 
 	// The human names a session by hand while the generated one waits for an id.
@@ -1049,8 +1049,8 @@ func TestAutoTitleStashDroppedWhenAHumanNamesFirst(t *testing.T) {
 	m, cmd = stepCmd(t, m, saveDoneMsg{})
 	cmdMsg(cmd)
 
-	if m.pendingTitle != "" {
-		t.Errorf("pendingTitle = %q, want dropped once a human had named the session", m.pendingTitle)
+	if m.pendingTitle.name != "" {
+		t.Errorf("pendingTitle = %q, want dropped once a human had named the session", m.pendingTitle.name)
 	}
 	want := []renameCall{{id: "old1", title: "my own name"}}
 	if got := host.renamedTitles(); !reflect.DeepEqual(got, want) {
@@ -1115,8 +1115,8 @@ func TestSessionNameFollowsAppliedTitle(t *testing.T) {
 				}
 				// The stash branch is the one no write can vouch for: nothing was renamed, because
 				// there is no record to rename yet — the name exists on the Model alone.
-				if m.pendingTitle != r.want {
-					t.Errorf("pendingTitle = %q, want the name held for the id the first save mints", m.pendingTitle)
+				if m.pendingTitle.name != r.want {
+					t.Errorf("pendingTitle = %q, want the name held for the id the first save mints", m.pendingTitle.name)
 				}
 				if got := host.renamedTitles(); len(got) != 0 {
 					t.Errorf("renames = %+v, want none: the session was named before any record existed", got)
@@ -1141,8 +1141,8 @@ func TestSessionNameSurvivesDroppedAutoTitle(t *testing.T) {
 	if cmd != nil {
 		t.Fatal("a title that arrived before any id dispatched a rename")
 	}
-	if m.sessionName != "a generated name" || m.pendingTitle != "a generated name" {
-		t.Fatalf("sessionName = %q, stash = %q; want the generated name in both", m.sessionName, m.pendingTitle)
+	if m.sessionName != "a generated name" || m.pendingTitle.name != "a generated name" {
+		t.Fatalf("sessionName = %q, stash = %q; want the generated name in both", m.sessionName, m.pendingTitle.name)
 	}
 
 	// The first Save mints the id (as the real host does, before its saveDoneMsg lands) and the human
@@ -1160,8 +1160,8 @@ func TestSessionNameSurvivesDroppedAutoTitle(t *testing.T) {
 	m, cmd = stepCmd(t, m, saveDoneMsg{})
 	m = runWrites(t, m, cmd)
 
-	if m.pendingTitle != "" {
-		t.Fatalf("pendingTitle = %q, want the generated stash dropped once a human had named the session", m.pendingTitle)
+	if m.pendingTitle.name != "" {
+		t.Fatalf("pendingTitle = %q, want the generated stash dropped once a human had named the session", m.pendingTitle.name)
 	}
 	if m.sessionName != "my own name" {
 		t.Errorf("sessionName = %q, want the human's name: the dropped title named nothing", m.sessionName)
@@ -1211,8 +1211,8 @@ func TestSessionNameGivesUpADroppedAutoTitle(t *testing.T) {
 	m, cmd = stepCmd(t, m, saveDoneMsg{})
 	m = runWrites(t, m, cmd)
 
-	if m.pendingTitle != "" {
-		t.Fatalf("pendingTitle = %q, want the generated stash dropped", m.pendingTitle)
+	if m.pendingTitle.name != "" {
+		t.Fatalf("pendingTitle = %q, want the generated stash dropped", m.pendingTitle.name)
 	}
 	if m.sessionName != "" {
 		t.Errorf("sessionName = %q, want the dropped name given up so the display falls back to the heuristic", m.sessionName)
@@ -1240,5 +1240,145 @@ func TestSessionNameResetByClear(t *testing.T) {
 
 	if m.sessionName != "" {
 		t.Errorf("sessionName = %q after /clear, want empty: the record it opened has no name", m.sessionName)
+	}
+}
+
+// ----------------------------------------------------------------------------
+// The title stash's own verbs (titleStash)
+// ----------------------------------------------------------------------------
+//
+// The stash/restash invariant is a property of the value, not of the renderer that holds it: these
+// pin it directly, with no Model, no host and no Update loop in the way. The whole-Model tests
+// above still pin that the right verb is asked at the right moment.
+
+// The zero value is "nothing is waiting" — which is what lets a fresh Model, and every session
+// boundary that resets one, be correct without a flag of its own.
+func TestTitleStashZeroValueHoldsNothing(t *testing.T) {
+	t.Parallel()
+
+	var stash titleStash
+	if stash.stashed() {
+		t.Errorf("stashed() = true on the zero value, want false")
+	}
+	if stash.clobbered(true) {
+		t.Errorf("clobbered() = true on the zero value, want false: an empty stash has nothing to lose")
+	}
+}
+
+// adopt asks nothing: with no record to rename yet the newest decision IS the name the session goes
+// by, so a second title replaces a first — including one from the other source.
+func TestTitleStashAdoptTakesTheNewestTitle(t *testing.T) {
+	t.Parallel()
+
+	var stash titleStash
+	stash.adopt("a generated name", titleAutomatic)
+	if !stash.stashed() || stash.name != "a generated name" || stash.src != titleAutomatic {
+		t.Fatalf("stash = %+v, want the generated title held", stash)
+	}
+
+	stash.adopt("the parser rewrite", titleManual)
+	if stash.name != "the parser rewrite" || stash.src != titleManual {
+		t.Errorf("stash = %+v, want the newer title to have replaced the older one", stash)
+	}
+}
+
+// flush hands the title over and empties the stash, so the next save has nothing left to apply.
+func TestTitleStashFlushEmptiesIt(t *testing.T) {
+	t.Parallel()
+
+	var stash titleStash
+	stash.adopt("the parser rewrite", titleManual)
+
+	name, src := stash.flush()
+	if name != "the parser rewrite" || src != titleManual {
+		t.Errorf("flush() = %q from %v, want the held title and its source", name, src)
+	}
+	if stash.stashed() {
+		t.Errorf("stash = %+v after a flush, want empty", stash)
+	}
+}
+
+// drop gives up whatever is held, whoever asked for it: the session it was made for is gone.
+func TestTitleStashDropGivesUpEvenAHumansTitle(t *testing.T) {
+	t.Parallel()
+
+	var stash titleStash
+	stash.adopt("the parser rewrite", titleManual)
+	stash.drop()
+	if stash.stashed() {
+		t.Errorf("stash = %+v after a drop, want empty", stash)
+	}
+}
+
+// clobbered is the never-clobber rule itself: only an AUTOMATIC title is outranked by a human's own
+// naming, and only while one is actually waiting.
+func TestTitleStashClobbered(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name    string
+		stash   titleStash
+		touched bool
+		want    bool
+	}{
+		{"automatic title, human named the session", titleStash{name: "a generated name", src: titleAutomatic}, true, true},
+		{"automatic title, nobody named the session", titleStash{name: "a generated name", src: titleAutomatic}, false, false},
+		{"the human's own title stands", titleStash{name: "the parser rewrite", src: titleManual}, true, false},
+		{"nothing waiting", titleStash{}, true, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			if got := c.stash.clobbered(c.touched); got != c.want {
+				t.Errorf("clobbered(%v) on %+v = %v, want %v", c.touched, c.stash, got, c.want)
+			}
+		})
+	}
+}
+
+// restash is the failed rename's way back: it re-holds a title the store never took, unless a newer
+// instruction already occupies the stash or the never-clobber rule has overtaken it.
+func TestTitleStashRestash(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name    string
+		before  titleStash
+		put     string
+		src     titleSource
+		touched bool
+		want    titleStash
+	}{
+		{
+			name: "an empty stash takes it back",
+			put:  "a generated name", src: titleAutomatic,
+			want: titleStash{name: "a generated name", src: titleAutomatic},
+		},
+		{
+			name:   "a stash already holding something wins: it is the newer instruction",
+			before: titleStash{name: "the parser rewrite", src: titleManual},
+			put:    "a generated name", src: titleAutomatic,
+			want: titleStash{name: "the parser rewrite", src: titleManual},
+		},
+		{
+			name: "an automatic title is dropped once a human has named the session",
+			put:  "a generated name", src: titleAutomatic, touched: true,
+			want: titleStash{},
+		},
+		{
+			name: "a title the human asked for goes back regardless",
+			put:  "the parser rewrite", src: titleManual, touched: true,
+			want: titleStash{name: "the parser rewrite", src: titleManual},
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			stash := c.before
+			stash.restash(c.put, c.src, c.touched)
+			if stash != c.want {
+				t.Errorf("stash = %+v, want %+v", stash, c.want)
+			}
+		})
 	}
 }

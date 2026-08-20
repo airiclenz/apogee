@@ -88,21 +88,21 @@ type Model struct {
 	// cosmetic naming call a Session record gets — set when it fires, and set UP FRONT on a resumed
 	// record, which already has a name. titleTouched records that a human named this session (the
 	// browser's `r`, either form of /rename), which drops a late-landing automatic title (never
-	// clobber). pendingTitle stashes a title that resolved before the first Save minted an id to
-	// rename, applied at that save's completion, and pendingSource remembers who asked for it — the
-	// stash outlives the never-clobber check, so the flush makes it again (flushPendingTitle).
+	// clobber). pendingTitle is the title stash: a title that resolved before the first Save minted
+	// an id to rename, held with who asked for it and applied at that save's completion. Its rules —
+	// what may be stashed, restashed, flushed or dropped — are the value's own (titleStash), and
+	// every site that changes it asks for one of its verbs rather than writing the fields.
 	// sessionName is the same machinery's DISPLAY side: the name this session is currently known
 	// by, and the one the frame renders. It is what the human last saw decided rather than what the
 	// store holds — a rename that never reaches disk leaves the frame naming the session the human
 	// named — and "" means "not named yet", which the seam that renders it answers for itself. It
 	// carries untrusted text (a model's reply, a resumed record's Meta), so that seam sanitizes;
 	// nothing else reads it.
-	// Five plain values, safe in the value-copied Model (ADR 0011); startNewSession resets the
-	// four that carry state, so the session /clear opens names itself afresh.
+	// Four plain values, safe in the value-copied Model (ADR 0011); startNewSession resets all of
+	// them, so the session /clear opens names itself afresh.
 	autoTitleFired bool
 	titleTouched   bool
-	pendingTitle   string
-	pendingSource  titleSource
+	pendingTitle   titleStash
 	sessionName    string
 
 	// actuation is the launcher latch (actuation.go, ADR 0029 D5): which blocking launcher verb is

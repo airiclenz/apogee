@@ -874,7 +874,15 @@ DEFER — never change the behaviour here.
 
 **Commit:** `refactor(tui): give per-lifetime state its own reset and share the replay block`
 
-## 29. The session title gets one owner
+## 29. The session title gets one owner — ✅ DONE (2026-08-20)
+
+NOTES (2026-08-20): the verb set is `adopt` / `flush` / `restash` / `drop`, with `stashed()` and `clobbered()` as its two queries — the plan named `adopt`/`stash`/`flush`/`restash`. The five distinct writes need a hold, a take, a re-hold, a rule-drop and a boundary-drop, and `stash` survives as the type name (`titleStash`) and its "is one waiting" query (`stashed`). The rule-drop and the take stayed separate verbs because the `ActiveID()` check must keep sitting BETWEEN them: the never-clobber drop happens even when no id was minted, so folding the two into one verb would have changed when a stash is given up.
+
+NOTES (2026-08-20): the value owns `pendingTitle`/`pendingSource` only — the review's `model.go:105-106` — and not the whole naming cluster item 28's NOTES gestured at. `autoTitleFired`, `titleTouched` and `sessionName` stay plain `Model` fields: this item's text scopes it to the eight `pendingTitle`/`pendingSource` write sites, `titleTouched` is read by `foldAutoTitle` outside the stash entirely, and `sessionName` is the display half with its own single writer (`nameSession`). The two verbs that consult the never-clobber rule take `touched` as a parameter instead.
+
+NOTES (2026-08-20): `restashTitle` (sessionsave.go) is deleted rather than kept as a wrapper — its doc and its rule moved onto `titleStash.restash`, and `foldRecordWrite` asks the value directly, which is what "all 8 write sites go through the verbs" costs.
+
+NOTES (2026-08-20): `autotitle_test.go`'s field accesses were retargeted mechanically (`m.pendingTitle` → `m.pendingTitle.name`, `m.pendingSource` → `m.pendingTitle.src`, two arrange-only assignments → `adopt`); no test expectation changed. Six new verb tests were added beside them (`TestTitleStash*`), Model-free as the item asks.
 
 **Source:** review §Smaller findings, row 2.
 

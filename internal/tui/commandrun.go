@@ -165,7 +165,7 @@ func (m Model) startNewSession() (tea.Model, tea.Cmd) {
 	// waiting for an id — it was stashed for the session that just went into history.
 	m.autoTitleFired = false
 	m.titleTouched = false
-	m.pendingTitle = ""
+	m.pendingTitle.drop()
 	m.sessionName = "" // the session /clear opens is unnamed until it names itself
 	m.layout()
 	return m, cmd

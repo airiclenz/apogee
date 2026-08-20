@@ -32,11 +32,12 @@ import (
 // behind [Options.GenerateTitle], which the composition root backs with its own provider.Client over
 // the server and model this session is bound to at the moment of the call.
 //
-// Four plain fields on the Model carry the state (see the Model's own declaration):
-// autoTitleFired latches "this Session record has had its one call", titleTouched records that a
-// HUMAN named the session (which drops a late-landing automatic title), and pendingTitle plus
-// pendingSource stash a title that resolved before the first Save minted an id to rename, together
-// with who asked for it.
+// Three values on the Model carry the state (see the Model's own declaration): autoTitleFired
+// latches "this Session record has had its one call", titleTouched records that a HUMAN named the
+// session (which drops a late-landing automatic title), and pendingTitle is the titleStash below —
+// a title that resolved before the first Save minted an id to rename, together with who asked for
+// it. What may be stashed, and what becomes of it, is the stash's own affair (titleStash): every
+// site that used to write those fields by hand now asks it for one of its verbs.
 //
 // /rename (runRename) is the human's half of the same machinery, and it inverts two rules. It is an
 // explicit request, so its answer applies even over a name the human set a moment ago, and — unlike
@@ -70,11 +71,11 @@ var (
 	_ tea.Msg = manualTitleMsg{}
 )
 
-// titleSource says WHO a title came from. It rides with a stashed one (pendingTitle) because the
+// titleSource says WHO a title came from. It rides with a stashed one (titleStash) because the
 // never-clobber rule is about provenance and a stash outlives the moment it was made: a GENERATED
 // title waiting for the id that the first Save mints must still be dropped when a human names the
 // session while it waits, while a title the human typed before that same Save is theirs and lands
-// regardless. It is meaningful only while pendingTitle is non-empty — applyTitle writes the two
+// regardless. It is meaningful only while the stash holds a name — the stash writes the two
 // together, and nothing else writes either.
 type titleSource int
 
@@ -82,6 +83,92 @@ const (
 	titleAutomatic titleSource = iota // the out-of-band naming call — it answers to titleTouched
 	titleManual                       // a human named it: the browser's rename edit, or /rename
 )
+
+// titleStash owns the session title between the moment it is decided and the moment a record exists
+// to carry it. Rename is the only correct writer of a stored title — SessionHost.Save fixes it at
+// create and ignores the argument thereafter (wire.go) — so a title that resolves before the first
+// Save has minted an id has nowhere to go yet, and is held here until one exists (flushPendingTitle).
+//
+// Four things can happen to a held title, and they are this value's verbs rather than assignments
+// spread across the naming, save and session-lifetime files:
+//
+//   - adopt — a resolved title with no record to rename takes the stash. Unconditional: the newest
+//     decision is the one the session goes by, so a second title replaces a first.
+//   - flush — the save that minted the id takes the title back out, emptying the stash.
+//   - restash — a title the rename could not write goes back in, so the NEXT successful save
+//     applies it (foldRecordWrite) instead of losing it to a window in which the record was not
+//     there yet. A stash already holding something wins: that one is the newer instruction.
+//   - drop — the stash is given up: the never-clobber rule threw the title away (clobbered), or the
+//     session it was made for is gone (a /clear rotation, a /sessions restore).
+//
+// The never-clobber rule lives in clobbered, which adopt deliberately does not consult and the two
+// paths that end a wait do. That asymmetry is the whole reason src is stashed alongside the name: a
+// stash OUTLIVES the check its title already passed. An automatic title can be waiting for an id at
+// the moment a human names the session — through the browser, or /rename on a record that does not
+// exist yet — and applying it then would overwrite the name they just chose, so the check is made
+// again wherever the stash is about to be honoured. A title the human asked for is exempt at every
+// one of those points: it IS what they chose.
+//
+// The zero value is "nothing is waiting", which is what makes a fresh Model, and every session
+// boundary that resets one, correct without a flag of its own (ADR 0011: two plain fields, safe in
+// the value-copied Model).
+type titleStash struct {
+	// name is the title waiting for an id, and "" is the empty stash: a title that sanitizes to
+	// nothing never reaches here (title.Sanitize refuses it), so the two can be the same field.
+	name string
+	// src is who asked for name, read only by clobbered and carried into the rename that lands it
+	// (recordWrite.source) so a retry can make the same judgement. It is meaningful only while name
+	// is non-empty.
+	src titleSource
+}
+
+// stashed reports whether a title is waiting for the id the first Save mints.
+func (t titleStash) stashed() bool { return t.name != "" }
+
+// clobbered reports whether what is held is an AUTOMATIC title that a human's own naming outranks —
+// touched being Model.titleTouched, "a human named this session". It is asked wherever a stash is
+// about to be honoured, never where one is made: see the type's doc for why a stash must be judged
+// twice.
+func (t titleStash) clobbered(touched bool) bool {
+	return t.stashed() && t.src == titleAutomatic && touched
+}
+
+// adopt puts a resolved title on the stash, unconditionally: with no record to rename yet this IS
+// the name the session goes by (applyTitle names the frame from the same decision), and a later
+// title supersedes an earlier one.
+func (t *titleStash) adopt(name string, src titleSource) {
+	t.name, t.src = name, src
+}
+
+// flush hands the held title to the write that will land it and empties the stash. The caller has
+// already established that there is a record to rename and that the title may still be applied
+// (flushPendingTitle) — flush itself asks nothing.
+func (t *titleStash) flush() (name string, src titleSource) {
+	name, src = t.name, t.src
+	t.name = ""
+	return name, src
+}
+
+// restash puts a title a rename could not write back on the stash, so the next successful save
+// re-applies it rather than losing it. A stash already holding something wins — it is the newer
+// instruction — and the never-clobber rule holds here as everywhere else: an automatic title is
+// dropped rather than re-stashed once a human has named the session.
+func (t *titleStash) restash(name string, src titleSource, touched bool) {
+	if t.stashed() {
+		return
+	}
+	next := titleStash{name: name, src: src}
+	if next.clobbered(touched) {
+		return
+	}
+	*t = next
+}
+
+// drop gives up whatever is held. Two things ask for it: the never-clobber rule, which throws away
+// an automatic title a human's own name outranks (flushPendingTitle), and a session boundary, which
+// leaves a title stashed for a session that is no longer the live one (startNewSession,
+// resumeLoaded).
+func (t *titleStash) drop() { t.name = "" }
 
 // maybeAutoTitle fires the automatic naming call for the prompt that just went out, returning the
 // Cmd to batch alongside the Exchange (nil when nothing should fire). It latches autoTitleFired, so
@@ -184,8 +271,7 @@ func (m *Model) applyTitle(name string, src titleSource) (cmd tea.Cmd, stashed b
 	m.nameSession(name)
 	id := m.sessions.ActiveID()
 	if id == "" {
-		m.pendingTitle = name
-		m.pendingSource = src
+		m.pendingTitle.adopt(name, src)
 		return nil, true
 	}
 	return m.setSessionTitle(id, name, src), false
@@ -220,35 +306,33 @@ func (m *Model) nameSession(name string) {
 // on another, which is exactly the collision that could roll a Turn off disk (model.go, audit
 // 2026-08-01). The queue dispatches it next instead.
 //
-// The never-clobber rule is enforced here as well as at arrival, because a stash is the one way an
-// AUTOMATIC title can outlive the check foldAutoTitle already made: it can be waiting for an id at
-// the moment a human names the session (through the browser, or `/rename <name>` on a record that
-// does not exist yet), and flushing it then would overwrite the name they just chose. A stash the
-// human asked for flushes unconditionally — it IS what they chose.
+// The never-clobber rule is asked again here (clobbered), because a stash is the one way an
+// AUTOMATIC title can outlive the check foldAutoTitle already made — the reason the stash carries
+// its source at all (titleStash). What this fold owns beyond the stash's own verbs is the frame: a
+// dropped title must not stay on it.
 func (m *Model) flushPendingTitle() {
-	if m.pendingTitle == "" || m.sessions == nil {
+	if !m.pendingTitle.stashed() || m.sessions == nil {
 		return
 	}
-	if m.pendingSource == titleAutomatic && m.titleTouched {
-		// A dropped title must not stay on the frame. The stash named the session when it was made
-		// (applyTitle), so the frame can be wearing the very name this drop throws away — and it
-		// would then be a name NOTHING carries, since the record keeps the heuristic title the first
-		// Save stamped. Giving it up returns the frame to that heuristic, which is what the record
-		// says. The check is on the name and not on titleTouched, because a human who named THIS
-		// session is already what the field holds and theirs must stand: titleTouched is set by a
-		// browser rename of ANY row, so it cannot tell the two apart on its own.
-		if m.sessionName == m.pendingTitle {
+	if m.pendingTitle.clobbered(m.titleTouched) {
+		// The stash named the session when it was made (applyTitle), so the frame can be wearing the
+		// very name this drop throws away — and it would then be a name NOTHING carries, since the
+		// record keeps the heuristic title the first Save stamped. Giving it up returns the frame to
+		// that heuristic, which is what the record says. The check is on the name and not on
+		// titleTouched, because a human who named THIS session is already what the field holds and
+		// theirs must stand: titleTouched is set by a browser rename of ANY row, so it cannot tell
+		// the two apart on its own.
+		if m.sessionName == m.pendingTitle.name {
 			m.sessionName = ""
 		}
-		m.pendingTitle = ""
+		m.pendingTitle.drop()
 		return
 	}
 	id := m.sessions.ActiveID()
 	if id == "" {
 		return
 	}
-	name, src := m.pendingTitle, m.pendingSource
-	m.pendingTitle = ""
+	name, src := m.pendingTitle.flush()
 	m.queueWrite(recordWrite{kind: writeRename, id: id, title: name, retryTitle: true, source: src})
 }
 

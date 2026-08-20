@@ -316,7 +316,10 @@ func (m *Model) saveComplete(err error) tea.Cmd {
 // next successful save instead (flushPendingTitle), so the window costs a delay rather than the name.
 func (m *Model) foldRecordWrite(msg recordWriteDoneMsg) tea.Cmd {
 	if msg.err != nil && msg.write.retryTitle {
-		m.restashTitle(msg.write.title, msg.write.source)
+		// What may go back on the stash is the stash's own rule (titleStash.restash): a stash already
+		// holding something wins, and an automatic title a human has since outranked is dropped
+		// rather than retried.
+		m.pendingTitle.restash(msg.write.title, msg.write.source, m.titleTouched)
 	}
 	if msg.write.relist {
 		m.foldSessionList(msg.list) // repaint the overlay over the store as the write left it
@@ -339,21 +342,6 @@ func (m *Model) pumpOrQuit() tea.Cmd {
 		return tea.Quit
 	}
 	return nil
-}
-
-// restashTitle puts a title that could not be written back on the stash, so the next successful save
-// re-applies it rather than losing it. A stash already holding something wins — it is the newer
-// instruction — and the never-clobber rule holds here as everywhere else: an AUTOMATIC title is
-// dropped rather than re-stashed once a human has named the session.
-func (m *Model) restashTitle(name string, src titleSource) {
-	if m.pendingTitle != "" {
-		return
-	}
-	if src == titleAutomatic && m.titleTouched {
-		return
-	}
-	m.pendingTitle = name
-	m.pendingSource = src
 }
 
 // sessionTitleMax is the longest a derived session title runs before word-boundary truncation

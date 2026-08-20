@@ -495,7 +495,7 @@ func (m *Model) resumeLoaded(msg sessionLoadedMsg) tea.Cmd {
 	// the record just reopened. Leaving a human's "I named a session" standing is the answer that
 	// keeps it from doing so, so the asymmetry with startNewSession is preserved as it stands.
 	m.autoTitleFired = true
-	m.pendingTitle = ""
+	m.pendingTitle.drop()
 	title := msg.rec.Meta.Title
 	m.nameSession(title) // the frame follows the restore, as it follows every other naming route
 	m.transcript.reset()
