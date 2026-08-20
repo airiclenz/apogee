@@ -608,7 +608,15 @@
 // stays that block's own floor. What the registry keeps is presentation vocabulary — label,
 // verb, target, stat — plus the detail extractor that stays the FLOOR for a result carrying no summary:
 // a third-party tool, or any built-in that attaches none, still renders its first line exactly as
-// before. The wording stays the view's own; that several lines read like the tool's own header is
+// before. What did NOT fully go is the READING: six stat hooks — testVerdictStat, foundFilesStat,
+// changedFilesStat, commitCountStat, commitHashStat, diffLinesStat — still word their slot off a
+// fixed header the tool writes into its own output, because design call 14 rules out growing the
+// engine for presentation. That residue is a documented trade rather than an oversight, and
+// toolregistry.go states it beside the hooks: each reading is anchored on a token the tool formats
+// deliberately and each is TOTAL, so a shape it does not recognise returns false and leaves that
+// tool's prose floor in the slot rather than a wrong number — a wording change over there degrades
+// such a card to what it showed before this existed instead of lying in it.
+// The wording stays the view's own; that several lines read like the tool's own header is
 // what made "the rendered output does not change, byte for byte" a checkable oracle for the
 // change, not a contract, and this package may reword without touching a tool.
 // toolsummary_pin_test.go executes all nine summary-bearing tools for real and asserts the
@@ -749,9 +757,11 @@
 // [toolRegistry] whose one entry per tool carries its label, its active verb, the extractor that reads the target off the call's arguments, the prose detail
 // extractor that stays the floor for a result carrying no typed summary, and the body renderers
 // ([toolPresenter]), so a new tool is one entry rather than a control-flow statement to grow; and
-// the per-tool hooks those entries point at — the stat that words the right-hand outcome slot off
-// the domain.ToolSummary the tool already reports, the target extractors that read the call's
-// arguments, and the detail extractors that quote a summary-less result's first line;
+// the per-tool hooks those entries point at — the stat that words the right-hand outcome slot, off
+// the domain.ToolSummary the tool already reports where there is one and otherwise off the call's
+// own arguments or off a fixed header in the tool's own output (the residue design call 14 leaves,
+// stated beside the hooks), the target extractors that read the call's arguments, and the detail
+// extractors that quote a summary-less result's first line;
 // splitdiff.go the SPLIT reading of a diff body — the Edit regions a tool recorded
 // (domain.EditRegion) arranged as two panes, each numbering its own file, with the width rule
 // that says whether that reading fits at all ([splitDiffFits], splitPaneMinCols) and the gutter,

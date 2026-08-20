@@ -222,6 +222,18 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **`doc.go` stops claiming the tool cards read no prose at all.** The narration of the post-v0.8
+  presenter deepening — facts arrive as data, only the wording is the view's — read as if the
+  free-text parsing it replaced had gone entirely, while `toolregistry.go` has always been honest
+  beside the hooks that it did not: six stat hooks (`testVerdictStat`, `foundFilesStat`,
+  `changedFilesStat`, `commitCountStat`, `commitHashStat`, `diffLinesStat`) still word their slot
+  off a fixed header the tool writes into its own output, because design call 14 rules out growing
+  the engine for presentation. The package narration now says so in both places it summarises the
+  stat hooks, and says what makes the residue safe: each reading is anchored on a token the tool
+  formats deliberately and each hook is total, so an unrecognised shape returns false and leaves
+  that tool's prose floor in the slot rather than a wrong number. Documentation only — not one
+  hook, regex or rendered byte changed.
+
 - **The escape-stripping security seam is its own file, `internal/tui/sanitize.go`.** `stripEscapes`,
   the batch form `stripEscapesAll` and the `bidiControl` set they drop beside the control characters
   were filed under `transcript.go`'s "Formatting helpers" banner, which is where they grew up rather

@@ -304,7 +304,10 @@ invariant wording pointing at the new home) in the same commit.
 
 **Commit:** `refactor(tui): rehome the escape-stripping security seam into sanitize.go`
 
-## 10. Correct doc.go's ADR 0011 narration
+## 10. Correct doc.go's ADR 0011 narration — ✅ DONE (2026-08-20)
+
+NOTES (2026-08-20): the item says "the doc.go sentence", singular, but the same overclaim is written twice — once in the candidate-03 narration paragraph and once in the file-map line for `toolregistry.go`, which said the stat words the slot off `domain.ToolSummary` full stop. Both were corrected; leaving the second would have kept a reader one grep away from the claim the item exists to retire.
+NOTES (2026-08-20): the review's evidence phrase "five package regexes" was deliberately NOT carried into `doc.go`. It does not hold for the six hooks as they stand: `commitCountStat` and `diffLinesStat` use no regex at all (line and prefix counting), and one of the five package regexes, `exitCodeMarker`, belongs to `exitCodeFailure` rather than to any of the six. The new prose names the six hooks and the reading they take instead of counting regexes, which is what `toolregistry.go`'s own note does.
 
 **Source:** review §Verified healthy, last bullet.
 
