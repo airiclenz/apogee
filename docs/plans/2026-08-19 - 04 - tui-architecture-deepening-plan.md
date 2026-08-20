@@ -537,7 +537,12 @@ internal/tui/popup.go
 
 **Commit:** `refactor(tui): adopt listSurface for the approval and ask selections`
 
-## 18. Merge the settings twins
+## 18. Merge the settings twins — ✅ DONE (2026-08-20)
+
+NOTES (2026-08-20): the buffer/text merge parameterizes the pair slightly differently from the item's "commit-key and trim parameters". The commit KEY is claimed by each state before the shared router is reached (`settingsBufferKey` takes ⏎, `settingsTextKey` takes ctrl+s) rather than passed down to it, and the trim arrives as the already-trimmed VALUE plus the state's own blank verdict rather than as a function parameter. Reason: the two states disagree on the trim AND on what "empty" is (`value == ""` against `strings.TrimSpace(value) == ""`, which part ways on a field cleared to spaces), so preserving both exactly (merge policy) would have cost two func-valued parameters to save two call-site lines — and a key claimed at the call site is where the merge policy asks the per-pane difference to be documented anyway.
+NOTES (2026-08-20): `settingsEditKey` takes one parameter the item does not name — `relayout` — because the two key routers disagree on a second thing besides the commit key: the multi-line field IS the pane's row list and lays the frame out again on every edited character, where the one-line buffer is one cell of one row and does not. Both behaviours are preserved exactly.
+NOTES (2026-08-20): all four twin names are KEPT as one- and two-line namings of the shared pair instead of being deleted (item 16's "a one-line naming of the shared one" precedent). Three prose pointers outside the item's Files line name them — `lineeditor.go`'s "settingsCommitBuffer's TrimSpace", `listsurface.go`'s "(settingsBufferKey)", `mouse.go`'s "(renderSettingsEnum)" — so keeping the names is what let this item touch exactly the one file its Files line allows.
+NOTES (2026-08-20): the DECISION's reading held — item 16 had already collapsed the two renderers to their row-building loop and their hint, so the "content parameter" is exactly those two arguments (`renderSettingsSubList(row, values, hint)`); no third difference was left to merge.
 
 **Source:** review §Candidate 12 (twin merges). Depends on item 16.
 

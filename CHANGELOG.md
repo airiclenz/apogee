@@ -222,6 +222,17 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- Merged the /settings pane's two twin pairs (`internal/tui/settings.go`). The enum vocabulary and the
+  Mechanism catalogue paint through one sub-list painter that states the pane, the title, the body
+  naming the key, the menu shape and the row window once — each content passes only its rows and its
+  legend, which is the whole of what they disagree on. The one-line value buffer and the multi-line
+  prose field route their keys through one edit contract (esc abandons; everything else goes to the
+  field) and persist through one commit. Each typed state keeps its own commit key and its own trim
+  exactly as they were — ⏎ with TrimSpace for a scalar token, ctrl+s with TrimRight of newlines for
+  prose, including the two different verdicts on what counts as an empty edit — and each is claimed
+  and documented at the call site rather than folded into the shared body. Behaviour-preserving:
+  nothing either sub-list paints and nothing either edit commits changed.
+
 - Adopted the shared list cursor in the two decision panes — the approval menu and the ask_user
   offering (`internal/tui/listsurface.go`, ADR 0053): the last two non-wrapping arrow idioms the
   review counted are gone, and with them five hand-written clamps around the highlight. Both

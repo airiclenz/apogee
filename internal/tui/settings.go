@@ -1080,50 +1080,63 @@ func newSettingsEditor(shape tea.CursorShape, surface color.Color, seed string) 
 	return newPopupField(shape, surface, settingsCaret, seed)
 }
 
-// settingsBufferKey routes a keypress in the string/int edit buffer: ⏎ commits, esc abandons, and
-// every other key goes to the FIELD (lineEditor.editKey) — which is the whole of the editing this
-// pane does not write itself. What the human gets there is what the chat box gives: insertion at the
-// caret, backspace and delete around it, ←/→ and the word jumps, home/end (spec requirement 7).
+// settingsEditKey routes the keys the pane's two typed states — the one-line value buffer
+// (settingsBufferKey) and the multi-line prose field (settingsTextKey) — answer the SAME way: esc
+// abandons the edit, and every other key goes to the FIELD (lineEditor.editKey), which is the whole of
+// the editing this pane does not write itself. What the human gets there is what the chat box gives:
+// insertion at the caret, backspace and delete around it, ←/→ and the word jumps, home/end (spec
+// requirement 7).
 //
-// The buffer is the one state in which backspace does not arm a reset: inside an edit it means what
+// The COMMIT key is deliberately NOT here. It is the one key the two states disagree on — ⏎ for a
+// scalar that has no second line to walk to, ctrl+s for a field where ⏎ means what it means in any
+// editor (ADR 0037 decision 10) — so each state claims its own before reaching this, and the
+// difference stays readable at the two call sites rather than as a parameter naming a keystroke.
+//
+// relayout is the second thing they disagree on, and it IS a parameter because it is not a key: the
+// multi-line field is the pane's row list, so a line added or removed changes how many rows the pane
+// measures, where the one-line buffer is one cell of one row and changes nothing it measures.
+//
+// Backspace reaches the field in both states rather than arming a reset: inside an edit it means what
 // it means in every other text field on the screen. That is exactly why the two idioms can share the
 // key — the pane's kind says which of them is being typed at, and the field claims backspace only
 // while it is open.
-func (m Model) settingsBufferKey(msg tea.KeyPressMsg, row SettingRow) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "esc":
-		// An abandoned edit takes its refusal with it: the ✗ on this row is the reason THIS buffer
-		// was not accepted, and leaving it up after the human walked away from the edit would report
-		// a failure against a row nobody is editing any more.
+func (m Model) settingsEditKey(msg tea.KeyPressMsg, relayout bool) (tea.Model, tea.Cmd) {
+	if msg.String() == "esc" {
+		// An abandoned edit takes its refusal with it: the ✗ on this row is the reason THIS edit was
+		// not accepted, and leaving it up after the human walked away from the edit would report a
+		// failure against a row nobody is editing any more.
 		m.settings.kind, m.settings.editor = settingsKeyList, lineEditor{}
 		m.settings.failure = settingFailure{}
 		m.layout()
 		return m, nil
-	case "enter":
-		return m.settingsCommitBuffer(row)
 	}
 	// Whatever Cmd the widget asks for is returned rather than dropped, exactly as the chat box
 	// returns it (model.go) — a single-line field asks for none today (lineEditor.singleLine), and
-	// swallowing one silently is how that stops being true unnoticed. The frame is NOT laid out
-	// again: the field is one cell of one row, so nothing typed into it changes what the pane
-	// measures.
-	return m, m.settings.editor.editKey(msg)
+	// swallowing one silently is how that stops being true unnoticed.
+	cmd := m.settings.editor.editKey(msg)
+	if relayout {
+		m.layout()
+	}
+	return m, cmd
 }
 
-// settingsCommitBuffer persists what was typed, and stays in the buffer when the binary will not have
-// it. That is the whole reason a commit reports its outcome: a refused value is still on the screen,
-// with the reason beside it (settingsNote), so the human fixes a port they mistyped instead of typing
-// it again from nothing.
+// settingsCommitEdit persists what a typed state committed, and stays in the edit when the binary will
+// not have it. That is the whole reason a commit reports its outcome: a refused value is still on the
+// screen, with the reason beside it (settingsNote), so the human fixes a port they mistyped instead of
+// typing it again from nothing.
 //
 // The value is checked by the BINARY, not here (ADR 0011's thin renderer): what a key may hold is the
 // registry's business and it is the write seam that asks — this pane knows only that a refusal means
-// the file is unchanged. An EMPTY buffer commits nothing at all and simply closes, the /sessions
-// empty-rename posture: ⏎ on a buffer the human has just cleared is far more likely to be an
-// abandoned edit than a request to persist emptiness, and the deliberate way to take a value away is
-// the reset backspace arms.
-func (m Model) settingsCommitBuffer(row SettingRow) (tea.Model, tea.Cmd) {
-	value := stripEscapes(strings.TrimSpace(m.settings.editor.value()))
-	if value == "" {
+// the file is unchanged.
+//
+// The trim is the CALLER's and so is blank, its verdict that there is nothing to commit: the two
+// states trim differently and therefore disagree about what "nothing" is (settingsCommitBuffer,
+// settingsCommitText), and both verdicts are preserved exactly as they were written. A blank edit
+// commits nothing at all and simply closes, the /sessions empty-rename posture: a field the human has
+// just cleared is far more likely to be an abandoned edit than a request to persist emptiness, and the
+// deliberate way to take a value away is the reset backspace arms.
+func (m Model) settingsCommitEdit(row SettingRow, value string, blank bool) (tea.Model, tea.Cmd) {
+	if blank {
 		m.settings.kind, m.settings.editor = settingsKeyList, lineEditor{}
 		m.layout()
 		return m, nil
@@ -1135,6 +1148,30 @@ func (m Model) settingsCommitBuffer(row SettingRow) (tea.Model, tea.Cmd) {
 	}
 	m.layout()
 	return m, cmd
+}
+
+// settingsBufferKey routes a keypress in the string/int edit buffer: ⏎ commits, and every other key is
+// the shared edit contract's (settingsEditKey — esc abandons, the rest goes to the field). ⏎ is this
+// state's commit because a scalar config value has no second line to walk to, so the widget's newline
+// binding is free for it (newSettingsEditor).
+//
+// The frame is NOT laid out again on an edited character: the buffer is one cell of one row, so
+// nothing typed into it changes what the pane measures.
+func (m Model) settingsBufferKey(msg tea.KeyPressMsg, row SettingRow) (tea.Model, tea.Cmd) {
+	if msg.String() == "enter" {
+		return m.settingsCommitBuffer(row)
+	}
+	return m.settingsEditKey(msg, false)
+}
+
+// settingsCommitBuffer commits the string/int buffer — the shared commit (settingsCommitEdit) against
+// this state's own trim. TrimSpace, because a scalar value is a token (a port, a path, a model id) and
+// the whitespace around one is never part of it: it is also what lets a path pasted with its line
+// ending still on it commit as the path, since the widget folds that ending to a space
+// ([lineEditor.flattenLine]). The buffer is therefore blank exactly when that trim leaves nothing.
+func (m Model) settingsCommitBuffer(row SettingRow) (tea.Model, tea.Cmd) {
+	value := stripEscapes(strings.TrimSpace(m.settings.editor.value()))
+	return m.settingsCommitEdit(row, value, value == "")
 }
 
 // settingsTextValue is the prose a text row holds: what this pane last wrote for the key, else the
@@ -1188,54 +1225,33 @@ func settingsWritable(row SettingRow) bool {
 	return row.Editable && row.Kind == SettingText
 }
 
-// settingsTextKey routes a keypress in the multi-line field: ctrl+s commits, esc discards, and every
-// other key goes to the FIELD — ⏎ among them, which is the whole difference between this step and the
-// one-line buffer. What the human gets is what the chat box gives, over several lines.
+// settingsTextKey routes a keypress in the multi-line field: ctrl+s commits, and every other key is
+// the shared edit contract's (settingsEditKey — esc abandons, the rest goes to the field, ⏎ among
+// them, which is the whole difference between this step and the one-line buffer).
 //
 // esc discarding rather than committing is deliberate and is what the legend says (settingsTextHint):
 // the field holds a page of prose, and the key that walks away from an edit must not be the one that
-// persists it.
+// persists it. The frame IS laid out again on an edited character, unlike the buffer's: this field is
+// the pane's row list, so a line added or removed changes how many rows the pane measures.
 func (m Model) settingsTextKey(msg tea.KeyPressMsg, row SettingRow) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "esc":
-		// The refusal goes with the abandoned edit, the buffer's own reason: a ✗ left on the row would
-		// report a failure against an edit nobody is making any more.
-		m.settings.kind, m.settings.editor = settingsKeyList, lineEditor{}
-		m.settings.failure = settingFailure{}
-		m.layout()
-		return m, nil
-	case "ctrl+s":
+	if msg.String() == "ctrl+s" {
 		return m.settingsCommitText(row)
 	}
-	// The frame IS laid out again, unlike the one-line buffer's: this field is the pane's row list, so
-	// a line added or removed changes how many rows the pane measures.
-	cmd := m.settings.editor.editKey(msg)
-	m.layout()
-	return m, cmd
+	return m.settingsEditKey(msg, true)
 }
 
-// settingsCommitText persists the prose and stays in the field when the binary will not have it — the
-// edit buffer's contract, for its reason: a refused prompt is still on the screen with the reason
-// beside it, so the human fixes the placeholder they mistyped instead of writing the prompt again.
+// settingsCommitText commits the prose field — the shared commit (settingsCommitEdit) against this
+// state's own trim. TrimRight of newlines and nothing else, because the spaces inside a prompt and the
+// indentation of its lines ARE the prompt; what goes is the blank last line a trailing ⏎ leaves behind
+// (the writer normalizes a block scalar to exactly one, settingsTextValue).
 //
-// An EMPTY field commits nothing at all and simply closes, the buffer's own posture: a prompt cleared
-// to nothing is far more likely to be an abandoned edit than a request to send no prompt, and the
-// deliberate way to take the prompt away is the reset backspace arms (which the binary's own validator
-// says in as many words).
+// "Nothing to commit" is therefore whitespace-only prose rather than the empty string, which is where
+// this state parts from the buffer's verdict: a field cleared back to spaces is as abandoned as one
+// cleared to nothing, and the deliberate way to take the prompt away is the reset backspace arms
+// (which the binary's own validator says in as many words).
 func (m Model) settingsCommitText(row SettingRow) (tea.Model, tea.Cmd) {
 	value := strings.TrimRight(stripEscapes(m.settings.editor.value()), "\n")
-	if strings.TrimSpace(value) == "" {
-		m.settings.kind, m.settings.editor = settingsKeyList, lineEditor{}
-		m.layout()
-		return m, nil
-	}
-	next, cmd, landed := m.settingsPersist(row, value)
-	m = next
-	if landed {
-		m.settings.kind, m.settings.editor = settingsKeyList, lineEditor{}
-	}
-	m.layout()
-	return m, cmd
+	return m.settingsCommitEdit(row, value, strings.TrimSpace(value) == "")
 }
 
 // settingsArmReset arms the selected row's reset-to-default — backspace on a row that HAS something to
@@ -2342,11 +2358,34 @@ func (m Model) settingsTextSpec(rows []SettingRow) (popupSpec, bool) {
 	}, true
 }
 
+// renderSettingsSubList paints a second-step sub-list in the pane the key list was read in — the enum
+// vocabulary (renderSettingsEnum) and the Mechanism catalogue (renderSettingsMechanisms), which are one
+// surface with two contents. Everything that makes it that surface is stated once here: the pane it
+// claims, the title over it, the body naming the key being answered (settingsEnumPrompt, because the
+// list where the human read that name is what this replaced), the MENU shape (listContent.menuRows —
+// choices a human takes in at once, not a scrolled offering), the window left to the row plan, and the
+// highlight the sub-list's shared cursor clamps.
+//
+// What each content brings is its ROWS and its LEGEND — a vocabulary with one "(current)" cell against
+// a catalogue of switches that each carry their own — so those are the only two parameters.
+func (m Model) renderSettingsSubList(row SettingRow, values []popupRow, hint string) string {
+	return m.renderList(listContent{
+		pane:     paneSettings,
+		title:    settingsTitle,
+		body:     truncateToWidth(m.th, stripEscapes(settingsEnumPrompt(row)), popupInnerWidth(m.th, m.width)),
+		hint:     hint,
+		rowCap:   len(values), // the whole content is the taste; popupBudget answers with the frame's
+		rows:     values,
+		menuRows: true,
+		selected: m.settings.sub.highlight(len(values)),
+	})
+}
+
 // renderSettingsEnum paints the value sub-list — the second step of an enum edit — in the SAME pane,
-// as a MENU rather than as a list (popupSpec.menuRows): four values a human is choosing between, all
-// of them on the screen at once, which is the approval prompt's shape and not the picker's scrolled
-// offering. The pane it replaces is still the one the frame allocated, so nothing about the frame
-// moves between the two steps except what is inside the border.
+// as a MENU rather than as a list (renderSettingsSubList): four values a human is choosing between,
+// all of them on the screen at once, which is the approval prompt's shape and not the picker's
+// scrolled offering. The pane it replaces is still the one the frame allocated, so nothing about the
+// frame moves between the two steps except what is inside the border.
 //
 // It is SHORTER than the key list it replaced — a vocabulary is a handful of rows — and the rows it
 // does not use go back to the transcript for as long as the question is open. That is the row plan
@@ -2355,7 +2394,8 @@ func (m Model) settingsTextSpec(rows []SettingRow) (popupSpec, bool) {
 //
 // The body names the key being set and what it is for, because the list behind it — where the human
 // read the key's name — is the thing this pane just replaced. The value the key already holds carries a
-// "(current)" cell of its own, so the question can be answered without remembering the answer to it.
+// "(current)" cell of its own, so the question can be answered without remembering the answer to it —
+// and that cell is the whole of what this content brings to the shared painter.
 func (m Model) renderSettingsEnum(row SettingRow) string {
 	current := m.settingsCurrentValue(row)
 	vocabulary := m.settingsVocabulary(row)
@@ -2367,16 +2407,7 @@ func (m Model) renderSettingsEnum(row SettingRow) string {
 		}
 		values = append(values, popupRow{stripEscapes(value), cell})
 	}
-	return m.renderList(listContent{
-		pane:     paneSettings,
-		title:    settingsTitle,
-		body:     truncateToWidth(m.th, stripEscapes(settingsEnumPrompt(row)), popupInnerWidth(m.th, m.width)),
-		hint:     settingsEnumHint,
-		rowCap:   len(values), // the whole vocabulary is the taste; popupBudget answers with the frame's
-		rows:     values,
-		menuRows: true,
-		selected: m.settings.sub.highlight(len(values)),
-	})
+	return m.renderSettingsSubList(row, values, settingsEnumHint)
 }
 
 // settingsMechanismState is what a Mechanism's row says about itself: the whole cell, because a
@@ -2387,16 +2418,16 @@ const (
 )
 
 // renderSettingsMechanisms paints the `mechanisms` row's own list — the pane's fourth renderer, and
-// the second that replaces the key list with a list of its own. It is the value sub-list's shape
-// (renderSettingsEnum: a MENU in the same pane, the same frame around it, the body naming the key
-// because the list where the human read that name is what this replaced) with the one difference the
-// content forces: the rows are SWITCHES, so every one carries its own state cell rather than one of
-// them carrying "(current)", and the legend says what flips them (settingsMechanismHint).
+// the second content the shared sub-list draws (renderSettingsSubList: a MENU in the same pane, the
+// same frame around it, the body naming the key because the list where the human read that name is
+// what this replaced). What this function IS, is the one difference the content forces: the rows are
+// SWITCHES, so every one carries its own state cell rather than one of them carrying "(current)", and
+// the legend says what flips them (settingsMechanismHint).
 //
 // It is also the one list of this pane that reliably overflows — the catalogue is twenty-one
-// Mechanisms and counting — so the window is left to the row plan exactly as the key list's is
-// (popupBudget answers with the frame's grant) and the bar the overflow earns comes from the same
-// place every other popup's does (popupSpec.scrollbar).
+// Mechanisms and counting — which is why the shared painter leaves the window to the row plan exactly
+// as the key list does (popupBudget answers with the frame's grant) and the bar the overflow earns
+// comes from the same place every other popup's does (popupSpec.scrollbar).
 //
 // Nothing here says what a Mechanism DOES: the id is what the config file names it by and what the
 // documentation indexes it under, and a sentence per row would make a manual of a switch panel
@@ -2410,16 +2441,7 @@ func (m Model) renderSettingsMechanisms(row SettingRow, toggles []MechanismToggl
 		}
 		values = append(values, popupRow{stripEscapes(toggle.ID), state})
 	}
-	return m.renderList(listContent{
-		pane:     paneSettings,
-		title:    settingsTitle,
-		body:     truncateToWidth(m.th, stripEscapes(settingsEnumPrompt(row)), popupInnerWidth(m.th, m.width)),
-		hint:     settingsMechanismHint,
-		rowCap:   len(values), // the whole catalogue is the taste; popupBudget answers with the frame's
-		rows:     values,
-		menuRows: true,
-		selected: m.settings.sub.highlight(len(values)),
-	})
+	return m.renderSettingsSubList(row, values, settingsMechanismHint)
 }
 
 // settingsEnumPrompt is the sub-list's one-line question: the key, then what it is for. Two facts on
