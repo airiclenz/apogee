@@ -192,7 +192,19 @@ where they are. doc.go line in the same commit.
 
 **Commit:** `refactor(tui): move the tool card type and view lifecycle into toolview.go`
 
-## 6. Move the presenter registry and tool hooks into toolregistry.go
+## 6. Move the presenter registry and tool hooks into toolregistry.go — ✅ DONE (2026-08-20)
+
+NOTES (2026-08-20): the file's own header banner (`Tool presentation (P2.7 …)`) moved with this item
+rather than staying behind — item 5's note left it for "items 6 and 8" because it narrates the registry
+and the stat hooks, and this item moves both. It is moved verbatim; `toolregistry.go` therefore opens
+with it and `toolpresent.go` is left with no header banner until item 7 or 8 gives it one or deletes it.
+NOTES (2026-08-20): the split of "per-tool body hooks" from "the diff-body cluster (item 7 moves that)"
+was drawn at the diff machinery's own edge: `readFileBody` (read off the typed summary) moved, while
+`viewDiffBody`, `diffBody`, the region recovery, the `editPair`/`changedLines` family, the git-diff walk,
+the stacked rows and the four argument-derived bodies built on them (`singleReplacementBody`,
+`multiReplacementBody`, `fileEditBody`, `writtenLines`) stayed together for item 7. `diffCounts` and
+`pairCounts` sit inside the stat section and moved with it (`diffCounts` keeps its third caller in
+`toolview.go`'s run aggregation, unchanged).
 
 **Source:** review §Candidate 7, spans 2 and 4. Depends on item 5.
 

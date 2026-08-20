@@ -737,15 +737,23 @@
 // the console mode it lent (ADR 0038), altscreen_other.go being the never-nil no-op restore that
 // stands in where there is no console mode word to lend;
 // toolview.go the tool CARD itself and the lifecycle that fills it, lifted out of toolpresent.go
-// (ADR 0043) which keeps the presentation vocabulary the lifecycle reads — the [toolView] a call
-// becomes, with the [detailLine]s a [detailKind] colours and the [toolBody] carrying them, built
-// by [presentToolCall] the moment the call is seen (its body included, for the tools whose
-// ARGUMENTS already say what the call will change) and completed by [toolView.enrichWithResult]
-// when the result lands, both leaving through [toolView.finishDisplay] so the escape-strip
-// ([toolView.sanitize]) and the workspace-relative spelling of the paths a card NAMES
-// ([toolView.shortenPaths]) hold for every card rather than per producer, plus the run
-// aggregation over them ([runAggregate]) that words what a whole GROUP of calls did out of what
-// its members already say;
+// (ADR 0043) beside toolregistry.go, which holds the presentation vocabulary the lifecycle reads
+// — the [toolView] a call becomes, with the [detailLine]s a [detailKind] colours and the
+// [toolBody] carrying them, built by [presentToolCall] the moment the call is seen (its body
+// included, for the tools whose ARGUMENTS already say what the call will change) and completed by
+// [toolView.enrichWithResult] when the result lands, both leaving through
+// [toolView.finishDisplay] so the escape-strip ([toolView.sanitize]) and the workspace-relative
+// spelling of the paths a card NAMES ([toolView.shortenPaths]) hold for every card rather than per
+// producer, plus the run aggregation over them ([runAggregate]) that words what a whole GROUP of
+// calls did out of what its members already say;
+// toolregistry.go that vocabulary itself, lifted out of the same file in the same split (ADR
+// 0043) — the OPEN, name-keyed [toolRegistry] whose one entry per tool carries its label, its
+// active verb, the extractor that reads the target off the call's arguments, the prose detail
+// extractor that stays the floor for a result carrying no typed summary, and the body renderers
+// ([toolPresenter]), so a new tool is one entry rather than a control-flow statement to grow; and
+// the per-tool hooks those entries point at — the stat that words the right-hand outcome slot off
+// the domain.ToolSummary the tool already reports, the target extractors that read the call's
+// arguments, and the detail extractors that quote a summary-less result's first line;
 // splitdiff.go the SPLIT reading of a diff body — the Edit regions a tool recorded
 // (domain.EditRegion) arranged as two panes, each numbering its own file, with the width rule
 // that says whether that reading fits at all ([splitDiffFits], splitPaneMinCols) and the gutter,

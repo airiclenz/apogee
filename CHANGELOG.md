@@ -222,6 +222,20 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **The presenter registry and the per-tool hooks move out of `toolpresent.go` into
+  `internal/tui/toolregistry.go`.** The third and fourth of the four modules that shared one file
+  name (ADR 0043), moved verbatim and never reshaped — the registry is the package's one open,
+  name-keyed table and adding a tool stays a single edit. What moves is the presentation
+  vocabulary the card lifecycle reads: the file's own opening note, the `toolPresenter` type with
+  its eight hooks, the `toolRegistry` table itself, the outcome-slot stat hooks that word each
+  tool's right-hand slot off the typed `domain.ToolSummary` it already reports, the target
+  extractors that read the call's own arguments, and the detail and body extractors that stay the
+  floor for a result carrying no summary. The diff-body cluster stays behind for the next move,
+  and so does the tail — the JSON-argument display module and the generic text utilities — leaving
+  `toolpresent.go` at 1082 lines, down from 2291. No signature changed, no call site moved, and
+  the test files stay where they are. `doc.go`'s file map gains the new file's line. No behaviour
+  change.
+
 - **The tool card and the lifecycle that fills it move out of `toolpresent.go` into
   `internal/tui/toolview.go`.** The first two of the four modules that shared one file name (ADR
   0043), moved verbatim as two contiguous spans anchored on the file's own section banners. The
