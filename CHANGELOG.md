@@ -222,6 +222,15 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- Adopted the shared list surface in the /settings pane (its key list and both value sub-lists) and in
+  the "/" | "@" autocomplete dropdown (`internal/tui/listsurface.go`, ADR 0053): the wrap-arrow idiom
+  written four more times, a third `clampSelection`, a second clamp-to-highlight and three more copies
+  of the budget→render boilerplate all collapse into the one set. The surface split into a
+  `listCursor` every list embeds and the `listSurface` the two filtering panes embed instead, so a
+  pane that never types into a filter no longer carries a text widget it does not use — the `Model`
+  measured 104,592 bytes before and after. Behaviour-preserving: every pane answers every key exactly
+  as it did.
+
 - Introduced `listSurface`, the one list state and key contract every filtering overlay is built on
   (`internal/tui/listsurface.go`, ADR 0053), and adopted it in the /model | /server picker (all seven
   kinds) and the /sessions browser (all three modes). The clamp written twice, the wrap-arrow idiom

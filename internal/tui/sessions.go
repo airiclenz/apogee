@@ -40,10 +40,10 @@ type sessionBrowser struct {
 	// edit commits or is abandoned. It is the browser's OWN field and no part of the list surface
 	// below: a rename is a modal surface within the modal, and no filter is typed inside it.
 	renameBuf lineEditor
-	// listSurface is the highlight and the filter — the state EVERY list overlay in the package keeps
-	// and the key contract that goes with it (listsurface.go, ADR 0053), embedded rather than
-	// re-declared so `m.sessionBrowser.selected` and `.filter` still read as the pane's own while the
-	// picker and this browser answer ↑/↓, a typed letter and esc with the same code.
+	// listSurface is the highlight and the filter — the state a list overlay that FILTERS keeps, and
+	// the key contract that goes with it (listsurface.go, ADR 0053), embedded rather than re-declared
+	// so `m.sessionBrowser.selected` and `.filter` still read as the pane's own while the picker and
+	// this browser answer ↑/↓, a typed letter and esc with the same code.
 	//
 	// The filter is composed after the workspace view rather than beside it (browserView), and a
 	// re-LIST is deliberately not a path that clears it — a delete or a rename refreshes the pane the
@@ -532,7 +532,8 @@ func (m *Model) resumeLoaded(msg sessionLoadedMsg) tea.Cmd {
 // so View treats it like the approval-prompt slot.
 //
 // While a filter is being typed the pane grows one line for it, set off by a blank line at each end —
-// the shared list surface's own line, budget and trade (renderList, listsurface.go): the three lines
+// the shared list surface's own line, budget and trade (renderFilterList, listsurface.go): the three
+// lines
 // are the module's BODY block, both blanks are the body's own pads, and the whole claim comes off the
 // top of the frame's grant so a short window gives up ROWS before it gives up the line the human is
 // typing. The row window is likewise the SCREEN's to grant and not the browser's to assume:
@@ -564,9 +565,9 @@ func (m Model) renderSessionBrowser() string {
 		c.rows = singleCellRows([]string{"no sessions in this workspace — press ^a to see all"})
 	} else {
 		c.rows = sessionRows(b, m.opts.Workspace, time.Now())
-		c.selected = b.highlight(c.rows)
+		c.selected = b.highlight(len(c.rows))
 	}
-	return m.renderList(b.listSurface, c)
+	return m.renderFilterList(b.filter, c)
 }
 
 // sessionRows composes the row list the popup module paints: the filtered view's rows (browserView

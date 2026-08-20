@@ -119,7 +119,9 @@ const (
 // level up, on the Model ([Model.settingEdits]). sub is a sub-list's highlight, meaningful only while
 // kind is [settingsEnumList] or [settingsMechanismList] — the two steps that replace the key list with
 // a list of their own; editor is the field a string or an int is typed into, meaningful only while
-// kind is [settingsValueBuffer].
+// kind is [settingsValueBuffer]. Both selections are [listCursor]s: the clamp, the wrap rule and the
+// verdict each key earns are the package's one answer to those questions (listsurface.go, ADR 0053),
+// and what stays here is what only this pane knows — which row a ⏎ opens, and what backspace arms.
 //
 // The editor is a [lineEditor] held BY VALUE, as the Model holds the prompt's own (ADR 0011): the
 // widget is copy-safe and carries no self-referential no-copy type, which is what lets the pane stay
@@ -136,14 +138,22 @@ const (
 // later. The highlight derives its columns from the offsets at paint time instead
 // ([Model.highlightSettingsEdit]).
 type settingsPane struct {
-	open     bool
-	kind     settingsKind
-	selected int
-	sub      int
-	editor   lineEditor
-	sel      promptSel
-	failure  settingFailure
-	answer   settingAnswer
+	open bool
+	kind settingsKind
+	// listCursor is the KEY list's highlight and the key contract that walks it (listsurface.go,
+	// ADR 0053), embedded rather than re-declared so `m.settings.selected` still reads as the pane's
+	// own while there is one answer to what ↑/↓, ⏎ and esc do inside a modal list.
+	listCursor
+	// sub is a SUB-LIST's highlight, meaningful only while kind is [settingsEnumList] or
+	// [settingsMechanismList]. It is a second cursor rather than a second surface, and NAMED rather
+	// than embedded, because a pane cannot embed two of anything and because neither sub-list filters:
+	// a cursor is eight bytes where a filtering surface would have brought a whole text widget with it
+	// (ADR 0053 decision 9). The pane's one field ([lineEditor]) stays the one it already had.
+	sub     listCursor
+	editor  lineEditor
+	sel     promptSel
+	failure settingFailure
+	answer  settingAnswer
 }
 
 // settingEdit is one key this pane PERSISTED this session and the value the file now yields for it —
@@ -382,7 +392,7 @@ func (m Model) settingsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		// The sub-list's key went away under it. Drop back to the key list and SWALLOW this keypress
 		// rather than let it through: a ⏎ aimed at a value must not land on whatever key now sits at
 		// that index, and the human's next press is aimed at a list they can see.
-		m.settings.kind, m.settings.sub = settingsKeyList, 0
+		m.settings.kind, m.settings.sub = settingsKeyList, listCursor{}
 		m.layout()
 		return m, nil
 	}
@@ -393,7 +403,7 @@ func (m Model) settingsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		// The catalogue went away under the list — an unwired seam, or a row that is no longer the
 		// `mechanisms` row. Same fallback and the same swallow as the sub-list above: a ⏎ aimed at a
 		// switch must not land on whatever the key list now highlights.
-		m.settings.kind, m.settings.sub = settingsKeyList, 0
+		m.settings.kind, m.settings.sub = settingsKeyList, listCursor{}
 		m.layout()
 		return m, nil
 	}
@@ -415,30 +425,28 @@ func (m Model) settingsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		return m.settingsAbandonStep()
 	}
-	switch msg.String() {
-	case "esc":
+	switch m.settings.key(msg, n, listWrapsAround) {
+	case listCloses:
 		// The overlay goes whole — highlight, step, buffer, last refusal — and the session's edit
 		// journal does NOT: it is on the Model, and the ` *` markers it carries describe a session that
 		// is still running the values it recorded (ADR 0037 decision 8).
 		m.settings = settingsPane{}
 		m.layout()
 		return m, nil
-	case "up", "ctrl+p":
-		if n > 0 {
-			m.settings.selected = (m.settings.selected - 1 + n) % n
-		}
-		return m, nil
-	case "down", "ctrl+n":
-		if n > 0 {
-			m.settings.selected = (m.settings.selected + 1) % n
-		}
-		return m, nil
-	case "enter":
+	case listAccepts:
 		return m.settingsEnter(rows)
-	case "backspace":
+	case listSwallowed:
+		return m, nil // an arrow the cursor spent, or a ⏎ over a list with no rows to open
+	case listUnclaimed:
+	}
+	// backspace is the one key of this pane that no list has — it UNSETS rather than edits — so it is
+	// answered here, out of what the shared contract found no use for. Everything else is swallowed:
+	// this is a full-height modal, and a key falling through it would land in a chat box the human
+	// cannot see (handleKey's own reason one surface down).
+	if msg.String() == "backspace" {
 		return m.settingsArmReset(rows)
 	}
-	return m, nil // any other key is swallowed by the modal
+	return m, nil
 }
 
 // settingsOwnsInput reports whether the pane is the surface the keyboard is on: open, at the one
@@ -496,7 +504,7 @@ func (m Model) settingsEditorMsg(msg tea.Msg) (Model, tea.Cmd, bool) {
 // written and nothing is kept: a buffer whose key is no longer there has nothing to save, and a
 // confirmation for a row that left cannot be confirmed.
 func (m Model) settingsAbandonStep() (tea.Model, tea.Cmd) {
-	m.settings.kind, m.settings.sub, m.settings.editor = settingsKeyList, 0, lineEditor{}
+	m.settings.kind, m.settings.sub, m.settings.editor = settingsKeyList, listCursor{}, lineEditor{}
 	m.layout()
 	return m, nil
 }
@@ -530,7 +538,7 @@ func (m Model) settingsEnter(rows []SettingRow) (tea.Model, tea.Cmd) {
 		if len(m.settingsMechanisms(rows)) == 0 {
 			return m, nil
 		}
-		m.settings.kind, m.settings.sub = settingsMechanismList, 0
+		m.settings.kind, m.settings.sub = settingsMechanismList, listCursor{}
 		m.layout()
 		return m, nil
 	}
@@ -557,7 +565,7 @@ func (m Model) settingsEnter(rows []SettingRow) (tea.Model, tea.Cmd) {
 		// presses ⏎ twice has then confirmed what was already set — which config.SaveConfigSetting writes
 		// nothing for — where a highlight reset to the first row would have silently changed the key.
 		m.settings.kind = settingsEnumList
-		m.settings.sub = max(0, indexOfSetting(values, m.settingsCurrentValue(row)))
+		m.settings.sub.selected = max(0, indexOfSetting(values, m.settingsCurrentValue(row)))
 		m.layout()
 		return m, nil
 	case SettingString, SettingInt:
@@ -589,25 +597,21 @@ func (m Model) settingsEnter(rows []SettingRow) (tea.Model, tea.Cmd) {
 // value is not written by this pane at all.
 func (m Model) settingsEnumKey(msg tea.KeyPressMsg, row SettingRow) (tea.Model, tea.Cmd) {
 	values := m.settingsVocabulary(row)
-	n := len(values)
-	switch msg.String() {
-	case "esc":
-		m.settings.kind, m.settings.sub = settingsKeyList, 0
+	switch m.settings.sub.key(msg, len(values), listWrapsAround) {
+	case listCloses:
+		m.settings.kind, m.settings.sub = settingsKeyList, listCursor{}
 		m.layout()
 		return m, nil
-	case "up", "ctrl+p":
-		m.settings.sub = (m.settings.sub - 1 + n) % n
-		return m, nil
-	case "down", "ctrl+n":
-		m.settings.sub = (m.settings.sub + 1) % n
-		return m, nil
-	case "enter":
-		value := values[clampInt(m.settings.sub, 0, n-1)]
-		m.settings.kind, m.settings.sub = settingsKeyList, 0
+	case listAccepts:
+		// The cursor clamped itself against this composition of the vocabulary before it answered, so
+		// the highlighted value is a value this list has.
+		value := values[m.settings.sub.selected]
+		m.settings.kind, m.settings.sub = settingsKeyList, listCursor{}
 		if row.Kind == SettingServer {
 			return m.settingsSwitchServer(row, value)
 		}
 		return m.settingsWrite(row, value)
+	case listSwallowed, listUnclaimed:
 	}
 	return m, nil // swallowed, like every key the pane does not act on
 }
@@ -625,19 +629,21 @@ func (m Model) settingsEnumKey(msg tea.KeyPressMsg, row SettingRow) (tea.Model, 
 // pane acts on, and space is what a list of switches is ticked with (the ask prompt's multi-select).
 func (m Model) settingsMechanismKey(msg tea.KeyPressMsg, toggles []MechanismToggle) (tea.Model, tea.Cmd) {
 	n := len(toggles)
-	switch msg.String() {
-	case "esc":
-		m.settings.kind, m.settings.sub = settingsKeyList, 0
+	switch m.settings.sub.key(msg, n, listWrapsAround) {
+	case listCloses:
+		m.settings.kind, m.settings.sub = settingsKeyList, listCursor{}
 		m.layout()
 		return m, nil
-	case "up", "ctrl+p":
-		m.settings.sub = (m.settings.sub - 1 + n) % n
+	case listAccepts:
+		return m.settingsToggleMechanism(toggles[m.settings.sub.selected])
+	case listSwallowed:
 		return m, nil
-	case "down", "ctrl+n":
-		m.settings.sub = (m.settings.sub + 1) % n
-		return m, nil
-	case "enter", "space":
-		return m.settingsToggleMechanism(toggles[clampInt(m.settings.sub, 0, n-1)])
+	case listUnclaimed:
+	}
+	// space is the second key on the one act and no list's, so it is answered here, out of what the
+	// shared contract handed back. Why the act has two keys is above.
+	if msg.String() == "space" && n > 0 {
+		return m.settingsToggleMechanism(toggles[m.settings.sub.selected])
 	}
 	return m, nil // swallowed, like every key the pane does not act on
 }
@@ -1839,27 +1845,13 @@ func settingsResetKind(row SettingRow) bool {
 	return row.Kind != SettingServer
 }
 
-// clampSelection keeps selected inside a row list that moved under the open pane. An empty list pins
-// it at zero, which renderSettings paints with no highlight at all (the picker's own contract).
-func (p *settingsPane) clampSelection(n int) {
-	switch {
-	case n == 0:
-		p.selected = 0
-	case p.selected >= n:
-		p.selected = n - 1
-	case p.selected < 0:
-		p.selected = 0
-	}
-}
-
 // settingsSelection is which SETTING row is highlighted, clamped to a list of n rows: −1 when there
-// are none, which is renderPopup's own "no highlight" convention. It is the one place the stored
-// index is turned into an index anything may be read by, so a stale selection cannot reach a slice.
+// are none, which is renderPopup's own "no highlight" convention. It is this pane's naming of the one
+// clamp every list in the package answers through ([listCursor.highlight], listsurface.go), and the
+// one place the stored index is turned into an index anything may be read by — so a stale selection
+// cannot reach a slice, and it cannot be clamped one way here and another way in a sibling pane.
 func (m Model) settingsSelection(n int) int {
-	if n == 0 {
-		return -1
-	}
-	return clampInt(m.settings.selected, 0, n-1)
+	return m.settings.highlight(n)
 }
 
 // ----------------------------------------------------------------------------
@@ -2375,23 +2367,16 @@ func (m Model) renderSettingsEnum(row SettingRow) string {
 		}
 		values = append(values, popupRow{stripEscapes(value), cell})
 	}
-	body := truncateToWidth(m.th, stripEscapes(settingsEnumPrompt(row)), popupInnerWidth(m.th, m.width))
-	maxBody, maxRows, seated := m.popupBudget(paneSettings, len(values), len(values),
-		popupChrome, popupFloor{body: popupBodyLineCount(m.th, body, m.width)})
-	if !seated {
-		return "" // the frame cannot seat this pane (settingsGiveWayNote says so on the status line)
-	}
-	return renderPopup(m.th, popupSpec{
-		title:       settingsTitle,
-		body:        body,
-		maxBodyRows: maxBody,
-		rows:        values,
-		menuRows:    true,
-		selected:    clampInt(m.settings.sub, 0, len(values)-1),
-		hint:        settingsEnumHint,
-		maxRows:     maxRows,
-		scrollbar:   m.popupScrollbarOn(),
-	}, m.width)
+	return m.renderList(listContent{
+		pane:     paneSettings,
+		title:    settingsTitle,
+		body:     truncateToWidth(m.th, stripEscapes(settingsEnumPrompt(row)), popupInnerWidth(m.th, m.width)),
+		hint:     settingsEnumHint,
+		rowCap:   len(values), // the whole vocabulary is the taste; popupBudget answers with the frame's
+		rows:     values,
+		menuRows: true,
+		selected: m.settings.sub.highlight(len(values)),
+	})
 }
 
 // settingsMechanismState is what a Mechanism's row says about itself: the whole cell, because a
@@ -2425,23 +2410,16 @@ func (m Model) renderSettingsMechanisms(row SettingRow, toggles []MechanismToggl
 		}
 		values = append(values, popupRow{stripEscapes(toggle.ID), state})
 	}
-	body := truncateToWidth(m.th, stripEscapes(settingsEnumPrompt(row)), popupInnerWidth(m.th, m.width))
-	maxBody, maxRows, seated := m.popupBudget(paneSettings, len(values), len(values),
-		popupChrome, popupFloor{body: popupBodyLineCount(m.th, body, m.width)})
-	if !seated {
-		return "" // the frame cannot seat this pane (settingsGiveWayNote says so on the status line)
-	}
-	return renderPopup(m.th, popupSpec{
-		title:       settingsTitle,
-		body:        body,
-		maxBodyRows: maxBody,
-		rows:        values,
-		menuRows:    true,
-		selected:    clampInt(m.settings.sub, 0, len(values)-1),
-		hint:        settingsMechanismHint,
-		maxRows:     maxRows,
-		scrollbar:   m.popupScrollbarOn(),
-	}, m.width)
+	return m.renderList(listContent{
+		pane:     paneSettings,
+		title:    settingsTitle,
+		body:     truncateToWidth(m.th, stripEscapes(settingsEnumPrompt(row)), popupInnerWidth(m.th, m.width)),
+		hint:     settingsMechanismHint,
+		rowCap:   len(values), // the whole catalogue is the taste; popupBudget answers with the frame's
+		rows:     values,
+		menuRows: true,
+		selected: m.settings.sub.highlight(len(values)),
+	})
 }
 
 // settingsEnumPrompt is the sub-list's one-line question: the key, then what it is for. Two facts on

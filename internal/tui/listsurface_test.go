@@ -52,7 +52,7 @@ func TestListSurfaceArrowsAnswerTheEndsByTheWrapFlag(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			l := listSurface{selected: tc.from}
+			l := listSurface{listCursor: listCursor{selected: tc.from}}
 			if got := pressList(m, &l, tc.key, rows, tc.wrap); got != listSwallowed {
 				t.Fatalf("verdict = %v, want the modal to keep an arrow", got)
 			}
@@ -85,7 +85,7 @@ func TestListSurfaceArrowsAtTheBottomOfAFilteredList(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			l := listSurface{selected: 1, filter: typedFilter(m, "alpha")}
+			l := listSurface{listCursor: listCursor{selected: 1}, filter: typedFilter(m, "alpha")}
 			if got := len(l.view(rows).rows); got != 2 {
 				t.Fatalf("precondition: the filter leaves %d rows, want 2", got)
 			}
@@ -125,7 +125,7 @@ func TestListSurfaceVerdictsNameWhatThePaneMustDo(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			l := listSurface{selected: tc.from}
+			l := listSurface{listCursor: listCursor{selected: tc.from}}
 			if got := pressList(m, &l, tc.key, rows, listWrapsAround); got != tc.want {
 				t.Errorf("verdict = %v, want %v", got, tc.want)
 			}
@@ -153,7 +153,7 @@ func TestListSurfaceTypingNarrowsTheListAndReclampsTheHighlight(t *testing.T) {
 	t.Parallel()
 	m := newTestModel(t)
 	rows := listTestRows("alpha", "beta", "gamma")
-	l := listSurface{selected: 2}
+	l := listSurface{listCursor: listCursor{selected: 2}}
 
 	if got := pressList(m, &l, keyRune('a'), rows, listWrapsAround); got != listSwallowed {
 		t.Fatalf("verdict = %v, want a printable key to be typed", got)
@@ -191,7 +191,7 @@ func TestListSurfaceTypingNarrowsTheListAndReclampsTheHighlight(t *testing.T) {
 func TestListSurfaceClampsTheHighlightBeforeActing(t *testing.T) {
 	t.Parallel()
 	m := newTestModel(t)
-	l := listSurface{selected: 7}
+	l := listSurface{listCursor: listCursor{selected: 7}}
 
 	if got := pressList(m, &l, keyCtrl('r'), listTestRows("only"), listWrapsAround); got != listUnclaimed {
 		t.Fatalf("verdict = %v, want the chord handed back", got)
@@ -200,7 +200,7 @@ func TestListSurfaceClampsTheHighlightBeforeActing(t *testing.T) {
 		t.Errorf("selected = %d, want 0 — the clamp runs on every key, claimed or not", l.selected)
 	}
 
-	l = listSurface{selected: 3}
+	l = listSurface{listCursor: listCursor{selected: 3}}
 	if got := pressList(m, &l, keyEnter(), nil, listWrapsAround); got != listSwallowed {
 		t.Fatalf("verdict = %v, want ⏎ over an empty list to take nothing", got)
 	}
@@ -209,16 +209,66 @@ func TestListSurfaceClampsTheHighlightBeforeActing(t *testing.T) {
 	}
 }
 
+// A list that does NOT filter hands the typing keys back, and that is the whole of the difference
+// between the two shapes this module holds. Neither answer could be decided here: the /settings key
+// list answers backspace with an armed reset, and the "/" | "@" dropdown gives every letter to the
+// chat box it hangs over. Proved per key, because a merge that swallowed one of them would leave the
+// other passing.
+func TestListCursorHandsTheTypingKeysBack(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		key  tea.KeyPressMsg
+	}{
+		{"a printable key", keyRune('s')},
+		{"backspace", keyBackspace()},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			l := listCursor{selected: 1}
+
+			if got := l.key(tc.key, 3, listWrapsAround); got != listUnclaimed {
+				t.Errorf("verdict = %v, want listUnclaimed — a list with no filter types nowhere", got)
+			}
+			if l.selected != 1 {
+				t.Errorf("selected = %d, want 1 — a key the cursor did not claim moves no highlight", l.selected)
+			}
+		})
+	}
+}
+
+// The keys the cursor hands back are the SAME keys a filtering surface claims, which is what makes
+// the two one contract rather than two: the surface is asked last, of what the cursor found no use
+// for. A chord neither of them wants still reaches the pane.
+func TestListSurfaceClaimsTheTypingKeysTheCursorReturns(t *testing.T) {
+	t.Parallel()
+	m := newTestModel(t)
+	l := listSurface{listCursor: listCursor{selected: 1}}
+	rows := listTestRows("first", "second", "third")
+
+	if got := pressList(m, &l, keyRune('s'), rows, listWrapsAround); got != listSwallowed {
+		t.Errorf("printable verdict = %v, want listSwallowed — the filter took it", got)
+	}
+	if got := l.filter.value(); got != "s" {
+		t.Errorf("filter = %q, want %q", got, "s")
+	}
+	if got := pressList(m, &l, keyCtrl('r'), rows, listWrapsAround); got != listUnclaimed {
+		t.Errorf("chord verdict = %v, want listUnclaimed — neither half of the contract wants it", got)
+	}
+}
+
 // The highlight the painter is given is the clamped selection, and −1 where there is nothing to
 // choose — the popup module's own convention for a pane with no cursor.
 func TestListSurfaceHighlightIsOffAnEmptyList(t *testing.T) {
 	t.Parallel()
-	l := listSurface{selected: 5}
+	l := listCursor{selected: 5}
 
-	if got := l.highlight(nil); got != -1 {
+	if got := l.highlight(0); got != -1 {
 		t.Errorf("highlight over no rows = %d, want −1 (no highlight)", got)
 	}
-	if got := l.highlight(listTestRows("first", "second")); got != 1 {
+	if got := l.highlight(2); got != 1 {
 		t.Errorf("highlight = %d, want the selection clamped onto the last row", got)
 	}
 }

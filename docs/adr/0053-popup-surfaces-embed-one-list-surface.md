@@ -90,6 +90,35 @@ filter is a `lineEditor`, and a `lineEditor` is a `textarea` — thousands of by
 is copied on every `Update`. Adopting this module must move fields, never multiply them: a pane whose
 sub-lists cannot share one surface holds them as named fields and reuses the editor it already has.
 
+## Amendment (2026-08-20) — the surface is two values: a cursor every list embeds, and the field only a filtering list adds
+
+Decision 9 bounded what adopting this module may cost; the remaining panes then made the bound bite.
+Item 16 of the deepening plan moved the /settings key list, its two sub-lists and the "/" | "@"
+dropdown onto the module, and **none of those four filters** — /settings is walked with arrows and
+answers backspace with an armed reset, and the dropdown is narrowed by the token in the chat box it
+hangs over. Handing each of them a `listSurface` would have handed each of them a `lineEditor` it
+never types into: **+40,704 bytes** on a `Model` copied on every `Update` (three widgets at 13,568
+bytes), which is exactly the multiplication decision 9 forbids.
+
+So the value is split where the panes already split:
+
+- **`listCursor`** — `{selected}`, eight bytes — is where the highlight stands and the key contract
+  that walks it: `clampSelection`, the wrap rule, `highlight`, and `key` (esc, ↑/↓ and ^p/^n, the ⏎
+  that lands on a row, everything else handed back as `listUnclaimed`). Every list in the package
+  embeds it.
+- **`listSurface`** — that cursor plus `filter lineEditor` — is a list that also FILTERS, and adds
+  only the keys that type: `Model.listKey` asks the cursor first and claims the printable keys and
+  backspace out of what it hands back. The picker and the /sessions browser are its two panes.
+
+Decisions 1–8 stand as written for a filtering list; decision 1's "two values" is now two values in
+the surface and one in the cursor, and decision 8's "every list embeds" is "embeds the one of the two
+its pane is". `Model` measured **104,592 bytes before and after** item 16, which is decision 9 held.
+
+The render call split the same way, for the same reason: `renderList` takes a pane's own body block
+(the /settings sub-list's question — the pane it replaced is where the human read the key's name),
+and `renderFilterList` fills that block with the filter line, its label and its two pads before
+delegating. Decision 6 is unchanged — the line is still stated in exactly one place.
+
 ## Consequences
 
 - The marginal cost of a new list pane is **rows + accept**. Adding one no longer means re-deriving

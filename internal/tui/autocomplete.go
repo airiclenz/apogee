@@ -108,10 +108,16 @@ func slashMatchRank(partial, name string) int {
 // splices over exactly that range and re-seats the caret after it, so whatever the human had
 // already written on either side survives untouched.
 type autocompleteState struct {
-	active     bool
-	kind       acKind
-	items      []acItem
-	selected   int
+	active bool
+	kind   acKind
+	items  []acItem
+	// listCursor is the highlight and the key contract that walks it — the package's one answer to
+	// what ↑/↓, ⏎ and esc do inside a modal list (listsurface.go, ADR 0053), embedded rather than
+	// re-declared so `ac.selected` still reads as this overlay's own field. It is the CURSOR rather
+	// than a filtering [listSurface] because this menu is narrowed by the token in the chat box below
+	// it (computeAutocomplete) and never by a field of its own: the dropdown is the one list whose
+	// filter is the thing it is completing.
+	listCursor
 	tokenStart int
 	tokenEnd   int
 }
@@ -627,25 +633,26 @@ func (m Model) fileSuggestions(partial string) []acItem {
 // accept the highlighted item (splicing it in, NOT submitting); esc dismisses the overlay.
 // Any other key returns handled=false so the input-editing path takes it and re-derives the
 // overlay.
+//
+// Everything but tab is the shared list contract ([listCursor.key], listsurface.go) and is answered
+// by it; what is left here is what only this overlay knows. It is the one list that is NOT
+// modal — it hangs over a chat box the human is still typing in — so a key the contract hands back
+// (listUnclaimed) is given up rather than swallowed, which is what keeps every letter, backspace and
+// caret move the box's while a menu is open.
 func (m Model) autocompleteKey(msg tea.KeyPressMsg) (bool, tea.Model, tea.Cmd) {
 	ac := m.autocomplete
 	n := len(ac.items)
 	if n == 0 {
 		return false, m, nil
 	}
-	switch msg.String() {
-	case "up", "ctrl+p":
-		ac.selected = (ac.selected - 1 + n) % n
-		m.autocomplete = ac
+	switch ac.key(msg, n, listWrapsAround) {
+	case listSwallowed:
+		m.autocomplete = ac // an arrow: the moved highlight is the whole of what it did
 		return true, m, nil
-	case "down", "ctrl+n":
-		ac.selected = (ac.selected + 1) % n
-		m.autocomplete = ac
+	case listCloses:
+		m.dismissAutocomplete()
 		return true, m, nil
-	case "tab":
-		nm, cmd := m.acceptAutocomplete()
-		return true, nm, cmd
-	case "enter":
+	case listAccepts:
 		// Enter falls through to submit when the token is already fully typed AND submitting is the
 		// more useful answer (autocompleteExactMatch); otherwise it accepts the highlighted row —
 		// which completes a skill or a file, and RUNS a command.
@@ -654,9 +661,13 @@ func (m Model) autocompleteKey(msg tea.KeyPressMsg) (bool, tea.Model, tea.Cmd) {
 		}
 		nm, cmd := m.acceptAutocomplete()
 		return true, nm, cmd
-	case "esc":
-		m.dismissAutocomplete()
-		return true, m, nil
+	case listUnclaimed:
+	}
+	// tab is this overlay's own second accept key and no list's: a dropdown over a text box is
+	// completed with it, where ⏎ has to stay the box's own submit for the token that is already typed.
+	if msg.String() == "tab" {
+		nm, cmd := m.acceptAutocomplete()
+		return true, nm, cmd
 	}
 	return false, m, nil
 }
@@ -892,17 +903,12 @@ func (m Model) renderAutocomplete() string {
 	for i, it := range ac.items {
 		rows[i] = it.cells
 	}
-	_, shown, seated := m.popupBudget(paneDropdown, len(rows), maxAutocompleteItems, popupChrome, popupFloor{})
-	if !seated {
-		return "" // the frame cannot seat this pane beside its siblings (frameRowPlan)
-	}
-	spec := popupSpec{
-		title:     autocompleteTitle(ac.kind),
-		rows:      rows,
-		selected:  ac.selected,
-		hint:      autocompleteHint,
-		maxRows:   shown,
-		scrollbar: m.popupScrollbarOn(),
-	}
-	return renderPopup(m.th, spec, m.width)
+	return m.renderList(listContent{
+		pane:     paneDropdown,
+		title:    autocompleteTitle(ac.kind),
+		hint:     autocompleteHint,
+		rowCap:   maxAutocompleteItems,
+		rows:     rows,
+		selected: ac.highlight(len(rows)),
+	})
 }

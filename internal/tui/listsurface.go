@@ -7,14 +7,23 @@ import (
 )
 
 // ----------------------------------------------------------------------------
-// The list surface every filtering overlay is built on
+// The list surface every modal list overlay is built on
 // ----------------------------------------------------------------------------
 //
-// A LIST SURFACE is what the /model | /server picker (picker.go) and the /sessions browser
-// (sessions.go) both are underneath their own wording: a modal list of rows with one highlight, a
-// filter the human types into it, and a row window the frame grants. Everything about that is
-// written once here and named twice there, so a pane's whole remaining job is its ROWS, its ACCEPT
-// and its HINT (ADR 0053).
+// A LIST SURFACE is what the /model | /server picker (picker.go), the /sessions browser
+// (sessions.go), the /settings key list with its two sub-lists (settings.go) and the "/" | "@"
+// dropdown (autocomplete.go) all are underneath their own wording: a modal list of rows with one
+// highlight, a row window the frame grants, and — for the two that filter — a field the human types
+// into. Everything about that is written once here and named at each pane, so a pane's whole
+// remaining job is its ROWS, its ACCEPT and its HINT (ADR 0053).
+//
+// It is TWO values, because the panes are two kinds. [listCursor] is where the highlight stands and
+// the keys that walk it — the whole state a list that does not filter keeps. [listSurface] is that
+// cursor plus the [lineEditor] a filter is typed into, and the keys that type. The split is what let
+// the five lists above adopt the module without adopting a text widget none of them types into: a
+// lineEditor is a textarea, thousands of bytes in a Model copied on every Update, and a surface
+// handed to a pane that never filters would multiply exactly the field this module must not
+// (ADR 0053 decision 9).
 //
 // What a list surface is, stated once:
 //
@@ -31,17 +40,21 @@ import (
 //     rows it leaves standing can be fewer than the highlight was pointing at.
 //   - It is MODAL. Every key it is offered is either one of its own or handed back once
 //     (listVerdict), and the pane swallows what neither of them wanted: no letter is a verb inside
-//     an open list, which is what makes every letter the filter's.
+//     an open list, which is what makes every letter the filter's. A list with NO filter hands its
+//     letters back instead, and the pane says what that means: the /settings key list swallows them
+//     (it is modal too), while the dropdown gives them to the chat box it is completing a token in.
 //   - What ↑/↓ do at the ENDS is a parameter and not a rule (listWrap) — the panes already disagree
 //     and each keeps the answer it had.
 //   - The filter LINE is the surface's, not the painter's spec. Its label, its caret, its two
-//     blank lines and the budget claim all three cost ride here (renderList), so a pane cannot
-//     paint a line it did not claim room for.
+//     blank lines and the budget claim all three cost ride here (renderFilterList), so a pane cannot
+//     paint a line it did not claim room for. A pane with a body of its own instead — the /settings
+//     sub-list's question — states it as body and takes the same budget→render call (renderList).
 //
 // The surface decides nothing about what a key MEANS. Closing an overlay, resuming a session,
 // rebinding a model: those are the pane's own acts with the pane's own consequences, and a
-// listVerdict is what asks for one. That is the split that lets seven pickerKinds and three browser
-// modes share one key contract without this file knowing that any of them exist.
+// listVerdict is what asks for one. That is the split that lets seven pickerKinds, three browser
+// modes, three /settings steps and two dropdown kinds share one key contract without this file
+// knowing that any of them exist.
 
 // listVerdict is what a [listSurface] DID with one keypress, and the whole of what it tells its pane.
 type listVerdict int
@@ -64,14 +77,29 @@ const (
 	listWrapsAround listWrap = true  // ↓ on the last row returns to the first
 )
 
-// listSurface is the state a filtering list overlay keeps between keypresses. It is a plain value
-// with no lock and no self-pointer, so a pane EMBEDS it inline in the value-copied Model (ADR 0011,
-// ADR 0053) and the fields below read as the pane's own; its zero value is "nothing typed, first row
-// highlighted", which is the state a whole-struct reset (`m.picker = picker{}`) leaves behind.
-type listSurface struct {
-	// selected indexes the FILTERED rows — what the pane actually paints — and is clamped rather than
-	// trusted, because the list underneath it can change while the overlay is open.
+// listCursor is where a list overlay's highlight stands, and — for the lists that do not filter —
+// the whole state such a list keeps between keypresses. It is a plain value with no lock and no
+// self-pointer, so a pane EMBEDS it inline in the value-copied Model (ADR 0011, ADR 0053) and the
+// field below reads as the pane's own; its zero value is "first row highlighted", which is the state
+// a whole-struct reset (`m.settings = settingsPane{}`) leaves behind.
+//
+// It is eight bytes, deliberately: a pane that never filters adopts the clamp, the wrap rule and the
+// key contract without adopting a text widget with them (ADR 0053 decision 9). A pane that DOES
+// filter holds a [listSurface], which is this value plus the field.
+type listCursor struct {
+	// selected indexes the rows the pane actually PAINTS — for a filtering list, the filtered view —
+	// and is clamped rather than trusted, because the list underneath it can change while the overlay
+	// is open.
 	selected int
+}
+
+// listSurface is a list that also FILTERS: the cursor above, plus the field the human narrows the
+// rows with. The picker and the /sessions browser are its two panes; every other list in the package
+// holds the cursor alone. Embedded rather than named, so `m.picker.selected` and `m.picker.filter`
+// both still read as the pane's own fields, and its zero value is "nothing typed, first row
+// highlighted" — the state `m.picker = picker{}` leaves behind.
+type listSurface struct {
+	listCursor
 	// filter is what the human has typed into the open overlay: the case-insensitive substring every
 	// row must carry to survive (filterPopupRows). It is a [lineEditor] — the package's one text FIELD
 	// (lineeditor.go), so "what does backspace do here" is answered where every other field answers it
@@ -95,10 +123,11 @@ func (l listSurface) view(rows []popupRow) pickerView {
 }
 
 // clampSelection keeps selected inside a row list that moved under the open overlay — a beat carrying
-// a shorter offering, a keystroke that narrowed the filter, a deleted session. n is the count of the
-// FILTERED view, so the highlight can never point past the last row on the screen. An empty list pins
-// the selection at zero (the pane paints no highlight for it — highlight).
-func (l *listSurface) clampSelection(n int) {
+// a shorter offering, a keystroke that narrowed the filter, a deleted session. n is the count the pane
+// PAINTS (for a filtering list, its filtered view), so the highlight can never point past the last row
+// on the screen. An empty list pins the selection at zero (the pane paints no highlight for it —
+// highlight).
+func (l *listCursor) clampSelection(n int) {
 	switch {
 	case n == 0:
 		l.selected = 0
@@ -112,7 +141,7 @@ func (l *listSurface) clampSelection(n int) {
 // move walks the highlight delta rows through a list of n, by whichever answer to "what happens at
 // the end" this pane keeps (listWrap). An empty list moves nowhere. The caller has already clamped,
 // so a wrapping move is the modulo of a seated index and a stopping one cannot leave the range.
-func (l *listSurface) move(delta, n int, wrap listWrap) {
+func (l *listCursor) move(delta, n int, wrap listWrap) {
 	if n == 0 {
 		return
 	}
@@ -124,66 +153,84 @@ func (l *listSurface) move(delta, n int, wrap listWrap) {
 	l.selected = clampInt(next, 0, n-1)
 }
 
-// highlight is which of rows the painter marks: the clamped selection, or −1 where there is nothing
-// to choose — the popup module's own convention for a pane with no cursor (popupSpec.selected). A
-// pane whose rows are PROSE rather than choices states that −1 itself; this answers for a list.
-func (l listSurface) highlight(rows []popupRow) int {
-	if len(rows) == 0 {
+// highlight is which of a pane's n painted rows the painter marks: the clamped selection, or −1
+// where there is nothing to choose — the popup module's own convention for a pane with no cursor
+// (popupSpec.selected). A pane whose rows are PROSE rather than choices states that −1 itself; this
+// answers for a list.
+//
+// It takes the COUNT rather than the rows because the /settings key list counts something else than
+// it paints (its display rows interleave unselectable section headers, settingsDisplayRows), and one
+// clamp answering for both is what keeps a stale selection from reaching either slice.
+func (l listCursor) highlight(n int) int {
+	if n == 0 {
 		return -1
 	}
-	return clampInt(l.selected, 0, len(rows)-1)
+	return clampInt(l.selected, 0, n-1)
 }
 
-// listKey routes one keypress through the surface at l over the pane's UNFILTERED rows, and reports
-// what it did (listVerdict). It is the whole key contract every filtering list shares: esc closes,
-// ↑/↓ (and ^p/^n) move the highlight by this pane's wrap rule, ⏎ takes the highlighted row where
-// there is one, and everything PRINTABLE types — the key's runes extend the filter that prunes the
-// rows, with backspace as its undo.
+// key routes one keypress through the cursor at l over a list of n painted rows, and reports what it
+// did (listVerdict). It is the key contract EVERY list in the package shares — the whole of it for a
+// list that does not filter, and the floor [Model.listKey] adds the typing keys to for one that
+// does: esc closes, ↑/↓ (and ^p/^n) move the highlight by this pane's wrap rule, ⏎ takes the
+// highlighted row where there is one, and every other key goes back to the pane (listUnclaimed).
 //
-// The count is re-derived and the selection re-clamped BEFORE anything else, because the rows
-// underneath can have changed since the last key, and again after a key that moved the filter
-// (typeIntoOverlayFilter). Both clamps read the SAME unfiltered rows the caller composed for this
-// keypress, so the two counts one key spends can never come from two different compositions of the
-// list.
+// The selection is re-clamped BEFORE anything else, because the rows underneath can have changed
+// since the last key — a beat carrying a shorter offering, a deleted session, a config key the
+// provider stopped answering for. n is what the pane composed for THIS keypress, so the count a key
+// is measured against and the count it leaves behind are one reading of the list.
+//
+// l points into the CALLER's Model and the pointer never outlives the call: every caller is a
+// value-receiver method that hands over the address of its own copy's cursor and returns that copy,
+// so nothing here puts a self-pointer on a Model that is copied on every Update (ADR 0011 — the
+// [Model.reportState] posture).
+func (l *listCursor) key(msg tea.KeyPressMsg, n int, wrap listWrap) listVerdict {
+	l.clampSelection(n)
+	switch msg.String() {
+	case "esc":
+		return listCloses
+	case "up", "ctrl+p":
+		l.move(-1, n, wrap)
+		return listSwallowed
+	case "down", "ctrl+n":
+		l.move(1, n, wrap)
+		return listSwallowed
+	case "enter":
+		if n == 0 {
+			return listSwallowed // nothing to take: the modal keeps the key and does nothing
+		}
+		return listAccepts
+	}
+	return listUnclaimed
+}
+
+// listKey routes one keypress through the FILTERING surface at l over the pane's UNFILTERED rows.
+// It is the cursor's contract above, measured against the rows the filter leaves standing, plus the
+// two keys only a filtering list has: everything PRINTABLE types — the key's runes extend the filter
+// that prunes the rows — with backspace as its undo.
+//
+// The typing keys are asked LAST, of what the cursor handed back, which is what keeps the two
+// contracts one contract: a key the cursor claims means the same thing in every list of the package,
+// and only what no list claims can be a letter of the filter. Both clamps of a keypress — the
+// cursor's, and the one typeIntoOverlayFilter makes against the rows the edited filter leaves —
+// read the SAME rows the caller composed for this keypress.
 //
 // There is no activation key, deliberately (ratified 2026-08-06): the overlay is modal, so no letter
 // is a verb inside it and every one of them can be the filter's. That is also why esc CLOSES with a
 // filter set rather than clearing it first — one key, one meaning, so a legend's "esc close" is never
 // conditionally wrong, and backspace is the way back to a wider list.
-//
-// l points into the CALLER's Model and the pointer never outlives the call: every caller is a
-// value-receiver method that hands over the address of its own copy's surface and returns that copy,
-// so nothing here puts a self-pointer on a Model that is copied on every Update (ADR 0011 — the
-// [Model.reportState] posture).
 func (m Model) listKey(
 	l *listSurface,
 	msg tea.KeyPressMsg,
 	rows []popupRow,
 	wrap listWrap,
 ) (listVerdict, tea.Cmd) {
-	n := len(l.view(rows).rows)
-	l.clampSelection(n)
-	switch msg.String() {
-	case "esc":
-		return listCloses, nil
-	case "up", "ctrl+p":
-		l.move(-1, n, wrap)
-		return listSwallowed, nil
-	case "down", "ctrl+n":
-		l.move(1, n, wrap)
-		return listSwallowed, nil
-	case "enter":
-		if n == 0 {
-			return listSwallowed, nil // nothing to take: the modal keeps the key and does nothing
-		}
-		return listAccepts, nil
-	case "backspace":
-		return listSwallowed, m.typeIntoOverlayFilter(l, msg, rows)
+	if verdict := l.listCursor.key(msg, len(l.view(rows).rows), wrap); verdict != listUnclaimed {
+		return verdict, nil
 	}
 	// Text carries the key's rune(s) only for PRINTABLE input — a modifier chord carries none
-	// (bubbletea's own contract) — so a chord that is not one of the verbs above is handed back to the
-	// pane rather than typed into the filter.
-	if msg.Text != "" {
+	// (bubbletea's own contract) — so a chord the cursor had no use for is handed back to the pane
+	// rather than typed into the filter.
+	if msg.String() == "backspace" || msg.Text != "" {
 		return listSwallowed, m.typeIntoOverlayFilter(l, msg, rows)
 	}
 	return listUnclaimed, nil
@@ -315,48 +362,55 @@ func overlayFilterLine(filter lineEditor) string {
 // is on.
 //
 // rowCap is the pane's own taste and not a limit the frame respects; [Model.popupBudget] cuts it down
-// to what the window can seat. selected is [listSurface.highlight] for a list of choices and −1 for a
+// to what the window can seat. selected is [listCursor.highlight] for a list of choices and −1 for a
 // pane whose rows are prose (the /sessions browser's empty-workspace note), which is a fact about the
 // rows and so the pane's to state.
+//
+// body is the block between the title and the rows, and a pane either states one of its own — the
+// /settings sub-list's question, which names the key being answered because the list where the human
+// read that name is what the sub-list replaced — or leaves it to [Model.renderFilterList], which
+// fills all three body fields from the filter being typed. The two cannot both be true of one pane:
+// a filtering list's body IS its filter line.
 type listContent struct {
 	pane     framePane
 	title    string
+	body     string
+	bodyLead string
+	bodyPad  bool
 	hint     string
 	rowCap   int
 	rows     []popupRow
+	menuRows bool
 	selected int
 }
 
 // renderList paints an open list overlay through the shared popup module (renderPopup): a titled,
 // bordered pane spanning the full window width (m.width, flush with the input box below) holding the
-// filter line, the rows and a key legend, the selected row highlighted. It returns "" when the frame
-// cannot seat the pane beside its siblings, so View treats every list's slot alike.
+// body block, the rows and a key legend, the selected row highlighted. It is the one budget→render
+// call behind every list pane — the picker, the /sessions browser, the /settings sub-lists and the
+// "/" | "@" dropdown — and it returns "" when the frame cannot seat the pane beside its siblings, so
+// View treats every list's slot alike.
 //
-// While a filter is being typed the pane grows one line for it, set off by a blank line at each end
-// (ratified 2026-08-06 — "not all bunched up"). All three lines are the module's BODY block, which
-// sits between the title and the rows and drops away entirely when the filter is empty: the text is
-// the body, and BOTH blanks are the body's own pads (popupSpec.bodyPadAbove, bodyPadBelow) rather
-// than one pad per neighbouring block. The lower blank has to belong to the body because the row
-// block's pads are spent out of the ROW window — and an offering longer than the pane's taste fills
-// that window by definition, so a pad owned by the rows would be dropped exactly on the roomy
-// terminals where the pane has lines to spare, and dropped by taking a row past the pane's own taste.
+// The BODY block is the pane's, and it is BUDGETED rather than merely drawn: the claim is the
+// wrapped body plus whichever blanks it asked to be set off by (popupFloor.body), so the pane paints
+// what it asked the frame for. The claim is also what decides the trade on a window too short for
+// everything — it comes off the top of the grant, so the ROWS shrink and the body stays. That is the
+// right way round for both bodies a list has: the one line the human is actively typing
+// (renderFilterList) is what says the list is being narrowed, and the /settings sub-list's question
+// is what says which key is being answered — while a list you cannot see all of is still a list. The
+// row demand and the row cap are untouched by any of it: the pane's taste is its taste with a body
+// exactly as without.
 //
-// The three flags are set HERE and nowhere else, which is the point of the line living with the
-// surface that owns the filter: a pane states its rows and its wording, and cannot forget the pads or
-// set them out of step with the claim below.
-//
-// All three lines are BUDGETED and not merely drawn: the claim is the wrapped filter line plus its
-// two blanks (popupFloor.body), so the pane paints what it asked the frame for. The claim is also
-// what decides the trade on a window too short for everything — it comes off the top of the grant, so
-// the ROWS shrink and the filter line stays. That is the right way round for the one line the human
-// is actively typing: a list you cannot see all of is still being narrowed, while a filter you cannot
-// see is a pane that has stopped explaining itself. The row demand and the row cap are untouched by
-// any of it — the pane's taste is its taste with a filter open exactly as without.
-func (m Model) renderList(l listSurface, c listContent) string {
-	filter := overlayFilterLine(l.filter)
+// A body set off by blanks pays for BOTH of them out of its own claim (popupSpec.bodyPadAbove,
+// bodyPadBelow) rather than one pad per neighbouring block. The lower blank has to belong to the body
+// because the row block's pads are spent out of the ROW window — and an offering longer than the
+// pane's taste fills that window by definition, so a pad owned by the rows would be dropped exactly
+// on the roomy terminals where the pane has lines to spare, and dropped by taking a row past the
+// pane's own taste.
+func (m Model) renderList(c listContent) string {
 	claim := popupFloor{}
-	if filter != "" {
-		claim.body = popupBodyLineCount(m.th, filter, m.width) + popupBodyPadLines(true, true)
+	if c.body != "" {
+		claim.body = popupBodyLineCount(m.th, c.body, m.width) + popupBodyPadLines(c.bodyPad, c.bodyPad)
 	}
 	// The pane's rowCap is the taste; popupBudget is the screen's answer to it, so a long offering on a
 	// short terminal shrinks the pane instead of pushing the input box off the frame (D2).
@@ -366,15 +420,30 @@ func (m Model) renderList(l listSurface, c listContent) string {
 	}
 	return renderPopup(m.th, popupSpec{
 		title:        c.title,
-		body:         filter,
-		bodyLead:     pickerFilterLead,
+		body:         c.body,
+		bodyLead:     c.bodyLead,
 		maxBodyRows:  maxBody,
-		bodyPadAbove: filter != "",
-		bodyPadBelow: filter != "",
+		bodyPadAbove: c.bodyPad,
+		bodyPadBelow: c.bodyPad,
 		rows:         c.rows,
+		menuRows:     c.menuRows,
 		selected:     c.selected,
 		hint:         c.hint,
 		maxRows:      shown,
 		scrollbar:    m.popupScrollbarOn(),
 	}, m.width)
+}
+
+// renderFilterList paints an open FILTERING list overlay: the call above, with the filter line as
+// the pane's body. It is the one place the line, its label, its two blanks and the claim for all
+// three are stated (renderList's own doc says what that claim buys), so a pane states its rows and
+// its wording and cannot forget the pads or set them out of step with what it asked the frame for.
+//
+// An empty filter leaves the body block exactly as the pane left it — nothing at all, for both panes
+// that filter — so a list nobody has typed into is the list it was before a filter existed.
+func (m Model) renderFilterList(filter lineEditor, c listContent) string {
+	if line := overlayFilterLine(filter); line != "" {
+		c.body, c.bodyLead, c.bodyPad = line, pickerFilterLead, true
+	}
+	return m.renderList(c)
 }

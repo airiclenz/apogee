@@ -123,7 +123,7 @@ func (m *Model) openPrebound() {
 	default:
 		m.transcript.addNote(preboundNotice(m.opts.Prebound))
 		m.picker = picker{open: true, kind: pickerServer,
-			listSurface: listSurface{selected: m.currentServerRow()}}
+			listSurface: listSurface{listCursor: listCursor{selected: m.currentServerRow()}}}
 	}
 }
 
@@ -137,7 +137,7 @@ func (m Model) preboundRefusal() (tea.Model, tea.Cmd) {
 	m.transcript.addNote(preboundNotice(m.opts.Prebound))
 	if len(m.servers()) > 0 && m.opts.BindServer != nil {
 		m.picker = picker{open: true, kind: pickerServer,
-			listSurface: listSurface{selected: m.currentServerRow()}}
+			listSurface: listSurface{listCursor: listCursor{selected: m.currentServerRow()}}}
 	}
 	m.layout()
 	return m, nil

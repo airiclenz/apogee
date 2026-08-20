@@ -25,7 +25,7 @@ import (
 //
 // Rows are DERIVED at render time from the state they describe, never captured at open. That is
 // what lets a beat landing under an open /model picker refresh the offering in place (the
-// selection is clamped, [listSurface.clampSelection]) instead of leaving the human
+// selection is clamped, [listCursor.clampSelection]) instead of leaving the human
 // choosing from a list the server has moved on from.
 //
 // The accept path is deliberately not a third way to bind: a picked model becomes a
@@ -85,10 +85,11 @@ const (
 type picker struct {
 	open bool
 	kind pickerKind
-	// listSurface is the highlight and the filter — the state EVERY list overlay in the package keeps
-	// and the key contract that goes with it (listsurface.go, ADR 0053), embedded rather than
-	// re-declared so `m.picker.selected` and `m.picker.filter` still read as the pane's own while
-	// there is one answer to what ↑/↓, a typed letter and esc do inside a modal list.
+	// listSurface is the highlight and the filter — the state a list overlay that FILTERS keeps, and
+	// the key contract that goes with it (listsurface.go, ADR 0053), embedded rather than re-declared
+	// so `m.picker.selected` and `m.picker.filter` still read as the pane's own while there is one
+	// answer to what ↑/↓, a typed letter and esc do inside a modal list. The lists that do not filter
+	// hold the [listCursor] inside it and answer the same arrows through the same code.
 	//
 	// selected indexes the FILTERED rows the current kind derives; it is clamped rather than trusted,
 	// because the list underneath it can change while the overlay is open.
@@ -288,7 +289,7 @@ func (m Model) runServerCommand(args []string) (tea.Model, tea.Cmd) {
 			"unknown server %q — configured: %s", args[0], serverNameList(servers)))
 	}
 	m.picker = picker{open: true, kind: pickerServer,
-		listSurface: listSurface{selected: m.currentServerRow()}}
+		listSurface: listSurface{listCursor: listCursor{selected: m.currentServerRow()}}}
 	m.layout()
 	return m, nil
 }
@@ -756,26 +757,28 @@ func (m Model) pickerFilteredView() pickerView {
 // Rendering
 // ----------------------------------------------------------------------------
 
-// renderPicker paints the open picker through the shared list surface (renderList, listsurface.go):
+// renderPicker paints the open picker through the shared list surface (renderFilterList,
+// listsurface.go):
 // a titled, bordered pane spanning the full window width holding the filter line, the rows and a key
 // legend, the selected row highlighted. It returns "" when the picker is closed, so View treats it
 // exactly like the /sessions browser's slot.
 //
 // What this file states is what only this pane knows — its slot in the frame, its name, its legend,
 // its taste in rows and the rows themselves. The filter line, its two blanks, the budget claim all
-// three cost and the trade on a window too short for everything are the surface's (renderList).
+// three cost and the trade on a window too short for everything are the surface's
+// (renderFilterList).
 func (m Model) renderPicker() string {
 	if !m.picker.open {
 		return ""
 	}
 	rows := m.pickerRows()
-	return m.renderList(m.picker.listSurface, listContent{
+	return m.renderFilterList(m.picker.filter, listContent{
 		pane:     panePicker,
 		title:    m.pickerTitle(),
 		hint:     pickerHintFor(m.picker.kind),
 		rowCap:   maxPickerRows,
 		rows:     rows,
-		selected: m.picker.highlight(rows),
+		selected: m.picker.highlight(len(rows)),
 	})
 }
 

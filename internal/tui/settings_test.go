@@ -689,7 +689,7 @@ func TestSettingsPaneEnumSubListCommitsAndBacksOut(t *testing.T) {
 
 	opened := step(t, m, keyEnter())
 
-	if opened.settings.kind != settingsEnumList || opened.settings.sub != 0 {
+	if opened.settings.kind != settingsEnumList || opened.settings.sub.selected != 0 {
 		t.Fatalf("pane = %+v, want the sub-list open on the current value (row 0)", opened.settings)
 	}
 	pane := strip(opened.renderSettings())
@@ -701,7 +701,7 @@ func TestSettingsPaneEnumSubListCommitsAndBacksOut(t *testing.T) {
 
 	// esc backs out of the QUESTION, not out of the pane, and writes nothing.
 	backed := step(t, opened, keyEsc())
-	if !backed.settings.open || backed.settings.kind != settingsKeyList || backed.settings.sub != 0 {
+	if !backed.settings.open || backed.settings.kind != settingsKeyList || backed.settings.sub.selected != 0 {
 		t.Errorf("pane = %+v after esc, want it open again on its key list", backed.settings)
 	}
 	if len(log.writes) != 0 {
@@ -773,8 +773,8 @@ func TestSettingsServerRowPicksFromTheLiveList(t *testing.T) {
 	if opened.settings.kind != settingsEnumList {
 		t.Fatalf("pane = %+v, want the value sub-list — the server row never opens a text buffer", opened.settings)
 	}
-	if opened.settings.sub != 0 {
-		t.Errorf("sub = %d, want the row for the server this session is on", opened.settings.sub)
+	if opened.settings.sub.selected != 0 {
+		t.Errorf("sub = %d, want the row for the server this session is on", opened.settings.sub.selected)
 	}
 	pane := strip(opened.renderSettings())
 	for _, want := range []string{"server", "test-host", "remote", "(current)", settingsEnumHint} {
@@ -2885,8 +2885,8 @@ func TestSettingsPaneOffersTheSchemesTheSessionDiscovers(t *testing.T) {
 		}
 	}
 	// The sub-list opens ON the scheme the key holds, which is what makes ⏎⏎ a confirmation.
-	if opened.settings.sub != 0 {
-		t.Errorf("sub = %d, want 0 — the highlight opens on the current scheme", opened.settings.sub)
+	if opened.settings.sub.selected != 0 {
+		t.Errorf("sub = %d, want 0 — the highlight opens on the current scheme", opened.settings.sub.selected)
 	}
 }
 
@@ -3102,7 +3102,7 @@ func TestSettingsMechanismsRowOpensTheToggleList(t *testing.T) {
 
 	opened, cmd := stepCmd(t, m, keyEnter())
 
-	if opened.settings.kind != settingsMechanismList || opened.settings.sub != 0 {
+	if opened.settings.kind != settingsMechanismList || opened.settings.sub.selected != 0 {
 		t.Fatalf("pane = %+v, want the Mechanism list open at its first row", opened.settings)
 	}
 	if cmd != nil || len(edit.asked) != 0 {
@@ -3149,7 +3149,7 @@ func TestSettingsMechanismListTogglesAndStaysOpen(t *testing.T) {
 	if !reflect.DeepEqual(log.writes, want) {
 		t.Fatalf("writes = %+v, want %+v — space flips the row the highlight moved to", log.writes, want)
 	}
-	if toggled.settings.kind != settingsMechanismList || toggled.settings.sub != 1 {
+	if toggled.settings.kind != settingsMechanismList || toggled.settings.sub.selected != 1 {
 		t.Errorf("pane = %+v, want the list open with the highlight where it was left", toggled.settings)
 	}
 }
@@ -3164,7 +3164,7 @@ func TestSettingsMechanismListEscReturnsToTheKeyList(t *testing.T) {
 
 	backed := step(t, step(t, m, keyEnter()), keyEsc())
 
-	if !backed.settings.open || backed.settings.kind != settingsKeyList || backed.settings.sub != 0 {
+	if !backed.settings.open || backed.settings.kind != settingsKeyList || backed.settings.sub.selected != 0 {
 		t.Errorf("pane = %+v after esc, want it open again on its key list", backed.settings)
 	}
 	if len(log.writes) != 0 {
