@@ -2,6 +2,7 @@ package config
 
 import (
 	"errors"
+	"fmt"
 	"io/fs"
 	"math"
 	"os"
@@ -419,47 +420,255 @@ func TestRegistryModeDefaultIsTheLadderDefault(t *testing.T) {
 	}
 }
 
-// The binding table over the registry cannot half-describe a key: every row advertising a
-// variable or a flag must have the plumbing that reads it, every binding must name a described
-// key, and no binding may carry plumbing for a source its row does not name (which would be
-// dead code advertising nothing). Without this, adding `EnvVar:` to a row would silently
-// advertise a variable resolution never reads.
-func TestMultiSourceKeysBindDescribedKeys(t *testing.T) {
+// The accessor table over the registry cannot half-describe a key: EVERY row needs both the
+// projection that reads it out of the file and the overlay that copies it onto the resolved
+// settings, exactly once; every row advertising a variable or a flag must have the plumbing that
+// reads that source; every accessor must name a described key; and no accessor may carry plumbing
+// for a source its row does not name (which would be dead code advertising nothing). Without this,
+// a key added to the schema and described in the registry could still be a key resolution never
+// reads, and adding `EnvVar:` to a row would silently advertise a variable nothing looks at.
+func TestKeyAccessorsBindDescribedKeys(t *testing.T) {
 	t.Parallel()
 
-	bound := map[string]multiSourceKey{}
-	for _, k := range multiSourceKeys {
+	bound := map[string]keyAccessor{}
+	for _, k := range keyAccessors {
 		if _, ok := LookupKey(k.row.Path); !ok {
-			t.Errorf("multiSourceKeys binds %q, which the registry does not describe", k.row.Path)
+			t.Errorf("keyAccessors binds %q, which the registry does not describe", k.row.Path)
+		}
+		if _, dup := bound[k.row.Path]; dup {
+			t.Errorf("keyAccessors binds %q twice — one key, one entry", k.row.Path)
+		}
+		if k.fromFile == nil {
+			t.Errorf("keyAccessors entry %q has no fromFile, so the config file could never set it", k.row.Path)
 		}
 		if k.overlay == nil {
-			t.Errorf("multiSourceKeys entry %q has no overlay, so resolution would never copy it", k.row.Path)
+			t.Errorf("keyAccessors entry %q has no overlay, so resolution would never copy it", k.row.Path)
 		}
 		if k.fromEnv != nil && k.row.EnvVar == "" {
-			t.Errorf("multiSourceKeys entry %q reads an environment variable its row does not name", k.row.Path)
+			t.Errorf("keyAccessors entry %q reads an environment variable its row does not name", k.row.Path)
 		}
 		if k.fromFlag != nil && k.row.FlagName == "" {
-			t.Errorf("multiSourceKeys entry %q reads a flag its row does not name", k.row.Path)
+			t.Errorf("keyAccessors entry %q reads a flag its row does not name", k.row.Path)
 		}
 		bound[k.row.Path] = k
 	}
 	for _, row := range KeyRegistry {
-		if row.EnvVar == "" && row.FlagName == "" {
-			continue // file-only, so nothing above the file has to be plumbed
-		}
 		k, ok := bound[row.Path]
 		if !ok {
-			t.Errorf("registry row %q names a source above the file but nothing binds it — the variable "+
-				"or flag would be advertised and never read", row.Path)
+			t.Errorf("registry row %q has no accessor — the key would be shown by /settings and never "+
+				"read by resolution", row.Path)
 			continue
 		}
 		if row.EnvVar != "" && k.fromEnv == nil {
-			t.Errorf("registry row %q names %s but the binding reads no environment value", row.Path, row.EnvVar)
+			t.Errorf("registry row %q names %s but the accessor reads no environment value", row.Path, row.EnvVar)
 		}
 		if row.FlagName != "" && k.fromFlag == nil {
-			t.Errorf("registry row %q names --%s but the binding reads no flag value", row.Path, row.FlagName)
+			t.Errorf("registry row %q names --%s but the accessor reads no flag value", row.Path, row.FlagName)
 		}
 	}
+}
+
+// The accessor table has to produce the SAME layer the hand-written projection does, key by key
+// and kind by kind — that equivalence is the whole licence for resolution to read the rows instead
+// of the chain. Each case is one representative kind carried by a real fileConfig: a bool, an int,
+// a float, an enum, a name list, a multi-line text value, the blocks whose keys share one carrier,
+// and the structured terminators. The last case sets every key at once, which is what catches an
+// accessor that projects the right value onto the wrong field.
+func TestKeyAccessorsProjectTheFileLikeTheChain(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		fc   fileConfig
+	}{
+		{name: "empty file sets nothing"},
+		{name: "bool keys", fc: fileConfig{
+			Bypass: boolptr(true), AutoCompact: boolptr(false), AutoTitle: boolptr(false),
+			RememberModel: boolptr(true), UseProjectSkills: boolptr(false),
+			ConfineToWorkspace: boolptr(false),
+			ValidatedSets:      &validatedSetsConfig{Enable: boolptr(false)},
+		}},
+		{name: "enum and name keys", fc: fileConfig{
+			Mode: "auto", Server: "the-box", CursorShape: "bar", Editor: "code -w",
+			WebSearch: "off", UI: &uiConfig{Spinner: "glitter", ColorScheme: "nord"},
+		}},
+		{name: "string lists", fc: fileConfig{
+			Tools:        &toolsConfig{Disabled: []string{"web_search"}},
+			URLSafety:    &urlSafetyConfig{AllowHosts: []string{"example.com"}},
+			ContextFiles: &contextFilesConfig{Names: []string{"CLAUDE.md", "AGENTS.md"}},
+		}},
+		{name: "an empty name list is off, not absent", fc: fileConfig{
+			ContextFiles: &contextFilesConfig{Names: []string{}},
+		}},
+		{name: "numbers and text", fc: fileConfig{
+			ContextWindow: 32000, ResponseReserve: 0.25, SystemPromptText: "be brief\nand kind",
+			Present: &presentConfig{Port: 8080},
+		}},
+		{name: "numbers at zero are unset", fc: fileConfig{ContextWindow: 0, ResponseReserve: 0}},
+		{name: "blocks whose keys share a carrier", fc: fileConfig{
+			UI: &uiConfig{SpinnerColor: boolptr(false), ShowScrollbar: boolptr(false),
+				StallAfter: strptr("45s"), Inspector: boolptr(true)},
+			Present:      &presentConfig{AutoOpen: boolptr(false), Command: "open {path}", Host: "box.local"},
+			ContextFiles: &contextFilesConfig{Enable: boolptr(false)},
+			SystemPromptModels: map[string]systemPromptEntryConfig{
+				"qwen": {Text: "be terse"},
+			},
+		}},
+		{name: "structured terminators", fc: fileConfig{
+			Servers:         []ServerEntry{{Name: "box", Endpoint: "http://localhost:8080"}},
+			UnconfinedHosts: []UnconfinedHost{{ID: "abc", Note: "the laptop"}},
+			MCPServers:      []mcpServerConfig{{Name: "docs", Command: "mcp-docs"}},
+			Mechanisms:      map[string]bool{"decompose": true},
+			ValidatedSets:   &validatedSetsConfig{Alias: map[string]string{"local": "qwen-30b"}},
+			ModelProfiles: map[string]modelProfileConfig{
+				"qwen": {ToolCallFormat: "xml"}, "gpt": {ToolCallFormat: "native"},
+			},
+		}},
+		{name: "every key at once", fc: everyKeyFileConfig()},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			var got Layer
+			for _, k := range keyAccessors {
+				k.fromFile(&got, tc.fc)
+			}
+			for _, diff := range structDiff(got, tc.fc.layer()) {
+				t.Errorf("layer field %s", diff)
+			}
+		})
+	}
+}
+
+// And the other half of the equivalence: the overlays have to land the layer's values on the same
+// settings fields the hand-written copy block does. The comparison is against ResolveSettings
+// itself — the defaults it starts from, then every row's overlay, then the ONE collapse no
+// accessor can make (a Host acknowledgement needs this machine's identity, which no row holds).
+// A missing overlay, or one writing a neighbour's field, shows up as a diff on the resolved value.
+func TestKeyAccessorsOverlayLikeResolution(t *testing.T) {
+	t.Parallel()
+
+	const hostID = "this-host"
+	tests := []struct {
+		name string
+		fc   fileConfig
+	}{
+		{name: "empty file resolves to the defaults"},
+		{name: "every key at once", fc: everyKeyFileConfig()},
+		{name: "an acknowledged host still loosens confinement", fc: fileConfig{
+			UnconfinedHosts: []UnconfinedHost{{ID: hostID, Acknowledged: "2026-08-20"}},
+		}},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			file := tc.fc.layer()
+			got, _ := ResolveSettings(Layer{}, Layer{}, Layer{}, hostID) // the default base
+			for _, k := range keyAccessors {
+				k.overlay(&got, file)
+			}
+			got.ConfineToWorkspace, _ = resolveConfineToWorkspace(file.ConfineToWorkspace, file.UnconfinedHosts, hostID)
+
+			want, _ := ResolveSettings(file, Layer{}, Layer{}, hostID)
+			for _, diff := range structDiff(got, want) {
+				t.Errorf("settings field %s", diff)
+			}
+		})
+	}
+}
+
+// The one place the accessors do NOT reproduce the hand-written projection exactly, pinned here so
+// it stays a decision rather than a surprise. A block written with no keys under it (`present:`
+// and nothing beneath it) hands the chain a carrier holding the block's defaults, while the
+// per-key accessors leave it unset — no key of the block is present, so no accessor claims one is.
+// The two resolve to the same settings, because the carrier the chain builds holds exactly the
+// defaults resolution already starts from, and that equality is what makes the divergence safe.
+func TestKeyAccessorsLeaveABlockWithNoKeysUnset(t *testing.T) {
+	t.Parallel()
+
+	fc := fileConfig{Present: &presentConfig{}, UI: &uiConfig{}, ContextFiles: &contextFilesConfig{}}
+	var accessors Layer
+	for _, k := range keyAccessors {
+		k.fromFile(&accessors, fc)
+	}
+	if accessors.Present != nil || accessors.UI != nil || accessors.ContextFiles != nil {
+		t.Errorf("a block with no keys set a carrier: present=%v ui=%v context-files=%v",
+			accessors.Present, accessors.UI, accessors.ContextFiles)
+	}
+	chain := fc.layer()
+	if chain.Present == nil || chain.UI == nil || chain.ContextFiles == nil {
+		t.Fatal("the hand-written projection no longer carries an empty block — the divergence this " +
+			"test explains is gone, so it should be deleted rather than updated")
+	}
+
+	got, _ := ResolveSettings(accessors, Layer{}, Layer{}, "this-host")
+	want, _ := ResolveSettings(chain, Layer{}, Layer{}, "this-host")
+	for _, diff := range structDiff(got, want) {
+		t.Errorf("settings field %s", diff)
+	}
+}
+
+// everyKeyFileConfig is a file that sets EVERY key of the schema to a non-default value, so an
+// accessor that reads the wrong field cannot hide behind a key the case left absent. It is one
+// function rather than a literal in each test because both equivalence tests want the same
+// exhaustive file — the layer they compare and the settings they resolve are two ends of it.
+func everyKeyFileConfig() fileConfig {
+	return fileConfig{
+		Mode: "auto", Bypass: boolptr(true), Server: "the-box", Editor: "hx",
+		Servers:            []ServerEntry{{Name: "the-box", Endpoint: "http://localhost:9000"}},
+		ConfineToWorkspace: boolptr(false),
+		UnconfinedHosts:    []UnconfinedHost{{ID: "another-host", Acknowledged: "2026-08-20"}},
+		WebSearch:          "https://search.example.com",
+		UseProjectSkills:   boolptr(false), AutoCompact: boolptr(false), AutoTitle: boolptr(false),
+		RememberModel: boolptr(true),
+		ContextWindow: 64000, ResponseReserve: 0.3,
+		MCPServers:    []mcpServerConfig{{Name: "docs", Command: "mcp-docs"}},
+		Tools:         &toolsConfig{Disabled: []string{"web_search"}},
+		URLSafety:     &urlSafetyConfig{AllowHosts: []string{"example.com"}, DenyHosts: []string{"evil.example"}},
+		ModelProfiles: map[string]modelProfileConfig{"qwen": {ToolCallFormat: "xml"}},
+		Mechanisms:    map[string]bool{"decompose": true},
+		ValidatedSets: &validatedSetsConfig{Enable: boolptr(false),
+			Alias: map[string]string{"local": "qwen-30b"}},
+		Present: &presentConfig{AutoOpen: boolptr(false), Command: "open {path}", Port: 8080,
+			Host: "box.local"},
+		SystemPromptText: "be brief", SystemPromptFile: "prompt.md",
+		SystemPromptModels: map[string]systemPromptEntryConfig{"qwen": {Text: "be terse"}},
+		ContextFiles:       &contextFilesConfig{Enable: boolptr(false), Names: []string{"CLAUDE.md"}},
+		CursorShape:        "bar",
+		UI: &uiConfig{Spinner: "glitter", SpinnerColor: boolptr(false), ShowScrollbar: boolptr(false),
+			ColorScheme: "nord", StallAfter: strptr("30s"), Inspector: boolptr(true)},
+	}
+}
+
+// structDiff names the fields two carriers disagree on, one line each, dereferencing the pointers
+// a Layer is made of: printing a whole Layer with %+v prints addresses, which says nothing about
+// the value that differs, and printing a whole Settings buries the one field that moved in
+// twenty-odd that did not.
+func structDiff[T any](got, want T) []string {
+	var diffs []string
+	g, w := reflect.ValueOf(got), reflect.ValueOf(want)
+	for i := range g.NumField() {
+		if reflect.DeepEqual(g.Field(i).Interface(), w.Field(i).Interface()) {
+			continue
+		}
+		diffs = append(diffs, fmt.Sprintf("%s = %s; want %s", g.Type().Field(i).Name,
+			renderFieldValue(g.Field(i)), renderFieldValue(w.Field(i))))
+	}
+	return diffs
+}
+
+// renderFieldValue prints one carrier field as the VALUE it stands for: an unset pointer as
+// "unset", a set one as what it points at.
+func renderFieldValue(v reflect.Value) string {
+	if v.Kind() == reflect.Pointer {
+		if v.IsNil() {
+			return "unset"
+		}
+		return fmt.Sprintf("%+v", v.Elem().Interface())
+	}
+	return fmt.Sprintf("%+v", v.Interface())
 }
 
 // The Host acknowledgement ladder (ADR 0012, amendment 2026-07-21), pinned in the order the
@@ -1178,7 +1387,7 @@ func TestResolveStartupOverridesEmptyFlagBeatsTheVariable(t *testing.T) {
 	}
 }
 
-// The override table cannot half-describe a source, on TestMultiSourceKeysBindDescribedKeys'
+// The override table cannot half-describe a source, on TestKeyAccessorsBindDescribedKeys'
 // reasoning: every entry must read the variable it names and the flag it names, the three
 // detached variables must each be bound exactly once, and no override name may collide with a
 // registry row's — since ADR 0036 these names describe no config key, and an overlap would mean

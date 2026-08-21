@@ -401,7 +401,13 @@ NOTES (2026-08-21): applied the dispatch DECISION — the `spinnerValues`/`curso
 
 **Commit:** `refactor(config): reach UI vocabulary through domain, not tui`
 
-## 18. Every registry row carries fromFile and overlay accessors
+## 18. Every registry row carries fromFile and overlay accessors — ✅ DONE (2026-08-21)
+
+NOTES (2026-08-21): renamed `multiSourceKey`/`multiSourceKeys` to `keyAccessor`/`keyAccessors` (and `TestMultiSourceKeysBindDescribedKeys` to `TestKeyAccessorsBindDescribedKeys`, with the two comments that cite them). The item extends this table from 3 keys to all 38, which makes "multi-source" a false name for it; `TestResolveSettingsMultiSourceKeysReadTheRegistry` keeps its name, since it still tests exactly the multi-source keys.
+NOTES (2026-08-21): `confine-to-workspace`'s overlay carries the file's EXPLICIT value only. The EFFECTIVE value also depends on whether a Host acknowledgement names this machine, which needs the host identity — a fact no row holds — so `resolveConfineToWorkspace` stays in `ResolveSettings`; both the accessor doc comment and the overlay equivalence test say so.
+NOTES (2026-08-21): the accessors are NOT layer-identical to the hand-written projection in one case, documented and pinned by `TestKeyAccessorsLeaveABlockWithNoKeysUnset`: a block written with no keys under it (`present:` and nothing beneath) leaves the carrier unset where the chain sets it to the block defaults. The resolved settings are identical, because that carrier holds exactly the defaults resolution starts from.
+NOTES (2026-08-21): `ResolveSettings`' precedence loop gained a two-line skip for file-only keys, so extending the table it ranges over does not make it re-copy the 35 keys the hand-written block above it already copied. Behaviour is unchanged (the skipped overlays are all no-ops on the env/flag layers); the loop itself is item 19's to replace.
+NOTES (2026-08-21): the item's Files list names `internal/config/registry_test.go`; the completeness guard and the two equivalence tables live in `config_test.go` instead, beside the table they guard — `registry_test.go` describes the registry, not resolution's plumbing. `registry.go` changed only where its `mustKey` comment cites the renamed table.
 
 **Source:** review candidate 2; ratified call 3. Depends on item 17 (same files).
 

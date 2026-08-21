@@ -222,6 +222,18 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **Every config key now travels through its own registry row.** The table binding a key to the
+  plumbing that resolves it described three of the schema's thirty-eight keys — the ones settable
+  from an environment variable or a flag — while the other thirty-five rode a hand-written copy
+  chain: a branch per field projecting the parsed file onto a precedence layer, and a second one
+  copying that layer onto the resolved settings. Every row now carries both of those as accessors
+  of its own (`fromFile`, `overlay`), written against the same typed carriers the chain uses, and
+  the completeness is a test gate rather than an editorial promise: a row with no accessor, an
+  accessor naming no row, or a row advertising a variable nothing reads all fail the build gate.
+  Two equivalence tables pin the new accessors to the chain they were read off — kind by kind, and
+  once with every key of the schema set at once — so nothing about resolution changes yet: the
+  chain still runs, and this is the table it will be replaced by.
+
 - **The config layer no longer pulls the whole TUI in to check a spelling.** `internal/config`
   imported `internal/tui` for four things that are not rendering at all — the spinner style name a
   `ui.spinner:` carries, the caret names a `cursor-shape:` carries, the reason a session can start

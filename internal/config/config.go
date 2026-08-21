@@ -626,40 +626,87 @@ type Layer struct {
 	CursorShape *string
 }
 
-// multiSourceKey binds one registry row to the plumbing that carries its key through resolution.
-// Three of the schema's keys are settable from more than one source, and they are the only ones
-// whose environment-variable and flag NAMES are ever in play — so those names are read from the
-// row (EnvVar, FlagName) rather than restated as a literal at each of the three sites that used
-// to spell them: the env layer, the flag layer, and ResolveSettings' precedence loop. Source
-// metadata therefore has exactly one home, and renaming APOGEE_MODE or --mode is an edit to one
-// registry row instead of a three-site edit that can half-land — with the row the /settings
-// surface shows as the key's source guaranteed to be the row resolution actually read.
+// keyAccessor binds one registry row to the plumbing that carries its key through resolution:
+// which sources the key is read FROM, and where a value read from each of them is written TO. The
+// registry says what a key IS; this table says how it travels, and the two are one row apart so a
+// key described to the /settings surface cannot be a key resolution forgot to read.
+//
+// The environment-variable and flag NAMES are read off the row (EnvVar, FlagName) rather than
+// restated as a literal at each site that used to spell them — the env layer, the flag layer, the
+// override marker, and the precedence loop. Source metadata therefore has exactly one home, and
+// renaming APOGEE_MODE or --mode is an edit to one registry row instead of a four-site edit that
+// can half-land.
+//
+// The accessors are closures over the CURRENT typed carriers (fileConfig, Layer, Settings) rather
+// than reflection over them, so the compiler still checks every projection:
+//
+//   - fromFile projects a parsed file's typed value AND its presence onto a Layer — an absent key
+//     leaves the field nil so it falls through to the source below, which is the whole reason the
+//     layer is pointer-shaped. Every row has one: every key of this schema is settable from the file.
+//   - fromEnv projects a variable's text and fromFlag the already-parsed flag value. Both are nil
+//     for a key with no source of that kind, which is most of the schema — a per-machine or
+//     per-model fact does not belong to one invocation, and ADR 0012 fences two keys to the global
+//     file outright.
+//   - overlay copies a Layer's value onto the resolved Settings when that Layer sets it. Every row
+//     has one, and each writes only its own field, so applying the layers in order IS the
+//     precedence rule.
+//
+// Two shapes need a word. The keys that SHARE a carrier — the three system-prompt keys, the two
+// context-files keys, the four present keys, the six ui keys — each project the whole block their
+// key sits in, because the Layer field is that block; each still answers for its OWN key's
+// presence, and applying two of them is idempotent. A block written with NO keys under it
+// therefore leaves the carrier unset where the hand-written projection sets it to the block
+// defaults — the one place the two differ, and a difference with no consequence, since that
+// carrier holds exactly the defaults resolution starts from
+// (TestKeyAccessorsLeaveABlockWithNoKeysUnset). And confine-to-workspace's accessors carry the
+// file's EXPLICIT value only: the EFFECTIVE one also depends on whether a Host acknowledgement
+// names this machine, which needs the host identity — a fact no row holds, so that collapse stays
+// in ResolveSettings (resolveConfineToWorkspace).
 //
 // What this table does NOT carry is the raw startup overrides (`--endpoint`, `APOGEE_ENDPOINT`,
 // `APOGEE_API_KEY`, `--model`, `APOGEE_MODEL`): since ADR 0036 those name no config key at all —
 // they build or overlay a startup server entry — so they are resolved on their own, off the
 // registry, rather than pretending to be file keys that no longer exist.
-//
-// The accessors are what lets the typed Layer/Settings structs stand unchanged (rewriting that
-// whole copy chain into table-driven resolution is a separate effort): fromEnv projects a
-// variable's text onto a Layer, fromFlag projects the already-parsed flag value, and overlay
-// copies a Layer's value onto the resolved Settings when that Layer sets it. A nil fromEnv or
-// fromFlag means the key has no source of that kind.
-type multiSourceKey struct {
+type keyAccessor struct {
 	row      Key
+	fromFile func(l *Layer, fc fileConfig)
 	fromEnv  func(l *Layer, text string) error
 	fromFlag func(l *Layer, opts Options)
 	overlay  func(s *Settings, l Layer)
 }
 
-// multiSourceKeys is that table, in the order the registry lists the keys. The order does not
-// affect the outcome — each key overlays its own field, and precedence is the order the LAYERS
-// are applied in — it only keeps the table readable beside the registry it is built over.
-var multiSourceKeys = []multiSourceKey{
+// keyAccessors is that table: one entry per registry row, in the order the registry lists the keys.
+// The order does not affect the outcome — each key writes its own field, and precedence is the
+// order the LAYERS are applied in — it only keeps the table readable beside the registry it is
+// built over. Its completeness is a test gate rather than an editorial promise
+// (TestKeyAccessorsBindDescribedKeys): every registry row has an entry here, every entry has both
+// a fromFile and an overlay, and a row advertising a variable or a flag has the plumbing that
+// reads it.
+var keyAccessors = []keyAccessor{
+	{
+		// File-only: the list names MACHINES, which is a config act rather than an invocation one —
+		// its invocation-settable neighbour is the `server:` pointer below it.
+		row: mustKey("servers"),
+		fromFile: func(l *Layer, fc fileConfig) {
+			if len(fc.Servers) > 0 {
+				l.Servers = fc.Servers
+			}
+		},
+		overlay: func(s *Settings, l Layer) {
+			if l.Servers != nil {
+				s.Servers = l.Servers
+			}
+		},
+	},
 	{
 		// The one key of the `servers:` neighbourhood with sources above the file: the list is
 		// config, the choice of entry is an invocation.
 		row: mustKey("server"),
+		fromFile: func(l *Layer, fc fileConfig) {
+			if fc.Server != "" {
+				l.StartupServer = &fc.Server
+			}
+		},
 		fromEnv: func(l *Layer, text string) error {
 			l.StartupServer = &text
 			return nil
@@ -676,6 +723,11 @@ var multiSourceKeys = []multiSourceKey{
 	},
 	{
 		row: mustKey("mode"),
+		fromFile: func(l *Layer, fc fileConfig) {
+			if fc.Mode != "" {
+				l.Mode = &fc.Mode
+			}
+		},
 		fromEnv: func(l *Layer, text string) error {
 			l.Mode = &text
 			return nil
@@ -691,7 +743,391 @@ var multiSourceKeys = []multiSourceKey{
 		},
 	},
 	{
+		// The first of the three keys that are ONE prompt (ADR 0023) and therefore one carrier: each
+		// answers for its own key's presence and projects the block all three describe.
+		row: mustKey("system-prompt-text"),
+		fromFile: func(l *Layer, fc fileConfig) {
+			if fc.SystemPromptText != "" {
+				sp := fc.toSystemPromptSettings()
+				l.SystemPrompt = &sp
+			}
+		},
+		overlay: overlaySystemPrompt,
+	},
+	{
+		row: mustKey("system-prompt-file"),
+		fromFile: func(l *Layer, fc fileConfig) {
+			if fc.SystemPromptFile != "" {
+				sp := fc.toSystemPromptSettings()
+				l.SystemPrompt = &sp
+			}
+		},
+		overlay: overlaySystemPrompt,
+	},
+	{
+		row: mustKey("system-prompt-models"),
+		fromFile: func(l *Layer, fc fileConfig) {
+			if len(fc.SystemPromptModels) > 0 {
+				sp := fc.toSystemPromptSettings()
+				l.SystemPrompt = &sp
+			}
+		},
+		overlay: overlaySystemPrompt,
+	},
+	{
+		// The `context-files:` pair, one carrier like the system-prompt trio above: an absent block
+		// leaves the carrier nil and the defaults (on, AGENTS.md) stand, and a block that names one
+		// key projects the other at its default — which is what toContextFilesSettings applies.
+		row: mustKey("context-files.enable"),
+		fromFile: func(l *Layer, fc fileConfig) {
+			if fc.ContextFiles != nil && fc.ContextFiles.Enable != nil {
+				c := fc.ContextFiles.toContextFilesSettings()
+				l.ContextFiles = &c
+			}
+		},
+		overlay: overlayContextFiles,
+	},
+	{
+		row: mustKey("context-files.names"),
+		fromFile: func(l *Layer, fc fileConfig) {
+			// Present-but-empty is "no names", the second spelling of off — so the nil check is the
+			// presence test, not a length one.
+			if fc.ContextFiles != nil && fc.ContextFiles.Names != nil {
+				c := fc.ContextFiles.toContextFilesSettings()
+				l.ContextFiles = &c
+			}
+		},
+		overlay: overlayContextFiles,
+	},
+	{
+		// Global-config-only (ADR 0012): no env, no flag, so the invocation environment cannot
+		// loosen Auto's blast radius. The overlay carries the file's EXPLICIT value; the effective
+		// one is resolveConfineToWorkspace's, because only it holds this machine's identity.
+		row: mustKey("confine-to-workspace"),
+		fromFile: func(l *Layer, fc fileConfig) {
+			if fc.ConfineToWorkspace != nil {
+				l.ConfineToWorkspace = fc.ConfineToWorkspace
+			}
+		},
+		overlay: func(s *Settings, l Layer) {
+			if l.ConfineToWorkspace != nil {
+				s.ConfineToWorkspace = *l.ConfineToWorkspace
+			}
+		},
+	},
+	{
+		// Global-config-only for the reason above — a hostile repo must not be able to name your
+		// host — and carried past resolution so the session can report the list back and extend it.
+		row: mustKey("unconfined-hosts"),
+		fromFile: func(l *Layer, fc fileConfig) {
+			if len(fc.UnconfinedHosts) > 0 {
+				l.UnconfinedHosts = fc.UnconfinedHosts
+			}
+		},
+		overlay: func(s *Settings, l Layer) {
+			if l.UnconfinedHosts != nil {
+				s.UnconfinedHosts = l.UnconfinedHosts
+			}
+		},
+	},
+	{
+		row: mustKey("web-search-endpoint"),
+		fromFile: func(l *Layer, fc fileConfig) {
+			if fc.WebSearch != "" {
+				l.WebSearchEndpoint = &fc.WebSearch
+			}
+		},
+		overlay: func(s *Settings, l Layer) {
+			if l.WebSearchEndpoint != nil {
+				s.WebSearchEndpoint = *l.WebSearchEndpoint
+			}
+		},
+	},
+	{
+		// The on-disk entries are mapped across one by one, as they are everywhere else in this
+		// package: the schema shape and the resolved one stay independently evolvable.
+		row: mustKey("mcp-servers"),
+		fromFile: func(l *Layer, fc fileConfig) {
+			if len(fc.MCPServers) > 0 {
+				servers := make([]mcp.ServerConfig, len(fc.MCPServers))
+				for i, m := range fc.MCPServers {
+					servers[i] = m.toServerConfig()
+				}
+				l.MCPServers = servers
+			}
+		},
+		overlay: func(s *Settings, l Layer) {
+			if l.MCPServers != nil {
+				s.MCPServers = l.MCPServers
+			}
+		},
+	},
+	{
+		row: mustKey("tools.disabled"),
+		fromFile: func(l *Layer, fc fileConfig) {
+			if fc.Tools != nil && len(fc.Tools.Disabled) > 0 {
+				l.ToolsDisabled = fc.Tools.Disabled
+			}
+		},
+		overlay: func(s *Settings, l Layer) {
+			if l.ToolsDisabled != nil {
+				s.ToolsDisabled = l.ToolsDisabled
+			}
+		},
+	},
+	{
+		// Each list of the `url-safety:` block projects on its own: a block that names only one of
+		// them configures that one and leaves the other to fall through.
+		row: mustKey("url-safety.allow-hosts"),
+		fromFile: func(l *Layer, fc fileConfig) {
+			if fc.URLSafety != nil && len(fc.URLSafety.AllowHosts) > 0 {
+				l.URLAllowHosts = fc.URLSafety.AllowHosts
+			}
+		},
+		overlay: func(s *Settings, l Layer) {
+			if l.URLAllowHosts != nil {
+				s.URLAllowHosts = l.URLAllowHosts
+			}
+		},
+	},
+	{
+		row: mustKey("url-safety.deny-hosts"),
+		fromFile: func(l *Layer, fc fileConfig) {
+			if fc.URLSafety != nil && len(fc.URLSafety.DenyHosts) > 0 {
+				l.URLDenyHosts = fc.URLSafety.DenyHosts
+			}
+		},
+		overlay: func(s *Settings, l Layer) {
+			if l.URLDenyHosts != nil {
+				s.URLDenyHosts = l.URLDenyHosts
+			}
+		},
+	},
+	{
+		row: mustKey("use-project-skills"),
+		fromFile: func(l *Layer, fc fileConfig) {
+			if fc.UseProjectSkills != nil {
+				l.UseProjectSkills = fc.UseProjectSkills
+			}
+		},
+		overlay: func(s *Settings, l Layer) {
+			if l.UseProjectSkills != nil {
+				s.UseProjectSkills = *l.UseProjectSkills
+			}
+		},
+	},
+	{
+		row: mustKey("auto-compact"),
+		fromFile: func(l *Layer, fc fileConfig) {
+			if fc.AutoCompact != nil {
+				l.AutoCompact = fc.AutoCompact
+			}
+		},
+		overlay: func(s *Settings, l Layer) {
+			if l.AutoCompact != nil {
+				s.AutoCompact = *l.AutoCompact
+			}
+		},
+	},
+	{
+		row: mustKey("auto-title"),
+		fromFile: func(l *Layer, fc fileConfig) {
+			if fc.AutoTitle != nil {
+				l.AutoTitle = fc.AutoTitle
+			}
+		},
+		overlay: func(s *Settings, l Layer) {
+			if l.AutoTitle != nil {
+				s.AutoTitle = *l.AutoTitle
+			}
+		},
+	},
+	{
+		row: mustKey("remember-model"),
+		fromFile: func(l *Layer, fc fileConfig) {
+			if fc.RememberModel != nil {
+				l.RememberModel = fc.RememberModel
+			}
+		},
+		overlay: func(s *Settings, l Layer) {
+			if l.RememberModel != nil {
+				s.RememberModel = *l.RememberModel
+			}
+		},
+	},
+	{
+		// A plain int rather than a pointer on disk, so PRESENCE is the positive value: 0 and absent
+		// both mean unpinned, and the heartbeat's live observation stands (ADR 0024).
+		row: mustKey("context-window"),
+		fromFile: func(l *Layer, fc fileConfig) {
+			if fc.ContextWindow > 0 {
+				l.ContextWindow = &fc.ContextWindow
+			}
+		},
+		overlay: func(s *Settings, l Layer) {
+			if l.ContextWindow != nil {
+				s.ContextWindow = *l.ContextWindow
+			}
+		},
+	},
+	{
+		// Presence is the positive value here too, for context-window's reason: the loader accepts
+		// nothing but 0 and the open range (0, 1), so 0 is "unset" and apogee's built-in share stands.
+		row: mustKey("response-reserve"),
+		fromFile: func(l *Layer, fc fileConfig) {
+			if fc.ResponseReserve > 0 {
+				l.ResponseReserve = &fc.ResponseReserve
+			}
+		},
+		overlay: func(s *Settings, l Layer) {
+			if l.ResponseReserve != nil {
+				s.ResponseReserve = *l.ResponseReserve
+			}
+		},
+	},
+	{
+		// The four `present:` keys are one carrier, the system-prompt trio's shape: each answers for
+		// its own key's presence and projects the block, whose absent keys toPresentSettings defaults.
+		row: mustKey("present.auto-open"),
+		fromFile: func(l *Layer, fc fileConfig) {
+			if fc.Present != nil && fc.Present.AutoOpen != nil {
+				p := fc.Present.toPresentSettings()
+				l.Present = &p
+			}
+		},
+		overlay: overlayPresent,
+	},
+	{
+		row: mustKey("present.command"),
+		fromFile: func(l *Layer, fc fileConfig) {
+			if fc.Present != nil && fc.Present.Command != "" {
+				p := fc.Present.toPresentSettings()
+				l.Present = &p
+			}
+		},
+		overlay: overlayPresent,
+	},
+	{
+		row: mustKey("present.port"),
+		fromFile: func(l *Layer, fc fileConfig) {
+			if fc.Present != nil && fc.Present.Port != 0 {
+				p := fc.Present.toPresentSettings()
+				l.Present = &p
+			}
+		},
+		overlay: overlayPresent,
+	},
+	{
+		row: mustKey("present.host"),
+		fromFile: func(l *Layer, fc fileConfig) {
+			if fc.Present != nil && fc.Present.Host != "" {
+				p := fc.Present.toPresentSettings()
+				l.Present = &p
+			}
+		},
+		overlay: overlayPresent,
+	},
+	{
+		// The six `ui:` keys are one carrier, the `present:` block's shape — and independent axes
+		// within it: naming a style does not turn the colour loop off (toUISettings).
+		row: mustKey("ui.spinner"),
+		fromFile: func(l *Layer, fc fileConfig) {
+			if fc.UI != nil && fc.UI.Spinner != "" {
+				u := fc.UI.toUISettings()
+				l.UI = &u
+			}
+		},
+		overlay: overlayUI,
+	},
+	{
+		row: mustKey("ui.spinner-color"),
+		fromFile: func(l *Layer, fc fileConfig) {
+			if fc.UI != nil && fc.UI.SpinnerColor != nil {
+				u := fc.UI.toUISettings()
+				l.UI = &u
+			}
+		},
+		overlay: overlayUI,
+	},
+	{
+		row: mustKey("ui.show-scrollbar"),
+		fromFile: func(l *Layer, fc fileConfig) {
+			if fc.UI != nil && fc.UI.ShowScrollbar != nil {
+				u := fc.UI.toUISettings()
+				l.UI = &u
+			}
+		},
+		overlay: overlayUI,
+	},
+	{
+		row: mustKey("ui.color-scheme"),
+		fromFile: func(l *Layer, fc fileConfig) {
+			if fc.UI != nil && fc.UI.ColorScheme != "" {
+				u := fc.UI.toUISettings()
+				l.UI = &u
+			}
+		},
+		overlay: overlayUI,
+	},
+	{
+		row: mustKey("ui.stall-after"),
+		fromFile: func(l *Layer, fc fileConfig) {
+			// The pointer is the presence test rather than the text: an explicit `0` — the documented
+			// spelling of "off" — must be told from a block that never named the key.
+			if fc.UI != nil && fc.UI.StallAfter != nil {
+				u := fc.UI.toUISettings()
+				l.UI = &u
+			}
+		},
+		overlay: overlayUI,
+	},
+	{
+		row: mustKey("ui.inspector"),
+		fromFile: func(l *Layer, fc fileConfig) {
+			if fc.UI != nil && fc.UI.Inspector != nil {
+				u := fc.UI.toUISettings()
+				l.UI = &u
+			}
+		},
+		overlay: overlayUI,
+	},
+	{
+		// Carried as the raw NAME: ApplyConfig validates it against the vocabulary internal/domain
+		// owns, so this seam neither parses nor refuses it.
+		row: mustKey("cursor-shape"),
+		fromFile: func(l *Layer, fc fileConfig) {
+			if fc.CursorShape != "" {
+				l.CursorShape = &fc.CursorShape
+			}
+		},
+		overlay: func(s *Settings, l Layer) {
+			if l.CursorShape != nil {
+				s.CursorShape = *l.CursorShape
+			}
+		},
+	},
+	{
+		// File-only (ADR 0041): $VISUAL and $EDITOR are a FALLBACK below this key, read at the launch
+		// site, rather than a layer above it — which is why this row names no environment source.
+		row: mustKey("editor"),
+		fromFile: func(l *Layer, fc fileConfig) {
+			if fc.Editor != "" {
+				l.Editor = &fc.Editor
+			}
+		},
+		overlay: func(s *Settings, l Layer) {
+			if l.Editor != nil {
+				s.Editor = *l.Editor
+			}
+		},
+	},
+	{
 		row: mustKey("bypass"),
+		fromFile: func(l *Layer, fc fileConfig) {
+			if fc.Bypass != nil {
+				l.Bypass = fc.Bypass
+			}
+		},
 		// The one env value that is parsed rather than carried: a set-but-unparseable flag is a hard
 		// error, never a silently-ignored boolean. envLayer adds the variable's name to the message,
 		// because the name is the row's to know, not this closure's.
@@ -713,6 +1149,92 @@ var multiSourceKeys = []multiSourceKey{
 			}
 		},
 	},
+	{
+		row: mustKey("mechanisms"),
+		fromFile: func(l *Layer, fc fileConfig) {
+			if len(fc.Mechanisms) > 0 {
+				l.Mechanisms = fc.Mechanisms
+			}
+		},
+		overlay: func(s *Settings, l Layer) {
+			if l.Mechanisms != nil {
+				s.Mechanisms = l.Mechanisms
+			}
+		},
+	},
+	{
+		// The `validated-sets:` pair project on their own, the `url-safety:` lists' shape: a block
+		// that sets the switch alone leaves the alias map to fall through, and the other way round.
+		row: mustKey("validated-sets.enable"),
+		fromFile: func(l *Layer, fc fileConfig) {
+			if fc.ValidatedSets != nil && fc.ValidatedSets.Enable != nil {
+				l.ValidatedSetsEnable = fc.ValidatedSets.Enable
+			}
+		},
+		overlay: func(s *Settings, l Layer) {
+			if l.ValidatedSetsEnable != nil {
+				s.ValidatedSetsEnable = *l.ValidatedSetsEnable
+			}
+		},
+	},
+	{
+		row: mustKey("validated-sets.alias"),
+		fromFile: func(l *Layer, fc fileConfig) {
+			if fc.ValidatedSets != nil && len(fc.ValidatedSets.Alias) > 0 {
+				l.ValidatedSetsAlias = fc.ValidatedSets.Alias
+			}
+		},
+		overlay: func(s *Settings, l Layer) {
+			if l.ValidatedSetsAlias != nil {
+				s.ValidatedSetsAlias = l.ValidatedSetsAlias
+			}
+		},
+	},
+	{
+		// Ordered by pattern on the way in (toProfileEntries), so the same file always resolves to
+		// the same slice; a layer that sets the key replaces the map whole rather than merging
+		// patterns into it (ADR 0044).
+		row: mustKey("model-profiles"),
+		fromFile: func(l *Layer, fc fileConfig) {
+			if len(fc.ModelProfiles) > 0 {
+				l.ModelProfiles = toProfileEntries(fc.ModelProfiles)
+			}
+		},
+		overlay: func(s *Settings, l Layer) {
+			if l.ModelProfiles != nil {
+				s.ModelProfiles = l.ModelProfiles
+			}
+		},
+	},
+}
+
+// The overlays shared by the key groups that resolve into ONE carrier. They are named functions
+// rather than a closure repeated per row because the rows differ in what they read from the FILE,
+// never in where the resolved block lands: three system-prompt keys, two context-files keys, four
+// present keys and six ui keys each write the block their key belongs to, and applying the same
+// one twice is idempotent.
+func overlaySystemPrompt(s *Settings, l Layer) {
+	if l.SystemPrompt != nil {
+		s.SystemPrompt = *l.SystemPrompt
+	}
+}
+
+func overlayContextFiles(s *Settings, l Layer) {
+	if l.ContextFiles != nil {
+		s.ContextFiles = *l.ContextFiles
+	}
+}
+
+func overlayPresent(s *Settings, l Layer) {
+	if l.Present != nil {
+		s.Present = *l.Present
+	}
+}
+
+func overlayUI(s *Settings, l Layer) {
+	if l.UI != nil {
+		s.UI = *l.UI
+	}
 }
 
 // ResolveSettings overlays the layers in increasing priority — the default base, then
@@ -801,9 +1323,14 @@ func ResolveSettings(file, env, flag Layer, hostID string) (Settings, []string) 
 	}
 	// The multi-source keys, lowest-priority layer first: each key's overlay writes its own field,
 	// so a later layer that sets the key wins and one that does not leaves the value below it
-	// standing. The keys and their sources are the registry's to describe (multiSourceKeys).
+	// standing. The keys and their sources are the registry's to describe (keyAccessors) — and only
+	// a key with a source ABOVE the file rides this ladder, since a file-only one has no contest to
+	// lose and was copied by the block above.
 	for _, l := range []Layer{file, env, flag} {
-		for _, k := range multiSourceKeys {
+		for _, k := range keyAccessors {
+			if k.fromEnv == nil && k.fromFlag == nil {
+				continue
+			}
 			k.overlay(&s, l)
 		}
 	}
@@ -2176,7 +2703,7 @@ func (lc legacyFileConfig) block() string {
 // Environment variable names, prefixed APOGEE_ to namespace the process environment.
 //
 // They fall in three groups. EnvServer/EnvMode/EnvBypass are read through the registry rows their
-// keys carry (multiSourceKeys). EnvConfig/EnvWorkspace are read by ApplyConfig directly, because
+// keys carry (keyAccessors). EnvConfig/EnvWorkspace are read by ApplyConfig directly, because
 // they name the roots resolution itself runs in and so cannot be config keys. EnvEndpoint/
 // EnvModel/EnvAPIKey are the raw startup overrides ADR 0036 DETACHED from the schema: they no
 // longer describe config keys — they build or overlay the startup server entry — so they are
@@ -2193,7 +2720,7 @@ const (
 )
 
 // envLayer reads the APOGEE_* variables into a precedence layer; an unset variable stays nil to
-// fall through. Which variable carries which key is the registry's to say (multiSourceKeys), so
+// fall through. Which variable carries which key is the registry's to say (keyAccessors), so
 // this reads names out of the rows rather than repeating them: a key whose row names no variable
 // has no environment source at all. The variables that name no config key — APOGEE_ENDPOINT,
 // APOGEE_API_KEY, APOGEE_MODEL — are not read here at all: since ADR 0036 they override the
@@ -2203,7 +2730,7 @@ const (
 // mutating the process environment.
 func envLayer(getenv func(string) string) (Layer, error) {
 	var l Layer
-	for _, k := range multiSourceKeys {
+	for _, k := range keyAccessors {
 		if k.fromEnv == nil || k.row.EnvVar == "" {
 			continue
 		}
@@ -2226,7 +2753,7 @@ func envLayer(getenv func(string) string) (Layer, error) {
 // (ADR 0036): they name no config key, so they are not resolved through the layers.
 func flagLayer(opts Options, changed func(string) bool) Layer {
 	var l Layer
-	for _, k := range multiSourceKeys {
+	for _, k := range keyAccessors {
 		if k.fromFlag == nil || k.row.FlagName == "" {
 			continue
 		}
@@ -2261,8 +2788,8 @@ const (
 // claim a source that did not actually win. Keys absent from the map resolved from the file or the
 // default, which is the majority and needs no entry.
 func overrideSources(changed func(string) bool, getenv func(string) string) map[string]Source {
-	sources := make(map[string]Source, len(multiSourceKeys))
-	for _, k := range multiSourceKeys {
+	sources := make(map[string]Source, len(keyAccessors))
+	for _, k := range keyAccessors {
 		switch {
 		case k.fromFlag != nil && k.row.FlagName != "" && changed(k.row.FlagName):
 			sources[k.row.Path] = SourceFlag
@@ -2486,7 +3013,7 @@ type startupOverrides struct {
 }
 
 // startupOverride binds one raw override to the sources it is read from. It exists for the same
-// reason multiSourceKey does — so the environment-variable and flag NAMES have exactly one home,
+// reason keyAccessor does — so the environment-variable and flag NAMES have exactly one home,
 // and a source that is advertised is a source that is read — but it deliberately hangs off no
 // registry row: since ADR 0036 these names describe no config key, and the bijection guard pins
 // registry rows to `fileConfig` tags that no longer exist for them.

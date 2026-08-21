@@ -619,11 +619,11 @@ func LookupKey(path string) (Key, bool) {
 }
 
 // mustKey returns the registry row for a path and panics when the table has none. It exists for
-// the package-level tables built OVER the registry — resolution's multiSourceKeys binding — where
+// the package-level tables built OVER the registry — resolution's keyAccessors table — where
 // a missing row is a defect in this package's own literals rather than anything an input can
 // cause, exactly the regexp.MustCompile-on-a-literal-pattern case. Every such table is
 // initialised at process start, so the panic can only ever fire on the first run after the
-// edit that removed the row, and TestMultiSourceKeysBindDescribedKeys names it before then.
+// edit that removed the row, and TestKeyAccessorsBindDescribedKeys names it before then.
 func mustKey(path string) Key {
 	k, ok := LookupKey(path)
 	if !ok {
