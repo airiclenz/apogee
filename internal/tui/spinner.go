@@ -1,15 +1,14 @@
 package tui
 
 import (
-	"fmt"
 	"image/color"
 	"math"
 	"math/bits"
-	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
 	lipgloss "charm.land/lipgloss/v2"
+	"github.com/airiclenz/apogee/internal/domain"
 	colorful "github.com/lucasb-eyer/go-colorful"
 )
 
@@ -35,41 +34,23 @@ import (
 // Update loop drops a tick from any older one, which is what keeps the frame rate from doubling
 // after an approval prompt or an ask_user question re-arms the chain.
 
-// SpinnerStyle names a status-line animation. internal/tui owns the vocabulary so the config
-// layer validates against one source of truth rather than duplicating the name list.
-type SpinnerStyle string
+// SpinnerStyle names a status-line animation. The vocabulary itself — the names, the default and
+// the parse — lives in [domain] (uivocab.go), so internal/config can validate a `ui.spinner:`
+// value without importing the renderer. This alias and the constants beside it keep every call
+// site in this package spelling the type its own short way.
+type SpinnerStyle = domain.SpinnerStyle
 
 const (
-	SpinnerSnake   SpinnerStyle = "snake"
-	SpinnerGlitter SpinnerStyle = "glitter"
-	SpinnerClassic SpinnerStyle = "classic"
+	SpinnerSnake   = domain.SpinnerSnake
+	SpinnerGlitter = domain.SpinnerGlitter
+	SpinnerClassic = domain.SpinnerClassic
 )
 
-// spinnerStyleNames is the vocabulary [ParseSpinnerStyle] accepts, in the order its error lists
-// them: the names this build knows, declared once so no caller re-types the set.
-var spinnerStyleNames = []SpinnerStyle{SpinnerSnake, SpinnerGlitter, SpinnerClassic}
-
-// defaultSpinnerStyle is what an unset config value resolves to.
-const defaultSpinnerStyle = SpinnerSnake
-
-// ParseSpinnerStyle maps a config value onto a style. "" ⇒ the default; an unknown value is an
-// error naming the styles this build knows. The caller names the key it read the value from —
-// this package does not know the config schema.
-func ParseSpinnerStyle(s string) (SpinnerStyle, error) {
-	if s == "" {
-		return defaultSpinnerStyle, nil
-	}
-	for _, style := range spinnerStyleNames {
-		if SpinnerStyle(s) == style {
-			return style, nil
-		}
-	}
-	names := make([]string, 0, len(spinnerStyleNames))
-	for _, style := range spinnerStyleNames {
-		names = append(names, string(style))
-	}
-	return "", fmt.Errorf("unknown spinner style %q (known styles: %s)", s, strings.Join(names, ", "))
-}
+// ParseSpinnerStyle maps a config value onto a style: "" ⇒ the default, an unknown value an error
+// naming the styles this build knows (the caller names the key it read the value from). It is
+// [domain.ParseSpinnerStyle] under this package's name, kept because the binary's config layer and
+// this package's own settings pane both call the door by that spelling.
+func ParseSpinnerStyle(s string) (SpinnerStyle, error) { return domain.ParseSpinnerStyle(s) }
 
 // classicFrames are the eight braille cells of the original status-line spinner — a single cell
 // that appears to rotate. They are pinned, in this order, by

@@ -363,7 +363,12 @@ NOTES (2026-08-21): chose the "document the returned slice as read-only" option 
 
 **Commit:** `perf(domain): precompute per-hook-point mechanism order at validation`
 
-## 16. UI vocabulary moves into internal/domain
+## 16. UI vocabulary moves into internal/domain — ✅ DONE (2026-08-21)
+
+NOTES (2026-08-21): the item named six files; two test files had to change too. `internal/tui/spinner_test.go` reads the vocabulary at its new home (`domain.SpinnerStyleNames()`, `domain.DefaultSpinnerStyle`) because `spinnerStyleNames` and `defaultSpinnerStyle` were left with no production reader in tui once the parse moved — keeping them would have been dead declarations in a production file that only tests reach.
+NOTES (2026-08-21): `internal/tui/prompteditor_test.go` gains `TestCursorShapeNamesAllDraw` (+ an error-wording twin). Unlike the spinner, the cursor-shape split has NO compiler joint: domain holds the names, tui holds the `tea.CursorShape` each one means, so a fourth name added to the domain list would parse successfully and hand the renderer the zero shape. Mutation-checked by adding "beam" to the domain list — both new pins fail.
+NOTES (2026-08-21): the two name lists are exported as `SpinnerStyleNames()` / `CursorShapeNames()` returning clones rather than as exported vars, so a caller sweeping the vocabulary cannot reorder the list the parsers read. Mutation-checked: dropping the clone lets one parallel test clobber another's vocabulary.
+NOTES (2026-08-21): `internal/config/registry.go`'s comment (~133) still says two of the three enum vocabularies "live in internal/tui as unexported sets (spinnerStyleNames, cursorShapeNames)", which this item falsifies. Left untouched deliberately — the item states `internal/config` is not touched here, and item 17 rewrites that file's validators.
 
 **Source:** review candidate 8 (first half); ratified calls 2, 8.
 

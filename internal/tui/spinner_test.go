@@ -432,7 +432,7 @@ func TestSpinnerColorLoops(t *testing.T) {
 	t.Parallel()
 
 	th := newTheme(scheme.Default())
-	for _, style := range spinnerStyleNames {
+	for _, style := range domain.SpinnerStyleNames() {
 		t.Run(string(style), func(t *testing.T) {
 			t.Parallel()
 
@@ -464,7 +464,7 @@ func TestSpinnerColorIsSoft(t *testing.T) {
 	t.Parallel()
 
 	th := newTheme(scheme.Default())
-	for _, style := range spinnerStyleNames {
+	for _, style := range domain.SpinnerStyleNames() {
 		t.Run(string(style), func(t *testing.T) {
 			t.Parallel()
 
@@ -488,7 +488,7 @@ func TestSpinnerColorOffPaintsNoForeground(t *testing.T) {
 	t.Parallel()
 
 	th := newTheme(scheme.Default())
-	for _, style := range spinnerStyleNames {
+	for _, style := range domain.SpinnerStyleNames() {
 		t.Run(string(style), func(t *testing.T) {
 			t.Parallel()
 
@@ -514,7 +514,7 @@ func TestSpinnerColorIsOrthogonalToStyle(t *testing.T) {
 	t.Parallel()
 
 	th := newTheme(scheme.Default())
-	for _, style := range spinnerStyleNames {
+	for _, style := range domain.SpinnerStyleNames() {
 		for _, colour := range []bool{true, false} {
 			t.Run(fmt.Sprintf("%s/colour=%t", style, colour), func(t *testing.T) {
 				t.Parallel()
@@ -804,7 +804,7 @@ func TestBlinkingStarDropsOnlyTheSelectionsSpanningIt(t *testing.T) {
 func TestParseSpinnerStyle(t *testing.T) {
 	t.Parallel()
 
-	for _, want := range spinnerStyleNames {
+	for _, want := range domain.SpinnerStyleNames() {
 		got, err := ParseSpinnerStyle(string(want))
 		if err != nil {
 			t.Errorf("ParseSpinnerStyle(%q) errored: %v", want, err)
@@ -818,14 +818,14 @@ func TestParseSpinnerStyle(t *testing.T) {
 	if err != nil {
 		t.Errorf(`ParseSpinnerStyle("") errored: %v`, err)
 	}
-	if got != defaultSpinnerStyle {
-		t.Errorf(`ParseSpinnerStyle("") = %q, want the default %q`, got, defaultSpinnerStyle)
+	if got != domain.DefaultSpinnerStyle {
+		t.Errorf(`ParseSpinnerStyle("") = %q, want the default %q`, got, domain.DefaultSpinnerStyle)
 	}
 
 	if _, err := ParseSpinnerStyle("sparkle"); err == nil {
 		t.Error(`ParseSpinnerStyle("sparkle") accepted an unknown style`)
 	} else {
-		for _, style := range spinnerStyleNames {
+		for _, style := range domain.SpinnerStyleNames() {
 			if !strings.Contains(err.Error(), string(style)) {
 				t.Errorf("error %q does not name the known style %q", err, style)
 			}
@@ -843,7 +843,7 @@ func TestParseSpinnerStyle(t *testing.T) {
 func TestNewModelSelectsTheConfiguredSpinner(t *testing.T) {
 	t.Parallel()
 
-	for _, style := range spinnerStyleNames {
+	for _, style := range domain.SpinnerStyleNames() {
 		for _, colour := range []bool{false, true} {
 			opts := testOpts
 			opts.Spinner, opts.SpinnerColor = style, colour

@@ -1170,36 +1170,22 @@ type ServerSwitchResult struct {
 }
 
 // PreboundReason names why a session started with NO upstream bound — the three answers ADR 0036
-// gives when the config alone cannot say which server to start on. It is a fact the binary resolved
-// (it read the file, the flags and the environment); the renderer only renders it and, on the first
-// two, asks the human through the picker it already has.
-//
-// The empty value is the ordinary start: a server WAS determined and the engine was constructed
-// before the program began.
-type PreboundReason string
+// gives when the config alone cannot say which server to start on. The vocabulary lives in [domain]
+// (uivocab.go) so the binary resolves the fact without importing the renderer; these aliases keep
+// this package's call sites spelling it their own short way. The empty value is the ordinary start:
+// a server WAS determined and the engine was constructed before the program began.
+type PreboundReason = domain.PreboundReason
 
 const (
-	// PreboundFirstBoot: servers are configured, none is chosen yet (no `server:` recorded). The
-	// picker asks, and the choice is what records one.
-	PreboundFirstBoot PreboundReason = "first-boot"
-	// PreboundStaleChoice: the recorded `server:` names an entry the list no longer carries — a
-	// renamed or deleted server, or a typo. It is state, not intent: the picker fixes in one
-	// keystroke what a refusal would send to file surgery.
-	PreboundStaleChoice PreboundReason = "stale-choice"
-	// PreboundNoServers: nothing is configured at all, so there is nothing to pick from and the
-	// guidance is to add a server to config.yaml.
-	PreboundNoServers PreboundReason = "no-servers"
+	PreboundFirstBoot   = domain.PreboundFirstBoot
+	PreboundStaleChoice = domain.PreboundStaleChoice
+	PreboundNoServers   = domain.PreboundNoServers
 )
 
 // PreboundStart says whether this session started with an upstream bound, and if not, why. The zero
 // value — an empty Reason — is the ordinary bound start, so a hand-built Options describes today's
 // behaviour without naming this field at all.
-type PreboundStart struct {
-	Reason PreboundReason
-	// Name is the `server:` value that named no entry, carried for PreboundStaleChoice so the
-	// notice can say which one went missing. Empty for every other reason.
-	Name string
-}
+type PreboundStart = domain.PreboundStart
 
 // KeyMigrationOffer is what this start-up found to offer about plaintext API keys (ADR 0047): the
 // `servers:` entries whose key is a literal `api-key:` line in the config file and that have not

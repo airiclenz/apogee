@@ -7,6 +7,7 @@ import (
 
 	lipgloss "charm.land/lipgloss/v2"
 
+	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/scheme"
 )
 
@@ -19,6 +20,50 @@ import (
 // logic is now testable without standing up the whole widget graph. The same behaviour is also
 // covered end-to-end through the Model in minilang_test.go / skill_test.go / mouse_test.go, which
 // keep passing unmodified (the refactor's safety net); these add the direct, loop-free path.
+
+// TestCursorShapeNamesAllDraw is the drift pin on the split the caret vocabulary lives across:
+// internal/domain holds the NAMES a config value may spell, this package holds what each one is
+// DRAWN as, and nothing in the compiler joins the two. Without this, a fourth name added to the
+// domain list would parse successfully here and hand the renderer the zero CursorShape — a
+// silently wrong caret rather than a build failure. The default is checked through the same door,
+// because it is resolved by map lookup rather than by the parse.
+func TestCursorShapeNamesAllDraw(t *testing.T) {
+	t.Parallel()
+
+	for _, name := range domain.CursorShapeNames() {
+		shape, err := ParseCursorShape(name)
+		if err != nil {
+			t.Errorf("ParseCursorShape(%q) errored on a name the domain vocabulary offers: %v", name, err)
+			continue
+		}
+		if _, ok := cursorShapes[name]; !ok {
+			t.Errorf("the domain offers cursor shape %q but this package draws no shape for it "+
+				"(it parsed to %v, the zero shape's meaning)", name, shape)
+		}
+	}
+
+	if _, ok := cursorShapes[domain.DefaultCursorShapeName]; !ok {
+		t.Errorf("the default cursor shape %q has no renderer constant, so defaultCursorShape is "+
+			"the zero shape rather than a chosen one", domain.DefaultCursorShapeName)
+	}
+}
+
+// TestParseCursorShapeRefusesAnUnknownName pins the other half of the seam: a name outside the
+// domain vocabulary is an error whose text names the shapes this build draws, because that error
+// is the only thing the config layer can show a human who mistyped the key.
+func TestParseCursorShapeRefusesAnUnknownName(t *testing.T) {
+	t.Parallel()
+
+	_, err := ParseCursorShape("beam")
+	if err == nil {
+		t.Fatal(`ParseCursorShape("beam") accepted a shape this build cannot draw`)
+	}
+	for _, name := range domain.CursorShapeNames() {
+		if !strings.Contains(err.Error(), name) {
+			t.Errorf("error %q does not name the known shape %q", err, name)
+		}
+	}
+}
 
 // submitParse classifies a free-text line as a message and extracts its @file references.
 func TestPromptEditorSubmitParseMessage(t *testing.T) {

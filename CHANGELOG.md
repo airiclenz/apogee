@@ -222,6 +222,19 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **The vocabulary a `ui.spinner:` or a `cursor-shape:` is spelled in has one home.** The three
+  spinner style names with their parse, the three caret shape names with their default, and the
+  reason a session can start with no server bound all lived in the renderer, so the config layer
+  had to import the whole TUI to check that a name was a name — a legal sibling import that
+  defeated the point of splitting config off in the first place (ADR 0043). They now sit in
+  `internal/domain` beside the autonomy modes, which is where a word that names a configuration
+  choice belongs: it depends on nothing but the standard library, so anything can ask it what a
+  build knows. What stays with the renderer is the half that only a terminal can answer — which
+  animation each spinner name paints, and which cursor glyph each shape name draws — and the
+  renderer now derives the names it accepts from the shared list rather than keeping a second copy
+  of it. Nothing changes for a user: the same three styles, the same three shapes, the same error
+  text when a config file names something else.
+
 - **The dispatch order is computed once, at the construction gates.** `MechanismRegistry.Ordered`
   re-ran the whole computation on every call — filter the catalogue by hook point, then
   topologically sort what is left — which is roughly twenty-three sorts a Turn with a full

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/airiclenz/apogee/internal/domain"
 )
 
 // ----------------------------------------------------------------------------
@@ -113,25 +114,26 @@ const (
 	runningPlaceholder   = "queue a message…  ⏎ queue · ↑ recall · esc stop"
 )
 
-// cursorShapeNames is the vocabulary [ParseCursorShape] accepts, in the order its error lists
-// them, paired with the renderer constant each name means. Declared once so no caller re-types
-// the set — the spinnerStyleNames posture.
-var cursorShapeNames = []struct {
-	name  string
-	shape tea.CursorShape
-}{
-	{"block", tea.CursorBlock},
-	{"underline", tea.CursorUnderline},
-	{"bar", tea.CursorBar},
+// cursorShapes maps each name in the caret vocabulary onto the renderer constant it means. Only
+// this half lives here: the NAMES live in [domain] (uivocab.go), so internal/config can validate a
+// `cursor-shape:` value without importing the renderer, and the tea typing cannot travel with them
+// because domain is a leaf that imports nothing beyond the standard library.
+// TestCursorShapeNamesAllDraw pins that every name domain offers has an entry here.
+var cursorShapes = map[string]tea.CursorShape{
+	"block":     tea.CursorBlock,
+	"underline": tea.CursorUnderline,
+	"bar":       tea.CursorBar,
 }
 
-// defaultCursorShape is what an unset config value resolves to.
-const defaultCursorShape = tea.CursorBlock
+// defaultCursorShape is what an unset config value resolves to: what the domain's default NAME
+// ([domain.DefaultCursorShapeName]) is drawn as.
+var defaultCursorShape = cursorShapes[domain.DefaultCursorShapeName]
 
 // ParseCursorShape maps a config value onto the shape the prompt's caret is drawn with. "" ⇒ the
-// default (block); an unknown value is an error naming the shapes. The caller names the key it read
-// the value from — this package does not know the config schema (as with [ParseSpinnerStyle], the
-// vocabulary lives here so the config layer validates against one source of truth).
+// default (block); an unknown value is an error naming the shapes. The names it accepts are the
+// domain's, asked for rather than restated ([domain.ValidCursorShapeName]), so this package holds
+// no second list to drift from. The caller names the key it read the value from — this package
+// does not know the config schema (as with [ParseSpinnerStyle]).
 //
 // The set is closed at three because that is what a terminal cursor can be. Inheriting the shape
 // the terminal itself is configured with is deliberately NOT among them: a Bubble Tea program names
@@ -141,16 +143,11 @@ func ParseCursorShape(s string) (tea.CursorShape, error) {
 	if s == "" {
 		return defaultCursorShape, nil
 	}
-	for _, c := range cursorShapeNames {
-		if s == c.name {
-			return c.shape, nil
-		}
+	if !domain.ValidCursorShapeName(s) {
+		return defaultCursorShape, fmt.Errorf("unknown cursor shape %q (known shapes: %s)", s,
+			strings.Join(domain.CursorShapeNames(), ", "))
 	}
-	names := make([]string, 0, len(cursorShapeNames))
-	for _, c := range cursorShapeNames {
-		names = append(names, c.name)
-	}
-	return defaultCursorShape, fmt.Errorf("unknown cursor shape %q (known shapes: %s)", s, strings.Join(names, ", "))
+	return cursorShapes[s], nil
 }
 
 // newPromptEditor builds the idle input cluster: the shared text field (newLineEditor — focused,
