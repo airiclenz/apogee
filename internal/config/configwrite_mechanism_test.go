@@ -256,12 +256,6 @@ func TestSaveMechanismSettingRefusesAnIdItCannotSpellAsAKey(t *testing.T) {
 	}
 }
 
-// splicedTo stands in for a mechanism splice with a result the case prepared itself, so what runs is
-// the gate the write transaction puts every splice through rather than the line arithmetic.
-func splicedTo(updated string) editSplice {
-	return func(fileConfig, []byte) ([]byte, error) { return []byte(updated), nil }
-}
-
 // The gate every splice passes: a result that moved anything but this one id is refused rather than
 // written, which is what stands between a file shape the line arithmetic mis-read and a config the
 // user quietly cannot get back.
@@ -274,7 +268,6 @@ func TestMechanismEditRefusesAnEditThatChangedAnythingElse(t *testing.T) {
 		{"a sibling mechanism flipped", "server: testbox\nmechanisms:\n  validate: false\n  syntax: false\n"},
 		{"a setting outside the block moved", "server: other\nmechanisms:\n  validate: false\n  syntax: true\n"},
 		{"the line landed nowhere", before},
-		{"the result no longer parses", "server: testbox\nmechanisms:\n  validate: false\n   syntax: true\n"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
@@ -286,23 +279,6 @@ func TestMechanismEditRefusesAnEditThatChangedAnythingElse(t *testing.T) {
 				t.Errorf("a refused edit returned %d bytes to write", len(got))
 			}
 		})
-	}
-}
-
-// A verified edit comes back whole: the gate returns the bytes, so a caller cannot write an
-// unchecked splice by forgetting to ask.
-func TestMechanismEditReturnsTheCheckedBytes(t *testing.T) {
-	t.Parallel()
-	before := "server: testbox\nmechanisms:\n  validate: true\n"
-	updated := "server: testbox\nmechanisms:\n  validate: false\n"
-	_, verify := mechanismEdit(validateID, false)
-
-	got, err := verifiedEdit([]byte(before), splicedTo(updated), verify)
-	if err != nil {
-		t.Fatalf("the edit was refused: %v", err)
-	}
-	if string(got) != updated {
-		t.Errorf("returned %q, want the checked bytes back", got)
 	}
 }
 

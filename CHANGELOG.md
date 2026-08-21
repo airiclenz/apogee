@@ -943,6 +943,16 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **Re-saving a setting into a config apogee cannot read is refused again, not confirmed.** Every
+  edit apogee makes to `config.yaml` runs one transaction now, and it parses the file you started
+  from before it splices — deliberately holding that parse's error back, so a splice able to name
+  WHICH part of the file it could not read gets to speak first. A splice that found nothing to do
+  was slipping out ahead of the held-back error: re-saving a value the file already carries answered
+  with a silent "already done" where a config carrying a type error — a `context-window:` holding a
+  word, say — is refused for every other write of that file. It is refused again, naming the file
+  and what the decoder choked on. A confirmation that the file already says it is a claim about a
+  file, and apogee makes no claims about a file it cannot read.
+
 - **A typo in a `model-profiles:` entry is a startup error on every axis now, not just on
   `effort:`.** The load-time check read one of the four keys an entry can carry. A misspelled
   `tool-call-format:` or `thinking: style:` went straight through the cast into the profile and

@@ -17,6 +17,16 @@ import (
 // is present but commented out. What the goldens pin is that a write touches ONE line of it.
 const editedConfigFixture = "settings-edited.yaml"
 
+// resetScalarSetting is the reset half of setScalarSetting over bytes already in hand: the same
+// splice-and-verify pair ResetConfigSetting hands the transaction (configedit.go), run without a
+// file. Production has no such entry — a reset always addresses a path — so the two-line
+// composition lives here, where the splice cases that read it are.
+func resetScalarSetting(t *testing.T, data []byte, k Key) ([]byte, error) {
+	t.Helper()
+	splice, verify := scalarResetEdit(k)
+	return verifiedEdit(data, splice, verify)
+}
+
 // readFixture reads a testdata config as a string.
 func readFixture(t *testing.T, name string) string {
 	t.Helper()
@@ -132,7 +142,7 @@ func TestSpliceScalarSettingGoldenOps(t *testing.T) {
 			var updated []byte
 			var err error
 			if tt.reset {
-				updated, err = deleteScalarSetting([]byte(input), k)
+				updated, err = resetScalarSetting(t, []byte(input), k)
 			} else {
 				updated, err = setScalarSetting([]byte(input), k, tt.value)
 			}
@@ -241,7 +251,7 @@ func TestSpliceScalarSettingRoundTripsEveryEditableKey(t *testing.T) {
 					}
 					assertOnlyKeyChanged(t, input, string(result), k.Path)
 
-					reset, err := deleteScalarSetting(result, k)
+					reset, err := resetScalarSetting(t, result, k)
 					if err != nil {
 						t.Fatalf("reset %s: %v", k.Path, err)
 					}
@@ -392,7 +402,7 @@ func TestSpliceTextBlockRewritesTheTemplatesPrompt(t *testing.T) {
 			}
 			assertCommentsSurvive(t, template, string(again))
 
-			reset, err := deleteScalarSetting(updated, k)
+			reset, err := resetScalarSetting(t, updated, k)
 			if err != nil {
 				t.Fatalf("reset %s: %v", key, err)
 			}
@@ -528,7 +538,7 @@ func TestSpliceScalarSettingWritesAListOnOneLine(t *testing.T) {
 
 	// And the reset removes the block whole — the `names:` line and the `context-files:` key it was
 	// the only child of — which is the template again, comment for comment.
-	reset, err := deleteScalarSetting(updated, k)
+	reset, err := resetScalarSetting(t, updated, k)
 	if err != nil {
 		t.Fatalf("reset the list: %v", err)
 	}
@@ -716,9 +726,10 @@ func TestConfigWriteSettingRefusals(t *testing.T) {
 	}
 }
 
-// The end-to-end write: an absent config is seeded from the template first (so an edit never leaves
-// a bare fragment where a documented file belongs), the template's own text survives the write, and
-// the file's mode is carried over — a config may hold an api-key, so a rewrite must not widen it.
+// The end-to-end write into a config that was not there: the seeded template's own text survives
+// it, and what the write added to that template is the key's two lines and nothing else. That the
+// seeding and the mode-preserving atomic write happen at all is the transaction's property
+// (configedit_test.go); what is asked here is that THIS writer's edit reaches a seeded file whole.
 func TestConfigWriteSettingSeedsAnAbsentConfig(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "config.yaml")
@@ -734,13 +745,6 @@ func TestConfigWriteSettingSeedsAnAbsentConfig(t *testing.T) {
 	}
 	if _, added := splicedInsertion(t, string(defaultConfigYAML), written); !slices.Equal(added, []string{"ui:", "  spinner: glitter"}) {
 		t.Errorf("the write added %q to the template", added)
-	}
-	info, err := os.Stat(path)
-	if err != nil {
-		t.Fatalf("stat the written config: %v", err)
-	}
-	if perm := info.Mode().Perm(); perm != 0o600 {
-		t.Errorf("the seeded config's mode is %v, want 0600", perm)
 	}
 }
 
@@ -824,7 +828,7 @@ func TestSpliceScalarSettingNestedBlockShapes(t *testing.T) {
 			var updated []byte
 			var err error
 			if tt.reset {
-				updated, err = deleteScalarSetting([]byte(tt.content), k)
+				updated, err = resetScalarSetting(t, []byte(tt.content), k)
 			} else {
 				updated, err = setScalarSetting([]byte(tt.content), k, tt.value)
 			}
@@ -917,116 +921,6 @@ func TestSpliceScalarSettingQuotesValuesThatNeedIt(t *testing.T) {
 			}
 			if got, ok, err := scalarAtPath(updated, tt.path); err != nil || !ok || got != strings.TrimSpace(tt.value) {
 				t.Errorf("%s reads back as %q (set=%v, err=%v), want %q", tt.path, got, ok, err, strings.TrimSpace(tt.value))
-			}
-		})
-	}
-}
-
-// sameApartFrom is the verification every splice passes, so what it does and does not forgive is
-// worth pinning on its own: a block created for one key compares equal to the absent block it
-// replaced, while a change to any other setting — including one in the same block — does not.
-func TestConfigWriteSameApartFrom(t *testing.T) {
-	t.Parallel()
-	for _, tt := range []struct {
-		name   string
-		before string
-		after  string
-		path   string
-		want   bool
-	}{
-		{
-			name:   "the target key alone",
-			before: "mode: auto\nserver: box\n",
-			after:  "mode: plan\nserver: box\n",
-			path:   "mode", want: true,
-		},
-		{
-			name:   "a block created for the target key",
-			before: "mode: auto\n",
-			after:  "mode: auto\nui:\n  spinner: glitter\n",
-			path:   "ui.spinner", want: true,
-		},
-		{
-			name:   "a block emptied by resetting the target key",
-			before: "mode: auto\nui:\n  spinner: glitter\n",
-			after:  "mode: auto\n",
-			path:   "ui.spinner", want: true,
-		},
-		{
-			name:   "a neighbour in the same block",
-			before: "ui:\n  spinner: snake\n  show-scrollbar: true\n",
-			after:  "ui:\n  spinner: glitter\n",
-			path:   "ui.spinner", want: false,
-		},
-		{
-			name:   "a neighbour elsewhere in the file",
-			before: "mode: auto\nserver: box\n",
-			after:  "mode: plan\nserver: other\n",
-			path:   "mode", want: false,
-		},
-		{
-			name:   "a path the schema does not have cannot be verified",
-			before: "mode: auto\n",
-			after:  "mode: auto\n",
-			path:   "ui.sparkle", want: false,
-		},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			var b, a fileConfig
-			if err := yaml.Unmarshal([]byte(tt.before), &b); err != nil {
-				t.Fatalf("parse before: %v", err)
-			}
-			if err := yaml.Unmarshal([]byte(tt.after), &a); err != nil {
-				t.Fatalf("parse after: %v", err)
-			}
-			if got := sameApartFrom(b, a, tt.path); got != tt.want {
-				t.Errorf("sameApartFrom(..., %q) = %v, want %v", tt.path, got, tt.want)
-			}
-			// The comparison must not consume what it compares: a second call sees the same answer,
-			// which is what proves it copied the blocks it reached into rather than blanking them.
-			if got := sameApartFrom(b, a, tt.path); got != tt.want {
-				t.Errorf("a second sameApartFrom(..., %q) = %v, want %v", tt.path, got, tt.want)
-			}
-		})
-	}
-}
-
-// The legacy migration changes two keys as one edit, so it verifies against two paths: both are
-// forgiven together, and a third difference is still caught — a forgiven path must not become a
-// licence to rewrite the file.
-func TestConfigWriteSameApartFromTwoPaths(t *testing.T) {
-	t.Parallel()
-	for _, tt := range []struct {
-		name   string
-		before string
-		after  string
-		want   bool
-	}{
-		{
-			name:   "the fold's own two keys",
-			before: "mode: auto\n",
-			after:  "mode: auto\nservers:\n  - name: box\n    endpoint: http://box:1111\nserver: box\n",
-			want:   true,
-		},
-		{
-			name:   "one path forgiven does not forgive the other keys",
-			before: "mode: auto\n",
-			after:  "mode: plan\nservers:\n  - name: box\n    endpoint: http://box:1111\nserver: box\n",
-			want:   false,
-		},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			var b, a fileConfig
-			if err := yaml.Unmarshal([]byte(tt.before), &b); err != nil {
-				t.Fatalf("parse before: %v", err)
-			}
-			if err := yaml.Unmarshal([]byte(tt.after), &a); err != nil {
-				t.Fatalf("parse after: %v", err)
-			}
-			if got := sameApartFrom(b, a, "servers", "server"); got != tt.want {
-				t.Errorf(`sameApartFrom(..., "servers", "server") = %v, want %v`, got, tt.want)
 			}
 		})
 	}

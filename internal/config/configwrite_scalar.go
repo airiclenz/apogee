@@ -132,13 +132,6 @@ func setScalarSetting(data []byte, k Key, value string) ([]byte, error) {
 	return verifiedEdit(data, splice, verify)
 }
 
-// deleteScalarSetting returns the config bytes with key's active line removed, or nil bytes when
-// the file does not set the key at all — the reset half of setScalarSetting, over bytes in hand.
-func deleteScalarSetting(data []byte, k Key) ([]byte, error) {
-	splice, verify := scalarResetEdit(k)
-	return verifiedEdit(data, splice, verify)
-}
-
 // scalarSetEdit states a set as the transaction's two halves (configedit.go): the splice that
 // rewrites the key's active line — or inserts one where the key has none — and the gate the result
 // must pass. The value is rendered once, up front, into the text the file will carry AND the value a

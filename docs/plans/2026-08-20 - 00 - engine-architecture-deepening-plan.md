@@ -586,7 +586,27 @@ NOTES (2026-08-21): two of the writers keep a parse of their own, so that their 
 
 **Commit:** `refactor(config): entry, host-ack and fold writers ride the write transaction`
 
-## 24. One property suite for the write transaction
+## 24. One property suite for the write transaction — ✅ DONE (2026-08-21)
+
+NOTES (2026-08-21): applied the dispatch DECISION (1) — `verifiedEdit` consults the held-back `parseErr` BEFORE its no-op arm, so a no-op on an unreadable config is refused rather than confirmed. Pinned at both levels: `TestVerifiedEditHoldsTheDecoderErrorUntilTheSpliceHasSpoken` (three rows: a splice that objects wins, a splice that worked still meets the decoder, a splice with nothing to do is refused) and `TestEditRefusesAConfigTheParserCannotRead` for the user-visible `apogee: update config …: yaml: unmarshal errors` sentence.
+
+NOTES (2026-08-21): applied the dispatch DECISION (2) — `deleteScalarSetting` is deleted. Its five test call sites now go through `resetScalarSetting`, a two-line helper in `configwrite_scalar_test.go` that composes `scalarResetEdit` + `verifiedEdit`; production has no reset-over-bytes entry, so the composition belongs in the suite that reads it, not in a production file.
+
+NOTES (2026-08-21): `TestConfigWriteSameApartFrom` and `TestConfigWriteSameApartFromTwoPaths` MOVED from `configwrite_scalar_test.go` into `configedit_test.go` (as `TestSameApartFrom` / `TestSameApartFromTwoPaths`, bodies unchanged). The item names `sameApartFrom` as one of the four pipeline properties, and the scalar writer's file was its only home — deleting them outright would have dropped exactly the coverage the item requires kept, so the property moved to the suite that owns it.
+
+NOTES (2026-08-21): `splicedTo` moved from `configwrite_mechanism_test.go` into `configedit_test.go` with a writer-neutral comment. It is the transaction's test double rather than the mechanism writer's, and both suites now share the one copy.
+
+NOTES (2026-08-21): what was deleted as a per-writer duplicate — `TestSaveHostAcknowledgement_PreservesTheFileMode` and `TestSaveHostAcknowledgement_UnwritablePath` (configwrite_test.go); `TestMechanismEditReturnsTheCheckedBytes` and the "the result no longer parses" row of `TestMechanismEditRefusesAnEditThatChangedAnythingElse` (configwrite_mechanism_test.go); the file-mode tail of `TestConfigWriteSettingSeedsAnAbsentConfig` (configwrite_scalar_test.go, comment reworded to say the seeding and the atomic write are the transaction's property).
+
+NOTES (2026-08-21): the empty-path half of the deleted `UnwritablePath` test is NOT a transaction property — it is `saveHostAcknowledgement`'s own refusal wording, ahead of the transaction — so it survives as `TestSaveHostAcknowledgement_RefusesWithoutAConfigPath`, matching the entry writers' spelling of the same test. Without it that function's coverage fell from 100% to 95%.
+
+NOTES (2026-08-21): two of the item's named files needed no edit — `configwrite_keysource_test.go` and `configmigrate_test.go` carry no copy of the four pipeline properties (the key-source suite is locate errors, rendering, revalidation and noun wording; the migration suite is the fold's own refusals and the BACKUP's mode, which `backUpConfig` owns and the transaction never touches). `configwrite_server_test.go` — the sixth writer's suite, which the item's Files list does not name — was left untouched for the same reason.
+
+NOTES (2026-08-21): coverage is flat where the item asks it to be. Package `internal/config` reads 88.4% before and after; a per-function diff of the after profile against one taken from a pristine `HEAD` checkout shows exactly two changes — `verifiedEdit` 92.3% → 100.0% and `deleteScalarSetting` gone with its subject. No other function lost a statement.
+
+NOTES (2026-08-21): mutation-checked — restoring the old `updated == nil` / `parseErr` order fails both DECISION pins; widening the mode in `writeConfigAtomically` fails `TestEditPreservesTheFileMode`; writing the unchanged bytes on the no-op arm fails `TestEditWritesNothingWhenTheSpliceHasNothingToDo`.
+
+NOTES (2026-08-21): the CHANGELOG entry belongs under `[Unreleased]`'s existing `### Fixed` heading. The commit keeps the item's prescribed `test(config): …` subject although it also carries the DECISION's one-line behaviour fix; the fix is one line of the transaction and the bulk of the change is the suite.
 
 **Source:** review candidate 9. Depends on items 22 and 23.
 

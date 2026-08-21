@@ -242,26 +242,6 @@ func TestSaveHostAcknowledgement_IsIdempotent(t *testing.T) {
 	}
 }
 
-// A config may hold endpoint details, so the rewrite must not widen its permissions.
-func TestSaveHostAcknowledgement_PreservesTheFileMode(t *testing.T) {
-	t.Parallel()
-	path := writeTestConfig(t, "model: qwen2.5-coder\n")
-	const mode = 0o640
-	if err := os.Chmod(path, mode); err != nil {
-		t.Fatalf("chmod: %v", err)
-	}
-	if _, _, err := saveHostAcknowledgement(path, savedHostID, saveClock); err != nil {
-		t.Fatalf("saveHostAcknowledgement: %v", err)
-	}
-	info, err := os.Stat(path)
-	if err != nil {
-		t.Fatalf("stat: %v", err)
-	}
-	if got := info.Mode().Perm(); got != mode {
-		t.Errorf("mode after save = %04o, want %04o", got, mode)
-	}
-}
-
 // Every shape the writer refuses: it must say so rather than report a save that did not happen,
 // and must leave the file exactly as it found it.
 func TestSaveHostAcknowledgement_Errors(t *testing.T) {
@@ -327,20 +307,17 @@ func TestSaveHostAcknowledgement_Errors(t *testing.T) {
 	}
 }
 
-// An unwritable destination surfaces as an error, not a silent success. A directory where the
-// config file should be is the portable way to say "this path cannot be written" — unlike file
-// permissions, it holds for root too.
-func TestSaveHostAcknowledgement_UnwritablePath(t *testing.T) {
+// A Driver that never resolved an apogee home has no file to record the host in, and the writer
+// says so in its own words rather than reaching for a path that is not there — the same refusal the
+// entry writers make (configwrite_server_test.go, configwrite_keysource_test.go).
+func TestSaveHostAcknowledgement_RefusesWithoutAConfigPath(t *testing.T) {
 	t.Parallel()
-	path := filepath.Join(t.TempDir(), "config.yaml")
-	if err := os.Mkdir(path, 0o700); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	if written, _, err := saveHostAcknowledgement(path, savedHostID, saveClock); err == nil {
-		t.Fatalf("want an error writing over a directory, got path %q", written)
-	}
-	if written, _, err := saveHostAcknowledgement("", savedHostID, saveClock); err == nil {
+	written, _, err := saveHostAcknowledgement("", savedHostID, saveClock)
+	if err == nil {
 		t.Fatalf("want an error with no config path, got path %q", written)
+	}
+	if !strings.Contains(err.Error(), "no config file path is known") {
+		t.Errorf("refusal = %v, want the writer's own wording", err)
 	}
 }
 

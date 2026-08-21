@@ -106,10 +106,14 @@ func verifiedEdit(data []byte, splice editSplice, verify editVerify) ([]byte, er
 	switch {
 	case err != nil:
 		return nil, err
+	case parseErr != nil:
+		// The splice had its say and did not object; the file still does not parse as settings, so
+		// the decoder's error is the answer — including for a splice that found nothing to do. A
+		// no-op is a CONFIRMATION that the file already says it, and a file apogee cannot read is
+		// not a file it may confirm anything about.
+		return nil, parseErr
 	case updated == nil: // the file already says it: nothing to write, and nothing to verify
 		return nil, nil
-	case parseErr != nil:
-		return nil, parseErr
 	}
 
 	var after fileConfig
