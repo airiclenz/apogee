@@ -222,6 +222,21 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **Config resolution is now three loops over the registry, and nothing else.** The chain that
+  carried a key from the file to the running engine was written out by hand three times over —
+  a branch per field projecting the parsed file onto a precedence layer, a second one copying that
+  layer onto the resolved settings, and a flat run of thirty-odd assignments writing those onto the
+  options everything is constructed from. All three are gone, replaced by a loop over the accessors
+  each registry row already carries, plus a third accessor for the write-back. The failure this
+  removes is the quiet one: a key added to the schema, described in the registry and read out of the
+  file, that some fourth site never copied — resolving correctly and then never reaching the thing
+  that needed it. A key is now carried by the act of being described, a row missing any of its three
+  accessors fails the build gate, and one file states every key of the schema in a test that checks
+  every option field it owns moved. Two behaviours were deliberately kept as they were: a file-only
+  key is still fenced off the environment and the flags by construction rather than by trusting a
+  layer to be empty, and `confine-to-workspace` still collapses last, because whether a host
+  acknowledgement names THIS machine is not a fact any key holds.
+
 - **Every config key now travels through its own registry row.** The table binding a key to the
   plumbing that resolves it described three of the schema's thirty-eight keys — the ones settable
   from an environment variable or a flag — while the other thirty-five rode a hand-written copy

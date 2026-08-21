@@ -631,14 +631,19 @@ type Layer struct {
 // registry says what a key IS; this table says how it travels, and the two are one row apart so a
 // key described to the /settings surface cannot be a key resolution forgot to read.
 //
+// The whole of resolution is three loops over this table — the file projection (fileConfig.layer),
+// the precedence ladder (ResolveSettings), and the write-back onto Options (ApplyConfig) — so a
+// key is carried by the act of being described here, and a row's accessors are the only place a
+// key's plumbing exists.
+//
 // The environment-variable and flag NAMES are read off the row (EnvVar, FlagName) rather than
 // restated as a literal at each site that used to spell them — the env layer, the flag layer, the
 // override marker, and the precedence loop. Source metadata therefore has exactly one home, and
 // renaming APOGEE_MODE or --mode is an edit to one registry row instead of a four-site edit that
 // can half-land.
 //
-// The accessors are closures over the CURRENT typed carriers (fileConfig, Layer, Settings) rather
-// than reflection over them, so the compiler still checks every projection:
+// The accessors are closures over the typed carriers themselves (fileConfig, Layer, Settings,
+// Options) rather than reflection over them, so the compiler still checks every projection:
 //
 //   - fromFile projects a parsed file's typed value AND its presence onto a Layer — an absent key
 //     leaves the field nil so it falls through to the source below, which is the whole reason the
@@ -650,15 +655,18 @@ type Layer struct {
 //   - overlay copies a Layer's value onto the resolved Settings when that Layer sets it. Every row
 //     has one, and each writes only its own field, so applying the layers in order IS the
 //     precedence rule.
+//   - writeBack copies the RESOLVED value onto the Options the composition root builds everything
+//     from. Every row has one, and it is a plain copy rather than a guarded one: precedence is
+//     already settled by the time it runs, so there is no longer anything to fall through to.
 //
 // Two shapes need a word. The keys that SHARE a carrier — the three system-prompt keys, the two
 // context-files keys, the four present keys, the six ui keys — each project the whole block their
 // key sits in, because the Layer field is that block; each still answers for its OWN key's
 // presence, and applying two of them is idempotent. A block written with NO keys under it
-// therefore leaves the carrier unset where the hand-written projection sets it to the block
-// defaults — the one place the two differ, and a difference with no consequence, since that
-// carrier holds exactly the defaults resolution starts from
-// (TestKeyAccessorsLeaveABlockWithNoKeysUnset). And confine-to-workspace's accessors carry the
+// (`present:` and nothing beneath it) therefore sets no carrier at all — no key of the block is
+// present, so no accessor claims one is — and the block resolves to the defaults resolution starts
+// from, which is exactly what the block's own defaults would have produced. And
+// confine-to-workspace's accessors carry the
 // file's EXPLICIT value only: the EFFECTIVE one also depends on whether a Host acknowledgement
 // names this machine, which needs the host identity — a fact no row holds, so that collapse stays
 // in ResolveSettings (resolveConfineToWorkspace).
@@ -668,20 +676,21 @@ type Layer struct {
 // they build or overlay a startup server entry — so they are resolved on their own, off the
 // registry, rather than pretending to be file keys that no longer exist.
 type keyAccessor struct {
-	row      Key
-	fromFile func(l *Layer, fc fileConfig)
-	fromEnv  func(l *Layer, text string) error
-	fromFlag func(l *Layer, opts Options)
-	overlay  func(s *Settings, l Layer)
+	row       Key
+	fromFile  func(l *Layer, fc fileConfig)
+	fromEnv   func(l *Layer, text string) error
+	fromFlag  func(l *Layer, opts Options)
+	overlay   func(s *Settings, l Layer)
+	writeBack func(opts *Options, s Settings)
 }
 
 // keyAccessors is that table: one entry per registry row, in the order the registry lists the keys.
 // The order does not affect the outcome — each key writes its own field, and precedence is the
 // order the LAYERS are applied in — it only keeps the table readable beside the registry it is
 // built over. Its completeness is a test gate rather than an editorial promise
-// (TestKeyAccessorsBindDescribedKeys): every registry row has an entry here, every entry has both
-// a fromFile and an overlay, and a row advertising a variable or a flag has the plumbing that
-// reads it.
+// (TestKeyAccessorsBindDescribedKeys): every registry row has an entry here, every entry carries
+// the three accessors every key needs (fromFile, overlay, writeBack), and a row advertising a
+// variable or a flag has the plumbing that reads it.
 var keyAccessors = []keyAccessor{
 	{
 		// File-only: the list names MACHINES, which is a config act rather than an invocation one —
@@ -697,6 +706,7 @@ var keyAccessors = []keyAccessor{
 				s.Servers = l.Servers
 			}
 		},
+		writeBack: func(o *Options, s Settings) { o.Servers = s.Servers },
 	},
 	{
 		// The one key of the `servers:` neighbourhood with sources above the file: the list is
@@ -720,6 +730,7 @@ var keyAccessors = []keyAccessor{
 				s.StartupServer = *l.StartupServer
 			}
 		},
+		writeBack: func(o *Options, s Settings) { o.StartupServer = s.StartupServer },
 	},
 	{
 		row: mustKey("mode"),
@@ -741,6 +752,7 @@ var keyAccessors = []keyAccessor{
 				s.Mode = *l.Mode
 			}
 		},
+		writeBack: func(o *Options, s Settings) { o.Mode = s.Mode },
 	},
 	{
 		// The first of the three keys that are ONE prompt (ADR 0023) and therefore one carrier: each
@@ -752,7 +764,8 @@ var keyAccessors = []keyAccessor{
 				l.SystemPrompt = &sp
 			}
 		},
-		overlay: overlaySystemPrompt,
+		overlay:   overlaySystemPrompt,
+		writeBack: writeBackSystemPrompt,
 	},
 	{
 		row: mustKey("system-prompt-file"),
@@ -762,7 +775,8 @@ var keyAccessors = []keyAccessor{
 				l.SystemPrompt = &sp
 			}
 		},
-		overlay: overlaySystemPrompt,
+		overlay:   overlaySystemPrompt,
+		writeBack: writeBackSystemPrompt,
 	},
 	{
 		row: mustKey("system-prompt-models"),
@@ -772,7 +786,8 @@ var keyAccessors = []keyAccessor{
 				l.SystemPrompt = &sp
 			}
 		},
-		overlay: overlaySystemPrompt,
+		overlay:   overlaySystemPrompt,
+		writeBack: writeBackSystemPrompt,
 	},
 	{
 		// The `context-files:` pair, one carrier like the system-prompt trio above: an absent block
@@ -785,7 +800,8 @@ var keyAccessors = []keyAccessor{
 				l.ContextFiles = &c
 			}
 		},
-		overlay: overlayContextFiles,
+		overlay:   overlayContextFiles,
+		writeBack: writeBackContextFiles,
 	},
 	{
 		row: mustKey("context-files.names"),
@@ -797,7 +813,8 @@ var keyAccessors = []keyAccessor{
 				l.ContextFiles = &c
 			}
 		},
-		overlay: overlayContextFiles,
+		overlay:   overlayContextFiles,
+		writeBack: writeBackContextFiles,
 	},
 	{
 		// Global-config-only (ADR 0012): no env, no flag, so the invocation environment cannot
@@ -814,6 +831,7 @@ var keyAccessors = []keyAccessor{
 				s.ConfineToWorkspace = *l.ConfineToWorkspace
 			}
 		},
+		writeBack: func(o *Options, s Settings) { o.ConfineToWorkspace = s.ConfineToWorkspace },
 	},
 	{
 		// Global-config-only for the reason above — a hostile repo must not be able to name your
@@ -829,6 +847,7 @@ var keyAccessors = []keyAccessor{
 				s.UnconfinedHosts = l.UnconfinedHosts
 			}
 		},
+		writeBack: func(o *Options, s Settings) { o.UnconfinedHosts = s.UnconfinedHosts },
 	},
 	{
 		row: mustKey("web-search-endpoint"),
@@ -842,6 +861,7 @@ var keyAccessors = []keyAccessor{
 				s.WebSearchEndpoint = *l.WebSearchEndpoint
 			}
 		},
+		writeBack: func(o *Options, s Settings) { o.WebSearchEndpoint = s.WebSearchEndpoint },
 	},
 	{
 		// The on-disk entries are mapped across one by one, as they are everywhere else in this
@@ -861,6 +881,7 @@ var keyAccessors = []keyAccessor{
 				s.MCPServers = l.MCPServers
 			}
 		},
+		writeBack: func(o *Options, s Settings) { o.MCPServers = s.MCPServers },
 	},
 	{
 		row: mustKey("tools.disabled"),
@@ -874,6 +895,7 @@ var keyAccessors = []keyAccessor{
 				s.ToolsDisabled = l.ToolsDisabled
 			}
 		},
+		writeBack: func(o *Options, s Settings) { o.ToolsDisabled = s.ToolsDisabled },
 	},
 	{
 		// Each list of the `url-safety:` block projects on its own: a block that names only one of
@@ -889,6 +911,7 @@ var keyAccessors = []keyAccessor{
 				s.URLAllowHosts = l.URLAllowHosts
 			}
 		},
+		writeBack: func(o *Options, s Settings) { o.URLAllowHosts = s.URLAllowHosts },
 	},
 	{
 		row: mustKey("url-safety.deny-hosts"),
@@ -902,6 +925,7 @@ var keyAccessors = []keyAccessor{
 				s.URLDenyHosts = l.URLDenyHosts
 			}
 		},
+		writeBack: func(o *Options, s Settings) { o.URLDenyHosts = s.URLDenyHosts },
 	},
 	{
 		row: mustKey("use-project-skills"),
@@ -915,6 +939,7 @@ var keyAccessors = []keyAccessor{
 				s.UseProjectSkills = *l.UseProjectSkills
 			}
 		},
+		writeBack: func(o *Options, s Settings) { o.UseProjectSkills = s.UseProjectSkills },
 	},
 	{
 		row: mustKey("auto-compact"),
@@ -928,6 +953,7 @@ var keyAccessors = []keyAccessor{
 				s.AutoCompact = *l.AutoCompact
 			}
 		},
+		writeBack: func(o *Options, s Settings) { o.AutoCompact = s.AutoCompact },
 	},
 	{
 		row: mustKey("auto-title"),
@@ -941,6 +967,7 @@ var keyAccessors = []keyAccessor{
 				s.AutoTitle = *l.AutoTitle
 			}
 		},
+		writeBack: func(o *Options, s Settings) { o.AutoTitle = s.AutoTitle },
 	},
 	{
 		row: mustKey("remember-model"),
@@ -954,6 +981,7 @@ var keyAccessors = []keyAccessor{
 				s.RememberModel = *l.RememberModel
 			}
 		},
+		writeBack: func(o *Options, s Settings) { o.RememberModel = s.RememberModel },
 	},
 	{
 		// A plain int rather than a pointer on disk, so PRESENCE is the positive value: 0 and absent
@@ -969,6 +997,7 @@ var keyAccessors = []keyAccessor{
 				s.ContextWindow = *l.ContextWindow
 			}
 		},
+		writeBack: func(o *Options, s Settings) { o.ContextWindow = s.ContextWindow },
 	},
 	{
 		// Presence is the positive value here too, for context-window's reason: the loader accepts
@@ -984,6 +1013,7 @@ var keyAccessors = []keyAccessor{
 				s.ResponseReserve = *l.ResponseReserve
 			}
 		},
+		writeBack: func(o *Options, s Settings) { o.ResponseReserve = s.ResponseReserve },
 	},
 	{
 		// The four `present:` keys are one carrier, the system-prompt trio's shape: each answers for
@@ -995,7 +1025,8 @@ var keyAccessors = []keyAccessor{
 				l.Present = &p
 			}
 		},
-		overlay: overlayPresent,
+		overlay:   overlayPresent,
+		writeBack: writeBackPresent,
 	},
 	{
 		row: mustKey("present.command"),
@@ -1005,7 +1036,8 @@ var keyAccessors = []keyAccessor{
 				l.Present = &p
 			}
 		},
-		overlay: overlayPresent,
+		overlay:   overlayPresent,
+		writeBack: writeBackPresent,
 	},
 	{
 		row: mustKey("present.port"),
@@ -1015,7 +1047,8 @@ var keyAccessors = []keyAccessor{
 				l.Present = &p
 			}
 		},
-		overlay: overlayPresent,
+		overlay:   overlayPresent,
+		writeBack: writeBackPresent,
 	},
 	{
 		row: mustKey("present.host"),
@@ -1025,7 +1058,8 @@ var keyAccessors = []keyAccessor{
 				l.Present = &p
 			}
 		},
-		overlay: overlayPresent,
+		overlay:   overlayPresent,
+		writeBack: writeBackPresent,
 	},
 	{
 		// The six `ui:` keys are one carrier, the `present:` block's shape — and independent axes
@@ -1037,7 +1071,8 @@ var keyAccessors = []keyAccessor{
 				l.UI = &u
 			}
 		},
-		overlay: overlayUI,
+		overlay:   overlayUI,
+		writeBack: writeBackUI,
 	},
 	{
 		row: mustKey("ui.spinner-color"),
@@ -1047,7 +1082,8 @@ var keyAccessors = []keyAccessor{
 				l.UI = &u
 			}
 		},
-		overlay: overlayUI,
+		overlay:   overlayUI,
+		writeBack: writeBackUI,
 	},
 	{
 		row: mustKey("ui.show-scrollbar"),
@@ -1057,7 +1093,8 @@ var keyAccessors = []keyAccessor{
 				l.UI = &u
 			}
 		},
-		overlay: overlayUI,
+		overlay:   overlayUI,
+		writeBack: writeBackUI,
 	},
 	{
 		row: mustKey("ui.color-scheme"),
@@ -1067,7 +1104,8 @@ var keyAccessors = []keyAccessor{
 				l.UI = &u
 			}
 		},
-		overlay: overlayUI,
+		overlay:   overlayUI,
+		writeBack: writeBackUI,
 	},
 	{
 		row: mustKey("ui.stall-after"),
@@ -1079,7 +1117,8 @@ var keyAccessors = []keyAccessor{
 				l.UI = &u
 			}
 		},
-		overlay: overlayUI,
+		overlay:   overlayUI,
+		writeBack: writeBackUI,
 	},
 	{
 		row: mustKey("ui.inspector"),
@@ -1089,7 +1128,8 @@ var keyAccessors = []keyAccessor{
 				l.UI = &u
 			}
 		},
-		overlay: overlayUI,
+		overlay:   overlayUI,
+		writeBack: writeBackUI,
 	},
 	{
 		// Carried as the raw NAME: ApplyConfig validates it against the vocabulary internal/domain
@@ -1105,6 +1145,7 @@ var keyAccessors = []keyAccessor{
 				s.CursorShape = *l.CursorShape
 			}
 		},
+		writeBack: func(o *Options, s Settings) { o.CursorShape = s.CursorShape },
 	},
 	{
 		// File-only (ADR 0041): $VISUAL and $EDITOR are a FALLBACK below this key, read at the launch
@@ -1120,6 +1161,7 @@ var keyAccessors = []keyAccessor{
 				s.Editor = *l.Editor
 			}
 		},
+		writeBack: func(o *Options, s Settings) { o.Editor = s.Editor },
 	},
 	{
 		row: mustKey("bypass"),
@@ -1148,6 +1190,7 @@ var keyAccessors = []keyAccessor{
 				s.Bypass = *l.Bypass
 			}
 		},
+		writeBack: func(o *Options, s Settings) { o.Bypass = s.Bypass },
 	},
 	{
 		row: mustKey("mechanisms"),
@@ -1161,6 +1204,7 @@ var keyAccessors = []keyAccessor{
 				s.Mechanisms = l.Mechanisms
 			}
 		},
+		writeBack: func(o *Options, s Settings) { o.Mechanisms = s.Mechanisms },
 	},
 	{
 		// The `validated-sets:` pair project on their own, the `url-safety:` lists' shape: a block
@@ -1176,6 +1220,7 @@ var keyAccessors = []keyAccessor{
 				s.ValidatedSetsEnable = *l.ValidatedSetsEnable
 			}
 		},
+		writeBack: func(o *Options, s Settings) { o.ValidatedSetsEnable = s.ValidatedSetsEnable },
 	},
 	{
 		row: mustKey("validated-sets.alias"),
@@ -1189,6 +1234,7 @@ var keyAccessors = []keyAccessor{
 				s.ValidatedSetsAlias = l.ValidatedSetsAlias
 			}
 		},
+		writeBack: func(o *Options, s Settings) { o.ValidatedSetsAlias = s.ValidatedSetsAlias },
 	},
 	{
 		// Ordered by pattern on the way in (toProfileEntries), so the same file always resolves to
@@ -1205,6 +1251,7 @@ var keyAccessors = []keyAccessor{
 				s.ModelProfiles = l.ModelProfiles
 			}
 		},
+		writeBack: func(o *Options, s Settings) { o.ModelProfiles = s.ModelProfiles },
 	},
 }
 
@@ -1237,6 +1284,18 @@ func overlayUI(s *Settings, l Layer) {
 	}
 }
 
+// And the write-backs those same four groups share, for the same reason: the rows differ in what
+// they read from the file, never in which Options field the resolved block lands on. context-files
+// is the one that is not a plain copy — Options carries the RESOLVED name list rather than the
+// block, because the composition root has no use for the switch that produced it.
+func writeBackSystemPrompt(o *Options, s Settings) { o.SystemPrompt = s.SystemPrompt }
+
+func writeBackContextFiles(o *Options, s Settings) { o.ContextFiles = s.ContextFiles.resolved() }
+
+func writeBackPresent(o *Options, s Settings) { o.Present = s.Present }
+
+func writeBackUI(o *Options, s Settings) { o.UI = s.UI }
+
 // ResolveSettings overlays the layers in increasing priority — the default base, then
 // the file, then the environment, then the flags — so a flag beats an environment
 // variable beats the file beats the default. Only ask-before (the default mode) is a
@@ -1264,69 +1323,19 @@ func ResolveSettings(file, env, flag Layer, hostID string) (Settings, []string) 
 	s := Settings{Mode: mustKey("mode").Default, ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: true,
 		AutoTitle: true, ValidatedSetsEnable: true, Present: PresentSettings{AutoOpen: true}, UI: defaultUISettings(),
 		ContextFiles: defaultContextFilesSettings()}
-	// file-only (ADR 0012 + its 2026-07-21 amendment); env/flag never carry either, so the
-	// invocation environment can neither flip the flag nor name a host.
-	s.UnconfinedHosts = file.UnconfinedHosts
-	confine, notices := resolveConfineToWorkspace(file.ConfineToWorkspace, file.UnconfinedHosts, hostID)
-	s.ConfineToWorkspace = confine
-	if file.WebSearchEndpoint != nil {
-		s.WebSearchEndpoint = *file.WebSearchEndpoint
+	// The file layer first, and for EVERY key: each row's overlay writes its own field when the
+	// layer sets that key, so the whole schema lands in one pass with no per-key branch left to
+	// forget. Which keys exist, and which of them the file carries, is the registry's to describe
+	// (keyAccessors) — and the file carries all of them.
+	for _, k := range keyAccessors {
+		k.overlay(&s, file)
 	}
-	if file.UseProjectSkills != nil {
-		s.UseProjectSkills = *file.UseProjectSkills
-	}
-	if file.AutoCompact != nil {
-		s.AutoCompact = *file.AutoCompact
-	}
-	if file.AutoTitle != nil {
-		s.AutoTitle = *file.AutoTitle
-	}
-	if file.RememberModel != nil {
-		s.RememberModel = *file.RememberModel
-	}
-	if file.ContextWindow != nil {
-		s.ContextWindow = *file.ContextWindow
-	}
-	if file.ResponseReserve != nil {
-		s.ResponseReserve = *file.ResponseReserve
-	}
-	if file.Editor != nil { // file-only (ADR 0041); the env rungs below it are read at launch time
-		s.Editor = *file.Editor
-	}
-	s.Servers = file.Servers             // file-only; env/flag never name an upstream server
-	s.MCPServers = file.MCPServers       // file-only (P3.15); env/flag never set MCP servers
-	s.ToolsDisabled = file.ToolsDisabled // file-only; env/flag never prune the tool roster
-	s.URLAllowHosts = file.URLAllowHosts // file-only; env/flag never narrow the network tools' reach
-	s.URLDenyHosts = file.URLDenyHosts   // file-only, like the allow list it is read beside
-	s.Mechanisms = file.Mechanisms       // file-only (Phase 4); env/flag never enable Mechanisms
-	if file.ValidatedSetsEnable != nil { // file-only (ADR 0016); env/flag never touch the surface
-		s.ValidatedSetsEnable = *file.ValidatedSetsEnable
-	}
-	s.ValidatedSetsAlias = file.ValidatedSetsAlias
-	// file-only (ADR 0044), like mechanisms above: env/flag never carry a model profile, and a
-	// layer that sets the key replaces the map whole rather than merging patterns into it.
-	s.ModelProfiles = file.ModelProfiles
-	if file.Present != nil { // file-only (ADR 0019); env/flag never carry the presentation block
-		s.Present = *file.Present
-	}
-	if file.SystemPrompt != nil { // file-only (ADR 0023); env/flag never carry a system prompt
-		s.SystemPrompt = *file.SystemPrompt
-	}
-	if file.ContextFiles != nil { // file-only, like the system prompt it stands beside
-		s.ContextFiles = *file.ContextFiles
-	}
-	if file.UI != nil { // file-only; env/flag never carry the UI block
-		s.UI = *file.UI
-	}
-	if file.CursorShape != nil { // file-only, like the UI block above
-		s.CursorShape = *file.CursorShape
-	}
-	// The multi-source keys, lowest-priority layer first: each key's overlay writes its own field,
-	// so a later layer that sets the key wins and one that does not leaves the value below it
-	// standing. The keys and their sources are the registry's to describe (keyAccessors) — and only
-	// a key with a source ABOVE the file rides this ladder, since a file-only one has no contest to
-	// lose and was copied by the block above.
-	for _, l := range []Layer{file, env, flag} {
+	// Then the two layers above it, lowest priority first, and only for the keys that HAVE a source
+	// up there: a later layer that sets a key wins, one that does not leaves the value below it
+	// standing, and applying them in order IS the precedence rule. The skip is the file-only fence
+	// itself rather than an optimisation — a key with no environment variable and no flag can only
+	// ever be read from the file, whatever a hand-built layer happens to carry in its field.
+	for _, l := range []Layer{env, flag} {
 		for _, k := range keyAccessors {
 			if k.fromEnv == nil && k.fromFlag == nil {
 				continue
@@ -1334,6 +1343,13 @@ func ResolveSettings(file, env, flag Layer, hostID string) (Settings, []string) 
 			k.overlay(&s, l)
 		}
 	}
+	// The one collapse no row can make, so it stays here and runs last: confine-to-workspace's
+	// EFFECTIVE value also depends on whether a Host acknowledgement names THIS machine (ADR 0012 +
+	// its 2026-07-21 amendment), which needs the host identity — a fact no key holds. It answers for
+	// the key outright, from the FILE layer alone: env and flag never carry either half, so the
+	// invocation environment can neither flip the flag nor name a host.
+	confine, notices := resolveConfineToWorkspace(file.ConfineToWorkspace, file.UnconfinedHosts, hostID)
+	s.ConfineToWorkspace = confine
 	return s, notices
 }
 
@@ -2495,104 +2511,17 @@ func toProfileEntries(m map[string]modelProfileConfig) []profiles.Entry {
 	return entries
 }
 
-// layer projects a parsed file config onto a precedence layer: a present (non-empty)
-// field becomes an explicit setting, an absent one stays nil to fall through.
+// layer projects a parsed file config onto a precedence layer: a key the file states becomes an
+// explicit setting, one it leaves out stays nil so it falls through to the source below.
+//
+// WHICH field carries a key — and what counts as stating it, which differs by kind (an empty
+// string, a nil pointer, a zero number, a present-but-empty list) — is the key's own registry row
+// (keyAccessors). A key added to the schema is therefore read here by the act of being described,
+// rather than by a branch someone had to remember to add beside thirty-seven others.
 func (fc fileConfig) layer() Layer {
 	var l Layer
-	if fc.Mode != "" {
-		l.Mode = &fc.Mode
-	}
-	if fc.Bypass != nil {
-		l.Bypass = fc.Bypass
-	}
-	if fc.ConfineToWorkspace != nil {
-		l.ConfineToWorkspace = fc.ConfineToWorkspace
-	}
-	if len(fc.UnconfinedHosts) > 0 {
-		l.UnconfinedHosts = fc.UnconfinedHosts
-	}
-	if len(fc.Servers) > 0 {
-		l.Servers = fc.Servers
-	}
-	if fc.Server != "" {
-		l.StartupServer = &fc.Server
-	}
-	if fc.Editor != "" {
-		l.Editor = &fc.Editor
-	}
-	if fc.WebSearch != "" {
-		l.WebSearchEndpoint = &fc.WebSearch
-	}
-	if fc.UseProjectSkills != nil {
-		l.UseProjectSkills = fc.UseProjectSkills
-	}
-	if fc.AutoCompact != nil {
-		l.AutoCompact = fc.AutoCompact
-	}
-	if fc.AutoTitle != nil {
-		l.AutoTitle = fc.AutoTitle
-	}
-	if fc.RememberModel != nil {
-		l.RememberModel = fc.RememberModel
-	}
-	if fc.ContextWindow > 0 {
-		l.ContextWindow = &fc.ContextWindow
-	}
-	if fc.ResponseReserve > 0 {
-		l.ResponseReserve = &fc.ResponseReserve
-	}
-	if len(fc.MCPServers) > 0 {
-		servers := make([]mcp.ServerConfig, len(fc.MCPServers))
-		for i, m := range fc.MCPServers {
-			servers[i] = m.toServerConfig()
-		}
-		l.MCPServers = servers
-	}
-	if fc.Tools != nil && len(fc.Tools.Disabled) > 0 {
-		l.ToolsDisabled = fc.Tools.Disabled
-	}
-	if fc.URLSafety != nil {
-		// Each list projects on its own: a block that names only one of them configures that one and
-		// leaves the other to fall through, the way the `validated-sets:` pair below does.
-		if len(fc.URLSafety.AllowHosts) > 0 {
-			l.URLAllowHosts = fc.URLSafety.AllowHosts
-		}
-		if len(fc.URLSafety.DenyHosts) > 0 {
-			l.URLDenyHosts = fc.URLSafety.DenyHosts
-		}
-	}
-	if len(fc.ModelProfiles) > 0 {
-		l.ModelProfiles = toProfileEntries(fc.ModelProfiles)
-	}
-	if len(fc.Mechanisms) > 0 {
-		l.Mechanisms = fc.Mechanisms
-	}
-	if fc.ValidatedSets != nil {
-		l.ValidatedSetsEnable = fc.ValidatedSets.Enable
-		if len(fc.ValidatedSets.Alias) > 0 {
-			l.ValidatedSetsAlias = fc.ValidatedSets.Alias
-		}
-	}
-	if fc.Present != nil {
-		p := fc.Present.toPresentSettings()
-		l.Present = &p
-	}
-	// Three top-level keys rather than a block, so the projection asks whether ANY of them is
-	// present: one inline prompt, one file, or a per-model map alone all configure the subsystem.
-	if fc.SystemPromptText != "" || fc.SystemPromptFile != "" || len(fc.SystemPromptModels) > 0 {
-		sp := fc.toSystemPromptSettings()
-		l.SystemPrompt = &sp
-	}
-	if fc.ContextFiles != nil {
-		c := fc.ContextFiles.toContextFilesSettings()
-		l.ContextFiles = &c
-	}
-	if fc.UI != nil {
-		u := fc.UI.toUISettings()
-		l.UI = &u
-	}
-	if fc.CursorShape != "" {
-		l.CursorShape = &fc.CursorShape
+	for _, k := range keyAccessors {
+		k.fromFile(&l, fc)
 	}
 	return l
 }
@@ -2948,22 +2877,15 @@ func ApplyConfig(opts *Options, changed func(string) bool, getenv func(string) s
 	// (ResolveResponseReserve) at the bind. The ephemeral override entry states no share, which
 	// leaves an override run on that top-level key and, unset there too, on apogee's own.
 	opts.StartupResponseReserve = startup.ResponseReserve
-	opts.Mode = s.Mode
-	opts.Bypass = s.Bypass
-	opts.Servers = s.Servers
-	opts.StartupServer = s.StartupServer
-	opts.Editor = s.Editor
-	opts.ConfineToWorkspace = s.ConfineToWorkspace
-	opts.UnconfinedHosts = s.UnconfinedHosts
-	opts.WebSearchEndpoint = s.WebSearchEndpoint
-	opts.UseProjectSkills = s.UseProjectSkills
-	opts.AutoCompact = s.AutoCompact
-	opts.AutoTitle = s.AutoTitle
-	opts.RememberModel = s.RememberModel
-	opts.ContextWindow = s.ContextWindow
-	opts.ResponseReserve = s.ResponseReserve
-	opts.MCPServers = s.MCPServers
-	opts.ToolsDisabled = s.ToolsDisabled
+	// And every resolved key, onto the field of opts that carries it. Which field that is, is the
+	// key's own registry row (keyAccessors), so a key added to the schema is written back by the
+	// act of being described — the failure this replaces is a key that resolves correctly and then
+	// never reaches the construction that needed it, which no test of resolution can see. The
+	// startup entry's fields above are deliberately not in that table: since ADR 0036 they name no
+	// config key at all.
+	for _, k := range keyAccessors {
+		k.writeBack(opts, s)
+	}
 	// A `tools.disabled:` name that matches no tool is a NOTICE, never a refusal: the list is how a
 	// roster is pruned on evidence, and a typo in it must cost the user the tool they meant to
 	// disable rather than the session. It is reported here, at the same startup boundary the
@@ -2971,17 +2893,6 @@ func ApplyConfig(opts *Options, changed func(string) bool, getenv func(string) s
 	if n := unknownToolNotice(s.ToolsDisabled); n != "" {
 		notify(n)
 	}
-	opts.URLAllowHosts = s.URLAllowHosts
-	opts.URLDenyHosts = s.URLDenyHosts
-	opts.ModelProfiles = s.ModelProfiles
-	opts.Mechanisms = s.Mechanisms
-	opts.ValidatedSetsEnable = s.ValidatedSetsEnable
-	opts.ValidatedSetsAlias = s.ValidatedSetsAlias
-	opts.Present = s.Present
-	opts.SystemPrompt = s.SystemPrompt
-	opts.ContextFiles = s.ContextFiles.resolved()
-	opts.UI = s.UI
-	opts.CursorShape = s.CursorShape
 	// Which source won, for the keys where more than one could have: the resolved values above no
 	// longer carry that fact, and the /settings pane has to mark a row the environment or a flag is
 	// overriding (see overrideSources). Recorded from the same predicates the layers were built

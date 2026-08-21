@@ -421,7 +421,34 @@ NOTES (2026-08-21): the item's Files list names `internal/config/registry_test.g
 
 **Commit:** `refactor(config): give every registry row fromFile and overlay accessors`
 
-## 19. Resolution becomes a loop over registry rows
+## 19. Resolution becomes a loop over registry rows — ✅ DONE (2026-08-21)
+
+NOTES (2026-08-21): the item names three blocks to loop, but item 18's accessors covered only two of
+them — a row had no Settings→Options accessor, so `ApplyConfig`'s copy block had nothing to loop
+over. Every row gained a third accessor, `writeBack`, with the four shared-carrier groups sharing a
+named function the way their overlays already do (`writeBackSystemPrompt`, `writeBackContextFiles`,
+`writeBackPresent`, `writeBackUI`). Item 20 folds it back into `overlay` when that retargets
+`Options` directly.
+NOTES (2026-08-21): `ResolveSettings` keeps item 18's file-only skip, on the env and flag layers
+only. Ten subtests of `TestResolveSettingsPrecedence` hand-build an env or a flag `Layer` carrying a
+file-only field and assert it does NOT reach the settings, so the skip is the fence itself and not
+an optimisation; the file layer runs every row's overlay, which is what makes the schema land in one
+pass. The comment now says so.
+NOTES (2026-08-21): `TestKeyAccessorsLeaveABlockWithNoKeysUnset` was DELETED, as its own `t.Fatal`
+message instructs once the hand-written projection stops carrying an empty block — which is exactly
+what this item does. The behaviour it documented survives in the `keyAccessor` doc comment: a block
+written with no keys under it sets no carrier, and resolves to the defaults resolution starts from.
+NOTES (2026-08-21): item 18's two equivalence tables compared the accessors against the chain. With
+the chain deleted both sides became the same code, so `TestKeyAccessorsProjectTheFileLikeTheChain`
+was deleted and `TestKeyAccessorsOverlayLikeResolution` was retargeted (as
+`TestEveryConfigKeyReachesTheOptions`) at the one claim this item newly puts at risk and no other
+test makes: every key of the schema reaches `Options`, and only the fields config owns are written.
+It keeps the `everyKeyFileConfig` fixture, which would otherwise have been left with no caller.
+Mutation-checked — pointing one row's `writeBack` at a neighbour's field, and neutering a shared
+group write-back, each fail it by name.
+NOTES (2026-08-21): coverage of `internal/config` reads 91.3% against 91.7% before, with the SAME
+159 uncovered statements out of 1833 rather than 1926 — the percentage moved because 93 covered
+statements of hand-written copying were deleted, not because anything stopped being tested.
 
 **Source:** review candidate 2. Depends on item 18.
 

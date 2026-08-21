@@ -420,13 +420,17 @@ func TestRegistryModeDefaultIsTheLadderDefault(t *testing.T) {
 	}
 }
 
-// The accessor table over the registry cannot half-describe a key: EVERY row needs both the
-// projection that reads it out of the file and the overlay that copies it onto the resolved
-// settings, exactly once; every row advertising a variable or a flag must have the plumbing that
-// reads that source; every accessor must name a described key; and no accessor may carry plumbing
-// for a source its row does not name (which would be dead code advertising nothing). Without this,
-// a key added to the schema and described in the registry could still be a key resolution never
-// reads, and adding `EnvVar:` to a row would silently advertise a variable nothing looks at.
+// The accessor table over the registry cannot half-describe a key: EVERY row needs all three of
+// the accessors a key travels on — the projection that reads it out of the file, the overlay that
+// copies it onto the resolved settings, and the write-back that lands it on the Options everything
+// is built from — exactly once; every row advertising a variable or a flag must have the plumbing
+// that reads that source; every accessor must name a described key; and no accessor may carry
+// plumbing for a source its row does not name (which would be dead code advertising nothing).
+// Without this, a key added to the schema and described in the registry could still be a key
+// resolution never reads, and adding `EnvVar:` to a row would silently advertise a variable
+// nothing looks at. Since the three loops that carry a key ARE these accessors, a missing one is a
+// nil call at startup rather than a value quietly left at its default — the guard is what turns
+// that into a build failure instead.
 func TestKeyAccessorsBindDescribedKeys(t *testing.T) {
 	t.Parallel()
 
@@ -443,6 +447,10 @@ func TestKeyAccessorsBindDescribedKeys(t *testing.T) {
 		}
 		if k.overlay == nil {
 			t.Errorf("keyAccessors entry %q has no overlay, so resolution would never copy it", k.row.Path)
+		}
+		if k.writeBack == nil {
+			t.Errorf("keyAccessors entry %q has no writeBack, so the resolved value would never reach "+
+				"the Options construction reads", k.row.Path)
 		}
 		if k.fromEnv != nil && k.row.EnvVar == "" {
 			t.Errorf("keyAccessors entry %q reads an environment variable its row does not name", k.row.Path)
@@ -468,152 +476,63 @@ func TestKeyAccessorsBindDescribedKeys(t *testing.T) {
 	}
 }
 
-// The accessor table has to produce the SAME layer the hand-written projection does, key by key
-// and kind by kind — that equivalence is the whole licence for resolution to read the rows instead
-// of the chain. Each case is one representative kind carried by a real fileConfig: a bool, an int,
-// a float, an enum, a name list, a multi-line text value, the blocks whose keys share one carrier,
-// and the structured terminators. The last case sets every key at once, which is what catches an
-// accessor that projects the right value onto the wrong field.
-func TestKeyAccessorsProjectTheFileLikeTheChain(t *testing.T) {
+// Every key of the schema, carried end to end: a file that states all of them, resolved, then
+// written back onto the Options the composition root builds everything from. The assertion is the
+// SET of Options fields that moved off what an empty file resolves to — which is what catches the
+// two failures the accessor table can have and the completeness guard above cannot see: a row whose
+// writeBack copies its value onto a NEIGHBOUR's field (the neighbour's name appears, its own does
+// not), and a row whose value never reaches opts at all (its name is missing).
+//
+// It is the set rather than a hand-written expected Options because the values themselves are
+// pinned per key by the TestApplyConfig* suites below; what has no other home is the claim that
+// every key of the schema reaches construction, and that only the fields config owns are touched.
+func TestEveryConfigKeyReachesTheOptions(t *testing.T) {
 	t.Parallel()
 
-	tests := []struct {
-		name string
-		fc   fileConfig
-	}{
-		{name: "empty file sets nothing"},
-		{name: "bool keys", fc: fileConfig{
-			Bypass: boolptr(true), AutoCompact: boolptr(false), AutoTitle: boolptr(false),
-			RememberModel: boolptr(true), UseProjectSkills: boolptr(false),
-			ConfineToWorkspace: boolptr(false),
-			ValidatedSets:      &validatedSetsConfig{Enable: boolptr(false)},
-		}},
-		{name: "enum and name keys", fc: fileConfig{
-			Mode: "auto", Server: "the-box", CursorShape: "bar", Editor: "code -w",
-			WebSearch: "off", UI: &uiConfig{Spinner: "glitter", ColorScheme: "nord"},
-		}},
-		{name: "string lists", fc: fileConfig{
-			Tools:        &toolsConfig{Disabled: []string{"web_search"}},
-			URLSafety:    &urlSafetyConfig{AllowHosts: []string{"example.com"}},
-			ContextFiles: &contextFilesConfig{Names: []string{"CLAUDE.md", "AGENTS.md"}},
-		}},
-		{name: "an empty name list is off, not absent", fc: fileConfig{
-			ContextFiles: &contextFilesConfig{Names: []string{}},
-		}},
-		{name: "numbers and text", fc: fileConfig{
-			ContextWindow: 32000, ResponseReserve: 0.25, SystemPromptText: "be brief\nand kind",
-			Present: &presentConfig{Port: 8080},
-		}},
-		{name: "numbers at zero are unset", fc: fileConfig{ContextWindow: 0, ResponseReserve: 0}},
-		{name: "blocks whose keys share a carrier", fc: fileConfig{
-			UI: &uiConfig{SpinnerColor: boolptr(false), ShowScrollbar: boolptr(false),
-				StallAfter: strptr("45s"), Inspector: boolptr(true)},
-			Present:      &presentConfig{AutoOpen: boolptr(false), Command: "open {path}", Host: "box.local"},
-			ContextFiles: &contextFilesConfig{Enable: boolptr(false)},
-			SystemPromptModels: map[string]systemPromptEntryConfig{
-				"qwen": {Text: "be terse"},
-			},
-		}},
-		{name: "structured terminators", fc: fileConfig{
-			Servers:         []ServerEntry{{Name: "box", Endpoint: "http://localhost:8080"}},
-			UnconfinedHosts: []UnconfinedHost{{ID: "abc", Note: "the laptop"}},
-			MCPServers:      []mcpServerConfig{{Name: "docs", Command: "mcp-docs"}},
-			Mechanisms:      map[string]bool{"decompose": true},
-			ValidatedSets:   &validatedSetsConfig{Alias: map[string]string{"local": "qwen-30b"}},
-			ModelProfiles: map[string]modelProfileConfig{
-				"qwen": {ToolCallFormat: "xml"}, "gpt": {ToolCallFormat: "native"},
-			},
-		}},
-		{name: "every key at once", fc: everyKeyFileConfig()},
+	// The Options fields the config schema owns — every field some registry row writes back, and no
+	// other. The startup fields (Endpoint, Model, APIKey, the Startup* run) are deliberately absent:
+	// since ADR 0036 they name no config key, and they are resolved from the selected servers entry
+	// rather than from a layer.
+	want := map[string]bool{
+		"Mode": true, "Bypass": true, "Servers": true, "StartupServer": true, "Editor": true,
+		"ConfineToWorkspace": true, "UnconfinedHosts": true, "WebSearchEndpoint": true,
+		"UseProjectSkills": true, "AutoCompact": true, "AutoTitle": true, "RememberModel": true,
+		"ContextWindow": true, "ResponseReserve": true, "MCPServers": true, "ToolsDisabled": true,
+		"URLAllowHosts": true, "URLDenyHosts": true, "ModelProfiles": true, "Mechanisms": true,
+		"ValidatedSetsEnable": true, "ValidatedSetsAlias": true, "Present": true,
+		"SystemPrompt": true, "ContextFiles": true, "UI": true, "CursorShape": true,
 	}
 
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			var got Layer
-			for _, k := range keyAccessors {
-				k.fromFile(&got, tc.fc)
-			}
-			for _, diff := range structDiff(got, tc.fc.layer()) {
-				t.Errorf("layer field %s", diff)
-			}
-		})
-	}
-}
-
-// And the other half of the equivalence: the overlays have to land the layer's values on the same
-// settings fields the hand-written copy block does. The comparison is against ResolveSettings
-// itself — the defaults it starts from, then every row's overlay, then the ONE collapse no
-// accessor can make (a Host acknowledgement needs this machine's identity, which no row holds).
-// A missing overlay, or one writing a neighbour's field, shows up as a diff on the resolved value.
-func TestKeyAccessorsOverlayLikeResolution(t *testing.T) {
-	t.Parallel()
-
-	const hostID = "this-host"
-	tests := []struct {
-		name string
-		fc   fileConfig
-	}{
-		{name: "empty file resolves to the defaults"},
-		{name: "every key at once", fc: everyKeyFileConfig()},
-		{name: "an acknowledged host still loosens confinement", fc: fileConfig{
-			UnconfinedHosts: []UnconfinedHost{{ID: hostID, Acknowledged: "2026-08-20"}},
-		}},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			file := tc.fc.layer()
-			got, _ := ResolveSettings(Layer{}, Layer{}, Layer{}, hostID) // the default base
-			for _, k := range keyAccessors {
-				k.overlay(&got, file)
-			}
-			got.ConfineToWorkspace, _ = resolveConfineToWorkspace(file.ConfineToWorkspace, file.UnconfinedHosts, hostID)
-
-			want, _ := ResolveSettings(file, Layer{}, Layer{}, hostID)
-			for _, diff := range structDiff(got, want) {
-				t.Errorf("settings field %s", diff)
-			}
-		})
-	}
-}
-
-// The one place the accessors do NOT reproduce the hand-written projection exactly, pinned here so
-// it stays a decision rather than a surprise. A block written with no keys under it (`present:`
-// and nothing beneath it) hands the chain a carrier holding the block's defaults, while the
-// per-key accessors leave it unset — no key of the block is present, so no accessor claims one is.
-// The two resolve to the same settings, because the carrier the chain builds holds exactly the
-// defaults resolution already starts from, and that equality is what makes the divergence safe.
-func TestKeyAccessorsLeaveABlockWithNoKeysUnset(t *testing.T) {
-	t.Parallel()
-
-	fc := fileConfig{Present: &presentConfig{}, UI: &uiConfig{}, ContextFiles: &contextFilesConfig{}}
-	var accessors Layer
+	resolved, _ := ResolveSettings(everyKeyFileConfig().layer(), Layer{}, Layer{}, testHostID)
+	base, _ := ResolveSettings(Layer{}, Layer{}, Layer{}, testHostID)
+	var got, unset Options
 	for _, k := range keyAccessors {
-		k.fromFile(&accessors, fc)
-	}
-	if accessors.Present != nil || accessors.UI != nil || accessors.ContextFiles != nil {
-		t.Errorf("a block with no keys set a carrier: present=%v ui=%v context-files=%v",
-			accessors.Present, accessors.UI, accessors.ContextFiles)
-	}
-	chain := fc.layer()
-	if chain.Present == nil || chain.UI == nil || chain.ContextFiles == nil {
-		t.Fatal("the hand-written projection no longer carries an empty block — the divergence this " +
-			"test explains is gone, so it should be deleted rather than updated")
+		k.writeBack(&got, resolved)
+		k.writeBack(&unset, base)
 	}
 
-	got, _ := ResolveSettings(accessors, Layer{}, Layer{}, "this-host")
-	want, _ := ResolveSettings(chain, Layer{}, Layer{}, "this-host")
-	for _, diff := range structDiff(got, want) {
-		t.Errorf("settings field %s", diff)
+	moved := map[string]bool{}
+	for _, diff := range structDiff(got, unset) {
+		moved[strings.SplitN(diff, " ", 2)[0]] = true
+	}
+	for name := range want {
+		if !moved[name] {
+			t.Errorf("Options.%s is unchanged by a file that states every key — the key that owns it "+
+				"resolves and then never reaches construction", name)
+		}
+	}
+	for name := range moved {
+		if !want[name] {
+			t.Errorf("Options.%s was written by a config key, but no key owns it — an accessor is "+
+				"copying its value onto a neighbour's field", name)
+		}
 	}
 }
 
 // everyKeyFileConfig is a file that sets EVERY key of the schema to a non-default value, so an
-// accessor that reads the wrong field cannot hide behind a key the case left absent. It is one
-// function rather than a literal in each test because both equivalence tests want the same
-// exhaustive file — the layer they compare and the settings they resolve are two ends of it.
+// accessor that reads or writes the wrong field cannot hide behind a key the case left absent. It
+// is a function rather than a literal at its call site so the exhaustive file has one home as the
+// suites that want it come and go.
 func everyKeyFileConfig() fileConfig {
 	return fileConfig{
 		Mode: "auto", Bypass: boolptr(true), Server: "the-box", Editor: "hx",
