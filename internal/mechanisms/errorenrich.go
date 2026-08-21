@@ -105,21 +105,22 @@ var errorEnrichmentDescriptor = domain.MechanismDescriptor{
 // PostToolResult appends the enrichment hint to a write-tool error result when an earlier write to
 // the same file failed with the same category this Session (apogee-sim detectRepeatedErrors +
 // injectErrorEnrichmentIfNeeded @pin, one enriched error at a time). It is a no-op — booking no
-// fire (the loop keys the acted fire on *ToolResult changing, R4) — when the result is not an
-// error, the originating call is not a write, the path is unknown, the category is unknown or a
-// plain missing-file (the sim skips both), no earlier same-file/same-category failure exists, or an
-// earlier result already carried the enrichment for this file.
-func (errorEnrichmentMechanism) PostToolResult(_ context.Context, call domain.ToolCall, result *domain.ToolResult, view domain.LoopView) error {
+// fire (the loop keys the acted fire on the ToolResultEdit's Revision, R4) — when the result is
+// not an error, the originating call is not a write, the path is unknown, the category is unknown
+// or a plain missing-file (the sim skips both), no earlier same-file/same-category failure exists,
+// or an earlier result already carried the enrichment for this file.
+func (errorEnrichmentMechanism) PostToolResult(_ context.Context, call domain.ToolCall, result *domain.ToolResultEdit, view domain.LoopView) error {
 	// The current failure uses the authoritative flag; prior failures in history string-sniff,
 	// because the committed tool-result Message no longer carries IsError (hook-mutation-api §5).
-	if !result.IsError || !isFileMutatingTool(call.Tool) {
+	if !result.IsError() || !isFileMutatingTool(call.Tool) {
 		return nil
 	}
 	rawPath := toolCallPath(call.Arguments)
 	if rawPath == "" {
 		return nil
 	}
-	cat := classifyError(result.Content)
+	content := result.Content()
+	cat := classifyError(content)
 	if cat == errUnknown || cat == errMissingFile {
 		return nil
 	}
@@ -129,12 +130,12 @@ func (errorEnrichmentMechanism) PostToolResult(_ context.Context, call domain.To
 	if !priorWriteErrorMatches(conv, np, call.ID, cat) {
 		return nil
 	}
-	if strings.Contains(result.Content, errorEnrichmentMarker) || alreadyEnriched(conv, np) {
+	if strings.Contains(content, errorEnrichmentMarker) || alreadyEnriched(conv, np) {
 		return nil
 	}
 
-	hint := enrichError(enrichedError{Category: cat, ToolName: call.Tool, FilePath: np, OrigError: result.Content})
-	result.Content = strings.TrimRight(result.Content, "\n") + "\n\n" + hint
+	hint := enrichError(enrichedError{Category: cat, ToolName: call.Tool, FilePath: np, OrigError: content})
+	result.SetContent(strings.TrimRight(content, "\n") + "\n\n" + hint)
 	return nil
 }
 

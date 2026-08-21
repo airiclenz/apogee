@@ -308,7 +308,12 @@ and the effort compare each failed exactly the table rows meant to catch them (f
 
 **Commit:** `fix(config): validate every model-profile axis at load`
 
-## 13. Revision-bearing edit values for the tool-stage hooks
+## 13. Revision-bearing edit values for the tool-stage hooks — ✅ DONE (2026-08-21)
+
+NOTES (2026-08-21): the identity fields are deliberately NOT given mutators — `ToolCall.ID` and `ToolResult.CallID` are read-only on the edit values, although the hand-written probes they replace watched `ID` for changes. The id is what the loop pairs a result to its call by (the `ToolCallEvent` naming the call is already emitted when a pre-tool-exec hook runs), so a hook that moved it would break the pairing rather than express an intervention.
+NOTES (2026-08-21): the item's Files list named `internal/domain/tools.go` while its text says the plain structs stay unchanged; the structs are indeed untouched and the file gained only two cross-reference lines pointing `ToolCall` / `ToolResult` at their edit values.
+NOTES (2026-08-21): four files the item did not list had to change or their packages would not compile — `internal/mechanisms/cachedcontent_test.go` and `errorenrich_test.go` (their fire helpers now wrap the struct in an edit value) and the root `benchreadiness_test.go` (its `fivePointProbe` implements the facade interfaces). `internal/domain/doc.go` gained `tooledit.go`'s file-map line and its count (the docmap test enforces it), and the item's `ToolResultEdit` mutator test landed as a new `internal/domain/tooledit_test.go` beside the type it covers rather than in the agent package.
+NOTES (2026-08-21): `TestPostToolResultChangedFieldByField` was deleted with its subject (`toolResultChanged`); the new `internal/domain/tooledit_test.go` covers the same ground at the new interface, including the uncomparable summary case.
 
 **Source:** review candidate 1 (first half); ratified call 4. Depends on item 3 only in spirit (same package tests) — no semantic dependency.
 

@@ -1,10 +1,8 @@
 package agent
 
 import (
-	"bytes"
 	"context"
 	"fmt"
-	"reflect"
 
 	"github.com/airiclenz/apogee/internal/domain"
 )
@@ -28,9 +26,9 @@ import (
 // hooks are NEVER gated by either — they are the bench's own instruments.
 //
 // Fired means ACTED (R4, phase-4-review-fixes item 4): each catalogued fire is bracketed — the
-// working value's Revision counter (Request/Response/Conversation) or a before/after snapshot
-// (ToolCall/ToolResult) around the invocation, plus a non-zero post-response Action — and
-// recordFire + MechanismFiredEvent are booked only when the invocation intervened. An
+// working value's Revision counter around the invocation, at all five points (Request, Response,
+// Conversation, and the tool stage's ToolCallEdit / ToolResultEdit), plus a non-zero post-response
+// Action — and recordFire + MechanismFiredEvent are booked only when the invocation intervened. An
 // inspect-and-do-nothing invocation is not a fire (apogee-sim's FiredCounts: interventions, not
 // invocations). Experimental hooks keep today's always-booked behaviour under the synthetic ID
 // (bench observability). Booked fires feed the Session ledger LoopView.Fired reads and the
@@ -210,10 +208,13 @@ func (a *Agent) firePostResponse(ctx context.Context, id domain.MechanismID, hoo
 }
 
 // runPreToolExecHooks fires the pre-tool-exec Mechanisms/hooks against the pending call (which
-// they may mutate) and the loop view. A recovered panic returns errHookPanicked so the caller
-// skips the call rather than running it against a half-applied decision.
+// they may reshape through the shared ToolCallEdit, so their mutations compose) and the loop
+// view. The edit writes through to call, so the caller executes what the cascade left behind. A
+// recovered panic returns errHookPanicked so the caller skips the call rather than running it
+// against a half-applied decision.
 func (a *Agent) runPreToolExecHooks(ctx context.Context, turn int, call *domain.ToolCall) error {
 	view := a.loopView(turn)
+	edit := domain.NewToolCallEdit(call)
 	for _, m := range a.registry.Ordered(domain.HookPreToolExec) {
 		if a.skipMechanism(m) {
 			continue
@@ -223,11 +224,11 @@ func (a *Agent) runPreToolExecHooks(ctx context.Context, turn int, call *domain.
 			continue
 		}
 		id := m.Descriptor.ID
-		before := callSnapshot(*call)
-		if err := a.firePreToolExec(ctx, id, hook, turn, call, view); err != nil {
+		before := edit.Revision()
+		if err := a.firePreToolExec(ctx, id, hook, turn, edit, view); err != nil {
 			return err
 		}
-		if callChanged(before, *call) {
+		if edit.Revision() != before {
 			a.fired(turn, id, domain.HookPreToolExec, "fired")
 		}
 	}
@@ -236,7 +237,7 @@ func (a *Agent) runPreToolExecHooks(ctx context.Context, turn int, call *domain.
 		if !ok {
 			continue
 		}
-		if err := a.firePreToolExec(ctx, experimentalMechanismID, hook, turn, call, view); err != nil {
+		if err := a.firePreToolExec(ctx, experimentalMechanismID, hook, turn, edit, view); err != nil {
 			return err
 		}
 		a.fired(turn, experimentalMechanismID, domain.HookPreToolExec, "fired")
@@ -244,17 +245,19 @@ func (a *Agent) runPreToolExecHooks(ctx context.Context, turn int, call *domain.
 	return nil
 }
 
-func (a *Agent) firePreToolExec(ctx context.Context, id domain.MechanismID, hook domain.PreToolExecHook, turn int, call *domain.ToolCall, view domain.LoopView) (err error) {
+func (a *Agent) firePreToolExec(ctx context.Context, id domain.MechanismID, hook domain.PreToolExecHook, turn int, call *domain.ToolCallEdit, view domain.LoopView) (err error) {
 	defer a.recoverHook(turn, id, &err)()
 	return hook.PreToolExec(ctx, call, view)
 }
 
 // runPostToolResultHooks fires the post-tool-result Mechanisms/hooks against the result (which
-// they may mutate) before the model sees it, passing the originating call (the tool name +
-// arguments live there, not on the result) and the loop view. A recovered panic stops the chain
-// and the loop proceeds with the result as-is.
+// they may rewrite through the shared ToolResultEdit) before the model sees it, passing the
+// originating call (the tool name + arguments live there, not on the result) and the loop view.
+// The edit writes through to result, so the loop commits what the cascade left behind. A
+// recovered panic stops the chain and the loop proceeds with the result as-is.
 func (a *Agent) runPostToolResultHooks(ctx context.Context, turn int, call domain.ToolCall, result *domain.ToolResult) {
 	view := a.loopView(turn)
+	edit := domain.NewToolResultEdit(result)
 	for _, m := range a.registry.Ordered(domain.HookPostToolResult) {
 		if a.skipMechanism(m) {
 			continue
@@ -264,11 +267,11 @@ func (a *Agent) runPostToolResultHooks(ctx context.Context, turn int, call domai
 			continue
 		}
 		id := m.Descriptor.ID
-		before := *result
-		if err := a.firePostToolResult(ctx, id, hook, turn, call, result, view); err != nil {
+		before := edit.Revision()
+		if err := a.firePostToolResult(ctx, id, hook, turn, call, edit, view); err != nil {
 			return
 		}
-		if toolResultChanged(before, *result) {
+		if edit.Revision() != before {
 			a.fired(turn, id, domain.HookPostToolResult, "fired")
 		}
 	}
@@ -277,50 +280,16 @@ func (a *Agent) runPostToolResultHooks(ctx context.Context, turn int, call domai
 		if !ok {
 			continue
 		}
-		if err := a.firePostToolResult(ctx, experimentalMechanismID, hook, turn, call, result, view); err != nil {
+		if err := a.firePostToolResult(ctx, experimentalMechanismID, hook, turn, call, edit, view); err != nil {
 			return
 		}
 		a.fired(turn, experimentalMechanismID, domain.HookPostToolResult, "fired")
 	}
 }
 
-func (a *Agent) firePostToolResult(ctx context.Context, id domain.MechanismID, hook domain.PostToolResultHook, turn int, call domain.ToolCall, result *domain.ToolResult, view domain.LoopView) (err error) {
+func (a *Agent) firePostToolResult(ctx context.Context, id domain.MechanismID, hook domain.PostToolResultHook, turn int, call domain.ToolCall, result *domain.ToolResultEdit, view domain.LoopView) (err error) {
 	defer a.recoverHook(turn, id, &err)()
 	return hook.PostToolResult(ctx, call, result, view)
-}
-
-// callSnapshot deep-copies a tool call (Arguments included) so an in-place hook mutation —
-// even one writing through the original Arguments backing array — is detected by the
-// acted-fire comparison (R4).
-func callSnapshot(c domain.ToolCall) domain.ToolCall {
-	c.Arguments = append([]byte(nil), c.Arguments...)
-	return c
-}
-
-// callChanged reports whether the pending call differs from its pre-fire snapshot — the
-// pre-tool-exec acted probe (R4).
-func callChanged(before, after domain.ToolCall) bool {
-	return before.ID != after.ID ||
-		before.Tool != after.Tool ||
-		!bytes.Equal(before.Arguments, after.Arguments)
-}
-
-// toolResultChanged reports whether the result differs from its pre-fire snapshot — the
-// post-tool-result acted probe (R4). It compares field by field on purpose: ToolResult.Summary
-// is an interface that routinely holds an UNCOMPARABLE value (domain.ReadSpan carries the []int
-// of located line numbers, so every successful read_file produces one), and the whole-struct
-// compare this replaces panicked with "comparing uncomparable type …" exactly when the hook
-// did NOT act — Go short-circuits a struct compare on the first differing field, so only the
-// no-op path reached Summary.
-//
-// HOTFIX: deliberately minimal. The C1 Mechanism-runner consolidation replaces every
-// hand-written acted probe with one shared Revision() bracket and deletes this helper together
-// with its call site.
-func toolResultChanged(before, after domain.ToolResult) bool {
-	return before.CallID != after.CallID ||
-		before.Content != after.Content ||
-		before.IsError != after.IsError ||
-		!reflect.DeepEqual(before.Summary, after.Summary)
 }
 
 // recoverHook returns a deferred closure that converts a hook panic into an ErrorEvent

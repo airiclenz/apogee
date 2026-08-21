@@ -222,6 +222,24 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **The tool-stage hooks now speak in working values, like every other hook point.** A
+  pre-tool-exec Mechanism used to receive the raw `*ToolCall` and a post-tool-result one the raw
+  `*ToolResult`, which left the loop no way to ask "did that hook actually act?" except to copy the
+  value before the fire and diff it afterwards — field by field, because `ToolResult.Summary` is an
+  interface that routinely holds an uncomparable value (the `ReadSpan` every successful
+  `read_file` returns carries a slice of located line numbers), and the whole-struct compare that
+  originally shipped panicked with "comparing uncomparable type …" on exactly the no-op path. Both
+  hooks now receive an edit value — `ToolCallEdit` and `ToolResultEdit` — of the same shape
+  `Request`, `Response` and `Conversation` have had all along: read accessors, a curated set of
+  mutators (`SetTool` / `SetArguments`; `SetContent` / `SetIsError` / `SetSummary`), and a
+  `Revision()` counter every mutator bumps. The loop reads that one counter around each fire, so
+  the acted probe never inspects the carried value again and the whole class of failure is gone.
+  The plain `ToolCall` / `ToolResult` structs are untouched and stay the currency everywhere else:
+  the provider parses into them, a tool returns one, the loop commits one to history. A Mechanism
+  of your own that implements either tool-stage hook takes the edit value in place of the pointer
+  and reads through its accessors; the call id and the result's call id are read-only now, since
+  they are what a result is paired to its call by.
+
 - **One constructor builds the confinement box.** The box a subprocess is fenced to — the workspace
   root, the extra writable paths a confined toolchain needs, and the per-project network allow-list —
   was hand-assembled at three places out of the same three `Config` fields, and one of the three

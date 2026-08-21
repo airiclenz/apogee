@@ -16,7 +16,7 @@
 //
 // # The files, one line each
 //
-// Twenty-two files, grouped by which part of the language each one carries.
+// Twenty-three files, grouped by which part of the language each one carries.
 //
 // The construction surface and the session envelope. config.go is Config, the whole
 // construction surface (ADR 0001), plus the mode ladder it opens on — Mode, ParseMode,
@@ -58,8 +58,10 @@
 // ToolResult, the ToolRegistry, and the marker interfaces the dispatch disposition reads —
 // ReadOnlyTool, SubprocessTool, ExternalEffectTool, ReadSourceTool, PromptTool — plus
 // ApprovalScoper, read on the approval path rather than by the dispatch disposition.
-// toolsummary.go is ToolSummary and its seven variants, the structured half of an outcome,
-// written for a host rather than for the model. confinement.go is the Confiner interface, its
+// tooledit.go is the tool stage's pair of hook working values — ToolCallEdit and
+// ToolResultEdit, the revision-bearing wrappers the two tool-stage hooks reshape a pending
+// call and a returned result through. toolsummary.go is ToolSummary and its seven variants,
+// the structured half of an outcome, written for a host rather than for the model. confinement.go is the Confiner interface, its
 // capability and box value types, the per-call Confinement / SubprocessPermit context
 // carriers (ADR 0012), and the WriteEscapePermit that carries one approved out-of-workspace
 // write target (ADR 0049).

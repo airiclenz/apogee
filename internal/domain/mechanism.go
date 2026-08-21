@@ -43,21 +43,24 @@ type PostResponseHook interface {
 	PostResponse(ctx context.Context, resp *Response) (PostResponseDecision, error)
 }
 
-// PreToolExecHook acts between the decision to run a tool and its execution. It
-// receives the loop view because the decision is usually cross-Turn (e.g.
-// short-circuiting a re-read of a file already read earlier needs the read history).
+// PreToolExecHook acts between the decision to run a tool and its execution. It reads
+// and reshapes the pending call through a ToolCallEdit (tooledit.go) — the working value
+// whose Revision counter tells the loop whether the hook acted — and receives the loop
+// view because the decision is usually cross-Turn (e.g. short-circuiting a re-read of a
+// file already read earlier needs the read history).
 type PreToolExecHook interface {
-	PreToolExec(ctx context.Context, call *ToolCall, view LoopView) error
+	PreToolExec(ctx context.Context, call *ToolCallEdit, view LoopView) error
 }
 
 // PostToolResultHook acts on a tool result before the model next sees it — the home
 // of error_enrichment (correct_tool_result is deferred, owner-ratified 2026-07-04: a
 // bench-side experimental hook until a production trigger is found), new to the loop
-// (the proxy could not host it). It receives the originating call (the tool name and
-// arguments live there, not on the result) and the loop view (error handling often
-// counts prior failures across Turns).
+// (the proxy could not host it). It rewrites the result through a ToolResultEdit
+// (tooledit.go), and receives the originating call (the tool name and arguments live
+// there, not on the result — it is read-only here, hence the plain struct) and the loop
+// view (error handling often counts prior failures across Turns).
 type PostToolResultHook interface {
-	PostToolResult(ctx context.Context, call ToolCall, result *ToolResult, view LoopView) error
+	PostToolResult(ctx context.Context, call ToolCall, result *ToolResultEdit, view LoopView) error
 }
 
 // HistoryRewriter edits conversation state — the home of truncate_history. A

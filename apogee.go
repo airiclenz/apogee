@@ -496,6 +496,12 @@ const (
 // Conversation is the serializable conversation state a history-rewrite hook edits.
 type Conversation = domain.Conversation
 
+// ToolCallEdit is the pending tool call a pre-tool-exec hook may reshape.
+type ToolCallEdit = domain.ToolCallEdit
+
+// ToolResultEdit is the tool result a post-tool-result hook may rewrite.
+type ToolResultEdit = domain.ToolResultEdit
+
 // ----------------------------------------------------------------------------
 // Confinement (internal/domain; backends in internal/platform)
 // ----------------------------------------------------------------------------

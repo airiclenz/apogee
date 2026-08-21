@@ -17,7 +17,7 @@ func enrich(t *testing.T, history []domain.Message, call domain.ToolCall, result
 		t.Fatal("error_enrichment does not implement PostToolResultHook")
 	}
 	before := result.Content
-	if err := hook.PostToolResult(context.Background(), call, result, historyView(history)); err != nil {
+	if err := hook.PostToolResult(context.Background(), call, domain.NewToolResultEdit(result), historyView(history)); err != nil {
 		t.Fatalf("PostToolResult: %v", err)
 	}
 	return result.Content != before

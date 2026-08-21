@@ -68,28 +68,29 @@ var cachedContentDescriptor = domain.MechanismDescriptor{
 }
 
 // PreToolExec caps a redundant re-read of an unchanged file (apogee-sim detectCachedReread @pin,
-// relocated). It is a no-op — booking no fire (the loop keys the acted fire on the ToolCall
-// changing, R4) — when the pending call is not a read, has no path, targets a file not read
+// relocated). It is a no-op — booking no fire (the loop keys the acted fire on the ToolCallEdit's
+// Revision, R4) — when the pending call is not a read, has no path, targets a file not read
 // successfully before (or written since — the file may have changed), the pending tool's schema
 // does not declare a max_lines property (the cap has nothing to attach to), the read already has an
 // explicit line range/limit (a targeted read is not a redundant full re-dump), or the arguments are
 // not a JSON object.
-func (cachedContentMechanism) PreToolExec(_ context.Context, call *domain.ToolCall, view domain.LoopView) error {
-	if !isReadTool(call.Tool) {
+func (cachedContentMechanism) PreToolExec(_ context.Context, call *domain.ToolCallEdit, view domain.LoopView) error {
+	if !isReadTool(call.Tool()) {
 		return nil
 	}
-	rawPath := toolCallPath(call.Arguments)
+	args := call.Arguments()
+	rawPath := toolCallPath(args)
 	if rawPath == "" {
 		return nil
 	}
-	if !priorSuccessfulReadUnchanged(view.Conversation(), normalizePath(rawPath), call.ID) {
+	if !priorSuccessfulReadUnchanged(view.Conversation(), normalizePath(rawPath), call.ID()) {
 		return nil
 	}
-	if !toolDeclaresMaxLines(view.Tools(), call.Tool) {
+	if !toolDeclaresMaxLines(view.Tools(), call.Tool()) {
 		return nil
 	}
-	if capped, ok := capReadArguments(call.Arguments); ok {
-		call.Arguments = capped
+	if capped, ok := capReadArguments(args); ok {
+		call.SetArguments(capped)
 	}
 	return nil
 }

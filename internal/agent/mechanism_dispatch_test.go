@@ -68,12 +68,12 @@ func (p fivePointProbe) PostResponse(context.Context, *domain.Response) (domain.
 	return domain.PostResponseDecision{}, nil
 }
 
-func (p fivePointProbe) PreToolExec(context.Context, *domain.ToolCall, domain.LoopView) error {
+func (p fivePointProbe) PreToolExec(context.Context, *domain.ToolCallEdit, domain.LoopView) error {
 	p.note(domain.HookPreToolExec)
 	return nil
 }
 
-func (p fivePointProbe) PostToolResult(context.Context, domain.ToolCall, *domain.ToolResult, domain.LoopView) error {
+func (p fivePointProbe) PostToolResult(context.Context, domain.ToolCall, *domain.ToolResultEdit, domain.LoopView) error {
 	p.note(domain.HookPostToolResult)
 	return nil
 }

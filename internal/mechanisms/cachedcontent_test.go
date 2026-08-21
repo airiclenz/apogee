@@ -26,7 +26,7 @@ func fireCachedWithTools(t *testing.T, history []domain.Message, call domain.Too
 	}
 	c := call
 	view := domain.NewRequest("m", history, tools, domain.Budget{}, 0, nil).View()
-	if err := hook.PreToolExec(context.Background(), &c, view); err != nil {
+	if err := hook.PreToolExec(context.Background(), domain.NewToolCallEdit(&c), view); err != nil {
 		t.Fatalf("PreToolExec: %v", err)
 	}
 	return c

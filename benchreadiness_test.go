@@ -216,12 +216,12 @@ func (p *fivePointProbe) PostResponse(context.Context, *apogee.Response) (apogee
 	return apogee.PostResponseDecision{}, nil
 }
 
-func (p *fivePointProbe) PreToolExec(context.Context, *apogee.ToolCall, apogee.LoopView) error {
+func (p *fivePointProbe) PreToolExec(context.Context, *apogee.ToolCallEdit, apogee.LoopView) error {
 	p.seen[apogee.HookPreToolExec]++
 	return nil
 }
 
-func (p *fivePointProbe) PostToolResult(context.Context, apogee.ToolCall, *apogee.ToolResult, apogee.LoopView) error {
+func (p *fivePointProbe) PostToolResult(context.Context, apogee.ToolCall, *apogee.ToolResultEdit, apogee.LoopView) error {
 	p.seen[apogee.HookPostToolResult]++
 	return nil
 }

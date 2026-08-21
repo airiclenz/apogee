@@ -1,12 +1,15 @@
 package agent
 
-// Regression cover for the post-tool-result acted probe (R4). The whole-struct compare this
-// replaces panicked with "comparing uncomparable type …" whenever a summary-carrying result
-// reached a hook that did not act — the shape every successful read_file produces (ReadSpan
-// carries the []int of located lines), and error_enrichment (the only catalogued
-// post-tool-result Mechanism) never acts on a non-error result. No existing test drove a
-// summary-carrying result through dispatch, which is why CI never tripped; these do, through
-// the real Submit → Step → dispatchTools → runPostToolResultHooks path.
+// Regression cover for the two tool-stage acted probes (R4), driven through the real
+// Submit → Step → dispatchTools → runPreToolExecHooks / runPostToolResultHooks path.
+//
+// Both now read a ToolCallEdit / ToolResultEdit Revision counter, and the post-tool-result
+// case is where that matters: the whole-struct compare the counter replaces panicked with
+// "comparing uncomparable type …" whenever a summary-carrying result reached a hook that did
+// not act — the shape every successful read_file produces (ReadSpan carries the []int of
+// located lines), and error_enrichment (the only catalogued post-tool-result Mechanism) never
+// acts on a non-error result. No existing test drove a summary-carrying result through
+// dispatch, which is why CI never tripped; these do.
 
 import (
 	"context"
@@ -40,11 +43,11 @@ func summaryTool() fakeTool {
 // postToolResultMech is a catalogued post-tool-result Mechanism that applies mutate (nil for a
 // pure inspect-and-do-nothing hook) and counts its invocations. It is catalogued as an off-ramp
 // so neither the Bypass gate nor self-regulation can withdraw it — this fixture probes the
-// acted comparison, not dispatch gating.
+// acted probe, not dispatch gating.
 type postToolResultMech struct {
 	id     domain.MechanismID
 	calls  *int
-	mutate func(*domain.ToolResult)
+	mutate func(*domain.ToolResultEdit)
 }
 
 func (m postToolResultMech) row() domain.RegisteredMechanism {
@@ -54,10 +57,34 @@ func (m postToolResultMech) row() domain.RegisteredMechanism {
 	}
 }
 
-func (m postToolResultMech) PostToolResult(_ context.Context, _ domain.ToolCall, result *domain.ToolResult, _ domain.LoopView) error {
+func (m postToolResultMech) PostToolResult(_ context.Context, _ domain.ToolCall, result *domain.ToolResultEdit, _ domain.LoopView) error {
 	*m.calls++
 	if m.mutate != nil {
 		m.mutate(result)
+	}
+	return nil
+}
+
+// preToolExecMech is postToolResultMech's pre-tool-exec twin: a catalogued off-ramp Mechanism
+// that applies mutate (nil for a pure inspect-and-do-nothing hook) to the pending call and
+// counts its invocations.
+type preToolExecMech struct {
+	id     domain.MechanismID
+	calls  *int
+	mutate func(*domain.ToolCallEdit)
+}
+
+func (m preToolExecMech) row() domain.RegisteredMechanism {
+	return domain.RegisteredMechanism{
+		Descriptor: domain.MechanismDescriptor{ID: m.id, Capability: domain.CapOffRamp},
+		Hook:       m,
+	}
+}
+
+func (m preToolExecMech) PreToolExec(_ context.Context, call *domain.ToolCallEdit, _ domain.LoopView) error {
+	*m.calls++
+	if m.mutate != nil {
+		m.mutate(call)
 	}
 	return nil
 }
@@ -81,7 +108,7 @@ func TestPostToolResultActedProbe(t *testing.T) {
 
 	tests := []struct {
 		name      string
-		mutate    func(*domain.ToolResult)
+		mutate    func(*domain.ToolResultEdit)
 		wantFires int
 	}{
 		{
@@ -91,13 +118,13 @@ func TestPostToolResultActedProbe(t *testing.T) {
 		},
 		{
 			name:      "a Content mutation books a fire",
-			mutate:    func(r *domain.ToolResult) { r.Content += "\n[enriched]" },
+			mutate:    func(r *domain.ToolResultEdit) { r.SetContent(r.Content() + "\n[enriched]") },
 			wantFires: 1,
 		},
 		{
 			name: "a Summary-only mutation books a fire",
-			mutate: func(r *domain.ToolResult) {
-				r.Summary = domain.ReadSpan{Start: 1, End: 99, Total: 99, LocatedOn: []int{7}}
+			mutate: func(r *domain.ToolResultEdit) {
+				r.SetSummary(domain.ReadSpan{Start: 1, End: 99, Total: 99, LocatedOn: []int{7}})
 			},
 			wantFires: 1,
 		},
@@ -131,37 +158,44 @@ func TestPostToolResultActedProbe(t *testing.T) {
 	}
 }
 
-// TestPostToolResultChangedFieldByField is the unit half: every field the probe reads is
-// load-bearing, and an equal pair carrying an uncomparable Summary compares without panicking.
-func TestPostToolResultChangedFieldByField(t *testing.T) {
-	base := domain.ToolResult{CallID: "c1", Content: "body", Summary: locatedReadSummary()}
+// TestPreToolExecActedProbe is the pre-tool-exec half of the same pin: a hook that inspects
+// the pending call and leaves it alone books nothing, while one that reshapes it through a
+// ToolCallEdit mutator books its fire.
+func TestPreToolExecActedProbe(t *testing.T) {
+	const mechID domain.MechanismID = "pre_probe_mech"
 
 	tests := []struct {
-		name  string
-		after domain.ToolResult
-		want  bool
+		name      string
+		mutate    func(*domain.ToolCallEdit)
+		wantFires int
 	}{
-		{name: "identical", after: base, want: false},
 		{
-			name:  "equal summaries with distinct backing slices",
-			after: domain.ToolResult{CallID: "c1", Content: "body", Summary: locatedReadSummary()},
-			want:  false,
+			name:      "an inspect-only hook books no fire",
+			mutate:    nil,
+			wantFires: 0,
 		},
-		{name: "CallID differs", after: domain.ToolResult{CallID: "c2", Content: "body", Summary: locatedReadSummary()}, want: true},
-		{name: "Content differs", after: domain.ToolResult{CallID: "c1", Content: "other", Summary: locatedReadSummary()}, want: true},
-		{name: "IsError differs", after: domain.ToolResult{CallID: "c1", Content: "body", IsError: true, Summary: locatedReadSummary()}, want: true},
 		{
-			name:  "Summary differs",
-			after: domain.ToolResult{CallID: "c1", Content: "body", Summary: domain.ReadSpan{Start: 1, End: 9, Total: 9}},
-			want:  true,
+			name:      "an Arguments mutation books a fire",
+			mutate:    func(c *domain.ToolCallEdit) { c.SetArguments([]byte(`{"max_lines":40}`)) },
+			wantFires: 1,
 		},
-		{name: "Summary cleared", after: domain.ToolResult{CallID: "c1", Content: "body"}, want: true},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := toolResultChanged(base, tt.after); got != tt.want {
-				t.Errorf("toolResultChanged(%+v, %+v) = %v, want %v", base, tt.after, got, tt.want)
+			sink := &recordingSink{}
+			cfg := configWithTools(sink, summaryTool())
+			cfg.Mechanisms = domain.NewMechanismRegistry()
+			calls := 0
+			mustAddMech(t, cfg.Mechanisms, preToolExecMech{id: mechID, calls: &calls, mutate: tt.mutate}.row())
+
+			driveToolExchange(t, cfg)
+
+			if calls != 1 {
+				t.Fatalf("pre-tool-exec hook ran %d times, want 1 (it must reach the acted probe)", calls)
+			}
+			if got := firesFor(sink.events, mechID); got != tt.wantFires {
+				t.Errorf("booked fires = %d, want %d", got, tt.wantFires)
 			}
 		})
 	}

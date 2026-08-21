@@ -170,14 +170,17 @@ const (
 	EffectMCP     ExternalEffectKind = "mcp"
 )
 
-// ToolCall is a parsed request from the model to run a tool.
+// ToolCall is a parsed request from the model to run a tool. A pre-tool-exec hook does not
+// receive it directly: the loop wraps it in a ToolCallEdit (tooledit.go), whose revision
+// counter is how the loop tells an intervening hook from an inspecting one.
 type ToolCall struct {
 	ID        string
 	Tool      string
 	Arguments json.RawMessage
 }
 
-// ToolResult is what a tool returns to the loop (pre tool-result-capping).
+// ToolResult is what a tool returns to the loop (pre tool-result-capping). Like ToolCall it
+// reaches its hook — post-tool-result — wrapped in an edit value, ToolResultEdit (tooledit.go).
 type ToolResult struct {
 	CallID  string
 	Content string
