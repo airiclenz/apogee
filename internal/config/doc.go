@@ -33,7 +33,10 @@
 // first run, plus the seed-if-absent write everything else reuses. configsplice.go is the line and
 // node machinery every write into config.yaml shares — read, parse for positions, cut and rejoin
 // the text, verify the result against the original, replace the file atomically — which is what
-// keeps ONE key writable without moving a comment (ADR 0035). configwrite.go is the
+// keeps ONE key writable without moving a comment (ADR 0035). configedit.go is the one transaction
+// those pieces are run in — seed and read the file, splice, re-parse, verify, replace it
+// atomically — together with the per-container shape predicates a writer's verify step is written
+// from. configwrite.go is the
 // acknowledgement writer that records a host `/confine off --save` names, and the per-entry writer
 // that remembers a choice on a single `servers:` entry. configwrite_scalar.go sets or resets one
 // /settings key, addressed by its registry path, and configwrite_scalarsplice.go is that writer's

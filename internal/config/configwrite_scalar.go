@@ -53,18 +53,11 @@ func SaveConfigSetting(path, key, value string) error {
 	if err := validateSettingValue(k, value); err != nil {
 		return err
 	}
-	data, err := ReadConfigForWrite(path)
-	if err != nil {
-		return err
-	}
-	updated, err := setScalarSetting(data, k, value)
+	splice, verify, err := scalarSetEdit(k, value)
 	if err != nil {
 		return fmt.Errorf("apogee: update config %q: %w", path, err)
 	}
-	if updated == nil {
-		return nil
-	}
-	return writeConfigAtomically(path, updated)
+	return edit(path, splice, verify)
 }
 
 // ResetConfigSetting removes the config file's active line for the registry path key, so the key
@@ -75,18 +68,8 @@ func ResetConfigSetting(path, key string) error {
 	if err != nil {
 		return err
 	}
-	data, err := ReadConfigForWrite(path)
-	if err != nil {
-		return err
-	}
-	updated, err := deleteScalarSetting(data, k)
-	if err != nil {
-		return fmt.Errorf("apogee: update config %q: %w", path, err)
-	}
-	if updated == nil {
-		return nil
-	}
-	return writeConfigAtomically(path, updated)
+	splice, verify := scalarResetEdit(k)
+	return edit(path, splice, verify)
 }
 
 // validateSettingValue refuses a value the key cannot hold, BEFORE the config file is opened: the
@@ -137,38 +120,64 @@ func writableKey(key string) (Key, error) {
 }
 
 // setScalarSetting returns the config bytes with key set to value, or nil bytes when the edit would
-// not change one — a re-set of what the file already says is a confirmation, not a rewrite. The
-// splice is verified before it is returned: the result must parse, must resolve the key to the
-// value asked for, and must agree with the original on every OTHER setting — so a file shape the
-// line arithmetic mis-reads surfaces as an error rather than as a quietly mangled config.
-//
-// The splice runs before the file is parsed into fileConfig, so a config apogee could not read at
-// all is refused by the shape checks — which can say WHICH part of the file they could not
-// read — rather than by the decoder's own type error.
+// not change one — a re-set of what the file already says is a confirmation, not a rewrite. It is
+// the write transaction over bytes already in hand (verifiedEdit, configedit.go) rather than against
+// a path, which is what the one-time legacy fold needs: the fold stacks this set under its own
+// splice before anything reaches the disk (configmigrate.go).
 func setScalarSetting(data []byte, k Key, value string) ([]byte, error) {
-	text, want, err := renderSettingValue(k, value)
+	splice, verify, err := scalarSetEdit(k, value)
 	if err != nil {
 		return nil, err
 	}
-	updated, err := spliceScalarSet(data, k, text)
-	if err != nil {
-		return nil, err
-	}
-	if bytes.Equal(updated, data) {
-		return nil, nil
-	}
-	return verifiedSplice(data, updated, k, want, true)
+	return verifiedEdit(data, splice, verify)
 }
 
 // deleteScalarSetting returns the config bytes with key's active line removed, or nil bytes when
-// the file does not set the key at all. It is verified exactly as a set is, with the target's
-// absence standing in for its value.
+// the file does not set the key at all — the reset half of setScalarSetting, over bytes in hand.
 func deleteScalarSetting(data []byte, k Key) ([]byte, error) {
-	updated, err := spliceScalarDelete(data, k)
-	if err != nil || updated == nil {
-		return nil, err
+	splice, verify := scalarResetEdit(k)
+	return verifiedEdit(data, splice, verify)
+}
+
+// scalarSetEdit states a set as the transaction's two halves (configedit.go): the splice that
+// rewrites the key's active line — or inserts one where the key has none — and the gate the result
+// must pass. The value is rendered once, up front, into the text the file will carry AND the value a
+// reader will parse back out of it, so the two halves cannot disagree about what was written; a
+// value the key's kind does not hold is refused here, with nothing spliced at all.
+func scalarSetEdit(k Key, value string) (editSplice, editVerify, error) {
+	text, want, err := renderSettingValue(k, value)
+	if err != nil {
+		return nil, nil, err
 	}
-	return verifiedSplice(data, updated, k, "", false)
+	splice := func(_ fileConfig, data []byte) ([]byte, error) {
+		updated, err := spliceScalarSet(data, k, text)
+		if err != nil {
+			return nil, err
+		}
+		if bytes.Equal(updated, data) {
+			return nil, nil // the file already spells the line this way
+		}
+		return updated, nil
+	}
+	verify := func(before, after fileConfig, updated []byte) error {
+		return verifyScalarEdit(before, after, updated, k, want, true)
+	}
+	return splice, verify, nil
+}
+
+// scalarResetEdit states a reset as the same two halves: the splice REMOVES the key's active line
+// rather than setting it to a default literal, so the key goes back to being described by the
+// binary's default, and the gate is the set's with the target's absence standing in for its value.
+// A key the file does not set is already at its default: the splice reports nothing to do, and
+// nothing is written.
+func scalarResetEdit(k Key) (editSplice, editVerify) {
+	splice := func(_ fileConfig, data []byte) ([]byte, error) {
+		return spliceScalarDelete(data, k)
+	}
+	verify := func(before, after fileConfig, updated []byte) error {
+		return verifyScalarEdit(before, after, updated, k, "", false)
+	}
+	return splice, verify
 }
 
 // renderSettingValue turns a value typed at a surface into the text the file will carry and the
@@ -235,7 +244,7 @@ func renderSettingValue(k Key, value string) (string, string, error) {
 		// the block from it. Normalizing is trimming the trailing newlines down to the single one a
 		// clip-chomped block scalar yields, which is what a reader takes back out of the file: without
 		// it a value typed with two blank lines at the end would come back differing from itself and
-		// verifiedSplice would refuse the edit. Nothing else is trimmed — a prompt's leading indentation
+		// the edit's own gate (verifyScalarEdit) would refuse it. Nothing else is trimmed — a prompt's leading indentation
 		// and its trailing spaces are its own, and a literal block preserves both.
 		text := strings.TrimRight(value, "\n")
 		if text == "" {
@@ -397,72 +406,21 @@ func spliceScalarDelete(data []byte, k Key) ([]byte, error) {
 	return deleteLines(lines, drop...)
 }
 
-// verifiedSplice is the gate every scalar splice passes before it reaches the disk: the result must
-// parse, must resolve the target path to exactly what the edit intended (or to nothing, for a
-// reset), and must agree with the original config on every other setting. It returns the verified
-// bytes, so a caller cannot forget to check them.
-func verifiedSplice(data, updated []byte, k Key, want string, set bool) ([]byte, error) {
-	var before fileConfig
-	if err := yaml.Unmarshal(data, &before); err != nil {
-		return nil, err
-	}
-	var after fileConfig
-	if err := yaml.Unmarshal(updated, &after); err != nil {
-		return nil, fmt.Errorf("the edited file would not parse: %w", err)
-	}
-	got, isSet, err := scalarAtPath(updated, k.Path)
-	if err != nil {
-		return nil, fmt.Errorf("the edited file would not parse: %w", err)
-	}
+// verifyScalarEdit is the gate every scalar splice passes before it reaches the disk: the result
+// must resolve the target path to exactly what the edit intended (or to nothing, for a reset), and
+// must agree with the config it started from on every other setting — so a file shape the line
+// arithmetic mis-reads surfaces as a refusal rather than as a quietly mangled config.
+func verifyScalarEdit(before, after fileConfig, updated []byte, k Key, want string, set bool) error {
+	placed, err := scalarChangedOnlyAt(updated, k.Path, want, set)
 	switch {
-	case set && (!isSet || got != want):
-		return nil, fmt.Errorf("the edit did not put %s where a reader would look for it; edit the file by hand", k.Path)
-	case !set && isSet:
-		return nil, fmt.Errorf("the edit left %s set; edit the file by hand", k.Path)
+	case err != nil:
+		return fmt.Errorf("the edited file would not parse: %w", err)
+	case !placed && set:
+		return fmt.Errorf("the edit did not put %s where a reader would look for it; edit the file by hand", k.Path)
+	case !placed:
+		return fmt.Errorf("the edit left %s set; edit the file by hand", k.Path)
 	case !sameApartFrom(before, after, k.Path):
-		return nil, fmt.Errorf("the edit would have changed more than %s; edit the file by hand", k.Path)
+		return fmt.Errorf("the edit would have changed more than %s; edit the file by hand", k.Path)
 	}
-	return updated, nil
-}
-
-// scalarAtPath reads the value a config file actually holds at a dotted path, the way any YAML
-// reader sees it — the round-trip half of the verification: a splice must put the value where the
-// PARSER looks for it, not merely somewhere that reads correctly in the text. A path that is
-// absent, or that runs through a value which is not a block, reports not-set.
-//
-// A list of plain values reads back as the one-line spelling the writer renders and the row shows
-// (listValue), so a name list is verified the same way a scalar is. A list holding anything else —
-// the blocks under `servers:` — is not a value a settings path names at all, and reports not-set.
-func scalarAtPath(data []byte, path string) (string, bool, error) {
-	var doc map[string]any
-	if err := yaml.Unmarshal(data, &doc); err != nil {
-		return "", false, err
-	}
-	var node any = doc
-	for _, segment := range strings.Split(path, ".") {
-		block, ok := node.(map[string]any)
-		if !ok {
-			return "", false, nil
-		}
-		if node, ok = block[segment]; !ok {
-			return "", false, nil
-		}
-	}
-	switch v := node.(type) {
-	case nil: // a bare `key:` — set, with nothing in it
-		return "", true, nil
-	case map[string]any:
-		return "", false, nil
-	case []any:
-		names := make([]string, 0, len(v))
-		for _, item := range v {
-			switch item.(type) {
-			case nil, map[string]any, []any:
-				return "", false, nil
-			}
-			names = append(names, fmt.Sprint(item))
-		}
-		return listValue(names), true, nil
-	}
-	return fmt.Sprint(node), true, nil
+	return nil
 }

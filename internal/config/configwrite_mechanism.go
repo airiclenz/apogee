@@ -3,10 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
-	"maps"
 	"strings"
-
-	"gopkg.in/yaml.v3"
 )
 
 // ----------------------------------------------------------------------------
@@ -54,18 +51,8 @@ func SaveMechanismSetting(path, id string, enabled bool) error {
 	if err != nil {
 		return err
 	}
-	data, err := ReadConfigForWrite(path)
-	if err != nil {
-		return err
-	}
-	updated, err := setMechanismSetting(data, name, enabled)
-	if err != nil {
-		return fmt.Errorf("apogee: update config %q: %w", path, err)
-	}
-	if updated == nil {
-		return nil
-	}
-	return writeConfigAtomically(path, updated)
+	splice, verify := mechanismEdit(name, enabled)
+	return edit(path, splice, verify)
 }
 
 // writableMechanismID refuses an id this writer cannot put in the file as a plain key, BEFORE the
@@ -90,32 +77,30 @@ func writableMechanismID(id string) (string, error) {
 	return name, nil
 }
 
-// setMechanismSetting returns the config bytes with id set to enabled inside the `mechanisms:`
-// block, or nil bytes when the file already says that — a re-set is a confirmation, not a rewrite.
-// An id the block does not NAME is always written, `false` included: an absent key and an explicit
-// `false` leave the Mechanism in the same state but not the file in the same one, since a block
-// with a line in it is manual control (ADR 0016).
+// mechanismEdit states one mechanism line as the write transaction's two halves (configedit.go):
+// the splice that puts `<id>: <enabled>` inside the `mechanisms:` block, and the gate the result
+// must pass. An id the block does not NAME is always written, `false` included — an absent key and
+// an explicit `false` leave the Mechanism in the same state but not the file in the same one, since
+// a block with a line in it is manual control (ADR 0016) — while an id the block already spells that
+// way is nothing to write at all.
 //
 // The splice is the scalar writer's (spliceScalarSet): a mechanism line is a nested `key: value`
 // like any other, so the shapes it must meet — no block at all, a bare `mechanisms:`, a populated
 // block, and a line already there — are the ones scalarInsertion already reads out of the file.
-func setMechanismSetting(data []byte, id string, enabled bool) ([]byte, error) {
-	var before fileConfig
-	if err := yaml.Unmarshal(data, &before); err != nil {
-		return nil, err
+func mechanismEdit(id string, enabled bool) (editSplice, editVerify) {
+	splice := func(before fileConfig, data []byte) ([]byte, error) {
+		if was, named := before.Mechanisms[id]; named && was == enabled {
+			return nil, nil // the block already says it: a confirmation, not a rewrite
+		}
+		text, err := renderScalar(enabled)
+		if err != nil {
+			return nil, err
+		}
+		return spliceScalarSet(data, mechanismTarget(id), text)
 	}
-	if was, named := before.Mechanisms[id]; named && was == enabled {
-		return nil, nil
+	return splice, func(before, after fileConfig, _ []byte) error {
+		return verifyMechanismEdit(before, after, id, enabled)
 	}
-	text, err := renderScalar(enabled)
-	if err != nil {
-		return nil, err
-	}
-	updated, err := spliceScalarSet(data, mechanismTarget(id), text)
-	if err != nil {
-		return nil, err
-	}
-	return verifiedMechanismSplice(updated, before, id, enabled)
 }
 
 // mechanismTarget is where one mechanism line stands, in the shape the splice machinery reads a
@@ -126,40 +111,22 @@ func mechanismTarget(id string) Key {
 	return Key{Path: mechanismsKey + "." + id, Kind: KindBool}
 }
 
-// verifiedMechanismSplice is the gate a mechanism splice passes before it reaches the disk: the
-// result must parse, must hold the block it started from with this one id set to exactly what was
-// asked for and every sibling Mechanism untouched, and must agree with the original config on every
-// setting outside the block.
+// verifyMechanismEdit is the gate a mechanism splice passes before it reaches the disk: the result
+// must hold the block it started from with this one id set to exactly what was asked for and every
+// sibling Mechanism untouched, and must agree with the config it started from on every setting
+// outside the block.
 //
-// It is verifiedEntrySplice's shape (configwrite_keysource.go), one key wide rather than one list
-// item, and it is what catches a file shape the line arithmetic mis-read: a line inserted into
-// somebody else's block changes a setting nobody asked to touch, and the comparison is what sees
-// it. It returns the verified bytes, so a caller cannot forget to check them.
-func verifiedMechanismSplice(updated []byte, before fileConfig, id string, enabled bool) ([]byte, error) {
-	var after fileConfig
-	if err := yaml.Unmarshal(updated, &after); err != nil {
-		return nil, fmt.Errorf("the edited file would not parse: %w", err)
-	}
+// It is what catches a file shape the line arithmetic mis-read: a line inserted into somebody
+// else's block changes a setting nobody asked to touch, and the comparison is what sees it.
+func verifyMechanismEdit(before, after fileConfig, id string, enabled bool) error {
 	switch {
 	case !mechanismsChangedOnlyAt(before.Mechanisms, after.Mechanisms, id, enabled):
-		return nil, fmt.Errorf(
+		return fmt.Errorf(
 			"the edit did not put %s: %t in the mechanisms: block where a reader would look for it; "+
 				"edit the file by hand", id, enabled)
 	case !sameApartFrom(before, after, mechanismsKey):
-		return nil, errors.New(
+		return errors.New(
 			"the edit would have changed more than the mechanisms: block; edit the file by hand")
 	}
-	return updated, nil
-}
-
-// mechanismsChangedOnlyAt reports whether after is before with id set to enabled and nothing else
-// moved — the shape a mechanism splice must produce, which is serversChangedOnlyAt's rule over a
-// map rather than a list.
-func mechanismsChangedOnlyAt(before, after map[string]bool, id string, enabled bool) bool {
-	want := maps.Clone(before)
-	if want == nil {
-		want = make(map[string]bool, 1)
-	}
-	want[id] = enabled
-	return maps.Equal(after, want)
+	return nil
 }

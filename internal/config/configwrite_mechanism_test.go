@@ -256,16 +256,19 @@ func TestSaveMechanismSettingRefusesAnIdItCannotSpellAsAKey(t *testing.T) {
 	}
 }
 
+// splicedTo stands in for a mechanism splice with a result the case prepared itself, so what runs is
+// the gate the write transaction puts every splice through rather than the line arithmetic.
+func splicedTo(updated string) editSplice {
+	return func(fileConfig, []byte) ([]byte, error) { return []byte(updated), nil }
+}
+
 // The gate every splice passes: a result that moved anything but this one id is refused rather than
 // written, which is what stands between a file shape the line arithmetic mis-read and a config the
 // user quietly cannot get back.
-func TestVerifiedMechanismSpliceRefusesAnEditThatChangedAnythingElse(t *testing.T) {
+func TestMechanismEditRefusesAnEditThatChangedAnythingElse(t *testing.T) {
 	t.Parallel()
 	before := "server: testbox\nmechanisms:\n  validate: true\n  syntax: true\n"
-	var parsed fileConfig
-	if err := yaml.Unmarshal([]byte(before), &parsed); err != nil {
-		t.Fatalf("parse the starting config: %v", err)
-	}
+	_, verify := mechanismEdit(validateID, false)
 
 	for _, tt := range []struct{ name, updated string }{
 		{"a sibling mechanism flipped", "server: testbox\nmechanisms:\n  validate: false\n  syntax: false\n"},
@@ -275,7 +278,7 @@ func TestVerifiedMechanismSpliceRefusesAnEditThatChangedAnythingElse(t *testing.
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got, err := verifiedMechanismSplice([]byte(tt.updated), parsed, validateID, false)
+			got, err := verifiedEdit([]byte(before), splicedTo(tt.updated), verify)
 			if err == nil {
 				t.Fatalf("the edit was accepted; want a refusal")
 			}
@@ -288,16 +291,13 @@ func TestVerifiedMechanismSpliceRefusesAnEditThatChangedAnythingElse(t *testing.
 
 // A verified edit comes back whole: the gate returns the bytes, so a caller cannot write an
 // unchecked splice by forgetting to ask.
-func TestVerifiedMechanismSpliceReturnsTheCheckedBytes(t *testing.T) {
+func TestMechanismEditReturnsTheCheckedBytes(t *testing.T) {
 	t.Parallel()
 	before := "server: testbox\nmechanisms:\n  validate: true\n"
-	var parsed fileConfig
-	if err := yaml.Unmarshal([]byte(before), &parsed); err != nil {
-		t.Fatalf("parse the starting config: %v", err)
-	}
 	updated := "server: testbox\nmechanisms:\n  validate: false\n"
+	_, verify := mechanismEdit(validateID, false)
 
-	got, err := verifiedMechanismSplice([]byte(updated), parsed, validateID, false)
+	got, err := verifiedEdit([]byte(before), splicedTo(updated), verify)
 	if err != nil {
 		t.Fatalf("the edit was refused: %v", err)
 	}

@@ -222,6 +222,16 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **A config write is one transaction.** The ~40 lines every writer into `config.yaml` carried a
+  copy of — seed and read the file, splice the located text, re-parse, hold the result against the
+  config it started from, replace the file atomically with its mode preserved — are now one function
+  (`edit`), with the bytes-level half (`verifiedEdit`) the one-time legacy fold stacks its own splice
+  under, and the three container-shape predicates a verify step is written from beside it: a scalar
+  at a dotted path, an item in a list, a key in a map. The `/settings` scalar writer and the
+  per-Mechanism writer adopt it first, keeping only what is theirs — which key or catalogue id they
+  address, the text they cut in, and the shape they refuse in their own wording. What lands on disk,
+  and which edits are refused with which words, is unchanged.
+
 - `/settings` reads every key's value off the key registry itself: each row now carries `Read`,
   `Text` and `Structure` projections of a resolved config, and the binary's three per-key display
   tables (`settingValues`, `settingTexts`, `settingStructures`) are loops over the rows. A key added

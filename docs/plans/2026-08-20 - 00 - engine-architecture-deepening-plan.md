@@ -544,7 +544,15 @@ NOTES (2026-08-21): two closing prose blocks of `settingsrows.go` went with the 
 
 **Commit:** `refactor(config): project the settings display tables from registry rows`
 
-## 22. One config-write transaction; the scalar and mechanism writers adopt it
+## 22. One config-write transaction; the scalar and mechanism writers adopt it — ✅ DONE (2026-08-21)
+
+NOTES (2026-08-21): `internal/config/configwrite_keysource.go` was edited although the item's Files list does not name it — the item asks for the list-item `changedOnlyAt` predicate beside `edit`, and that predicate already existed there as `serversChangedOnlyAt`, so it MOVED into configedit.go (its now-unused `reflect` import dropped) rather than being duplicated. Pure relocation: its one caller and its behavior are untouched, and item 23 owns that file next.
+
+NOTES (2026-08-21): the item's Files list also names `configwrite_scalar_test.go`; it needed no edit — that suite calls only `setScalarSetting`, `deleteScalarSetting` and `scalarAtPath`, all of which survive the conversion (`scalarAtPath` moved to configedit.go beside the scalar-path predicate, same package, so no call site changed).
+
+NOTES (2026-08-21): the transaction holds the STARTING config's parse error back until the splice has had its say, because the two adopters disagreed about that order and both contracts had to survive: the scalar writer documented that a file the parser cannot read as settings is refused by the shape checks — which say which part of the file they mis-read — rather than by the decoder's type error, while the mechanism writer needs the parsed config before it splices (its no-op check). `TestConfigWriteSettingRefusals`'s "a top level that is not a mapping of settings" case is what pins the ordering.
+
+NOTES (2026-08-21): the two mechanism tests named after the removed gate (`TestVerifiedMechanismSplice*`) now drive the same two properties — a result that moved anything else is refused; a passed edit comes back whole — through `verifiedEdit` with the real `mechanismEdit` verify half, and are renamed `TestMechanismEdit*`.
 
 **Source:** review candidate 9. Independent of items 18-21 (disjoint files).
 

@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -307,24 +306,4 @@ func verifiedEntrySplice(updated []byte, before fileConfig, at int, want ServerE
 		return nil, fmt.Errorf("the edited file would not load: %w", err)
 	}
 	return updated, nil
-}
-
-// serversChangedOnlyAt reports whether after is before with the entry at index at replaced by want
-// and nothing else moved — the shape a key-source splice must produce (serversAppended's rule, for
-// an edit in place rather than an append). Entries are compared with reflect.DeepEqual because a
-// ServerEntry holding a `mechanisms:` map cannot be `==`d.
-func serversChangedOnlyAt(before, after []ServerEntry, at int, want ServerEntry) bool {
-	if len(after) != len(before) || at < 0 || at >= len(before) {
-		return false
-	}
-	for i := range before {
-		expected := before[i]
-		if i == at {
-			expected = want
-		}
-		if !reflect.DeepEqual(after[i], expected) {
-			return false
-		}
-	}
-	return true
 }
