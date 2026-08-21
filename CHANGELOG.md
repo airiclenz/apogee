@@ -797,6 +797,21 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **A typo in a `model-profiles:` entry is a startup error on every axis now, not just on
+  `effort:`.** The load-time check read one of the four keys an entry can carry. A misspelled
+  `tool-call-format:` or `thinking: style:` went straight through the cast into the profile and
+  surfaced only at the first Beat, as a failed model rebind naming no config key at all — and
+  `tool-call-pattern:` was never looked at, so a regex with one bracket too few compiled to a
+  pattern that matches nothing and read on screen as a model that had simply stopped calling tools.
+  All four axes are checked when the file loads now, and every refusal names the full key path —
+  `model-profiles.<pattern>.tool-call-format`, `.tool-call-pattern`, `.thinking.style`,
+  `.thinking.effort` — and spells out the vocabulary that key takes, the way the effort message
+  always did. Two of the refusals are about the PAIR rather than one key: `custom-regex` with no
+  pattern is refused, because that format parses every call with one, and a pattern set under a
+  format that never reads one is refused too rather than quietly ignored — a pattern that can never
+  fire is almost always a typo or a half-finished edit. The shipped config template, which used to
+  call the pattern "ignored by the other two formats", says that now.
+
 - **A retired provider client is now closed.** `Agent.Close` was a no-op whose comment predated
   real clients: a `/server` switch overwrote the session's Upstream without teardown, and a routed
   delegation dialled a client of its own that nothing ever released — both left idle sockets pinned

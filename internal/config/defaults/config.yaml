@@ -742,7 +742,8 @@ system-prompt-text: |
 #   tool-call-format   native (the default) — calls arrive structured, out of band
 #                      markdown-fenced      — calls are parsed back out of a fenced block in the reply
 #                      custom-regex         — calls are parsed with tool-call-pattern
-#   tool-call-pattern  the named-group regex custom-regex needs; ignored by the other two formats
+#   tool-call-pattern  the named-group regex custom-regex needs — required by that format, and
+#                      refused under the other two, which never read it
 #   thinking:
 #     style            none (the default) — no inline channel; content passes through untouched
 #                      delimited          — a literal token pair: set start: and end: to what the

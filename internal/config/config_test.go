@@ -3268,27 +3268,145 @@ func TestApplyConfigModelProfileEffort(t *testing.T) {
 	}
 }
 
-// An `effort:` outside the four levels is a LOAD error, not a silently-dropped setting: the failure
-// is otherwise invisible (a model sent no effort and a model sent an unmapped one answer alike), so
-// the message has to name the offending pattern and spell the vocabulary out.
-func TestApplyConfigBadModelProfileEffortErrors(t *testing.T) {
+// Every axis of a `model-profiles:` entry is checked at LOAD, and a bad value on any of them is a
+// startup error rather than a silently-dropped setting — because each one fails invisibly further
+// down: an unknown format or style fails the first Rebind naming no config key, a pattern that does
+// not compile parses no call at all, and an unmapped effort reaches the wire as nothing (a model
+// that ignores an effort dial and a model that was never sent one answer alike). So every message
+// has to name the full key path it is about, and spell out the vocabulary that key takes.
+func TestApplyConfigBadModelProfileAxisErrors(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name       string
+		configYAML string
+		wantIn     []string
+	}{
+		{
+			name: "a tool-call-format outside the three the parse seam knows",
+			configYAML: `model-profiles:
+  qwen3.8:
+    tool-call-format: markdown-fencd
+`,
+			wantIn: []string{
+				"model-profiles.qwen3.8.tool-call-format", "markdown-fencd",
+				"native", "markdown-fenced", "custom-regex",
+			},
+		},
+		{
+			name: "a custom-regex format with no pattern to parse with",
+			configYAML: `model-profiles:
+  qwen3.8:
+    tool-call-format: custom-regex
+`,
+			wantIn: []string{"model-profiles.qwen3.8.tool-call-pattern", "custom-regex"},
+		},
+		{
+			name: "a tool-call-pattern that does not compile",
+			configYAML: `model-profiles:
+  qwen3.8:
+    tool-call-format: custom-regex
+    tool-call-pattern: "(?<name>\\w+"
+`,
+			wantIn: []string{`model-profiles.qwen3.8.tool-call-pattern`, `(?<name>\w+`},
+		},
+		{
+			name: "a tool-call-pattern under a format that never reads one",
+			configYAML: `model-profiles:
+  qwen3.8:
+    tool-call-format: markdown-fenced
+    tool-call-pattern: "(?<name>\\w+)"
+`,
+			wantIn: []string{
+				"model-profiles.qwen3.8.tool-call-pattern",
+				"model-profiles.qwen3.8.tool-call-format", "custom-regex",
+			},
+		},
+		{
+			name: "a thinking style outside the three strippers",
+			configYAML: `model-profiles:
+  qwen3.8:
+    thinking:
+      style: delimted
+`,
+			wantIn: []string{
+				"model-profiles.qwen3.8.thinking.style", "delimted",
+				"none", "delimited", "harmony",
+			},
+		},
+		{
+			name: "an effort outside the four levels",
+			configYAML: `model-profiles:
+  qwen3.8:
+    thinking:
+      effort: hihg
+`,
+			wantIn: []string{
+				"model-profiles.qwen3.8.thinking.effort", "hihg",
+				"off", "low", "medium", "high",
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			home := testConfigHome(t, "")
+			writeConfigHome(t, home, tc.configYAML)
+
+			opts := Options{ConfigDir: home}
+			err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify)
+
+			if err == nil {
+				t.Fatalf("%s — want a load error, got nil", tc.name)
+			}
+			for _, want := range tc.wantIn {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error %q does not mention %q — it must name the offending key path and the vocabulary", err, want)
+				}
+			}
+		})
+	}
+}
+
+// A profile that sets all four axes to legitimate values loads, and reaches the composition root
+// whole — the other half of the check above: validation refuses typos, never a config that means
+// exactly what it says.
+func TestApplyConfigFullyValidModelProfileLoads(t *testing.T) {
 	t.Parallel()
 	home := testConfigHome(t, "")
 	const configYAML = `model-profiles:
   qwen3.8:
+    tool-call-format: custom-regex
+    tool-call-pattern: "(?<name>[a-z_]+)\\s+(?<args>.*)"
     thinking:
-      effort: hihg
+      style: delimited
+      start: "<think>"
+      end: "</think>"
+      effort: medium
 `
 	writeConfigHome(t, home, configYAML)
 	opts := Options{ConfigDir: home}
-	err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify)
-	if err == nil {
-		t.Fatal("effort: hihg — want a load error, got nil")
+	if err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
+		t.Fatalf("ApplyConfig: %v", err)
 	}
-	for _, want := range []string{"qwen3.8", "hihg", "off", "low", "medium", "high"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("error %q does not mention %q — it must name the offending entry and the vocabulary", err, want)
-		}
+
+	want := []profiles.Entry{
+		{
+			Pattern: "qwen3.8",
+			Profile: domain.ModelProfile{
+				ToolCallFormat: domain.FormatCustomRegex,
+				Pattern:        `(?<name>[a-z_]+)\s+(?<args>.*)`,
+				Thinking: domain.ThinkingProfile{
+					Style:  domain.ThinkingDelimited,
+					Start:  "<think>",
+					End:    "</think>",
+					Effort: domain.EffortMedium,
+				},
+			},
+		},
+	}
+	if !reflect.DeepEqual(opts.ModelProfiles, want) {
+		t.Errorf("opts.modelProfiles = %+v; want %+v", opts.ModelProfiles, want)
 	}
 }
 

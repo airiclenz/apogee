@@ -270,7 +270,31 @@ in that comment changed.
 
 **Commit:** `refactor(context): drop the unused HistoryExceedsAllocation shim and unify PromptChars`
 
-## 12. Model-profile validation covers all four axes
+## 12. Model-profile validation covers all four axes — ✅ DONE (2026-08-21)
+
+NOTES (2026-08-21): the item named two files; `internal/config/defaults/config.yaml` had to change
+too — its `tool-call-pattern` line read "ignored by the other two formats", which is exactly the
+claim the ratified refusal falsifies. One comment line became two; nothing else in the template
+changed.
+
+NOTES (2026-08-21): the DECISION's example key path reads `models.<name>.tool-call-pattern`. The
+on-disk key is `model-profiles:`, keyed by a model PATTERN, so the error names
+`model-profiles.<pattern>.tool-call-pattern` — the full key path in the item's own stated style
+(`model-profiles.<pattern>.<axis>`), which is what the decision asks for.
+
+NOTES (2026-08-21): `TestApplyConfigBadModelProfileEffortErrors` was REPLACED by the four-axis
+table rather than left beside it — its one case (`effort: hihg`, asserting the offending entry and
+the four levels) is row six of the new table verbatim, so keeping it would have layered a duplicate
+on the same pin. Its doc comment's reasoning is folded into the table's.
+
+NOTES (2026-08-21): the pattern is checked with plain `regexp.Compile`, not through processing's
+unexported `compilePattern`. That helper additionally rewrites `(?<name>` to `(?P<name>` and
+prefixes the default `(?s)` flag; under Go 1.26 neither changes WHETHER a pattern compiles
+(verified against both spellings and the flag prefix), so the load check accepts exactly the
+patterns the parser can build — and `internal/config` gains no import of `internal/processing`.
+
+NOTES (2026-08-21): mutation-checked — neutering `validateToolCallAxes`, `isKnownThinkingStyle`
+and the effort compare each failed exactly the table rows meant to catch them (four, one and one).
 
 **Source:** review defect i.
 

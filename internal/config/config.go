@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -1827,23 +1828,100 @@ func (p modelProfileConfig) toModelProfile() domain.ModelProfile {
 	}
 }
 
-// validateModelProfiles rejects a `model-profiles:` map naming a thinking effort outside the four
-// levels the wire mapping knows (ADR 0050). It runs at LOAD, before the layer is built, because a
-// typo'd `effort:` would otherwise reach the wire as an unmapped value and quietly emit nothing —
-// the one failure the user cannot see from the outside, since a model that ignores an effort dial
-// and a model that was never sent one produce the same reply.
+// validateModelProfiles rejects a `model-profiles:` map whose entry names a value outside one of
+// the profile's four axes' vocabularies (ADR 0044, ADR 0050). It runs at LOAD, before the layer is
+// built, because every one of the four fails INVISIBLY further down: an unknown `tool-call-format`
+// or `thinking.style` reaches the parse seam as a word it has no parser for and fails the first
+// Rebind naming no config key at all; a `tool-call-pattern` that does not compile becomes a regex
+// that matches nothing, so the model's calls are simply never seen; and a typo'd `effort:` reaches
+// the wire as an unmapped value and quietly emits nothing — a model that ignores an effort dial and
+// a model that was never sent one produce the same reply.
 //
 // The patterns are walked in sorted order so a file with two bad entries reports the same one on
 // every run (the reason toProfileEntries sorts too).
 func validateModelProfiles(m map[string]modelProfileConfig) error {
 	for _, pattern := range slices.Sorted(maps.Keys(m)) {
-		effort := domain.ThinkingEffort(m[pattern].Thinking.Effort)
-		if !effort.Valid() {
-			return fmt.Errorf("apogee: invalid model-profiles.%s.thinking.effort %q: want off, low, "+
-				"medium, or high, or leave the key out for the model's own default", pattern, string(effort))
+		profile := m[pattern]
+		if err := validateToolCallAxes(pattern, profile); err != nil {
+			return err
+		}
+		if err := validateThinkingAxes(pattern, profile.Thinking); err != nil {
+			return err
 		}
 	}
 	return nil
+}
+
+// validateToolCallAxes checks one profile's tool-call half: the format against the three the parse
+// seam has a parser for, and the pattern against the format that reads it. The two axes are ONE
+// check because the pattern's validity is a property of the PAIR — mandatory under custom-regex,
+// read by nothing under the others.
+//
+// A pattern set under a format that never reads it is REFUSED rather than ignored (user,
+// 2026-08-20): a pattern that can never fire is almost always a typo or a half-finished edit, and
+// accepting it would leave the user watching a model whose calls go unparsed with a config file
+// that reads as though it says how to parse them.
+func validateToolCallAxes(pattern string, p modelProfileConfig) error {
+	switch format := domain.ToolCallFormat(p.ToolCallFormat); format {
+	case "", domain.FormatNative, domain.FormatMarkdownFenced:
+		if p.ToolCallPattern != "" {
+			return fmt.Errorf("apogee: model-profiles.%s.tool-call-pattern is set but "+
+				"model-profiles.%s.tool-call-format is not custom-regex: no other format reads a "+
+				"pattern, so this one can never match — set the format to custom-regex, or drop "+
+				"the pattern", pattern, pattern)
+		}
+	case domain.FormatCustomRegex:
+		return validateToolCallPattern(pattern, p.ToolCallPattern)
+	default:
+		return fmt.Errorf("apogee: invalid model-profiles.%s.tool-call-format %q: want native, "+
+			"markdown-fenced, or custom-regex, or leave the key out for native", pattern, string(format))
+	}
+	return nil
+}
+
+// validateToolCallPattern checks the named-group regex a custom-regex profile parses every tool call
+// with: it has to be there, and it has to compile. Neither failure shows itself at runtime — the
+// parser falls back to a regex that matches no rune rather than refusing to build — so a missing or
+// malformed pattern reads on screen as a model that has simply stopped calling tools.
+func validateToolCallPattern(pattern, toolCallPattern string) error {
+	if toolCallPattern == "" {
+		return fmt.Errorf("apogee: model-profiles.%s.tool-call-pattern is missing: tool-call-format "+
+			"custom-regex parses every tool call with it, so a profile without one finds no call at "+
+			"all — give the named-group regex, or pick a format that needs none", pattern)
+	}
+	if _, err := regexp.Compile(toolCallPattern); err != nil {
+		return fmt.Errorf("apogee: invalid model-profiles.%s.tool-call-pattern %q: %w — a pattern "+
+			"that does not compile parses no tool call at all", pattern, toolCallPattern, err)
+	}
+	return nil
+}
+
+// validateThinkingAxes checks one profile's thinking half: the style against the three strippers the
+// parse seam builds, and the effort against the four levels the wire mapping knows (ADR 0050).
+func validateThinkingAxes(pattern string, t thinkingConfig) error {
+	if !isKnownThinkingStyle(t.Style) {
+		return fmt.Errorf("apogee: invalid model-profiles.%s.thinking.style %q: want none, "+
+			"delimited, or harmony, or leave the key out for no inline thinking channel",
+			pattern, t.Style)
+	}
+	if effort := domain.ThinkingEffort(t.Effort); !effort.Valid() {
+		return fmt.Errorf("apogee: invalid model-profiles.%s.thinking.effort %q: want off, low, "+
+			"medium, or high, or leave the key out for the model's own default", pattern, string(effort))
+	}
+	return nil
+}
+
+// isKnownThinkingStyle reports whether s names one of the three strippers the parse seam can build,
+// or is the empty value that means the default (no inline channel). It is a predicate here rather
+// than a method beside the type because ThinkingStyle carries no Valid of its own, the way
+// ThinkingEffort — which the effort axis above asks directly — does.
+func isKnownThinkingStyle(s string) bool {
+	switch domain.ThinkingStyle(s) {
+	case "", domain.ThinkingNone, domain.ThinkingDelimited, domain.ThinkingHarmony:
+		return true
+	default:
+		return false
+	}
 }
 
 // isResponseReserveShare reports whether f is a `response-reserve:` value the Budget can spend: the
