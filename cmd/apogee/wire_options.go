@@ -269,11 +269,11 @@ func (w *rootWiring) options() tui.Options {
 // because the only reader is a LIST and an absent block already means the same thing: nothing is
 // switched on. The write half is where an unusable config has to be reported, and it reports it.
 func mechanismBlock(path string) map[string]bool {
-	layer, err := config.LoadFileConfig(path, os.ReadFile, func(string) {})
+	file, err := config.LoadFileConfig(path, os.ReadFile, func(string) {})
 	if err != nil {
 		return nil
 	}
-	return layer.Mechanisms
+	return file.Mechanisms
 }
 
 // writeMechanismFor builds [tui.Options.WriteMechanism]: one line spliced into the `mechanisms:` block

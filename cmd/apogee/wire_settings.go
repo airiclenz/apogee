@@ -875,19 +875,17 @@ func (a settingsApplier) rideTheRebind() error {
 // holder, validate-then-commit: a block the file cannot express — both spellings of one prompt at
 // once, an entry with neither — is refused before it displaces a prompt that works.
 //
-// Only the FILE layer carries these keys (there is no flag or environment variable for a prompt), so
-// re-reading that one layer resolves them exactly as startup resolved them. The migration notice is
-// dropped rather than surfaced: a file still in the retired schema was already migrated and announced
-// at launch, and this read happens after the pane has just written to it.
+// Only the FILE carries these keys (there is no flag or environment variable for a prompt), so
+// re-reading the file resolves them exactly as startup resolved them — the loader answers with the
+// same Options resolution starts from. The migration notice is dropped rather than surfaced: a file
+// still in the retired schema was already migrated and announced at launch, and this read happens
+// after the pane has just written to it.
 func (a settingsApplier) reloadSystemPrompt() error {
-	l, err := config.LoadFileConfig(a.configPath, os.ReadFile, func(string) {})
+	file, err := config.LoadFileConfig(a.configPath, os.ReadFile, func(string) {})
 	if err != nil {
 		return err
 	}
-	var sp config.SystemPromptSettings
-	if l.SystemPrompt != nil {
-		sp = *l.SystemPrompt
-	}
+	sp := file.SystemPrompt
 	if err := sp.Validate(); err != nil {
 		return err
 	}
@@ -899,19 +897,19 @@ func (a settingsApplier) reloadSystemPrompt() error {
 // an entry that could never be switched to — no name, no endpoint, or a name an earlier entry took —
 // is refused by the SAME check startup runs, before it can displace a list that works.
 //
-// Only the FILE layer carries the list (no flag, no environment variable names an upstream), so
-// re-reading that one layer resolves it exactly as startup resolved it — reloadSystemPrompt's own
+// Only the FILE carries the list (no flag, no environment variable names an upstream), so
+// re-reading it resolves the list exactly as startup resolved it — reloadSystemPrompt's own
 // reasoning, and the reason the migration notice is dropped here too.
 //
 // It reports whether the re-read moved either token bound the BOUND entry resolves to — its window
 // or its reply ceiling (setServers' own answer) — which is what tells the caller a rebind has to ride
 // this apply. A refusal reports false with the error: nothing was installed, so nothing moved.
 func (a settingsApplier) reloadServers() (bool, error) {
-	l, err := config.LoadFileConfig(a.configPath, os.ReadFile, func(string) {})
+	file, err := config.LoadFileConfig(a.configPath, os.ReadFile, func(string) {})
 	if err != nil {
 		return false, err
 	}
-	if err := config.ValidateServers(l.Servers); err != nil {
+	if err := config.ValidateServers(file.Servers); err != nil {
 		return false, err
 	}
 	// The Sub-agent server the list now flags (ADR 0045), re-pointed BEFORE anything is installed:
@@ -919,11 +917,11 @@ func (a settingsApplier) reloadServers() (bool, error) {
 	// map this build does not know — and a refusal has to leave the session on the list it was
 	// already running, not half-way onto a new one.
 	if a.delegation != nil {
-		if err := a.delegation.relist(l.Servers); err != nil {
+		if err := a.delegation.relist(file.Servers); err != nil {
 			return false, err
 		}
 	}
-	moved := a.live.setServers(l.Servers)
+	moved := a.live.setServers(file.Servers)
 	// One thing in that list the engine holds and can be PUSHED: the fan-out width of the server this
 	// session is on (ADR 0039 decision 2). Re-resolving it here is what makes `parallel-agents:` an
 	// ADR 0037 key like the rest — moved in the pane, in force in the running session — rather than one
@@ -932,7 +930,7 @@ func (a settingsApplier) reloadServers() (bool, error) {
 	// pin and its reply ceiling, have no setter to push at and reach the engine on the caller's ride
 	// instead.)
 	if a.caps != nil {
-		a.caps.relist(l.Servers)
+		a.caps.relist(file.Servers)
 	}
 	return moved, nil
 }
@@ -942,32 +940,27 @@ func (a settingsApplier) reloadServers() (bool, error) {
 // enabled and disabled alike — so a Mechanism id this build does not know is refused here rather than
 // silently arming nothing, exactly as it is at launch (ADR 0015 §1).
 func (a settingsApplier) reloadMechanisms() error {
-	l, err := config.LoadFileConfig(a.configPath, os.ReadFile, func(string) {})
+	file, err := config.LoadFileConfig(a.configPath, os.ReadFile, func(string) {})
 	if err != nil {
 		return err
 	}
-	ids, err := mechanismIDs(l.Mechanisms, mechanisms.KnownIDs())
+	ids, err := mechanismIDs(file.Mechanisms, mechanisms.KnownIDs())
 	if err != nil {
 		return err
 	}
-	a.live.setMechanisms(ids, l.Mechanisms)
+	a.live.setMechanisms(ids, file.Mechanisms)
 	return nil
 }
 
-// reloadValidatedSets re-reads the `validated-sets:` block. An absent off-switch resolves to ON, the
-// default ResolveSettings starts from, so a block the human deleted goes back to the surface being
-// available rather than to it being off — the difference between "unset" and "false" that the file
-// layer's pointer carries.
+// reloadValidatedSets re-reads the `validated-sets:` block. An absent off-switch resolves to ON —
+// the loader answers with the key's default where the file states nothing — so a block the human
+// deleted goes back to the surface being available rather than to it being off.
 func (a settingsApplier) reloadValidatedSets() error {
-	l, err := config.LoadFileConfig(a.configPath, os.ReadFile, func(string) {})
+	file, err := config.LoadFileConfig(a.configPath, os.ReadFile, func(string) {})
 	if err != nil {
 		return err
 	}
-	enable := true
-	if l.ValidatedSetsEnable != nil {
-		enable = *l.ValidatedSetsEnable
-	}
-	a.live.setValidatedSets(enable, l.ValidatedSetsAlias)
+	a.live.setValidatedSets(file.ValidatedSetsEnable, file.ValidatedSetsAlias)
 	return nil
 }
 
@@ -979,11 +972,11 @@ func (a settingsApplier) reloadValidatedSets() error {
 // A file that no longer parses is refused before anything is dialled, so a typo in an unrelated key
 // cannot cost the session the servers it is talking to.
 func (a settingsApplier) reconnectMCP() error {
-	l, err := config.LoadFileConfig(a.configPath, os.ReadFile, func(string) {})
+	file, err := config.LoadFileConfig(a.configPath, os.ReadFile, func(string) {})
 	if err != nil {
 		return err
 	}
-	return a.mcp.reconnect(l.MCPServers, a.tools, a.engine)
+	return a.mcp.reconnect(file.MCPServers, a.tools, a.engine)
 }
 
 // reloadModelProfiles re-reads the `model-profiles:` map, installs it on the holder, and swaps the
@@ -1002,18 +995,18 @@ func (a settingsApplier) reconnectMCP() error {
 // there is nothing to resolve against and the holder carries the change alone, rideTheRebind's own
 // posture: the first beat that binds a model resolves it in.
 func (a settingsApplier) reloadModelProfiles() error {
-	l, err := config.LoadFileConfig(a.configPath, os.ReadFile, func(string) {})
+	file, err := config.LoadFileConfig(a.configPath, os.ReadFile, func(string) {})
 	if err != nil {
 		return err
 	}
-	a.live.setModelProfiles(l.ModelProfiles)
+	a.live.setModelProfiles(file.ModelProfiles)
 	model := a.binding().Model
 	if model == "" {
 		return nil
 	}
 	// The notice is dropped rather than returned: it is a resolution's narration for a model change
 	// nobody made, and the row the pane is about to paint already says the edit applied.
-	profile, _ := resolveModelProfile(model, l.ModelProfiles)
+	profile, _ := resolveModelProfile(model, file.ModelProfiles)
 	return a.engine.SetProfile(profile)
 }
 

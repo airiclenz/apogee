@@ -3,7 +3,6 @@ package config
 import (
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
 
@@ -69,16 +68,16 @@ func TestEmbeddedDefaultConfigSetsOnlyTheSystemPrompt(t *testing.T) {
 	if err := os.WriteFile(path, defaultConfigYAML, 0o600); err != nil {
 		t.Fatalf("write embedded: %v", err)
 	}
-	l, err := LoadFileConfig(path, os.ReadFile, noNotify)
+	file, err := LoadFileConfig(path, os.ReadFile, noNotify)
 	if err != nil {
 		t.Fatalf("embedded default config does not parse: %v", err)
 	}
 
 	// The one active key: an inline global prompt, no file, no per-model entries.
-	if l.SystemPrompt == nil {
+	text := file.SystemPrompt.Global.Text
+	if text == "" {
 		t.Fatal("embedded default config carries no system prompt; the shipped default must be active")
 	}
-	text := l.SystemPrompt.Global.Text
 	for _, want := range []string{
 		"You are apogee",
 		prompt.PlaceholderWorkspace,
@@ -89,27 +88,28 @@ func TestEmbeddedDefaultConfigSetsOnlyTheSystemPrompt(t *testing.T) {
 			t.Errorf("shipped system prompt does not contain %q:\n%s", want, text)
 		}
 	}
-	if l.SystemPrompt.Global.File != "" {
+	if file.SystemPrompt.Global.File != "" {
 		t.Errorf("shipped system-prompt-file = %q; want empty — the file key stays a commented example",
-			l.SystemPrompt.Global.File)
+			file.SystemPrompt.Global.File)
 	}
-	if l.SystemPrompt.Models != nil {
+	if file.SystemPrompt.Models != nil {
 		t.Errorf("shipped system-prompt-models = %+v; want none — the per-model block stays a commented example",
-			l.SystemPrompt.Models)
+			file.SystemPrompt.Models)
 	}
 
 	// The shipped prompt must survive both gates a user's own prompt faces.
 	if err := prompt.Validate(text); err != nil {
 		t.Errorf("shipped system prompt fails prompt.Validate: %v", err)
 	}
-	if err := l.SystemPrompt.Validate(); err != nil {
+	if err := file.SystemPrompt.Validate(); err != nil {
 		t.Errorf("shipped system-prompt block fails validate: %v", err)
 	}
 
-	// Everything else still parses to nothing — the surviving half of the old invariant.
-	l.SystemPrompt = nil
-	if !reflect.DeepEqual(l, Layer{}) {
-		t.Errorf("embedded default config sets values beyond the system prompt: %+v", l)
+	// Every other key still resolves to its built-in default — the surviving half of the old
+	// invariant, now stated against the defaults rather than against an empty layer.
+	file.SystemPrompt = SystemPromptSettings{}
+	if diffs := structDiff(file, wantDefaults()); len(diffs) != 0 {
+		t.Errorf("embedded default config moves keys beyond the system prompt:\n%s", strings.Join(diffs, "\n"))
 	}
 }
 

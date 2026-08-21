@@ -304,14 +304,14 @@ func TestSpliceScalarSettingWritesTheValidatedSetsOffSwitch(t *testing.T) {
 			if err := os.WriteFile(path, updated, 0o600); err != nil {
 				t.Fatalf("write the spliced config: %v", err)
 			}
-			layer, err := LoadFileConfig(path, os.ReadFile, noNotify)
+			file, err := LoadFileConfig(path, os.ReadFile, noNotify)
 			if err != nil {
 				t.Fatalf("load the spliced config: %v", err)
 			}
-			if layer.ValidatedSetsEnable == nil || *layer.ValidatedSetsEnable {
-				t.Errorf("the loaded off-switch is %v, want an explicit false", layer.ValidatedSetsEnable)
+			if file.ValidatedSetsEnable {
+				t.Error("the loaded off-switch resolves to on, want the explicit false the write left")
 			}
-			if got := len(layer.ValidatedSetsAlias); got != tt.aliases {
+			if got := len(file.ValidatedSetsAlias); got != tt.aliases {
 				t.Errorf("the write left %d aliases, want %d", got, tt.aliases)
 			}
 		})

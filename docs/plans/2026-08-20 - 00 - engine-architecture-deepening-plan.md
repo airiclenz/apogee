@@ -462,7 +462,53 @@ statements of hand-written copying were deleted, not because anything stopped be
 
 **Commit:** `refactor(config): resolve every key through the registry accessor loop`
 
-## 20. Settings and Layer dissolve into Options
+## 20. Settings and Layer dissolve into Options — ✅ DONE (2026-08-21)
+
+NOTES (2026-08-21): `LoadFileConfig` now returns `Options` — what a config file alone resolves to —
+and `ResolveSettings` is replaced by `ResolveOptions(opts, changed, getenv, readFile, notify,
+hostID)`, ApplyConfig's whole resolution half with the host identity injected. The file SOURCE is
+`fileConfig`, which is unexported, so a resolve entry taking the three sources could not be
+exported; taking the path instead keeps one exported entry and keeps `cmd/apogee`'s host-scoped
+confinement test able to resolve a real config file under an injected host id. ApplyConfig is now
+that call plus the startup-server selection.
+NOTES (2026-08-21): the six machine-independent validations (present, ui, cursor-shape,
+system-prompt, context-files, servers) moved from `ApplyConfig` into `ResolveOptions`, in the same
+order and with the same messages: they are what makes a resolved Options honourable, and the
+context-files one needs the parsed file (below). Notices are returned beside a refusal so
+ApplyConfig still reports them before it returns the error, as it did.
+NOTES (2026-08-21): the context-files refusal is asked of the FILE's block, not of the resolved
+value. `Options` carries the collapsed name list, and `enable: false` collapses to no names — which
+would have retired the existing rule that a bad name is refused whatever the switch says (pinned by
+the `enable: false` + `../secrets.md` case). `parseConfigFile` is the unexported half of the loader
+that keeps the parsed file in reach for it.
+NOTES (2026-08-21): the file accessors write UNCONDITIONALLY (the file's value, else the key's
+default) instead of the presence-guarded overlay item 18 gave them. With the layer gone the file is
+the only source below the default, so there is nothing left to fall through to; the guards that
+survive are the ones distinguishing nil from empty for a slice or a map, where the old chain
+distinguished them too. This is also what removes the need for a hand-written defaults block: a full
+file pass IS the reset.
+NOTES (2026-08-21): `resolveConfineToWorkspace` takes a plain `bool` — what the FILE resolves the
+key to — rather than the layer's `*bool`. An absent key and an explicit `confine-to-workspace: true`
+always resolved identically, so its two table cases for them merged into one.
+NOTES (2026-08-21): the ten "X is NOT settable by env or flag" subtests of the precedence table were
+DELETED rather than retargeted: with `Layer` gone there is no way to hand an env or a flag source a
+file-only key, so a case could only assert a path that does not exist. The claim moved to
+`TestMultiSourceKeysReadTheRegistry` as one check over the WHOLE schema — exactly the three listed
+rows carry an environment or a flag accessor, every other key is file-only — which covers
+thirty-five keys where the subtests covered eight.
+NOTES (2026-08-21): three tests renamed for the entries they now drive:
+`TestResolveSettingsPrecedence` → `TestResolvePrecedence`,
+`TestResolveSettingsMultiSourceKeysReadTheRegistry` → `TestMultiSourceKeysReadTheRegistry`,
+`TestLoadFileConfigAbsentIsEmpty` → `TestLoadFileConfigAbsentIsTheDefaults`. The precedence table's
+per-case `want` is now a mutation of one spelled-out `wantDefaults()` rather than a full struct
+literal per case, since Options carries fields no config key owns.
+NOTES (2026-08-21): the item's Files list named `internal/config/keyresolve.go`, `configwatch.go`,
+`keyresolve_test.go` and `cmd/apogee/wire_boot.go` — none of them referenced the deleted types, so
+none changed. Four files it did not name did: `cmd/apogee/wire_options.go` (the mechanisms block
+re-read), `internal/config/configwrite_scalar_test.go`, `internal/config/defaults_test.go` (both
+read the loader's result) and `internal/config/registry.go` (one comment citing `ResolveSettings`).
+`intptr`, `floatptr` and `wantContextFilesDefault` in `config_test.go` lost their last callers with
+the deleted cases and went with them.
 
 **Source:** review candidate 2. Depends on item 19.
 

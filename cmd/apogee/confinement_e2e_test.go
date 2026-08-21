@@ -185,12 +185,13 @@ func TestE2EAutoDegradationJourneyOnAnIncapableHost(t *testing.T) {
 	// 4. A fresh resolution over that config: unconfined here, confined anywhere else.
 	// ------------------------------------------------------------------
 
-	file, err := config.LoadFileConfig(configPath, os.ReadFile, noNotify)
+	here := config.Options{ConfigDir: configHome}
+	onlyConfig := func(name string) bool { return name == "config" }
+	noGetenv := func(string) string { return "" }
+	notices, err := config.ResolveOptions(&here, onlyConfig, noGetenv, os.ReadFile, noNotify, hostID)
 	if err != nil {
-		t.Fatalf("re-read the saved config: %v", err)
+		t.Fatalf("re-resolve the saved config: %v", err)
 	}
-
-	here, notices := config.ResolveSettings(file, config.Layer{}, config.Layer{}, hostID)
 	if here.ConfineToWorkspace {
 		t.Errorf("a fresh resolution on the acknowledged host %q resolves confined; want unconfined — "+
 			"the saved acknowledgement did not survive the round trip", hostID)
@@ -204,7 +205,11 @@ func TestE2EAutoDegradationJourneyOnAnIncapableHost(t *testing.T) {
 
 	// The load-bearing assertion for the host-scoped design: the very same config file, read on
 	// a DIFFERENT machine, confines again and says why. A global flag flip could not do this.
-	elsewhere, _ := config.ResolveSettings(file, config.Layer{}, config.Layer{}, hostID+"-some-other-machine")
+	elsewhere := config.Options{ConfigDir: configHome}
+	if _, err := config.ResolveOptions(&elsewhere, onlyConfig, noGetenv, os.ReadFile, noNotify,
+		hostID+"-some-other-machine"); err != nil {
+		t.Fatalf("re-resolve the saved config for another machine: %v", err)
+	}
 	if !elsewhere.ConfineToWorkspace {
 		t.Error("the acknowledgement written on this host also unconfines a different host id; " +
 			"it must not travel with the config file")

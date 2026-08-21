@@ -19,10 +19,10 @@
 //
 // The files, one line each.
 //
-// config.go is the core: the resolved [Settings], the on-disk schema (fileConfig), the
-// per-source [Layer] and the precedence between them, the `servers:` entry a session starts on,
+// config.go is the core: the on-disk schema (fileConfig), the precedence that resolves it onto
+// [Options] ([ResolveOptions], one accessor per key), the `servers:` entry a session starts on,
 // and the apogee-home path resolution every other file here asks for. options.go is [Options] —
-// the Driver's parsed invocation plus every value resolution writes back onto it, which is what
+// the Driver's parsed invocation plus every value resolution writes onto it, which is what
 // ApplyConfig fills. registry.go is the declarative table describing every schema key exactly
 // once — its type, default, env var, flag, validator and /settings visibility — guarded as a
 // bijection with fileConfig, so a key added to the schema breaks the build gate until it is

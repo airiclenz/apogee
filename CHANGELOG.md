@@ -222,6 +222,24 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **Config resolution has no carrier left between the file and the options.** A key used to travel
+  from the config file to the running engine through two structs that existed only to carry it —
+  a pointer-shaped precedence layer, then a resolved-settings struct — before a third pass wrote it
+  onto the Options everything is constructed from. Both are gone. Each registry row now carries one
+  projection that writes what its key resolves to from the FILE alone (the file's value, or the
+  key's built-in default where the file says nothing) straight onto those Options, and the
+  environment and the flags are two more passes over the same table, each writing the same field
+  where its own source set the key — so applying the three in order IS the precedence rule, with
+  nothing in between to copy wrong. The file pass writes every key of the schema, which is what lets
+  resolution run on the caller's own options with no value of a previous resolution surviving it,
+  and the loader now answers with the options a config file alone resolves to — the same projection
+  startup begins from, so the `/settings` applies that re-read one block resolve it exactly as
+  startup did, an absent off-switch included. Behaviour is unchanged, including the two things the
+  layers were carrying: a key with no environment variable and no flag is now file-only because its
+  row has no accessor for either source rather than because a layer was trusted to be empty, and
+  `confine-to-workspace` still collapses last, since whether a host acknowledgement names THIS
+  machine is not a fact any key holds.
+
 - **Config resolution is now three loops over the registry, and nothing else.** The chain that
   carried a key from the file to the running engine was written out by hand three times over —
   a branch per field projecting the parsed file onto a precedence layer, a second one copying that

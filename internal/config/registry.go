@@ -19,7 +19,7 @@ import (
 // schema (fileConfig), so the surfaces that need to talk ABOUT a key — the /settings
 // screen's rows, resolution's env-var and flag names, the scalar splice writer's target
 // paths — all read the same description instead of restating it. Before this table each
-// of those facts lived wherever it was needed (a string literal in ResolveSettings, a
+// of those facts lived wherever it was needed (a string literal in the resolution loop, a
 // sentence in the template's comments, nothing at all for the screen), which is exactly
 // how a config surface drifts from its schema.
 //

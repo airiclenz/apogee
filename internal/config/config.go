@@ -31,187 +31,17 @@ import (
 
 // The settable upstream/autonomy values resolve from four sources, highest priority
 // first: an explicitly-set command-line flag, then an APOGEE_* environment variable,
-// then the config file (<apogee-home>/config.yaml), then the built-in default. The
-// resolution is split into a pure core (ResolveSettings over optional layers) and a
-// thin orchestrator (ApplyConfig) that builds the layers from the live flag set,
-// environment, and filesystem — so the precedence rule is table-testable without cobra,
-// an environment, or a real file (the P2.5 acceptance).
-
-// Settings is the resolved configuration after precedence is applied: the values the
-// composition root feeds into the domain.Config and the TUI Options.
-type Settings struct {
-	Mode   string
-	Bypass bool
-
-	// servers is the resolved `servers:` list: the SINGLE definition of the upstream servers this
-	// config knows (ADR 0036), in file order — the one a session starts on and every one it can be
-	// switched to. File-only (no flag, no env — like mcpServers): naming a machine's endpoint and
-	// its key is a config act, not an invocation one. Absent/empty ⇒ no server is configured at
-	// all, which selection answers rather than resolution.
-	Servers []ServerEntry
-
-	// startupServer is the resolved `server:` key: the NAME of the `servers:` entry this session
-	// starts on — the last one chosen, which /server records automatically. It resolves
-	// flag > env > file (`--server`, `APOGEE_SERVER`, `server:`), so one invocation can start on
-	// another configured machine without editing the file. Empty ⇒ no choice is recorded (or none
-	// is asked for). It is deliberately NOT validated against the list here: which names exist is
-	// a fact about the resolved `servers:` list, so a name that matches nothing is answered at
-	// selection, where the list is in hand.
-	StartupServer string
-
-	// editor is the resolved `editor:` key: the command line an external edit is opened with, carried
-	// exactly as the user wrote it (`code -w` stays two words until the launch site splits it).
-	// File-only, on the `servers:` reasoning: naming the program installed on this machine is a
-	// config act, not an invocation one. Empty ⇒ the rest of the ladder decides — $VISUAL, then
-	// $EDITOR, then the OS default opener (ADR 0041).
-	Editor string
-
-	// confineToWorkspace is GLOBAL-CONFIG-ONLY (ADR 0012): it is resolved from the config
-	// file alone, never from a flag or env, so a hostile repo invoking apogee cannot loosen
-	// Auto's blast radius. Default true. (There is no project-level config file today; the
-	// file-only resolution is what keeps it un-loosenable by the invocation environment.)
-	// It is the EFFECTIVE value: an explicit `confine-to-workspace: false` OR a Host
-	// acknowledgement matching this machine resolves it to false (resolveConfineToWorkspace).
-	ConfineToWorkspace bool
-
-	// unconfinedHosts is the Host acknowledgement list as configured (ADR 0012, amendment
-	// 2026-07-21) — the machines the user has recorded as disposable. File-only on the same
-	// reasoning as confine-to-workspace: a hostile repo must not be able to name your host.
-	// It is carried past resolution (which collapses it into confineToWorkspace above) so the
-	// session can report the list back and extend it.
-	UnconfinedHosts []UnconfinedHost
-
-	// webSearchEndpoint is the config'd search backend for the web_search tool (P3.11),
-	// file-only (empty ⇒ the built-in DuckDuckGo default; "off" disables the tool).
-	WebSearchEndpoint string
-
-	// useProjectSkills gates whether the workspace's bare skills/ folder is discovered (in
-	// addition to the global library and the project's .apogee/skills, which are always loaded).
-	// File-only, default TRUE — a project's skills/ is trusted by default, like the @file
-	// references the same workspace already feeds the model.
-	UseProjectSkills bool
-
-	// autoCompact gates the automatic, budget-driven generative Compaction trigger (item 9). File-only,
-	// default TRUE — Compaction is structural and load-bearing (it stays on under Bypass, D5/D6), so it
-	// runs unless a config explicitly opts out with `auto-compact: false`. The on-demand /compact command
-	// is unaffected by it (that always folds on request).
-	AutoCompact bool
-
-	// autoTitle gates the AUTOMATIC session-naming call — the cosmetic out-of-band completion that
-	// names a new Session record from its first prompt. File-only, default TRUE. It is cosmetic, not
-	// structural: nothing breaks when it is off (the heuristic title stamped at the first Save
-	// stands), which is why it can be turned off at all. It gates only the automatic firing — the
-	// generator stays wired either way, so `/rename` still regenerates on demand under
-	// `auto-title: false`.
-	AutoTitle bool
-
-	// rememberModel gates remembering the model choice: the write into the session's `servers:`
-	// entry on an explicit pick, and the TUI's startup restore of what was recorded. File-only, and
-	// default FALSE — writing back into the human's own config is opted into, never assumed.
-	RememberModel bool
-
-	// contextWindow PINS the model context window in tokens (item 3 / S3). File-only (no flag/env,
-	// like autoCompact) and default 0 ⇒ unpinned, so the window is whatever the ten-second
-	// heartbeat observes, live, and follows a model switch with it; a positive value is never
-	// overridden by a beat (ADR 0024 — the escape hatch for a server that does not advertise a
-	// window, or advertises one that is wrong for how it is run). Nothing pre-fills it any more, so
-	// > 0 means "the user pinned it" and nothing else. It feeds ContextConfig.MaxContextTokens,
-	// which the Budget and automatic Compaction bind against.
-	ContextWindow int
-
-	// responseReserve is the share of that window held back for the model's reply, as a fraction
-	// (item 12). File-only (no flag/env, like contextWindow above) and default 0 ⇒ unset, so
-	// apogee's built-in 0.20 share stands; the loader accepts nothing but 0 and the open range
-	// (0, 1), so a non-zero value here is always a usable share. It feeds
-	// ContextConfig.ResponseReserveFraction, which the Budget applies whenever no reply reserve in
-	// TOKENS is pinned.
-	ResponseReserve float64
-
-	// mcpServers is the set of external MCP servers to connect on startup (P3.15), file-only
-	// and default-empty (no servers ⇒ the MCP feature is dormant). Their tools surface into the
-	// registry as classMCP ExternalEffectTools the disposition gates in Auto.
-	MCPServers []mcp.ServerConfig
-
-	// toolsDisabled is the `tools.disabled:` roster switch: the built-in tools this config takes
-	// off the menu, by name. File-only and default-empty (⇒ the whole roster), like mcpServers
-	// beside it — which tools a model is offered is a per-machine tuning fact, not an invocation
-	// one. It is deliberately GLOBAL: a per-profile roster is a later key that builds on it.
-	ToolsDisabled []string
-
-	// urlAllowHosts / urlDenyHosts are the resolved `url-safety:` host layer — the hosts the network
-	// tools may reach, and the hosts they may not. File-only and default-empty (⇒ every host, subject
-	// to the always-on SSRF floor), like toolsDisabled beside it. They TIGHTEN the guard and can
-	// never loosen it: the floor is unreachable from configuration by construction.
-	URLAllowHosts []string
-	URLDenyHosts  []string
-
-	// modelProfiles is the resolved `model-profiles:` map (ADR 0044): the user's pattern-keyed
-	// Model profiles, ordered by pattern so the same file always resolves to the same slice.
-	// File-only (a per-model concern, like mcpServers, with no flag/env) and default-empty ⇒ the
-	// user configures no shape and the composition root resolves against the shipped table alone.
-	// The composition root — never this package — matches a model name against them
-	// (profiles.Resolve): which model is bound is not a fact the config file holds.
-	ModelProfiles []profiles.Entry
-
-	// mechanisms enables catalogued small-model Mechanisms by canonical ID (Phase 4), file-only
-	// (a per-model tuning concern, like mcpServers, with no flag/env) and default-empty. All
-	// Mechanisms ship OFF (D1 — default-off until bench-proven); a `true` entry turns one on. The
-	// composition root validates every key against the catalogue and hands the enabled IDs to
-	// domain.Config.EnableMechanisms, which the engine builds catalogue rows from (ADR 0015 §1); an
-	// unknown ID is a loud startup error. Bypass still wins (an enabled non-off-ramp Mechanism is
-	// not dispatched under bypass — ADR 0006 / item 2's gate).
-	Mechanisms map[string]bool
-
-	// validatedSetsEnable gates the Validated-set runtime surface (ADR 0016 §5's off-switch),
-	// file-only and default TRUE — a matching per-model set applies (or is offered) unless the
-	// config explicitly opts out with `validated-sets: enable: false`.
-	ValidatedSetsEnable bool
-
-	// validatedSetsAlias is the explicit carry-over map (ADR 0016 §3): runtime fingerprint
-	// label → Validated-set entry key. File-only, default-empty. An identity mapping is the
-	// low-confidence confirm ("my model is what the label says"); a differing mapping is the
-	// explicit transfer to a sibling quant/family member.
-	ValidatedSetsAlias map[string]string
-
-	// present is the resolved `present:` block (ADR 0019): which mechanisms of the presentation
-	// ladder this host offers a finished document. File-only (no flag/env, like the newer keys
-	// above). Its defaults are auto-open ON — the headline want is that a run on the user's own
-	// desktop simply opens the deliverable — with no command override, an ephemeral doc-server
-	// port, and a detected advertise host.
-	Present PresentSettings
-
-	// systemPrompt is the resolved system-prompt block (ADR 0023): the global prompt (inline or
-	// a file) and the per-model overrides. File-only (no flag/env, like present above), and its
-	// zero value is no prompt at all — the promptless request apogee sent before ADR 0023. The
-	// composition root collapses it into the ONE template domain.Config carries, with
-	// ResolveSystemPrompt, AFTER model resolution: which entry applies is not known until then.
-	SystemPrompt SystemPromptSettings
-
-	// contextFiles is the resolved `context-files:` block: the workspace-root files whose content
-	// joins the standing system content (the AGENTS.md / CLAUDE.md behaviour). File-only (no
-	// flag/env, like the system-prompt keys it sits beside) and its default is ON with the one
-	// name AGENTS.md, so a repo carrying that file works with no configuration at all. The
-	// composition root collapses it into the name list domain.Config.ContextFiles carries.
-	ContextFiles contextFilesSettings
-
-	// ui is the resolved `ui:` block: how the terminal UI presents itself — today the status-line
-	// spinner's animation and its colour loop. File-only (no flag/env, like the blocks above), and
-	// its defaults are the renderer's own (defaultUISettings): the default style with the colour
-	// loop on. The composition root hands both values to the TUI as Options.
-	UI UISettings
-
-	// cursorShape is the configured shape of the prompt's caret, as the user spelled it (block |
-	// underline | bar). File-only like the ui block, and empty ⇒ the renderer's default (block).
-	// It is carried as the raw NAME — ApplyConfig validates it against the vocabulary
-	// internal/domain owns, and the composition root parses it once more into the tea.CursorShape
-	// the TUI Options take, so cmd/apogee never restates that vocabulary.
-	CursorShape string
-}
+// then the config file (<apogee-home>/config.yaml), then the built-in default. There is no
+// carrier between those sources and the [Options] the composition root builds everything from:
+// each source is applied straight onto that struct, lowest priority first, so applying them in
+// order IS the precedence rule (ResolveOptions). The sources are injected — a parsed file, a
+// getenv, a flag set — so the rule stays table-testable without cobra, an environment, or a real
+// file (the P2.5 acceptance).
 
 // PresentSettings is the resolved `present:` block (ADR 0019), in the form the composition root
 // turns into the host-side mechanisms themselves (wire.go's presentationRungs).
 //
-// It is one struct rather than four fields on Settings because the four describe ONE subsystem
+// It is one struct rather than four fields on [Options] because the four describe ONE subsystem
 // and travel together — from the on-disk block, through resolution, to the wire that builds the
 // ladder out of them. Nothing in here can switch presentation off: rung 0, the transcript line
 // carrying the path, needs no configuration and is never skipped. These keys only change WHICH
@@ -260,7 +90,7 @@ type PromptSource struct {
 
 // SystemPromptSettings is the resolved system-prompt block (ADR 0023): the global prompt plus
 // the per-model overrides, keyed by the RESOLVED model name (the label the Validated-set surface
-// keys on too). It is one struct rather than three fields on Settings for the same reason
+// keys on too). It is one struct rather than three fields on [Options] for the same reason
 // PresentSettings is: the keys describe ONE subsystem and travel together, from the on-disk block
 // through resolution to the composition root, where ResolveSystemPrompt collapses them into the
 // single template domain.Config carries.
@@ -312,12 +142,13 @@ func (sp SystemPromptSettings) Validate() error {
 // reason the feature needs no configuration in the common case.
 const defaultContextFileName = "AGENTS.md"
 
-// contextFilesSettings is the resolved `context-files:` block: whether workspace context files are
-// folded into the standing system content at all, and which names are looked for in the workspace
-// root, in inclusion order. It is one struct rather than two fields on settings for the same
-// reason PresentSettings is: the keys describe ONE subsystem and travel together, from the on-disk
-// block through resolution to the composition root, where resolved() collapses them into the
-// single name list domain.Config carries.
+// contextFilesSettings is the `context-files:` block as the file states it: whether workspace
+// context files are folded into the standing system content at all, and which names are looked for
+// in the workspace root, in inclusion order. It is one struct rather than two fields for the same
+// reason PresentSettings is — the keys describe ONE subsystem and travel together — but it is the
+// one such block that does NOT land on [Options] whole: resolved() collapses it into the single
+// name list domain.Config carries, which is all the composition root has a use for. It stays a
+// struct because the two keys are also what validate() has to see, off-switch included.
 //
 // The list is an INCLUSION set, not a priority chain — every listed name that EXISTS is included —
 // and whether any of them exists is deliberately not a config-time question: discovery is the
@@ -395,7 +226,7 @@ func (cf contextFilesSettings) resolved() []string {
 }
 
 // UISettings is the resolved `ui:` block, in the form the composition root hands the renderer
-// (wire.go's tui.Options). It is one struct rather than loose fields on Settings for the same
+// (wire.go's tui.Options). It is one struct rather than loose fields on [Options] for the same
 // reason PresentSettings is: the keys describe ONE subsystem and travel together, from the on-disk
 // block through resolution to the wire.
 //
@@ -495,862 +326,401 @@ func (u UISettings) Validate() error {
 	return nil
 }
 
-// Layer is one precedence source. A nil pointer means the source does not set that
-// field, so resolution falls through to the next-lower-priority source. A non-nil
-// pointer (including a pointer to the zero value) is an explicit setting that wins over
-// everything below it.
-type Layer struct {
-	Mode   *string
-	Bypass *bool
-
-	// startupServer is the `server:` key: the NAME of the `servers:` entry a session starts on.
-	// Unlike the list it names — file-only, because naming a machine is a config act — this one
-	// key is settable from all three layers (`--server` beats `APOGEE_SERVER` beats the file),
-	// because which of those machines THIS run starts on is an invocation fact. A nil pointer
-	// means the source names none, so resolution falls through to the empty default.
-	StartupServer *string
-
-	// servers is set only by the FILE layer (the `servers:` list is config'd, default-empty, with
-	// no flag/env — like mcpServers). A nil slice means the source names no server, so resolution
-	// falls through to the empty default.
-	Servers []ServerEntry
-
-	// editor is set only by the FILE layer (the editor command is config'd, with no flag/env — like
-	// servers above; $VISUAL and $EDITOR are consulted at the launch site, not here, because
-	// they are a FALLBACK below this key rather than a layer above it). A nil pointer means the
-	// source names no editor, so resolution leaves it empty and the rest of the ladder decides.
-	Editor *string
-
-	// confineToWorkspace is set only by the FILE layer (global-config-only, ADR 0012). The
-	// env and flag layers leave it nil so the invocation environment cannot loosen it.
-	ConfineToWorkspace *bool
-
-	// unconfinedHosts is set only by the FILE layer (global-config-only on the same reasoning
-	// as confineToWorkspace above — ADR 0012, amendment 2026-07-21). A nil slice means the
-	// source acknowledges no host, which is the default: every host is confined.
-	UnconfinedHosts []UnconfinedHost
-
-	// webSearchEndpoint is set only by the FILE layer (P3.11 — web-search is config'd,
-	// with no flag/env). Empty/absent ⇒ the built-in DuckDuckGo default; "off" disables.
-	WebSearchEndpoint *string
-
-	// useProjectSkills is set only by the FILE layer (skills are config'd, default-on, with no
-	// flag/env). A pointer so an explicit `use-project-skills: false` is distinguishable from
-	// an absent key (which keeps the default true).
-	UseProjectSkills *bool
-
-	// autoCompact is set only by the FILE layer (the automatic Compaction trigger is config'd,
-	// default-on, with no flag/env). A pointer so an explicit `auto-compact: false` is
-	// distinguishable from an absent key (which keeps the default true).
-	AutoCompact *bool
-
-	// autoTitle is set only by the FILE layer (the automatic session-naming call is config'd,
-	// default-on, with no flag/env — like autoCompact above). A pointer so an explicit
-	// `auto-title: false` is distinguishable from an absent key (which keeps the default true).
-	AutoTitle *bool
-
-	// rememberModel is set only by the FILE layer (the toggle is config'd, with no flag/env — like
-	// autoTitle above). A pointer so an explicit `remember-model: false` is distinguishable from an
-	// absent key; both resolve to off, and the distinction is what tells /settings which of the two
-	// the file says.
-	RememberModel *bool
-
-	// contextWindow is set only by the FILE layer (the window pin is config'd, no flag/env — like
-	// autoCompact). A nil pointer means the source pins no window, so resolution leaves it 0 and
-	// the heartbeat's live observation stands; only a positive `context-window:` projects to a
-	// non-nil pointer.
-	ContextWindow *int
-
-	// responseReserve is set only by the FILE layer (the reply share is config'd, no flag/env —
-	// like contextWindow above). A nil pointer means the source configures no share, so resolution
-	// leaves it 0 and apogee's built-in default stands; only a `response-reserve:` the loader
-	// accepted as a positive share projects to a non-nil pointer.
-	ResponseReserve *float64
-
-	// mcpServers is set only by the FILE layer (P3.15 — MCP servers are config'd, default-empty,
-	// with no flag/env). A nil slice means the source does not configure servers (fall through).
-	MCPServers []mcp.ServerConfig
-
-	// toolsDisabled is set only by the FILE layer (the roster is config'd, default-empty, with no
-	// flag/env — like mcpServers above). A nil slice means the source disables no tool, so
-	// resolution leaves the whole built-in roster standing.
-	ToolsDisabled []string
-
-	// urlAllowHosts / urlDenyHosts are set only by the FILE layer (the host layer is config'd,
-	// default-empty, with no flag/env — like toolsDisabled above). A nil slice means the source
-	// configures no list, so resolution leaves the guard's own default standing: every host, subject
-	// to the always-on SSRF floor.
-	URLAllowHosts []string
-	URLDenyHosts  []string
-
-	// modelProfiles is set only by the FILE layer (the map is config'd, default-empty, with no
-	// flag/env — like mechanisms). A nil slice means the source configures no profile at all, so
-	// a nearer layer that does carries the whole map: the block is replaced entry-and-all, never
-	// merged key by key.
-	ModelProfiles []profiles.Entry
-
-	// mechanisms is set only by the FILE layer (Mechanisms are config'd, default-empty, with no
-	// flag/env — like mcpServers). A nil map means the source does not enable any Mechanism (fall
-	// through to the empty default).
-	Mechanisms map[string]bool
-
-	// validatedSetsEnable / validatedSetsAlias are set only by the FILE layer (the Validated-set
-	// surface is config'd, no flag/env — like mechanisms). A nil enable pointer keeps the default
-	// true; a nil alias map means no carry-over is configured.
-	ValidatedSetsEnable *bool
-	ValidatedSetsAlias  map[string]string
-
-	// present is set only by the FILE layer (the presentation ladder is config'd, no flag/env —
-	// like mechanisms). A nil pointer means the source configures no `present:` block, so
-	// resolution keeps the defaults (auto-open on, an ephemeral port, a detected host).
-	Present *PresentSettings
-
-	// systemPrompt is set only by the FILE layer (the system prompt is config'd, no flag/env —
-	// like present above). A nil pointer means the source sets none of the three system-prompt
-	// keys, so resolution keeps the zero value: no prompt, today's promptless request.
-	SystemPrompt *SystemPromptSettings
-
-	// contextFiles is set only by the FILE layer (the `context-files:` block is config'd, no
-	// flag/env — like systemPrompt above). A nil pointer means the source carries no block, so
-	// resolution keeps the defaults: on, looking for AGENTS.md in the workspace root.
-	ContextFiles *contextFilesSettings
-
-	// ui is set only by the FILE layer (the UI's own presentation is config'd, no flag/env — like
-	// present). A nil pointer means the source configures no `ui:` block, so resolution keeps the
-	// defaults (the renderer's default spinner style, colour loop on).
-	UI *UISettings
-
-	// cursorShape is set only by the FILE layer (the caret's shape is config'd, no flag/env — like
-	// the ui block). A nil pointer means the source names no shape, so resolution leaves it empty
-	// and the renderer's default (a steady block) stands.
-	CursorShape *string
-}
-
 // keyAccessor binds one registry row to the plumbing that carries its key through resolution:
 // which sources the key is read FROM, and where a value read from each of them is written TO. The
 // registry says what a key IS; this table says how it travels, and the two are one row apart so a
 // key described to the /settings surface cannot be a key resolution forgot to read.
 //
-// The whole of resolution is three loops over this table — the file projection (fileConfig.layer),
-// the precedence ladder (ResolveSettings), and the write-back onto Options (ApplyConfig) — so a
-// key is carried by the act of being described here, and a row's accessors are the only place a
-// key's plumbing exists.
+// There is no carrier between the sources and the [Options] the composition root builds everything
+// from: every accessor writes onto that struct directly, and the whole of resolution is three
+// passes over this table — the file, then the environment, then the flags — so applying them in
+// that order IS the precedence rule (ResolveOptions), and a key is carried by the act of being
+// described here.
 //
 // The environment-variable and flag NAMES are read off the row (EnvVar, FlagName) rather than
-// restated as a literal at each site that used to spell them — the env layer, the flag layer, the
-// override marker, and the precedence loop. Source metadata therefore has exactly one home, and
-// renaming APOGEE_MODE or --mode is an edit to one registry row instead of a four-site edit that
-// can half-land.
+// restated as a literal at each site that used to spell them — the env pass, the flag pass and the
+// override marker. Source metadata therefore has exactly one home, and renaming APOGEE_MODE or
+// --mode is an edit to one registry row instead of a three-site edit that can half-land.
 //
-// The accessors are closures over the typed carriers themselves (fileConfig, Layer, Settings,
-// Options) rather than reflection over them, so the compiler still checks every projection:
+// The accessors are closures over the typed carriers themselves (fileConfig, Options) rather than
+// reflection over them, so the compiler still checks every projection:
 //
-//   - fromFile projects a parsed file's typed value AND its presence onto a Layer — an absent key
-//     leaves the field nil so it falls through to the source below, which is the whole reason the
-//     layer is pointer-shaped. Every row has one: every key of this schema is settable from the file.
-//   - fromEnv projects a variable's text and fromFlag the already-parsed flag value. Both are nil
-//     for a key with no source of that kind, which is most of the schema — a per-machine or
-//     per-model fact does not belong to one invocation, and ADR 0012 fences two keys to the global
-//     file outright.
-//   - overlay copies a Layer's value onto the resolved Settings when that Layer sets it. Every row
-//     has one, and each writes only its own field, so applying the layers in order IS the
-//     precedence rule.
-//   - writeBack copies the RESOLVED value onto the Options the composition root builds everything
-//     from. Every row has one, and it is a plain copy rather than a guarded one: precedence is
-//     already settled by the time it runs, so there is no longer anything to fall through to.
+//   - fromFile writes what the key resolves to from the FILE ALONE: the file's value where the file
+//     states the key, its built-in default where the file does not. Every row has one, and the write
+//     is unconditional — the file is the only source below the default, so there is nothing left to
+//     fall through TO, and a full pass resets every field the schema owns rather than leaving a
+//     stale one standing. That is also what makes [LoadFileConfig] answer with usable Options.
+//   - fromEnv projects a variable's text and fromFlag the already-parsed flag value, each onto the
+//     same field. They run only where their source SET the key (a non-empty variable, an explicitly
+//     changed flag), so neither can shadow the value below it. Both are nil for a key with no source
+//     of that kind, which is most of the schema — a per-machine or per-model fact does not belong to
+//     one invocation, and ADR 0012 fences two keys to the global file outright. A nil accessor IS
+//     that fence: the pass skips the row, so there is no path for those sources to reach the key.
 //
 // Two shapes need a word. The keys that SHARE a carrier — the three system-prompt keys, the two
-// context-files keys, the four present keys, the six ui keys — each project the whole block their
-// key sits in, because the Layer field is that block; each still answers for its OWN key's
-// presence, and applying two of them is idempotent. A block written with NO keys under it
-// (`present:` and nothing beneath it) therefore sets no carrier at all — no key of the block is
-// present, so no accessor claims one is — and the block resolves to the defaults resolution starts
-// from, which is exactly what the block's own defaults would have produced. And
-// confine-to-workspace's accessors carry the
-// file's EXPLICIT value only: the EFFECTIVE one also depends on whether a Host acknowledgement
-// names this machine, which needs the host identity — a fact no row holds, so that collapse stays
-// in ResolveSettings (resolveConfineToWorkspace).
+// context-files keys, the four present keys, the six ui keys — each write the whole block their key
+// sits in, because the Options field IS that block and the block's own mapper (toUISettings and its
+// siblings) applies the defaults for whatever the file left out. The rows of one block therefore
+// write the same value, which is why they share one named projection. And confine-to-workspace's
+// accessor carries the file's own value only: the EFFECTIVE one also depends on whether a Host
+// acknowledgement names this machine, which needs the host identity — a fact no row holds, so that
+// collapse stays in ResolveOptions (resolveConfineToWorkspace).
 //
 // What this table does NOT carry is the raw startup overrides (`--endpoint`, `APOGEE_ENDPOINT`,
 // `APOGEE_API_KEY`, `--model`, `APOGEE_MODEL`): since ADR 0036 those name no config key at all —
 // they build or overlay a startup server entry — so they are resolved on their own, off the
 // registry, rather than pretending to be file keys that no longer exist.
 type keyAccessor struct {
-	row       Key
-	fromFile  func(l *Layer, fc fileConfig)
-	fromEnv   func(l *Layer, text string) error
-	fromFlag  func(l *Layer, opts Options)
-	overlay   func(s *Settings, l Layer)
-	writeBack func(opts *Options, s Settings)
+	row      Key
+	fromFile func(o *Options, fc fileConfig)
+	fromEnv  func(o *Options, text string) error
+	fromFlag func(o *Options, flags Options)
 }
 
 // keyAccessors is that table: one entry per registry row, in the order the registry lists the keys.
 // The order does not affect the outcome — each key writes its own field, and precedence is the
-// order the LAYERS are applied in — it only keeps the table readable beside the registry it is
+// order the SOURCES are applied in — it only keeps the table readable beside the registry it is
 // built over. Its completeness is a test gate rather than an editorial promise
-// (TestKeyAccessorsBindDescribedKeys): every registry row has an entry here, every entry carries
-// the three accessors every key needs (fromFile, overlay, writeBack), and a row advertising a
-// variable or a flag has the plumbing that reads it.
+// (TestKeyAccessorsBindDescribedKeys): every registry row has an entry here, every entry carries the
+// fromFile projection every key needs, and a row advertising a variable or a flag has the plumbing
+// that reads it.
 var keyAccessors = []keyAccessor{
 	{
 		// File-only: the list names MACHINES, which is a config act rather than an invocation one —
 		// its invocation-settable neighbour is the `server:` pointer below it.
 		row: mustKey("servers"),
-		fromFile: func(l *Layer, fc fileConfig) {
+		fromFile: func(o *Options, fc fileConfig) {
+			o.Servers = nil
 			if len(fc.Servers) > 0 {
-				l.Servers = fc.Servers
+				o.Servers = fc.Servers
 			}
 		},
-		overlay: func(s *Settings, l Layer) {
-			if l.Servers != nil {
-				s.Servers = l.Servers
-			}
-		},
-		writeBack: func(o *Options, s Settings) { o.Servers = s.Servers },
 	},
 	{
 		// The one key of the `servers:` neighbourhood with sources above the file: the list is
 		// config, the choice of entry is an invocation.
-		row: mustKey("server"),
-		fromFile: func(l *Layer, fc fileConfig) {
-			if fc.Server != "" {
-				l.StartupServer = &fc.Server
-			}
-		},
-		fromEnv: func(l *Layer, text string) error {
-			l.StartupServer = &text
+		row:      mustKey("server"),
+		fromFile: func(o *Options, fc fileConfig) { o.StartupServer = fc.Server },
+		fromEnv: func(o *Options, text string) error {
+			o.StartupServer = text
 			return nil
 		},
-		fromFlag: func(l *Layer, opts Options) {
-			v := opts.StartupServer
-			l.StartupServer = &v
-		},
-		overlay: func(s *Settings, l Layer) {
-			if l.StartupServer != nil {
-				s.StartupServer = *l.StartupServer
-			}
-		},
-		writeBack: func(o *Options, s Settings) { o.StartupServer = s.StartupServer },
+		fromFlag: func(o *Options, flags Options) { o.StartupServer = flags.StartupServer },
 	},
 	{
 		row: mustKey("mode"),
-		fromFile: func(l *Layer, fc fileConfig) {
+		fromFile: func(o *Options, fc fileConfig) {
+			// The default comes from the row, so the mode resolution starts from and the mode /settings
+			// shows as "the default" are one string.
+			o.Mode = mustKey("mode").Default
 			if fc.Mode != "" {
-				l.Mode = &fc.Mode
+				o.Mode = fc.Mode
 			}
 		},
-		fromEnv: func(l *Layer, text string) error {
-			l.Mode = &text
+		fromEnv: func(o *Options, text string) error {
+			o.Mode = text
 			return nil
 		},
-		fromFlag: func(l *Layer, opts Options) {
-			v := opts.Mode
-			l.Mode = &v
-		},
-		overlay: func(s *Settings, l Layer) {
-			if l.Mode != nil {
-				s.Mode = *l.Mode
-			}
-		},
-		writeBack: func(o *Options, s Settings) { o.Mode = s.Mode },
+		fromFlag: func(o *Options, flags Options) { o.Mode = flags.Mode },
 	},
 	{
-		// The first of the three keys that are ONE prompt (ADR 0023) and therefore one carrier: each
-		// answers for its own key's presence and projects the block all three describe.
-		row: mustKey("system-prompt-text"),
-		fromFile: func(l *Layer, fc fileConfig) {
-			if fc.SystemPromptText != "" {
-				sp := fc.toSystemPromptSettings()
-				l.SystemPrompt = &sp
-			}
-		},
-		overlay:   overlaySystemPrompt,
-		writeBack: writeBackSystemPrompt,
+		// The first of the three keys that are ONE prompt (ADR 0023) and therefore one carrier. Its
+		// zero value is no prompt at all — the promptless request apogee sent before the ADR — so the
+		// block needs no default beyond what the file states.
+		row:      mustKey("system-prompt-text"),
+		fromFile: fileSystemPrompt,
 	},
 	{
-		row: mustKey("system-prompt-file"),
-		fromFile: func(l *Layer, fc fileConfig) {
-			if fc.SystemPromptFile != "" {
-				sp := fc.toSystemPromptSettings()
-				l.SystemPrompt = &sp
-			}
-		},
-		overlay:   overlaySystemPrompt,
-		writeBack: writeBackSystemPrompt,
+		row:      mustKey("system-prompt-file"),
+		fromFile: fileSystemPrompt,
 	},
 	{
-		row: mustKey("system-prompt-models"),
-		fromFile: func(l *Layer, fc fileConfig) {
-			if len(fc.SystemPromptModels) > 0 {
-				sp := fc.toSystemPromptSettings()
-				l.SystemPrompt = &sp
-			}
-		},
-		overlay:   overlaySystemPrompt,
-		writeBack: writeBackSystemPrompt,
+		row:      mustKey("system-prompt-models"),
+		fromFile: fileSystemPrompt,
 	},
 	{
-		// The `context-files:` pair, one carrier like the system-prompt trio above: an absent block
-		// leaves the carrier nil and the defaults (on, AGENTS.md) stand, and a block that names one
-		// key projects the other at its default — which is what toContextFilesSettings applies.
-		row: mustKey("context-files.enable"),
-		fromFile: func(l *Layer, fc fileConfig) {
-			if fc.ContextFiles != nil && fc.ContextFiles.Enable != nil {
-				c := fc.ContextFiles.toContextFilesSettings()
-				l.ContextFiles = &c
-			}
-		},
-		overlay:   overlayContextFiles,
-		writeBack: writeBackContextFiles,
+		// The `context-files:` pair, one carrier like the system-prompt trio above — and the one
+		// carrier Options does not hold whole: it takes the RESOLVED name list, because the composition
+		// root has no use for the switch that produced it (contextFilesSettings.resolved).
+		row:      mustKey("context-files.enable"),
+		fromFile: fileContextFiles,
 	},
 	{
-		row: mustKey("context-files.names"),
-		fromFile: func(l *Layer, fc fileConfig) {
-			// Present-but-empty is "no names", the second spelling of off — so the nil check is the
-			// presence test, not a length one.
-			if fc.ContextFiles != nil && fc.ContextFiles.Names != nil {
-				c := fc.ContextFiles.toContextFilesSettings()
-				l.ContextFiles = &c
-			}
-		},
-		overlay:   overlayContextFiles,
-		writeBack: writeBackContextFiles,
+		row:      mustKey("context-files.names"),
+		fromFile: fileContextFiles,
 	},
 	{
-		// Global-config-only (ADR 0012): no env, no flag, so the invocation environment cannot
-		// loosen Auto's blast radius. The overlay carries the file's EXPLICIT value; the effective
-		// one is resolveConfineToWorkspace's, because only it holds this machine's identity.
+		// Global-config-only (ADR 0012): no env, no flag, so the invocation environment cannot loosen
+		// Auto's blast radius. This carries what the FILE says — default true, and an absent key states
+		// the same thing an explicit `true` does; the effective value is resolveConfineToWorkspace's,
+		// because only it holds this machine's identity.
 		row: mustKey("confine-to-workspace"),
-		fromFile: func(l *Layer, fc fileConfig) {
-			if fc.ConfineToWorkspace != nil {
-				l.ConfineToWorkspace = fc.ConfineToWorkspace
-			}
+		fromFile: func(o *Options, fc fileConfig) {
+			o.ConfineToWorkspace = fc.ConfineToWorkspace == nil || *fc.ConfineToWorkspace
 		},
-		overlay: func(s *Settings, l Layer) {
-			if l.ConfineToWorkspace != nil {
-				s.ConfineToWorkspace = *l.ConfineToWorkspace
-			}
-		},
-		writeBack: func(o *Options, s Settings) { o.ConfineToWorkspace = s.ConfineToWorkspace },
 	},
 	{
 		// Global-config-only for the reason above — a hostile repo must not be able to name your
 		// host — and carried past resolution so the session can report the list back and extend it.
 		row: mustKey("unconfined-hosts"),
-		fromFile: func(l *Layer, fc fileConfig) {
+		fromFile: func(o *Options, fc fileConfig) {
+			o.UnconfinedHosts = nil
 			if len(fc.UnconfinedHosts) > 0 {
-				l.UnconfinedHosts = fc.UnconfinedHosts
+				o.UnconfinedHosts = fc.UnconfinedHosts
 			}
 		},
-		overlay: func(s *Settings, l Layer) {
-			if l.UnconfinedHosts != nil {
-				s.UnconfinedHosts = l.UnconfinedHosts
-			}
-		},
-		writeBack: func(o *Options, s Settings) { o.UnconfinedHosts = s.UnconfinedHosts },
 	},
 	{
-		row: mustKey("web-search-endpoint"),
-		fromFile: func(l *Layer, fc fileConfig) {
-			if fc.WebSearch != "" {
-				l.WebSearchEndpoint = &fc.WebSearch
-			}
-		},
-		overlay: func(s *Settings, l Layer) {
-			if l.WebSearchEndpoint != nil {
-				s.WebSearchEndpoint = *l.WebSearchEndpoint
-			}
-		},
-		writeBack: func(o *Options, s Settings) { o.WebSearchEndpoint = s.WebSearchEndpoint },
+		row:      mustKey("web-search-endpoint"),
+		fromFile: func(o *Options, fc fileConfig) { o.WebSearchEndpoint = fc.WebSearch },
 	},
 	{
 		// The on-disk entries are mapped across one by one, as they are everywhere else in this
 		// package: the schema shape and the resolved one stay independently evolvable.
 		row: mustKey("mcp-servers"),
-		fromFile: func(l *Layer, fc fileConfig) {
+		fromFile: func(o *Options, fc fileConfig) {
+			o.MCPServers = nil
 			if len(fc.MCPServers) > 0 {
 				servers := make([]mcp.ServerConfig, len(fc.MCPServers))
 				for i, m := range fc.MCPServers {
 					servers[i] = m.toServerConfig()
 				}
-				l.MCPServers = servers
+				o.MCPServers = servers
 			}
 		},
-		overlay: func(s *Settings, l Layer) {
-			if l.MCPServers != nil {
-				s.MCPServers = l.MCPServers
-			}
-		},
-		writeBack: func(o *Options, s Settings) { o.MCPServers = s.MCPServers },
 	},
 	{
 		row: mustKey("tools.disabled"),
-		fromFile: func(l *Layer, fc fileConfig) {
+		fromFile: func(o *Options, fc fileConfig) {
+			o.ToolsDisabled = nil
 			if fc.Tools != nil && len(fc.Tools.Disabled) > 0 {
-				l.ToolsDisabled = fc.Tools.Disabled
+				o.ToolsDisabled = fc.Tools.Disabled
 			}
 		},
-		overlay: func(s *Settings, l Layer) {
-			if l.ToolsDisabled != nil {
-				s.ToolsDisabled = l.ToolsDisabled
-			}
-		},
-		writeBack: func(o *Options, s Settings) { o.ToolsDisabled = s.ToolsDisabled },
 	},
 	{
 		// Each list of the `url-safety:` block projects on its own: a block that names only one of
-		// them configures that one and leaves the other to fall through.
+		// them configures that one and leaves the other at its default.
 		row: mustKey("url-safety.allow-hosts"),
-		fromFile: func(l *Layer, fc fileConfig) {
+		fromFile: func(o *Options, fc fileConfig) {
+			o.URLAllowHosts = nil
 			if fc.URLSafety != nil && len(fc.URLSafety.AllowHosts) > 0 {
-				l.URLAllowHosts = fc.URLSafety.AllowHosts
+				o.URLAllowHosts = fc.URLSafety.AllowHosts
 			}
 		},
-		overlay: func(s *Settings, l Layer) {
-			if l.URLAllowHosts != nil {
-				s.URLAllowHosts = l.URLAllowHosts
-			}
-		},
-		writeBack: func(o *Options, s Settings) { o.URLAllowHosts = s.URLAllowHosts },
 	},
 	{
 		row: mustKey("url-safety.deny-hosts"),
-		fromFile: func(l *Layer, fc fileConfig) {
+		fromFile: func(o *Options, fc fileConfig) {
+			o.URLDenyHosts = nil
 			if fc.URLSafety != nil && len(fc.URLSafety.DenyHosts) > 0 {
-				l.URLDenyHosts = fc.URLSafety.DenyHosts
+				o.URLDenyHosts = fc.URLSafety.DenyHosts
 			}
 		},
-		overlay: func(s *Settings, l Layer) {
-			if l.URLDenyHosts != nil {
-				s.URLDenyHosts = l.URLDenyHosts
-			}
-		},
-		writeBack: func(o *Options, s Settings) { o.URLDenyHosts = s.URLDenyHosts },
 	},
 	{
 		row: mustKey("use-project-skills"),
-		fromFile: func(l *Layer, fc fileConfig) {
-			if fc.UseProjectSkills != nil {
-				l.UseProjectSkills = fc.UseProjectSkills
-			}
+		fromFile: func(o *Options, fc fileConfig) {
+			o.UseProjectSkills = fc.UseProjectSkills == nil || *fc.UseProjectSkills
 		},
-		overlay: func(s *Settings, l Layer) {
-			if l.UseProjectSkills != nil {
-				s.UseProjectSkills = *l.UseProjectSkills
-			}
-		},
-		writeBack: func(o *Options, s Settings) { o.UseProjectSkills = s.UseProjectSkills },
 	},
 	{
 		row: mustKey("auto-compact"),
-		fromFile: func(l *Layer, fc fileConfig) {
-			if fc.AutoCompact != nil {
-				l.AutoCompact = fc.AutoCompact
-			}
+		fromFile: func(o *Options, fc fileConfig) {
+			o.AutoCompact = fc.AutoCompact == nil || *fc.AutoCompact
 		},
-		overlay: func(s *Settings, l Layer) {
-			if l.AutoCompact != nil {
-				s.AutoCompact = *l.AutoCompact
-			}
-		},
-		writeBack: func(o *Options, s Settings) { o.AutoCompact = s.AutoCompact },
 	},
 	{
 		row: mustKey("auto-title"),
-		fromFile: func(l *Layer, fc fileConfig) {
-			if fc.AutoTitle != nil {
-				l.AutoTitle = fc.AutoTitle
-			}
+		fromFile: func(o *Options, fc fileConfig) {
+			o.AutoTitle = fc.AutoTitle == nil || *fc.AutoTitle
 		},
-		overlay: func(s *Settings, l Layer) {
-			if l.AutoTitle != nil {
-				s.AutoTitle = *l.AutoTitle
-			}
-		},
-		writeBack: func(o *Options, s Settings) { o.AutoTitle = s.AutoTitle },
 	},
 	{
+		// The one switch of this run that defaults OFF: writing back into the human's own config is
+		// opted into, never assumed.
 		row: mustKey("remember-model"),
-		fromFile: func(l *Layer, fc fileConfig) {
-			if fc.RememberModel != nil {
-				l.RememberModel = fc.RememberModel
-			}
+		fromFile: func(o *Options, fc fileConfig) {
+			o.RememberModel = fc.RememberModel != nil && *fc.RememberModel
 		},
-		overlay: func(s *Settings, l Layer) {
-			if l.RememberModel != nil {
-				s.RememberModel = *l.RememberModel
-			}
-		},
-		writeBack: func(o *Options, s Settings) { o.RememberModel = s.RememberModel },
 	},
 	{
 		// A plain int rather than a pointer on disk, so PRESENCE is the positive value: 0 and absent
 		// both mean unpinned, and the heartbeat's live observation stands (ADR 0024).
 		row: mustKey("context-window"),
-		fromFile: func(l *Layer, fc fileConfig) {
+		fromFile: func(o *Options, fc fileConfig) {
+			o.ContextWindow = 0
 			if fc.ContextWindow > 0 {
-				l.ContextWindow = &fc.ContextWindow
+				o.ContextWindow = fc.ContextWindow
 			}
 		},
-		overlay: func(s *Settings, l Layer) {
-			if l.ContextWindow != nil {
-				s.ContextWindow = *l.ContextWindow
-			}
-		},
-		writeBack: func(o *Options, s Settings) { o.ContextWindow = s.ContextWindow },
 	},
 	{
 		// Presence is the positive value here too, for context-window's reason: the loader accepts
 		// nothing but 0 and the open range (0, 1), so 0 is "unset" and apogee's built-in share stands.
 		row: mustKey("response-reserve"),
-		fromFile: func(l *Layer, fc fileConfig) {
+		fromFile: func(o *Options, fc fileConfig) {
+			o.ResponseReserve = 0
 			if fc.ResponseReserve > 0 {
-				l.ResponseReserve = &fc.ResponseReserve
+				o.ResponseReserve = fc.ResponseReserve
 			}
 		},
-		overlay: func(s *Settings, l Layer) {
-			if l.ResponseReserve != nil {
-				s.ResponseReserve = *l.ResponseReserve
-			}
-		},
-		writeBack: func(o *Options, s Settings) { o.ResponseReserve = s.ResponseReserve },
 	},
 	{
-		// The four `present:` keys are one carrier, the system-prompt trio's shape: each answers for
-		// its own key's presence and projects the block, whose absent keys toPresentSettings defaults.
-		row: mustKey("present.auto-open"),
-		fromFile: func(l *Layer, fc fileConfig) {
-			if fc.Present != nil && fc.Present.AutoOpen != nil {
-				p := fc.Present.toPresentSettings()
-				l.Present = &p
-			}
-		},
-		overlay:   overlayPresent,
-		writeBack: writeBackPresent,
+		// The four `present:` keys are one carrier, the system-prompt trio's shape: the block the file
+		// carries, with toPresentSettings defaulting the keys it leaves out (auto-open on).
+		row:      mustKey("present.auto-open"),
+		fromFile: filePresent,
 	},
 	{
-		row: mustKey("present.command"),
-		fromFile: func(l *Layer, fc fileConfig) {
-			if fc.Present != nil && fc.Present.Command != "" {
-				p := fc.Present.toPresentSettings()
-				l.Present = &p
-			}
-		},
-		overlay:   overlayPresent,
-		writeBack: writeBackPresent,
+		row:      mustKey("present.command"),
+		fromFile: filePresent,
 	},
 	{
-		row: mustKey("present.port"),
-		fromFile: func(l *Layer, fc fileConfig) {
-			if fc.Present != nil && fc.Present.Port != 0 {
-				p := fc.Present.toPresentSettings()
-				l.Present = &p
-			}
-		},
-		overlay:   overlayPresent,
-		writeBack: writeBackPresent,
+		row:      mustKey("present.port"),
+		fromFile: filePresent,
 	},
 	{
-		row: mustKey("present.host"),
-		fromFile: func(l *Layer, fc fileConfig) {
-			if fc.Present != nil && fc.Present.Host != "" {
-				p := fc.Present.toPresentSettings()
-				l.Present = &p
-			}
-		},
-		overlay:   overlayPresent,
-		writeBack: writeBackPresent,
+		row:      mustKey("present.host"),
+		fromFile: filePresent,
 	},
 	{
 		// The six `ui:` keys are one carrier, the `present:` block's shape — and independent axes
 		// within it: naming a style does not turn the colour loop off (toUISettings).
-		row: mustKey("ui.spinner"),
-		fromFile: func(l *Layer, fc fileConfig) {
-			if fc.UI != nil && fc.UI.Spinner != "" {
-				u := fc.UI.toUISettings()
-				l.UI = &u
-			}
-		},
-		overlay:   overlayUI,
-		writeBack: writeBackUI,
+		row:      mustKey("ui.spinner"),
+		fromFile: fileUI,
 	},
 	{
-		row: mustKey("ui.spinner-color"),
-		fromFile: func(l *Layer, fc fileConfig) {
-			if fc.UI != nil && fc.UI.SpinnerColor != nil {
-				u := fc.UI.toUISettings()
-				l.UI = &u
-			}
-		},
-		overlay:   overlayUI,
-		writeBack: writeBackUI,
+		row:      mustKey("ui.spinner-color"),
+		fromFile: fileUI,
 	},
 	{
-		row: mustKey("ui.show-scrollbar"),
-		fromFile: func(l *Layer, fc fileConfig) {
-			if fc.UI != nil && fc.UI.ShowScrollbar != nil {
-				u := fc.UI.toUISettings()
-				l.UI = &u
-			}
-		},
-		overlay:   overlayUI,
-		writeBack: writeBackUI,
+		row:      mustKey("ui.show-scrollbar"),
+		fromFile: fileUI,
 	},
 	{
-		row: mustKey("ui.color-scheme"),
-		fromFile: func(l *Layer, fc fileConfig) {
-			if fc.UI != nil && fc.UI.ColorScheme != "" {
-				u := fc.UI.toUISettings()
-				l.UI = &u
-			}
-		},
-		overlay:   overlayUI,
-		writeBack: writeBackUI,
+		row:      mustKey("ui.color-scheme"),
+		fromFile: fileUI,
 	},
 	{
-		row: mustKey("ui.stall-after"),
-		fromFile: func(l *Layer, fc fileConfig) {
-			// The pointer is the presence test rather than the text: an explicit `0` — the documented
-			// spelling of "off" — must be told from a block that never named the key.
-			if fc.UI != nil && fc.UI.StallAfter != nil {
-				u := fc.UI.toUISettings()
-				l.UI = &u
-			}
-		},
-		overlay:   overlayUI,
-		writeBack: writeBackUI,
+		row:      mustKey("ui.stall-after"),
+		fromFile: fileUI,
 	},
 	{
-		row: mustKey("ui.inspector"),
-		fromFile: func(l *Layer, fc fileConfig) {
-			if fc.UI != nil && fc.UI.Inspector != nil {
-				u := fc.UI.toUISettings()
-				l.UI = &u
-			}
-		},
-		overlay:   overlayUI,
-		writeBack: writeBackUI,
+		row:      mustKey("ui.inspector"),
+		fromFile: fileUI,
 	},
 	{
-		// Carried as the raw NAME: ApplyConfig validates it against the vocabulary internal/domain
+		// Carried as the raw NAME: ResolveOptions validates it against the vocabulary internal/domain
 		// owns, so this seam neither parses nor refuses it.
-		row: mustKey("cursor-shape"),
-		fromFile: func(l *Layer, fc fileConfig) {
-			if fc.CursorShape != "" {
-				l.CursorShape = &fc.CursorShape
-			}
-		},
-		overlay: func(s *Settings, l Layer) {
-			if l.CursorShape != nil {
-				s.CursorShape = *l.CursorShape
-			}
-		},
-		writeBack: func(o *Options, s Settings) { o.CursorShape = s.CursorShape },
+		row:      mustKey("cursor-shape"),
+		fromFile: func(o *Options, fc fileConfig) { o.CursorShape = fc.CursorShape },
 	},
 	{
 		// File-only (ADR 0041): $VISUAL and $EDITOR are a FALLBACK below this key, read at the launch
-		// site, rather than a layer above it — which is why this row names no environment source.
-		row: mustKey("editor"),
-		fromFile: func(l *Layer, fc fileConfig) {
-			if fc.Editor != "" {
-				l.Editor = &fc.Editor
-			}
-		},
-		overlay: func(s *Settings, l Layer) {
-			if l.Editor != nil {
-				s.Editor = *l.Editor
-			}
-		},
-		writeBack: func(o *Options, s Settings) { o.Editor = s.Editor },
+		// site, rather than a source above it — which is why this row names no environment variable.
+		row:      mustKey("editor"),
+		fromFile: func(o *Options, fc fileConfig) { o.Editor = fc.Editor },
 	},
 	{
 		row: mustKey("bypass"),
-		fromFile: func(l *Layer, fc fileConfig) {
-			if fc.Bypass != nil {
-				l.Bypass = fc.Bypass
-			}
+		fromFile: func(o *Options, fc fileConfig) {
+			o.Bypass = fc.Bypass != nil && *fc.Bypass
 		},
 		// The one env value that is parsed rather than carried: a set-but-unparseable flag is a hard
-		// error, never a silently-ignored boolean. envLayer adds the variable's name to the message,
+		// error, never a silently-ignored boolean. applyEnv adds the variable's name to the message,
 		// because the name is the row's to know, not this closure's.
-		fromEnv: func(l *Layer, text string) error {
+		fromEnv: func(o *Options, text string) error {
 			b, err := strconv.ParseBool(text)
 			if err != nil {
 				return errors.New("want a boolean")
 			}
-			l.Bypass = &b
+			o.Bypass = b
 			return nil
 		},
-		fromFlag: func(l *Layer, opts Options) {
-			v := opts.Bypass
-			l.Bypass = &v
-		},
-		overlay: func(s *Settings, l Layer) {
-			if l.Bypass != nil {
-				s.Bypass = *l.Bypass
-			}
-		},
-		writeBack: func(o *Options, s Settings) { o.Bypass = s.Bypass },
+		fromFlag: func(o *Options, flags Options) { o.Bypass = flags.Bypass },
 	},
 	{
 		row: mustKey("mechanisms"),
-		fromFile: func(l *Layer, fc fileConfig) {
+		fromFile: func(o *Options, fc fileConfig) {
+			o.Mechanisms = nil
 			if len(fc.Mechanisms) > 0 {
-				l.Mechanisms = fc.Mechanisms
+				o.Mechanisms = fc.Mechanisms
 			}
 		},
-		overlay: func(s *Settings, l Layer) {
-			if l.Mechanisms != nil {
-				s.Mechanisms = l.Mechanisms
-			}
-		},
-		writeBack: func(o *Options, s Settings) { o.Mechanisms = s.Mechanisms },
 	},
 	{
 		// The `validated-sets:` pair project on their own, the `url-safety:` lists' shape: a block
-		// that sets the switch alone leaves the alias map to fall through, and the other way round.
+		// that sets the switch alone leaves the alias map at its default, and the other way round.
 		row: mustKey("validated-sets.enable"),
-		fromFile: func(l *Layer, fc fileConfig) {
-			if fc.ValidatedSets != nil && fc.ValidatedSets.Enable != nil {
-				l.ValidatedSetsEnable = fc.ValidatedSets.Enable
-			}
+		fromFile: func(o *Options, fc fileConfig) {
+			o.ValidatedSetsEnable = fc.ValidatedSets == nil || fc.ValidatedSets.Enable == nil ||
+				*fc.ValidatedSets.Enable
 		},
-		overlay: func(s *Settings, l Layer) {
-			if l.ValidatedSetsEnable != nil {
-				s.ValidatedSetsEnable = *l.ValidatedSetsEnable
-			}
-		},
-		writeBack: func(o *Options, s Settings) { o.ValidatedSetsEnable = s.ValidatedSetsEnable },
 	},
 	{
 		row: mustKey("validated-sets.alias"),
-		fromFile: func(l *Layer, fc fileConfig) {
+		fromFile: func(o *Options, fc fileConfig) {
+			o.ValidatedSetsAlias = nil
 			if fc.ValidatedSets != nil && len(fc.ValidatedSets.Alias) > 0 {
-				l.ValidatedSetsAlias = fc.ValidatedSets.Alias
+				o.ValidatedSetsAlias = fc.ValidatedSets.Alias
 			}
 		},
-		overlay: func(s *Settings, l Layer) {
-			if l.ValidatedSetsAlias != nil {
-				s.ValidatedSetsAlias = l.ValidatedSetsAlias
-			}
-		},
-		writeBack: func(o *Options, s Settings) { o.ValidatedSetsAlias = s.ValidatedSetsAlias },
 	},
 	{
 		// Ordered by pattern on the way in (toProfileEntries), so the same file always resolves to
-		// the same slice; a layer that sets the key replaces the map whole rather than merging
-		// patterns into it (ADR 0044).
+		// the same slice; the map is carried whole rather than merged pattern by pattern (ADR 0044).
 		row: mustKey("model-profiles"),
-		fromFile: func(l *Layer, fc fileConfig) {
+		fromFile: func(o *Options, fc fileConfig) {
+			o.ModelProfiles = nil
 			if len(fc.ModelProfiles) > 0 {
-				l.ModelProfiles = toProfileEntries(fc.ModelProfiles)
+				o.ModelProfiles = toProfileEntries(fc.ModelProfiles)
 			}
 		},
-		overlay: func(s *Settings, l Layer) {
-			if l.ModelProfiles != nil {
-				s.ModelProfiles = l.ModelProfiles
-			}
-		},
-		writeBack: func(o *Options, s Settings) { o.ModelProfiles = s.ModelProfiles },
 	},
 }
 
-// The overlays shared by the key groups that resolve into ONE carrier. They are named functions
-// rather than a closure repeated per row because the rows differ in what they read from the FILE,
-// never in where the resolved block lands: three system-prompt keys, two context-files keys, four
-// present keys and six ui keys each write the block their key belongs to, and applying the same
-// one twice is idempotent.
-func overlaySystemPrompt(s *Settings, l Layer) {
-	if l.SystemPrompt != nil {
-		s.SystemPrompt = *l.SystemPrompt
+// The file projections shared by the key groups that resolve into ONE carrier: three system-prompt
+// keys, two context-files keys, four present keys and six ui keys. Every key of a block writes the
+// whole block — the Options field IS the block, and the block's mapper defaults whatever the file
+// left out — so the rows of one block differ in nothing but the key they are described by, and a
+// named function is the honest way to say that. context-files is the one that is not a plain copy:
+// Options carries the RESOLVED name list rather than the block, because the composition root has no
+// use for the switch that produced it.
+func fileSystemPrompt(o *Options, fc fileConfig) { o.SystemPrompt = fc.toSystemPromptSettings() }
+
+func fileContextFiles(o *Options, fc fileConfig) { o.ContextFiles = fc.contextFiles().resolved() }
+
+func filePresent(o *Options, fc fileConfig) { o.Present = fc.present() }
+
+func fileUI(o *Options, fc fileConfig) { o.UI = fc.ui() }
+
+// present, ui and contextFiles are the three optional blocks as the file leaves them: the block it
+// carries, or — where it names no block at all — the block its own mapper builds from nothing,
+// which is that block's defaults. Reaching the defaults through the mapper rather than restating
+// them keeps one home for "what an unconfigured `ui:` resolves to".
+func (fc fileConfig) present() PresentSettings {
+	var p presentConfig
+	if fc.Present != nil {
+		p = *fc.Present
 	}
+	return p.toPresentSettings()
 }
 
-func overlayContextFiles(s *Settings, l Layer) {
-	if l.ContextFiles != nil {
-		s.ContextFiles = *l.ContextFiles
+func (fc fileConfig) ui() UISettings {
+	var u uiConfig
+	if fc.UI != nil {
+		u = *fc.UI
 	}
+	return u.toUISettings()
 }
 
-func overlayPresent(s *Settings, l Layer) {
-	if l.Present != nil {
-		s.Present = *l.Present
+func (fc fileConfig) contextFiles() contextFilesSettings {
+	var c contextFilesConfig
+	if fc.ContextFiles != nil {
+		c = *fc.ContextFiles
 	}
-}
-
-func overlayUI(s *Settings, l Layer) {
-	if l.UI != nil {
-		s.UI = *l.UI
-	}
-}
-
-// And the write-backs those same four groups share, for the same reason: the rows differ in what
-// they read from the file, never in which Options field the resolved block lands on. context-files
-// is the one that is not a plain copy — Options carries the RESOLVED name list rather than the
-// block, because the composition root has no use for the switch that produced it.
-func writeBackSystemPrompt(o *Options, s Settings) { o.SystemPrompt = s.SystemPrompt }
-
-func writeBackContextFiles(o *Options, s Settings) { o.ContextFiles = s.ContextFiles.resolved() }
-
-func writeBackPresent(o *Options, s Settings) { o.Present = s.Present }
-
-func writeBackUI(o *Options, s Settings) { o.UI = s.UI }
-
-// ResolveSettings overlays the layers in increasing priority — the default base, then
-// the file, then the environment, then the flags — so a flag beats an environment
-// variable beats the file beats the default. Only ask-before (the default mode) is a
-// non-zero base; `server:` defaults empty and bypass defaults false.
-//
-// What resolution deliberately does NOT produce is an endpoint: which server a session runs on is
-// selected from the resolved `servers:` list afterwards (selectStartupServer), because the answer
-// needs the list and the chosen name in one hand (ADR 0036).
-//
-// confine-to-workspace is the exception: it defaults true and is resolved from the FILE
-// layer ONLY (never env or flag), because it is global-config-only (ADR 0012) — a hostile
-// repo's invocation environment must not be able to loosen Auto's blast radius. hostID is
-// this machine's identity (platform.HostID(), injected so the ladder is testable off any
-// host): it selects the Host acknowledgement, if any, that applies here.
-//
-// It returns the soft notices resolution produced — today only malformed `unconfined-hosts`
-// entries, which are skipped rather than fatal (the ADR 0016 posture the validated-set
-// surface established: a data defect degrades, it never blocks startup).
-func ResolveSettings(file, env, flag Layer, hostID string) (Settings, []string) {
-	// The default base. mode's default comes from its registry row, so the value resolution starts
-	// from and the value /settings shows as "the default" are one string. The remaining defaults
-	// stay typed literals on purpose: their rows spell them as TEXT ("true"), and reaching
-	// confine-to-workspace's default through a parse of a table entry would leave a safety default
-	// one typo away from silently flipping to false.
-	s := Settings{Mode: mustKey("mode").Default, ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: true,
-		AutoTitle: true, ValidatedSetsEnable: true, Present: PresentSettings{AutoOpen: true}, UI: defaultUISettings(),
-		ContextFiles: defaultContextFilesSettings()}
-	// The file layer first, and for EVERY key: each row's overlay writes its own field when the
-	// layer sets that key, so the whole schema lands in one pass with no per-key branch left to
-	// forget. Which keys exist, and which of them the file carries, is the registry's to describe
-	// (keyAccessors) — and the file carries all of them.
-	for _, k := range keyAccessors {
-		k.overlay(&s, file)
-	}
-	// Then the two layers above it, lowest priority first, and only for the keys that HAVE a source
-	// up there: a later layer that sets a key wins, one that does not leaves the value below it
-	// standing, and applying them in order IS the precedence rule. The skip is the file-only fence
-	// itself rather than an optimisation — a key with no environment variable and no flag can only
-	// ever be read from the file, whatever a hand-built layer happens to carry in its field.
-	for _, l := range []Layer{env, flag} {
-		for _, k := range keyAccessors {
-			if k.fromEnv == nil && k.fromFlag == nil {
-				continue
-			}
-			k.overlay(&s, l)
-		}
-	}
-	// The one collapse no row can make, so it stays here and runs last: confine-to-workspace's
-	// EFFECTIVE value also depends on whether a Host acknowledgement names THIS machine (ADR 0012 +
-	// its 2026-07-21 amendment), which needs the host identity — a fact no key holds. It answers for
-	// the key outright, from the FILE layer alone: env and flag never carry either half, so the
-	// invocation environment can neither flip the flag nor name a host.
-	confine, notices := resolveConfineToWorkspace(file.ConfineToWorkspace, file.UnconfinedHosts, hostID)
-	s.ConfineToWorkspace = confine
-	return s, notices
+	return c.toContextFilesSettings()
 }
 
 // UnknownToolNames returns the entries of a `tools.disabled:` list that name no tool this build
@@ -1409,7 +779,8 @@ func quoteAll(names []string) []string {
 // An explicit `confine-to-workspace: true` does NOT veto a matching acknowledgement: the
 // flag states the global default and the entry states a fact about THIS machine, so the
 // more specific statement wins — which is also what makes the list usable beside the
-// default-true flag at all.
+// default-true flag at all. confine is what the FILE resolves the key to, which is why an absent
+// key and an explicit `true` arrive here as the same value: neither loosens anything.
 //
 // An entry with no id is a soft skip with a notice naming it: it acknowledges no machine, and
 // a malformed line must not block startup (nor, by matching an empty hostID, loosen anything).
@@ -1422,7 +793,7 @@ func quoteAll(names []string) []string {
 // acknowledgement loosen every such host — the interlock's whole purpose reversed. That match
 // is refused with a notice instead. Step 1 is untouched: an explicit global false still means
 // every host, identity or not.
-func resolveConfineToWorkspace(explicit *bool, hosts []UnconfinedHost, hostID string) (bool, []string) {
+func resolveConfineToWorkspace(confine bool, hosts []UnconfinedHost, hostID string) (bool, []string) {
 	var notices []string
 	identified := !platform.IsUnidentifiedHostID(hostID)
 	acknowledged := false
@@ -1446,7 +817,7 @@ func resolveConfineToWorkspace(explicit *bool, hosts []UnconfinedHost, hostID st
 		}
 		acknowledged = true // keep scanning: every malformed entry still gets named
 	}
-	if explicit != nil && !*explicit {
+	if !confine {
 		return false, notices
 	}
 	return !acknowledged, notices
@@ -2511,62 +1882,81 @@ func toProfileEntries(m map[string]modelProfileConfig) []profiles.Entry {
 	return entries
 }
 
-// layer projects a parsed file config onto a precedence layer: a key the file states becomes an
-// explicit setting, one it leaves out stays nil so it falls through to the source below.
+// applyFile writes what every key of the schema resolves to from the FILE alone onto o: the value
+// the file states, or the key's built-in default where it states nothing. It is a full reset of the
+// fields the config schema owns — no value from an earlier resolution survives it — which is what
+// lets the two sources above the file be applied straight onto the caller's own Options.
 //
-// WHICH field carries a key — and what counts as stating it, which differs by kind (an empty
-// string, a nil pointer, a zero number, a present-but-empty list) — is the key's own registry row
-// (keyAccessors). A key added to the schema is therefore read here by the act of being described,
-// rather than by a branch someone had to remember to add beside thirty-seven others.
-func (fc fileConfig) layer() Layer {
-	var l Layer
+// WHICH field carries a key — and what the file has to say to state it, which differs by kind (an
+// empty string, a nil pointer, a zero number, a present-but-empty list) — is the key's own registry
+// row (keyAccessors). A key added to the schema is therefore read here by the act of being
+// described, rather than by a branch someone had to remember to add beside thirty-seven others.
+func applyFile(o *Options, fc fileConfig) {
 	for _, k := range keyAccessors {
-		k.fromFile(&l, fc)
+		k.fromFile(o, fc)
 	}
-	return l
 }
 
-// LoadFileConfig reads and parses the config file, returning an empty layer when the
-// file is absent (the common case — a config file is optional). A malformed file is a
-// hard error: silently ignoring it would mask a typo'd setting. readFile is injected so
-// the loader is testable without touching the filesystem.
+// LoadFileConfig reads and parses the config file and answers with what it alone resolves to: every
+// key of the schema at the value the file states, or at its built-in default where the file states
+// nothing. An absent file is not an error but the common case — a config file is optional — and
+// answers with the defaults. A malformed file IS a hard error: silently ignoring it would mask a
+// typo'd setting. readFile is injected so the loader is testable without touching the filesystem.
 //
-// A config still written in the retired schema is migrated here, before the layer is built: the
+// It is the same projection resolution starts from (applyFile), which is what lets a surface that
+// re-reads ONE block of the file — the /settings applies, which re-resolve the block they just
+// wrote — resolve it exactly as startup did, without a second reading of the schema.
+//
+// A config still written in the retired schema is migrated here, before anything is projected: the
 // decoder ignores keys the struct no longer has, so without the sniff a working `endpoint:` would
 // simply stop being read and the session would report no server configured, with nothing pointing
 // at the four lines that ARE the configuration. This is the one place the loader can WRITE — the
 // one-time fold of ADR 0036 decision 9, which rewrites path itself and announces the change through
 // notify; a file already in the new schema is never touched, so the write happens at most once per
 // config and the injected readFile stays the only reader on every other launch.
-func LoadFileConfig(path string, readFile func(string) ([]byte, error), notify func(string)) (Layer, error) {
+func LoadFileConfig(path string, readFile func(string) ([]byte, error), notify func(string)) (Options, error) {
+	fc, err := parseConfigFile(path, readFile, notify)
+	if err != nil {
+		return Options{}, err
+	}
+	var o Options
+	applyFile(&o, fc)
+	return o, nil
+}
+
+// parseConfigFile is that read and parse alone, stopping at the decoded schema: resolution needs
+// the parsed file itself for the one refusal a resolved value cannot carry (a context-files name
+// under a block that is switched off), so the two halves are separable here rather than folded
+// into one exported call.
+func parseConfigFile(path string, readFile func(string) ([]byte, error), notify func(string)) (fileConfig, error) {
 	if path == "" {
-		return Layer{}, nil
+		return fileConfig{}, nil
 	}
 	data, err := readFile(path)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
-			return Layer{}, nil
+			return fileConfig{}, nil
 		}
-		return Layer{}, fmt.Errorf("apogee: read config %q: %w", path, err)
+		return fileConfig{}, fmt.Errorf("apogee: read config %q: %w", path, err)
 	}
 	data, note, err := migrateLegacyConfig(path, data, time.Now())
 	if err != nil {
-		return Layer{}, err
+		return fileConfig{}, err
 	}
 	if note != "" {
 		notify(note)
 	}
 	var fc fileConfig
 	if err := yaml.Unmarshal(data, &fc); err != nil {
-		return Layer{}, fmt.Errorf("apogee: parse config %q: %w", path, err)
+		return fileConfig{}, fmt.Errorf("apogee: parse config %q: %w", path, err)
 	}
 	if err := validateModelProfiles(fc.ModelProfiles); err != nil {
-		return Layer{}, err
+		return fileConfig{}, err
 	}
 	if err := validateResponseReserveFraction(fc.ResponseReserve); err != nil {
-		return Layer{}, err
+		return fileConfig{}, err
 	}
-	return fc.layer(), nil
+	return fc, nil
 }
 
 // legacyFileConfig is the retired half of the schema — and ONLY that half: the top-level
@@ -2648,17 +2038,16 @@ const (
 	EnvWorkspace = "APOGEE_WORKSPACE"
 )
 
-// envLayer reads the APOGEE_* variables into a precedence layer; an unset variable stays nil to
-// fall through. Which variable carries which key is the registry's to say (keyAccessors), so
-// this reads names out of the rows rather than repeating them: a key whose row names no variable
-// has no environment source at all. The variables that name no config key — APOGEE_ENDPOINT,
+// applyEnv overlays the APOGEE_* variables; an unset (or empty) variable leaves the value below it
+// standing. Which variable carries which key is the registry's to say (keyAccessors), so this reads
+// names out of the rows rather than repeating them: a key whose row names no variable has no
+// environment source at all. The variables that name no config key — APOGEE_ENDPOINT,
 // APOGEE_API_KEY, APOGEE_MODEL — are not read here at all: since ADR 0036 they override the
 // startup SERVER rather than a file key, so they are resolved outside this loop. A
 // set-but-unparseable APOGEE_BYPASS is a hard error rather than a silently-ignored boolean,
-// reported with the name the row carries. getenv is injected so the layer is testable without
+// reported with the name the row carries. getenv is injected so the pass is testable without
 // mutating the process environment.
-func envLayer(getenv func(string) string) (Layer, error) {
-	var l Layer
+func applyEnv(o *Options, getenv func(string) string) error {
 	for _, k := range keyAccessors {
 		if k.fromEnv == nil || k.row.EnvVar == "" {
 			continue
@@ -2667,21 +2056,21 @@ func envLayer(getenv func(string) string) (Layer, error) {
 		if v == "" {
 			continue
 		}
-		if err := k.fromEnv(&l, v); err != nil {
-			return Layer{}, fmt.Errorf("apogee: invalid %s %q: %w", k.row.EnvVar, v, err)
+		if err := k.fromEnv(o, v); err != nil {
+			return fmt.Errorf("apogee: invalid %s %q: %w", k.row.EnvVar, v, err)
 		}
 	}
-	return l, nil
+	return nil
 }
 
-// flagLayer projects the parsed flags onto a precedence layer, including a field only when its
-// flag was explicitly set (changed reports cobra's per-flag Changed). An unset flag carries its
-// zero default, which must not shadow a lower layer — so it is omitted. The flag NAMES come from
-// the registry rows, like the variable names above: a key whose row names no flag cannot be
-// carried by one. `--endpoint` and `--model` are absent for the same reason APOGEE_ENDPOINT is
-// (ADR 0036): they name no config key, so they are not resolved through the layers.
-func flagLayer(opts Options, changed func(string) bool) Layer {
-	var l Layer
+// applyFlags overlays the parsed flags, writing a key only when its flag was explicitly set
+// (changed reports cobra's per-flag Changed). An unset flag carries its zero default, which must
+// not shadow the source below — so it is skipped. flags is the Options as the parser filled it,
+// read separately from the Options being resolved because the file pass has already overwritten
+// those same fields. The flag NAMES come from the registry rows, like the variable names above: a
+// key whose row names no flag cannot be carried by one. `--endpoint` and `--model` are absent for
+// the same reason APOGEE_ENDPOINT is (ADR 0036): they name no config key.
+func applyFlags(o *Options, flags Options, changed func(string) bool) {
 	for _, k := range keyAccessors {
 		if k.fromFlag == nil || k.row.FlagName == "" {
 			continue
@@ -2689,9 +2078,8 @@ func flagLayer(opts Options, changed func(string) bool) Layer {
 		if !changed(k.row.FlagName) {
 			continue
 		}
-		k.fromFlag(&l, opts)
+		k.fromFlag(o, flags)
 	}
-	return l
 }
 
 // Source names which precedence source supplied a key's value. The zero value is the
@@ -2712,8 +2100,8 @@ const (
 // without the marker would present an environment variable's value as the file's, and offer to
 // persist an edit that the override would keep swallowing for the rest of the run.
 //
-// The predicates are deliberately the SAME two the layers themselves are built from (flagLayer's
-// changed, envLayer's non-empty getenv), read off the same registry rows, so the marker cannot
+// The predicates are deliberately the SAME two the passes themselves are gated on (applyFlags'
+// changed, applyEnv's non-empty getenv), read off the same registry rows, so the marker cannot
 // claim a source that did not actually win. Keys absent from the map resolved from the file or the
 // default, which is the majority and needs no entry.
 func overrideSources(changed func(string) bool, getenv func(string) string) map[string]Source {
@@ -2733,19 +2121,113 @@ func overrideSources(changed func(string) bool, getenv func(string) string) map[
 // The orchestrator
 // ----------------------------------------------------------------------------
 
-// ApplyConfig resolves the upstream/autonomy settings by precedence and writes them
-// back into opts before construction. The config file lives at <apogee-home>/config.yaml,
-// where the home follows --config > APOGEE_CONFIG > ~/.apogee; the file cannot set the
-// home (it lives inside it), so --config / APOGEE_CONFIG are overlaid onto opts first.
-// The workspace honours --workspace > APOGEE_WORKSPACE > cwd the same way. changed,
-// getenv, and readFile are injected so the whole chain is testable end-to-end.
+// ResolveOptions resolves every configured value onto opts, in precedence order: the built-in
+// defaults and the config file first (one pass, since the file is the only source below the
+// defaults), then the APOGEE_* variables, then the explicitly-set flags — so a flag beats a
+// variable beats the file beats the default. Every source writes onto opts itself, which is what
+// makes applying them in that order the precedence rule; the file pass writes every key of the
+// schema, so no value from a previous resolution survives it.
 //
-// This is where the live machine identity enters resolution: platform.HostID() selects the
-// Host acknowledgement, if any, that applies on this host (ADR 0012, amendment 2026-07-21).
-// notify receives resolution's soft notices — a malformed acknowledgement is reported and
-// skipped, never fatal — on stderr, like the other pre-TUI startup lines. The one-time legacy
-// migration announces itself the same way (LoadFileConfig): a file apogee rewrote on the user's
-// behalf must say so where they will see it.
+// The config file lives at <apogee-home>/config.yaml, where the home follows
+// --config > APOGEE_CONFIG > ~/.apogee; the file cannot set the home (it lives inside it), so
+// --config / APOGEE_CONFIG are resolved onto opts first. The workspace honours
+// --workspace > APOGEE_WORKSPACE > cwd the same way. changed, getenv and readFile are injected so
+// the whole chain is testable end-to-end, and so is hostID — the machine identity the Host
+// acknowledgement ladder is selected by (ADR 0012, amendment 2026-07-21) — which is what lets a
+// test pin that ladder off whatever host it runs on. [ApplyConfig] passes the live platform.HostID().
+//
+// What resolution deliberately does NOT produce is an endpoint: which server a session runs on is
+// selected from the resolved `servers:` list afterwards (ApplyConfig), because the answer needs the
+// list and the chosen name in one hand (ADR 0036).
+//
+// It returns the soft notices resolution produced — today only malformed `unconfined-hosts`
+// entries, which are skipped rather than fatal (the ADR 0016 posture the validated-set surface
+// established: a data defect degrades, it never blocks startup) — beside any refusal, so a caller
+// can report both. A config that cannot be honoured IS refused here: the blocks whose defects are
+// machine-independent facts about the file are validated once the sources are in, where the message
+// can name the key and the value.
+func ResolveOptions(opts *Options, changed func(string) bool, getenv func(string) string,
+	readFile func(string) ([]byte, error), notify func(string), hostID string) ([]string, error) {
+	opts.ConfigDir = resolveConfigDir(opts.ConfigDir, changed, getenv)
+	if !changed("workspace") {
+		if v := getenv(EnvWorkspace); v != "" {
+			opts.Workspace = v
+		}
+	}
+	fc, err := parseConfigFile(FilePath(opts.ConfigDir), readFile, notify)
+	if err != nil {
+		return nil, err
+	}
+	// The flag values, before the file pass below overwrites the three fields cobra binds: an unset
+	// flag carries its zero default, so what a flag SAYS is only meaningful together with whether it
+	// was changed, which is applyFlags' own test.
+	flags := *opts
+	applyFile(opts, fc)
+	if err := applyEnv(opts, getenv); err != nil {
+		return nil, err
+	}
+	applyFlags(opts, flags, changed)
+	// The one collapse no row can make, so it runs here and last: confine-to-workspace's EFFECTIVE
+	// value also depends on whether a Host acknowledgement names THIS machine (ADR 0012 + its
+	// 2026-07-21 amendment), which needs the host identity — a fact no key holds. Both halves come
+	// from the FILE alone: neither has an environment variable or a flag, so the invocation
+	// environment can neither flip the switch nor name a host.
+	confine, notices := resolveConfineToWorkspace(opts.ConfineToWorkspace, opts.UnconfinedHosts, hostID)
+	opts.ConfineToWorkspace = confine
+	// A present block that cannot be honoured is a hard error: an out-of-range port would otherwise
+	// surface as a degraded rung at the first presentation, long after the typo (ADR 0019 §4 degrades
+	// MECHANISM failures, not config).
+	if err := opts.Present.Validate(); err != nil {
+		return notices, err
+	}
+	// A ui block naming a spinner style this build has no animation for is the same kind of loud
+	// startup error: silently resolving it to another style would leave the user staring at a
+	// spinner their config did not ask for, with nothing pointing at the typo.
+	if err := opts.UI.Validate(); err != nil {
+		return notices, err
+	}
+	// A `cursor-shape:` naming a shape no terminal cursor has is the same kind of loud startup
+	// error, for the same reason: drawing a block instead would leave the user staring at a caret
+	// their config did not ask for. The judgement is the registry's own validator, so the startup
+	// refusal and the one the /settings pane writes are one wording over the vocabulary
+	// internal/domain owns.
+	if err := validateCursorShapeName(opts.CursorShape); err != nil {
+		return notices, err
+	}
+	// A system-prompt block that contradicts itself — both spellings of one prompt at one level,
+	// or a per-model entry carrying no prompt at all — is a defect in the FILE, independent of
+	// this machine and of which model this run resolves, so it is refused here for every level.
+	// Whether the SELECTED source's file reads and its placeholders are known is
+	// ResolveSystemPrompt's job, after model resolution (ADR 0023).
+	if err := opts.SystemPrompt.Validate(); err != nil {
+		return notices, err
+	}
+	// A context-file NAME that cannot be a workspace file — empty, rooted, drive-scoped, climbing
+	// out with "..", or listed twice — is the same kind of machine-independent defect in the file,
+	// refused here where the message can name `context-files.names` and the value. It is asked of
+	// the FILE's block rather than of the resolved list because the two spellings of "off" collapse
+	// that list to nothing, and a bad name is a defect whatever `enable:` says — a block that is off
+	// today gets switched on months later, by which time the typo has lost its context. Whether the
+	// named files exist is deliberately not asked: discovery is the feature (contextFilesSettings).
+	if err := fc.contextFiles().validate(); err != nil {
+		return notices, err
+	}
+	// A `servers:` entry that could never be switched to — no name, no endpoint, or a name an
+	// earlier entry already took — is refused here for the same reason: it is a defect in the file,
+	// independent of this machine and of whether the session ever reaches for that server. Left to
+	// the moment of the switch it would surface as an entry that cannot be selected, or a name
+	// resolving to whichever entry happened to come first, long after the line was written.
+	if err := ValidateServers(opts.Servers); err != nil {
+		return notices, err
+	}
+	return notices, nil
+}
+
+// ApplyConfig is [ResolveOptions] on the live machine plus the step that needs its result: which of
+// the resolved `servers:` entries this session starts on. notify receives resolution's soft notices
+// — a malformed acknowledgement is reported and skipped, never fatal — on stderr, like the other
+// pre-TUI startup lines. The one-time legacy migration announces itself the same way
+// (LoadFileConfig): a file apogee rewrote on the user's behalf must say so where they will see it.
 //
 // One error is deliberately returned LAST, after every value has been written back:
 // [StartupUndetermined], the refusal that says the config could not name a startup server. Every
@@ -2754,81 +2236,25 @@ func overrideSources(changed func(string) bool, getenv func(string) string) map[
 // 7), and it can only do that if the rest of the resolution — the servers list to pick from, the
 // mode, the roots — is standing in opts by the time it reads the refusal.
 func ApplyConfig(opts *Options, changed func(string) bool, getenv func(string) string, readFile func(string) ([]byte, error), notify func(string)) error {
-	opts.ConfigDir = resolveConfigDir(opts.ConfigDir, changed, getenv)
-	if !changed("workspace") {
-		if v := getenv(EnvWorkspace); v != "" {
-			opts.Workspace = v
-		}
-	}
-
-	file, err := LoadFileConfig(FilePath(opts.ConfigDir), readFile, notify)
-	if err != nil {
-		return err
-	}
-	env, err := envLayer(getenv)
-	if err != nil {
-		return err
-	}
-
-	s, notices := ResolveSettings(file, env, flagLayer(*opts, changed), platform.HostID())
+	notices, err := ResolveOptions(opts, changed, getenv, readFile, notify, platform.HostID())
 	for _, n := range notices {
 		notify(n)
 	}
-	// A present block that cannot be honoured is a hard error, before anything is written back
-	// into opts: an out-of-range port would otherwise surface as a degraded rung at the first
-	// presentation, long after the typo (ADR 0019 §4 degrades MECHANISM failures, not config).
-	if err := s.Present.Validate(); err != nil {
-		return err
-	}
-	// A ui block naming a spinner style this build has no animation for is the same kind of loud
-	// startup error: silently resolving it to another style would leave the user staring at a
-	// spinner their config did not ask for, with nothing pointing at the typo.
-	if err := s.UI.Validate(); err != nil {
-		return err
-	}
-	// A `cursor-shape:` naming a shape no terminal cursor has is the same kind of loud startup
-	// error, for the same reason: drawing a block instead would leave the user staring at a caret
-	// their config did not ask for. The judgement is the registry's own validator, so the startup
-	// refusal and the one the /settings pane writes are one wording over the vocabulary
-	// internal/domain owns.
-	if err := validateCursorShapeName(s.CursorShape); err != nil {
-		return err
-	}
-	// A system-prompt block that contradicts itself — both spellings of one prompt at one level,
-	// or a per-model entry carrying no prompt at all — is a defect in the FILE, independent of
-	// this machine and of which model this run resolves, so it is refused here for every level.
-	// Whether the SELECTED source's file reads and its placeholders are known is
-	// ResolveSystemPrompt's job, after model resolution (ADR 0023).
-	if err := s.SystemPrompt.Validate(); err != nil {
-		return err
-	}
-	// A context-file NAME that cannot be a workspace file — empty, rooted, drive-scoped, climbing
-	// out with "..", or listed twice — is the same kind of machine-independent defect in the file,
-	// refused here where the message can name `context-files.names` and the value. Whether the
-	// named files exist is deliberately not asked: discovery is the feature (contextFilesSettings).
-	if err := s.ContextFiles.validate(); err != nil {
-		return err
-	}
-	// A `servers:` entry that could never be switched to — no name, no endpoint, or a name an
-	// earlier entry already took — is refused here for the same reason: it is a defect in the file,
-	// independent of this machine and of whether the session ever reaches for that server. Left to
-	// the moment of the switch it would surface as an entry that cannot be selected, or a name
-	// resolving to whichever entry happened to come first, long after the line was written.
-	if err := ValidateServers(s.Servers); err != nil {
+	if err != nil {
 		return err
 	}
 	// Which server this session starts on. It is the last step of resolution rather than part of it
 	// (ADR 0036): the answer needs the resolved list, the resolved name and the raw invocation
 	// overrides together, and a name that matches nothing is a fact about that triple, not about
-	// any one key. The overrides are read from the SAME opts the flag layer was built from, before
-	// the write-back below overwrites the flag-bound endpoint/model fields with the answer.
+	// any one key. The overrides are read straight off opts: they name no config key, so nothing
+	// above wrote the flag-bound endpoint/model fields they come from.
 	//
 	// A selection that cannot be made is NOT returned here: the refusal is held and returned at the
 	// very end, so a Driver that answers it by asking the human (the TUI's pre-bound start) still
 	// receives a fully-resolved opts to ask WITH. The startup entry is the zero one in that case,
 	// which writes the empty endpoint/model/key a session with no upstream honestly has.
 	raw := resolveStartupOverrides(*opts, changed, getenv)
-	startup, startupErr := resolveStartupEntry(raw, s.StartupServer, s.Servers,
+	startup, startupErr := resolveStartupEntry(raw, opts.StartupServer, opts.Servers,
 		FilePath(opts.ConfigDir), opts.ServerFlagBound)
 	opts.Endpoint = startup.Endpoint
 	opts.Model = startup.Model
@@ -2877,26 +2303,17 @@ func ApplyConfig(opts *Options, changed func(string) bool, getenv func(string) s
 	// (ResolveResponseReserve) at the bind. The ephemeral override entry states no share, which
 	// leaves an override run on that top-level key and, unset there too, on apogee's own.
 	opts.StartupResponseReserve = startup.ResponseReserve
-	// And every resolved key, onto the field of opts that carries it. Which field that is, is the
-	// key's own registry row (keyAccessors), so a key added to the schema is written back by the
-	// act of being described — the failure this replaces is a key that resolves correctly and then
-	// never reaches the construction that needed it, which no test of resolution can see. The
-	// startup entry's fields above are deliberately not in that table: since ADR 0036 they name no
-	// config key at all.
-	for _, k := range keyAccessors {
-		k.writeBack(opts, s)
-	}
 	// A `tools.disabled:` name that matches no tool is a NOTICE, never a refusal: the list is how a
 	// roster is pruned on evidence, and a typo in it must cost the user the tool they meant to
-	// disable rather than the session. It is reported here, at the same startup boundary the
-	// confinement notices come out of, because this is where the resolved list first exists.
-	if n := unknownToolNotice(s.ToolsDisabled); n != "" {
+	// disable rather than the session. It is reported here rather than where the list is read, at the
+	// same startup boundary the confinement notices come out of.
+	if n := unknownToolNotice(opts.ToolsDisabled); n != "" {
 		notify(n)
 	}
 	// Which source won, for the keys where more than one could have: the resolved values above no
 	// longer carry that fact, and the /settings pane has to mark a row the environment or a flag is
-	// overriding (see overrideSources). Recorded from the same predicates the layers were built
-	// from, a few lines up.
+	// overriding (see overrideSources). Recorded from the same predicates the environment and flag
+	// passes are gated on.
 	opts.Overrides = overrideSources(changed, getenv)
 	// A configured entry always has a name (ValidateServers refuses one without), so this fallback
 	// is for the entry that has none: the unnamed startup entry a raw `--endpoint`/`APOGEE_ENDPOINT`

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -18,10 +19,8 @@ import (
 	"github.com/airiclenz/apogee/internal/profiles"
 )
 
-func strptr(s string) *string     { return &s }
-func boolptr(b bool) *bool        { return &b }
-func intptr(i int) *int           { return &i }
-func floatptr(f float64) *float64 { return &f }
+func strptr(s string) *string { return &s }
+func boolptr(b bool) *bool    { return &b }
 
 // wantUIDefault is the resolved `ui:` block a config that configures none must produce: the
 // default spinner style with its colour loop on, the transcript's scroll bar shown, and the stall
@@ -31,14 +30,8 @@ func floatptr(f float64) *float64 { return &f }
 var wantUIDefault = UISettings{Spinner: domain.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true,
 	ColorScheme: "dark", StallAfter: 90 * time.Second}
 
-// wantContextFilesDefault is the resolved `context-files:` block a config that configures none must
-// produce: the feature on, looking for the one default name in the workspace root. Spelled out
-// rather than taken from defaultContextFilesSettings, like wantUIDefault above, so a change to
-// either shipped default shows up here as a failure instead of silently agreeing with itself.
-var wantContextFilesDefault = contextFilesSettings{enable: true, names: []string{"AGENTS.md"}}
-
-// testHostID is the machine identity injected into ResolveSettings so the Host
-// acknowledgement ladder is pinned off whatever host the tests happen to run on.
+// testHostID is the machine identity injected into resolution so the Host acknowledgement
+// ladder is pinned off whatever host the tests happen to run on.
 const testHostID = "testbox-a1b2c3"
 
 // unidentifiedTestHostID is what platform.HostID() composes on a host that can supply
@@ -47,272 +40,261 @@ const testHostID = "testbox-a1b2c3"
 // rather than computed, so a change to the composition shows up here as a failure.
 const unidentifiedTestHostID = "unknown-e3b0c4"
 
-// The precedence rule itself: a flag beats an env var beats the file beats the default,
-// resolved per field (phase-2 detail plan §4 P2.5).
-func TestResolveSettingsPrecedence(t *testing.T) {
+// The precedence rule itself: a flag beats an env var beats the file beats the default, resolved
+// per field (phase-2 detail plan §4 P2.5). The sources are the real ones — a parsed fileConfig, a
+// getenv, an explicitly-changed flag — because there is no carrier between them and the Options
+// they resolve onto any more: what the passes write IS the answer.
+//
+// Each case names only the fields its sources MOVE off the defaults; the defaults themselves are
+// wantDefaults', spelled out once. The keys with no environment variable and no flag are file-only
+// by construction rather than by convention — their rows carry no accessor for either source, so
+// there is no path to close and nothing here can hand them one; that fence is asserted over the
+// whole schema by TestMultiSourceKeysReadTheRegistry below.
+func TestResolvePrecedence(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name            string
-		file, env, flag Layer
-		want            Settings
+		name    string
+		file    fileConfig
+		env     map[string]string
+		flags   Options
+		changed []string
+		want    func(*Options)
 	}{
 		{
-			name: "all empty → defaults",
-			want: Settings{Mode: "ask-before", ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: true, AutoTitle: true, ValidatedSetsEnable: true, ContextFiles: wantContextFilesDefault, Present: PresentSettings{AutoOpen: true}, UI: wantUIDefault},
+			name: "nothing stated → the defaults",
 		},
 		{
-			name: "file fills every field",
-			file: Layer{StartupServer: strptr("file-box"), Mode: strptr("plan"), Bypass: boolptr(true)},
-			want: Settings{StartupServer: "file-box", Mode: "plan", Bypass: true, ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: true, AutoTitle: true, ValidatedSetsEnable: true, ContextFiles: wantContextFilesDefault, Present: PresentSettings{AutoOpen: true}, UI: wantUIDefault},
+			name: "the file fills the keys it states",
+			file: fileConfig{Server: "file-box", Mode: "plan", Bypass: boolptr(true)},
+			want: func(o *Options) { o.StartupServer = "file-box"; o.Mode = "plan"; o.Bypass = true },
 		},
 		{
 			name: "env beats file, file fills the rest",
-			file: Layer{StartupServer: strptr("file-box"), Mode: strptr("plan")},
-			env:  Layer{StartupServer: strptr("env-box")},
-			want: Settings{StartupServer: "env-box", Mode: "plan", ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: true, AutoTitle: true, ValidatedSetsEnable: true, ContextFiles: wantContextFilesDefault, Present: PresentSettings{AutoOpen: true}, UI: wantUIDefault},
+			file: fileConfig{Server: "file-box", Mode: "plan"},
+			env:  map[string]string{EnvServer: "env-box"},
+			want: func(o *Options) { o.StartupServer = "env-box"; o.Mode = "plan" },
 		},
 		{
-			name: "flag beats env beats file, per field",
-			file: Layer{StartupServer: strptr("file-box"), Mode: strptr("plan")},
-			env:  Layer{StartupServer: strptr("env-box"), Mode: strptr("auto")},
-			flag: Layer{StartupServer: strptr("flag-box")},
-			want: Settings{StartupServer: "flag-box", Mode: "auto", ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: true, AutoTitle: true, ValidatedSetsEnable: true, ContextFiles: wantContextFilesDefault, Present: PresentSettings{AutoOpen: true}, UI: wantUIDefault},
+			name:    "flag beats env beats file, per field",
+			file:    fileConfig{Server: "file-box", Mode: "plan"},
+			env:     map[string]string{EnvServer: "env-box", EnvMode: "auto"},
+			flags:   Options{StartupServer: "flag-box"},
+			changed: []string{"server"},
+			want:    func(o *Options) { o.StartupServer = "flag-box"; o.Mode = "auto" },
 		},
 		{
-			name: "explicit false in a higher layer overrides true below it",
-			file: Layer{Bypass: boolptr(true)},
-			flag: Layer{Bypass: boolptr(false)},
-			want: Settings{Mode: "ask-before", Bypass: false, ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: true, AutoTitle: true, ValidatedSetsEnable: true, ContextFiles: wantContextFilesDefault, Present: PresentSettings{AutoOpen: true}, UI: wantUIDefault},
+			// The flag's own zero value is not a setting: only an explicitly-changed flag is read, which
+			// is what keeps an unset `--bypass` from shadowing the file below it.
+			name:  "an unchanged flag does not shadow the file",
+			file:  fileConfig{Bypass: boolptr(true)},
+			flags: Options{Bypass: false},
+			want:  func(o *Options) { o.Bypass = true },
 		},
 		{
-			// The servers list is file-only: it describes machines, not this invocation, so neither
-			// the environment nor a flag can name one (only `server:` — which of them to start on —
-			// rides the layers above the file).
+			name:    "an explicit false in a higher source overrides a true below it",
+			file:    fileConfig{Bypass: boolptr(true)},
+			flags:   Options{Bypass: false},
+			changed: []string{"bypass"},
+			want:    func(o *Options) { o.Bypass = false },
+		},
+		{
+			// The servers list is file-only: it describes machines, not this invocation, so neither the
+			// environment nor a flag can name one (only `server:` — which of them to start on — has
+			// sources above the file).
 			name: "servers is file-only",
-			file: fileConfig{Servers: []ServerEntry{{Name: "box", Endpoint: "http://box:1111"}}}.layer(),
-			want: Settings{Mode: "ask-before", Servers: []ServerEntry{{Name: "box", Endpoint: "http://box:1111"}}, ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: true, AutoTitle: true, ValidatedSetsEnable: true, ContextFiles: wantContextFilesDefault, Present: PresentSettings{AutoOpen: true}, UI: wantUIDefault},
+			file: fileConfig{Servers: []ServerEntry{{Name: "box", Endpoint: "http://box:1111"}}},
+			want: func(o *Options) { o.Servers = []ServerEntry{{Name: "box", Endpoint: "http://box:1111"}} },
 		},
 		{
-			name: "confine-to-workspace is file-only and defaults true",
-			file: Layer{ConfineToWorkspace: boolptr(false)},
-			want: Settings{Mode: "ask-before", ConfineToWorkspace: false, UseProjectSkills: true, AutoCompact: true, AutoTitle: true, ValidatedSetsEnable: true, ContextFiles: wantContextFilesDefault, Present: PresentSettings{AutoOpen: true}, UI: wantUIDefault},
+			name: "confine-to-workspace is global-config-only and defaults true",
+			file: fileConfig{ConfineToWorkspace: boolptr(false)},
+			want: func(o *Options) { o.ConfineToWorkspace = false },
 		},
 		{
 			name: "use-project-skills is file-only and defaults true",
-			file: Layer{UseProjectSkills: boolptr(false)},
-			want: Settings{Mode: "ask-before", ConfineToWorkspace: true, UseProjectSkills: false, AutoCompact: true, AutoTitle: true, ValidatedSetsEnable: true, ContextFiles: wantContextFilesDefault, Present: PresentSettings{AutoOpen: true}, UI: wantUIDefault},
-		},
-		{
-			name: "use-project-skills is NOT set by env or flag (file-only)",
-			env:  Layer{UseProjectSkills: boolptr(false)},
-			flag: Layer{UseProjectSkills: boolptr(false)},
-			want: Settings{Mode: "ask-before", ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: true, AutoTitle: true, ValidatedSetsEnable: true, ContextFiles: wantContextFilesDefault, Present: PresentSettings{AutoOpen: true}, UI: wantUIDefault},
+			file: fileConfig{UseProjectSkills: boolptr(false)},
+			want: func(o *Options) { o.UseProjectSkills = false },
 		},
 		{
 			name: "auto-compact is file-only and defaults true",
-			file: Layer{AutoCompact: boolptr(false)},
-			want: Settings{Mode: "ask-before", ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: false, AutoTitle: true, ValidatedSetsEnable: true, ContextFiles: wantContextFilesDefault, Present: PresentSettings{AutoOpen: true}, UI: wantUIDefault},
-		},
-		{
-			name: "auto-compact is NOT set by env or flag (file-only)",
-			env:  Layer{AutoCompact: boolptr(false)},
-			flag: Layer{AutoCompact: boolptr(false)},
-			want: Settings{Mode: "ask-before", ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: true, AutoTitle: true, ValidatedSetsEnable: true, ContextFiles: wantContextFilesDefault, Present: PresentSettings{AutoOpen: true}, UI: wantUIDefault},
+			file: fileConfig{AutoCompact: boolptr(false)},
+			want: func(o *Options) { o.AutoCompact = false },
 		},
 		{
 			name: "auto-title is file-only and defaults true",
-			file: Layer{AutoTitle: boolptr(false)},
-			want: Settings{Mode: "ask-before", ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: true, AutoTitle: false, ValidatedSetsEnable: true, ContextFiles: wantContextFilesDefault, Present: PresentSettings{AutoOpen: true}, UI: wantUIDefault},
+			file: fileConfig{AutoTitle: boolptr(false)},
+			want: func(o *Options) { o.AutoTitle = false },
 		},
 		{
 			name: "an explicit auto-title: true resolves to the same value as an absent key",
-			file: Layer{AutoTitle: boolptr(true)},
-			want: Settings{Mode: "ask-before", ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: true, AutoTitle: true, ValidatedSetsEnable: true, ContextFiles: wantContextFilesDefault, Present: PresentSettings{AutoOpen: true}, UI: wantUIDefault},
+			file: fileConfig{AutoTitle: boolptr(true)},
 		},
 		{
-			name: "auto-title is NOT set by env or flag (file-only)",
-			env:  Layer{AutoTitle: boolptr(false)},
-			flag: Layer{AutoTitle: boolptr(false)},
-			want: Settings{Mode: "ask-before", ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: true, AutoTitle: true, ValidatedSetsEnable: true, ContextFiles: wantContextFilesDefault, Present: PresentSettings{AutoOpen: true}, UI: wantUIDefault},
+			name: "remember-model is file-only and defaults false",
+			file: fileConfig{RememberModel: boolptr(true)},
+			want: func(o *Options) { o.RememberModel = true },
 		},
 		{
 			name: "context-window is file-only (default 0 ⇒ discover)",
-			file: Layer{ContextWindow: intptr(65536)},
-			want: Settings{Mode: "ask-before", ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: true, AutoTitle: true, ValidatedSetsEnable: true, ContextFiles: wantContextFilesDefault, Present: PresentSettings{AutoOpen: true}, UI: wantUIDefault, ContextWindow: 65536},
-		},
-		{
-			name: "context-window is NOT set by env or flag (file-only)",
-			env:  Layer{ContextWindow: intptr(65536)},
-			flag: Layer{ContextWindow: intptr(65536)},
-			want: Settings{Mode: "ask-before", ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: true, AutoTitle: true, ValidatedSetsEnable: true, ContextFiles: wantContextFilesDefault, Present: PresentSettings{AutoOpen: true}, UI: wantUIDefault},
+			file: fileConfig{ContextWindow: 65536},
+			want: func(o *Options) { o.ContextWindow = 65536 },
 		},
 		{
 			name: "response-reserve is file-only (default 0 ⇒ the engine's own share)",
-			file: Layer{ResponseReserve: floatptr(0.35)},
-			want: Settings{Mode: "ask-before", ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: true, AutoTitle: true, ValidatedSetsEnable: true, ContextFiles: wantContextFilesDefault, Present: PresentSettings{AutoOpen: true}, UI: wantUIDefault, ResponseReserve: 0.35},
-		},
-		{
-			name: "response-reserve is NOT set by env or flag (file-only)",
-			env:  Layer{ResponseReserve: floatptr(0.35)},
-			flag: Layer{ResponseReserve: floatptr(0.35)},
-			want: Settings{Mode: "ask-before", ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: true, AutoTitle: true, ValidatedSetsEnable: true, ContextFiles: wantContextFilesDefault, Present: PresentSettings{AutoOpen: true}, UI: wantUIDefault},
-		},
-		{
-			name: "confine-to-workspace is NOT loosenable by env or flag (global-config-only)",
-			env:  Layer{ConfineToWorkspace: boolptr(false)}, // an env layer cannot carry it in practice; assert it is ignored even if set
-			flag: Layer{ConfineToWorkspace: boolptr(false)},
-			want: Settings{Mode: "ask-before", ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: true, AutoTitle: true, ValidatedSetsEnable: true, ContextFiles: wantContextFilesDefault, Present: PresentSettings{AutoOpen: true}, UI: wantUIDefault},
+			file: fileConfig{ResponseReserve: 0.35},
+			want: func(o *Options) { o.ResponseReserve = 0.35 },
 		},
 		{
 			name: "a matching unconfined-hosts entry resolves confine-to-workspace to false",
-			file: Layer{UnconfinedHosts: []UnconfinedHost{{ID: testHostID, Acknowledged: "2026-07-21", Note: "disposable"}}},
-			want: Settings{Mode: "ask-before", ConfineToWorkspace: false, UseProjectSkills: true, AutoCompact: true, AutoTitle: true, ValidatedSetsEnable: true, ContextFiles: wantContextFilesDefault, Present: PresentSettings{AutoOpen: true}, UI: wantUIDefault,
-				UnconfinedHosts: []UnconfinedHost{{ID: testHostID, Acknowledged: "2026-07-21", Note: "disposable"}}},
-		},
-		{
-			name: "unconfined-hosts is NOT settable by env or flag (global-config-only)",
-			env:  Layer{UnconfinedHosts: []UnconfinedHost{{ID: testHostID}}},
-			flag: Layer{UnconfinedHosts: []UnconfinedHost{{ID: testHostID}}},
-			want: Settings{Mode: "ask-before", ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: true, AutoTitle: true, ValidatedSetsEnable: true, ContextFiles: wantContextFilesDefault, Present: PresentSettings{AutoOpen: true}, UI: wantUIDefault},
+			file: fileConfig{UnconfinedHosts: []UnconfinedHost{{ID: testHostID, Acknowledged: "2026-07-21", Note: "disposable"}}},
+			want: func(o *Options) {
+				o.ConfineToWorkspace = false
+				o.UnconfinedHosts = []UnconfinedHost{{ID: testHostID, Acknowledged: "2026-07-21", Note: "disposable"}}
+			},
 		},
 		{
 			name: "web-search endpoint is file-only (default empty)",
-			file: Layer{WebSearchEndpoint: strptr("https://search.example.com")},
-			want: Settings{Mode: "ask-before", ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: true, AutoTitle: true, ValidatedSetsEnable: true, ContextFiles: wantContextFilesDefault, Present: PresentSettings{AutoOpen: true}, UI: wantUIDefault, WebSearchEndpoint: "https://search.example.com"},
+			file: fileConfig{WebSearch: "https://search.example.com"},
+			want: func(o *Options) { o.WebSearchEndpoint = "https://search.example.com" },
 		},
 		{
 			name: "mcp servers are file-only (default empty)",
-			file: Layer{MCPServers: []mcp.ServerConfig{{Name: "github", Transport: mcp.TransportStdio, Command: "gh-mcp"}}},
-			want: Settings{Mode: "ask-before", ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: true, AutoTitle: true, ValidatedSetsEnable: true, ContextFiles: wantContextFilesDefault, Present: PresentSettings{AutoOpen: true}, UI: wantUIDefault, MCPServers: []mcp.ServerConfig{{Name: "github", Transport: mcp.TransportStdio, Command: "gh-mcp"}}},
+			file: fileConfig{MCPServers: []mcpServerConfig{{Name: "github", Transport: "stdio", Command: "gh-mcp"}}},
+			want: func(o *Options) {
+				o.MCPServers = []mcp.ServerConfig{{Name: "github", Transport: mcp.TransportStdio, Command: "gh-mcp"}}
+			},
 		},
 		{
-			name: "mcp servers are NOT settable by env or flag (file-only)",
-			env:  Layer{MCPServers: []mcp.ServerConfig{{Name: "fromenv"}}},
-			flag: Layer{MCPServers: []mcp.ServerConfig{{Name: "fromflag"}}},
-			want: Settings{Mode: "ask-before", ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: true, AutoTitle: true, ValidatedSetsEnable: true, ContextFiles: wantContextFilesDefault, Present: PresentSettings{AutoOpen: true}, UI: wantUIDefault},
-		},
-		{
-			name: "servers are file-only (default empty)",
-			file: Layer{Servers: []ServerEntry{{Name: "workstation", Endpoint: "http://box:1111"}}},
-			want: Settings{Mode: "ask-before", ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: true, AutoTitle: true, ValidatedSetsEnable: true, ContextFiles: wantContextFilesDefault, Present: PresentSettings{AutoOpen: true}, UI: wantUIDefault, Servers: []ServerEntry{{Name: "workstation", Endpoint: "http://box:1111"}}},
-		},
-		{
-			name: "servers are NOT settable by env or flag (file-only)",
-			env:  Layer{Servers: []ServerEntry{{Name: "fromenv", Endpoint: "http://env:1111"}}},
-			flag: Layer{Servers: []ServerEntry{{Name: "fromflag", Endpoint: "http://flag:1111"}}},
-			want: Settings{Mode: "ask-before", ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: true, AutoTitle: true, ValidatedSetsEnable: true, ContextFiles: wantContextFilesDefault, Present: PresentSettings{AutoOpen: true}, UI: wantUIDefault},
-		},
-		{
-			name: "the model-profiles map is file-only, and a nearer layer replaces it whole",
-			file: Layer{ModelProfiles: []profiles.Entry{
-				{Pattern: "gemma", Profile: domain.ModelProfile{Thinking: domain.ThinkingProfile{Style: domain.ThinkingDelimited, Start: "<think>", End: "</think>"}}},
+			name: "the model-profiles map is file-only and is carried whole",
+			file: fileConfig{ModelProfiles: map[string]modelProfileConfig{
+				"gemma": {Thinking: thinkingConfig{Style: "delimited", Start: "<think>", End: "</think>"}},
 			}},
-			env:  Layer{ModelProfiles: []profiles.Entry{{Pattern: "fromenv"}}},
-			flag: Layer{ModelProfiles: []profiles.Entry{{Pattern: "fromflag"}}},
-			want: Settings{Mode: "ask-before", ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: true, AutoTitle: true, ValidatedSetsEnable: true, ContextFiles: wantContextFilesDefault, Present: PresentSettings{AutoOpen: true}, UI: wantUIDefault, ModelProfiles: []profiles.Entry{
-				{Pattern: "gemma", Profile: domain.ModelProfile{Thinking: domain.ThinkingProfile{Style: domain.ThinkingDelimited, Start: "<think>", End: "</think>"}}},
-			}},
+			want: func(o *Options) {
+				o.ModelProfiles = []profiles.Entry{{Pattern: "gemma", Profile: domain.ModelProfile{
+					Thinking: domain.ThinkingProfile{Style: domain.ThinkingDelimited, Start: "<think>", End: "</think>"}}}}
+			},
 		},
 		{
 			name: "mechanisms are file-only (default empty)",
-			file: Layer{Mechanisms: map[string]bool{"validate": true, "syntax": false}},
-			want: Settings{Mode: "ask-before", ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: true, AutoTitle: true, ValidatedSetsEnable: true, ContextFiles: wantContextFilesDefault, Present: PresentSettings{AutoOpen: true}, UI: wantUIDefault, Mechanisms: map[string]bool{"validate": true, "syntax": false}},
-		},
-		{
-			name: "mechanisms are NOT settable by env or flag (file-only)",
-			env:  Layer{Mechanisms: map[string]bool{"fromenv": true}},
-			flag: Layer{Mechanisms: map[string]bool{"fromflag": true}},
-			want: Settings{Mode: "ask-before", ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: true, AutoTitle: true, ValidatedSetsEnable: true, ContextFiles: wantContextFilesDefault, Present: PresentSettings{AutoOpen: true}, UI: wantUIDefault},
+			file: fileConfig{Mechanisms: map[string]bool{"validate": true, "syntax": false}},
+			want: func(o *Options) { o.Mechanisms = map[string]bool{"validate": true, "syntax": false} },
 		},
 		{
 			name: "the present block is file-only (all four keys)",
-			file: Layer{Present: &PresentSettings{AutoOpen: false, Command: "zed {path}", Port: 8934, Host: "10.0.0.2"}},
-			want: Settings{Mode: "ask-before", ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: true, AutoTitle: true, ValidatedSetsEnable: true, ContextFiles: wantContextFilesDefault,
-				Present: PresentSettings{AutoOpen: false, Command: "zed {path}", Port: 8934, Host: "10.0.0.2"}, UI: wantUIDefault},
+			file: fileConfig{Present: &presentConfig{AutoOpen: boolptr(false), Command: "zed {path}", Port: 8934, Host: "10.0.0.2"}},
+			want: func(o *Options) {
+				o.Present = PresentSettings{AutoOpen: false, Command: "zed {path}", Port: 8934, Host: "10.0.0.2"}
+			},
 		},
 		{
-			name: "present is NOT settable by env or flag (file-only ⇒ auto-open stays on)",
-			env:  Layer{Present: &PresentSettings{AutoOpen: false, Port: 1}},
-			flag: Layer{Present: &PresentSettings{AutoOpen: false, Port: 2}},
-			want: Settings{Mode: "ask-before", ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: true, AutoTitle: true, ValidatedSetsEnable: true, ContextFiles: wantContextFilesDefault, Present: PresentSettings{AutoOpen: true}, UI: wantUIDefault},
-		},
-		{
-			name: "the ui block is file-only (all three keys)",
-			file: fileConfig{UI: &uiConfig{Spinner: "glitter", SpinnerColor: boolptr(false), ShowScrollbar: boolptr(false)}}.layer(),
-			want: Settings{Mode: "ask-before", ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: true, AutoTitle: true, ValidatedSetsEnable: true, ContextFiles: wantContextFilesDefault, Present: PresentSettings{AutoOpen: true},
-				UI: UISettings{Spinner: domain.SpinnerGlitter, SpinnerColor: false, ShowScrollbar: false, ColorScheme: "dark",
-					StallAfter: 90 * time.Second}},
+			name: "the ui block is file-only (three of its keys stated)",
+			file: fileConfig{UI: &uiConfig{Spinner: "glitter", SpinnerColor: boolptr(false), ShowScrollbar: boolptr(false)}},
+			want: func(o *Options) {
+				o.UI = UISettings{Spinner: domain.SpinnerGlitter, SpinnerColor: false, ShowScrollbar: false,
+					ColorScheme: "dark", StallAfter: 90 * time.Second}
+			},
 		},
 		{
 			// The keys are independent: naming a style says nothing about the colour loop.
 			name: "ui with only spinner: set → the colour loop stays at its default",
-			file: fileConfig{UI: &uiConfig{Spinner: "classic"}}.layer(),
-			want: Settings{Mode: "ask-before", ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: true, AutoTitle: true, ValidatedSetsEnable: true, ContextFiles: wantContextFilesDefault, Present: PresentSettings{AutoOpen: true},
-				UI: UISettings{Spinner: domain.SpinnerClassic, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "dark",
-					StallAfter: 90 * time.Second}},
+			file: fileConfig{UI: &uiConfig{Spinner: "classic"}},
+			want: func(o *Options) { o.UI.Spinner = domain.SpinnerClassic },
 		},
 		{
 			// …and the other way round: turning the loop off does not change which style paints.
 			name: "ui with only spinner-color: false → the style stays at its default",
-			file: fileConfig{UI: &uiConfig{SpinnerColor: boolptr(false)}}.layer(),
-			want: Settings{Mode: "ask-before", ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: true, AutoTitle: true, ValidatedSetsEnable: true, ContextFiles: wantContextFilesDefault, Present: PresentSettings{AutoOpen: true},
-				UI: UISettings{Spinner: domain.SpinnerSnake, SpinnerColor: false, ShowScrollbar: true, ColorScheme: "dark",
-					StallAfter: 90 * time.Second}},
+			file: fileConfig{UI: &uiConfig{SpinnerColor: boolptr(false)}},
+			want: func(o *Options) { o.UI.SpinnerColor = false },
 		},
 		{
-			// The scroll-bar switch is the third independent key: hiding the bar leaves both
-			// spinner keys exactly where they were.
+			// The scroll-bar switch is the third independent key: hiding the bar leaves both spinner
+			// keys exactly where they were.
 			name: "ui with only show-scrollbar: false → the spinner keys stay at their defaults",
-			file: fileConfig{UI: &uiConfig{ShowScrollbar: boolptr(false)}}.layer(),
-			want: Settings{Mode: "ask-before", ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: true, AutoTitle: true, ValidatedSetsEnable: true, ContextFiles: wantContextFilesDefault, Present: PresentSettings{AutoOpen: true},
-				UI: UISettings{Spinner: domain.SpinnerSnake, SpinnerColor: true, ShowScrollbar: false, ColorScheme: "dark",
-					StallAfter: 90 * time.Second}},
-		},
-		{
-			name: "ui is NOT settable by env or flag (file-only ⇒ the defaults hold)",
-			env:  Layer{UI: &UISettings{Spinner: domain.SpinnerClassic, ShowScrollbar: false}},
-			flag: Layer{UI: &UISettings{Spinner: domain.SpinnerGlitter, ShowScrollbar: false}},
-			want: Settings{Mode: "ask-before", ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: true, AutoTitle: true, ValidatedSetsEnable: true, ContextFiles: wantContextFilesDefault, Present: PresentSettings{AutoOpen: true}, UI: wantUIDefault},
+			file: fileConfig{UI: &uiConfig{ShowScrollbar: boolptr(false)}},
+			want: func(o *Options) { o.UI.ShowScrollbar = false },
 		},
 		{
 			name: "a context-files block replaces the default name list whole",
-			file: fileConfig{ContextFiles: &contextFilesConfig{Names: []string{"CONVENTIONS.md", "AGENTS.md"}}}.layer(),
-			want: Settings{Mode: "ask-before", ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: true, AutoTitle: true, ValidatedSetsEnable: true, Present: PresentSettings{AutoOpen: true}, UI: wantUIDefault,
-				ContextFiles: contextFilesSettings{enable: true, names: []string{"CONVENTIONS.md", "AGENTS.md"}}},
+			file: fileConfig{ContextFiles: &contextFilesConfig{Names: []string{"CONVENTIONS.md", "AGENTS.md"}}},
+			want: func(o *Options) { o.ContextFiles = []string{"CONVENTIONS.md", "AGENTS.md"} },
 		},
 		{
-			name: "context-files is NOT settable by env or flag (file-only ⇒ the defaults hold)",
-			env:  Layer{ContextFiles: &contextFilesSettings{enable: true, names: []string{"from-env.md"}}},
-			flag: Layer{ContextFiles: &contextFilesSettings{enable: false}},
-			want: Settings{Mode: "ask-before", ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: true, AutoTitle: true, ValidatedSetsEnable: true, ContextFiles: wantContextFilesDefault, Present: PresentSettings{AutoOpen: true}, UI: wantUIDefault},
+			// Both spellings of "off" collapse to the one value downstream: no names to look for.
+			name: "a context-files block switched off resolves to no names",
+			file: fileConfig{ContextFiles: &contextFilesConfig{Enable: boolptr(false)}},
+			want: func(o *Options) { o.ContextFiles = nil },
+		},
+		{
+			name: "cursor-shape and editor are file-only (default empty)",
+			file: fileConfig{CursorShape: "bar", Editor: "hx"},
+			want: func(o *Options) { o.CursorShape = "bar"; o.Editor = "hx" },
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got, notices := ResolveSettings(tt.file, tt.env, tt.flag, testHostID)
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("ResolveSettings = %+v; want %+v", got, tt.want)
+			want := wantDefaults()
+			if tt.want != nil {
+				tt.want(&want)
+			}
+			got, notices := resolveSources(t, tt.file, tt.env, tt.flags, tt.changed)
+			if diffs := structDiff(got, want); len(diffs) != 0 {
+				t.Errorf("resolution disagrees with the expected options:\n%s", strings.Join(diffs, "\n"))
 			}
 			if len(notices) != 0 {
-				t.Errorf("ResolveSettings notices = %q; want none for a well-formed config", notices)
+				t.Errorf("resolution notices = %q; want none for a well-formed config", notices)
 			}
 		})
 	}
+}
+
+// wantDefaults is the Options a config that states nothing resolves to: every key of the schema at
+// its built-in default. Spelled out rather than taken from the resolution under test, like
+// wantUIDefault it embeds, so a change to a shipped default shows up as a failure here instead of
+// silently agreeing with itself. Every other field is the zero value — no key of the schema
+// defaults to anything else, and the fields config does not own are not resolution's to fill.
+func wantDefaults() Options {
+	return Options{
+		Mode: "ask-before", ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: true,
+		AutoTitle: true, ValidatedSetsEnable: true, ContextFiles: []string{"AGENTS.md"},
+		Present: PresentSettings{AutoOpen: true}, UI: wantUIDefault,
+	}
+}
+
+// resolveSources drives the three passes in the order ResolveOptions drives them, off injected
+// sources: a parsed file, a getenv over a map, and a flag set whose changed names are listed. It
+// stops where ResolveOptions' validation begins, so a case can state a value the validators would
+// refuse and still assert what resolution made of it.
+func resolveSources(t *testing.T, fc fileConfig, env map[string]string, flags Options, changed []string) (Options, []string) {
+	t.Helper()
+	var o Options
+	applyFile(&o, fc)
+	if err := applyEnv(&o, func(name string) string { return env[name] }); err != nil {
+		t.Fatalf("applyEnv(%v): %v", env, err)
+	}
+	applyFlags(&o, flags, func(name string) bool { return slices.Contains(changed, name) })
+	confine, notices := resolveConfineToWorkspace(o.ConfineToWorkspace, o.UnconfinedHosts, testHostID)
+	o.ConfineToWorkspace = confine
+	return o, notices
 }
 
 // The three keys that resolve from more than one source, driven end to end through their registry
 // rows: a real fileConfig, a real getenv, a real explicitly-set flag, and the precedence the
 // three produce. The WIRE-FACING names — the variable a user exports, the flag they type — are
 // spelled out here as literals rather than read from the row, which is what makes this a test of
-// the rows and not of itself: resolution now asks the registry which variable and which flag
-// carry each key, so editing a row's EnvVar or FlagName to anything else means the value this
-// test sets is never seen and the precedence assertions fail.
+// the rows and not of itself: resolution asks the registry which variable and which flag carry
+// each key, so editing a row's EnvVar or FlagName to anything else means the value this test sets
+// is never seen and the precedence assertions fail.
+//
+// The closing check is the file-only fence for the WHOLE schema, which no case of a precedence
+// table can make any more: exactly these three rows carry an environment or a flag accessor, so
+// every other key of the schema can be read from the config file and from nowhere else. ADR 0012's
+// two global-config-only keys are covered by it like the rest.
 //
 // The raw startup overrides (APOGEE_ENDPOINT, APOGEE_API_KEY, APOGEE_MODEL, --endpoint, --model)
 // are deliberately absent: since ADR 0036 they name no config key at all, so they do not ride
-// these layers and nothing here should claim they do.
-func TestResolveSettingsMultiSourceKeysReadTheRegistry(t *testing.T) {
+// these sources and nothing here should claim they do.
+func TestMultiSourceKeysReadTheRegistry(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		path            string
@@ -321,29 +303,29 @@ func TestResolveSettingsMultiSourceKeysReadTheRegistry(t *testing.T) {
 		file, env, flag string // what each source supplies, as that source spells it
 		setFile         func(*fileConfig, string)
 		setFlag         func(*Options, string)
-		resolved        func(Settings) string
+		resolved        func(Options) string
 	}{
 		{
 			path: "server", envVar: "APOGEE_SERVER", flagName: "server",
 			file: "the-file-box", env: "the-env-box", flag: "the-flag-box",
 			setFile:  func(fc *fileConfig, v string) { fc.Server = v },
 			setFlag:  func(o *Options, v string) { o.StartupServer = v },
-			resolved: func(s Settings) string { return s.StartupServer },
+			resolved: func(o Options) string { return o.StartupServer },
 		},
 		{
 			path: "mode", envVar: "APOGEE_MODE", flagName: "mode",
 			file: string(domain.ModePlan), env: string(domain.ModeAllowEdits), flag: string(domain.ModeAuto),
 			setFile:  func(fc *fileConfig, v string) { fc.Mode = v },
 			setFlag:  func(o *Options, v string) { o.Mode = v },
-			resolved: func(s Settings) string { return s.Mode },
+			resolved: func(o Options) string { return o.Mode },
 		},
 		{
 			path: "bypass", envVar: "APOGEE_BYPASS", flagName: "bypass",
 			file: "true", env: "false", flag: "true",
 			setFile: func(fc *fileConfig, v string) { fc.Bypass = boolptr(v == "true") },
 			setFlag: func(o *Options, v string) { o.Bypass = v == "true" },
-			resolved: func(s Settings) string {
-				if s.Bypass {
+			resolved: func(o Options) string {
+				if o.Bypass {
 					return "true"
 				}
 				return "false"
@@ -368,51 +350,49 @@ func TestResolveSettingsMultiSourceKeysReadTheRegistry(t *testing.T) {
 
 			var fc fileConfig
 			tt.setFile(&fc, tt.file)
-			file := fc.layer()
-			if got, _ := ResolveSettings(file, Layer{}, Layer{}, testHostID); tt.resolved(got) != tt.file {
+			got, _ := resolveSources(t, fc, nil, Options{}, nil)
+			if tt.resolved(got) != tt.file {
 				t.Fatalf("file only: %s = %q, want %q", tt.path, tt.resolved(got), tt.file)
 			}
 
-			var env Layer
-			if tt.envVar != "" {
-				var err error
-				env, err = envLayer(func(name string) string {
-					if name == tt.envVar {
-						return tt.env
-					}
-					return ""
-				})
-				if err != nil {
-					t.Fatalf("envLayer with %s=%q: %v", tt.envVar, tt.env, err)
-				}
-				if got, _ := ResolveSettings(file, env, Layer{}, testHostID); tt.resolved(got) != tt.env {
-					t.Errorf("%s over the file: %s = %q, want %q (does the row still name %s?)", tt.envVar,
-						tt.path, tt.resolved(got), tt.env, tt.envVar)
-				}
+			env := map[string]string{tt.envVar: tt.env}
+			got, _ = resolveSources(t, fc, env, Options{}, nil)
+			if tt.resolved(got) != tt.env {
+				t.Errorf("%s over the file: %s = %q, want %q (does the row still name %s?)", tt.envVar,
+					tt.path, tt.resolved(got), tt.env, tt.envVar)
 			}
 
-			if tt.flagName != "" {
-				var opts Options
-				tt.setFlag(&opts, tt.flag)
-				flag := flagLayer(opts, func(name string) bool { return name == tt.flagName })
-				if got, _ := ResolveSettings(file, env, flag, testHostID); tt.resolved(got) != tt.flag {
-					t.Errorf("--%s over %s: %s = %q, want %q (does the row still name --%s?)", tt.flagName,
-						tt.envVar, tt.path, tt.resolved(got), tt.flag, tt.flagName)
-				}
+			var flags Options
+			tt.setFlag(&flags, tt.flag)
+			got, _ = resolveSources(t, fc, env, flags, []string{tt.flagName})
+			if tt.resolved(got) != tt.flag {
+				t.Errorf("--%s over %s: %s = %q, want %q (does the row still name --%s?)", tt.flagName,
+					tt.envVar, tt.path, tt.resolved(got), tt.flag, tt.flagName)
 			}
 		})
 	}
+
+	multiSource := map[string]bool{}
+	for _, tt := range tests {
+		multiSource[tt.path] = true
+	}
+	for _, k := range keyAccessors {
+		if (k.fromEnv != nil || k.fromFlag != nil) && !multiSource[k.row.Path] {
+			t.Errorf("key %q reads an environment variable or a flag, but only the keys listed here do — "+
+				"either it stopped being file-only or this table has fallen behind the schema", k.row.Path)
+		}
+	}
 }
 
-// ResolveSettings takes its base mode from the registry row rather than a literal, so the row is
-// what the "all empty → defaults" expectation above now rests on. This pins that row to the
+// Resolution takes its base mode from the registry row rather than a literal, so the row is what
+// the "nothing stated → the defaults" expectation above now rests on. This pins that row to the
 // autonomy ladder's own default constant: a row edited to another mode — or to nothing — would
 // otherwise quietly change what a session with no config starts in.
 func TestRegistryModeDefaultIsTheLadderDefault(t *testing.T) {
 	t.Parallel()
 	row, ok := LookupKey("mode")
 	if !ok {
-		t.Fatal("no registry row for mode — ResolveSettings takes the default mode from it")
+		t.Fatal("no registry row for mode — resolution takes the default mode from it")
 	}
 	if row.Default != string(domain.ModeAskBefore) {
 		t.Errorf("registry mode default = %q, want %q (the mode a session with no config starts in)",
@@ -420,17 +400,15 @@ func TestRegistryModeDefaultIsTheLadderDefault(t *testing.T) {
 	}
 }
 
-// The accessor table over the registry cannot half-describe a key: EVERY row needs all three of
-// the accessors a key travels on — the projection that reads it out of the file, the overlay that
-// copies it onto the resolved settings, and the write-back that lands it on the Options everything
-// is built from — exactly once; every row advertising a variable or a flag must have the plumbing
-// that reads that source; every accessor must name a described key; and no accessor may carry
-// plumbing for a source its row does not name (which would be dead code advertising nothing).
-// Without this, a key added to the schema and described in the registry could still be a key
-// resolution never reads, and adding `EnvVar:` to a row would silently advertise a variable
-// nothing looks at. Since the three loops that carry a key ARE these accessors, a missing one is a
-// nil call at startup rather than a value quietly left at its default — the guard is what turns
-// that into a build failure instead.
+// The accessor table over the registry cannot half-describe a key: EVERY row needs the projection
+// that reads its key out of the file and lands it on the Options, exactly once; every row
+// advertising a variable or a flag must have the plumbing that reads that source; every accessor
+// must name a described key; and no accessor may carry plumbing for a source its row does not name
+// (which would be dead code advertising nothing). Without this, a key added to the schema and
+// described in the registry could still be a key resolution never reads, and adding `EnvVar:` to a
+// row would silently advertise a variable nothing looks at. Since the passes that carry a key ARE
+// these accessors, a missing one is a nil call at startup rather than a value quietly left at its
+// default — the guard is what turns that into a test failure instead.
 func TestKeyAccessorsBindDescribedKeys(t *testing.T) {
 	t.Parallel()
 
@@ -443,14 +421,8 @@ func TestKeyAccessorsBindDescribedKeys(t *testing.T) {
 			t.Errorf("keyAccessors binds %q twice — one key, one entry", k.row.Path)
 		}
 		if k.fromFile == nil {
-			t.Errorf("keyAccessors entry %q has no fromFile, so the config file could never set it", k.row.Path)
-		}
-		if k.overlay == nil {
-			t.Errorf("keyAccessors entry %q has no overlay, so resolution would never copy it", k.row.Path)
-		}
-		if k.writeBack == nil {
-			t.Errorf("keyAccessors entry %q has no writeBack, so the resolved value would never reach "+
-				"the Options construction reads", k.row.Path)
+			t.Errorf("keyAccessors entry %q has no fromFile, so neither the config file nor the key's "+
+				"own default would ever reach the Options", k.row.Path)
 		}
 		if k.fromEnv != nil && k.row.EnvVar == "" {
 			t.Errorf("keyAccessors entry %q reads an environment variable its row does not name", k.row.Path)
@@ -476,23 +448,24 @@ func TestKeyAccessorsBindDescribedKeys(t *testing.T) {
 	}
 }
 
-// Every key of the schema, carried end to end: a file that states all of them, resolved, then
-// written back onto the Options the composition root builds everything from. The assertion is the
-// SET of Options fields that moved off what an empty file resolves to — which is what catches the
-// two failures the accessor table can have and the completeness guard above cannot see: a row whose
-// writeBack copies its value onto a NEIGHBOUR's field (the neighbour's name appears, its own does
-// not), and a row whose value never reaches opts at all (its name is missing).
+// Every key of the schema, carried end to end: a file that states all of them, resolved onto the
+// Options the composition root builds everything from. The assertion is the SET of Options fields
+// that moved off what an empty file resolves to — which is what catches the two failures the
+// accessor table can have and the completeness guard above cannot see: a row whose accessor writes
+// its value onto a NEIGHBOUR's field (the neighbour's name appears, its own does not), and a row
+// whose value never reaches opts at all (its name is missing).
 //
 // It is the set rather than a hand-written expected Options because the values themselves are
-// pinned per key by the TestApplyConfig* suites below; what has no other home is the claim that
-// every key of the schema reaches construction, and that only the fields config owns are touched.
+// pinned per key by TestResolvePrecedence above and the TestApplyConfig* suites below; what has no
+// other home is the claim that every key of the schema reaches construction, and that only the
+// fields config owns are touched.
 func TestEveryConfigKeyReachesTheOptions(t *testing.T) {
 	t.Parallel()
 
-	// The Options fields the config schema owns — every field some registry row writes back, and no
+	// The Options fields the config schema owns — every field some registry row writes, and no
 	// other. The startup fields (Endpoint, Model, APIKey, the Startup* run) are deliberately absent:
 	// since ADR 0036 they name no config key, and they are resolved from the selected servers entry
-	// rather than from a layer.
+	// rather than from a source of the precedence ladder.
 	want := map[string]bool{
 		"Mode": true, "Bypass": true, "Servers": true, "StartupServer": true, "Editor": true,
 		"ConfineToWorkspace": true, "UnconfinedHosts": true, "WebSearchEndpoint": true,
@@ -503,13 +476,9 @@ func TestEveryConfigKeyReachesTheOptions(t *testing.T) {
 		"SystemPrompt": true, "ContextFiles": true, "UI": true, "CursorShape": true,
 	}
 
-	resolved, _ := ResolveSettings(everyKeyFileConfig().layer(), Layer{}, Layer{}, testHostID)
-	base, _ := ResolveSettings(Layer{}, Layer{}, Layer{}, testHostID)
 	var got, unset Options
-	for _, k := range keyAccessors {
-		k.writeBack(&got, resolved)
-		k.writeBack(&unset, base)
-	}
+	applyFile(&got, everyKeyFileConfig())
+	applyFile(&unset, fileConfig{})
 
 	moved := map[string]bool{}
 	for _, diff := range structDiff(got, unset) {
@@ -518,13 +487,13 @@ func TestEveryConfigKeyReachesTheOptions(t *testing.T) {
 	for name := range want {
 		if !moved[name] {
 			t.Errorf("Options.%s is unchanged by a file that states every key — the key that owns it "+
-				"resolves and then never reaches construction", name)
+				"is read and then never reaches construction", name)
 		}
 	}
 	for name := range moved {
 		if !want[name] {
 			t.Errorf("Options.%s was written by a config key, but no key owns it — an accessor is "+
-				"copying its value onto a neighbour's field", name)
+				"writing its value onto a neighbour's field", name)
 		}
 	}
 }
@@ -591,8 +560,9 @@ func renderFieldValue(v reflect.Value) string {
 }
 
 // The Host acknowledgement ladder (ADR 0012, amendment 2026-07-21), pinned in the order the
-// ADR fixes: an explicit global false wins; else a match on THIS host's id loosens here; else
-// confinement stays on. A malformed entry degrades softly with a notice, and an entry naming
+// ADR fixes: a file that loosens the key globally wins; else a match on THIS host's id loosens
+// here; else confinement stays on. confine is what the FILE resolves the key to, so an absent key
+// and an explicit `confine-to-workspace: true` are the same input — neither loosens anything. A malformed entry degrades softly with a notice, and an entry naming
 // another machine is simply not this host — neither is an error. Step 2 additionally requires
 // an identity to match: on a host that can supply none, the id stands for every such machine,
 // so honouring it would let one saved acknowledgement loosen all of them.
@@ -601,36 +571,38 @@ func TestResolveConfineToWorkspace(t *testing.T) {
 	const otherHost = "laptop-9f8e7d"
 	tests := []struct {
 		name        string
-		explicit    *bool
+		confine     bool
 		hosts       []UnconfinedHost
 		hostID      string
 		want        bool
 		wantNotices int
 	}{
-		{name: "nothing configured → the secure default", hostID: testHostID, want: true},
-		{name: "explicit global false → unconfined everywhere", explicit: boolptr(false), hostID: testHostID, want: false},
-		{name: "explicit global true, no acknowledgement → confined", explicit: boolptr(true), hostID: testHostID, want: true},
+		{name: "the file does not loosen, nothing acknowledged → the secure default", confine: true, hostID: testHostID, want: true},
+		{name: "an explicit global false → unconfined everywhere", hostID: testHostID, want: false},
 		{
-			name:   "this host is acknowledged → unconfined here",
-			hosts:  []UnconfinedHost{{ID: otherHost}, {ID: testHostID, Acknowledged: "2026-07-21", Note: "disposable container"}},
-			hostID: testHostID,
-			want:   false,
+			name:    "this host is acknowledged → unconfined here",
+			confine: true,
+			hosts:   []UnconfinedHost{{ID: otherHost}, {ID: testHostID, Acknowledged: "2026-07-21", Note: "disposable container"}},
+			hostID:  testHostID,
+			want:    false,
 		},
 		{
-			name:   "only other machines are acknowledged → still confined here",
-			hosts:  []UnconfinedHost{{ID: otherHost}, {ID: "buildbox-000111"}},
-			hostID: testHostID,
-			want:   true,
+			name:    "only other machines are acknowledged → still confined here",
+			confine: true,
+			hosts:   []UnconfinedHost{{ID: otherHost}, {ID: "buildbox-000111"}},
+			hostID:  testHostID,
+			want:    true,
 		},
 		{
-			name:     "an explicit true does not veto a match — the entry is the more specific claim",
-			explicit: boolptr(true),
-			hosts:    []UnconfinedHost{{ID: testHostID}},
-			hostID:   testHostID,
-			want:     false,
+			name:    "a file that does not loosen never vetoes a match — the entry is the more specific claim",
+			confine: true,
+			hosts:   []UnconfinedHost{{ID: testHostID}},
+			hostID:  testHostID,
+			want:    false,
 		},
 		{
 			name:        "a malformed entry is skipped with a notice, the well-formed one still matches",
+			confine:     true,
 			hosts:       []UnconfinedHost{{Note: "no id here"}, {ID: testHostID}},
 			hostID:      testHostID,
 			want:        false,
@@ -638,6 +610,7 @@ func TestResolveConfineToWorkspace(t *testing.T) {
 		},
 		{
 			name:        "a blank id never matches a blank host id — it is malformed, not a wildcard",
+			confine:     true,
 			hosts:       []UnconfinedHost{{ID: "   "}},
 			hostID:      "",
 			want:        true,
@@ -645,26 +618,27 @@ func TestResolveConfineToWorkspace(t *testing.T) {
 		},
 		{
 			name:        "an identity-less host is not acknowledged by an entry naming its shared id",
+			confine:     true,
 			hosts:       []UnconfinedHost{{ID: unidentifiedTestHostID, Acknowledged: "2026-07-21"}},
 			hostID:      unidentifiedTestHostID,
 			want:        true,
 			wantNotices: 1,
 		},
 		{
-			name:     "an explicit global false still loosens an identity-less host — step 1 is untouched",
-			explicit: boolptr(false),
-			hosts:    []UnconfinedHost{{ID: unidentifiedTestHostID}},
-			hostID:   unidentifiedTestHostID,
-			want:     false,
+			name:   "an explicit global false still loosens an identity-less host — step 1 is untouched",
+			hosts:  []UnconfinedHost{{ID: unidentifiedTestHostID}},
+			hostID: unidentifiedTestHostID,
+			want:   false,
 			// The entry is still reported: the match was refused, and saying so is what keeps
 			// the notice honest about why the id cannot stand for one machine.
 			wantNotices: 1,
 		},
 		{
-			name:   "an identity-less host with a real machine's entry is simply not that machine",
-			hosts:  []UnconfinedHost{{ID: otherHost}},
-			hostID: unidentifiedTestHostID,
-			want:   true,
+			name:    "an identity-less host with a real machine's entry is simply not that machine",
+			confine: true,
+			hosts:   []UnconfinedHost{{ID: otherHost}},
+			hostID:  unidentifiedTestHostID,
+			want:    true,
 		},
 	}
 	for _, tt := range tests {
@@ -674,7 +648,7 @@ func TestResolveConfineToWorkspace(t *testing.T) {
 				t.Fatalf("%q is no longer the identity-less host id; the cases below prove nothing",
 					unidentifiedTestHostID)
 			}
-			got, notices := resolveConfineToWorkspace(tt.explicit, tt.hosts, tt.hostID)
+			got, notices := resolveConfineToWorkspace(tt.confine, tt.hosts, tt.hostID)
 			if got != tt.want {
 				t.Errorf("confineToWorkspace = %v; want %v", got, tt.want)
 			}
@@ -1636,23 +1610,21 @@ func TestLoadFileConfigRefusesAResponseReserveThatIsNotAShare(t *testing.T) {
 	}
 }
 
-// The accepted half of the same gate: a share inside the open range loads, and projects onto the
-// layer as a set value rather than as the absent state — the distinction resolution reads.
+// The accepted half of the same gate: a share inside the open range loads, and resolves to the
+// file's own number rather than to the 0 an absent key resolves to — the distinction the engine
+// reads as "hold my own built-in share back".
 func TestLoadFileConfigAcceptsAResponseReserveShare(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	if err := os.WriteFile(path, []byte("response-reserve: 0.2\n"), 0o600); err != nil {
 		t.Fatalf("write config.yaml: %v", err)
 	}
-	l, err := LoadFileConfig(path, os.ReadFile, noNotify)
+	file, err := LoadFileConfig(path, os.ReadFile, noNotify)
 	if err != nil {
 		t.Fatalf("LoadFileConfig: %v", err)
 	}
-	if l.ResponseReserve == nil {
-		t.Fatal("the layer carries no response-reserve; an explicit share must be distinguishable from an absent key")
-	}
-	if *l.ResponseReserve != 0.2 {
-		t.Errorf("layer response-reserve = %v; want the file's explicit 0.2", *l.ResponseReserve)
+	if file.ResponseReserve != 0.2 {
+		t.Errorf("resolved response-reserve = %v; want the file's explicit 0.2", file.ResponseReserve)
 	}
 }
 
@@ -3631,15 +3603,16 @@ func TestApplyConfigBadBypassEnvErrors(t *testing.T) {
 	}
 }
 
-// An absent config file is not an error — a config file is optional.
-func TestLoadFileConfigAbsentIsEmpty(t *testing.T) {
+// An absent config file is not an error — a config file is optional — and resolves to exactly
+// what an empty one does: every key of the schema at its built-in default.
+func TestLoadFileConfigAbsentIsTheDefaults(t *testing.T) {
 	t.Parallel()
-	l, err := LoadFileConfig(filepath.Join(t.TempDir(), "config.yaml"), os.ReadFile, noNotify)
+	file, err := LoadFileConfig(filepath.Join(t.TempDir(), "config.yaml"), os.ReadFile, noNotify)
 	if err != nil {
 		t.Fatalf("absent config: unexpected error %v", err)
 	}
-	if !reflect.DeepEqual(l, Layer{}) {
-		t.Errorf("absent config produced a non-empty layer: %+v", l)
+	if diffs := structDiff(file, wantDefaults()); len(diffs) != 0 {
+		t.Errorf("an absent config does not resolve to the defaults:\n%s", strings.Join(diffs, "\n"))
 	}
 }
 
@@ -3658,10 +3631,10 @@ func TestLoadFileConfigReadErrorPropagates(t *testing.T) {
 // Which source won (the /settings override marker's input)
 // ----------------------------------------------------------------------------
 
-// overrideSources must agree with the LAYERS themselves about which source beat the config file:
+// overrideSources must agree with the PASSES themselves about which source beat the config file:
 // the marker it feeds tells the user their file's value is not the one in force, so a marker naming
-// a source that did not win would be a lie in both directions. The cases mirror flagLayer's and
-// envLayer's own predicates, including the shape that is easy to get wrong — an empty variable is
+// a source that did not win would be a lie in both directions. The cases mirror applyFlags' and
+// applyEnv's own predicates, including the shape that is easy to get wrong — an empty variable is
 // not a setting.
 func TestOverrideSourcesNameTheWinningSource(t *testing.T) {
 	t.Parallel()
