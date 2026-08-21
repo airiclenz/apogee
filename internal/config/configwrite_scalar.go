@@ -317,11 +317,9 @@ func renderScalar(v any) (string, error) {
 // CANONICAL spelling a written list is verified against, so the value a reader takes back out of
 // the file is the same string that was typed.
 //
-// It is deliberately duplicated from the /settings row renderer (cmd/apogee/settingsrows.go), which
-// spells the same value for the human. It is one line of string handling with no state behind it,
-// and the binary's display projection stays in the binary (ADR 0011, ADR 0043) — so the alternative
-// to two copies is an exported string-formatting surface on this package that exists only so the
-// renderer can borrow it.
+// It is the spelling the registry rows show a name list in as well (Key.Read): the row's text and
+// the value a reader takes back out of the file are one string, or an edit would come back reading
+// differently from what was typed.
 func listValue(names []string) string { return "[" + strings.Join(names, ", ") + "]" }
 
 // spliceScalarSet rewrites the key's active line, or inserts one where the key has none. A text key

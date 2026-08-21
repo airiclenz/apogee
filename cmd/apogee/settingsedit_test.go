@@ -275,24 +275,6 @@ func TestExternalEditReloadReportsThinkingDelimitersUnderTheSameSummary(t *testi
 	}
 }
 
-// Every structured key is diffed by the value it holds rather than by the summary its row shows, and
-// the pin is mechanical: a structured key added to the registry without a projection here is a key
-// whose edits would silently fail to apply.
-func TestSettingStructuresCoverEveryStructuredKey(t *testing.T) {
-	t.Parallel()
-	for _, k := range config.KeyRegistry {
-		_, described := settingStructures[k.Path]
-		switch {
-		case k.Kind == config.KindStructured && !described:
-			t.Errorf("structured key %q has no entry in settingStructures, so a reload would diff it "+
-				"by its row summary and miss any change that summarizes alike", k.Path)
-		case k.Kind != config.KindStructured && described:
-			t.Errorf("key %q is kind %q, whose row shows its whole value; a structure projection for it "+
-				"is a second answer to a question the row already answers", k.Path, k.Kind)
-		}
-	}
-}
-
 // A file the startup resolution refuses is refused HERE, with nothing reported: the human's own text
 // is left exactly as they wrote it and the pane puts the reason on the row they launched from. The
 // baseline stands, so fixing the file and coming back reports the fix against what was there before.

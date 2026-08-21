@@ -225,6 +225,36 @@ func TestRegistryRowInvariants(t *testing.T) {
 	}
 }
 
+// TestRegistryRowsProjectEveryValue is the projection half of the anti-drift guard, and it replaces
+// the three per-key cover tests the display tables used to need (one per table, each walking the
+// registry to prove a map had an entry for every row). With the projections ON the row there is no
+// second table to cover: what is left to assert is that no row half-describes its value, which is
+// one property of the registry rather than three properties of the binary.
+//
+// Every row reads. A KindText row carries its prose and no other row does — a text key with no
+// prose would open its editor on an empty field and offer to overwrite the prompt with what was
+// typed into it, and prose for a key whose row shows its whole value is a second answer to a
+// question the row already answers. The same biconditional for a structured row's lossless value:
+// without it a re-read would diff the block by its summary and miss every change that summarizes
+// alike.
+func TestRegistryRowsProjectEveryValue(t *testing.T) {
+	t.Parallel()
+
+	for _, k := range KeyRegistry {
+		if k.Read == nil {
+			t.Errorf("registry row %q does not read its value — a surface would show it blank", k.Path)
+		}
+		if (k.Text != nil) != (k.Kind == KindText) {
+			t.Errorf("registry row %q is kind %q but carries prose = %v — the raw value is carried for "+
+				"exactly the text keys", k.Path, k.Kind, k.Text != nil)
+		}
+		if (k.Structure != nil) != (k.Kind == KindStructured) {
+			t.Errorf("registry row %q is kind %q but carries a structure = %v — the lossless value is "+
+				"carried for exactly the structured keys", k.Path, k.Kind, k.Structure != nil)
+		}
+	}
+}
+
 // TestSettingKeyValidatorsRefuseWhatStartupWouldRefuse pins each row's validate hook (Key.Validate
 // — the write path's guard) to one value it must refuse. It calls the hooks directly rather than through
 // SaveConfigSetting because three of them cannot be reached from there: an enum's vocabulary is checked

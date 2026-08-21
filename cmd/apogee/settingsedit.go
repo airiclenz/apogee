@@ -248,44 +248,22 @@ func (e *externalEdit) refresh() {
 	e.mu.Unlock()
 }
 
-// settingStructures is the LOSSLESS projection of the keys whose row shows only a SUMMARY of what
-// they hold. It is what the reload diff compares them by, because two different structures summarize
-// alike: repoint the one `mcp-servers:` entry at another machine and the row still reads "1 server";
-// change a model profile's thinking delimiters and it still reads "1 model profile". A diff over
-// summaries reports neither, so neither applies, and the edit sits in the file waiting for a
-// relaunch — the deferral ADR 0037 exists to abolish.
-//
-// It is keyed by registry path and covers every structured key, `unconfined-hosts` included even
-// though the diff never reaches it (binding G skips the confinement pair before comparing): the table
-// answers "what does this key hold", which is a fact about the schema and not about who asks.
-// TestSettingStructuresCoverEveryStructuredKey pins it to the registry, so a structured key added
-// there is diffed properly the day it is added rather than the day someone remembers.
-//
-// The values are compared, never rendered — a `servers:` entry carries an api-key, and it stays as
-// far from a row as it has always been (maskedSettingValue).
-var settingStructures = map[string]func(config.Options) any{
-	"servers":              func(o config.Options) any { return o.Servers },
-	"system-prompt-models": func(o config.Options) any { return o.SystemPrompt.Models },
-	"unconfined-hosts":     func(o config.Options) any { return o.UnconfinedHosts },
-	"mcp-servers":          func(o config.Options) any { return o.MCPServers },
-	"mechanisms":           func(o config.Options) any { return o.Mechanisms },
-	// The alias map alone: the block's other half is the `validated-sets.enable` row, a bool whose
-	// row shows its whole value and which is therefore answered by the row (settingChanged's first
-	// clause) rather than by a projection here.
-	"validated-sets.alias": func(o config.Options) any { return o.ValidatedSetsAlias },
-	"model-profiles":       func(o config.Options) any { return o.ModelProfiles },
-}
-
 // settingChanged reports whether the key at registry index i came back holding something else.
 //
 // A key whose row shows its whole value is answered by the row — its displayed value, and the prose
 // a text row carries beside it — so it is compared in the same spelling it is displayed in. A key
-// whose row shows a summary is answered by its structure as well (settingStructures), and the two
-// tests are OR-ed rather than exclusive: the row still catches everything it ever caught, and the
-// structure catches what a summary cannot say.
+// whose row shows a SUMMARY is answered by the lossless value its registry row projects
+// (config.Key.Structure) as well, and the two tests are OR-ed rather than exclusive: the row still
+// catches everything it ever caught, and the structure catches what a summary cannot say. Two
+// different blocks summarize alike — repoint the one `mcp-servers:` entry at another machine and the
+// row still reads "1 server" — and a diff over summaries would leave that edit sitting in the file
+// waiting for a relaunch, the deferral ADR 0037 exists to abolish.
+//
+// The projection is compared, never rendered: a `servers:` entry carries an api-key, and it stays as
+// far from a row as it has always been (maskedSettingValue).
 func settingChanged(k config.Key, before, after fileProjection, i int) bool {
-	if structure, ok := settingStructures[k.Path]; ok &&
-		!reflect.DeepEqual(structure(before.opts), structure(after.opts)) {
+	if k.Structure != nil &&
+		!reflect.DeepEqual(k.Structure(before.opts), k.Structure(after.opts)) {
 		return true
 	}
 	return before.rows[i].Value != after.rows[i].Value || before.rows[i].Text != after.rows[i].Text

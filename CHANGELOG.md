@@ -222,6 +222,12 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- `/settings` reads every key's value off the key registry itself: each row now carries `Read`,
+  `Text` and `Structure` projections of a resolved config, and the binary's three per-key display
+  tables (`settingValues`, `settingTexts`, `settingStructures`) are loops over the rows. A key added
+  to the schema is rendered — and diffed on an external edit — by the act of being described, with
+  one row invariant in place of three cover tests. No change to what the pane shows.
+
 - **Config resolution has no carrier left between the file and the options.** A key used to travel
   from the config file to the running engine through two structs that existed only to carry it —
   a pointer-shaped precedence layer, then a resolved-settings struct — before a third pass wrote it

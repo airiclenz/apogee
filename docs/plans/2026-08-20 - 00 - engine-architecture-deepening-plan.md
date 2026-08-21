@@ -522,7 +522,15 @@ the deleted cases and went with them.
 
 **Commit:** `refactor(config): dissolve Settings and Layer into Options`
 
-## 21. The settings display tables become registry projections
+## 21. The settings display tables become registry projections — ✅ DONE (2026-08-21)
+
+NOTES (2026-08-21): the item names two accessors; the rows carry THREE. `settingTexts` cannot be a loop over rows without one — the text row's `Read` answers the summary ("12 lines") that the pane paints, and the prose behind it is a second value only that row can give. `Text` is non-nil for exactly the KindText rows, and the completeness guard's three clauses (`TestRegistryRowsProjectEveryValue`) are the one guard the item asks for, with one clause per projection. The alternative — `Read` answering the prose and the pane summarizing it — would have made `cmd/apogee` keep a copy of `countSummary`/`lineCount` for one key.
+
+NOTES (2026-08-21): the five display helpers moved from `cmd/apogee/settingsrows.go` to `internal/config/registry.go` with the projections, except the two `internal/config` ALREADY had its own copy of: `listValue` (configwrite_scalar.go) and `lineCount` (configwrite_scalarsplice.go). Both copies existed because "the binary's display projection stays in the binary" — no longer true, so the rows borrow the writer's spelling and both comments now say so. That is what makes a value shown and the same value written one string rather than two that agree by inspection.
+
+NOTES (2026-08-21): four files outside the item's Files list changed, all of them documents the move makes untrue. `internal/config/configwrite_scalar.go` and `configwrite_scalarsplice.go`: the duplication comments above. `internal/config/doc.go`: its "what deliberately did NOT come along" paragraph claimed the whole /settings display projection stays in the binary. `docs/adr/0043-...md`: same claim as a decision, amended (2026-08-21) to move the line from the file to the fact — the value's SPELLING is the schema's, how a row is DRAWN stays in the binary, and the rejected "move settingsrows.go / settingsedit.go" alternative still stands as rejected.
+
+NOTES (2026-08-21): two closing prose blocks of `settingsrows.go` went with the tables they annotated. The `validated-sets:` one is already stated on that key's registry row; the `model-profiles:` one (why a per-model profile is summarized by count, ADR 0044) moved onto its row.
 
 **Source:** review candidate 2; ratified call 3. Depends on item 20.
 

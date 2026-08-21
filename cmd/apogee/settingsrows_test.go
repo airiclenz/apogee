@@ -90,43 +90,6 @@ func TestSettingsRowsMatchTheRegistryOrder(t *testing.T) {
 	}
 }
 
-// Every registry key has a value formatter, and no formatter names a path the registry does not
-// have. This is the projection's own anti-drift guard, one level above the schema bijection: a key
-// added to the registry without a formatter would render as an honest-looking blank row.
-func TestSettingValuesCoverEveryRegistryKey(t *testing.T) {
-	t.Parallel()
-
-	for _, k := range config.KeyRegistry {
-		if _, ok := settingValues[k.Path]; !ok {
-			t.Errorf("registry key %q has no settingValues formatter — /settings would show it blank", k.Path)
-		}
-	}
-	for path := range settingValues {
-		if _, ok := config.LookupKey(path); !ok {
-			t.Errorf("settingValues formats %q, which the registry does not describe (renamed or removed key?)", path)
-		}
-	}
-}
-
-// The same guard for the second, tiny table: a KindText row whose prose nothing projects would open
-// its editor on an empty field and offer to overwrite the prompt with what was typed into it, and a
-// projection for a key that is not text would be prose no surface reads.
-func TestSettingTextsCoverEveryTextKey(t *testing.T) {
-	t.Parallel()
-
-	for _, k := range config.KeyRegistry {
-		if _, ok := settingTexts[k.Path]; ok != (k.Kind == config.KindText) {
-			t.Errorf("registry key %q is kind %q but settingTexts projects it = %v — the raw value is "+
-				"carried for exactly the text keys", k.Path, k.Kind, ok)
-		}
-	}
-	for path := range settingTexts {
-		if _, ok := config.LookupKey(path); !ok {
-			t.Errorf("settingTexts projects %q, which the registry does not describe (renamed or removed key?)", path)
-		}
-	}
-}
-
 // The text row carries BOTH halves: the summary a row has space for, and the prose the editor opens
 // on. They are read in different places and neither stands in for the other.
 func TestSettingsRowsCarryThePromptTextBesideItsSummary(t *testing.T) {

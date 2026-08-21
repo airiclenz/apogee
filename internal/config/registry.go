@@ -113,6 +113,27 @@ const (
 // settings surface and a value refused at launch are refused by one implementation. Startup
 // resolution does not call it — it validates the parsed block it already builds — so this is
 // the write path's guard rather than a second schema.
+//
+// Read, Text and Structure are the row's three projections of a RESOLVED config ([Options]) —
+// what the key is holding right now, as against everything above, which says what the key is.
+// A surface that renders a key therefore reads its value off the same row it reads the key's
+// name, kind and default off, instead of restating the schema in a table of its own; the guard
+// is mechanical (TestRegistryRowsProjectEveryValue), so a key added here is rendered by the act
+// of being described rather than the day somebody remembers a second table:
+//
+//   - Read is the value SPELLED THE WAY THE FILE SPELLS IT ("true", "[AGENTS.md]", "1m30s"), so a
+//     row and the file read alike and the string a surface seeds an edit field with is one the
+//     writer takes back unchanged. Every row has one. A structured block is the exception it
+//     cannot be: no row holds a list of servers, so those rows answer with a summary of how much
+//     is in the block ("3 servers"), empty when it holds nothing.
+//   - Text is the RAW value of a key whose Read is only a summary of it — the prose behind
+//     "12 lines", which an editor opens on. Non-nil for exactly the KindText rows, which is the
+//     one key of the schema whose value no row can hold.
+//   - Structure is the LOSSLESS value behind a structured summary, non-nil for exactly the
+//     KindStructured rows. It is what a re-read DIFFS a block by, because two different blocks
+//     summarize alike: repoint the one `mcp-servers:` entry at another machine and the row still
+//     reads "1 server". Its values are compared, never rendered — a `servers:` entry carries an
+//     api-key, and it stays as far from a row as it has always been.
 type Key struct {
 	Path       string
 	Kind       Kind
@@ -125,6 +146,9 @@ type Key struct {
 	Masked     bool
 	Validate   func(value string) error
 	Desc       string
+	Read       func(o Options) string
+	Text       func(o Options) string
+	Structure  func(o Options) any
 }
 
 // The closed vocabularies of the three enum keys, in the order their parse sites list them.
@@ -146,7 +170,9 @@ var (
 var KeyRegistry = []Key{
 	{
 		Path: "servers", Kind: KindStructured,
-		Desc: "The servers you run models on — name, endpoint, and what each one needs.",
+		Desc:      "The servers you run models on — name, endpoint, and what each one needs.",
+		Read:      func(o Options) string { return countSummary(len(o.Servers), "server") },
+		Structure: func(o Options) any { return o.Servers },
 	},
 	{
 		// A kind of its own rather than an enum, even though its values ARE a closed set: EnumValues
@@ -163,6 +189,7 @@ var KeyRegistry = []Key{
 		EnvVar: EnvServer, FlagName: "server",
 		Editable: true,
 		Desc:     "Which servers: entry a session starts on; /server records the last one chosen.",
+		Read:     func(o Options) string { return o.StartupServer },
 	},
 	{
 		Path: "mode", Kind: KindEnum, Default: string(domain.ModeAskBefore), EnumValues: modeValues,
@@ -170,6 +197,7 @@ var KeyRegistry = []Key{
 		Editable: true, // Shift+Tab drives the same seam this key's live apply does
 		Validate: validateSettingMode,
 		Desc:     "Autonomy mode: how tool calls are gated, from least to most autonomous.",
+		Read:     func(o Options) string { return o.Mode },
 	},
 	{
 		// Prose rather than a value on a line, so it is the one key the pane edits in a field of its
@@ -180,6 +208,12 @@ var KeyRegistry = []Key{
 		Editable: true,
 		Validate: validateSystemPromptText,
 		Desc:     "The system prompt written inline — the standing instructions sent ahead of your first message.",
+		// The row shows how MUCH prose there is, since no row holds prose; Text carries the prose
+		// itself, which is what the editor opens on. Blank when nothing is set inline — the answer
+		// every row whose value seeds a field gives, since "none" would be a word standing where the
+		// prompt goes.
+		Read: func(o Options) string { return countSummary(lineCount(o.SystemPrompt.Global.Text), "line") },
+		Text: func(o Options) string { return o.SystemPrompt.Global.Text },
 	},
 	{
 		// A plain path on a plain line, so the pane types it like any other string. What it names is
@@ -190,15 +224,25 @@ var KeyRegistry = []Key{
 		Editable: true,
 		Validate: validateSystemPromptFile,
 		Desc:     "A file to read the system prompt from instead of writing it inline.",
+		// The path AS WRITTEN, blank when the key names no file: this value SEEDS an edit field, so a
+		// word standing in for emptiness would be a word the next commit persisted as a path, and a row
+		// reading "none" against a blank default would arm a reset for a key with no line to remove.
+		Read: func(o Options) string { return o.SystemPrompt.Global.File },
 	},
 	{
 		Path: "system-prompt-models", Kind: KindStructured,
-		Desc: "Per-model system prompts, keyed by resolved model name; a match replaces the global prompt whole.",
+		Desc:      "Per-model system prompts, keyed by resolved model name; a match replaces the global prompt whole.",
+		Read:      func(o Options) string { return countSummary(len(o.SystemPrompt.Models), "model") },
+		Structure: func(o Options) any { return o.SystemPrompt.Models },
 	},
 	{
 		Path: "context-files.enable", Kind: KindBool, Default: "true",
 		Editable: true,
 		Desc:     "Fold the workspace context files below into the system prompt at session start.",
+		// Answered from the resolved LIST rather than from the switch: the block resolves to the names
+		// in force (nil when the feature is off, however it got there — `enable: false`, or an empty
+		// `names:`), and the effective outcome is what the row is asked about.
+		Read: func(o Options) string { return boolValue(len(o.ContextFiles) > 0) },
 	},
 	{
 		// The one list the file writes on a single line, and therefore the one a text field can edit
@@ -208,27 +252,34 @@ var KeyRegistry = []Key{
 		Editable: true,
 		Validate: validateContextFileNames, // the startup check itself: contextFilesSettings.validate
 		Desc:     "Workspace-root file names folded into the system prompt, in list order.",
+		Read:     func(o Options) string { return listValue(o.ContextFiles) },
 	},
 	{
 		Path: "confine-to-workspace", Kind: KindBool, Default: "true",
 		GlobalOnly: true,
 		Editable:   false, // the acknowledgement interlock stays single-homed in /confine (ADR 0012)
 		Desc:       "Auto's blast radius: filesystem writes fenced to the workspace under OS confinement.",
+		Read:       func(o Options) string { return boolValue(o.ConfineToWorkspace) },
 	},
 	{
 		Path: "unconfined-hosts", Kind: KindStructured,
 		GlobalOnly: true,
 		Desc:       "Machines acknowledged as disposable, where auto mode runs unconfined.",
+		Read:       func(o Options) string { return countSummary(len(o.UnconfinedHosts), "host") },
+		Structure:  func(o Options) any { return o.UnconfinedHosts },
 	},
 	{
 		Path: "web-search-endpoint", Kind: KindString,
 		Editable: true,
 		Validate: validateSearchEndpoint,
 		Desc:     "Search endpoint the web_search tool queries; unset uses DuckDuckGo, off disables it.",
+		Read:     func(o Options) string { return o.WebSearchEndpoint },
 	},
 	{
 		Path: "mcp-servers", Kind: KindStructured,
-		Desc: "External MCP servers connected at startup; their tools always ask in auto.",
+		Desc:      "External MCP servers connected at startup; their tools always ask in auto.",
+		Read:      func(o Options) string { return countSummary(len(o.MCPServers), "server") },
+		Structure: func(o Options) any { return o.MCPServers },
 	},
 	{
 		// The roster switch, a name list on one line like context-files.names — so the pane edits it
@@ -239,6 +290,9 @@ var KeyRegistry = []Key{
 		Path: "tools.disabled", Kind: KindStringList,
 		Editable: true,
 		Desc:     "Built-in tools to take off the menu, by name; the model is neither offered nor able to call them.",
+		// The NAMES rather than a count: the list is short, which tools are off is the whole of what
+		// the row is asked, and the value seeds the edit field — blank when nothing is disabled.
+		Read: func(o Options) string { return listValue(o.ToolsDisabled) },
 	},
 	{
 		// The host layer over the network tools' url-safety guard, a name list on one line like the
@@ -249,37 +303,46 @@ var KeyRegistry = []Key{
 		Path: "url-safety.allow-hosts", Kind: KindStringList,
 		Editable: true,
 		Desc:     "Hosts the network tools may reach, with their subdomains; empty means every host.",
+		// The names, for the roster's reason above — and "[]" for a list nobody has set, since an empty
+		// allow list means every host rather than none.
+		Read: func(o Options) string { return listValue(o.URLAllowHosts) },
 	},
 	{
 		Path: "url-safety.deny-hosts", Kind: KindStringList,
 		Editable: true,
 		Desc:     "Hosts the network tools may never reach, with their subdomains; deny wins over the allow list.",
+		Read:     func(o Options) string { return listValue(o.URLDenyHosts) },
 	},
 	{
 		Path: "use-project-skills", Kind: KindBool, Default: "true",
 		Editable: true,
 		Desc:     "Discover skills from the workspace's bare skills/ folder as well as the libraries.",
+		Read:     func(o Options) string { return boolValue(o.UseProjectSkills) },
 	},
 	{
 		Path: "auto-compact", Kind: KindBool, Default: "true",
 		Editable: true,
 		Desc:     "Fold older turns into a compact brief before the context window overflows.",
+		Read:     func(o Options) string { return boolValue(o.AutoCompact) },
 	},
 	{
 		Path: "auto-title", Kind: KindBool, Default: "true",
 		Editable: true,
 		Desc:     "Name a new session from its first prompt with one small extra completion.",
+		Read:     func(o Options) string { return boolValue(o.AutoTitle) },
 	},
 	{
 		Path: "remember-model", Kind: KindBool, Default: "false",
 		Editable: true,
 		Desc:     "Record the model you pick into its servers: entry and come back on it next start.",
+		Read:     func(o Options) string { return boolValue(o.RememberModel) },
 	},
 	{
 		Path: "context-window", Kind: KindInt, Default: "0",
 		Editable: true,
 		Validate: validateContextWindow,
 		Desc:     "Pin the model context window in tokens; 0 discovers it from the server, live.",
+		Read:     func(o Options) string { return strconv.Itoa(o.ContextWindow) },
 	},
 	{
 		// Editable, and the edit is honoured at the NEXT start — the share is read off the file into
@@ -291,43 +354,54 @@ var KeyRegistry = []Key{
 		Validate: validateResponseReserve,
 		Desc: "Share of the window held back for the reply, above 0 and below 1; " +
 			"0 takes apogee's own 0.20; takes effect at the next start.",
+		// The share in the SHORTEST spelling that reads back as the same number, which is the spelling
+		// the writer persists too — so the value seeding an edit field is one the next commit writes
+		// back unchanged.
+		Read: func(o Options) string { return strconv.FormatFloat(o.ResponseReserve, 'g', -1, 64) },
 	},
 	{
 		Path: "present.auto-open", Kind: KindBool, Default: "true",
 		Editable: true,
 		Desc:     "Open a presented document in its application on a local desktop run.",
+		Read:     func(o Options) string { return boolValue(o.Present.AutoOpen) },
 	},
 	{
 		Path: "present.command", Kind: KindString,
 		Editable: true,
 		Desc:     "Open presented documents with this application instead of the OS default ({path} = the file).",
+		Read:     func(o Options) string { return o.Present.Command },
 	},
 	{
 		Path: "present.port", Kind: KindInt, Default: "0",
 		Editable: true,
 		Validate: validatePresentPort,
 		Desc:     "The built-in document server's port; 0 picks a free one per session.",
+		Read:     func(o Options) string { return strconv.Itoa(o.Present.Port) },
 	},
 	{
 		Path: "present.host", Kind: KindString,
 		Editable: true,
 		Desc:     "Address the printed document URL advertises; empty is detected from the SSH connection.",
+		Read:     func(o Options) string { return o.Present.Host },
 	},
 	{
 		Path: "ui.spinner", Kind: KindEnum, Default: "snake", EnumValues: spinnerValues,
 		Editable: true,
 		Validate: validateSpinnerName,
 		Desc:     "The status-line spinner animation shown while a turn runs.",
+		Read:     func(o Options) string { return string(o.UI.Spinner) },
 	},
 	{
 		Path: "ui.spinner-color", Kind: KindBool, Default: "true",
 		Editable: true,
 		Desc:     "Run the ten-second colour loop over the spinner glyph.",
+		Read:     func(o Options) string { return boolValue(o.UI.SpinnerColor) },
 	},
 	{
 		Path: "ui.show-scrollbar", Kind: KindBool, Default: "true",
 		Editable: true,
 		Desc:     "Paint the scroll bar on the transcript and on any overflowing popup, and reserve its column.",
+		Read:     func(o Options) string { return boolValue(o.UI.ShowScrollbar) },
 	},
 	{
 		// A dynamic vocabulary (KindScheme), so EnumValues is empty and the surface asks the session
@@ -337,6 +411,7 @@ var KeyRegistry = []Key{
 		Editable: true,
 		Validate: validateColorSchemeName,
 		Desc:     "Palette the screen is drawn in; ~/.apogee/schemes/<name>.yaml shadows a built-in.",
+		Read:     func(o Options) string { return o.UI.ColorScheme },
 	},
 	{
 		// A length of time, which this table has no kind for — and one key is not a vocabulary, so it
@@ -346,6 +421,9 @@ var KeyRegistry = []Key{
 		Editable: true,
 		Validate: validateStallAfter,
 		Desc:     "Engine silence after which a running turn is marked quiet on the status line; 0 turns it off.",
+		// The threshold as a DURATION prints itself (`1m30s`), a spelling the key takes back — so the
+		// value seeding an edit field is one the next commit persists unchanged.
+		Read: func(o Options) string { return o.UI.StallAfter.String() },
 	},
 	{
 		// No validate hook and none possible: a bool's kind IS its whole contract. Editable, and the
@@ -355,12 +433,17 @@ var KeyRegistry = []Key{
 		Path: "ui.inspector", Kind: KindBool, Default: "false",
 		Editable: true,
 		Desc:     "Capture raw request/response traffic for /inspect; takes effect at the next start.",
+		// What this RUN is capturing, which for a startup-only key is what the file said when it
+		// started: a row edited mid-session goes on reporting the armed state until the next start,
+		// the same fact the description states.
+		Read: func(o Options) string { return boolValue(o.UI.Inspector) },
 	},
 	{
 		Path: "cursor-shape", Kind: KindEnum, Default: "block", EnumValues: cursorShapeValues,
 		Editable: true,
 		Validate: validateCursorShapeName,
 		Desc:     "The shape the prompt's caret is drawn with; it is always steady.",
+		Read:     func(o Options) string { return o.CursorShape },
 	},
 	{
 		// Free text with no validate hook, like present.command: the value is a command LINE, and
@@ -368,16 +451,23 @@ var KeyRegistry = []Key{
 		Path: "editor", Kind: KindString,
 		Editable: true,
 		Desc:     "Command an external edit opens in; unset falls back to $VISUAL, $EDITOR, the OS opener.",
+		// The command AS WRITTEN, blank when the key names none: the value seeds an edit field, so a
+		// word standing in for emptiness ("$EDITOR", "the OS opener") would be a word the next commit
+		// persisted as a command.
+		Read: func(o Options) string { return o.Editor },
 	},
 	{
 		Path: "bypass", Kind: KindBool, Default: "false",
 		EnvVar: EnvBypass, FlagName: "bypass",
 		Editable: true,
 		Desc:     "Run with Mechanisms off; the structural context reducers stay on.",
+		Read:     func(o Options) string { return boolValue(o.Bypass) },
 	},
 	{
 		Path: "mechanisms", Kind: KindStructured,
-		Desc: "Catalogued small-model Mechanisms to enable by canonical ID; every one defaults off.",
+		Desc:      "Catalogued small-model Mechanisms to enable by canonical ID; every one defaults off.",
+		Read:      func(o Options) string { return countSummary(enabledCount(o.Mechanisms), "mechanism") },
+		Structure: func(o Options) any { return o.Mechanisms },
 	},
 	{
 		// The block's off-switch is a row of its own, for the `context-files.*` reason: it is a bool
@@ -387,14 +477,23 @@ var KeyRegistry = []Key{
 		Path: "validated-sets.enable", Kind: KindBool, Default: "true",
 		Editable: true,
 		Desc:     "Apply the Validated Mechanism set measured for the bound model when one matches.",
+		Read:     func(o Options) string { return boolValue(o.ValidatedSetsEnable) },
 	},
 	{
 		Path: "validated-sets.alias", Kind: KindStructured,
-		Desc: "Explicit carry-over from a runtime model label to the Validated-set entry it applies.",
+		Desc:      "Explicit carry-over from a runtime model label to the Validated-set entry it applies.",
+		Read:      func(o Options) string { return countSummary(len(o.ValidatedSetsAlias), "alias") },
+		Structure: func(o Options) any { return o.ValidatedSetsAlias },
 	},
 	{
+		// Summarized by its COUNT, like every other block of entries no row can hold. What the summary
+		// does not say — which model each pattern matches, and what shape it gives it — is deliberate:
+		// a profile is per-model (ADR 0044), so no single line can name the one in force without
+		// knowing which model is bound.
 		Path: "model-profiles", Kind: KindStructured,
-		Desc: "How a model speaks the wire — tool-call format and thinking style — per name pattern.",
+		Desc:      "How a model speaks the wire — tool-call format and thinking style — per name pattern.",
+		Read:      func(o Options) string { return countSummary(len(o.ModelProfiles), "model profile") },
+		Structure: func(o Options) any { return o.ModelProfiles },
 	},
 }
 
@@ -603,6 +702,50 @@ func validateCursorShapeName(value string) error {
 func validateSettingMode(value string) error {
 	_, err := domain.ParseMode(value)
 	return err
+}
+
+// ----------------------------------------------------------------------------
+// The rows' value projections
+// ----------------------------------------------------------------------------
+//
+// The spellings Key.Read answers in, shared by the rows that answer alike. They live beside the
+// table for the reason the validate hooks do: what a key's value LOOKS like written down is a fact
+// about the key, and a surface that had to spell it would be a second, quietly diverging schema —
+// which is also why the two spellings the WRITER already owned are borrowed rather than restated
+// here ([listValue], [lineCount]), so a value shown and the same value written are one string.
+// A display SURFACE still owns everything about how a row is drawn — its sections, the mask over a
+// secret, the word an empty structured row shows — and none of that is here (ADR 0011).
+
+// boolValue spells a bool the way the config file spells it.
+func boolValue(v bool) string { return strconv.FormatBool(v) }
+
+// countSummary summarizes a structured block by how much is in it ("3 servers"). Zero returns
+// EMPTY rather than "0 servers", so a surface's own rule for an empty block ("none") is what the
+// reader sees, in the one wording every empty structured row shows. The plural is the naive one
+// because every noun the rows count ("server", "model", "host", "line", "mechanism", "alias")
+// takes a bare s.
+func countSummary(n int, noun string) string {
+	switch n {
+	case 0:
+		return ""
+	case 1:
+		return "1 " + noun
+	default:
+		return strconv.Itoa(n) + " " + noun + "s"
+	}
+}
+
+// enabledCount counts the Mechanisms actually switched ON. A `mechanisms:` block may carry explicit
+// `false` entries — that is how a user records a decision to leave one off — and those are not
+// enabled Mechanisms, so counting map keys would overstate what the session is running.
+func enabledCount(mechanisms map[string]bool) int {
+	n := 0
+	for _, on := range mechanisms {
+		if on {
+			n++
+		}
+	}
+	return n
 }
 
 // LookupKey returns the registry row for a yaml path. A linear scan is the right shape at

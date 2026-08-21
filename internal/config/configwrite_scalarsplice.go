@@ -236,13 +236,10 @@ func blockScalarHeader(value string, indent int) string {
 	return "|"
 }
 
-// lineCount counts the lines of a multi-line value.
-//
-// It is deliberately duplicated from the /settings row renderer (cmd/apogee/settingsrows.go), which
-// counts the same lines for the human. It is three lines of string handling with no state behind
-// it, and the binary's display projection stays in the binary (ADR 0011, ADR 0043) — so the
-// alternative to two copies is an exported string-formatting surface on this package that exists
-// only so the renderer can borrow it.
+// lineCount counts the lines of a multi-line value: how much block the writer is about to replace,
+// and — since the registry rows carry the display projection (Key.Read) — how a system prompt is
+// summarized for a row, its text being far too long to show and its length being what the human
+// recognizes it by.
 func lineCount(text string) int {
 	if text == "" {
 		return 0

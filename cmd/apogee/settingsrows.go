@@ -9,14 +9,13 @@ package main
 // none of it (ADR 0011's thin renderer). What crosses the seam is a list of rows a pane can paint
 // and select in, and nothing else.
 //
-// Two tables do the work, and both are covered by tests that pin them to the registry so a key
-// added there cannot quietly render as a blank row: settingSections names the runs of keys the
-// pane groups under a header, and settingValues formats each key's effective value.
+// The values themselves come off the registry rows (config.Key.Read and its two siblings), so a key
+// added to the schema renders by the act of being described rather than by a table here somebody has
+// to remember. What this file owns is the PRESENTATION: settingSections names the runs of keys the
+// pane groups under a header, and settingsRows applies the rules that hold for every row alike —
+// the mask over a secret, the word an empty block shows, the default a row falls back to.
 
 import (
-	"strconv"
-	"strings"
-
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/tui"
 )
@@ -89,105 +88,17 @@ var settingSections = []settingSection{
 	{Name: "Model profiles", Opens: "model-profiles"},
 }
 
-// settingValues formats each key's EFFECTIVE value — what this run actually resolved, spelled the
-// way the config file spells it, so the row and the file read the same. A structured block is
-// summarized instead ("3 servers"): the pane cannot edit one, so a YAML fragment would be noise.
-//
-// It is keyed by registry path and covers every row (TestSettingValuesCoverEveryRegistryKey). A
-// path with no formatter renders as an empty value rather than panicking — a table gap must not
-// cost the user the whole surface mid-session — and that test is what keeps the gap from shipping.
-var settingValues = map[string]func(config.Options) string{
-	"servers": func(o config.Options) string { return countSummary(len(o.Servers), "server") },
-	"server":  func(o config.Options) string { return o.StartupServer },
-	"mode":    func(o config.Options) string { return o.Mode },
-	// A SUMMARY of the prompt, since no row holds prose — the text itself travels beside it
-	// (settingTexts) for the editor to open on. Blank when nothing is set inline, the answer every
-	// other row whose value seeds a field gives: "none" would be a word standing where the prompt goes.
-	"system-prompt-text": func(o config.Options) string { return countSummary(lineCount(o.SystemPrompt.Global.Text), "line") },
-	// The path AS WRITTEN, blank when the key names no file — the three other editable string rows'
-	// answer (present.command, present.host, web-search-endpoint), and the only safe one: this row's
-	// value is what the edit field is SEEDED with, so a word standing in for emptiness would be a word
-	// the next ⏎ persisted as a path, and a row reading "none" against a blank default would arm a
-	// reset for a key with no line to remove.
-	"system-prompt-file": func(o config.Options) string { return o.SystemPrompt.Global.File },
-	"system-prompt-models": func(o config.Options) string {
-		return countSummary(len(o.SystemPrompt.Models), "model")
-	},
-	// The `context-files:` block resolves to the NAME LIST in force (nil when the feature is off,
-	// however it got there — `enable: false`, or an empty `names:`), which is why enable is reported
-	// from the list rather than from a flag: the effective outcome is what the row is asked about.
-	"context-files.enable": func(o config.Options) string { return boolValue(len(o.ContextFiles) > 0) },
-	"context-files.names":  func(o config.Options) string { return listValue(o.ContextFiles) },
-	"confine-to-workspace": func(o config.Options) string { return boolValue(o.ConfineToWorkspace) },
-	"unconfined-hosts":     func(o config.Options) string { return countSummary(len(o.UnconfinedHosts), "host") },
-	"web-search-endpoint":  func(o config.Options) string { return o.WebSearchEndpoint },
-	"mcp-servers":          func(o config.Options) string { return countSummary(len(o.MCPServers), "server") },
-	// The roster switch shows the NAMES it holds, not a count: the list is short, and which tools
-	// are off is the whole of what the row is asked. Blank when nothing is disabled — the answer
-	// every editable field row gives, since this value seeds the edit field.
-	"tools.disabled": func(o config.Options) string { return listValue(o.ToolsDisabled) },
-	// The url-safety host layer shows its NAMES for the roster's reason: the lists are short, which
-	// hosts are permitted or denied is the whole of what each row is asked, and the value seeds the
-	// edit field — so it reads back as the flow sequence the file carries, "[]" for a list nobody has
-	// set (an empty allow list means every host, not none).
-	"url-safety.allow-hosts": func(o config.Options) string { return listValue(o.URLAllowHosts) },
-	"url-safety.deny-hosts":  func(o config.Options) string { return listValue(o.URLDenyHosts) },
-	"use-project-skills":     func(o config.Options) string { return boolValue(o.UseProjectSkills) },
-	"auto-compact":           func(o config.Options) string { return boolValue(o.AutoCompact) },
-	"auto-title":             func(o config.Options) string { return boolValue(o.AutoTitle) },
-	"remember-model":         func(o config.Options) string { return boolValue(o.RememberModel) },
-	"context-window":         func(o config.Options) string { return strconv.Itoa(o.ContextWindow) },
-	// The share in the SHORTEST spelling that reads back as the same number, which is the spelling
-	// the writer persists too — so the value this row seeds its edit field with is one the next ⏎
-	// can write back unchanged.
-	"response-reserve": func(o config.Options) string {
-		return strconv.FormatFloat(o.ResponseReserve, 'g', -1, 64)
-	},
-	"present.auto-open": func(o config.Options) string { return boolValue(o.Present.AutoOpen) },
-	"present.command":   func(o config.Options) string { return o.Present.Command },
-	"present.port":      func(o config.Options) string { return strconv.Itoa(o.Present.Port) },
-	"present.host":      func(o config.Options) string { return o.Present.Host },
-	"ui.spinner":        func(o config.Options) string { return string(o.UI.Spinner) },
-	"ui.spinner-color":  func(o config.Options) string { return boolValue(o.UI.SpinnerColor) },
-	"ui.show-scrollbar": func(o config.Options) string { return boolValue(o.UI.ShowScrollbar) },
-	"ui.color-scheme":   func(o config.Options) string { return o.UI.ColorScheme },
-	// The threshold as a DURATION prints itself (`1m30s`), which is a spelling the key takes back —
-	// so the value this row seeds its edit field with is one the next ⏎ can persist unchanged.
-	"ui.stall-after": func(o config.Options) string { return o.UI.StallAfter.String() },
-	// What this RUN is capturing, which for a startup-only key is what the file said when it
-	// started — so a row edited mid-session goes on reporting the armed state until the next start,
-	// the same fact the key's description states.
-	"ui.inspector": func(o config.Options) string { return boolValue(o.UI.Inspector) },
-	"cursor-shape": func(o config.Options) string { return o.CursorShape },
-	// The command AS WRITTEN, blank when the key names none — the answer every other editable string
-	// row gives, and the only safe one here too: this value SEEDS the edit field, so a word standing
-	// in for emptiness ("$EDITOR", "the OS opener") would be a word the next ⏎ persisted as a command.
-	"editor":                func(o config.Options) string { return o.Editor },
-	"bypass":                func(o config.Options) string { return boolValue(o.Bypass) },
-	"mechanisms":            func(o config.Options) string { return countSummary(enabledCount(o.Mechanisms), "mechanism") },
-	"validated-sets.enable": func(o config.Options) string { return boolValue(o.ValidatedSetsEnable) },
-	"validated-sets.alias":  func(o config.Options) string { return countSummary(len(o.ValidatedSetsAlias), "alias") },
-	"model-profiles":        func(o config.Options) string { return countSummary(len(o.ModelProfiles), "model profile") },
-}
-
-// settingTexts is the RAW value of the keys whose displayed value is only a summary of it — the
-// KindText rows, whose editor is seeded with the prose itself (tui.SettingRow.Text). It is a second,
-// deliberately tiny table rather than a second return from settingValues: exactly one key of the
-// schema is prose, and every other row would have to answer a question it has no answer to.
-// TestSettingTextsCoverEveryTextKey pins it to the registry.
-var settingTexts = map[string]func(config.Options) string{
-	"system-prompt-text": func(o config.Options) string { return o.SystemPrompt.Global.Text },
-}
-
 // settingsRows builds the /settings pane's rows: one per registry key, in registry order (which is
 // the config template's order), each carrying its section, its effective value, and the metadata
 // the pane needs in order to render and later edit it.
 //
-// Three things are applied HERE rather than in the per-key formatters, so no formatter can forget
-// one: a masked key's value is replaced by the mask, a structured key with nothing in it reads
-// "none", and a key whose effective value came out empty while the registry declares a default
-// shows that default — an unset `cursor-shape:` is a block caret, and saying so is the honest
-// answer to "what is this set to".
+// The value and the prose behind it are the ROW's answers (config.Key.Read, config.Key.Text) — a nil
+// projection renders as an empty value rather than panicking, because a gap in the registry must not
+// cost the user the whole surface mid-session. Three rules are applied HERE, on top of whatever the
+// row answered, so no per-key projection can forget one: a masked key's value is replaced by the
+// mask, a structured key with nothing in it reads "none", and a key whose effective value came out
+// empty while the registry declares a default shows that default — an unset `cursor-shape:` is a
+// block caret, and saying so is the honest answer to "what is this set to".
 func settingsRows(opts config.Options) []tui.SettingRow {
 	rows := make([]tui.SettingRow, 0, len(config.KeyRegistry))
 	section := ""
@@ -198,8 +109,8 @@ func settingsRows(opts config.Options) []tui.SettingRow {
 			next++
 		}
 		value := ""
-		if format, ok := settingValues[k.Path]; ok {
-			value = format(opts)
+		if k.Read != nil {
+			value = k.Read(opts)
 		}
 		switch {
 		case k.Masked && value != "":
@@ -210,8 +121,8 @@ func settingsRows(opts config.Options) []tui.SettingRow {
 			value = k.Default
 		}
 		text := ""
-		if raw, ok := settingTexts[k.Path]; ok {
-			text = raw(opts)
+		if k.Text != nil {
+			text = k.Text(opts)
 		}
 		source, sourceName := settingSource(k, opts.Overrides)
 		rows = append(rows, tui.SettingRow{
@@ -316,64 +227,3 @@ func editPointer(k config.Key) string {
 func externallyEdited(k config.Key) bool {
 	return !k.Editable && !k.GlobalOnly && k.Path != settingKeyMechanisms
 }
-
-// boolValue spells a bool the way the config file spells it.
-func boolValue(v bool) string { return strconv.FormatBool(v) }
-
-// listValue spells a resolved name list the way the template's inline form spells it
-// ("[AGENTS.md]"), so the row and the registry's default for the key read alike. An empty list is
-// "[]" rather than "none": the key holds a list, and an empty one is a value the user can have set.
-//
-// It is also the CANONICAL spelling the splice writer verifies a written list against
-// (internal/config/configwrite.go, which carries its own copy of this three-line spelling for the
-// same reason): the row's text and the value a reader takes back out of the file are one string,
-// or an edit would come back reading differently from what was typed.
-func listValue(names []string) string { return "[" + strings.Join(names, ", ") + "]" }
-
-// countSummary summarizes a structured block by how much is in it ("3 servers"). Zero returns
-// EMPTY rather than "0 servers", so settingsRows' one central rule turns it into "none" — the
-// same word every other empty structured row shows. The plural is the naive one because every
-// noun this file counts ("server", "model", "host", "line", "mechanism", "alias") takes a bare s.
-func countSummary(n int, noun string) string {
-	switch n {
-	case 0:
-		return ""
-	case 1:
-		return "1 " + noun
-	default:
-		return strconv.Itoa(n) + " " + noun + "s"
-	}
-}
-
-// lineCount counts the lines of a multi-line value — how a system prompt is summarized, since its
-// text is far too long to show on a row and its length is what the human recognizes it by.
-func lineCount(text string) int {
-	if text == "" {
-		return 0
-	}
-	return len(strings.Split(strings.TrimSuffix(text, "\n"), "\n"))
-}
-
-// enabledCount counts the Mechanisms actually switched ON. A `mechanisms:` block may carry explicit
-// `false` entries — that is how a user records a decision to leave one off — and those are not
-// enabled Mechanisms, so counting map keys would overstate what the session is running.
-func enabledCount(mechanisms map[string]bool) int {
-	n := 0
-	for _, on := range mechanisms {
-		if on {
-			n++
-		}
-	}
-	return n
-}
-
-// The `validated-sets:` block is two rows rather than one summary of both: the off-switch is the
-// fact that decides whether the rest of the block does anything, and it is a bool the pane writes
-// (boolValue above), while the carry-over aliases stay a counted structured row (countSummary) that
-// ⏎ opens the file on — a map of runtime labels to entry keys is a shape no row holds.
-
-// The `model-profiles:` map is summarized by its COUNT (countSummary above), like every other block
-// of entries the pane cannot hold on a row. What it does not say — which model each pattern matches,
-// and what shape it gives it — is deliberate: a profile is per-model now (ADR 0044), so no single
-// line can name the one in force without knowing which model is bound, and the row's job is to say
-// how many the file carries and open the file on that key.
