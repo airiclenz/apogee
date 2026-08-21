@@ -566,7 +566,13 @@ NOTES (2026-08-21): the two mechanism tests named after the removed gate (`TestV
 
 **Commit:** `refactor(config): one verified config-write transaction; scalar and mechanism writers adopt it`
 
-## 23. The entry, host-acknowledgement and legacy-fold writers adopt the transaction
+## 23. The entry, host-acknowledgement and legacy-fold writers adopt the transaction — ✅ DONE (2026-08-21)
+
+NOTES (2026-08-21): `internal/config/configedit.go` was edited although the item's Files list does not name it — the dispatch's DECISION asks for a read seam ON the transaction rather than a writer bypassing it. `edit` keeps its seeding read and now delegates to a new `editFrom(path, read, splice, verify)`, which is what the two key-source writers call with the existing non-seeding `readConfigForEntryEdit`. Every writer's seeding behavior is exactly what it was: the key-source pair does not seed, the other four do (they go through `edit`), and item 22's two callers are untouched.
+
+NOTES (2026-08-21): three of the item's named test files needed no edit — `configwrite_test.go`, `configwrite_server_test.go` and `configmigrate_test.go` drive only the writers' entry points, and those are behavior-identical. The fourth, `configwrite_keysource_test.go`, has one test that drove the gate directly: `verifiedEntrySplice` is now the transaction's `editVerify` half `verifyEntryEdit` — it no longer re-parses the edited bytes or hands them back, since the transaction does both — so the test calls that instead and is renamed `TestVerifyEntryEditNamesWhatTheEditFailedToPlace`.
+
+NOTES (2026-08-21): two of the writers keep a parse of their own, so that their own wording survives the transaction's held-back decoder error (configedit.go's ordering note). The fold asks first, because "the rest of it does not parse into settings apogee can read" is a sentence in the one paragraph it hands a user to fix by hand — that costs one extra parse of the file it starts from. An entry edit asks only when it found no entry, because a file that is not settings at all parses into the ZERO config, and refusing it with "it configures no servers at all" would be true of the value and misleading about the file — that parse is on the refusal path only. Both keep the pre-item errors byte-for-byte.
 
 **Source:** review candidate 9. Depends on item 22.
 

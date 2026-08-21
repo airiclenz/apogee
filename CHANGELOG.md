@@ -222,6 +222,17 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **The last four config writers ride the transaction too.** The two key-source entry writers (the
+  one that points an entry at a key command, and the one that records "this key stays in the file"),
+  the writer that remembers a model or Launch profile on one `servers:` entry, the `/confine off
+  --save` host acknowledgement and the one-time legacy fold now each state their edit as the same
+  locate + splice + verify triple the scalar and Mechanism writers do, over the one transaction
+  (`edit`) — instead of six copies of read, splice, re-parse, compare and replace the file
+  atomically. The transaction grew the one seam they needed for that: WHICH read an edit starts
+  from, because an entry edit must not seed an absent config from the embedded template — a template
+  names no server, so there would be nothing in it to rewrite. What lands on disk, and which edits
+  are refused with which words, is unchanged.
+
 - **A config write is one transaction.** The ~40 lines every writer into `config.yaml` carried a
   copy of — seed and read the file, splice the located text, re-parse, hold the result against the
   config it started from, replace the file atomically with its mode preserved — are now one function

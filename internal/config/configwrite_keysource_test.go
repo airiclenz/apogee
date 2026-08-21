@@ -302,11 +302,11 @@ func TestSaveServerPlaintextKeyOK_RefusesAnUnknownEntry(t *testing.T) {
 	}
 }
 
-// verifiedEntrySplice is the gate under every entry writer, not only the two key-source ones, so its
+// verifyEntryEdit is the gate under every entry writer, not only the two key-source ones, so its
 // refusal takes the noun from its caller: a model or launch-profile write that missed its entry must
 // not tell the reader "the key source" did not land. Driven directly, because the refusal is the
 // backstop for a splice that landed somewhere unexpected — no reachable fixture produces it.
-func TestVerifiedEntrySpliceNamesWhatTheEditFailedToPlace(t *testing.T) {
+func TestVerifyEntryEditNamesWhatTheEditFailedToPlace(t *testing.T) {
 	const config = "server: box\nservers:\n  - name: box\n    api-key: sk-1\n"
 	var before fileConfig
 	if err := yaml.Unmarshal([]byte(config), &before); err != nil {
@@ -318,11 +318,8 @@ func TestVerifiedEntrySpliceNamesWhatTheEditFailedToPlace(t *testing.T) {
 
 	for _, noun := range []string{"the key source", "the model"} {
 		t.Run(noun, func(t *testing.T) {
-			out, err := verifiedEntrySplice([]byte(config), before, 0, want, noun)
+			err := verifyEntryEdit(before, before, 0, want, noun)
 
-			if out != nil {
-				t.Errorf("a refused splice returned bytes to write:\n%s", out)
-			}
 			if err == nil {
 				t.Fatal("want a refusal when the edit did not land on the entry")
 			}

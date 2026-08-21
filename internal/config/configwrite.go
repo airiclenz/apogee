@@ -3,7 +3,6 @@ package config
 import (
 	"errors"
 	"fmt"
-	"os"
 	"slices"
 	"strings"
 	"time"
@@ -82,23 +81,23 @@ func saveHostAcknowledgement(path, hostID string, now time.Time) (string, Unconf
 		return "", UnconfinedHost{}, errors.New(
 			"apogee: cannot save the host acknowledgement: no config file path is known")
 	}
-	if _, err := seedConfig(path, defaultConfigYAML); err != nil {
-		return "", UnconfinedHost{}, err
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return "", UnconfinedHost{}, fmt.Errorf("apogee: read config %q: %w", path, err)
-	}
-
+	// The recorded entry is this one, unless the splice finds the list already names the host: then
+	// it is the entry that is on disk, which is what makes a repeated `--save` a confirmation.
 	entry := UnconfinedHost{ID: id, Acknowledged: now.Format(acknowledgedDateLayout), Note: hostAcknowledgementNote}
-	updated, recorded, err := insertHostAcknowledgement(data, entry)
-	if err != nil {
-		return "", UnconfinedHost{}, fmt.Errorf("apogee: update config %q: %w", path, err)
+	recorded := entry
+	splice := func(before fileConfig, data []byte) ([]byte, error) {
+		for _, h := range before.UnconfinedHosts {
+			if strings.TrimSpace(h.ID) == entry.ID {
+				recorded = h
+				return nil, nil // already acknowledged: nothing to write, and no second entry
+			}
+		}
+		return spliceHostAcknowledgement(data, entry)
 	}
-	if updated == nil { // already acknowledged: the save is a confirmation, not a second entry
-		return path, recorded, nil
+	verify := func(before, after fileConfig, _ []byte) error {
+		return verifyHostAcknowledgement(before, after, entry)
 	}
-	if err := writeConfigAtomically(path, updated); err != nil {
+	if err := edit(path, splice, verify); err != nil {
 		return "", UnconfinedHost{}, err
 	}
 	return path, recorded, nil
@@ -115,39 +114,17 @@ func HostAcknowledgementSaver(path, hostID string) func() (string, error) {
 	}
 }
 
-// insertHostAcknowledgement splices entry into the config bytes and returns the new file content.
-// A config whose list already names entry.ID is left alone: the returned content is nil (nothing
-// to write) and the reported entry is the one already on disk, which is what makes a repeated
-// `--save` idempotent.
-//
-// The splice is verified before it is returned: the result must parse, must carry exactly the old
-// list plus this entry, and must leave every other setting untouched — so an exotic file shape
-// surfaces as an error rather than as a quietly mangled config.
-func insertHostAcknowledgement(data []byte, entry UnconfinedHost) ([]byte, UnconfinedHost, error) {
-	var before fileConfig
-	if err := yaml.Unmarshal(data, &before); err != nil {
-		return nil, UnconfinedHost{}, err
-	}
-	for _, h := range before.UnconfinedHosts {
-		if strings.TrimSpace(h.ID) == entry.ID {
-			return nil, h, nil
-		}
-	}
-
-	updated, err := spliceHostAcknowledgement(data, entry)
-	if err != nil {
-		return nil, UnconfinedHost{}, err
-	}
-	var after fileConfig
-	if err := yaml.Unmarshal(updated, &after); err != nil {
-		return nil, UnconfinedHost{}, fmt.Errorf("the edited file would not parse: %w", err)
-	}
+// verifyHostAcknowledgement is the gate the acknowledgement splice passes before it reaches the
+// disk: the result must carry exactly the list it started from plus this entry, and must leave every
+// other setting untouched — so an exotic file shape surfaces as an error rather than as a quietly
+// mangled config.
+func verifyHostAcknowledgement(before, after fileConfig, entry UnconfinedHost) error {
 	if !hostsAppended(before.UnconfinedHosts, after.UnconfinedHosts, entry) ||
 		!sameApartFrom(before, after, unconfinedHostsKey) {
-		return nil, UnconfinedHost{}, errors.New(
+		return errors.New(
 			"the edit would have changed more than the unconfined-hosts list; add the entry by hand")
 	}
-	return updated, entry, nil
+	return nil
 }
 
 // spliceHostAcknowledgement inserts the rendered entry into data's lines. There are three shapes
@@ -335,18 +312,10 @@ func SaveServerEntrySetting(path, name, key, value string) error {
 			"apogee: cannot write %s: on the %q server entry: there is no value to record, and this "+
 				"writer does not clear a key — remove the line by hand instead", key, name)
 	}
-	data, err := ReadConfigForWrite(path)
-	if err != nil {
-		return err
-	}
-	updated, err := setEntrySetting(data, name, setting, v)
-	if err != nil {
-		return fmt.Errorf("apogee: update config %q: %w", path, err)
-	}
-	if updated == nil {
-		return nil
-	}
-	return writeConfigAtomically(path, updated)
+	splice, verify := entryEdit(name, setting.Noun, func(data []byte, entry ServerEntry) ([]byte, ServerEntry, error) {
+		return setEntrySetting(data, entry, setting, v)
+	})
+	return edit(path, splice, verify)
 }
 
 // writableEntrySetting resolves a key to the row that describes it, and refuses one this writer may
@@ -367,29 +336,24 @@ func writableEntrySetting(key string) (entrySetting, error) {
 	return entrySettings[at], nil
 }
 
-// setEntrySetting returns the config bytes with the named entry's key set to value, or nil bytes when
-// the entry already reads that way. The value's text comes from the YAML marshaller, which owns the
-// quoting — so a model id or a profile name a bare scalar would misread (`off`, `1.5`, one carrying a
-// colon or a `#`) lands as a value a reader takes back out unchanged.
-func setEntrySetting(data []byte, name string, setting entrySetting, value string) ([]byte, error) {
-	before, at, err := serverEntryAt(data, name)
-	if err != nil {
-		return nil, err
-	}
-	if setting.get(before.Servers[at]) == value {
-		return nil, nil // already what the file says: a confirmation, not a rewrite
+// setEntrySetting returns the config bytes with entry's key set to value — and the entry that leaves
+// behind — or nil bytes when it already reads that way. The value's text comes from the YAML
+// marshaller, which owns the quoting — so a model id or a profile name a bare scalar would misread
+// (`off`, `1.5`, one carrying a colon or a `#`) lands as a value a reader takes back out unchanged.
+func setEntrySetting(data []byte, entry ServerEntry, setting entrySetting, value string) ([]byte, ServerEntry, error) {
+	if setting.get(entry) == value {
+		return nil, ServerEntry{}, nil // already what the file says: a confirmation, not a rewrite
 	}
 	text, err := renderScalar(value)
 	if err != nil {
-		return nil, err
+		return nil, ServerEntry{}, err
 	}
-	updated, err := spliceEntrySetting(data, name, setting.Key, text)
+	updated, err := spliceEntrySetting(data, entry.Name, setting.Key, text)
 	if err != nil {
-		return nil, err
+		return nil, ServerEntry{}, err
 	}
-	want := before.Servers[at]
-	setting.set(&want, value)
-	return verifiedEntrySplice(updated, before, at, want, setting.Noun)
+	setting.set(&entry, value)
+	return updated, entry, nil
 }
 
 // spliceEntrySetting writes the key into the entry's block: over the line the entry already spells it
@@ -402,7 +366,7 @@ func setEntrySetting(data []byte, name string, setting entrySetting, value strin
 // text and a node tree that disagree about where the key sits. Each one would leave part of the old
 // value behind. The insertion point is the last line the entry's subtree reaches, which is where the
 // next sibling key would go; an entry whose last value the node tree cannot measure would put that
-// line inside it instead, and verifiedEntrySplice (configwrite_keysource.go) is what catches that.
+// line inside it instead, and verifyEntryEdit (configwrite_keysource.go) is what catches that.
 func spliceEntrySetting(data []byte, name, key, text string) ([]byte, error) {
 	lines, entry, err := serverEntryNode(data, name)
 	if err != nil {

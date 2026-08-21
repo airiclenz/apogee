@@ -24,10 +24,11 @@ import (
 //
 // What is new here is the ADDRESSING, one level deeper than the scalar writer reaches: a settings
 // path names a key in a block, while these edits name a key in a LIST ITEM, picked out of the list
-// by its `name:`. The rest is the established shape — parse for positions, splice text, re-parse and
-// compare before writing anything — with one check the others do not make: the rewritten list must
-// still pass ValidateServers, because the whole point of the edit is to swap which key source the
-// entry declares, and the exactly-one rule is what makes that swap legal.
+// by its `name:`. The rest is the one write transaction (configedit.go), with two turns of it these
+// edits take that no other writer does: the read does NOT seed, because an entry has to be in the
+// file already for there to be anything to rewrite; and the gate asks one question more, that the
+// rewritten list still passes ValidateServers — the whole point of the edit is to swap which key
+// source the entry declares, and the exactly-one rule is what makes that swap legal.
 
 // The key-source keys these edits write, and the `name:` they address an entry by — spelled as
 // ServerEntry tags them, since the writer matches them in the node tree.
@@ -38,7 +39,7 @@ const (
 	plaintextKeyOKKey = "plaintext-key-ok"
 )
 
-// keySourceNoun is what these two edits tell verifiedEntrySplice they were placing. Both write a
+// keySourceNoun is what these two edits tell their gate they were placing. Both write a
 // DECLARATION of where the key comes from rather than one named key — an `api-key:` swapped for an
 // `api-key-cmd:`, or the acknowledgement that the literal stays — so the refusal names the thing
 // rather than the line.
@@ -59,9 +60,10 @@ func SaveServerKeyCommand(path, name, command string) error {
 	if cmd == "" {
 		return errors.New("apogee: cannot point a server entry at a key command: the command is empty")
 	}
-	return saveEntryEdit(path, name, func(data []byte, name string) ([]byte, error) {
-		return setEntryKeyCommand(data, name, cmd)
+	splice, verify := entryEdit(name, keySourceNoun, func(data []byte, entry ServerEntry) ([]byte, ServerEntry, error) {
+		return setEntryKeyCommand(data, entry, cmd)
 	})
+	return editFrom(path, readConfigForEntryEdit, splice, verify)
 }
 
 // SaveServerPlaintextKeyOK records `plaintext-key-ok: true` on the `servers:` entry named name — the
@@ -71,26 +73,53 @@ func SaveServerKeyCommand(path, name, command string) error {
 // The marker is appended to the entry's block, or its existing line is rewritten when the entry
 // already spells the key as false. An entry that already says true is left alone.
 func SaveServerPlaintextKeyOK(path, name string) error {
-	return saveEntryEdit(path, name, setEntryPlaintextKeyOK)
+	splice, verify := entryEdit(name, keySourceNoun, setEntryPlaintextKeyOK)
+	return editFrom(path, readConfigForEntryEdit, splice, verify)
 }
 
-// saveEntryEdit is the shape both key-source edits share: read the file, splice, and write it back
-// atomically unless the splice reports there was nothing to change. The splice failure is qualified
-// with the config's path, the way every other write here qualifies one — a refusal about a file's
-// SHAPE has to say which file.
-func saveEntryEdit(path, name string, splice func(data []byte, name string) ([]byte, error)) error {
-	data, err := readConfigForEntryEdit(path)
-	if err != nil {
-		return err
+// entryApply is the half of an entry edit that is the writer's own: given the config bytes and the
+// entry as the file carries it, it returns the edited bytes together with the entry the result must
+// hold in its place — or nil bytes when the file already says it, which is a confirmation rather
+// than a rewrite.
+type entryApply func(data []byte, entry ServerEntry) ([]byte, ServerEntry, error)
+
+// entryEdit states one edit of the `servers:` entry named name as the write transaction's two halves
+// (configedit.go): the splice locates the entry, hands it to apply and takes back the bytes plus the
+// entry the result must read as, and the gate holds the re-parsed file against exactly that.
+//
+// The located index and the wanted entry travel from the one half to the other in the closure,
+// because the gate's question is about what THIS splice did — and the transaction asks it only when
+// the splice produced bytes, so there is always an answer to give.
+//
+// what names the thing the edit was placing, in the caller's own words ("the key source", "the
+// model"): the shape serves every entry writer, and only the caller knows which line a refusal has
+// to name.
+func entryEdit(name, what string, apply entryApply) (editSplice, editVerify) {
+	var at int
+	var want ServerEntry
+	splice := func(before fileConfig, data []byte) ([]byte, error) {
+		found, err := serverEntryAt(before, name)
+		if err != nil {
+			// A file that is not settings at all parses into the ZERO config, whose list answers
+			// "which entry, then?" with "no servers at all" — true of the value, misleading about
+			// the file. The decoder's own error is the honest one there, so the locate step asks
+			// for it before refusing (configedit.go holds it back for exactly this choice).
+			if parseErr := yaml.Unmarshal(data, new(fileConfig)); parseErr != nil {
+				return nil, parseErr
+			}
+			return nil, err
+		}
+		updated, entry, err := apply(data, before.Servers[found])
+		if err != nil || updated == nil {
+			return nil, err
+		}
+		at, want = found, entry
+		return updated, nil
 	}
-	updated, err := splice(data, name)
-	if err != nil {
-		return fmt.Errorf("apogee: update config %q: %w", path, err)
+	verify := func(before, after fileConfig, _ []byte) error {
+		return verifyEntryEdit(before, after, at, want, what)
 	}
-	if updated == nil {
-		return nil
-	}
-	return writeConfigAtomically(path, updated)
+	return splice, verify
 }
 
 // readConfigForEntryEdit reads the config an entry edit rewrites. It deliberately does NOT seed an
@@ -108,65 +137,51 @@ func readConfigForEntryEdit(path string) ([]byte, error) {
 	return data, nil
 }
 
-// setEntryKeyCommand returns the config bytes with the named entry's `api-key:` line replaced by an
-// `api-key-cmd:` line, or nil bytes when the entry already reads that way. The command's text comes
-// from the YAML marshaller, which owns the quoting — so a command carrying a `#`, a colon or a
-// leading quote lands as a value a reader takes back out unchanged rather than as a syntax break.
-func setEntryKeyCommand(data []byte, name, command string) ([]byte, error) {
-	before, at, err := serverEntryAt(data, name)
-	if err != nil {
-		return nil, err
-	}
-	if before.Servers[at].APIKey == "" && before.Servers[at].APIKeyCmd == command {
-		return nil, nil // already pointed at this command: a confirmation, not a rewrite
+// setEntryKeyCommand returns the config bytes with entry's `api-key:` line replaced by an
+// `api-key-cmd:` line — and the entry that leaves behind — or nil bytes when it already reads that
+// way. The command's text comes from the YAML marshaller, which owns the quoting — so a command
+// carrying a `#`, a colon or a leading quote lands as a value a reader takes back out unchanged
+// rather than as a syntax break.
+func setEntryKeyCommand(data []byte, entry ServerEntry, command string) ([]byte, ServerEntry, error) {
+	if entry.APIKey == "" && entry.APIKeyCmd == command {
+		return nil, ServerEntry{}, nil // already pointed at this command: a confirmation, not a rewrite
 	}
 	text, err := renderScalar(command)
 	if err != nil {
-		return nil, err
+		return nil, ServerEntry{}, err
 	}
-	updated, err := spliceEntryKeyCommand(data, name, text)
+	updated, err := spliceEntryKeyCommand(data, entry.Name, text)
 	if err != nil {
-		return nil, err
+		return nil, ServerEntry{}, err
 	}
-	want := before.Servers[at]
-	want.APIKey, want.APIKeyCmd = "", command
-	return verifiedEntrySplice(updated, before, at, want, keySourceNoun)
+	entry.APIKey, entry.APIKeyCmd = "", command
+	return updated, entry, nil
 }
 
-// setEntryPlaintextKeyOK returns the config bytes with the named entry marked `plaintext-key-ok:
-// true`, or nil bytes when it already is.
-func setEntryPlaintextKeyOK(data []byte, name string) ([]byte, error) {
-	before, at, err := serverEntryAt(data, name)
+// setEntryPlaintextKeyOK returns the config bytes with entry marked `plaintext-key-ok: true`, or nil
+// bytes when it already is.
+func setEntryPlaintextKeyOK(data []byte, entry ServerEntry) ([]byte, ServerEntry, error) {
+	if entry.PlaintextKeyOK {
+		return nil, ServerEntry{}, nil
+	}
+	updated, err := spliceEntryPlaintextKeyOK(data, entry.Name)
 	if err != nil {
-		return nil, err
+		return nil, ServerEntry{}, err
 	}
-	if before.Servers[at].PlaintextKeyOK {
-		return nil, nil
-	}
-	updated, err := spliceEntryPlaintextKeyOK(data, name)
-	if err != nil {
-		return nil, err
-	}
-	want := before.Servers[at]
-	want.PlaintextKeyOK = true
-	return verifiedEntrySplice(updated, before, at, want, keySourceNoun)
+	entry.PlaintextKeyOK = true
+	return updated, entry, nil
 }
 
-// serverEntryAt parses the config the way apogee reads it and reports the whole parsed file plus the
-// index of the entry named name — the sole before-state every verifiedEntrySplice call compares
-// against, and the refusal for a name the list does not carry.
-func serverEntryAt(data []byte, name string) (fileConfig, int, error) {
-	var before fileConfig
-	if err := yaml.Unmarshal(data, &before); err != nil {
-		return fileConfig{}, 0, err
-	}
+// serverEntryAt reports where the entry named name stands in the config as a reader parses it — the
+// locate step every entry edit begins with — and the refusal for a name the list does not carry.
+func serverEntryAt(before fileConfig, name string) (int, error) {
 	at := slices.IndexFunc(before.Servers, func(s ServerEntry) bool { return s.Name == name })
 	if at < 0 {
-		return fileConfig{}, 0, fmt.Errorf(
+		return 0, fmt.Errorf(
 			"it has no servers: entry named %q — it configures %s; edit the file by hand",
 			name, configuredEntryNames(before.Servers))
 	}
-	return before, at, nil
+	return at, nil
 }
 
 // configuredEntryNames spells what the `servers:` list DOES carry, for a refusal about a name it does
@@ -278,32 +293,28 @@ func serverEntryNode(data []byte, name string) ([]string, *yaml.Node, error) {
 	return nil, nil, fmt.Errorf("its servers: list has no entry block named %q; edit the file by hand", name)
 }
 
-// verifiedEntrySplice is the gate an entry splice passes before it reaches the disk: the result must
-// parse, must hold before's `servers:` list with the entry at `at` changed to exactly want and every
-// other entry untouched, must agree with before on every setting outside the list, and must still
-// LOAD — the exactly-one key-source rule is what an edit that swaps sources has to leave satisfied,
-// and asking ValidateServers is how this writer knows it did. Every comparison is between PARSED
-// states — the caller's before and the re-parse of updated — so the config's original bytes stay
-// the caller's business and never reach the gate.
+// verifyEntryEdit is the gate an entry splice passes before it reaches the disk: the result must
+// hold before's `servers:` list with the entry at `at` changed to exactly want and every other entry
+// untouched, must agree with before on every setting outside the list, and must still LOAD — the
+// exactly-one key-source rule is what an edit that swaps sources has to leave satisfied, and asking
+// ValidateServers is how this writer knows it did. Every comparison is between PARSED states — the
+// config the edit started from and the re-parse the transaction hands over — so the file's bytes
+// stay the splice's business and never reach the gate.
 //
 // what names the thing the edit was supposed to place, in the caller's own words ("the key source",
 // "the model"), because the gate serves every entry writer: the refusal has to say what did not land
 // where the reader would look, and only the caller knows which line that was.
-func verifiedEntrySplice(updated []byte, before fileConfig, at int, want ServerEntry, what string) ([]byte, error) {
-	var after fileConfig
-	if err := yaml.Unmarshal(updated, &after); err != nil {
-		return nil, fmt.Errorf("the edited file would not parse: %w", err)
-	}
+func verifyEntryEdit(before, after fileConfig, at int, want ServerEntry, what string) error {
 	switch {
 	case !serversChangedOnlyAt(before.Servers, after.Servers, at, want):
-		return nil, fmt.Errorf(
+		return fmt.Errorf(
 			"the edit did not put %s on the %q entry where a reader would look for it; "+
 				"edit the file by hand", what, want.Name)
 	case !sameApartFrom(before, after, serversKey):
-		return nil, errors.New("the edit would have changed more than the servers: list; edit the file by hand")
+		return errors.New("the edit would have changed more than the servers: list; edit the file by hand")
 	}
 	if err := ValidateServers(after.Servers); err != nil {
-		return nil, fmt.Errorf("the edited file would not load: %w", err)
+		return fmt.Errorf("the edited file would not load: %w", err)
 	}
-	return updated, nil
+	return nil
 }

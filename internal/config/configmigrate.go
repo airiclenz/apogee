@@ -114,92 +114,105 @@ func migrateLegacyConfig(path string, data []byte, now time.Time) ([]byte, strin
 // appended to `servers:`, and `server:` pointing at it. It returns the new bytes and the entry that
 // was written, or an error naming what stopped it.
 //
-// Two shapes are refused before any line is moved, because neither can be folded without
-// overwriting something the user wrote: a quadruple with no endpoint (those keys name no server on
-// their own — there is nothing to move them INTO), and a name the list already uses (the fold would
-// either collide with that entry or silently rename this one). A file that already sets `server:`
-// is refused for the same reason: the pointer this writes would replace a startup choice the user
-// made deliberately.
+// It is the write transaction over bytes already in hand (verifiedEdit, configedit.go) rather than
+// against a path, because the migration owns the steps around it: the backup its caller writes only
+// once the fold is verified, and the read that has already happened by the time the sniff fired.
+//
+// The file it starts from is read as settings HERE, ahead of the transaction, so a file the parser
+// cannot make settings of is refused in the migration's own words — that refusal is one paragraph
+// telling a user what to fix by hand, and the transaction would otherwise hold the decoder's error
+// back until its splice had spoken (configedit.go's ordering note).
 func foldLegacyKeys(data []byte, lc legacyFileConfig) ([]byte, ServerEntry, error) {
-	var before fileConfig
-	if err := yaml.Unmarshal(data, &before); err != nil {
-		return nil, ServerEntry{}, fmt.Errorf("the rest of it does not parse into settings apogee can "+
-			"read (%v)", err)
-	}
 	entry := ServerEntry{
 		Name:     lc.name(),
 		Endpoint: strings.TrimSpace(lc.Endpoint),
 		APIKey:   strings.TrimSpace(lc.APIKey),
 		Model:    strings.TrimSpace(lc.Model),
 	}
+	if err := yaml.Unmarshal(data, new(fileConfig)); err != nil {
+		return nil, ServerEntry{}, fmt.Errorf("the rest of it does not parse into settings apogee can "+
+			"read (%v)", err)
+	}
+	verify := func(before, after fileConfig, updated []byte) error {
+		return verifyFold(before, after, updated, entry)
+	}
+	updated, err := verifiedEdit(data, foldSplice(entry), verify)
 	switch {
-	case entry.Endpoint == "":
-		return nil, entry, errors.New("there is no endpoint: among them, and a server is its endpoint — " +
-			"the entry they would fold into could never be talked to")
-	case slices.ContainsFunc(before.Servers, func(s ServerEntry) bool { return s.Name == entry.Name }):
-		return nil, entry, fmt.Errorf("its servers: list already has an entry called %q, and one name names "+
-			"one server", entry.Name)
-	case strings.TrimSpace(before.Server) != "":
-		return nil, entry, fmt.Errorf("it already starts on server: %q, which the fold would have to "+
-			"repoint at the migrated entry", before.Server)
-	}
-
-	doc, err := Document(data)
-	if err != nil {
+	case err != nil:
 		return nil, entry, err
-	}
-	root, err := rootMapping(doc)
-	if err != nil {
-		return nil, entry, err
-	}
-	if root == nil {
-		return nil, entry, errors.New("it holds no settings at all, so the keys are not where the parser found them")
-	}
-	lines := SplitConfigLines(data)
-	drop, err := legacyKeyLines(root, lines)
-	if err != nil {
-		return nil, entry, err
-	}
-	block, at, err := serversInsertion(root, lines, entry)
-	if err != nil {
-		return nil, entry, err
-	}
-	folded, err := spliceFold(lines, drop, block, at)
-	if err != nil {
-		return nil, entry, err
-	}
-	// The pointer rides the ordinary scalar writer: it is one `server: <name>` line, which is
-	// exactly what that writer places (below the key's commented example, ADR 0035) and verifies.
-	k, ok := LookupKey(serverKey)
-	if !ok {
-		return nil, entry, errors.New("apogee has no server: setting to point at the entry")
-	}
-	updated, err := setScalarSetting(folded, k, entry.Name)
-	if err != nil {
-		return nil, entry, err
-	}
-	if updated == nil { // the guard above rules this out; a nil here would write the fold without its pointer
+	case updated == nil: // the pointer guard rules this out; a nil here would write the fold without it
 		return nil, entry, errors.New("the edit did not add a server: line")
-	}
-	if err := verifyFold(data, updated, entry); err != nil {
-		return nil, entry, err
 	}
 	return updated, entry, nil
 }
 
+// foldSplice is the fold's own half of the transaction: the four retired lines cut out, the entry
+// they describe inserted into `servers:`, and the `server:` pointer stacked under it by the ordinary
+// scalar writer.
+//
+// Two shapes are refused before any line is moved, because neither can be folded without
+// overwriting something the user wrote: a quadruple with no endpoint (those keys name no server on
+// their own — there is nothing to move them INTO), and a name the list already uses (the fold would
+// either collide with that entry or silently rename this one). A file that already sets `server:`
+// is refused for the same reason: the pointer this writes would replace a startup choice the user
+// made deliberately.
+func foldSplice(entry ServerEntry) editSplice {
+	return func(before fileConfig, data []byte) ([]byte, error) {
+		switch {
+		case entry.Endpoint == "":
+			return nil, errors.New("there is no endpoint: among them, and a server is its endpoint — " +
+				"the entry they would fold into could never be talked to")
+		case slices.ContainsFunc(before.Servers, func(s ServerEntry) bool { return s.Name == entry.Name }):
+			return nil, fmt.Errorf("its servers: list already has an entry called %q, and one name names "+
+				"one server", entry.Name)
+		case strings.TrimSpace(before.Server) != "":
+			return nil, fmt.Errorf("it already starts on server: %q, which the fold would have to "+
+				"repoint at the migrated entry", before.Server)
+		}
+
+		doc, err := Document(data)
+		if err != nil {
+			return nil, err
+		}
+		root, err := rootMapping(doc)
+		if err != nil {
+			return nil, err
+		}
+		if root == nil {
+			return nil, errors.New("it holds no settings at all, so the keys are not where the parser found them")
+		}
+		lines := SplitConfigLines(data)
+		drop, err := legacyKeyLines(root, lines)
+		if err != nil {
+			return nil, err
+		}
+		block, at, err := serversInsertion(root, lines, entry)
+		if err != nil {
+			return nil, err
+		}
+		folded, err := spliceFold(lines, drop, block, at)
+		if err != nil {
+			return nil, err
+		}
+		// The pointer rides the ordinary scalar writer: it is one `server: <name>` line, which is
+		// exactly what that writer places (below the key's commented example, ADR 0035) and verifies.
+		k, ok := LookupKey(serverKey)
+		if !ok {
+			return nil, errors.New("apogee has no server: setting to point at the entry")
+		}
+		return setScalarSetting(folded, k, entry.Name)
+	}
+}
+
 // verifyFold is the gate the migration passes before anything reaches the disk: the rewritten file
-// must parse, must carry the retired keys nowhere, must hold exactly the old `servers:` list plus
-// this entry with `server:` naming it, and must agree with the original on every OTHER setting. It
-// is the whole-file statement of "the original with exactly the quadruple folded" — the two splices
-// that produced it each verified their own step, and this asks the question of their composition.
-func verifyFold(data, updated []byte, entry ServerEntry) error {
-	var before, after fileConfig
-	if err := yaml.Unmarshal(data, &before); err != nil {
-		return err
-	}
-	if err := yaml.Unmarshal(updated, &after); err != nil {
-		return fmt.Errorf("the edited file would not parse: %w", err)
-	}
+// must carry the retired keys nowhere, must hold exactly the old `servers:` list plus this entry
+// with `server:` naming it, and must agree with the original on every OTHER setting. It is the
+// whole-file statement of "the original with exactly the quadruple folded" — the two splices that
+// produced it each verified their own step, and this asks the question of their composition.
+//
+// The retired keys are read out of the edited BYTES, because they are what fileConfig has no field
+// for: the parsed after says nothing about a `model:` the fold was supposed to take away.
+func verifyFold(before, after fileConfig, updated []byte, entry ServerEntry) error {
 	var lc legacyFileConfig
 	if err := yaml.Unmarshal(updated, &lc); err != nil {
 		return fmt.Errorf("the edited file would not parse: %w", err)

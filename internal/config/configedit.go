@@ -49,6 +49,13 @@ import (
 // note above.
 type editSplice func(before fileConfig, data []byte) ([]byte, error)
 
+// editRead is the transaction's read step, named so a writer can bring its own. Almost every writer
+// wants ReadConfigForWrite (configsplice.go), which seeds an absent file from the embedded template
+// before reading it. The server-entry key-source edits want the read that deliberately does NOT seed
+// (readConfigForEntryEdit, configwrite_keysource.go): they address an entry the file must already
+// carry, and a seeded template names no server for them to rewrite.
+type editRead func(path string) ([]byte, error)
+
 // editVerify is one writer's gate: the config parsed before and after the splice, plus the edited
 // bytes themselves, for the half of a check that must read the file the way any YAML reader sees it
 // rather than through fileConfig. It refuses in the writer's own wording — the "edit the file by
@@ -65,7 +72,14 @@ type editVerify func(before, after fileConfig, updated []byte) error
 // key cannot hold — belong before this call, where they are refused without the file having been
 // opened at all, so "refused" and "written" can never be the same outcome.
 func edit(path string, splice editSplice, verify editVerify) error {
-	data, err := ReadConfigForWrite(path)
+	return editFrom(path, ReadConfigForWrite, splice, verify)
+}
+
+// editFrom is edit with the read step the caller names — the seam a writer whose file must already
+// exist reaches for (editRead above). Everything after the read is the same transaction, so which
+// bytes an edit starts from is the only part of it a caller decides.
+func editFrom(path string, read editRead, splice editSplice, verify editVerify) error {
+	data, err := read(path)
 	if err != nil {
 		return err
 	}
