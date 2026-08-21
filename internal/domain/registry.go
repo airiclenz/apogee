@@ -47,6 +47,40 @@ func hookImplements(at HookPoint, hook any) bool {
 	}
 }
 
+// hookPoints is the fixed hook-point set in loop order — what the frozen per-hook-point
+// dispatch order is precomputed over (freezeOrder). It mirrors the HookPoint constants in
+// mechanism.go; a sixth hook point joins both.
+var hookPoints = [...]HookPoint{
+	HookPreRequest,
+	HookPostResponse,
+	HookPreToolExec,
+	HookPostToolResult,
+	HookHistoryRewrite,
+}
+
+// orderAt returns the Mechanisms among mechanisms that hook at at, in the deterministic
+// dispatch order topoSort defines. It is the whole of Ordered's computation, factored out so
+// the frozen order and the on-the-fly fallback are one implementation, not two.
+func orderAt(mechanisms []RegisteredMechanism, at HookPoint) []RegisteredMechanism {
+	present := make([]RegisteredMechanism, 0, len(mechanisms))
+	for _, m := range mechanisms {
+		if hookImplements(at, m.Hook) {
+			present = append(present, m)
+		}
+	}
+	return topoSort(present)
+}
+
+// orderAll runs orderAt for every hook point — the frozen order a validated registry serves
+// Ordered from, computed once at the construction gates instead of per dispatch.
+func orderAll(mechanisms []RegisteredMechanism) map[HookPoint][]RegisteredMechanism {
+	frozen := make(map[HookPoint][]RegisteredMechanism, len(hookPoints))
+	for _, at := range hookPoints {
+		frozen[at] = orderAt(mechanisms, at)
+	}
+	return frozen
+}
+
 // detectOrderingCycle reports ErrOrderingCycle if the Before/After constraints among
 // mechs form a cycle (ADR 0003 — a constraint cycle is a startup error). It builds a
 // directed graph over the registered Mechanism IDs — an After=[Y] on X is an edge

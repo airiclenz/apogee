@@ -222,6 +222,20 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **The dispatch order is computed once, at the construction gates.** `MechanismRegistry.Ordered`
+  re-ran the whole computation on every call — filter the catalogue by hook point, then
+  topologically sort what is left — which is roughly twenty-three sorts a Turn with a full
+  catalogue, all of them producing the same answer, because a registry is declared read-only from
+  the moment the engine has it. The three startup gates (`ValidateOrdering`,
+  `ValidateIncompatibilities`, `ValidateRequirements`) now freeze the order for all five hook
+  points as they pass, and `Ordered` serves that frozen slice; `Add` and `AddExperimental` drop it,
+  so a registry still under construction can never hand out a stale order, and a registry that
+  never runs a gate — a bench or embedder registry held through the `apogee.MechanismRegistry`
+  alias — computes on the fly exactly as it always did. The returned slice is the registry's own
+  once frozen and is read-only to the caller, the same contract `Experimental` returns its slice
+  under. No API shape changed and no order changed: a validated registry returns, hook point by
+  hook point, precisely what the per-call computation returned.
+
 - **One runner fires every hook point.** Each of the five points — history-rewrite, pre-request,
   post-response, pre-tool-exec, post-tool-result — carried its own hand-written pair of dispatch
   loops, ten in all, and every pair repeated the same protocol: ask the registry for that point's

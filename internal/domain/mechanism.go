@@ -207,9 +207,9 @@ var errNoHookInterface = errors.New("implements no hook interface")
 // Mechanisms join, AddExperimental is how the bench registers a candidate hook.
 //
 // OWNERSHIP AND CONCURRENCY. A registry is MUTABLE while it is being built (Add /
-// AddExperimental, both single-goroutine at construction) and READ-ONLY once the engine has it:
-// the read seams (Ordered, Experimental) and the three validate gates only read, so any number
-// of goroutines may drive one registry at once. Instance ownership is the separate question a
+// AddExperimental and the three validate gates, which freeze the dispatch order — all
+// single-goroutine at construction) and READ-ONLY once the engine has it: the read seams
+// (Ordered, Experimental) only read, so any number of goroutines may drive one registry at once. Instance ownership is the separate question a
 // concurrent depth-0 fan-out asks (ADR 0039), and ForSubAgent is its answer: an agent never
 // hands a delegated child the registry it is itself running, so the two can never race through
 // the container, and a hook that carries live state declares its own per-child instance
@@ -217,6 +217,9 @@ var errNoHookInterface = errors.New("implements no hook interface")
 type MechanismRegistry struct {
 	mechanisms   []RegisteredMechanism // catalogued Mechanism rows registered via Add
 	experimental map[HookPoint][]any   // bench experimental hooks registered via AddExperimental
+	// ordered is the frozen per-hook-point dispatch order the validate gates precompute; nil
+	// until a gate runs and again after any Add, and then Ordered computes on the fly.
+	ordered map[HookPoint][]RegisteredMechanism
 }
 
 // NewMechanismRegistry returns a registry seeded with the built-in catalogue. The
@@ -253,6 +256,7 @@ func (r *MechanismRegistry) Add(m RegisteredMechanism) error {
 		return fmt.Errorf("apogee: mechanism %q: %w", id, errNoHookInterface)
 	}
 	r.mechanisms = append(r.mechanisms, m)
+	r.ordered = nil
 	return nil
 }
 
@@ -267,6 +271,7 @@ func (r *MechanismRegistry) AddExperimental(at HookPoint, hook any) error {
 		r.experimental = make(map[HookPoint][]any)
 	}
 	r.experimental[at] = append(r.experimental[at], hook)
+	r.ordered = nil
 	return nil
 }
 
@@ -299,6 +304,8 @@ func (r *MechanismRegistry) ForSubAgent() *MechanismRegistry {
 		m.Hook = hookForSubAgent(m.Hook)
 		sub.mechanisms[i] = m
 	}
+	// The child's frozen order is deliberately NOT inherited: its hooks are the scoped
+	// instances substituted just above, so the child's own construction gates freeze it.
 	for at, hooks := range r.experimental {
 		scoped := make([]any, len(hooks))
 		for i, hook := range hooks {
@@ -321,7 +328,13 @@ func hookForSubAgent(hook any) any {
 // ValidateOrdering reports ErrOrderingCycle if the catalogued Mechanisms' Before/After
 // constraints form a cycle (ADR 0003 — a constraint cycle is a startup error). New
 // calls it once the whole graph is present.
-func (r *MechanismRegistry) ValidateOrdering() error { return detectOrderingCycle(r.mechanisms) }
+func (r *MechanismRegistry) ValidateOrdering() error {
+	if err := detectOrderingCycle(r.mechanisms); err != nil {
+		return err
+	}
+	r.freezeOrder()
+	return nil
+}
 
 // ValidateIncompatibilities reports ErrIncompatibleMechanisms if two registered Mechanisms
 // declare each other incompatible (MechanismDescriptor.IncompatibleWith). It is the second
@@ -329,7 +342,11 @@ func (r *MechanismRegistry) ValidateOrdering() error { return detectOrderingCycl
 // config enabling two mutually-exclusive Mechanisms is refused rather than silently running
 // both. New calls it once the whole graph is present.
 func (r *MechanismRegistry) ValidateIncompatibilities() error {
-	return detectIncompatibility(r.mechanisms)
+	if err := detectIncompatibility(r.mechanisms); err != nil {
+		return err
+	}
+	r.freezeOrder()
+	return nil
 }
 
 // ValidateRequirements reports ErrMissingRequirement if any registered Mechanism declares a
@@ -341,7 +358,25 @@ func (r *MechanismRegistry) ValidateIncompatibilities() error {
 // required peer mid-Session is accepted and not re-checked. New calls it once the whole graph is
 // present.
 func (r *MechanismRegistry) ValidateRequirements() error {
-	return detectRequirements(r.mechanisms)
+	if err := detectRequirements(r.mechanisms); err != nil {
+		return err
+	}
+	r.freezeOrder()
+	return nil
+}
+
+// freezeOrder precomputes the dispatch order for all five hook points, so a validated registry
+// answers Ordered with a map lookup instead of re-filtering and re-sorting the catalogue on
+// every call (~23 sorts a Turn with a full catalogue) — the registry is declared read-only once
+// the engine has it, so the order cannot change under the loop. It is idempotent: each of the
+// three gates calls it once its own check passes and only the first computes. Add and
+// AddExperimental drop the frozen order, so a registry still under construction can never serve
+// a stale one, and a registry that never runs a gate never freezes at all.
+func (r *MechanismRegistry) freezeOrder() {
+	if r.ordered != nil {
+		return
+	}
+	r.ordered = orderAll(r.mechanisms)
 }
 
 // Ordered returns the catalogued Mechanisms that hook at at, in the deterministic total order
@@ -351,12 +386,15 @@ func (r *MechanismRegistry) ValidateRequirements() error {
 // Mechanism absent from at is ignored (ordering is relative to the co-located Mechanisms). It is
 // the read seam the engine dispatches catalogued Mechanisms through, the counterpart to
 // Experimental for the descriptor-carrying catalogue.
+//
+// Once a validate gate has run, the order is served from the frozen copy that gate computed
+// (freezeOrder) — so the returned slice is the registry's own and is READ-ONLY to the caller,
+// the same contract Experimental returns its slice under. An unvalidated registry (a bench or
+// public caller holding one through the apogee.MechanismRegistry alias) computes on the fly per
+// call, exactly as every caller did before the order was frozen.
 func (r *MechanismRegistry) Ordered(at HookPoint) []RegisteredMechanism {
-	present := make([]RegisteredMechanism, 0, len(r.mechanisms))
-	for _, m := range r.mechanisms {
-		if hookImplements(at, m.Hook) {
-			present = append(present, m)
-		}
+	if frozen, ok := r.ordered[at]; ok {
+		return frozen
 	}
-	return topoSort(present)
+	return orderAt(r.mechanisms, at)
 }

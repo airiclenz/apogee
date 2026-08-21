@@ -145,6 +145,66 @@ func TestOrdered_IgnoresConstraintOnAbsentMechanism(t *testing.T) {
 	}
 }
 
+// TestOrdered_FrozenOrderMatchesOnTheFly proves the order the validate gates precompute is the
+// same order Ordered used to compute on every call: the same fixtures as
+// TestOrdered_DeterministicUnderShuffle above, plus a post-response row so both sides run the
+// hook-point filter, compared across all five hook points.
+func TestOrdered_FrozenOrderMatchesOnTheFly(t *testing.T) {
+	build := func() *MechanismRegistry {
+		// b before d, a after b, c and d free — the shuffle test's constraint set.
+		return registerAll(t, regd("a", after("b")), regd("b", before("d")), regd("c"), regd("d"),
+			regd("post", atPostResponse))
+	}
+	onTheFly := build() // never validated: computes per call, as a bench caller's registry does
+	frozen := build()
+	if err := frozen.ValidateOrdering(); err != nil {
+		t.Fatalf("ValidateOrdering: %v", err)
+	}
+
+	for _, at := range []HookPoint{HookPreRequest, HookPostResponse, HookPreToolExec, HookPostToolResult, HookHistoryRewrite} {
+		want := orderedIDs(onTheFly.Ordered(at))
+		if got := orderedIDs(frozen.Ordered(at)); !reflect.DeepEqual(got, want) {
+			t.Errorf("Ordered(%s): frozen = %v, computed on the fly = %v", at, got, want)
+		}
+	}
+}
+
+// TestOrdered_AddAfterValidationDropsTheFrozenOrder covers the invalidation half: a registry that
+// gains a Mechanism after a gate froze its order must never serve the stale one, and the next gate
+// freezes the new order.
+func TestOrdered_AddAfterValidationDropsTheFrozenOrder(t *testing.T) {
+	r := registerAll(t, regd("b"), regd("d"))
+	if err := r.ValidateOrdering(); err != nil {
+		t.Fatalf("ValidateOrdering: %v", err)
+	}
+	if got := orderedIDs(r.Ordered(HookPreRequest)); !reflect.DeepEqual(got, []MechanismID{"b", "d"}) {
+		t.Fatalf("Ordered after validation = %v, want [b d]", got)
+	}
+
+	if err := r.Add(regd("c")); err != nil {
+		t.Fatalf("Add(c): %v", err)
+	}
+	want := []MechanismID{"b", "c", "d"}
+	if got := orderedIDs(r.Ordered(HookPreRequest)); !reflect.DeepEqual(got, want) {
+		t.Errorf("Ordered after a post-validation Add = %v, want %v", got, want)
+	}
+	if err := r.ValidateRequirements(); err != nil {
+		t.Fatalf("ValidateRequirements: %v", err)
+	}
+	if got := orderedIDs(r.Ordered(HookPreRequest)); !reflect.DeepEqual(got, want) {
+		t.Errorf("Ordered after re-validation = %v, want %v", got, want)
+	}
+
+	// AddExperimental drops the frozen order too — it cannot change the catalogued order, so
+	// what this pins is that recomputing it yields the same answer.
+	if err := r.AddExperimental(HookPreRequest, preReqMech{}); err != nil {
+		t.Fatalf("AddExperimental: %v", err)
+	}
+	if got := orderedIDs(r.Ordered(HookPreRequest)); !reflect.DeepEqual(got, want) {
+		t.Errorf("Ordered after AddExperimental = %v, want %v", got, want)
+	}
+}
+
 func TestValidateIncompatibilities(t *testing.T) {
 	t.Run("both registered ⇒ error", func(t *testing.T) {
 		r := registerAll(t,

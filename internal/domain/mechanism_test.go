@@ -106,6 +106,33 @@ func TestForSubAgent_ContainerIsAlwaysTheChildsOwn(t *testing.T) {
 	}
 }
 
+// TestForSubAgent_ChildDoesNotInheritTheFrozenOrder guards the precomputed dispatch order across
+// the delegation seam. The parent's frozen rows carry the PARENT's hook instances, so a child
+// serving them would run the very instance ForSubAgent exists to replace; the child's order is its
+// own, computed from the scoped instances — and frozen by the child's own construction gates.
+func TestForSubAgent_ChildDoesNotInheritTheFrozenOrder(t *testing.T) {
+	t.Parallel()
+	stateful := &scopedHook{}
+	parent := NewMechanismRegistry()
+	if err := parent.Add(RegisteredMechanism{Descriptor: MechanismDescriptor{ID: "stateful"}, Hook: stateful}); err != nil {
+		t.Fatalf("Add(stateful): %v", err)
+	}
+	if err := parent.ValidateOrdering(); err != nil {
+		t.Fatalf("ValidateOrdering: %v", err)
+	}
+	if got := len(parent.Ordered(HookPreRequest)); got != 1 {
+		t.Fatalf("parent holds %d Mechanisms after validation, want 1", got)
+	}
+
+	ordered := parent.ForSubAgent().Ordered(HookPreRequest)
+	if len(ordered) != 1 {
+		t.Fatalf("child holds %d Mechanisms, want the parent's 1", len(ordered))
+	}
+	if ordered[0].Hook == stateful {
+		t.Error("the child's order carries the parent's own hook instance; the scoped instance was lost")
+	}
+}
+
 // TestForSubAgent_ScopedHooksAreFreshAndOthersInherited is the seam's whole rule in one test: a hook
 // declaring SubAgentScoped hands the child the instance IT chose (here a fresh one, so two siblings
 // cannot share state), and a hook declaring nothing is inherited verbatim — which is what keeps

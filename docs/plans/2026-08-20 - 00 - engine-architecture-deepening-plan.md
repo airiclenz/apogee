@@ -345,7 +345,11 @@ NOTES (2026-08-21): the matrix's teeth were checked by mutation — booking unco
 
 **Commit:** `refactor(agent): one generic hook runner behind five adapters`
 
-## 15. Precompute the per-hook-point mechanism order
+## 15. Precompute the per-hook-point mechanism order — ✅ DONE (2026-08-21)
+
+NOTES (2026-08-21): the freeze is one idempotent `freezeOrder` that each of the three gates calls once its own check passes — the item says "when the `Validate*` gates run", and a caller that runs only a subset (or none) must land in the same state, so the first gate computes and the other two are no-ops.
+NOTES (2026-08-21): `ForSubAgent` deliberately does NOT inherit the parent's frozen order — the item does not mention it, but the frozen rows carry the parent's hook instances, which is exactly what `ForSubAgent` substitutes. The child registry starts unfrozen and its own construction gates (`newAgent`, which every spawn goes through) freeze it. A regression test for this is the one addition to `mechanism_test.go`.
+NOTES (2026-08-21): chose the "document the returned slice as read-only" option over cloning, matching `Experimental`, which returns its stored slice directly; all present callers only range over the result.
 
 **Source:** review candidate 1 companion; ratified call 7. Depends on item 13 (shared file `internal/domain/mechanism.go`).
 
