@@ -22,7 +22,6 @@ import (
 	"github.com/airiclenz/apogee/internal/prompt"
 	"github.com/airiclenz/apogee/internal/scheme"
 	"github.com/airiclenz/apogee/internal/tools"
-	"github.com/airiclenz/apogee/internal/tui"
 	"gopkg.in/yaml.v3"
 )
 
@@ -203,9 +202,9 @@ type Settings struct {
 
 	// cursorShape is the configured shape of the prompt's caret, as the user spelled it (block |
 	// underline | bar). File-only like the ui block, and empty ⇒ the renderer's default (block).
-	// It is carried as the raw NAME — ApplyConfig validates it through tui.ParseCursorShape, and
-	// the composition root parses it once more into the tea.CursorShape the TUI Options take, so
-	// cmd/apogee never restates the vocabulary internal/tui owns.
+	// It is carried as the raw NAME — ApplyConfig validates it against the vocabulary
+	// internal/domain owns, and the composition root parses it once more into the tea.CursorShape
+	// the TUI Options take, so cmd/apogee never restates that vocabulary.
 	CursorShape string
 }
 
@@ -408,7 +407,7 @@ type UISettings struct {
 	// spinner names the status-line animation. It is carried as read (a name this build may not
 	// know) until validate parses it, so an unknown style is a startup error naming the key rather
 	// than a silent fall back to the default.
-	Spinner tui.SpinnerStyle
+	Spinner domain.SpinnerStyle
 	// spinnerColor runs the slow colour loop over whichever style spinner names. Default true;
 	// false leaves the glyph in the terminal's own text colour, which is the escape hatch for a
 	// terminal whose colour depth turns the gradient into steps.
@@ -458,14 +457,14 @@ const defaultStallAfter = 90 * time.Second
 // style, with the colour loop on, the scroll bar shown, the default colour scheme, the shipped
 // quiet threshold the stall guard waits out, and the Inspector disarmed (a false left at the zero
 // value: an off-state that captures nothing is the absence of the feature). The style is
-// ASKED of internal/tui (ParseSpinnerStyle's documented "" ⇒ the default) rather than restated here,
+// ASKED of internal/domain (ParseSpinnerStyle's documented "" ⇒ the default) rather than restated here,
 // so the vocabulary and its default stay in the one package that owns them — the same reason
 // validate does not list the valid names, and the same reason the scheme name comes from
 // internal/scheme.
 func defaultUISettings() UISettings {
 	// ParseSpinnerStyle errors only on a style it does not know; "" is the request for the default,
 	// so this cannot fail.
-	style, _ := tui.ParseSpinnerStyle("")
+	style, _ := domain.ParseSpinnerStyle("")
 	return UISettings{
 		Spinner:       style,
 		SpinnerColor:  true,
@@ -479,10 +478,10 @@ func defaultUISettings() UISettings {
 // `stall-after:` that is not a length of time to wait. Catching them here makes a typo a startup
 // error that names the key; left to the renderer they would silently resolve to some other style
 // and to the shipped threshold, and the user would be left wondering why their setting did nothing.
-// The spinner's valid set comes from internal/tui, which owns the vocabulary — this only adds the
+// The spinner's valid set comes from internal/domain, which owns the vocabulary — this only adds the
 // key the bad value was read from, which that package cannot know.
 func (u UISettings) Validate() error {
-	if _, err := tui.ParseSpinnerStyle(string(u.Spinner)); err != nil {
+	if _, err := domain.ParseSpinnerStyle(string(u.Spinner)); err != nil {
 		return fmt.Errorf("apogee: invalid ui.spinner: %w", err)
 	}
 	if u.unparsedStallAfter != "" {
@@ -1072,7 +1071,7 @@ type fileConfig struct {
 	// CursorShape names the shape the prompt's caret is drawn with — block (the default) |
 	// underline | bar. apogee draws the REAL terminal cursor, always steady, so this is the one
 	// axis there is: nothing blinks, and the shape the terminal itself is configured with cannot be
-	// inherited while a full-screen program runs (tui.ParseCursorShape says why). File-only (no
+	// inherited while a full-screen program runs (domain.ValidCursorShapeName says why). File-only (no
 	// flag/env), like the blocks above. It stays a raw string here — ApplyConfig parses it once, so
 	// an unknown name reaches startup as an error rather than being quietly dropped at the yaml
 	// seam (the `ui.spinner` posture).
@@ -1705,7 +1704,7 @@ type uiConfig struct {
 func (u uiConfig) toUISettings() UISettings {
 	s := defaultUISettings()
 	if u.Spinner != "" {
-		s.Spinner = tui.SpinnerStyle(u.Spinner) // validated by UISettings.Validate, not here
+		s.Spinner = domain.SpinnerStyle(u.Spinner) // validated by UISettings.Validate, not here
 	}
 	if u.SpinnerColor != nil {
 		s.SpinnerColor = *u.SpinnerColor
@@ -2333,10 +2332,11 @@ func ApplyConfig(opts *Options, changed func(string) bool, getenv func(string) s
 	}
 	// A `cursor-shape:` naming a shape no terminal cursor has is the same kind of loud startup
 	// error, for the same reason: drawing a block instead would leave the user staring at a caret
-	// their config did not ask for. internal/tui owns the vocabulary (ParseCursorShape lists the
-	// shapes); this only adds the key the bad value was read from, which that package cannot know.
-	if _, err := tui.ParseCursorShape(s.CursorShape); err != nil {
-		return fmt.Errorf("apogee: invalid cursor-shape: %w", err)
+	// their config did not ask for. The judgement is the registry's own validator, so the startup
+	// refusal and the one the /settings pane writes are one wording over the vocabulary
+	// internal/domain owns.
+	if err := validateCursorShapeName(s.CursorShape); err != nil {
+		return err
 	}
 	// A system-prompt block that contradicts itself — both spellings of one prompt at one level,
 	// or a per-model entry carrying no prompt at all — is a defect in the FILE, independent of
@@ -2624,13 +2624,13 @@ func selectStartupServer(name string, servers []ServerEntry, configPath string, 
 	switch {
 	case len(servers) == 0:
 		return ServerEntry{}, &StartupUndetermined{
-			Start: tui.PreboundStart{Reason: tui.PreboundNoServers},
+			Start: domain.PreboundStart{Reason: domain.PreboundNoServers},
 			Msg: fmt.Sprintf("apogee: no servers are configured — apogee needs a server to "+
 				"talk to.\n\nAdd one to %s and start apogee again:\n\n%s", configPath, exampleServersBlock),
 		}
 	case chosen == "":
 		return ServerEntry{}, &StartupUndetermined{
-			Start: tui.PreboundStart{Reason: tui.PreboundFirstBoot},
+			Start: domain.PreboundStart{Reason: domain.PreboundFirstBoot},
 			Msg: fmt.Sprintf("apogee: no startup server is chosen — %s configures %s but "+
 				"records no server:.\n\nName the one to start on (%s):\n\nserver: %s\n",
 				configPath, ServerNameList(servers), startupServerRemedy(serverFlag), servers[0].Name),
@@ -2642,7 +2642,7 @@ func selectStartupServer(name string, servers []ServerEntry, configPath string, 
 		}
 	}
 	return ServerEntry{}, &StartupUndetermined{
-		Start: tui.PreboundStart{Reason: tui.PreboundStaleChoice, Name: chosen},
+		Start: domain.PreboundStart{Reason: domain.PreboundStaleChoice, Name: chosen},
 		Msg: fmt.Sprintf("apogee: server: names %q, which no servers: entry in %s carries "+
 			"(configured: %s).\n\nFix the name (%s).", chosen, configPath,
 			ServerNameList(servers), startupServerRemedy(serverFlag)),
@@ -2673,7 +2673,7 @@ func startupServerRemedy(serverFlag bool) string {
 // The message is carried rather than formatted here so each of the three cases keeps the wording
 // that names ITS remedy, and so the type has exactly one job: pairing that message with the reason.
 type StartupUndetermined struct {
-	Start tui.PreboundStart
+	Start domain.PreboundStart
 	Msg   string
 }
 

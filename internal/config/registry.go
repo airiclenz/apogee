@@ -13,7 +13,6 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/prompt"
 	"github.com/airiclenz/apogee/internal/scheme"
-	"github.com/airiclenz/apogee/internal/tui"
 )
 
 // The declarative key registry: ONE table describing every key of the on-disk config
@@ -129,10 +128,11 @@ type Key struct {
 }
 
 // The closed vocabularies of the three enum keys, in the order their parse sites list them.
-// They are restated here rather than imported because two of the three live in internal/tui
-// as unexported sets (spinnerStyleNames, cursorShapeNames) — that package owns the
-// vocabulary and validates against it, and TestRegistryEnumValuesMatchParseSites pins these
-// lists to those parse functions so a divergence is a test failure, not a silent one.
+// They are restated here — as the plain strings a config FILE carries — rather than derived
+// from the typed vocabularies internal/domain owns (the autonomy ladder, SpinnerStyle, the
+// caret names), so this table stays one readable literal. What keeps them honest is not the
+// spelling but the gate: TestRegistryEnumValuesMatchParseSites pins these lists to those parse
+// sites, so a divergence is a test failure, not a silent one.
 var (
 	modeValues        = []string{string(domain.ModePlan), string(domain.ModeAskBefore), string(domain.ModeAllowEdits), string(domain.ModeAuto)}
 	spinnerValues     = []string{"snake", "glitter", "classic"}
@@ -548,10 +548,10 @@ func validatePresentPort(value string) error {
 }
 
 // validateSpinnerName refuses a spinner style this build has no animation for, through the startup
-// check itself — UISettings.Validate, which asks internal/tui (the package that owns the
+// check itself — UISettings.Validate, which asks internal/domain (the package that owns the
 // vocabulary) and names the key the value was read from.
 func validateSpinnerName(value string) error {
-	return UISettings{Spinner: tui.SpinnerStyle(value)}.Validate()
+	return UISettings{Spinner: domain.SpinnerStyle(value)}.Validate()
 }
 
 // validateStallAfter refuses a `ui.stall-after:` that is not a length of time to wait, through the
@@ -583,13 +583,17 @@ func validateColorSchemeName(value string) error {
 	return nil
 }
 
-// validateCursorShapeName refuses a caret shape internal/tui cannot draw, wrapped exactly as
-// ApplyConfig wraps the same parse at startup (config.go) so both say the same thing.
+// validateCursorShapeName refuses a caret shape no terminal cursor has, judged against the
+// vocabulary internal/domain owns rather than by discarding a renderer parse — the config layer
+// checks a SPELLING, and what each name is drawn as is the renderer's business alone. The empty
+// value is the request for the default and is accepted, as it is everywhere else. ApplyConfig
+// calls this too, so the startup refusal and the one this pane writes are the same sentence.
 func validateCursorShapeName(value string) error {
-	if _, err := tui.ParseCursorShape(value); err != nil {
-		return fmt.Errorf("apogee: invalid cursor-shape: %w", err)
+	if value == "" || domain.ValidCursorShapeName(value) {
+		return nil
 	}
-	return nil
+	return fmt.Errorf("apogee: invalid cursor-shape: unknown cursor shape %q (known shapes: %s)",
+		value, strings.Join(domain.CursorShapeNames(), ", "))
 }
 
 // validateSettingMode refuses a mode outside the autonomy ladder, through the same parse the --mode

@@ -6,9 +6,9 @@ package config
 // cobra command that binds a handful of its fields (ADR 0043).
 
 import (
+	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/mcp"
 	"github.com/airiclenz/apogee/internal/profiles"
-	"github.com/airiclenz/apogee/internal/tui"
 )
 
 // Options holds the parsed root-command flags plus every value resolution writes back onto
@@ -155,7 +155,7 @@ type Options struct {
 	// recognises StartupUndetermined and turns it into this value (ADR 0036 decisions 3 and 8),
 	// while every other Driver returns the refusal and stops. runRoot reads it to decide whether to
 	// construct the engine before the TUI starts or to hand the TUI the bind seam instead.
-	Prebound tui.PreboundStart
+	Prebound domain.PreboundStart
 
 	// editor is the resolved `editor:` key (ADR 0041), exactly as the user wrote it: the command line
 	// an external edit is opened with, flags included (`code -w`). Loaded from the config file only,

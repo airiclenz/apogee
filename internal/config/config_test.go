@@ -15,7 +15,6 @@ import (
 	"github.com/airiclenz/apogee/internal/mcp"
 	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/profiles"
-	"github.com/airiclenz/apogee/internal/tui"
 )
 
 func strptr(s string) *string     { return &s }
@@ -28,7 +27,7 @@ func floatptr(f float64) *float64 { return &f }
 // guard waiting 90 seconds of engine silence out. It is spelled out rather than taken from
 // defaultUISettings, so a change to any shipped default shows up here as a failure instead of
 // silently agreeing with itself.
-var wantUIDefault = UISettings{Spinner: tui.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true,
+var wantUIDefault = UISettings{Spinner: domain.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true,
 	ColorScheme: "dark", StallAfter: 90 * time.Second}
 
 // wantContextFilesDefault is the resolved `context-files:` block a config that configures none must
@@ -240,7 +239,7 @@ func TestResolveSettingsPrecedence(t *testing.T) {
 			name: "the ui block is file-only (all three keys)",
 			file: fileConfig{UI: &uiConfig{Spinner: "glitter", SpinnerColor: boolptr(false), ShowScrollbar: boolptr(false)}}.layer(),
 			want: Settings{Mode: "ask-before", ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: true, AutoTitle: true, ValidatedSetsEnable: true, ContextFiles: wantContextFilesDefault, Present: PresentSettings{AutoOpen: true},
-				UI: UISettings{Spinner: tui.SpinnerGlitter, SpinnerColor: false, ShowScrollbar: false, ColorScheme: "dark",
+				UI: UISettings{Spinner: domain.SpinnerGlitter, SpinnerColor: false, ShowScrollbar: false, ColorScheme: "dark",
 					StallAfter: 90 * time.Second}},
 		},
 		{
@@ -248,7 +247,7 @@ func TestResolveSettingsPrecedence(t *testing.T) {
 			name: "ui with only spinner: set → the colour loop stays at its default",
 			file: fileConfig{UI: &uiConfig{Spinner: "classic"}}.layer(),
 			want: Settings{Mode: "ask-before", ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: true, AutoTitle: true, ValidatedSetsEnable: true, ContextFiles: wantContextFilesDefault, Present: PresentSettings{AutoOpen: true},
-				UI: UISettings{Spinner: tui.SpinnerClassic, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "dark",
+				UI: UISettings{Spinner: domain.SpinnerClassic, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "dark",
 					StallAfter: 90 * time.Second}},
 		},
 		{
@@ -256,7 +255,7 @@ func TestResolveSettingsPrecedence(t *testing.T) {
 			name: "ui with only spinner-color: false → the style stays at its default",
 			file: fileConfig{UI: &uiConfig{SpinnerColor: boolptr(false)}}.layer(),
 			want: Settings{Mode: "ask-before", ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: true, AutoTitle: true, ValidatedSetsEnable: true, ContextFiles: wantContextFilesDefault, Present: PresentSettings{AutoOpen: true},
-				UI: UISettings{Spinner: tui.SpinnerSnake, SpinnerColor: false, ShowScrollbar: true, ColorScheme: "dark",
+				UI: UISettings{Spinner: domain.SpinnerSnake, SpinnerColor: false, ShowScrollbar: true, ColorScheme: "dark",
 					StallAfter: 90 * time.Second}},
 		},
 		{
@@ -265,13 +264,13 @@ func TestResolveSettingsPrecedence(t *testing.T) {
 			name: "ui with only show-scrollbar: false → the spinner keys stay at their defaults",
 			file: fileConfig{UI: &uiConfig{ShowScrollbar: boolptr(false)}}.layer(),
 			want: Settings{Mode: "ask-before", ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: true, AutoTitle: true, ValidatedSetsEnable: true, ContextFiles: wantContextFilesDefault, Present: PresentSettings{AutoOpen: true},
-				UI: UISettings{Spinner: tui.SpinnerSnake, SpinnerColor: true, ShowScrollbar: false, ColorScheme: "dark",
+				UI: UISettings{Spinner: domain.SpinnerSnake, SpinnerColor: true, ShowScrollbar: false, ColorScheme: "dark",
 					StallAfter: 90 * time.Second}},
 		},
 		{
 			name: "ui is NOT settable by env or flag (file-only ⇒ the defaults hold)",
-			env:  Layer{UI: &UISettings{Spinner: tui.SpinnerClassic, ShowScrollbar: false}},
-			flag: Layer{UI: &UISettings{Spinner: tui.SpinnerGlitter, ShowScrollbar: false}},
+			env:  Layer{UI: &UISettings{Spinner: domain.SpinnerClassic, ShowScrollbar: false}},
+			flag: Layer{UI: &UISettings{Spinner: domain.SpinnerGlitter, ShowScrollbar: false}},
 			want: Settings{Mode: "ask-before", ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: true, AutoTitle: true, ValidatedSetsEnable: true, ContextFiles: wantContextFilesDefault, Present: PresentSettings{AutoOpen: true}, UI: wantUIDefault},
 		},
 		{
@@ -833,25 +832,25 @@ func TestApplyConfigStartupServerRefusals(t *testing.T) {
 		name       string
 		configYAML string
 		wantParts  []string
-		wantStart  tui.PreboundStart
+		wantStart  domain.PreboundStart
 	}{
 		{
 			name:       "an empty list has nothing to start on",
 			configYAML: "mode: plan\n",
 			wantParts:  []string{"no servers are configured", "config.yaml", "servers:", "server: my-box"},
-			wantStart:  tui.PreboundStart{Reason: tui.PreboundNoServers},
+			wantStart:  domain.PreboundStart{Reason: domain.PreboundNoServers},
 		},
 		{
 			name:       "a list with no choice recorded",
 			configYAML: list,
 			wantParts:  []string{"no startup server is chosen", "laptop", "--server"},
-			wantStart:  tui.PreboundStart{Reason: tui.PreboundFirstBoot},
+			wantStart:  domain.PreboundStart{Reason: domain.PreboundFirstBoot},
 		},
 		{
 			name:       "a choice no entry carries",
 			configYAML: list + "server: the-old-name\n",
 			wantParts:  []string{`names "the-old-name"`, "configured: laptop", "--server"},
-			wantStart:  tui.PreboundStart{Reason: tui.PreboundStaleChoice, Name: "the-old-name"},
+			wantStart:  domain.PreboundStart{Reason: domain.PreboundStaleChoice, Name: "the-old-name"},
 		},
 	}
 	for _, tt := range tests {
@@ -2855,7 +2854,7 @@ func TestApplyConfigUI(t *testing.T) {
 		t.Fatalf("ApplyConfig: %v", err)
 	}
 
-	want := UISettings{Spinner: tui.SpinnerGlitter, SpinnerColor: false, ShowScrollbar: false, ColorScheme: "light",
+	want := UISettings{Spinner: domain.SpinnerGlitter, SpinnerColor: false, ShowScrollbar: false, ColorScheme: "light",
 		StallAfter: 2 * time.Minute}
 	if opts.UI != want {
 		t.Errorf("opts.ui = %+v; want %+v", opts.UI, want)
@@ -3002,19 +3001,19 @@ func TestApplyConfigUIPartialKeepsTheOtherDefault(t *testing.T) {
 		{
 			name: "only spinner: → the colour loop stays on and the bar stays shown",
 			yaml: "ui:\n  spinner: classic\n",
-			want: UISettings{Spinner: tui.SpinnerClassic, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "dark",
+			want: UISettings{Spinner: domain.SpinnerClassic, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "dark",
 				StallAfter: 90 * time.Second},
 		},
 		{
 			name: "only spinner-color: false → the style stays the default and the bar stays shown",
 			yaml: "ui:\n  spinner-color: false\n",
-			want: UISettings{Spinner: tui.SpinnerSnake, SpinnerColor: false, ShowScrollbar: true, ColorScheme: "dark",
+			want: UISettings{Spinner: domain.SpinnerSnake, SpinnerColor: false, ShowScrollbar: true, ColorScheme: "dark",
 				StallAfter: 90 * time.Second},
 		},
 		{
 			name: "only show-scrollbar: false → the bar goes, the spinner keys stay put",
 			yaml: "ui:\n  show-scrollbar: false\n",
-			want: UISettings{Spinner: tui.SpinnerSnake, SpinnerColor: true, ShowScrollbar: false, ColorScheme: "dark",
+			want: UISettings{Spinner: domain.SpinnerSnake, SpinnerColor: true, ShowScrollbar: false, ColorScheme: "dark",
 				StallAfter: 90 * time.Second},
 		},
 		{
@@ -3022,13 +3021,13 @@ func TestApplyConfigUIPartialKeepsTheOtherDefault(t *testing.T) {
 			// present-and-true branch is exercised, not just its nil one.
 			name: "only show-scrollbar: true → the shipped default, said out loud",
 			yaml: "ui:\n  show-scrollbar: true\n",
-			want: UISettings{Spinner: tui.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "dark",
+			want: UISettings{Spinner: domain.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "dark",
 				StallAfter: 90 * time.Second},
 		},
 		{
 			name: "only color-scheme: → the spinner keys and the bar stay put",
 			yaml: "ui:\n  color-scheme: light\n",
-			want: UISettings{Spinner: tui.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "light",
+			want: UISettings{Spinner: domain.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "light",
 				StallAfter: 90 * time.Second},
 		},
 		{
@@ -3036,7 +3035,7 @@ func TestApplyConfigUIPartialKeepsTheOtherDefault(t *testing.T) {
 			// nothing about the look, and none of the four keys above moves it.
 			name: "only stall-after: 0 → the look is untouched and only the guard goes",
 			yaml: "ui:\n  stall-after: 0\n",
-			want: UISettings{Spinner: tui.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "dark",
+			want: UISettings{Spinner: domain.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "dark",
 				StallAfter: 0},
 		},
 	}
@@ -3075,8 +3074,8 @@ func TestApplyConfigNoUIDefaults(t *testing.T) {
 // which is the request for the default, a steady block. An unknown name is a loud startup error
 // that names the key AND lists the shapes that would have worked, for the same reason a bad
 // spinner style is: silently drawing a block would leave the user wondering why their key did
-// nothing. The vocabulary comes from internal/tui (ParseCursorShape), so this also pins that the
-// message the user sees carries it.
+// nothing. The vocabulary comes from internal/domain (CursorShapeNames), so this also pins that
+// the message the user sees carries it.
 func TestCursorShapeConfigParses(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -3121,9 +3120,10 @@ func TestCursorShapeConfigParses(t *testing.T) {
 			if opts.CursorShape != tt.want {
 				t.Errorf("opts.cursorShape = %q; want %q", opts.CursorShape, tt.want)
 			}
-			// The renderer takes a shape, not a name: what the binary hands the TUI must parse.
-			if _, err := tui.ParseCursorShape(opts.CursorShape); err != nil {
-				t.Errorf("the resolved shape %q does not parse for the renderer: %v", opts.CursorShape, err)
+			// The renderer is handed a NAME to draw: what survives resolution must be one the
+			// vocabulary knows, or the empty request for the default.
+			if opts.CursorShape != "" && !domain.ValidCursorShapeName(opts.CursorShape) {
+				t.Errorf("the resolved shape %q is not a name the vocabulary carries", opts.CursorShape)
 			}
 		})
 	}
@@ -3132,7 +3132,7 @@ func TestCursorShapeConfigParses(t *testing.T) {
 // A ui.spinner naming a style this build has no animation for is a loud startup error that names
 // the key AND lists the styles that would have worked — not a silent fall back, which would leave
 // the user watching a spinner their config did not ask for with nothing pointing at the typo. The
-// valid set comes from internal/tui (ParseSpinnerStyle), so this also pins that the message the
+// valid set comes from internal/domain (ParseSpinnerStyle), so this also pins that the message the
 // user sees carries it.
 func TestApplyConfigUIUnknownSpinnerErrors(t *testing.T) {
 	t.Parallel()
@@ -3150,7 +3150,7 @@ func TestApplyConfigUIUnknownSpinnerErrors(t *testing.T) {
 	}
 
 	// Every style this build knows is accepted, so the check rejects only what it should.
-	for _, style := range []tui.SpinnerStyle{tui.SpinnerSnake, tui.SpinnerGlitter, tui.SpinnerClassic} {
+	for _, style := range []domain.SpinnerStyle{domain.SpinnerSnake, domain.SpinnerGlitter, domain.SpinnerClassic} {
 		home := testConfigHome(t, "")
 		writeConfigHome(t, home, "ui:\n  spinner: "+string(style)+"\n")
 		opts := Options{ConfigDir: home}

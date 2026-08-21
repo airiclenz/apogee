@@ -209,3 +209,33 @@ What this record decides is untouched. The config cluster is `internal/config`; 
 and `settingsedit.go` stayed in the binary as the /settings display projection; the package imports
 `internal/domain` and siblings and never the root module; the doc.go file-map rule binds it as
 stated. Only the sentence about how the move would be sequenced was wrong.
+
+## Amendment (2026-08-21) — `internal/config` reaches the UI vocabulary through `internal/domain`
+
+"What does not change" above says `internal/config` imports `internal/domain` **and siblings**, and
+`internal/tui` is a sibling — so the config package importing the renderer was legal under this
+record from the day the cluster moved. It was still wrong. The package existed to give the config
+schema a home of its own, and three of its files (`registry.go`, `config.go`, `options.go`) reached
+into the 53-file renderer for four things that are not rendering at all: the `SpinnerStyle` name a
+`ui.spinner:` value is spelled with, the caret names a `cursor-shape:` value is spelled with, the
+`PreboundStart` a refusal carries, and the two parsers that judge those spellings. Validating a
+config value therefore pulled the whole TUI into `internal/config`'s dependency graph — which is
+the coupling this record's own motivation set out to end, not an instance of the sibling freedom it
+granted.
+
+**The vocabulary moved to `internal/domain`, for `ParseMode`'s reason.** The 2026-08-10 amendment
+already recorded that call: parsing the autonomy ladder belongs beside the ladder's words, so
+`parseMode` became `domain.ParseMode`. The presentation words are the same kind of fact — they
+describe the configuration surface, not any one renderer — so `SpinnerStyle` and its parser, the
+cursor-shape names and their validator, and `PreboundStart`/`PreboundReason` now live in
+`internal/domain/uivocab.go`. What stays with `internal/tui` is everything a terminal library
+types: which animation each style paints, and which `tea.CursorShape` each name draws.
+`internal/tui` re-exports the moved types as aliases, so its call sites are unchanged, and
+`cmd/apogee` still calls `tui.ParseCursorShape` — the binary may import the renderer.
+
+**What this buys is a testable line, not a tidier one.** `go list -deps ./internal/config` no longer
+names `internal/tui`; the config package's dependency set is now the schema's own. No decision in
+this record is superseded — the sibling freedom stands for the siblings config genuinely needs
+(`internal/scheme`, `internal/prompt`, `internal/profiles`, `internal/mcp`). What is added is the
+reading of it: a sibling import that exists only to borrow a vocabulary is a sign the vocabulary is
+homed in the wrong package.

@@ -382,7 +382,12 @@ NOTES (2026-08-21): `internal/config/registry.go`'s comment (~133) still says tw
 
 **Commit:** `refactor(domain): home the spinner, prebound and cursor-shape vocabulary`
 
-## 17. internal/config stops importing internal/tui
+## 17. internal/config stops importing internal/tui — ✅ DONE (2026-08-21)
+
+NOTES (2026-08-21): `cmd/apogee/wire_options.go` is in the item's file list but needed no edit — ratified call 8 keeps `tui.PreboundStart`/`tui.SpinnerStyle` as aliases of the domain types, so the binary compiled unchanged and its `tui.ParseCursorShape` call stands exactly as the item says it should.
+NOTES (2026-08-21): `validateCursorShapeName` now composes the "unknown cursor shape %q (known shapes: …)" sentence itself from `domain.CursorShapeNames()`, and `ApplyConfig` calls that validator instead of repeating the check — same user-facing text, one wording for both surfaces; the renderer keeps its own copy of that sentence, which is the unavoidable price of not importing it.
+NOTES (2026-08-21): `TestRegistryEnumValuesMatchParseSites`'s two retargeted subtests now compare the registry rows against `domain.SpinnerStyleNames()` / `domain.CursorShapeNames()` — exported by item 16 — rather than scraping a parse error for the list; the helper that did the scraping (`vocabularyFromError`) had no other caller and was deleted with them.
+NOTES (2026-08-21): applied the dispatch DECISION — the `spinnerValues`/`cursorShapeValues` comment in `registry.go` no longer claims those sets live in `internal/tui`, and now states the real reason the table restates them.
 
 **Source:** review candidate 8 (second half). Depends on item 16.
 

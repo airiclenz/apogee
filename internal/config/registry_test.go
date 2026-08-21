@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
-	"github.com/airiclenz/apogee/internal/tui"
 )
 
 // TestRegistryIsBijectionWithFileConfig is the anti-drift core of the key registry: it walks
@@ -108,16 +107,13 @@ func derefType(typ reflect.Type) reflect.Type {
 }
 
 // TestRegistryEnumValuesMatchParseSites pins each enum row's vocabulary to the function that
-// actually validates the key at startup. Two of the three sets live in internal/tui as
-// unexported slices, so the vocabulary is recovered from the exported parser's own error
-// message — which is the parse site's published list — rather than duplicated by hand: a
-// style added there and not here fails this test instead of silently going unofferable in
-// /settings.
+// actually validates the key at startup — all three of them in internal/domain, which owns the
+// words a config file is spelled with. Each subtest checks the bijection in both directions:
+// every value the registry offers is accepted by the parse site, and every value the parse site
+// knows is offered. A style added to the vocabulary and not to the table therefore fails here,
+// instead of silently going unofferable in /settings.
 func TestRegistryEnumValuesMatchParseSites(t *testing.T) {
 	t.Parallel()
-
-	// A value no vocabulary will ever contain, used to make each parser list what it knows.
-	const unknown = "apogee-registry-test-not-a-value"
 
 	t.Run("mode", func(t *testing.T) {
 		t.Parallel()
@@ -139,14 +135,13 @@ func TestRegistryEnumValuesMatchParseSites(t *testing.T) {
 		t.Parallel()
 		values := enumValues(t, "ui.spinner")
 		for _, v := range values {
-			if _, err := tui.ParseSpinnerStyle(v); err != nil {
-				t.Errorf("registry offers spinner %q but ParseSpinnerStyle rejects it: %v", v, err)
+			if _, err := domain.ParseSpinnerStyle(v); err != nil {
+				t.Errorf("registry offers spinner %q but domain.ParseSpinnerStyle rejects it: %v", v, err)
 			}
 		}
-		_, err := tui.ParseSpinnerStyle(unknown)
-		for _, name := range vocabularyFromError(t, err) {
-			if !slices.Contains(values, name) {
-				t.Errorf("ParseSpinnerStyle knows style %q but the registry does not offer it", name)
+		for _, style := range domain.SpinnerStyleNames() {
+			if !slices.Contains(values, string(style)) {
+				t.Errorf("domain knows spinner style %q but the registry does not offer it", style)
 			}
 		}
 	})
@@ -155,14 +150,13 @@ func TestRegistryEnumValuesMatchParseSites(t *testing.T) {
 		t.Parallel()
 		values := enumValues(t, "cursor-shape")
 		for _, v := range values {
-			if _, err := tui.ParseCursorShape(v); err != nil {
-				t.Errorf("registry offers cursor shape %q but ParseCursorShape rejects it: %v", v, err)
+			if !domain.ValidCursorShapeName(v) {
+				t.Errorf("registry offers cursor shape %q but domain.ValidCursorShapeName rejects it", v)
 			}
 		}
-		_, err := tui.ParseCursorShape(unknown)
-		for _, name := range vocabularyFromError(t, err) {
+		for _, name := range domain.CursorShapeNames() {
 			if !slices.Contains(values, name) {
-				t.Errorf("ParseCursorShape knows shape %q but the registry does not offer it", name)
+				t.Errorf("domain knows cursor shape %q but the registry does not offer it", name)
 			}
 		}
 	})
@@ -183,30 +177,6 @@ func enumValues(t *testing.T, path string) []string {
 		t.Fatalf("registry row %q is an enum with no values", path)
 	}
 	return row.EnumValues
-}
-
-// vocabularyFromError recovers the list a parse site names in its rejection message — the
-// "(known styles: a, b, c)" tail. It fails loudly rather than quietly returning nothing when
-// the format changes, because a silent empty list would turn the completeness check above
-// into a test that asserts nothing.
-func vocabularyFromError(t *testing.T, err error) []string {
-	t.Helper()
-	if err == nil {
-		t.Fatal("the parse site accepted a value no vocabulary contains")
-	}
-	const marker = "(known "
-	msg := err.Error()
-	i := strings.Index(msg, marker)
-	if i < 0 {
-		t.Fatalf("cannot read the vocabulary out of %q: no %q section — the parse site's error "+
-			"format changed, so update this test", msg, marker)
-	}
-	rest := msg[i+len(marker):]
-	j := strings.Index(rest, ": ")
-	if j < 0 {
-		t.Fatalf("cannot read the vocabulary out of %q: no list follows %q", msg, marker)
-	}
-	return strings.Split(strings.TrimSuffix(rest[j+2:], ")"), ", ")
 }
 
 // TestRegistryRowInvariants pins the properties every surface reading the registry relies on,

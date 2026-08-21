@@ -222,6 +222,19 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **The config layer no longer pulls the whole TUI in to check a spelling.** `internal/config`
+  imported `internal/tui` for four things that are not rendering at all — the spinner style name a
+  `ui.spinner:` carries, the caret names a `cursor-shape:` carries, the reason a session can start
+  with no server bound, and the two parsers that judge those spellings. All four moved to
+  `internal/domain` in the previous change, so the config package now reaches them there:
+  `UISettings.Spinner` and `Options.Prebound` are domain types, the startup checks call the domain
+  parsers, and the `cursor-shape:` validator asks the shared name list instead of throwing away a
+  renderer parse. `go list -deps ./internal/config` no longer names `internal/tui`. Nothing changes
+  for a user — the same values are accepted and refused, with the same messages — and the binary
+  still parses a caret name into the shape the renderer draws, because a binary may import the
+  renderer. ADR 0043 carries a dated amendment recording why a legal sibling import was still the
+  wrong one.
+
 - **The vocabulary a `ui.spinner:` or a `cursor-shape:` is spelled in has one home.** The three
   spinner style names with their parse, the three caret shape names with their default, and the
   reason a session can start with no server bound all lived in the renderer, so the config layer
