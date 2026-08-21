@@ -327,7 +327,11 @@ NOTES (2026-08-21): `TestPostToolResultChangedFieldByField` was deleted with its
 
 **Commit:** `refactor(domain): revision-bearing edit values for the tool-stage hooks`
 
-## 14. One generic hook runner with five adapters
+## 14. One generic hook runner with five adapters — ✅ DONE (2026-08-21)
+
+NOTES (2026-08-21): post-response's `ActionDefer` routing moved into the fire adapter, so it now runs inside the recover boundary and BEFORE the fire is booked, where it previously ran after booking and outside the boundary. Both moves are unobservable: `Conversation.Defer` only appends to the deferred queue and cannot panic, and no consumer of the fire event can read that queue.
+NOTES (2026-08-21): the two acted-probe tests the item retires (`TestPostToolResultActedProbe`, `TestPreToolExecActedProbe`) are gone with their fixtures, but the regression they were written for is preserved: every cell of the 25-cell matrix drives its Exchange through a tool whose result carries the uncomparable `ReadSpan` summary that panicked the old whole-struct compare.
+NOTES (2026-08-21): the matrix's teeth were checked by mutation — booking unconditionally in `runOneHook` fails exactly the five "catalogued no-op ⇒ not booked" cells.
 
 **Source:** review candidate 1 (second half). Depends on item 13.
 

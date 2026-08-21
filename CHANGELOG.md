@@ -222,6 +222,22 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **One runner fires every hook point.** Each of the five points — history-rewrite, pre-request,
+  post-response, pre-tool-exec, post-tool-result — carried its own hand-written pair of dispatch
+  loops, ten in all, and every pair repeated the same protocol: ask the registry for that point's
+  Mechanisms in their deterministic order, drop the ones Bypass or self-regulation switched off,
+  bracket the fire with the working value's `Revision()` counter, run it under the recover
+  boundary, and book a `MechanismFiredEvent` when it intervened. Ten copies are ten places for that
+  protocol to drift, which is how the acted probe at one point could be a field-by-field compare
+  while its neighbour counted revisions. There is one runner now, and what each point does
+  differently is a small adapter beside it: post-response alone installs the subprocess permit
+  ahead of its cascade, stops the chain on `ActionRetry` and files an `ActionDefer` correction;
+  post-tool-result alone swallows a recovered panic instead of reporting it upward; the two tool
+  stages alone build the loop view their hooks read. Nothing an extension observes changes — same
+  order, same gates, same events, same attribution — and the matrix proving it now spans all five
+  hook points × acts / no-op / experimental / panicking / Bypass-gated, where two of the five points
+  had that cover before.
+
 - **The tool-stage hooks now speak in working values, like every other hook point.** A
   pre-tool-exec Mechanism used to receive the raw `*ToolCall` and a post-tool-result one the raw
   `*ToolResult`, which left the loop no way to ask "did that hook actually act?" except to copy the
