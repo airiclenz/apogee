@@ -72,22 +72,6 @@ moved the code each comment describes without repointing the comment.
 
 ---
 
-### ADR 0053's adoption note credits the approval and ask panes with `clampSelection`
-
-**Status:** [P] open 2026-08-20 — residual of
-`docs/plans/archived/2026-08-19 - 04 - tui-architecture-deepening-plan.md` item 17, which wrote the
-note.
-
-The note says the two decision panes "take `move`, `clampSelection` and `highlight` **without
-`key`**" (`docs/adr/0053-popup-surfaces-embed-one-list-surface.md:120`). Neither pane calls
-`clampSelection`: the approval menu takes `move` (`internal/tui/approval.go:91`, `:94`) and
-`highlight` (`:108`, `:287`), and the ask_user offering the same pair (`internal/tui/ask.go:70`,
-`:73`, `:83`, `:114`, `:318`). Their row sets are fixed for the pane's lifetime, so there is nothing
-to clamp against — the code is right and the prose overclaims. The correction is either dropping the
-verb from the list or stating why these two do not need it.
-
----
-
 ### A session saved before the typed stat value replays with blank type-row totals
 
 **Status:** [P] open 2026-08-20 — residual of

@@ -117,8 +117,8 @@ its pane is". `Model` measured **104,592 bytes before and after** item 16, which
 **Adoption note (2026-08-20, item 17).** The two DECISION panes take the cursor a third way, and
 decisions 4, 7 and 8 read this way for them. The approval menu (`approval.go`) and the ask_user
 offering (`ask.go`) have no pane struct to embed it in — their state IS the `Model`'s own — so they
-**name** it (`m.approvalSel`, `m.askSel`), and they take `move`, `clampSelection` and `highlight`
-**without `key`**: both panes are soft-modal, so every key they do not claim has somewhere else to be
+**name** it (`m.approvalSel`, `m.askSel`), and they take `move` and `highlight` **without `key`**:
+both panes are soft-modal, so every key they do not claim has somewhere else to be
 (the transcript under the approval prompt, the answer box under the question), and which keys they
 claim is a fact about the surface underneath them rather than about lists. Each says it at its own
 switch. What decision 4 promised is delivered whole — `listStopsAtEnds` is a stated argument at both

@@ -131,7 +131,7 @@ style the repo's other ADRs use. Remove the ISSUES.md entry.
 
 ---
 
-## 4. Drop clampSelection from ADR 0053's decision-pane sentence
+## 4. Drop clampSelection from ADR 0053's decision-pane sentence — ✅ DONE (2026-08-22)
 
 **What:** Fix the ISSUES.md entry *"ADR 0053's adoption note credits the approval and ask
 panes with `clampSelection`"*. In

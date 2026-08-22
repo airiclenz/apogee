@@ -952,6 +952,11 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- ADR 0053's adoption note stops crediting the two decision panes with `clampSelection`. Neither the
+  approval menu nor the ask_user offering calls it — their row sets are fixed for the pane's
+  lifetime, so there is nothing to clamp against — and the note now says they take `move` and
+  `highlight` without `key`, which is what the code does.
+
 - ADR 0052 records the tiling rule that shipped, not the merge its ratified call proposed. Decision
   1 still described each Edit region as carrying up to three *merged* unchanged context lines each
   side; the owner superseded that on 2026-08-19, before the shared region builder was written, and
