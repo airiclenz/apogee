@@ -87,7 +87,9 @@
 // the nil-degrading [tui.LauncherHost] the seven launcher acts cross to the renderer as
 // (ADR 0029, ADR 0054); schedule.go the scheduler's three
 // composition seams — what a Firing runs against, when it may start, where it narrates
-// (ADR 0033).
+// (ADR 0033); daemonfire.go that same composition for the daemon — the adopted
+// name→Entry set a Firing resolves its schedule against, the `servers:` entry it binds to
+// by name, and the unattended run composed over the pair (ADR 0034, ADR 0055).
 //
 // The subcommands: headless.go is `apogee headless`, one prompt run to completion with
 // nobody watching, and the binary's only distinct exit codes; probe.go `apogee probe`
