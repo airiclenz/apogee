@@ -61,7 +61,8 @@ func onlyFileIn(t *testing.T, dir string) []string {
 
 // An absent config is seeded from the embedded template before anything is spliced, so an edit
 // never leaves a bare fragment where a documented file belongs — and the seeded file is the
-// template plus what the splice put in it.
+// template plus what the splice put in it. A config may hold endpoint details, so the file the
+// seeding creates is owner-only from the moment it exists — there is no earlier mode to preserve.
 func TestEditSeedsAnAbsentConfig(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -85,6 +86,13 @@ func TestEditSeedsAnAbsentConfig(t *testing.T) {
 	}
 	if got := onlyFileIn(t, dir); len(got) != 1 || got[0] != "config.yaml" {
 		t.Errorf("the directory holds %v, want the config alone", got)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat the seeded config: %v", err)
+	}
+	if perm := info.Mode().Perm(); perm != 0o600 {
+		t.Errorf("the seeded config's mode is %04o, want 0600", perm)
 	}
 }
 

@@ -951,6 +951,9 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- Restored the test pin that a config seeded from the embedded template is created owner-only
+  (0600); item 24's rewrite of the config-write suite had dropped the only assertion covering it.
+
 - Corrected a stale symbol in ADR 0036. Decision 6's account of the detached `--endpoint` /
   `APOGEE_ENDPOINT` overrides says they "leave `multiSourceKeys`" — a table renamed to
   `keyAccessors` when every registry row gained a `fromFile` projection and resolution became a
