@@ -92,6 +92,12 @@ point is a **minor** bump, not a breaking change.
   the one shutdown path nothing exercised — a firing still in flight, one stop signal, and a
   `shutdown-grace` short enough to elapse — and asserts the daemon logs
   `grace expired — cancelling the firing in flight` and stops. Test-only; no production change.
+- **The notify switch's drift guard exists, and its doc-comment claim is now true.**
+  `internal/schedule` exports `EventKinds` — the library's own kind set, declared beside the
+  kind consts and bound to them by comment and its own once-each test — and the daemon's new
+  `TestDaemonNotifyRendersEveryLibraryKind` iterates it, so a kind added to the library later
+  falls through the spelled-out `notify` switch and fails the guard instead of vanishing from
+  the log. `TestDaemonNotifyLinesArePinned` stays the exact-wording table.
 
 ### Known verification (owner-run)
 

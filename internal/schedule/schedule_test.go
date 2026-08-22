@@ -471,6 +471,27 @@ func TestEventsArriveInPerScheduleOrder(t *testing.T) {
 	}
 }
 
+// TestEventKindsHoldsEveryKindOnce pins the exported kind set consumers derive their drift
+// guards from: it must hold every kind the scheduler can emit — the lifecycle kinds the
+// per-schedule-order test walks plus skipped and failed — each exactly once.
+func TestEventKindsHoldsEveryKindOnce(t *testing.T) {
+	t.Parallel()
+
+	want := []EventKind{EventCreated, EventFired, EventCompleted, EventSkipped, EventStopped, EventFailed}
+	seen := make(map[EventKind]int, len(EventKinds))
+	for _, k := range EventKinds {
+		seen[k]++
+	}
+	for _, k := range want {
+		if seen[k] != 1 {
+			t.Errorf("EventKinds holds %q %d times, want exactly once", k, seen[k])
+		}
+	}
+	if len(EventKinds) != len(want) {
+		t.Errorf("EventKinds = %v, want exactly the %d kinds %v", EventKinds, len(want), want)
+	}
+}
+
 // TestAFailingRunnerIsReportedAndTheCadenceSurvives proves a failed Firing is an Event rather
 // than the end of the Schedule: an unattended run that errors must not silently take its
 // cycle down with it.

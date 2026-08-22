@@ -26,20 +26,6 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 - [ ] when the pop-up box is open - the main session-chat's last row is not reachable anymore with scrolling. The pop-up box covers that poart of the chat. This is importent when questions or other permanent pop-ups are open where access to the last messages of the chat history are important.
 
 
-### The shutdown grace EXPIRY has no test, and the notify switch's drift guard does not exist
-
-**Status:** [ ] open 2026-08-22 — residual of
-`docs/plans/archived/2026-08-22 - 02 - daemon-plan.md` item 6, two gaps in the same file's coverage.
-
-- `notify`'s doc comment says the kinds are spelled out "so that a kind added to the library later
-  fails this switch's own test rather than vanishing from the log"
-  (`cmd/apogee/daemon.go:598-599`). No such test exists: `TestDaemonNotifyLinesArePinned`
-  (`cmd/apogee/daemon_test.go:845`) is a hand-written table of the seven kinds that exist today, so a
-  new `schedule.EventKind` would fall through the switch silently and the table would still pass.
-  Either the claim goes or the table is derived from the library's own kind set.
-
----
-
 ### `apogee daemon install` writes the supervisor unit without the repo's temp-file-plus-rename idiom
 
 **Status:** [ ] open 2026-08-22 — residual of

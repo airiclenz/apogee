@@ -132,6 +132,18 @@ const (
 	EventFailed EventKind = "failed"
 )
 
+// EventKinds lists every EventKind, in the order declared above. It is the set a consumer's
+// exhaustive switch is tested against — a drift guard that iterates it catches a kind the switch
+// forgot. A new kind is added to both, on this screen: the const block and this slice.
+var EventKinds = []EventKind{
+	EventCreated,
+	EventFired,
+	EventCompleted,
+	EventSkipped,
+	EventStopped,
+	EventFailed,
+}
+
 // Event is one thing that happened to one Schedule.
 type Event struct {
 	// Kind is what happened.

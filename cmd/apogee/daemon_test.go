@@ -1004,6 +1004,36 @@ func TestDaemonNotifyLinesArePinned(t *testing.T) {
 	}
 }
 
+// TestDaemonNotifyRendersEveryLibraryKind is the completeness guard behind notify's doc-comment
+// claim: it iterates the library's own kind set, so a kind added to schedule.EventKinds later
+// falls through the spelled-out switch, renders no line, and fails HERE rather than vanishing
+// from the log — TestDaemonNotifyLinesArePinned above stays the exact-wording table.
+func TestDaemonNotifyRendersEveryLibraryKind(t *testing.T) {
+	t.Parallel()
+
+	at := time.Date(2026, 8, 22, 3, 4, 5, 0, time.UTC)
+	for _, kind := range schedule.EventKinds {
+		t.Run(string(kind), func(t *testing.T) {
+			t.Parallel()
+			out := &syncBuffer{}
+			log := &daemonLog{out: out, now: func() time.Time { return at }}
+			// One event carrying every field any kind's line renders, so no kind is
+			// short-changed into an empty render.
+			log.notify(schedule.Event{
+				Kind:         kind,
+				ScheduleName: "nightly-audit",
+				Prompt:       "audit the tree",
+				Outcome:      schedule.Outcome{RecordID: "ses_abc", Turns: 1},
+				Elapsed:      time.Second,
+				Err:          errors.New("the server refused the connection"),
+			})
+			if out.String() == "" {
+				t.Errorf("kind %q fell through the notify switch: no log line rendered", kind)
+			}
+		})
+	}
+}
+
 // ----------------------------------------------------------------------------
 // Registration
 // ----------------------------------------------------------------------------

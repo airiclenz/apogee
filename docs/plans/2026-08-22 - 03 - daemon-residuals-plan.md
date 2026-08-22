@@ -138,7 +138,10 @@ guard does not exist* — item 4 removes the remainder — and add the CHANGELOG
 
 **Commit:** `test(daemon): cover the shutdown-grace expiry branch`
 
-## 4. The notify switch's drift guard exists and the doc claim becomes true
+## 4. The notify switch's drift guard exists and the doc claim becomes true — ✅ DONE (2026-08-22)
+
+NOTES (2026-08-22): the CHANGELOG bullet goes under the existing `### Fixed` subsection of `[Unreleased]`, after the shutdown-grace-expiry bullet.
+NOTES (2026-08-22): reworded the `notify` doc comment's claim to name the drift-guard test and `schedule.EventKinds` — the item allows a wording adjustment where the test's name makes it clearer; the claim itself is unchanged.
 
 **What:** Per the ratified call: in `internal/schedule/schedule.go`, export
 `EventKinds` — a slice listing every `EventKind`, declared IMMEDIATELY next to the kind

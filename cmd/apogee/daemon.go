@@ -599,7 +599,8 @@ func (l *daemonLog) line(format string, args ...any) {
 // whichever of completed or failed ends it, which is the same pair of brackets the lines report.
 //
 // The Event kinds are spelled out rather than defaulted so that a kind added to the library later
-// fails this switch's own test rather than vanishing from the log.
+// fails this switch's drift guard — TestDaemonNotifyRendersEveryLibraryKind iterates
+// [schedule.EventKinds] — rather than vanishing from the log.
 func (l *daemonLog) notify(ev schedule.Event) {
 	switch ev.Kind {
 	case schedule.EventCreated:
