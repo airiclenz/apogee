@@ -6,7 +6,7 @@
 
 - `CONTEXT.md` — the domain language and concept map (Mechanisms, Bypass, Steps,   Turns, …). Terms used in code and docs are defined here; read the relevant   section before design work. Large — read sections, don't load it wholesale.
 - `docs/adr/` — 30+ architectural decision records. Settled questions live here; check for an ADR before re-opening one.
-- `docs/design/` — design contracts (confinement execution contract, hook mutation API, MCP client, mechanism catalogue, technical design).
+- `docs/design/` — design contracts (confinement execution contract, MCP client, mechanism catalogue) plus the `tool-surface-findings.md` record.
 - `docs/plans/` — implementation plans in the house format: numbered `## N.` H2 items with What/Tests/Acceptance/commit. Plans are saved repo docs, executed item-by-item; completed plans get archived.
 - `docs/handoffs/` — multi-session work-in-flight handoffs (superseded ones move to `docs/handoffs/archived/`).
 - `docs/reviews/` — saved review reports.

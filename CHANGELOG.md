@@ -951,6 +951,12 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- Refreshed the `docs/design/` line in `AGENTS.md`. Its parenthetical still advertised the hook
+  mutation API and the technical design — both moved to `docs/design/archived/` — and never
+  mentioned `tool-surface-findings.md`, the design doc created when the tool-surface record left
+  `ISSUES.md`. The line now names the three contracts actually at the top level of `docs/design/`
+  plus that findings record.
+
 - Restored the test pin that a config seeded from the embedded template is created owner-only
   (0600); item 24's rewrite of the config-write suite had dropped the only assertion covering it.
 

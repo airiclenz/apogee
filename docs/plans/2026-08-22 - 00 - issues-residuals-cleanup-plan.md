@@ -50,7 +50,9 @@ code fixes left behind as residuals of the 2026-08-19/20 plan runs.
 
 ---
 
-## 1. Refresh AGENTS.md's docs/design parenthetical
+## 1. Refresh AGENTS.md's docs/design parenthetical — ✅ DONE (2026-08-22)
+
+NOTES (2026-08-22): the added doc is named as the file, `tool-surface-findings.md`, and set off from the three contracts ("plus the ... record") rather than listed inside the parenthetical with them — it is a findings record, not a design contract, and the item's own acceptance greps for the hyphenated spelling.
 
 **What:** Fix the ISSUES.md entry *"`AGENTS.md:9`'s `docs/design/` parenthetical does not
 list `tool-surface-findings.md`"*. Rewrite the parenthetical on the `docs/design/` bullet in

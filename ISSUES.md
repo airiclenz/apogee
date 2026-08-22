@@ -42,19 +42,6 @@ still state the superseded rule:
 
 ---
 
-### `AGENTS.md:9`'s `docs/design/` parenthetical does not list `tool-surface-findings.md`
-
-**Status:** [P] open 2026-08-19 — residual of
-`docs/plans/2026-08-19 - 02 - issues-defects-and-ledger-slimming-plan.md` item 4, which created
-the new design doc.
-
-The parenthetical reads "confinement execution contract, hook mutation API, MCP client, mechanism
-catalogue, technical design". It misses `docs/design/tool-surface-findings.md`, and it is stale in
-the other direction too: `hook-mutation-api.md` and `technical-design.md` both now live under
-`docs/design/archived/`. One refresh of the line fixes both.
-
----
-
 ### `git_diff_range` drops the whole diff to plain rendering when git quotes a path
 
 **Status:** [P] open 2026-08-19 — residual of
