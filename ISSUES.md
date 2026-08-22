@@ -25,7 +25,7 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 
 ### Two doc sites still assert the old resolved-path journal rule
 
-**Status:** [ ] open 2026-08-19 — residual of
+**Status:** [P] open 2026-08-19 — residual of
 `docs/plans/2026-08-19 - 02 - issues-defects-and-ledger-slimming-plan.md` item 1, which corrected
 five sites and removed the defect entry that tracked the rule, leaving these two untracked.
 
@@ -44,7 +44,7 @@ still state the superseded rule:
 
 ### `AGENTS.md:9`'s `docs/design/` parenthetical does not list `tool-surface-findings.md`
 
-**Status:** [ ] open 2026-08-19 — residual of
+**Status:** [P] open 2026-08-19 — residual of
 `docs/plans/2026-08-19 - 02 - issues-defects-and-ledger-slimming-plan.md` item 4, which created
 the new design doc.
 
@@ -57,7 +57,7 @@ the other direction too: `hook-mutation-api.md` and `technical-design.md` both n
 
 ### `git_diff_range` drops the whole diff to plain rendering when git quotes a path
 
-**Status:** [ ] open 2026-08-19 — residual of
+**Status:** [P] open 2026-08-19 — residual of
 `docs/plans/2026-08-19 - 03 - split-diff-display-plan.md` item 9, which added the recovery.
 
 The file-section walk matches a section header against
@@ -72,7 +72,7 @@ and it falls back to the plain uncoloured output.
 
 ### ADR 0052 §1 still describes MERGED context, not the tiling rule that shipped
 
-**Status:** [ ] open 2026-08-19 — residual of
+**Status:** [P] open 2026-08-19 — residual of
 `docs/plans/2026-08-19 - 03 - split-diff-display-plan.md` item 2, whose NOTES record the owner's
 2026-08-19 decision superseding the ratified merge wording.
 
@@ -87,7 +87,7 @@ item 2 NOTES; the ADR that ratifies the decision does not carry it.
 
 ### The stacked frame's line NUMBER rides inside the diff band, not the chrome gutter
 
-**Status:** [ ] open 2026-08-19 — residual of
+**Status:** [P] open 2026-08-19 — residual of
 `docs/plans/2026-08-19 - 05 - diff-background-tint-plan.md`, whose ratified call 3 ("the gutter
 stays chrome" — line numbers untinted) is still unmet for the stacked frame. No item of that plan
 owns it.
@@ -103,7 +103,7 @@ band (same plan, item 3's amendment to ADR 0052); only the number is the miss.
 
 ### Two shipped comments still point at the home their subject left
 
-**Status:** [ ] open 2026-08-20 — residual of
+**Status:** [P] open 2026-08-20 — residual of
 `docs/plans/archived/2026-08-19 - 04 - tui-architecture-deepening-plan.md` items 21 and 33, which
 moved the code each comment describes without repointing the comment.
 
@@ -121,7 +121,7 @@ moved the code each comment describes without repointing the comment.
 
 ### ADR 0053's adoption note credits the approval and ask panes with `clampSelection`
 
-**Status:** [ ] open 2026-08-20 — residual of
+**Status:** [P] open 2026-08-20 — residual of
 `docs/plans/archived/2026-08-19 - 04 - tui-architecture-deepening-plan.md` item 17, which wrote the
 note.
 
@@ -137,7 +137,7 @@ verb from the list or stating why these two do not need it.
 
 ### A session saved before the typed stat value replays with blank type-row totals
 
-**Status:** [ ] open 2026-08-20 — residual of
+**Status:** [P] open 2026-08-20 — residual of
 `docs/plans/archived/2026-08-19 - 04 - tui-architecture-deepening-plan.md` item 12, which persisted
 the typed value for records written from then on but left the ones already on disk without it.
 
@@ -156,7 +156,7 @@ down.
 
 ### `sessionBrowser` derives the visible list twice per frame
 
-**Status:** [ ] open 2026-08-20 — residual of
+**Status:** [P] open 2026-08-20 — residual of
 `docs/plans/archived/2026-08-19 - 04 - tui-architecture-deepening-plan.md` item 15, which split
 `unfilteredRows` out of `filteredView` and left the caller's own call standing.
 
@@ -171,7 +171,7 @@ duplicate without touching the seam item 15 created.
 
 ### The path-keyed history family still cannot see `copy_file` / `move_file`
 
-**Status:** [ ] open 2026-08-22 — residual of
+**Status:** [P] open 2026-08-22 — residual of
 `docs/plans/archived/2026-08-20 - 00 - engine-architecture-deepening-plan.md` item 5, which added the
 three 2026-08-10 write tools to `wave4WriteTools` and so reached only the half of the family that
 keys on the tool NAME.
@@ -195,7 +195,7 @@ two a copy or a move should report as the file it touched.
 
 ### The hook subprocess env scrub drops apogee's own keys but not the operator-named ones
 
-**Status:** [ ] open 2026-08-22 — residual of
+**Status:** [P] open 2026-08-22 — residual of
 `docs/plans/archived/2026-08-20 - 00 - engine-architecture-deepening-plan.md` item 7, which routed the
 autofix formatter through the tools funnel. Recorded in prose at the door itself
 (`internal/tools/exec_common.go:325-327`) and in `docs/design/confinement-execution-contract.md` §10.5.
@@ -214,7 +214,7 @@ carrying those names on `Deps` and passing them through the door.
 
 ### Four shipped doc comments went stale under the engine-deepening run
 
-**Status:** [ ] open 2026-08-22 — residual of
+**Status:** [P] open 2026-08-22 — residual of
 `docs/plans/archived/2026-08-20 - 00 - engine-architecture-deepening-plan.md` items 7, 10, 12 and 13,
 each of which changed the behaviour its comment describes without repointing the comment.
 
@@ -237,7 +237,7 @@ each of which changed the behaviour its comment describes without repointing the
 
 ### Nothing pins `construct.go`'s deliberate empty `NetworkAllow`
 
-**Status:** [ ] open 2026-08-22 — residual of
+**Status:** [P] open 2026-08-22 — residual of
 `docs/plans/archived/2026-08-20 - 00 - engine-architecture-deepening-plan.md` item 9, whose
 constructor test pins the three fields `Config.ConfinementBox()` fills but not the one call site that
 deliberately un-fills one.
@@ -253,7 +253,7 @@ coverage.
 
 ### A `delimited` thinking style with no delimiters loads and strips nothing
 
-**Status:** [ ] open 2026-08-22 — residual of
+**Status:** [P] open 2026-08-22 — residual of
 `docs/plans/archived/2026-08-20 - 00 - engine-architecture-deepening-plan.md` item 12, which validated
 the four named axes and left this cross-field check outside all four.
 
@@ -270,7 +270,7 @@ tokens, in the style of the existing messages (`model-profiles.<pattern>.thinkin
 
 ### `runOneHook`'s recover boundary now also covers the fire booking
 
-**Status:** [ ] open 2026-08-22 — residual of
+**Status:** [P] open 2026-08-22 — residual of
 `docs/plans/archived/2026-08-20 - 00 - engine-architecture-deepening-plan.md` item 14, which collapsed
 the ten hand-written loops into one runner and in doing so widened what the deferred recover sees.
 
@@ -288,7 +288,7 @@ design.
 
 ### `hookPoints` and `hookImplements` duplicate the HookPoint set with no drift guard
 
-**Status:** [ ] open 2026-08-22 — residual of
+**Status:** [P] open 2026-08-22 — residual of
 `docs/plans/archived/2026-08-20 - 00 - engine-architecture-deepening-plan.md` item 15, which
 introduced the second of the two lists.
 
