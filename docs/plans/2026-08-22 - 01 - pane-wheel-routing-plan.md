@@ -290,7 +290,15 @@ leaves `m.picker.draft` untouched.
 
 ---
 
-## 5. The approval and ask prompts take the notch inside their box
+## 5. The approval and ask prompts take the notch inside their box — ✅ DONE (2026-08-22)
+
+NOTES (2026-08-22): `promptWheel` short-circuits on `m.openPanes().has(panePrompt)` before asking
+`m.frameSpans().pane(panePrompt)`, rather than gating on the rectangle alone as the item's text reads
+— the same deviation items 3 and 4 recorded, for the same reason: the wheel path publishes no frame,
+so an unguarded `frameSpans()` would compose (and render) every overlay of the frame on every notch
+the transcript owns. The pane's OWN open predicate (`openPanes`, model.go) is reused rather than
+restated, so the guard cannot drift from what the renderer draws. The rectangle is still the only
+gate that decides anything.
 
 Depends on items 1 and 4.
 

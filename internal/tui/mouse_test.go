@@ -3823,3 +3823,217 @@ func TestPickerWheelWalksAScheduleStep(t *testing.T) {
 		t.Errorf("draft = %+v, want the notch to leave the half-built Schedule at %+v", after.picker.draft, draft)
 	}
 }
+
+// ----------------------------------------------------------------------------
+// Mouse in the approval and ask prompts (approval.go)
+// ----------------------------------------------------------------------------
+
+// approvalPaneModel raises an approval prompt over a screenful of transcript. The transcript is the
+// point: these two panes are SOFT-modal, so every notch has to be checked against lines that WOULD
+// have scrolled — the ones inside the box for having left them alone, the ones outside it for
+// having scrolled them exactly as they always did.
+func approvalPaneModel(t *testing.T) Model {
+	t.Helper()
+	m := streamOneScreen(t, newTestModel(t))
+	return step(t, m, approvalReqMsg{
+		Request: domain.ApprovalRequest{Tool: "write_file", Reason: "it overwrites a tracked file"},
+		Reply:   make(chan domain.ApprovalDecision, 1),
+	})
+}
+
+// askPaneModel raises an ask_user question over the same screenful of transcript.
+func askPaneModel(t *testing.T, req domain.AskRequest) Model {
+	t.Helper()
+	m := streamOneScreen(t, newTestModel(t))
+	return step(t, m, askReqMsg{Request: req, Reply: make(chan domain.AskAnswer, 1)})
+}
+
+// promptRect is where the open decision pane is drawn — the ONE rectangle the two share — and a row
+// squarely inside it for a notch to be aimed at.
+func promptRect(t *testing.T, m Model) (paneTop, inside int) {
+	t.Helper()
+	y0, h, ok := m.frameSpans().pane(panePrompt)
+	if !ok {
+		t.Fatal("no decision prompt is on the frame")
+	}
+	return y0, y0 + h/2
+}
+
+// A notch inside the approval box walks the decision menu one row and CLAMPS at both ends — which
+// is what its ↑/↓ already do (listStopsAtEnds), so on this security surface the wheel and the arrows
+// agree at the ends rather than offering two answers.
+func TestPromptWheelWalksTheApprovalMenu(t *testing.T) {
+	m := approvalPaneModel(t)
+	_, y := promptRect(t, m)
+	last := len(approvalMenu) - 1
+
+	down := wheelAt(t, m, tea.MouseWheelDown, y)
+	if down.approvalSel.selected != 1 {
+		t.Fatalf("approvalSel = %d after one notch down, want 1", down.approvalSel.selected)
+	}
+	if got := wheelAt(t, down, tea.MouseWheelUp, y).approvalSel.selected; got != 0 {
+		t.Errorf("approvalSel = %d after a notch back up, want 0", got)
+	}
+
+	if got := wheelAt(t, m, tea.MouseWheelUp, y).approvalSel.selected; got != 0 {
+		t.Errorf("approvalSel = %d after a notch up on Allow, want it clamped at 0", got)
+	}
+	end := m
+	for range last + 5 {
+		end = wheelAt(t, end, tea.MouseWheelDown, y)
+	}
+	if end.approvalSel.selected != last {
+		t.Errorf("approvalSel = %d after rolling past Cancel, want it clamped at the last row (%d)",
+			end.approvalSel.selected, last)
+	}
+	if got := step(t, end, keyDown()).approvalSel.selected; got != last {
+		t.Errorf("approvalSel = %d after ↓ on the last row, want these keys to clamp there too", got)
+	}
+}
+
+// The same for the ask offering, which shares the rectangle and the handler with the menu above.
+func TestPromptWheelWalksTheAskOffering(t *testing.T) {
+	choices := []string{"left", "middle", "right"}
+	m := askPaneModel(t, domain.AskRequest{Question: "which way?", Choices: choices})
+	_, y := promptRect(t, m)
+	last := len(choices) - 1
+
+	down := wheelAt(t, m, tea.MouseWheelDown, y)
+	if down.askSel.selected != 1 {
+		t.Fatalf("askSel = %d after one notch down, want 1", down.askSel.selected)
+	}
+	if got := wheelAt(t, down, tea.MouseWheelUp, y).askSel.selected; got != 0 {
+		t.Errorf("askSel = %d after a notch back up, want 0", got)
+	}
+
+	if got := wheelAt(t, m, tea.MouseWheelUp, y).askSel.selected; got != 0 {
+		t.Errorf("askSel = %d after a notch up on the first choice, want it clamped at 0", got)
+	}
+	end := m
+	for range last + 5 {
+		end = wheelAt(t, end, tea.MouseWheelDown, y)
+	}
+	if end.askSel.selected != last {
+		t.Errorf("askSel = %d after rolling past the last choice, want it clamped at %d",
+			end.askSel.selected, last)
+	}
+}
+
+// The D5 asymmetry, pinned: ↑/↓ give the offering up the moment a draft answer is typed, because
+// those keys double as the textarea's cursor keys — a wheel has no such second duty, so the notch
+// walks the choices whether or not the box holds a draft.
+func TestPromptWheelWalksTheOfferingWithADraftTyped(t *testing.T) {
+	m := askPaneModel(t, domain.AskRequest{Question: "which way?", Choices: []string{"left", "middle", "right"}})
+	m = typeInput(t, m, "neither, actually")
+	if m.input.Value() == "" {
+		t.Fatal("the draft did not reach the input box; the asymmetry has nothing to assert against")
+	}
+	_, y := promptRect(t, m)
+
+	after := wheelAt(t, m, tea.MouseWheelDown, y)
+
+	if after.askSel.selected != 1 {
+		t.Errorf("askSel = %d after a notch down with a draft typed, want the wheel to walk anyway (1)",
+			after.askSel.selected)
+	}
+	if got := step(t, m, keyDown()).askSel.selected; got != 0 {
+		t.Errorf("askSel = %d after ↓ with a draft typed, want the arrows to stay the textarea's (0)", got)
+	}
+	if after.input.Value() != m.input.Value() {
+		t.Errorf("the draft became %q, want the notch to leave it at %q", after.input.Value(), m.input.Value())
+	}
+}
+
+// The soft-modal floor: a notch OUTSIDE the box scrolls the transcript and moves neither pane's
+// highlight, which is what makes "the pane under the pointer owns the notch" compatible with these
+// two panes leaving the surface beneath them alive.
+func TestPromptWheelOutsideTheBoxScrollsTheTranscript(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		build func(t *testing.T) Model
+		sel   func(Model) (int, int) // the two decision cursors, whichever pane is up
+	}{
+		{
+			name:  "an approval menu",
+			build: approvalPaneModel,
+			sel:   func(m Model) (int, int) { return m.approvalSel.selected, m.askSel.selected },
+		},
+		{
+			name: "an ask offering",
+			build: func(t *testing.T) Model {
+				t.Helper()
+				return askPaneModel(t, domain.AskRequest{
+					Question: "which way?",
+					Choices:  []string{"left", "middle", "right"},
+				})
+			},
+			sel: func(m Model) (int, int) { return m.approvalSel.selected, m.askSel.selected },
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := tc.build(t)
+			paneTop, inside := promptRect(t, m)
+			if paneTop == 0 {
+				t.Fatal("the pane starts on the first row; there is no transcript above it to aim at")
+			}
+			m = wheelAt(t, m, tea.MouseWheelDown, inside) // off the first row, so a stray move would show
+			wantApproval, wantAsk := tc.sel(m)
+
+			off := wheelAt(t, m, tea.MouseWheelUp, paneTop-1)
+
+			gotApproval, gotAsk := tc.sel(off)
+			if gotApproval != wantApproval || gotAsk != wantAsk {
+				t.Errorf("cursors moved to (%d, %d), want them left at (%d, %d)",
+					gotApproval, gotAsk, wantApproval, wantAsk)
+			}
+			if off.viewport.YOffset() == m.viewport.YOffset() {
+				t.Errorf("the transcript stayed at %d; a notch outside the box is still the transcript's",
+					off.viewport.YOffset())
+			}
+		})
+	}
+}
+
+// The wheel walks and ␣ ticks: a notch over a multi-select question moves the highlight and leaves
+// the checked set exactly as the human left it.
+func TestPromptWheelLeavesTheCheckedSetAlone(t *testing.T) {
+	m := askPaneModel(t, domain.AskRequest{
+		Question:    "which files?",
+		Choices:     []string{"one", "two", "three"},
+		MultiSelect: true,
+	})
+	m = step(t, m, keySpace()) // tick the first row, so an overwritten set would show
+	before := append([]bool(nil), m.askChecked...)
+	if len(before) != 3 || !before[0] {
+		t.Fatalf("askChecked = %v, want the first of three rows ticked", before)
+	}
+	_, y := promptRect(t, m)
+
+	after := wheelAt(t, m, tea.MouseWheelDown, y)
+
+	if after.askSel.selected != 1 {
+		t.Errorf("askSel = %d after one notch down, want 1", after.askSel.selected)
+	}
+	for i, want := range before {
+		if after.askChecked[i] != want {
+			t.Fatalf("askChecked = %v after the notch, want it left at %v", after.askChecked, before)
+		}
+	}
+}
+
+// A question offering no choices has no highlight to walk, and the notch is still the pane's: it is
+// swallowed, moves nothing, panics on nothing, and never reaches the transcript behind the box.
+func TestPromptWheelOverAChoicelessQuestion(t *testing.T) {
+	m := askPaneModel(t, domain.AskRequest{Question: "what colour?"})
+	_, y := promptRect(t, m)
+
+	after := wheelAt(t, m, tea.MouseWheelDown, y)
+
+	if after.askSel.selected != 0 {
+		t.Errorf("askSel = %d, want a question with no choices to leave it at 0", after.askSel.selected)
+	}
+	if after.viewport.YOffset() != m.viewport.YOffset() {
+		t.Errorf("the transcript scrolled to %d; a notch inside the box is the pane's whether or not it has rows",
+			after.viewport.YOffset())
+	}
+}

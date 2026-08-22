@@ -97,6 +97,53 @@ func (m Model) handleApprovalKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m.scrollViewport(msg)
 }
 
+// promptWheel walks the highlight of whichever decision pane is up — the approval menu or the
+// ask_user offering — one row per notch while the pointer is INSIDE its box. The two share one
+// rectangle (panePrompt is "the approval or the ask prompt", model.go), so they share one handler
+// and what it branches on is which state is live, not which pane owns the geometry.
+//
+// handled is false everywhere OUTSIDE that box, and that is the whole of what keeps "the pane under
+// the pointer owns the notch" (ratified 2026-08-22) compatible with these two panes being
+// SOFT-modal: they are soft-modal about the surface UNDER them, and there is no surface of theirs
+// under the pointer when the pointer is in their box. Outside it the transcript scrolls exactly as
+// it did before the pane went up, which is the same review-the-context floor handleApprovalKey
+// keeps for every key the menu does not claim.
+//
+// Inside it the notch is ALWAYS handled, including on a pane with nothing to walk — a question
+// offering no choices, so there is no highlight — because what decides is the pane under the
+// pointer, not whether that pane has an answer for the gesture.
+//
+// Unlike ↑/↓ on the offering, the wheel is NOT gated on an empty input box: [Model.askChoiceKey]'s
+// guard (D5) exists because those keys double as the textarea's cursor keys, and a wheel has no
+// second duty to give way to. It is the one place this pane's wheel and its keys deliberately
+// disagree.
+//
+// The walk is the list module's own ([listCursor.wheel], listsurface.go) and CLAMPS at the ends —
+// which is what both these panes' keys already do (listStopsAtEnds), so here the wheel and the
+// arrows agree at the ends by construction rather than by two rules that happen to match.
+func (m Model) promptWheel(msg tea.MouseWheelMsg) (Model, bool) {
+	if !m.openPanes().has(panePrompt) {
+		// Asked before the frame is composed, because every wheel notch asks: with no pane up there is
+		// nothing to place, and composing the frame's overlays to learn that would put a render on the
+		// path of a notch the pane has no part in (browserWheel, sessions.go).
+		return m, false
+	}
+	y0, h, ok := m.frameSpans().pane(panePrompt)
+	if !ok || msg.Y < y0 || msg.Y >= y0+h {
+		return m, false
+	}
+	// The pane's open predicate restated as a branch: the payload test is what makes the read of the
+	// question's choices safe here without a gesture path leaning on the state↔payload invariant
+	// (model.go), and a rectangle up with neither state live swallows the notch and moves nothing.
+	switch {
+	case m.state == stateAwaitingApproval && m.pending != nil:
+		m.approvalSel.wheel(msg, len(approvalMenu))
+	case m.state == stateAwaitingAsk && m.pendingAsk != nil:
+		m.askSel.wheel(msg, len(m.pendingAsk.Request.Choices))
+	}
+	return m, true
+}
+
 // resolveApproval takes the menu row approvalSel points at — what ⏎ means on this pane. A decision
 // row replies like its letter would; the Cancel row takes the Esc path instead, cancelling the
 // in-flight worker and leaving the prompt standing until the worker reports back with its

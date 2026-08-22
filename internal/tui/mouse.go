@@ -1299,5 +1299,12 @@ func (m Model) foldMouseWheel(msg tea.MouseWheelMsg) (tea.Model, tea.Cmd) {
 	if next, handled := m.pickerWheel(msg); handled {
 		return next, nil
 	}
+	// A notch over the approval menu or the ask offering walks it on the same terms (approval.go).
+	// These two are the frame's SOFT-modal panes — the transcript stays scrollable underneath them —
+	// so what they claim is the notch INSIDE their box and nothing else; a notch anywhere outside it
+	// carries on down this chain and scrolls the transcript exactly as it always did.
+	if next, handled := m.promptWheel(msg); handled {
+		return next, nil
+	}
 	return m.scrollViewport(msg)
 }

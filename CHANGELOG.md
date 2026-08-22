@@ -10,6 +10,18 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **The approval and ask prompts scroll under the mouse wheel.** A notch with the pointer INSIDE the
+  decision box now walks the approval menu or the question's offering one row instead of falling
+  through to the transcript behind it. The two panes share one rectangle, so they share one handler
+  and one rule: the pane under the pointer owns the notch. Outside the box nothing changes — these
+  panes are soft-modal about the surface UNDER them, so the transcript scrolls there exactly as it
+  did and the human can still read back through the context before ruling. Unlike ↑/↓, the wheel is
+  NOT gated on an empty answer box: those arrows double as the textarea's cursor keys and give the
+  offering up the moment a draft is typed, while a wheel has no second duty and walks the choices
+  either way. On a multi-select question the wheel walks and ␣ still ticks — a notch leaves the
+  checked set alone. The walk CLAMPS at both ends, which is what these two panes' own arrows already
+  do, so here the wheel and the keys agree at the ends by construction.
+
 - **The /model | /server picker scrolls under the mouse wheel.** A notch with the pointer over the
   open picker now walks its highlight one row instead of falling through to the transcript behind it,
   and it walks the same FILTERED offering the keys and the painter already read — so a wheel can
