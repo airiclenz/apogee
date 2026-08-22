@@ -23,6 +23,87 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 
 ## Open defects
 
+### The reload's accepted-swap summary is logged before the failures it does not know about
+
+**Status:** [ ] open 2026-08-22 — residual of
+`docs/plans/archived/2026-08-22 - 02 - daemon-plan.md` item 7, which gave the live reload its
+all-or-nothing swap and the two lines that report it.
+
+`reloadSchedules` logs `reloadSummary(reload)` at `cmd/apogee/daemon.go:323` and only then, at
+`:324-326`, logs whatever `adoptSchedules` → `daemon.Apply` returned. The summary is built from the
+`Reload` the diff PLANNED, not from what reached the clock, so an entry whose `Add` failed
+(`internal/daemon/diff.go:157-163`, which appends to the joined failures and leaves the name out of
+the id map) is still named in the "added"/"replaced" clause a reader sees FIRST, with the correction
+underneath it. A journal read the next morning therefore says an entry took and then, on the next
+line, that some of the edit did not — without saying which. Ordering the two lines the other way, or
+building the summary from the id map, would make the first line the true one.
+
+---
+
+### The daemon's `stop` forgets a schedule's id before the scheduler confirms it is off the clock
+
+**Status:** [ ] open 2026-08-22 — residual of
+`docs/plans/archived/2026-08-22 - 02 - daemon-plan.md` item 2. **Latent, not reachable today.**
+
+`stop` deletes the name→id entry at `internal/daemon/diff.go:149` and calls `Scheduler.Stop` at
+`:150`. A `Stop` that fails with anything other than `schedule.ErrNotFound` therefore returns an
+error while the schedule is still on the clock and no longer in the map the daemon uses to say who is
+running — so the shutdown's `adoptedEntries` (`cmd/apogee/daemon.go:421`) would skip it and the next
+reload could never stop it. Today's `schedule.Stop` returns only `ErrNotFound`, which is exactly the
+error the line swallows, so nothing can currently take that path; the ordering is what would have to
+change if the library ever grows a second failure.
+
+---
+
+### The shutdown grace EXPIRY has no test, and the notify switch's drift guard does not exist
+
+**Status:** [ ] open 2026-08-22 — residual of
+`docs/plans/archived/2026-08-22 - 02 - daemon-plan.md` item 6, two gaps in the same file's coverage.
+
+- The `<-grace.C` branch of `daemonShutdown` (`cmd/apogee/daemon.go:405-406`) — the grace running out
+  and the firing being cancelled for it — is the one shutdown path nothing exercises.
+  `TestDaemonStopsPromptlyWithNoFiringInFlight` (`cmd/apogee/daemon_test.go:434`) covers the drained
+  case and `TestDaemonSecondSignalCancelsTheFiringInFlight` (`:462`) the second-signal case, both
+  with a `shutdown-grace: 1h` that is never allowed to elapse.
+- `notify`'s doc comment says the kinds are spelled out "so that a kind added to the library later
+  fails this switch's own test rather than vanishing from the log"
+  (`cmd/apogee/daemon.go:598-599`). No such test exists: `TestDaemonNotifyLinesArePinned`
+  (`cmd/apogee/daemon_test.go:845`) is a hand-written table of the seven kinds that exist today, so a
+  new `schedule.EventKind` would fall through the switch silently and the table would still pass.
+  Either the claim goes or the table is derived from the library's own kind set.
+
+---
+
+### `apogee daemon install` writes the supervisor unit without the repo's temp-file-plus-rename idiom
+
+**Status:** [ ] open 2026-08-22 — residual of
+`docs/plans/archived/2026-08-22 - 02 - daemon-plan.md` item 8.
+
+`writeDaemonUnit` writes the rendered unit with a plain `os.WriteFile`
+(`cmd/apogee/daemoninstall.go:326`), so a crash or a full disk mid-write leaves a truncated unit
+where a valid one was — a file a supervisor reads, and the one path in this feature where a
+half-written file is acted on by something other than apogee. Everywhere else the repo writes a file
+a reader depends on, it writes a temp file beside it and renames (`internal/library/store.go:323`,
+`internal/session/store.go:413`, `internal/recall/store.go:249`, `internal/config/configsplice.go:225`,
+with the rationale spelled out at `internal/platform/winlabel/journal.go:192`). Note the Windows unit
+is UTF-16LE with a BOM, so the temp file has to carry the same bytes `daemonUnitBytes` produces.
+
+---
+
+### The parked `schedule`-tool entry's own trigger has now fired
+
+**Status:** [ ] open 2026-08-22 — residual of
+`docs/plans/archived/2026-08-22 - 02 - daemon-plan.md`, the run that built the daemon.
+
+**Parked / deferred work** → *A model-facing `schedule` tool — daemon-era, not v1* names the daemon
+as the trigger to pick it up and then says "the daemon itself is unbuilt and this entry stays parked
+until it exists" — in this file, `ISSUES.md:696-697`. `apogee daemon` shipped in this run, so that
+sentence is false and the entry is parked on a condition that has been met. It needs an owner call —
+unpark it, or re-park it on a new condition and say which — rather than a silent edit of the
+sentence.
+
+---
+
 ## Parked / deferred work
 
 Live, deliberately deferred work only. Each entry records *enough* design that we don't re-derive
@@ -507,6 +588,15 @@ the archived plans; what remains open needs hardware this environment does not h
   permit breakaway" (`internal/tools/exec_pgroup_other.go:24`), and nothing asserts that a
   descendant cannot leave the job, so the POSIX side's pinned residual has no Windows twin.
   Needs a Windows host.
+- **The advisory single-instance lock, on Windows and on macOS** (folded here 2026-08-22 from the
+  residuals of `docs/plans/archived/2026-08-22 - 02 - daemon-plan.md` item 4) — the lock that keeps
+  one `apogee daemon` per apogee home is `flock(2)` on POSIX (`internal/platform/lock_unix.go:29`)
+  and `LockFileEx` translating a refused wait into `ERROR_LOCK_VIOLATION` on Windows
+  (`internal/platform/lock_windows.go:47-58`). Both non-Linux halves are COMPILE-verified only from
+  this host: `internal/platform/lock_test.go`'s contention and release cases run natively on Linux
+  alone. What stays open is the runtime assertion on the other two — a second handle refused while
+  the first holds it, the lock dropped when the process dies — which belongs with the live daemon
+  activation pass `CHANGELOG.md` already defers to the owner.
 
 **Not repeated here:** the "pre-existing, NOT Phase 5 scope" group (Linux/macOS live-run
 variants already tracked elsewhere) lives in the CHANGELOG's **"Known post-release verification
