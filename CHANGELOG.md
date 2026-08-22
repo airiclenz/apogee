@@ -956,6 +956,16 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- A hook's subprocess now scrubs the operator's declared key variables too. `RunHookSubprocess` —
+  the one door a Mechanism spawns through — dropped apogee's own `APOGEE_API_KEY` and nothing else,
+  so a formatter spawned by `autofix` inherited whatever variable an `api-key-env:` server entry
+  names (ADR 0047) while `terminal`, `python_exec` and `run_tests` dropped it. Those names now
+  travel a route of their own to the hook side: `Config.SecretEnvVars` → `mechanisms.Deps` →
+  the spawning Mechanism → the door, derived for every run beside the tools' own copy. A hook's
+  child drops exactly what the three execution tools drop; a Mechanism naming none leaves the fixed
+  half alone, byte-identical to before. `docs/design/confinement-execution-contract.md` §10.5 records
+  the symmetric scrub in place of the asymmetry it used to note.
+
 - The path-keyed history family now sees `copy_file` and `move_file`: `toolCallPath` reads a call's
   `destination` after the four original spellings (`path`, `file_path`, `filePath`, `filename`), so
   read-repeat, cached-content-intercept, error-enrichment, the off-ramps, the tool-loop interceptor

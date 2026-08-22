@@ -62,6 +62,17 @@ type Deps struct {
 	// no confinement backend too, so it cannot be derived from a fire-time permit's box, and a
 	// zero value simply names no fence (a Deps built by a test that has no workspace).
 	WritableBox domain.ConfinementBox
+
+	// SecretEnvVars names the operator-declared credential variables a Mechanism that SPAWNS must
+	// drop from the child's environment beside apogee's own — the `api-key-env:` names (ADR 0047)
+	// the execution tools receive as tools.HostTools.SecretEnvVars. Autofix's formatter is its only
+	// reader today: it hands them to tools.RunHookSubprocess, so a hook's child scrubs exactly what
+	// terminal/python_exec/run_tests scrub instead of inheriting a key the operator exported into
+	// the shell apogee was started from. deriveDeps (internal/agent/construct.go) populates it from
+	// Config.SecretEnvVars UNCONDITIONALLY, like WritableBox and for the same reason: the scrub has
+	// to hold whichever rows a run enabled, so it cannot hang off a DepNeeds flag. Nil names none,
+	// leaving apogee's own fixed half — the scrub before this field existed.
+	SecretEnvVars []string
 }
 
 // DepNeeds is which construction-injected collaborators a set of enabled rows requires, so the

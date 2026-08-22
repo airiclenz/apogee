@@ -975,11 +975,11 @@ authorisation hole while every *other* execution guard stayed on the tool side o
 
 A hook now spawns through `tools.RunHookSubprocess` (`internal/tools/exec_common.go`), the single
 exported door onto the same `runSubprocess` funnel every execution tool goes through. The funnel
-itself stays unexported: the door takes only what a hook names (ctx, argv, dir, timeout, stdin) and
-returns the child's stdout alone, so a caller consuming the output as a payload — the formatter
-reads the reformatted file off stdout — never gets a diagnostic spliced into it.
+itself stays unexported: the door takes only what a hook names (ctx, argv, dir, secretEnv, timeout,
+stdin) and returns the child's stdout alone, so a caller consuming the output as a payload — the
+formatter reads the reformatted file off stdout — never gets a diagnostic spliced into it.
 
-Two contracts are unchanged and one is narrowed:
+All three of the tool side's execution contracts hold for a hook's child:
 
 - §10.2's table still governs. The caller installs its permit's box with `domain.WithConfinement`
   before calling, which is the same handle §2.2 hands a subprocess tool; no handle means the
@@ -987,6 +987,10 @@ Two contracts are unchanged and one is narrowed:
 - §2.4's teardown, the output cap and the timeout clamp now apply to a hook's child exactly as to a
   tool's — the teardown reaps the whole process group, so a wrapper-shaped formatter's grandchild
   goes with it.
-- The credential scrub is `subprocessEnv`'s **fixed half** only: a hook has no host handle, so the
-  operator-configured `api-key-env` names (`HostTools.SecretEnvVars`, ADR 0047) are still inherited
-  by a hook's child. Closing that half needs the names to reach `internal/mechanisms`.
+- The credential scrub is `subprocessEnv`'s **whole** scrub, as a tool's is (amended 2026-08-22).
+  Its fixed half — apogee's own `APOGEE_API_KEY` — needs nothing from the caller; the
+  operator-configured `api-key-env` names (ADR 0047) reach a hook the way they reach a tool, along
+  their own route: `Config.SecretEnvVars` → `mechanisms.Deps.SecretEnvVars` (filled by the engine's
+  `deriveDeps`, unconditionally, beside `HostTools.SecretEnvVars`) → the spawning Mechanism → the
+  door's `secretEnv` argument. A hook's child therefore drops exactly the variables `terminal`,
+  `python_exec` and `run_tests` drop; a Mechanism that names none leaves the fixed half alone.

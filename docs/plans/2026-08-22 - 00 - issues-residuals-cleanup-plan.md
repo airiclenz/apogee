@@ -323,7 +323,11 @@ implementation chooses as a test).
 
 ---
 
-## 11. Hook subprocesses scrub operator-declared key variables too
+## 11. Hook subprocesses scrub operator-declared key variables too — ✅ DONE (2026-08-22)
+
+NOTES (2026-08-22): the door's new `secretEnv` argument is INSERTED after `dir` rather than appended last — the environment belongs with the child's process shape, and every call site fails to compile either way, so nothing can pass it silently.
+
+NOTES (2026-08-22): a third test beyond the two the item names — `TestAutofixScrubsTheConfiguredKeyVariablesFromTheFormatter` (`internal/mechanisms/autofix_test.go`) — pins the whole route end to end (Deps → gate → door → child), since neither named test crosses the `internal/mechanisms` seam this item widened. All three were mutation-checked: reverting `subprocessEnv(secretEnv)` to `subprocessEnv(nil)` fails the two subprocess tests.
 
 **What:** Fix the ISSUES.md entry *"The hook subprocess env scrub drops apogee's own keys
 but not the operator-named ones"*. `RunHookSubprocess` calls `subprocessEnv(nil)`

@@ -190,6 +190,7 @@ func TestRunHookSubprocessScrubsApogeeCredentials(t *testing.T) {
 		context.Background(),
 		[]string{"/bin/sh", "-c", `printf 'key=[%s] endpoint=[%s]' "$APOGEE_API_KEY" "$APOGEE_TEST_ENDPOINT"`},
 		"",
+		nil,
 		30*time.Second,
 		"",
 	)
@@ -198,6 +199,39 @@ func TestRunHookSubprocessScrubsApogeeCredentials(t *testing.T) {
 	}
 	if want := "key=[] endpoint=[http://192.0.2.1:1111]"; out != want {
 		t.Errorf("child saw %q, want %q — apogee's key must not reach a hook's subprocess", out, want)
+	}
+}
+
+// TestRunHookSubprocessScrubsTheConfiguredSecretNames pins the other half of the door's scrub: the
+// operator-declared `api-key-env:` names (ADR 0047) the caller hands in are dropped from a hook's
+// child too, so a formatter spawned by autofix sees exactly what a terminal command sees. Before
+// the door took them, a hook's child inherited the operator's key while the execution tools' did
+// not. Read from INSIDE the child, with two controls: apogee's own key still goes (the fixed half
+// is not replaced by the configured one) and an ordinary variable still arrives (it is a
+// subtraction, not an allowlist).
+func TestRunHookSubprocessScrubsTheConfiguredSecretNames(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell canary; the scrub it pins is platform-independent")
+	}
+	// Not parallel: t.Setenv.
+	t.Setenv("APOGEE_API_KEY", "sk-secret-value")
+	t.Setenv("APOGEE_TEST_PROVIDER_KEY", "sk-configured-value")
+	t.Setenv("APOGEE_TEST_ENDPOINT", "http://192.0.2.1:1111")
+
+	// The configured spelling differs in case from the exported one, as it may in a config file.
+	out, err := RunHookSubprocess(
+		context.Background(),
+		[]string{"/bin/sh", "-c", `printf 'own=[%s] configured=[%s] endpoint=[%s]' "$APOGEE_API_KEY" "$APOGEE_TEST_PROVIDER_KEY" "$APOGEE_TEST_ENDPOINT"`},
+		"",
+		[]string{"apogee_test_provider_key"},
+		30*time.Second,
+		"",
+	)
+	if err != nil {
+		t.Fatalf("RunHookSubprocess: %v", err)
+	}
+	if want := "own=[] configured=[] endpoint=[http://192.0.2.1:1111]"; out != want {
+		t.Errorf("child saw %q, want %q — an operator-declared key must not reach a hook's subprocess", out, want)
 	}
 }
 
@@ -214,6 +248,7 @@ func TestRunHookSubprocessReturnsStdoutAloneAndFeedsStdin(t *testing.T) {
 		context.Background(),
 		[]string{"/bin/sh", "-c", `echo "warning: noisy formatter" >&2; cat`},
 		"",
+		nil,
 		30*time.Second,
 		"payload\n",
 	)
@@ -238,6 +273,7 @@ func TestRunHookSubprocessFailsOnANonZeroExit(t *testing.T) {
 		context.Background(),
 		[]string{"/bin/sh", "-c", `echo "cannot parse input" >&2; exit 3`},
 		"",
+		nil,
 		30*time.Second,
 		"",
 	)

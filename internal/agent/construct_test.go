@@ -18,6 +18,7 @@ import (
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/mechanisms"
 	"github.com/airiclenz/apogee/internal/security"
 )
 
@@ -51,6 +52,44 @@ func TestHostToolsCarriesSecretEnvVars(t *testing.T) {
 
 			if got := hostTools(tc.cfg).SecretEnvVars; !slices.Equal(got, tc.want) {
 				t.Errorf("hostTools().SecretEnvVars = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestDeriveDepsCarriesSecretEnvVars pins the SECOND route the same names have to travel: a
+// Mechanism that spawns (autofix's formatter) scrubs the child environment from Deps, not from
+// HostTools, so a config whose names reach the tools but stop before Deps leaves a hook's child
+// inheriting the operator's key while a terminal command does not — the asymmetry this route
+// closes. Derived for every run, so the empty DepNeeds arm is the one that matters most.
+func TestDeriveDepsCarriesSecretEnvVars(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		cfg  domain.Config
+		want []string
+	}{
+		{
+			name: "two configured key variables both reach a spawning Mechanism",
+			cfg:  domain.Config{SecretEnvVars: []string{"FIRST_KEY", "SECOND_KEY"}},
+			want: []string{"FIRST_KEY", "SECOND_KEY"},
+		},
+		{
+			name: "a config naming none leaves the scrub at apogee's own",
+			cfg:  domain.Config{},
+			want: nil,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := deriveDeps(tc.cfg, mechanisms.DepNeeds{}).SecretEnvVars
+
+			if !slices.Equal(got, tc.want) {
+				t.Errorf("deriveDeps().SecretEnvVars = %q, want %q", got, tc.want)
 			}
 		})
 	}

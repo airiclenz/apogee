@@ -69,6 +69,22 @@ func buildAutofixBounded(t *testing.T, look func(string) (string, error), timeou
 	return af
 }
 
+// buildAutofixScrubbing is buildAutofix with the operator-declared credential names a spawning
+// Mechanism receives on its Deps — the injection point the formatter's environment scrub reads.
+func buildAutofixScrubbing(t *testing.T, look func(string) (string, error), secretEnv []string) domain.PostResponseHook {
+	t.Helper()
+	m, err := Build(autofixID, Deps{LookPath: look, SecretEnvVars: secretEnv})
+	if err != nil {
+		t.Fatalf("Build(%q): %v", autofixID, err)
+	}
+	af, ok := m.Hook.(autofixMechanism)
+	if !ok {
+		t.Fatalf("mechanism %q is not an autofixMechanism (%T)", autofixID, m.Hook)
+	}
+	af.timeout = testFormatterTimeout
+	return af
+}
+
 // fireAutofix runs one post-response pass over resp with NO subprocess permit on the ctx — the
 // default state, in which every external formatter rung is refused — and returns its decision.
 func fireAutofix(t *testing.T, hook domain.PostResponseHook, resp *domain.Response) domain.PostResponseDecision {
@@ -558,5 +574,28 @@ func TestAutofixScrubsApogeeCredentialsFromTheFormatter(t *testing.T) {
 	want := "x = (1)  # key: endpoint:http://192.0.2.1:1111\n"
 	if got := contentArg(t, resp.ToolCalls()[0].Arguments); got != want {
 		t.Errorf("content = %q, want %q — apogee's key must not reach the formatter", got, want)
+	}
+}
+
+// TestAutofixScrubsTheConfiguredKeyVariablesFromTheFormatter pins the whole route the
+// operator-declared `api-key-env:` names (ADR 0047) travel: Deps.SecretEnvVars at construction →
+// the spawn gate → tools.RunHookSubprocess → the child's environment. Until Deps carried them a
+// formatter inherited the operator's key while terminal/python_exec/run_tests dropped it; the
+// control variable proves the scrub is still a subtraction rather than an emptied environment.
+func TestAutofixScrubsTheConfiguredKeyVariablesFromTheFormatter(t *testing.T) {
+	// Not parallel: t.Setenv.
+	t.Setenv("APOGEE_TEST_PROVIDER_KEY", "sk-configured-value")
+	t.Setenv("APOGEE_TEST_ENDPOINT", "http://192.0.2.1:1111")
+
+	echoing := formatterScript(t, `printf 'x = (1)  # key:%s endpoint:%s\n' "$APOGEE_TEST_PROVIDER_KEY" "$APOGEE_TEST_ENDPOINT"`+"\n")
+	hook := buildAutofixScrubbing(t, resolveOnly("black", echoing), []string{"APOGEE_TEST_PROVIDER_KEY"})
+	resp := responseWith(nil, writeCall("c1", "script.py", brokenPy))
+
+	if decision := firePermitted(t, hook, resp, nil); decision.Action != domain.ActionIntercept {
+		t.Fatalf("Action = %q, want %q (the formatter repaired the payload)", decision.Action, domain.ActionIntercept)
+	}
+	want := "x = (1)  # key: endpoint:http://192.0.2.1:1111\n"
+	if got := contentArg(t, resp.ToolCalls()[0].Arguments); got != want {
+		t.Errorf("content = %q, want %q — an operator-declared key must not reach the formatter", got, want)
 	}
 }

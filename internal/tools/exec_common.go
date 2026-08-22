@@ -311,9 +311,10 @@ const maxSubprocessErrorExcerptBytes = 256
 // HOOK spawns through — a Mechanism runs outside the per-call Resolution and carries a
 // domain.SubprocessPermit instead (docs/design/confinement-execution-contract.md §10) — so its
 // subprocess gets every protection a tool's does rather than a hand-rolled exec.Command that has
-// none: the credential scrub (subprocessEnv — apogee's own key never reaches a child), the §2.4
-// process-tree teardown, the output cap, the timeout clamp, and the confinement handoff, which
-// fails CLOSED: a handle on ctx carrying no Confiner refuses the run rather than running unfenced.
+// none: the credential scrub (subprocessEnv — neither apogee's own key nor an operator-declared one
+// reaches a child), the §2.4 process-tree teardown, the output cap, the timeout clamp, and the
+// confinement handoff, which fails CLOSED: a handle on ctx carrying no Confiner refuses the run
+// rather than running unfenced.
 //
 // The funnel itself stays unexported; this is the whole of its outside surface. The caller
 // installs its permit's box on ctx (domain.WithConfinement) before calling — no handle means an
@@ -321,9 +322,10 @@ const maxSubprocessErrorExcerptBytes = 256
 // apogee's own working directory. timeout zero takes the funnel's default and a timeout past the
 // ceiling is clamped to it. stdin empty gives the child no input.
 //
-// The scrub it applies is subprocessEnv's fixed half — apogee's own credentials — because a hook
-// has no host handle to read the operator-configured secret names from (HostTools.SecretEnvVars);
-// those variables still reach a hook's child, as they do any program the operator launches.
+// secretEnv names the operator-declared credential variables to drop beside apogee's own — the
+// same `api-key-env:` names (ADR 0047) the execution tools take from HostTools.SecretEnvVars,
+// carried to a hook on mechanisms.Deps.SecretEnvVars and handed in here. A hook's child therefore
+// scrubs exactly what a tool's child scrubs; nil names none and leaves the fixed half alone.
 //
 // The returned output is the child's stdout ALONE, never interleaved with its diagnostics, so a
 // caller consuming it as a payload gets exactly the bytes the command produced. err is non-nil for
@@ -334,6 +336,7 @@ func RunHookSubprocess(
 	ctx context.Context,
 	argv []string,
 	dir string,
+	secretEnv []string,
 	timeout time.Duration,
 	stdin string,
 ) (string, error) {
@@ -342,7 +345,7 @@ func RunHookSubprocess(
 		dir:         dir,
 		timeout:     timeout,
 		stdin:       stdin,
-		env:         subprocessEnv(nil),
+		env:         subprocessEnv(secretEnv),
 		splitStdout: true,
 	})
 	if err != nil {

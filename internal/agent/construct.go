@@ -348,6 +348,12 @@ func deriveDeps(cfg domain.Config, needs mechanisms.DepNeeds) mechanisms.Deps {
 	// short literal.
 	deps.WritableBox = cfg.ConfinementBox()
 	deps.WritableBox.NetworkAllow = nil
+	// The operator-declared credential names a spawning Mechanism drops from its child's
+	// environment (autofix's formatter, through tools.RunHookSubprocess). Same source and same
+	// unconditional derivation as the tools' own copy (hostTools below): the two subprocess
+	// families must scrub the same variables, and a run's enabled rows do not change which key
+	// the operator exported.
+	deps.SecretEnvVars = cfg.SecretEnvVars
 	if needs.Library {
 		store := library.NewStore(cfg.LibraryDir)
 		if err := store.Load(); err != nil {

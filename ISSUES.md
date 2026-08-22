@@ -23,25 +23,6 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 
 ## Open defects
 
-### The hook subprocess env scrub drops apogee's own keys but not the operator-named ones
-
-**Status:** [P] open 2026-08-22 — residual of
-`docs/plans/archived/2026-08-20 - 00 - engine-architecture-deepening-plan.md` item 7, which routed the
-autofix formatter through the tools funnel. Recorded in prose at the door itself
-(`internal/tools/exec_common.go:325-327`) and in `docs/design/confinement-execution-contract.md` §10.5.
-
-`RunHookSubprocess` calls `subprocessEnv(nil)` (`internal/tools/exec_common.go:345`), so the child
-loses apogee's own credential names (`apogeeSecretEnvVars`, `internal/tools/exec_common.go:69`) and
-nothing else. The operator-configured `api-key-env` names (ADR 0047) live on
-`HostTools.SecretEnvVars` (`internal/tools/registry.go:66`) and are threaded only into the three
-EXECUTION tools (`internal/tools/registry.go:170-178`); a hook has no host handle to read them from,
-because `mechanisms.Deps` (`internal/mechanisms/catalogue.go:20`) carries none. The result is an
-asymmetry rather than a hole with no floor: a formatter spawned by `autofix` inherits the operator's
-declared key variables while `terminal`, `python_exec` and `run_tests` do not. Closing it means
-carrying those names on `Deps` and passing them through the door.
-
----
-
 ### Nothing pins `construct.go`'s deliberate empty `NetworkAllow`
 
 **Status:** [P] open 2026-08-22 — residual of

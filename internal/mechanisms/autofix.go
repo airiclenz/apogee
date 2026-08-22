@@ -70,6 +70,13 @@ type autofixMechanism struct {
 	// child's WaitDelay to its own fixed 5s processWaitDelay (internal/tools). Seeded from
 	// defaultFormatterTimeout in newAutofix.
 	timeout time.Duration
+
+	// secretEnv names the operator-declared credential variables every external rung drops from
+	// its child's environment, beside apogee's own fixed half (tools.RunHookSubprocess). Injected
+	// once at construction from Deps.SecretEnvVars (D3) — the same `api-key-env:` names the
+	// execution tools scrub — so a formatter spawned here sees no more of the operator's keys than
+	// a terminal command does. Nil leaves the fixed half alone.
+	secretEnv []string
 }
 
 // repairer is one rung of a language's formatter ladder. external is decided at CONSTRUCTION and
@@ -91,6 +98,7 @@ type spawnGate struct {
 	allowed     bool
 	confinement *domain.Confinement // nil = the permit authorises an unfenced spawn
 	timeout     time.Duration
+	secretEnv   []string // operator-declared credential names the child must not inherit
 }
 
 // refuseExecFromWritablePath is this package's name for the shared exec fence
@@ -164,7 +172,11 @@ func newAutofix(deps Deps) (any, error) {
 		},
 	})
 
-	return autofixMechanism{repairs: repairs, timeout: defaultFormatterTimeout}, nil
+	return autofixMechanism{
+		repairs:   repairs,
+		timeout:   defaultFormatterTimeout,
+		secretEnv: deps.SecretEnvVars,
+	}, nil
 }
 
 // autofixDescriptor identifies autofix as a strikes-3 response-repair Mechanism (catalogue Table A).
@@ -211,7 +223,12 @@ func (m autofixMechanism) PostResponse(ctx context.Context, resp *domain.Respons
 // every external rung is skipped, leaving only the in-process tail.
 func (m autofixMechanism) permitGate(ctx context.Context) spawnGate {
 	permit, granted := domain.SubprocessPermitFromContext(ctx)
-	return spawnGate{allowed: granted, confinement: permit.Confinement, timeout: m.timeout}
+	return spawnGate{
+		allowed:     granted,
+		confinement: permit.Confinement,
+		timeout:     m.timeout,
+		secretEnv:   m.secretEnv,
+	}
 }
 
 // attemptFix ports the sim's AttemptFix (internal/autofix/autofix.go @pin): act only on a sane
@@ -283,10 +300,11 @@ var externalFormatters = []struct {
 // runExternalFormatter runs the construction-resolved formatter at cmdPath over content via
 // stdin, returning the formatted output. It spawns through internal/tools' subprocess funnel
 // (tools.RunHookSubprocess) rather than an exec.Command of its own, so the one subprocess this
-// package launches carries every protection the execution tools' do: apogee's API key is scrubbed
-// out of the child environment, the process TREE is torn down when the run ends, the output is
-// capped, and the timeout is clamped. The FIRE's ctx bounds the run — a user cancel stops an
-// in-flight formatter instead of leaving the loop waiting on it — narrowed by gate.timeout.
+// package launches carries every protection the execution tools' do: apogee's API key and the
+// operator-declared key variables (gate.secretEnv) are scrubbed out of the child environment, the
+// process TREE is torn down when the run ends, the output is capped, and the timeout is clamped.
+// The FIRE's ctx bounds the run — a user cancel stops an in-flight formatter instead of leaving the
+// loop waiting on it — narrowed by gate.timeout.
 //
 // The permit's box reaches the funnel the way every subprocess site names one: on the context
 // (confinement-execution-contract §2.2). A permit carrying no box authorises an unfenced spawn, so
@@ -301,7 +319,7 @@ func runExternalFormatter(ctx context.Context, cmdPath string, spec formatterSpe
 	}
 
 	argv := append([]string{cmdPath}, spec.args...)
-	out, err := tools.RunHookSubprocess(ctx, argv, "", gate.timeout, content)
+	out, err := tools.RunHookSubprocess(ctx, argv, "", gate.secretEnv, gate.timeout, content)
 	if err != nil || strings.TrimSpace(out) == "" {
 		return content, false
 	}
