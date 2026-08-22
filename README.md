@@ -66,7 +66,7 @@ is built on the Charm stack (Bubble Tea + Lipgloss + Bubbles) with Cobra for the
 
 ## Status
 
-**`v0.14.x` on `main` — pre-production.** Under SemVer a `0.x` version makes no
+**`v0.15.x` on `main` — pre-production.** Under SemVer a `0.x` version makes no
 API-stability promise — the Go API may still move while the tool hardens. That
 says nothing about how you get the tool: every release ships prebuilt binaries
 for all six targets and a Homebrew formula installs them — see
@@ -167,7 +167,9 @@ until then `SHA256SUMS` is the check that is actually worth making.
   vLLM, an OpenAI-compatible cloud provider — is one `api-key` on its
   `servers:` entry away.
 - **Agentic tool use** — multi-step loop with file edits, shell, search, git, web,
-  and sub-agents.
+  and sub-agents. The file tools are git-aware: deleting or moving a tracked file
+  also stages that change in the git index (the model is not asked), so `git status`
+  shows a rename or staged deletion rather than an unexplained missing file.
 - **Four autonomy modes** — Plan (read-only), Ask-Before (writes need approval),
   Allow-Edits (workspace-scoped writes auto-approved), Auto (autonomous, confined
   at the OS level via Linux landlock / macOS seatbelt / a Windows low-integrity
@@ -574,6 +576,12 @@ model back to its profile, bare `/effort` reports what the two layers resolved t
 override is session intent, not configuration: it survives a model switch, is never
 written to the file, and stays on the primary loop — a delegated sub-agent resolves
 effort from its own profile.
+
+A model that thinks for a long time can also go silent. `ui.stall-after` — a duration
+written the way Go spells one (`90s`, `2m`), default `90s`, `0` turns it off — sets how
+long the engine may say nothing before the status line adds a warning-tinted `quiet`
+qualifier to its running phrase: `thinking · quiet · 12m`. It reports a fact, not a
+verdict — nothing has arrived in that long — and any engine event clears it.
 
 The prompt's caret is the **real terminal cursor**, and it never blinks. Set
 `cursor-shape:` (a file-only key) to `block` (the default), `underline`, or `bar` to say
