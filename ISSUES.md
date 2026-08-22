@@ -169,6 +169,140 @@ duplicate without touching the seam item 15 created.
 
 ---
 
+### The path-keyed history family still cannot see `copy_file` / `move_file`
+
+**Status:** [ ] open 2026-08-22 — residual of
+`docs/plans/archived/2026-08-20 - 00 - engine-architecture-deepening-plan.md` item 5, which added the
+three 2026-08-10 write tools to `wave4WriteTools` and so reached only the half of the family that
+keys on the tool NAME.
+
+`toolCallPath` reads a call's file from four argument spellings — `path`, `file_path`, `filePath`,
+`filename` (`internal/mechanisms/offramps.go:59`). `copy_file` and `move_file` carry none of them:
+their arguments are `source` and `destination` (`internal/tools/file_ops.go:66-67`), so every
+consumer that asks a write call WHICH file it touched still gets `""` for those two —
+`read_repeat` (`internal/mechanisms/readrepeat.go:82`), `cached_content_intercept`
+(`internal/mechanisms/cachedcontent.go:82`, `:116`), `error_enrichment`
+(`internal/mechanisms/errorenrich.go:118`, `:157`), the off-ramps
+(`internal/mechanisms/offramps.go:148`), `tool_loop_interceptor`
+(`internal/mechanisms/toolloop.go:218`) and the history scans (`internal/mechanisms/historyscan.go:38`,
+`:82`, `:90`, `:128`) that feed `deriveWriteTarget` (`internal/mechanisms/historyhints.go:143`). Of the
+three tools the item added, only `delete_file` — which takes `path` — reaches them. The name-keyed
+half (`isFileMutatingTool`, `hasWrittenFiles`, `isGreenfieldContext`) does count all three. Closing it
+means teaching `toolCallPath` the source/destination pair, which first needs a call on WHICH of the
+two a copy or a move should report as the file it touched.
+
+---
+
+### The hook subprocess env scrub drops apogee's own keys but not the operator-named ones
+
+**Status:** [ ] open 2026-08-22 — residual of
+`docs/plans/archived/2026-08-20 - 00 - engine-architecture-deepening-plan.md` item 7, which routed the
+autofix formatter through the tools funnel. Recorded in prose at the door itself
+(`internal/tools/exec_common.go:325-327`) and in `docs/design/confinement-execution-contract.md` §10.5.
+
+`RunHookSubprocess` calls `subprocessEnv(nil)` (`internal/tools/exec_common.go:345`), so the child
+loses apogee's own credential names (`apogeeSecretEnvVars`, `internal/tools/exec_common.go:69`) and
+nothing else. The operator-configured `api-key-env` names (ADR 0047) live on
+`HostTools.SecretEnvVars` (`internal/tools/registry.go:66`) and are threaded only into the three
+EXECUTION tools (`internal/tools/registry.go:170-178`); a hook has no host handle to read them from,
+because `mechanisms.Deps` (`internal/mechanisms/catalogue.go:20`) carries none. The result is an
+asymmetry rather than a hole with no floor: a formatter spawned by `autofix` inherits the operator's
+declared key variables while `terminal`, `python_exec` and `run_tests` do not. Closing it means
+carrying those names on `Deps` and passing them through the door.
+
+---
+
+### Four shipped doc comments went stale under the engine-deepening run
+
+**Status:** [ ] open 2026-08-22 — residual of
+`docs/plans/archived/2026-08-20 - 00 - engine-architecture-deepening-plan.md` items 7, 10, 12 and 13,
+each of which changed the behaviour its comment describes without repointing the comment.
+
+- `internal/mechanisms/autofix.go:68-70` — the `timeout` field doc says it bounds "both its run
+  context and the WaitDelay that bounds the kill path". Since item 7 the kill path is bounded by the
+  funnel's fixed 5s `processWaitDelay`, not by this field.
+- `internal/agent/agent.go:309-311` — `Close`'s doc says MCP connections and the log sink "belong to
+  the host that wired them, and cmd/apogee closes both alongside this call". The log sink's teardown
+  is in the TUI, not in `cmd/apogee`: `internal/tui/tui.go:1525` defers `diag.Close()`
+  (`internal/tui/diagnostics.go:253`).
+- `internal/domain/config.go:300-302` — `ModelProfile.Pattern`'s doc says the pattern is "ignored for
+  the other formats". Item 12 made a pattern set under a non-custom-regex format a REFUSAL at config
+  load; the sentence needs the one-line correction the shipped default template
+  (`internal/config/defaults/config.yaml`) already got.
+- `internal/domain/hooks.go:295-297` — `LoopView`'s doc still calls the primary mutable value "a
+  *Response, *ToolCall, *ToolResult". Item 13 replaced the two tool-stage values with `ToolCallEdit`
+  and `ToolResultEdit`.
+
+---
+
+### Nothing pins `construct.go`'s deliberate empty `NetworkAllow`
+
+**Status:** [ ] open 2026-08-22 — residual of
+`docs/plans/archived/2026-08-20 - 00 - engine-architecture-deepening-plan.md` item 9, whose
+constructor test pins the three fields `Config.ConfinementBox()` fills but not the one call site that
+deliberately un-fills one.
+
+The tool box built at construction clears `NetworkAllow` on purpose — the field names hosts a confined
+subprocess may REACH, and the comment above it carries the reasoning
+(`internal/agent/construct.go:345-350`). No test asserts the clearing: deleting
+`deps.WritableBox.NetworkAllow = nil` leaves `./internal/agent` green, so a future edit that drops the
+line opens a confinement hole silently. The pin belongs beside the existing agent-construction
+coverage.
+
+---
+
+### A `delimited` thinking style with no delimiters loads and strips nothing
+
+**Status:** [ ] open 2026-08-22 — residual of
+`docs/plans/archived/2026-08-20 - 00 - engine-architecture-deepening-plan.md` item 12, which validated
+the four named axes and left this cross-field check outside all four.
+
+`validateThinkingAxes` checks `style` against the three strippers and `effort` against the four levels
+(`internal/config/config.go:1814-1826`); neither looks at `start`/`end`
+(`thinkingConfig`, `internal/config/config.go:1721-1726`). A profile with `style: delimited` and no
+token pair therefore loads clean, and the seam wraps `StripThinking` with two empty delimiters
+(`internal/processing/parserfor.go:57`) — a stripper that removes nothing, so the model's reasoning
+lands in its visible content with no error naming the key. It is the same failure shape item 12 was
+written to remove, one axis further out: the fix is a fifth check refusing `delimited` without both
+tokens, in the style of the existing messages (`model-profiles.<pattern>.thinking.start`).
+
+---
+
+### `runOneHook`'s recover boundary now also covers the fire booking
+
+**Status:** [ ] open 2026-08-22 — residual of
+`docs/plans/archived/2026-08-20 - 00 - engine-architecture-deepening-plan.md` item 14, which collapsed
+the ten hand-written loops into one runner and in doing so widened what the deferred recover sees.
+
+`runOneHook` arms `a.recoverHook(turn, id, &err)` for the whole function
+(`internal/agent/hookrun.go:137`) and then calls `a.fired(...)` inside it
+(`internal/agent/hookrun.go:146`). `fired` emits a `MechanismFiredEvent` through `a.cfg.Events`, so a
+panicking Events SINK is recovered by the hook boundary and reported as `errHookPanicked` attributed
+to the Mechanism's id (`internal/agent/hookrun.go:271-280`) — the Turn degrades naming an innocent
+Mechanism. Theoretical today: no in-tree sink panics, and every one of the five points ran its fire
+inside a boundary before the collapse; what changed is that the BOOKING joined it. The fix is to book
+outside the deferred closure, or to state on `recoverHook` that the sink is inside its scope by
+design.
+
+---
+
+### `hookPoints` and `hookImplements` duplicate the HookPoint set with no drift guard
+
+**Status:** [ ] open 2026-08-22 — residual of
+`docs/plans/archived/2026-08-20 - 00 - engine-architecture-deepening-plan.md` item 15, which
+introduced the second of the two lists.
+
+The five `HookPoint` constants are re-enumerated twice in `internal/domain/registry.go`: by
+`hookPoints`, the array `freezeOrder` precomputes over (`:53-59`, and its own comment says "a sixth
+hook point joins both"), and by `hookImplements`'s switch (`:28-47`). Nothing fails when a sixth
+constant is added to `mechanism.go` and forgotten in either: a point missing from `hookPoints` is
+never frozen and silently falls back to computing its order on the fly on every `Ordered` call — the
+per-Turn cost item 15 removed, restored for that point only — while a point missing from
+`hookImplements` makes `AddExperimental` refuse every hook registered at it. A drift pin over the
+constant set closes both.
+
+---
+
 ## Parked / deferred work
 
 Live, deliberately deferred work only. Each entry records *enough* design that we don't re-derive
