@@ -38,21 +38,6 @@ and it falls back to the plain uncoloured output.
 
 ---
 
-### ADR 0052 §1 still describes MERGED context, not the tiling rule that shipped
-
-**Status:** [P] open 2026-08-19 — residual of
-`docs/plans/2026-08-19 - 03 - split-diff-display-plan.md` item 2, whose NOTES record the owner's
-2026-08-19 decision superseding the ratified merge wording.
-
-The ADR says each region carries "up to **three** merged unchanged context lines each side"
-(`docs/adr/0052-diff-bodies-render-as-split-diffs-fed-by-tool-recorded-edit-regions.md:39-40`).
-What shipped is the tiling rule: neighbours within the gap stay SEPARATE regions whose context
-ranges tile the interior lines without overlap, and the renderers omit the `⋯` separator between
-contiguous regions so the paint matches a merge. The amendment is recorded only in the plan's
-item 2 NOTES; the ADR that ratifies the decision does not carry it.
-
----
-
 ### The stacked frame's line NUMBER rides inside the diff band, not the chrome gutter
 
 **Status:** [P] open 2026-08-19 — residual of

@@ -952,6 +952,16 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- ADR 0052 records the tiling rule that shipped, not the merge its ratified call proposed. Decision
+  1 still described each Edit region as carrying up to three *merged* unchanged context lines each
+  side; the owner superseded that on 2026-08-19, before the shared region builder was written, and
+  what shipped keeps neighbours as SEPARATE regions whose context ranges tile the lines between them
+  without overlap — the earlier takes up to three as its `Trailing`, the later takes the remainder as
+  its `Leading` — with the renderers omitting the `⋯` separator between contiguous regions so the
+  paint is identical to a merge. Decision 1's text now states that, and a dated amendment carries the
+  supersession and its rationale (no line is context for two regions at once, so `EditRegions.Stat()`
+  matches `unifiedLineDiff` exactly). The decision the ADR ratifies is unchanged.
+
 - Corrected the last two doc sites that still asserted the superseded resolved-path journal rule.
   `UndoPreview`'s doc on the TUI's `Engine` seam said the preview lists its classification "at
   resolved absolute paths", and the `/undo` bullet below said the preview names "every recorded

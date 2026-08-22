@@ -104,7 +104,9 @@ Remove the ISSUES.md entry.
 
 ---
 
-## 3. Amend ADR 0052 §1 to the tiling rule that shipped
+## 3. Amend ADR 0052 §1 to the tiling rule that shipped — ✅ DONE (2026-08-22)
+
+NOTES (2026-08-22): the amendment cites the plan at its archived path, `docs/plans/archived/2026-08-19 - 03 - split-diff-display-plan.md` (where it now lives), rather than the unarchived path the item quotes. The amendment paraphrases the old "merged" wording instead of quoting it verbatim, so the item's `! grep "three.*merged"` acceptance holds over the whole file.
 
 **What:** Fix the ISSUES.md entry *"ADR 0052 §1 still describes MERGED context, not the
 tiling rule that shipped"*. In

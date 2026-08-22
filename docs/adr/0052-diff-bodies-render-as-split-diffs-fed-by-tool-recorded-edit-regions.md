@@ -36,11 +36,15 @@ regions); row-level layout in `docs/layout/split-diff-layout.md`.
 holds both sides of the change in hand at the moment it applies — the renderer never does, and a
 paint that re-read the file would race the very next edit and breach the thin-renderer rule
 ([ADR 0011](0011-tui-is-a-thin-renderer-over-a-worker-goroutine-engine.md)). Each region carries
-its before/after start lines, the removed and inserted lines, and up to **three** merged
-unchanged context lines each side, counted from the applied operations themselves — the same
-counted-not-reparsed rule `unifiedLineDiff`'s diffstat already follows. The variant is a new
-sealed `domain.ToolSummary`, so the Tool summary contract is untouched: display data, never sent
-to the model, never persisted in the session record
+its before/after start lines, the removed and inserted lines, and up to **three** unchanged
+context lines each side, counted from the applied operations themselves — the same
+counted-not-reparsed rule `unifiedLineDiff`'s diffstat already follows. Neighbouring changes stay
+SEPARATE regions whose context ranges TILE the lines between them without overlap — the earlier
+region takes up to three of them as its trailing context, the later takes whatever is left as its
+leading — and the renderers omit the `⋯` separator between regions that are contiguous in line
+numbering, so the paint reads exactly as a merge would. The variant is a new sealed
+`domain.ToolSummary`, so the Tool summary contract is untouched: display data, never sent to the
+model, never persisted in the session record
 ([ADR 0022](0022-sessions-persist-per-turn-as-dual-representation-records.md)). The edit blocks'
 `+A −R` slot reads the same summary instead of re-deriving from arguments.
 
@@ -146,3 +150,19 @@ cluster — `changedLines` over the edit tools' arguments, the `view_diff` and `
 region recovery, and the stacked rows — now lives in `internal/tui/diffbody.go`, beside
 `splitdiff.go`, which composes the Split reading decision 3 picks by width. The pointer in Context
 is updated to match. Pure file moves: no decision recorded here changes.
+
+## Amendment (2026-08-22) — neighbouring regions TILE their context; they do not merge
+
+Decision 1 above called a region's bracketing context **merged** — up to three unchanged lines each
+side, folded together with a neighbour's. The implementing plan's ratified call 3 was written that
+way and the owner superseded it on 2026-08-19, before the shared region builder was written
+(`docs/plans/archived/2026-08-19 - 03 - split-diff-display-plan.md`, item 2 NOTES): neighbours
+within the gap stay SEPARATE regions whose context ranges TILE the interior lines without overlap —
+the earlier region takes up to three of them as its `Trailing`, the later takes the remainder as its
+`Leading`. No line is context for two regions at once, `Removed`/`Inserted` stay changed-only so
+`EditRegions.Stat()` matches `unifiedLineDiff` exactly, and a gap of at most six lines always splits
+cleanly (nothing branches on the gap width any more — the tiling falls out of the context rule
+alone). What the merge was wanted for is delivered at the paint instead: both readings omit the `⋯`
+separator between regions that are contiguous in line numbering, so a small gap reads end to end and
+the painted result is identical to a merge. Decision 1's text above is amended to match; no other
+decision recorded here changes.
