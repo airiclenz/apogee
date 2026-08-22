@@ -1306,5 +1306,12 @@ func (m Model) foldMouseWheel(msg tea.MouseWheelMsg) (tea.Model, tea.Cmd) {
 	if next, handled := m.promptWheel(msg); handled {
 		return next, nil
 	}
+	// A notch over the open "/" | "@" autocomplete menu walks it on the same terms (autocomplete.go).
+	// It is asked LAST of the panes because it is the one that is not modal at all — it hangs over a
+	// chat box the human is still typing in, in the frame's OTHER overlay slot — so it claims the
+	// notches inside its own rectangle and gives up every other one to the transcript below.
+	if next, handled := m.dropdownWheel(msg); handled {
+		return next, nil
+	}
 	return m.scrollViewport(msg)
 }

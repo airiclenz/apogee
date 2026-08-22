@@ -672,6 +672,41 @@ func (m Model) autocompleteKey(msg tea.KeyPressMsg) (bool, tea.Model, tea.Cmd) {
 	return false, m, nil
 }
 
+// dropdownWheel walks the "/" | "@" menu's highlight one row per notch while the pointer is over the
+// dropdown, against the same len(items) [Model.autocompleteKey] walks — so a notch and an ↑ can never
+// disagree about which row is highlighted.
+//
+// This is the one list of the package that is NOT modal: it hangs over a chat box the human is still
+// typing in. Its wheel keeps that posture exactly as its keys do — handled is true only for a notch
+// INSIDE its rectangle on a menu that has rows to walk, and false everywhere else, so every other
+// notch carries on down the chain and scrolls the transcript above it (foldMouseWheel, mouse.go).
+// That is also why the notch is not swallowed on an empty menu the way the modal panes swallow it:
+// with no rows there is no dropdown drawn, so there is no pane under the pointer to own the gesture.
+//
+// A notch MOVES THE HIGHLIGHT AND NOTHING ELSE: it does not filter, splice or dismiss. The overlay is
+// re-derived from the box on the next keystroke (recomputeAutocomplete), so nothing here has to put
+// the menu back in step with the token being completed.
+//
+// It CLAMPS at the ends where these keys WRAP (listWrapsAround, autocompleteKey), and the clamp is the
+// list module's own rather than this overlay's ([listCursor.wheel], listsurface.go): ↑/↓ walk a list as
+// a cycle, while a wheel is a scroll.
+func (m Model) dropdownWheel(msg tea.MouseWheelMsg) (Model, bool) {
+	if !m.openPanes().has(paneDropdown) {
+		// Asked before the frame is composed, because every wheel notch asks: with no menu up there is
+		// nothing to place, and composing the frame's overlays to learn that would put a render on the
+		// path of a notch the dropdown has no part in (browserWheel, sessions.go). The pane's OWN open
+		// predicate (openPanes, model.go) is reused rather than restated, so the guard cannot drift from
+		// what the renderer draws.
+		return m, false
+	}
+	y0, h, ok := m.frameSpans().pane(paneDropdown)
+	if !ok || msg.Y < y0 || msg.Y >= y0+h {
+		return m, false
+	}
+	m.autocomplete.wheel(msg, len(m.autocomplete.items))
+	return m, true
+}
+
 // dismissAutocomplete closes the "/" | "@" dropdown.
 //
 // Besides the keystrokes that dismiss it, it is what a MODAL PROMPT arriving does to a menu the

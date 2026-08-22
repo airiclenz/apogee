@@ -3,6 +3,7 @@ package tui
 import (
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -4035,5 +4036,188 @@ func TestPromptWheelOverAChoicelessQuestion(t *testing.T) {
 	if after.viewport.YOffset() != m.viewport.YOffset() {
 		t.Errorf("the transcript scrolled to %d; a notch inside the box is the pane's whether or not it has rows",
 			after.viewport.YOffset())
+	}
+}
+
+// ----------------------------------------------------------------------------
+// Mouse in the "/" | "@" autocomplete dropdown (autocomplete.go)
+// ----------------------------------------------------------------------------
+
+// dropdownPaneModel opens the autocomplete menu draft summons over a screenful of transcript, on a
+// window with room for both. The transcript is the point: this dropdown is the frame's one NON-modal
+// overlay, so every notch has to be checked against lines that WOULD have scrolled — the ones inside
+// its box for having been left alone, the ones outside it for having scrolled as they always did.
+func dropdownPaneModel(t *testing.T, opts Options, draft string) Model {
+	t.Helper()
+	m := modelWithOverlayRoomAt(t, 100, 30, opts)
+	m.input.SetValue(draft)
+	m.autocomplete = m.computeAutocomplete(m.caretByteOffset())
+	m.layout()
+	if len(m.autocomplete.items) < 3 {
+		t.Fatalf("the %q menu opened %d rows; the walk needs a list to walk", draft, len(m.autocomplete.items))
+	}
+	return m
+}
+
+// fileDropdownOpts is testOpts pointed at a workspace holding more files than a notch needs, so the
+// "@" menu has a list of its own rather than borrowing the repo's.
+func fileDropdownOpts(t *testing.T) Options {
+	t.Helper()
+	dir := t.TempDir()
+	for _, name := range []string{"alpha.go", "beta.go", "gamma.go", "delta.go", "epsilon.go"} {
+		mustWrite(t, filepath.Join(dir, name), "package main")
+	}
+	opts := testOpts
+	opts.Workspace = dir
+	return opts
+}
+
+// dropdownRect is where the open menu is drawn — the rectangle item 2 of the pane-wheel plan
+// published for it — and a row squarely inside it for a notch to be aimed at.
+func dropdownRect(t *testing.T, m Model) (paneTop, inside int) {
+	t.Helper()
+	y0, h, ok := m.frameSpans().pane(paneDropdown)
+	if !ok {
+		t.Fatal("the open dropdown is not on the frame")
+	}
+	return y0, y0 + h/2
+}
+
+// A notch over the "/" menu walks its highlight one row and CLAMPS at both ends, where its own ↑/↓
+// WRAP (listWrapsAround, autocompleteKey). Both answers are asserted at both ends, so the deliberate
+// difference between the gestures cannot drift into an accident.
+func TestDropdownWheelWalksTheSlashMenu(t *testing.T) {
+	m := dropdownPaneModel(t, testOpts, "/")
+	_, y := dropdownRect(t, m)
+	last := len(m.autocomplete.items) - 1
+
+	down := wheelAt(t, m, tea.MouseWheelDown, y)
+	if down.autocomplete.selected != 1 {
+		t.Fatalf("selected = %d after one notch down, want 1", down.autocomplete.selected)
+	}
+	if got := wheelAt(t, down, tea.MouseWheelUp, y).autocomplete.selected; got != 0 {
+		t.Errorf("selected = %d after a notch back up, want 0", got)
+	}
+
+	if got := wheelAt(t, m, tea.MouseWheelUp, y).autocomplete.selected; got != 0 {
+		t.Errorf("selected = %d after a notch up on the first row, want it clamped at 0", got)
+	}
+	if got := step(t, m, keyUp()).autocomplete.selected; got != last {
+		t.Errorf("selected = %d after ↑ on the first row, want the keys to wrap to %d", got, last)
+	}
+
+	end := m
+	for range last + 5 {
+		end = wheelAt(t, end, tea.MouseWheelDown, y)
+	}
+	if end.autocomplete.selected != last {
+		t.Errorf("selected = %d after rolling past the last row, want it clamped at %d",
+			end.autocomplete.selected, last)
+	}
+	if got := step(t, end, keyDown()).autocomplete.selected; got != 0 {
+		t.Errorf("selected = %d after ↓ on the last row, want the keys to wrap to 0", got)
+	}
+}
+
+// The "@" file menu is the same overlay over a different namespace, and it answers the notch the same
+// way — the handler branches on neither kind, and this is what says so.
+func TestDropdownWheelWalksTheFileMenu(t *testing.T) {
+	m := dropdownPaneModel(t, fileDropdownOpts(t), "@")
+	if m.autocomplete.kind != acFile {
+		t.Fatalf("the draft opened the %v menu, want the file menu", m.autocomplete.kind)
+	}
+	_, y := dropdownRect(t, m)
+	last := len(m.autocomplete.items) - 1
+
+	down := wheelAt(t, m, tea.MouseWheelDown, y)
+	if down.autocomplete.selected != 1 {
+		t.Fatalf("selected = %d after one notch down, want 1", down.autocomplete.selected)
+	}
+	if got := wheelAt(t, m, tea.MouseWheelUp, y).autocomplete.selected; got != 0 {
+		t.Errorf("selected = %d after a notch up on the first file, want it clamped at 0", got)
+	}
+
+	end := m
+	for range last + 5 {
+		end = wheelAt(t, end, tea.MouseWheelDown, y)
+	}
+	if end.autocomplete.selected != last {
+		t.Errorf("selected = %d after rolling past the last file, want it clamped at %d",
+			end.autocomplete.selected, last)
+	}
+}
+
+// Above the menu the transcript still owns the wheel. This is the whole of what keeps the dropdown's
+// posture unchanged: it is the one overlay the human is still typing underneath, so it claims the
+// notches inside its own rectangle and gives every other one up to the surface behind it.
+func TestDropdownWheelAboveTheMenuScrollsTheTranscript(t *testing.T) {
+	m := dropdownPaneModel(t, testOpts, "/")
+	paneTop, inside := dropdownRect(t, m)
+	if paneTop == 0 {
+		t.Fatal("the menu starts on the first row; there is no transcript above it to aim at")
+	}
+	m = wheelAt(t, m, tea.MouseWheelDown, inside) // off the first row, so a stray move would show
+
+	off := wheelAt(t, m, tea.MouseWheelUp, paneTop-1)
+
+	if off.autocomplete.selected != m.autocomplete.selected {
+		t.Errorf("a notch above the menu moved the highlight to %d, want it left at %d",
+			off.autocomplete.selected, m.autocomplete.selected)
+	}
+	if off.viewport.YOffset() == m.viewport.YOffset() {
+		t.Errorf("the transcript stayed at %d; a notch outside the menu is still the transcript's",
+			off.viewport.YOffset())
+	}
+}
+
+// A notch MOVES THE HIGHLIGHT AND NOTHING ELSE: the menu stays open on the same rows and the draft in
+// the box is untouched. The overlay is re-derived from that draft on the next keystroke
+// (recomputeAutocomplete), so a wheel that filtered, spliced or dismissed would be undoing work the
+// human never asked for.
+func TestDropdownWheelLeavesTheMenuAndTheDraftAlone(t *testing.T) {
+	m := dropdownPaneModel(t, testOpts, "/c")
+	_, y := dropdownRect(t, m)
+
+	after := wheelAt(t, m, tea.MouseWheelDown, y)
+
+	if !after.autocomplete.active {
+		t.Fatal("the notch dismissed the menu")
+	}
+	if len(after.autocomplete.items) != len(m.autocomplete.items) {
+		t.Errorf("the menu offers %d rows after the notch, want the %d it opened with",
+			len(after.autocomplete.items), len(m.autocomplete.items))
+	}
+	if after.input.Value() != m.input.Value() {
+		t.Errorf("the draft became %q, want the notch to leave it at %q", after.input.Value(), m.input.Value())
+	}
+	if after.autocomplete.selected != 1 {
+		t.Errorf("selected = %d, want the notch to have moved the highlight and nothing else", after.autocomplete.selected)
+	}
+}
+
+// The chain's order, stated where it is decided: with a menu frozen on the frame beneath a modal
+// decision pane, a notch inside the PROMPT's rectangle is the prompt's. The two rectangles live in
+// different slots and cannot overlap, and today the fold that raises either prompt clears the menu
+// outright (dismissAutocomplete) — so this asserts the routing itself, against a frame assembled by
+// hand, rather than leaving the order resting on that clearing.
+func TestDropdownWheelYieldsToAModalPrompt(t *testing.T) {
+	open := dropdownPaneModel(t, testOpts, "/")
+	m := step(t, open, approvalReqMsg{
+		Request: domain.ApprovalRequest{Tool: "write_file", Reason: "it overwrites a tracked file"},
+		Reply:   make(chan domain.ApprovalDecision, 1),
+	})
+	m.autocomplete = open.autocomplete // the frozen menu the fold cleared
+	m.layout()
+	_, inPrompt := promptRect(t, m)
+
+	after := wheelAt(t, m, tea.MouseWheelDown, inPrompt)
+
+	if after.approvalSel.selected != 1 {
+		t.Errorf("approvalSel = %d after a notch inside the prompt, want the prompt to have taken it (1)",
+			after.approvalSel.selected)
+	}
+	if after.autocomplete.selected != 0 {
+		t.Errorf("the dropdown's highlight moved to %d, want a notch in the prompt's box to leave it at 0",
+			after.autocomplete.selected)
 	}
 }

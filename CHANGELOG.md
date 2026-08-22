@@ -10,6 +10,18 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **The "/" and "@" autocomplete dropdown scrolls under the mouse wheel.** A notch with the pointer
+  over the open menu now walks its highlight one row instead of falling through to the transcript
+  behind it — the last of the six overlays a wheel used to pass straight through. It walks the same
+  rows the keys walk, so a notch and an ↑ can never disagree about which suggestion is highlighted,
+  and it moves the highlight and NOTHING else: the menu is not filtered, spliced or dismissed, and
+  the draft in the box is untouched. This is the frame's one non-modal overlay — it hangs over a
+  chat box the human is still typing in — so it claims only the notches inside its own rectangle and
+  gives every other one up to the transcript, exactly as its keys give up every letter and caret
+  move. It CLAMPS at both ends where the menu's own ↑/↓ wrap around: a wheel is a scroll, so rolling
+  past the last suggestion and landing back on the first would move the human somewhere they did not
+  aim.
+
 - **The approval and ask prompts scroll under the mouse wheel.** A notch with the pointer INSIDE the
   decision box now walks the approval menu or the question's offering one row instead of falling
   through to the transcript behind it. The two panes share one rectangle, so they share one handler

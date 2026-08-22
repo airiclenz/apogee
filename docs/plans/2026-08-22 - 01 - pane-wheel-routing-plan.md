@@ -352,7 +352,21 @@ Route it in `foldMouseWheel` after the picker.
 
 ---
 
-## 6. The autocomplete dropdown takes the notch over it
+## 6. The autocomplete dropdown takes the notch over it — ✅ DONE (2026-08-22)
+
+NOTES (2026-08-22): `dropdownWheel` short-circuits on `m.openPanes().has(paneDropdown)` before asking
+`m.frameSpans().pane(paneDropdown)`, rather than gating on the rectangle alone as the item's text reads
+— the same deviation items 3, 4 and 5 recorded, for the same reason: the wheel path publishes no frame,
+so an unguarded `frameSpans()` would compose (and render) every overlay of the frame on every notch the
+transcript owns. That predicate is also exactly the item's "only when it has items to walk" gate
+(`active && len(items) > 0`, model.go), reused rather than restated so it cannot drift from what the
+renderer draws. The rectangle is still the only gate that decides anything.
+
+NOTES (2026-08-22): the item's last test — a frozen dropdown under a modal prompt — assembles that
+frame by hand, because neither prompt fold can produce it any more: `foldApprovalRequest` and
+`foldAskRequest` both call `dismissAutocomplete` so a stale menu never shares a frame with a decision
+surface. The test therefore pins the ROUTING ORDER (promptWheel is asked before dropdownWheel) rather
+than resting the order on that clearing, which is what the item asked it to establish.
 
 Depends on items 1, 2 and 5.
 
