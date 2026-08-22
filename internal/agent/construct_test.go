@@ -95,6 +95,38 @@ func TestDeriveDepsCarriesSecretEnvVars(t *testing.T) {
 	}
 }
 
+// TestDeriveDepsClearsTheExecFenceNetworkAllow pins the one deliberate divergence between the box
+// a Config declares and the box a spawning Mechanism measures an executable against. deriveDeps
+// builds the FULL ConfinementBox and then clears NetworkAllow, because that field names hosts a
+// confined subprocess may REACH and says nothing about the paths a program may be resolved FROM.
+// Nothing else notices if that one line goes: the fence still fences and the rest of the package
+// stays green, while the exec fence quietly starts carrying a network policy it never vets. So the
+// assertion is two-sided — the two path fields have to ARRIVE (a box zeroed wholesale would pass a
+// bare emptiness check) and the host list has to be gone.
+func TestDeriveDepsClearsTheExecFenceNetworkAllow(t *testing.T) {
+	t.Parallel()
+
+	// A config whose ConfinementBox() fills all three fields, so the cleared one is cleared and
+	// not merely never set.
+	cfg := domain.Config{
+		WorkspaceDir:         "/work",
+		ConfineWritablePaths: []string{"/work/out"},
+		ConfineNetworkAllow:  []string{"example.test"},
+	}
+
+	box := deriveDeps(cfg, mechanisms.DepNeeds{}).WritableBox
+
+	if len(box.NetworkAllow) != 0 {
+		t.Errorf("deriveDeps().WritableBox.NetworkAllow = %q, want empty", box.NetworkAllow)
+	}
+	if box.WorkspaceRoot != cfg.WorkspaceDir {
+		t.Errorf("deriveDeps().WritableBox.WorkspaceRoot = %q, want %q", box.WorkspaceRoot, cfg.WorkspaceDir)
+	}
+	if !slices.Equal(box.WritablePaths, cfg.ConfineWritablePaths) {
+		t.Errorf("deriveDeps().WritableBox.WritablePaths = %q, want %q", box.WritablePaths, cfg.ConfineWritablePaths)
+	}
+}
+
 // TestHostToolsBuildsTheURLGuardFromTheConfiguredHosts covers the network half of that
 // translation. Until this key existed hostTools handed the tools a zero URLGuard, so the whole
 // question was whether the SSRF floor was on; now the operator's own `url-safety:` hosts ride

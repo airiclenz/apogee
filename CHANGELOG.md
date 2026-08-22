@@ -956,6 +956,10 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- Pinned the exec fence's deliberately empty `NetworkAllow`: `deriveDeps` builds the full
+  `ConfinementBox` and clears the host list on purpose, and a test now fails if that clearing
+  line is ever dropped.
+
 - A hook's subprocess now scrubs the operator's declared key variables too. `RunHookSubprocess` —
   the one door a Mechanism spawns through — dropped apogee's own `APOGEE_API_KEY` and nothing else,
   so a formatter spawned by `autofix` inherited whatever variable an `api-key-env:` server entry

@@ -23,22 +23,6 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 
 ## Open defects
 
-### Nothing pins `construct.go`'s deliberate empty `NetworkAllow`
-
-**Status:** [P] open 2026-08-22 — residual of
-`docs/plans/archived/2026-08-20 - 00 - engine-architecture-deepening-plan.md` item 9, whose
-constructor test pins the three fields `Config.ConfinementBox()` fills but not the one call site that
-deliberately un-fills one.
-
-The tool box built at construction clears `NetworkAllow` on purpose — the field names hosts a confined
-subprocess may REACH, and the comment above it carries the reasoning
-(`internal/agent/construct.go:345-350`). No test asserts the clearing: deleting
-`deps.WritableBox.NetworkAllow = nil` leaves `./internal/agent` green, so a future edit that drops the
-line opens a confinement hole silently. The pin belongs beside the existing agent-construction
-coverage.
-
----
-
 ### A `delimited` thinking style with no delimiters loads and strips nothing
 
 **Status:** [P] open 2026-08-22 — residual of

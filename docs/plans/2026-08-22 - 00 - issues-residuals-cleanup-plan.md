@@ -357,7 +357,11 @@ that the configured names reach `Deps`.
 
 ---
 
-## 12. Pin construct.go's deliberately empty NetworkAllow
+## 12. Pin construct.go's deliberately empty NetworkAllow — ✅ DONE (2026-08-22)
+
+NOTES (2026-08-22): mutation-checked the pin — deleting `deps.WritableBox.NetworkAllow = nil` from
+`internal/agent/construct.go` makes `TestDeriveDepsClearsTheExecFenceNetworkAllow` fail; the line was
+restored and `construct.go` is untouched in the diff.
 
 **What:** Fix the ISSUES.md entry *"Nothing pins `construct.go`'s deliberate empty
 `NetworkAllow`"*. The tool box built at construction clears `NetworkAllow` on purpose
