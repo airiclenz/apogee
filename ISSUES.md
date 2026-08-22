@@ -54,24 +54,6 @@ band (same plan, item 3's amendment to ADR 0052); only the number is the miss.
 
 ---
 
-### Two shipped comments still point at the home their subject left
-
-**Status:** [P] open 2026-08-20 — residual of
-`docs/plans/archived/2026-08-19 - 04 - tui-architecture-deepening-plan.md` items 21 and 33, which
-moved the code each comment describes without repointing the comment.
-
-- `internal/tui/prompteditor.go:83` — the `keyDisambiguation` field doc says the flag is set from
-  `tea.KeyboardEnhancementsMsg` "(the arm in model.go)". That arm (`internal/tui/model.go:757`) now
-  only delegates; the setter is `foldKeyboardEnhancements`, in this very file
-  (`internal/tui/prompteditor.go:258`). `internal/tui/doc.go:306` already names the new home, so the
-  two sites disagree.
-- `internal/tui/model.go:364` — the `lineTargets` field doc credits "(render.go)" with "what each
-  line is to a motionless click". That vocabulary is `lineTarget`/`lineMark`, which item 33 moved to
-  `internal/tui/blocktarget.go:47`. The other pointer in the same file (`internal/tui/model.go:1832`)
-  is correct — `render.go` is still the PRODUCER — so only the vocabulary reference is wrong.
-
----
-
 ### A session saved before the typed stat value replays with blank type-row totals
 
 **Status:** [P] open 2026-08-20 — residual of
@@ -146,29 +128,6 @@ because `mechanisms.Deps` (`internal/mechanisms/catalogue.go:20`) carries none. 
 asymmetry rather than a hole with no floor: a formatter spawned by `autofix` inherits the operator's
 declared key variables while `terminal`, `python_exec` and `run_tests` do not. Closing it means
 carrying those names on `Deps` and passing them through the door.
-
----
-
-### Four shipped doc comments went stale under the engine-deepening run
-
-**Status:** [P] open 2026-08-22 — residual of
-`docs/plans/archived/2026-08-20 - 00 - engine-architecture-deepening-plan.md` items 7, 10, 12 and 13,
-each of which changed the behaviour its comment describes without repointing the comment.
-
-- `internal/mechanisms/autofix.go:68-70` — the `timeout` field doc says it bounds "both its run
-  context and the WaitDelay that bounds the kill path". Since item 7 the kill path is bounded by the
-  funnel's fixed 5s `processWaitDelay`, not by this field.
-- `internal/agent/agent.go:309-311` — `Close`'s doc says MCP connections and the log sink "belong to
-  the host that wired them, and cmd/apogee closes both alongside this call". The log sink's teardown
-  is in the TUI, not in `cmd/apogee`: `internal/tui/tui.go:1525` defers `diag.Close()`
-  (`internal/tui/diagnostics.go:253`).
-- `internal/domain/config.go:300-302` — `ModelProfile.Pattern`'s doc says the pattern is "ignored for
-  the other formats". Item 12 made a pattern set under a non-custom-regex format a REFUSAL at config
-  load; the sentence needs the one-line correction the shipped default template
-  (`internal/config/defaults/config.yaml`) already got.
-- `internal/domain/hooks.go:295-297` — `LoopView`'s doc still calls the primary mutable value "a
-  *Response, *ToolCall, *ToolResult". Item 13 replaced the two tool-stage values with `ToolCallEdit`
-  and `ToolResultEdit`.
 
 ---
 

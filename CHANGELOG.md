@@ -952,6 +952,17 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- Repointed six shipped doc comments that the two deepening runs left aimed at the wrong place. The
+  `keyDisambiguation` field still credited "the arm in model.go" with setting the flag, when the
+  setter is `prompteditor.go`'s own `foldKeyboardEnhancements`; the `lineTargets` field credited
+  `render.go` with the `lineTarget`/`lineMark` vocabulary, which lives in `blocktarget.go` (render.go
+  remains the producer); `autofix`'s `timeout` claimed to bound the kill path, which the subprocess
+  funnel's fixed 5s `processWaitDelay` bounds instead; `Agent.Close` said `cmd/apogee` closes the log
+  sink, which the TUI that opened it does; `ModelProfile.Pattern` called a pattern set under another
+  tool-call format "ignored", when config load REFUSES it; and `LoopView` still named `*ToolCall` /
+  `*ToolResult` as the tool-stage mutable values, which are `ToolCallEdit` and `ToolResultEdit`.
+  Comments only — nothing about the behaviour changes.
+
 - ADR 0053's adoption note stops crediting the two decision panes with `clampSelection`. Neither the
   approval menu nor the ask_user offering calls it — their row sets are fixed for the pane's
   lifetime, so there is nothing to clamp against — and the note now says they take `move` and

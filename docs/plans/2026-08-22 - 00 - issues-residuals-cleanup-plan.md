@@ -153,7 +153,7 @@ statement is the fix. Remove the ISSUES.md entry.
 
 ---
 
-## 5. Repoint six doc comments left stale by the deepening runs
+## 5. Repoint six doc comments left stale by the deepening runs — ✅ DONE (2026-08-22)
 
 **What:** Fix TWO ISSUES.md entries — *"Two shipped comments still point at the home their
 subject left"* and *"Four shipped doc comments went stale under the engine-deepening run"*.

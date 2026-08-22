@@ -306,9 +306,9 @@ func Resume(cfg domain.Config, snap domain.Session) (*Agent, error) {
 // Responder injected through the internal seam has no connection to close at all.
 //
 // It is idempotent, and it does not end the Agent: closing a client only returns its idle
-// sockets, so a later request dials again. The other live resources of a running session — MCP
-// connections and the log sink — belong to the host that wired them, and cmd/apogee closes both
-// alongside this call rather than through it.
+// sockets, so a later request dials again. The other live resources of a running session belong
+// to the host that wired them rather than to this call: cmd/apogee closes the MCP connections
+// alongside it, and the log sink is torn down by the TUI that opened it (internal/tui).
 func (a *Agent) Close() error { return a.closeOwnedUpstream(a.upstream) }
 
 // closeOwnedUpstream tears down up when this Agent owns it and it actually holds a connection —

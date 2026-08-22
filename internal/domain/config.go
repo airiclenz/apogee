@@ -297,9 +297,10 @@ type ModelProfile struct {
 	// content at the seam.
 	ToolCallFormat ToolCallFormat
 
-	// Pattern is the custom-regex tool-call pattern — mandatory for FormatCustomRegex, ignored
-	// for the other formats. Named capture groups name the tool and its arguments; the parser's
-	// own group/flag defaults apply at the boundary when its finer knobs are unset.
+	// Pattern is the custom-regex tool-call pattern — required by FormatCustomRegex, and REFUSED
+	// at config load under the other formats, which never read it. Named capture groups name the
+	// tool and its arguments; the parser's own group/flag defaults apply at the boundary when its
+	// finer knobs are unset.
 	Pattern string
 
 	// Thinking selects the model's inline reasoning-channel style. A zero Thinking (ThinkingNone)

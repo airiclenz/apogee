@@ -293,8 +293,9 @@ type Budget struct {
 // mutable value — the conversation so far, the tool menu, the budget, the Turn index,
 // and a self-regulation query. It is the home of all cross-Turn reads: most
 // Mechanisms decide by aggregating across Turns, so the primary mutable value (a
-// *Response, *ToolCall, *ToolResult) is never sufficient alone. Request and Response
-// expose it via their View method; the tool-stage hooks receive it as an argument.
+// *Response, a *ToolCallEdit, a *ToolResultEdit) is never sufficient alone. Request
+// and Response expose it via their View method; the tool-stage hooks receive it as an
+// argument.
 type LoopView interface {
 	Conversation() ConversationView
 	Tools() []ToolDef

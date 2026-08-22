@@ -361,9 +361,10 @@ type Model struct {
 	// Last render output, stashed by refreshViewport for View's sticky-header overlay and the
 	// mouse: the physical lines the viewport holds, the line range of every user block, and — one
 	// entry per line, the zero value where a line is no click target — what each line is to a
-	// motionless click (render.go). lineTargets is the paint's OWN accounting, carried across
-	// rather than re-derived, so a click resolves against exactly the lines that were drawn; it is
-	// a plain slice of plain values, so ADR 0011's copy rule needs no exception.
+	// motionless click (the lineTarget/lineMark vocabulary lives in blocktarget.go; render.go
+	// remains the producer). lineTargets is the paint's OWN accounting, carried across rather than
+	// re-derived, so a click resolves against exactly the lines that were drawn; it is a plain
+	// slice of plain values, so ADR 0011's copy rule needs no exception.
 	lines       []string
 	userBlocks  []userBlock
 	lineTargets []lineTarget

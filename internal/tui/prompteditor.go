@@ -79,8 +79,9 @@ type promptEditor struct {
 	// keyDisambiguation records whether the terminal negotiated the enhanced (kitty) keyboard
 	// protocol's key disambiguation — the thing that makes ⇧⏎ reach the program as a key of its
 	// own instead of as a plain ⏎. It starts FALSE and is set from tea.KeyboardEnhancementsMsg
-	// (the arm in model.go), which capable terminals answer within the first frames; on a terminal
-	// that never answers it stays false, which is the honest reading rather than a guess.
+	// (foldKeyboardEnhancements, in this file), which capable terminals answer within the first
+	// frames; on a terminal that never answers it stays false, which is the honest reading rather
+	// than a guess.
 	//
 	// Only the idle legend reads it (idleLegend). The textarea's InsertNewline binding keeps
 	// "shift+enter" either way — a chord the terminal never delivers costs nothing to leave bound,
