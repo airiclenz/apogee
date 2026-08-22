@@ -23,21 +23,6 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 
 ## Open defects
 
-### `sessionBrowser` derives the visible list twice per frame
-
-**Status:** [P] open 2026-08-20 — residual of
-`docs/plans/archived/2026-08-19 - 04 - tui-architecture-deepening-plan.md` item 15, which split
-`unfilteredRows` out of `filteredView` and left the caller's own call standing.
-
-`filteredView` calls `b.visible(workspace)` (`internal/tui/sessions.go:198`) and then calls
-`unfilteredRows`, which calls it again (`internal/tui/sessions.go:213`). Unless the pane is showing
-all workspaces, `visible` allocates and fills a fresh `[]session.Meta` over the whole store on every
-call (`internal/tui/sessions.go:164-175`), so an open browser walks and copies the store twice per
-frame. Passing the visible slice into `unfilteredRows`, or having it answer both halves, removes the
-duplicate without touching the seam item 15 created.
-
----
-
 ### The path-keyed history family still cannot see `copy_file` / `move_file`
 
 **Status:** [P] open 2026-08-22 — residual of

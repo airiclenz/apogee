@@ -269,7 +269,11 @@ right-aligned number column is unchanged.
 
 ---
 
-## 9. Derive the session browser's visible list once per frame
+## 9. Derive the session browser's visible list once per frame — ✅ DONE (2026-08-22)
+
+NOTES (2026-08-22): took the entry's second sketch — `unfilteredRows` answers BOTH halves (`([]popupRow, []session.Meta)`) rather than taking the visible slice as a parameter; passing it in would have made the keypress route (`sessionBrowserKey`) derive the workspace view itself, leaking the browser's internal composition into the Model's key handling. The seam item 15 created is untouched: `unfilteredRows` stays a named function the keypress route calls, with the same inputs.
+
+NOTES (2026-08-22): `internal/tui/sessions_test.go` is listed under the item's Files but is unchanged — no test calls `unfilteredRows`, so the signature change needed no call-site adjustment, which is the only extension the item's Tests line authorizes.
 
 **What:** Fix the ISSUES.md entry *"`sessionBrowser` derives the visible list twice per
 frame"*. `filteredView` calls `b.visible(workspace)` (`internal/tui/sessions.go:198`) and

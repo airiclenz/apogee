@@ -223,6 +223,10 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- The session browser derives its workspace view once per frame: `unfilteredRows` now hands back the
+  visible metas alongside the rows it composed from them, so `filteredView` no longer re-walks and
+  re-copies the whole session store a second time on every frame and keypress.
+
 - **The refusal for an unknown `cursor-shape:` is written once.** The sentence "unknown cursor
   shape … (known shapes: block, underline, bar)" was spelled out twice — once in the config
   layer's validator, once in the renderer's parse — so a reworded refusal or a fourth shape would

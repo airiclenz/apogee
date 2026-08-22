@@ -195,8 +195,8 @@ type browserView struct {
 // the store can be re-listed under the open pane (a delete, a rename) and the relative times in the
 // cells move on their own.
 func (b sessionBrowser) filteredView(workspace string, now time.Time) browserView {
-	visible := b.visible(workspace)
-	pruned := b.view(b.unfilteredRows(workspace, now))
+	rows, visible := b.unfilteredRows(workspace, now)
+	pruned := b.view(rows)
 	view := browserView{rows: pruned.rows, metas: make([]session.Meta, 0, len(pruned.offering))}
 	for _, i := range pruned.offering {
 		view.metas = append(view.metas, visible[i])
@@ -209,13 +209,18 @@ func (b sessionBrowser) filteredView(workspace string, now time.Time) browserVie
 // It is the row half of filteredView, named on its own because a keypress needs the unfiltered list
 // to answer with: the surface owns the filter, so the count a key is clamped against and the count
 // it leaves behind must both be read off the SAME composition of the list.
-func (b sessionBrowser) unfilteredRows(workspace string, now time.Time) []popupRow {
+//
+// It hands back the workspace view it composed those rows from alongside them, so both halves come
+// off ONE walk of the store: filteredView needs the metas to map a surviving row back to its record,
+// and asking `visible` for them a second time re-allocated and re-copied the whole store on every
+// frame. A caller that only paints or clamps rows discards the second half.
+func (b sessionBrowser) unfilteredRows(workspace string, now time.Time) ([]popupRow, []session.Meta) {
 	visible := b.visible(workspace)
 	rows := make([]popupRow, 0, len(visible))
 	for _, meta := range visible {
 		rows = append(rows, sessionRowCells(meta, workspace, b.allWorkspaces, now))
 	}
-	return rows
+	return rows, visible
 }
 
 // record is the session the highlight NAMES inside a row set the surface has already been clamped
@@ -267,7 +272,7 @@ func (m Model) sessionBrowserKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.sessionBrowser.confirming {
 		return m.sessionConfirmKey(msg)
 	}
-	rows := m.sessionBrowser.unfilteredRows(m.opts.Workspace, time.Now())
+	rows, _ := m.sessionBrowser.unfilteredRows(m.opts.Workspace, time.Now())
 	verdict, cmd := m.listKey(&m.sessionBrowser.listSurface, msg, rows, listWrapsAround)
 	switch verdict {
 	case listCloses:
