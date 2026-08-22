@@ -292,3 +292,82 @@ func TestListSurfaceAcceptResolvesThroughTheFilter(t *testing.T) {
 		t.Error("offeringIndex named a row for a highlight past the end of the filtered list")
 	}
 }
+
+// wheelNotch is one wheel notch of the given button, the message a pane's wheel handler is offered
+// once it has decided the pointer is inside its own rectangle.
+func wheelNotch(button tea.MouseButton) tea.MouseWheelMsg {
+	return tea.MouseWheelMsg{Button: button}
+}
+
+// The wheel contract, proved on the cursor itself rather than through the five panes that adopt it: a
+// notch is one row, the two sideways buttons a trackpad sends are nothing, and a list with no rows has
+// no highlight for either of them to walk.
+func TestListCursorWheelWalksOneRowPerNotch(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name   string
+		from   int
+		button tea.MouseButton
+		rows   int
+		want   int
+		since  string
+	}{
+		{"a down notch", 0, tea.MouseWheelDown, 3, 1, "moves one row on"},
+		{"an up notch", 2, tea.MouseWheelUp, 3, 1, "moves one row back"},
+		{"a down notch on the last row", 2, tea.MouseWheelDown, 3, 2, "stays on the last row"},
+		{"an up notch on the first row", 0, tea.MouseWheelUp, 3, 0, "stays on the first row"},
+		{"a left notch", 1, tea.MouseWheelLeft, 3, 1, "is not a scroll of this list"},
+		{"a right notch", 1, tea.MouseWheelRight, 3, 1, "is not a scroll of this list"},
+		{"a notch over an empty list", 0, tea.MouseWheelDown, 0, 0, "has no row to walk"},
+		{"a notch over a list that emptied", 7, tea.MouseWheelUp, 0, 7, "walks nothing and panics on nothing"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			l := listCursor{selected: tc.from}
+
+			l.wheel(wheelNotch(tc.button), tc.rows)
+
+			if l.selected != tc.want {
+				t.Errorf("selected = %d, want %d — %s", l.selected, tc.want, tc.since)
+			}
+		})
+	}
+}
+
+// The wheel CLAMPS where the keys WRAP, and the two answers are pinned side by side rather than one at
+// a time: the same cursor, on the same end of the same list, walked by a notch and by the arrow of a
+// pane that wraps. ↑/↓ walk a list as a cycle; a wheel is a scroll, and rolling past the last row onto
+// the first would move the human somewhere they did not aim.
+func TestListCursorWheelClampsWhereTheKeysWrap(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name      string
+		from      int
+		button    tea.MouseButton
+		key       tea.KeyPressMsg
+		wantWheel int
+		wantKey   int
+	}{
+		{"at the bottom", 2, tea.MouseWheelDown, keyDown(), 2, 0},
+		{"at the top", 0, tea.MouseWheelUp, keyUp(), 0, 2},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			wheeled, keyed := listCursor{selected: tc.from}, listCursor{selected: tc.from}
+
+			wheeled.wheel(wheelNotch(tc.button), 3)
+			keyed.key(tc.key, 3, listWrapsAround)
+
+			if wheeled.selected != tc.wantWheel {
+				t.Errorf("wheel left selected = %d, want %d — a notch stops at the end", wheeled.selected, tc.wantWheel)
+			}
+			if keyed.selected != tc.wantKey {
+				t.Errorf("key left selected = %d, want %d — this pane's arrows wrap around", keyed.selected, tc.wantKey)
+			}
+		})
+	}
+}

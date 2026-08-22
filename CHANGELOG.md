@@ -10,6 +10,13 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **The shared list surface answers for the mouse wheel.** The module every list overlay is built on
+  (`internal/tui/listsurface.go`) gained `listCursor.wheel`: one row per notch, up and down only, and
+  the clamp at both ends passed from inside rather than by a caller — a wheel is a scroll, so rolling
+  past the last row and landing back on the first is not something any pane can ask for, even where
+  its own ↑/↓ wrap around. No pane routes a notch through it yet; the /sessions browser, the
+  /model | /server picker, the approval and ask prompts and the autocomplete dropdown adopt it next.
+
 - **`move_file` stages the rename of a tracked file.** A move whose source is tracked in git now
   leaves the rename in the INDEX as well as on disk — the index half of `git mv`, without the model
   having to know to ask for it — and the result says so: `moved old.go to new.go (rename staged in

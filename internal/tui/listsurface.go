@@ -50,7 +50,9 @@ import (
 //     stays typeable under the question — so they claim their arrows and leave every other key to
 //     the surface it belonged to (listCursor).
 //   - What ↑/↓ do at the ENDS is a parameter and not a rule (listWrap) — the panes already disagree
-//     and each keeps the answer it had.
+//     and each keeps the answer it had. What the WHEEL does at the ends is NOT a parameter: it CLAMPS
+//     in every one of them (listCursor.wheel), because a wheel is a scroll and rolling past the last
+//     row onto the first would move the human somewhere they did not aim (ratified 2026-08-22).
 //   - The filter LINE is the surface's, not the painter's spec. Its label, its caret, its two
 //     blank lines and the budget claim all three cost ride here (renderFilterList), so a pane cannot
 //     paint a line it did not claim room for. A pane with a body of its own instead — the /settings
@@ -219,6 +221,41 @@ func (l *listCursor) key(msg tea.KeyPressMsg, n int, wrap listWrap) listVerdict 
 		return listAccepts
 	}
 	return listUnclaimed
+}
+
+// wheel walks the cursor at l one row per wheel notch over a list of n painted rows, and is the
+// package's one answer to what a WHEEL does to a list overlay: [tea.MouseWheelUp] a row back,
+// [tea.MouseWheelDown] a row on, and every other button — the sideways notches a trackpad sends —
+// nothing at all. The pane above it decides whether the notch is ITS notch (the pointer is inside its
+// rectangle); this decides what the notch does once it is.
+//
+// It CLAMPS at the ends where the keys WRAP, and the difference is the gesture rather than an
+// inconsistency: ↑/↓ walk a list as a cycle, while a wheel is a scroll — rolling past the last row and
+// landing back on the first would move the human somewhere they did not aim (ratified 2026-08-22).
+// That is why there is no [listWrap] parameter here: the clamp is structural, [listStopsAtEnds] passed
+// from inside rather than by a caller who could get it wrong, and a wheel that wraps is not a scroll.
+//
+// n is the count the pane PAINTS for this notch — for a filtering list, its filtered view — so a notch
+// and an ↑ can never disagree about which row is highlighted. A list with no rows to walk (n < 1) moves
+// nothing, and a highlight the rows shrank out from under needs no clamp of its own first: a stopping
+// [listCursor.move] cannot leave the range, so the notch lands it on the last row that is still there.
+//
+// settingsWheel (mouse.go) and reportWheel (reportpane.go) stated the clamp rule first and keep their
+// own row arithmetic — they scroll a row WINDOW and a caret rather than a bare cursor — so this is the
+// shared answer for the panes that hold a [listCursor], not for those two.
+//
+// l points into the CALLER's Model exactly as [listCursor.key]'s does and the pointer never outlives
+// the call, so nothing here puts a self-pointer on a Model that is copied on every Update (ADR 0011).
+func (l *listCursor) wheel(msg tea.MouseWheelMsg, n int) {
+	if n < 1 {
+		return // no rows: nothing to highlight, so nothing for a notch to walk
+	}
+	switch msg.Button {
+	case tea.MouseWheelUp:
+		l.move(-1, n, listStopsAtEnds)
+	case tea.MouseWheelDown:
+		l.move(1, n, listStopsAtEnds)
+	}
 }
 
 // listKey routes one keypress through the FILTERING surface at l over the pane's UNFILTERED rows.
