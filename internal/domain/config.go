@@ -53,6 +53,17 @@ type Config struct {
 	ConfineWritablePaths []string
 	ConfineNetworkAllow  []string
 
+	// ScratchDir is this session's own scratch directory OUTSIDE the workspace
+	// (`~/.apogee/scratch/<session-id>/` under the shipped composition root) — the one place a
+	// confined subprocess may write besides the workspace itself, so scratch work has somewhere
+	// safe to land instead of improvising into the project tree (the 2026-08-22 clobber incident).
+	// ConfinementBox() folds it into WritablePaths, and the host owns its lifecycle: minting the
+	// per-session path, creating it, and garbage-collecting stale siblings. Empty — the default,
+	// and what a Driver that manages no sessions passes — adds nothing, leaving the box exactly
+	// what it was before this field existed. It is the construction seed; the live, session-
+	// following value is Agent.SetScratchDir's (the mode/confine pattern).
+	ScratchDir string
+
 	// Host-supplied delegates. The host (TUI / bench / embedder) owns these.
 	Approver  Approver  // the human-in-the-loop gate; required unless Mode==Plan
 	Asker     Asker     // free-text Q&A delegate for the ask_user tool; nil ⇒ ask_user is not registered (P3.11)

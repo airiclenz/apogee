@@ -60,6 +60,12 @@ func (c *fakeConfiner) confineCount() int {
 	return c.confined
 }
 
+func (c *fakeConfiner) lastConfinedBox() domain.ConfinementBox {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.lastBox
+}
+
 // subprocTool is a fake SubprocessTool: on Execute it pulls the Confinement handle from
 // ctx (the dispatch disposition installs it for a dispoConfine call) and confines a real
 // *exec.Cmd through it, recording whether it ran confined. This is exactly the contract's

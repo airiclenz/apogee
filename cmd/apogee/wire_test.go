@@ -1543,7 +1543,7 @@ func TestSessionHostRoundTripsThroughResume(t *testing.T) {
 	}
 
 	store := session.NewStore(filepath.Join(t.TempDir(), "sessions"))
-	host := newSessionHost(store, t.TempDir(), "fake", nil)
+	host := newSessionHost(store, t.TempDir(), "fake", nil, "", nil)
 	if err := host.Save(snap, nil, "hi", 1, 0, session.Usage{}); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
@@ -1606,7 +1606,7 @@ func TestBuildAgentResumeFutureVersion(t *testing.T) {
 func TestSessionHostMintsIDOnceAndUpdatesInPlace(t *testing.T) {
 	t.Parallel()
 	store := session.NewStore(t.TempDir())
-	host := newSessionHost(store, "/ws", "model-x", nil)
+	host := newSessionHost(store, "/ws", "model-x", nil, "", nil)
 
 	if host.ActiveID() != "" {
 		t.Errorf("ActiveID before any Save = %q; want empty", host.ActiveID())
@@ -1652,7 +1652,7 @@ func TestSessionHostMintsIDOnceAndUpdatesInPlace(t *testing.T) {
 func TestSessionHostSetModelStampsSaves(t *testing.T) {
 	t.Parallel()
 	store := session.NewStore(t.TempDir())
-	host := newSessionHost(store, "/ws", "", nil) // a cold start: nothing bound yet
+	host := newSessionHost(store, "/ws", "", nil, "", nil) // a cold start: nothing bound yet
 
 	if err := host.Save(apogee.Session{}, nil, "cold", 1, 0, session.Usage{}); err != nil {
 		t.Fatalf("Save before the bind: %v", err)
@@ -1681,7 +1681,7 @@ func TestSessionHostSetModelStampsSaves(t *testing.T) {
 func TestSessionHostRotateAndLoadActivate(t *testing.T) {
 	t.Parallel()
 	store := session.NewStore(t.TempDir())
-	host := newSessionHost(store, "/ws", "m", nil)
+	host := newSessionHost(store, "/ws", "m", nil, "", nil)
 
 	if err := host.Save(apogee.Session{}, nil, "A", 1, 0, session.Usage{}); err != nil {
 		t.Fatalf("Save A: %v", err)
@@ -1729,7 +1729,7 @@ func TestSessionHostRotateAndLoadActivate(t *testing.T) {
 func TestSessionHostRenameActiveSticks(t *testing.T) {
 	t.Parallel()
 	store := session.NewStore(t.TempDir())
-	host := newSessionHost(store, "/ws", "m", nil)
+	host := newSessionHost(store, "/ws", "m", nil, "", nil)
 	if err := host.Save(apogee.Session{}, nil, "original", 1, 0, session.Usage{}); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
@@ -1755,7 +1755,7 @@ func TestSessionHostResumeBeginsActive(t *testing.T) {
 	t.Parallel()
 	store := session.NewStore(t.TempDir())
 	seed := &session.Record{Meta: session.Meta{ID: "20260724T120000Z-abcd", Title: "kept"}}
-	host := newSessionHost(store, "/ws", "m", seed)
+	host := newSessionHost(store, "/ws", "m", seed, "", nil)
 
 	if host.ActiveID() != seed.Meta.ID {
 		t.Errorf("ActiveID of a resumed host = %q; want the resumed id %q", host.ActiveID(), seed.Meta.ID)
@@ -1837,7 +1837,7 @@ func TestResolveResumeByPathRemintsID(t *testing.T) {
 
 	// The run continues as a NEW session: its autosave lands on its own file and the victim's
 	// record is untouched.
-	host := newSessionHost(store, "/ws", "m", rec)
+	host := newSessionHost(store, "/ws", "m", rec, "", nil)
 	if host.ActiveID() != rec.Meta.ID {
 		t.Errorf("host active id = %q; want the re-minted %q", host.ActiveID(), rec.Meta.ID)
 	}
@@ -1902,7 +1902,7 @@ func TestResolveContinuePicksWorkspaceNewest(t *testing.T) {
 // UpdatedAt), returning the minted id. Each call uses its own host so it mints a distinct session.
 func saveAt(t *testing.T, store *session.Store, ws string, when time.Time, title string) string {
 	t.Helper()
-	h := newSessionHost(store, ws, "m", nil)
+	h := newSessionHost(store, ws, "m", nil, "", nil)
 	h.now = func() time.Time { return when }
 	if err := h.Save(apogee.Session{}, nil, title, 1, 0, session.Usage{}); err != nil {
 		t.Fatalf("saveAt %q: %v", title, err)
@@ -5189,5 +5189,108 @@ func TestServerBindHandsTheEntrysResponseReserveToTheEngine(t *testing.T) {
 					handed.Context.ResponseReserveFraction, tt.want)
 			}
 		})
+	}
+}
+
+// ----------------------------------------------------------------------------
+// Session scratch dirs (workspace-clobber hardening, 2026-08-22)
+// ----------------------------------------------------------------------------
+
+// TestGCScratchDirsRemovesOldKeepsFresh pins the startup sweep's one rule: an entry whose mtime
+// has aged past scratchMaxAge goes, one inside the window stays — and a root that does not exist
+// is silently nothing to do.
+func TestGCScratchDirsRemovesOldKeepsFresh(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	now := time.Now()
+
+	old := filepath.Join(root, "2026-01-01T00-00-00-old1")
+	fresh := filepath.Join(root, "2026-08-22T00-00-00-new1")
+	for _, dir := range []string{old, fresh} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatalf("MkdirAll(%s): %v", dir, err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(old, "scratch.txt"), []byte("x"), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	backdated := now.Add(-scratchMaxAge - time.Hour)
+	if err := os.Chtimes(old, backdated, backdated); err != nil {
+		t.Fatalf("Chtimes: %v", err)
+	}
+
+	gcScratchDirs(root, now)
+
+	if _, err := os.Stat(old); !os.IsNotExist(err) {
+		t.Errorf("stale scratch dir survived the sweep (stat err = %v)", err)
+	}
+	if _, err := os.Stat(fresh); err != nil {
+		t.Errorf("fresh scratch dir did not survive the sweep: %v", err)
+	}
+
+	gcScratchDirs(filepath.Join(root, "does-not-exist"), now) // must not panic or create anything
+}
+
+// TestSessionHostScratchFollowsTheActiveSession proves the scratch seam tracks session identity
+// end to end: the boot dir exists before any Save (the pre-minted id), a Rotate mints a NEW
+// session and moves the engine's scratch to its dir, an Activate moves it to the resumed
+// session's, and the id the first Save adopts is the one the boot scratch dir was named by — so
+// dir and record never disagree.
+func TestSessionHostScratchFollowsTheActiveSession(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	store := session.NewStore(filepath.Join(t.TempDir(), "sessions"))
+	var moved []string
+	host := newSessionHost(store, "/ws", "m", nil, root, func(dir string) { moved = append(moved, dir) })
+
+	bootDir := host.SessionScratchDir()
+	if bootDir == "" {
+		t.Fatal("SessionScratchDir answered \"\" on a scratch-enabled host")
+	}
+	if info, err := os.Stat(bootDir); err != nil || !info.IsDir() {
+		t.Fatalf("boot scratch dir %s not created: %v", bootDir, err)
+	}
+
+	// The first Save adopts the pre-minted id — the name the boot dir already carries.
+	if err := host.Save(apogee.Session{}, nil, "t", 1, 0, session.Usage{}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if got, want := host.ActiveID(), filepath.Base(bootDir); got != want {
+		t.Errorf("first Save minted id %q, want the boot scratch dir's name %q", got, want)
+	}
+
+	host.Rotate()
+	if len(moved) != 1 {
+		t.Fatalf("Rotate pushed %d scratch moves, want 1", len(moved))
+	}
+	if moved[0] == bootDir || filepath.Dir(moved[0]) != root {
+		t.Errorf("Rotate moved scratch to %q, want a NEW dir under %q", moved[0], root)
+	}
+	if info, err := os.Stat(moved[0]); err != nil || !info.IsDir() {
+		t.Errorf("rotated scratch dir %s not created: %v", moved[0], err)
+	}
+
+	// A /sessions resume: scratch follows the ACTIVATED session's own id.
+	host.Activate(session.Meta{ID: filepath.Base(bootDir)})
+	if len(moved) != 2 || moved[1] != bootDir {
+		t.Fatalf("Activate pushed moves %v, want the resumed session's dir %q last", moved, bootDir)
+	}
+}
+
+// TestSessionHostWithoutScratchRootIsInert pins the disabled seam: no root means no dirs, no
+// listener calls, and the pre-scratch behaviour everywhere else.
+func TestSessionHostWithoutScratchRootIsInert(t *testing.T) {
+	t.Parallel()
+	store := session.NewStore(filepath.Join(t.TempDir(), "sessions"))
+	called := false
+	host := newSessionHost(store, "/ws", "m", nil, "", func(string) { called = true })
+
+	if dir := host.SessionScratchDir(); dir != "" {
+		t.Errorf("SessionScratchDir = %q on a disabled seam, want \"\"", dir)
+	}
+	host.Rotate()
+	host.Activate(session.Meta{ID: "some-id"})
+	if called {
+		t.Error("scratchMoved called on a host with no scratch root")
 	}
 }

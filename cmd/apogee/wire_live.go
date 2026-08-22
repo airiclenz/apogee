@@ -141,7 +141,14 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	// facts only the binary knows (workspace root, resolved model) — so the renderer stays free of
 	// file I/O (phase-2 detail plan §3 C5). Seeded active on a resumed record, it updates that
 	// session's file rather than starting a new one.
-	w.host = newSessionHost(w.store, w.roots.workspace, w.opts.Model, w.resumed)
+	// The scratch seam rides the host because the host owns session identity: it creates the
+	// active session's `scratch/<id>/` dir at each identity boundary and pushes the move into the
+	// engine holder, so the confinement box follows /clear|/new and /sessions resume. The seed
+	// below puts the boot session's dir on the Config the binder captures, which is what makes it
+	// writable from the engine's very first tool call (workspace-clobber hardening, 2026-08-22).
+	w.host = newSessionHost(w.store, w.roots.workspace, w.opts.Model, w.resumed,
+		w.roots.scratch, w.engine.SetScratchDir)
+	w.cfg.ScratchDir = w.host.SessionScratchDir()
 
 	// The upstream monitor: one beat every heartbeat.Interval, from inside the running TUI. The
 	// configured model id travels with it as the discovery HINT (decision 10) — while the server

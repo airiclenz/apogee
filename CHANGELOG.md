@@ -10,6 +10,11 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **Per-session scratch dir `~/.apogee/scratch/<session-id>/`** (0700), folded into the
+  confinement box's `WritablePaths` so a confined subprocess has a safe write target
+  outside the workspace; the dir follows the active session across `/clear|/new` and
+  `/sessions` resume, and a startup sweep removes scratch dirs older than 14 days.
+
 - **Confinement denials are now labeled in terminal results.** When a confined terminal
   call fails and its output carries an OS-denial signature (`Operation not permitted`,
   `operation not permitted`, `EPERM`), the error result gains one labeled line —

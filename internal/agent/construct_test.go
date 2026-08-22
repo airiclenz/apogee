@@ -361,3 +361,38 @@ func TestInspectorSurvivesASwitchUpstream(t *testing.T) {
 		t.Errorf("got %d WireEvents after a server switch; want the capture still armed (2)", len(got))
 	}
 }
+
+// TestConfinedCallBoxCarriesTheScratchDir covers the scratch half of the construction translation
+// (workspace-clobber hardening, 2026-08-22): the ScratchDir the host puts on Config must reach the
+// box a confined tool call actually runs inside — the real dispatch path, observed through the
+// fake Confiner — and must then FOLLOW the active session: after SetScratchDir moves it at a
+// session boundary, the box built for the next call carries the new session's dir and not the old.
+func TestConfinedCallBoxCarriesTheScratchDir(t *testing.T) {
+	t.Parallel()
+
+	sink := &recordingSink{}
+	sub := &subprocTool{name: "terminal"}
+	conf := &fakeConfiner{caps: capsBoth()}
+	cfg := autoConfig(sink, conf, true, sub)
+	cfg.ScratchDir = "/home/u/.apogee/scratch/sess-1"
+
+	a := driveToolCall(t, cfg, sink, "c1", "terminal", `{}`)
+
+	if conf.confineCount() != 1 {
+		t.Fatalf("Confine called %d times, want 1", conf.confineCount())
+	}
+	if box := conf.lastConfinedBox(); !slices.Contains(box.WritablePaths, cfg.ScratchDir) {
+		t.Errorf("confined box WritablePaths = %v, want to contain the scratch dir %q",
+			box.WritablePaths, cfg.ScratchDir)
+	}
+
+	// The session boundary: the host moves the scratch dir; the very next box follows it.
+	a.SetScratchDir("/home/u/.apogee/scratch/sess-2")
+	box := a.confinementBox()
+	if !slices.Contains(box.WritablePaths, "/home/u/.apogee/scratch/sess-2") {
+		t.Errorf("after SetScratchDir, box WritablePaths = %v, want the new session's dir", box.WritablePaths)
+	}
+	if slices.Contains(box.WritablePaths, cfg.ScratchDir) {
+		t.Errorf("after SetScratchDir, box WritablePaths = %v still carries the OLD session's dir", box.WritablePaths)
+	}
+}

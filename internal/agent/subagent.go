@@ -185,6 +185,8 @@ func (a *Agent) newChildAgent(spawnCallID, task, name string) (*Agent, error) {
 	//                          read under the lock since this runs on the worker goroutine during dispatch
 	childCfg.ConfineToWorkspace = a.ConfineToWorkspace() // likewise the parent's LIVE blast radius at spawn
 	//                                                     (/confine may have moved it since construction)
+	childCfg.ScratchDir = a.ScratchDir() // and the parent's LIVE session scratch dir — a session
+	//                                      boundary may have moved it (SetScratchDir) since construction
 	childCfg.Bypass = a.bypassEnabled()                        // and the parent's LIVE Bypass + auto-Compaction gates, which the
 	childCfg.Context.CompactionEnabled = a.compactionEnabled() // settings surface may have swapped since construction
 	// The context-file NAMES are deliberately NOT re-read from the live list: the child copies the

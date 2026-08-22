@@ -104,7 +104,13 @@ nothing; never force an error on an exit-0 result.
 
 **Commit:** `feat(tools): label confinement-denial failures in terminal results`
 
-## 3. Per-session scratch dir inside the confinement box
+## 3. Per-session scratch dir inside the confinement box — ✅ DONE (2026-08-22)
+
+NOTES (2026-08-22): "follows the **active** session" needed seams beyond the item's named files: session ids are minted lazily at first Save, after a session's first tool call — so `sessionHost` (cmd/apogee/wire_session.go) now pre-mints the next id at construction and at Rotate (Save adopts it; store behaviour, `ActiveID()`, and title/CreatedAt semantics unchanged) and pushes each identity boundary's dir through a `scratchMoved` listener; `lateEngine` (wire_engine.go) forwards it as `SetScratchDir` with the standard pending-while-unbound pattern; the engine gained the live field + `Agent.ScratchDir/SetScratchDir` (agent.go, mode/confine idiom), a `confinementBox()` live fold in dispatch.go used by both per-call box sites (resolutionInput and hookExecutionCtx), and live inheritance at spawn (subagent.go). Wire seeding lives in wire_live.go's `wireSession` (the item named wire.go, which holds the scratch root, GC, and `ensureScratchDir`) because that is where Config assembly meets the session host.
+
+NOTES (2026-08-22): `ConfinementBox()` appends the scratch dir into a FRESH slice (never the host's `ConfineWritablePaths` backing array); a guard test pins it. Creation failure or a disabled seam yields "" — a path that does not exist is never advertised writable.
+
+NOTES (2026-08-22): deriveDeps' mechanism-hook exec fence and a scheduled Firing's copied Config carry the construction-time scratch seed rather than the live value — hook/MCP subprocess surfaces are out of the plan's scope, and the seed is still a valid writable root.
 
 **What:** New dotdir root `~/.apogee/scratch/<session-id>/` (sibling of `sessions/`,
 `library/`, … — composed in `cmd/apogee/wire.go` next to `wire.go:349-368`).

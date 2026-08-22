@@ -23,7 +23,9 @@ import (
 // session's id and the metadata policy the renderer must not, stamps the wiring facts only the
 // binary knows (workspace root, resolved model) onto every record, and delegates listing, loading,
 // deletion, and renaming to the store. It is the composition root's single owner of id minting and
-// metadata, keeping both out of the renderer (phase-2 detail plan §3 C5).
+// metadata, keeping both out of the renderer (phase-2 detail plan §3 C5) — and, because the
+// per-session scratch dir is named by that id, of the scratch dirs too: it creates the active
+// session's dir at each identity boundary and tells the engine when it moves (scratchMoved).
 //
 // The mutable fields are mutex-guarded: Save runs on a Bubble Tea Cmd goroutine while ActiveID, the
 // browser verbs, and SetModel are driven from the Update loop, so the two can race.
@@ -32,13 +34,31 @@ type sessionHost struct {
 	workspace string
 	now       func() time.Time
 
+	// scratchRoot is the run's `~/.apogee/scratch` root (stateRoots.scratch): the host owns the
+	// per-session scratch dirs because it is the single owner of session identity — the dir is
+	// named by the id it mints. "" (tests, and any host built without one) disables the scratch
+	// seam entirely: no dir is created and the listener below is never called.
+	scratchRoot string
+	// scratchMoved tells the engine the ACTIVE session's scratch dir moved (a /clear|/new rotate,
+	// a /sessions resume), so the confinement box handed to the next tool call is fenced to the
+	// new session's scratch rather than the old one's. nil ⇒ no listener.
+	scratchMoved func(dir string)
+
 	mu sync.Mutex
 	// model is the model id stamped on saved metadata. It MOVES: a heartbeat rebind switches the
 	// session's model mid-conversation (ADR 0024), and SetModel is how the composition root's
 	// rebind closure keeps the record's metadata describing what the conversation actually ran
 	// against. Guarded because that closure runs on the Update goroutine while Save runs on a Cmd.
 	model  string
-	active *activeSession // nil ⇒ no active session; the next Save mints one
+	active *activeSession // nil ⇒ no active session; the next Save adopts nextID (or mints one)
+
+	// nextID is the PRE-MINTED id the next Save adopts while active is nil. It exists so a
+	// session's id — and with it the scratch dir named by that id — is minted at the session
+	// BOUNDARY (construction, Rotate) rather than at the first Save: tool calls run before a
+	// Turn is ever saved, and the scratch dir must be created and fenced writable before the
+	// first of them. An id is only a name; nothing reaches the store until a Save. "" falls
+	// back to Save minting on the spot, exactly the pre-scratch behaviour.
+	nextID string
 }
 
 // activeSession is the identity of the session Saves currently target: the id minted once (or
@@ -56,15 +76,22 @@ var _ tui.SessionHost = (*sessionHost)(nil)
 // newSessionHost builds the host over a store and the run's wiring facts. When resumed is non-nil
 // (a --resume/--continue start) the host begins ACTIVE on that record, so subsequent Saves update
 // its file in place — its id, CreatedAt, and Title carried over rather than a new session forked.
-func newSessionHost(store *session.Store, workspace, model string, resumed *session.Record) *sessionHost {
-	h := &sessionHost{store: store, workspace: workspace, model: model, now: time.Now}
+// A fresh start instead PRE-MINTS the id its first Save will adopt (nextID), so the session's
+// scratch dir can exist before the first tool call. scratchRoot and scratchMoved wire the scratch
+// seam ("" / nil disable it — see the fields).
+func newSessionHost(store *session.Store, workspace, model string, resumed *session.Record,
+	scratchRoot string, scratchMoved func(dir string)) *sessionHost {
+	h := &sessionHost{store: store, workspace: workspace, model: model, now: time.Now,
+		scratchRoot: scratchRoot, scratchMoved: scratchMoved}
 	if resumed != nil {
 		h.active = &activeSession{
 			id:        resumed.Meta.ID,
 			title:     resumed.Meta.Title,
 			createdAt: resumed.Meta.CreatedAt,
 		}
+		return h
 	}
+	h.nextID = session.NewID(h.now())
 	return h
 }
 
@@ -77,7 +104,14 @@ func (h *sessionHost) Save(sess apogee.Session, transcript []byte, title string,
 	now := h.now().UTC()
 	h.mu.Lock()
 	if h.active == nil {
-		h.active = &activeSession{id: session.NewID(now), title: title, createdAt: now}
+		// Adopt the id the session boundary pre-minted (construction / Rotate — the name the
+		// scratch dir already carries); "" is the defensive fallback, minting on the spot.
+		id := h.nextID
+		if id == "" {
+			id = session.NewID(now)
+		}
+		h.nextID = ""
+		h.active = &activeSession{id: id, title: title, createdAt: now}
 	}
 	a := *h.active
 	model := h.model
@@ -111,12 +145,18 @@ func (h *sessionHost) SetModel(model string) {
 	h.mu.Unlock()
 }
 
-// Rotate closes the active session so the next Save mints a fresh id (the /clear|/new boundary).
-// It is idempotent on an already-inactive host.
+// Rotate closes the active session and pre-mints the fresh id the next Save adopts (the
+// /clear|/new boundary). Minting HERE rather than at that Save is what lets the new session's
+// scratch dir exist — created and pushed to the engine via scratchMoved — before the new
+// session's first tool call. It is idempotent on an already-inactive host (each call simply
+// re-mints).
 func (h *sessionHost) Rotate() {
 	h.mu.Lock()
 	h.active = nil
+	h.nextID = session.NewID(h.now())
+	id := h.nextID
 	h.mu.Unlock()
+	h.followScratch(id)
 }
 
 // List returns every stored session's browsable metadata, newest first (the store's ordering).
@@ -137,6 +177,39 @@ func (h *sessionHost) Activate(meta session.Meta) {
 	h.mu.Lock()
 	h.active = &activeSession{id: meta.ID, title: meta.Title, createdAt: meta.CreatedAt}
 	h.mu.Unlock()
+	// The scratch dir follows the activation: the resumed session's own dir (re)exists and is
+	// what the engine fences the next tool call to.
+	h.followScratch(meta.ID)
+}
+
+// SessionScratchDir returns the scratch dir of the session Saves currently target — the active
+// session's, or the pre-minted next id's — creating it on the way (ensureScratchDir). The
+// composition root calls it once at boot to seed Config.ScratchDir, so the dir is fenced writable
+// from the engine's very first tool call; every later move goes through followScratch at the
+// session boundaries above. "" when the scratch seam is disabled or creation failed.
+func (h *sessionHost) SessionScratchDir() string {
+	h.mu.Lock()
+	id := h.nextID
+	if h.active != nil {
+		id = h.active.id
+	}
+	root := h.scratchRoot
+	h.mu.Unlock()
+	return ensureScratchDir(root, id)
+}
+
+// followScratch creates the scratch dir for id and tells the listener the active scratch moved.
+// Outside the lock: scratchMoved reaches into the engine holder, and nothing here reads host
+// state. A disabled seam (no root) does nothing; a creation failure pushes "", removing the old
+// session's dir from the box rather than leaving a stale — or nonexistent — path fenced writable.
+func (h *sessionHost) followScratch(id string) {
+	if h.scratchRoot == "" {
+		return
+	}
+	dir := ensureScratchDir(h.scratchRoot, id)
+	if h.scratchMoved != nil {
+		h.scratchMoved(dir)
+	}
 }
 
 // Delete removes a stored session's file.

@@ -41,6 +41,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
@@ -77,6 +78,10 @@ func runRoot(ctx context.Context, opts config.Options, launch launcher) error {
 	if err != nil {
 		return err
 	}
+
+	// The startup scratch sweep: stale per-session scratch dirs go before this run's own is
+	// created (wireSession), best-effort and silent — GC is never a reason a start fails.
+	gcScratchDirs(roots.scratch, time.Now())
 
 	// The facilities this run owns for its whole life, and — in one defer, before the first
 	// fallible step — the teardown for everything the phases below reach (wire_boot.go).
@@ -300,6 +305,7 @@ type stateRoots struct {
 	probe     string
 	prompts   string
 	schemes   string
+	scratch   string
 	workspace string
 }
 
@@ -365,7 +371,61 @@ func resolveRoots(configDir, workspace string) (stateRoots, error) {
 		// built-in of the same name. Like every root here it is a path only — nothing creates the
 		// folder until `/color-scheme export` writes into it, and a run whose scheme is a built-in
 		// never looks inside it beyond listing what is there.
-		schemes:   filepath.Join(absHome, "schemes"),
+		schemes: filepath.Join(absHome, "schemes"),
+		// The session scratch roots (workspace-clobber hardening, 2026-08-22): one
+		// `scratch/<session-id>/` per session, the extra writable root the confinement box
+		// carries so a confined subprocess has somewhere safe to put scratch work besides the
+		// workspace itself. A sibling root like the others — sessions storage itself stays a
+		// flat `<id>.json` — and, like every root here, a path only: the session host creates
+		// the active session's dir when its id is minted, and gcScratchDirs sweeps the stale
+		// ones at startup.
+		scratch:   filepath.Join(absHome, "scratch"),
 		workspace: absWorkspace,
 	}, nil
+}
+
+// ----------------------------------------------------------------------------
+// Session scratch dirs (workspace-clobber hardening, 2026-08-22)
+// ----------------------------------------------------------------------------
+
+// scratchMaxAge is how long an untouched per-session scratch dir survives under
+// `~/.apogee/scratch/` before the startup sweep removes it.
+const scratchMaxAge = 14 * 24 * time.Hour
+
+// gcScratchDirs removes every entry under the scratch root whose mtime is older than
+// scratchMaxAge — the startup GC that keeps abandoned sessions' scratch work from accumulating
+// forever. Strictly best-effort: scratch dirs are disposable by definition, so a root that does
+// not exist yet, an unreadable entry, and a failed removal are all ignored — GC must never be a
+// reason a session fails to start. It runs before the active session's dir is (re)created, so
+// even a resumed-after-15-days session simply starts with an empty scratch dir.
+func gcScratchDirs(root string, now time.Time) {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		if now.Sub(info.ModTime()) > scratchMaxAge {
+			_ = os.RemoveAll(filepath.Join(root, entry.Name()))
+		}
+	}
+}
+
+// ensureScratchDir creates (0700) and returns the scratch dir for one session id under root —
+// the path the confinement box will advertise as writable. It answers "" when there is nothing
+// to advertise: no root or no id, or a creation failure, because a path that does not exist must
+// never be named writable. 0700 because scratch may hold anything a session was working on, and
+// the dotdir convention is owner-only.
+func ensureScratchDir(root, id string) string {
+	if root == "" || id == "" {
+		return ""
+	}
+	dir := filepath.Join(root, id)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return ""
+	}
+	return dir
 }

@@ -93,6 +93,15 @@ type Agent struct {
 	confineMu          sync.RWMutex
 	confineToWorkspace bool // live confine-to-workspace flag; seeded from cfg.ConfineToWorkspace, swappable via SetConfineToWorkspace
 
+	// scratchMu guards scratchDir, the session scratch directory the confinement box carries as
+	// an extra writable root (Config.ScratchDir). It is another live field of the modeMu class,
+	// with its own lock for the same reason each sibling has one: the host moves it at a SESSION
+	// boundary (/clear|/new mints a new session id, /sessions resume adopts another) from its own
+	// goroutine while the worker reads it per tool call (confinementBox, dispatch.go).
+	// cfg.ScratchDir stays the immutable construction seed.
+	scratchMu  sync.RWMutex
+	scratchDir string // live session scratch dir; seeded from cfg.ScratchDir, swappable via SetScratchDir
+
 	// bypassMu, compactionMu and contextFilesMu guard the three settings the settings surface may
 	// swap mid-session (SetBypass / SetCompactionEnabled / SetContextFiles). They follow the modeMu
 	// pattern to the letter — one mutex per field, named for the single field it guards, because the
@@ -467,6 +476,34 @@ func (a *Agent) SetConfineToWorkspace(confine bool) {
 	a.confineMu.Lock()
 	a.confineToWorkspace = confine
 	a.confineMu.Unlock()
+}
+
+// ScratchDir reports the session scratch directory the confinement box currently carries as an
+// extra writable root ("" ⇒ none). It reads the live value under the lock, so a concurrent
+// SetScratchDir (a session boundary in the host) is observed safely from the worker goroutine.
+func (a *Agent) ScratchDir() string {
+	a.scratchMu.RLock()
+	defer a.scratchMu.RUnlock()
+	return a.scratchDir
+}
+
+// SetScratchDir moves the session scratch directory for subsequent tool calls — the extra
+// writable root ConfinementBox folds into WritablePaths (Config.ScratchDir documents the field).
+// The host calls it at a SESSION boundary so the box handed to each call follows the ACTIVE
+// session: /clear|/new mints a fresh session id and with it a fresh scratch dir, a resume adopts
+// the restored session's. "" removes the root. The engine never mints, creates, or deletes the
+// directory — lifecycle is the host's (ADR 0031: wire-silent, and a Driver that never calls this
+// simply keeps its construction seed, so there is no new Driver obligation).
+//
+// It is safe to call from another goroutine while a Step runs: the per-call Resolution reads the
+// value through ScratchDir() under the same lock, so the change lands on the NEXT tool call with
+// no rebuild — exactly like SetMode and SetConfineToWorkspace. A sub-agent spawned AFTER the move
+// inherits the new value (newChildAgent reads the live value at spawn); one already mid-flight
+// keeps the dir it was spawned with.
+func (a *Agent) SetScratchDir(dir string) {
+	a.scratchMu.Lock()
+	a.scratchDir = dir
+	a.scratchMu.Unlock()
 }
 
 // UndoPreview describes what the human's next undo would put back: the top un-undone Exchange

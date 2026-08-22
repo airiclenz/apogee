@@ -87,6 +87,12 @@ type lateEngine struct {
 	// usable was ever resolved — which is also what a cleared target leaves behind, and both mean the
 	// same thing to a bind: latch nothing, delegations run on the session's own Upstream.
 	pendingDelegation *apogee.DelegationTarget
+
+	// pendingScratch is the last session scratch dir pushed while there was no Agent to carry it
+	// (SetScratchDir): a /clear before a server is picked mints a new session id, and its scratch
+	// dir must not be a move the eventual engine never hears about. nil means the session host
+	// never moved it here, so a bind leaves the Agent on the seed its Config carried.
+	pendingScratch *string
 }
 
 // contextFileChoice is one remembered SetContextFiles call. The pair travels together because
@@ -151,6 +157,9 @@ func (e *lateEngine) Bind(construct func() (*apogee.Agent, error)) error {
 	}
 	if t := e.pendingDelegation; t != nil {
 		agent.SetDelegationTarget(t)
+	}
+	if s := e.pendingScratch; s != nil {
+		agent.SetScratchDir(*s)
 	}
 	// The one remembered value that can be REFUSED: a dialect this build cannot parse. The Agent is
 	// released and the bind fails, which is exactly what a config carrying that profile at launch
@@ -294,6 +303,20 @@ func (e *lateEngine) SetBypass(enabled bool) {
 	e.mu.Unlock()
 	if agent != nil {
 		agent.SetBypass(enabled)
+	}
+}
+
+// SetScratchDir moves the session scratch dir the confinement box carries — the session host
+// calls it at each identity boundary (a /clear|/new rotate, a /sessions resume), remembered while
+// unbound for SetBypass's reason: a rotate before a server is chosen mints a new session id, and
+// the engine that eventually binds must fence the dir that id names, not the boot seed.
+func (e *lateEngine) SetScratchDir(dir string) {
+	e.mu.Lock()
+	e.pendingScratch = &dir
+	agent := e.agent
+	e.mu.Unlock()
+	if agent != nil {
+		agent.SetScratchDir(dir)
 	}
 }
 

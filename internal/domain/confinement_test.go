@@ -185,6 +185,43 @@ func TestConfigConfinementBox(t *testing.T) {
 			cfg:  Config{},
 			want: ConfinementBox{},
 		},
+		{
+			// The session scratch dir (workspace-clobber hardening, 2026-08-22): a set
+			// ScratchDir joins WritablePaths — appended after the host's own paths — so a
+			// confined subprocess may write there and nowhere else new.
+			name: "a set ScratchDir joins WritablePaths",
+			cfg: Config{
+				WorkspaceDir:         "/work/space",
+				ConfineWritablePaths: []string{"/tmp/build"},
+				ScratchDir:           "/home/u/.apogee/scratch/2026-08-22-abcd",
+			},
+			want: ConfinementBox{
+				WorkspaceRoot: "/work/space",
+				WritablePaths: []string{"/tmp/build", "/home/u/.apogee/scratch/2026-08-22-abcd"},
+			},
+		},
+		{
+			name: "a ScratchDir with no other writable paths still reaches the box",
+			cfg: Config{
+				WorkspaceDir: "/work/space",
+				ScratchDir:   "/home/u/.apogee/scratch/2026-08-22-abcd",
+			},
+			want: ConfinementBox{
+				WorkspaceRoot: "/work/space",
+				WritablePaths: []string{"/home/u/.apogee/scratch/2026-08-22-abcd"},
+			},
+		},
+		{
+			// An empty ScratchDir adds NOTHING — the box is byte-identical to one built
+			// before the field existed, including WritablePaths staying nil when unset.
+			name: "an empty ScratchDir is omitted",
+			cfg: Config{
+				WorkspaceDir: "/work/space",
+			},
+			want: ConfinementBox{
+				WorkspaceRoot: "/work/space",
+			},
+		},
 	}
 
 	for _, tc := range tests {
@@ -197,5 +234,29 @@ func TestConfigConfinementBox(t *testing.T) {
 				t.Errorf("ConfinementBox() = %+v, want %+v", box, tc.want)
 			}
 		})
+	}
+}
+
+// TestConfigConfinementBoxNeverMutatesTheConfiguredPaths proves folding a ScratchDir in cannot
+// scribble on the host's own ConfineWritablePaths: the append lands in a fresh slice, so a slice
+// the host still holds (and every later box built from it) keeps exactly the paths it configured.
+func TestConfigConfinementBoxNeverMutatesTheConfiguredPaths(t *testing.T) {
+	t.Parallel()
+
+	configured := make([]string, 1, 2) // spare capacity, so an in-place append WOULD land in it
+	configured[0] = "/tmp/build"
+	cfg := Config{
+		WorkspaceDir:         "/work/space",
+		ConfineWritablePaths: configured,
+		ScratchDir:           "/home/u/.apogee/scratch/id",
+	}
+
+	_ = cfg.ConfinementBox()
+
+	if got := configured[:cap(configured)][1]; got == cfg.ScratchDir {
+		t.Errorf("ConfinementBox() appended into the configured slice's backing array (found %q)", got)
+	}
+	if !reflect.DeepEqual(configured, []string{"/tmp/build"}) {
+		t.Errorf("ConfineWritablePaths mutated to %v, want [/tmp/build]", configured)
 	}
 }

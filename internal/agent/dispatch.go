@@ -415,8 +415,20 @@ func (a *Agent) resolutionInput(tool domain.Tool, call domain.ToolCall, guard se
 		writeEscapeTarget:      escape,
 		atDepthBound:           a.depth >= maxSubAgentDepth,
 		approverPresent:        a.cfg.Approver != nil,
-		box:                    a.cfg.ConfinementBox(),
+		box:                    a.confinementBox(),
 	}
+}
+
+// confinementBox is the box every per-call consumer builds from: Config.ConfinementBox() — the
+// single fold of the Confine* fields — over the LIVE scratch dir rather than the construction
+// seed, read through ScratchDir() under its lock. That one substitution is what makes the box
+// handed to each tool call carry the CURRENT session's scratch path: the host moves the dir at a
+// session boundary (SetScratchDir) and the very next call is fenced to the new session's scratch,
+// exactly as a mode or /confine change lands on the next call.
+func (a *Agent) confinementBox() domain.ConfinementBox {
+	cfg := a.cfg
+	cfg.ScratchDir = a.ScratchDir()
+	return cfg.ConfinementBox()
 }
 
 // hookExecutionCtx returns ctx wrapped with the domain.SubprocessPermit a hook may spawn a
@@ -436,7 +448,7 @@ func (a *Agent) resolutionInput(tool domain.Tool, call domain.ToolCall, guard se
 //
 // The mode is read through effectiveMode(), never Mode(), so a sub-agent whose parent has
 // tightened mid-delegation loses the permit exactly as it loses the matching tool verdict
-// (ADR 0013). The box comes from Config.ConfinementBox(), the same constructor resolutionInput
+// (ADR 0013). The box comes from confinementBox(), the same live-scratch fold resolutionInput
 // uses, so a hook-spawned process is fenced identically to a subprocess tool's.
 func (a *Agent) hookExecutionCtx(ctx context.Context) context.Context {
 	if a.effectiveMode() != domain.ModeAuto {
@@ -451,7 +463,7 @@ func (a *Agent) hookExecutionCtx(ctx context.Context) context.Context {
 	return domain.WithSubprocessPermit(ctx, domain.SubprocessPermit{
 		Confinement: &domain.Confinement{
 			Confiner: a.cfg.Confiner,
-			Box:      a.cfg.ConfinementBox(),
+			Box:      a.confinementBox(),
 		},
 	})
 }
