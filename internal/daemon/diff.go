@@ -107,7 +107,7 @@ func index(entries []Entry) (map[string]Entry, []Entry) {
 // ids is the daemon's name→schedule-id map and is updated IN PLACE: a stopped name is deleted from
 // it, an added name is recorded with the id the scheduler returned. It is the map a Firing
 // composition and a status surface read, so it always describes what is actually on the clock —
-// an entry whose Add failed is absent from it.
+// an entry whose Add failed is absent from it, and one whose Stop failed keeps its id.
 //
 // Every failure is reported, joined into one error, and none of them stops the rest of the work: a
 // scheduler that refuses one Spec must not leave the other edits in the same save unapplied. A
@@ -139,17 +139,20 @@ func Apply(scheduler Scheduler, ids map[string]string, running, desired []Entry)
 	return reload, errors.Join(failures...)
 }
 
-// stop takes one named entry off the clock and out of the id map. A name with no id was never on
-// the clock — its own Add failed on an earlier reload — so there is nothing to stop.
+// stop takes one named entry off the clock and out of the id map, in that order: the map drops a
+// name only once the scheduler no longer runs it. A Stop that fails with anything other than
+// [schedule.ErrNotFound] returns its error with the entry still in the map, so the schedule stays
+// visible to the shutdown's adopted set and stoppable by a later reload. A name with no id was
+// never on the clock — its own Add failed on an earlier reload — so there is nothing to stop.
 func stop(scheduler Scheduler, ids map[string]string, name string) error {
 	id, onTheClock := ids[name]
 	if !onTheClock {
 		return nil
 	}
-	delete(ids, name)
 	if err := scheduler.Stop(id); err != nil && !errors.Is(err, schedule.ErrNotFound) {
 		return fmt.Errorf("apogee: schedules.yaml: stopping the %q schedule: %w", name, err)
 	}
+	delete(ids, name)
 	return nil
 }
 

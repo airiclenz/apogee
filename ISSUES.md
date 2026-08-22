@@ -23,6 +23,9 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 
 ## Open defects
 
+- [ ] when the pop-up box is open - the main session-chat's last row is not reachable anymore with scrolling. The pop-up box covers that poart of the chat. This is importent when questions or other permanent pop-ups are open where access to the last messages of the chat history are important.
+
+
 ### The reload's accepted-swap summary is logged before the failures it does not know about
 
 **Status:** [ ] open 2026-08-22 — residual of
@@ -37,21 +40,6 @@ the id map) is still named in the "added"/"replaced" clause a reader sees FIRST,
 underneath it. A journal read the next morning therefore says an entry took and then, on the next
 line, that some of the edit did not — without saying which. Ordering the two lines the other way, or
 building the summary from the id map, would make the first line the true one.
-
----
-
-### The daemon's `stop` forgets a schedule's id before the scheduler confirms it is off the clock
-
-**Status:** [ ] open 2026-08-22 — residual of
-`docs/plans/archived/2026-08-22 - 02 - daemon-plan.md` item 2. **Latent, not reachable today.**
-
-`stop` deletes the name→id entry at `internal/daemon/diff.go:149` and calls `Scheduler.Stop` at
-`:150`. A `Stop` that fails with anything other than `schedule.ErrNotFound` therefore returns an
-error while the schedule is still on the clock and no longer in the map the daemon uses to say who is
-running — so the shutdown's `adoptedEntries` (`cmd/apogee/daemon.go:421`) would skip it and the next
-reload could never stop it. Today's `schedule.Stop` returns only `ErrNotFound`, which is exactly the
-error the line swallows, so nothing can currently take that path; the ordering is what would have to
-change if the library ever grows a second failure.
 
 ---
 

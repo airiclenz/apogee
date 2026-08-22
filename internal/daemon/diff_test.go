@@ -263,6 +263,9 @@ func TestApplyReportsAStopFailure(t *testing.T) {
 	if !errors.Is(err, schedule.ErrClosed) {
 		t.Fatalf("Apply error = %v, want one wrapping ErrClosed", err)
 	}
+	// The scheduler still runs the schedule, so the map must still say who it is — dropping the
+	// id here would strand it: absent from the shutdown's adopted set, unstoppable by any reload.
+	assertIDs(t, ids, map[string]string{"morning-sweep": "id-B"})
 }
 
 func TestApplyDoesNotStopAnEntryThatWasNeverOnTheClock(t *testing.T) {

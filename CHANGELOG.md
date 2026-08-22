@@ -73,6 +73,16 @@ point is a **minor** bump, not a breaking change.
   overwritten, so this reaches a running configuration only if you copy the paragraph into
   your own prompt.
 
+### Fixed
+
+- **The daemon drops a schedule's id only after the scheduler confirms the stop.** `stop` used to
+  delete the name→id entry before calling `Scheduler.Stop`, so a `Stop` failing with anything
+  other than `schedule.ErrNotFound` would have stranded the schedule: still on the clock, but gone
+  from the map the shutdown's adopted set and every later reload consult. Latent — the library
+  returns only `ErrNotFound` today — but the ordering was the defect: the map now drops a name
+  only once the scheduler no longer runs it, and a failed `Stop` leaves the entry in place so the
+  schedule stays stoppable.
+
 ### Known verification (owner-run)
 
 - **Live activation under each host supervisor, and one real firing there.** The generated units
