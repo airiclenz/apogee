@@ -1,9 +1,7 @@
 package tui
 
 import (
-	"fmt"
 	"image/color"
-	"strings"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/airiclenz/apogee/internal/domain"
@@ -130,10 +128,11 @@ var cursorShapes = map[string]tea.CursorShape{
 var defaultCursorShape = cursorShapes[domain.DefaultCursorShapeName]
 
 // ParseCursorShape maps a config value onto the shape the prompt's caret is drawn with. "" ⇒ the
-// default (block); an unknown value is an error naming the shapes. The names it accepts are the
-// domain's, asked for rather than restated ([domain.ValidCursorShapeName]), so this package holds
-// no second list to drift from. The caller names the key it read the value from — this package
-// does not know the config schema (as with [ParseSpinnerStyle]).
+// default (block); an unknown value is an error naming the shapes. Both halves of that refusal are
+// the domain's, asked for rather than restated ([domain.ValidCursorShapeName],
+// [domain.UnknownCursorShapeError]), so this package holds neither a second list nor a second
+// wording to drift from. The caller names the key it read the value from — this package does not
+// know the config schema (as with [ParseSpinnerStyle]).
 //
 // The set is closed at three because that is what a terminal cursor can be. Inheriting the shape
 // the terminal itself is configured with is deliberately NOT among them: a Bubble Tea program names
@@ -144,8 +143,7 @@ func ParseCursorShape(s string) (tea.CursorShape, error) {
 		return defaultCursorShape, nil
 	}
 	if !domain.ValidCursorShapeName(s) {
-		return defaultCursorShape, fmt.Errorf("unknown cursor shape %q (known shapes: %s)", s,
-			strings.Join(domain.CursorShapeNames(), ", "))
+		return defaultCursorShape, domain.UnknownCursorShapeError(s)
 	}
 	return cursorShapes[s], nil
 }

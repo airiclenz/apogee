@@ -222,6 +222,14 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **The refusal for an unknown `cursor-shape:` is written once.** The sentence "unknown cursor
+  shape … (known shapes: block, underline, bar)" was spelled out twice — once in the config
+  layer's validator, once in the renderer's parse — so a reworded refusal or a fourth shape would
+  have had to be edited in two places to stay consistent. It now lives beside the caret vocabulary
+  it lists, in `internal/domain` (`UnknownCursorShapeError`), and both surfaces ask for it: the
+  config validator wraps it with the key it is about to write, the renderer returns it as it is.
+  Nothing changes for a user — both messages are byte-for-byte what they were.
+
 - **The last four config writers ride the transaction too.** The two key-source entry writers (the
   one that points an entry at a key command, and the one that records "this key stays in the file"),
   the writer that remembers a model or Launch profile on one `servers:` entry, the `/confine off

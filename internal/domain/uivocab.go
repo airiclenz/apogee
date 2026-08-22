@@ -61,7 +61,7 @@ func ParseSpinnerStyle(s string) (SpinnerStyle, error) {
 }
 
 // cursorShapeNames is the vocabulary a `cursor-shape:` value is validated against, in the order
-// the renderer's parse error lists them. Only the NAMES live here: what each one draws is a
+// [UnknownCursorShapeError] lists them. Only the NAMES live here: what each one draws is a
 // terminal-library constant, and this package stays a leaf, so internal/tui owns the mapping and
 // derives the names it accepts from this list.
 var cursorShapeNames = []string{"block", "underline", "bar"}
@@ -69,9 +69,9 @@ var cursorShapeNames = []string{"block", "underline", "bar"}
 // DefaultCursorShapeName is what an unset `cursor-shape:` resolves to.
 const DefaultCursorShapeName = "block"
 
-// CursorShapeNames returns the caret shapes a config value may name, in the order the renderer's
-// parse error lists them. It hands back a fresh slice on every call, for [SpinnerStyleNames]'
-// reason.
+// CursorShapeNames returns the caret shapes a config value may name, in the order
+// [UnknownCursorShapeError] lists them. It hands back a fresh slice on every call, for
+// [SpinnerStyleNames]' reason.
 func CursorShapeNames() []string { return slices.Clone(cursorShapeNames) }
 
 // ValidCursorShapeName reports whether s names a caret shape this build can draw. The empty
@@ -84,6 +84,15 @@ func CursorShapeNames() []string { return slices.Clone(cursorShapeNames) }
 // nothing to inherit back into — this key is the honest substitute (the terminal's own cursor
 // returns on exit).
 func ValidCursorShapeName(s string) bool { return slices.Contains(cursorShapeNames, s) }
+
+// UnknownCursorShapeError is the refusal every surface reports for a `cursor-shape:` value no caret
+// has: the config layer's validator and the renderer's parse both ASK for the sentence rather than
+// spell it, so the wording and the list of known shapes exist once, here, beside the vocabulary the
+// list is read from. A caller that speaks for a config key wraps this with the key it read the
+// value from — this package does not know the config schema (as [ParseSpinnerStyle]).
+func UnknownCursorShapeError(name string) error {
+	return fmt.Errorf("unknown cursor shape %q (known shapes: %s)", name, strings.Join(cursorShapeNames, ", "))
+}
 
 // PreboundReason names why a session started with NO upstream bound — the three answers ADR 0036
 // gives when the config alone cannot say which server to start on. It is a fact the binary resolved

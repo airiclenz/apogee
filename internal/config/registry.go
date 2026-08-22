@@ -685,14 +685,15 @@ func validateColorSchemeName(value string) error {
 // validateCursorShapeName refuses a caret shape no terminal cursor has, judged against the
 // vocabulary internal/domain owns rather than by discarding a renderer parse — the config layer
 // checks a SPELLING, and what each name is drawn as is the renderer's business alone. The empty
-// value is the request for the default and is accepted, as it is everywhere else. ApplyConfig
-// calls this too, so the startup refusal and the one this pane writes are the same sentence.
+// value is the request for the default and is accepted, as it is everywhere else. The refusal
+// itself is the domain's sentence ([domain.UnknownCursorShapeError]), wrapped with the key this
+// pane is about to write; ApplyConfig calls this too, so the startup refusal and the one this pane
+// writes are the same sentence, and so is the renderer's parse.
 func validateCursorShapeName(value string) error {
 	if value == "" || domain.ValidCursorShapeName(value) {
 		return nil
 	}
-	return fmt.Errorf("apogee: invalid cursor-shape: unknown cursor shape %q (known shapes: %s)",
-		value, strings.Join(domain.CursorShapeNames(), ", "))
+	return fmt.Errorf("apogee: invalid cursor-shape: %w", domain.UnknownCursorShapeError(value))
 }
 
 // validateSettingMode refuses a mode outside the autonomy ladder, through the same parse the --mode

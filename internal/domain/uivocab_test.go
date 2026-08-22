@@ -107,3 +107,22 @@ func TestDefaultCursorShapeNameIsInTheVocabulary(t *testing.T) {
 		t.Errorf("the default cursor shape %q is not in the vocabulary", DefaultCursorShapeName)
 	}
 }
+
+// TestUnknownCursorShapeErrorNamesTheValueAndEveryShape pins the refusal both surfaces report — the
+// config layer's validator wraps it with the key it is about to write, the renderer's parse returns
+// it as it is — so the sentence cannot be reworded for one of them alone, and a shape added to the
+// vocabulary cannot go unlisted in it.
+func TestUnknownCursorShapeErrorNamesTheValueAndEveryShape(t *testing.T) {
+	t.Parallel()
+
+	err := UnknownCursorShapeError("hourglass")
+	const want = `unknown cursor shape "hourglass" (known shapes: block, underline, bar)`
+	if got := err.Error(); got != want {
+		t.Errorf("UnknownCursorShapeError = %q, want %q", got, want)
+	}
+	for _, name := range CursorShapeNames() {
+		if !strings.Contains(err.Error(), name) {
+			t.Errorf("the refusal does not name %q, a shape this build knows", name)
+		}
+	}
+}
