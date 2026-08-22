@@ -952,6 +952,14 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- Wrote down the accepted one-way break in replaying a session saved before the typed stat value.
+  `fromWireStatValue` decodes a record carrying no `statValue` — every session file written before
+  113b3078 — as a plain value, and a plain value does not sum, so the grouped type row of a replayed
+  multi-call run shows an empty total where the live run showed one. That is accepted rather than
+  papered over: the total is deliberately not re-derived from the members' wording, the deleted
+  phrase parsing does not come back, and the comment beside the decoder now says so. Only runs of two
+  or more members are affected, and only records already on disk.
+
 - Repointed six shipped doc comments that the two deepening runs left aimed at the wrong place. The
   `keyDisambiguation` field still credited "the arm in model.go" with setting the flag, when the
   setter is `prompteditor.go`'s own `foldKeyboardEnhancements`; the `lineTargets` field credited

@@ -267,6 +267,14 @@ func toWireStatValue(v statValue) *wireStatValue {
 // fromWireStatValue reads that arithmetic back, falling back to the phrase as a plain value — which
 // is what a record written before the value rode the wire carries, and what every slot with no
 // arithmetic in it carries by rule.
+//
+// For the old record that fallback is an ACCEPTED one-way break. A slot written before 113b3078
+// carries no statValue, so it decodes as a plain value; a plain value does not sum (statValue.sums),
+// so the grouped type row of a replayed multi-call run shows an empty total where the live run
+// showed one. The value is deliberately NOT re-derived from the phrase: the phrase parsing that once
+// read a total back out of the members' wording is gone and does not come back, so the same file
+// reads differently than it did before that commit. Only runs of two or more members are affected,
+// and only session files already on disk — everything written since carries the arithmetic.
 func fromWireStatValue(w *wireStatValue, text string) statValue {
 	if w == nil {
 		return plainStat(text)

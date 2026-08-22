@@ -54,25 +54,6 @@ band (same plan, item 3's amendment to ADR 0052); only the number is the miss.
 
 ---
 
-### A session saved before the typed stat value replays with blank type-row totals
-
-**Status:** [P] open 2026-08-20 — residual of
-`docs/plans/archived/2026-08-19 - 04 - tui-architecture-deepening-plan.md` item 12, which persisted
-the typed value for records written from then on but left the ones already on disk without it.
-
-`fromWireStatValue` answers `plainStat(text)` for a record carrying no `statValue`
-(`internal/tui/transcriptcodec.go:270`) — every session file written before 113b3078. A plain value
-does not sum (`statValue.sums`, `internal/tui/toolview.go:219`), so `sumStats` bails on the first
-member (`internal/tui/toolview.go:897`) and `runAggregate` hands back the empty summary
-(`internal/tui/toolview.go:865`): the grouped type row of a replayed multi-call run shows an empty
-slot. The deleted `sumCountPhrases`/`parseDiffCounts` used to read that total back out of the
-members' wording, so the same file read differently before the change. Only runs of two or more
-members are affected, and only records already on disk. Either the decode falls back to re-deriving
-the value from the phrase when the field is absent, or the one-way break is accepted and written
-down.
-
----
-
 ### `sessionBrowser` derives the visible list twice per frame
 
 **Status:** [P] open 2026-08-20 — residual of

@@ -188,7 +188,7 @@ Remove both ISSUES.md entries.
 
 ---
 
-## 6. Record the accepted one-way break for pre-statValue session records
+## 6. Record the accepted one-way break for pre-statValue session records — ✅ DONE (2026-08-22)
 
 **What:** Fix the ISSUES.md entry *"A session saved before the typed stat value replays with
 blank type-row totals"* the way ratified call 3 decided: **accept and document**, no decode
