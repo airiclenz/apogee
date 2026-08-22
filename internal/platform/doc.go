@@ -27,6 +27,11 @@
 // composer: the restricted token, the guardrails that veto a root, and the
 // Confiner seam itself stay here.
 //
+// The advisory single-instance lock lives here for the same reason the backends do: it is one
+// facility with two genuinely different implementations (flock on POSIX, a byte-range
+// LockFileEx on Windows), and the difference is more than spelling. It is what refuses a second
+// `apogee daemon` (ADR 0034 decision 7); the package that holds it knows nothing about daemons.
+//
 // HostID lives here for the same reason the backends do — it is a per-machine fact.
 // It is the interlock that keeps a host-scoped confinement acknowledgement
 // (`unconfined-hosts:`, ADR 0012 amendment 2026-07-21) from silently travelling
@@ -34,9 +39,9 @@
 //
 // # The files, one line each
 //
-// Eighteen files, in three groups: the shell/path Host every OS-touching caller reads, the
-// Confiner backends, and the per-machine identity. The Windows label mechanism is a module of
-// its own beside them (internal/platform/winlabel).
+// Twenty-one files, in four groups: the shell/path Host every OS-touching caller reads, the
+// Confiner backends, the per-machine identity, and the single-instance lock. The Windows label
+// mechanism is a module of its own beside them (internal/platform/winlabel).
 //
 // The Host abstraction. platform.go is the interface set — Shell (the argv, the raw command
 // line, quoting, the scoped environment) and Path — plus the Host accessor they hang off and
@@ -76,6 +81,14 @@
 // The per-machine fact. hostid.go computes HostID once per process from the systemd or dbus
 // machine-id file, falling back to the hostname, and reports whether the result is the
 // unidentified sentinel.
+//
+// The single-instance lock. lock.go is the OS-neutral half: AcquireLock, the LockHeldError a
+// refused caller turns into "already running (pid N)", and the PID it writes into the file for
+// `cat`-diagnostics and nothing else — the kernel drops the lock with the process, so no
+// liveness is ever probed and no stale file is ever judged. lock_unix.go takes it with flock,
+// whose lock belongs to the open file description rather than the process, and lock_windows.go
+// with LockFileEx over one byte past end-of-file, because Windows byte-range locks are
+// mandatory and locking the contents would hide the PID from the caller that wants it.
 //
 // And doc.go this map.
 package platform
