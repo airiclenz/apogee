@@ -608,12 +608,13 @@ type Engine interface {
 	ConfineToWorkspace() bool
 	// UndoPreview describes what `/undo` would put back: the top un-undone Exchange group,
 	// classified against the files as they are now — restore, delete, or skip with a reason for
-	// each, at resolved absolute paths, since that listing is the disclosure the human authorises
-	// the revert from (ADR 0051). It reports false when there is nothing to undo, which an engine
-	// whose process made no writes also answers — the journal is memory, not storage, so a resumed
-	// session cannot reach an earlier process's writes. It touches no file and does not move the
-	// journal. Called only at idle: the command is idle-only precisely because a running Step is
-	// writing into the group this describes.
+	// each, at the journal's recorded absolute addresses (a root-joined named path for an ordinary
+	// write, the permit-pinned resolved target for an approved escape), since that listing is the
+	// disclosure the human authorises the revert from (ADR 0051). It reports false when there is
+	// nothing to undo, which an engine whose process made no writes also answers — the journal is
+	// memory, not storage, so a resumed session cannot reach an earlier process's writes. It
+	// touches no file and does not move the journal. Called only at idle: the command is idle-only
+	// precisely because a running Step is writing into the group this describes.
 	UndoPreview() (undo.Step, bool)
 	// UndoRevert executes the group UndoPreview described and reports what it restored, removed,
 	// and skipped. generation is the stamp that preview carried, handed back as proof the human is

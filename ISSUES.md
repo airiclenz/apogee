@@ -23,25 +23,6 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 
 ## Open defects
 
-### Two doc sites still assert the old resolved-path journal rule
-
-**Status:** [P] open 2026-08-19 — residual of
-`docs/plans/2026-08-19 - 02 - issues-defects-and-ledger-slimming-plan.md` item 1, which corrected
-five sites and removed the defect entry that tracked the rule, leaving these two untracked.
-
-The journal records the NAMED path — the argument's root-joined, cleaned spelling with nothing
-followed — and only an approved escape (ADR 0049) records the permit's resolved target; the
-rationale is `journalTarget`'s comment (`internal/tools/path_safety.go:338`). Two shipped sites
-still state the superseded rule:
-
-- `internal/tui/tui.go:194` — the `UndoPreview` doc on the `Engine` seam says the classification
-  is listed "at resolved absolute paths".
-- `CHANGELOG.md:49` — the `[Unreleased]` `/undo` bullet from 05ed72ad says the preview names
-  "every recorded path at its resolved spelling". A shipped changelog line, so the correction
-  needs a call on whether it is edited in place or amended.
-
----
-
 ### `git_diff_range` drops the whole diff to plain rendering when git quotes a path
 
 **Status:** [P] open 2026-08-19 — residual of

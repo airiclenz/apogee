@@ -198,7 +198,8 @@ point is a **minor** bump, not a breaking change.
   seam)**, with a stale-generation refusal that leaves the journal and the workspace untouched.
 
 - **The two-step `/undo` command.** Bare `/undo` PREVIEWS what putting the last exchange's file
-  writes back would do — the exchange ordinal and every recorded path at its resolved spelling,
+  writes back would do — the exchange ordinal and every recorded path as the journal names it
+  (root-joined and cleaned; an approved escape's permitted target is the one resolved path),
   classified restore / delete / skip-with-reason — and `/undo confirm` executes exactly that
   preview, reporting the counts and naming every path it left alone. The generation stamped on the
   preview travels back with the confirmation, so a journal that moved in between (another exchange
@@ -950,6 +951,14 @@ point is a **minor** bump, not a breaking change.
   field are gone.
 
 ### Fixed
+
+- Corrected the last two doc sites that still asserted the superseded resolved-path journal rule.
+  `UndoPreview`'s doc on the TUI's `Engine` seam said the preview lists its classification "at
+  resolved absolute paths", and the `/undo` bullet below said the preview names "every recorded
+  path at its resolved spelling". The journal records the path the argument NAMED — root-joined and
+  cleaned, with nothing followed — and only an approved escape (ADR 0049) records the permit's
+  resolved target; both sites now state that rule, in the vocabulary `journalTarget` and
+  `undo.Journal.Preview` already use. Nothing about the behaviour changes.
 
 - Refreshed the `docs/design/` line in `AGENTS.md`. Its parenthetical still advertised the hook
   mutation API and the technical design — both moved to `docs/design/archived/` — and never

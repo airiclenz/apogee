@@ -74,7 +74,9 @@ the line's one-sentence shape. Remove the ISSUES.md entry.
 
 ---
 
-## 2. Correct the journal path rule at the two remaining sites
+## 2. Correct the journal path rule at the two remaining sites — ✅ DONE (2026-08-22)
+
+NOTES (2026-08-22): the item cites `internal/tui/tui.go:194` and `CHANGELOG.md:49`; both files have grown since the entry was written, so the corrections landed at `tui.go:611` and `CHANGELOG.md:201` — the grep evidence, not the line numbers, located them. The `/undo` bullet was edited in place per ratified call 1.
 
 **What:** Fix the ISSUES.md entry *"Two doc sites still assert the old resolved-path journal
 rule"*. The journal records the NAMED path — the argument's root-joined, cleaned spelling
