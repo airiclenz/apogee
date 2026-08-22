@@ -717,7 +717,11 @@
 // FILTER embed instead
 // (that cursor plus the field typed into it, and the keys that type), the filter that prunes the
 // rows and maps a highlight back to what it names, and the one budget→render call behind every list
-// pane — a pane's own body block, or the filter line and its two blanks (ADR 0053);
+// pane — a pane's own body block, or the filter line and its two blanks (ADR 0053) — and the WHEEL
+// contract is the module's too ([listCursor.wheel], the package's one answer to what a notch does to
+// a list overlay), where the clamp at the ends is unconditional however a pane answered [listWrap]
+// for its keys, and the two panes that scroll a row WINDOW or a caret rather than a bare cursor
+// (settingsWheel in mouse.go, reportWheel in reportpane.go) keep their own arithmetic;
 // settings.go the /settings pane — the frame's one FULL-HEIGHT pane, listing every config key the
 // binary resolved this run over one display seam ([SettingsHost.Rows]), claiming the whole
 // transcript budget while it is open, and persisting ONE key per deliberate edit through

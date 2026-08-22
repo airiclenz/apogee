@@ -55,7 +55,11 @@ import (
 //     autocomplete dropdown and the staged-interjection strip take their rows OFF the transcript
 //     (Model.transcriptRows composes the frame from what is left). Those rows map to no content
 //     line at all, so a click on a popup border or a session row arms nothing — the alternative,
-//     bounding by the height layout() stored, addressed reply lines that were not on screen.
+//     bounding by the height layout() stored, addressed reply lines that were not on screen. The
+//     WHEEL reads the same rows the same way and gives the same answer: a notch on them belongs to
+//     the pane that painted them, so it walks that pane's own list instead of scrolling a transcript
+//     that is not there (foldMouseWheel below routes all seven panes; the /settings pane takes the
+//     whole budget rather than a slot at the bottom, and is in that chain too).
 
 // cell is an absolute visual position inside the textarea content: row counts wrapped (visual)
 // lines from the top of the value; col is the display column within that row.
@@ -1265,7 +1269,23 @@ func (m Model) highlightTranscript(view string) string {
 }
 
 // foldMouseWheel routes one wheel notch: to whichever open pane holds the pointer, and to the
-// transcript everywhere else.
+// transcript everywhere else. The chain asks every pane the frame can have open, in this order —
+// the /settings pane (settingsWheel), the /usage report (usageWheel), the /inspect pane
+// (inspectorWheel), the /sessions browser (browserWheel), the /model | /server picker (pickerWheel),
+// the approval menu and the ask offering (promptWheel), the "/" | "@" autocomplete dropdown
+// (dropdownWheel) — and each one takes the notch only when the pointer is inside its own rectangle.
+// Wherever two of those panes can never share a frame the order between them is arbitrary, because
+// only one rectangle can hold the pointer at a time.
+//
+// The transcript is the FLOOR of that chain rather than its default: scrollViewport is what a notch
+// reaches once no open pane has claimed it, so a pane never has to argue its way past a transcript
+// that took the notch first. That is the whole doctrine — the pane under the POINTER owns the notch —
+// and it is why the wheel answer does not follow focus or modality.
+//
+// The approval menu and the ask offering are the frame's SOFT-modal panes: the transcript stays
+// scrollable underneath them, so what they claim is the notch INSIDE their box and only inside it,
+// while a notch anywhere outside carries on down the chain and scrolls the transcript exactly as it
+// did before they opened (ratified 2026-08-22). Their soft-modality stays a fact about KEYS.
 //
 // The wheel scrolls the transcript in every state — unlike the ordinary keyboard path, which is
 // state-gated (idle/ask/running feed the input; only PgUp/PgDn scroll from the keyboard everywhere).

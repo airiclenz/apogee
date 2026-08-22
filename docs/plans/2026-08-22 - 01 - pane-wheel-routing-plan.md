@@ -405,7 +405,13 @@ Route it in `foldMouseWheel` after the prompt.
 
 ---
 
-## 7. State the completed doctrine once
+## 7. State the completed doctrine once — ✅ DONE (2026-08-22)
+
+NOTES (2026-08-22): ISSUES.md carries no open entry for this defect — searched for wheel/scroll/notch/mouse/overlay/pane terms and found none — so the file is unchanged despite being named in the item's Files list; nothing to remove, and the closed trail stays the changelog's.
+
+NOTES (2026-08-22): layout.md had no global statement of which surfaces the wheel scrolls (only the /usage and /inspect panes state their own), so the item's second branch applied: one sentence added to "What 'height' means" beside the click rule already stated there, rather than editing an existing claim.
+
+NOTES (2026-08-22): the per-branch inline comments inside foldMouseWheel's chain (added by items 3–6) were left as they are — the item's What list names only the doc comment, the module doc's pane inventory, doc.go, layout.md and ISSUES.md, and removing them would be work outside that list.
 
 Depends on items 1–6.
 

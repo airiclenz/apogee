@@ -294,6 +294,17 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **The pane-wheel routing doctrine is now stated once, where the routing lives.** `foldMouseWheel`'s
+  doc comment names the full chain in the order it asks it — /settings, /usage, /inspect, /sessions,
+  the /model | /server picker, the approval and ask prompts, the "/" | "@" dropdown — says that the
+  transcript is the FLOOR that chain reaches rather than the default a pane must argue its way past,
+  and states the soft-modal rule in one place: the approval menu and the ask offering claim the notch
+  inside their box and only inside it. The mouse module's pane inventory now gives the wheel's answer
+  beside the click's, `internal/tui/doc.go`'s list-module entry records that the wheel contract is the
+  shared module's with an unconditional clamp (the two panes with their own row arithmetic keeping
+  it), and `layout.md` states that a notch over any open pane scrolls THAT pane. Prose only — no
+  behaviour changed.
+
 - **The autocomplete dropdown's rectangle is published by the frame that draws it.** The dropdown was
   the one open overlay of the frame with no geometry at all — `frameSpans` deliberately kept its entry
   as the zero span, so nothing could name it by rectangle and a gesture over it had nothing to hit.

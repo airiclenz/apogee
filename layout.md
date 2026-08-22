@@ -116,7 +116,10 @@ and the session area is what shrinks to seat them. The frame is composed from ON
 how many rows are left over, so the rows the transcript is drawn on, the rows a mouse click may
 address in it, and the rows an overlay paints are the same three answers to one question — a click
 on a pane's border or on a session row selects nothing in the transcript, because there is no
-transcript there.
+transcript there. **And the wheel follows the pointer:** a notch over any open pane scrolls THAT
+pane — its rows are not the transcript's — and the transcript is what a notch reaches everywhere
+else, the approval and ask prompts included, since those two leave the transcript scrollable under
+them and claim only the notches inside their own box.
 
 **And a pane in that slot sits flush on the bottom chrome.** The frame spends exactly one blank gap
 row, and it sits ABOVE the slot — between the session area and whatever comes next — so the approval
