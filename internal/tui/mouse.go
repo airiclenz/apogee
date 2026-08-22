@@ -1286,5 +1286,12 @@ func (m Model) foldMouseWheel(msg tea.MouseWheelMsg) (tea.Model, tea.Cmd) {
 	if next, handled := m.inspectorWheel(msg); handled {
 		return next, nil
 	}
+	// A notch over the open /sessions browser walks its highlight (sessions.go). The panes never share
+	// a frame, so the order among them is arbitrary; what is not arbitrary is that every pane is asked
+	// before the transcript — the transcript is the floor a notch reaches when no pane holds the
+	// pointer, not the default a pane has to argue its way past.
+	if next, handled := m.browserWheel(msg); handled {
+		return next, nil
+	}
 	return m.scrollViewport(msg)
 }

@@ -3523,3 +3523,161 @@ func TestTheClickChainKeepsItsFrameToItself(t *testing.T) {
 		})
 	}
 }
+
+// ----------------------------------------------------------------------------
+// Mouse in the /sessions browser (sessions.go)
+// ----------------------------------------------------------------------------
+
+// browserPaneModel opens the /sessions overlay over more records than the pane can seat rows for,
+// with a screenful of transcript behind it. The transcript is the point: the browser is modal, so a
+// notch it swallows has to be checked against lines that WOULD have scrolled had it fallen through.
+func browserPaneModel(t *testing.T, sessions int) Model {
+	t.Helper()
+	m := streamOneScreen(t, newTestModel(t))
+	m.sessionBrowser = browserWithSessions(sessions)
+	m.layout()
+	return m
+}
+
+// browserRect is where the open overlay is drawn: its top row, and a row squarely inside it for a
+// notch to be aimed at.
+func browserRect(t *testing.T, m Model) (paneTop, inside int) {
+	t.Helper()
+	y0, h, ok := m.frameSpans().pane(paneBrowser)
+	if !ok {
+		t.Fatal("the browser is not on the frame")
+	}
+	return y0, y0 + h/2
+}
+
+// wheelAt rolls one notch with the pointer on the given screen row.
+func wheelAt(t *testing.T, m Model, button tea.MouseButton, y int) Model {
+	t.Helper()
+	return step(t, m, tea.MouseWheelMsg{X: 10, Y: y, Button: button})
+}
+
+// A notch over the pane walks the session list one row, which is the whole of the reported defect:
+// before this the browser was one of the overlays a wheel fell straight through.
+func TestBrowserWheelWalksTheSessionList(t *testing.T) {
+	m := browserPaneModel(t, 12)
+	_, y := browserRect(t, m)
+
+	down := wheelAt(t, m, tea.MouseWheelDown, y)
+	if down.sessionBrowser.selected != 1 {
+		t.Fatalf("selected = %d after one notch down, want 1", down.sessionBrowser.selected)
+	}
+
+	back := wheelAt(t, wheelAt(t, down, tea.MouseWheelUp, y), tea.MouseWheelUp, y)
+	if back.sessionBrowser.selected != 0 {
+		t.Errorf("selected = %d after two notches up, want it back on the first row", back.sessionBrowser.selected)
+	}
+}
+
+// The wheel CLAMPS where ↑/↓ WRAP, and the difference is the gesture rather than an inconsistency
+// (ratified 2026-08-22): rolling past the last session and landing back on the first would move the
+// human somewhere they did not aim. Both answers are asserted at both ends, so neither can drift
+// into the other unnoticed.
+func TestBrowserWheelClampsWhereTheKeysWrap(t *testing.T) {
+	m := browserPaneModel(t, 12)
+	_, y := browserRect(t, m)
+	last := len(m.sessionBrowserView().rows) - 1
+	if last < 2 {
+		t.Fatalf("the pane offers %d rows; the clamp needs a list to walk", last+1)
+	}
+
+	if got := wheelAt(t, m, tea.MouseWheelUp, y).sessionBrowser.selected; got != 0 {
+		t.Errorf("selected = %d after a notch up on the first row, want it clamped at 0", got)
+	}
+	if got := step(t, m, keyUp()).sessionBrowser.selected; got != last {
+		t.Errorf("selected = %d after ↑ on the first row, want the keys to wrap to %d", got, last)
+	}
+
+	end := m
+	for range last + 5 {
+		end = wheelAt(t, end, tea.MouseWheelDown, y)
+	}
+	if end.sessionBrowser.selected != last {
+		t.Errorf("selected = %d after rolling past the end, want it clamped at the last row (%d)",
+			end.sessionBrowser.selected, last)
+	}
+	if got := step(t, end, keyDown()).sessionBrowser.selected; got != 0 {
+		t.Errorf("selected = %d after ↓ on the last row, want the keys to wrap to 0", got)
+	}
+}
+
+// Above the pane the transcript still owns the wheel: the browser claims the notches inside its
+// rectangle and no others.
+func TestBrowserWheelAboveThePaneScrollsTheTranscript(t *testing.T) {
+	m := browserPaneModel(t, 12)
+	paneTop, y := browserRect(t, m)
+	if paneTop == 0 {
+		t.Fatal("the pane starts on the first row; there is no transcript above it to aim at")
+	}
+	m = wheelAt(t, m, tea.MouseWheelDown, y) // somewhere for a stray notch to move the highlight from
+
+	off := wheelAt(t, m, tea.MouseWheelUp, paneTop-1)
+	if off.sessionBrowser.selected != m.sessionBrowser.selected {
+		t.Errorf("a notch above the pane moved the highlight to %d, want it left at %d",
+			off.sessionBrowser.selected, m.sessionBrowser.selected)
+	}
+	if off.viewport.YOffset() == m.viewport.YOffset() {
+		t.Errorf("the transcript stayed at %d; a notch the pane does not own is the transcript's",
+			off.viewport.YOffset())
+	}
+}
+
+// A live rename edit or delete confirm is a modal surface within the modal: it owns the pane until
+// it is answered, so a notch over it moves NOTHING — and, the browser being modal, still never
+// reaches the transcript behind it.
+func TestBrowserWheelIsSwallowedByARenameOrAConfirm(t *testing.T) {
+	base := browserPaneModel(t, 12)
+	_, y := browserRect(t, base)
+	base = wheelAt(t, base, tea.MouseWheelDown, y) // off the first row, so a stray move would show
+
+	for _, tc := range []struct {
+		name string
+		arm  func(Model) Model
+	}{
+		{"a rename edit", func(m Model) Model { m.sessionBrowser.renaming = true; return m }},
+		{"a delete confirm", func(m Model) Model { m.sessionBrowser.confirming = true; return m }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := tc.arm(base)
+
+			after := wheelAt(t, m, tea.MouseWheelDown, y)
+
+			if after.sessionBrowser.selected != m.sessionBrowser.selected {
+				t.Errorf("selected = %d, want the armed surface to swallow the notch and leave it at %d",
+					after.sessionBrowser.selected, m.sessionBrowser.selected)
+			}
+			if after.viewport.YOffset() != m.viewport.YOffset() {
+				t.Errorf("the transcript scrolled to %d; a notch over the modal must never reach it",
+					after.viewport.YOffset())
+			}
+		})
+	}
+}
+
+// The notch walks the rows the pane PAINTS — the filtered view every key route and the painter share
+// — so a wheel and an ↑ can never disagree about which record is highlighted, and the clamp is the
+// filtered list's length rather than the store's.
+func TestBrowserWheelWalksTheFilteredList(t *testing.T) {
+	m := browserPaneModel(t, 12)
+	for _, r := range "number 1" {
+		m = step(t, m, keyRune(r))
+	}
+	rows := len(m.sessionBrowserView().rows)
+	if rows != 2 {
+		t.Fatalf("the filter leaves %d rows, want the 2 the clamp is measured against", rows)
+	}
+	_, y := browserRect(t, m)
+
+	m = wheelAt(t, m, tea.MouseWheelDown, y)
+	if m.sessionBrowser.selected != 1 {
+		t.Fatalf("selected = %d after one notch down, want the second surviving row", m.sessionBrowser.selected)
+	}
+
+	if got := wheelAt(t, m, tea.MouseWheelDown, y).sessionBrowser.selected; got != 1 {
+		t.Errorf("selected = %d after rolling past the filtered end, want it clamped at %d", got, rows-1)
+	}
+}

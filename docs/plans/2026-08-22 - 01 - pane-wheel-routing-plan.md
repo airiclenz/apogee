@@ -190,7 +190,14 @@ tests:
 
 ---
 
-## 3. The /sessions browser takes the notch over it
+## 3. The /sessions browser takes the notch over it — ✅ DONE (2026-08-22)
+
+NOTES (2026-08-22): `browserWheel` short-circuits on a CLOSED browser before asking
+`m.frameSpans().pane(paneBrowser)`, rather than gating on the rectangle alone as the item's text
+reads. The rectangle is still the only gate that decides anything; the guard exists because the wheel
+path publishes no frame, so an unguarded `frameSpans()` would compose (and render) every overlay of
+the frame on every notch the transcript owns — the reason `settingsPaneRect` and `reportPaneRect`
+state verbatim for the same short-circuit.
 
 Depends on item 1.
 

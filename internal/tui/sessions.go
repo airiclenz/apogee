@@ -406,6 +406,39 @@ func (m Model) sessionRenameKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// browserWheel walks the /sessions highlight one row per notch while the pointer is over the pane —
+// the keyboard's ↑/↓ under the wheel, against the FILTERED view every key route and the painter
+// already share (sessionBrowserView), so a notch and an arrow can never disagree about which record
+// is highlighted. handled is false anywhere else, which leaves the notch to the transcript scrolling
+// above and behind the pane.
+//
+// Inside the rectangle it is ALWAYS handled, in every state the browser can be in: the browser is
+// modal, and a notch over it must never reach the transcript behind it. While a rename edit or a
+// delete confirm is live the notch is swallowed and moves NOTHING — those are modal surfaces of
+// their own that own the pane until they are answered, exactly as settingsWheel (mouse.go) treats
+// its value buffer and its armed reset.
+//
+// It CLAMPS at the ends where these keys WRAP, and the clamp is the list module's own rather than
+// this pane's ([listCursor.wheel], listsurface.go): ↑/↓ walk a list as a cycle, while a wheel is a
+// scroll.
+func (m Model) browserWheel(msg tea.MouseWheelMsg) (Model, bool) {
+	if !m.sessionBrowser.open {
+		// Asked before the frame is composed, because every wheel notch asks: with no pane up there is
+		// nothing to place, and composing the frame's overlays to learn that would put a render on the
+		// path of a notch the pane has no part in (settingsPaneRect, mouse.go).
+		return m, false
+	}
+	y0, h, ok := m.frameSpans().pane(paneBrowser)
+	if !ok || msg.Y < y0 || msg.Y >= y0+h {
+		return m, false
+	}
+	if m.sessionBrowser.renaming || m.sessionBrowser.confirming {
+		return m, true
+	}
+	m.sessionBrowser.wheel(msg, len(m.sessionBrowserView().rows))
+	return m, true
+}
+
 // deleteSession queues the removal of id and the re-list that follows it, so the browser refreshes
 // without the deleted row. It goes through the record-write queue (model.go) rather than straight
 // onto a Cmd goroutine: a delete racing the per-Turn save can otherwise remove a record the
