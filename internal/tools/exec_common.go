@@ -183,6 +183,12 @@ type subprocessResult struct {
 	// killed what was left. The captured output may be missing its tail, and the run is not a
 	// success however cleanly the leader itself exited.
 	drainWedged bool
+	// confined reports that the run actually executed inside the confinement fence — a
+	// Confinement handle was on ctx and its Confiner wrapped the cmd before it started.
+	// subprocessToolResult keys on it to label a likely OS denial (EPERM-shaped output on a
+	// failed confined run) so the model learns WHY a write outside the box failed; an
+	// unconfined run must never carry that label, however EPERM-shaped its output.
+	confined bool
 }
 
 // runSubprocess runs spec as a one-shot subprocess (ADR 0008 — fresh process per call, no
@@ -271,6 +277,7 @@ func runSubprocess(ctx context.Context, spec subprocessSpec) (subprocessResult, 
 	// installed handle carrying no Confiner is broken wiring, not permission to run free: it
 	// fails closed the same way, so the escape surfaces as the truthful demote instead of a
 	// silent unconfined run.
+	confined := false
 	if conf, ok := domain.ConfinementFromContext(ctx); ok {
 		if conf.Confiner == nil {
 			return subprocessResult{}, fmt.Errorf("confine %s: %w: the installed handle carries no Confiner",
@@ -279,6 +286,7 @@ func runSubprocess(ctx context.Context, spec subprocessSpec) (subprocessResult, 
 		if err := conf.Confiner.Confine(runCtx, conf.Box, cmd); err != nil {
 			return subprocessResult{}, fmt.Errorf("confine %s: %w", spec.argv[0], err)
 		}
+		confined = true
 	}
 
 	runErr := runWithTeardown(cmd, teardown)
@@ -288,7 +296,7 @@ func runSubprocess(ctx context.Context, spec subprocessSpec) (subprocessResult, 
 		return subprocessResult{}, ctx.Err()
 	}
 
-	res := subprocessResult{combinedOutput: out.String(), stdout: stdoutOnly.String()}
+	res := subprocessResult{combinedOutput: out.String(), stdout: stdoutOnly.String(), confined: confined}
 	res.timedOut = runCtx.Err() == context.DeadlineExceeded
 	res.exitCode = exitCodeOf(cmd, runErr)
 	// exec.ErrWaitDelay is not an *exec.ExitError, so exitCodeOf falls through to the leader's

@@ -287,3 +287,35 @@ func TestRunHookSubprocessFailsOnANonZeroExit(t *testing.T) {
 		t.Errorf("err = %v, want the command's diagnostics quoted", err)
 	}
 }
+
+// TestRunSubprocessRecordsConfined pins the confined flag on the result: true exactly when a
+// Confinement handle wrapped the run, false on a plain unconfined run — the structural half
+// the terminal's denial label keys on, so an unconfined EPERM can never be blamed on the box.
+func TestRunSubprocessRecordsConfined(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell canary; the flag it pins is platform-independent")
+	}
+	t.Parallel()
+
+	spec := subprocessSpec{argv: []string{"/bin/sh", "-c", "true"}}
+
+	res, err := runSubprocess(context.Background(), spec)
+	if err != nil {
+		t.Fatalf("unconfined runSubprocess err = %v, want nil", err)
+	}
+	if res.confined {
+		t.Error("unconfined run reported confined = true")
+	}
+
+	ctx := domain.WithConfinement(context.Background(), domain.Confinement{
+		Confiner: &fakeConfiner{caps: domain.ConfinementCaps{FSWrite: true}},
+		Box:      domain.ConfinementBox{WorkspaceRoot: t.TempDir()},
+	})
+	res, err = runSubprocess(ctx, spec)
+	if err != nil {
+		t.Fatalf("confined runSubprocess err = %v, want nil", err)
+	}
+	if !res.confined {
+		t.Error("confined run reported confined = false")
+	}
+}

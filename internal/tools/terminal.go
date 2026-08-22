@@ -167,9 +167,39 @@ func (t *Terminal) resolveWorkdir(workdir string) (string, error) {
 	return resolveInRoot(workdir, t.root)
 }
 
+// confinementDenialLabel is the line appended to a FAILED confined result whose output looks
+// like an OS confinement denial, so the model learns the write-fence exists instead of
+// treating the EPERM as a broken command and routing around it blind.
+const confinementDenialLabel = "[likely blocked by workspace confinement: writes are allowed" +
+	" only inside the workspace and the session scratch dir]"
+
+// confinementDenialSignatures are the OS-denial spellings the label keys on: strerror(EPERM)
+// as libc capitalises it, the lower-cased spelling Go's syscall.Errno prints, and the bare
+// errno name toolchains emit. Best-effort by design — strerror text is locale-dependent, and
+// a missed match costs nothing (the model still sees the non-zero exit).
+var confinementDenialSignatures = []string{
+	"Operation not permitted",
+	"operation not permitted",
+	"EPERM",
+}
+
+// looksLikeConfinementDenial reports whether a confined command's combined output carries one
+// of the OS-denial signatures — the heuristic half of the denial label; the structural half
+// (the run was confined AND failed) is the caller's to check.
+func looksLikeConfinementDenial(output string) bool {
+	for _, signature := range confinementDenialSignatures {
+		if strings.Contains(output, signature) {
+			return true
+		}
+	}
+	return false
+}
+
 // subprocessToolResult renders a captured subprocess outcome as a ToolResult. A non-zero
 // exit is an error result (so the model sees the command failed) carrying the captured
-// output and exit code; a clean exit is a success result with the output.
+// output and exit code; a clean exit is a success result with the output. An error result
+// from a CONFINED run whose output looks like an OS denial additionally carries
+// confinementDenialLabel — best-effort, never forced onto a clean exit.
 func subprocessToolResult(callID string, res subprocessResult) domain.ToolResult {
 	var b strings.Builder
 	if res.timedOut {
@@ -184,6 +214,9 @@ func subprocessToolResult(callID string, res subprocessResult) domain.ToolResult
 	b.WriteString(res.combinedOutput)
 	if res.exitCode != 0 {
 		fmt.Fprintf(&b, "\n[exit code %d]", res.exitCode)
+		if res.confined && looksLikeConfinementDenial(res.combinedOutput) {
+			b.WriteString("\n" + confinementDenialLabel)
+		}
 		return errorResult(callID, b.String())
 	}
 	return okResult(callID, b.String())

@@ -553,3 +553,74 @@ func TestTerminal_NoPreambleOnRawCmdLines(t *testing.T) {
 		t.Errorf("cmdline = %q, want no preamble on the verbatim cmd.exe line", captured.cmdline)
 	}
 }
+
+// TestSubprocessToolResultDenialLabel pins the denial-label rendering as a pure table over
+// subprocessToolResult: the label lands only on a CONFINED, non-zero-exit result whose output
+// carries an OS-denial signature — every other combination stays label-free, and a clean exit
+// never gains one however EPERM-shaped its output.
+func TestSubprocessToolResultDenialLabel(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name      string
+		res       subprocessResult
+		wantLabel bool
+	}{
+		{"confined error with strerror text", subprocessResult{
+			combinedOutput: "touch: /etc/f: Operation not permitted", exitCode: 1, confined: true}, true},
+		{"confined error with Go errno text", subprocessResult{
+			combinedOutput: "open /etc/f: operation not permitted", exitCode: 1, confined: true}, true},
+		{"confined error with bare EPERM", subprocessResult{
+			combinedOutput: "write failed: EPERM", exitCode: 2, confined: true}, true},
+		{"unconfined error with strerror text", subprocessResult{
+			combinedOutput: "touch: /etc/f: Operation not permitted", exitCode: 1, confined: false}, false},
+		{"confined success with strerror text", subprocessResult{
+			combinedOutput: "grep found: Operation not permitted", exitCode: 0, confined: true}, false},
+		{"confined error without a signature", subprocessResult{
+			combinedOutput: "no such file or directory", exitCode: 1, confined: true}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			res := subprocessToolResult("c1", tc.res)
+			if got := strings.Contains(res.Content, confinementDenialLabel); got != tc.wantLabel {
+				t.Errorf("label present = %v, want %v (content = %q)", got, tc.wantLabel, res.Content)
+			}
+			if wantErr := tc.res.exitCode != 0; res.IsError != wantErr {
+				t.Errorf("IsError = %v, want %v", res.IsError, wantErr)
+			}
+		})
+	}
+}
+
+// TestTerminal_ConfinementDenialLabelEndToEnd drives Execute with a fake Confiner and a
+// command whose output mimics the incident's OS denial, proving the confined flag travels
+// from runSubprocess into the rendered result: the confined failure carries the label, the
+// identical unconfined failure does not.
+func TestTerminal_ConfinementDenialLabelEndToEnd(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell command; the label plumbing it pins is platform-independent")
+	}
+	t.Parallel()
+	term := NewTerminal(t.TempDir(), nil)
+	denial := `echo "touch: cannot touch '/etc/f': Operation not permitted" >&2; exit 1`
+
+	ctx := domain.WithConfinement(context.Background(), domain.Confinement{
+		Confiner: &fakeConfiner{caps: domain.ConfinementCaps{FSWrite: true}},
+		Box:      domain.ConfinementBox{WorkspaceRoot: t.TempDir()},
+	})
+	res, err := term.Execute(ctx, terminalCall("c1", denial))
+	if err != nil {
+		t.Fatalf("Execute err = %v, want nil", err)
+	}
+	if !res.IsError || !strings.Contains(res.Content, confinementDenialLabel) {
+		t.Errorf("confined denial result = %q (IsError=%v), want the confinement label", res.Content, res.IsError)
+	}
+
+	res, err = term.Execute(context.Background(), terminalCall("c2", denial))
+	if err != nil {
+		t.Fatalf("Execute err = %v, want nil", err)
+	}
+	if !res.IsError || strings.Contains(res.Content, confinementDenialLabel) {
+		t.Errorf("unconfined result = %q (IsError=%v), want the same failure WITHOUT the label", res.Content, res.IsError)
+	}
+}

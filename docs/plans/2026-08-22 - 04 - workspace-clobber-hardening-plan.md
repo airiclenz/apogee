@@ -75,7 +75,9 @@ any unguarded later line runs — this alone prevents the incident's clobber.
 
 **Commit:** `feat(tools): fail-fast preamble (set -e, probed pipefail) for terminal scripts`
 
-## 2. Label confinement denials in the terminal result
+## 2. Label confinement denials in the terminal result — ✅ DONE (2026-08-22)
+
+NOTES (2026-08-22): the append site is the shared renderer `subprocessToolResult`, as the item's mechanism names — so a confined `python_exec` failure with denial-shaped output gains the same label as terminal; not a deviation, just the mechanism's reach stated.
 
 Depends on item 1 (shares `terminal.go`).
 

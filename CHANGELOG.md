@@ -10,6 +10,16 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **Confinement denials are now labeled in terminal results.** When a confined terminal
+  call fails and its output carries an OS-denial signature (`Operation not permitted`,
+  `operation not permitted`, `EPERM`), the error result gains one labeled line —
+  `[likely blocked by workspace confinement: writes are allowed only inside the workspace
+  and the session scratch dir]` — so the model learns the write-fence exists instead of
+  routing around a bare EPERM blind. Best-effort by design (strerror text is
+  locale-dependent); an unconfined run never gets the label, and a clean exit never does.
+  `runSubprocess` records whether the Confiner actually wrapped the run (`confined` on its
+  result), and the shared result renderer does the match-and-append on error results only.
+
 - **Terminal scripts now fail fast on POSIX.** Every `terminal` command line runs under a
   prepended `set -e` — plus `set -o pipefail` where a one-time cached probe shows the host
   `sh` accepts it (`platform.FailFastPreamble`) — so a failed command, a workspace-confinement
