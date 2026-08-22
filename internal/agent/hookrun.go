@@ -14,10 +14,10 @@ import (
 // This way the bench observes/perturbs the configured behaviour, not the other way round.
 //
 // All five points run that cascade through ONE runner (runHooks): ordered → Bypass gate →
-// revision bracket → fire under the recover boundary → book. What differs between the points
-// — which working value they edit, which of them builds a LoopView, which installs the
-// subprocess permit, which may short-circuit, which swallows a panic — lives in the five thin
-// adapters below, each a hookPointRun the runner reads.
+// revision bracket → fire under the recover boundary → book outside it. What differs between
+// the points — which working value they edit, which of them builds a LoopView, which installs
+// the subprocess permit, which may short-circuit, which swallows a panic — lives in the five
+// thin adapters below, each a hookPointRun the runner reads.
 //
 // Every hook runs under the same recover boundary, so a panicking extension degrades to a
 // clean quiescent boundary instead of unwinding the host (ADR 0007); a MechanismFiredEvent
@@ -122,10 +122,16 @@ func runHooks[H any](a *Agent, ctx context.Context, turn int, run hookPointRun[H
 	return nil
 }
 
-// runOneHook fires one hook under the recover boundary and books it when it acted: a catalogued
-// invocation is booked only if it moved the working value's Revision or reported acting (R4),
-// an experimental one always (bench observability). A recovered panic returns errHookPanicked
-// and books nothing.
+// runOneHook fires one hook under the recover boundary and then books the fire OUTSIDE it: a
+// catalogued invocation is booked only if it moved the working value's Revision or reported
+// acting (R4), an experimental one always (bench observability). A recovered panic returns
+// errHookPanicked and books nothing.
+//
+// The booking deliberately sits outside the boundary — the shape every hook point had before
+// the five runners collapsed into this one. a.fired reaches the HOST's Events sink, and a sink
+// that panics is the host's fault: recovered here it would surface as errHookPanicked
+// attributed to the Mechanism whose hook had already returned cleanly, degrading the Turn in
+// an innocent Mechanism's name. Outside the boundary it unwinds to the host untouched.
 func runOneHook[H any](
 	a *Agent,
 	ctx context.Context,
@@ -133,19 +139,39 @@ func runOneHook[H any](
 	id domain.MechanismID,
 	hook H,
 	run hookPointRun[H],
-) (stop bool, err error) {
-	defer a.recoverHook(turn, id, &err)()
-
-	before := run.revision()
-	out, err := run.fire(ctx, hook)
+) (bool, error) {
+	out, book, err := fireOneHook(a, ctx, turn, id, hook, run)
 	if err != nil {
 		return false, err
 	}
 
-	if id == experimentalMechanismID || out.acted || run.revision() != before {
+	if book {
 		a.fired(turn, id, run.at, out.action)
 	}
 	return out.stop, nil
+}
+
+// fireOneHook invokes one hook inside the recover boundary and reports what it did, plus
+// whether the invocation earns a booking: acted by its own account, or the revision bracket
+// caught an in-place mutation (R4) — an experimental hook always. Everything the boundary must
+// cover lives here, the invocation and the bracket reads around it, and nothing else does. A
+// recovered panic returns errHookPanicked, an empty outcome and no booking.
+func fireOneHook[H any](
+	a *Agent,
+	ctx context.Context,
+	turn int,
+	id domain.MechanismID,
+	hook H,
+	run hookPointRun[H],
+) (out hookOutcome, book bool, err error) {
+	defer a.recoverHook(turn, id, &err)()
+
+	before := run.revision()
+	out, err = run.fire(ctx, hook)
+	if err != nil {
+		return hookOutcome{}, false, err
+	}
+	return out, id == experimentalMechanismID || out.acted || run.revision() != before, nil
 }
 
 // runHistoryRewriteHooks lets each history-rewrite Mechanism/hook edit conversation state

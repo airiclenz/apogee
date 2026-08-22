@@ -23,24 +23,6 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 
 ## Open defects
 
-### `runOneHook`'s recover boundary now also covers the fire booking
-
-**Status:** [P] open 2026-08-22 — residual of
-`docs/plans/archived/2026-08-20 - 00 - engine-architecture-deepening-plan.md` item 14, which collapsed
-the ten hand-written loops into one runner and in doing so widened what the deferred recover sees.
-
-`runOneHook` arms `a.recoverHook(turn, id, &err)` for the whole function
-(`internal/agent/hookrun.go:137`) and then calls `a.fired(...)` inside it
-(`internal/agent/hookrun.go:146`). `fired` emits a `MechanismFiredEvent` through `a.cfg.Events`, so a
-panicking Events SINK is recovered by the hook boundary and reported as `errHookPanicked` attributed
-to the Mechanism's id (`internal/agent/hookrun.go:271-280`) — the Turn degrades naming an innocent
-Mechanism. Theoretical today: no in-tree sink panics, and every one of the five points ran its fire
-inside a boundary before the collapse; what changed is that the BOOKING joined it. The fix is to book
-outside the deferred closure, or to state on `recoverHook` that the sink is inside its scope by
-design.
-
----
-
 ### `hookPoints` and `hookImplements` duplicate the HookPoint set with no drift guard
 
 **Status:** [P] open 2026-08-22 — residual of

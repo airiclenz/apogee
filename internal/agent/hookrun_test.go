@@ -329,3 +329,67 @@ func assertBypassSkips(t *testing.T, at domain.HookPoint) {
 		t.Errorf("a Bypass-gated Mechanism booked %d fires at %s, want 0", got, at)
 	}
 }
+
+// firePanickingSink is a host Events sink that faults the moment it is told about a fire: it
+// records every event and panics on the MechanismFiredEvent a booking emits.
+type firePanickingSink struct {
+	events []domain.Event
+}
+
+func (s *firePanickingSink) Emit(e domain.Event) {
+	s.events = append(s.events, e)
+	if _, ok := e.(domain.MechanismFiredEvent); ok {
+		panic("firePanickingSink: deliberate panic on MechanismFiredEvent")
+	}
+}
+
+// TestFireBookedOutsideRecoverBoundary pins which side of the recover boundary the booking
+// sits on. a.fired reaches the HOST's Events sink, so a sink that panics while being told
+// about a fire is the host's fault, not the Mechanism's: it must unwind to the host rather
+// than come back as errHookPanicked attributed to a Mechanism whose hook already returned
+// cleanly. The hook BODY keeps its coverage — a panic there is still recovered and attributed.
+func TestFireBookedOutsideRecoverBoundary(t *testing.T) {
+	t.Run("panicking sink ⇒ not attributed to the Mechanism", func(t *testing.T) {
+		sink := &firePanickingSink{}
+		cfg := baseConfig(sink)
+		cfg.Mechanisms = domain.NewMechanismRegistry()
+		probe := cascadeProbe{at: domain.HookPreRequest, behavior: probeActs, seen: func(domain.HookPoint) {}}
+		mustAddMech(t, cfg.Mechanisms, probe.row(domain.CapOffRamp))
+
+		a, err := newAgent(cfg, &scriptedResponder{scripts: [][]provider.Delta{contentScript("done")}})
+		if err != nil {
+			t.Fatalf("newAgent: %v", err)
+		}
+		if err := a.Submit(domain.UserInput{Text: "do the thing"}); err != nil {
+			t.Fatalf("Submit: %v", err)
+		}
+
+		escaped := stepRecoveringPanic(t, a)
+
+		if escaped == nil {
+			t.Fatalf("the sink panic did not reach the host: the fire is still booked inside the recover boundary")
+		}
+		if hookPanicBooked(sink.events, cascadeProbeID) {
+			t.Errorf("a panicking Events sink was reported as a hook panic attributed to %s", cascadeProbeID)
+		}
+	})
+
+	t.Run("panicking hook body ⇒ still attributed to the Mechanism", func(t *testing.T) {
+		run := driveCascade(t, cascadeSpec{at: domain.HookPreRequest, behavior: probePanics, capability: domain.CapOffRamp})
+
+		if !hookPanicBooked(run.events, cascadeProbeID) {
+			t.Errorf("a panicking hook body was not attributed to %s; the body keeps its coverage", cascadeProbeID)
+		}
+	})
+}
+
+// stepRecoveringPanic drives one Step and returns the panic value that escaped it, or nil when
+// none did — the probe for whether a fault was contained inside the loop or handed to the host.
+func stepRecoveringPanic(t *testing.T, a *Agent) (escaped any) {
+	t.Helper()
+	defer func() { escaped = recover() }()
+	if _, err := a.Step(context.Background()); err != nil {
+		t.Fatalf("Step returned a loop error: %v", err)
+	}
+	return nil
+}

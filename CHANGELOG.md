@@ -956,6 +956,15 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **A panicking Events sink is no longer blamed on the Mechanism that was firing.** Collapsing the
+  five hook runners into one put `runOneHook`'s fire booking inside the recover boundary the hook
+  itself runs under, and `a.fired` emits a `MechanismFiredEvent` through the host's sink: a sink
+  that panicked came back as `errHookPanicked` attributed to a Mechanism whose hook had already
+  returned cleanly, degrading the Turn in its name. The invocation and its revision bracket now sit
+  in `fireOneHook` behind the boundary and the booking sits outside it — the shape every point had
+  before the collapse — so a host sink fault unwinds to the host untouched. A panic in the hook BODY
+  is unchanged: still recovered, still attributed, still `errHookPanicked`.
+
 - A `delimited` thinking style with no delimiters is now a startup error. Profile validation
   checked the style against the three strippers and the effort against the four levels, but never
   the token pair the delimited style strips WITH — so `thinking: {style: delimited}` on its own

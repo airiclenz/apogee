@@ -409,7 +409,9 @@ still load without tokens.
 
 ---
 
-## 14. Book the mechanism fire outside the hook recover boundary
+## 14. Book the mechanism fire outside the hook recover boundary — ✅ DONE (2026-08-22)
+
+NOTES (2026-08-22): the file-header comment's cascade sketch gained "→ book outside it" so the runner's one-line contract still matches the code.
 
 **What:** Fix the ISSUES.md entry *"`runOneHook`'s recover boundary now also covers the fire
 booking"* per ratified call 4: **book outside**. `runOneHook` arms
