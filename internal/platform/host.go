@@ -2,7 +2,9 @@ package platform
 
 import (
 	"os"
+	"os/exec"
 	"strings"
+	"sync"
 )
 
 // hostRules is the per-OS behaviour table behind Host: the shell argv prefix, the
@@ -509,6 +511,36 @@ func caretEscape(line string) string {
 		b.WriteByte(line[i])
 	}
 	return b.String()
+}
+
+// failFastPreambleOnce probes the host `sh` once per process and caches the composed
+// preamble: `set -o pipefail` is in POSIX.1-2024 but older shells still reject it, and
+// the answer cannot change while apogee runs, so one subprocess settles it for good. A
+// probe that cannot run at all (no `sh` on this host) reads as unsupported — the caller
+// that would prepend the result is the POSIX shell path, which such a host never takes.
+var failFastPreambleOnce = sync.OnceValue(func() string {
+	return composeFailFastPreamble(exec.Command("sh", "-c", "set -o pipefail").Run() == nil)
+})
+
+// FailFastPreamble returns the fail-fast prefix the terminal tool prepends to every
+// POSIX script: `set -e` always, plus `set -o pipefail` when a one-time cached probe
+// shows the host `sh` accepts it (`sh -c "set -o pipefail"` exiting 0 ⇒ supported).
+// With `set -e` in force, a failed command — a confinement denial included — aborts the
+// whole script instead of letting an unguarded later line run. It is exported so the
+// escape-probe battery can prepend exactly what the terminal tool would. It is
+// meaningful only for a POSIX `sh`: cmd.exe has no `set -e` analogue, so callers apply
+// it on the POSIX shell path alone.
+func FailFastPreamble() string { return failFastPreambleOnce() }
+
+// composeFailFastPreamble builds the preamble for a host whose `sh` does (or does not)
+// accept pipefail — the pure half of FailFastPreamble, so both compositions are
+// table-testable without a shell.
+func composeFailFastPreamble(pipefail bool) string {
+	preamble := "set -e\n"
+	if pipefail {
+		preamble += "set -o pipefail\n"
+	}
+	return preamble
 }
 
 // The rule table must satisfy the Host contract at compile time, on every target.

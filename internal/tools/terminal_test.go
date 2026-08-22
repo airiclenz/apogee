@@ -453,3 +453,103 @@ func pidAlive(pid int, within time.Duration) bool {
 	}
 	return syscallKill0(pid) == nil
 }
+
+// TestTerminal_FailFastAbortsTheScriptAtTheFirstFailure pins the incident shape (minus
+// confinement): a multi-line script whose first command fails must abort before any
+// unguarded later line runs — under `set -e` the write after `false` never happens.
+func TestTerminal_FailFastAbortsTheScriptAtTheFirstFailure(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX fail-fast preamble; cmd.exe has no set -e analogue")
+	}
+	t.Parallel()
+	root := t.TempDir()
+	term := NewTerminal(root, nil)
+	res, err := term.Execute(context.Background(), terminalCall("c1", "false\necho reached > blocked.txt"))
+	if err != nil {
+		t.Fatalf("Execute err = %v, want nil", err)
+	}
+	if !res.IsError || !strings.Contains(res.Content, "exit code") {
+		t.Errorf("result = %q (IsError=%v), want a non-zero-exit error result", res.Content, res.IsError)
+	}
+	if _, statErr := os.Stat(filepath.Join(root, "blocked.txt")); !os.IsNotExist(statErr) {
+		t.Errorf("blocked.txt exists (stat err = %v); the script ran past its first failure", statErr)
+	}
+}
+
+// TestTerminal_PipefailFailsAPipelineWhereSupported asserts the probed half of the
+// preamble: where the host sh accepts pipefail, a failing left side of a pipe fails the
+// whole call. Where the probe found no support the preamble cannot carry it, so skip.
+func TestTerminal_PipefailFailsAPipelineWhereSupported(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX fail-fast preamble; cmd.exe has no set -e analogue")
+	}
+	if !strings.Contains(platform.FailFastPreamble(), "pipefail") {
+		t.Skip("host sh does not accept `set -o pipefail`; the preamble omits it")
+	}
+	t.Parallel()
+	term := NewTerminal(t.TempDir(), nil)
+	res, err := term.Execute(context.Background(), terminalCall("c1", "false | cat"))
+	if err != nil {
+		t.Fatalf("Execute err = %v, want nil", err)
+	}
+	if !res.IsError || !strings.Contains(res.Content, "exit code") {
+		t.Errorf("result = %q (IsError=%v), want pipefail to surface the pipeline failure", res.Content, res.IsError)
+	}
+}
+
+// TestTerminal_PreambleLeavesSuccessOutputUntouched pins that the preamble is silent: a
+// clean command still exits 0 with exactly its own output, nothing prepended.
+func TestTerminal_PreambleLeavesSuccessOutputUntouched(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell command; covered on unix")
+	}
+	t.Parallel()
+	term := NewTerminal(t.TempDir(), nil)
+	res, err := term.Execute(context.Background(), terminalCall("c1", "echo hello"))
+	if err != nil {
+		t.Fatalf("Execute err = %v, want nil", err)
+	}
+	if res.IsError || res.Content != "hello\n" {
+		t.Errorf("result = %q (IsError=%v), want exactly %q with exit 0", res.Content, res.IsError, "hello\n")
+	}
+}
+
+// TestTerminal_PrependsFailFastPreambleToThePOSIXLine pins where the preamble lands: the
+// spec's argv carries the composed preamble ahead of the model's own line, verbatim.
+//
+// Not parallel: it swaps the package-level runner.
+func TestTerminal_PrependsFailFastPreambleToThePOSIXLine(t *testing.T) {
+	if !hostShellIsPOSIX() {
+		t.Skip("POSIX shell path; the cmd.exe path is pinned by TestTerminal_NoPreambleOnRawCmdLines")
+	}
+	captured := withCapturedTerminalRun(t)
+	if _, err := NewTerminal(t.TempDir(), nil).Execute(context.Background(), terminalCall("c1", "echo hi")); err != nil {
+		t.Fatalf("Execute err = %v, want nil", err)
+	}
+	want := platform.FailFastPreamble() + "echo hi"
+	if got := captured.argv[len(captured.argv)-1]; got != want {
+		t.Errorf("shell line = %q, want %q (preamble + the model's line)", got, want)
+	}
+}
+
+// TestTerminal_NoPreambleOnRawCmdLines drives Execute under the Windows raw-command-line
+// convention and asserts the line reaches spec construction verbatim: cmd.exe has no
+// `set -e` analogue, so the fail-fast preamble is POSIX-only by design.
+//
+// Not parallel: it substitutes the package-level shellHost and the runner.
+func TestTerminal_NoPreambleOnRawCmdLines(t *testing.T) {
+	saved := shellHost
+	shellHost = rawCmdlineHost{Host: saved}
+	t.Cleanup(func() { shellHost = saved })
+
+	captured := withCapturedTerminalRun(t)
+	if _, err := NewTerminal(t.TempDir(), nil).Execute(context.Background(), terminalCall("c1", "echo hi")); err != nil {
+		t.Fatalf("Execute err = %v, want nil", err)
+	}
+	if got := captured.argv[len(captured.argv)-1]; got != "echo hi" {
+		t.Errorf("shell line = %q, want the verbatim %q (no preamble on the cmd path)", got, "echo hi")
+	}
+	if strings.Contains(captured.cmdline, "set -e") {
+		t.Errorf("cmdline = %q, want no preamble on the verbatim cmd.exe line", captured.cmdline)
+	}
+}

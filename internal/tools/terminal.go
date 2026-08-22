@@ -10,6 +10,7 @@ import (
 	"github.com/google/shlex"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/platform"
 )
 
 var terminalSpec = toolSpec{
@@ -43,6 +44,13 @@ type terminalArgs struct {
 // (subprocessEnvScopedPath): a shell line the model chose has no use for the key apogee
 // authenticates to its inference server with, and must not resolve its programs out of the box
 // the model can write.
+//
+// On the POSIX path every script runs under a fail-fast preamble
+// (platform.FailFastPreamble: `set -e`, plus `set -o pipefail` where the host sh accepts
+// it), so a failed command — a confinement denial included — aborts the whole script
+// instead of letting an unguarded later line run against a half-done state. Windows is
+// asymmetric by necessity: cmd.exe has no `set -e` analogue (`if errorlevel` is per-line,
+// not a mode), so cmd lines pass through verbatim with no fail-fast floor.
 type Terminal struct {
 	toolSpec
 	root string
@@ -102,8 +110,17 @@ func (t *Terminal) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 		return errorResult(call.ID, err.Error()), nil
 	}
 
+	// Fail fast, POSIX only (cmdline == "" is the same convention the pre-flight keys
+	// on): the preamble goes in AFTER the pre-flight parsed the model's own line, so a
+	// parse verdict is about what the model wrote, and cmd.exe — which has no `set -e`
+	// analogue — gets the line verbatim.
+	command := args.Command
+	if cmdline == "" {
+		command = platform.FailFastPreamble() + command
+	}
+
 	spec := subprocessSpec{
-		argv:    shellHost.Command(args.Command),
+		argv:    shellHost.Command(command),
 		cmdline: cmdline,
 		dir:     dir,
 		timeout: time.Duration(args.TimeoutSeconds) * time.Second,

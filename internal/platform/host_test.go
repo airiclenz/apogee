@@ -1,6 +1,7 @@
 package platform
 
 import (
+	"os/exec"
 	"reflect"
 	"strings"
 	"testing"
@@ -467,4 +468,34 @@ func countPrefix(entries []string, prefix string) int {
 		}
 	}
 	return n
+}
+
+func TestComposeFailFastPreamble(t *testing.T) {
+	t.Parallel()
+
+	if got, want := composeFailFastPreamble(false), "set -e\n"; got != want {
+		t.Errorf("composeFailFastPreamble(false) = %q, want %q", got, want)
+	}
+	if got, want := composeFailFastPreamble(true), "set -e\nset -o pipefail\n"; got != want {
+		t.Errorf("composeFailFastPreamble(true) = %q, want %q", got, want)
+	}
+}
+
+// TestFailFastPreambleMatchesTheHostProbe pins the probe against the ground truth on this
+// host: the cached preamble carries pipefail exactly when `sh -c "set -o pipefail"` exits 0
+// here, and repeated calls return the identical (cached) string.
+func TestFailFastPreambleMatchesTheHostProbe(t *testing.T) {
+	t.Parallel()
+
+	got := FailFastPreamble()
+	if !strings.HasPrefix(got, "set -e\n") {
+		t.Fatalf("FailFastPreamble() = %q, want a `set -e` first line always", got)
+	}
+	wantPipefail := exec.Command("sh", "-c", "set -o pipefail").Run() == nil
+	if want := composeFailFastPreamble(wantPipefail); got != want {
+		t.Errorf("FailFastPreamble() = %q, want %q (host sh pipefail support = %v)", got, want, wantPipefail)
+	}
+	if again := FailFastPreamble(); again != got {
+		t.Errorf("FailFastPreamble() second call = %q, want the cached %q", again, got)
+	}
 }

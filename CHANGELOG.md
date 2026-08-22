@@ -10,6 +10,15 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **Terminal scripts now fail fast on POSIX.** Every `terminal` command line runs under a
+  prepended `set -e` — plus `set -o pipefail` where a one-time cached probe shows the host
+  `sh` accepts it (`platform.FailFastPreamble`) — so a failed command, a workspace-confinement
+  denial included, aborts the whole script before any unguarded later line runs against a
+  half-done state (the 2026-08-22 workspace-clobber incident shape). POSIX-only by design:
+  `cmd /c` has no `set -e` analogue, so Windows lines pass through verbatim (asymmetry
+  recorded in the `Terminal` doc comment). The preamble is prepended after the pre-flight
+  parse and leaves output and the `[exit code N]` marker untouched.
+
 - **`apogee daemon` — schedules that outlive the session, declared in a file.** `/schedule` keeps a
   prompt on a cycle for as long as apogee is open; the daemon is the same idea with the TUI taken
   away. It is an in-repo subcommand of the same binary (ADR 0034) — the third Driver over the
