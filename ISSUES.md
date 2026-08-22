@@ -31,11 +31,6 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 **Status:** [ ] open 2026-08-22 — residual of
 `docs/plans/archived/2026-08-22 - 02 - daemon-plan.md` item 6, two gaps in the same file's coverage.
 
-- The `<-grace.C` branch of `daemonShutdown` (`cmd/apogee/daemon.go:405-406`) — the grace running out
-  and the firing being cancelled for it — is the one shutdown path nothing exercises.
-  `TestDaemonStopsPromptlyWithNoFiringInFlight` (`cmd/apogee/daemon_test.go:434`) covers the drained
-  case and `TestDaemonSecondSignalCancelsTheFiringInFlight` (`:462`) the second-signal case, both
-  with a `shutdown-grace: 1h` that is never allowed to elapse.
 - `notify`'s doc comment says the kinds are spelled out "so that a kind added to the library later
   fails this switch's own test rather than vanishing from the log"
   (`cmd/apogee/daemon.go:598-599`). No such test exists: `TestDaemonNotifyLinesArePinned`

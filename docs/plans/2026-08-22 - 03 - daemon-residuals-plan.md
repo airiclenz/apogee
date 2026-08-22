@@ -114,7 +114,10 @@ and add the CHANGELOG bullet.
 
 **Commit:** `fix(daemon): reload summary reports only the schedules that actually took`
 
-## 3. Test the shutdown grace expiring
+## 3. Test the shutdown grace expiring — ✅ DONE (2026-08-22)
+
+NOTES (2026-08-22): the CHANGELOG bullet goes under the existing `### Fixed` subsection of `[Unreleased]`, after the reload-summary bullet.
+NOTES (2026-08-22): the entry's intro line still says "two gaps in the same file's coverage" — the item's text scopes this item to deleting the FIRST bullet only; item 4 deletes the entry's remainder and with it that intro.
 
 **What:** The `<-grace.C` branch of `daemonShutdown` (`cmd/apogee/daemon.go:405-406`) is
 the one shutdown path nothing exercises. Add

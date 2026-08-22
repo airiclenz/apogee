@@ -498,6 +498,37 @@ func TestDaemonSecondSignalCancelsTheFiringInFlight(t *testing.T) {
 	}
 }
 
+// The grace is not a promise to wait forever: with one stop signal and a firing that never
+// finishes, the grace elapses and the daemon cancels the firing itself.
+func TestDaemonGraceExpiryCancelsTheFiringInFlight(t *testing.T) {
+	h := newDaemonHarness(t)
+	h.writeSchedules(t, "shutdown-grace: 50ms\nschedules:\n"+
+		"  - name: nightly-audit\n    on:\n      cycle: 24h\n"+
+		"    run:\n      prompt: audit\n      workspace: "+t.TempDir()+"\n")
+
+	// A runner that blocks until its context is cancelled: nothing but the grace expiring ends
+	// this firing.
+	firing := make(chan struct{})
+	runOnce = func(ctx context.Context, _ run.Spec) (run.Result, error) {
+		close(firing)
+		<-ctx.Done()
+		return run.Result{}, ctx.Err()
+	}
+
+	wait := h.run(t)
+	h.awaitLog(t, "1 schedule on the clock")
+	h.clock.tick()
+	<-firing
+
+	h.stop()
+	if err := wait(); err != nil {
+		t.Fatalf("daemon: %v\n%s", err, h.errOut.String())
+	}
+	if !strings.Contains(h.out.String(), "grace expired — cancelling the firing in flight") {
+		t.Errorf("the grace expiry was not acted on; the log holds:\n%s", h.out.String())
+	}
+}
+
 // ----------------------------------------------------------------------------
 // The host facts validation is given
 // ----------------------------------------------------------------------------

@@ -88,6 +88,10 @@ point is a **minor** bump, not a breaking change.
   stranded — is pruned from `Replaced`/`Added` (a failed-stop removal likewise from `Removed`) and
   named only in the joined error. The daemon's two reload lines keep their order and are now both
   true: the summary names what reached the clock, the line under it what did not take.
+- **The shutdown-grace expiry is tested.** `TestDaemonGraceExpiryCancelsTheFiringInFlight` drives
+  the one shutdown path nothing exercised — a firing still in flight, one stop signal, and a
+  `shutdown-grace` short enough to elapse — and asserts the daemon logs
+  `grace expired — cancelling the firing in flight` and stops. Test-only; no production change.
 
 ### Known verification (owner-run)
 
