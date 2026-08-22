@@ -304,10 +304,10 @@ system-prompt-text: |
 # outgrown its share of the context window. The warning is advisory only: nothing is ever capped
 # or truncated, and with no window known yet there is no share to compare against and no warning.
 #
-# context-files:
-#   enable: true             # the off-switch; default true
-#   names: [AGENTS.md]       # the default; looked up in the workspace root, in this order
-#                            # (an explicitly empty list, names: [], is the other way to say off)
+context-files:
+  enable: true             # the off-switch; default true
+  names: [AGENTS.md]       # the default; looked up in the workspace root, in this order
+                           # (an explicitly empty list, names: [], is the other way to say off)
 
 # =============================================================================
 # Auto's blast radius (only meaningful in --mode auto). GLOBAL-CONFIG-ONLY: there is no flag
@@ -441,7 +441,7 @@ system-prompt-text: |
 # of losing it, so auto-compact: false opts out of both and an overflowing turn then fails as it
 # would without apogee. The on-demand /compact command works either way. Config-file only (no flag
 # or env). Default: true.
-# auto-compact: true
+auto-compact: true
 
 # =============================================================================
 # Name new sessions from their first prompt. On the first thing you say in a fresh session, apogee
@@ -454,7 +454,7 @@ system-prompt-text: |
 # fails the title apogee derived from your prompt stays. Turning it off stops only the AUTOMATIC
 # naming — /rename still sets a title by hand, and bare /rename still asks the model for one.
 # Config-file only (no flag or env). Default: true.
-# auto-title: true
+auto-title: true
 
 # =============================================================================
 # Come back on the model you were using. With this on, picking a model with /model is remembered:
@@ -467,7 +467,7 @@ system-prompt-text: |
 # never written — the pointer lives here, in apogee's file. /unload-model and /stop-server leave it
 # alone: they free the GPU, they do not forget what you were on. Config-file only (no flag or env).
 # Default: false.
-# remember-model: true
+remember-model: true
 
 # =============================================================================
 # The model's context window in tokens. This one IS a pin: the ten-second heartbeat never overrides
@@ -642,13 +642,13 @@ system-prompt-text: |
 # nothing at all. It is read once, at startup — changing it here (or from /settings) arms or disarms
 # the capture at your NEXT start, not in the running session.
 #
-# ui:
-#   spinner: snake         # snake | glitter | classic
-#   spinner-color: true    # the 10s colour loop; false = your terminal's own text colour
-#   show-scrollbar: true   # false = no bar in the transcript or any popup; they take back the column
-#   color-scheme: dark     # dark | light | any *.yaml in ~/.apogee/schemes/
-#   stall-after: 90s       # engine silence before "· quiet" qualifies the status line; 0 = off
-#   inspector: false       # true = capture the raw wire traffic /inspect shows; takes effect next start
+ui:
+  spinner: snake         # snake | glitter | classic
+  spinner-color: true    # the 10s colour loop; false = your terminal's own text colour
+  show-scrollbar: true   # false = no bar in the transcript or any popup; they take back the column
+  color-scheme: dark     # dark | light | any *.yaml in ~/.apogee/schemes/
+  stall-after: 120s      # engine silence before "· quiet" qualifies the status line; 0 = off
+  inspector: false       # true = capture the raw wire traffic /inspect shows; takes effect next start
 
 # =============================================================================
 # The prompt cursor — apogee draws the real terminal cursor, always steady, in the shape named here:
