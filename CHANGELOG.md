@@ -10,6 +10,17 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **Tool results now warn when a subprocess changes workspace files.** An always-on
+  structural floor (every mode, Bypass included — ADR 0006 class): when the workspace
+  root is a git repository (probed once per Agent, cached), the loop snapshots
+  `git status --porcelain` immediately before and after each subprocess tool call and,
+  when the snapshots differ, appends `[warning: this command changed workspace files:
+  <paths>]` to the result — success and error results alike, capped at 10 paths with an
+  `… and N more` tail. Each git run is bounded by a 2s timeout in the workspace root;
+  any git error or timeout skips the check silently for that call, so the floor never
+  breaks or slows a tool call beyond the two porcelain runs. Not a Mechanism — no
+  gating, no config key.
+
 - New `{{scratch}}` system-prompt placeholder (the closed set is now four): renders the
   session scratch directory, per-session constant so the prefix KV cache holds. The
   shipped default prompt now steers scratch and test files to `{{scratch}}` instead of

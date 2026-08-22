@@ -118,9 +118,10 @@ func newAgent(cfg domain.Config, up provider.Responder) (*Agent, error) {
 		stripper:           stripper,
 		tracker:            newSelfRegulator(),
 		tokens:             apogeectx.NewTokenEstimator(),
-		prompts:            domain.NewPromptSlot(), // the one prompt surface this Agent tree queues on
-		journal:            undo.New(),             // the per-Exchange undo record, empty and per-process (ADR 0051)
-		now:                time.Now,               // the request-render clock for the system prompt's {{datetime}}
+		prompts:            domain.NewPromptSlot(),               // the one prompt surface this Agent tree queues on
+		journal:            undo.New(),                           // the per-Exchange undo record, empty and per-process (ADR 0051)
+		tree:               newTreeSnapshotter(cfg.WorkspaceDir), // the tracked-file mutation floor around subprocess calls (treesnapshot.go)
+		now:                time.Now,                             // the request-render clock for the system prompt's {{datetime}}
 	}
 	// Fill the context-file cache for this session's first boundary: construction. Every later
 	// refill goes through the same seam at a session boundary (contextfiles.go).

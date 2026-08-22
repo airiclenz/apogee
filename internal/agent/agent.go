@@ -217,6 +217,14 @@ type Agent struct {
 	// group on it (loop.go).
 	journal *undo.Journal
 
+	// tree is the tracked-file mutation floor around subprocess tool calls
+	// (treesnapshot.go): git-status snapshots taken before and after each subprocess
+	// run so the result names the workspace files the command changed. A structural
+	// floor in the ADR 0006 class — always on, every mode including Bypass — active
+	// only when the workspace root is a git repository (probed once per Agent,
+	// cached). newAgent always supplies it; nil is an inactive floor, never an error.
+	tree *treeSnapshotter
+
 	conv         domain.Conversation // serializable conversation state (ADR 0001)
 	pendingInput *domain.UserInput   // queued by Submit, consumed by the next Step
 	turns        *turnLifecycle      // owns the Turn/Exchange lifecycle state (index, inExchange, exchangeStart) and, from item 2 on, the exits — internal/agent/turn.go

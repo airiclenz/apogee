@@ -796,6 +796,16 @@ func (a *Agent) executeTool(ctx context.Context, turn int, tool domain.Tool, cal
 		})
 	}
 
+	// Tracked-file mutation floor (treesnapshot.go — structural, every mode including
+	// Bypass, ADR 0006 class): snapshot the git tree around a subprocess run so the
+	// result can name the workspace files the command changed. Best-effort by contract:
+	// a non-repo workspace, a git error or a timeout skips the check for this call
+	// silently, and the floor never turns a clean result into an error.
+	preTree, watchTree := "", false
+	if domain.IsSubprocessTool(tool) {
+		preTree, watchTree = a.tree.beforeCall()
+	}
+
 	res, err := a.runTool(ctx, tool, call)
 	if err != nil {
 		if ctx.Err() != nil {
@@ -813,7 +823,16 @@ func (a *Agent) executeTool(ctx context.Context, turn int, tool domain.Tool, cal
 			return domain.ToolResult{}, dispatchConfinementUnavailable
 		}
 		a.cfg.Events.Emit(domain.ErrorEvent{EventBase: a.base(turn), Source: call.Tool, Err: err.Error()})
-		return errorToolResult(call.ID, err.Error()), dispatchDone
+		errResult := errorToolResult(call.ID, err.Error())
+		if watchTree {
+			// The error result carries the warning too: a command that failed may
+			// still have written before it failed — the incident's exact shape.
+			appendTreeMutationWarning(&errResult, a.tree.mutationWarning(preTree))
+		}
+		return errResult, dispatchDone
+	}
+	if watchTree {
+		appendTreeMutationWarning(&res, a.tree.mutationWarning(preTree))
 	}
 	return res, dispatchDone
 }

@@ -174,7 +174,11 @@ prompts opt in by using the placeholder; `Validate` accepts it like the other th
 
 **Commit:** `feat(prompt): {{scratch}} placeholder + scratch guidance in the default prompt`
 
-## 5. Tracked-file mutation warning around terminal calls
+## 5. Tracked-file mutation warning around terminal calls — ✅ DONE (2026-08-22)
+
+NOTES (2026-08-22): the Agent-side seam needed three files beyond the item's named list — the `tree *treeSnapshotter` field lives on the Agent struct (agent.go), its construction wiring in newAgent (construct.go), and doc.go's package map gains treesnapshot.go (the docmap guard test fails otherwise); the interception itself is in dispatch.go's `executeTool`, the single choke point every run/gate/confine arm shares.
+NOTES (2026-08-22): the once-per-Agent repo probe runs lazily via `sync.Once` on the first subprocess call rather than eagerly at construction — still exactly once per Agent, and construction (including every sub-agent spawn) stays free of git invocations.
+NOTES (2026-08-22): the diff is the symmetric line difference of the two porcelain snapshots, so a path whose status line VANISHED (an untracked file the command deleted, a dirty file it restored) is also listed — "the two snapshots differ" is the trigger the item states, and a deletion is a workspace change worth naming.
 
 **What:** Always-on structural floor (every mode, including Bypass — ADR 0006 class),
 new file `internal/agent/treesnapshot.go`: when the workspace root is a git repository

@@ -15,7 +15,7 @@
 //
 // # The files, one line each
 //
-// Twenty files: the handle and its lifecycle, the loop proper, the tool path, and the
+// Twenty-one files: the handle and its lifecycle, the loop proper, the tool path, and the
 // mid-session doors a host opens without tearing the session down.
 //
 // The handle. agent.go is the Agent type and the surface a Driver holds — New, Resume, Close,
@@ -45,7 +45,10 @@
 // anything executes: the guardrail floor, the ladder-by-blast-radius table, the confinement
 // capability check, and the precomputed fallback for what only run time can reveal.
 // dispatch.go executes it: the serial and depth-0 fan-out paths, the run/gate/confine/delegate/
-// refuse arms, Approval, result clamping, and the audit records. subagent.go is the sub-agent
+// refuse arms, Approval, result clamping, and the audit records. treesnapshot.go is the
+// tracked-file mutation floor around subprocess calls — the git-status snapshots taken before
+// and after each run and the warning line naming what changed (always on, ADR 0006 class).
+// subagent.go is the sub-agent
 // orchestrator — a nested Agent whose privileges are the parent's verbatim or stricter, with a
 // tool set that is a subset and never an expansion (ADR 0013). approvalcache.go is the Session's
 // allow-for-session memory: the guarded set of cleared keys the approver seam in construct.go owns,
