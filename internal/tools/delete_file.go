@@ -20,13 +20,19 @@ import (
 // text and the shipped credential/persistence rules hard-refuse it in every mode, ahead of the
 // ladder — belt to the fence's braces, since the os.Root would refuse those paths anyway.
 // TestDeleteFile_DangerousActionClassification pins both halves.
+//
+// Git-aware since 2026-08-22: when the workspace is a git worktree and the named file is TRACKED,
+// the removal is followed by a best-effort stage, so the deletion lands in the index the way
+// `git rm` would leave it. The contract — silent skip when there is nothing to stage, a note
+// instead of an error when staging fails, and the undo interplay (/undo restores worktree bytes
+// and leaves the staged deletion standing) — is stated once, on stageGitPaths in git_stage.go.
 
 var deleteFileSpec = toolSpec{
 	name: "delete_file",
 	// The description says "permanently" because that is the one fact the model cannot recover
 	// from getting wrong: there is no trash and no undo, and the file is gone from the workspace
 	// even though a committed copy may survive in git.
-	description: "Permanently delete a file within the workspace. Files only — a directory is refused. There is no undo, so name the path exactly.",
+	description: "Permanently delete a file within the workspace. Files only — a directory is refused. There is no undo, so name the path exactly. A file tracked in git has its deletion staged automatically.",
 	schema: json.RawMessage(`{
   "type": "object",
   "required": ["path"],
@@ -98,7 +104,10 @@ func (t *DeleteFile) Execute(ctx context.Context, call domain.ToolCall) (domain.
 		return errorResult(call.ID, err.Error()), nil
 	}
 	pre.commit(nil, false)
-	return okResult(call.ID, "deleted "+args.Path+resolved), nil
+	// Staging runs only after the unlink stands, and only ever adds to what the call reports: the
+	// probe reads the INDEX, so the path it takes is the one that was just removed from disk.
+	staged := stageGitPaths(ctx, t.root, " (deletion staged in git)", args.Path)
+	return okResult(call.ID, "deleted "+args.Path+resolved+staged), nil
 }
 
 // checkDeletePath validates the one path delete_file takes and returns the model-facing refusal

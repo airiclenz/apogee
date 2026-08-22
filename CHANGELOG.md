@@ -20,6 +20,16 @@ point is a **minor** bump, not a breaking change.
   that already succeeded. `/undo` still restores worktree bytes only — a staged entry it leaves
   behind is visible in `git_status` and cleared by `git add -A` or `git restore --staged`.
 
+- **`delete_file` stages the deletion of a tracked file.** Deleting a file git already knows about
+  now leaves that deletion in the index — the half of `git rm` the tool used to leave for the model
+  to do by hand — and the result says so, appending ` (deletion staged in git)` so the index change
+  is read rather than discovered later through `git_status`. Nothing else moves: an untracked file
+  or a workspace that is no repository behaves byte-identically to before, right down to the result
+  text, and staging is best-effort — a git that refuses or fails appends a skipped note instead of
+  turning a completed removal into a failed call. `/undo` still restores worktree bytes only, so an
+  undone deletion leaves its staged entry standing, visible in `git status` and resolved by
+  `git add -A` or `git restore --staged`.
+
 - **Two new colour roles carry the diff band.** `diff-add-bg` and `diff-del-bg` join the scheme
   vocabulary (ADR 0040), taking it to 31 roles: the background a diff body line sits on, shipped
   as dark `#0e3b34` / `#42181d` and light `#d9f2ec` / `#fbe4e6` — quiet washes out of the same

@@ -213,3 +213,68 @@ func TestDeleteFile_DisclosesTheResolvedTarget(t *testing.T) {
 		t.Errorf("Content = %q, want the bare sentence for a path that resolves to itself", ordinary.Content)
 	}
 }
+
+// deletionStagedNote is the wording delete_file hands stageGitPaths. The tests below pin the exact
+// text, because it is what the model reads to learn that the index moved too.
+const deletionStagedNote = " (deletion staged in git)"
+
+// The three git-aware tests stay sequential: they drive real git, and the package's fake-resolver
+// tests (withFakeGit) swap the process-wide lookGit while they run.
+
+// TestDeleteFile_StagesTheDeletionOfATrackedFile is the point of the git-aware half: deleting a
+// committed file leaves the index holding that deletion — what `git rm` would have produced — and
+// the result says so instead of leaving the model to discover it through git_status.
+func TestDeleteFile_StagesTheDeletionOfATrackedFile(t *testing.T) {
+	root := realPath(t, gitRepo(t))
+
+	result := runFileOp(t, NewDeleteFile(root), map[string]any{"path": "README.md"})
+
+	if result.IsError {
+		t.Fatalf("unexpected tool error: %q", result.Content)
+	}
+	if want := "deleted README.md" + deletionStagedNote; result.Content != want {
+		t.Errorf("Content = %q, want %q", result.Content, want)
+	}
+	if status := gitStatusPorcelain(t, root); !strings.Contains(status, "D  README.md") {
+		t.Errorf("the deletion was not staged:\n%s", status)
+	}
+}
+
+// TestDeleteFile_UntrackedDeletionIsNotStaged is the guard on the trackedness probe: a file git
+// never knew about must leave the index exactly as it was, and the result text unchanged from what
+// the tool has always returned.
+func TestDeleteFile_UntrackedDeletionIsNotStaged(t *testing.T) {
+	root := realPath(t, gitRepo(t))
+	if err := writeFileForTest(root, "scratch.txt", "draft\n"); err != nil {
+		t.Fatalf("seed file: %v", err)
+	}
+
+	result := runFileOp(t, NewDeleteFile(root), map[string]any{"path": "scratch.txt"})
+
+	if result.IsError {
+		t.Fatalf("unexpected tool error: %q", result.Content)
+	}
+	if result.Content != "deleted scratch.txt" {
+		t.Errorf("Content = %q, want the bare sentence for an untracked file", result.Content)
+	}
+	if status := gitStatusPorcelain(t, root); strings.TrimSpace(status) != "" {
+		t.Errorf("deleting an untracked file must leave the repository clean:\n%s", status)
+	}
+}
+
+// TestDeleteFile_NonRepoWorkspaceIsUnchanged pins the other silent skip: outside a repository the
+// probe fails the same way an untracked file does, so the tool behaves byte-identically to the
+// version that knew nothing about git.
+func TestDeleteFile_NonRepoWorkspaceIsUnchanged(t *testing.T) {
+	root := tempRoot(t)
+	writeFixture(t, filepath.Join(root, "plain.txt"), "bytes\n", 0o644)
+
+	result := runFileOp(t, NewDeleteFile(root), map[string]any{"path": "plain.txt"})
+
+	if result.IsError {
+		t.Fatalf("unexpected tool error: %q", result.Content)
+	}
+	if result.Content != "deleted plain.txt" {
+		t.Errorf("Content = %q, want the bare sentence outside a repository", result.Content)
+	}
+}

@@ -125,7 +125,9 @@ is tracked in git, the rename is staged automatically (the effect of git mv)."`
 
 **Commit:** `feat(tools): stage renames of tracked files in move_file (git mv semantics)`
 
-## 3. `delete_file` stages the deletion of a tracked file
+## 3. `delete_file` stages the deletion of a tracked file — ✅ DONE (2026-08-22)
+
+NOTES (2026-08-22): the three new tests stay non-parallel (unlike the rest of `delete_file_test.go`) because they drive real git and the package's `withFakeGit` tests swap the process-wide `lookGit`; the repo fixture's root is passed through `realPath` so the exact result text is assertable.
 
 Depends on item 1.
 
