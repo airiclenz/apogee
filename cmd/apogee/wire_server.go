@@ -15,6 +15,7 @@ import (
 
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
+	"github.com/airiclenz/apogee/internal/filewatch"
 	"github.com/airiclenz/apogee/internal/heartbeat"
 	"github.com/airiclenz/apogee/internal/session"
 	"github.com/airiclenz/apogee/internal/tui"
@@ -157,7 +158,7 @@ func (b serverBinder) bind(entry config.ServerEntry) error {
 // done (a quit, which must not leave a goroutine parked on a channel until teardown reaches the
 // watcher), or the watch itself has been stopped and closed its channel. Either way there will never
 // be another report, and the chain retires.
-func awaitConfigChangeOn(w *config.Watcher) func(context.Context) bool {
+func awaitConfigChangeOn(w *filewatch.Watcher) func(context.Context) bool {
 	return func(ctx context.Context) bool {
 		select {
 		case <-ctx.Done():

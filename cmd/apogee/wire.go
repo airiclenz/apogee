@@ -45,6 +45,7 @@ import (
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/filewatch"
 	"github.com/airiclenz/apogee/internal/library"
 	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/schedule"
@@ -160,7 +161,7 @@ type rootWiring struct {
 	binder        serverBinder
 	live          *liveSettings
 	externalEdits *externalEdit
-	configWatch   *config.Watcher
+	configWatch   *filewatch.Watcher
 	mover         sessionMover
 	launcherPath  *launcherPath
 	launcherSeams launcherWiring

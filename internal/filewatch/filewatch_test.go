@@ -1,9 +1,9 @@
-package config
+package filewatch
 
-// The config file watcher (ADR 0041 decision 3): what counts as a change, how a save's burst of
-// writes becomes one report, and what Stop guarantees. Every test drives a real watcher over a real
-// file in t.TempDir() at a millisecond cadence — the mechanism is a poll and a clock, and a fake of
-// either would test the fake.
+// The file watcher (ADR 0041 decision 3): what counts as a change, how a save's burst of
+// writes becomes one report, what Stop guarantees, and that two watchers over two files each answer
+// for their own. Every test drives a real watcher over a real file in t.TempDir() at a millisecond
+// cadence — the mechanism is a poll and a clock, and a fake of either would test the fake.
 
 import (
 	"os"
@@ -16,18 +16,18 @@ import (
 // so that a burst of writes coalesces even on a loaded machine under -race, and the deadline is wide
 // enough that a missed report is a failure of the watcher rather than of the box it runs on.
 const (
-	configWatchTestInterval = 10 * time.Millisecond
-	configWatchTestSettle   = 150 * time.Millisecond
-	configWatchTestDeadline = 3 * time.Second
-	configWatchTestQuiet    = 400 * time.Millisecond
+	testInterval = 10 * time.Millisecond
+	testSettle   = 150 * time.Millisecond
+	testDeadline = 3 * time.Second
+	testQuiet    = 400 * time.Millisecond
 )
 
-// startConfigWatcher starts a watcher over path at the test cadence and stops it with the test.
-func startConfigWatcher(t *testing.T, path string) *Watcher {
+// startWatcher starts a watcher over path at the test cadence and stops it with the test.
+func startWatcher(t *testing.T, path string) *Watcher {
 	t.Helper()
-	w := NewWatcher(path)
-	w.Interval = configWatchTestInterval
-	w.Settle = configWatchTestSettle
+	w := New(path)
+	w.Interval = testInterval
+	w.Settle = testSettle
 	w.Start()
 	t.Cleanup(w.Stop)
 	return w
@@ -41,21 +41,21 @@ func writeWatchedFile(t *testing.T, path, content string) {
 	}
 }
 
-// awaitConfigChange waits for one report, failing the test with why if none arrives.
-func awaitConfigChange(t *testing.T, w *Watcher, why string) {
+// awaitChange waits for one report, failing the test with why if none arrives.
+func awaitChange(t *testing.T, w *Watcher, why string) {
 	t.Helper()
 	select {
 	case _, ok := <-w.Changes():
 		if !ok {
 			t.Fatalf("Changes closed before %s was reported", why)
 		}
-	case <-time.After(configWatchTestDeadline):
+	case <-time.After(testDeadline):
 		t.Fatalf("no change reported for %s", why)
 	}
 }
 
-// expectNoConfigChange asserts that nothing is reported for the given window.
-func expectNoConfigChange(t *testing.T, w *Watcher, window time.Duration, why string) {
+// expectNoChange asserts that nothing is reported for the given window.
+func expectNoChange(t *testing.T, w *Watcher, window time.Duration, why string) {
 	t.Helper()
 	select {
 	case _, ok := <-w.Changes():
@@ -70,42 +70,42 @@ func expectNoConfigChange(t *testing.T, w *Watcher, window time.Duration, why st
 // One save is one report. The watcher is a poll, so the risk it has to be pinned against is a
 // change that keeps being re-reported on every tick after it: the sample the comparison is made
 // against must advance when the change is observed, not when it is reported.
-func TestConfigWatchReportsAWriteOnce(t *testing.T) {
+func TestWatchReportsAWriteOnce(t *testing.T) {
 	t.Parallel()
 
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	writeWatchedFile(t, path, "auto-title: false\n")
 
-	w := startConfigWatcher(t, path)
+	w := startWatcher(t, path)
 	writeWatchedFile(t, path, "auto-title: true\n# a second line\n")
 
-	awaitConfigChange(t, w, "a single write")
-	expectNoConfigChange(t, w, configWatchTestQuiet, "the file had already been reported once")
+	awaitChange(t, w, "a single write")
+	expectNoChange(t, w, testQuiet, "the file had already been reported once")
 }
 
 // An editor saving is a burst — write, truncate, rename — and each of those is a distinct file state
 // a poll can land on. The Settle delay exists so the burst is one apply, not three, the last two of
 // which would be against a half-written document.
-func TestConfigWatchCoalescesABurstIntoOneReport(t *testing.T) {
+func TestWatchCoalescesABurstIntoOneReport(t *testing.T) {
 	t.Parallel()
 
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	writeWatchedFile(t, path, "auto-title: false\n")
 
-	w := startConfigWatcher(t, path)
+	w := startWatcher(t, path)
 	writeWatchedFile(t, path, "")
 	writeWatchedFile(t, path, "auto-title: tr")
 	writeWatchedFile(t, path, "auto-title: true\n")
 
-	awaitConfigChange(t, w, "a burst of three writes")
-	expectNoConfigChange(t, w, configWatchTestQuiet, "the burst had already been reported once")
+	awaitChange(t, w, "a burst of three writes")
+	expectNoChange(t, w, testQuiet, "the burst had already been reported once")
 }
 
 // The size half of the change witness, pinned on its own: a rewrite that lands on the same mtime is
 // exactly the case ADR 0041 rejected "mtime alone" for. Both files are stamped with a whole-second
 // timestamp so the assertion holds on a filesystem of any timestamp granularity, and the new content
 // arrives by rename so the watcher can never observe an intermediate state with a moved mtime.
-func TestConfigWatchReportsASameMtimeSizeChange(t *testing.T) {
+func TestWatchReportsASameMtimeSizeChange(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
@@ -118,7 +118,7 @@ func TestConfigWatchReportsASameMtimeSizeChange(t *testing.T) {
 		t.Fatalf("stamp %s: %v", path, err)
 	}
 
-	w := startConfigWatcher(t, path)
+	w := startWatcher(t, path)
 
 	writeWatchedFile(t, staged, "auto-title: false\n# longer\n")
 	if err := os.Chtimes(staged, stamp, stamp); err != nil {
@@ -137,64 +137,64 @@ func TestConfigWatchReportsASameMtimeSizeChange(t *testing.T) {
 			info.ModTime(), stamp)
 	}
 
-	awaitConfigChange(t, w, "a same-mtime rewrite of a different length")
+	awaitChange(t, w, "a same-mtime rewrite of a different length")
 }
 
 // Editors that save by renaming leave the watched path missing for an instant. That absence is not a
 // change and not a fatal error: the watch survives it, reports nothing for it, and reports the file
 // that replaces it.
-func TestConfigWatchSurvivesADeleteAndRecreate(t *testing.T) {
+func TestWatchSurvivesADeleteAndRecreate(t *testing.T) {
 	t.Parallel()
 
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	writeWatchedFile(t, path, "auto-title: false\n")
 
-	w := startConfigWatcher(t, path)
+	w := startWatcher(t, path)
 	if err := os.Remove(path); err != nil {
 		t.Fatalf("remove %s: %v", path, err)
 	}
-	expectNoConfigChange(t, w, configWatchTestQuiet, "the file was merely absent")
+	expectNoChange(t, w, testQuiet, "the file was merely absent")
 
 	writeWatchedFile(t, path, "auto-title: true\n# recreated\n")
-	awaitConfigChange(t, w, "the recreated file")
+	awaitChange(t, w, "the recreated file")
 }
 
 // An idle apogee must stay idle. A poll that reported a file nobody touched would journal markers and
 // reconnect MCP servers on its own schedule (ADR 0041's rejection of an unconditional re-apply).
-func TestConfigWatchStaysSilentOnAnUnchangedFile(t *testing.T) {
+func TestWatchStaysSilentOnAnUnchangedFile(t *testing.T) {
 	t.Parallel()
 
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	writeWatchedFile(t, path, "auto-title: false\n")
 
-	w := startConfigWatcher(t, path)
-	expectNoConfigChange(t, w, configWatchTestQuiet, "nothing had touched the file")
+	w := startWatcher(t, path)
+	expectNoChange(t, w, testQuiet, "nothing had touched the file")
 }
 
 // Stop's guarantee is structural rather than statistical: it waits for the poll goroutine to return
 // before closing Changes, so once Stop has returned there is no goroutine left to report anything and
 // the closed channel says the watch is over. Churning the file afterwards is the leak check — a
 // surviving goroutine would answer.
-func TestConfigWatchStopEndsTheWatch(t *testing.T) {
+func TestWatchStopEndsTheWatch(t *testing.T) {
 	t.Parallel()
 
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	writeWatchedFile(t, path, "auto-title: false\n")
 
-	w := startConfigWatcher(t, path)
+	w := startWatcher(t, path)
 	writeWatchedFile(t, path, "auto-title: true\n# changed\n")
-	awaitConfigChange(t, w, "a write before Stop")
+	awaitChange(t, w, "a write before Stop")
 
 	w.Stop()
 	writeWatchedFile(t, path, "auto-title: false\n# changed again, after Stop\n")
-	time.Sleep(configWatchTestSettle + 5*configWatchTestInterval)
+	time.Sleep(testSettle + 5*testInterval)
 
 	select {
 	case _, ok := <-w.Changes():
 		if ok {
 			t.Fatal("a change was reported after Stop returned")
 		}
-	case <-time.After(configWatchTestDeadline):
+	case <-time.After(testDeadline):
 		t.Fatal("Changes must be closed once Stop has returned")
 	}
 }
@@ -202,19 +202,19 @@ func TestConfigWatchStopEndsTheWatch(t *testing.T) {
 // Stop must not depend on anyone draining Changes. The consumer is a select in the composition root,
 // and at teardown it has already stopped selecting — a watcher that parked its goroutine on an
 // undrained send would wedge the shutdown it is being torn down by.
-func TestConfigWatchStopReturnsWithNobodyDraining(t *testing.T) {
+func TestWatchStopReturnsWithNobodyDraining(t *testing.T) {
 	t.Parallel()
 
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	writeWatchedFile(t, path, "auto-title: false\n")
 
-	w := NewWatcher(path)
-	w.Interval = configWatchTestInterval
-	w.Settle = configWatchTestSettle
+	w := New(path)
+	w.Interval = testInterval
+	w.Settle = testSettle
 	w.Start()
 
 	writeWatchedFile(t, path, "auto-title: true\n# never read\n")
-	time.Sleep(configWatchTestSettle + 5*configWatchTestInterval)
+	time.Sleep(testSettle + 5*testInterval)
 
 	stopped := make(chan struct{})
 	go func() {
@@ -223,10 +223,40 @@ func TestConfigWatchStopReturnsWithNobodyDraining(t *testing.T) {
 	}()
 	select {
 	case <-stopped:
-	case <-time.After(configWatchTestDeadline):
+	case <-time.After(testDeadline):
 		t.Fatal("Stop did not return with an undrained report pending")
 	}
 
 	// A second Stop is what a teardown running its closers twice would do.
 	w.Stop()
+}
+
+// The reason this is a package rather than a type inside internal/config: the daemon watches
+// `schedules.yaml` on the same mechanism (ADR 0034), so two watchers run side by side over two
+// files. Each must answer for its own file only — a report that could have come from either would
+// make the daemon re-read a file nobody edited, and would re-apply config.yaml on every schedule
+// edit.
+func TestTwoWatchersReportOnlyTheirOwnFile(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.yaml")
+	schedulesPath := filepath.Join(dir, "schedules.yaml")
+	writeWatchedFile(t, configPath, "auto-title: false\n")
+	writeWatchedFile(t, schedulesPath, "schedules: []\n")
+
+	configWatch := startWatcher(t, configPath)
+	schedulesWatch := startWatcher(t, schedulesPath)
+
+	// A burst on the second file: one report there, and nothing at all on the first.
+	writeWatchedFile(t, schedulesPath, "schedules:\n")
+	writeWatchedFile(t, schedulesPath, "schedules:\n  - name: nightly\n")
+	awaitChange(t, schedulesWatch, "a burst of writes to the second file")
+	expectNoChange(t, schedulesWatch, testQuiet, "the burst had already been reported once")
+	expectNoChange(t, configWatch, testQuiet, "nothing had touched the first file")
+
+	// And the first file still reports its own single write.
+	writeWatchedFile(t, configPath, "auto-title: true\n")
+	awaitChange(t, configWatch, "a single write to the first file")
+	expectNoChange(t, schedulesWatch, testQuiet, "the second file had not changed again")
 }

@@ -20,6 +20,7 @@ import (
 
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
+	"github.com/airiclenz/apogee/internal/filewatch"
 	"github.com/airiclenz/apogee/internal/mcp"
 	"github.com/airiclenz/apogee/internal/mechanisms"
 	"github.com/airiclenz/apogee/internal/schedule"
@@ -224,8 +225,8 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	// against, and stopped with the run's other closers.
 	//
 	// The path is the one this session resolved, which is the same file every seam in the block below
-	// writes; the watcher reads no YAML and holds no projection of its own (internal/config/configwatch.go).
-	w.configWatch = config.NewWatcher(config.FilePath(w.opts.ConfigDir))
+	// writes; the watcher reads no YAML and holds no projection of its own (internal/filewatch).
+	w.configWatch = filewatch.New(config.FilePath(w.opts.ConfigDir))
 	w.configWatch.Start()
 
 	// The one fold that re-points a session at another Upstream, shared by `/server`'s switch and

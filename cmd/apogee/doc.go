@@ -53,9 +53,11 @@
 // acts cross to the renderer as.
 //
 // The config cluster is no longer here: the schema, the precedence, the key registry, the
-// splice writer, the legacy fold, the watcher and the [config.Options] the flags bind to all
+// splice writer, the legacy fold and the [config.Options] the flags bind to all
 // live in internal/config (ADR 0043) — a fact about the config file is not a fact about this
-// Driver. This binary calls that package and keeps only its own display projection of it.
+// Driver. The poll that reports the file changed sits one package over in internal/filewatch,
+// which knows nothing about YAML and which the daemon's schedules watch shares (ADR 0041). This
+// binary calls both packages and keeps only its own display projection of them.
 //
 // The /settings seams: settingsrows.go projects the key registry plus the values THIS
 // run resolved onto the renderer's plain rows, masking what must never be shown;

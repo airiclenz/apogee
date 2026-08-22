@@ -15,6 +15,7 @@ import (
 
 	apogee "github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
+	"github.com/airiclenz/apogee/internal/filewatch"
 	"github.com/airiclenz/apogee/internal/mcp"
 	"github.com/airiclenz/apogee/internal/tui"
 )
@@ -30,9 +31,9 @@ const (
 )
 
 // startConfigWatcher starts a watcher over path at the test cadence and stops it with the test.
-func startConfigWatcher(t *testing.T, path string) *config.Watcher {
+func startConfigWatcher(t *testing.T, path string) *filewatch.Watcher {
 	t.Helper()
-	w := config.NewWatcher(path)
+	w := filewatch.New(path)
 	w.Interval = configWatchTestInterval
 	w.Settle = configWatchTestSettle
 	w.Start()

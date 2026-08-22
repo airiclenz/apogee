@@ -51,8 +51,10 @@
 // literal key, a command whose output is the key, or the name of an environment variable — into the
 // token a seam sends, running it at first use and caching the answer for the session.
 // configmigrate.go is the one-time fold of the retired
-// top-level upstream keys into `servers:` (ADR 0036 decision 9). configwatch.go is the
-// one-goroutine poller that reports config.yaml changed, whoever changed it (ADR 0041).
+// top-level upstream keys into `servers:` (ADR 0036 decision 9). The one-goroutine poller that
+// reports config.yaml changed, whoever changed it (ADR 0041), is deliberately NOT here: it knows
+// nothing about YAML or this schema, and it has a second caller in the daemon's schedules watch, so
+// it lives in internal/filewatch.
 //
 // And doc.go this map.
 package config
