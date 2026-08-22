@@ -34,6 +34,14 @@ func userProfileEscapeTarget(home string) string {
 	return filepath.Join(home, "apogee-confinetest-escape")
 }
 
+// chainedClobberLine declines on Windows: the chained-script clobber probe reproduces the
+// terminal tool's POSIX hardening — the fail-fast preamble (`set -e`), for which cmd.exe
+// has no analogue (the terminal tool passes cmd lines through verbatim, see
+// platform.FailFastPreamble), and the kill-on-denial watch, whose signatures are the POSIX
+// EPERM spellings where cmd.exe prints "Access is denied." — and the script's heredoc has
+// no cmd.exe spelling either. The probe skips loudly instead.
+func chainedClobberLine(Shell, string) (string, bool) { return "", false }
+
 // setRawCommandLine hands raw to CreateProcess verbatim, bypassing os/exec's EscapeArg
 // joining, which mangles the redirect's quotes (internal/tools/exec_cmdline_other.go carries
 // the full reasoning; this is the same fix for the harness). It only sets the command line:

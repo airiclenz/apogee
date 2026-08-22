@@ -593,9 +593,10 @@ func TestSubprocessToolResultDenialLabel(t *testing.T) {
 }
 
 // TestTerminal_ConfinementDenialLabelEndToEnd drives Execute with a fake Confiner and a
-// command whose output mimics the incident's OS denial, proving the confined flag travels
-// from runSubprocess into the rendered result: the confined failure carries the label, the
-// identical unconfined failure does not.
+// command whose output mimics the incident's OS denial, proving the denial plumbing travels
+// from runSubprocess into the rendered result. On the confined run the live kill-on-denial
+// watch matches the streamed EPERM text, so the failure carries the definitive STOP label;
+// the identical unconfined failure is never watched and carries no confinement label at all.
 func TestTerminal_ConfinementDenialLabelEndToEnd(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("POSIX shell command; the label plumbing it pins is platform-independent")
@@ -612,15 +613,60 @@ func TestTerminal_ConfinementDenialLabelEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute err = %v, want nil", err)
 	}
-	if !res.IsError || !strings.Contains(res.Content, confinementDenialLabel) {
-		t.Errorf("confined denial result = %q (IsError=%v), want the confinement label", res.Content, res.IsError)
+	if !res.IsError || !strings.Contains(res.Content, confinementDenialStopLabel) {
+		t.Errorf("confined denial result = %q (IsError=%v), want the stopped-by-confinement label", res.Content, res.IsError)
 	}
 
 	res, err = term.Execute(context.Background(), terminalCall("c2", denial))
 	if err != nil {
 		t.Fatalf("Execute err = %v, want nil", err)
 	}
-	if !res.IsError || strings.Contains(res.Content, confinementDenialLabel) {
-		t.Errorf("unconfined result = %q (IsError=%v), want the same failure WITHOUT the label", res.Content, res.IsError)
+	if !res.IsError || strings.Contains(res.Content, confinementDenialLabel) ||
+		strings.Contains(res.Content, confinementDenialStopLabel) {
+		t.Errorf("unconfined result = %q (IsError=%v), want the same failure WITHOUT any confinement label", res.Content, res.IsError)
+	}
+}
+
+// TestSubprocessToolResultDenialStopLabel pins the stop-label rendering as a pure table over
+// subprocessToolResult: a denial-stopped non-zero result carries confinementDenialStopLabel
+// (and it wins over the weaker "likely" heuristic), while a clean exit stays a success with
+// no label however the watch flagged it — the watch's kill racing a process that already
+// finished must never turn a success into an error.
+func TestSubprocessToolResultDenialStopLabel(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name          string
+		res           subprocessResult
+		wantStopLabel bool
+		wantErr       bool
+		wantAnyLikely bool
+	}{
+		{"stopped kill (signalled exit)", subprocessResult{
+			combinedOutput: "mkdir: /tmp/srtest: Operation not permitted", exitCode: -1,
+			confined: true, denialStopped: true}, true, true, false},
+		{"stopped but self-exited non-zero", subprocessResult{
+			combinedOutput: "mkdir: /tmp/srtest: Operation not permitted", exitCode: 1,
+			confined: true, denialStopped: true}, true, true, false},
+		{"watch matched but the run finished cleanly", subprocessResult{
+			combinedOutput: "grep found: Operation not permitted", exitCode: 0,
+			confined: true, denialStopped: true}, false, false, false},
+		{"confined failure without the watch verdict keeps the likely label", subprocessResult{
+			combinedOutput: "touch: /etc/f: Operation not permitted", exitCode: 1,
+			confined: true}, false, true, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			res := subprocessToolResult("c1", tc.res)
+			if got := strings.Contains(res.Content, confinementDenialStopLabel); got != tc.wantStopLabel {
+				t.Errorf("stop label present = %v, want %v (content = %q)", got, tc.wantStopLabel, res.Content)
+			}
+			if got := strings.Contains(res.Content, confinementDenialLabel); got != tc.wantAnyLikely {
+				t.Errorf("likely label present = %v, want %v (content = %q)", got, tc.wantAnyLikely, res.Content)
+			}
+			if res.IsError != tc.wantErr {
+				t.Errorf("IsError = %v, want %v", res.IsError, tc.wantErr)
+			}
+		})
 	}
 }

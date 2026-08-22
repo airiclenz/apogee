@@ -205,7 +205,19 @@ beyond the two porcelain runs. Not a Mechanism; no gating, no config key.
 
 **Commit:** `feat(agent): warn in tool results when a subprocess changes workspace files`
 
-## 6. Escape-probe battery: chained-script clobber probe
+## 6. Escape-probe battery: chained-script clobber probe — ✅ DONE (2026-08-22)
+
+NOTES (2026-08-22): authorized scope deviation (owner decision, 2026-08-22): the item's premise — the item-1 preamble alone aborts the denied `&&` chain — is false (POSIX `set -e` exempts every command of an AND-OR list but the last; verified under the real landlock backend, dash, and bash), so this item lands the incident handoff's fix A instead: a live kill-on-denial output watch (`platform.DenialKillWriter`) wired onto every confined `runSubprocess` run, killing the §2.4 process group at the first OS-denial signature, plus the definitive stopped-by-confinement result label; the chained-script probe now targets that mechanism (preamble still prepended exactly as the terminal composes it) and asserts watch-detected AND non-zero exit AND no workspace `inside.txt`.
+
+NOTES (2026-08-22): item 1's `set -e` rationale is corrected wherever its docs state it — `platform.FailFastPreamble`'s doc (host.go) and the `Terminal` doc comment (terminal.go) now say the preamble does NOT cover a failure inside an AND-OR list other than its last command and that the confined-run denial watch closes that gap; the plan's own item-1 paragraph ("this alone prevents the incident's clobber") is false for the same reason.
+
+NOTES (2026-08-22): the watch is asynchronous (the denial's stderr races the shell's next command through a pipe), so the probe's script carries a `sleep 2` standing in for the incident's intervening commands and the probe asserts the mechanism wins within that margin; mechanism reach: the watch lives at the shared `runSubprocess` funnel, so a confined `python_exec` or hook subprocess gets the same protection — the reach statement item 2 recorded for the label, now for the kill.
+
+NOTES (2026-08-22): files beyond the item's named list: the mechanism lives in `internal/platform` (confinetest cannot import platform — the documented Shell import cycle — so the three battery drivers hand `Probe` a `DenialKillerFactory` beside the preamble, and `runChainedClobber` wires cancel-as-kill + WaitDelay); the tools wiring and the two result labels live in exec_common.go/terminal.go with their tests; platform's doc.go map gains denialkill.go.
+
+NOTES (2026-08-22): landlock denials print strerror(EACCES) ("Permission denied"), not EPERM — discovered when the probe's real-backend run missed the EPERM-only signatures; the set now carries both errnos' spellings, and item 2's label (whose list moved to `platform.LooksLikeConfinementDenial`) is thereby fixed too: it could never have matched a real Linux denial. Item 7 should reconcile the "EPERM" wording in contract §6.2 row 3 / §2.2 and ADR 0012 with the EACCES reality when it documents this plan.
+
+NOTES (2026-08-22): item 2's end-to-end test updated, not a drive-by: with the watch live, a confined denial-shaped failure deterministically carries the stronger stop label, so `TestTerminal_ConfinementDenialLabelEndToEnd`'s confined arm now asserts `confinementDenialStopLabel` (the unconfined arm asserts neither label).
 
 Depends on item 1.
 

@@ -189,6 +189,13 @@ type subprocessResult struct {
 	// failed confined run) so the model learns WHY a write outside the box failed; an
 	// unconfined run must never carry that label, however EPERM-shaped its output.
 	confined bool
+	// denialStopped reports that the live kill-on-denial watch on a CONFINED run matched an
+	// OS-denial signature and issued the process-group kill (fix A of the 2026-08-22
+	// workspace-clobber incident). subprocessToolResult keys on it for the definitive
+	// stopped-by-confinement label — but only on a non-zero exit: a run that still finished
+	// cleanly (the match landed after the process was already done, or matched output that
+	// was not a fatal denial) keeps its success result untouched.
+	denialStopped bool
 }
 
 // runSubprocess runs spec as a one-shot subprocess (ADR 0008 — fresh process per call, no
@@ -289,6 +296,25 @@ func runSubprocess(ctx context.Context, spec subprocessSpec) (subprocessResult, 
 		confined = true
 	}
 
+	// A CONFINED run's output is watched live for an OS-denial signature; the first match
+	// cancels runCtx, which fires cmd.Cancel — the §2.4 process-group kill — so a script
+	// whose command the fence denied is stopped there instead of running its remaining
+	// lines against a half-done state (fix A of the 2026-08-22 workspace-clobber
+	// incident). `set -e` cannot do this alone: POSIX exempts every command of an AND-OR
+	// list but the last, so a denied `mkdir d && cd d` chain does not abort the script and
+	// the unguarded lines after it run with the cwd unchanged — the incident's clobber.
+	// The watch wraps the SAME capped buffer the streams already feed (one instance on
+	// both keeps exec's single interleaved copier); on a split-stdout run only stderr is
+	// watched, stdout being the caller's payload. Unconfined runs are never watched.
+	var denialWatch *platform.DenialKillWriter
+	if confined {
+		denialWatch = platform.NewDenialKillWriter(&out, cancel)
+		cmd.Stderr = denialWatch
+		if !spec.splitStdout {
+			cmd.Stdout = denialWatch
+		}
+	}
+
 	runErr := runWithTeardown(cmd, teardown)
 
 	// A ctx cancellation is the one case surfaced as a Go error (the loop rolls back).
@@ -307,6 +333,7 @@ func runSubprocess(ctx context.Context, spec subprocessSpec) (subprocessResult, 
 	if res.drainWedged && res.exitCode == 0 {
 		res.exitCode = -1
 	}
+	res.denialStopped = denialWatch != nil && denialWatch.Detected()
 	return res, nil
 }
 

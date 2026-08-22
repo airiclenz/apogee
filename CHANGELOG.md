@@ -10,6 +10,26 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **A confinement denial now stops the whole terminal call (kill-on-denial watch), and the
+  escape battery proves it on the incident's own shape.** Fix A of the 2026-08-22
+  workspace-clobber incident: every CONFINED subprocess run is wired through
+  `platform.DenialKillWriter`, a live output watch that kills the process group at the
+  first OS-denial signature, so a denied command aborts the script instead of letting its
+  unguarded later lines run against a half-done state — the job `set -e` cannot do, since
+  POSIX exempts every command of an AND-OR list but the last (the incident's `&&` chain).
+  A stopped call renders a definitive `[blocked by workspace confinement: an operation was
+  denied, so the command was stopped; …]` error label (the "likely" heuristic label
+  remains for unstopped denial-shaped failures); a run that still finished cleanly is
+  never forced into an error. The shared signature set (now `platform`-owned) also matches
+  strerror(EACCES) (`Permission denied`, `EACCES`) — what landlock denials actually print
+  on Linux, which the EPERM-only list shipped with the denial label missed — and stays
+  deliberately POSIX-only (Windows' `Access is denied.` is unmatched, mirroring its
+  missing fail-fast floor). The escape battery's new `chained_script_clobber_denied` probe
+  reproduces the incident under the real backends — cwd = the workspace box root,
+  fail-fast preamble and denial watch wired exactly as the terminal tool composes them —
+  and asserts the watch matched the streamed denial, the script died non-zero, and the
+  unguarded relative write never reached the workspace.
+
 - **Tool results now warn when a subprocess changes workspace files.** An always-on
   structural floor (every mode, Bypass included — ADR 0006 class): when the workspace
   root is a git repository (probed once per Agent, cached), the loop snapshots

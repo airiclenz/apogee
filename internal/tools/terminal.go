@@ -47,10 +47,16 @@ type terminalArgs struct {
 //
 // On the POSIX path every script runs under a fail-fast preamble
 // (platform.FailFastPreamble: `set -e`, plus `set -o pipefail` where the host sh accepts
-// it), so a failed command — a confinement denial included — aborts the whole script
-// instead of letting an unguarded later line run against a half-done state. Windows is
-// asymmetric by necessity: cmd.exe has no `set -e` analogue (`if errorlevel` is per-line,
-// not a mode), so cmd lines pass through verbatim with no fail-fast floor.
+// it), so a failed plain command aborts the whole script instead of letting an unguarded
+// later line run against a half-done state. `set -e` does NOT cover a failure inside an
+// AND-OR list other than its last command (POSIX exempts them), so a denied
+// `mkdir d && cd d && …` chain still falls through to the lines after it — the 2026-08-22
+// incident's shape; that gap is closed by the live kill-on-denial watch every CONFINED
+// run is wired through (platform.DenialKillWriter in runSubprocess), which kills the
+// process group at the first OS-denial signature. Windows is asymmetric by necessity:
+// cmd.exe has no `set -e` analogue (`if errorlevel` is per-line, not a mode), so cmd
+// lines pass through verbatim with no fail-fast floor — and no denial watch either (its
+// denials print "Access is denied.", which the POSIX signature set deliberately skips).
 type Terminal struct {
 	toolSpec
 	root string
@@ -173,33 +179,22 @@ func (t *Terminal) resolveWorkdir(workdir string) (string, error) {
 const confinementDenialLabel = "[likely blocked by workspace confinement: writes are allowed" +
 	" only inside the workspace and the session scratch dir]"
 
-// confinementDenialSignatures are the OS-denial spellings the label keys on: strerror(EPERM)
-// as libc capitalises it, the lower-cased spelling Go's syscall.Errno prints, and the bare
-// errno name toolchains emit. Best-effort by design — strerror text is locale-dependent, and
-// a missed match costs nothing (the model still sees the non-zero exit).
-var confinementDenialSignatures = []string{
-	"Operation not permitted",
-	"operation not permitted",
-	"EPERM",
-}
-
-// looksLikeConfinementDenial reports whether a confined command's combined output carries one
-// of the OS-denial signatures — the heuristic half of the denial label; the structural half
-// (the run was confined AND failed) is the caller's to check.
-func looksLikeConfinementDenial(output string) bool {
-	for _, signature := range confinementDenialSignatures {
-		if strings.Contains(output, signature) {
-			return true
-		}
-	}
-	return false
-}
+// confinementDenialStopLabel is the line appended when the live kill-on-denial watch stopped
+// the call itself (subprocessResult.denialStopped): stronger than the "likely" label above,
+// because here the harness matched the denial as it streamed and killed the process group, so
+// the model is told plainly that the rest of its script did not run. The OS-denial spellings
+// both labels key on live in internal/platform (platform.LooksLikeConfinementDenial), which
+// is also what the watch scans with.
+const confinementDenialStopLabel = "[blocked by workspace confinement: an operation was" +
+	" denied, so the command was stopped; writes are allowed only inside the workspace and" +
+	" the session scratch dir]"
 
 // subprocessToolResult renders a captured subprocess outcome as a ToolResult. A non-zero
 // exit is an error result (so the model sees the command failed) carrying the captured
 // output and exit code; a clean exit is a success result with the output. An error result
-// from a CONFINED run whose output looks like an OS denial additionally carries
-// confinementDenialLabel — best-effort, never forced onto a clean exit.
+// the kill-on-denial watch stopped carries confinementDenialStopLabel; any other error
+// result from a CONFINED run whose output looks like an OS denial carries
+// confinementDenialLabel — both best-effort, never forced onto a clean exit.
 func subprocessToolResult(callID string, res subprocessResult) domain.ToolResult {
 	var b strings.Builder
 	if res.timedOut {
@@ -214,7 +209,10 @@ func subprocessToolResult(callID string, res subprocessResult) domain.ToolResult
 	b.WriteString(res.combinedOutput)
 	if res.exitCode != 0 {
 		fmt.Fprintf(&b, "\n[exit code %d]", res.exitCode)
-		if res.confined && looksLikeConfinementDenial(res.combinedOutput) {
+		switch {
+		case res.denialStopped:
+			b.WriteString("\n" + confinementDenialStopLabel)
+		case res.confined && platform.LooksLikeConfinementDenial(res.combinedOutput):
 			b.WriteString("\n" + confinementDenialLabel)
 		}
 		return errorResult(callID, b.String())

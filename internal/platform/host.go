@@ -525,11 +525,15 @@ var failFastPreambleOnce = sync.OnceValue(func() string {
 // FailFastPreamble returns the fail-fast prefix the terminal tool prepends to every
 // POSIX script: `set -e` always, plus `set -o pipefail` when a one-time cached probe
 // shows the host `sh` accepts it (`sh -c "set -o pipefail"` exiting 0 ⇒ supported).
-// With `set -e` in force, a failed command — a confinement denial included — aborts the
-// whole script instead of letting an unguarded later line run. It is exported so the
-// escape-probe battery can prepend exactly what the terminal tool would. It is
-// meaningful only for a POSIX `sh`: cmd.exe has no `set -e` analogue, so callers apply
-// it on the POSIX shell path alone.
+// With `set -e` in force, a failed plain command aborts the whole script instead of
+// letting an unguarded later line run — but NOT a failure inside an AND-OR list other
+// than its last command: POSIX exempts those, so a denied `mkdir d && cd d && …` chain
+// falls through to the lines after it with the cwd unchanged (the 2026-08-22 incident's
+// exact shape). That gap is closed elsewhere, by the kill-on-denial output watch a
+// confined run is wired through (DenialKillWriter; internal/tools wires it). The
+// preamble is exported so the escape-probe battery can prepend exactly what the
+// terminal tool would. It is meaningful only for a POSIX `sh`: cmd.exe has no `set -e`
+// analogue, so callers apply it on the POSIX shell path alone.
 func FailFastPreamble() string { return failFastPreambleOnce() }
 
 // composeFailFastPreamble builds the preamble for a host whose `sh` does (or does not)

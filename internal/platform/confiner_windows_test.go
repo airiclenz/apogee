@@ -42,7 +42,7 @@ func newProbeConfiner(t *testing.T) *tokenConfiner {
 func TestWindowsTokenProbe(t *testing.T) {
 	// Not parallel: the confined children are real subprocesses, and the harness labels the
 	// box roots on the real filesystem.
-	confinetest.Probe(t, newProbeConfiner(t), Current())
+	confinetest.Probe(t, newProbeConfiner(t), Current(), FailFastPreamble(), newProbeDenialKiller)
 }
 
 func TestWindowsTokenProbeNetwork(t *testing.T) {

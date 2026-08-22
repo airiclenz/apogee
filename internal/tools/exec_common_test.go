@@ -319,3 +319,70 @@ func TestRunSubprocessRecordsConfined(t *testing.T) {
 		t.Error("confined run reported confined = false")
 	}
 }
+
+// TestRunSubprocessDenialWatchKillsConfinedRun proves fix A of the 2026-08-22
+// workspace-clobber incident at the funnel: a CONFINED run whose stream carries an
+// OS-denial signature is killed by the live watch before its later, unguarded write line
+// runs — the job `set -e` cannot do for an AND-OR list, since POSIX exempts every command
+// of one but the last. The script mimics the incident: the "denial", intervening work
+// (the sleep, which the incident's own commands stood in for — the kill is asynchronous),
+// then the destructive write that must never land.
+func TestRunSubprocessDenialWatchKillsConfinedRun(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell script; the watch keys on POSIX EPERM spellings only")
+	}
+	t.Parallel()
+
+	dir := t.TempDir()
+	clobber := filepath.Join(dir, "clobber.txt")
+	script := `echo "mkdir: cannot create directory: Operation not permitted" >&2` + "\n" +
+		"sleep 5\n" +
+		"echo clobbered > " + clobber + "\n"
+	ctx := domain.WithConfinement(context.Background(), domain.Confinement{
+		Confiner: &fakeConfiner{caps: domain.ConfinementCaps{FSWrite: true}},
+		Box:      domain.ConfinementBox{WorkspaceRoot: dir},
+	})
+
+	res, err := runSubprocess(ctx, subprocessSpec{argv: []string{"/bin/sh", "-c", script}})
+
+	if err != nil {
+		t.Fatalf("runSubprocess err = %v, want nil (a denial kill is a result, not a Go error)", err)
+	}
+	if !res.denialStopped {
+		t.Error("denialStopped = false, want the watch to have matched and killed the run")
+	}
+	if res.exitCode == 0 {
+		t.Error("exitCode = 0, want non-zero for the killed run")
+	}
+	if res.timedOut {
+		t.Error("timedOut = true, want the denial kill reported as a kill, not a timeout")
+	}
+	if _, statErr := os.Stat(clobber); !errors.Is(statErr, os.ErrNotExist) {
+		t.Errorf("stat %q = %v, want not-exist — the kill must land before the unguarded write", clobber, statErr)
+	}
+}
+
+// TestRunSubprocessDenialWatchNeverWatchesUnconfined pins the watch's structural gate: the
+// identical denial-shaped output on an UNCONFINED run is not scanned, not killed, and not
+// flagged — an unconfined EPERM can never be blamed on the box (the same gate the confined
+// flag itself pins above).
+func TestRunSubprocessDenialWatchNeverWatchesUnconfined(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell script; the gate it pins is platform-independent")
+	}
+	t.Parallel()
+
+	script := `echo "mkdir: cannot create directory: Operation not permitted" >&2`
+
+	res, err := runSubprocess(context.Background(), subprocessSpec{argv: []string{"/bin/sh", "-c", script}})
+
+	if err != nil {
+		t.Fatalf("runSubprocess err = %v, want nil", err)
+	}
+	if res.denialStopped {
+		t.Error("denialStopped = true on an unconfined run")
+	}
+	if res.exitCode != 0 {
+		t.Errorf("exitCode = %d, want 0 — the run must complete untouched", res.exitCode)
+	}
+}
