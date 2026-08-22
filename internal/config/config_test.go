@@ -1495,10 +1495,11 @@ func TestApplyConfigAutoTitle(t *testing.T) {
 }
 
 // The remember-model config block parses into opts.rememberModel: a file-only key like auto-title,
-// with the default the other way round — absent ⇒ OFF, so a config that says nothing has apogee
-// write nothing back into it. The seeded template is in the table for the same reason it is in
-// auto-title's: the key ships commented, so a first run must land on the same default as an empty
-// file.
+// with the BUILT-IN default the other way round — absent ⇒ OFF, so a config that says nothing has
+// apogee write nothing back into it. The seeded template is in the table for the same reason it is
+// in auto-title's, but it now answers differently: the template ships `remember-model: true` as an
+// active line, so a first run comes back ON, and that case is what pins the shipped line reaching
+// opts rather than being read past.
 func TestApplyConfigRememberModel(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -1509,7 +1510,7 @@ func TestApplyConfigRememberModel(t *testing.T) {
 		{name: "absent key ⇒ off", want: false},
 		{name: "an explicit true opts in", fileYAML: "remember-model: true\n", want: true},
 		{name: "an explicit false is the default, said out loud", fileYAML: "remember-model: false\n", want: false},
-		{name: "the seeded template resolves the default", fileYAML: string(defaultConfigYAML), want: false},
+		{name: "the seeded template ships it on", fileYAML: string(defaultConfigYAML), want: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

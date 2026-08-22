@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/airiclenz/apogee/internal/prompt"
 )
@@ -54,11 +55,14 @@ func TestSeedConfigDoesNotOverwrite(t *testing.T) {
 	}
 }
 
-// The embedded starter config is valid YAML and sets EXACTLY one thing: the default system
-// prompt (ADR 0023), the template's one deliberately-active key. Every other key stays a
-// commented example, so seeding the template on first run changes nothing else about how a
-// run resolves. This is the precise form of the old "the template is behaviour-neutral"
-// invariant, amended when the shipped prompt went active.
+// The embedded starter config is valid YAML and moves EXACTLY what it means to move: the default
+// system prompt (ADR 0023) plus the short list of settings the template deliberately ships with a
+// value of their own. Every other key stays at its built-in default, so seeding the template on
+// first run resolves those keys exactly as a run with no config file at all would. The exception
+// list is the point of the test: a key that starts differing from its built-in default without
+// being named there is drift, and fails here. It is the "the template is behaviour-neutral"
+// invariant twice amended — once when the shipped prompt went active, once when the template
+// started shipping settings of its own.
 func TestEmbeddedDefaultConfigSetsOnlyTheSystemPrompt(t *testing.T) {
 	t.Parallel()
 	if len(defaultConfigYAML) == 0 {
@@ -105,11 +109,18 @@ func TestEmbeddedDefaultConfigSetsOnlyTheSystemPrompt(t *testing.T) {
 		t.Errorf("shipped system-prompt block fails validate: %v", err)
 	}
 
-	// Every other key still resolves to its built-in default — the surviving half of the old
-	// invariant, now stated against the defaults rather than against an empty layer.
+	// Every other key still resolves to its built-in default, except the settings the template
+	// ships active with a value of their own. Each line here mirrors one template line and names
+	// it: the template is the ground truth, so a deliberate change there is meant to be echoed
+	// here, and an unannounced one is what this fails on.
+	want := wantDefaults()
+	want.RememberModel = true              // `remember-model: true`
+	want.UI.StallAfter = 120 * time.Second // `ui.stall-after: 120s`
+
 	file.SystemPrompt = SystemPromptSettings{}
-	if diffs := structDiff(file, wantDefaults()); len(diffs) != 0 {
-		t.Errorf("embedded default config moves keys beyond the system prompt:\n%s", strings.Join(diffs, "\n"))
+	if diffs := structDiff(file, want); len(diffs) != 0 {
+		t.Errorf("embedded default config moves keys beyond the system prompt and the settings it ships active:\n%s",
+			strings.Join(diffs, "\n"))
 	}
 }
 

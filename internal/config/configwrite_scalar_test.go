@@ -161,6 +161,11 @@ func TestSpliceScalarSettingGoldenOps(t *testing.T) {
 // about it: a key set for the first time lands under the paragraph that documents it. For a nested
 // key that means under its block's whole commented example, since the block line has to be created
 // with it.
+//
+// A key the template ships ACTIVE is not set for the first time at all — the splice rewrites the
+// line where it already stands, the shape settings-edited.set-ui-spinner.golden pins — so this
+// table asks the template which of the two each path is in rather than hard-coding the answer.
+// That is what keeps it honest when the template turns a key on or off.
 func TestSpliceScalarSettingInsertsBelowTheTemplateExample(t *testing.T) {
 	t.Parallel()
 	for _, tt := range []struct {
@@ -183,11 +188,23 @@ func TestSpliceScalarSettingInsertsBelowTheTemplateExample(t *testing.T) {
 			if err != nil {
 				t.Fatalf("splice %s into the template: %v", tt.path, err)
 			}
+			lines := SplitConfigLines([]byte(template))
+			if value, active, err := scalarAtPath(defaultConfigYAML, tt.path); err != nil {
+				t.Fatalf("read %s from the template: %v", tt.path, err)
+			} else if active {
+				if got := len(SplitConfigLines(updated)); got != len(lines) {
+					t.Fatalf("the template sets %s (%s), so the write must rewrite that line: %d lines from %d",
+						tt.path, value, got, len(lines))
+				}
+				if got, ok, err := scalarAtPath(updated, tt.path); err != nil || !ok || got != tt.value {
+					t.Fatalf("after the rewrite, %s reads %q (set=%v, err=%v), want %q", tt.path, got, ok, err, tt.value)
+				}
+				return
+			}
 			at, added := splicedInsertion(t, template, string(updated))
 			if !slices.Equal(added, tt.want) {
 				t.Errorf("inserted %q, want %q", added, tt.want)
 			}
-			lines := SplitConfigLines([]byte(template))
 			if above := lines[at-2]; !isCommentLine(above) {
 				t.Fatalf("the setting landed under %q, which is not part of its commented example", above)
 			}
@@ -495,56 +512,70 @@ func assertOnlyKeyChanged(t *testing.T, before, after, path string) {
 	}
 }
 
-// The list kind end to end, on the file the users actually have: the seeded template, which documents
-// `context-files:` as a commented example and sets none of it. The block is created below that
-// example, a second edit REWRITES the one line it created rather than adding another, and the reset
-// takes the block back out — leaving the template byte-for-byte as it shipped.
+// The list kind end to end, in both states the file it is written into can be in. On the file the
+// users actually have — the seeded template, which ships `context-files:` active with its `names:`
+// list on ONE line — a write REWRITES that line rather than folding the list into a block sequence,
+// and a second write rewrites it again rather than adding another. Created from nothing, the list
+// is still one line, under the block line created with it, and the reset takes both back out.
 func TestSpliceScalarSettingWritesAListOnOneLine(t *testing.T) {
 	t.Parallel()
 	k := mustKey("context-files.names")
 	template := string(defaultConfigYAML)
 
-	created, err := setScalarSetting([]byte(template), k, "NOTES.md, docs/HOWTO.md")
+	rewritten, err := setScalarSetting(defaultConfigYAML, k, "NOTES.md, docs/HOWTO.md")
 	if err != nil {
-		t.Fatalf("create the block: %v", err)
+		t.Fatalf("rewrite the template's list: %v", err)
 	}
-	at, inserted := splicedInsertion(t, template, string(created))
-	want := []string{"context-files:", "  names: [NOTES.md, docs/HOWTO.md]"}
-	if !slices.Equal(inserted, want) {
-		t.Fatalf("inserted %q at line %d, want %q — one line for the block and one for the list", inserted, at, want)
+	if rewritten == nil {
+		t.Fatal("the write reported nothing to do")
 	}
-	// The block lands under the commented example that documents it, not at the end of the file
-	// (ADR 0035's insert-below-example call).
-	if lines := SplitConfigLines([]byte(template)); at >= len(lines) {
-		t.Errorf("the block was appended at line %d of %d, want it below the commented example", at, len(lines))
+	if before, after := len(SplitConfigLines(defaultConfigYAML)), len(SplitConfigLines(rewritten)); before != after {
+		t.Fatalf("the rewrite changed the line count from %d to %d — a list this writer touches stays on one line",
+			before, after)
 	}
-	if got, ok, err := scalarAtPath(created, k.Path); err != nil || !ok || got != "[NOTES.md, docs/HOWTO.md]" {
-		t.Fatalf("the created list reads %q (set=%v, err=%v)", got, ok, err)
+	if got, ok, err := scalarAtPath(rewritten, k.Path); err != nil || !ok || got != "[NOTES.md, docs/HOWTO.md]" {
+		t.Fatalf("the rewritten list reads %q (set=%v, err=%v)", got, ok, err)
 	}
+	assertOnlyKeyChanged(t, template, string(rewritten), k.Path)
 
-	// A second edit is a REWRITE of that one line: same line count, and the flow sequence already
-	// there is a value this writer may replace (valueFitsOneLine).
-	updated, err := setScalarSetting(created, k, "[AGENTS.md]")
+	// A second edit is a REWRITE of that same one line: the flow sequence already there is a value
+	// this writer may replace (valueFitsOneLine).
+	updated, err := setScalarSetting(rewritten, k, "[AGENTS.md]")
 	if err != nil {
-		t.Fatalf("rewrite the list: %v", err)
+		t.Fatalf("rewrite the list again: %v", err)
 	}
-	if before, after := len(SplitConfigLines(created)), len(SplitConfigLines(updated)); before != after {
-		t.Errorf("the rewrite changed the line count from %d to %d", before, after)
+	if before, after := len(SplitConfigLines(rewritten)), len(SplitConfigLines(updated)); before != after {
+		t.Errorf("the second rewrite changed the line count from %d to %d", before, after)
 	}
 	if got, ok, err := scalarAtPath(updated, k.Path); err != nil || !ok || got != "[AGENTS.md]" {
 		t.Fatalf("the rewritten list reads %q (set=%v, err=%v)", got, ok, err)
 	}
-	assertOnlyKeyChanged(t, string(created), string(updated), k.Path)
+	assertOnlyKeyChanged(t, string(rewritten), string(updated), k.Path)
 
-	// And the reset removes the block whole — the `names:` line and the `context-files:` key it was
-	// the only child of — which is the template again, comment for comment.
-	reset, err := resetScalarSetting(t, updated, k)
+	// Written into a file that has no such block, the list is one line too — the block line and the
+	// list line, and nothing else — and the reset takes the pair back out whole, the `names:` line
+	// and the `context-files:` key it was the only child of.
+	const bare = "mode: auto\n"
+	created, err := setScalarSetting([]byte(bare), k, "NOTES.md, docs/HOWTO.md")
+	if err != nil {
+		t.Fatalf("create the block: %v", err)
+	}
+	at, inserted := splicedInsertion(t, bare, string(created))
+	want := []string{"", "context-files:", "  names: [NOTES.md, docs/HOWTO.md]"}
+	if !slices.Equal(inserted, want) {
+		t.Fatalf("inserted %q at line %d, want %q — one line for the block and one for the list", inserted, at, want)
+	}
+	reset, err := resetScalarSetting(t, created, k)
 	if err != nil {
 		t.Fatalf("reset the list: %v", err)
 	}
-	if string(reset) != template {
-		t.Errorf("the reset did not restore the template:\n%s", reset)
+	if got, ok, _ := scalarAtPath(reset, k.Path); ok {
+		t.Errorf("after the reset the list still reads %q", got)
 	}
+	if slices.Contains(SplitConfigLines(reset), "context-files:") {
+		t.Errorf("the reset left the block line standing with nothing under it:\n%s", reset)
+	}
+	assertOnlyKeyChanged(t, string(created), string(reset), k.Path)
 }
 
 // A file shape the line arithmetic would have to guess at is refused, loudly, with nothing written:
@@ -727,9 +758,12 @@ func TestConfigWriteSettingRefusals(t *testing.T) {
 }
 
 // The end-to-end write into a config that was not there: the seeded template's own text survives
-// it, and what the write added to that template is the key's two lines and nothing else. That the
-// seeding and the mode-preserving atomic write happen at all is the transaction's property
+// it, and what the write left behind is the one key it was given and nothing else. That the seeding
+// and the mode-preserving atomic write happen at all is the transaction's property
 // (configedit_test.go); what is asked here is that THIS writer's edit reaches a seeded file whole.
+// Which shape the splice took — an insertion below the commented example, or a rewrite of a line
+// the template ships active — is the splice's own business, pinned by the placement tests above;
+// what a seeded file must show either way is every line of the template's documentation intact.
 func TestConfigWriteSettingSeedsAnAbsentConfig(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "config.yaml")
@@ -737,15 +771,29 @@ func TestConfigWriteSettingSeedsAnAbsentConfig(t *testing.T) {
 		t.Fatalf("save into an absent config: %v", err)
 	}
 	written := readTestConfig(t, path)
-	if !strings.Contains(written, "\nui:\n  spinner: glitter\n") {
-		t.Errorf("the seeded config does not carry the setting:\n%s", written)
+	if got, ok, err := scalarAtPath([]byte(written), "ui.spinner"); err != nil || !ok || got != "glitter" {
+		t.Errorf("the seeded config reads ui.spinner = %q (set=%v, err=%v), want \"glitter\":\n%s", got, ok, err, written)
 	}
 	if !strings.Contains(written, "# apogee configuration") {
 		t.Error("the seeded template's documentation did not survive the write")
 	}
-	if _, added := splicedInsertion(t, string(defaultConfigYAML), written); !slices.Equal(added, []string{"ui:", "  spinner: glitter"}) {
-		t.Errorf("the write added %q to the template", added)
+	if got, want := commentLines(written), commentLines(string(defaultConfigYAML)); !slices.Equal(got, want) {
+		t.Errorf("the write changed the template's documentation: %d comment lines, want %d", len(got), len(want))
 	}
+	assertOnlyKeyChanged(t, string(defaultConfigYAML), written, "ui.spinner")
+}
+
+// commentLines is the documentation of a config file: every whole-line comment in it, in order. A
+// write splices one setting's value, so whatever it does to that setting's own line, this comes
+// back equal.
+func commentLines(data string) []string {
+	var out []string
+	for _, line := range SplitConfigLines([]byte(data)) {
+		if isCommentLine(line) {
+			out = append(out, line)
+		}
+	}
+	return out
 }
 
 // Writing what the file already says, and resetting a key it does not set, are both confirmations
