@@ -383,7 +383,7 @@ Remove the ISSUES.md entry.
 
 ---
 
-## 13. Refuse a delimited thinking style with no delimiters
+## 13. Refuse a delimited thinking style with no delimiters — ✅ DONE (2026-08-22)
 
 **What:** Fix the ISSUES.md entry *"A `delimited` thinking style with no delimiters loads
 and strips nothing"*. `validateThinkingAxes` (`internal/config/config.go:1814-1826`) checks

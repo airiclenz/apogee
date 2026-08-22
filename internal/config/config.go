@@ -1810,18 +1810,48 @@ func validateToolCallPattern(pattern, toolCallPattern string) error {
 }
 
 // validateThinkingAxes checks one profile's thinking half: the style against the three strippers the
-// parse seam builds, and the effort against the four levels the wire mapping knows (ADR 0050).
+// parse seam builds, the delimited style against the token pair it strips with, and the effort
+// against the four levels the wire mapping knows (ADR 0050).
 func validateThinkingAxes(pattern string, t thinkingConfig) error {
 	if !isKnownThinkingStyle(t.Style) {
 		return fmt.Errorf("apogee: invalid model-profiles.%s.thinking.style %q: want none, "+
 			"delimited, or harmony, or leave the key out for no inline thinking channel",
 			pattern, t.Style)
 	}
+	if err := validateDelimitedTokens(pattern, t); err != nil {
+		return err
+	}
 	if effort := domain.ThinkingEffort(t.Effort); !effort.Valid() {
 		return fmt.Errorf("apogee: invalid model-profiles.%s.thinking.effort %q: want off, low, "+
 			"medium, or high, or leave the key out for the model's own default", pattern, string(effort))
 	}
 	return nil
+}
+
+// validateDelimitedTokens checks the token pair the delimited style strips with: both halves have to
+// be there. Neither failure shows itself at runtime — the seam builds the stripper from whatever it
+// is given, and an empty token pair strips nothing at all — so a half-configured profile reads on
+// screen as a model whose reasoning has simply moved into its visible reply. Only the delimited
+// style is checked: tokens left beside another style are inert, not a misconfiguration this refuses.
+func validateDelimitedTokens(pattern string, t thinkingConfig) error {
+	if domain.ThinkingStyle(t.Style) != domain.ThinkingDelimited {
+		return nil
+	}
+	var missing []string
+	if t.Start == "" {
+		missing = append(missing, fmt.Sprintf("model-profiles.%s.thinking.start", pattern))
+	}
+	if t.End == "" {
+		missing = append(missing, fmt.Sprintf("model-profiles.%s.thinking.end", pattern))
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	return fmt.Errorf("apogee: model-profiles.%s.thinking.style is delimited but %s is not set: "+
+		"delimited strips the reasoning a model brackets with that literal token pair, so a profile "+
+		"missing either half strips nothing and the thinking lands in the visible reply — set both to "+
+		"the tokens the model actually emits, or pick a style that needs none",
+		pattern, strings.Join(missing, " and "))
 }
 
 // isKnownThinkingStyle reports whether s names one of the three strippers the parse seam can build,

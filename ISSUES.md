@@ -23,23 +23,6 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 
 ## Open defects
 
-### A `delimited` thinking style with no delimiters loads and strips nothing
-
-**Status:** [P] open 2026-08-22 — residual of
-`docs/plans/archived/2026-08-20 - 00 - engine-architecture-deepening-plan.md` item 12, which validated
-the four named axes and left this cross-field check outside all four.
-
-`validateThinkingAxes` checks `style` against the three strippers and `effort` against the four levels
-(`internal/config/config.go:1814-1826`); neither looks at `start`/`end`
-(`thinkingConfig`, `internal/config/config.go:1721-1726`). A profile with `style: delimited` and no
-token pair therefore loads clean, and the seam wraps `StripThinking` with two empty delimiters
-(`internal/processing/parserfor.go:57`) — a stripper that removes nothing, so the model's reasoning
-lands in its visible content with no error naming the key. It is the same failure shape item 12 was
-written to remove, one axis further out: the fix is a fifth check refusing `delimited` without both
-tokens, in the style of the existing messages (`model-profiles.<pattern>.thinking.start`).
-
----
-
 ### `runOneHook`'s recover boundary now also covers the fire booking
 
 **Status:** [P] open 2026-08-22 — residual of

@@ -956,6 +956,16 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- A `delimited` thinking style with no delimiters is now a startup error. Profile validation
+  checked the style against the three strippers and the effort against the four levels, but never
+  the token pair the delimited style strips WITH — so `thinking: {style: delimited}` on its own
+  loaded clean and the parse seam built a stripper from two empty tokens, which removes nothing:
+  the model's reasoning simply landed in its visible reply with no error naming a key. Loading now
+  refuses that profile and names the halves that are missing —
+  `model-profiles.<pattern>.thinking.start`, `.end`, or both. Only the delimited style is checked:
+  `none` and `harmony` need no tokens and still load without them, and tokens left beside a
+  non-delimited style stay as inert as they were.
+
 - Pinned the exec fence's deliberately empty `NetworkAllow`: `deriveDeps` builds the full
   `ConfinementBox` and clears the host list on purpose, and a test now fails if that clearing
   line is ever dropped.

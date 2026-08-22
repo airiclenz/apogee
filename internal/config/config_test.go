@@ -3445,6 +3445,32 @@ func TestApplyConfigBadModelProfileAxisErrors(t *testing.T) {
 				"off", "low", "medium", "high",
 			},
 		},
+		{
+			name: "a delimited style with no token pair to strip with",
+			configYAML: `model-profiles:
+  qwen3.8:
+    thinking:
+      style: delimited
+`,
+			wantIn: []string{
+				"model-profiles.qwen3.8.thinking.style", "delimited",
+				"model-profiles.qwen3.8.thinking.start",
+				"model-profiles.qwen3.8.thinking.end",
+			},
+		},
+		{
+			name: "a delimited style holding only half its token pair",
+			configYAML: `model-profiles:
+  qwen3.8:
+    thinking:
+      style: delimited
+      start: "<think>"
+`,
+			wantIn: []string{
+				"model-profiles.qwen3.8.thinking.style", "delimited",
+				"model-profiles.qwen3.8.thinking.end",
+			},
+		},
 	}
 
 	for _, tc := range cases {
@@ -3507,6 +3533,64 @@ func TestApplyConfigFullyValidModelProfileLoads(t *testing.T) {
 	}
 	if !reflect.DeepEqual(opts.ModelProfiles, want) {
 		t.Errorf("opts.modelProfiles = %+v; want %+v", opts.ModelProfiles, want)
+	}
+}
+
+// The other three styles need no token pair, so none of them is dragged into the delimited check: a
+// profile naming them — or naming no style at all — loads with `start:`/`end:` left out entirely.
+func TestApplyConfigTokenlessThinkingStylesLoad(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name       string
+		configYAML string
+		wantStyle  domain.ThinkingStyle
+	}{
+		{
+			name: "the none style passes content through untouched",
+			configYAML: `model-profiles:
+  qwen3.8:
+    thinking:
+      style: none
+`,
+			wantStyle: domain.ThinkingNone,
+		},
+		{
+			name: "the harmony style reads gpt-oss channels",
+			configYAML: `model-profiles:
+  qwen3.8:
+    thinking:
+      style: harmony
+`,
+			wantStyle: domain.ThinkingHarmony,
+		},
+		{
+			name: "no style at all, just an effort",
+			configYAML: `model-profiles:
+  qwen3.8:
+    thinking:
+      effort: high
+`,
+			wantStyle: "",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			home := testConfigHome(t, "")
+			writeConfigHome(t, home, tc.configYAML)
+
+			opts := Options{ConfigDir: home}
+			err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify)
+
+			if err != nil {
+				t.Fatalf("ApplyConfig: %v — a style that needs no tokens must load without them", err)
+			}
+			if len(opts.ModelProfiles) != 1 || opts.ModelProfiles[0].Profile.Thinking.Style != tc.wantStyle {
+				t.Errorf("opts.ModelProfiles = %+v; want one qwen3.8 entry with style %q",
+					opts.ModelProfiles, tc.wantStyle)
+			}
+		})
 	}
 }
 
