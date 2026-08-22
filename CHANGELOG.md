@@ -951,6 +951,16 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- Corrected a stale symbol in ADR 0036. Decision 6's account of the detached `--endpoint` /
+  `APOGEE_ENDPOINT` overrides says they "leave `multiSourceKeys`" — a table renamed to
+  `keyAccessors` when every registry row gained a `fromFile` projection and resolution became a
+  loop over the registry, which also widened it from the three multi-source keys to all 38 rows.
+  The record gains a short dated amendment naming the table as it is spelled today, the two guards
+  that pin it to `fileConfig` through the registry (`TestKeyAccessorsBindDescribedKeys` and
+  `TestRegistryIsBijectionWithFileConfig`), and the overrides' own resolver and binding test
+  (`startupOverrideSources`, `TestStartupOverrideSourcesBindTheDetachedNames`). What the decision
+  decides is unchanged.
+
 - **Re-saving a setting into a config apogee cannot read is refused again, not confirmed.** Every
   edit apogee makes to `config.yaml` runs one transaction now, and it parses the file you started
   from before it splices — deliberately holding that parse's error back, so a splice able to name

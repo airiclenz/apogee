@@ -128,6 +128,14 @@ test, so nothing advertises a source that nothing reads. And `upstreamChoices` s
 invariant holds unchanged, while its duplicate-name edge dissolves, because a configured startup
 server is already in the list it would have been prepended to.
 
+*(Amended 2026-08-22: the table those names leave is called `keyAccessors` today. `multiSourceKeys`
+held only the three keys with sources above the file; it gained an entry per registry row — a
+`fromFile` projection for every key — when resolution became a loop over the registry, so its pin to
+`fileConfig` now runs through the registry: `TestKeyAccessorsBindDescribedKeys` binds one entry per
+row, and the bijection guard `TestRegistryIsBijectionWithFileConfig` pins those rows to the tags. The
+overrides' own resolver and binding test are `startupOverrideSources` and
+`TestStartupOverrideSourcesBindTheDetachedNames`. Nothing this decision decides changes.)*
+
 **7. An empty list guides into `/settings`, whose scope does not change.** No entries and no
 override → the TUI starts pre-bound and opens the `/settings` pane, with a status-line fact naming
 `~/.apogee/config.yaml` and a restart. The pane behaves exactly as ADR 0035 shipped it: the
