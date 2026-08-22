@@ -8,6 +8,8 @@ point is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+## [0.16.0] — 2026-08-22
+
 ### Added
 
 - **The "/" and "@" autocomplete dropdown scrolls under the mouse wheel.** A notch with the pointer
