@@ -94,7 +94,7 @@
 // The subcommands: headless.go is `apogee headless`, one prompt run to completion with
 // nobody watching, and the binary's only distinct exit codes; daemon.go `apogee daemon`,
 // the standing process behind the schedules file — seed, single-instance lock, load,
-// adopt, run, shut down — plus the timestamped stdout log that is its whole user
+// adopt, live-reload, shut down — plus the timestamped stdout log that is its whole user
 // interface (ADR 0034); probe.go `apogee probe`
 // and the free host report its bare noun prints (ADR 0021); probemodel.go
 // `apogee probe model`, the half that spends live tokens and records a fingerprint;

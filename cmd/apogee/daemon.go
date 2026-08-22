@@ -8,8 +8,8 @@ package main
 // of the three. Everything that decides anything lives somewhere else: the file's schema and its
 // validation in internal/daemon, the reload diff there too, the clock in internal/schedule, the
 // composition of one Firing in daemonfire.go, the single-instance lock in internal/platform. What is
-// left here is the lifecycle — seed, lock, load, adopt, run, shut down — and the log lines that say
-// what happened, because a process nobody watches has nothing else to say it with.
+// left here is the lifecycle — seed, lock, load, adopt, reload, shut down — and the log lines that
+// say what happened, because a process nobody watches has nothing else to say it with.
 //
 // Foreground only: it never forks, never writes a pid file it consults, and never detaches. A host
 // supervisor — systemd, launchd, the Task Scheduler — owns restarts and log retention, and
@@ -33,6 +33,7 @@ import (
 
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/daemon"
+	"github.com/airiclenz/apogee/internal/filewatch"
 	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/probe"
 	"github.com/airiclenz/apogee/internal/schedule"
@@ -80,6 +81,21 @@ var acquireDaemonLock = platform.AcquireLock
 // cycle is thirty seconds must run on. A test replaces it to make a due tick happen now rather than
 // in half a minute. Production never reassigns it.
 var daemonClock schedule.Clock
+
+// watchSchedules is the seam onto the live-reload watch: it starts a stat-poll watcher over the
+// schedules file (ADR 0041 decision 3, internal/filewatch) and hands back the channel that reports
+// a settled save together with the stop that ends the watch and closes it.
+//
+// It is a seam rather than a direct call for the same reason daemonClock is one. What item 7 owns is
+// what the daemon DOES when a save lands — re-read, refuse or swap — and a test of that should not
+// have to out-wait a poll cadence to reach it; the poll, the settle window and the two witnesses are
+// internal/filewatch's own tested behaviour. A test replaces this with a channel it sends on itself.
+// Production never reassigns it.
+var watchSchedules = func(path string) (<-chan struct{}, func()) {
+	watcher := filewatch.New(path)
+	watcher.Start()
+	return watcher.Changes(), watcher.Stop
+}
 
 // newDaemonCommand builds `apogee daemon` — the standing process behind every schedule on this
 // host. It carries exactly one flag: which apogee home to read. Everything else a run needs is a
@@ -202,7 +218,10 @@ func runDaemon(ctx context.Context, opts *config.Options, changed func(string) b
 		}
 	}()
 
-	file, err := loadSchedules(schedulesPath, daemonHost(*opts, home, wiring), log)
+	// The facts internal/daemon's validation cannot learn from the file, resolved once: config.yaml
+	// is startup-only (ADR 0055), so the same host answers every reload as answered the first load.
+	host := daemonHost(*opts, home, wiring)
+	file, err := loadSchedules(schedulesPath, host, log)
 	if err != nil {
 		return err
 	}
@@ -222,16 +241,119 @@ func runDaemon(ctx context.Context, opts *config.Options, changed func(string) b
 	// The startup adoption is a reload against an EMPTY running set — the same call an edit makes,
 	// so the two paths cannot drift apart (ADR 0034's all-or-nothing swap).
 	ids := make(map[string]string, len(file.Schedules))
-	if _, err := daemon.Apply(scheduler, ids, nil, file.Schedules); err != nil {
+	if _, err := adoptSchedules(scheduler, wiring, ids, nil, file.Schedules); err != nil {
 		scheduler.Close()
 		return fmt.Errorf("apogee daemon: %w", err)
 	}
-	wiring.adopt(file.Schedules)
+
+	// The live-reload watch. `schedules.yaml` is the ONLY file the daemon re-reads while it runs, and
+	// the watch starts AFTER the first adoption so that a save landing during startup is measured
+	// against the file the daemon actually put on the clock.
+	changes, stopWatching := watchSchedules(schedulesPath)
+	defer stopWatching()
 	log.line("watching %s — %s on the clock", schedulesPath, countedSchedules(len(file.Schedules)))
 
-	<-daemonStopRequest(ctx, signals, log)
-	daemonShutdown(scheduler, ids, file, log, signals, ctx.Done())
-	return nil
+	// One wait, two things worth waking for. Folding the watch into the stop request's own select is
+	// what keeps a reload from racing a shutdown: the loop is single-threaded, so a save being acted
+	// on finishes before the stop is read, and a stop already asked for is never overtaken by a save.
+	stopRequested := daemonStopRequest(ctx, signals, log)
+	for {
+		select {
+		case <-stopRequested:
+			daemonShutdown(scheduler, ids, file, log, signals, ctx.Done())
+			return nil
+		case _, watching := <-changes:
+			if !watching {
+				// The watch ended without the daemon being asked to stop — nothing further will ever
+				// arrive on it, so it leaves the select and the daemon runs on with the set it has.
+				changes = nil
+				log.line("the schedules watch ended — no further edits will be picked up until the daemon restarts")
+				continue
+			}
+			file = reloadSchedules(scheduler, wiring, ids, schedulesPath, host, file, log)
+		}
+	}
+}
+
+// adoptSchedules is the ONE way onto the clock: startup calls it with an empty running set, every
+// accepted edit with the set the daemon last adopted. Sharing it is what keeps the two from
+// drifting — an entry adopted at boot and the same entry adopted by a save reach the scheduler and
+// the Firing composition through exactly the same two calls, in the same order.
+//
+// The wiring adopts the desired set whatever [daemon.Apply] reported, because the id map — not the
+// returned Reload — is what says who is on the clock. An entry whose Add failed is absent from that
+// map and can never fire, so carrying its `run:` half costs nothing, while withholding the set on a
+// partial failure would leave the entries that DID land with no workspace to run in.
+func adoptSchedules(scheduler *schedule.Scheduler, wiring *daemonWiring, ids map[string]string,
+	running, desired []daemon.Entry) (daemon.Reload, error) {
+	reload, err := daemon.Apply(scheduler, ids, running, desired)
+	wiring.adopt(desired)
+	return reload, err
+}
+
+// reloadSchedules acts on one settled save and returns the file the daemon runs from here on: the
+// new one when it validated, the one already running when it did not. `shutdown-grace` therefore
+// takes effect on the next shutdown rather than the current one, which is the only moment it means
+// anything.
+//
+// The swap is all-or-nothing (ADR 0034 decision 3). ONE defect anywhere refuses the WHOLE file and
+// changes nothing, because a partial swap would leave the file a human just saved and the set the
+// daemon is running disagreeing, with nothing on screen to say which entries took — and the daemon
+// has no screen. The refusal names every defect and then says what is still running, so a journal
+// read the next morning shows both halves of the answer.
+func reloadSchedules(scheduler *schedule.Scheduler, wiring *daemonWiring, ids map[string]string,
+	path string, host daemon.Host, running daemon.File, log *daemonLog) daemon.File {
+	file, defects, err := readSchedules(path, host, log)
+	if err != nil {
+		if defects == 0 {
+			// A read that failed outright — the file was deleted, or its permissions changed. There
+			// are no defect lines in the log for it, so the reason is stated here.
+			log.line("%s could not be read: %v", path, err)
+		}
+		log.line("the edit was refused whole — keeping the previous %s on the clock", countedSchedules(len(ids)))
+		return running
+	}
+
+	// The running set is what the id map actually holds, not what the previous file listed: an entry
+	// whose Add failed is not on the clock, and diffing as though it were would ask the scheduler to
+	// stop something it never started.
+	reload, err := adoptSchedules(scheduler, wiring, ids, adoptedEntries(running.Schedules, ids), file.Schedules)
+	log.line("%s", reloadSummary(reload))
+	if err != nil {
+		log.line("some of the edit did not take: %v", err)
+	}
+	return file
+}
+
+// reloadSummary is the one line an accepted save logs: what it added, replaced and removed, with the
+// untouched entries counted rather than named. Naming them is what the line must not do — a file of
+// twenty schedules where one changed would otherwise bury the one name that matters under nineteen
+// that did not, on every save.
+//
+// A cosmetic edit — a comment, a reordering, a whitespace change — says so plainly, because a human
+// who saves a file and sees nothing in the log cannot tell a reload that decided nothing from a
+// watch that never fired.
+func reloadSummary(reload daemon.Reload) string {
+	if !reload.Changed() {
+		return "reloaded " + schedulesFileName + " — no change; every schedule keeps its place in its cycle"
+	}
+	parts := make([]string, 0, 4)
+	for _, part := range []struct {
+		verb  string
+		names []string
+	}{
+		{"added", reload.Added},
+		{"replaced", reload.Replaced},
+		{"removed", reload.Removed},
+	} {
+		if len(part.names) > 0 {
+			parts = append(parts, part.verb+" "+strings.Join(part.names, ", "))
+		}
+	}
+	if kept := len(reload.Kept); kept > 0 {
+		parts = append(parts, fmt.Sprintf("%s untouched", countedSchedules(kept)))
+	}
+	return "reloaded " + schedulesFileName + " — " + strings.Join(parts, "; ")
 }
 
 // daemonStopRequest returns the channel that closes when the daemon is asked to stop: the first
@@ -334,29 +456,44 @@ func seedSchedulesFile(path string) (bool, error) {
 	return true, nil
 }
 
-// loadSchedules reads and validates the schedules file, logging EVERY defect on its own line before
-// refusing. At startup there is no previous set to fall back on — that is the reload path's answer
-// (ADR 0034) — so a defective file stops the daemon rather than starting it with nothing on the
-// clock, which would look like a daemon that is working.
+// readSchedules reads and validates the schedules file, logging EVERY defect on its own line, and
+// reports how many there were. It is the half startup and reload share; what they do NOT share is
+// what a refusal falls back to, so the sentence that says so belongs to each caller and not here.
 //
-// The returned error is a summary rather than the joined defects: the defects have already been
-// logged where a supervisor journals them, and main would otherwise print all of them a second time
-// on the way out.
-func loadSchedules(path string, host daemon.Host, log *daemonLog) (daemon.File, error) {
+// A read failure — an absent file, a permission change — reports zero defects, which is how a caller
+// tells "the file says something wrong" from "there was no file to ask".
+func readSchedules(path string, host daemon.Host, log *daemonLog) (daemon.File, int, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return daemon.File{}, fmt.Errorf("apogee daemon: read %s: %w", path, err)
+		return daemon.File{}, 0, fmt.Errorf("read %s: %w", path, err)
 	}
 	file, err := daemon.Load(data, host)
 	if err == nil {
-		return file, nil
+		return file, 0, nil
 	}
 	defects := daemonDefects(err)
 	for _, defect := range defects {
 		log.line("%s", defect)
 	}
-	return daemon.File{}, fmt.Errorf("apogee daemon: %s has %s — nothing was scheduled; fix the file and start again",
-		path, countedDefects(len(defects)))
+	return daemon.File{}, len(defects), fmt.Errorf("%s has %s", path, countedDefects(len(defects)))
+}
+
+// loadSchedules is the STARTUP read. At startup there is no previous set to fall back on — that is
+// the reload path's answer (ADR 0034) — so a defective file stops the daemon rather than starting it
+// with nothing on the clock, which would look like a daemon that is working.
+//
+// The returned error is a summary rather than the joined defects: the defects have already been
+// logged where a supervisor journals them, and main would otherwise print all of them a second time
+// on the way out.
+func loadSchedules(path string, host daemon.Host, log *daemonLog) (daemon.File, error) {
+	file, defects, err := readSchedules(path, host, log)
+	switch {
+	case err == nil:
+		return file, nil
+	case defects == 0:
+		return daemon.File{}, fmt.Errorf("apogee daemon: %w", err)
+	}
+	return daemon.File{}, fmt.Errorf("apogee daemon: %w — nothing was scheduled; fix the file and start again", err)
 }
 
 // daemonDefects splits a validation failure into the lines it is made of. internal/daemon joins its

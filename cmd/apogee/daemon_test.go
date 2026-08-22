@@ -50,6 +50,12 @@ type daemonHarness struct {
 	locked string
 	// released reports whether the lock was given back.
 	released bool
+	// changes is the schedules watch, stood in for: a test sends on it to report the settled save it
+	// has just written, so the reload path is driven without out-waiting a real poll cadence.
+	changes chan struct{}
+	// watched records the path the watch seam was asked for, and stopped whether it was ended.
+	watched string
+	stopped bool
 }
 
 // newDaemonHarness prepares an apogee home with a startup server and installs every seam.
@@ -66,10 +72,11 @@ func newDaemonHarness(t *testing.T) *daemonHarness {
 		signals:   make(chan os.Signal, 2),
 		out:       &syncBuffer{},
 		errOut:    &syncBuffer{},
+		changes:   make(chan struct{}, 1),
 	}
 
 	prevRunner, prevSlots, prevConfiner := runOnce, discoverSlots, newConfiner
-	prevLock, prevClock := acquireDaemonLock, daemonClock
+	prevLock, prevClock, prevWatch := acquireDaemonLock, daemonClock, watchSchedules
 	runOnce = h.runner.once
 	discoverSlots = func(context.Context, string, string, string) int { return 0 }
 	newConfiner = func() apogee.Confiner { return fenceableHost }
@@ -78,9 +85,13 @@ func newDaemonHarness(t *testing.T) *daemonHarness {
 		return func() { h.released = true }, nil
 	}
 	daemonClock = h.clock
+	watchSchedules = func(path string) (<-chan struct{}, func()) {
+		h.watched = path
+		return h.changes, func() { h.stopped = true }
+	}
 	t.Cleanup(func() {
 		runOnce, discoverSlots, newConfiner = prevRunner, prevSlots, prevConfiner
-		acquireDaemonLock, daemonClock = prevLock, prevClock
+		acquireDaemonLock, daemonClock, watchSchedules = prevLock, prevClock, prevWatch
 	})
 	return h
 }
@@ -94,6 +105,14 @@ func (h *daemonHarness) writeSchedules(t *testing.T, body string) {
 	if err := os.WriteFile(h.schedules, []byte(body), 0o600); err != nil {
 		t.Fatalf("write schedules.yaml: %v", err)
 	}
+}
+
+// save rewrites the schedules file while the daemon runs and reports the settled change the watcher
+// would have reported, which is the one event the reload path is driven by.
+func (h *daemonHarness) save(t *testing.T, body string) {
+	t.Helper()
+	h.writeSchedules(t, body)
+	h.changes <- struct{}{}
 }
 
 // run drives one daemon to completion on its own goroutine and returns a func that waits for it and
@@ -330,14 +349,22 @@ func TestDaemonRefusesWhenNoStartupServerIsResolved(t *testing.T) {
 // Adoption and the run
 // ----------------------------------------------------------------------------
 
-// twoSchedulesYAML is a valid file with two entries, one per mode the schema accepts.
-func twoSchedulesYAML(workspace string) string {
+// oneScheduleYAML is a valid file with a single plan entry.
+func oneScheduleYAML(workspace string) string {
 	return fmt.Sprintf("shutdown-grace: 1s\nschedules:\n"+
 		"  - name: nightly-audit\n    on:\n      cycle: 24h\n"+
-		"    run:\n      prompt: \"/code-audit internal/tui\"\n      workspace: %s\n"+
-		"  - name: hourly-sweep\n    on:\n      cycle: 1h\n"+
-		"    run:\n      prompt: sweep the tree\n      workspace: %s\n      mode: auto\n"+
-		"      server: %s\n", workspace, workspace, testServerName)
+		"    run:\n      prompt: \"/code-audit internal/tui\"\n      workspace: %s\n", workspace)
+}
+
+// twoSchedulesYAML is that same file with a second entry appended, one per mode the schema accepts.
+// It is built ON the one-entry file rather than beside it because the reload tests turn one into the
+// other and back: the first entry has to be byte-identical for a reload to see it as untouched, and
+// composing them is what keeps that true when either is edited.
+func twoSchedulesYAML(workspace string) string {
+	return oneScheduleYAML(workspace) +
+		fmt.Sprintf("  - name: hourly-sweep\n    on:\n      cycle: 1h\n"+
+			"    run:\n      prompt: sweep the tree\n      workspace: %s\n      mode: auto\n"+
+			"      server: %s\n", workspace, testServerName)
 }
 
 // Every entry in a valid file goes on the clock, and each one says so in the log.
@@ -543,6 +570,269 @@ func TestDaemonHostRefusesAutoOnAHostThatCannotFence(t *testing.T) {
 	host := daemonHost(opts, h.home, wiring)
 	if host.AutoEligible {
 		t.Fatal("a host with no filesystem confinement was reported Auto-eligible")
+	}
+}
+
+// ----------------------------------------------------------------------------
+// Live reload
+// ----------------------------------------------------------------------------
+
+// brokenSchedulesYAML is a file with a defect on every rule a single entry can break at once, so a
+// refusal that reported only the first would be visible.
+const brokenSchedulesYAML = "schedules:\n" +
+	"  - name: \"\"\n    on:\n      cycle: 1s\n" +
+	"    run:\n      prompt: \"\"\n      workspace: /nowhere-at-all\n"
+
+// A saved edit that adds an entry adopts it and leaves every other schedule exactly where it was.
+// The untouched entry is neither stopped nor created a second time — that is what "editing one
+// schedule re-phases nothing else" looks like from the log a supervisor keeps (ADR 0034).
+func TestDaemonReloadAdoptsAnAddedEntry(t *testing.T) {
+	h := newDaemonHarness(t)
+	workspace := t.TempDir()
+	h.writeSchedules(t, oneScheduleYAML(workspace))
+
+	wait := h.run(t)
+	h.awaitLog(t, "1 schedule on the clock")
+	h.save(t, twoSchedulesYAML(workspace))
+	h.awaitLog(t, "reloaded schedules.yaml — added hourly-sweep; 1 schedule untouched")
+
+	h.stop()
+	if err := wait(); err != nil {
+		t.Fatalf("daemon: %v\n%s", err, h.errOut.String())
+	}
+
+	logged := h.out.String()
+	if h.watched != h.schedules {
+		t.Errorf("the watch is over %q; it must be over the schedules file %q", h.watched, h.schedules)
+	}
+	if !h.stopped {
+		t.Error("the daemon exited without ending the schedules watch")
+	}
+	if got := strings.Count(logged, "created   nightly-audit"); got != 1 {
+		t.Errorf("nightly-audit was created %d times; the reload re-phased an entry it never touched:\n%s", got, logged)
+	}
+	// The one stop is the shutdown's, at the end — the reload itself took nothing off the clock.
+	if got := strings.Count(logged, "stopped   nightly-audit"); got != 1 {
+		t.Errorf("nightly-audit was stopped %d times; want only the shutdown's:\n%s", got, logged)
+	}
+}
+
+// The all-or-nothing swap: ONE defect refuses the WHOLE file. Every defect is logged, the previous
+// set keeps running, and the log says so — a daemon has no screen to show a half-applied file on.
+func TestDaemonReloadRefusesABrokenFileWhole(t *testing.T) {
+	h := newDaemonHarness(t)
+	workspace := t.TempDir()
+	h.writeSchedules(t, twoSchedulesYAML(workspace))
+
+	wait := h.run(t)
+	h.awaitLog(t, "2 schedules on the clock")
+	h.save(t, brokenSchedulesYAML)
+	h.awaitLog(t, "keeping the previous 2 schedules on the clock")
+
+	h.stop()
+	if err := wait(); err != nil {
+		t.Fatalf("daemon: %v\n%s", err, h.errOut.String())
+	}
+
+	logged := h.out.String()
+	for _, want := range []string{"name:", "prompt:", "workspace:"} {
+		if !strings.Contains(logged, want) {
+			t.Errorf("no logged defect names %q; the log holds:\n%s", want, logged)
+		}
+	}
+	for _, name := range []string{"nightly-audit", "hourly-sweep"} {
+		if got := strings.Count(logged, "stopped   "+name); got != 1 {
+			t.Errorf("%s was stopped %d times; the refused edit took it off the clock:\n%s", name, got, logged)
+		}
+	}
+}
+
+// An entry deleted from the file comes off the clock, and the summary names it.
+func TestDaemonReloadStopsARemovedEntry(t *testing.T) {
+	h := newDaemonHarness(t)
+	workspace := t.TempDir()
+	h.writeSchedules(t, twoSchedulesYAML(workspace))
+
+	wait := h.run(t)
+	h.awaitLog(t, "2 schedules on the clock")
+	h.save(t, oneScheduleYAML(workspace))
+	h.awaitLog(t, "reloaded schedules.yaml — removed hourly-sweep; 1 schedule untouched")
+	h.awaitLog(t, "stopped   hourly-sweep")
+
+	h.stop()
+	if err := wait(); err != nil {
+		t.Fatalf("daemon: %v\n%s", err, h.errOut.String())
+	}
+}
+
+// A save that changed nothing the daemon acts on says so. A human who saves a file and sees an empty
+// log cannot tell a reload that decided nothing from a watch that never fired.
+func TestDaemonReloadSaysSoWhenAnEditChangedNothing(t *testing.T) {
+	h := newDaemonHarness(t)
+	workspace := t.TempDir()
+	h.writeSchedules(t, oneScheduleYAML(workspace))
+
+	wait := h.run(t)
+	h.awaitLog(t, "1 schedule on the clock")
+	h.save(t, "# a comment the daemon does not act on\n"+oneScheduleYAML(workspace))
+	h.awaitLog(t, "reloaded schedules.yaml — no change; every schedule keeps its place in its cycle")
+
+	h.stop()
+	if err := wait(); err != nil {
+		t.Fatalf("daemon: %v\n%s", err, h.errOut.String())
+	}
+}
+
+// A watch that ends on its own leaves the select rather than spinning on a closed channel, and the
+// daemon runs on with the set it has until it is asked to stop.
+func TestDaemonReloadSurvivesTheWatchEnding(t *testing.T) {
+	h := newDaemonHarness(t)
+	h.writeSchedules(t, oneScheduleYAML(t.TempDir()))
+
+	wait := h.run(t)
+	h.awaitLog(t, "1 schedule on the clock")
+	close(h.changes)
+	h.awaitLog(t, "the schedules watch ended — no further edits will be picked up")
+
+	h.stop()
+	if err := wait(); err != nil {
+		t.Fatalf("daemon: %v\n%s", err, h.errOut.String())
+	}
+}
+
+// reloadHarness is the daemon's reload path with no lifecycle around it: the scheduler, the wiring
+// and the name→id map a running daemon holds, driven one save at a time. It exists because the
+// phase-preservation claim is ABOUT that map — an untouched entry keeps its schedule id, and no log
+// line can prove that as directly as the map itself can.
+type reloadHarness struct {
+	*daemonHarness
+	scheduler *schedule.Scheduler
+	wiring    *daemonWiring
+	host      daemon.Host
+	ids       map[string]string
+	log       *daemonLog
+	file      daemon.File
+}
+
+// newReloadHarness adopts body the way a startup does, through the very call the reload path uses.
+func newReloadHarness(t *testing.T, body string) *reloadHarness {
+	t.Helper()
+
+	h := newDaemonHarness(t)
+	h.writeSchedules(t, body)
+
+	opts := config.Options{ConfigDir: h.home}
+	if err := config.ApplyConfig(&opts, func(string) bool { return false },
+		os.Getenv, os.ReadFile, func(string) {}); err != nil {
+		t.Fatalf("resolve the config: %v", err)
+	}
+	wiring, err := newDaemonWiring(opts)
+	if err != nil {
+		t.Fatalf("newDaemonWiring: %v", err)
+	}
+	t.Cleanup(func() { wiring.closeConfiner() })
+
+	log := &daemonLog{out: h.out, now: time.Now}
+	host := daemonHost(opts, h.home, wiring)
+	file, err := loadSchedules(h.schedules, host, log)
+	if err != nil {
+		t.Fatalf("load the schedules: %v", err)
+	}
+	scheduler, err := schedule.New(schedule.Config{Fire: wiring.fire, Notify: log.notify, Clock: h.clock})
+	if err != nil {
+		t.Fatalf("build the scheduler: %v", err)
+	}
+	t.Cleanup(scheduler.Close)
+
+	ids := make(map[string]string)
+	if _, err := adoptSchedules(scheduler, wiring, ids, nil, file.Schedules); err != nil {
+		t.Fatalf("adopt the initial set: %v", err)
+	}
+	return &reloadHarness{daemonHarness: h, scheduler: scheduler, wiring: wiring, host: host, ids: ids, log: log, file: file}
+}
+
+// reload rewrites the schedules file and runs one reload over it.
+func (r *reloadHarness) reload(t *testing.T, body string) {
+	t.Helper()
+	r.writeSchedules(t, body)
+	r.file = reloadSchedules(r.scheduler, r.wiring, r.ids, r.schedules, r.host, r.file, r.log)
+}
+
+// The map itself: an untouched entry keeps the id it was adopted under — so it keeps its place in
+// its own cycle — while the added one arrives and the removed one leaves. A refused file moves
+// nothing at all.
+func TestDaemonReloadKeepsTheUntouchedEntrysScheduleID(t *testing.T) {
+	workspace := t.TempDir()
+	r := newReloadHarness(t, oneScheduleYAML(workspace))
+
+	adopted := r.ids["nightly-audit"]
+	if adopted == "" {
+		t.Fatal("the startup adoption put no id in the map for nightly-audit")
+	}
+
+	r.reload(t, twoSchedulesYAML(workspace))
+	if got := r.ids["nightly-audit"]; got != adopted {
+		t.Errorf("nightly-audit's id moved from %q to %q; adding a schedule re-phased one it never touched", adopted, got)
+	}
+	if r.ids["hourly-sweep"] == "" {
+		t.Error("the added entry is not on the clock")
+	}
+
+	r.reload(t, brokenSchedulesYAML)
+	if got := r.ids["nightly-audit"]; got != adopted {
+		t.Errorf("a refused file moved nightly-audit's id from %q to %q", adopted, got)
+	}
+	if r.ids["hourly-sweep"] == "" {
+		t.Error("a refused file took the previous set off the clock")
+	}
+
+	r.reload(t, oneScheduleYAML(workspace))
+	if _, onTheClock := r.ids["hourly-sweep"]; onTheClock {
+		t.Error("the removed entry is still in the id map")
+	}
+	if got := r.ids["nightly-audit"]; got != adopted {
+		t.Errorf("removing a schedule moved nightly-audit's id from %q to %q", adopted, got)
+	}
+}
+
+// An edited entry is a new standing instruction: it is stopped and added again, so its id changes
+// and its cycle starts over — while its neighbour's does not.
+func TestDaemonReloadReplacesAnEditedEntry(t *testing.T) {
+	workspace := t.TempDir()
+	r := newReloadHarness(t, twoSchedulesYAML(workspace))
+	edited, neighbour := r.ids["nightly-audit"], r.ids["hourly-sweep"]
+
+	r.reload(t, strings.Replace(twoSchedulesYAML(workspace), "cycle: 24h", "cycle: 12h", 1))
+
+	if got := r.ids["nightly-audit"]; got == "" || got == edited {
+		t.Errorf("the edited entry's id is %q; it should have been stopped and added again", got)
+	}
+	if got := r.ids["hourly-sweep"]; got != neighbour {
+		t.Errorf("hourly-sweep's id moved from %q to %q; editing its neighbour re-phased it", neighbour, got)
+	}
+	if !strings.Contains(r.out.String(), "reloaded schedules.yaml — replaced nightly-audit; 1 schedule untouched") {
+		t.Errorf("the reload summary does not name the replacement; the log holds:\n%s", r.out.String())
+	}
+}
+
+// `shutdown-grace` is the one key a reload cannot act on immediately, so it must be carried forward:
+// an accepted edit becomes the grace the NEXT shutdown waits out, and a refused one leaves the
+// running file's grace in place.
+func TestDaemonReloadCarriesTheNewShutdownGrace(t *testing.T) {
+	workspace := t.TempDir()
+	r := newReloadHarness(t, oneScheduleYAML(workspace))
+	if r.file.ShutdownGrace != time.Second {
+		t.Fatalf("the adopted grace is %s; want the file's 1s", r.file.ShutdownGrace)
+	}
+
+	r.reload(t, strings.Replace(oneScheduleYAML(workspace), "shutdown-grace: 1s", "shutdown-grace: 45s", 1))
+	if r.file.ShutdownGrace != 45*time.Second {
+		t.Errorf("the grace after the edit is %s; want 45s", r.file.ShutdownGrace)
+	}
+
+	r.reload(t, brokenSchedulesYAML)
+	if r.file.ShutdownGrace != 45*time.Second {
+		t.Errorf("a refused file changed the grace to %s; want the running file's 45s", r.file.ShutdownGrace)
 	}
 }
 
