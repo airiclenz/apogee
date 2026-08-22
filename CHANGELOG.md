@@ -8,6 +8,22 @@ point is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+### Changed
+
+- **The default system prompt tells the model when to delegate — and when not to.** A fresh
+  install's `system-prompt-text:` gains one paragraph on `sub_agent`: delegate the work whose
+  material floods the window and is never needed again (searching the codebase, scanning logs or
+  command output, surveying many files, where/whether/which questions), state per delegation
+  exactly what to report back — findings, paths, line numbers, not file contents — because the
+  child's last message is what the parent receives verbatim. The closing sentence is the
+  load-bearing half: do it yourself when you already know the file, when you are about to edit
+  it and need its exact text, or when one or two tool calls would settle it. A delegation costs
+  a whole nested run, and a model that delegates the read it is about to edit from writes a
+  worse edit — so an unqualified "delegate the big reads" would have traded context for
+  correctness. Existing installs are untouched: `config.yaml` is seeded once and never
+  overwritten, so this reaches a running configuration only if you copy the paragraph into
+  your own prompt.
+
 ## [0.16.0] — 2026-08-22
 
 ### Added
