@@ -8,6 +8,55 @@ point is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+### Added
+
+- **`apogee daemon` — schedules that outlive the session, declared in a file.** `/schedule` keeps a
+  prompt on a cycle for as long as apogee is open; the daemon is the same idea with the TUI taken
+  away. It is an in-repo subcommand of the same binary (ADR 0034) — the third Driver over the
+  embeddable engine, and deliberately the thinnest of them — that reads
+  `~/.apogee/daemon/schedules.yaml`, puts every entry in it on the clock (`internal/schedule`) and
+  runs each one's prompt through the same shared runner a `/schedule` firing and `apogee headless`
+  run through, saving every firing into `~/.apogee/sessions` where `/sessions` already browses it.
+  The file is the WHOLE contract: there is no `apogee daemon add` and no hidden state, a first run
+  seeds a fully commented template — which parses as a valid EMPTY set, so a fresh daemon logs
+  "0 schedules" and watches — and an existing file is never overwritten. Each entry is a
+  trigger+action envelope, `on:` (a cycle) plus `run:` (prompt, workspace, mode, server, model), so
+  webhook triggers and workflow actions can arrive later as new keys rather than as a schema break.
+  Saved edits are picked up live, over the same stat-poll watcher `config.yaml` is watched with
+  (lifted to `internal/filewatch` so a second file can reuse it), and are matched by `name:`: an
+  entry whose spec is untouched is left strictly alone and keeps the phase of its own cycle, only
+  what actually changed is stopped and re-added, and an edit that does not parse or does not
+  validate is refused WHOLE — every defect logged, the previously adopted set still running,
+  nothing half-applied. A firing takes the Firing posture unchanged (ADR 0033): plan or auto only,
+  nobody to ask, every gated action refused rather than parked, `ask_user` and `present_document`
+  unregistered and no MCP server contacted — so a plan schedule's deliverable IS the recorded
+  answer, while an auto schedule's is the state of its workspace, and an `auto` entry on a host
+  that cannot fence the filesystem rejects the file rather than running unfenced. A schedule binds
+  to a server by NAME out of `config.yaml`'s `servers:` list, so the schedules file carries no
+  secret; `config.yaml` is read once at startup (rebinding servers is a restart) and
+  `schedules.yaml` is the only live surface. The daemon never actuates a model load (ADR 0055):
+  `model:` is refused on a launcher-fronted server, and a firing against a server with nothing
+  serving fails visibly in its own record instead of loading one. One daemon per apogee home,
+  enforced by an advisory OS lock the kernel drops with the process, so a crash leaves no stale
+  state to reason about. The first SIGTERM or Ctrl-C stops the clock and gives a firing already in
+  flight up to `shutdown-grace` (10m by default) to finish; a second cancels it immediately;
+  either way what the run completed is saved and the exit is `0`. It never detaches — the log is
+  plain timestamped lines on stdout and the host supervisor owns restarts and retention.
+
+- **`apogee daemon install` writes this host's supervisor unit and prints how to activate it —
+  never running that command itself.** A systemd user unit
+  (`~/.config/systemd/user/apogee-daemon.service`), a launchd agent
+  (`~/Library/LaunchAgents/com.airiclenz.apogee.daemon.plist`) or a Task Scheduler definition
+  (`~/.apogee/daemon/apogee-daemon-task.xml`), generated from templates embedded in the binary,
+  followed by the one `systemctl` / `launchctl` / `schtasks` line that turns it on. Putting a
+  standing process on a machine is the machine owner's sentence to type, and a generated unit is
+  worth reading before it is trusted. The unit pins the absolute path of the binary that generated
+  it and the resolved apogee home when `--config` was passed, and derives the supervisor's kill
+  escalation from `shutdown-grace` (grace + 30s) so the supervisor never kills a firing the daemon
+  is still letting finish. A re-run regenerates the file and says whether anything changed.
+  `README.md` gains a **Standing schedules** section covering all of it, and `CONTEXT.md`'s
+  **Daemon** entry is no longer marked "Decided, not yet built".
+
 ### Changed
 
 - **The default system prompt tells the model when to delegate — and when not to.** A fresh
@@ -23,6 +72,17 @@ point is a **minor** bump, not a breaking change.
   correctness. Existing installs are untouched: `config.yaml` is seeded once and never
   overwritten, so this reaches a running configuration only if you copy the paragraph into
   your own prompt.
+
+### Known verification (owner-run)
+
+- **Live activation under each host supervisor, and one real firing there.** The generated units
+  are pinned byte-for-byte by goldens and parsed for well-formedness, and the daemon's lifecycle
+  (seed, lock, adopt, reload, grace, cancel) is covered hermetically with a fake clock and a
+  stubbed watch — but no test in this environment can prove that
+  `systemctl --user enable --now apogee-daemon`, `launchctl load -w …` and `schtasks /create …`
+  actually bring the daemon up under the host's own supervisor, that its stdout lands in that
+  supervisor's journal, or that a schedule fires and saves a browsable session from there.
+  Deferred to an owner-run pass on Linux, macOS and Windows before the next tag.
 
 ## [0.16.0] — 2026-08-22
 

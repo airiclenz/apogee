@@ -45,11 +45,10 @@ different thing; do not resurrect the name for the new library), "the SDK".
 
 **Driver**:
 A program that embeds the **Embeddable agent** and drives the loop through its public
-API. Three exist today — the TUI, `apogee headless` and the bench — with a
-platform daemon anticipated. The engine must stay sufficient for *any* Driver: nothing
-model-visible or safety-relevant may exist only in one Driver's surface, and a wire
-surface (HTTP, webhooks) is always composed by a Driver — the engine itself is
-wire-silent. See
+API. Four exist today — the TUI, `apogee daemon`, `apogee headless` and the bench.
+The engine must stay sufficient for *any* Driver: nothing model-visible or
+safety-relevant may exist only in one Driver's surface, and a wire surface (HTTP,
+webhooks) is always composed by a Driver — the engine itself is wire-silent. See
 [ADR 0031](docs/adr/0031-the-local-platform-north-star-binds-every-future-layer-to-the-embeddable-engine.md).
 _Avoid_: "embedder" (names the linking, not the responsibility of pacing the loop),
 "frontend" / "client" (a Driver owns the loop's pace and state roots, not just a view).
@@ -60,7 +59,7 @@ re-runs) and an Agent mode — created in the TUI with `/schedule` and ended wit
 `/schedule-stop`. Everything that decides *when and how* it runs (cycle timing, the
 skip-on-overlap policy, the wait for a quiescent host, lifecycle) lives in the scheduler
 **library** (`internal/schedule`); the TUI is merely its first Driver surface, owning only
-input and display, and a future daemon composes the same library. A TUI-hosted Schedule **dies
+input and display, and `apogee daemon` composes the same library. A TUI-hosted Schedule **dies
 with the TUI** — "while apogee is open, re-run this every N minutes" is the whole promise;
 nothing persists to config. A Schedule's mode is **Plan or Auto only** and is chosen explicitly
 at creation, independent of the host session's mode (Auto still gated by the same eligibility
@@ -86,7 +85,7 @@ _Avoid_: "background task" / "detached process" (a Firing is a Session in this p
 ends), "job run", "cron run".
 
 **Daemon**:
-The anticipated always-on **Driver** — `apogee daemon`, an in-repo subcommand (same binary as
+The always-on **Driver** — `apogee daemon`, an in-repo subcommand (same binary as
 the TUI) composing the same scheduler and runner libraries, but holding **durable** Schedules
 read from a declarative `~/.apogee/daemon/schedules.yaml`: validated and atomically swapped on
 change, an invalid file keeps the old set running. Each entry is a **trigger+action envelope**
@@ -98,7 +97,7 @@ where that is a per-request act, and its Firings **never actuate a local model l
 **Firing** posture unchanged and save into the shared sessions store, so the TUI's `/sessions`
 browser is the results window; the two processes share libraries and stores, never IPC. Runs
 foreground under the OS's own supervisor (`apogee daemon install` generates the unit),
-single-instanced by a lock file. Decided, not yet built. See
+single-instanced by a lock file. See
 [ADR 0034](docs/adr/0034-the-daemon-is-an-in-repo-subcommand-over-a-declarative-trigger-action-file.md).
 _Avoid_: "server" (the engine is wire-silent and v1 has no listener; the future webhook
 surface is this Driver's composition), "the scheduler" (that names the library both Drivers
