@@ -5,8 +5,8 @@
 // builds a Config, constructs the Agent through the public apogee package (dogfooding
 // the shipped surface), and hands it to the internal/tui renderer. The root command
 // launches the TUI; the subcommands it also carries are assembled here, from the
-// subcommands() registration seam (`apogee probe` and `apogee headless` today, phase-2
-// detail plan §6).
+// subcommands() registration seam (`apogee probe`, `apogee headless` and `apogee daemon`
+// today, phase-2 detail plan §6 and ADR 0034).
 //
 // Everything this layer owns is a fact nothing above it holds: where state lives on
 // disk, which server a run starts on, how this host draws and edits a config key, which
@@ -92,7 +92,10 @@
 // by name, and the unattended run composed over the pair (ADR 0034, ADR 0055).
 //
 // The subcommands: headless.go is `apogee headless`, one prompt run to completion with
-// nobody watching, and the binary's only distinct exit codes; probe.go `apogee probe`
+// nobody watching, and the binary's only distinct exit codes; daemon.go `apogee daemon`,
+// the standing process behind the schedules file — seed, single-instance lock, load,
+// adopt, run, shut down — plus the timestamped stdout log that is its whole user
+// interface (ADR 0034); probe.go `apogee probe`
 // and the free host report its bare noun prints (ADR 0021); probemodel.go
 // `apogee probe model`, the half that spends live tokens and records a fingerprint;
 // probeterminal.go `apogee probe terminal`, which measures the terminal by painting on

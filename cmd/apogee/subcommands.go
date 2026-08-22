@@ -8,7 +8,9 @@ import "github.com/spf13/cobra"
 //
 // `probe` is the first entry: the host report (ADR 0021's free half) plus its `host` child.
 // `headless` is the second: one prompt run to completion with nobody watching, over the same
-// shared core the scheduler's Firings use (ADR 0033). Registering a child is what makes a
+// shared core the scheduler's Firings use (ADR 0033). `daemon` is the third: the standing
+// process that runs the schedules declared in ~/.apogee/daemon/schedules.yaml over that same
+// core (ADR 0034). Registering a child is what makes a
 // Commands section appear under `apogee --help` — the one permitted output delta of the
 // Phase-5 subcommand work.
 //
@@ -17,5 +19,5 @@ import "github.com/spf13/cobra"
 // through to the root's argument validation when nothing matches, so an unknown word still
 // fails with the same `unknown command` error it does today.
 func subcommands() []*cobra.Command {
-	return []*cobra.Command{newProbeCommand(), newHeadlessCommand()}
+	return []*cobra.Command{newProbeCommand(), newHeadlessCommand(), newDaemonCommand()}
 }

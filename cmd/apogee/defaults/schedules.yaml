@@ -1,0 +1,100 @@
+# apogee daemon schedules — ~/.apogee/daemon/schedules.yaml
+#
+# This file is created automatically the first time you run `apogee daemon`, from a
+# template compiled into the apogee binary. Your edits are preserved: apogee never
+# overwrites an existing schedules file.
+#
+# It is the daemon's ONLY contract. There is no `apogee daemon add` and no hidden state:
+# what this file says is what runs. The daemon watches it and picks up every saved edit
+# within a second or two — no restart, and every schedule you did not touch keeps its
+# place in its own cycle.
+#
+# An edit that does not parse, or that breaks any rule below, is refused WHOLE: the
+# defects are printed to the log and the schedules already running keep running. Nothing
+# is ever half-applied.
+#
+# Out of the box every line here is commented out, which is a valid empty file: the daemon
+# starts, logs that it has 0 schedules, and watches. Uncomment the example, point it at a
+# real workspace, and save.
+#
+# ---------------------------------------------------------------------------------------
+# Where a run's result ends up
+# ---------------------------------------------------------------------------------------
+#
+# Every firing is saved to ~/.apogee/sessions like any other session, so it shows up in
+# /sessions inside apogee. What the firing LEAVES BEHIND depends on its mode:
+#
+#   plan (the default)  read-only. The model reads, searches and reasons, and it changes
+#                       nothing on disk. The deliverable IS the recorded answer — open the
+#                       run in /sessions to read it. Use this for reviews, audits, digests
+#                       and anything whose output is a report.
+#
+#   auto                confined and unattended. The model edits files and runs commands
+#                       inside the workspace, and the deliverable is the state of that
+#                       workspace afterwards. A firing has nobody to ask, so every action
+#                       that would need approval is REFUSED rather than parked — which is
+#                       why auto is refused outright on a host whose confinement backend
+#                       cannot fence the filesystem (run `apogee probe` to see what this
+#                       host reports). Point it at a git repository, so you can read the
+#                       diff and throw it away.
+#
+# ask-before and allow-edits exist to consult a human, so no schedule may use them.
+#
+# ---------------------------------------------------------------------------------------
+# Which server a schedule talks to
+# ---------------------------------------------------------------------------------------
+#
+# A schedule binds to a server BY NAME, out of the `servers:` list in ~/.apogee/config.yaml
+# — so the endpoint and its key stay in one file and this one carries no secrets. Leave
+# `server:` out and the schedule runs on whatever `server:` in config.yaml names as the
+# startup default.
+#
+# The daemon reads config.yaml ONCE, at startup: editing your servers means restarting the
+# daemon. Only this file is live.
+#
+# The daemon never loads a model. On a server llama-launcher fronts, `model:` would be a
+# request to LOAD that model, so it is refused there — drop the key and the firing sends to
+# whatever that server is serving. If nothing is serving, the firing fails visibly in its
+# own record and the next cycle behaves normally.
+#
+# ---------------------------------------------------------------------------------------
+# The keys
+# ---------------------------------------------------------------------------------------
+#
+# shutdown-grace:  how long an in-flight firing gets to finish when the daemon is asked to
+#                  stop, before it is cancelled (whatever the run completed is still
+#                  saved). Optional; the default is 10m. A second Ctrl-C or SIGTERM
+#                  cancels immediately.
+#
+# schedules:       the list. Each entry is:
+#
+#   name:          required, and unique in this file. It is the identity the daemon
+#                  reloads by: rename an entry and it counts as a new one.
+#   on:
+#     cycle:       required. How often it runs, as a Go duration (30s, 15m, 6h, 24h).
+#                  30s is the floor. The first run lands one full cycle after the daemon
+#                  adopts the entry — nothing fires the moment the daemon starts, and
+#                  restarting the daemon restarts every cycle. If a run is still going
+#                  when the next tick comes due, that tick is skipped, not queued.
+#   run:
+#     prompt:      required. Exactly what you would type into apogee — a slash command
+#                  works here too.
+#     workspace:   required. The directory the run happens in. `~` is expanded; it must
+#                  exist when the file is read.
+#     mode:        optional: plan (the default) or auto. See above.
+#     server:      optional: the name of a `servers:` entry in config.yaml.
+#     model:       optional, and only where the bound server serves more than one model.
+#
+# ---------------------------------------------------------------------------------------
+
+# shutdown-grace: 10m
+
+# schedules:
+#   - name: nightly-audit
+#     on:
+#       cycle: 24h
+#     run:
+#       prompt: "/code-audit internal/tui"
+#       workspace: ~/repos/apogee
+#       mode: plan
+#       server: workstation

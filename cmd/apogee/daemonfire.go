@@ -18,6 +18,7 @@ import (
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/daemon"
 	"github.com/airiclenz/apogee/internal/mechanisms"
+	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/run"
 	"github.com/airiclenz/apogee/internal/schedule"
 	"github.com/airiclenz/apogee/internal/session"
@@ -61,7 +62,8 @@ type daemonWiring struct {
 	// Firing takes it whatever its mode: an Auto entry is fenced by it, and a Plan entry's terminal
 	// commands are confined by the same posture a session's are. Whether this host may run Auto
 	// unattended at all was ruled on at VALIDATION (internal/daemon's Host.AutoEligible), where the
-	// refusal could name the entry, so nothing here re-asks.
+	// refusal could name the entry, so nothing here re-asks. [daemonWiring.closeConfiner] is the
+	// other end of it: a backend that has to put the disk back is torn down when the daemon stops.
 	confiner apogee.Confiner
 	// store is the shared sessions store every Firing's record lands in, so a schedule's runs are
 	// browsable in /sessions beside the conversations and headless runs on this host (ADR 0034).
@@ -99,6 +101,22 @@ func newDaemonWiring(opts config.Options) (*daemonWiring, error) {
 		store:     session.NewStore(roots.sessions),
 		adopted:   make(map[string]daemon.Entry),
 	}, nil
+}
+
+// closeConfiner tears the confinement backend down at the end of the daemon's life and reports the
+// one failure that has no other surface. Two of the three backends need nothing; the Windows token
+// backend has to put the disk back (ADR 0020 §2), and a teardown that could not is a silently
+// mutated disk the user is otherwise never told about — which is why runRoot and runHeadless make
+// this same optional-interface assertion, through the same wording (internal/platform).
+//
+// It returns the notice rather than printing it, because where a daemon's narration goes is the
+// daemon's decision (daemon.go), not this file's.
+func (w *daemonWiring) closeConfiner() string {
+	closer, ok := w.confiner.(interface{ Close() error })
+	if !ok {
+		return ""
+	}
+	return platform.ConfinementTeardownNotice(closer.Close())
 }
 
 // adopt replaces the set a Firing resolves its name against. It is called once with the file the
