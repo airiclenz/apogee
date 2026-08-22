@@ -40,7 +40,7 @@ var copyFileSpec = toolSpec{
 
 var moveFileSpec = toolSpec{
 	name:        "move_file",
-	description: "Move or rename a file within the workspace. The destination is the full path of the moved file, not a directory to move into. Refuses to replace an existing destination unless overwrite is true.",
+	description: "Move or rename a file within the workspace. The destination is the full path of the moved file, not a directory to move into. Refuses to replace an existing destination unless overwrite is true. When the source file is tracked in git, the rename is staged automatically (the effect of git mv).",
 	schema:      fileOpsSchema("File path to move from", "File path to move to"),
 }
 
@@ -177,6 +177,13 @@ func (t *MoveFile) workspaceWriteTarget(call domain.ToolCall) (writeTarget, bool
 // refusals copy_file gives apply; a rename that the filesystem cannot perform (the classic being
 // a destination on a different filesystem, reachable inside the workspace through a mount point)
 // falls back to copy-then-remove, which is the same move at a higher cost.
+//
+// A move whose SOURCE is tracked in git also stages the rename, which is the index half of
+// `git mv` — the model gets rename tracking without a second tool call, and the appended note
+// tells it the index changed (git_stage.go, which also owns the /undo interplay). Staging is read
+// from the ONE place that means the whole move landed: move returns an empty string on both of
+// its routes and a sentence on every failure, so a split failure — the copy landed, the source
+// did not go — never reaches it. There is no completed rename to stage there.
 func (t *MoveFile) Execute(ctx context.Context, call domain.ToolCall) (domain.ToolResult, error) {
 	if err := ctx.Err(); err != nil {
 		return domain.ToolResult{}, err
@@ -197,7 +204,12 @@ func (t *MoveFile) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 	if err := t.move(ctx, args); err != "" {
 		return errorResult(call.ID, err), nil
 	}
-	return okResult(call.ID, fmt.Sprintf("moved %s to %s%s", args.Source, args.Destination, resolved)), nil
+	// args.Source is paths[0] by the helper's contract — the pre-move path whose trackedness
+	// decides whether anything is staged. The destination rides along in the same pathspec pair,
+	// which is also what stages an OVERWRITTEN tracked destination's replacement.
+	staged := stageGitPaths(ctx, t.root, " (rename staged in git)", args.Source, args.Destination)
+	return okResult(call.ID, fmt.Sprintf("moved %s to %s%s%s",
+		args.Source, args.Destination, resolved, staged)), nil
 }
 
 // move performs the rename, falling back to copy-then-remove, and returns the model-facing

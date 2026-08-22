@@ -94,7 +94,9 @@ they fit):
 
 **Commit:** `feat(tools): add stageGitPaths git-staging helper`
 
-## 2. `move_file` stages the rename of a tracked source
+## 2. `move_file` stages the rename of a tracked source — ✅ DONE (2026-08-22)
+
+NOTES (2026-08-22): the item's "BOTH routes, never on the split-failure route" binding is met by ONE call site rather than two — `MoveFile.move` returns the empty string on exactly its two full-success routes (`SafeRename`, and the copy-then-remove fallback once the removal landed) and a sentence on every failure including the split, so staging placed after its guard in `Execute` covers both routes and no failure. Recorded because the item text is also readable as two call sites inside `move`; the reasoning is in `Execute`'s doc comment.
 
 Depends on item 1.
 

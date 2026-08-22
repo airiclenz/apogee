@@ -744,3 +744,104 @@ func TestMoveFile_DisclosesTheResolvedDestination(t *testing.T) {
 		t.Errorf("Content = %q, want the bare sentence for a destination that resolves to itself", ordinary.Content)
 	}
 }
+
+// gitWorkspace returns a temp git repository usable as a workspace ROOT. It is gitRepo's temp dir
+// with its symlinks resolved: on hosts where the temp dir sits behind a link (macOS /var), an
+// unresolved root makes every destination "resolve to" somewhere else and the disclosure note
+// fires, which would drown out what these tests are actually reading — the staging note.
+func gitWorkspace(t *testing.T) string {
+	t.Helper()
+
+	return realPath(t, gitRepo(t))
+}
+
+// TestMoveFile_StagesATrackedRename is the tool half of the git-mv contract: moving a file that
+// git tracks leaves the rename in the INDEX, not just on disk, and says so in the result — the
+// model must not have to discover the index change through a later git_status.
+func TestMoveFile_StagesATrackedRename(t *testing.T) {
+	root := gitWorkspace(t)
+
+	result := runFileOp(t, NewMoveFile(root), map[string]any{
+		"source": "README.md", "destination": "GUIDE.md",
+	})
+	if result.IsError {
+		t.Fatalf("unexpected tool error: %q", result.Content)
+	}
+
+	if want := "moved README.md to GUIDE.md (rename staged in git)"; result.Content != want {
+		t.Errorf("Content = %q, want %q", result.Content, want)
+	}
+	if status := strings.TrimSpace(gitStatusPorcelain(t, root)); status != "R  README.md -> GUIDE.md" {
+		t.Errorf("status = %q, want the staged rename alone", status)
+	}
+}
+
+// TestMoveFile_UntrackedSourceIsUnchanged pins the no-surprise half: a file git never tracked is
+// content the operator did not commit, so moving it must stage nothing AND read exactly as it did
+// before staging existed — the note is the signal that something happened to the index.
+func TestMoveFile_UntrackedSourceIsUnchanged(t *testing.T) {
+	root := gitWorkspace(t)
+	writeFixture(t, filepath.Join(root, "scratch.txt"), "draft\n", 0o644)
+
+	result := runFileOp(t, NewMoveFile(root), map[string]any{
+		"source": "scratch.txt", "destination": "notes.txt",
+	})
+	if result.IsError {
+		t.Fatalf("unexpected tool error: %q", result.Content)
+	}
+
+	if result.Content != "moved scratch.txt to notes.txt" {
+		t.Errorf("Content = %q, want the bare sentence for an untracked source", result.Content)
+	}
+	if status := strings.TrimSpace(gitStatusPorcelain(t, root)); status != "?? notes.txt" {
+		t.Errorf("status = %q, want the moved file still merely untracked", status)
+	}
+}
+
+// TestMoveFile_OutsideARepositoryIsUnchanged covers the workspace that is no git worktree at all,
+// which is the case the whole feature must be invisible in: same sentence, no note, no error.
+func TestMoveFile_OutsideARepositoryIsUnchanged(t *testing.T) {
+	t.Parallel()
+
+	root := tempRoot(t)
+	writeFixture(t, filepath.Join(root, "old.txt"), "payload\n", 0o644)
+
+	result := runFileOp(t, NewMoveFile(root), map[string]any{
+		"source": "old.txt", "destination": "new.txt",
+	})
+	if result.IsError {
+		t.Fatalf("unexpected tool error: %q", result.Content)
+	}
+
+	if result.Content != "moved old.txt to new.txt" {
+		t.Errorf("Content = %q, want the bare sentence outside a repository", result.Content)
+	}
+}
+
+// TestMoveFile_OverwriteStagesBothPaths drives the pathspec PAIR. Overwriting a tracked
+// destination changes two tracked paths at once — the source goes, the destination's bytes are
+// replaced — and both halves must land in the index, or the next commit would carry a rename the
+// operator never reviewed alongside a worktree change they thought they had staged. Git reports
+// the pair as a deletion plus a modification rather than a rename: the destination is modified,
+// not added, so there is no addition for rename detection to pair the deletion with.
+func TestMoveFile_OverwriteStagesBothPaths(t *testing.T) {
+	root := gitWorkspace(t)
+	commitInRepo(t, root, "old.txt", "source bytes")
+	commitInRepo(t, root, "dest.txt", "destination bytes")
+
+	result := runFileOp(t, NewMoveFile(root), map[string]any{
+		"source": "old.txt", "destination": "dest.txt", "overwrite": true,
+	})
+	if result.IsError {
+		t.Fatalf("unexpected tool error: %q", result.Content)
+	}
+
+	if want := "moved old.txt to dest.txt (rename staged in git)"; result.Content != want {
+		t.Errorf("Content = %q, want %q", result.Content, want)
+	}
+	// An exact match is the assertion: any leftover for either path would show as a second
+	// column, and any untouched third path as an extra record.
+	if status := strings.TrimSpace(gitStatusPorcelain(t, root)); status != "M  dest.txt\nD  old.txt" {
+		t.Errorf("status = %q, want both paths fully staged with no leftovers", status)
+	}
+}

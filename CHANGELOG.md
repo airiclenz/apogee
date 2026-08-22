@@ -10,6 +10,16 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **`move_file` stages the rename of a tracked file.** A move whose source is tracked in git now
+  leaves the rename in the INDEX as well as on disk — the index half of `git mv`, without the model
+  having to know to ask for it — and the result says so: `moved old.go to new.go (rename staged in
+  git)`. Renaming with `overwrite: true` onto a file git also tracks stages both halves, the
+  departure and the replacement. Nothing changes anywhere else: an untracked source, a workspace
+  that is no git worktree, and a move that only half-landed all read exactly as they did before, and
+  a staging that git itself refuses appends `(git staging skipped: …)` rather than failing a move
+  that already succeeded. `/undo` still restores worktree bytes only — a staged entry it leaves
+  behind is visible in `git_status` and cleared by `git add -A` or `git restore --staged`.
+
 - **Two new colour roles carry the diff band.** `diff-add-bg` and `diff-del-bg` join the scheme
   vocabulary (ADR 0040), taking it to 31 roles: the background a diff body line sits on, shipped
   as dark `#0e3b34` / `#42181d` and light `#d9f2ec` / `#fbe4e6` — quiet washes out of the same
