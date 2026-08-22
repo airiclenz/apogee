@@ -95,7 +95,10 @@
 // nobody watching, and the binary's only distinct exit codes; daemon.go `apogee daemon`,
 // the standing process behind the schedules file — seed, single-instance lock, load,
 // adopt, live-reload, shut down — plus the timestamped stdout log that is its whole user
-// interface (ADR 0034); probe.go `apogee probe`
+// interface (ADR 0034); daemoninstall.go `apogee daemon install`, which renders the host
+// supervisor's unit from an embedded template and prints the one command that activates
+// it, generating for any of the three OSes from a plan the caller resolved;
+// probe.go `apogee probe`
 // and the free host report its bare noun prints (ADR 0021); probemodel.go
 // `apogee probe model`, the half that spends live tokens and records a fingerprint;
 // probeterminal.go `apogee probe terminal`, which measures the terminal by painting on

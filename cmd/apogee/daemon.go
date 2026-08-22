@@ -146,6 +146,8 @@ func newDaemonCommand() *cobra.Command {
 	cmd.Flags().StringVar(&opts.ConfigDir, "config", "",
 		"apogee home directory for config/library/sessions (default: ~/.apogee)")
 
+	cmd.AddCommand(newDaemonInstallCommand())
+
 	return cmd
 }
 
