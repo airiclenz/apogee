@@ -40,7 +40,7 @@ func TestNewThemeTakesItsColoursFromTheScheme(t *testing.T) {
 	// Every role a distinct value, so no assertion below can pass by borrowing another role's tone.
 	s := scheme.Scheme{
 		UserText: "#010101", Chrome: "#020202", Divider: "#030303", Surface: "#040404",
-		Muted: "#050505", MutedBright: "#181818", DiffAdd: "#060606", DiffDel: "#070707", Error: "#080808",
+		Muted: "#050505", MutedBright: "#181818", Error: "#080808",
 		Code: "#090909", ToolHeader: "#191919", ModePlan: "#0a0a0a", ModeAskBefore: "#0b0b0b",
 		ModeAllowEdits: "#0c0c0c", ModeAuto: "#0d0d0d", Skill: "#0e0e0e", FileRef: "#0f0f0f",
 		PromptToggle: "#101010", ToolMarker: "#111111", Gauge: "#121212", Selection: "#131313",

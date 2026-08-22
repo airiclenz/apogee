@@ -1031,6 +1031,15 @@ point is a **minor** bump, not a breaking change.
 
 ### Removed
 
+- **The `diff-add` / `diff-del` foreground roles are retired.** The diff-background-tint work moved
+  the added/removed signal onto the `diff-add-bg` / `diff-del-bg` bands, and the `+8 −3` stat slot
+  paints with the marker role, so nothing in the shipped code read the foreground pair any more —
+  it stood as scheme vocabulary that painted nothing. The two keys are gone from the `Scheme`
+  struct, both shipped scheme files and the role-table test; the vocabulary is 29 roles now. A user
+  scheme file that still names either key gets the standard "unknown color role — ignored" warning
+  and keeps working, exactly as any other unknown key does. (Owner call resolving the parked
+  ISSUES.md entry from 2026-08-19.)
+
 - **`internal/context` no longer keeps a second spelling of the Budget's history compare.** The
   package exported `HistoryExceedsAllocation`, a two-line delegate onto
   `domain.Budget.HistoryExceedsAllocation` that no production code had called since the pure

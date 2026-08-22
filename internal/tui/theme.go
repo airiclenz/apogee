@@ -274,7 +274,7 @@ func (th theme) modeColor(m domain.Mode) color.Color {
 	}
 }
 
-// newTheme builds the styles from a colour scheme — the 31 semantic roles of ADR 0040, resolved
+// newTheme builds the styles from a colour scheme — the 29 semantic roles of ADR 0040, resolved
 // before it is called (the renderer never reads a scheme file itself). It is the ONE seam between a
 // scheme and the look: calling it again with another scheme rebuilds every style, which is what a
 // live scheme switch does (settingsApplyLocal).

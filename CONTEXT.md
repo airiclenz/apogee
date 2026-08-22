@@ -627,7 +627,7 @@ four, and a detached launch has no round trip to come back from), "file watcher"
 The **palette apogee draws with, as a file of semantic roles** — `ui.color-scheme` names it, and
 the name resolves to `~/.apogee/schemes/<name>.yaml` first and an **embedded built-in** second, so
 a user file **shadows** a shipped scheme of the same name rather than replacing it (ADR 0040). A
-scheme file is YAML with **one key per role — 31 of them**, named for meaning rather than place
+scheme file is YAML with **one key per role — 29 of them**, named for meaning rather than place
 (`error`, `code`, `tool-header`, `file-ref`, `skill`, `muted` / `muted-bright`, the four `mode-*`,
 the four `spinner-*`, …) — and **every key is optional**: a missing one inherits the built-in
 **`dark`** default, which is the palette apogee has always drawn with apart from three roles

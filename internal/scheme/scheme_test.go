@@ -20,8 +20,6 @@ var roleTable = []struct {
 	{"surface", func(s Scheme) string { return s.Surface }},
 	{"muted", func(s Scheme) string { return s.Muted }},
 	{"muted-bright", func(s Scheme) string { return s.MutedBright }},
-	{"diff-add", func(s Scheme) string { return s.DiffAdd }},
-	{"diff-del", func(s Scheme) string { return s.DiffDel }},
 	{"diff-add-bg", func(s Scheme) string { return s.DiffAddBg }},
 	{"diff-del-bg", func(s Scheme) string { return s.DiffDelBg }},
 	{"error", func(s Scheme) string { return s.Error }},
@@ -67,10 +65,10 @@ func TestRoleTableCoversEveryRole(t *testing.T) {
 	// The vocabulary's size is stated in prose in three places that nothing else holds to the
 	// struct, so pin it here: roleKeys is built off Scheme's yaml tags by reflection, which makes
 	// this the one assertion a silent struct/prose drift has to pass.
-	const wantRoleCount = 31
+	const wantRoleCount = 29
 	if len(roleKeys) != wantRoleCount {
-		t.Errorf("Scheme declares %d roles, the prose says %d — update README.md:187, layout.md:94 "+
-			"and newTheme's comment (internal/tui/theme.go:267), then this count",
+		t.Errorf("Scheme declares %d roles, the prose says %d — update README.md:188, layout.md:94 "+
+			"and newTheme's comment (internal/tui/theme.go:277), then this count",
 			len(roleKeys), wantRoleCount)
 	}
 	if len(roleTable) != len(roleKeys) {

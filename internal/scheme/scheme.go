@@ -32,15 +32,13 @@ type Scheme struct {
 	Muted       string `yaml:"muted"`        // status/footer/tool-detail dim
 	MutedBright string `yaml:"muted-bright"` // the muted tone's open step: an EXPANDED tool block's text
 
-	DiffAdd string `yaml:"diff-add"` // diff "+" lines
-	DiffDel string `yaml:"diff-del"` // diff "-" lines
 	// DiffAddBg and DiffDelBg are the background band a diff BODY line carries. The
 	// added/removed signal rides that band so the text itself can wear the plain detail tone of
 	// its block state, like every other detail line, and so the band can run the full width of
-	// the row rather than stopping where the text does. They do not replace the foreground pair
-	// above: `diff-add` / `diff-del` keep the markers, the stat summaries and every other use of
-	// diff colour outside a diff body line. A scheme keeps both bands quiet and in the same hue
-	// families as that pair, so the turquoise-vs-red pairing still survives red-green-weak vision.
+	// the row rather than stopping where the text does. A scheme keeps both bands quiet, in a
+	// turquoise-vs-red pairing so the added/removed contrast survives red-green-weak vision.
+	// (A retired `diff-add` / `diff-del` foreground pair once colored the lines themselves; the
+	// stat summaries and markers paint with the marker role, so the pair had no consumer left.)
 	DiffAddBg string `yaml:"diff-add-bg"` // the band an added diff body line sits on
 	DiffDelBg string `yaml:"diff-del-bg"` // the band a removed diff body line sits on
 	Error     string `yaml:"error"`       // recovered-fault notices
