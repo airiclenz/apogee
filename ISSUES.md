@@ -25,19 +25,6 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 
 - [ ] when the pop-up box is open - the main session-chat's last row is not reachable anymore with scrolling. The pop-up box covers that poart of the chat. This is importent when questions or other permanent pop-ups are open where access to the last messages of the chat history are important.
 
-
-### The parked `schedule`-tool entry's own trigger has now fired
-
-**Status:** [ ] open 2026-08-22 — residual of
-`docs/plans/archived/2026-08-22 - 02 - daemon-plan.md`, the run that built the daemon.
-
-**Parked / deferred work** → *A model-facing `schedule` tool — daemon-era, not v1* names the daemon
-as the trigger to pick it up and then says "the daemon itself is unbuilt and this entry stays parked
-until it exists" — in this file, `ISSUES.md:696-697`. `apogee daemon` shipped in this run, so that
-sentence is false and the entry is parked on a condition that has been met. It needs an owner call —
-unpark it, or re-park it on a new condition and say which — rather than a silent edit of the
-sentence.
-
 ---
 
 ## Parked / deferred work
@@ -624,14 +611,15 @@ gate. The residual hole is Auto (gated-but-eligible runs unsupervised — the ex
 "create an Auto schedule" belongs in the footgun-guard's dangerous tier, or the tool caps
 model-creatable schedules at Plan. Sub-agents don't inherit it (ADR 0005).
 
-**The trigger to pick it up: the daemon.** Durable schedules that survive quit are where a model
+**The trigger to pick it up: a real need.** Durable schedules that survive quit are where a model
 setting up its own monitoring has real value, and the companion feature is the cross-session
 approval surface ADR 0033 already named when it rejected Ask-Before schedules. Build the tool once,
 at that layer; the TUI still never has to register it. The daemon's shape has since been settled —
 [ADR 0034](docs/adr/0034-the-daemon-is-an-in-repo-subcommand-over-a-declarative-trigger-action-file.md),
-an in-repo subcommand over a declarative trigger-action file — so the trigger is now a dated record
-to build against rather than an open question, but the daemon itself is unbuilt and this entry stays
-parked until it exists. **Not the vehicle:** MCP — schedules are
+an in-repo subcommand over a declarative trigger-action file — and `apogee daemon` itself shipped
+on 2026-08-22, which made this tool possible, not needed. Re-parked 2026-08-22 (owner call): this
+entry stays parked until a real need for a model-facing schedule tool appears.
+**Not the vehicle:** MCP — schedules are
 in-process driver state, Firings run without MCP, and ADR 0031 forbids first-party connectors.
 
 ---

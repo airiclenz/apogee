@@ -104,6 +104,11 @@ point is a **minor** bump, not a breaking change.
   depends on, so a crash or full disk mid-write leaves the previous complete unit for the
   supervisor to read, never a truncated one. The unchanged-content short-circuit and the
   `existed`/`changed` report are untouched.
+- **The parked `schedule`-tool entry is re-parked on demand, not on the daemon existing.** Its old
+  trigger — "the daemon itself is unbuilt and this entry stays parked until it exists" — fired when
+  `apogee daemon` shipped. By owner call (2026-08-22) the entry stays in `ISSUES.md`'s *Parked /
+  deferred work* with its recorded design intact, now parked until a real need for a model-facing
+  schedule tool appears: the daemon made the tool possible, not needed.
 
 ### Known verification (owner-run)
 

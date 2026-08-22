@@ -201,7 +201,11 @@ and add the CHANGELOG bullet.
 
 **Commit:** `fix(daemon): install writes the supervisor unit via temp file and rename`
 
-## 6. Re-park the model-facing `schedule`-tool entry on demand
+## 6. Re-park the model-facing `schedule`-tool entry on demand — ✅ DONE (2026-08-22)
+
+NOTES (2026-08-22): the CHANGELOG bullet goes under the existing `### Fixed` subsection of `[Unreleased]`, after the supervisor-unit-atomic bullet — the item allows *Changed* or *Fixed*; *Fixed* keeps the six daemon-residual closures together.
+NOTES (2026-08-22): the paragraph's bold lead "**The trigger to pick it up: the daemon.**" was also rewritten to "a real need." — it is the trigger sentence's headline and would otherwise contradict the re-parked condition; all other recorded design in the entry is untouched.
+NOTES (2026-08-22): the stale clause "so the trigger is now a dated record to build against rather than an open question" (it referred to the daemon-as-trigger) was folded into the rewritten sentence rather than kept verbatim — same sentence, same scope.
 
 **What:** Per the ratified call: in `ISSUES.md`, the parked entry *A model-facing
 `schedule` tool — daemon-era, not v1* is parked on "the daemon itself is unbuilt"
