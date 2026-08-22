@@ -36,7 +36,13 @@
   `git add -A` time); extending the undo journal to revert index operations; any config flag;
   any version bump (see closing note).
 
-## 1. `stageGitPaths` helper — best-effort index update for tracked files
+## 1. `stageGitPaths` helper — best-effort index update for tracked files — ✅ DONE (2026-08-22)
+
+NOTES (2026-08-22): no CHANGELOG entry for this item — the helper is unexported and no tool calls it yet, so nothing observable changed; items 2 and 3 carry the user-facing entries for move_file and delete_file staging.
+
+NOTES (2026-08-22): the item text specifies the skipped-note only for a failed `git add`; a Go error from `runGit` on the add (ctx cancellation or a confinement-unavailable demotion) is treated the same way — it is equally a stage that did not happen — and returns `" (git staging skipped: <reason>)"`. Documented at the call site.
+
+NOTES (2026-08-22): two tests beyond the plan's list — an empty-`paths` guard (a bare `git add -A --` would stage the whole tree) and a table test pinning the one-line skipped-note wording.
 
 **What:** Add `internal/tools/git_stage.go` with one unexported helper the two tools share:
 

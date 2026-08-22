@@ -221,7 +221,7 @@
 //
 // # The package spine, one line each
 //
-// Six files register no tool. tools.go is the shared toolSpec (name, description, JSON
+// Seven files register no tool. tools.go is the shared toolSpec (name, description, JSON
 // schema) every built-in embeds, the size ceilings they all read, and the result helpers —
 // including okSummary, which attaches the structured half. registry.go is HostTools and the
 // two assemblers, NewDefaultRegistry and NewDefaultRegistryWithHost, that turn the built-ins
@@ -243,6 +243,12 @@
 // precisely because a per-tool copy could drift on what a region is while painting into the same
 // body. Beside it, okEditRegions is the success result those tools return through, and the one
 // place the shared "a pair with no regions attaches no summary" rule is applied.
+// git_stage.go is stageGitPaths, the best-effort git index update move_file and delete_file
+// share: one index probe for the source path's trackedness, one `git add -A` over :(literal)
+// pathspecs, and the note a caller appends to its result so the model reads that the index
+// changed. It lives here rather than in either tool so the two cannot grow parallel staging
+// code paths, and its header owns the undo interplay both of them reference (/undo restores
+// worktree bytes, never the index).
 //
 // And doc.go this map.
 package tools
