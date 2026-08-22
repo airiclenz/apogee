@@ -23,22 +23,6 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 
 ## Open defects
 
-### The stacked frame's line NUMBER rides inside the diff band, not the chrome gutter
-
-**Status:** [P] open 2026-08-19 — residual of
-`docs/plans/2026-08-19 - 05 - diff-background-tint-plan.md`, whose ratified call 3 ("the gutter
-stays chrome" — line numbers untinted) is still unmet for the stacked frame. No item of that plan
-owns it.
-
-`stackedRow.line` (`internal/tui/diffbody.go:606`) composes the right-aligned number, the marker
-and the text into the detail line's single `Text` field, so the number sits inside the very string
-the tinted style paints and the band runs under it. No wrap-rail change can hold it out — the rail
-receives one opaque string and cannot tell the number from the text — so the fix has to split the
-number off the styled text before the row reaches the style seam. The marker is *meant* to ride the
-band (same plan, item 3's amendment to ADR 0052); only the number is the miss.
-
----
-
 ### `sessionBrowser` derives the visible list twice per frame
 
 **Status:** [P] open 2026-08-20 — residual of

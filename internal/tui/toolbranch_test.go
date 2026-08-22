@@ -121,13 +121,17 @@ func TestRenderDiffDetailStandalone(t *testing.T) {
 		t.Errorf("diff block mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
 	}
 
-	// The band is FULL WIDTH and the hang beside it is CHROME: the tint runs on to the block's wrap
-	// rail rather than stopping at the last glyph — so a body of unequal lines reads as one field
-	// with a straight right edge and a short line's trailing space says added/removed like the rest
-	// of it — while the four columns the body hangs under stay in the plain detail tone (ratified
+	// The band is FULL WIDTH and the chrome beside it is CHROME: the tint runs on to the block's
+	// wrap rail rather than stopping at the last glyph — so a body of unequal lines reads as one
+	// field with a straight right edge and a short line's trailing space says added/removed like the
+	// rest of it — while the columns left of the marker stay in the plain detail tone (ratified
 	// calls 2 and 3 of docs/plans/"2026-08-19 - 05"; renderHangingRow).
+	//
+	// Those columns are the four the body hangs under AND the row's own number gutter: the number
+	// says WHERE the line is, not that it changed, so it sits outside the band exactly as the split
+	// panes' does (splitCell.paint, TestStackedDiffKeepsTheNumberGutterChrome).
 	const width = 80
-	const hang = "    " // the body hangs under the leader row's "  ┕ "
+	const hang = "    1 " // the leader row's "  ┕ " the body hangs under, then the row's number gutter
 	th := newTheme(scheme.Default())
 	lines := tr.renderLines(th, width)
 	for _, tc := range []struct {
@@ -135,8 +139,8 @@ func TestRenderDiffDetailStandalone(t *testing.T) {
 		kind detailKind
 		text string
 	}{
-		{2, detailDiffRemoved, "1 - a removed line"},
-		{3, detailDiffAdded, "1 + an added line"},
+		{2, detailDiffRemoved, "- a removed line"},
+		{3, detailDiffAdded, "+ an added line"},
 	} {
 		band := detailStyle(th, tc.kind, true)
 		want := band.Background(lipgloss.NoColor{}).Render(hang) +

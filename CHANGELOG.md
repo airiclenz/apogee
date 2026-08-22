@@ -952,6 +952,17 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **A stacked diff's line numbers no longer sit on the tint.** The narrow reading of a diff body
+  composed its right-aligned line number, its `-`/`+` marker and its code into one string, so the
+  red or turquoise band painted straight under the number — the split panes had held their numbers
+  out of it since the band shipped, and only the stacked twin still tinted them. A detail line now
+  carries that number as a chrome gutter of its own, parted from the styled text before the row
+  reaches the style seam, and the band starts at the marker exactly as it does in the panes (the
+  marker keeps riding the band on purpose — it is the palette-proof signal). The numbers stand in
+  the columns they always did; a wrapped line's continuation rows now hang under that gutter, so
+  the text keeps one column down the whole line. The gutter rides the session record as an additive
+  wire member, so a resumed session's diff rows come back numbered.
+
 - A quoted path no longer costs a `git_diff_range` body its diff reading. git prints a section
   header with BOTH names C-quoted the moment either of them needs escaping — `diff --git
   "a/tab\tname.go" "b/tab\tname.go"`, which any control byte, double quote, backslash or (under the

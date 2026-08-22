@@ -191,9 +191,17 @@ type wireToolView struct {
 // detailDiffRemoved=2) are pinned by value: they must never be reordered or renumbered, or an
 // old file's diff colours would shift. A string enum was not used here because detailKind is a
 // closed rendering hint, not an evolving vocabulary like the entry kinds.
+//
+// Gutter carries the chrome column a line leads with ([detailLine.Gutter] — a stacked diff row's
+// line number) because a body is replayed from these lines and not rebuilt: a record whose gutters
+// were left off the wire would come back as numberless diff rows. It is ADDITIVE within
+// transcriptVersion on the wireEntry rule — it takes omitempty, so every line that has no such
+// column writes nothing new, and a blob written before it decodes with the empty gutter those
+// records were written under.
 type wireDetailLine struct {
-	Kind int    `json:"kind,omitempty"`
-	Text string `json:"text,omitempty"`
+	Kind   int    `json:"kind,omitempty"`
+	Gutter string `json:"gutter,omitempty"`
+	Text   string `json:"text,omitempty"`
 }
 
 // wireBranchSummary is the serialized form of a [branchSummary]: the branch line's text together
@@ -447,7 +455,7 @@ func toWireToolView(tv toolView) *wireToolView {
 	if tv.Details.len() > 0 {
 		w.Details = make([]wireDetailLine, 0, tv.Details.len())
 		for _, d := range tv.Details.all() {
-			w.Details = append(w.Details, wireDetailLine{Kind: int(d.Kind), Text: d.Text})
+			w.Details = append(w.Details, wireDetailLine{Kind: int(d.Kind), Gutter: d.Gutter, Text: d.Text})
 		}
 	}
 	// The regions ride BESIDE the rows they were rendered into, not instead of them: Details keeps
@@ -612,7 +620,7 @@ func fromWireToolView(w *wireToolView, done bool) toolView {
 	if len(w.Details) > 0 {
 		lines := make([]detailLine, 0, len(w.Details))
 		for _, d := range w.Details {
-			lines = append(lines, detailLine{Kind: detailKind(d.Kind), Text: d.Text})
+			lines = append(lines, detailLine{Kind: detailKind(d.Kind), Gutter: d.Gutter, Text: d.Text})
 		}
 		tv.Details = newToolBody(lines)
 	}

@@ -240,7 +240,11 @@ without error.
 
 ---
 
-## 8. Hold the stacked frame's line number out of the diff band
+## 8. Hold the stacked frame's line number out of the diff band — ✅ DONE (2026-08-22)
+
+NOTES (2026-08-22): the split needed a place to put the number, so the change reaches past the item's three named files — `detailLine` gained a `Gutter` member (`toolview.go`), the one body painter composes it into the frame's hanging prefix (`toolbody.go`), and it rides the session record additively (`transcriptcodec.go`) so a resumed diff is not replayed numberless. Three further test files (`toolpresent_test.go`, `toolbranch_test.go`, `workspacepath_test.go`) held goldens of the composed row and were moved onto the split shape; `docs/layout/split-diff-layout.md`'s Stacked section gained the chrome rule it now shares with the panes.
+
+NOTES (2026-08-22): the 160-rune detail clip now measures the marker and the code, not the number with them — the number is out of its reach entirely, which is what the split makes true rather than a choice taken beside it.
 
 **What:** Fix the ISSUES.md entry *"The stacked frame's line NUMBER rides inside the diff
 band, not the chrome gutter"* — the still-unmet ratified call 3 of the diff-background-tint

@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	lipgloss "charm.land/lipgloss/v2"
+
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/scheme"
 )
@@ -361,6 +363,64 @@ func TestSplitDiffMarkerColumnMatchesTheStackedReading(t *testing.T) {
 	}
 }
 
+// The STACKED reading holds its number out of the band exactly as the panes do: a line number says
+// WHERE a line is, not that it changed, so it is painted chrome and the tint starts at the marker
+// (ratified call 3 of docs/plans/"2026-08-19 - 05", "the gutter stays chrome"). The marker itself
+// rides the band on purpose — it is the palette-proof signal (ADR 0052's 2026-08-19 amendment) —
+// so what the two readings agree about is precisely where the band begins.
+//
+// It is asserted at the PAINT because that is where the miss was: the number used to travel inside
+// the line's own text, where no wrap rail could tell it from the code beside it, and it is
+// [detailLine.Gutter] that parts them now. The plain rows below carry the same numbers in the same
+// columns as before, which is the other half of the claim — holding the number out of the band did
+// not move it.
+func TestStackedDiffKeepsTheNumberGutterChrome(t *testing.T) {
+	t.Parallel()
+
+	const width, indent = 60, 4
+	th := newTheme(scheme.Default())
+	if !colorActive(th) {
+		t.Skip("no-colour profile: there is no band to assert")
+	}
+	// One region whose numbers span two widths, so the right-aligned column is under test with the
+	// colour: the context line is 9 and the change lands on 10.
+	regions := []domain.EditRegion{{BeforeStart: 9, AfterStart: 9,
+		Leading: []string{"ctx"}, Removed: []string{"gone"}, Inserted: []string{"here"}}}
+
+	lines := stackedDiffLines(regions)
+	rows, _ := subDetailFrame(indent).paint(th, lines, width)
+	if len(rows) != len(lines) {
+		t.Fatalf("paint spent %d rows on %d stacked lines, want one each", len(rows), len(lines))
+	}
+
+	pad := strings.Repeat(" ", indent)
+	for i, tc := range []struct {
+		gutter, text string
+		kind         detailKind
+	}{
+		{gutter: " 9 ", text: "  ctx", kind: detailPlain},
+		{gutter: "10 ", text: "- gone", kind: detailDiffRemoved},
+		{gutter: "10 ", text: "+ here", kind: detailDiffAdded},
+	} {
+		chrome := pad + tc.gutter
+		style := detailStyle(th, tc.kind, true)
+		// An unbanded line has no seam to split at and paints whole, exactly as it always did.
+		want := style.Render(chrome + tc.text)
+		if tc.kind != detailPlain {
+			want = style.Background(lipgloss.NoColor{}).Render(chrome) +
+				style.Render(squareLine(th.measure, tc.text, width-th.measure.Width(chrome)))
+		}
+		if rows[i] != want {
+			t.Errorf("row %d = %q, want the number chrome and the band from the marker on %q",
+				i, rows[i], want)
+		}
+		// The band's own pad reaches the rail (renderToRail), so the read-back is trimmed of it.
+		if got, want := strings.TrimRight(strip(rows[i]), " "), chrome+tc.text; got != want {
+			t.Errorf("row %d reads %q, want the number in the column it always stood in: %q", i, got, want)
+		}
+	}
+}
+
 // Nothing to arrange, and nowhere to arrange it: no regions paints no rows — which is what leaves a
 // call that recorded none showing the argument-derived body it was presented with (ratified call
 // 9) — and a width too narrow to seat one column of code paints none either, rather than composing
@@ -401,9 +461,9 @@ func TestGitDiffQuotedHeaderKeepsItsFileSections(t *testing.T) {
 	}
 	want := []detailLine{
 		{Text: "my file.go"},
-		{Text: "1   one"},
-		{Kind: detailDiffRemoved, Text: "2 - two"},
-		{Kind: detailDiffAdded, Text: "2 + TWO"},
+		{Gutter: "1 ", Text: "  one"},
+		{Kind: detailDiffRemoved, Gutter: "2 ", Text: "- two"},
+		{Kind: detailDiffAdded, Gutter: "2 ", Text: "+ TWO"},
 	}
 	if got, want := detailDump(tv.Details.all()), detailDump(want); got != want {
 		t.Errorf("body:\n--- got ---\n%s--- want ---\n%s", got, want)

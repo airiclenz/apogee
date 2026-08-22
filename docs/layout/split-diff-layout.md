@@ -103,3 +103,7 @@ are untouched.
 
 - per region: context, then `-` rows (before numbers), then `+` rows (after
   numbers), then trailing context. Same wrap rule, same `⋯` separator.
+- Same chrome rule too: the band runs from the marker column to the block's wrap
+  rail, on the first row of a line and on its continuation rows alike, while the
+  number gutter left of it stays chrome. A continuation row hangs under that
+  gutter, so a wrapped line shows one number.

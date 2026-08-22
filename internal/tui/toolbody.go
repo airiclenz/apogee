@@ -84,6 +84,13 @@ func (f bodyFrame) continuation(th theme) string {
 // is styled for its kind in the frame's state (detailStyle) and laid out by the one primitive the
 // frame's shape asks for — clipped under a row budget, guttered, or hanging.
 //
+// A line carrying a chrome gutter of its own ([detailLine.Gutter] — the stacked diff reading's line
+// number) has it appended to the frame's prefix rather than to its text, and every primitive here
+// paints its prefix outside the band (renderHangingRow, gutteredWrap). That is what holds the
+// numbers off the tint (ratified call 3 of docs/plans/"2026-08-19 - 05") without any wrap rail
+// having to tell a number from the code beside it — and, because the prefix widens, a wrapped
+// number's continuation rows hang under the text with the gutter blank.
+//
 // It REPORTS a clip for the same reason [clipWrap] does: whether a collapsed block hides anything is
 // width-dependent once its lines can be cut, and the indicator, the click target and the paint all
 // have to agree about it (blockHidesWhenCollapsed). An uncapped frame can never cut, and answers
@@ -93,19 +100,30 @@ func (f bodyFrame) paint(th theme, details []detailLine, width int) (rows []stri
 	out := make([]string, 0, len(details))
 	for i, d := range details {
 		style := detailStyle(th, d.Kind, f.expanded)
-		lead := f.lead(i == len(details)-1)
+		lead := f.lead(i == len(details)-1) + d.Gutter
 		switch {
 		case f.rowCap > 0:
 			capped, cut := clipWrap(th, style, lead, d.Text, width, f.rowCap)
 			out = append(out, capped...)
 			clipped = clipped || cut
 		case f.guttered:
-			out = append(out, gutteredWrap(th, style, lead, cont, d.Text, width)...)
+			out = append(out, gutteredWrap(th, style, lead, cont+blankColumns(th, d.Gutter), d.Text, width)...)
 		default:
 			out = append(out, hangingWrap(th, style, lead, d.Text, width)...)
 		}
 	}
 	return out, clipped
+}
+
+// blankColumns is s's own width in blanks. It stands a line's chrome gutter empty on the
+// continuation rows of a wrapped line ([bodyFrame.paint]) so the text keeps one column down the
+// whole line — the pad [splitCell.paint] puts under its panes' numbers, for the same reason: a
+// second number on a continuation row would claim the wrapped line was two.
+//
+// The count is the width authority's (ADR 0030), not the string's length, so a gutter is padded by
+// the columns it actually occupies.
+func blankColumns(th theme, s string) string {
+	return strings.Repeat(" ", th.measure.Width(s))
 }
 
 // paintToolBody is [bodyFrame.paint] with ADR 0052's reading rule in front of it: a call that

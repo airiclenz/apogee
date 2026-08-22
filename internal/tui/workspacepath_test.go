@@ -206,10 +206,7 @@ func TestToolCardBodyKeepsTheSpellingOfWhatItQuotes(t *testing.T) {
 			tv := presentToolCall(tc.call, "", ws)
 			tv.enrichWithResult(tc.res, ws)
 
-			body := make([]string, 0, tv.Details.len())
-			for _, d := range tv.Details.all() {
-				body = append(body, d.Text)
-			}
+			body := detailTexts(tv.Details.all())
 			if strings.Join(body, "\n") != strings.Join(tc.want, "\n") {
 				t.Errorf("body = %q, want the paths in it verbatim: %q", body, tc.want)
 			}

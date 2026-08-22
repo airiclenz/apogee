@@ -714,14 +714,30 @@ type stackedRow struct {
 	text   string
 }
 
-// line is the row as a detail line, its number right-aligned into a gutter of the given width. The
-// composed text is clipped like every other detail line, and clipping the whole row rather than its
-// text alone is deliberate: the cut takes the tail, so the number and the marker always survive it.
+// line is the row as a detail line: its number right-aligned into a chrome gutter of the given
+// width (plus the space parting it from the marker), and the marker with its text as the line's
+// own text.
+//
+// The number is handed over as the line's GUTTER rather than as the head of its text because the
+// two are painted differently — the band a diff kind wears is the text's field, and a number inside
+// that string would be tinted along with it, where ratified call 3 of
+// docs/plans/"2026-08-19 - 05" holds the number gutter chrome. The marker stays ON the band: it is
+// the change's palette-proof signal and rides the tint on purpose (ADR 0052's 2026-08-19
+// amendment), which is exactly how the split panes part the same three pieces (splitCell.paint).
+//
+// The marker and its text are clipped together like every other detail line, and clipping them
+// rather than the text alone is deliberate: the cut takes the tail, so the marker always survives
+// it. The number is out of the clip's reach entirely now, which is one fewer way for a very long
+// line to cost the row the thing that places it.
 func (r stackedRow) line(gutter int) detailLine {
 	if r.number == 0 {
 		return detailLine{Kind: r.kind, Text: r.text}
 	}
-	return detailLine{Kind: r.kind, Text: clipDetail(fmt.Sprintf("%*d %s%s", gutter, r.number, r.marker, r.text))}
+	return detailLine{
+		Kind:   r.kind,
+		Gutter: fmt.Sprintf("%*d ", gutter, r.number),
+		Text:   clipDetail(r.marker + r.text),
+	}
 }
 
 // stackedRows lays the regions out as unsized rows, in file order, with the `⋯` rule laid between

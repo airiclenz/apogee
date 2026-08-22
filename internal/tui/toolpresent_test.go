@@ -684,10 +684,7 @@ func TestPresentToolCallOutcomeSplit(t *testing.T) {
 			if got := tv.stat.spell(); got != tc.wantStat {
 				t.Errorf("stat = %q, want %q", got, tc.wantStat)
 			}
-			body := make([]string, 0, tv.Details.len())
-			for _, d := range tv.Details.all() {
-				body = append(body, d.Text)
-			}
+			body := detailTexts(tv.Details.all())
 			if strings.Join(body, "\n") != strings.Join(tc.wantBody, "\n") {
 				t.Errorf("body = %q, want %q", body, tc.wantBody)
 			}
@@ -2038,17 +2035,21 @@ func TestStackedDiffLinesRendersTheLayoutSketch(t *testing.T) {
 
 	got := stackedDiffLines(regions)
 
+	// Every numbered row parts into a chrome gutter and a banded text — the number and its trailing
+	// space on one side of the style seam, the marker and the code on the other (detailLine.Gutter,
+	// ratified call 3 of docs/plans/"2026-08-19 - 05"). The ⋯ rule shows neither and carries no
+	// gutter at all.
 	want := []detailLine{
-		{Text: " 88   func paint(w int) error {"},
-		{Text: " 89     if w < minWidth {"},
-		{Kind: detailDiffRemoved, Text: " 90 -     return errNarrow"},
-		{Kind: detailDiffAdded, Text: ` 90 +     return fmt.Errorf("width %d under %d", w, minWidth)`},
-		{Text: " 91     }"},
+		{Gutter: " 88 ", Text: "  func paint(w int) error {"},
+		{Gutter: " 89 ", Text: "    if w < minWidth {"},
+		{Kind: detailDiffRemoved, Gutter: " 90 ", Text: "-     return errNarrow"},
+		{Kind: detailDiffAdded, Gutter: " 90 ", Text: `+     return fmt.Errorf("width %d under %d", w, minWidth)`},
+		{Gutter: " 91 ", Text: "    }"},
 		{Text: strings.Repeat("⋯", stackedRegionRuleCells)},
-		{Text: "204     return nil"},
-		{Kind: detailDiffRemoved, Text: "205 - }"},
-		{Kind: detailDiffAdded, Text: "206 +   }"},
-		{Kind: detailDiffAdded, Text: "207 + "},
+		{Gutter: "204 ", Text: "    return nil"},
+		{Kind: detailDiffRemoved, Gutter: "205 ", Text: "- }"},
+		{Kind: detailDiffAdded, Gutter: "206 ", Text: "+   }"},
+		{Kind: detailDiffAdded, Gutter: "207 ", Text: "+ "},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("stacked rows =\n%s\nwant\n%s", detailDump(got), detailDump(want))
@@ -2612,20 +2613,20 @@ func TestGitDiffRangeRecoversARegionPerFileSection(t *testing.T) {
 
 	want := []detailLine{
 		{Text: "alpha.go"},
-		{Text: "10   one"},
-		{Text: "11   two"},
-		{Text: "12   three"},
-		{Kind: detailDiffRemoved, Text: "13 - four"},
-		{Kind: detailDiffAdded, Text: "13 + FOUR"},
-		{Text: "14   five"},
-		{Text: "15   six"},
-		{Text: "16   seven"},
+		{Gutter: "10 ", Text: "  one"},
+		{Gutter: "11 ", Text: "  two"},
+		{Gutter: "12 ", Text: "  three"},
+		{Kind: detailDiffRemoved, Gutter: "13 ", Text: "- four"},
+		{Kind: detailDiffAdded, Gutter: "13 ", Text: "+ FOUR"},
+		{Gutter: "14 ", Text: "  five"},
+		{Gutter: "15 ", Text: "  six"},
+		{Gutter: "16 ", Text: "  seven"},
 		{Text: "beta.go"},
-		{Text: "100   alpha"},
-		{Kind: detailDiffRemoved, Text: "101 - beta"},
-		{Kind: detailDiffAdded, Text: "101 + BETA"},
-		{Kind: detailDiffAdded, Text: "102 + extra"},
-		{Text: "102   gamma"},
+		{Gutter: "100 ", Text: "  alpha"},
+		{Kind: detailDiffRemoved, Gutter: "101 ", Text: "- beta"},
+		{Kind: detailDiffAdded, Gutter: "101 ", Text: "+ BETA"},
+		{Kind: detailDiffAdded, Gutter: "102 ", Text: "+ extra"},
+		{Gutter: "102 ", Text: "  gamma"},
 	}
 	if got, want := detailDump(tv.Details.all()), detailDump(want); got != want {
 		t.Errorf("body:\n--- got ---\n%s--- want ---\n%s", got, want)
@@ -2671,13 +2672,13 @@ func TestGitDiffRangeSeparatesTheHunksOfOneFile(t *testing.T) {
 
 	want := []detailLine{
 		{Text: "only.go"},
-		{Text: " 1   head"},
-		{Kind: detailDiffRemoved, Text: " 2 - old"},
-		{Kind: detailDiffAdded, Text: " 2 + new"},
+		{Gutter: " 1 ", Text: "  head"},
+		{Kind: detailDiffRemoved, Gutter: " 2 ", Text: "- old"},
+		{Kind: detailDiffAdded, Gutter: " 2 ", Text: "+ new"},
 		{Text: strings.Repeat(glyphLeaderDot, stackedRegionRuleCells)},
-		{Text: "40   far"},
-		{Kind: detailDiffRemoved, Text: "41 - there"},
-		{Kind: detailDiffAdded, Text: "41 + here"},
+		{Gutter: "40 ", Text: "  far"},
+		{Kind: detailDiffRemoved, Gutter: "41 ", Text: "- there"},
+		{Kind: detailDiffAdded, Gutter: "41 ", Text: "+ here"},
 	}
 	if got, want := detailDump(tv.Details.all()), detailDump(want); got != want {
 		t.Errorf("body:\n--- got ---\n%s--- want ---\n%s", got, want)
@@ -2767,19 +2768,26 @@ func TestGitDiffRangeFallsBackToPlainOutputWholesale(t *testing.T) {
 
 // detailTexts is a body's lines as plain strings, for assertions that are about the rows' text
 // rather than about which half of the outcome they landed in.
+//
+// A line's chrome gutter leads its text here, because what these assertions are about is the ROW as
+// the reader sees it and the painter puts the two back together in that order (bodyFrame.paint).
+// Which of the two a piece of the row travels in is [detailLine.Gutter]'s own claim, pinned where
+// it is made — at the builder (TestStackedDiffLinesRendersTheLayoutSketch) and at the paint
+// (TestStackedDiffKeepsTheNumberGutterChrome).
 func detailTexts(lines []detailLine) []string {
 	out := make([]string, 0, len(lines))
 	for _, line := range lines {
-		out = append(out, line.Text)
+		out = append(out, line.Gutter+line.Text)
 	}
 	return out
 }
 
-// detailDump renders a body one line per row, kind and text, so a failed golden comparison reads.
+// detailDump renders a body one line per row — kind, chrome gutter, text — so a failed golden
+// comparison reads and shows which side of the style seam each piece of the row travels on.
 func detailDump(lines []detailLine) string {
 	var b strings.Builder
 	for _, line := range lines {
-		fmt.Fprintf(&b, "  %d %q\n", line.Kind, line.Text)
+		fmt.Fprintf(&b, "  %d %q %q\n", line.Kind, line.Gutter, line.Text)
 	}
 	return b.String()
 }

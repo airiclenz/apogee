@@ -52,6 +52,22 @@ const (
 // right-aligned outcome slot, a Details line lays out beneath it (render.go owns that shape).
 type detailLine struct {
 	Kind detailKind
+
+	// Gutter is the CHROME column this line carries between its frame's own prefix and its text,
+	// empty on every line that has none. Only the stacked diff reading fills it today, with the
+	// right-aligned line number the row sits on ([stackedRow.line]).
+	//
+	// It is a member of its own rather than the head of Text because the two are painted
+	// differently: a diff kind's band is the TEXT's field, so a number sharing that string would be
+	// tinted along with it, where ratified call 3 of docs/plans/"2026-08-19 - 05" ("the gutter stays
+	// chrome") holds the numbers out of the band. No wrap rail can make that split for itself — it
+	// receives one opaque string and cannot tell a number from the code beside it — so the line
+	// arrives at the style seam already parted ([bodyFrame.paint], which widens the row's hanging
+	// prefix by this column and lets the primitives keep prefixes chrome). The split panes hold
+	// their numbers out the same way ([splitCell.paint]), so the two readings of one body agree
+	// about what is chrome.
+	Gutter string
+
 	Text string
 }
 
