@@ -212,7 +212,9 @@ CHANGELOG text records the acceptance.
 
 ---
 
-## 7. Parse quoted paths in git diff section headers
+## 7. Parse quoted paths in git diff section headers — ✅ DONE (2026-08-22)
+
+NOTES (2026-08-22): the ISSUES entry's premise that git quotes a path holding a SPACE is wrong — verified against git, a bare space needs no escaping (`quote_c_style`), so `diff --git a/my file.go b/my file.go` prints unquoted and the existing greedy pattern already read it. The quoted shape the fix adds is what a control byte, a double quote, a backslash or a non-ASCII byte forces; the item's space case is still covered as a quoted-header test, since the reading accepts a space riding inside a quoted name.
 
 **What:** Fix the ISSUES.md entry *"`git_diff_range` drops the whole diff to plain rendering
 when git quotes a path"*. The section-header match at `internal/tui/diffbody.go:377`

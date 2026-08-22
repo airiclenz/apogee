@@ -367,12 +367,17 @@ const (
 	gitDiffFilePrefix = "diff --git "
 	gitDiffHunkPrefix = "@@"
 	gitDiffNoNewline  = `\ No newline at end of file`
+	gitDiffSourceSide = "a/"
+	gitDiffTargetSide = "b/"
 )
 
 // The two headers this recovery reads rather than skips: the file a section is about (the b-side
 // path — the name the change left the file under) and the lines each side of a hunk resumes at. A
 // count of 1 is written without its comma, which is why the counts are optional here; they are not
 // read at all, because what a hunk holds is the lines it then prints.
+//
+// The file pattern reads the BARE spelling of the header only; a header whose names git C-quoted
+// is read by gitDiffFileHeaderPath, which owns both shapes.
 var (
 	gitDiffFilePattern = regexp.MustCompile(`^diff --git a/(.+) b/(.+)$`)
 	gitDiffHunkPattern = regexp.MustCompile(`^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@`)
@@ -448,8 +453,8 @@ type gitDiffWalk struct {
 func (w *gitDiffWalk) take(line string) bool {
 	switch {
 	case strings.HasPrefix(line, gitDiffFilePrefix):
-		m := gitDiffFilePattern.FindStringSubmatch(line)
-		return m != nil && w.startFile(m[2])
+		path, ok := gitDiffFileHeaderPath(line)
+		return ok && w.startFile(path)
 	case !w.open:
 		return false
 	case strings.HasPrefix(line, gitDiffHunkPrefix):
@@ -537,6 +542,115 @@ func gitDiffHeaderLine(line string) bool {
 		}
 	}
 	return false
+}
+
+// gitDiffFileHeaderPath reads the b-side path off the "diff --git" line a file section opens on —
+// the name the change left the file under. git prints that pair of names in one of two shapes
+// (quote_two): bare, `diff --git a/one.go b/one.go`, when neither name needs escaping, and BOTH
+// names C-quoted when either of them does, `diff --git "a/tab\tname.go" "b/tab\tname.go"`. A
+// control byte, a double quote, a backslash and — under the default core.quotePath — any
+// non-ASCII byte force the quoted shape; a plain space does not, so the bare pattern is what reads
+// paths holding one.
+//
+// A line in neither shape reports false and stops the walk dead, the way an unreadable header
+// always has (gitDiffFileSections).
+func gitDiffFileHeaderPath(line string) (string, bool) {
+	rest, ok := strings.CutPrefix(line, gitDiffFilePrefix)
+	if !ok {
+		return "", false
+	}
+	if !strings.HasPrefix(rest, `"`) {
+		m := gitDiffFilePattern.FindStringSubmatch(line)
+		if m == nil {
+			return "", false
+		}
+		return m[2], true
+	}
+	if _, rest, ok = cutQuotedDiffName(rest, gitDiffSourceSide); !ok {
+		return "", false
+	}
+	if rest, ok = strings.CutPrefix(rest, " "); !ok {
+		return "", false
+	}
+	target, rest, ok := cutQuotedDiffName(rest, gitDiffTargetSide)
+	if !ok || rest != "" {
+		return "", false
+	}
+	return target, true
+}
+
+// cutQuotedDiffName cuts one C-quoted name off the front of s, returning it with its `a/`/`b/`
+// side prefix stripped and whatever follows the closing quote. Undoing git's quoting here is what
+// recovers the bytes the path is actually made of, so the section is named the way every other
+// reading of that file names it. An unterminated quote, an escape git would not have written, or a
+// name that is bare of its side prefix leaves nothing to name a section with, and reports false.
+func cutQuotedDiffName(s, side string) (string, string, bool) {
+	if !strings.HasPrefix(s, `"`) {
+		return "", "", false
+	}
+	var name strings.Builder
+	for i := 1; i < len(s); {
+		switch c := s[i]; c {
+		case '"':
+			path, ok := strings.CutPrefix(name.String(), side)
+			if !ok || path == "" {
+				return "", "", false
+			}
+			return path, s[i+1:], true
+		case '\\':
+			escaped, width, ok := gitQuotedEscape(s[i+1:])
+			if !ok {
+				return "", "", false
+			}
+			name.WriteByte(escaped)
+			i += 1 + width
+		default:
+			name.WriteByte(c)
+			i++
+		}
+	}
+	return "", "", false
+}
+
+// gitOctalEscapeDigits is how many octal digits git's C-style quoting spends on one byte at most.
+const gitOctalEscapeDigits = 3
+
+// gitQuotedEscape reads the escape sequence standing after a backslash inside a C-quoted path and
+// answers the byte it spells plus how many bytes of s it spent. A byte git cannot print it writes
+// in octal, which is the form every non-ASCII path arrives in — one UTF-8 byte per escape — while
+// everything else it escapes is a single letter or one of the two verbatim characters.
+func gitQuotedEscape(s string) (byte, int, bool) {
+	if s == "" {
+		return 0, 0, false
+	}
+	switch s[0] {
+	case 'a':
+		return '\a', 1, true
+	case 'b':
+		return '\b', 1, true
+	case 'f':
+		return '\f', 1, true
+	case 'n':
+		return '\n', 1, true
+	case 'r':
+		return '\r', 1, true
+	case 't':
+		return '\t', 1, true
+	case 'v':
+		return '\v', 1, true
+	case '"', '\\':
+		return s[0], 1, true
+	}
+	if s[0] < '0' || s[0] > '7' {
+		return 0, 0, false
+	}
+	value, width := 0, 0
+	for width < gitOctalEscapeDigits && width < len(s) && '0' <= s[width] && s[width] <= '7' {
+		value = value<<3 + int(s[width]-'0')
+		width++
+	}
+	// A three-digit escape can spell past a byte; truncating is what git's own unquoting does.
+	return byte(value), width, true
 }
 
 // The marker column of the stacked reading: two cells, the same width in every row, carrying `-` on

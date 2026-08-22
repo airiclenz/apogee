@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -373,5 +374,110 @@ func TestSplitDiffRowsPaintNothingWithoutRoomOrRegions(t *testing.T) {
 	}
 	if got := splitDiffRows(th, sketchRegions(), 12); got != nil {
 		t.Errorf("splitDiffRows at 12 columns = %q, want no rows — the code column would be under one cell", got)
+	}
+}
+
+// TestGitDiffQuotedHeaderKeepsItsFileSections: git prints a section header in one of two shapes,
+// and a name it had to escape arrives in the quoted one — `diff --git "a/…" "b/…"`, both names
+// quoted the moment either needs it. The walk reads that shape too, so a path riding inside a
+// quoted name keeps the body its Split/Stacked reading instead of dropping the whole diff to the
+// plain uncoloured output, and the section is named by the path itself rather than its quoting.
+func TestGitDiffQuotedHeaderKeepsItsFileSections(t *testing.T) {
+	t.Parallel()
+
+	tv := gitDiffCard(t, []string{
+		`diff --git "a/my file.go" "b/my file.go"`,
+		"index 1111111..2222222 100644",
+		`--- "a/my file.go"`,
+		`+++ "b/my file.go"`,
+		"@@ -1,3 +1,3 @@",
+		" one",
+		"-two",
+		"+TWO",
+	})
+
+	if got, want := tv.RegionFiles, []string{"my file.go"}; !slices.Equal(got, want) {
+		t.Fatalf("region files = %v, want %v — the section is named by the unquoted path", got, want)
+	}
+	want := []detailLine{
+		{Text: "my file.go"},
+		{Text: "1   one"},
+		{Kind: detailDiffRemoved, Text: "2 - two"},
+		{Kind: detailDiffAdded, Text: "2 + TWO"},
+	}
+	if got, want := detailDump(tv.Details.all()), detailDump(want); got != want {
+		t.Errorf("body:\n--- got ---\n%s--- want ---\n%s", got, want)
+	}
+}
+
+// TestGitDiffQuotedHeaderDoesNotCostTheOtherFilesTheirSections: the walk is all-or-nothing
+// (gitDiffFileSections), so before the quoted shape was read ONE escaped path took every other
+// file's section down with it. A diff mixing the two spellings now keeps all of its sections.
+func TestGitDiffQuotedHeaderDoesNotCostTheOtherFilesTheirSections(t *testing.T) {
+	t.Parallel()
+
+	tv := gitDiffCard(t, []string{
+		"diff --git a/alpha.go b/alpha.go",
+		"index 1111111..2222222 100644",
+		"--- a/alpha.go",
+		"+++ b/alpha.go",
+		"@@ -1,2 +1,2 @@",
+		" one",
+		"-two",
+		"+TWO",
+		`diff --git "a/two words.go" "b/two words.go"`,
+		"index 4444444..5555555 100644",
+		"@@ -1,2 +1,2 @@",
+		" alpha",
+		"-beta",
+		"+BETA",
+	})
+
+	if got, want := tv.RegionFiles, []string{"alpha.go", "two words.go"}; !slices.Equal(got, want) {
+		t.Fatalf("region files = %v, want %v — one quoted header costs no file its section", got, want)
+	}
+	if got := len(tv.Regions); got != 2 {
+		t.Errorf("regions = %d, want 2 — one per file section", got)
+	}
+}
+
+// TestGitDiffFileHeaderPathReadsBothSpellings pins what the two shapes of a section header spell.
+// git escapes a name with quote_c_style, writing a byte it cannot print as an octal escape — one
+// per UTF-8 byte — so undoing that is what recovers the name every other reading of the file uses.
+// A header in neither shape reads as no path at all, which is what stops the walk dead.
+func TestGitDiffFileHeaderPathReadsBothSpellings(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		line string
+		want string
+	}{
+		{name: "bare", line: "diff --git a/plain.go b/plain.go", want: "plain.go"},
+		{name: "a space needs no quoting", line: "diff --git a/my file.go b/my file.go", want: "my file.go"},
+		{name: "quoted with a space", line: `diff --git "a/my file.go" "b/my file.go"`, want: "my file.go"},
+		{name: "an octal escape per non-ASCII byte", line: `diff --git "a/\303\274ni.go" "b/\303\274ni.go"`, want: "üni.go"},
+		{name: "a letter escape", line: `diff --git "a/tab\tname.go" "b/tab\tname.go"`, want: "tab\tname.go"},
+		{name: "the verbatim escapes", line: `diff --git "a/say \"hi\"\\.go" "b/say \"hi\"\\.go"`, want: `say "hi"\.go`},
+		{name: "the b-side name is the one read", line: `diff --git "a/old\tname.go" "b/new\tname.go"`, want: "new\tname.go"},
+		{name: "an unterminated quote", line: `diff --git "a/x.go" "b/x.go`},
+		{name: "an escape git would not write", line: `diff --git "a/x\qy.go" "b/x\qy.go"`},
+		{name: "a name bare of its side prefix", line: `diff --git "c/x.go" "d/x.go"`},
+		{name: "only one side quoted", line: `diff --git "a/x.go" b/x.go`},
+		{name: "nothing but the sides", line: `diff --git "a/" "b/"`},
+		{name: "trailing junk after the pair", line: `diff --git "a/x.go" "b/x.go" and more`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, ok := gitDiffFileHeaderPath(tc.line)
+			if ok != (tc.want != "") {
+				t.Fatalf("gitDiffFileHeaderPath(%q) ok = %v, want %v", tc.line, ok, tc.want != "")
+			}
+			if got != tc.want {
+				t.Errorf("gitDiffFileHeaderPath(%q) = %q, want %q", tc.line, got, tc.want)
+			}
+		})
 	}
 }

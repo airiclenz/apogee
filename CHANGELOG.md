@@ -952,6 +952,16 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- A quoted path no longer costs a `git_diff_range` body its diff reading. git prints a section
+  header with BOTH names C-quoted the moment either of them needs escaping — `diff --git
+  "a/tab\tname.go" "b/tab\tname.go"`, which any control byte, double quote, backslash or (under the
+  default `core.quotePath`) non-ASCII byte forces — and the walk matched only the bare spelling, so
+  one such path failed the header line and, the reading being all-or-nothing, dropped the WHOLE body
+  to plain uncoloured output, the other files' sections included. The header now reads both shapes,
+  undoing git's C-style quoting — the letter escapes, the two verbatim characters, and one octal
+  escape per byte — so the section is named by the path itself rather than by its quoting. A header
+  in neither shape still fails the walk exactly as before.
+
 - Wrote down the accepted one-way break in replaying a session saved before the typed stat value.
   `fromWireStatValue` decodes a record carrying no `statValue` — every session file written before
   113b3078 — as a plain value, and a plain value does not sum, so the grouped type row of a replayed

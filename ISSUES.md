@@ -23,21 +23,6 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 
 ## Open defects
 
-### `git_diff_range` drops the whole diff to plain rendering when git quotes a path
-
-**Status:** [P] open 2026-08-19 — residual of
-`docs/plans/2026-08-19 - 03 - split-diff-display-plan.md` item 9, which added the recovery.
-
-The file-section walk matches a section header against
-`^diff --git a/(.+) b/(.+)$` (`internal/tui/diffbody.go:377`). Git QUOTES a path holding a
-space or a non-ASCII byte — it prints `diff --git "a/my file.go" "b/my file.go"` — and that line
-fails the pattern, so `gitDiffWalk.take` returns false (`internal/tui/diffbody.go:448`). The
-walk is all-or-nothing by design (`gitDiffFileSections`, `internal/tui/diffbody.go:421`), so
-ONE such path costs the whole body its Split/Stacked reading, including the other files' sections,
-and it falls back to the plain uncoloured output.
-
----
-
 ### The stacked frame's line NUMBER rides inside the diff band, not the chrome gutter
 
 **Status:** [P] open 2026-08-19 — residual of
