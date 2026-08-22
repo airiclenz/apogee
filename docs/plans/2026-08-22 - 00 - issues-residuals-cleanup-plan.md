@@ -437,7 +437,7 @@ panics is still recovered and attributed as today.
 
 ---
 
-## 15. Guard hookPoints and hookImplements against HookPoint drift
+## 15. Guard hookPoints and hookImplements against HookPoint drift — ✅ DONE (2026-08-22)
 
 **What:** Fix the ISSUES.md entry *"`hookPoints` and `hookImplements` duplicate the
 HookPoint set with no drift guard"*. The five `HookPoint` constants are re-enumerated in

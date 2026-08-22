@@ -7,7 +7,12 @@ package domain
 import (
 	"context"
 	"errors"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"reflect"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -308,4 +313,182 @@ func TestValidateRequirements(t *testing.T) {
 			t.Errorf("error %q should name the broken B→C link", msg)
 		}
 	})
+}
+
+// hookPointSource is the file the drift pin below parses: the HookPoint constants' OWN file. A
+// string enum cannot be reflected over — only the constants a test already names come back, which
+// is exactly the set that cannot contain the omission — so the guard reads the const block off
+// disk and compares it with what registry.go claims.
+const hookPointSource = "mechanism.go"
+
+// hookPointType is the enum whose const block the guard walks.
+const hookPointType = "HookPoint"
+
+// canonicalHookPoints pins the hook-point set once, in loop order — the order hookPoints holds and
+// the set mechanism.go declares. A sixth hook point joins four places at once: the const block, this
+// pin, hookPointFixtures, and hookImplements's switch; the pin is what turns forgetting any of them
+// into a failing test instead of a point that silently never freezes or never accepts a hook.
+var canonicalHookPoints = []HookPoint{
+	HookPreRequest,
+	HookPostResponse,
+	HookPreToolExec,
+	HookPostToolResult,
+	HookHistoryRewrite,
+}
+
+// preToolExecMech, postToolResultMech and historyRewriteMech complete the fixture set the pin needs:
+// a hook satisfying exactly one of the five hook interfaces, so every hook point has a registration
+// shape to be offered.
+type preToolExecMech struct{}
+
+func (preToolExecMech) PreToolExec(context.Context, *ToolCallEdit, LoopView) error { return nil }
+
+type postToolResultMech struct{}
+
+func (postToolResultMech) PostToolResult(context.Context, ToolCall, *ToolResultEdit, LoopView) error {
+	return nil
+}
+
+type historyRewriteMech struct{}
+
+func (historyRewriteMech) RewriteHistory(context.Context, *Conversation) error { return nil }
+
+// hookPointFixtures pairs every hook point with a hook implementing the one interface that point
+// requires — what AddExperimental hands hookImplements at registration.
+var hookPointFixtures = map[HookPoint]any{
+	HookPreRequest:     preReqMech{},
+	HookPostResponse:   postRespMech{},
+	HookPreToolExec:    preToolExecMech{},
+	HookPostToolResult: postToolResultMech{},
+	HookHistoryRewrite: historyRewriteMech{},
+}
+
+// hookPointConst is one parsed constant: the source name the failure messages point at, and the
+// value the enumerations are compared on.
+type hookPointConst struct {
+	name  string
+	point HookPoint
+}
+
+// TestHookPointsMatchTheDeclaredConstants is half the drift pin. mechanism.go's const block is the
+// truth; hookPoints — the array freezeOrder precomputes the frozen dispatch order over — must hold
+// exactly that set, in loop order. A point the array omits is never frozen and silently falls back
+// to computing its order on the fly on every Ordered call.
+func TestHookPointsMatchTheDeclaredConstants(t *testing.T) {
+	t.Parallel()
+
+	declared := declaredHookPoints(t)
+
+	for _, c := range declared {
+		if !slices.Contains(canonicalHookPoints, c.point) {
+			t.Errorf("%s declares %s = %q, which the pin does not carry; extend canonicalHookPoints, hookPointFixtures, hookPoints and hookImplements",
+				hookPointSource, c.name, c.point)
+		}
+	}
+	if len(declared) != len(canonicalHookPoints) {
+		t.Errorf("%s declares %d %s constants, the pin carries %d", hookPointSource, len(declared), hookPointType, len(canonicalHookPoints))
+	}
+	if got := hookPoints[:]; !slices.Equal(got, canonicalHookPoints) {
+		t.Errorf("hookPoints = %v, want %v in loop order", got, canonicalHookPoints)
+	}
+}
+
+// TestHookImplementsAnswersForEveryHookPoint is the other half. hookImplements is the gate
+// AddExperimental applies, so a hook point its switch forgets refuses every hook registered there.
+// Every declared point must accept its own registration shape and refuse a hook that implements
+// nothing; a value no constant names must be refused whatever it is handed.
+func TestHookImplementsAnswersForEveryHookPoint(t *testing.T) {
+	t.Parallel()
+
+	for _, c := range declaredHookPoints(t) {
+		hook, ok := hookPointFixtures[c.point]
+		if !ok {
+			t.Errorf("%s has no entry in hookPointFixtures; give the new hook point a hook implementing its interface", c.name)
+			continue
+		}
+		if !hookImplements(c.point, hook) {
+			t.Errorf("hookImplements(%s, %T) = false; the switch has no case for the constant, so AddExperimental refuses every hook registered there", c.name, hook)
+		}
+		if hookImplements(c.point, struct{}{}) {
+			t.Errorf("hookImplements(%s, struct{}{}) = true; a hook implementing no interface is not a registration shape", c.name)
+		}
+	}
+
+	for _, c := range canonicalHookPoints {
+		if hookImplements("no-such-hook-point", hookPointFixtures[c]) {
+			t.Errorf("hookImplements(\"no-such-hook-point\", %T) = true; a hook point no constant names matches nothing", hookPointFixtures[c])
+		}
+	}
+}
+
+// declaredHookPoints parses hookPointSource's HookPoint constants and returns them in source order.
+// The const block spells the type out on every line, which is what makes a constant recognisable one
+// spec at a time; a spec inside that block that dropped the type would be invisible to the guard, so
+// it fails the test rather than being passed over.
+func declaredHookPoints(t *testing.T) []hookPointConst {
+	t.Helper()
+
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, hookPointSource, nil, parser.SkipObjectResolution)
+	if err != nil {
+		t.Fatalf("parse %s: %v", hookPointSource, err)
+	}
+	var declared []hookPointConst
+	for _, decl := range file.Decls {
+		gen, ok := decl.(*ast.GenDecl)
+		if !ok || gen.Tok != token.CONST {
+			continue
+		}
+		inBlock := declaresHookPoint(gen)
+		for _, spec := range gen.Specs {
+			vs, ok := spec.(*ast.ValueSpec)
+			if !ok || !typesHookPoint(vs) {
+				if inBlock {
+					t.Fatalf("%s's %s block has a spec that does not spell its type out; the guard cannot see it", hookPointSource, hookPointType)
+				}
+				continue
+			}
+			declared = append(declared, hookPointConst{name: vs.Names[0].Name, point: hookPointValue(t, vs)})
+		}
+	}
+	// A guard that parsed no constants would pass over an enum it never looked at.
+	if len(declared) == 0 {
+		t.Fatalf("no %s constants were parsed out of %s; the drift pin proved nothing", hookPointType, hookPointSource)
+	}
+	return declared
+}
+
+// declaresHookPoint reports whether a const block is THE HookPoint block — its first spec types
+// itself as HookPoint, which is how the block names the type it enumerates.
+func declaresHookPoint(gen *ast.GenDecl) bool {
+	if len(gen.Specs) == 0 {
+		return false
+	}
+	first, ok := gen.Specs[0].(*ast.ValueSpec)
+	return ok && typesHookPoint(first)
+}
+
+// typesHookPoint reports whether a const spec spells its type out as HookPoint.
+func typesHookPoint(vs *ast.ValueSpec) bool {
+	id, ok := vs.Type.(*ast.Ident)
+	return ok && id.Name == hookPointType
+}
+
+// hookPointValue returns the wire string a HookPoint constant is declared with — the value the
+// enumerations are keyed on, not the source name.
+func hookPointValue(t *testing.T, vs *ast.ValueSpec) HookPoint {
+	t.Helper()
+
+	if len(vs.Names) != 1 || len(vs.Values) != 1 {
+		t.Fatalf("%s: a %s constant is one name declared with one string literal; %v is not", hookPointSource, hookPointType, vs.Names)
+	}
+	lit, ok := vs.Values[0].(*ast.BasicLit)
+	if !ok || lit.Kind != token.STRING {
+		t.Fatalf("%s: %s = %v is not a string literal; the guard reads constants off their literals", hookPointSource, vs.Names[0].Name, vs.Values[0])
+	}
+	value, err := strconv.Unquote(lit.Value)
+	if err != nil {
+		t.Fatalf("%s: %s's literal %s does not unquote: %v", hookPointSource, vs.Names[0].Name, lit.Value, err)
+	}
+	return HookPoint(value)
 }

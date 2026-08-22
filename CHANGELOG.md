@@ -956,6 +956,13 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- `internal/domain` now carries a drift pin over the hook-point set: the `HookPoint` const block is
+  parsed out of `mechanism.go` and compared with `hookPoints` (exact set, in loop order) and with
+  `hookImplements` (every declared point accepts a hook implementing its interface, refuses one that
+  implements none, and a point no constant names is refused outright). A sixth hook point forgotten
+  in either enumeration now fails `go test ./internal/domain` instead of silently skipping the frozen
+  dispatch order or making `AddExperimental` refuse every hook registered there.
+
 - **A panicking Events sink is no longer blamed on the Mechanism that was firing.** Collapsing the
   five hook runners into one put `runOneHook`'s fire booking inside the recover boundary the hook
   itself runs under, and `a.fired` emits a `MechanismFiredEvent` through the host's sink: a sink

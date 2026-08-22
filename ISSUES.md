@@ -23,23 +23,6 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 
 ## Open defects
 
-### `hookPoints` and `hookImplements` duplicate the HookPoint set with no drift guard
-
-**Status:** [P] open 2026-08-22 — residual of
-`docs/plans/archived/2026-08-20 - 00 - engine-architecture-deepening-plan.md` item 15, which
-introduced the second of the two lists.
-
-The five `HookPoint` constants are re-enumerated twice in `internal/domain/registry.go`: by
-`hookPoints`, the array `freezeOrder` precomputes over (`:53-59`, and its own comment says "a sixth
-hook point joins both"), and by `hookImplements`'s switch (`:28-47`). Nothing fails when a sixth
-constant is added to `mechanism.go` and forgotten in either: a point missing from `hookPoints` is
-never frozen and silently falls back to computing its order on the fly on every `Ordered` call — the
-per-Turn cost item 15 removed, restored for that point only — while a point missing from
-`hookImplements` makes `AddExperimental` refuse every hook registered at it. A drift pin over the
-constant set closes both.
-
----
-
 ## Parked / deferred work
 
 Live, deliberately deferred work only. Each entry records *enough* design that we don't re-derive
