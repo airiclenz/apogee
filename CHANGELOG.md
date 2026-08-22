@@ -82,6 +82,12 @@ point is a **minor** bump, not a breaking change.
   returns only `ErrNotFound` today — but the ordering was the defect: the map now drops a name
   only once the scheduler no longer runs it, and a failed `Stop` leaves the entry in place so the
   schedule stays stoppable.
+- **The reload summary reports only the schedules that actually took.** `daemon.Apply` now returns
+  a `Reload` describing what happened rather than what the diff planned: a name whose `Add` was
+  refused — or whose stop half failed, in which case the add is skipped so the old schedule is not
+  stranded — is pruned from `Replaced`/`Added` (a failed-stop removal likewise from `Removed`) and
+  named only in the joined error. The daemon's two reload lines keep their order and are now both
+  true: the summary names what reached the clock, the line under it what did not take.
 
 ### Known verification (owner-run)
 

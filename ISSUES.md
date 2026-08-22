@@ -26,23 +26,6 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 - [ ] when the pop-up box is open - the main session-chat's last row is not reachable anymore with scrolling. The pop-up box covers that poart of the chat. This is importent when questions or other permanent pop-ups are open where access to the last messages of the chat history are important.
 
 
-### The reload's accepted-swap summary is logged before the failures it does not know about
-
-**Status:** [ ] open 2026-08-22 — residual of
-`docs/plans/archived/2026-08-22 - 02 - daemon-plan.md` item 7, which gave the live reload its
-all-or-nothing swap and the two lines that report it.
-
-`reloadSchedules` logs `reloadSummary(reload)` at `cmd/apogee/daemon.go:323` and only then, at
-`:324-326`, logs whatever `adoptSchedules` → `daemon.Apply` returned. The summary is built from the
-`Reload` the diff PLANNED, not from what reached the clock, so an entry whose `Add` failed
-(`internal/daemon/diff.go:157-163`, which appends to the joined failures and leaves the name out of
-the id map) is still named in the "added"/"replaced" clause a reader sees FIRST, with the correction
-underneath it. A journal read the next morning therefore says an entry took and then, on the next
-line, that some of the edit did not — without saying which. Ordering the two lines the other way, or
-building the summary from the id map, would make the first line the true one.
-
----
-
 ### The shutdown grace EXPIRY has no test, and the notify switch's drift guard does not exist
 
 **Status:** [ ] open 2026-08-22 — residual of

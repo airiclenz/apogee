@@ -282,11 +282,11 @@ func runDaemon(ctx context.Context, opts *config.Options, changed func(string) b
 // drifting — an entry adopted at boot and the same entry adopted by a save reach the scheduler and
 // the Firing composition through exactly the same two calls, in the same order.
 //
-// The wiring adopts the desired set whatever [daemon.Apply] reported, because the id map — not the
-// returned Reload — is what says who is on the clock. An entry whose Add failed is absent from that
-// map and can never fire, so carrying its `run:` half costs nothing, while withholding the set on a
-// partial failure would leave the entries that DID land with no workspace to run in.
-func adoptSchedules(scheduler *schedule.Scheduler, wiring *daemonWiring, ids map[string]string,
+// The wiring adopts the desired set whatever [daemon.Apply] reported, because the id map is what
+// says who is on the clock. An entry whose Add failed is absent from that map and can never fire,
+// so carrying its `run:` half costs nothing, while withholding the set on a partial failure would
+// leave the entries that DID land with no workspace to run in.
+func adoptSchedules(scheduler daemon.Scheduler, wiring *daemonWiring, ids map[string]string,
 	running, desired []daemon.Entry) (daemon.Reload, error) {
 	reload, err := daemon.Apply(scheduler, ids, running, desired)
 	wiring.adopt(desired)
@@ -303,7 +303,7 @@ func adoptSchedules(scheduler *schedule.Scheduler, wiring *daemonWiring, ids map
 // daemon is running disagreeing, with nothing on screen to say which entries took — and the daemon
 // has no screen. The refusal names every defect and then says what is still running, so a journal
 // read the next morning shows both halves of the answer.
-func reloadSchedules(scheduler *schedule.Scheduler, wiring *daemonWiring, ids map[string]string,
+func reloadSchedules(scheduler daemon.Scheduler, wiring *daemonWiring, ids map[string]string,
 	path string, host daemon.Host, running daemon.File, log *daemonLog) daemon.File {
 	file, defects, err := readSchedules(path, host, log)
 	if err != nil {
@@ -320,6 +320,9 @@ func reloadSchedules(scheduler *schedule.Scheduler, wiring *daemonWiring, ids ma
 	// whose Add failed is not on the clock, and diffing as though it were would ask the scheduler to
 	// stop something it never started.
 	reload, err := adoptSchedules(scheduler, wiring, ids, adoptedEntries(running.Schedules, ids), file.Schedules)
+	// Summary first, then the failures: [daemon.Apply] prunes whatever did not take from the Reload
+	// it returns, so the summary is the true line — it names only what actually reached the clock —
+	// and the line under it names what did not.
 	log.line("%s", reloadSummary(reload))
 	if err != nil {
 		log.line("some of the edit did not take: %v", err)

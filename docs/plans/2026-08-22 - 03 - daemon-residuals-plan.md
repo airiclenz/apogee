@@ -78,7 +78,12 @@ preserved).
 
 **Commit:** `fix(daemon): drop a schedule's id only after the scheduler confirms the stop`
 
-## 2. `Apply` returns what actually reached the clock, making the reload summary truthful
+## 2. `Apply` returns what actually reached the clock, making the reload summary truthful — ✅ DONE (2026-08-22)
+
+NOTES (2026-08-22): the CHANGELOG bullet goes under the existing `### Fixed` subsection of `[Unreleased]`.
+NOTES (2026-08-22): `adoptSchedules`/`reloadSchedules` now accept the `daemon.Scheduler` interface (which `daemon.Apply` already takes and `*schedule.Scheduler` satisfies) instead of the concrete type — the file's own validation enforces every constraint the scheduler's does, so no real save can make one `Add` fail selectively; the plan's reload-log test needs a wrapping fake at that seam.
+NOTES (2026-08-22): pruning extended beyond the item's literal `Replaced`/`Added` wording in two composing ways the ratified contract ("the returned `Reload` describes what actually happened") implies: a replaced entry whose `Stop` failed also has its add-half SKIPPED (adding over the still-running old id would re-create the strand item 1 fixed), and a removed entry whose `Stop` failed is pruned from `Removed` (it is still on the clock). Both covered by tests.
+NOTES (2026-08-22): dropped the now-false "— not the returned Reload —" clause from `adoptSchedules`'s doc comment; the id-map rationale it carried is unchanged.
 
 **What:** Per the ratified call: in `internal/daemon/diff.go`, when an `add` fails during
 `Apply` (the loops over `reload.Replaced` and `reload.Added`, `:130-140`), prune that

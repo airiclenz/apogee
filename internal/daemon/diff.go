@@ -18,10 +18,11 @@ type Scheduler interface {
 	Stop(id string) error
 }
 
-// Reload is what one file edit decides, as four lists of entry names. It is a DECISION rather than
-// a report of what happened: [Apply] returns the same Reload whether every operation landed or one
-// of them failed, and names the failures in its error instead. A surface logging it says what the
-// edit asked for, and logs the error beside it when something refused.
+// Reload is what one file edit decides, as four lists of entry names. From [Diff] it is the
+// DECISION — what turning the running set into the desired one takes. From [Apply] it is a report
+// of what actually happened: a name whose enactment failed is pruned from the list that would have
+// claimed it and named in the joined error instead, so a surface logging the Reload tells the
+// truth, with the error beside it saying what did not take.
 //
 // Kept, Replaced and Added are in the new file's order; Removed is in the order the running set
 // held them.
@@ -101,8 +102,11 @@ func index(entries []Entry) (map[string]Entry, []Entry) {
 
 // Apply diffs the running set against the desired set and enacts the difference on the scheduler:
 // every removed and replaced entry is stopped, every replaced and added entry is added, and a kept
-// entry receives no call at all. It returns what the diff decided, so a caller can log the edit
-// and adopt the desired set as its new running set.
+// entry receives no call at all. The Reload it returns describes what actually happened, not what
+// the diff planned: a name whose enactment failed is pruned from the list that would have claimed
+// it — an entry whose Add was refused is neither running nor replaced, and one whose Stop failed
+// is still on the clock — and the joined error names it instead. A caller can therefore log the
+// Reload as the truth and still adopt the desired set as its new running set.
 //
 // ids is the daemon's name→schedule-id map and is updated IN PLACE: a stopped name is deleted from
 // it, an added name is recorded with the id the scheduler returned. It is the map a Firing
@@ -114,27 +118,37 @@ func index(entries []Entry) (map[string]Entry, []Entry) {
 // Stop of an id the scheduler no longer knows ([schedule.ErrNotFound]) is not a failure — the
 // entry is off the clock, which is what the stop asked for.
 func Apply(scheduler Scheduler, ids map[string]string, running, desired []Entry) (Reload, error) {
-	reload := Diff(running, desired)
+	planned := Diff(running, desired)
 	desiredByName, _ := index(desired)
+	reload := Reload{Kept: planned.Kept}
 	var failures []error
 
-	for _, name := range reload.Removed {
+	for _, name := range planned.Removed {
 		if err := stop(scheduler, ids, name); err != nil {
 			failures = append(failures, err)
+			continue
 		}
+		reload.Removed = append(reload.Removed, name)
 	}
-	for _, name := range reload.Replaced {
+	for _, name := range planned.Replaced {
 		if err := stop(scheduler, ids, name); err != nil {
+			// The old spec is still on the clock under its old id; putting the new one on top would
+			// strand it — the very defect stop's ordering guards against — so the add is skipped.
 			failures = append(failures, err)
+			continue
 		}
 		if err := add(scheduler, ids, desiredByName[name]); err != nil {
 			failures = append(failures, err)
+			continue
 		}
+		reload.Replaced = append(reload.Replaced, name)
 	}
-	for _, name := range reload.Added {
+	for _, name := range planned.Added {
 		if err := add(scheduler, ids, desiredByName[name]); err != nil {
 			failures = append(failures, err)
+			continue
 		}
+		reload.Added = append(reload.Added, name)
 	}
 	return reload, errors.Join(failures...)
 }

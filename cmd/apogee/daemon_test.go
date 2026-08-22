@@ -367,6 +367,14 @@ func twoSchedulesYAML(workspace string) string {
 			"      server: %s\n", workspace, testServerName)
 }
 
+// threeSchedulesYAML appends a third plan entry, for the reload case where only part of an edit
+// takes: the first two entries stay byte-identical for the same reason as above.
+func threeSchedulesYAML(workspace string) string {
+	return twoSchedulesYAML(workspace) +
+		fmt.Sprintf("  - name: weekly-report\n    on:\n      cycle: 168h\n"+
+			"    run:\n      prompt: write the weekly report\n      workspace: %s\n", workspace)
+}
+
 // Every entry in a valid file goes on the clock, and each one says so in the log.
 func TestDaemonAdoptsEveryEntry(t *testing.T) {
 	h := newDaemonHarness(t)
@@ -813,6 +821,63 @@ func TestDaemonReloadReplacesAnEditedEntry(t *testing.T) {
 	if !strings.Contains(r.out.String(), "reloaded schedules.yaml — replaced nightly-audit; 1 schedule untouched") {
 		t.Errorf("the reload summary does not name the replacement; the log holds:\n%s", r.out.String())
 	}
+}
+
+// addRefusingScheduler is the real scheduler with one name's Add refused — a clock that takes the
+// rest of the edit but not that entry.
+type addRefusingScheduler struct {
+	*schedule.Scheduler
+	refuse string
+}
+
+func (s addRefusingScheduler) Add(spec schedule.Spec) (string, error) {
+	if spec.Name == s.refuse {
+		return "", fmt.Errorf("the clock refuses %s", spec.Name)
+	}
+	return s.Scheduler.Add(spec)
+}
+
+// The two lines of a partly-taken edit, in order: the summary names only what actually reached the
+// clock — [daemon.Apply] prunes the rest from the Reload — and the line after it names what did
+// not take.
+func TestDaemonReloadSummaryNamesOnlyWhatTook(t *testing.T) {
+	workspace := t.TempDir()
+	r := newReloadHarness(t, oneScheduleYAML(workspace))
+	refusing := addRefusingScheduler{Scheduler: r.scheduler, refuse: "hourly-sweep"}
+
+	r.writeSchedules(t, threeSchedulesYAML(workspace))
+	r.file = reloadSchedules(refusing, r.wiring, r.ids, r.schedules, r.host, r.file, r.log)
+
+	logged := r.out.String()
+	summary := loggedLineContaining(t, logged, "reloaded "+schedulesFileName)
+	failure := loggedLineContaining(t, logged, "some of the edit did not take")
+	if strings.Index(logged, failure) < strings.Index(logged, summary) {
+		t.Errorf("the failure line came before the summary; the log holds:\n%s", logged)
+	}
+	if strings.Contains(summary, "hourly-sweep") {
+		t.Errorf("the summary names the entry whose Add was refused: %s", summary)
+	}
+	if !strings.Contains(summary, "added weekly-report") {
+		t.Errorf("the summary does not name the entry that took: %s", summary)
+	}
+	if !strings.Contains(failure, "hourly-sweep") {
+		t.Errorf("the failure line does not name the refused entry: %s", failure)
+	}
+	if _, onTheClock := r.ids["hourly-sweep"]; onTheClock {
+		t.Error("the refused entry is in the id map")
+	}
+}
+
+// loggedLineContaining returns the whole log line holding want, and fails the test when no line does.
+func loggedLineContaining(t *testing.T, logged, want string) string {
+	t.Helper()
+	for _, line := range strings.Split(logged, "\n") {
+		if strings.Contains(line, want) {
+			return line
+		}
+	}
+	t.Fatalf("no log line says %q; the log holds:\n%s", want, logged)
+	return ""
 }
 
 // `shutdown-grace` is the one key a reload cannot act on immediately, so it must be carried forward:

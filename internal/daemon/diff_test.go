@@ -238,6 +238,62 @@ func TestApplyReportsAnAddFailureAndFinishesTheRest(t *testing.T) {
 	assertIDs(t, ids, map[string]string{"weekly-report": "id-1"})
 }
 
+// The returned Reload is a report, not the plan: an entry whose Add was refused is pruned from
+// Replaced/Added — it is neither running nor replaced — while the survivors stay, in order, and
+// the joined error names every refusal.
+func TestApplyPrunesTheEntriesThatDidNotTake(t *testing.T) {
+	t.Parallel()
+	nightly := entry("nightly-audit", "/code-audit", 24*time.Hour)
+	sweep := entry("morning-sweep", "sweep the log", time.Hour)
+	editedNightly := entry("nightly-audit", "/code-audit twice", 24*time.Hour)
+	editedSweep := entry("morning-sweep", "sweep the log twice", time.Hour)
+	wedged := entry("wedged", "never lands", time.Hour)
+	fresh := entry("weekly-report", "report", 7*24*time.Hour)
+	scheduler := &recordingScheduler{refuseAdd: map[string]error{
+		"nightly-audit": schedule.ErrCycle,
+		"wedged":        schedule.ErrCycle,
+	}}
+	ids := map[string]string{"nightly-audit": "id-A", "morning-sweep": "id-B"}
+
+	reload, err := Apply(scheduler, ids,
+		[]Entry{nightly, sweep},
+		[]Entry{editedNightly, editedSweep, wedged, fresh})
+
+	if !errors.Is(err, schedule.ErrCycle) {
+		t.Fatalf("Apply error = %v, want one wrapping ErrCycle", err)
+	}
+	for _, name := range []string{"nightly-audit", "wedged"} {
+		if !strings.Contains(err.Error(), name) {
+			t.Errorf("the joined error does not name %s: %v", name, err)
+		}
+	}
+	assertNames(t, "Replaced", reload.Replaced, []string{"morning-sweep"})
+	assertNames(t, "Added", reload.Added, []string{"weekly-report"})
+	assertIDs(t, ids, map[string]string{"morning-sweep": "id-1", "weekly-report": "id-2"})
+}
+
+// A replaced entry whose Stop failed is still on the clock under its old id: the add half is
+// skipped — putting the new spec on top would strand the old one — and the name is not reported
+// replaced.
+func TestApplySkipsTheAddHalfWhenAReplacedEntrysStopFails(t *testing.T) {
+	t.Parallel()
+	sweep := entry("morning-sweep", "sweep the log", time.Hour)
+	edited := entry("morning-sweep", "sweep the log twice", time.Hour)
+	scheduler := &recordingScheduler{refuseStop: map[string]error{"id-B": schedule.ErrClosed}}
+	ids := map[string]string{"morning-sweep": "id-B"}
+
+	reload, err := Apply(scheduler, ids, []Entry{sweep}, []Entry{edited})
+
+	if !errors.Is(err, schedule.ErrClosed) {
+		t.Fatalf("Apply error = %v, want one wrapping ErrClosed", err)
+	}
+	if slices.Contains(scheduler.calls, "add morning-sweep -> id-1") {
+		t.Errorf("the add half ran over a failed stop: %v", scheduler.calls)
+	}
+	assertNames(t, "Replaced", reload.Replaced, nil)
+	assertIDs(t, ids, map[string]string{"morning-sweep": "id-B"})
+}
+
 func TestApplyTreatsAForgottenScheduleAsStopped(t *testing.T) {
 	t.Parallel()
 	sweep := entry("morning-sweep", "sweep the log", time.Hour)
@@ -258,7 +314,7 @@ func TestApplyReportsAStopFailure(t *testing.T) {
 	scheduler := &recordingScheduler{refuseStop: map[string]error{"id-B": schedule.ErrClosed}}
 	ids := map[string]string{"morning-sweep": "id-B"}
 
-	_, err := Apply(scheduler, ids, []Entry{sweep}, nil)
+	reload, err := Apply(scheduler, ids, []Entry{sweep}, nil)
 
 	if !errors.Is(err, schedule.ErrClosed) {
 		t.Fatalf("Apply error = %v, want one wrapping ErrClosed", err)
@@ -266,6 +322,8 @@ func TestApplyReportsAStopFailure(t *testing.T) {
 	// The scheduler still runs the schedule, so the map must still say who it is — dropping the
 	// id here would strand it: absent from the shutdown's adopted set, unstoppable by any reload.
 	assertIDs(t, ids, map[string]string{"morning-sweep": "id-B"})
+	// And the Reload must not claim it left: the entry is still on the clock.
+	assertNames(t, "Removed", reload.Removed, nil)
 }
 
 func TestApplyDoesNotStopAnEntryThatWasNeverOnTheClock(t *testing.T) {
