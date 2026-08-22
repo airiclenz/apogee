@@ -406,6 +406,61 @@ func TestDaemonInstallWritesThenReportsUnchangedThenUpdated(t *testing.T) {
 	}
 }
 
+// TestDaemonInstallWritesTheUnitViaTempFileAndRename pins the write's contract from the outside:
+// the bytes that land are exactly the ones daemonUnitBytes produced for a golden rendering —
+// UTF-16LE with a BOM on windows — and the unit's directory holds no leftover temp file afterwards,
+// which is the only observable difference between the temp-file-plus-rename write and a plain one
+// on the success path.
+func TestDaemonInstallWritesTheUnitViaTempFileAndRename(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct{ goos, golden string }{
+		{goos: "linux", golden: systemdUnitFileName},
+		{goos: "windows", golden: taskFileName},
+	} {
+		t.Run(tc.goos, func(t *testing.T) {
+			t.Parallel()
+
+			plan := installFixture(tc.goos, daemon.DefaultShutdownGrace)
+			plan.UnitPath = filepath.Join(t.TempDir(), "units", tc.golden)
+			content, err := renderDaemonUnit(plan)
+			if err != nil {
+				t.Fatalf("render the %s unit: %v", tc.goos, err)
+			}
+			if want := goldenUnit(t, tc.golden); content != want {
+				t.Fatalf("the %s unit no longer matches testdata/%s.golden:\n%s",
+					tc.goos, tc.golden, firstDifference(content, want))
+			}
+
+			existed, changed, err := writeDaemonUnit(plan, content)
+
+			if err != nil {
+				t.Fatalf("write the %s unit: %v", tc.goos, err)
+			}
+			if existed || !changed {
+				t.Errorf("a first write reports existed=%t changed=%t, want false and true", existed, changed)
+			}
+			written, err := os.ReadFile(plan.UnitPath)
+			if err != nil {
+				t.Fatalf("read the written unit: %v", err)
+			}
+			if !bytes.Equal(written, daemonUnitBytes(plan, content)) {
+				t.Errorf("the written bytes are not the ones daemonUnitBytes produced for the golden unit")
+			}
+			entries, err := os.ReadDir(filepath.Dir(plan.UnitPath))
+			if err != nil {
+				t.Fatalf("list the unit directory: %v", err)
+			}
+			for _, entry := range entries {
+				if entry.Name() != tc.golden {
+					t.Errorf("the unit directory holds %s next to %s — a temp file survived the write",
+						entry.Name(), tc.golden)
+				}
+			}
+		})
+	}
+}
+
 // TestDaemonInstallIsRegisteredUnderDaemon guards the wiring: generation is worth nothing if the
 // child command is not reachable from `apogee daemon`.
 func TestDaemonInstallIsRegisteredUnderDaemon(t *testing.T) {

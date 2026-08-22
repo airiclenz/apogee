@@ -171,7 +171,10 @@ duplicates.
 
 **Commit:** `fix(daemon): derive the notify drift guard from the library's own kind set`
 
-## 5. `daemon install` writes the supervisor unit atomically
+## 5. `daemon install` writes the supervisor unit atomically — ✅ DONE (2026-08-22)
+
+NOTES (2026-08-22): the CHANGELOG bullet goes under the existing `### Fixed` subsection of `[Unreleased]`, after the notify-drift-guard bullet.
+NOTES (2026-08-22): the new test also re-asserts the rendering against the golden before writing (a `Fatalf` guard, so a golden drift fails here with its own message rather than as a confusing byte mismatch) — the existing golden tests pass unmodified, as the item requires.
 
 **What:** `writeDaemonUnit` writes the rendered unit with a plain `os.WriteFile`
 (`cmd/apogee/daemoninstall.go:326`) — a crash or full disk mid-write leaves a truncated

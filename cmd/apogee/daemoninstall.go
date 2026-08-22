@@ -304,7 +304,10 @@ func stopWindow(grace time.Duration) time.Duration {
 // writeDaemonUnit writes the rendered unit, creating the supervisor's directory if it is not there,
 // and reports whether a file was already present and whether these bytes differ from it. Identical
 // bytes are not rewritten: a re-run that changes nothing should leave the file's mtime alone, so a
-// supervisor watching it has nothing to react to.
+// supervisor watching it has nothing to react to. The write itself is a temp file beside the target
+// renamed over it — the repo's idiom for a file another reader depends on (rationale at
+// internal/platform/winlabel/journal.go): a crash or full disk mid-write leaves the previous
+// complete unit, never a truncated one for a supervisor to act on.
 func writeDaemonUnit(plan installPlan, content string) (existed, changed bool, err error) {
 	want := daemonUnitBytes(plan, content)
 	switch have, readErr := os.ReadFile(plan.UnitPath); {
@@ -321,10 +324,29 @@ func writeDaemonUnit(plan installPlan, content string) (existed, changed bool, e
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return existed, false, fmt.Errorf("apogee daemon install: create %s: %w", dir, err)
 	}
+	tmp, err := os.CreateTemp(dir, filepath.Base(plan.UnitPath)+".tmp-*")
+	if err != nil {
+		return existed, false, fmt.Errorf("apogee daemon install: create temp unit in %s: %w", dir, err)
+	}
+	tmpName := tmp.Name()
+	// Remove the temp file on every path except a successful rename (where it no longer exists,
+	// so Remove is a harmless no-op).
+	defer func() { _ = os.Remove(tmpName) }()
 	// 0o600, matching the rest of the apogee home: a per-user unit is read by the user's own
 	// supervisor and by nobody else, and it names the paths this account's schedules run in.
-	if err := os.WriteFile(plan.UnitPath, want, 0o600); err != nil {
-		return existed, false, fmt.Errorf("apogee daemon install: write %s: %w", plan.UnitPath, err)
+	if err := tmp.Chmod(0o600); err != nil {
+		_ = tmp.Close()
+		return existed, false, fmt.Errorf("apogee daemon install: chmod temp unit %s: %w", tmpName, err)
+	}
+	if _, err := tmp.Write(want); err != nil {
+		_ = tmp.Close()
+		return existed, false, fmt.Errorf("apogee daemon install: write temp unit %s: %w", tmpName, err)
+	}
+	if err := tmp.Close(); err != nil {
+		return existed, false, fmt.Errorf("apogee daemon install: close temp unit %s: %w", tmpName, err)
+	}
+	if err := os.Rename(tmpName, plan.UnitPath); err != nil {
+		return existed, false, fmt.Errorf("apogee daemon install: rename unit into %s: %w", plan.UnitPath, err)
 	}
 	return existed, true, nil
 }

@@ -98,6 +98,12 @@ point is a **minor** bump, not a breaking change.
   `TestDaemonNotifyRendersEveryLibraryKind` iterates it, so a kind added to the library later
   falls through the spelled-out `notify` switch and fails the guard instead of vanishing from
   the log. `TestDaemonNotifyLinesArePinned` stays the exact-wording table.
+- **`daemon install` writes the supervisor unit atomically.** `writeDaemonUnit` now writes the
+  exact rendered bytes — the Windows unit's UTF-16LE+BOM included — to a `0o600` temp file
+  beside the target and renames it into place, the repo's idiom for a file another reader
+  depends on, so a crash or full disk mid-write leaves the previous complete unit for the
+  supervisor to read, never a truncated one. The unchanged-content short-circuit and the
+  `existed`/`changed` report are untouched.
 
 ### Known verification (owner-run)
 

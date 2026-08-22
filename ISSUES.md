@@ -26,22 +26,6 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 - [ ] when the pop-up box is open - the main session-chat's last row is not reachable anymore with scrolling. The pop-up box covers that poart of the chat. This is importent when questions or other permanent pop-ups are open where access to the last messages of the chat history are important.
 
 
-### `apogee daemon install` writes the supervisor unit without the repo's temp-file-plus-rename idiom
-
-**Status:** [ ] open 2026-08-22 — residual of
-`docs/plans/archived/2026-08-22 - 02 - daemon-plan.md` item 8.
-
-`writeDaemonUnit` writes the rendered unit with a plain `os.WriteFile`
-(`cmd/apogee/daemoninstall.go:326`), so a crash or a full disk mid-write leaves a truncated unit
-where a valid one was — a file a supervisor reads, and the one path in this feature where a
-half-written file is acted on by something other than apogee. Everywhere else the repo writes a file
-a reader depends on, it writes a temp file beside it and renames (`internal/library/store.go:323`,
-`internal/session/store.go:413`, `internal/recall/store.go:249`, `internal/config/configsplice.go:225`,
-with the rationale spelled out at `internal/platform/winlabel/journal.go:192`). Note the Windows unit
-is UTF-16LE with a BOM, so the temp file has to carry the same bytes `daemonUnitBytes` produces.
-
----
-
 ### The parked `schedule`-tool entry's own trigger has now fired
 
 **Status:** [ ] open 2026-08-22 — residual of
