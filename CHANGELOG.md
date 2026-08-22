@@ -956,6 +956,12 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- The path-keyed history family now sees `copy_file` and `move_file`: `toolCallPath` reads a call's
+  `destination` after the four original spellings (`path`, `file_path`, `filePath`, `filename`), so
+  read-repeat, cached-content-intercept, error-enrichment, the off-ramps, the tool-loop interceptor
+  and the history scans learn which file a copy or a move wrote. A move's vacated source stays
+  invisible to the path-keyed family — destination-only, by owner call.
+
 - **A stacked diff's line numbers no longer sit on the tint.** The narrow reading of a diff body
   composed its right-aligned line number, its `-`/`+` marker and its code into one string, so the
   red or turquoise band painted straight under the number — the split panes had held their numbers

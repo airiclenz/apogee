@@ -297,7 +297,7 @@ signature change needs a call-site adjustment in a test.
 
 ---
 
-## 10. Teach toolCallPath the copy_file / move_file destination
+## 10. Teach toolCallPath the copy_file / move_file destination — ✅ DONE (2026-08-22)
 
 **What:** Fix the ISSUES.md entry *"The path-keyed history family still cannot see
 `copy_file` / `move_file`"*. `toolCallPath` (`internal/mechanisms/offramps.go:59`) reads

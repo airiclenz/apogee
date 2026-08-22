@@ -23,30 +23,6 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 
 ## Open defects
 
-### The path-keyed history family still cannot see `copy_file` / `move_file`
-
-**Status:** [P] open 2026-08-22 — residual of
-`docs/plans/archived/2026-08-20 - 00 - engine-architecture-deepening-plan.md` item 5, which added the
-three 2026-08-10 write tools to `wave4WriteTools` and so reached only the half of the family that
-keys on the tool NAME.
-
-`toolCallPath` reads a call's file from four argument spellings — `path`, `file_path`, `filePath`,
-`filename` (`internal/mechanisms/offramps.go:59`). `copy_file` and `move_file` carry none of them:
-their arguments are `source` and `destination` (`internal/tools/file_ops.go:66-67`), so every
-consumer that asks a write call WHICH file it touched still gets `""` for those two —
-`read_repeat` (`internal/mechanisms/readrepeat.go:82`), `cached_content_intercept`
-(`internal/mechanisms/cachedcontent.go:82`, `:116`), `error_enrichment`
-(`internal/mechanisms/errorenrich.go:118`, `:157`), the off-ramps
-(`internal/mechanisms/offramps.go:148`), `tool_loop_interceptor`
-(`internal/mechanisms/toolloop.go:218`) and the history scans (`internal/mechanisms/historyscan.go:38`,
-`:82`, `:90`, `:128`) that feed `deriveWriteTarget` (`internal/mechanisms/historyhints.go:143`). Of the
-three tools the item added, only `delete_file` — which takes `path` — reaches them. The name-keyed
-half (`isFileMutatingTool`, `hasWrittenFiles`, `isGreenfieldContext`) does count all three. Closing it
-means teaching `toolCallPath` the source/destination pair, which first needs a call on WHICH of the
-two a copy or a move should report as the file it touched.
-
----
-
 ### The hook subprocess env scrub drops apogee's own keys but not the operator-named ones
 
 **Status:** [P] open 2026-08-22 — residual of

@@ -49,14 +49,21 @@ var readToolNames = toolSet(readSpellings)
 func isReadTool(name string) bool { return readToolNames[name] }
 
 // toolCallPath extracts the file path a tool call targets, matching apogee-sim's
-// toolsets.ExtractPath @pin (path / file_path / filePath / filename). "" when the arguments are not
-// a JSON object or carry no path key — the "no path to count" case progress detection skips.
+// toolsets.ExtractPath @pin (path / file_path / filePath / filename) plus destination — the second
+// half of the source/destination pair copy_file and move_file carry (internal/tools/file_ops.go).
+// "" when the arguments are not a JSON object or carry no path key — the "no path to count" case
+// progress detection skips.
+//
+// destination is read LAST, so a call carrying one of the four original spellings alongside it
+// keeps today's precedence. Reporting the destination — the file the write landed on — matches
+// deriveWriteTarget's semantics; the accepted limit is that a move's vacated SOURCE stays invisible
+// to the path-keyed family, cache invalidation included (destination-only, owner call 2026-08-22).
 func toolCallPath(args json.RawMessage) string {
 	var m map[string]any
 	if json.Unmarshal(args, &m) != nil {
 		return ""
 	}
-	for _, key := range []string{"path", "file_path", "filePath", "filename"} {
+	for _, key := range []string{"path", "file_path", "filePath", "filename", "destination"} {
 		if v, ok := m[key].(string); ok && v != "" {
 			return v
 		}
