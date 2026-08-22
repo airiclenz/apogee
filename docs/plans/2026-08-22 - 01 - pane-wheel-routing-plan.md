@@ -249,7 +249,13 @@ through `step`):
 
 ---
 
-## 4. The /model | /server picker takes the notch over it
+## 4. The /model | /server picker takes the notch over it — ✅ DONE (2026-08-22)
+
+NOTES (2026-08-22): `pickerWheel` short-circuits on a CLOSED picker before asking
+`m.frameSpans().pane(panePicker)`, rather than gating on the rectangle alone as the item's text reads
+— the same deviation item 3 recorded, for the same reason: the wheel path publishes no frame, so an
+unguarded `frameSpans()` would compose (and render) every overlay of the frame on every notch the
+transcript owns. The rectangle is still the only gate that decides anything.
 
 Depends on items 1 and 3.
 

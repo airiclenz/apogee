@@ -631,6 +631,38 @@ func (m Model) pickerKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+// pickerWheel walks the picker's highlight one row per notch while the pointer is over the pane —
+// the keyboard's ↑/↓ under the wheel, against the FILTERED view pickerKey and the painter already
+// share (pickerFilteredView, counted by pickerCount), so a notch and an arrow can never disagree
+// about which row is highlighted and neither can move the human onto a row the filter has pruned
+// away. handled is false anywhere else, which leaves the notch to the transcript scrolling above and
+// behind the pane.
+//
+// Inside the rectangle it is ALWAYS handled, whatever kind is open: the picker is modal (its claim
+// in keyClaimOrder, model.go), and a notch over it must never reach the transcript behind it. No
+// kind is special-cased either — the rows come from pickerOfferingRows, which already answers per
+// kind — so /schedule's two-step flow and the start-up key migration walk the offering the CURRENT
+// step is showing, and a notch changes nothing else about the round: the half-built Schedule and the
+// entries still to be asked about are the accept's business, not the highlight's.
+//
+// It CLAMPS at the ends where these keys WRAP, and the clamp is the list module's own rather than
+// this pane's ([listCursor.wheel], listsurface.go): ↑/↓ walk a list as a cycle, while a wheel is a
+// scroll.
+func (m Model) pickerWheel(msg tea.MouseWheelMsg) (Model, bool) {
+	if !m.picker.open {
+		// Asked before the frame is composed, because every wheel notch asks: with no pane up there is
+		// nothing to place, and composing the frame's overlays to learn that would put a render on the
+		// path of a notch the pane has no part in (browserWheel, sessions.go).
+		return m, false
+	}
+	y0, h, ok := m.frameSpans().pane(panePicker)
+	if !ok || msg.Y < y0 || msg.Y >= y0+h {
+		return m, false
+	}
+	m.picker.wheel(msg, m.pickerCount())
+	return m, true
+}
+
 // acceptPicker resolves ⏎ on the highlighted row, by kind. The highlight indexes the FILTERED rows,
 // so it is mapped back to the offering it names (pickerView.offeringIndex) before any underlying
 // list is touched: with a filter set, "the third painted row" and "the third model advertised" are

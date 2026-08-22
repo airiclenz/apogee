@@ -10,6 +10,16 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **The /model | /server picker scrolls under the mouse wheel.** A notch with the pointer over the
+  open picker now walks its highlight one row instead of falling through to the transcript behind it,
+  and it walks the same FILTERED offering the keys and the painter already read — so a wheel can
+  never move the human onto a row the filter has pruned away. Inside the pane's box the notch is
+  always the pane's, whatever the picker is listing: no kind is special-cased, so `/schedule`'s
+  two-step flow and the start-up key-migration offer walk the step that is showing and nothing else
+  changes. It CLAMPS at both ends where the picker's own ↑/↓ wrap around — a wheel is a scroll, so
+  rolling past the last row and landing back on the first would move the human somewhere they did not
+  aim. Outside the box nothing changes: the transcript scrolls exactly as it did.
+
 - **The /sessions browser scrolls under the mouse wheel.** A notch with the pointer over the open
   browser now walks its highlight one row instead of falling through to the transcript behind it, and
   it walks the same FILTERED view every key route and the painter already read — so a wheel and an ↑

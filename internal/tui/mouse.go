@@ -1293,5 +1293,11 @@ func (m Model) foldMouseWheel(msg tea.MouseWheelMsg) (tea.Model, tea.Cmd) {
 	if next, handled := m.browserWheel(msg); handled {
 		return next, nil
 	}
+	// A notch over the open /model | /server picker walks its highlight on the same terms (picker.go),
+	// and it is asked after the browser for the same non-reason: the two are modal overlays that never
+	// share a frame, so only one of them can hold the pointer.
+	if next, handled := m.pickerWheel(msg); handled {
+		return next, nil
+	}
 	return m.scrollViewport(msg)
 }

@@ -3681,3 +3681,145 @@ func TestBrowserWheelWalksTheFilteredList(t *testing.T) {
 		t.Errorf("selected = %d after rolling past the filtered end, want it clamped at %d", got, rows-1)
 	}
 }
+
+// ----------------------------------------------------------------------------
+// Mouse in the /model | /server picker (picker.go)
+// ----------------------------------------------------------------------------
+
+// pickerPaneModel opens the picker on kind, with a screenful of transcript behind it. The transcript
+// is the point, exactly as it is for the browser: the picker is modal, so a notch it swallows has to
+// be checked against lines that WOULD have scrolled had it fallen through.
+func pickerPaneModel(t *testing.T, kind pickerKind) Model {
+	t.Helper()
+	m := streamOneScreen(t, newTestModel(t))
+	m.picker = picker{open: true, kind: kind}
+	m.layout()
+	return m
+}
+
+// pickerRect is where the open overlay is drawn: its top row, and a row squarely inside it for a
+// notch to be aimed at.
+func pickerRect(t *testing.T, m Model) (paneTop, inside int) {
+	t.Helper()
+	y0, h, ok := m.frameSpans().pane(panePicker)
+	if !ok {
+		t.Fatal("the picker is not on the frame")
+	}
+	return y0, y0 + h/2
+}
+
+// A notch over the pane walks the offering one row, which is the reported defect one pane along:
+// before this the picker was one of the overlays a wheel fell straight through.
+func TestPickerWheelWalksTheOffering(t *testing.T) {
+	m := pickerPaneModel(t, pickerCycle)
+	_, y := pickerRect(t, m)
+
+	down := wheelAt(t, m, tea.MouseWheelDown, y)
+	if down.picker.selected != 1 {
+		t.Fatalf("selected = %d after one notch down, want 1", down.picker.selected)
+	}
+
+	back := wheelAt(t, wheelAt(t, down, tea.MouseWheelUp, y), tea.MouseWheelUp, y)
+	if back.picker.selected != 0 {
+		t.Errorf("selected = %d after two notches up, want it back on the first row", back.picker.selected)
+	}
+}
+
+// The wheel CLAMPS where ↑/↓ WRAP, and the difference is the gesture rather than an inconsistency
+// (ratified 2026-08-22). Both answers are asserted at both ends, so neither can drift into the other
+// unnoticed.
+func TestPickerWheelClampsWhereTheKeysWrap(t *testing.T) {
+	m := pickerPaneModel(t, pickerCycle)
+	_, y := pickerRect(t, m)
+	last := m.pickerCount() - 1
+	if last < 2 {
+		t.Fatalf("the pane offers %d rows; the clamp needs a list to walk", last+1)
+	}
+
+	if got := wheelAt(t, m, tea.MouseWheelUp, y).picker.selected; got != 0 {
+		t.Errorf("selected = %d after a notch up on the first row, want it clamped at 0", got)
+	}
+	if got := step(t, m, keyUp()).picker.selected; got != last {
+		t.Errorf("selected = %d after ↑ on the first row, want the keys to wrap to %d", got, last)
+	}
+
+	end := m
+	for range last + 5 {
+		end = wheelAt(t, end, tea.MouseWheelDown, y)
+	}
+	if end.picker.selected != last {
+		t.Errorf("selected = %d after rolling past the end, want it clamped at the last row (%d)",
+			end.picker.selected, last)
+	}
+	if got := step(t, end, keyDown()).picker.selected; got != 0 {
+		t.Errorf("selected = %d after ↓ on the last row, want the keys to wrap to 0", got)
+	}
+}
+
+// Above the pane the transcript still owns the wheel: the picker claims the notches inside its
+// rectangle and no others.
+func TestPickerWheelAboveThePaneScrollsTheTranscript(t *testing.T) {
+	m := pickerPaneModel(t, pickerCycle)
+	paneTop, y := pickerRect(t, m)
+	if paneTop == 0 {
+		t.Fatal("the pane starts on the first row; there is no transcript above it to aim at")
+	}
+	m = wheelAt(t, m, tea.MouseWheelDown, y) // somewhere for a stray notch to move the highlight from
+
+	off := wheelAt(t, m, tea.MouseWheelUp, paneTop-1)
+	if off.picker.selected != m.picker.selected {
+		t.Errorf("a notch above the pane moved the highlight to %d, want it left at %d",
+			off.picker.selected, m.picker.selected)
+	}
+	if off.viewport.YOffset() == m.viewport.YOffset() {
+		t.Errorf("the transcript stayed at %d; a notch the pane does not own is the transcript's",
+			off.viewport.YOffset())
+	}
+}
+
+// The notch walks the rows the pane PAINTS — the filtered view pickerKey and the painter share — so
+// a wheel and an ↑ can never disagree about which row is highlighted, and the clamp is the filtered
+// offering's length rather than the kind's whole list.
+func TestPickerWheelWalksTheFilteredOffering(t *testing.T) {
+	m := pickerPaneModel(t, pickerCycle)
+	for _, r := range "hour" {
+		m = step(t, m, keyRune(r))
+	}
+	rows := m.pickerCount()
+	if rows != 2 {
+		t.Fatalf("the filter leaves %d rows, want the 2 the clamp is measured against", rows)
+	}
+	_, y := pickerRect(t, m)
+
+	m = wheelAt(t, m, tea.MouseWheelDown, y)
+	if m.picker.selected != 1 {
+		t.Fatalf("selected = %d after one notch down, want the second surviving row", m.picker.selected)
+	}
+
+	if got := wheelAt(t, m, tea.MouseWheelDown, y).picker.selected; got != rows-1 {
+		t.Errorf("selected = %d after rolling past the filtered end, want it clamped at %d", got, rows-1)
+	}
+}
+
+// No kind is special-cased: with a /schedule step open the notch walks THAT step's rows, and the
+// half-built Schedule the two popups carry between them is untouched — the wheel moves a highlight
+// and nothing else.
+func TestPickerWheelWalksAScheduleStep(t *testing.T) {
+	m := streamOneScreen(t, newTestModel(t))
+	draft := scheduleDraft{prompt: "tidy the logs", cycle: 15 * time.Minute}
+	m.picker = picker{open: true, kind: pickerScheduleMode, draft: draft}
+	m.layout()
+	if m.pickerCount() < 2 {
+		t.Fatalf("the mode step offers %d rows; the walk needs two", m.pickerCount())
+	}
+	_, y := pickerRect(t, m)
+
+	after := wheelAt(t, m, tea.MouseWheelDown, y)
+
+	if after.picker.selected != 1 {
+		t.Errorf("selected = %d after one notch down, want the step's second row", after.picker.selected)
+	}
+	if after.picker.draft != draft {
+		t.Errorf("draft = %+v, want the notch to leave the half-built Schedule at %+v", after.picker.draft, draft)
+	}
+}
