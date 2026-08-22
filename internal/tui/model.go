@@ -2009,10 +2009,10 @@ type blockSpan struct {
 	rows int // how many rows it takes; zero means it is not on this frame
 }
 
-// frameSpans is the geometry of ONE composed frame: where each boxed overlay of the transcript-side
-// slot landed, indexed by its framePane. It is what View knows while stacking the blocks and used to
-// throw away — three near-identical prefix sums re-derived it, one per pane, on every click and every
-// wheel notch, each of them re-rendering every overlay of the frame to do so.
+// frameSpans is the geometry of ONE composed frame: where each boxed overlay landed, indexed by its
+// framePane. It is what View knows while stacking the blocks and used to throw away — three
+// near-identical prefix sums re-derived it, one per pane, on every click and every wheel notch, each
+// of them re-rendering every overlay of the frame to do so.
 //
 // It is a bool and a fixed-size ARRAY of plain ints: it copies with the Model by value and holds no
 // pointer, no map and no no-copy type, so no two Model values can share a byte of it (ADR 0011).
@@ -2022,8 +2022,12 @@ type blockSpan struct {
 // ([Model.withFrameSpans]) while every other Model composes its own rather than answering from a frame
 // that was never drawn.
 //
-// The autocomplete dropdown's entry is always the zero span: it is in the other slot, hugging the
-// input box, and no pointer addresses it by rectangle.
+// The frame has two overlay slots and both publish into this one value: the transcript-side slot
+// above the chrome (stackTranscriptSlot) and the input-side slot below it, which is where the
+// autocomplete dropdown hugs the input box (stackInputSlot). The dropdown's entry therefore means
+// what every other pane's means — the zero span says it is not on this frame, not that nothing can
+// address it. The staged-interjection strip shares the lower slot but is no framePane and has no
+// entry here.
 type frameSpans struct {
 	composed bool
 	panes    [paneKinds]blockSpan
@@ -2045,6 +2049,12 @@ func (s frameSpans) pane(p framePane) (y0, h int, ok bool) {
 // row the first block of the slot starts on: the rows the transcript kept plus the frame's single
 // blank gap row, which falls ABOVE the slot rather than below it.
 //
+// It also reports `below`, the screen row directly under the slot — the row the ▔ hairline is drawn
+// on. That is what places everything the frame stacks after it (the chrome and the input-side slot,
+// stackInputSlot) from the blocks this walk ACTUALLY stacked, rather than from a second sum over the
+// same panes: an omitted term is exactly the off-by-one that puts a gesture on the wrong row
+// (settingsPaneRect, mouse.go), and the slot has gained tenants before.
+//
 // It is the frame's one composition of that slot, and it publishes the geometry instead of discarding
 // it. View paints the blocks it returns; every rect the pointer asks — the /settings pane's, either
 // report's — is a lookup into the spans ([Model.frameSpans]). So the rows a pane is DRAWN on and the
@@ -2054,7 +2064,7 @@ func (s frameSpans) pane(p framePane) (y0, h int, ok bool) {
 // A closed pane contributes nothing: it takes no rows, goes on no frame, and keeps the zero span —
 // the same answer as a pane the window was too short to seat (frameRowPlan), which is right, because
 // neither is on the frame and the pointer has nothing to name in either case.
-func stackTranscriptSlot(rows []string, ov frameOverlays, y0 int) ([]string, frameSpans) {
+func stackTranscriptSlot(rows []string, ov frameOverlays, y0 int) ([]string, frameSpans, int) {
 	spans := frameSpans{composed: true}
 	for _, p := range transcriptSlotPanes {
 		block := ov.block(p)
@@ -2066,19 +2076,51 @@ func stackTranscriptSlot(rows []string, ov frameOverlays, y0 int) ([]string, fra
 		y0 += h
 		rows = append(rows, block)
 	}
-	return rows, spans
+	return rows, spans, y0
+}
+
+// stackInputSlot appends the frame's OTHER overlay slot to rows — the one below the chrome, whose
+// blocks hug the input box rather than the transcript — and reports where the autocomplete dropdown
+// landed. y0 is the screen row the slot starts on: the row the transcript-side slot ended above plus
+// the chrome rows between them (topRuleHeight, statusHeight), handed in by the composer that stacked
+// that slot rather than counted up from the window's last row.
+//
+// It is stackTranscriptSlot's sibling and carries the same doctrine: the slot is composed HERE, once,
+// and the rectangle a pointer asks for the dropdown is a lookup into what this walk published
+// ([Model.frameSpans]) — so the rows the dropdown is DRAWN on and the rows a notch may address are
+// the same rows by construction.
+//
+// The staged-interjection strip (ADR 0025) is stacked by it too and gets no span: it sits closest to
+// the box — it is what ⏎ just put there, and what Backspace on an empty box takes back — and it is no
+// framePane, so nothing addresses it by rectangle. It is composed here anyway so the slot has ONE
+// walk rather than one per block. A closed block contributes nothing and keeps the zero span, the
+// same answer as a dropdown the window was too short to seat (frameRowPlan).
+func stackInputSlot(rows []string, ov frameOverlays, y0 int) ([]string, blockSpan) {
+	var dropdown blockSpan
+	if ov.dropdown != "" {
+		dropdown = blockSpan{y0: y0, rows: lipgloss.Height(ov.dropdown)}
+		rows = append(rows, ov.dropdown)
+	}
+	if ov.queued != "" {
+		rows = append(rows, ov.queued)
+	}
+	return rows, dropdown
 }
 
 // frameSpans is where the frame this Model composes draws each of its boxed overlays. A Model a
 // pointer gesture has published its frame onto answers from that value; every other one composes the
-// overlays and walks the slot here — WITHOUT painting the transcript, which no rectangle depends on
+// overlays and walks both slots here — WITHOUT painting the transcript, which no rectangle depends on
 // and every press would otherwise pay for.
+//
+// The two walks are the same pair View paints with, in the same order and off the same y0 chain, so
+// the rectangles this hands the pointer cannot drift from the frame the human is looking at.
 func (m Model) frameSpans() frameSpans {
 	if m.spans.composed {
 		return m.spans
 	}
 	ov := m.frameOverlays()
-	_, spans := stackTranscriptSlot(nil, ov, ov.transcriptRows(m.transcriptBudget())+gapHeight)
+	_, spans, belowSlot := stackTranscriptSlot(nil, ov, ov.transcriptRows(m.transcriptBudget())+gapHeight)
+	_, spans.panes[paneDropdown] = stackInputSlot(nil, ov, belowSlot+topRuleHeight+statusHeight)
 	return spans
 }
 
@@ -2161,21 +2203,19 @@ func (m Model) View() tea.View {
 	rows = append(rows, "")
 	// Then the transcript-side overlay slot — the approval or ask prompt, the /sessions browser, the
 	// picker, the /settings pane and the two reports — stacked in the one order the frame states for
-	// it and starting directly below that gap row. The walk also PUBLISHES where each pane landed;
-	// View has no use for the spans because it is painting, and the pointer reads them off the same
-	// composition rather than re-deriving a prefix sum per pane (transcriptSlotPanes, frameSpans).
-	rows, _ = stackTranscriptSlot(rows, ov, transcriptHeight+gapHeight)
-	// Then the ▔ top-edge hairline capping the chrome, the status line, the autocomplete overlay
-	// (when open), the input box, the footer, and the ▁ hairline closing the screen under it.
+	// it and starting directly below that gap row. The walk also PUBLISHES where each pane landed and
+	// which row it ended above; View has no use for the spans because it is painting, and the pointer
+	// reads them off the same composition rather than re-deriving a prefix sum per pane
+	// (transcriptSlotPanes, frameSpans).
+	rows, spans, belowSlot := stackTranscriptSlot(rows, ov, transcriptHeight+gapHeight)
+	// Then the ▔ top-edge hairline capping the chrome, and the status line under it.
 	rows = append(rows, m.topRule(), m.statusLine())
-	if ov.dropdown != "" {
-		rows = append(rows, ov.dropdown)
-	}
-	// The staged interjection rows sit closest to the box: they are what ⏎ just put there, and
-	// what Backspace on an empty box takes back (ADR 0025).
-	if ov.queued != "" {
-		rows = append(rows, ov.queued)
-	}
+	// Then the input-side slot — the autocomplete dropdown, then the staged-interjection strip closest
+	// to the box — starting on the row that chrome closes on. Its span goes into the same value the
+	// walk above filled, so the geometry the pointer asks of [Model.frameSpans] is composed by this
+	// very pair of calls rather than by a second arithmetic that agrees with it today.
+	rows, spans.panes[paneDropdown] = stackInputSlot(rows, ov, belowSlot+topRuleHeight+statusHeight)
+	// Then the input box, the footer, and the ▁ hairline closing the screen under it.
 	rows = append(rows, m.inputView(), m.footerView(), m.bottomRule())
 
 	v := tea.NewView(m.joinFrame(rows))

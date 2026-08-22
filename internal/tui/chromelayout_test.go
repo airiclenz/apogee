@@ -210,3 +210,162 @@ func TestPromptEditorRowsClampsTheWidgetCount(t *testing.T) {
 		}
 	}
 }
+
+// ----------------------------------------------------------------------------
+// The frame publishes BOTH overlay slots' geometry (model.go, frameSpans)
+// ----------------------------------------------------------------------------
+
+// frameBlockRow reports the screen row m.View() draws block's first line on, or −1 when the composed
+// frame does not draw it at all. It FINDS the block in the frame — matching the block's own lines
+// against the frame's — rather than re-deriving the row arithmetic the assertions below exist to
+// check: a test that recomputed the sum would agree with a wrong sum exactly as happily as with a
+// right one.
+func frameBlockRow(t *testing.T, m Model, block string) int {
+	t.Helper()
+	if block == "" {
+		return -1
+	}
+	frame := strings.Split(plain(m.View()), "\n")
+	want := strings.Split(ansiPattern.ReplaceAllString(block, ""), "\n")
+	for y := 0; y+len(want) <= len(frame); y++ {
+		drawn := true
+		for i, line := range want {
+			// The frame squares every line to the window width (joinFrame), so a drawn line can carry
+			// padding the block itself does not.
+			if strings.TrimRight(frame[y+i], " ") != strings.TrimRight(line, " ") {
+				drawn = false
+				break
+			}
+		}
+		if drawn {
+			return y
+		}
+	}
+	return -1
+}
+
+// dropdownFrame is a laid-out 100×30 model with the "/" command menu open over a full transcript and
+// staged interjections queued behind it — the state in which the lower slot has to take its rows from
+// something already occupying them.
+func dropdownFrame(t *testing.T, staged int) Model {
+	t.Helper()
+	m := withStagedRows(modelWithOverlayRoomAt(t, 100, 30, Options{Workspace: "."}), staged)
+	m.input.SetValue("/")
+	m.autocomplete = m.computeAutocomplete(m.caretByteOffset())
+	m.layout()
+	if !m.autocomplete.active || len(m.autocomplete.items) == 0 {
+		t.Fatal(`the "/" menu did not open — test premise broken`)
+	}
+	return m
+}
+
+// TestDropdownSpanMatchesTheDrawnFrame is what publishing the input-side slot's geometry buys: the
+// rectangle a pointer asks for the autocomplete dropdown is the rectangle the frame actually drew it
+// in. It was the one open overlay with no geometry at all — a notch or a click over it could name
+// nothing — and its row now comes down from the walk that stacked it (stackInputSlot), off the row the
+// transcript-side slot reported it ended above, rather than from a second sum over the same blocks.
+func TestDropdownSpanMatchesTheDrawnFrame(t *testing.T) {
+	m := dropdownFrame(t, 0)
+
+	y0, h, ok := m.frameSpans().pane(paneDropdown)
+
+	if !ok {
+		t.Fatal("the open dropdown is not on the published frame")
+	}
+	block := m.frameOverlays().dropdown
+	if want := frameBlockRow(t, m, block); y0 != want {
+		t.Errorf("the dropdown's span starts at row %d, the frame draws it at row %d", y0, want)
+	}
+	if want := lipgloss.Height(block); h != want {
+		t.Errorf("the dropdown's span is %d rows, the frame draws %d", h, want)
+	}
+}
+
+// The staged-interjection strip shares the lower slot and is stacked BELOW the dropdown — it is what
+// ⏎ just put there, closest to the box (ADR 0025) — so it may not disturb the rectangle the dropdown
+// publishes. The strip is no framePane and has no span of its own; what pins it is where the frame
+// draws it, directly on the row the dropdown's rectangle ends.
+func TestDropdownSpanWithAStagedStripBelowIt(t *testing.T) {
+	const staged = 2
+	m := dropdownFrame(t, staged)
+
+	y0, h, ok := m.frameSpans().pane(paneDropdown)
+
+	if !ok {
+		t.Fatal("the open dropdown is not on the published frame beside the staged strip")
+	}
+	ov := m.frameOverlays()
+	if ov.queued == "" {
+		t.Fatalf("%d staged interjections drew no strip — test premise broken", staged)
+	}
+	if want := frameBlockRow(t, m, ov.dropdown); y0 != want {
+		t.Errorf("beside the strip the dropdown's span starts at row %d, the frame draws it at row %d", y0, want)
+	}
+	if want := lipgloss.Height(ov.dropdown); h != want {
+		t.Errorf("beside the strip the dropdown's span is %d rows, the frame draws %d", h, want)
+	}
+	if got := frameBlockRow(t, m, ov.queued); got != y0+h {
+		t.Errorf("the staged strip is drawn at row %d, want %d — directly below the dropdown's %d rows",
+			got, y0+h, h)
+	}
+}
+
+// A closed dropdown answers what every closed pane answers: the zero span, meaning it is not on this
+// frame. That is the whole of what the entry means now — it no longer doubles as "nothing addresses
+// this pane by rectangle".
+func TestDropdownSpanIsAbsentWithNoMenuOpen(t *testing.T) {
+	m := modelWithOverlayRoomAt(t, 100, 30, Options{Workspace: "."})
+
+	if y0, h, ok := m.frameSpans().pane(paneDropdown); ok {
+		t.Errorf("a closed dropdown reports a rectangle at row %d, %d rows tall", y0, h)
+	}
+}
+
+// TestFrameSpansKeepTheTranscriptSlotWhereItIsDrawn is the other half of the bargain: composing the
+// lower slot may not move the upper one. Every pane of the transcript-side slot still publishes the
+// row the frame draws it on — asserted against the drawn frame rather than against a recorded number,
+// so the walk above the chrome stays pinned to the painter whatever is stacked below it.
+func TestFrameSpansKeepTheTranscriptSlotWhereItIsDrawn(t *testing.T) {
+	cases := []struct {
+		name string
+		pane framePane
+		open func(Model) Model
+	}{
+		{
+			name: "sessions browser",
+			pane: paneBrowser,
+			open: func(m Model) Model { m.sessionBrowser = sessionBrowser{open: true}; return m },
+		},
+		{
+			name: "model picker",
+			pane: panePicker,
+			open: func(m Model) Model { m.picker = picker{open: true, kind: pickerModel}; return m },
+		},
+		{
+			name: "settings pane",
+			pane: paneSettings,
+			open: func(m Model) Model { m.settings.open = true; return m },
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			m := c.open(modelWithOverlayRoomAt(t, 100, 30, Options{Workspace: "."}))
+			block := m.frameOverlays().block(c.pane)
+			if block == "" {
+				t.Fatalf("the %s drew nothing — test premise broken", c.name)
+			}
+
+			y0, h, ok := m.frameSpans().pane(c.pane)
+
+			if !ok {
+				t.Fatalf("the open %s is not on the published frame", c.name)
+			}
+			if want := frameBlockRow(t, m, block); y0 != want {
+				t.Errorf("the %s's span starts at row %d, the frame draws it at row %d", c.name, y0, want)
+			}
+			if want := lipgloss.Height(block); h != want {
+				t.Errorf("the %s's span is %d rows, the frame draws %d", c.name, h, want)
+			}
+		})
+	}
+}

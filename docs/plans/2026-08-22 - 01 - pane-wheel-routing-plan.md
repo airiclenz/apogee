@@ -134,7 +134,7 @@ idiom in that file:
 
 ---
 
-## 2. Publish the autocomplete dropdown's rectangle
+## 2. Publish the autocomplete dropdown's rectangle — ✅ DONE (2026-08-22)
 
 **What:** the dropdown is the one open overlay with no geometry — `frameSpans`'s doc says
 so outright ("The autocomplete dropdown's entry is always the zero span: it is in the

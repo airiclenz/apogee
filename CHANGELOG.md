@@ -250,6 +250,18 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **The autocomplete dropdown's rectangle is published by the frame that draws it.** The dropdown was
+  the one open overlay of the frame with no geometry at all — `frameSpans` deliberately kept its entry
+  as the zero span, so nothing could name it by rectangle and a gesture over it had nothing to hit.
+  The frame's input-side slot is now composed by `stackInputSlot`, a sibling of `stackTranscriptSlot`
+  that stacks the dropdown and the staged-interjection strip and reports where the dropdown landed;
+  `stackTranscriptSlot` in turn hands back the screen row its own slot ended above, so the chrome rows
+  between the two slots are added once instead of a second sum being written from the window's last
+  row upwards. `View` and `Model.frameSpans` both compose the frame through that same pair of calls,
+  so the rows the dropdown is DRAWN on and the rows a pointer may address are the same rows by
+  construction. Nothing changes on screen and no gesture is routed to the dropdown yet — this is the
+  geometry the routing needs.
+
 - The session browser derives its workspace view once per frame: `unfilteredRows` now hands back the
   visible metas alongside the rows it composed from them, so `filteredView` no longer re-walks and
   re-copies the whole session store a second time on every frame and keypress.
