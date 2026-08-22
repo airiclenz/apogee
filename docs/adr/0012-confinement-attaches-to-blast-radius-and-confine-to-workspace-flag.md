@@ -48,9 +48,12 @@ is only meaningful in **Auto** (the lower three modes have a human backstopping 
 - **`confine-to-workspace: true` (default).** Filesystem writes are fenced to the workspace; the
   **network is open**.
   - **Subprocess/shell tools** run OS-confined to the workspace. An escape (write outside the
-    workspace) is **OS-blocked (EPERM)** — there is no approval prompt; the command simply fails and
-    the model routes around it. Network reaches are open (`NetworkAllow` may *tighten* to a deny-list
-    for the security-conscious).
+    workspace) is **OS-blocked** — an OS denial (EACCES under Linux landlock, EPERM under macOS
+    seatbelt; wording reconciled 2026-08-22, ADR 0056 — this line previously said "EPERM"
+    unqualified, which a real Linux denial never prints) — there is no approval prompt; the command
+    fails and, since ADR 0056, a streamed denial also **stops the rest of the confined call**
+    (kill-on-denial watch) so later script lines never run against a half-done state. Network
+    reaches are open (`NetworkAllow` may *tighten* to a deny-list for the security-conscious).
   - **Apogee's own in-process write tools** are bounded by path-safety. An *in-workspace* write
     auto-runs; an *out-of-workspace* write raises an **Approval popup** (Apogee inspects the path
     before executing, so it *can* ask — unlike a subprocess).

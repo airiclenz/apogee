@@ -10,6 +10,22 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **Docs: the workspace-clobber hardening is recorded.** New ADR 0056 captures the four
+  ratified calls plus the mid-execution corrections: the fail-fast preamble with its
+  corrected rationale (POSIX `set -e` exempts every command of an AND-OR list but the last,
+  so the preamble alone never stopped the incident's `&&` chain), the kill-on-denial watch
+  (`platform.DenialKillWriter`) as the actual incident stop, the session scratch dir with
+  its 14-day GC and `{{scratch}}` placeholder, and the tracked-file mutation warning as an
+  always-on structural floor. The confinement execution contract is amended (2026-08-22):
+  §2.2 and battery row 3 now state the EACCES reality (Linux landlock denials print
+  strerror(EACCES) "Permission denied", not EPERM — the shared `internal/platform`
+  signature set is the source of truth), §2.2 records the kill-on-denial watch, §6.2 gains
+  the chained-script clobber row (#11), and §7 records the writable set as
+  workspace ∪ per-project `WritablePaths` ∪ session scratch dir (plus the backend-level
+  `/dev/null` exemption). ADR 0012's "EPERM" decision wording is reconciled in place with a
+  dated pointer to ADR 0056; CONTEXT.md gains the **Scratch dir** domain term; the incident
+  handoff is archived under `docs/handoffs/archived/`.
+
 - **A confinement denial now stops the whole terminal call (kill-on-denial watch), and the
   escape battery proves it on the incident's own shape.** Fix A of the 2026-08-22
   workspace-clobber incident: every CONFINED subprocess run is wired through

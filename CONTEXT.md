@@ -534,6 +534,19 @@ scoped to one machine, not a second kind of it.
 _Avoid_: "YOLO mode" (informal; it is a flag on Auto, not a fifth mode),
 "`--dangerously-skip-permissions`" (names Claude Code's analogue, not this flag).
 
+**Scratch dir**:
+The per-session writable directory **outside the workspace** —
+`~/.apogee/scratch/<session-id>/`, a dotdir sibling of `sessions/` — that the **Confinement**
+box carries as an extra writable root (ADR 0056). It exists because a workspace-only fence left
+a confined agent nowhere safe for scratch work, so improvisations landed in the workspace (the
+2026-08-22 clobber incident): now scratch tests, probes, and temp files have a home the fence
+allows, named to the model via the **`{{scratch}}`** prompt placeholder and one guidance line in
+the shipped default prompt. Created `0700` when the session id is minted, follows the **active**
+session across rotation, advertised writable only once it actually exists, and swept by a
+best-effort 14-day startup GC. Per-session constant, so prompt use is KV-cache safe.
+_Avoid_: "temp dir" (`/tmp` is exactly what confinement may deny), "cache" (it is disposable
+work space, not a cache with an invalidation story).
+
 **Host acknowledgement** (`unconfined-hosts:`):
 The user's recorded claim that **one named machine** is disposable, so Auto may run unconfined
 *there* — the same loosen as `confine-to-workspace: false` at the grain the claim is actually true

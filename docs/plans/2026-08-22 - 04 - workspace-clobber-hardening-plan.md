@@ -241,7 +241,13 @@ backend lacks `FSWrite`, as today)
 
 **Commit:** `test(confine): chained-script clobber probe in the escape battery`
 
-## 7. Docs: ADR, contract, CONTEXT.md, incident closeout
+## 7. Docs: ADR, contract, CONTEXT.md, incident closeout — ✅ DONE (2026-08-22)
+
+NOTES (2026-08-22): per the dispatch DECISION (owner-ratified item-6 scope updates), the ADR/contract text records fix A (`platform.DenialKillWriter` kill-on-denial + the chained-clobber probe) and the corrected `set -e` rationale instead of the plan's original "the preamble alone prevents the clobber" claim, and reconciles contract §2.2/§6.2 and ADR 0012 "EPERM" wording with the EACCES reality.
+
+NOTES (2026-08-22): ADR 0012 edited beyond the item's named file list — the DECISION requires reconciling its "EPERM" wording; done as an inline dated correction in the decision bullet (pointing at ADR 0056) rather than a new amendment section, since it is a factual errno correction plus a cross-reference, not a policy change.
+
+NOTES (2026-08-22): the incident handoff moved with plain `mv`, not the item's `git mv` — `docs/handoffs/.gitignore` ignores the whole tree, so the file was never tracked; the move is filesystem-only, appears in no commit, and is deliberately absent from FILES (staging an ignored path would fail). The item's acceptance test passes.
 
 Depends on items 1–6 (documents what they shipped).
 

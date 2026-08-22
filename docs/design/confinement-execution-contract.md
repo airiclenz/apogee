@@ -105,9 +105,25 @@ The semantics flip from **run-fn** to **prepare-cmd**:
   > idempotent, once-per-box filesystem I/O (the mandatory-label pass), because on Windows the box's
   > writable half can only be expressed on the objects themselves. It still never runs the command
   > and never blocks on it. See §9.
-- The tool then runs `cmd`. A confined child that writes outside the box gets an OS error (EPERM); the
-  command simply fails and the model routes around it — there is no Approval prompt for a *subprocess*
-  escape (ADR 0012: the subprocess surface is OS-fenced, not gated).
+- The tool then runs `cmd`. A confined child that writes outside the box gets an OS error —
+  strerror(EACCES) ("Permission denied") under Linux landlock, whose filesystem refusals are EACCES,
+  not EPERM; strerror(EPERM) ("Operation not permitted") under macOS seatbelt *(wording reconciled
+  2026-08-22, ADR 0056: this contract previously said "EPERM" unqualified, and the EPERM-only
+  denial-label signature list built on that wording could never have matched a real Linux denial;
+  the shared spelling set now lives in `internal/platform` — `LooksLikeConfinementDenial` — and is
+  the source of truth)*. The command fails and the model routes around it — there is no Approval
+  prompt for a *subprocess* escape (ADR 0012: the subprocess surface is OS-fenced, not gated).
+  > **Amended 2026-08-22 (ADR 0056).** A confined run no longer merely fails the one denied command:
+  > the execution tools wire the child's output through `platform.DenialKillWriter`, a live watch that
+  > kills the §2.4 process group at the first streamed OS-denial signature, so a multi-command script
+  > stops at the denial instead of running its remaining lines against a half-done state (the
+  > 2026-08-22 workspace-clobber incident: `set -e` cannot do this job — POSIX exempts every command
+  > of an AND-OR list but the last, so a denied `mkdir d && cd d` chain does not abort the script).
+  > Still no prompt — the stopped call renders a definitive `[blocked by workspace confinement: …]`
+  > error label; an unstopped confined failure with denial-shaped output gets the weaker
+  > `[likely blocked by workspace confinement: …]` heuristic label. Best-effort in both directions
+  > (strerror text is locale-dependent; the kill races the shell's next command through a pipe) and
+  > POSIX-only by design, mirroring the fail-fast preamble's Windows asymmetry.
 
 `domain` gains an `os/exec` import. This is acceptable: confinement *is* about launching OS
 subprocesses, so the public interface honestly says so, and `os/exec` is stdlib (ADR 0010's invariant
@@ -724,7 +740,7 @@ harness asserts on exit status / error.
 |---|---|---|---|
 | 1 | write `WorkspaceRoot/probe.txt` | **succeeds** (exit 0; file present) — positive control | both |
 | 2 | write a `WritablePaths` entry outside the workspace | **succeeds** — the allowlist works | both |
-| 3 | write `<sibling-temp>/escape.txt` (outside box) | **denied** — non-zero exit / EPERM; file absent | both |
+| 3 | write `<sibling-temp>/escape.txt` (outside box) | **denied** — non-zero exit / OS denial (EACCES on landlock, EPERM on seatbelt); file absent | both |
 | 4 | write `$HOME/.ssh/escape` (outside box) | **denied** | both |
 | 5 | after #1–#4, the **parent** writes `<sibling-temp>/parent.txt` | **succeeds** — parent unrestricted | both |
 | 6 | the confined child `exec`s a second program that writes outside | **denied** — domain inherits across `execve` | Linux, **Windows** |
@@ -732,6 +748,7 @@ harness asserts on exit status / error.
 | 8 | (net) connect a host, box network-**open** (default) | **allowed** — network is open by default | net-capable |
 | 9 | after teardown, the box roots' mandatory labels | **back to their prior state** — the disk mutation is reverted | **Windows** |
 | 10 | `Confine` a box with a non-empty `NetworkAllow` | **`ErrConfinementUnavailable`** — a requested tightening is never a silent no-op | **Windows** |
+| 11 | multi-command script: a denied `mkdir … && cd … && cat > …` heredoc chain, then an unguarded **relative** write — fail-fast preamble and kill-on-denial watch wired exactly as the terminal tool composes them | **stopped** — the watch matched the streamed denial; non-zero exit; the workspace file absent | POSIX (skips under `cmd.exe`) |
 
 #3/#4 are the core "escape is OS-blocked" proof; #5 is the "no per-thread landlock, parent untouched"
 proof; #6 is the "after fork, before execve, inherited across exec" proof specific to the re-exec
@@ -747,6 +764,20 @@ wrapper; #7/#8 encode ADR 0012's network-open default with deny as a tightening.
 > probe); item 8 widened it — the probes now run through the `Shell` the caller passes
 > (`platform.Current()`), and the shell-dialect lines live per OS in `confinetest/lines_other.go` and
 > `confinetest/lines_windows.go`; see §9's probe-expectations list.
+
+> **Amended 2026-08-22 (ADR 0056).** Row **#11** (`chained_script_clobber_denied`) reproduces the
+> 2026-08-22 workspace-clobber incident shape and extends the battery's "non-zero exit and file
+> absent" contract to **multi-command scripts**, which the single-line probes above do not cover: a
+> denied first chain leaves the cwd at the workspace root, `set -e` does not abort (the POSIX AND-OR
+> exemption), and only the §2.2 kill-on-denial watch stops the unguarded relative write from landing
+> inside the box. The probe carries a `sleep` between the denied chain and the destructive line —
+> standing in for the incident's intervening commands, because the watch is asynchronous (the
+> denial's stderr races the shell's next command through a pipe) — and asserts three things: the
+> watch **matched** the streamed denial, the script died **non-zero**, and the workspace file was
+> **not created**. The battery drivers hand `Probe` a `DenialKillerFactory` beside the fail-fast
+> preamble (confinetest cannot import `internal/platform` — the documented Shell import cycle). The
+> row skips under `cmd.exe`: no fail-fast analogue, and Windows denials ("Access is denied.") are
+> deliberately outside the POSIX signature set.
 
 ### 6.3 Per-backend acceptance checklists (now mechanical)
 
@@ -782,6 +813,17 @@ Recommendation: P3.4 seeds `WritablePaths` with the detected toolchain cache + t
 (probed, not hard-coded), and config may extend it per project. This is a box-*construction* concern, not
 a `Confiner` concern — the `Confine` contract (§2) is unaffected; it confines to whatever box it is
 handed.
+
+> **Amended 2026-08-22 (ADR 0056).** The box's writable set is now **workspace ∪ per-project
+> `WritablePaths` ∪ the session scratch dir** — plus the backend-level `/dev/null` exemption (§2.3),
+> which stays out of the box by construction. The scratch dir is `~/.apogee/scratch/<session-id>/`
+> (a dotdir sibling of `sessions/`, `library/`, …), created `0700` when the session id is minted and
+> following the **active** session across rotation; `Config.ConfinementBox()` appends it to
+> `WritablePaths` in a **fresh slice** (never mutating the host's backing array) and only when the
+> dir actually exists — a path that was never created is never advertised writable. A 14-day
+> best-effort startup GC sweeps stale scratch dirs. It exists because a workspace-only box left the
+> agent nowhere safe for scratch work, so its improvisations landed in the workspace (the 2026-08-22
+> incident's hazard inversion); the `{{scratch}}` prompt placeholder names the dir to the model.
 
 ---
 
