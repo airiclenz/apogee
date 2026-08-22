@@ -2638,7 +2638,7 @@ func TestSystemPromptSettingsValidate(t *testing.T) {
 // ResolveSystemPrompt collapses the block into the ONE template this session runs with, for the
 // RESOLVED model (ADR 0023): whole-entry replacement on an exact model match, an inert entry for
 // every other model, `~` and apogee-home-relative file paths, and the two checks that belong to
-// the selected source alone — the file must read and the placeholders must be the known three.
+// the selected source alone — the file must read and the placeholders must be the known four.
 func TestResolveSystemPrompt(t *testing.T) {
 	// Deliberately NOT parallel: the `~` case redirects the environment os.UserHomeDir reads.
 	userHome := t.TempDir()
@@ -2719,9 +2719,9 @@ func TestResolveSystemPrompt(t *testing.T) {
 			wantErr: []string{"system-prompt-file", filepath.Join(home, "prompts", "absent.md")},
 		},
 		{
-			name:    "an unknown placeholder names the source key and the known three",
+			name:    "an unknown placeholder names the source key and the known four",
 			sp:      SystemPromptSettings{Global: PromptSource{Text: "hi {{bogus}}"}},
-			wantErr: []string{"system-prompt-text", "{{bogus}}", "{{workspace}}", "{{datetime}}", "{{mode}}"},
+			wantErr: []string{"system-prompt-text", "{{bogus}}", "{{workspace}}", "{{datetime}}", "{{mode}}", "{{scratch}}"},
 		},
 		{
 			name:    "an unknown placeholder in a model entry names that entry",

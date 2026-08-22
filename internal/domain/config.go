@@ -214,8 +214,8 @@ type Config struct {
 	// parsers' own config types, which cannot move up the DAG since processing imports domain.
 	Profile ModelProfile
 
-	// SystemPrompt is the system-prompt TEMPLATE (ADR 0023) — internal/prompt's three
-	// placeholders ({{workspace}}, {{datetime}}, {{mode}}) — rendered FRESH per request by
+	// SystemPrompt is the system-prompt TEMPLATE (ADR 0023) — internal/prompt's four
+	// placeholders ({{workspace}}, {{datetime}}, {{mode}}, {{scratch}}) — rendered FRESH per request by
 	// the loop and seeded as the first system message of the wire request. It is a template,
 	// not a rendered string, because two inputs are live (the date, the autonomy mode). It is
 	// request-scoped only: never committed to history, never in the snapshot. "" (the

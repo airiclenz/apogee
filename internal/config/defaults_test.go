@@ -87,6 +87,7 @@ func TestEmbeddedDefaultConfigSetsOnlyTheSystemPrompt(t *testing.T) {
 		prompt.PlaceholderWorkspace,
 		prompt.PlaceholderDatetime,
 		prompt.PlaceholderMode,
+		prompt.PlaceholderScratch,
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("shipped system prompt does not contain %q:\n%s", want, text)

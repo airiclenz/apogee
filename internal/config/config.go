@@ -2691,7 +2691,7 @@ func FilePath(configDir string) string {
 // config across projects. readFile is injected so selection is testable without a filesystem.
 //
 // Everything that is only checkable for the SELECTED source happens here — the file must read,
-// and the template's placeholders must be the known three. Both errors name the config key the
+// and the template's placeholders must be the known four. Both errors name the config key the
 // prompt came from, because the same two spellings appear at every level.
 func ResolveSystemPrompt(sp SystemPromptSettings, model, home string, readFile func(string) ([]byte, error)) (string, error) {
 	src := sp.Global

@@ -218,7 +218,7 @@
 # resolved against this apogee home — the directory this config.yaml lives in — so a prompt
 # file travels with the rest of your configuration.
 #
-# Three placeholders are substituted fresh on every request:
+# Four placeholders are substituted fresh on every request:
 #
 #   {{workspace}}  — the absolute path of the workspace this session is scoped to
 #   {{datetime}}   — today's date, e.g. 2026-07-26. The DATE only, deliberately: a per-request
@@ -226,13 +226,18 @@
 #                    cache your local server relies on
 #   {{mode}}       — the current autonomy mode (plan | ask-before | allow-edits | auto), which
 #                    follows a Shift+Tab switch from the next request onward
+#   {{scratch}}    — this session's own scratch directory (~/.apogee/scratch/<session-id>),
+#                    writable even when workspace confinement is on; constant for the life
+#                    of a session, so the prefix cache holds
 #
 # The spelling is strict and the set is closed: anything else between double braces — including
-# `{{ workspace }}`, with spaces — is a startup error listing these three.
+# `{{ workspace }}`, with spaces — is a startup error listing these four.
 
 system-prompt-text: |
   You are apogee, a coding agent working in the workspace at {{workspace}}.
   Today's date is {{datetime}}. You are operating in {{mode}} mode.
+  Scratch and test files go in {{scratch}} — it is writable; the workspace is
+  for the project's own files only. /tmp may not be writable.
 
   Work step by step: read before you change, keep edits small and focused,
   and verify your work. Be direct and concise; when a task is done,

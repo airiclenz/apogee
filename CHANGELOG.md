@@ -10,6 +10,11 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- New `{{scratch}}` system-prompt placeholder (the closed set is now four): renders the
+  session scratch directory, per-session constant so the prefix KV cache holds. The
+  shipped default prompt now steers scratch and test files to `{{scratch}}` instead of
+  the workspace or /tmp.
+
 - **Per-session scratch dir `~/.apogee/scratch/<session-id>/`** (0700), folded into the
   confinement box's `WritablePaths` so a confined subprocess has a safe write target
   outside the workspace; the dir follows the active session across `/clear|/new` and

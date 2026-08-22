@@ -10,14 +10,14 @@ import (
 // render is visibly not a timestamp.
 var fixedNow = time.Date(2026, 7, 26, 23, 59, 58, 0, time.UTC)
 
-// The whole substitution contract in one template: all three placeholders, one of them
+// The whole substitution contract in one template: all four placeholders, one of them
 // repeated, every occurrence replaced and nothing else touched.
 func TestRenderSubstitutesAllPlaceholders(t *testing.T) {
 	t.Parallel()
 
-	template := "You are in {{workspace}} on {{datetime}} in {{mode}} mode.\nStill {{workspace}}."
-	in := Inputs{Workspace: "/home/eric/apogee", Mode: "ask-before", Now: fixedNow}
-	want := "You are in /home/eric/apogee on 2026-07-26 in ask-before mode.\nStill /home/eric/apogee."
+	template := "You are in {{workspace}} on {{datetime}} in {{mode}} mode.\nScratch: {{scratch}}.\nStill {{workspace}}."
+	in := Inputs{Workspace: "/home/eric/apogee", Mode: "ask-before", Now: fixedNow, Scratch: "/home/eric/.apogee/scratch/s1"}
+	want := "You are in /home/eric/apogee on 2026-07-26 in ask-before mode.\nScratch: /home/eric/.apogee/scratch/s1.\nStill /home/eric/apogee."
 
 	if got := Render(template, in); got != want {
 		t.Errorf("Render() = %q, want %q", got, want)
@@ -52,7 +52,7 @@ func TestRenderDateIsDateOnly(t *testing.T) {
 	}
 }
 
-// Everything the language accepts: the known three (alone and together), text with no
+// Everything the language accepts: the known four (alone and together), text with no
 // placeholders at all, the empty template (= no prompt configured), and brace-ish text
 // that is not a {{…}} token.
 func TestValidateAcceptsKnownAndEmpty(t *testing.T) {
@@ -66,7 +66,8 @@ func TestValidateAcceptsKnownAndEmpty(t *testing.T) {
 		{name: "workspace alone", template: "cwd: " + PlaceholderWorkspace},
 		{name: "datetime alone", template: "today: " + PlaceholderDatetime},
 		{name: "mode alone", template: "mode: " + PlaceholderMode},
-		{name: "all three, one repeated", template: PlaceholderWorkspace + " " + PlaceholderDatetime + " " + PlaceholderMode + " " + PlaceholderMode},
+		{name: "scratch alone", template: "scratch: " + PlaceholderScratch},
+		{name: "all four, one repeated", template: PlaceholderWorkspace + " " + PlaceholderDatetime + " " + PlaceholderMode + " " + PlaceholderScratch + " " + PlaceholderMode},
 		{name: "literal single braces are not placeholders", template: "use { and } freely"},
 		{name: "unclosed braces pass through", template: "a {{ dangling opener"},
 		{name: "a closing pair without an opener passes through", template: "a dangling closer }}"},
@@ -110,7 +111,7 @@ func TestValidateRejectsUnknownListingKnown(t *testing.T) {
 			if !strings.Contains(msg, tt.offender) {
 				t.Errorf("Validate(%q) error %q does not name the offender %q", tt.template, msg, tt.offender)
 			}
-			for _, known := range []string{PlaceholderWorkspace, PlaceholderDatetime, PlaceholderMode} {
+			for _, known := range []string{PlaceholderWorkspace, PlaceholderDatetime, PlaceholderMode, PlaceholderScratch} {
 				if !strings.Contains(msg, known) {
 					t.Errorf("Validate(%q) error %q does not list the known placeholder %s", tt.template, msg, known)
 				}
@@ -124,7 +125,7 @@ func TestValidateRejectsUnknownListingKnown(t *testing.T) {
 func TestKnownListNamesEveryPlaceholder(t *testing.T) {
 	t.Parallel()
 
-	want := "{{workspace}}, {{datetime}}, {{mode}}"
+	want := "{{workspace}}, {{datetime}}, {{mode}}, {{scratch}}"
 	if got := KnownList(); got != want {
 		t.Errorf("KnownList() = %q, want %q", got, want)
 	}

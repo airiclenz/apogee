@@ -807,7 +807,9 @@ func (a *Agent) standingSystem() string {
 // when none is configured. The inputs are live where the placeholders demand it: the mode
 // through the lock-guarded Mode() (a Shift+Tab lands on the next request, and a sub-agent
 // renders its own inherited mode), the date from a.now (date-only — stable within a day,
-// so the KV cache holds), the workspace from Config.
+// so the KV cache holds), the workspace from Config, and the scratch dir through the
+// lock-guarded ScratchDir() — constant for the life of a session (it moves only at a
+// session boundary), so {{scratch}} is KV-cache-stable too.
 //
 // The template was validated at construction (newAgent's prompt.Validate gate), so Render
 // cannot meet an unknown placeholder here; if one somehow survived it passes through
@@ -820,6 +822,7 @@ func (a *Agent) systemPrompt() string {
 		Workspace: a.cfg.WorkspaceDir,
 		Mode:      string(a.Mode()),
 		Now:       a.now(),
+		Scratch:   a.ScratchDir(),
 	})
 }
 

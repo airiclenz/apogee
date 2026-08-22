@@ -141,7 +141,11 @@ NOTES (2026-08-22): deriveDeps' mechanism-hook exec fence and a scheduled Firing
 
 **Commit:** `feat(confine): per-session scratch dir ~/.apogee/scratch/<id> in the writable box`
 
-## 4. `{{scratch}}` prompt placeholder and default-prompt guidance
+## 4. `{{scratch}}` prompt placeholder and default-prompt guidance — ✅ DONE (2026-08-22)
+
+NOTES (2026-08-22): the loop-level render test lives in `internal/agent/promptseam_test.go` (the existing seam harness), not in a file the item names — `TestPromptSeam_ScratchPlaceholderRendersSessionScratchDir` drives a Turn and asserts the seeded system message carries the scratch path verbatim.
+
+NOTES (2026-08-22): four files beyond the item's list carry comment-only "known three"/placeholder-enumeration re-syncs the new fourth placeholder made stale (`internal/domain/config.go`, `internal/config/config.go`, `internal/config/registry.go`), and `internal/config/config_test.go`'s unknown-placeholder case now also expects `{{scratch}}` in the error's known list.
 
 Depends on item 3.
 

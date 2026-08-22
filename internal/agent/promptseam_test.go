@@ -288,8 +288,9 @@ func wireToDomain(msgs []provider.Message) []domain.Message {
 // provider.Request: exactly ONE system message, rendered from live inputs, merged with the
 // mechanism directives and the profile tool block, and absent from history and the snapshot.
 
-// promptTemplate exercises all three placeholders with {{workspace}} REPEATED, so a render
-// assertion covers every substitution and the every-occurrence rule in one template.
+// promptTemplate exercises the workspace/datetime/mode placeholders with {{workspace}}
+// REPEATED, so a render assertion covers those substitutions and the every-occurrence rule
+// in one template ({{scratch}} has a seam test of its own below).
 const promptTemplate = "You are apogee working in {{workspace}} on {{datetime}} in {{mode}} mode. Stay inside {{workspace}}."
 
 // promptWorkspace is the workspace path the template renders; menuConfig injects the tool
@@ -487,7 +488,7 @@ func TestPromptSeam_ConfiguredPromptNeverEntersHistoryOrSnapshot(t *testing.T) {
 
 // TestNewAgentRejectsUnknownPromptPlaceholder: a template with an unknown placeholder fails
 // construction (the engine's own gate, mirroring the bad-profile one) with an error naming the
-// offender and listing the known three.
+// offender and listing the known four.
 func TestNewAgentRejectsUnknownPromptPlaceholder(t *testing.T) {
 	cfg := baseConfig(&recordingSink{})
 	cfg.SystemPrompt = "hi {{foo}}"
@@ -496,10 +497,34 @@ func TestNewAgentRejectsUnknownPromptPlaceholder(t *testing.T) {
 	if err == nil {
 		t.Fatal("newAgent accepted an unknown placeholder; a bad template must fail construction")
 	}
-	for _, want := range []string{"{{foo}}", prompt.PlaceholderWorkspace, prompt.PlaceholderDatetime, prompt.PlaceholderMode} {
+	for _, want := range []string{"{{foo}}", prompt.PlaceholderWorkspace, prompt.PlaceholderDatetime, prompt.PlaceholderMode, prompt.PlaceholderScratch} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error %q does not mention %q", err, want)
 		}
+	}
+}
+
+// TestPromptSeam_ScratchPlaceholderRendersSessionScratchDir: {{scratch}} renders the session
+// scratch directory the agent currently carries (Config.ScratchDir seeds it, SetScratchDir
+// moves it at a session boundary), so the default prompt's scratch guidance names the real
+// writable path the confinement box grants.
+func TestPromptSeam_ScratchPlaceholderRendersSessionScratchDir(t *testing.T) {
+	const scratch = "/tmp/apogee-prompt-scratch/sess-1"
+	sink := &recordingSink{}
+	cfg := menuConfig(t, sink)
+	cfg.Mode = domain.ModeAskBefore
+	cfg.WorkspaceDir = promptWorkspace
+	cfg.SystemPrompt = "Workspace {{workspace}}. Scratch and test files go in {{scratch}}."
+	cfg.ScratchDir = scratch
+
+	responder := &recordingResponder{reply: "All done."}
+	a := newProfileAgent(t, cfg, responder)
+	a.now = func() time.Time { return promptNow }
+
+	got := seedSystemMessage(t, a, responder, "hi")
+	want := "Workspace " + promptWorkspace + ". Scratch and test files go in " + scratch + "."
+	if got != want {
+		t.Errorf("seeded system message = %q, want %q", got, want)
 	}
 }
 

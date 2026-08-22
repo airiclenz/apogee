@@ -580,7 +580,7 @@ func validateSystemPromptFile(value string) error {
 //   - EMPTY, which is not how this key is cleared. A prompt of nothing is a SET of nothing, and the
 //     deliberate way to send no prompt at all is the reset backspace arms, which removes the block
 //     (ADR 0035) and hands the key back to the commented paragraph that documents it.
-//   - a template carrying a placeholder that is not one of the known three — the check
+//   - a template carrying a placeholder that is not one of the known four — the check
 //     ResolveSystemPrompt makes when it selects the prompt (prompt.Validate), moved ahead of the
 //     write so a mistyped `{{ workspace }}` is refused on the row rather than at the next launch.
 //

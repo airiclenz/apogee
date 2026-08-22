@@ -1,10 +1,10 @@
-// Package prompt owns the system-prompt template language (ADR 0023): exactly three
-// placeholders — {{workspace}}, {{datetime}}, {{mode}} — validated once at startup /
-// construction and rendered fresh per request by the loop.
+// Package prompt owns the system-prompt template language (ADR 0023): exactly four
+// placeholders — {{workspace}}, {{datetime}}, {{mode}}, {{scratch}} — validated once at
+// startup / construction and rendered fresh per request by the loop.
 //
 // The language is closed on purpose: the placeholder set is the whole vocabulary, the
 // spelling is strict (a near-miss like "{{ workspace }}" is an unknown placeholder, not a
-// silent literal), and an unknown placeholder is a startup error listing the known three
+// silent literal), and an unknown placeholder is a startup error listing the known four
 // rather than un-rendered braces shipped to the model. Validation and rendering are split
 // because they happen at different times: cmd/apogee validates the configured template
 // once while resolving config, internal/agent renders it per request from live inputs (the
@@ -26,13 +26,14 @@ import (
 	"time"
 )
 
-// The three placeholders the template language knows, in the order KnownList reports them.
+// The four placeholders the template language knows, in the order KnownList reports them.
 // The spellings are the exact tokens matched and substituted: no whitespace tolerance, no
 // case folding.
 const (
 	PlaceholderWorkspace = "{{workspace}}"
 	PlaceholderDatetime  = "{{datetime}}"
 	PlaceholderMode      = "{{mode}}"
+	PlaceholderScratch   = "{{scratch}}"
 )
 
 // dateLayout renders {{datetime}} as a date with no time-of-day, so the rendered prompt is
@@ -41,7 +42,7 @@ const dateLayout = "2006-01-02"
 
 // knownPlaceholders is the closed placeholder set, driving both the Validate check and the
 // KnownList error text from one source.
-var knownPlaceholders = []string{PlaceholderWorkspace, PlaceholderDatetime, PlaceholderMode}
+var knownPlaceholders = []string{PlaceholderWorkspace, PlaceholderDatetime, PlaceholderMode, PlaceholderScratch}
 
 // placeholderPattern matches any {{…}} token, known or not, so Validate can reject the
 // unknown ones. The inner class excludes braces so a stray or unclosed brace is not folded
@@ -49,8 +50,8 @@ var knownPlaceholders = []string{PlaceholderWorkspace, PlaceholderDatetime, Plac
 var placeholderPattern = regexp.MustCompile(`\{\{[^{}]*\}\}`)
 
 // KnownList returns the known placeholders as one comma-joined string —
-// "{{workspace}}, {{datetime}}, {{mode}}" — for error messages, so cmd/apogee and the
-// engine name the same set in the same words.
+// "{{workspace}}, {{datetime}}, {{mode}}, {{scratch}}" — for error messages, so
+// cmd/apogee and the engine name the same set in the same words.
 func KnownList() string { return strings.Join(knownPlaceholders, ", ") }
 
 // Inputs are the per-request render inputs. Mode is a plain string (the autonomy mode
@@ -59,10 +60,11 @@ type Inputs struct {
 	Workspace string    // Config.WorkspaceDir
 	Mode      string    // string(agent.Mode()) — live, changes on a mode switch
 	Now       time.Time // rendered DATE-ONLY (2006-01-02): KV-cache-stable within a day
+	Scratch   string    // agent.ScratchDir() — per-session constant, so KV-cache-stable
 }
 
 // Validate rejects a template carrying an unknown {{…}} placeholder, naming the first
-// offender and listing the known three. Spelling is strict, so "{{ workspace }}" and
+// offender and listing the known four. Spelling is strict, so "{{ workspace }}" and
 // "{{WORKSPACE}}" are unknown; literal or unclosed braces are not placeholders and are
 // accepted. An empty template validates: it configures no prompt.
 func Validate(template string) error {
@@ -74,11 +76,12 @@ func Validate(template string) error {
 	return nil
 }
 
-// Render substitutes every occurrence of the three placeholders. It assumes Validate has
+// Render substitutes every occurrence of the four placeholders. It assumes Validate has
 // passed; an unknown placeholder — unreachable after validation — passes through verbatim
 // rather than failing the request (the InstructionsFor defensive-degrade posture).
 func Render(template string, in Inputs) string {
 	rendered := strings.ReplaceAll(template, PlaceholderWorkspace, in.Workspace)
 	rendered = strings.ReplaceAll(rendered, PlaceholderDatetime, in.Now.Format(dateLayout))
-	return strings.ReplaceAll(rendered, PlaceholderMode, in.Mode)
+	rendered = strings.ReplaceAll(rendered, PlaceholderMode, in.Mode)
+	return strings.ReplaceAll(rendered, PlaceholderScratch, in.Scratch)
 }
