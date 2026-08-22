@@ -27,8 +27,21 @@
 // rerun. The daemon's reload rule is all-or-nothing for the same reason (ADR 0034): one bad entry
 // rejects the whole file with its reasons logged, and the previously adopted set keeps running.
 //
+// # Reload by name
+//
+// An edited file is adopted by DIFFING it against the running set, matching entries by their
+// `name:` (ADR 0034): an entry whose spec is untouched is left strictly alone, so its cycle keeps
+// its phase and the schedule fires when it was always going to. Only what actually changed is
+// stopped and started. That is why the name is required and unique — it is the identity a reload
+// recognises a schedule by across an edit, and a stop-everything-and-re-add reload would re-phase
+// every neighbour of the one line someone fixed.
+//
 // The files, one line each.
 //
 // file.go is the file model ([File], [Entry], [Trigger], [Action]), the strict YAML parse, and
 // the validation that applies the schema's defaults and names every defect.
+//
+// diff.go is the reload: [Diff], which decides by name what an edit changes; [Apply], which enacts
+// that decision on a [Scheduler] and keeps the daemon's name→id map; and [Entry.Spec], the mapping
+// onto the scheduler library's half of an entry.
 package daemon
