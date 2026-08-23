@@ -20,7 +20,9 @@ import (
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/format"
+	"github.com/airiclenz/apogee/internal/heartbeat"
 	"github.com/airiclenz/apogee/internal/scheme"
+	"github.com/airiclenz/apogee/internal/session"
 )
 
 // ----------------------------------------------------------------------------
@@ -4611,6 +4613,210 @@ func TestTranscriptTailReachableWithAPaneOpen(t *testing.T) {
 	// And on the really-composed frame: the last committed line is on it.
 	if last, rows := "reply line 39", transcriptRows(t, m); !strings.Contains(strings.Join(rows, "\n"), last) {
 		t.Errorf("the last transcript line %q is not painted at maximum scroll:\n%s", last, strings.Join(rows, "\n"))
+	}
+}
+
+// ----------------------------------------------------------------------------
+// Pane-height freshness — every change to a pane's DRAWN height reaches layout()
+// ----------------------------------------------------------------------------
+
+// The widget's height IS the transcript's drawn row count (layout(), model.go), so the number goes
+// stale the moment an open pane is drawn at a different height without laying out again — and a
+// stale one is the pop-up occlusion defect back in miniature: the scroll clamp holds back rows the
+// frame is painting, or lets the offset past rows it is not. Every site below moved a pane's height
+// somewhere OTHER than an open/close edge, and each one was found by the freshness audit.
+
+// assertClampFresh checks layout()'s invariant on the Model as it stands: the viewport widget's
+// height is the transcript's drawn row count, floored the one row a scroll surface needs.
+func assertClampFresh(t *testing.T, m Model, when string) {
+	t.Helper()
+	if got, want := m.viewport.Height(), max(1, m.transcriptRows()); got != want {
+		t.Fatalf("%s: viewport height = %d, drawn transcript rows = %d — the scroll clamp is stale",
+			when, got, want)
+	}
+}
+
+// wireSummaries is an offering of n models the /model picker draws a row each from, named so a
+// filter can prune them apart.
+func wireSummaries(names ...string) []heartbeat.ModelSummary {
+	out := make([]heartbeat.ModelSummary, 0, len(names))
+	for _, name := range names {
+		out = append(out, heartbeat.ModelSummary{ID: name, ContextWindow: 32768})
+	}
+	return out
+}
+
+// browserMetas is a stored-session listing: n records in workspace, titled so a filter rune can
+// tell them apart.
+func browserMetas(workspace string, titles ...string) []session.Meta {
+	now := time.Now()
+	out := make([]session.Meta, 0, len(titles))
+	for _, title := range titles {
+		out = append(out, session.Meta{
+			ID: title, Title: title, UpdatedAt: now, UserMsgs: 1, Workspace: workspace,
+		})
+	}
+	return out
+}
+
+// TestPaneHeightChangeReachesLayout is the freshness guard for [Model.layout]'s single-setter rule:
+// with the widget sized to the DRAWN rows, a pane redrawn at a new height without a layout() leaves
+// the scroll clamp measuring the frame that came before it. Each case opens a pane over a transcript
+// deeper than the window, moves that pane's height by a route that is not an open/close edge, and
+// asserts the widget followed.
+func TestPaneHeightChangeReachesLayout(t *testing.T) {
+	cases := []struct {
+		name    string
+		arrange func(*testing.T) Model
+		act     func(*testing.T, Model) Model
+	}{{
+		// interject.go — the worker committed staged rows, so the band above the input box shrinks.
+		name: "delivered rows leave the staged band",
+		arrange: func(t *testing.T) Model {
+			t.Helper()
+			m := withStagedRows(modelWithOverlayRoomAt(t, 80, 24, testOpts), 3)
+			m.layout()
+			return m
+		},
+		act: func(t *testing.T, m Model) Model {
+			t.Helper()
+			return step(t, m, interjectedMsg{items: m.pendingInterjections[:2]})
+		},
+	}, {
+		// model.go — an Event feeds the Inspector's ring, and the open pane derives its rows from it.
+		name: "a wire event grows the open /inspect pane",
+		arrange: func(t *testing.T) Model {
+			t.Helper()
+			opts := testOpts
+			opts.Inspector = true
+			m := modelWithOverlayRoomAt(t, 80, 24, opts)
+			m.inspector = inspectorPane{open: true}
+			m.layout()
+			return m
+		},
+		act: func(t *testing.T, m Model) Model {
+			t.Helper()
+			return step(t, m, eventMsg{Event: domain.WireEvent{
+				Direction: "request",
+				Payload:   `{"model":"test-model","stream":true,"messages":[]}`,
+			}})
+		},
+	}, {
+		// heartbeat.go — a beat replaces the offering an open /model picker draws its rows from.
+		name: "a beat moves the offering under an open /model picker",
+		arrange: func(t *testing.T) Model {
+			t.Helper()
+			opts := testOpts
+			serverSeams(&opts).beat = (&fakeHeartbeat{}).beat
+			m := modelWithOverlayRoomAt(t, 80, 24, opts)
+			m.hb.models = wireSummaries("alpha", "beta")
+			m.picker = picker{open: true, kind: pickerModel}
+			m.layout()
+			return m
+		},
+		act: func(t *testing.T, m Model) Model {
+			t.Helper()
+			beat := upBeat(testOpts.Model, testOpts.ContextWindow)
+			beat.AvailableModels = wireSummaries("alpha", "beta", "gamma", "delta", "epsilon")
+			return foldBeatMsg(t, m, beat)
+		},
+	}, {
+		// autocomplete.go — esc gives the dropdown's rows back to the transcript.
+		name: "esc closes the autocomplete dropdown",
+		arrange: func(t *testing.T) Model {
+			t.Helper()
+			m := modelWithOverlayRoomAt(t, 80, 24, testOpts)
+			m.input.SetValue("/")
+			m.autocomplete = m.computeAutocomplete(m.caretByteOffset())
+			m.layout()
+			if !m.autocomplete.active || len(m.autocomplete.items) == 0 {
+				t.Fatal(`the "/" menu did not open — test premise broken`)
+			}
+			return m
+		},
+		act: func(t *testing.T, m Model) Model {
+			t.Helper()
+			return step(t, m, keyEsc())
+		},
+	}, {
+		// sessions.go — the listing landed off the Update loop and opens the pane over the transcript.
+		name: "the /sessions listing opens the browser",
+		arrange: func(t *testing.T) Model {
+			t.Helper()
+			opts := testOpts
+			opts.Workspace = "/ws/a"
+			return modelWithOverlayRoomAt(t, 80, 24, opts)
+		},
+		act: func(t *testing.T, m Model) Model {
+			t.Helper()
+			return step(t, m, sessionListMsg{
+				metas: browserMetas("/ws/a", "alpha one", "beta two", "gamma three"),
+			})
+		},
+	}, {
+		// sessions.go — ^a widens the browser to every workspace, which is a different row set.
+		name: "the browser's workspace toggle changes its row set",
+		arrange: func(t *testing.T) Model {
+			t.Helper()
+			opts := testOpts
+			opts.Workspace = "/ws/a"
+			m := modelWithOverlayRoomAt(t, 80, 24, opts)
+			metas := browserMetas("/ws/a", "alpha one")
+			metas = append(metas, browserMetas("/ws/b", "beta two", "gamma three", "delta four")...)
+			return step(t, m, sessionListMsg{metas: metas})
+		},
+		act: func(t *testing.T, m Model) Model {
+			t.Helper()
+			return step(t, m, tea.KeyPressMsg{Code: 'a', Mod: tea.ModCtrl})
+		},
+	}, {
+		// sessions.go — a rune types into the browser's filter, which prunes rows.
+		name: "a filter rune prunes the browser's rows",
+		arrange: func(t *testing.T) Model {
+			t.Helper()
+			opts := testOpts
+			opts.Workspace = "/ws/a"
+			m := modelWithOverlayRoomAt(t, 80, 24, opts)
+			return step(t, m, sessionListMsg{
+				metas: browserMetas("/ws/a", "alpha one", "beta two", "gamma three"),
+			})
+		},
+		act: func(t *testing.T, m Model) Model {
+			t.Helper()
+			return step(t, m, keyRune('g'))
+		},
+	}, {
+		// picker.go — the same rune, one modal across.
+		name: "a filter rune prunes the /model picker's rows",
+		arrange: func(t *testing.T) Model {
+			t.Helper()
+			m := modelWithOverlayRoomAt(t, 80, 24, testOpts)
+			// Deep enough that pruning to one row outruns the two the filter line and its gap add
+			// back: at four rows the pane happened to draw the same height either way.
+			m.hb.models = wireSummaries("alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta", "theta")
+			m.picker = picker{open: true, kind: pickerModel}
+			m.layout()
+			return m
+		},
+		act: func(t *testing.T, m Model) Model {
+			t.Helper()
+			return step(t, m, keyRune('g'))
+		},
+	}}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := tc.arrange(t)
+			assertClampFresh(t, m, "setup")
+			before := m.frameOverlays().height()
+
+			m = tc.act(t, m)
+
+			if after := m.frameOverlays().height(); after == before {
+				t.Fatalf("premise: the overlays still measure %d rows — the act moved no pane height", after)
+			}
+			assertClampFresh(t, m, "after the act")
+		})
 	}
 }
 

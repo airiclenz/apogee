@@ -651,6 +651,7 @@ func (m Model) autocompleteKey(msg tea.KeyPressMsg) (bool, tea.Model, tea.Cmd) {
 		return true, m, nil
 	case listCloses:
 		m.dismissAutocomplete()
+		m.layout() // the dropdown's rows go back to the transcript, which moves the scroll clamp with them
 		return true, m, nil
 	case listAccepts:
 		// Enter falls through to submit when the token is already fully typed AND submitting is the

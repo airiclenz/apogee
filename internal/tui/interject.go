@@ -269,7 +269,11 @@ func (m *Model) foldInterjected(items []queuedInterjection) {
 		}
 	}
 	m.pendingInterjections = kept
-	m.refreshViewport()
+	// layout(), not a bare repaint: the rows that went out have left the staged band above the input
+	// box, so the band is drawn shorter (or not at all) and the transcript's own row count moved with
+	// it. The viewport WIDGET's height IS that count (layout(), model.go), and a stale one leaves the
+	// scroll clamp holding back the tail the band no longer covers.
+	m.layout()
 }
 
 // ----------------------------------------------------------------------------

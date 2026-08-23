@@ -97,7 +97,46 @@ unchanged.
 
 **Commit:** `fix(tui): scroll clamp follows the drawn transcript rows, not the full budget`
 
-## 2. Freshness audit — every pane-height change must reach layout()
+## 2. Freshness audit — every pane-height change must reach layout() — ✅ DONE (2026-08-23)
+
+NOTES (2026-08-23): audit verdict, one row per enumerated `refreshViewport()`-without-`layout()` site (plan line numbers, as of `1f0d72c3`):
+
+| site | verdict |
+| --- | --- |
+| `spinner.go:412` | cannot change pane height — the live-star blink repaints transcript lines only |
+| `heartbeat.go:184` (`foldBeatMsg`) | **fixed: now lays out** — a beat replaces `m.hb.models`, which is the offering an open `/model` picker derives its rows from (`pickerFilteredView`) |
+| `heartbeat.go:335` (`applyPendingRebind`) | cannot — bindings plus one transcript note |
+| `heartbeat.go:547` (`foldRoutingNotice`) | cannot — one ephemeral note |
+| `actuation.go:355` (`foldActuation`) | cannot — one narration note |
+| `actuation.go:437` (`foldActuationDone`, error) | cannot — one error note |
+| `actuation.go:449` (unload outcome) | cannot — one note |
+| `actuation.go:456` (load landed) | cannot — the note plus `recordLoadedProfile`, which writes only the transcript |
+| `actuation.go:569` (`foldRestore`) | cannot — one note |
+| `sessions.go:356` (delete confirm `y`) | cannot — the armed confirm is a fourth CELL on an existing row, not a row; the delete's re-list repaints through `foldSessionList`, which now lays out |
+| `sessions.go:506` (load failure) | cannot — one note; the browser closed before the load was dispatched |
+| `sessions.go:511` (restore failure) | cannot — same |
+| `commandrun.go:31` (`refuseUnknownSlash`) | cannot — one note |
+| `commandrun.go:427` (`foldCompactDone`) | cannot — `finishWorker` already lays out ahead of it |
+| `interject.go:272` (`foldInterjected`) | **fixed: now lays out** — delivered rows leave the staged band, so the band is drawn shorter or not at all |
+| `model.go:783` (`eventMsg`) | **fixed: now lays out** — `foldEvent` feeds the Inspector's ring (`foldWire`) and the `/usage` accounting, and both report panes derive their rows from what it wrote |
+| `model.go:803` (`foldScheduleEvent`) | cannot — a Firing block or one note |
+| `model.go:817` (`presentedMsg`) | cannot — one transcript entry |
+| `model.go:1409` (actuation-block note) | cannot — one note |
+| `model.go:1419` (upstream-block note) | cannot — one note |
+| `model.go:1566` (`foldCancelled`) | cannot — `finishWorker` already lays out ahead of it |
+| `model.go:1590` (`foldLoopError`) | cannot — same |
+| `sessionsave.go:293,297` (not enumerated; same grep) | cannot — save-failure and recovery notes |
+| `model.go:1886` (`refreshViewportAnchored`, not enumerated) | cannot — a transcript block toggle |
+
+NOTES (2026-08-23): deviation — five sites OUTSIDE the enumerated list needed the same fix, because the item's premise that "open/close edges are already covered" does not hold. `sessions.go:119`, which the item cites for the browser, is the unwired-host degrade path, not the open edge. Fixed, each with its own case in the new guard test: `autocomplete.go:654` (esc closes the dropdown — the one `dismissAutocomplete` caller with no `layout()` after it), `sessions.go:157` (`foldSessionList`'s SUCCESS path opens or refreshes the browser), `sessions.go:315` (`^a` widens the browser to every workspace — a different row set), `sessions.go:297` (a filter rune prunes the browser's rows), `picker.go:632` (a filter rune prunes the picker's rows). Leaving them would have made the item's own title false.
+
+NOTES (2026-08-23): `foldBeat` now also reports "the view changed" when an OPEN picker's row count moved under the beat, counted through `pickerCount()` before and after the offering is replaced (and only while the pane is up, so the ten-second repaint economy the fold's comments guard is untouched). Without it a beat that moved nothing else repainted nothing at all, and the enumerated `heartbeat.go:184` fix alone would not have reached the stale clamp. Its doc comment gained the third mover.
+
+NOTES (2026-08-23): the eight regression tests are ONE table-driven guard, `TestPaneHeightChangeReachesLayout` in `model_test.go`, rather than one test per file: the invariant under test is `layout()`'s, and eight copies of the same three assertions would have been eight places for it to drift. Verified both ways — every subtest fails with the six source files stashed and passes with them in place. `model_test.go` gained the `internal/heartbeat` and `internal/session` imports its arrangements need.
+
+NOTES (2026-08-23): no CHANGELOG entry in this sidecar — item 3's text owns the defect's closed trail ("record the fix under `[Unreleased]`"), and this item is the same defect, so an entry here would duplicate it. Item 1's sidecar declined for the same reason.
+
+NOTES (2026-08-23): the invariant "every pane-height change reaches `layout()`" has no structural enforcement — it is now correct at thirteen call sites and nothing fails when the fourteenth forgets. A guard that walks every pane and asserts the widget height after each mutation route is not derivable from the code, so the durable answer is probably a `layout()`-on-claim rule in `handleKey`'s claimant walk (one line, covers every pane keypress) traded against a second full transcript render per pane key. Recorded as an idea only; not in this plan's scope.
 
 Depends on item 1.
 

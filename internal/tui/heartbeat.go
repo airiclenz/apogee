@@ -176,19 +176,27 @@ func (m Model) foldBeatMsg(msg beatMsg) (tea.Model, tea.Cmd) {
 	}
 	next, noted := m.foldBeat(msg.beat)
 	if noted {
-		// Only a beat that MOVED something — the offline state, or a binding — repaints: a beat
-		// that changed nothing has nothing to draw, so re-rendering the whole transcript every
-		// ten seconds would be work for its own sake. (It no longer costs a live drag-selection:
-		// a repaint that appends a note leaves the spanned lines alone, and refreshViewport's
-		// keep-if-unchanged rule keeps the selection through it. Economy, not correctness.)
-		next.refreshViewport()
+		// Only a beat that MOVED something — the offline state, a binding, or the rows of an open
+		// picker — lays out: a beat that changed nothing has nothing to draw, so re-rendering the
+		// whole transcript every ten seconds would be work for its own sake. (It no longer costs a
+		// live drag-selection: a repaint that appends a note leaves the spanned lines alone, and
+		// refreshViewport's keep-if-unchanged rule keeps the selection through it. Economy, not
+		// correctness.)
+		//
+		// layout() rather than a bare refreshViewport, because an offering that moved under an open
+		// picker moved the pane's drawn height with it, and the viewport WIDGET's height IS the
+		// transcript's drawn row count (layout(), model.go) — left stale, the scroll clamp strands
+		// the tail under the pane.
+		next.layout()
 	}
 	return next, next.beatTick()
 }
 
 // foldBeat folds one landed observation into the heartbeat state and reports whether it changed
-// what the view shows (so the caller repaints only when there is something new to see). Two things
-// can move: the offline state, and — through [Model.observeBinding] — the bindings themselves.
+// what the view shows (so the caller repaints only when there is something new to see). Three things
+// can move: the offline state, the bindings themselves (through [Model.observeBinding]), and the row
+// count of a picker that is OPEN over the offering this beat replaces — which changes how tall that
+// pane is drawn, and so how many rows the transcript below it keeps ([Model.transcriptRows]).
 //
 // A beat that crosses back online AND rebinds says so once, not twice: "connected: <model>" is the
 // stronger statement, and it already implies the server answered. The recovery note is for the
@@ -214,9 +222,18 @@ func (m Model) foldBeat(beat heartbeat.Beat) (Model, bool) {
 	m.hb.failures = 0
 	m.hb.everOnline = true
 	m.hb.lastFailure = ""
+	// The offering an open picker is drawn from, counted BEFORE and after the beat replaces it: a
+	// row list that grew or shrank under the pane changed how tall the pane is drawn, which is a
+	// change to what the view shows exactly as an offline crossing is (see this function's doc).
+	// Counted only while the pane is up — with it closed the rows are nobody's height.
+	shownBefore := 0
+	if m.picker.open {
+		shownBefore = m.pickerCount()
+	}
 	m.hb.models = beat.AvailableModels // the /model picker's rows are derived from it (picker.go)
 	// A shorter offering must not leave an open picker highlighting a row that no longer exists.
 	m.picker.clampSelection(m.pickerCount())
+	offeringMoved := m.picker.open && m.pickerCount() != shownBefore
 	crossed := m.hb.offline
 	m.hb.offline = false
 
@@ -224,7 +241,7 @@ func (m Model) foldBeat(beat heartbeat.Beat) (Model, bool) {
 	if crossed && !rebound {
 		m.transcript.addNote(onlineNote)
 	}
-	return m, crossed || rebound
+	return m, crossed || rebound || offeringMoved
 }
 
 // observeBinding measures a landed beat against the last observation that mattered and, when the

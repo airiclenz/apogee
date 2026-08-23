@@ -780,7 +780,11 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		// record, a fired mechanism — still counts as life on the stall guard's clock (activity.go).
 		m.noteEngineHeard()
 		m = m.foldEvent(msg.Event)
-		m.refreshViewport()
+		// layout(), not a bare repaint: an Event also feeds the Inspector's ring (foldWire) and the
+		// /usage accounting, and both panes derive their rows — and so their drawn height — from what
+		// it just wrote. The widget's height IS the transcript's drawn row count (layout()), so a
+		// report pane that grew under a stale one strands the tail below the scroll clamp.
+		m.layout()
 		return m, nil
 
 	case approvalReqMsg:

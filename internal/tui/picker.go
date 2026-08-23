@@ -626,7 +626,10 @@ func (m Model) pickerKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.acceptPicker()
 	case listSwallowed, listUnclaimed:
 		// Both end the same way here: the surface either spent the key or found no use for it, and a
-		// modal with no verbs of its own swallows whatever is left.
+		// modal with no verbs of its own swallows whatever is left. It still lays out: a rune into the
+		// filter prunes rows, and a shorter row list is a shorter pane — the viewport widget's height
+		// is the transcript's drawn row count (layout(), model.go).
+		m.layout()
 	}
 	return m, cmd
 }

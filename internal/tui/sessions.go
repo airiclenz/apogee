@@ -154,6 +154,7 @@ func (m *Model) foldSessionList(msg sessionListMsg) tea.Cmd {
 	m.sessionBrowser.metas = msg.metas
 	m.sessionBrowser.open = true
 	m.sessionBrowser.clampSelection(len(m.sessionBrowserView().metas))
+	m.layout() // the pane just took its rows out of the transcript: the scroll clamp moves with them
 	return nil
 }
 
@@ -291,6 +292,9 @@ func (m Model) sessionBrowserKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.sessionBrowserVerb(msg, rows)
 	case listSwallowed:
 		// The surface spent the key — an arrow, or a rune into the filter, whose Cmd rides back below.
+		// A rune prunes rows, and a shorter row list is a shorter pane, so this lays out: the viewport
+		// widget's height is the transcript's drawn row count (layout(), model.go).
+		m.layout()
 	}
 	return m, cmd
 }
@@ -308,6 +312,7 @@ func (m Model) sessionBrowserVerb(msg tea.KeyPressMsg, rows []popupRow) (tea.Mod
 		// stands: it is what the human is looking FOR, and the toggle changes where they are looking.
 		m.sessionBrowser.allWorkspaces = !m.sessionBrowser.allWorkspaces
 		m.sessionBrowser.selected = 0
+		m.layout() // a different row set is a differently TALL pane, and the scroll clamp is sized to it
 	case "ctrl+d":
 		if _, ok := m.sessionBrowser.record(m.opts.Workspace, rows); ok {
 			m.sessionBrowser.confirming = true // arm the inline "delete? y/n" on the selected row
