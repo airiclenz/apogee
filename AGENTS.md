@@ -5,6 +5,7 @@
 ## Where knowledge lives
 
 - `CONTEXT.md` — the domain language and concept map (Mechanisms, Bypass, Steps,   Turns, …). Terms used in code and docs are defined here; read the relevant   section before design work. Large — read sections, don't load it wholesale.
+- `docs/manual/` — the user-facing reference manual (commands, sessions, configuration, probe, headless, daemon, building). `README.md` is the plain-language front door; detail lives here, not there.
 - `docs/adr/` — 54 architectural decision records. Settled questions live here; check for an ADR before re-opening one.
 - `docs/design/` — design contracts (confinement execution contract, MCP client, mechanism catalogue) plus the `tool-surface-findings.md` record.
 - `docs/plans/` — implementation plans in the house format: numbered `## N.` H2 items with What/Tests/Acceptance/commit. Plans are saved repo docs, executed item-by-item; completed plans get archived.

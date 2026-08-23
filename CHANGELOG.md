@@ -220,6 +220,13 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **The README is a front door; the reference moved to `docs/manual/`.** The README (1349 lines)
+  was a full manual; it is now ~220 lines of plain-language pitch, install, quick start, features
+  and pointers, written for discoverability. The reference sections moved verbatim to
+  `docs/manual/` — `commands.md`, `sessions.md`, `configuration.md`, `probe.md`, `headless.md`,
+  `daemon.md`, `building.md` — with an index at `docs/manual/README.md` and every cross-link
+  re-anchored. No information was dropped.
+
 - The two profile doc strings that still called a Model profile two axes now name the third: the
   root facade's `ModelProfile` alias comment and the `model-profiles` settings row's description
   ("How apogee equips and speaks to a model — tool-call format, thinking style, tool roster — per

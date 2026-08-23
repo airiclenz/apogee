@@ -1,0 +1,165 @@
+# In-chat commands, skills, and file references
+
+Typing `/` in the prompt opens **one menu of commands and skills**; `@` completes a
+workspace file path, and an `@path` in a message hands that file to the model. A path
+containing spaces is written quoted — `@"docs/my plan.md"` (single quotes are accepted
+too) — and the autocomplete keeps completing across the spaces and inserts the quotes
+for you.
+
+Both work **anywhere in the line and at any time**: the menu completes the token your
+cursor is on, so you can start typing a message and reach for a command halfway
+through, or go back and fix a misspelled name. Accepting a command from the menu
+**runs it and keeps the rest of your draft** — unless the command takes arguments, in
+which case the menu completes it to `/command ` and waits for you to type them; `/model`
+and `/server` are the exception to that exception and run straight away, since bare
+they only open a picker. The menu stays open while the model is working, too —
+commands that need a quiet engine wear an `— idle only` tag for as long as the engine
+is busy, and say so if you pick one anyway, while `/version`, `/skills`, `/usage`,
+`/inspect`, `/effort`, `/schedule`, `/schedule-stop` and `/confine`'s status report answer
+immediately. Once the engine is idle that tag is gone from the menu entirely — there
+is nothing left for it to warn about. A token
+lights up in the box exactly when it resolves — the `skill` role for a skill your catalog
+has, the `file-ref` role for a file your workspace has (violet and green under `dark`) — so
+a typo is visible before you send.
+
+| What you type | Does | While the model works |
+|---|---|---|
+| `/<skill-id>` | Invoke a skill — type its id anywhere in your message | ✅ rides the queued message |
+| `@<path>` | Hand a workspace file to the model | ✅ rides the queued message |
+| `/skills` | List the discovered skills — id, name, summary and where each came from | ✅ |
+| `/version` | Show the apogee version | ✅ |
+| `/usage` | What this session has spent — one row for the main agent, one per sub-agent, and a session total | ✅ |
+| `/inspect` | The raw request and response traffic of the recent model calls — armed by `ui.inspector` (off by default) | ✅ |
+| `/confine` | Report or change Auto's blast radius — see [below](configuration.md#auto-modes-blast-radius) | ✅ report only |
+| `/effort` | Set how hard the model thinks this session — `off`, `low`, `medium`, `high`, or `auto` (back to the profile); bare reports what resolved — see [below](configuration.md) | ✅ |
+| `/schedule` | Run a prompt on a cycle — bare lists what is live, `/schedule <prompt>` asks for the cycle and mode, `/schedule <cycle> [auto] <prompt>` creates one outright | ✅ |
+| `/schedule-stop` | Take a schedule off the clock — the only one straight away, a picker when several are live | ✅ |
+| `/clear` (or `/new`) | Close this session into history and start a fresh one | — |
+| `/compact` | Summarise the conversation to reclaim context | — |
+| `/continue` | Ask the model to keep going | — |
+| `/undo` | Put back the files the agent wrote in the last exchange — bare previews it, `/undo confirm` applies it — see [below](#undoing-the-agents-file-writes--undo) | — |
+| `/sessions` | Browse saved sessions — resume, rename, or delete | — |
+| `/rename` | Rename this session — `/rename <name>` sets it, bare `/rename` asks the model for one | — |
+| `/model` | Switch model — the Launch profiles [llama-launcher](configuration.md#local-servers--llama-launcher) defines when one is configured, what this server serves when not; picker, or `/model <name>` | — |
+| `/server` | Move this session to another server you configured — picker, or `/server <name>` | — |
+| `/unload-model` | Free the model of the server this session is on — see [below](configuration.md#local-servers--llama-launcher) | — |
+| `/stop-server` | Stop the server this session is on — see [below](configuration.md#local-servers--llama-launcher) | — |
+| `/color-scheme` | Recolour the screen — bare lists what you can switch to, `/color-scheme <name>` switches and saves, `/color-scheme export <name>` writes an editable copy of a built-in to `~/.apogee/schemes/` | — |
+| `/settings` | Browse and change every setting, live — see [below](#the-settings-screen--settings) | — |
+
+A lone `/word` that names neither a command nor a skill is **not** sent to the model:
+apogee says `unknown command or skill: /…` and leaves your line in the box to fix.
+Anywhere else in a message a slash is just text, so paths like `/usr/bin` travel
+untouched.
+
+The keys are few, and the empty prompt box advertises them: `⏎` sends — *queues*, while
+the model works — `⇧⏎`/`⌥⏎` opens a new line, `↑`/`↓` walk back and forward through the
+prompts you have already sent in this workspace, `esc` stops a run, `⌃c` quits. The box
+advertises `⇧⏎` only on terminals that negotiated the enhanced (kitty) keyboard
+protocol — the thing that makes that chord arrive as anything other than a plain `⏎`;
+everywhere else the legend names `⌥⏎` alone, which works on every terminal. Beyond
+the box, `⇧⇥` cycles the autonomy mode — Plan → Ask-Before → Allow-Edits → Auto — at
+any time, mid-run included, and `PgUp`/`PgDn` scroll the transcript. `⌥↑`/`⌥↓` light a
+bar on the transcript and hand the arrows to it: `↑`/`↓` walk from one foldable block to
+the next — a tool call, a group member, a type row — `⏎` opens or closes the one under
+the bar, and `esc`, or simply typing your next message, gives the keys back. `⌃l` is the
+readline redraw: it forces a full repaint, which is the way back from a terminal that
+has smeared or eaten part of the frame. It sends nothing, edits nothing and interrupts
+nothing — the only thing it takes with it is a mouse drag-selection's highlight, which
+every keypress drops.
+
+## Undoing the agent's file writes — `/undo`
+
+`/undo` takes back the files the agent wrote, **one exchange at a time** — one instruction
+you gave, however many tool calls it took, sub-agents included. Bare `/undo` only
+**previews**: it names the exchange and every file the revert would touch, at its full
+resolved path, each marked *restore*, *delete* (the agent created it, so putting things
+back means removing it) or *skip*; `/undo confirm` then applies exactly the step you just
+read, and anything else leaves your files alone. Repeat it to walk further back. A file
+you edited yourself after the agent wrote it is **skipped**, not overwritten — your edit
+wins, the rest of the exchange is still put back, and the note says which files were left
+and why. There is no redo.
+
+Two limits are worth knowing before you rely on it. The journal is **memory, not storage**:
+it starts empty each time apogee launches, so a resumed session cannot put back writes made
+before that run — `/undo` says so rather than pretending there was nothing to undo. And it
+covers only the writes apogee's own file tools make (`write_file`, the edit and
+find-and-replace verbs, `copy_file`, `move_file`, `delete_file`). Everything else that can
+change your workspace is **not** undone: whatever a `terminal`, Python or test-runner
+command wrote, git working-tree changes from a branch checkout, and writes by MCP servers
+or other tools an embedder added. `/undo` is idle-only — it waits until the model has
+finished.
+
+## The settings screen — `/settings`
+
+`/settings` opens a **full-height pane** over your whole configuration: one row per setting,
+in the order the starter `config.yaml` documents them and grouped under section headings,
+each row showing the value **this run resolved** for it. Where a higher-precedence source
+beat the file, the row says which — `(env)` or `(flag)` — so a key that reads one way in the
+file and another on screen explains itself. The conversation gives way
+entirely while the pane is up, because thirty-odd keys are a screen to read rather
+than a choice to scan: `↑/↓` move the `❯`, a fixed two-line `Description:` header above the
+list says what the key under the cursor is for, and `esc` closes the pane and hands the
+transcript back. Section labels stand in white above the rows they open, the row being typed
+into is lit, and the mouse works where the keys do — a click selects a row, the wheel walks
+the list one row per notch. It needs a quiet engine, so it is **idle only**.
+
+**Editing writes one key, when you ask.** `⏎` on a true/false row toggles it, `⏎` on a row
+with a fixed set of values — `mode:`, `server:` — opens that list to pick from, `⏎` on a
+string or a number opens a buffer on the row itself, and `⏎` on the inline system prompt
+opens a multi-line field over the list, where `⏎` makes a new line, `ctrl+s` saves and `esc`
+discards. A buffer is a real field: the arrow keys, `home`/`end` and word jumps move the
+caret, and the mouse seats it and drags a selection exactly as it does in the prompt box. Each
+committed edit is spliced straight into `~/.apogee/config.yaml` — your
+comments, your layout and every other key untouched, the result re-parsed and compared
+against the original before it replaces the file — and a key that was still one of the
+commented examples lands directly below it. A value the key cannot hold is refused before
+anything is written, with the reason on the row and your text still in the buffer. Nothing
+else is ever written: apogee still makes no edit to that file you did not ask for.
+
+**And what is saved is applied — to the session you are in.** The `⏎` that persists a key
+also puts it into effect, so no setting waits for a restart: change `mode:`, `bypass:`, a
+mechanism switch, the web-search endpoint, the presentation keys or the model profile and the
+next thing apogee does uses it. The row keeps a ` *` after its value — `false *` — which says
+*you changed this here, this session*; it is cleared only by a relaunch. One pair lands at a
+boundary the session crosses anyway rather than mid-conversation, and says so on the row: the
+`context-files:` keys are part of the prefix every request is cached against, so they take
+effect at the next `/clear` — `· applies at next clear`. On a key an environment variable or
+a flag is overriding, the edit still applies and is still written, and the row adds that the
+override will win again the next time apogee starts — startup precedence is unchanged. If a
+write lands but the live apply refuses it, the row says exactly that
+(`saved — live apply failed: …`) rather than leaving you to guess which half happened.
+
+**`backspace` unsets.** On a row you have set, `backspace` arms a reset, the hint line asks
+for a confirming `⏎`, and what that sends **removes the key's line** from the file rather than
+writing today's default into it — so the key goes back to following the built-in default
+instead of being pinned to a copy of it. The default is applied on the same keypress, and the
+row reports it with the same marker: `default *`.
+
+**The blocks no row can hold open your editor.** `servers:`, `mcp-servers:`,
+`validated-sets: alias:`, `system-prompt-models:` and the model profile render as a summary with an
+`· ⏎ opens $EDITOR` pointer, and that is what `⏎` does — in the editor the
+[four-rung ladder](configuration.md) `editor:` heads, with the cursor on that key's line where the
+editor takes a line argument. A **terminal** editor (`vi`, `vim`, `nvim`, `nano`, `pico`,
+`emacs`, `micro`, `hx`, `kak`) has to own the terminal, so apogee suspends into it and re-reads
+the file when it exits; a non-zero exit (`:cq`) discards that re-read. Anything else — a GUI
+editor, your desktop's opener — is started **detached**: the pane stays up, nothing waits on the
+window that opened somewhere else, and the row says `· opened in your editor`. Either way the
+edit lands the same way, because what applies it is the file being **saved**, not the editor
+exiting. Every key that changed is applied the way an in-pane edit is — a changed `mcp-servers:`
+**reconnects**, connecting the new set first and swapping the tools over only once it is up, so a
+server that will not come back leaves the old connections serving and the reason on the row; a
+changed `model-profiles:` swaps the parser. The jump is offered between runs only — mid-run the
+row asks you to wait, while in-pane edits stay open. The confinement keys are the one pair that
+goes nowhere near it: they carry `· use /confine`, because switching Auto's fence off asks for an
+acknowledgement that belongs with [that verb](configuration.md#auto-modes-blast-radius). And the `server:` row
+**moves the session** — the same switch `/server` performs, chosen from the same list, recorded
+the same way.
+
+**`mechanisms:` is the one block the pane opens itself.** `⏎` on that row opens a list of every
+catalogued mechanism with `on`/`off` beside each; `⏎` or `space` flips the highlighted one, writing
+and applying it on that keypress, and the list **stays open** so a posture is set in one visit. `esc`
+goes back. Switching one off writes `<id>: false` rather than deleting the line, and — as ever — a
+non-empty `mechanisms:` block means manual control, so the Validated set measured for the bound model
+is no longer applied on top.
+
