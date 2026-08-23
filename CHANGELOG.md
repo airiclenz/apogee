@@ -10,6 +10,21 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **The effective tool roster composes build, global and profile deltas (ADR 0057, plan item 2).**
+  `tools.EffectiveRoster(all, tools.RosterDeltas{Global, Profile})` is the one pure pass that
+  answers which built-in tools a host offers: it starts from the build default (every tool except
+  those registered `domain.DefaultOffTool`), lets the global `tools.disabled:`/`tools.enabled:`
+  lists override that per tool, then lets the matched Model profile's axis override those — the
+  profile > global > build ladder, in both directions. Menu order is preserved, an unknown name
+  matches nothing, and a name in BOTH lists of ONE scope resolves to disabled (fail closed) and is
+  returned as a `tools.RosterConflict` for the host to report — `tools.RosterConflicts` asks the
+  same question at config-load time, before any tool is composed. `HostTools` gains `Enabled` and
+  `ProfileRoster` beside `Disabled`, and `NewDefaultRegistry`/`DefaultTools` apply the ladder to
+  the assembled menu; `KnownToolNames` now answers for the whole BUILD rather than the composed
+  menu, so a default-off tool stays a name `tools.enabled:` may spell. No built-in ships
+  default-off, so today's menu is byte-identical. The ladder applies to the DEFAULT set only — an
+  injected `Config.Tools` never reaches it.
+
 - **The Model profile carries a tool-roster axis (ADR 0057, plan item 1).** `domain.ModelProfile`
   gains a third axis, `Tools domain.ToolRosterDelta` (`Disabled` / `Enabled` name lists) — delta
   lists against the DEFAULT tool set, never a replacement roster — and `domain.Config` gains

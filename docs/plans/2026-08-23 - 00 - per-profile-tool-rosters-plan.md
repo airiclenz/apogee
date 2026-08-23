@@ -89,7 +89,23 @@ existing Config-shape test (`config_test.go`'s field census gains `EnabledTools`
 
 **Commit:** `feat(domain): the Model profile carries a tool-roster delta axis`
 
-## 2. `tools`: roster computation over the registry
+## 2. `tools`: roster computation over the registry — ✅ DONE (2026-08-23)
+
+NOTES (2026-08-23): the item's "injected tool set untouched" test is pinned in-package as
+`TestEffectiveRoster_LeavesTheGivenSetUntouched` (the ladder never mutates or reorders the set it is
+handed, and returns the identical slice when it subtracts nothing) plus the contract on
+`EffectiveRoster`'s doc comment. The construction-path half — `resolveTools` returning
+`Config.Tools` before any roster is composed — lives in `internal/agent`, which is item 5's file
+set and its `Config.Tools never rebinds` test; item 2 stayed inside its named files and Acceptance
+command.
+
+NOTES (2026-08-23): `KnownToolNames` had to stop reading the composed menu (it called
+`DefaultToolsWithHost`, which now applies the ladder) or a default-off tool's name would be reported
+to the user as a typo in the very `tools.enabled:` list that exists to lift it. The assembly was
+split: unexported `builtinTools` is the build rung both `DefaultToolsWithHost` and `KnownToolNames`
+read; no tool construction moved or changed. `withoutDisabled` is superseded by `EffectiveRoster`
+and deleted (it was unexported and had no other caller); its trimming and empty-list no-op survive
+in the new pass, and its three existing `HostTools{Disabled: …}` tests still pass unchanged.
 
 **What:** one pure function computes the effective tool set: start from the default set minus
 build default-off tools, then apply global deltas, then profile deltas — later scope wins per

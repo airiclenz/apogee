@@ -31,7 +31,28 @@ type HostTools struct {
 	// A name matching no built-in tool is simply ignored here. Reporting it is the HOST's job
 	// (KnownToolNames is what it checks against): a registry assembly has nowhere to put a
 	// warning, and a roster the user is pruning must not be able to stop a session from starting.
+	//
+	// It is the GLOBAL rung of the roster precedence ladder — profile > global > build default
+	// (ADR 0057) — so it is the default word on a tool rather than the last one: a name in
+	// ProfileRoster.Enabled puts back what this list drops.
 	Disabled []string
+
+	// Enabled names the built-in tools this host must offer even though the BUILD leaves them out
+	// of the default menu — the global `tools.enabled:` key, the lift a tool registered default-off
+	// (domain.DefaultOffTool) needs. Empty/nil ⇒ nothing is lifted, which is today's whole state:
+	// no built-in ships default-off (ADR 0057).
+	//
+	// It is the enable direction of the same GLOBAL rung Disabled spells, so a name in BOTH lists
+	// is a conflict DISABLED wins — fail closed. Like an unknown name, that conflict is the HOST's
+	// to report (RosterConflicts is the query it asks); the assembly builds a roster either way.
+	Enabled []string
+
+	// ProfileRoster is the matched Model profile's `tools:` axis — the delta pair that makes the
+	// roster per-model (ADR 0057). It is the MOST SPECIFIC rung of the ladder, so a name here is
+	// the last word on that tool in either direction: a profile `enabled:` entry lifts a globally
+	// disabled or default-off tool, a profile `disabled:` entry turns off what global allows. A
+	// zero delta ⇒ this rung says nothing and the global lists and the build default decide.
+	ProfileRoster domain.ToolRosterDelta
 
 	// ExtraReadRoots reports directories the READ-ONLY tools may reach outside the workspace.
 	// The contract, in four clauses:
@@ -150,10 +171,22 @@ func DefaultTools(root string) []domain.Tool {
 // as it was. Nothing else receives it: the git and Go-toolchain subprocesses take an allowlist
 // instead, which no configured name can widen.
 //
-// host.Disabled is applied LAST, to the assembled menu: the roster switch subtracts from the set
-// this build offers rather than deciding, per tool, whether to construct it — so a tool's presence
-// stays one line above and its availability one list in the user's config.
+// The roster ladder is applied LAST, to the assembled menu (EffectiveRoster): the build's own
+// default-off declarations, then host.Disabled / host.Enabled, then host.ProfileRoster subtract
+// from and add back to the set this build offers, rather than deciding per tool whether to
+// construct it — so a tool's presence stays one line in builtinTools and its availability one list
+// in the user's config. A same-scope conflict is dropped here for the same reason an unknown name
+// is: an assembly has nowhere to put a warning (RosterConflicts is the host's query).
 func DefaultToolsWithHost(root string, host HostTools) []domain.Tool {
+	kept, _ := EffectiveRoster(builtinTools(root, host), host.rosterDeltas())
+	return kept
+}
+
+// builtinTools returns every tool this BUILD carries, scoped to root and configured from host, in
+// menu order and before any roster delta — a tool registered default-off included. It is the rung
+// the ladder starts from: DefaultToolsWithHost applies the deltas to it, and KnownToolNames reads
+// its names off it, so a default-off tool is still a name apogee knows while nothing offers it.
+func builtinTools(root string, host HostTools) []domain.Tool {
 	all := []domain.Tool{
 		NewReadFile(root, host.ExtraReadRoots),
 		NewWriteFile(root),
@@ -187,42 +220,162 @@ func DefaultToolsWithHost(root string, host HostTools) []domain.Tool {
 	if host.Presenter != nil {
 		all = append(all, NewPresentDocument(root, host.Presenter))
 	}
-	return withoutDisabled(all, host.Disabled)
+	return all
 }
 
-// withoutDisabled returns all minus the tools whose name is listed in disabled, in unchanged menu
-// order. An empty list returns the menu untouched — the same slice, so the default roster costs
-// nothing — and a listed name that matches no tool simply matches nothing.
+// rosterDeltas reads the two CONFIGURATION rungs of the ladder off HostTools: the global lists the
+// host folds in from `tools.disabled:`/`tools.enabled:`, and the matched Model profile's axis.
+func (h HostTools) rosterDeltas() RosterDeltas {
+	return RosterDeltas{
+		Global:  domain.ToolRosterDelta{Disabled: h.Disabled, Enabled: h.Enabled},
+		Profile: h.ProfileRoster,
+	}
+}
+
+// RosterDeltas carries the two CONFIGURATION rungs of the roster precedence ladder — the global
+// `tools.disabled:`/`tools.enabled:` lists and the matched Model profile's `tools:` axis (ADR
+// 0057). The third rung, the build default, travels with the tool itself as its DefaultOffTool
+// declaration rather than in this struct. The zero value is no deltas at all: the roster the build
+// offers, unchanged.
+type RosterDeltas struct {
+	// Global is the host-wide rung (domain.Config.DisabledTools / EnabledTools). It overrides a
+	// tool's build default and is itself overridden, per tool, by Profile.
+	Global domain.ToolRosterDelta
+
+	// Profile is the matched Model profile's roster axis — the most specific rung, so a name here
+	// is the last word on that tool whichever direction it points.
+	Profile domain.ToolRosterDelta
+}
+
+// RosterScope names the rung a conflict was found in, so the host's one-line NOTICE can say which
+// list the user has to fix.
+type RosterScope string
+
+const (
+	// RosterScopeGlobal is the global `tools.disabled:` / `tools.enabled:` pair.
+	RosterScopeGlobal RosterScope = "global"
+	// RosterScopeProfile is the matched Model profile's `tools:` axis.
+	RosterScopeProfile RosterScope = "profile"
+)
+
+// RosterConflict reports ONE tool named in BOTH directions of ONE scope — `disabled:` and
+// `enabled:` of the same rung, which cannot both be honoured. Disabled wins (fail closed) and the
+// conflict is handed back to the caller, because that is the only layer that can tell the user:
+// neither a registry assembly nor a rebind may refuse a session over a roster the user is editing
+// (ADR 0057).
+type RosterConflict struct {
+	// Scope is the rung whose two lists disagree.
+	Scope RosterScope
+	// Tool is the offending name, trimmed as the ladder compares it.
+	Tool string
+}
+
+// EffectiveRoster answers the whole roster question in one pure pass: which of the tools in all a
+// host actually offers, given the ladder profile > global > build default (ADR 0057). It starts
+// from the BUILD default — every tool except those registered default-off (domain.IsDefaultOff) —
+// then lets the global lists override that per tool, then the profile lists override those, so the
+// most specific word about a tool wins in either direction. Within ONE scope a name in both lists
+// resolves to DISABLED and is returned as a RosterConflict for the caller to report.
 //
-// Names are trimmed before they are compared, because the list reaches here from a YAML sequence a
+// Menu order is preserved and nothing is reordered or constructed: the ladder only subtracts from
+// and adds back to the set it is given. When it drops nothing it returns the very slice it was
+// given, so the default roster — no deltas, no default-off tool — costs nothing. A name matching
+// no tool matches nothing; reporting the typo is the caller's job (KnownToolNames).
+//
+// It applies to the DEFAULT tool set only. An injected domain.Config.Tools is the host's own
+// assembly, taken exactly as given (ADR 0001), and never reaches this function.
+//
+// Names are trimmed before they are compared, because the lists reach here from YAML sequences a
 // human wrote: a stray space around a name is a spelling of that name, not a different tool.
-func withoutDisabled(all []domain.Tool, disabled []string) []domain.Tool {
-	if len(disabled) == 0 {
-		return all
+func EffectiveRoster(all []domain.Tool, deltas RosterDeltas) ([]domain.Tool, []RosterConflict) {
+	conflicts := RosterConflicts(deltas)
+
+	// One verdict per NAMED tool, written in ladder order: enabled first and disabled second
+	// within a scope (so disabled wins the same-scope tie), global before profile (so the profile
+	// has the last word). A tool no list names keeps its build default below.
+	verdict := make(map[string]bool)
+	for _, scope := range []domain.ToolRosterDelta{deltas.Global, deltas.Profile} {
+		for _, name := range trimmedNames(scope.Enabled) {
+			verdict[name] = true
+		}
+		for _, name := range trimmedNames(scope.Disabled) {
+			verdict[name] = false
+		}
 	}
-	off := make(map[string]bool, len(disabled))
-	for _, name := range disabled {
-		off[strings.TrimSpace(name)] = true
-	}
+
 	kept := make([]domain.Tool, 0, len(all))
 	for _, tool := range all {
-		if !off[tool.Name()] {
+		on, named := verdict[tool.Name()]
+		if !named {
+			on = !domain.IsDefaultOff(tool)
+		}
+		if on {
 			kept = append(kept, tool)
 		}
 	}
-	return kept
+	if len(kept) == len(all) {
+		return all, conflicts
+	}
+	return kept, conflicts
 }
 
-// KnownToolNames returns the name of every tool this build's default set can offer, in menu order.
-// It is the catalogue a host checks a configured `tools.disabled:` entry against, so a misspelled
-// name is reported to the user instead of silently disabling nothing.
+// RosterConflicts returns every tool named in both directions of one scope, global rung first and
+// within a rung in the order `disabled:` spells them — a deterministic line for the host's NOTICE.
+// It is the query the config layer asks at load time, before any tool exists to compose: the rule
+// that disabled wins a same-scope tie lives here alone, so the notice and the roster cannot drift.
+// No conflicts ⇒ nil.
+func RosterConflicts(deltas RosterDeltas) []RosterConflict {
+	scopes := []struct {
+		scope RosterScope
+		delta domain.ToolRosterDelta
+	}{
+		{RosterScopeGlobal, deltas.Global},
+		{RosterScopeProfile, deltas.Profile},
+	}
+	var conflicts []RosterConflict
+	for _, s := range scopes {
+		enabled := make(map[string]bool, len(s.delta.Enabled))
+		for _, name := range trimmedNames(s.delta.Enabled) {
+			enabled[name] = true
+		}
+		seen := make(map[string]bool, len(enabled))
+		for _, name := range trimmedNames(s.delta.Disabled) {
+			if enabled[name] && !seen[name] {
+				seen[name] = true
+				conflicts = append(conflicts, RosterConflict{Scope: s.scope, Tool: name})
+			}
+		}
+	}
+	return conflicts
+}
+
+// trimmedNames returns the roster list with each name trimmed and the empty ones dropped: an empty
+// YAML item names no tool, and letting it through would make two blank lines look like a conflict.
+func trimmedNames(names []string) []string {
+	trimmed := make([]string, 0, len(names))
+	for _, name := range names {
+		if name = strings.TrimSpace(name); name != "" {
+			trimmed = append(trimmed, name)
+		}
+	}
+	return trimmed
+}
+
+// KnownToolNames returns the name of every tool this BUILD carries, in menu order. It is the
+// catalogue a host checks a configured roster entry against — `tools.disabled:`, `tools.enabled:`
+// and a profile's `tools:` axis alike — so a misspelled name is reported to the user instead of
+// silently disabling nothing.
+//
+// It reads the build rung rather than the composed menu, so a tool registered default-off is still
+// a name apogee knows: `tools.enabled:` exists precisely to name one, and must never be told its
+// only valid entry is a typo.
 //
 // The two host-delegate tools are included by CONSTRUCTION rather than by composition: a nil Asker
 // or Presenter leaves them out of a registry (graceful degradation), but their names are still
 // names apogee knows — so the answer is a fact about the build, not about one Driver's wiring.
 // TestKnownToolNamesCoversTheComposedSet pins it to the assembly above.
 func KnownToolNames() []string {
-	all := DefaultToolsWithHost("", HostTools{})
+	all := builtinTools("", HostTools{})
 	all = append(all, NewAskUser(nil), NewPresentDocument("", nil))
 	names := make([]string, 0, len(all))
 	for _, tool := range all {

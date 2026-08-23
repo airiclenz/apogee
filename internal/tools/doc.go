@@ -223,9 +223,11 @@
 //
 // Seven files register no tool. tools.go is the shared toolSpec (name, description, JSON
 // schema) every built-in embeds, the size ceilings they all read, and the result helpers —
-// including okSummary, which attaches the structured half. registry.go is HostTools and the
+// including okSummary, which attaches the structured half. registry.go is HostTools, the
 // two assemblers, NewDefaultRegistry and NewDefaultRegistryWithHost, that turn the built-ins
-// into a domain.ToolRegistry. path_safety.go is the thin alias layer onto internal/security's
+// into a domain.ToolRegistry, and the roster ladder they apply on the way — EffectiveRoster
+// over the build's default-off declarations, the global lists and the profile axis (ADR 0057).
+// path_safety.go is the thin alias layer onto internal/security's
 // one symlink-aware boundary (ResolveInRoot, ErrPathEscape), so every tool and test here keeps
 // calling the same names while the rule lives in one place — plus the approved escape's
 // tools-side read (ADR 0049), which hands the security core the one permitted out-of-workspace
