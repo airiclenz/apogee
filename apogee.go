@@ -101,9 +101,10 @@ type ContextFilesReport = domain.ContextFilesReport
 // size loaded or the reason a present file could not be read.
 type ContextFileNote = domain.ContextFileNote
 
-// ModelProfile describes how the configured model speaks the wire — its tool-call format and
-// inline thinking-channel style; the host sets it via Config.Profile (a zero profile is native
-// tool calls with no inline thinking).
+// ModelProfile describes how apogee EQUIPS and speaks to the configured model — three orthogonal
+// axes: its tool-call format, its inline thinking-channel style, and its tool roster (ADR 0057);
+// the host sets it via Config.Profile (a zero profile is native tool calls, no inline thinking,
+// no roster deltas).
 type ModelProfile = domain.ModelProfile
 
 // ToolCallFormat selects how a model emits tool calls (native / markdown-fenced / custom-regex).

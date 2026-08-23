@@ -505,7 +505,7 @@ var KeyRegistry = []Key{
 		// a profile is per-model (ADR 0044), so no single line can name the one in force without
 		// knowing which model is bound.
 		Path: "model-profiles", Kind: KindStructured,
-		Desc:      "How a model speaks the wire — tool-call format and thinking style — per name pattern.",
+		Desc:      "How apogee equips and speaks to a model — tool-call format, thinking style, tool roster — per name pattern.",
 		Read:      func(o Options) string { return countSummary(len(o.ModelProfiles), "model profile") },
 		Structure: func(o Options) any { return o.ModelProfiles },
 	},

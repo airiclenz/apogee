@@ -220,6 +220,12 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- The two profile doc strings that still called a Model profile two axes now name the third: the
+  root facade's `ModelProfile` alias comment and the `model-profiles` settings row's description
+  ("How apogee equips and speaks to a model — tool-call format, thinking style, tool roster — per
+  name pattern.") match ADR 0057 and the axis docs in `internal/domain/doc.go` /
+  `internal/profiles/doc.go`. Comment and description text only — no behaviour change.
+
 - **The default system prompt tells the model when to delegate — and when not to.** A fresh
   install's `system-prompt-text:` gains one paragraph on `sub_agent`: delegate the work whose
   material floods the window and is never needed again (searching the codebase, scanning logs or
