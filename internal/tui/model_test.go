@@ -4616,6 +4616,80 @@ func TestTranscriptTailReachableWithAPaneOpen(t *testing.T) {
 	}
 }
 
+// paneOverTailModel is the occlusion fixture the symptom guards below share: an ask prompt over the
+// transcript and more content than the rows the prompt leaves, so there is a tail to strand and a
+// bar with a position to describe. The prompt is the pane because it is the one the defect was
+// reported against — a question the human must answer while reading the last replies.
+func paneOverTailModel(t *testing.T) Model {
+	t.Helper()
+
+	m, _ := newAskModel(t, domain.AskRequest{Question: "which way?", Choices: []string{"left", "right"}})
+	m.transcript.addUser("a question", nil)
+	for i := range 40 { // deeper than the drawn rows, so the tail overflows them several times over
+		m.transcript.commitAssistant(fmt.Sprintf("reply line %02d", i), runRef{})
+	}
+	m.refreshViewport() // follows the tail: the view opens at maximum scroll, attached
+
+	drawn, budget := m.transcriptRows(), m.transcriptBudget()
+	if drawn >= budget {
+		t.Fatalf("setup: the ask prompt took no rows off the transcript (drawn %d, budget %d)", drawn, budget)
+	}
+	if total := m.viewport.TotalLineCount(); total < 2*drawn {
+		t.Fatalf("setup: %d transcript lines over %d drawn rows — too short to page through", total, drawn)
+	}
+	return m
+}
+
+// TestScrollbarThumbSeatsAtTheBottomWithAPaneOpen is the occlusion defect's second face. The gutter
+// places its thumb from the same window the clamp holds (scrollbarThumb, boxdraw.go), so while the
+// widget carried the overlay-blind budget the thumb stopped short of its track at maximum scroll:
+// the bar said "there is more below" over a transcript with nothing left to give. Nothing in
+// renderScrollbar changed for it — the seat falls out of the clamp, and this pins that it does.
+func TestScrollbarThumbSeatsAtTheBottomWithAPaneOpen(t *testing.T) {
+	m := paneOverTailModel(t)
+	if m.opts.HideScrollbar {
+		t.Fatal("setup: the scroll bar is switched off, so there is no thumb to place")
+	}
+
+	rows := transcriptRows(t, m)
+	last := []rune(rows[len(rows)-1])
+	if len(last) == 0 {
+		t.Fatal("the transcript's last drawn row is empty — it carries no scroll-bar cell")
+	}
+
+	if got := string(last[len(last)-1]); got != glyphScrollThumb {
+		t.Errorf("the bar's last line carries %q, want the thumb %q: the thumb does not reach the "+
+			"bottom of its track at maximum scroll (offset %d of %d lines over %d drawn rows)",
+			got, glyphScrollThumb, m.viewport.YOffset(), m.viewport.TotalLineCount(), m.transcriptRows())
+	}
+}
+
+// TestPageDownAdvancesOneDrawnScreenfulWithAPaneOpen is the third face: PgDn scrolls by the widget's
+// own Height() (viewport.PageDown), so the overlay-blind height stepped by a screenful PLUS the open
+// pane and jumped clean over the lines in between — a page key that skips what it never showed. The
+// step is now exactly the rows the frame draws, which is what makes one press one screenful.
+func TestPageDownAdvancesOneDrawnScreenfulWithAPaneOpen(t *testing.T) {
+	m := paneOverTailModel(t)
+	drawn, total := m.transcriptRows(), m.viewport.TotalLineCount()
+
+	// To the top the human's own way, so the press below pages through content rather than into the
+	// clamp; the loop ends on the top, not on a press count.
+	for i := 0; !m.viewport.AtTop(); i++ {
+		if i > total {
+			t.Fatalf("PgUp still moving after %d presses over %d lines", i, total)
+		}
+		m = step(t, m, tea.KeyPressMsg{Code: tea.KeyPgUp})
+	}
+
+	top := m.viewport.YOffset()
+	m = step(t, m, tea.KeyPressMsg{Code: tea.KeyPgDown})
+
+	if got := m.viewport.YOffset() - top; got != drawn {
+		t.Errorf("PgDn advanced %d lines, want the %d rows the frame draws — the press skips %d "+
+			"lines the human never saw", got, drawn, got-drawn)
+	}
+}
+
 // ----------------------------------------------------------------------------
 // Pane-height freshness — every change to a pane's DRAWN height reaches layout()
 // ----------------------------------------------------------------------------

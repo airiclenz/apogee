@@ -151,6 +151,21 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **A pop-up pane no longer strands the transcript's last rows.** With any pane over the
+  transcript — an approval or ask prompt, the `/sessions` browser, a picker, `/usage`,
+  `/inspect`, the autocomplete dropdown or the staged-interjection band — exactly the pane's
+  height of tail lines was unreachable at every scroll position: `layout()` sized the viewport
+  WIDGET to the full `transcriptBudget()` while `View` painted only `transcriptRows()` (that
+  budget less the overlays), and the widget clamps every scroll to `total − Height()`. The
+  widget now carries the DRAWN height, so the clamp and the paint agree: the tail comes up to
+  the last drawn row, `AtBottom`/detach report what is actually on screen, the scroll-bar thumb
+  reaches the bottom of its track, the block cursor can reach and toggle the newest block, and
+  PageDown steps by one visible screenful instead of a screenful plus the pane. The freshness
+  half went with it — thirteen call sites that changed an open pane's drawn height without
+  laying out again (a heartbeat under an open `/model` picker, a delivered interjection, a wire
+  event feeding an open report pane, the browser's and picker's filter keys, esc on the
+  dropdown, …) now route through `layout()`, so the clamp cannot go stale while a pane is up.
+
 - **The daemon drops a schedule's id only after the scheduler confirms the stop.** `stop` used to
   delete the name→id entry before calling `Scheduler.Stop`, so a `Stop` failing with anything
   other than `schedule.ErrNotFound` would have stranded the schedule: still on the clock, but gone

@@ -168,7 +168,17 @@ and `TestScrollWhileRunningViaPgKeysAndWheel` must pass unchanged.
 
 **Commit:** `fix(tui): pane-height changes re-lay out so the scroll clamp stays fresh`
 
-## 3. Symptom sweep — pin the behaviours the flip repairs, close the defect
+## 3. Symptom sweep — pin the behaviours the flip repairs, close the defect — ✅ DONE (2026-08-23)
+
+NOTES (2026-08-23): the CHANGELOG entry covers the whole defect (items 1–3), not item 3 alone — items 1 and 2 both declined an entry because this item's text owns the closed trail.
+
+NOTES (2026-08-23): the two model_test.go guards share one fixture, `paneOverTailModel` — the ask prompt over a 40-reply tail — rather than repeating the arrangement in each; the block-cursor guard cannot use it, because the walk stands down entirely while a decision is pending (`blockCursorOwnsKeys`), so it opens the non-modal `/usage` report instead and says so in its doc comment.
+
+NOTES (2026-08-23): applied the dispatch's deferred touch-up — View's comment (`model.go`, above `transcriptHeight := …`) claimed `m.viewport` "keeps its laid-out height … measure this very shrink instead of compounding it", which item 1 made imprecise: the local `SetHeight` now re-asserts the number `layout()` already put on the widget. The clause states that; the "never written back" and zero-rows clauses are unchanged.
+
+NOTES (2026-08-23): production code needed no change for any of the three symptoms, as the item predicted — each guard was verified BOTH ways (pre-fix `SetHeight(transcriptBudget())` restored: thumb lands on the track glyph at max scroll, PgDn advances 16 lines where 7 are drawn, the newest block's cursor line is on no drawn row; all three pass after the flip).
+
+NOTES (2026-08-23): `paint_test.go`'s `transcriptPaintRows` and `mouse_test.go`'s `screenRow` were verified rather than adjusted — both bound by `m.viewport.Height()`, which now IS the drawn row count, so both got MORE precise with the flip and stay green in the full suite.
 
 Depends on items 1 and 2.
 

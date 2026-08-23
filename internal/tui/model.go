@@ -2192,9 +2192,10 @@ func (m Model) View() tea.View {
 	// scroll-bar gutter off its right edge — the bar is sized from the same local viewport, so the
 	// two columns line up row-for-row. With the bar switched off (ui.show-scrollbar) the body goes
 	// on alone, into the full window width layout() then gave it.
-	// The height goes on that LOCAL copy and is never written back:
-	// m.viewport keeps its laid-out height, which is what lets contentLineAt (via transcriptRows)
-	// measure this very shrink instead of compounding it. At zero rows the transcript is off the
+	// The height goes on that LOCAL copy and is never written back. layout() sizes the WIDGET to
+	// this same drawn count, so the set here RE-ASSERTS the number rather than shrinking it — which
+	// is what keeps contentLineAt (via transcriptRows) measuring one height instead of compounding
+	// a second shrink onto it. At zero rows the transcript is off the
 	// frame entirely — the overlays took the whole budget, a draft grew the box into it, or the
 	// window is too short to pay for a transcript row at all (transcriptBudget).
 	transcriptHeight := ov.transcriptRows(m.transcriptBudget())

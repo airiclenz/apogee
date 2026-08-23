@@ -23,8 +23,6 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 
 ## Open defects
 
-- [ ] when the pop-up box is open - the main session-chat's last row is not reachable anymore with scrolling. The pop-up box covers that poart of the chat. This is importent when questions or other permanent pop-ups are open where access to the last messages of the chat history are important.
-
 ---
 
 ## Parked / deferred work

@@ -299,3 +299,60 @@ func TestBlockCursorYieldsItsKeysToAPendingDecision(t *testing.T) {
 		t.Error("the frame did not come back as it was before the decision interrupted the walk")
 	}
 }
+
+// TestBlockCursorReachesTheLastBlockUnderAPane is the occlusion defect's keyboard face: the walk
+// enters at the NEWEST block, and followBlockCursor scrolls to it through the same clamp the wheel
+// obeys. While the widget carried the overlay-blind budget the last block sat under an open pane at
+// every offset, so the scroll could not put it on a drawn row — the cursor entered on a line nobody
+// could see and ⏎ refused it, which is the one gesture a reader answering a question needs most.
+//
+// The pane is the /usage report rather than a prompt: the walk stands down entirely while a decision
+// is pending (blockCursorOwnsKeys), so a non-modal pane is what leaves the keys in the walk's hands
+// with rows taken off the transcript all the same.
+func TestBlockCursorReachesTheLastBlockUnderAPane(t *testing.T) {
+	t.Parallel()
+
+	m := newTestModel(t)
+	m.transcript.reset()
+	m.transcript.addUser("run the tests", nil)
+	for i := range 40 { // deeper than the drawn rows, so the newest block is in the stranded band
+		m.transcript.commitAssistant(fmt.Sprintf("reply line %02d", i), runRef{})
+	}
+	runCall(&m.transcript, "c1", "go test ./...", "ok   a\nok   b\nok   c\nPASS", 0)
+	m.usagePane = usagePane{open: true} // what /usage does, minus the verb (usage.go)
+	m.layout()
+
+	drawn, budget := m.transcriptRows(), m.transcriptBudget()
+	if drawn >= budget {
+		t.Fatalf("setup: the report took no rows off the transcript (drawn %d, budget %d)", drawn, budget)
+	}
+	stops := cursorStops(m.lineTargets)
+	if len(stops) == 0 {
+		t.Fatal("setup: the paint offers no cursor stops")
+	}
+	last := stops[len(stops)-1]
+	if last < m.viewport.TotalLineCount()-drawn {
+		t.Fatalf("setup: the newest stop is at line %d of %d, already inside the last %d drawn rows — "+
+			"nothing to reach", last, m.viewport.TotalLineCount(), drawn)
+	}
+
+	m = step(t, m, keyAltUp())
+
+	if got := cursorLine(t, m); got != last {
+		t.Fatalf("⌥↑ entered at line %d, want the newest stop %d", got, last)
+	}
+	if row := m.blockCursorRow(); row < 0 {
+		t.Fatalf("the cursor's line %d is on no drawn row: the scroll cannot bring the last block out "+
+			"from under the pane (offset %d, %d drawn rows of %d lines)",
+			last, m.viewport.YOffset(), drawn, m.viewport.TotalLineCount())
+	}
+	if blockExpanded(t, m, last) {
+		t.Fatal("setup: the newest block is expanded before any ⏎; collapsed is the default")
+	}
+
+	m = step(t, m, keyEnter())
+
+	if !blockExpanded(t, m, last) {
+		t.Error("⏎ on the newest block did not open it — the cursor reached a row the toggle refuses")
+	}
+}
