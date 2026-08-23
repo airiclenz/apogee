@@ -4554,6 +4554,66 @@ func TestPageDownToBottomReattachesFollow(t *testing.T) {
 	}
 }
 
+// TestTranscriptTailReachableWithAPaneOpen is the pop-up occlusion guard: with a pane over the
+// transcript, the LAST content line must still be reachable by scrolling. The viewport clamps every
+// scroll to total − Height(), so while layout() fed the widget the whole transcriptBudget — the
+// overlay-blind number — exactly the pane's height of tail lines sat below the clamp at every
+// offset: unreachable by PgDn, by the wheel and by the block cursor, with AtBottom reporting "at
+// the bottom" over content nobody could see. The widget now carries the DRAWN height
+// ([Model.transcriptRows]), which puts the clamp and the paint on the same row.
+func TestTranscriptTailReachableWithAPaneOpen(t *testing.T) {
+	m, _ := newAskModel(t, domain.AskRequest{Question: "which way?", Choices: []string{"left", "right"}})
+	m.transcript.addUser("a question", nil)
+	for i := range 40 { // deeper than the drawn rows, so there is a tail to strand
+		m.transcript.commitAssistant(fmt.Sprintf("reply line %02d", i), runRef{})
+	}
+	m.refreshViewport()
+
+	drawn, budget := m.transcriptRows(), m.transcriptBudget()
+	if drawn >= budget {
+		t.Fatalf("setup: the ask prompt took no rows off the transcript (drawn %d, budget %d)", drawn, budget)
+	}
+	total := m.viewport.TotalLineCount()
+	if total <= drawn {
+		t.Fatalf("setup: %d transcript lines over %d drawn rows — nothing to scroll", total, drawn)
+	}
+
+	// Off the tail and back down it, the human's own way: PgUp detaches, then PgDn until the view
+	// stops moving — the clamp is what ends the loop, not a press count.
+	m = step(t, m, tea.KeyPressMsg{Code: tea.KeyPgUp})
+	if !m.detached {
+		t.Fatalf("precondition: PgUp did not detach (offset %d of %d lines)", m.viewport.YOffset(), total)
+	}
+	for i := 0; i <= total; i++ {
+		before := m.viewport.YOffset()
+		m = step(t, m, tea.KeyPressMsg{Code: tea.KeyPgDown})
+		if m.viewport.YOffset() == before {
+			break
+		}
+		if i == total {
+			t.Fatalf("PgDn still moving after %d presses over %d lines", i, total)
+		}
+	}
+
+	if painted := m.viewport.YOffset() + drawn; painted < total {
+		t.Errorf("at maximum scroll the transcript paints through line %d of %d — the last %d are "+
+			"stranded under the pane (offset %d, drawn %d)",
+			painted, total, total-painted, m.viewport.YOffset(), drawn)
+	}
+	if !m.viewport.AtBottom() {
+		t.Errorf("the viewport does not report AtBottom at maximum scroll (offset %d of %d lines)",
+			m.viewport.YOffset(), total)
+	}
+	if m.detached {
+		t.Error("detached is still set at the tail: what is on screen and what the Model believes disagree")
+	}
+
+	// And on the really-composed frame: the last committed line is on it.
+	if last, rows := "reply line 39", transcriptRows(t, m); !strings.Contains(strings.Join(rows, "\n"), last) {
+		t.Errorf("the last transcript line %q is not painted at maximum scroll:\n%s", last, strings.Join(rows, "\n"))
+	}
+}
+
 // A scroll that lands mid-history holds exactly there: content appended below does not move the
 // view, and does not re-attach it either.
 func TestScrollMidHistoryHoldsPositionOnAppend(t *testing.T) {

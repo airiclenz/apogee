@@ -2457,14 +2457,17 @@ func TestMouseClickOnOverlayRowsArmsNoSelection(t *testing.T) {
 	}
 	m.refreshViewport()
 
-	drawn, laidOut := m.transcriptRows(), m.viewport.Height()
-	if drawn >= laidOut {
-		t.Fatalf("setup: the approval popup took no rows off the transcript (drawn %d, laid out %d)", drawn, laidOut)
+	// The comparison is against the FRAME's budget, not m.viewport.Height(): the widget is now sized
+	// to the drawn rows (layout(), so the scroll clamp reaches the tail), and the rows this test
+	// walks are the ones the budget has and the transcript does not — the popup's own.
+	drawn, budget := m.transcriptRows(), m.transcriptBudget()
+	if drawn >= budget {
+		t.Fatalf("setup: the approval popup took no rows off the transcript (drawn %d, budget %d)", drawn, budget)
 	}
 	if m.contentLineAt(drawn) >= 0 {
 		t.Errorf("the first overlay row still maps to content line %d", m.contentLineAt(drawn))
 	}
-	for y := drawn; y < laidOut; y++ {
+	for y := drawn; y < budget; y++ {
 		if line, _, ok := m.pointTranscriptRow(4, y); ok {
 			t.Errorf("row %d is painted by the popup, yet it maps to content line %d", y, line)
 		}
@@ -2476,8 +2479,8 @@ func TestMouseClickOnOverlayRowsArmsNoSelection(t *testing.T) {
 	// The whole gesture, not just the press: a drag across the popup copies nothing and flashes
 	// nothing, because it never anchored anywhere.
 	m = step(t, m, leftClick(4, drawn))
-	m = step(t, m, leftDrag(40, laidOut-1))
-	m, cmd := stepCmd(t, m, leftRelease(40, laidOut-1))
+	m = step(t, m, leftDrag(40, budget-1))
+	m, cmd := stepCmd(t, m, leftRelease(40, budget-1))
 	if cmd != nil {
 		t.Error("a drag over the popup returned a Cmd; nothing may reach the clipboard from there")
 	}

@@ -1687,9 +1687,11 @@ const (
 // content, clamped by its own taste and by what the frame can pay for (draftRowsCeiling), and the
 // viewport gets the height left after the gap row, the ▔ top-edge hairline, the status row, the
 // input box (its content rows plus its own top and bottom borders), the footer's single line and the
-// ▁ bottom-edge hairline under it. A floor of one row keeps the WIDGET valid on a tiny window; the
-// frame spends transcriptBudget instead, which does not have that floor and so cannot compose a row
-// the window never paid for.
+// ▁ bottom-edge hairline under it, less the rows this frame's overlays take from it
+// ([Model.transcriptRows]) — the widget is sized to what is DRAWN, so its scroll clamp reaches the
+// tail. A floor of one row keeps the WIDGET valid on a tiny window; the frame spends
+// transcriptBudget instead, which does not have that floor and so cannot compose a row the window
+// never paid for.
 func (m *Model) layout() {
 	// The scroll-bar gutter column is reserved only while the bar is shown (ui.show-scrollbar,
 	// inverted into Options.HideScrollbar): a hidden bar gives the column back to the body rather
@@ -1708,10 +1710,16 @@ func (m *Model) layout() {
 		m.reseatInput() // the box grew/shrank: re-clamp a scroll offset SetHeight left stale (ISSUES #2)
 	}
 
-	// The WIDGET floors at one row: a zero-height viewport is not a usable scroll surface. That floor
-	// is a lie about the frame on a window too short to pay for it, so the frame spends
+	// The WIDGET's height IS the drawn height: transcriptRows is the budget less the rows THIS
+	// frame's overlays measure at, composed once here the way View composes them each frame. The
+	// widget clamps every scroll to total − Height(), so feeding it the drawn height is what lets
+	// the tail come up to the last drawn row — fed the whole budget it held back exactly an open
+	// pane's height of content at every offset, unreachable by wheel, PageDown or block cursor.
+	// The floor of one row stays: a zero-height viewport is not a usable scroll surface, so when
+	// the overlays take the whole budget the widget is one row tall and View paints none of it.
+	// That floor is a lie about the frame on a window too short to pay for it, so the frame spends
 	// transcriptBudget instead — see there.
-	m.viewport.SetHeight(max(1, m.transcriptBudget()))
+	m.viewport.SetHeight(max(1, m.transcriptRows()))
 	m.refreshViewport()
 }
 
@@ -1727,10 +1735,12 @@ func (m Model) inputBoxRows() int {
 // ([Model.frameRowPlan]) — reads it, so the rows the transcript is drawn on and the rows the frame
 // believes it has are one number.
 //
-// It is deliberately NOT m.viewport.Height(). layout() floors the WIDGET at one row because a
-// zero-height viewport is not a scrollable surface, and on a window too short to pay for that row
-// the frame composed it anyway — one row past the terminal's last line, with the footer off the
-// alternate screen. The widget keeps its floor; the frame stops believing it.
+// It is deliberately NOT m.viewport.Height(). The WIDGET carries the DRAWN height — this budget
+// less the frame's overlays ([Model.transcriptRows], set by layout()) — and floors at one row
+// because a zero-height viewport is not a scrollable surface; on a window too short to pay for
+// that row the frame composed it anyway, one row past the terminal's last line with the footer off
+// the alternate screen. The widget keeps its floor and its overlay shrink; the frame spends the
+// budget, and so cannot compose a row the window never paid for.
 func (m Model) transcriptBudget() int {
 	return max(0, m.height-frameFixedRows-m.inputBoxRows())
 }
@@ -1955,15 +1965,18 @@ func (m Model) frameOverlays() frameOverlays {
 }
 
 // transcriptRows is THE derivation of how many screen rows the transcript occupies in the frame:
-// the viewport's laid-out height less the rows this frame's overlays take from it. View composes
-// the body at exactly this height, [Model.contentLineAt] refuses every row past it, and
-// pointTranscriptRow (mouse.go) bounds a click by it — one number, three readers, so a click on an
-// overlay row can no longer name the transcript line the overlay is drawn over.
+// the frame's budget ([Model.transcriptBudget]) less the rows this frame's overlays measure at.
+// View composes the body at exactly this height, [Model.contentLineAt] refuses every row past it,
+// pointTranscriptRow (mouse.go) bounds a click by it, and layout() sizes the viewport WIDGET to it
+// so the widget's own scroll clamp (maxYOffset = total − Height()) is its fourth reader — one
+// number, four readers, so a click on an overlay row cannot name the transcript line the overlay
+// is drawn over, and no content line is stranded below the clamp under an open pane.
 //
-// It stays honest only because View never writes the shrink back: the frame is composed from a
-// LOCAL copy of the viewport, so the budget below is always the laid-out one and this subtraction
-// can never compound with itself. The budget is transcriptBudget rather than the widget's own
-// height, which layout() floors at one row the frame may not have (see there).
+// It stays honest only because nothing reads the widget back: this derives from transcriptBudget —
+// the window, the fixed chrome and the input box, never m.viewport.Height() — and View composes
+// from a LOCAL copy of the viewport, so neither layout()'s set nor View's per-frame shrink can
+// compound with itself. The floor here is ZERO, not the one row layout() floors the WIDGET at
+// (see there): a frame whose overlays take the whole budget paints no transcript at all.
 func (m Model) transcriptRows() int {
 	return m.frameOverlays().transcriptRows(m.transcriptBudget())
 }
