@@ -4894,6 +4894,43 @@ func TestPaneHeightChangeReachesLayout(t *testing.T) {
 	}
 }
 
+// TestANewPaneClaimingAKeyStillReachesLayout is the STRUCTURAL half of the freshness guard above:
+// that one pins the panes that exist today, this one pins the mechanism they inherit it from. The
+// claimant it walks is deliberately NOT on [keyClaimOrder] — it stands for a pane nobody has written
+// yet — and it does exactly what such a pane will do wrong: it redraws itself at a new height and
+// stops there, never laying out. Nothing but the walk's own freshening ([Model.claimKey]) can keep
+// the scroll clamp honest for a surface no enumerated case knows about, so dropping that call fails
+// this test while every case above still passes.
+func TestANewPaneClaimingAKeyStillReachesLayout(t *testing.T) {
+	m := modelWithOverlayRoomAt(t, 80, 24, testOpts)
+	m.hb.models = wireSummaries("alpha", "beta")
+	m.picker = picker{open: true, kind: pickerModel}
+	m.layout()
+	assertClampFresh(t, m, "setup")
+	before := m.frameOverlays().height()
+
+	// The offering is the picker's row source (pickerFilteredView), so replacing it is this surface
+	// redrawing itself taller — the omission each enumerated case above had to be fixed for one site
+	// at a time.
+	unwritten := keyClaimant{
+		name: "a pane nobody has written yet",
+		claim: func(m Model, _ tea.KeyPressMsg) (Model, tea.Cmd, bool) {
+			m.hb.models = wireSummaries("alpha", "beta", "gamma", "delta", "epsilon", "zeta")
+			return m, nil, true
+		},
+	}
+
+	m, _, claimed := m.claimKey([]keyClaimant{unwritten}, keyRune('x'))
+
+	if !claimed {
+		t.Fatal("premise: the surface did not claim the key")
+	}
+	if after := m.frameOverlays().height(); after == before {
+		t.Fatalf("premise: the overlays still measure %d rows — the surface moved no pane height", after)
+	}
+	assertClampFresh(t, m, "after a key claimed by a pane that never lays out")
+}
+
 // A scroll that lands mid-history holds exactly there: content appended below does not move the
 // view, and does not re-attach it either.
 func TestScrollMidHistoryHoldsPositionOnAppend(t *testing.T) {

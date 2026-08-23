@@ -1061,6 +1061,10 @@ func paneClaim(key func(Model, tea.KeyPressMsg) (bool, tea.Model, tea.Cmd)) func
 // why it can neither rise nor fall in the list, and TestKeyClaimOrderMatchesTheDocumentedPrecedence
 // fails if the sequence changes. Adding a surface is one entry here plus its key contract in its own
 // file — never another `if` in handleKey.
+//
+// The entry buys more than routing: the walk freshens the transcript's scroll clamp after any claim
+// that moved a pane's height ([Model.claimKey]), so a surface added here inherits the layout() rule
+// rather than having to remember it.
 var keyClaimOrder = []keyClaimant{
 	{
 		// The /sessions browser is a modal overlay (idle only): while open it claims every keypress —
@@ -1136,6 +1140,38 @@ var keyClaimOrder = []keyClaimant{
 	},
 }
 
+// claimKey walks one claim order against a keypress: each surface that is open is asked whether the
+// key is its own, the first one that claims it answers, and nothing further down the order ever sees
+// the key. It reports the Model to carry on with — the walked one whether or not the key was claimed,
+// because one claimant leaves state behind on the way past ([keyClaimant.claim]) — that surface's
+// command, and whether anything claimed at all.
+//
+// The order is a PARAMETER rather than [keyClaimOrder] read directly, so the walk — and the freshness
+// repair below, which is the whole of what makes the layout() rule hold for panes nobody has written
+// yet — can be exercised against a surface that is not on the list (model_test.go).
+func (m Model) claimKey(order []keyClaimant, msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
+	for _, claimant := range order {
+		if claimant.open != nil && !claimant.open(m) {
+			continue
+		}
+		next, cmd, claimed := claimant.claim(m, msg)
+		m = next
+		if !claimed {
+			continue
+		}
+		// A claim is where a pane's HEIGHT moves: a filter rune prunes its rows, ^a widens its listing,
+		// esc closes it altogether. The viewport widget is sized to the rows the transcript is DRAWN on
+		// (layout), so a pane redrawn at a new height whose own path did not lay out leaves the scroll
+		// clamp measuring the frame before it, and strands that many transcript lines under the clamp.
+		// Repairing it HERE — the one place every pane's keys are routed through — is what makes the
+		// rule structural rather than a list to remember: a surface added to the order inherits the
+		// freshening, and its author never has to know layout() exists.
+		m.freshenTranscriptClamp()
+		return m, cmd, true
+	}
+	return m, nil, false
+}
+
 // handleKey routes a keypress against the current state. Esc cancels an in-flight worker (and
 // is otherwise a no-op); Ctrl+C twice within ctrlCQuitWindow quits; Ctrl+L forces a full repaint
 // and changes nothing else. Enter submits at idle — the
@@ -1166,18 +1202,12 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	// The overlay claim order. Each surface in [keyClaimOrder] is asked, in that order, whether the
 	// keypress is its own; the first one that claims it answers, and nothing further down the list
-	// ever sees the key. The order is load-bearing — it is stated once, as data, with each entry
-	// carrying the reason it sits where it does — and a claimant that did not claim still hands back
-	// the Model, because one of them leaves state behind on the way past.
-	for _, claimant := range keyClaimOrder {
-		if claimant.open != nil && !claimant.open(m) {
-			continue
-		}
-		next, cmd, claimed := claimant.claim(m, msg)
-		m = next
-		if claimed {
-			return m, cmd
-		}
+	// ever sees the key ([Model.claimKey] walks it). The order is load-bearing — it is stated once,
+	// as data, with each entry carrying the reason it sits where it does — and a claimant that did
+	// not claim still hands back the Model, because one of them leaves state behind on the way past.
+	m, claimCmd, claimed := m.claimKey(keyClaimOrder, msg)
+	if claimed {
+		return m, claimCmd
 	}
 
 	switch msg.String() {
@@ -1723,8 +1753,32 @@ func (m *Model) layout() {
 	// the overlays take the whole budget the widget is one row tall and View paints none of it.
 	// That floor is a lie about the frame on a window too short to pay for it, so the frame spends
 	// transcriptBudget instead — see there.
-	m.viewport.SetHeight(max(1, m.transcriptRows()))
+	m.viewport.SetHeight(m.transcriptWidgetRows())
 	m.refreshViewport()
+}
+
+// transcriptWidgetRows is the height the viewport WIDGET carries: the rows the transcript is drawn on
+// ([Model.transcriptRows]) with layout()'s one-row floor under them. It is stated once because two
+// readers must agree on it — layout() sets it, and [Model.freshenTranscriptClamp] asks whether that
+// set still holds.
+func (m Model) transcriptWidgetRows() int {
+	return max(1, m.transcriptRows())
+}
+
+// freshenTranscriptClamp lays out again when the viewport widget's height no longer matches the rows
+// the transcript is drawn on — the state a pane redrawn at a new height leaves behind when its own
+// path did not lay out. layout() stays the single setter of that height (design call 3): this asks
+// only whether the last set still holds, and hands the setting back to layout() when it does not.
+//
+// The question is asked rather than the answer simply re-applied because layout() re-renders the whole
+// transcript: a pane key that moved no rows — a selection step in the browser, a scroll in /usage —
+// pays one overlay composition, the same one View performs each frame, instead of a second full
+// repaint of the history.
+func (m *Model) freshenTranscriptClamp() {
+	if m.viewport.Height() == m.transcriptWidgetRows() {
+		return
+	}
+	m.layout()
 }
 
 // inputBoxRows is the screen rows the input box occupies: its content rows and the two border rows
