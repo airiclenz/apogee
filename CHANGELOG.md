@@ -10,6 +10,11 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- A model switch whose Model profile carries roster deltas now says so in one transcript line —
+  `tools: +web_search −single_find_and_replace (profile)` — additions before removals and each half
+  sorted, on the same notice channel the built-in shape line uses (ADR 0057 decision 8). A profile
+  that spells no `tools:` axis, or one whose lists resolve empty, switches silently as before.
+
 - **The resolved tool roster is a per-model rebind binding (ADR 0057, plan item 5).** Which tools a
   model is offered now moves with the model: the roster deltas ride `RebindSpec` as the third axis
   of the profile it already carries, and a switch applies them atomically at the ADR 0024 boundary

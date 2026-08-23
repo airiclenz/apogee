@@ -1064,10 +1064,11 @@ func settingBool(key, value string) (bool, error) {
 //     override arriving as the stated 0 that hands the split back to apogee's own default;
 //   - the Model profile, because `model-profiles:` keys on the model name and the shipped shape
 //     table matches on it too (ADR 0044) — the shape a model speaks the wire in travels with the
-//     model, so it rides the same atomic Rebind as the prompt and the Mechanisms.
+//     model, so it rides the same atomic Rebind as the prompt and the Mechanisms. Its THIRD axis,
+//     the tool roster, travels with it (ADR 0057 decision 7) and is announced here when it moves.
 //
-// What it deliberately does NOT touch: the endpoint, the mode, the tools, and the conversation, none
-// of which a model change has any claim on.
+// What it deliberately does NOT touch: the endpoint, the mode, the approvals and the conversation,
+// none of which a model change has any claim on.
 //
 // A resolution failure is returned rather than swallowed — an unreadable per-model prompt file or a
 // dangling validated-sets alias is the user's own config being wrong about the new model — and the
@@ -1106,6 +1107,14 @@ func rebindSpecFor(
 	// something apogee decided about this model that nobody typed.
 	profile, notice := resolveModelProfile(model, next.ModelProfiles)
 	if notice != "" {
+		notices = append(notices, notice)
+	}
+
+	// And the profile's THIRD axis, which is the one axis a human can otherwise only infer from a
+	// tool that stopped being offered: a switch whose roster deltas are non-empty says so in one
+	// line (ADR 0057 decision 8), on the channel the shape above already travels. Silent when the
+	// matched entry spells no `tools:` axis, which is every profile that predates the axis.
+	if notice := rosterDeltaNotice(profile.Tools); notice != "" {
 		notices = append(notices, notice)
 	}
 

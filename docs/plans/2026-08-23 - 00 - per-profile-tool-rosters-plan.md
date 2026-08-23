@@ -247,7 +247,15 @@ roster.
 
 **Commit:** `feat(agent): the resolved tool roster is a per-model rebind binding`
 
-## 6. `tui`: the switch notice
+## 6. `tui`: the switch notice — ✅ DONE (2026-08-23)
+
+NOTES (2026-08-23): the item's Files ("`internal/tui` / composition root") and its Acceptance (`go test ./internal/tui/...`) point at different packages; the notice PATH the `model profile: … (built-in)` line uses is the composition root's — `cmd/apogee/modelprofile.go` composes the string, `rebindSpecFor` appends it to `RebindResult.Notices`, and `internal/tui` only surfaces notice strings as transcript notes (`heartbeat.go`'s `applyRebind`, pinned generically by the existing `TestRebindNoticesSurfaceAsNotes`). So the line and its tests landed in `cmd/apogee` and the acceptance run was `go test ./internal/tui/... ./cmd/apogee/...` — both pass. No `internal/tui` change was needed; a tui-side test would have exercised a fake, not this line.
+
+NOTES (2026-08-23): the notice fires at the SWITCH seam only (`rebindSpecFor`), per the item's and ADR 0057 decision 8's wording. Startup's stderr profile line and the `model-profiles:`-edit door (`reloadModelProfiles`, which already drops the shape notice deliberately) were left silent — neither is a model switch, and a pre-bound start gets the line from the first beat's rebind anyway.
+
+NOTES (2026-08-23): two renderings the item did not spell, both fixed to the ladder's own verdict so the line describes the roster the session gets rather than the lists it was spelled from: a name written in BOTH directions of the axis renders once as a removal (disabled wins, `tools.EffectiveRoster`; the clash itself is already reported at load time by `config.rosterConflictNotice`), and names are trimmed and deduplicated exactly as `internal/tools` trims them before comparing.
+
+NOTES (2026-08-23): `rebindSpecFor`'s doc comment said "What it deliberately does NOT touch: the endpoint, the mode, the tools, and the conversation" — stale since item 5 put the roster on Rebind, and directly contradicted by the notice this item adds three lines above it. Refreshed in place ("the approvals" replaces "the tools", and the profile bullet now names the third axis) rather than left for a follow-up, because the contradiction would have shipped inside the function this item edits. `cmd/apogee/doc.go`'s half-line map entry for `modelprofile.go` was extended for the same reason: the file now produces two notices, not one.
 
 **What:** a switch whose roster deltas are non-empty renders one line —
 `tools: +a +b −c (profile)` — through the same notice surface as the shipped-profile line;

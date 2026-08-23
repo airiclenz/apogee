@@ -70,9 +70,11 @@
 // behind the "model not advertised" notice; title.go the out-of-band
 // session-naming completion behind [tui.Options.GenerateTitle]; validatedsets.go the
 // startup ladder that decides what the Validated-set surface applies and says this
-// session; modelprofile.go its per-model twin — which shape a model speaks the wire in,
-// matched out of the `model-profiles:` map and the shipped table, plus the one-line
-// notice a built-in match announces itself with (ADR 0044); delegation.go the Sub-agent
+// session; modelprofile.go its per-model twin — which shape a model speaks the wire in
+// and which tools it is offered, matched axis-wise out of the `model-profiles:` map and
+// the shipped table, plus the two one-line notices that resolution produces: a built-in
+// match announcing itself (ADR 0044) and a switch's non-empty roster deltas (ADR 0057);
+// delegation.go the Sub-agent
 // server — the second heartbeat on the `sub-agents:`-flagged entry, the Delegation
 // target each of its beats resolves for the engine to route spawns against, the one
 // notice each change of routing state is worth, and the re-point a live `servers:` edit

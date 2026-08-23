@@ -235,3 +235,145 @@ func TestApplySettingModelProfilesWithNothingBoundHoldsOnly(t *testing.T) {
 		t.Errorf("rebindInputs carries %+v, want the edit held for the first bind", base.ModelProfiles)
 	}
 }
+
+// The switch line itself (ADR 0057 decision 8): one line for a non-empty roster axis, sorted with
+// additions before removals so the same entry renders the same line on every run, and NOTHING at all
+// for an entry that spells no tools axis or spells one that resolves empty. The golden strings are
+// the point — this line is the only trail a vanished tool leaves.
+func TestRosterDeltaNoticeAnnouncesOnlyRealDeltas(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		roster domain.ToolRosterDelta
+		want   string
+	}{
+		{
+			name: "mixed deltas render additions first, each half sorted",
+			roster: domain.ToolRosterDelta{
+				Enabled:  []string{"web_search", "apply_patch"},
+				Disabled: []string{"single_find_and_replace", "run_terminal_command"},
+			},
+			want: "tools: +apply_patch +web_search −run_terminal_command −single_find_and_replace (profile)",
+		},
+		{
+			name:   "an additions-only axis says only what it added",
+			roster: domain.ToolRosterDelta{Enabled: []string{"web_search"}},
+			want:   "tools: +web_search (profile)",
+		},
+		{
+			name:   "a removals-only axis says only what it took away",
+			roster: domain.ToolRosterDelta{Disabled: []string{"web_search"}},
+			want:   "tools: −web_search (profile)",
+		},
+		{
+			// The zero axis — every profile that predates the roster, and every entry that spells
+			// none. Silence is the whole contract: nothing about the menu moved.
+			name: "an entry with no tools axis says nothing", roster: domain.ToolRosterDelta{},
+		},
+		{
+			// An axis WRITTEN but empty — `tools: {disabled: [], enabled: []}`, or a sequence of
+			// blanks a YAML editor left behind. It moves nothing either, so it says nothing.
+			name: "an axis that resolves empty says nothing",
+			roster: domain.ToolRosterDelta{
+				Enabled: []string{}, Disabled: []string{"", "   "},
+			},
+		},
+		{
+			// Disabled wins a same-scope clash (tools.EffectiveRoster), so the line describes the
+			// roster the session actually gets: one removal, never an addition contradicting it.
+			// The clash itself was reported at load time, against the config key that has to change.
+			name: "a name written in both directions renders once, as a removal",
+			roster: domain.ToolRosterDelta{
+				Enabled: []string{"web_search"}, Disabled: []string{"web_search"},
+			},
+			want: "tools: −web_search (profile)",
+		},
+		{
+			// Names reach here from YAML sequences a human wrote: the ladder trims before it
+			// compares, so a stray space is the same tool on the menu and in the line.
+			name: "names are trimmed and folded exactly as the ladder compares them",
+			roster: domain.ToolRosterDelta{
+				Enabled: []string{" web_search ", "web_search"},
+			},
+			want: "tools: +web_search (profile)",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := rosterDeltaNotice(tt.roster); got != tt.want {
+				t.Errorf("roster notice = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// And the seam that says it: a switch resolves the roster with the rest of the per-model binding, so
+// the line rides the same notices slice the shape line does — one switch, one place to read what
+// apogee decided. A model whose entry has no tools axis adds no line at all.
+func TestRebindSpecForAnnouncesRosterDeltas(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		model      string
+		user       []profiles.Entry
+		wantNotice string
+	}{
+		{
+			name:  "a switch to a model with a tools axis announces the deltas",
+			model: "big-model-70b",
+			user: []profiles.Entry{{
+				Pattern: "big-model",
+				Profile: apogee.ModelProfile{Tools: domain.ToolRosterDelta{
+					Enabled: []string{"web_search"}, Disabled: []string{"single_find_and_replace"},
+				}},
+				SpellsTools: true,
+			}},
+			wantNotice: "tools: +web_search −single_find_and_replace (profile)",
+		},
+		{
+			name:  "a switch to a model whose entry spells no tools axis stays silent",
+			model: "minimax-m3",
+			user: []profiles.Entry{{
+				Pattern: "minimax-m3",
+				Profile: apogee.ModelProfile{Thinking: apogee.ThinkingProfile{
+					Style: domain.ThinkingDelimited, Start: "<user>", End: "</user>",
+				}},
+			}},
+		},
+		{
+			name: "a switch to a model no tier knows stays silent", model: "some-unknown-14b",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			roots := stateRoots{config: t.TempDir(), validated: t.TempDir(), probe: t.TempDir()}
+			opts := config.Options{ModelProfiles: tt.user}
+
+			spec, notices, err := rebindSpecFor(opts, roots, nil, tt.model, 8192, 0, 0)
+			if err != nil {
+				t.Fatalf("rebindSpecFor: %v", err)
+			}
+			got := ""
+			for _, n := range notices {
+				if strings.HasPrefix(n, "tools:") {
+					got = n
+				}
+			}
+			if got != tt.wantNotice {
+				t.Errorf("roster notice = %q, want %q", got, tt.wantNotice)
+			}
+			// The line and the binding are one fact: what the notice announces is what the spec
+			// carries to Agent.Rebind, never a second, separately computed answer.
+			if (len(spec.Profile.Tools.Enabled) > 0 || len(spec.Profile.Tools.Disabled) > 0) != (tt.wantNotice != "") {
+				t.Errorf("spec roster = %+v but notice = %q — the line and the binding disagree",
+					spec.Profile.Tools, got)
+			}
+		})
+	}
+}

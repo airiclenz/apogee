@@ -11,11 +11,14 @@ package main
 // (ADR 0024), a scheduled Firing, and a `model-profiles:` edit committed while the session runs
 // (ADR 0037).
 //
-// It sits beside validatedsets.go for the same reason that file exists: one small resolution with a
-// notice of its own, reached from several wiring points and testable without a session.
+// It sits beside validatedsets.go for the same reason that file exists: one small resolution with
+// notices of its own, reached from several wiring points and testable without a session.
 
 import (
 	"fmt"
+	"maps"
+	"slices"
+	"strings"
 
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/domain"
@@ -51,4 +54,57 @@ func modelProfileNotice(decision profiles.Decision) string {
 		style = domain.ThinkingNone
 	}
 	return fmt.Sprintf("model profile: %s (built-in) — thinking: %s", decision.Entry.Pattern, style)
+}
+
+// minusSign is U+2212, the typographic minus a removed tool is announced with below. It is spelled
+// as an escape rather than as a literal because it is deliberately NOT the ASCII hyphen sitting
+// next to it in the same line, and nothing but the escape makes that visible in the source.
+const minusSign = "\u2212"
+
+// rosterDeltaNotice is the one line a model switch says when the model it lands on brings roster
+// deltas with it (ADR 0057 decision 8) — `tools: +web_search −single_find_and_replace (profile)` —
+// and the empty string when it brings none, which is every entry that spells no `tools:` axis and
+// every axis whose lists resolve empty. Its reason is ADR 0044 ratified call 7's, applied to the
+// third axis: announce what changes observable behavior, because a tool that silently vanished from
+// the menu at a switch is otherwise a mystery with no trail.
+//
+// It speaks for the PROFILE rung alone, and says so in the trailing `(profile)`: the global
+// `tools.disabled:`/`tools.enabled:` lists are a standing fact of the configuration that no switch
+// moved, and they already had their say at load time. Additions come before removals and each half
+// is sorted, so one entry renders one line on every run and two models' lines compare at a glance.
+//
+// A name the entry writes in BOTH directions renders once, as a removal — the ladder's own verdict
+// that disabled wins a same-scope clash (tools.EffectiveRoster) — because this line describes the
+// roster the session actually gets rather than the two lists it was spelled from. The clash itself
+// is reported at load time, where the config key that has to be fixed is still in hand.
+func rosterDeltaNotice(roster domain.ToolRosterDelta) string {
+	off := toolNameSet(roster.Disabled)
+	on := toolNameSet(roster.Enabled)
+	for name := range off {
+		delete(on, name)
+	}
+	if len(on) == 0 && len(off) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(on)+len(off))
+	for _, name := range slices.Sorted(maps.Keys(on)) {
+		parts = append(parts, "+"+name)
+	}
+	for _, name := range slices.Sorted(maps.Keys(off)) {
+		parts = append(parts, minusSign+name)
+	}
+	return fmt.Sprintf("tools: %s (profile)", strings.Join(parts, " "))
+}
+
+// toolNameSet is the set of tools one roster list actually names: trimmed exactly as the ladder
+// trims them (internal/tools) so a stray space around a name in a YAML sequence is the same tool in
+// the notice as on the menu, with blank entries dropped and a repeated name folded to one.
+func toolNameSet(names []string) map[string]bool {
+	set := make(map[string]bool, len(names))
+	for _, name := range names {
+		if name = strings.TrimSpace(name); name != "" {
+			set[name] = true
+		}
+	}
+	return set
 }
