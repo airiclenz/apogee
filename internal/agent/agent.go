@@ -53,7 +53,7 @@ type Agent struct {
 	cfg      domain.Config
 	upstream provider.Responder        // provider seam (Decision C): fake in tests, real HTTP via New
 	registry *domain.MechanismRegistry // catalogued + experimental hooks driving the loop
-	tools    *domain.ToolRegistry      // resolved tool set (Config.Tools, or the default registry)
+	tools    *domain.ToolRegistry      // resolved tool set (Config.Tools, or the default registry composed over the roster ladder)
 	guards   security.Guards           // always-on, mode-independent guardrails (dangerous-action + circuit-breaker + audit, D6)
 
 	// ownsUpstream says whether THIS Agent dialled the client in upstream and is therefore the one
@@ -63,6 +63,17 @@ type Agent struct {
 	// consult it before closing, so a shared client outlives every child that borrowed it and is
 	// closed exactly once — by its owner.
 	ownsUpstream bool
+
+	// ownsToolSet says whether the ENGINE composed the tool set in tools — resolveTools' default
+	// branch, the build's menu with the roster ladder applied (ADR 0057) — and may therefore
+	// RE-compose it when the bound model's roster axis changes at a Rebind. It is false whenever
+	// the set belongs to the host instead: an injected Config.Tools, which is the host's authority
+	// verbatim (ADR 0001), and a set installed mid-session through SwapTools, which is the host's
+	// own assembly with its MCP tools folded in (ADR 0037 binding F). Rebuilding under either would
+	// silently drop tools the host put there, so the roster binding stops at this flag.
+	//
+	// Seeded at construction (composesDefaultRoster) and cleared by SwapTools; never set back.
+	ownsToolSet bool
 
 	// textParser and stripper are the parse-seam collaborators selected from cfg.Profile at
 	// construction (processing.ParserFor): the text-format tool-call parser recovers a call from

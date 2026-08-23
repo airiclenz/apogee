@@ -2,7 +2,8 @@ package agent
 
 // Swapping the Agent's model profile mid-session (ADR 0037). The Model profile (CONTEXT: Model
 // profile) says how the bound model speaks the wire — which tool-call format it emits and which
-// inline thinking channel it hides its reasoning in — and it is a PER-MODEL binding (ADR 0044):
+// inline thinking channel it hides its reasoning in — and which tools it is offered at all (the
+// roster axis, ADR 0057) — and it is a PER-MODEL binding (ADR 0044):
 // the tag shape is a fact of the model's chat template, not a dialect the human picked, so an
 // observed model change re-resolves the profile and carries it in through Rebind. SetProfile is
 // the other door onto the same swap — the one a settings or config edit takes when the profile
@@ -29,7 +30,8 @@ import (
 var errSetProfileInExchange = fmt.Errorf("%w: the model profile can only be swapped between runs", domain.ErrInputPending)
 
 // SetProfile replaces the Agent's model profile outright — the parse seam's tool-call parser and
-// content stripper, and the profile the emit seam renders its wire-only tool menu from. It is the
+// content stripper, the profile the emit seam renders its wire-only tool menu from, and the tool
+// roster that menu is drawn over (ADR 0057). It is the
 // SAME-MODEL door for a profile change: the config's `model-profiles:` map resolved to a different
 // profile for the model already bound. A profile that changes BECAUSE the model changed rides
 // RebindSpec instead (ADR 0044), and both doors run the same applyProfile, so they cannot disagree
@@ -55,9 +57,12 @@ var errSetProfileInExchange = fmt.Errorf("%w: the model profile can only be swap
 // goroutine, where a swap is refused — so the two can never interleave.
 //
 // What stands: everything else. The conversation and Turn counters, the autonomy mode, session
-// approvals, the confinement flag, the resolved tools and the per-model bindings all outlive a
-// dialect change. Content ALREADY parsed keeps whatever the old profile made of it: this changes
-// how the next response is read, never how the last one was.
+// approvals, the confinement flag and the per-model bindings all outlive a dialect change. The
+// resolved TOOLS no longer do, since ADR 0057 made the roster the profile's third axis: a profile
+// with roster deltas re-composes the engine's own default set through applyRoster, exactly as a
+// model switch does — a set the host injected or swapped in is still untouched. Content ALREADY
+// parsed keeps whatever the old profile made of it: this changes how the next response is read,
+// never how the last one was.
 func (a *Agent) SetProfile(profile domain.ModelProfile) error {
 	if a.turns.inExchange {
 		return errSetProfileInExchange
@@ -65,14 +70,16 @@ func (a *Agent) SetProfile(profile domain.ModelProfile) error {
 	return a.applyProfile(profile)
 }
 
-// applyProfile installs a resolved profile on the two seams that read it — the parse seam's
-// tool-call parser and content stripper, and cfg.Profile, which the emit seam renders its
-// wire-only tool menu from. It is the ONE place that replacement exists (ADR 0044 decision 6):
+// applyProfile installs a resolved profile on the seams that read it — the parse seam's tool-call
+// parser and content stripper, cfg.Profile, which the emit seam renders its wire-only tool menu
+// from, and the resolved tool set, which the profile's roster axis composes (applyRoster, ADR
+// 0057). It is the ONE place that replacement exists (ADR 0044 decision 6):
 // both doors onto a profile change call it, so a model switch (Rebind) and a config edit
 // (SetProfile) can never install a profile two different ways.
 //
 // Validate-then-commit: the translation runs first, so a profile processing.ParserFor refuses
-// leaves all three fields exactly as they were. The idle-only refusal belongs to the CALLERS
+// leaves every one of those fields, the tool set included, exactly as it was. The idle-only
+// refusal belongs to the CALLERS
 // rather than here — each names the thing the user actually did (errSetProfileInExchange on an
 // edit, ErrInputPending on a rebind) — and every caller is past that gate by the time it arrives.
 func (a *Agent) applyProfile(profile domain.ModelProfile) error {
@@ -85,5 +92,27 @@ func (a *Agent) applyProfile(profile domain.ModelProfile) error {
 	a.textParser = textParser
 	a.stripper = stripper
 	a.cfg.Profile = profile
+	a.applyRoster()
 	return nil
+}
+
+// applyRoster re-assembles the tool set for the profile now on cfg — the roster axis ADR 0057 adds
+// to the Model profile, which makes WHICH TOOLS a session offers a per-model binding rather than a
+// launch-time constant. It is applyProfile's third seam and is called from inside it, so the roster
+// travels with the other two axes through the one swap both doors run: a model switch (Rebind) and
+// a config edit under a stable model (SetProfile) can no more disagree about a roster than they can
+// about a stripper.
+//
+// It cannot fail — assembling the default registry has no error path — so it commits in place
+// rather than validating first, and it is called after the parse seam is already committed.
+//
+// It is a no-op unless the ENGINE composed the set (ownsToolSet): an injected Config.Tools is the
+// host's authority verbatim and a SwapTools set is the host's own assembly, so under either the
+// roster axis is simply not this layer's to apply — the host folds its deltas in where it builds,
+// and the tools of such a session stand across a switch exactly as they always have.
+func (a *Agent) applyRoster() {
+	if !a.ownsToolSet {
+		return
+	}
+	a.tools = defaultRoster(a.cfg)
 }

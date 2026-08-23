@@ -58,7 +58,10 @@ var (
 //
 // What stands: everything else. The conversation and Turn counters, the autonomy mode, session
 // approvals, the confinement flag, the per-model bindings and the model profile all outlive a
-// tool-set change. Config.Tools stays the immutable construction seed (only resolveTools reads
+// tool-set change — including the profile's roster axis, whose deltas this set is expected to
+// already carry: the host that assembles a registry is the layer that folds its own roster in
+// (ADR 0057), and the engine's applyRoster stands down for the rest of the session once this door
+// has been taken. Config.Tools stays the immutable construction seed (only resolveTools reads
 // it), so a swapped Agent's live tools are a.tools alone.
 func (a *Agent) SwapTools(registry *domain.ToolRegistry) error {
 	if a.turns.inExchange {
@@ -84,5 +87,12 @@ func (a *Agent) SwapTools(registry *domain.ToolRegistry) error {
 
 	// Commit — from here on nothing can fail.
 	a.tools = registry
+	// And the set is the HOST's from here on, so the engine stops composing one of its own: a model
+	// switch re-runs the roster ladder over the set it ASSEMBLED (applyRoster, ADR 0057), and doing
+	// that under a host-supplied registry would rebuild the built-in menu over the top of whatever
+	// the host folded in — every MCP tool in this very registry among it. The flag is never set back:
+	// once the host has taken the set over, it owns it for the rest of the session and folds its own
+	// roster deltas in where it builds.
+	a.ownsToolSet = false
 	return nil
 }

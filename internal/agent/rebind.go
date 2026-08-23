@@ -48,8 +48,11 @@ var (
 // questions resolved in cmd/apogee, so the engine neither reads config.yaml nor re-derives an
 // identity — it applies what it is handed, atomically.
 //
-// It is deliberately NOT the whole Config: mode, approvals, confinement, tools and the
-// conversation are session state that a model switch has no business resetting.
+// It is deliberately NOT the whole Config: mode, approvals, confinement and the conversation are
+// session state that a model switch has no business resetting. The tool ROSTER left that list with
+// ADR 0057 — which tools a model is offered is a fact about the model (a small model drowns in a
+// menu a big one wants), so it is a per-model binding like the rest and rides here, as the third
+// axis of Profile below rather than as a field of its own.
 //
 // Two fields are the stated exceptions to "per-model", MaxOutputTokens (ADR 0046's amendment) and
 // ResponseReserveFraction: the reply ceiling and the share of the window that reply is given both
@@ -105,17 +108,25 @@ type RebindSpec struct {
 	// the current set outright; empty arms nothing (the default-off posture).
 	EnableMechanisms []domain.MechanismID
 	// Profile is the model profile re-resolved for the new model (ADR 0044): how it speaks the
-	// wire, on the two axes of tool-call format and inline thinking channel. It replaces the
-	// current profile outright, and the ZERO value is meaningful — native tool calls, no inline
-	// thinking — so a model that matches no user entry and no shipped shape parses exactly as an
-	// unprofiled session does. A profile the processing seam cannot translate fails the whole
-	// spec, leaving every binding standing.
+	// wire, on the axes of tool-call format and inline thinking channel — and, since ADR 0057,
+	// WHICH TOOLS it is offered, on the third axis Tools. It replaces the current profile
+	// outright, and the ZERO value is meaningful — native tool calls, no inline thinking, no
+	// roster deltas — so a model that matches no user entry and no shipped shape parses, and is
+	// offered exactly the menu, an unprofiled session gets. A profile the processing seam cannot
+	// translate fails the whole spec, leaving every binding standing.
+	//
+	// The roster axis is the RESOLVED delta pair for this model, computed whole by the caller like
+	// everything else here (the axis-wise ladder profile > global > build default lives in the
+	// composition root — ADR 0031). The engine applies it to the set it composed ITSELF; a host
+	// that injected Config.Tools or took the SwapTools door owns its set and folds its own deltas
+	// in where it builds (applyRoster).
 	Profile domain.ModelProfile
 }
 
 // Rebind swaps the Agent's per-model bindings at a quiescent boundary — the wire model, the
-// system-prompt template, the context window the Budget and Compaction measure against, and the
-// catalogued Mechanism set — and rebinds the provider client's wire model with them. It is the
+// system-prompt template, the context window the Budget and Compaction measure against, the
+// catalogued Mechanism set, and the profile with the tool roster its third axis spells (ADR 0057)
+// — and rebinds the provider client's wire model with them. It is the
 // engine half of the heartbeat's observed model change (ADR 0024). A spec may carry two bounds that
 // are NOT per-model, the reply ceiling (ADR 0046) and the share of the window reserved for that
 // reply, for the reason their fields state: neither pin has a setter of its own, so a live edit of
@@ -132,15 +143,18 @@ type RebindSpec struct {
 // incompatibility and requirements gates BEFORE anything is mutated, so a spec the new model
 // cannot satisfy leaves every existing binding, and the whole conversation, exactly as it was.
 //
-// What stands: the conversation and Turn counters, the autonomy mode, session approvals, the
-// confinement flag, and the resolved tools — and the reply ceiling and its reserve share too, unless
+// What stands: the conversation and Turn counters, the autonomy mode, session approvals and the
+// confinement flag — and the reply ceiling and its reserve share too, unless
 // the spec names them: those bounds describe the SERVER, so a spec silent about one (a nil
 // MaxOutputTokens or ResponseReserveFraction) leaves it exactly where the bind or the move that set
-// it put it.
-// What MOVES with the model, since ADR 0044: the profile and its parse-seam collaborators. The
+// it put it. A tool set the HOST owns stands as well, injected or swapped in: the engine composes
+// no roster under it (applyRoster).
+// What MOVES with the model, since ADR 0044: the profile and its parse-seam collaborators — and,
+// since ADR 0057, the tool ROSTER the profile's third axis spells. The
 // caller resolves it for the new model and hands it in on the spec; the same unexported
 // applyProfile SetProfile uses installs it, so the next response is read in the new model's
-// dialect rather than the departed model's.
+// dialect rather than the departed model's, and the next request offers the new model's menu
+// rather than the departed model's.
 // What resets: the token estimator (its chars→token calibration described the OLD model) and the
 // compaction saturation latch (it was judged against the old window).
 func (a *Agent) Rebind(spec RebindSpec) error {
@@ -198,8 +212,12 @@ func (a *Agent) Rebind(spec RebindSpec) error {
 		return err
 	}
 	// The last step that can fail: translating the new model's profile into its parse-seam
-	// collaborators. applyProfile is itself validate-then-commit, so an untranslatable profile
-	// leaves the parsers, cfg.Profile and every binding above exactly as they were.
+	// collaborators — and, once that has committed, composing the new model's tool roster off the
+	// same profile's third axis (applyRoster). applyProfile is itself validate-then-commit, so an
+	// untranslatable profile leaves the parsers, cfg.Profile, the tool set and every binding above
+	// exactly as they were. It runs BEFORE `a.cfg = next` and writes a.cfg.Profile itself, which is
+	// what lets the roster it composes read the profile now bound rather than the departed one;
+	// next carries the same profile, so the assignment below puts back what is already there.
 	if err := a.applyProfile(spec.Profile); err != nil {
 		return err
 	}

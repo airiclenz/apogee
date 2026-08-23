@@ -105,6 +105,7 @@ func newAgent(cfg domain.Config, up provider.Responder) (*Agent, error) {
 		upstream:           up,
 		registry:           registry,
 		tools:              resolveTools(cfg),
+		ownsToolSet:        composesDefaultRoster(cfg), // …and whether the engine may RE-compose it when the model's roster axis changes (ADR 0057)
 		guards:             security.NewDefaultGuards(),
 		mode:               cfg.Mode,               // seed the live, swappable mode from the construction config
 		confineToWorkspace: cfg.ConfineToWorkspace, // likewise the live, swappable blast-radius flag (/confine)
@@ -386,14 +387,48 @@ func deriveDeps(cfg domain.Config, needs mechanisms.DepNeeds) mechanisms.Deps {
 // network/host tools configured from Config — the url-safety policy, the web-search endpoint,
 // and the Asker and Presenter delegates); else no tools (the host gave neither, so the Agent
 // runs tool-less).
+//
+// The roster ladder (ADR 0057) applies to the DEFAULT branch alone. An injected Config.Tools is
+// the host's own assembly and is returned VERBATIM — before any roster is composed, so neither
+// the global `tools.disabled:`/`tools.enabled:` lists nor the bound model's profile axis can
+// subtract from a set the host built itself (ADR 0001). That is also why the engine may
+// re-compose only what it composed: see composesDefaultRoster.
 func resolveTools(cfg domain.Config) *domain.ToolRegistry {
 	if cfg.Tools != nil {
 		return cfg.Tools
 	}
 	if cfg.WorkspaceDir != "" {
-		return tools.NewDefaultRegistryWithHost(cfg.WorkspaceDir, hostTools(cfg))
+		return defaultRoster(cfg)
 	}
 	return nil
+}
+
+// defaultRoster assembles the engine's OWN tool set for cfg: the build's menu scoped to the
+// workspace and configured from Config, with the roster ladder applied over it (profile > global >
+// build default — tools.DefaultToolsWithHost). It is one function rather than a line inside
+// resolveTools because a model switch RE-runs it: the roster is a per-model binding, so the same
+// assembly answers "which tools does this Agent start with" and "which tools does it have now that
+// another model is bound", exactly as processing.ParserFor answers the parse seam's version of both
+// (applyProfile). Startup and switch therefore cannot disagree about what a roster means.
+func defaultRoster(cfg domain.Config) *domain.ToolRegistry {
+	return tools.NewDefaultRegistryWithHost(cfg.WorkspaceDir, hostTools(cfg))
+}
+
+// composesDefaultRoster reports whether the tool set an Agent built from cfg is the engine's OWN
+// assembly — the default registry above — rather than a set the host handed over. It is the line
+// between the two tool doors, and it is what makes the roster safe to re-compose at a rebind:
+//
+//   - an injected Config.Tools is the host's authority verbatim (ADR 0001, ADR 0057's stated
+//     bound), so the engine never rebuilds under it — a model switch leaves it exactly as it is;
+//   - a set installed mid-session through SwapTools is the host's assembly too (ADR 0037 binding
+//     F, MCP tools folded in and all), so taking that door clears the flag on the Agent;
+//   - and a tool-less Agent (no workspace, no injected set) has no roster to compose at all.
+//
+// Only the remaining case — the engine composed the set from the build's menu — may be re-composed
+// when the bound model's roster axis changes, because only there does the engine hold every fact
+// the assembly needs.
+func composesDefaultRoster(cfg domain.Config) bool {
+	return cfg.Tools == nil && cfg.WorkspaceDir != ""
 }
 
 // hostTools builds the host-supplied tool configuration (P3.11) from Config: the url-safety
@@ -402,8 +437,10 @@ func resolveTools(cfg domain.Config) *domain.ToolRegistry {
 // and configuration can only tighten it), the configured
 // web-search endpoint (empty ⇒ web_search's built-in DuckDuckGo default; "off" disables it),
 // the Asker delegate (nil ⇒ ask_user is not registered), the Presenter delegate (nil ⇒
-// present_document is not registered — ADR 0019), the disabled-tool roster (empty ⇒ the
-// whole built-in set), the credential variable names the execution tools scrub from a
+// present_document is not registered — ADR 0019), the three rungs of the roster ladder — the
+// global `tools.disabled:`/`tools.enabled:` lists and the bound model's profile axis, over the
+// build's own default-off declarations (ADR 0057; all empty ⇒ the whole built-in set) —, the
+// credential variable names the execution tools scrub from a
 // subprocess environment (empty ⇒ apogee's own alone), and the extra read-only roots the read
 // tools may reach (nil ⇒ workspace-only).
 //
@@ -422,10 +459,22 @@ func hostTools(cfg domain.Config) tools.HostTools {
 		WebSearchEndpoint: cfg.WebSearchEndpoint,
 		Asker:             cfg.Asker,
 		Presenter:         cfg.Presenter,
-		// The roster switch (`tools.disabled:`): the named tools are left out of the set this
-		// builds, which is the whole of the key — an Agent cannot offer or dispatch a tool its
-		// registry does not hold.
+		// The GLOBAL rung of the roster ladder (`tools.disabled:` / `tools.enabled:`, ADR 0057):
+		// the disabled names are left out of the set this builds, which is the whole of that key —
+		// an Agent cannot offer or dispatch a tool its registry does not hold — and the enabled
+		// names put back what the BUILD leaves off the default menu (a tool registered
+		// domain.DefaultOffTool). Both are overridden per tool by the profile axis below, and a
+		// name in both is a conflict disabled wins; reporting that, and an unknown name, is the
+		// host's job (tools.RosterConflicts / tools.KnownToolNames), never a refusal to build.
 		Disabled: cfg.DisabledTools,
+		Enabled:  cfg.EnabledTools,
+		// The MOST SPECIFIC rung: the bound model's own roster axis, the third axis of the Model
+		// profile the composition root already resolved for this model (ADR 0057). It travels on
+		// Config.Profile rather than in a field of its own precisely so it cannot drift from the
+		// other two axes — one resolved profile, three axes, one binding — and it is what makes a
+		// tool off for the small class and on for a big model. A zero delta says nothing, which
+		// keeps a zero profile the byte-identical anchor here too.
+		ProfileRoster: cfg.Profile.Tools,
 		// The caller-named half of the execution tools' credential scrub (`api-key-env:`, ADR 0047):
 		// the variables the host's configured key sources read, dropped from every subprocess
 		// environment beside apogee's own APOGEE_API_KEY. Empty ⇒ apogee's own alone, the scrub as

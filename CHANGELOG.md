@@ -10,6 +10,21 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **The resolved tool roster is a per-model rebind binding (ADR 0057, plan item 5).** Which tools a
+  model is offered now moves with the model: the roster deltas ride `RebindSpec` as the third axis
+  of the profile it already carries, and a switch applies them atomically at the ADR 0024 boundary
+  through the one `applyProfile` both doors run — so a config edit under a stable model
+  (`SetProfile`) and a model change (`Rebind`) can no more disagree about a roster than they can
+  about a stripper. Construction composes the same ladder over the same function (`hostTools` now
+  hands the global `tools.enabled:` list and the matched profile's axis to the registry beside
+  `tools.disabled:`), so startup and switch cannot mean different things by one entry, and a switch
+  back to a model that spells no roster restores the menu rather than leaving the departed model's
+  pruning in force. The engine re-composes only the set it ASSEMBLED itself: a tool set the host
+  injected through `Config.Tools` or handed over through `SwapTools` — the MCP-aware assembly a live
+  session runs on — is the host's authority verbatim and no model switch rebuilds under it. A
+  sub-agent's Config carries its OWN model's roster axis, and ADR 0005's narrowing is still the
+  ceiling on it, so a routed child can never be handed a tool its parent lacked.
+
 - **Model-profile resolution is axis-wise across the three layers (ADR 0057, plan item 4).** A
   `model-profiles:` entry no longer replaces the whole profile it matches: each axis — tool-call
   format (with the pattern that rides it), thinking channel, tool roster — independently takes the
