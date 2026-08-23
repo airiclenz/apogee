@@ -209,12 +209,18 @@ type Options struct {
 	// the config file only (default-empty ⇒ MCP dormant). ApplyConfig sets it from settings.
 	MCPServers []mcp.ServerConfig
 
-	// toolsDisabled is the resolved `tools.disabled:` roster switch — the built-in tools this
-	// config takes off the menu, by name. Loaded from the config file only (default-empty ⇒ the
-	// whole roster). ApplyConfig sets it from settings, having already reported any name that
-	// matches no tool; runRoot folds it into apogee.Config.DisabledTools, which the registry
-	// assembly subtracts, so a disabled tool is neither offered to the model nor dispatchable.
+	// toolsDisabled and toolsEnabled are the resolved GLOBAL roster deltas (ADR 0057) — the built-in
+	// tools this config takes off the menu, and the ones it puts back on it. Loaded from the config
+	// file only (default-empty ⇒ the whole roster the build offers). ApplyConfig sets them from
+	// settings, having already reported any name that matches no tool and any name written under
+	// both; runRoot folds ToolsDisabled into apogee.Config.DisabledTools, which the registry assembly
+	// subtracts, so a disabled tool is neither offered to the model nor dispatchable.
+	//
+	// ToolsEnabled is the middle rung's ADD direction: a name here lifts a tool the build registers
+	// default-off (tools.DefaultOffTool), so "I want this tool everywhere" never forces a catch-all
+	// `model-profiles:` entry. A matching profile's own `tools:` axis outranks both, per tool.
 	ToolsDisabled []string
+	ToolsEnabled  []string
 
 	// urlAllowHosts / urlDenyHosts are the resolved `url-safety:` host layer — the hosts the network
 	// tools (web_fetch, http_request, web_search) may reach, and the hosts they may not. Loaded from

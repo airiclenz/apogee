@@ -1840,6 +1840,235 @@ func TestApplyConfigToolsDisabled(t *testing.T) {
 	})
 }
 
+// The `tools:` block's OTHER half round-trips the same way (ADR 0057 decision 3): `enabled:` parses
+// into opts.ToolsEnabled in file order, each half stands on its own so a block naming one leaves the
+// other empty, and an absent block adds nothing back — which is the whole menu the build offers.
+func TestApplyConfigToolsEnabled(t *testing.T) {
+	t.Parallel()
+
+	t.Run("the listed names resolve in file order", func(t *testing.T) {
+		t.Parallel()
+		home := testConfigHome(t, "tools:\n  enabled: [web_search, grep]\n")
+		opts := Options{ConfigDir: home}
+		if err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" },
+			os.ReadFile, noNotify); err != nil {
+			t.Fatalf("ApplyConfig: %v", err)
+		}
+		if want := []string{"web_search", "grep"}; !reflect.DeepEqual(opts.ToolsEnabled, want) {
+			t.Errorf("toolsEnabled = %v; want %v", opts.ToolsEnabled, want)
+		}
+		if len(opts.ToolsDisabled) != 0 {
+			t.Errorf("toolsDisabled = %v; a block naming one half must leave the other empty", opts.ToolsDisabled)
+		}
+	})
+
+	t.Run("both halves of one block resolve independently", func(t *testing.T) {
+		t.Parallel()
+		home := testConfigHome(t, "tools:\n  disabled: [view_diff]\n  enabled: [web_search]\n")
+		opts := Options{ConfigDir: home}
+		if err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" },
+			os.ReadFile, noNotify); err != nil {
+			t.Fatalf("ApplyConfig: %v", err)
+		}
+		if want := []string{"view_diff"}; !reflect.DeepEqual(opts.ToolsDisabled, want) {
+			t.Errorf("toolsDisabled = %v; want %v", opts.ToolsDisabled, want)
+		}
+		if want := []string{"web_search"}; !reflect.DeepEqual(opts.ToolsEnabled, want) {
+			t.Errorf("toolsEnabled = %v; want %v — the two halves must not alias one another",
+				opts.ToolsEnabled, want)
+		}
+	})
+
+	t.Run("an absent block adds nothing back", func(t *testing.T) {
+		t.Parallel()
+		home := testConfigHome(t, "mode: plan\n")
+		opts := Options{ConfigDir: home}
+		if err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" },
+			os.ReadFile, noNotify); err != nil {
+			t.Fatalf("ApplyConfig: %v", err)
+		}
+		if len(opts.ToolsEnabled) != 0 {
+			t.Errorf("toolsEnabled = %v; want nothing added back", opts.ToolsEnabled)
+		}
+	})
+}
+
+// A `model-profiles:` entry's `tools:` axis round-trips onto the profile it describes (ADR 0057
+// decision 1): both lists reach domain.ModelProfile.Tools in file order, an entry that spells no
+// axis carries the zero delta, and the axis rides the same entry as the wire-shape axes rather than
+// a map of its own.
+func TestApplyConfigProfileToolsAxis(t *testing.T) {
+	t.Parallel()
+
+	home := testConfigHome(t, `model-profiles:
+  big-model:
+    thinking:
+      style: harmony
+    tools:
+      disabled: [view_diff]
+      enabled: [web_search, grep]
+  small-model:
+    thinking:
+      style: none
+`)
+	opts := Options{ConfigDir: home}
+	if err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" },
+		os.ReadFile, noNotify); err != nil {
+		t.Fatalf("ApplyConfig: %v", err)
+	}
+
+	byPattern := map[string]domain.ModelProfile{}
+	for _, e := range opts.ModelProfiles {
+		byPattern[e.Pattern] = e.Profile
+	}
+	big := byPattern["big-model"].Tools
+	want := domain.ToolRosterDelta{Disabled: []string{"view_diff"}, Enabled: []string{"web_search", "grep"}}
+	if !reflect.DeepEqual(big, want) {
+		t.Errorf("big-model tools axis = %+v; want %+v", big, want)
+	}
+	// The other axes of the same entry are untouched by the new one.
+	if got := byPattern["big-model"].Thinking.Style; got != domain.ThinkingHarmony {
+		t.Errorf("big-model thinking style = %q; want harmony — the roster axis must not disturb its neighbours", got)
+	}
+	// And an entry that spells no axis carries no deltas, which is what keeps it the anchor it was.
+	if small := byPattern["small-model"].Tools; !reflect.DeepEqual(small, domain.ToolRosterDelta{}) {
+		t.Errorf("small-model tools axis = %+v; want the zero delta", small)
+	}
+}
+
+// Axis PRESENCE is a fact of the FILE and is kept there (ADR 0057 decision 5): an entry that spells
+// `tools:` — empty lists included — is distinguishable from one that leaves the key out, which is
+// exactly what axis-wise resolution needs and what the domain value, carrying only the deltas, can
+// no longer say once both arrive as the zero delta.
+func TestProfileEntryRecordsWhetherItSpellsTheToolsAxis(t *testing.T) {
+	t.Parallel()
+
+	home := testConfigHome(t, `model-profiles:
+  spells-it:
+    tools: {}
+  leaves-it-out:
+    thinking:
+      style: none
+`)
+	fc, err := parseConfigFile(filepath.Join(home, "config.yaml"), os.ReadFile, noNotify)
+	if err != nil {
+		t.Fatalf("parseConfigFile: %v", err)
+	}
+	if !fc.ModelProfiles["spells-it"].spellsToolsAxis() {
+		t.Error("an entry writing `tools: {}` does not report the axis as spelled; an explicit empty " +
+			"axis is how a deeper layer's roster is overridden")
+	}
+	if fc.ModelProfiles["leaves-it-out"].spellsToolsAxis() {
+		t.Error("an entry with no `tools:` key reports the axis as spelled; absence is the inherit spelling")
+	}
+	// Both project to the same domain value, which is why presence cannot live there.
+	spelled := fc.ModelProfiles["spells-it"].toModelProfile().Tools
+	absent := fc.ModelProfiles["leaves-it-out"].toModelProfile().Tools
+	if !reflect.DeepEqual(spelled, absent) {
+		t.Errorf("the two entries project to %+v and %+v; both are the zero delta, and the difference "+
+			"between them is a file fact only", spelled, absent)
+	}
+}
+
+// Every roster list a config can spell is checked for names that are no tool, and every roster BLOCK
+// for a name written under both halves — and each notice says WHICH key it is about, because the
+// same list can now be written in four places and a complaint that does not name one sends the user
+// hunting. None of them is ever a refusal: a roster being tuned must not be able to stop a session.
+func TestApplyConfigRosterNoticesNameTheOffendingKey(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name     string
+		yaml     string
+		wantKey  string
+		wantName string
+	}{
+		{
+			name:     "an unknown name in the global disabled list",
+			yaml:     "tools:\n  disabled: [grepp, grep]\n",
+			wantKey:  "tools.disabled",
+			wantName: "grepp",
+		},
+		{
+			name:     "an unknown name in the global enabled list",
+			yaml:     "tools:\n  enabled: [web_searchh, web_search]\n",
+			wantKey:  "tools.enabled",
+			wantName: "web_searchh",
+		},
+		{
+			name:     "an unknown name in a profile's disabled list",
+			yaml:     "model-profiles:\n  big-model:\n    tools:\n      disabled: [view_diffff]\n",
+			wantKey:  "model-profiles.big-model.tools.disabled",
+			wantName: "view_diffff",
+		},
+		{
+			name:     "an unknown name in a profile's enabled list",
+			yaml:     "model-profiles:\n  big-model:\n    tools:\n      enabled: [grepp]\n",
+			wantKey:  "model-profiles.big-model.tools.enabled",
+			wantName: "grepp",
+		},
+		{
+			name:     "a name written under both halves of the global block",
+			yaml:     "tools:\n  disabled: [grep]\n  enabled: [grep]\n",
+			wantKey:  "tools lists",
+			wantName: "grep",
+		},
+		{
+			name:     "a name written under both halves of a profile's axis",
+			yaml:     "model-profiles:\n  big-model:\n    tools:\n      disabled: [grep]\n      enabled: [grep]\n",
+			wantKey:  "model-profiles.big-model.tools lists",
+			wantName: "grep",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			home := testConfigHome(t, tc.yaml)
+			opts := Options{ConfigDir: home}
+			var notices []string
+			if err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" },
+				os.ReadFile, func(n string) { notices = append(notices, n) }); err != nil {
+				t.Fatalf("a roster complaint must not stop startup: %v", err)
+			}
+			var reported string
+			for _, n := range notices {
+				if strings.Contains(n, tc.wantKey) {
+					reported = n
+				}
+			}
+			switch {
+			case reported == "":
+				t.Fatalf("no notice named %q; got %v", tc.wantKey, notices)
+			case !strings.Contains(reported, tc.wantName):
+				t.Errorf("the notice must name the offending tool %q: %q", tc.wantName, reported)
+			}
+		})
+	}
+}
+
+// The conflict notice says which way the clash is resolved, because a line that only reported the
+// disagreement would leave the user guessing which tool they end up with. Disabled wins — the
+// roster fails CLOSED (ADR 0057 decision 4) — and the wording has to say so.
+func TestRosterConflictNoticeSaysDisabledWins(t *testing.T) {
+	t.Parallel()
+
+	notice := rosterConflictNotice("tools", domain.ToolRosterDelta{
+		Disabled: []string{"grep", " view_diff "},
+		Enabled:  []string{"view_diff", "grep"},
+	})
+	for _, want := range []string{"tools", "grep", "view_diff", "disabled wins"} {
+		if !strings.Contains(notice, want) {
+			t.Errorf("conflict notice %q does not carry %q", notice, want)
+		}
+	}
+	// A block whose lists disagree about nothing says nothing at all.
+	if quiet := rosterConflictNotice("tools", domain.ToolRosterDelta{
+		Disabled: []string{"grep"}, Enabled: []string{"view_diff"},
+	}); quiet != "" {
+		t.Errorf("two lists naming different tools produced %q; want silence", quiet)
+	}
+}
+
 // The `url-safety:` block round-trips to Options the way the roster above it does: both host lists
 // parse in file order, each key stands on its own so a block naming one leaves the other empty, and
 // an absent block configures no host layer at all — which is every host, subject to the SSRF floor

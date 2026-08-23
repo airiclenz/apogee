@@ -213,6 +213,7 @@ func TestSettingsRowsFormatEffectiveValues(t *testing.T) {
 		"web-search-endpoint":    "off",
 		"mcp-servers":            noneSettingValue,
 		"tools.disabled":         "[view_diff]",
+		"tools.enabled":          "[]", // unset: nothing is added back, which is the whole default menu
 		"url-safety.allow-hosts": "[docs.example.com]",
 		"url-safety.deny-hosts":  "[]", // unset: a list row's empty spelling, and every host is still floored
 		"use-project-skills":     "false",

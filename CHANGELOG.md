@@ -10,6 +10,15 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- Config: the tool roster is spelled in two places now. The global `tools:` block gains `enabled:`
+  beside `disabled:` — the list that puts a tool this build leaves off by default back on the menu —
+  and a `model-profiles:` entry gains a `tools: {disabled, enabled}` axis of its own, the per-model
+  roster that outranks the global block per tool (ADR 0057). Every roster list is checked at startup
+  and every complaint now names the key it is about: a name that is no tool, in any of the four
+  lists, is the one-line notice it always was, and a name written under both halves of one block is
+  a notice too, with `disabled:` winning. Neither is ever a refusal. The seeded config template and
+  the README document both spellings.
+
 - **The effective tool roster composes build, global and profile deltas (ADR 0057, plan item 2).**
   `tools.EffectiveRoster(all, tools.RosterDeltas{Global, Profile})` is the one pure pass that
   answers which built-in tools a host offers: it starts from the build default (every tool except

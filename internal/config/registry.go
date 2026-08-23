@@ -295,6 +295,20 @@ var KeyRegistry = []Key{
 		Read: func(o Options) string { return listValue(o.ToolsDisabled) },
 	},
 	{
+		// The switch's ADD direction (ADR 0057 decision 3), beside it here because the template puts
+		// the two keys in one `tools:` block and the pane reads the registry top to bottom.
+		//
+		// NOT editable, unlike the list above it: the pane's roster edit is a tool-set SWAP, and the
+		// enable direction only reaches a tool the build registers default-off — a state no tool
+		// ships in yet, so the row would offer a live edit with nothing to move. It reads its value
+		// and sends ⏎ to the file, which is where a default-off tool is lifted today.
+		Path: "tools.enabled", Kind: KindStringList,
+		Desc: "Built-in tools to put back on the menu — for a tool this build leaves off by default.",
+		// The names, for the roster row's reason above; "[]" for a list nobody has set, since adding
+		// nothing back is the default rather than an unanswered row.
+		Read: func(o Options) string { return listValue(o.ToolsEnabled) },
+	},
+	{
 		// The host layer over the network tools' url-safety guard, a name list on one line like the
 		// roster above it — same kind, same field editor, and no validate hook for a reason of its own:
 		// an entry is normalized permissively where the guard is built (trim, surrounding brackets of an

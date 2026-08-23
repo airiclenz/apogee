@@ -124,7 +124,34 @@ conflict; injected tool set untouched; empty everything = today's exact menu.
 
 **Commit:** `feat(tools): the effective roster composes build, global and profile deltas`
 
-## 3. `config`: the spellings — `tools.enabled:` and the profile `tools:` axis
+## 3. `config`: the spellings — `tools.enabled:` and the profile `tools:` axis — ✅ DONE (2026-08-23)
+
+NOTES (2026-08-23): the item's "records axis PRESENCE per entry ... for the axis-wise resolver" is
+recorded at the YAML seam and goes no further, per the run's DECISION that the resolver is item 4 and
+has not landed: `modelProfileConfig.Tools` is a `*toolsConfig`, so `tools: {}` and an absent key are
+distinguishable, and the fact is asked for through the documented `spellsToolsAxis` predicate
+(pinned by `TestProfileEntryRecordsWhetherItSpellsTheToolsAxis`, which also pins that both project to
+the same zero delta — which is why presence cannot live in `domain.ModelProfile`). Nothing reads the
+predicate in production yet; item 4's resolver is its caller.
+
+NOTES (2026-08-23): the new `tools.enabled` registry row is NOT `Editable`, unlike `tools.disabled`
+beside it. An editable row needs an apply case in `cmd/apogee/wire_settings.go` plus a
+`liveTools.setEnabled` swap door (`TestEveryEditableSettingKeyHasAnApply` enforces it), which is
+`cmd/apogee` work this item's Files exclude, and the enable direction reaches only a tool registered
+default-off — a state no tool ships in yet. The row reads its value and sends ⏎ to the file, the
+`mcp-servers`/`model-profiles` posture. Pinning the new row's rendered value in
+`cmd/apogee/settingsrows_test.go` was unavoidable: that table asserts one entry per registry key.
+
+NOTES (2026-08-23): `unknownToolNotice` gained a `key` parameter (`unknownToolNotice(key, names)`)
+so the same complaint can name any of the four lists; exported `UnknownToolNames` keeps its
+signature, so `cmd/apogee/wire_settings.go`'s caller is untouched. The conflict notice asks
+`tools.RosterConflicts` (item 2) rather than comparing lists here, so the line can never describe a
+different set than the ladder acts on.
+
+NOTES (2026-08-23): README's tool-roster paragraph was updated beside the seeded template though the
+item's Files name only the template — the two spellings are user-facing, no later item of this plan
+touches README, and the paragraph's "all on by default … `disabled:` is how you take one off" would
+otherwise be the only account of a block that now has two keys.
 
 **What:** parse the global `tools.enabled:` list and
 `model-profiles.<pattern>.tools.{disabled,enabled}`. Unknown tool names in ANY of these lists

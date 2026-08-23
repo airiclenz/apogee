@@ -386,10 +386,13 @@ context-files:
 #     endpoint: https://mcp.example.com/ # the server URL (http://127.0.0.1:… is fine too)
 
 # =============================================================================
-# The tool roster: which of Apogee's BUILT-IN tools this configuration offers the model. Every one
-# of them is on by default; list a name under disabled: and it is taken off the menu entirely — the
-# model is never shown it, and a call naming it is refused as a tool that does not exist.
-# Config-file only (no flag or env), and global: it applies to every model this config runs.
+# The tool roster: which of Apogee's BUILT-IN tools this configuration offers the model. Almost all
+# of them are on by default; list a name under disabled: and it is taken off the menu entirely — the
+# model is never shown it, and a call naming it is refused as a tool that does not exist. The other
+# direction is enabled:, for a tool this build leaves OFF the menu by default — present in the
+# binary, offered to nobody until you name it here. (No tool ships that way today; the key is how
+# the first one is turned on.)
+# Config-file only (no flag or env), and global: both lists apply to every model this config runs.
 #
 # It exists because a long tool list is itself a cost for a small model: fewer, clearer tools can
 # beat more of them. Turn one off, run your own work against it, and keep what actually helps.
@@ -397,14 +400,21 @@ context-files:
 # The names are the ones the model calls a tool by — the same names the transcript shows while a
 # tool runs (read_file, grep, terminal, web_search, …). A name that is not a tool is a startup
 # NOTICE, never a refusal, and the rest of the list still applies, so a typo costs you the tool you
-# meant to disable and nothing else. An MCP server's tools are NOT listed here: they come and go
-# with the server, so drop the server from mcp-servers: above instead.
+# meant to move and nothing else. A name written under BOTH lists is a startup NOTICE too, and
+# disabled wins — the reading that takes a tool away is the one that cannot surprise you. An MCP
+# server's tools are NOT listed here: they come and go with the server, so drop the server from
+# mcp-servers: above instead.
+#
+# These are the GLOBAL lists. A single model can have a roster of its own: model-profiles: at the
+# end of this file takes the same two keys, and what it says about a tool beats what this block says
+# — that is how a tool stays off for the models that drown in it and on for the one that wants it.
 #
 # The change applies to the running session as soon as you save this file — the next request is
 # built from the new roster — so /settings and a text editor behave the same way.
 #
 # tools:
 #   disabled: [view_diff, single_find_and_replace]
+#   enabled: []
 
 # =============================================================================
 # Which HOSTS the network tools (web_fetch, http_request, web_search) may reach. Both lists are
@@ -749,8 +759,8 @@ ui:
 # beats every built-in — which is also how you switch a built-in off when it fires on a model it
 # has no business shaping: name that model here with a thinking style of none.
 #
-# A matching entry replaces the WHOLE profile, both axes: an axis you leave out means native /
-# nothing-stripped, NOT "keep the built-in's". The axes and their values:
+# A matching entry replaces the WHOLE profile, every axis: an axis you leave out means native /
+# nothing-stripped / no roster change, NOT "keep the built-in's". The axes and their values:
 #
 #   tool-call-format   native (the default) — calls arrive structured, out of band
 #                      markdown-fenced      — calls are parsed back out of a fenced block in the reply
@@ -768,6 +778,19 @@ ui:
 #                      the model's own default stands; off asks for no reasoning. Orthogonal to
 #                      style: above, which only says how the reasoning ARRIVES. A value outside
 #                      those four is a startup error.
+#   tools:             THIS model's tool roster — the same disabled: / enabled: pair the global
+#                      tools: block above takes, written as a CHANGE to the menu rather than as a
+#                      replacement for it, so a tool added by a later release reaches this model too.
+#     disabled         names this model is not offered, whatever the global block says. This is how
+#                      a tool that a small model drowns in stays off for it.
+#     enabled          names this model IS offered, even where the global block disables them or the
+#                      build leaves them off by default. This is the other half of the same story:
+#                      one tool, off for the class that cannot use it, on for the model that can.
+#
+#                      What this block says about a tool beats what the global block says about it,
+#                      per tool and in either direction. A name in both lists is a startup NOTICE and
+#                      disabled wins; a name that is no tool is the same NOTICE the global lists give.
+#                      MCP servers' tools are not addressable here — they ride their own surface.
 #
 # `apogee probe model` prints the entry its findings suggest, keyed by the model it probed and ready
 # to paste here (it never edits this file). Editing this block while a session runs swaps the parser
@@ -788,3 +811,7 @@ ui:
 #     tool-call-format: markdown-fenced
 #     thinking:
 #       style: none                 # also how you switch an unwanted built-in match back off
+#   my-big-model:                   # a roster of its own, for the model that can carry it
+#     tools:
+#       enabled: [web_search]       # on for this model, wherever the global block leaves it off
+#       disabled: []                # and nothing extra taken away

@@ -490,11 +490,22 @@ var keyAccessors = []keyAccessor{
 		},
 	},
 	{
+		// Each half of the `tools:` block projects on its own, the way the `url-safety:` pair below
+		// does: a block that names only one of them configures that one and leaves the other empty.
 		row: mustKey("tools.disabled"),
 		fromFile: func(o *Options, fc fileConfig) {
 			o.ToolsDisabled = nil
 			if fc.Tools != nil && len(fc.Tools.Disabled) > 0 {
 				o.ToolsDisabled = fc.Tools.Disabled
+			}
+		},
+	},
+	{
+		row: mustKey("tools.enabled"),
+		fromFile: func(o *Options, fc fileConfig) {
+			o.ToolsEnabled = nil
+			if fc.Tools != nil && len(fc.Tools.Enabled) > 0 {
+				o.ToolsEnabled = fc.Tools.Enabled
 			}
 		},
 	},
@@ -723,12 +734,13 @@ func (fc fileConfig) contextFiles() contextFilesSettings {
 	return c.toContextFilesSettings()
 }
 
-// UnknownToolNames returns the entries of a `tools.disabled:` list that name no tool this build
-// offers, in the order they were listed and trimmed as the filter trims them. The catalogue is
-// internal/tools' own (tools.KnownToolNames), so a tool renamed or added there is answered here
-// with no second list to keep in step.
-func UnknownToolNames(disabled []string) []string {
-	if len(disabled) == 0 {
+// UnknownToolNames returns the entries of a roster list — either half of the global `tools:` block
+// or of a `model-profiles:` entry's `tools:` axis — that name no tool this build offers, in the
+// order they were listed and trimmed as the filter trims them. The catalogue is internal/tools' own
+// (tools.KnownToolNames), which reads the BUILD rung and therefore still spells a default-off tool:
+// the name that lifts one is exactly the name `tools.enabled:` has to accept.
+func UnknownToolNames(names []string) []string {
+	if len(names) == 0 {
 		return nil
 	}
 	catalogue := tools.KnownToolNames()
@@ -737,7 +749,7 @@ func UnknownToolNames(disabled []string) []string {
 		known[name] = true
 	}
 	var unknown []string
-	for _, name := range disabled {
+	for _, name := range names {
 		if name = strings.TrimSpace(name); name != "" && !known[name] {
 			unknown = append(unknown, name)
 		}
@@ -745,17 +757,94 @@ func UnknownToolNames(disabled []string) []string {
 	return unknown
 }
 
-// unknownToolNotice is the ONE line an unrecognised `tools.disabled:` entry produces at startup,
-// or "" when every listed name is a tool. It is a notice and not an error on purpose: the list is
-// how a roster is pruned on evidence, so a typo in it costs the user the tool they meant to turn
-// off — never the session. Every name that IS a tool still applies.
-func unknownToolNotice(disabled []string) string {
-	unknown := UnknownToolNames(disabled)
+// unknownToolNotice is the ONE line an unrecognised roster entry produces at startup, or "" when
+// every listed name is a tool. key is the config key the list was written under — `tools.disabled`,
+// `tools.enabled`, or `model-profiles.<pattern>.tools.<half>` — because a config can now spell the
+// same list in several places, and a notice that does not say WHICH one has the typo sends the user
+// looking through all of them.
+//
+// It is a notice and not an error on purpose: the list is how a roster is tuned on evidence, so a
+// typo in it costs the user the tool they meant to turn off or on — never the session. Every name
+// that IS a tool still applies.
+func unknownToolNotice(key string, names []string) string {
+	unknown := UnknownToolNames(names)
 	if len(unknown) == 0 {
 		return ""
 	}
-	return fmt.Sprintf("apogee: tools.disabled names %s, which apogee has no tool for — check the "+
-		"spelling; the rest of the list applies", strings.Join(quoteAll(unknown), ", "))
+	return fmt.Sprintf("apogee: %s names %s, which apogee has no tool for — check the "+
+		"spelling; the rest of the list applies", key, strings.Join(quoteAll(unknown), ", "))
+}
+
+// rosterConflictNotice is the ONE line a tool named in BOTH halves of one roster block produces at
+// startup, or "" when the two lists disagree about nothing. key is the block — `tools` or
+// `model-profiles.<pattern>.tools` — for unknownToolNotice's reason: the same clash can be written
+// in several places.
+//
+// Disabled wins, because a roster the user is tuning must fail CLOSED: the two lists cannot both be
+// honoured, and the reading that takes a tool away is the one that cannot surprise a model with a
+// capability its operator tried to remove (ADR 0057 decision 4). Like every other roster complaint
+// this is a notice, never a refusal.
+func rosterConflictNotice(key string, roster domain.ToolRosterDelta) string {
+	clashing := conflictingToolNames(roster)
+	if len(clashing) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("apogee: %s lists %s under both disabled: and enabled: — disabled wins, so "+
+		"%s stays off the menu; drop the name from one list to say which you meant", key,
+		strings.Join(quoteAll(clashing), ", "), pluralSubject(len(clashing)))
+}
+
+// conflictingToolNames returns the names one roster block writes in both directions, asked of
+// internal/tools rather than compared here: the ladder that ACTS on the lists owns how a name is
+// trimmed and how a repeat is folded (tools.RosterConflicts), so a notice computed any other way
+// could come to describe a different set than the roster the session actually runs.
+//
+// The pair is handed over in the Global slot whichever rung it came from. The scope is immaterial
+// to the question — a clash is a property of ONE block's two lists — and the caller, which knows the
+// config key, is what names the offending place.
+func conflictingToolNames(roster domain.ToolRosterDelta) []string {
+	conflicts := tools.RosterConflicts(tools.RosterDeltas{Global: roster})
+	names := make([]string, 0, len(conflicts))
+	for _, c := range conflicts {
+		names = append(names, c.Tool)
+	}
+	return names
+}
+
+// pluralSubject is the pronoun the conflict line's second clause takes, so one clashing name reads
+// as a sentence about that tool and several as a sentence about the list.
+func pluralSubject(n int) string {
+	if n == 1 {
+		return "it"
+	}
+	return "they"
+}
+
+// rosterNotices is every complaint this configuration's roster lists produce, in the order the file
+// spells them: the global block first, then each `model-profiles:` entry's axis in pattern order
+// (toProfileEntries already sorts, so the same file reports the same lines on every run).
+//
+// EVERY configured entry is checked, not only the one the bound model matches: a typo in the profile
+// a user will switch to in ten minutes is worth reporting while they are still looking at the file
+// they typed it in.
+func rosterNotices(global domain.ToolRosterDelta, entries []profiles.Entry) []string {
+	var notices []string
+	add := func(key string, roster domain.ToolRosterDelta) {
+		if n := unknownToolNotice(key+".disabled", roster.Disabled); n != "" {
+			notices = append(notices, n)
+		}
+		if n := unknownToolNotice(key+".enabled", roster.Enabled); n != "" {
+			notices = append(notices, n)
+		}
+		if n := rosterConflictNotice(key, roster); n != "" {
+			notices = append(notices, n)
+		}
+	}
+	add("tools", global)
+	for _, e := range entries {
+		add("model-profiles."+e.Pattern+".tools", e.Profile.Tools)
+	}
+	return notices
 }
 
 // quoteAll quotes each name so a list of them reads as names rather than as prose.
@@ -920,9 +1009,11 @@ type fileConfig struct {
 	// the MCP feature is dormant (no servers, no error). Each server's tools surface into the
 	// registry as classMCP ExternalEffectTools the disposition gates in Auto.
 	MCPServers []mcpServerConfig `yaml:"mcp-servers"`
-	// Tools is the roster block: today its one key is `disabled:`, the built-in tools this config
-	// takes off the menu. A pointer so an absent block falls through to the default (every tool)
-	// rather than reading as an explicit empty one.
+	// Tools is the GLOBAL roster block (ADR 0057): `disabled:`, the built-in tools this config takes
+	// off the menu, and `enabled:`, the ones it puts back on it. A pointer so an absent block falls
+	// through to the default (every tool the build offers) rather than reading as an explicit empty
+	// one. It is the middle rung of the roster ladder — a matching `model-profiles:` entry's own
+	// `tools:` axis outranks it per tool, and it outranks the build's default-off state.
 	Tools *toolsConfig `yaml:"tools"`
 	// URLSafety is the host allow/deny layer the network tools' url-safety guard runs on top of its
 	// always-on SSRF floor. A pointer so an absent block falls through to the default (no host list
@@ -932,10 +1023,11 @@ type fileConfig struct {
 	URLSafety *urlSafetyConfig `yaml:"url-safety"`
 	// ModelProfiles describes how a model speaks the wire (CONTEXT: Model profile) — its tool-call
 	// format and inline thinking-channel style — keyed by a PATTERN the model name contains
-	// (ADR 0044). File-only, no flag/env, like mcp-servers. Absent/empty ⇒ nothing the user
-	// configured matches any model, so resolution falls back to apogee's shipped shape table and,
-	// failing that, to the zero profile (native tool calls, no inline thinking). A matching entry
-	// replaces the WHOLE profile, both axes, and outranks every shipped entry.
+	// (ADR 0044) — and, since ADR 0057, the tool roster that model is offered. File-only, no
+	// flag/env, like mcp-servers. Absent/empty ⇒ nothing the user configured matches any model, so
+	// resolution falls back to apogee's shipped shape table and, failing that, to the zero profile
+	// (native tool calls, no inline thinking, no roster deltas). A matching entry replaces the WHOLE
+	// profile, every axis, and outranks every shipped entry.
 	//
 	// The retired GLOBAL `model-profile:` block this replaces is refused at startup with the map
 	// spelling to paste (configmigrate.go): a profile is per-model now, so a config that still
@@ -1648,18 +1740,34 @@ func (u uiConfig) toUISettings() UISettings {
 	return s
 }
 
-// toolsConfig is the on-disk `tools:` block — the tool roster this config runs with. Its one key
-// is the switch: the built-in tools to leave OFF the menu, by name.
+// toolsConfig is the on-disk `tools:` block — the tool roster this config runs with, as a PAIR of
+// delta lists against the default menu: the built-in tools to leave OFF it, and the ones to put
+// back ON it (ADR 0057 decision 2).
 //
-// It is a BLOCK rather than a top-level `disabled-tools:` list because the roster is a subject
-// that will grow (per-profile rosters build on this key), and a block is where the next key of the
-// same subject goes without a second top-level name that means almost the same thing.
+// It is a BLOCK rather than a top-level `disabled-tools:` list because the roster is a subject that
+// grew exactly as expected: the same shape is now also a `model-profiles:` entry's third axis, so
+// this one struct is the on-disk spelling of BOTH rungs of the roster ladder — the global pair here
+// and the per-model pair there. What differs between them is only which rung the lists land on
+// (domain.Config.DisabledTools/EnabledTools vs domain.ModelProfile.Tools), never how they are
+// written, which is what keeps `tools:` one thing a user has to learn.
+//
+// Neither list is ever a REPLACEMENT roster: a full list would silently starve a configured model
+// of every tool a later release adds.
 type toolsConfig struct {
 	// Disabled names the built-in tools this config takes off the menu, so the model is neither
 	// offered them nor able to call them. Absent/empty ⇒ every tool, the default. A name matching
 	// no tool is a warning at startup, never an error: a roster the user is pruning must not be
 	// able to stop a session from starting.
 	Disabled []string `yaml:"disabled"`
+	// Enabled names the built-in tools this config puts BACK on the menu — the counterpart to the
+	// switch above, for a tool the build registers default-off (tools.DefaultOffTool) or a rung
+	// below this one disabled. Absent/empty ⇒ nothing is added back, which is today's whole menu
+	// since no tool ships default-off. A name matching no tool is the same startup warning
+	// Disabled's is, and for the same reason.
+	//
+	// A name in BOTH lists of one block cannot be honoured twice: disabled wins (fail closed) and
+	// the clash is a startup NOTICE naming it (rosterConflictNotice), never a refusal.
+	Enabled []string `yaml:"enabled"`
 }
 
 // urlSafetyConfig is the on-disk `url-safety:` block — the host allow/deny layer the network tools'
@@ -1714,6 +1822,35 @@ type modelProfileConfig struct {
 	ToolCallFormat  string         `yaml:"tool-call-format"`
 	ToolCallPattern string         `yaml:"tool-call-pattern"`
 	Thinking        thinkingConfig `yaml:"thinking"`
+	// Tools is the profile's roster axis (ADR 0057 decision 1) — the same `disabled:`/`enabled:`
+	// pair the global `tools:` block is written with, applied to THIS model. It is the most specific
+	// rung of the roster ladder, so a name here is the last word on that tool in either direction.
+	//
+	// It is a POINTER because the axis's PRESENCE is a fact of its own: an entry that spells no
+	// `tools:` key defers the axis to the next layer, while `tools: {}` states an empty axis and
+	// overrides it (ADR 0057 decision 5). A value type cannot tell those two apart — both would
+	// arrive as the zero delta — so the distinction is kept where it is true, at the YAML seam, and
+	// asked for through spellsToolsAxis.
+	Tools *toolsConfig `yaml:"tools"`
+}
+
+// spellsToolsAxis reports whether this entry WRITES the roster axis at all — `tools:` present, empty
+// lists included — as opposed to leaving it out. It is the axis-presence fact axis-wise resolution
+// reads (ADR 0057 decision 5): absence is the "inherit" spelling and defers to the next layer, and
+// an explicitly empty axis overrides it. Presence is a property of the FILE, never of
+// domain.ModelProfile — the engine is handed one resolved profile and sees no layering at all — so
+// it is answered here, off the on-disk schema, and never travels in the domain value.
+func (p modelProfileConfig) spellsToolsAxis() bool { return p.Tools != nil }
+
+// toolRosterDelta projects one on-disk `tools:` block onto the domain delta pair, mapping an absent
+// block to the zero delta (no deltas at all). It is one function for both rungs — the global block
+// and a profile's axis are the same shape (toolsConfig) — so the two can never come to read a list
+// differently.
+func (t *toolsConfig) toolRosterDelta() domain.ToolRosterDelta {
+	if t == nil {
+		return domain.ToolRosterDelta{}
+	}
+	return domain.ToolRosterDelta{Disabled: t.Disabled, Enabled: t.Enabled}
 }
 
 // thinkingConfig is the on-disk schema for a model's inline thinking channel (part of the model
@@ -1727,7 +1864,9 @@ type thinkingConfig struct {
 
 // toModelProfile maps the on-disk model-profile schema onto the domain.ModelProfile value the
 // loop translates to its parsers at the seam. An empty tool-call-format / thinking style resolves
-// to the native, no-inline-thinking default downstream.
+// to the native, no-inline-thinking default downstream, and an absent `tools:` axis to the zero
+// delta — the roster the host would build anyway. The domain value carries the axis's CONTENT and
+// not whether it was written: presence stays on the schema (spellsToolsAxis).
 func (p modelProfileConfig) toModelProfile() domain.ModelProfile {
 	return domain.ModelProfile{
 		ToolCallFormat: domain.ToolCallFormat(p.ToolCallFormat),
@@ -1738,6 +1877,7 @@ func (p modelProfileConfig) toModelProfile() domain.ModelProfile {
 			End:    p.Thinking.End,
 			Effort: domain.ThinkingEffort(p.Thinking.Effort),
 		},
+		Tools: p.Tools.toolRosterDelta(),
 	}
 }
 
@@ -2333,11 +2473,16 @@ func ApplyConfig(opts *Options, changed func(string) bool, getenv func(string) s
 	// (ResolveResponseReserve) at the bind. The ephemeral override entry states no share, which
 	// leaves an override run on that top-level key and, unset there too, on apogee's own.
 	opts.StartupResponseReserve = startup.ResponseReserve
-	// A `tools.disabled:` name that matches no tool is a NOTICE, never a refusal: the list is how a
-	// roster is pruned on evidence, and a typo in it must cost the user the tool they meant to
-	// disable rather than the session. It is reported here rather than where the list is read, at the
-	// same startup boundary the confinement notices come out of.
-	if n := unknownToolNotice(opts.ToolsDisabled); n != "" {
+	// A roster name that matches no tool — in either half of the global `tools:` block or of any
+	// `model-profiles:` entry's axis — is a NOTICE, never a refusal, and so is a name written under
+	// both halves of one block: the lists are how a roster is tuned on evidence, and a typo in one
+	// must cost the user the tool they meant to move rather than the session. They are reported here
+	// rather than where the lists are read, at the same startup boundary the confinement notices
+	// come out of.
+	for _, n := range rosterNotices(
+		domain.ToolRosterDelta{Disabled: opts.ToolsDisabled, Enabled: opts.ToolsEnabled},
+		opts.ModelProfiles,
+	) {
 		notify(n)
 	}
 	// Which source won, for the keys where more than one could have: the resolved values above no

@@ -502,14 +502,16 @@ catalogue currently counts **21** mechanisms — see
 [`docs/design/mechanism-catalogue.md`](docs/design/mechanism-catalogue.md) for
 what each one does.
 
-The **built-in tools** are all on by default, and `tools:` `disabled:` (a file-only key) is how
-you take one off the menu — the model is never shown it, and a call naming it is refused as a tool
-that does not exist:
+The **built-in tools** are all on by default, and `tools:` (a file-only block) is how you change
+that: `disabled:` takes a tool off the menu — the model is never shown it, and a call naming it is
+refused as a tool that does not exist — while `enabled:` puts one back on, for a tool this build
+leaves off by default (no tool ships that way today; the key is how the first one is turned on):
 
 ```yaml
 # ~/.apogee/config.yaml
 tools:
   disabled: [view_diff, single_find_and_replace]
+  enabled: []
 ```
 
 It exists because a long tool list is itself a cost for a small model: fewer, clearer tools can
@@ -517,10 +519,16 @@ beat more of them, and this is the switch that lets you find out on your own wor
 guess. The names are the ones the model calls a tool by — the same names the transcript shows
 while a tool runs — and a name that is not a tool is a startup **notice** rather than an error,
 with the rest of the list still applying, so a typo costs you the tool you meant to disable and
-nothing else. The key is global (it applies to every model this config runs) and it is live like
-every other: save the file, or commit the row in `/settings`, and the next request is built from
-the roster that is left. An MCP server's tools are not listed here — they come and go with the
-server, so drop the server from `mcp-servers:` instead.
+nothing else. A name written under both lists is a notice too, and `disabled:` wins. The block is
+global (it applies to every model this config runs) and it is live like every other: save the file,
+or commit the row in `/settings`, and the next request is built from the roster that is left. An MCP
+server's tools are not listed here — they come and go with the server, so drop the server from
+`mcp-servers:` instead.
+
+A single model can also carry a roster of its own: a `model-profiles:` entry
+takes the same two keys as a third axis, and what it says about a tool beats what the global block
+says about it — that is how a tool stays off for the models that drown in it and on for the one that
+wants it.
 
 Automatic context **Compaction** keeps a long session from overflowing the model's
 window: when the conversation history outgrows its budgeted share, apogee folds the
