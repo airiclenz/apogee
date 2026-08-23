@@ -23,6 +23,53 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 
 ## Open defects
 
+### The composition root never hands the roster to the tool set it builds
+
+**Status:** open 2026-08-23 — deferred at the close of the per-profile tool rosters plan
+(`docs/plans/archived/2026-08-23 - 00 - per-profile-tool-rosters-plan.md`); no item of that plan
+owned this wiring.
+
+`registryWithMCP` passes only `Disabled:` into `tools.HostTools` — never `Enabled:`, never
+`ProfileRoster:` (`cmd/apogee/wire_tools.go:191`) — and `cmd/apogee/wire_live.go:60` injects that
+registry into `Config.Tools` unconditionally. An injected set is the host's own assembly, so
+`Agent.ownsToolSet` is false in every live TUI session (`internal/agent/construct.go:108`) and the
+re-compose seam declines (`internal/agent/setprofile.go:114`). The roster axis is therefore inert in
+the product: a model switch announces the deltas and none of them take effect. `wire_boot.go:178`,
+`headless.go:390` and `daemonfire.go:297` are in the same state — each sets `DisabledTools` and no
+`EnabledTools`. Headless runs and scheduled Firings that leave `Config.Tools` nil do apply the
+roster, because there the engine composes the set itself.
+
+---
+
+### Two doc surfaces still teach the pre-ADR-0057 profile
+
+**Status:** open 2026-08-23 — deferred at the close of the per-profile tool rosters plan.
+
+- `internal/config/config.go:1029` — the `ModelProfiles` field doc still ends "A matching entry
+  replaces the WHOLE profile, every axis, and outranks every shipped entry." Item 4 of the plan
+  rewrote that exact sentence in the seeded template but missed its twin here, so the field doc now
+  contradicts [ADR 0057](docs/adr/0057-the-tool-roster-is-a-third-model-profile-axis-resolved-axis-wise.md) §5
+  (resolution is axis-wise).
+- The two-axis framing of a Model profile survives in `internal/domain/config.go:230`
+  (`Config.Profile`'s doc: "its tool-call format and inline thinking-channel style") and in
+  `internal/config/defaults/config.yaml:734` (the "Model profiles:" header). The roster is the third
+  axis; neither surface names it.
+
+---
+
+### An `effort:`-only profile entry silently drops the shipped thinking style
+
+**Status:** open 2026-08-23 — deferred at the close of the per-profile tool rosters plan. Literally
+[ADR 0057](docs/adr/0057-the-tool-roster-is-a-third-model-profile-axis-resolved-axis-wise.md) §5
+compliant, so this is a design call to settle, not a rule to enforce.
+
+`thinking` resolves as ONE atomic axis: `spellsThinking` is true for any non-zero `ThinkingProfile`
+(`internal/profiles/entry.go:45`) and the supplier then takes that entry's whole thinking half
+(`internal/profiles/match.go:92`). So a user entry that spells only `effort:` over the shipped
+gpt-oss profile wins the axis outright and drops harmony with it — `Style` comes out "", `Source` is
+user, and nothing is announced. That is the same whole-replacement trap axis-wise resolution was
+written to close, one level down, and the effort-only entry is a taught idiom (`README.md:150`).
+
 ---
 
 ## Parked / deferred work
