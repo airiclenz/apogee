@@ -48,7 +48,28 @@ shipped-table rosters; MCP tool gating; the unified-git and PTY grill topics; th
 
 ---
 
-## 1. `domain`: the roster axis and the default-off state
+## 1. `domain`: the roster axis and the default-off state — ✅ DONE (2026-08-23)
+
+NOTES (2026-08-23): the item's "`domain.Tool` … gains a `DefaultOff bool`" landed as the optional
+marker interface `DefaultOffTool` + the `IsDefaultOff` helper, not a struct field: `domain.Tool` is
+an INTERFACE and every other per-tool attribute (ReadOnlyTool, SubprocessTool, ReadSourceTool,
+PromptTool) already uses exactly this shape, including the implement-yet-report-false carve-out. It
+is still a `DefaultOff bool` for item 2, which reads it through `domain.IsDefaultOff(tool)`.
+
+NOTES (2026-08-23): the item's stated test — "Config field presence pinned by the existing
+Config-shape test (`config_test.go`'s field census gains `EnabledTools`)" — had no such census to
+extend; `internal/domain/config_test.go` holds only mode-ladder and effort tests, and no field
+census over `domain.Config` exists anywhere in the repo. Pinned instead with
+`TestConfigCarriesBothGlobalRosterLists`: a zero Config asks for neither list, and the two lists are
+independent (a copy-paste aliasing one to the other fails).
+
+NOTES (2026-08-23): the slice-typed axis makes `domain.ModelProfile` non-comparable, which broke six
+existing `==`/`!=` comparisons in tests outside the item's named files (production code compares
+none). Converted mechanically to `reflect.DeepEqual` in `internal/agent/rebind_test.go` (×3),
+`internal/agent/setprofile_test.go`, `internal/profiles/match_test.go` (×2, one of them on
+`profiles.Decision`, which embeds a profile) and `cmd/apogee/delegation_test.go`; assertions and
+messages are otherwise unchanged. The non-comparability is documented on the `ModelProfile` doc
+comment.
 
 **What:** `domain.ModelProfile` gains a third axis, `Tools ToolRosterDelta`
 (`Disabled, Enabled []string`; zero value = no deltas). `domain.Tool` (or the registration

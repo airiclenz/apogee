@@ -10,6 +10,17 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **The Model profile carries a tool-roster axis (ADR 0057, plan item 1).** `domain.ModelProfile`
+  gains a third axis, `Tools domain.ToolRosterDelta` (`Disabled` / `Enabled` name lists) — delta
+  lists against the DEFAULT tool set, never a replacement roster — and `domain.Config` gains
+  `EnabledTools` beside `DisabledTools` as the global rung of the new precedence ladder (profile >
+  global > build default). `domain.DefaultOffTool` (with the `domain.IsDefaultOff` helper) is the
+  build rung: the optional marker a tool implements to ship present-in-the-build but absent from
+  the default menu until a global `tools.enabled:` entry or a profile roster axis lifts it. No
+  built-in tool declares it, so the menu is byte-identical and a zero `ModelProfile` remains the
+  anchor in every axis. Note for embedders: the axis makes `domain.ModelProfile` NON-comparable —
+  compare profiles with `reflect.DeepEqual`, not `==`.
+
 - **Docs: per-profile tool rosters are ratified (grilled 2026-08-23).** New ADR 0057: the tool
   roster becomes a third Model-profile axis — delta lists `tools: {disabled, enabled}` against
   the default roster — with a build-level default-off state for tools, a global `tools.enabled:`

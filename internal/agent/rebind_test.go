@@ -10,6 +10,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -338,7 +339,7 @@ func TestRebindRefusesUnbuildableSpecs(t *testing.T) {
 		if a.cfg.Model != "test-model" {
 			t.Errorf("model = %q after the refusal, want it unchanged", a.cfg.Model)
 		}
-		if a.cfg.Profile != live {
+		if !reflect.DeepEqual(a.cfg.Profile, live) {
 			t.Errorf("cfg.Profile = %+v after the refusal, want the live one %+v", a.cfg.Profile, live)
 		}
 		if _, found := a.textParser.ParseToolCall(fencedReadFileCall); !found {
@@ -377,7 +378,7 @@ func TestRebindSwapsTheModelProfile(t *testing.T) {
 		t.Errorf("the rebound stripper ate the visible answer: %q", after.Content)
 	}
 	assertReasoning(t, after, "weighing it up")
-	if a.cfg.Profile != profile {
+	if !reflect.DeepEqual(a.cfg.Profile, profile) {
 		t.Errorf("cfg.Profile = %+v after the rebind, want the spec's %+v", a.cfg.Profile, profile)
 	}
 }
@@ -414,7 +415,7 @@ func TestRebindToZeroProfileResetsTheParsers(t *testing.T) {
 	if _, found := a.textParser.ParseToolCall(fencedReadFileCall); found {
 		t.Error("the departed model's text-format tool-call parser is still installed")
 	}
-	if a.cfg.Profile != (domain.ModelProfile{}) {
+	if !reflect.DeepEqual(a.cfg.Profile, domain.ModelProfile{}) {
 		t.Errorf("cfg.Profile = %+v after a zero-profile rebind, want the zero profile", a.cfg.Profile)
 	}
 }

@@ -163,15 +163,38 @@ type Config struct {
 	// DisabledTools names built-in tools the Agent must not be given — the roster switch the
 	// host folds in from `tools.disabled:` in config.yaml. A named tool is left out of the set
 	// built when Config.Tools is nil, so it is neither offered to the model nor dispatchable (a
-	// call naming it is refused as an unknown tool). Empty/nil ⇒ the whole built-in roster, the
+	// call naming it is refused as an unknown tool). Empty/nil ⇒ the whole default menu, the
 	// byte-identical default. A name matching no tool is ignored — pruning a roster must not be
 	// able to stop an Agent from being constructed — so a host that can warn should check the
 	// list against tools.KnownToolNames before it gets here.
+	//
+	// It is the GLOBAL rung of the roster precedence ladder — profile > global > build default
+	// (ADR 0057) — so it is the default word on a tool rather than the last one: a matching
+	// Config.Profile's Tools axis re-enables what it names. See EnabledTools for the ladder.
 	//
 	// It applies to the DEFAULT set only: an injected Config.Tools is the host's own assembly and
 	// is taken exactly as given (ADR 0001 — the registry is injectable, and an embedder that
 	// builds one has already said what it wants).
 	DisabledTools []string
+
+	// EnabledTools names built-in tools the Agent must be given even though this build leaves
+	// them OUT of the default menu — the host's `tools.enabled:` list, the lift a tool
+	// registered default-off needs (domain.DefaultOffTool, ADR 0057). It is the enable direction
+	// of the switch DisabledTools spells: a name here puts such a tool back on the set built
+	// when Config.Tools is nil, so it is both offered to the model and dispatchable. Empty/nil ⇒
+	// nothing is lifted — the byte-identical default, and today the whole state, since no
+	// built-in tool ships default-off.
+	//
+	// These two lists are the GLOBAL rung of the roster precedence ladder — profile > global >
+	// build default (ADR 0057): a matching Config.Profile's Tools axis overrides them per tool,
+	// and they in turn override a tool's own default-off registration. A name in BOTH global
+	// lists is a conflict DISABLED wins — fail closed — and, like a name matching no tool, one
+	// the HOST reports: construction has nowhere to put a warning, and a roster the user is
+	// editing must never be able to stop an Agent from being built (see DisabledTools).
+	//
+	// Like DisabledTools it applies to the DEFAULT set only: an injected Config.Tools is the
+	// host's own assembly and is taken exactly as given (ADR 0001).
+	EnabledTools []string
 
 	// URLAllowHosts and URLDenyHosts are the host layer of the network tools' url-safety guard —
 	// the hosts web_fetch / http_request / web_search may reach, and the hosts they may not — which
@@ -292,15 +315,23 @@ type ContextConfig struct {
 // Model profile (CONTEXT: Model profile) — the per-model wire description
 // ----------------------------------------------------------------------------
 
-// ModelProfile describes how a given small model speaks the wire (CONTEXT: Model profile):
-// two ORTHOGONAL axes — its tool-call format and its inline thinking-channel style (a model
-// can emit native tool calls AND inline thinking; gpt-oss does both). It is declarative domain
+// ModelProfile describes how apogee EQUIPS and speaks to a given model (CONTEXT: Model profile):
+// three ORTHOGONAL axes — its tool-call format, its inline thinking-channel style (a model can
+// emit native tool calls AND inline thinking; gpt-oss does both), and its tool roster, which is
+// capability tuning rather than wire shape (ADR 0057). It is declarative domain
 // DATA on Config (host- or embedder-settable) that the loop translates to the internal/processing
 // parsers at the parse seam, not the parsers' own config types — those cannot move up the
 // dependency DAG because internal/processing imports domain (ADR 0010), and profile-as-data
 // snapshots cleanly and seeds the deferred switchable-profile / `apogee probe` work. A ZERO
-// ModelProfile == native tool calls, no inline thinking == today's exact behaviour (the
-// byte-identical anchor).
+// ModelProfile == native tool calls, no inline thinking, no roster deltas == today's exact
+// behaviour (the byte-identical anchor), every axis independently.
+//
+// The axes resolve INDEPENDENTLY at the layer above: a host picks each one from the nearest
+// configuration layer that spells it (ADR 0057 supersedes ADR 0044's whole-entry replacement).
+// What reaches here is one already-resolved profile — the engine sees no layering.
+//
+// The roster axis carries slices, so a ModelProfile is NOT comparable: test two of them with
+// reflect.DeepEqual or axis by axis, never with == / !=.
 type ModelProfile struct {
 	// ToolCallFormat selects how the model emits tool calls. "" and FormatNative both mean the
 	// structured out-of-band tool_calls path (nothing to recover from visible content); a text
@@ -317,6 +348,40 @@ type ModelProfile struct {
 	// Thinking selects the model's inline reasoning-channel style. A zero Thinking (ThinkingNone)
 	// leaves the Upstream-split reasoning_content path untouched (the default).
 	Thinking ThinkingProfile
+
+	// Tools is this model's roster axis — delta lists against the DEFAULT tool set, so a tool can
+	// be off for the small class and on for a big model. A zero ToolRosterDelta means no deltas
+	// at all: the roster the host would build anyway, which is what keeps a zero ModelProfile the
+	// byte-identical anchor.
+	Tools ToolRosterDelta
+}
+
+// ToolRosterDelta is the Model profile's tool-roster axis (CONTEXT: Model profile): a pair of
+// DELTA lists against the default tool set, never a replacement roster — a full list would
+// silently starve a profiled model of every tool a later release adds (ADR 0057). The ZERO value
+// is no deltas: the default roster stands untouched, which is why adding this axis leaves a zero
+// ModelProfile the byte-identical anchor it has always been.
+//
+// It is the most specific rung of the roster precedence ladder — profile > global
+// (Config.DisabledTools / Config.EnabledTools) > build default (a tool registered
+// DefaultOffTool). So a profile Enabled entry lifts a globally disabled or default-off tool — the
+// ratifying use case, a tool off for the models that would drown in it and on for the one that
+// wants it — and a profile Disabled entry turns off what global allows. Within ONE scope a name
+// in both lists is a conflict DISABLED wins (fail closed); that conflict and an unknown name are
+// both reported by the HOST and are never a refusal, exactly as for the global lists.
+//
+// Like those lists it applies to the DEFAULT tool set only: an injected Config.Tools is the
+// host's own assembly, taken exactly as given (ADR 0001), and MCP-served tools ride their own
+// surface untouched. It is plain configuration, not a Mechanism — no gating, no Bypass
+// interaction.
+type ToolRosterDelta struct {
+	// Disabled names built-in tools this model must NOT be offered, whatever the global lists and
+	// the build default say. Empty/nil ⇒ this axis subtracts nothing.
+	Disabled []string
+
+	// Enabled names built-in tools this model must be offered even when the build registers them
+	// default-off or the global list disables them. Empty/nil ⇒ this axis adds nothing.
+	Enabled []string
 }
 
 // ToolCallFormat identifies how a model emits tool calls, so the loop can select the matching

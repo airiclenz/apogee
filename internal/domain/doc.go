@@ -20,8 +20,9 @@
 //
 // The construction surface and the session envelope. config.go is Config, the whole
 // construction surface (ADR 0001), plus the mode ladder it opens on — Mode, ParseMode,
-// NextMode, TighterMode — the UserInput a Driver submits, the StepResult it gets back, and
-// the SkillResolver seam. uivocab.go is the presentation vocabulary a Driver is CONFIGURED
+// NextMode, TighterMode — the UserInput a Driver submits, the StepResult it gets back, the
+// SkillResolver seam, and the ModelProfile with its three axes: tool-call format, thinking
+// channel, and the ToolRosterDelta a profile equips a model with (ADR 0057). uivocab.go is the presentation vocabulary a Driver is CONFIGURED
 // with — the spinner styles with their parse, the cursor-shape NAMES with their validator, and
 // the PreboundStart a session begins unbound with — homed here for ParseMode's reason, so the
 // config layer validates a spelling without importing a renderer (ADR 0043). session.go is the
@@ -60,7 +61,8 @@
 // Tools and confinement. tools.go is the open Tool extension point (ADR 0002) with ToolCall,
 // ToolResult, the ToolRegistry, and the marker interfaces the dispatch disposition reads —
 // ReadOnlyTool, SubprocessTool, ExternalEffectTool, ReadSourceTool, PromptTool — plus
-// ApprovalScoper, read on the approval path rather than by the dispatch disposition.
+// ApprovalScoper, read on the approval path rather than by the dispatch disposition, and
+// DefaultOffTool, read by the registry assembly when it composes the default menu.
 // tooledit.go is the tool stage's pair of hook working values — ToolCallEdit and
 // ToolResultEdit, the revision-bearing wrappers the two tool-stage hooks reshape a pending
 // call and a returned result through. toolsummary.go is ToolSummary and its seven variants,

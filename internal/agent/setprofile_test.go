@@ -9,6 +9,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -180,7 +181,7 @@ func TestSetProfileKeepsTheOldParserOnAnInvalidProfile(t *testing.T) {
 				t.Fatal("SetProfile accepted a profile processing.ParserFor refuses")
 			}
 
-			if a.cfg.Profile != live {
+			if !reflect.DeepEqual(a.cfg.Profile, live) {
 				t.Errorf("cfg.Profile = %+v after a refused swap, want the live one %+v", a.cfg.Profile, live)
 			}
 			if _, found := a.textParser.ParseToolCall(fencedReadFileCall); !found {

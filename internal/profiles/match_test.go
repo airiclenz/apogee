@@ -1,6 +1,7 @@
 package profiles
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
@@ -114,7 +115,7 @@ func TestResolve(t *testing.T) {
 			if got.Entry.Pattern != tc.wantPattern {
 				t.Errorf("Resolve(%q) entry pattern = %q, want %q", tc.model, got.Entry.Pattern, tc.wantPattern)
 			}
-			if got.Profile != tc.wantProfile {
+			if !reflect.DeepEqual(got.Profile, tc.wantProfile) {
 				t.Errorf("Resolve(%q) profile = %+v, want %+v", tc.model, got.Profile, tc.wantProfile)
 			}
 		})
@@ -126,7 +127,7 @@ func TestResolveNoMatchYieldsTheZeroProfile(t *testing.T) {
 
 	got := Resolve("unheard-of-model", nil, Shipped())
 
-	if got != (Decision{}) {
+	if !reflect.DeepEqual(got, Decision{}) {
 		t.Fatalf("Resolve of an unmatched model = %+v, want the zero Decision", got)
 	}
 }

@@ -130,6 +130,35 @@ func IsSubprocessTool(t Tool) bool {
 	return ok && st.Subprocess()
 }
 
+// DefaultOffTool is an optional interface a Tool implements to declare that it is present in
+// this BUILD but absent from the DEFAULT menu: registered code nobody is offered until a global
+// `tools.enabled:` entry or a matching Model profile's roster axis lifts it (ADR 0057). It exists
+// so a tool aimed at one class of model can ship without costing every other model a slot in the
+// tool list it has to read on every request.
+//
+// It is the BUILD rung of the roster precedence ladder — profile > global > build default — and
+// therefore the least specific word: either configuration scope overrides it, in both directions.
+// A Tool that does not implement it — or implements it returning false, the same carve-out
+// SubprocessTool keeps for a degraded build — is on the default menu, which is where every
+// built-in tool sits today (the state ships empty). IsDefaultOff is the helper the registry
+// assembly calls rather than the type assertion directly.
+//
+// It says nothing about blast radius or trust: default-off is a menu decision, not a gate, and a
+// lifted tool is dispatched, confined and approved exactly like any other.
+type DefaultOffTool interface {
+	Tool
+	// DefaultOff reports that this tool is left out of the default menu until something lifts it.
+	DefaultOff() bool
+}
+
+// IsDefaultOff reports whether t has declared itself default-off via DefaultOffTool. A tool that
+// makes no such declaration — including a nil t — is on the default menu: the roster a build
+// offers is the roster its assembly lists, and only a tool that opts out is missing from it.
+func IsDefaultOff(t Tool) bool {
+	dot, ok := t.(DefaultOffTool)
+	return ok && dot.DefaultOff()
+}
+
 // ApprovalScoper is an optional interface a Tool implements to state, in ONE human-readable
 // line, what a given call REACHES beyond what its arguments name — the fact an approval pane
 // built from the call's arguments alone cannot show. diagnostics carries it because `go vet`

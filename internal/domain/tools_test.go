@@ -145,3 +145,50 @@ func equalStrings(a, b []string) bool {
 	}
 	return true
 }
+
+// defaultOffStub is a stubTool that also carries the build-level default-off marker, including
+// the carve-out the marker keeps for a tool that implements it yet reports false.
+type defaultOffStub struct {
+	stubTool
+	off bool
+}
+
+func (d defaultOffStub) DefaultOff() bool { return d.off }
+
+// TestIsDefaultOff_ReadsTheMarkerAndDefaultsToOnTheMenu covers the build rung of the roster
+// ladder: only an affirmative declaration takes a tool off the default menu. A tool that says
+// nothing is on it, and so is one that implements the marker and reports false — which is what
+// keeps today's roster, where no built-in tool declares it, byte-identical to the roster before
+// the state existed.
+func TestIsDefaultOff_ReadsTheMarkerAndDefaultsToOnTheMenu(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		tool domain.Tool
+		want bool
+	}{
+		{name: "no marker at all", tool: stubTool{name: "read_file"}, want: false},
+		{
+			name: "marker reports false",
+			tool: defaultOffStub{stubTool: stubTool{name: "grep"}},
+			want: false,
+		},
+		{
+			name: "marker reports true",
+			tool: defaultOffStub{stubTool: stubTool{name: "specialist"}, off: true},
+			want: true,
+		},
+		{name: "nil tool", tool: nil, want: false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := domain.IsDefaultOff(tc.tool); got != tc.want {
+				t.Errorf("IsDefaultOff(%s) = %v, want %v", tc.name, got, tc.want)
+			}
+		})
+	}
+}

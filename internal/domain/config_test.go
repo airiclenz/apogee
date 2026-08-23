@@ -104,3 +104,69 @@ func TestThinkingEffortValid(t *testing.T) {
 		}
 	}
 }
+
+// TestModelProfileZeroValueCarriesNoRosterDeltas pins the anchor the third axis must not move: a
+// zero ModelProfile is still native tool calls with no inline thinking, and now also no roster
+// deltas — so a host that configures no profile builds exactly the default menu, byte-identical
+// to the set it built before the axis existed.
+func TestModelProfileZeroValueCarriesNoRosterDeltas(t *testing.T) {
+	t.Parallel()
+
+	var profile domain.ModelProfile
+
+	if profile.ToolCallFormat != "" || profile.Thinking.Style != "" {
+		t.Errorf("zero ModelProfile = %+v, want the native/no-thinking anchor", profile)
+	}
+	if len(profile.Tools.Disabled) != 0 || len(profile.Tools.Enabled) != 0 {
+		t.Errorf("zero ModelProfile.Tools = %+v, want no deltas in either direction", profile.Tools)
+	}
+}
+
+// TestToolRosterDeltaSpellsBothDirectionsIndependently covers the axis itself: the two lists are
+// separate words about separate tools — one subtracts, the other lifts — so neither direction can
+// be read as the other. A delta with only one list spoken leaves the other silent, which is what
+// lets a profile say "just this one extra tool" without restating the whole roster.
+func TestToolRosterDeltaSpellsBothDirectionsIndependently(t *testing.T) {
+	t.Parallel()
+
+	delta := domain.ToolRosterDelta{Disabled: []string{"terminal"}, Enabled: []string{"web_search"}}
+
+	if len(delta.Disabled) != 1 || delta.Disabled[0] != "terminal" {
+		t.Errorf("ToolRosterDelta.Disabled = %v, want [terminal]", delta.Disabled)
+	}
+	if len(delta.Enabled) != 1 || delta.Enabled[0] != "web_search" {
+		t.Errorf("ToolRosterDelta.Enabled = %v, want [web_search]", delta.Enabled)
+	}
+
+	subtractOnly := domain.ToolRosterDelta{Disabled: []string{"python_exec"}}
+
+	if len(subtractOnly.Enabled) != 0 {
+		t.Errorf("a disabled-only delta lifted %v, want nothing", subtractOnly.Enabled)
+	}
+}
+
+// TestConfigCarriesBothGlobalRosterLists pins the global rung of the roster ladder on the
+// construction surface: both directions are spelled on Config, they are independent lists, and a
+// zero Config asks for neither — the default every embedder gets without saying anything.
+func TestConfigCarriesBothGlobalRosterLists(t *testing.T) {
+	t.Parallel()
+
+	var zero domain.Config
+
+	if len(zero.DisabledTools) != 0 || len(zero.EnabledTools) != 0 {
+		t.Errorf("zero Config roster lists = %v / %v, want both empty",
+			zero.DisabledTools, zero.EnabledTools)
+	}
+
+	cfg := domain.Config{
+		DisabledTools: []string{"view_diff"},
+		EnabledTools:  []string{"web_search"},
+	}
+
+	if len(cfg.DisabledTools) != 1 || cfg.DisabledTools[0] != "view_diff" {
+		t.Errorf("Config.DisabledTools = %v, want [view_diff]", cfg.DisabledTools)
+	}
+	if len(cfg.EnabledTools) != 1 || cfg.EnabledTools[0] != "web_search" {
+		t.Errorf("Config.EnabledTools = %v, want [web_search]", cfg.EnabledTools)
+	}
+}

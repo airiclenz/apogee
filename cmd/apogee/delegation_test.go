@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -208,7 +209,7 @@ func TestResolveDelegationTargetResolvesTheProfileForTheBoundModel(t *testing.T)
 	// A model no tier knows keeps the zero profile — native tool calls, no inline thinking — which is
 	// how an unprofiled delegation has always parsed.
 	unmatched := resolveDelegationTarget(entry, "", heartbeat.Beat{Reachable: true, ActiveModel: "nobody-knows"}, user, nil)
-	if unmatched.Profile != (domain.ModelProfile{}) {
+	if !reflect.DeepEqual(unmatched.Profile, domain.ModelProfile{}) {
 		t.Errorf("Profile for an unmatched model = %+v; want the zero profile", unmatched.Profile)
 	}
 }
