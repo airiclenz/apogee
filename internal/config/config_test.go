@@ -1970,6 +1970,53 @@ func TestProfileEntryRecordsWhetherItSpellsTheToolsAxis(t *testing.T) {
 	}
 }
 
+// The projection into the resolver carries the roster axis's PRESENCE beside the profile (ADR 0057
+// decision 5), because that is the fact axis-wise resolution turns on: an entry that leaves `tools:`
+// out defers the axis to the shipped tier, while one that writes it empty overrides that tier with
+// no deltas at all — and the two project to the same domain value, so the profile alone cannot say
+// which was written.
+//
+// The third spelling is the degenerate one YAML allows and a human writes by accident: a bare
+// `tools:` key with nothing under it parses as NULL, which reaches the pointer as absent. It reads
+// as "I said nothing about the roster", which is the safe half of the pair — the entry inherits
+// rather than silently emptying a roster it never meant to touch.
+func TestProfileEntriesCarryTheToolsAxisPresence(t *testing.T) {
+	t.Parallel()
+
+	home := testConfigHome(t, `model-profiles:
+  empty-axis:
+    tools: {}
+  listed-axis:
+    tools:
+      disabled: [web_search]
+  null-axis:
+    tools:
+  no-axis:
+    thinking:
+      style: none
+`)
+	fc, err := parseConfigFile(filepath.Join(home, "config.yaml"), os.ReadFile, noNotify)
+	if err != nil {
+		t.Fatalf("parseConfigFile: %v", err)
+	}
+
+	spelled := map[string]bool{}
+	for _, entry := range toProfileEntries(fc.ModelProfiles) {
+		spelled[entry.Pattern] = entry.SpellsTools
+	}
+
+	for pattern, want := range map[string]bool{
+		"empty-axis":  true,
+		"listed-axis": true,
+		"null-axis":   false,
+		"no-axis":     false,
+	} {
+		if spelled[pattern] != want {
+			t.Errorf("entry %q reports the tools axis spelled = %v, want %v", pattern, spelled[pattern], want)
+		}
+	}
+}
+
 // Every roster list a config can spell is checked for names that are no tool, and every roster BLOCK
 // for a name written under both halves — and each notice says WHICH key it is about, because the
 // same list can now be written in four places and a complaint that does not name one sends the user
@@ -3507,8 +3554,10 @@ func TestApplyConfigNoValidatedSetsDefaultsOn(t *testing.T) {
 }
 
 // The `model-profiles:` map reaches opts.modelProfiles as entries the composition root matches a
-// model name against (ADR 0044): each pattern keeps the whole block it was given — both axes — and
-// the entries come back ordered by pattern, whatever order the map decoded in.
+// model name against (ADR 0044): each pattern keeps every axis of the block it was given — the
+// projection carries the file's word across intact, and which axis WINS against the shipped table is
+// the resolver's business — and the entries come back ordered by pattern, whatever order the map
+// decoded in.
 func TestApplyConfigModelProfiles(t *testing.T) {
 	t.Parallel()
 	home := testConfigHome(t, "")

@@ -13,7 +13,9 @@ import (
 
 // The two tiers and the silence rule in one table (ADR 0044): a user entry outranks the shipped
 // table and applies without a word, a shipped entry applies and says so, and a model neither tier
-// knows runs the zero profile — the pass-through an unprofiled model has always had.
+// knows runs the zero profile — the pass-through an unprofiled model has always had. Since ADR 0057
+// the tiers meet AXIS BY AXIS, so the table also fixes who narrates when both had a word: the
+// built-in speaks whenever it still supplied an axis the user's entry left unspelled.
 func TestResolveModelProfileMatchesAndNarrates(t *testing.T) {
 	t.Parallel()
 
@@ -25,12 +27,13 @@ func TestResolveModelProfileMatchesAndNarrates(t *testing.T) {
 	}}
 
 	tests := []struct {
-		name       string
-		model      string
-		user       []profiles.Entry
-		wantStart  string
-		wantStyle  domain.ThinkingStyle
-		wantNotice string
+		name        string
+		model       string
+		user        []profiles.Entry
+		wantStart   string
+		wantStyle   domain.ThinkingStyle
+		wantEnabled string
+		wantNotice  string
 	}{
 		{
 			// The live spelling that started this: the shipped table matches the family inside a
@@ -46,10 +49,29 @@ func TestResolveModelProfileMatchesAndNarrates(t *testing.T) {
 			wantStyle: domain.ThinkingDelimited, wantStart: "<user>",
 		},
 		{
-			// The escape hatch for a wrong built-in match: an entry that spells the zero profile.
-			name:  "a user entry can turn a shipped match back off",
-			model: "minimax-m3", user: []profiles.Entry{{Pattern: "minimax-m3"}},
-			wantStyle: "",
+			// The escape hatch for a wrong built-in match: an entry that SPELLS the off value. Under
+			// axis-wise resolution the spelling is what does it — an entry that says nothing at all
+			// says nothing about this axis either, and inherits the built-in (the case below).
+			name:  "a user entry can turn a shipped match back off by spelling style: none",
+			model: "minimax-m3", user: []profiles.Entry{{
+				Pattern: "minimax-m3",
+				Profile: apogee.ModelProfile{Thinking: apogee.ThinkingProfile{Style: domain.ThinkingNone}},
+			}},
+			wantStyle: domain.ThinkingNone,
+		},
+		{
+			// The ratifying case for axis-wise resolution (ADR 0057 decision 5): a tools-only entry
+			// for a model the table shapes keeps that shape instead of wiping it — and the built-in
+			// still announces itself, because it still supplied the axis being announced.
+			name:  "a tools-only user entry keeps the shipped shape, and the built-in still speaks",
+			model: "gpt-oss-20b", user: []profiles.Entry{{
+				Pattern:     "gpt-oss",
+				Profile:     apogee.ModelProfile{Tools: domain.ToolRosterDelta{Enabled: []string{"web_search"}}},
+				SpellsTools: true,
+			}},
+			wantStyle:   domain.ThinkingHarmony,
+			wantEnabled: "web_search",
+			wantNotice:  "model profile: gpt-oss (built-in) — thinking: harmony",
 		},
 		{
 			name:  "a model neither tier knows runs the zero profile, silently",
@@ -71,6 +93,9 @@ func TestResolveModelProfileMatchesAndNarrates(t *testing.T) {
 			}
 			if tt.wantStart != "" && profile.Thinking.Start != tt.wantStart {
 				t.Errorf("thinking start = %q, want %q", profile.Thinking.Start, tt.wantStart)
+			}
+			if got := strings.Join(profile.Tools.Enabled, ","); got != tt.wantEnabled {
+				t.Errorf("roster enabled = %q, want %q", got, tt.wantEnabled)
 			}
 			if notice != tt.wantNotice {
 				t.Errorf("notice = %q, want %q", notice, tt.wantNotice)

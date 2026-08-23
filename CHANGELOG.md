@@ -10,6 +10,24 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **Model-profile resolution is axis-wise across the three layers (ADR 0057, plan item 4).** A
+  `model-profiles:` entry no longer replaces the whole profile it matches: each axis — tool-call
+  format (with the pattern that rides it), thinking channel, tool roster — independently takes the
+  nearest layer whose matching entry SPELLS it, user ▸ shipped ▸ zero, superseding ADR 0044
+  decision 4. A tools-only entry for a model the shipped shape table knows therefore keeps that
+  table's thinking style instead of silently wiping it, while an explicitly spelled zero
+  (`tool-call-format: native`, `thinking: {style: none}`, an empty `tools:`) overrides the layer
+  below exactly as any other value does — absence is the 'inherit' spelling ADR 0044 deferred.
+  Pattern matching is unchanged (case-insensitive substring, longest pattern wins within a tier,
+  any user match beats any shipped one) and the engine is still handed ONE resolved
+  `domain.ModelProfile`, so it sees no layering. The built-in table's one-line notice now speaks
+  whenever the table still supplied an axis — including under a user entry that left that axis out
+  — because that is precisely the shape the human never asked for. `profiles.Entry` gains
+  `SpellsTools`, the roster axis's file-level presence (the one axis whose domain value cannot tell
+  "written empty" from "left out"), which `internal/config` fills in from the YAML; a bare `tools:`
+  key with no value parses as NULL and reads as ABSENT, so it inherits rather than empties. The
+  seeded config template documents the axis-by-axis rule in place of whole-entry replacement.
+
 - Config: the tool roster is spelled in two places now. The global `tools:` block gains `enabled:`
   beside `disabled:` — the list that puts a tool this build leaves off by default back on the menu —
   and a `model-profiles:` entry gains a `tools: {disabled, enabled}` axis of its own, the per-model

@@ -16,12 +16,13 @@ const (
 	// the pass-through an unknown model has always had.
 	SourceNone Source = iota
 
-	// SourceUser — an entry from the user's `model-profiles:` map matched. It applies
-	// silently and outranks every shipped entry.
+	// SourceUser — the user's `model-profiles:` map had the last word on every axis the
+	// shipped table also speaks to. It applies silently: the user wrote it.
 	SourceUser
 
-	// SourceShipped — an entry from the built-in shape table matched. The caller emits the
-	// one-line notice so a wrong match has a first debugging clue.
+	// SourceShipped — the built-in shape table supplied at least one axis of the result (or
+	// matched with nothing above it). The caller emits the one-line notice so a shape the
+	// human never asked for has a first debugging clue.
 	SourceShipped
 )
 
@@ -38,26 +39,68 @@ func (s Source) String() string {
 }
 
 // Decision is the outcome of resolving one model name: the profile to apply, which layer
-// supplied it, and the winning entry (zero when Source is SourceNone) so the caller can
-// name the pattern in its notice.
+// gets the credit for it, and that layer's winning entry (zero when Source is SourceNone) so
+// the caller can name the pattern in its notice.
+//
+// Because resolution is axis-wise, the profile can carry axes from BOTH tiers. Source names the
+// SHIPPED tier whenever the shipped table still got a word in — that is exactly the case the
+// notice exists for, a shape the human never asked for — and the user tier when the user's own
+// entry answered everything the shipped one had to say.
 type Decision struct {
 	Profile domain.ModelProfile
 	Source  Source
 	Entry   Entry
 }
 
-// Resolve picks the Model profile for model out of the two tiers — the user's entries
-// first, the shipped shape table second — and falls back to the zero profile when neither
-// matches. Any user match beats any shipped match, so the tiers are consulted in order
-// rather than pooled.
+// Resolve picks the Model profile for model AXIS BY AXIS out of the two tiers — the user's
+// entries first, the shipped shape table second — with the zero profile as the third layer
+// (ADR 0057 decision 5, amending ADR 0044's whole-entry replacement). Each axis independently
+// takes the nearest tier whose matching entry SPELLS it; an axis neither spells keeps its zero
+// value, and an explicitly spelled zero (`tool-call-format: native`, `thinking: {style: none}`,
+// an empty `tools:`) is a word like any other and overrides the tier below.
+//
+// The match itself is unchanged: within a tier the longest pattern wins, and any user match
+// beats any shipped match — so a user entry still outranks the table on every axis it writes.
+// What it no longer does is silence the axes it says nothing about: a tools-only entry for a
+// gpt-oss build keeps the table's harmony parsing, which whole-entry replacement would have
+// wiped without a word.
 func Resolve(model string, user, shipped []Entry) Decision {
-	if entry, ok := best(model, user); ok {
-		return Decision{Profile: entry.Profile, Source: SourceUser, Entry: entry}
+	userEntry, matchedUser := best(model, user)
+	shippedEntry, matchedShipped := best(model, shipped)
+
+	// shippedSpoke records whether the shipped tier supplied any axis of the result, which is
+	// what the caller's notice is about — not merely whether the table matched.
+	shippedSpoke := false
+	supplier := func(spells func(Entry) bool) Entry {
+		switch {
+		case matchedUser && spells(userEntry):
+			return userEntry
+		case matchedShipped && spells(shippedEntry):
+			shippedSpoke = true
+			return shippedEntry
+		default:
+			// The zero Entry carries the zero profile, so an unspelled axis reads its third layer
+			// straight off it.
+			return Entry{}
+		}
 	}
-	if entry, ok := best(model, shipped); ok {
-		return Decision{Profile: entry.Profile, Source: SourceShipped, Entry: entry}
+
+	toolCall := supplier(Entry.spellsToolCall)
+	profile := domain.ModelProfile{
+		ToolCallFormat: toolCall.Profile.ToolCallFormat,
+		Pattern:        toolCall.Profile.Pattern,
+		Thinking:       supplier(Entry.spellsThinking).Profile.Thinking,
+		Tools:          supplier(Entry.spellsTools).Profile.Tools,
 	}
-	return Decision{}
+
+	switch {
+	case matchedShipped && (shippedSpoke || !matchedUser):
+		return Decision{Profile: profile, Source: SourceShipped, Entry: shippedEntry}
+	case matchedUser:
+		return Decision{Profile: profile, Source: SourceUser, Entry: userEntry}
+	default:
+		return Decision{}
+	}
 }
 
 // best returns the winning entry within ONE tier: every entry whose pattern is a

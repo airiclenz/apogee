@@ -195,20 +195,21 @@ func TestEmbeddedDefaultConfigTeachesTheServersSchema(t *testing.T) {
 // nobody. The shipped shape table means a known family needs no entry at all, but the map is the
 // only thing to reach for when a model's dialect is wrong or a built-in matched the wrong model —
 // and a key the seeded file never names is a key its reader never finds. Five facts carry the
-// surface: the map's own spelling, both axes, a shipped pattern (so the built-in table is visible
-// at all), and that the global key it replaced is refused rather than ignored.
+// surface: the map's own spelling, its axes, a shipped pattern (so the built-in table is visible
+// at all), how a match resolves AGAINST that built-in, and that the global key it replaced is
+// refused rather than ignored.
 func TestEmbeddedDefaultConfigDocumentsModelProfiles(t *testing.T) {
 	t.Parallel()
 	template := string(defaultConfigYAML)
 	for _, want := range []string{
-		"# model-profiles:",          // the map itself, as a commented example to uncomment
-		"tool-call-format",           // the tool-call axis
-		"style: delimited",           // the thinking axis, with a value it actually takes
-		"effort: medium",             // the effort axis, likewise
-		"minimax-m3",                 // a shipped pattern: the built-in table is documented, not hidden
-		"is retired",                 // and the global key it replaced is named as retired…
-		"refused at startup",         // …loudly, so a stale config's reader knows what happened
-		"replaces the WHOLE profile", // an entry is not merged over a built-in
+		"# model-profiles:",  // the map itself, as a commented example to uncomment
+		"tool-call-format",   // the tool-call axis
+		"style: delimited",   // the thinking axis, with a value it actually takes
+		"effort: medium",     // the effort axis, likewise
+		"minimax-m3",         // a shipped pattern: the built-in table is documented, not hidden
+		"is retired",         // and the global key it replaced is named as retired…
+		"refused at startup", // …loudly, so a stale config's reader knows what happened
+		"AXIS BY AXIS",       // an entry is read per axis, so an axis it omits keeps the built-in's
 	} {
 		if !strings.Contains(template, want) {
 			t.Errorf("embedded template does not mention %q; the model-profiles documentation is missing "+

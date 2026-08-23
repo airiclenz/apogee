@@ -759,8 +759,12 @@ ui:
 # beats every built-in — which is also how you switch a built-in off when it fires on a model it
 # has no business shaping: name that model here with a thinking style of none.
 #
-# A matching entry replaces the WHOLE profile, every axis: an axis you leave out means native /
-# nothing-stripped / no roster change, NOT "keep the built-in's". The axes and their values:
+# A matching entry is read AXIS BY AXIS, not as a whole: an axis you spell is the last word on it,
+# an axis you leave out falls through to the built-in table and then to the default (native /
+# nothing-stripped / no roster change). So a `tools:`-only entry for a model the table already knows
+# keeps that built-in's thinking style instead of silently wiping it. Turning a built-in axis OFF is
+# therefore a matter of SPELLING its off value — `tool-call-format: native`, a thinking `style: none`,
+# an empty `tools:` — rather than leaving the key out. The axes and their values:
 #
 #   tool-call-format   native (the default) — calls arrive structured, out of band
 #                      markdown-fenced      — calls are parsed back out of a fenced block in the reply

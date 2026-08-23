@@ -172,7 +172,29 @@ conflict NOTICE; registry docmap test covers the new key rows.
 
 **Commit:** `feat(config): tools.enabled and the per-profile tools axis are spelled`
 
-## 4. `config`: profile resolution goes axis-wise
+## 4. `config`: profile resolution goes axis-wise — ✅ DONE (2026-08-23)
+
+NOTES (2026-08-23): the item's Files point at "wherever the resolver lives today (composition-root
+side, `internal/config` / `cmd/apogee`)" — that is `internal/profiles` (`Resolve`, `Entry`,
+`Decision`), which only `cmd/apogee` imports, so the resolution itself changed there and
+`internal/config`/`cmd/apogee` changed as its seam and its caller. `profiles.Entry` gained
+`SpellsTools` because axis presence cannot live in `domain.ModelProfile` (item 3's finding): it is
+the file fact `toProfileEntries` now carries across, and the shipped table leaves it false (ADR 0057
+decision 6). The other two axes need no flag — `""` vs `native` and `""` vs `none` are already
+distinct, so `spellsToolCall`/`spellsThinking` read the domain value.
+
+NOTES (2026-08-23): per the run's DECISION this item also owns the two facts item 3 left behind: the
+degenerate `tools:` NULL spelling is pinned as ABSENT
+(`TestProfileEntriesCarryTheToolsAxisPresence`, alongside `tools: {}`, a listed axis and no key at
+all), and the seeded template's "replaces the WHOLE profile, every axis" sentence — false the moment
+this item landed — is rewritten to the axis-by-axis rule with
+`TestEmbeddedDefaultConfigDocumentsModelProfiles` re-pinned on "AXIS BY AXIS".
+
+NOTES (2026-08-23): two stale doc comments in files this item already edits were corrected with it:
+`TestApplyConfigModelProfiles`'s "keeps the whole block it was given — both axes" (the projection
+does keep every axis; which one WINS is now the resolver's business) and
+`cmd/apogee/modelprofile.go`'s two-axis header plus `modelProfileNotice`'s "a user match is silent"
+rule, which is now "silent when the user's tier answered everything the table had to say".
 
 **What:** replace the whole-entry pick with axis-wise resolution per ADR 0057 §5: for each of
 tool-call format (+pattern), thinking, and tools, take the nearest layer (user ▸ shipped ▸ zero)

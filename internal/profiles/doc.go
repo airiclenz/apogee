@@ -1,9 +1,14 @@
 // Package profiles resolves WHICH Model profile a given model runs under (CONTEXT: Model
 // profile, ADR 0044): the user's `model-profiles:` pattern map ▸ apogee's shipped shape
-// table ▸ the zero profile. The nearest layer with a matching pattern supplies the WHOLE
-// profile — both axes, tool-call format and thinking channel — because an absent axis
-// already means native/none, so a per-axis merge would need an 'inherit' spelling to say
-// "leave it" rather than "turn it off".
+// table ▸ the zero profile. Resolution is AXIS-WISE across those layers (ADR 0057 decision
+// 5): each of the three axes — tool-call format, thinking channel, tool roster — takes the
+// nearest layer whose matching entry SPELLS it, so an axis an entry leaves out defers
+// downward instead of being turned off. The 'inherit' spelling ADR 0044 deferred is
+// therefore obsolete: absence IS inherit, and the OFF switch is the spelled zero
+// (`tool-call-format: native`, `thinking: {style: none}`, an empty `tools:`), which
+// overrides like any other value. Whole-entry replacement became a trap the moment the
+// roster joined the map — the likely user entry is a tools-only line for a model whose wire
+// shape the shipped table carries, and replacement would have wiped it silently.
 //
 // The match rule is a case-insensitive SUBSTRING of the entry's pattern in the advertised
 // or resolved model name: the name is what every Upstream reports, and quants, providers

@@ -2042,12 +2042,22 @@ func validateResponseReserveFraction(fraction float64) error {
 //
 // Order is a determinism property only: profiles.Resolve ranks by pattern length and breaks ties
 // lexicographically, so the winner is the same whatever order the entries arrive in.
+//
+// Each entry carries its roster-axis PRESENCE across as well (ADR 0057 decision 5): axis-wise
+// resolution has to tell an entry that leaves `tools:` out — which defers the axis to the next
+// layer — from one that writes it empty, which overrides that layer with no deltas at all. The two
+// project to the same domain value, so the fact travels beside the profile rather than in it, and
+// this projection is the only place it crosses from the file into the resolver.
 func toProfileEntries(m map[string]modelProfileConfig) []profiles.Entry {
 	patterns := slices.Sorted(maps.Keys(m))
 
 	entries := make([]profiles.Entry, 0, len(patterns))
 	for _, pattern := range patterns {
-		entries = append(entries, profiles.Entry{Pattern: pattern, Profile: m[pattern].toModelProfile()})
+		entries = append(entries, profiles.Entry{
+			Pattern:     pattern,
+			Profile:     m[pattern].toModelProfile(),
+			SpellsTools: m[pattern].spellsToolsAxis(),
+		})
 	}
 	return entries
 }
