@@ -10,6 +10,18 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **Docs: per-profile tool rosters are ratified (grilled 2026-08-23).** New ADR 0057: the tool
+  roster becomes a third Model-profile axis — delta lists `tools: {disabled, enabled}` against
+  the default roster — with a build-level default-off state for tools, a global `tools.enabled:`
+  counterpart, a profile > global > build specificity ladder, and profile resolution going
+  **axis-wise** across all three axes (superseding ADR 0044 decision 4's whole-profile
+  replacement, reconciled in place; its deferred 'inherit' spelling closes as obsolete — absence
+  is the inherit spelling). The resolved roster rides Rebind as a per-model binding and a switch
+  announces non-empty deltas in one line. CONTEXT.md's Model-profile entry widens to three axes;
+  the tool-surface findings doc and `ISSUES.md` pointer mark the grill topic resolved (unified
+  git and PTY remain open). Implementation plan saved:
+  `docs/plans/2026-08-23 - 00 - per-profile-tool-rosters-plan.md` (unexecuted).
+
 - **Docs: the workspace-clobber hardening is recorded.** New ADR 0056 captures the four
   ratified calls plus the mid-execution corrections: the fail-fast preamble with its
   corrected rationale (POSIX `set -e` exempts every command of an AND-OR list but the last,

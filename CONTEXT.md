@@ -244,11 +244,14 @@ keychain library — a source is a line in the entry), "key fallback" (an entry 
 a chain).
 
 **Model profile**:
-The per-model description Apogee carries of *how a given small model speaks the wire* — two
+The per-model description Apogee carries of *how it equips and speaks to a given model* — three
 **orthogonal** axes: its **tool-call format** (native structured `tool_calls`, or a text format
-the model emits inline in its content — **markdown-fenced** or a **custom regex**) and its
-**thinking channel** style. Orthogonal because a model can emit native tool calls *and* inline
-thinking (gpt-oss does both). The profile drives **both directions at the seams**: on the
+the model emits inline in its content — **markdown-fenced** or a **custom regex**), its
+**thinking channel** style, and its **tool roster** (delta lists — `disabled`/`enabled` —
+against the default tool set, so a tool can be off for the small class and on for a big model,
+and a new tool can ship default-off/profile-enabled). Orthogonal because a model can emit native
+tool calls *and* inline thinking (gpt-oss does both); the roster axis is capability tuning, not
+wire shape. The profile drives **both directions at the seams**: on the
 **parse** side it selects which parser and content-stripper the loop applies to incoming
 content; on the **emit** side, for a non-native tool-call format, the engine tells the model
 how to speak — rendering the tool menu and format-emission instructions as text into the
@@ -258,11 +261,15 @@ no-inline-thinking default** (today's behaviour) — it adds nothing to the requ
 direction. It is a `domain` type on `Config` (declarative data — [ADR 0010](docs/adr/0010-package-layout-domain-core-and-thin-root-facade.md)),
 translated to the `processing` parsers at the boundary, not the parsers' own config.
 Which profile a model gets is **resolved per model in three layers** — the user's
-`model-profiles:` pattern map ▸ apogee's **shipped shape table** ▸ the zero profile — where the
-nearest layer with a case-insensitive substring match on the model name supplies the WHOLE
-profile (longest pattern wins within a layer; any user entry beats any shipped one). A shipped
-match announces itself with a one-line notice (`model profile: <pattern> (built-in) — thinking:
-<style>`); a user match applies silently. The resolution rides every model switch — the profile is
+`model-profiles:` pattern map ▸ apogee's **shipped shape table** ▸ the zero profile — matched by
+case-insensitive substring on the model name (longest pattern wins within a layer; any user
+entry beats any shipped one) and resolved **axis-wise**: each axis takes the nearest layer that
+spells it, an absent axis defers downward, an explicitly spelled zero overrides
+([ADR 0057](docs/adr/0057-the-tool-roster-is-a-third-model-profile-axis-resolved-axis-wise.md),
+amending ADR 0044's whole-replacement rule). The shipped table carries wire-shape axes only —
+never a roster. A shipped match announces itself with a one-line notice (`model profile:
+<pattern> (built-in) — thinking: <style>`); a user match applies silently, except that a switch
+whose roster deltas are non-empty announces them in one line. The resolution rides every model switch — the profile is
 one of the per-model bindings Rebind applies at the boundary
 ([ADR 0024](docs/adr/0024-the-heartbeat-observes-upstream-and-rebind-applies-at-the-boundary.md)) —
 and the retired *global* `model-profile:` block is refused at startup with the map spelling to

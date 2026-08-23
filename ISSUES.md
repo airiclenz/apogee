@@ -677,8 +677,9 @@ decision.
 - **(d)** do sub-35B models use `view_diff` at all? — decide with the `write_file` dry-run.
 - **(e)** `web_fetch` → `http_request` merge.
 - **(f)** is `edit_existing_file`'s patch mode ever discovered unprompted?
-- **Needs a grill session:** per-profile tool rosters (promoted 2026-08-16); a unified `git` tool
-  vs the growing `git_*` family; a persistent terminal / PTY session.
+- **Needs a grill session:** a unified `git` tool vs the growing `git_*` family; a persistent
+  terminal / PTY session. (Per-profile tool rosters: grilled 2026-08-23 → ADR 0057, plan
+  `2026-08-23 - 00`.)
 
 ---
 

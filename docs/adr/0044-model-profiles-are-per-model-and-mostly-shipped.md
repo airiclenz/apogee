@@ -71,6 +71,10 @@ tolerated old key is a second source of truth.
 **4 — A matching user entry replaces the WHOLE profile, both axes.** The system-prompt-models rule
 verbatim. No per-axis merge: an absent axis already *means* native/none, so merging would need an
 'inherit' spelling to distinguish "leave it" from "turn it off".
+*(**Superseded 2026-08-23 by [ADR 0057](0057-the-tool-roster-is-a-third-model-profile-axis-resolved-axis-wise.md):**
+resolution is now axis-wise — an absent axis defers to the next layer, an explicitly spelled zero
+overrides. The tools axis made whole-replacement a trap: a tools-only user entry would silently
+wipe a shipped wire shape. The rest of this record stands.)*
 
 **5 — User entries key by the same pattern rule; longest pattern wins within a tier, and any user
 match beats any shipped match** — even a shorter user pattern against a longer shipped one. Equal
@@ -115,7 +119,9 @@ so a bench Driver drives the same doors directly.
 
 ## Deferred (dated 2026-08-11, not denied)
 
-- **An 'inherit' spelling** enabling per-axis overlay of a user entry on a shipped one — wanted
+- **An 'inherit' spelling** enabling per-axis overlay of a user entry on a shipped one *(closed
+  2026-08-23 as obsolete by [ADR 0057](0057-the-tool-roster-is-a-third-model-profile-axis-resolved-axis-wise.md):
+  axis-wise resolution makes absence itself the inherit spelling)* — wanted
   only once a shipped entry sets both axes and a user disagrees with one.
 - ~~**Profiles in the seeded config template.** `model-profiles:` stays the one key the seeded
   template does not document, deliberately: the shipped table is meant to make it unnecessary.~~

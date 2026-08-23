@@ -46,8 +46,10 @@ experiment, not a decision:
 - **(f)** do sub-35B models ever discover `edit_existing_file`'s patch mode unprompted? — a
   discovery experiment feeding the explicit-patch-param idea.
 
-**Needs a grill session:** per-profile tool rosters (builds on the `tools.disabled` key this plan
-shipped); a unified `git` tool with subcommands vs the growing `git_*` family.
+**Needs a grill session:** a unified `git` tool with subcommands vs the growing `git_*` family.
+*(Per-profile tool rosters: GRILLED 2026-08-23 →
+[ADR 0057](../adr/0057-the-tool-roster-is-a-third-model-profile-axis-resolved-axis-wise.md);
+implementation plan `docs/plans/2026-08-23 - 00 - per-profile-tool-rosters-plan.md`.)*
 
 **Deferred candidates:** env-var parameters on `terminal`/`python_exec` (stable across both Qwen
 sessions); `directory_create`/`directory_delete`; `git_stash`; `git_tag`; `file_metadata`; batch
