@@ -440,7 +440,9 @@ grep -n 'v0.16.x' README.md            # must print the Status line
 
 ---
 
-## 7. Retire the closed defects from ISSUES.md
+## 7. Retire the closed defects from ISSUES.md — ✅ DONE (2026-08-24)
+
+NOTES (2026-08-24): no CHANGELOG entry — items 1–5 already recorded each of these four closes under `[Unreleased]`, and `AGENTS.md` makes the changelog the sole closed trail; a second entry announcing the register cleanup would be narration of bookkeeping.
 
 **Depends on items 1, 2, 3, 4 and 5.**
 
