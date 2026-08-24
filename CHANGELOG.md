@@ -10,6 +10,14 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **The daemon's Firings are composed through `firingConfig` too (plan item 8).**
+  `daemonWiring.configFor` — the twin that mirrored `runHeadless` field for field — is gone:
+  `fire` now resolves the three facts the ENTRY decides (the bound `servers:` entry, the entry's
+  workspace roots, the `model:` overlay), mints the run's record id, and hands them to the shared
+  composer with the daemon's own key resolver, dropping the rebind notices. No behaviour change —
+  every daemon Firing test passes with its assertions untouched — and `Mode` and `ScratchDir` now
+  arrive through the composer's inputs rather than being stamped onto a returned Config.
+
 - Every unattended run's `apogee.Config` now comes out of ONE composer (`firingConfig`,
   `cmd/apogee/wire_firing.go`) instead of a per-Driver copy of the same twenty-field literal;
   `apogee headless` is the first Driver composed through it. No behaviour change — the composer

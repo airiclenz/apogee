@@ -3,8 +3,9 @@ package main
 // The daemon's Firing composition (ADR 0034, ADR 0055) — the third Driver over the embeddable
 // engine (ADR 0031), beside the TUI's scheduleWiring (schedule.go) and runHeadless (headless.go).
 //
-// A Firing raised here is the same unattended run those two compose, resolved from a different set
-// of facts: not the session's live binding and not one command's flags, but one validated entry of
+// A Firing raised here is the same unattended run those two compose — literally the same composer,
+// firingConfig in wire_firing.go — resolved from a different set of facts: not the session's live
+// binding and not one command's flags, but one validated entry of
 // `~/.apogee/daemon/schedules.yaml` — which server it names, which model, which workspace, which
 // mode — read against a `config.yaml` this process loaded once at startup.
 
@@ -23,7 +24,6 @@ import (
 	"github.com/airiclenz/apogee/internal/run"
 	"github.com/airiclenz/apogee/internal/schedule"
 	"github.com/airiclenz/apogee/internal/session"
-	"github.com/airiclenz/apogee/internal/skills"
 )
 
 // daemonWiring turns one Firing into one unattended run. It is the value wired into
@@ -155,6 +155,11 @@ func (w *daemonWiring) entryFor(name string) (daemon.Entry, bool) {
 // the daemon's single Scheduler, and it runs on that Scheduler's goroutine — never the reload's —
 // which is why everything it touches is its own copy or explicitly goroutine-safe (the adopted map,
 // the key resolver, the store, the skills Provider, the Confiner).
+//
+// The Config it runs against is composed by [firingConfig] (wire_firing.go), the one composer every
+// Driver's unattended run is built by — an unattended run is an unattended run whichever Driver
+// raised it (ADR 0031). What this Driver decides is what the ENTRY, rather than a flag or a live
+// session, decides: the server it names, the model it overlays, and the workspace it runs in.
 func (w *daemonWiring) fire(ctx context.Context, f schedule.Firing) (schedule.Outcome, error) {
 	entry, adopted := w.entryFor(f.ScheduleName)
 	if !adopted {
@@ -162,19 +167,57 @@ func (w *daemonWiring) fire(ctx context.Context, f schedule.Firing) (schedule.Ou
 			"adopted — the schedule was taken off the clock while this tick was due", f.ScheduleName)
 	}
 
-	cfg, scratchRoot, err := w.configFor(ctx, entry)
+	// The `servers:` entry this Firing binds to, and the roots it lives in — the entry's own
+	// workspace over the daemon's working directory, which is the one root a schedule decides.
+	// Everything else those roots name is home-derived and shared by every Firing.
+	server, err := w.serverFor(entry)
 	if err != nil {
 		return schedule.Outcome{}, err
 	}
-	cfg.Mode = f.Mode
-	// This Firing's own scratch dir, named after the record it will be saved under (wire.go). A
-	// daemon Firing had none at all before: nothing here mints a session id, so its model was
-	// offered no writable scratch and put its working files wherever else it could reach. Minting
-	// per Firing rather than per daemon also keeps two schedules that fire at the same minute out
-	// of each other's files, and hands the dir to the same 14-day sweep every session's dir goes
-	// through.
-	recordID, scratchDir := firingScratch(scratchRoot, time.Now())
-	cfg.ScratchDir = scratchDir
+	roots, err := resolveRoots(w.opts.ConfigDir, entry.Run.Workspace)
+	if err != nil {
+		return schedule.Outcome{}, err
+	}
+
+	// This Firing's own record id, minted here because the runner is handed it beside the Config
+	// (run.Spec) and the composer creates the run's scratch dir under that name — so the saved
+	// record and the working files its model left behind are one thing to find and one thing to
+	// sweep. A daemon Firing had no scratch dir at all before: nothing here minted a session id, so
+	// its model was offered no writable scratch and put its working files wherever else it could
+	// reach. Minting per Firing rather than per daemon also keeps two schedules that fire on the
+	// same minute out of each other's files.
+	recordID := session.NewID(time.Now())
+
+	// The construction surface every unattended run shares (wire_firing.go), reached from this
+	// Driver's own facts: the bound entry, that entry's roots, the daemon's own key resolver — so an
+	// `api-key-cmd:` runs once per entry rather than once per Firing — and the mode the Schedule
+	// fired, which is the FIRING's and never re-read off the entry (ADR 0033, decision 3).
+	//
+	// The `model:` overlay is handed over as the entry states it. It is legal here because
+	// validation already refused it where a model name would be a request to ACTUATE a load rather
+	// than a per-request selection (ADR 0055 decision 2); absent, the composer falls back to the
+	// bound entry's own `model:` — and on a launcher-fronted server that is whatever is serving,
+	// because the daemon never actuates the launcher (decision 3): nothing serving means this Firing
+	// fails visibly in its record and the next tick behaves normally.
+	//
+	// No skills catalog and no width source: a daemon holds no longer-lived provider to share and
+	// has no heartbeat to take a slot count off, which is exactly what the composer's nil defaults
+	// answer with. The rebind notices are dropped — they are a launch's narration, and a Firing's
+	// narration is the session record it leaves behind.
+	cfg, _, err := firingConfig(ctx, firingInputs{
+		opts:      w.opts,
+		entry:     server,
+		keys:      w.keys,
+		roots:     roots,
+		manualIDs: w.manualIDs,
+		confiner:  w.confiner,
+		model:     entry.Run.Model,
+		mode:      f.Mode,
+		recordID:  recordID,
+	})
+	if err != nil {
+		return schedule.Outcome{}, fmt.Errorf("apogee: daemon: resolve the %q schedule's bindings: %w", entry.Name, err)
+	}
 
 	// Through the package's runner seam (headless.go) rather than run.Once directly: production
 	// never reassigns it, so this is the same call, and it is what lets a test read the Config a
@@ -208,152 +251,6 @@ func (w *daemonWiring) fire(ctx context.Context, f schedule.Firing) (schedule.Ou
 		return out, err
 	}
 	return out, nil
-}
-
-// configFor composes the construction surface one entry's Firings run against. It mirrors
-// runHeadless field for field — an unattended run is an unattended run, whichever Driver raised it
-// (ADR 0031) — and differs only where the entry, rather than a flag, is the thing that decides:
-// the server it names, the model it overlays, and the workspace it runs in.
-//
-// The mode is deliberately NOT set here: it is the Firing's, taken from the Schedule the library
-// fired, exactly as scheduleWiring.fire takes it. The scratch ROOT the entry's home resolves to is
-// returned beside the Config for the same division of labour: the roots are resolved once here, and
-// the dir under that root is per FIRING, so fire mints it the way it stamps the mode.
-func (w *daemonWiring) configFor(ctx context.Context, entry daemon.Entry) (apogee.Config, string, error) {
-	server, err := w.serverFor(entry)
-	if err != nil {
-		return apogee.Config{}, "", err
-	}
-	// The `model:` overlay, legal here because validation already refused it where a model name
-	// would be a request to ACTUATE a load rather than a per-request selection (ADR 0055 decision
-	// 2). Absent, the Firing runs whatever the bound entry's own `model:` names — and on a
-	// launcher-fronted server that is whatever is serving, because the daemon never actuates the
-	// launcher (decision 3): nothing serving means this Firing fails visibly in its record and the
-	// next tick behaves normally.
-	model := server.Model
-	if entry.Run.Model != "" {
-		model = entry.Run.Model
-	}
-
-	// The entry's own workspace over the daemon's working directory — the one root a schedule
-	// decides. Everything else these roots name is home-derived and shared by every Firing.
-	roots, err := resolveRoots(w.opts.ConfigDir, entry.Run.Workspace)
-	if err != nil {
-		return apogee.Config{}, "", err
-	}
-
-	// The bearer token this Firing sends, resolved from the bound entry's own key SOURCE — the
-	// literal, the command's output, or the named variable — exactly as a session resolves it, so
-	// one configuration means one credential whichever Driver reads it. A source that refuses fails
-	// the Firing before a single token is spent: an unattended run that degraded to sending no key
-	// would put the prompt on the wire unauthenticated and report a 401 as the model's answer.
-	apiKey, err := w.keys.Resolve(server)
-	if err != nil {
-		return apogee.Config{}, "", err
-	}
-
-	// The per-model half of the Config, resolved exactly as a rebind resolves it — the system
-	// prompt keys on the model (ADR 0023) and so does the validated Mechanism set (ADR 0016), so a
-	// Firing must land in the state a session started on this model and this server would be in.
-	// The overlay onto the options copy is rebindInputs' own (wire_settings.go), spelled here
-	// because a daemon has no live settings holder to spell it: the endpoint a Firing resolves
-	// against and the endpoint it DIALS must be one value, or every input keyed on the endpoint —
-	// the probe record behind the identity ladder, and so the Validated-set decision above it —
-	// would be resolved against the startup server while the Firing talked to another one.
-	//
-	// The observed window is passed as unknown because nothing beats here to observe one; a
-	// `context-window:` pin still binds the Budget and an unpinned Firing leaves it inactive, which
-	// for one bounded prompt is the honest degrade rather than a guess. The per-session notices are
-	// dropped: they are a launch's narration, and a Firing's narration is its own session record.
-	specOpts := w.opts
-	specOpts.Endpoint = server.Endpoint
-	specOpts.APIKey = apiKey
-	pinnedWindow := config.ResolveContextWindow(server.ContextWindow, w.opts.ContextWindow)
-	specOpts.ContextWindow = pinnedWindow
-	specOpts.ResponseReserve = config.ResolveResponseReserve(server.ResponseReserve, w.opts.ResponseReserve)
-	spec, _, err := rebindSpecFor(specOpts, roots, w.manualIDs, model, 0, pinnedWindow, server.MaxOutputTokens)
-	if err != nil {
-		return apogee.Config{}, "", fmt.Errorf("apogee: daemon: resolve the %q schedule's bindings: %w", entry.Name, err)
-	}
-
-	// The share the Firing actually divides its window by, read back OFF the spec rather than
-	// resolved a second time, so the spec and the Config cannot state two different splits.
-	reserve := 0.0
-	if spec.ResponseReserveFraction != nil {
-		reserve = *spec.ResponseReserveFraction
-	}
-
-	// The skill catalog for this Firing, held in a variable rather than built inline so the SAME
-	// provider serves both halves of the skills contract: it resolves an attached ID into the
-	// prompt (Config.Skills) AND names the dirs whose files the model may then read
-	// (Config.ExtraReadRoots below). It is per Firing because the project half of it is per
-	// workspace, and the workspace is the entry's.
-	skillProvider := skills.NewProvider(skills.Sources{
-		Home:             roots.config,
-		Workspace:        roots.workspace,
-		UseProjectSkills: w.opts.UseProjectSkills,
-	})
-
-	cfg := apogee.Config{
-		Endpoint:     server.Endpoint,
-		Model:        spec.Model,
-		APIKey:       apiKey,
-		Bypass:       w.opts.Bypass,
-		ConfigDir:    roots.config,
-		LibraryDir:   roots.library,
-		WorkspaceDir: roots.workspace,
-		// Confiner and posture as a session's, so an Auto Firing is fenced by the same box an Auto
-		// session would be. Whether this host may run Auto unattended at all is the eligibility
-		// gate, which internal/daemon's validation already applied at the surface that offered the
-		// mode — the schedules file (ADR 0033, decision 3).
-		Confiner:           w.confiner,
-		ConfineToWorkspace: w.opts.ConfineToWorkspace,
-		WebSearchEndpoint:  w.opts.WebSearchEndpoint,
-		// Every file-only key below is honoured for the one reason runHeadless honours it: it is one
-		// configuration, and a Firing must offer the model the same tools, obey the same host
-		// allow/deny lists, scrub the same variables out of a subprocess and read responses in the
-		// same shape a session on this host would.
-		DisabledTools: w.opts.ToolsDisabled,
-		EnabledTools:  w.opts.ToolsEnabled,
-		URLAllowHosts: w.opts.URLAllowHosts,
-		URLDenyHosts:  w.opts.URLDenyHosts,
-		Inspector:     w.opts.UI.Inspector,
-		SecretEnvVars: config.APIKeyEnvNames(w.opts),
-		Profile:       spec.Profile,
-		SystemPrompt:  spec.SystemPrompt,
-		ContextFiles:  w.opts.ContextFiles,
-		Skills:        skillProvider,
-		// The same read-only mounts a session gets: a Firing's model can read the bundled files of
-		// a skill its prompt named exactly as an interactive one can. Sub-agents inherit them
-		// through the tool instances a Subset carries, so no per-child wiring exists.
-		ExtraReadRoots:   skillProvider.SourceDirs,
-		EnableMechanisms: spec.EnableMechanisms,
-		Context: apogee.ContextConfig{
-			MaxContextTokens:        spec.MaxContextTokens,
-			ResponseReserveFraction: reserve,
-			// The bound entry's `max-output-tokens:` pin (ADR 0046). Unpinned it stays 0 and the
-			// engine derives the cap from its own reply budget — never "no cap", which for an
-			// unattended run is precisely the thing a runaway reply must not be able to become.
-			MaxOutputTokens:   server.MaxOutputTokens,
-			CompactionEnabled: w.opts.AutoCompact,
-		},
-		// Tools, Events, Approver, Asker and Presenter all stay nil: run.Once pins its own, and
-		// handing it any of them is how a run acquires a human it does not have.
-	}
-
-	// How wide this Firing may fan its delegations out — the same cap a session and a headless run
-	// resolve, so every Driver reaches the same engine behaviour (ADR 0031; the resolution itself is
-	// ADR 0039 decision 2). The pin is the BOUND entry's own `parallel-agents:`; the discovery half
-	// is the one-shot probe standing in for the beat an unattended run has no heartbeat to take. A
-	// pin skips the probe outright — ResolveParallelAgents never lets discovery overrule a pin, so
-	// the round trip could only spend a Firing's latency on a question already settled.
-	slots := 0
-	if server.ParallelAgents < 1 {
-		slots = discoverSlots(ctx, server.Endpoint, spec.Model, apiKey)
-	}
-	cfg.ParallelAgents = config.ResolveParallelAgents(server.ParallelAgents, slots)
-
-	return cfg, roots.scratch, nil
 }
 
 // serverFor resolves the `servers:` entry one schedule's Firings bind to: the entry it names, or

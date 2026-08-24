@@ -442,7 +442,11 @@ Existing headless tests stay green: `TestHeadlessComposesTheRunnerSpec` (`headle
 
 ---
 
-## 8. Port the daemon Firing onto `firingConfig`
+## 8. Port the daemon Firing onto `firingConfig` — ✅ DONE (2026-08-24)
+
+NOTES (2026-08-24): `configFor` is dissolved into `fire` rather than kept as a method with a new signature — a method returning `(apogee.Config, error)` has to spell `apogee.Config{}` on its two early-error paths, which the item's own acceptance (`grep -c 'apogee.Config{' cmd/apogee/daemonfire.go` reports `0`) forbids. The resulting shape is schedule.go's, which item 9 ports the same way. `serverFor` is untouched and still resolves the bound entry.
+NOTES (2026-08-24): the daemon's existing wrap `apogee: daemon: resolve the %q schedule's bindings: %w` now covers the whole composer call, so a key-SOURCE failure gains that prefix (it was returned raw from `w.keys.Resolve` before). The rebind failure it already covered is unchanged, and no test asserts either message.
+NOTES (2026-08-24): `cmd/apogee/daemonfire_test.go` is listed in the item's Files but needed no edit — all seven named tests pass with their assertions untouched, which is the item's own no-behaviour-change bar. Doc comments: the deleted "mirrors runHeadless field for field" paragraph's surviving half (what the ENTRY, rather than a flag, decides) moved onto `fire`'s doc comment beside a pointer to `firingConfig`, and the file header now names the shared composer. `firingScratch` keeps its one non-test caller, `scheduleWiring.fire` (item 9).
 
 **Depends on item 7.**
 
