@@ -112,7 +112,15 @@ apogee
 
 On first run apogee writes a documented starter config to `~/.apogee/` and
 asks which server to talk to. Or skip the config entirely and point one
-session straight at a server:
+session straight at a server — no GPU needed, a free OpenRouter model will do
+(a key is at [openrouter.ai/keys](https://openrouter.ai/keys)):
+
+```bash
+export APOGEE_API_KEY=sk-or-your-key
+apogee --endpoint https://openrouter.ai/api --model google/gemma-4-31b-it:free
+```
+
+or a local one:
 
 ```bash
 apogee --endpoint http://localhost:8080 --model qwen3-coder
