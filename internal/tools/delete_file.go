@@ -94,16 +94,23 @@ func (t *DeleteFile) Execute(ctx context.Context, call domain.ToolCall) (domain.
 	// (the link's target survives), which is the direction a security surface errs in and the one
 	// the gate already took (resolvedTargetNote, ResolvedWriteTarget).
 	resolved := resolvedTargetNote(args.Path, t.root)
-	// Read the bytes before the unlink, for the plainest reason in the family: afterwards there
-	// are none. This pre-image IS the file (ADR 0051) — the journal's copy is the only one left
-	// once SafeRemove returns, and it is what `/undo` writes back, with the mode the file
-	// carried rather than a default one.
-	pre := capturePreImage(ctx, args.Path, t.root)
-
-	if err := security.SafeRemove(t.root, args.Path, writeEscapeTarget(ctx)); err != nil {
+	// The funnel reads the bytes before the unlink, for the plainest reason in the family:
+	// afterwards there are none. That pre-image IS the file (journaledMutation, ADR 0051) — the
+	// journal's copy is the only one left once SafeRemove returns, and it is what `/undo` writes
+	// back, with the mode the file carried rather than a default one. The path goes post-absent,
+	// which is what makes the undo a restore rather than a rewrite.
+	err := journaledMutation(
+		ctx,
+		[]mutationPath{{input: args.Path, root: t.root, post: postAbsent}},
+		func(escape string) ([]bool, error) {
+			if err := security.SafeRemove(t.root, args.Path, escape); err != nil {
+				return nil, err
+			}
+			return []bool{true}, nil
+		})
+	if err != nil {
 		return errorResult(call.ID, err.Error()), nil
 	}
-	pre.commit(nil, false)
 	// Staging runs only after the unlink stands, and only ever adds to what the call reports: the
 	// probe reads the INDEX, so the path it takes is the one that was just removed from disk.
 	staged := stageGitPaths(ctx, t.root, " (deletion staged in git)", args.Path)

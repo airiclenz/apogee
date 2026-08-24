@@ -232,7 +232,15 @@ returns nil, err ⇒ zero records, err returned), `TestJournaledMutationReadBack
 
 ---
 
-## 4. Route copy, move and delete through `journaledMutation`
+## 4. Route copy, move and delete through `journaledMutation` — ✅ DONE (2026-08-24)
+
+NOTES (2026-08-24): move_file's body reports its failures as `error` (converted to the model-facing
+string by `move`) rather than returning the string directly, because `journaledMutation`'s body
+signature returns `error`; the split-failure sentence is built with `fmt.Errorf(... %w ...)` and is
+byte-identical to the previous `fmt.Sprintf(... %v ...)`.
+NOTES (2026-08-24): `TestUndoCaptureHasExactlyTwoCallers` also asserts each scanned call spelling
+still occurs in `path_safety.go`, so a rename of `capturePreImage`/`commit` cannot make the scan
+pass vacuously.
 
 **Depends on item 3.**
 

@@ -824,3 +824,55 @@ func TestJournaledMutationWritesWithoutAJournal(t *testing.T) {
 		t.Errorf("file = %q after the unjournalled mutation, want the body's bytes", got)
 	}
 }
+
+// undoFunnelFile is the one file the capture calls belong in: safeWriteFile and journaledMutation
+// live side by side there, and nothing else in the package may reach the journal.
+const undoFunnelFile = "path_safety.go"
+
+// undoCaptureSites are the call spellings that put a record in the undo journal — taking a
+// pre-image, and committing it under either post-image policy.
+var undoCaptureSites = []string{"capturePreImage(", ".commit(", ".commitReadBack("}
+
+// TestUndoCaptureHasExactlyTwoCallers: ADR 0051 decision 3 — "capture is at the funnel, and that
+// IS the coverage boundary" — is only true while safeWriteFile and journaledMutation are the sole
+// capture sites in the package. A writer that captures at its own mutation site instead, the shape
+// copy, move and delete carried before the funnel, is invisible to that boundary and drops out of
+// `/undo` without anything failing, so this scans the package's own source and names the file that
+// did it. The funnel file is checked too, in the other direction: a capture call spelling that has
+// vanished from it is a rename this scan would otherwise pass vacuously.
+func TestUndoCaptureHasExactlyTwoCallers(t *testing.T) {
+	t.Parallel()
+
+	funnel, err := os.ReadFile(undoFunnelFile)
+	if err != nil {
+		t.Fatalf("read the funnel file: %v", err)
+	}
+	for _, site := range undoCaptureSites {
+		if !strings.Contains(string(funnel), site) {
+			t.Fatalf("%s no longer contains %s — the capture calls were renamed and this scan would pass vacuously; update undoCaptureSites",
+				undoFunnelFile, site)
+		}
+	}
+
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatalf("read the package directory: %v", err)
+	}
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || name == undoFunnelFile ||
+			!strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		source, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatalf("read %s: %v", name, err)
+		}
+		for _, site := range undoCaptureSites {
+			if strings.Contains(string(source), site) {
+				t.Errorf("%s reaches the undo journal directly through %s — capture belongs to safeWriteFile and journaledMutation in %s; route the mutation through one of them",
+					name, site, undoFunnelFile)
+			}
+		}
+	}
+}

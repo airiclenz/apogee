@@ -138,16 +138,22 @@ func (t *CopyFile) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 	// nothing. The SOURCE gets no note of its own: it is a read, and this is the writers'
 	// disclosure (workspace_scoped.go).
 	resolved := resolvedTargetNote(args.Destination, t.root)
-	// The DESTINATION is the only end a copy mutates, so it is the only end journalled (ADR
-	// 0051): pre-image bytes when overwrite:true clobbers a file, pre-absent when the copy
-	// creates one — which is what makes an undo restore the first and remove the second. The
-	// source is a read and records nothing.
-	pre := capturePreImage(ctx, args.Destination, t.root)
-
-	if err := security.SafeCopyFileFrom(sourceRoot, args.Source, t.root, args.Destination, writeEscapeTarget(ctx)); err != nil {
+	// The DESTINATION is the only end a copy mutates, so it is the only path handed to the funnel
+	// (journaledMutation, ADR 0051): pre-image bytes when overwrite:true clobbers a file,
+	// pre-absent when the copy creates one — which is what makes an undo restore the first and
+	// remove the second. The source is a read and records nothing.
+	err := journaledMutation(
+		ctx,
+		[]mutationPath{{input: args.Destination, root: t.root, post: postReadBack}},
+		func(escape string) ([]bool, error) {
+			if err := security.SafeCopyFileFrom(sourceRoot, args.Source, t.root, args.Destination, escape); err != nil {
+				return nil, err
+			}
+			return []bool{true}, nil
+		})
+	if err != nil {
 		return errorResult(call.ID, err.Error()), nil
 	}
-	pre.commitReadBack(ctx)
 	return okResult(call.ID, fmt.Sprintf("copied %s to %s%s", args.Source, args.Destination, resolved)), nil
 }
 
@@ -233,48 +239,53 @@ func (t *MoveFile) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 //
 // A move is TWO journal records (ADR 0051) because it changes two files: the source, whose
 // pre-image bytes are the only copy of it left once it is gone, and the destination, which the
-// move either creates or clobbers. Both pre-images are read BEFORE anything moves — afterwards
-// the source does not exist and the destination holds the source's bytes, so neither is
-// recoverable from the filesystem a move leaves behind — and each is committed only once ITS OWN
-// half landed. That is what makes the two routes journal identically, and it is what keeps the
-// split failure honest: a copy that landed while the removal was refused records the destination
-// alone, because the source really is still there.
+// move either creates or clobbers. Both are handed to the funnel as one mutation, so both
+// pre-images are read BEFORE anything moves — afterwards the source does not exist and the
+// destination holds the source's bytes, so neither is recoverable from the filesystem a move
+// leaves behind — and each is committed only once the route below REPORTS its own half landed.
+// That is what makes the two routes journal identically, and it is what keeps the split failure
+// honest: a copy that landed while the removal was refused reports [false, true], recording the
+// destination alone, because the source really is still there.
 func (t *MoveFile) move(ctx context.Context, args fileOpsArgs) string {
-	sourcePre := capturePreImage(ctx, args.Source, t.root)
-	destinationPre := capturePreImage(ctx, args.Destination, t.root)
-
-	permitted := writeEscapeTarget(ctx)
-	err := security.SafeRename(t.root, args.Source, args.Destination)
-	if err == nil {
-		sourcePre.commit(nil, false)
-		destinationPre.commitReadBack(ctx)
-		return ""
-	}
-	if errors.Is(err, security.ErrSymlinkedParent) {
+	err := journaledMutation(
+		ctx,
+		[]mutationPath{
+			{input: args.Source, root: t.root, post: postAbsent},
+			{input: args.Destination, root: t.root, post: postReadBack},
+		},
+		func(permitted string) ([]bool, error) {
+			err := security.SafeRename(t.root, args.Source, args.Destination)
+			if err == nil {
+				return []bool{true, true}, nil
+			}
+			if errors.Is(err, security.ErrSymlinkedParent) {
+				return nil, err
+			}
+			// A root that would not open is terminal too, and it comes FIRST because it is not a
+			// fence refusal at all: the copy-then-remove fallback runs through that same
+			// unopenable root, so retrying it would only restate the failure in the escape's
+			// words.
+			if errors.Is(err, security.ErrRootInaccessible) {
+				return nil, err
+			}
+			if errors.Is(err, ErrPathEscape) && permitted == "" {
+				return nil, err
+			}
+			if copyErr := security.SafeCopyFile(t.root, args.Source, args.Destination, permitted); copyErr != nil {
+				return nil, copyErr
+			}
+			if removeErr := security.SafeRemove(t.root, args.Source, ""); removeErr != nil {
+				// The destination now holds the file and the source still does. Say so: a bare
+				// error would leave the model guessing which half of the move happened — and
+				// report the half that DID happen, so an undo can still take the destination back.
+				return []bool{false, true}, fmt.Errorf("copied %s to %s but could not remove the source: %w",
+					args.Source, args.Destination, removeErr)
+			}
+			return []bool{true, true}, nil
+		})
+	if err != nil {
 		return err.Error()
 	}
-	// A root that would not open is terminal too, and it comes FIRST because it is not a fence
-	// refusal at all: the copy-then-remove fallback runs through that same unopenable root, so
-	// retrying it would only restate the failure in the escape's words.
-	if errors.Is(err, security.ErrRootInaccessible) {
-		return err.Error()
-	}
-	if errors.Is(err, ErrPathEscape) && permitted == "" {
-		return err.Error()
-	}
-	if copyErr := security.SafeCopyFile(t.root, args.Source, args.Destination, permitted); copyErr != nil {
-		return copyErr.Error()
-	}
-	if removeErr := security.SafeRemove(t.root, args.Source, ""); removeErr != nil {
-		// The destination now holds the file and the source still does. Say so: a bare error
-		// would leave the model guessing which half of the move happened — and journal the half
-		// that DID happen, so an undo can still take the destination back.
-		destinationPre.commitReadBack(ctx)
-		return fmt.Sprintf("copied %s to %s but could not remove the source: %v",
-			args.Source, args.Destination, removeErr)
-	}
-	sourcePre.commit(nil, false)
-	destinationPre.commitReadBack(ctx)
 	return ""
 }
 

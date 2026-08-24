@@ -80,6 +80,12 @@ point is a **minor** bump, not a breaking change.
   by the new `TestSettingsTableIsInRegistryOrder`, which also refuses a duplicate entry;
   `TestEveryEditableSettingKeyHasAnApply` is what still fails if an editable key has no entry at all.
 
+- `copy_file`, `move_file` and `delete_file` now take their `/undo` pre-images through the shared
+  `journaledMutation` funnel instead of hand-wiring capture and commit at each mutation site, so
+  `safeWriteFile` and `journaledMutation` are the package's only two undo capture sites — pinned by
+  the new `TestUndoCaptureHasExactlyTwoCallers` source scan. No change to what any of the three
+  tools journals, reports or refuses.
+
 ### Fixed
 
 - **The Tool summary persistence contract now agrees with ADR 0052 §5 (plan item 1).** The domain
