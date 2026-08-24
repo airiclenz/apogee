@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -557,6 +558,36 @@ func TestHeadlessSpecStatesTheShareTheConfigDividesBy(t *testing.T) {
 	if got != entryShare {
 		t.Errorf("Config.Context.ResponseReserveFraction = %v; want the entry-resolved %v that the "+
 			"RebindSpec states — spec and Config must not drift apart", got, entryShare)
+	}
+}
+
+// A headless run gets a scratch dir of its own, named after the record it will be saved under
+// (residuals sweep item 6, 2026-08-24). It had none at all before: nothing on this path mints a
+// session id, so the model was offered no writable scratch inside the box and put its working files
+// wherever else it could reach — the workspace itself, under an Auto fence. The same start also
+// sweeps the stale dirs the TUI's boot sweeps, because a host only ever driven headlessly never
+// reaches that boot and would otherwise accumulate one dir per run forever.
+func TestHeadlessRunGetsItsOwnScratchDirAndSweepsStaleOnes(t *testing.T) {
+	home := testConfigHome(t, "")
+	scratchRoot := filepath.Join(home, "scratch")
+	stale := filepath.Join(scratchRoot, "2026-01-01T00-00-00-stale")
+	if err := os.MkdirAll(stale, 0o700); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	aged := time.Now().Add(-scratchMaxAge - time.Hour)
+	if err := os.Chtimes(stale, aged, aged); err != nil {
+		t.Fatalf("Chtimes: %v", err)
+	}
+
+	stub := &stubRunner{}
+	if _, _, err := headlessRunOn(t, stub, fenceableHost, home, "a prompt"); err != nil {
+		t.Fatalf("headless: %v", err)
+	}
+
+	assertFiringScratchDir(t, stub.spec.RecordID, stub.spec.Config.ScratchDir, scratchRoot)
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Errorf("a stale scratch dir survived a headless start (stat err = %v); a host driven only "+
+			"headlessly never passes the TUI's boot sweep", err)
 	}
 }
 

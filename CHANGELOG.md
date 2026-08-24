@@ -166,6 +166,20 @@ point is a **minor** bump, not a breaking change.
   covering a formatter inside an operator-declared extra writable path (the shape a scratch dir
   arrives as).
 
+- **Every Driver now gives its Firing a scratch dir of its own, named after the record (plan
+  item 6).** One helper, `firingScratch` (`cmd/apogee/wire.go`), mints the record id before the run
+  and creates `~/.apogee/scratch/<record-id>/` at 0700; the three Firing composition sites hand
+  that pair over as `Config.ScratchDir` and the new `run.Spec.RecordID`, so a Firing's `{{scratch}}`
+  is a real per-Firing dir and the existing 14-day sweep reclaims it under the record's own name.
+  Before this, an in-session `/schedule` Firing inherited the scratch dir minted when the SESSION
+  booted — stale after a `/clear` or a `/sessions` resume moved the session off it, and gone
+  entirely once the sweep had been past it — while a daemon Firing and an `apogee headless` run had
+  no scratch dir at all, so their models were offered no writable scratch inside the confinement box
+  and put working files wherever else they could reach. The daemon and `apogee headless` also run
+  the stale-dir sweep once at start now, for the reason the TUI runs it at boot: a host driven only
+  by those two never passes that boot and would otherwise keep every dir its Firings ever left.
+
+
 ## [0.16.3] — 2026-08-24
 
 ### Added

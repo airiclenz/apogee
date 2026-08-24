@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
@@ -93,6 +94,13 @@ func newDaemonWiring(opts config.Options) (*daemonWiring, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	// The scratch sweep, run once at startup for the reason runRoot runs it (wire.go): a daemon
+	// mints a fresh dir per Firing and never passes the TUI's boot, so this is the only beat on
+	// which a host that only ever runs daemons reclaims the dirs its Firings left behind.
+	// Best-effort and silent, exactly as it is there — GC is never a reason a daemon fails to start.
+	gcScratchDirs(roots.scratch, time.Now())
+
 	return &daemonWiring{
 		opts:      opts,
 		manualIDs: manualIDs,
@@ -154,11 +162,19 @@ func (w *daemonWiring) fire(ctx context.Context, f schedule.Firing) (schedule.Ou
 			"adopted — the schedule was taken off the clock while this tick was due", f.ScheduleName)
 	}
 
-	cfg, err := w.configFor(ctx, entry)
+	cfg, scratchRoot, err := w.configFor(ctx, entry)
 	if err != nil {
 		return schedule.Outcome{}, err
 	}
 	cfg.Mode = f.Mode
+	// This Firing's own scratch dir, named after the record it will be saved under (wire.go). A
+	// daemon Firing had none at all before: nothing here mints a session id, so its model was
+	// offered no writable scratch and put its working files wherever else it could reach. Minting
+	// per Firing rather than per daemon also keeps two schedules that fire at the same minute out
+	// of each other's files, and hands the dir to the same 14-day sweep every session's dir goes
+	// through.
+	recordID, scratchDir := firingScratch(scratchRoot, time.Now())
+	cfg.ScratchDir = scratchDir
 
 	// Through the package's runner seam (headless.go) rather than run.Once directly: production
 	// never reassigns it, so this is the same call, and it is what lets a test read the Config a
@@ -169,6 +185,7 @@ func (w *daemonWiring) fire(ctx context.Context, f schedule.Firing) (schedule.Ou
 		ScheduleID:   f.ScheduleID,
 		ScheduleName: f.ScheduleName,
 		Store:        w.store,
+		RecordID:     recordID,
 	})
 	// Everything the run learned about itself, mapped onto the scheduler's report in one place so
 	// both ends of this function tell the daemon's log the same story. The library reads none of it
@@ -199,11 +216,13 @@ func (w *daemonWiring) fire(ctx context.Context, f schedule.Firing) (schedule.Ou
 // the server it names, the model it overlays, and the workspace it runs in.
 //
 // The mode is deliberately NOT set here: it is the Firing's, taken from the Schedule the library
-// fired, exactly as scheduleWiring.fire takes it.
-func (w *daemonWiring) configFor(ctx context.Context, entry daemon.Entry) (apogee.Config, error) {
+// fired, exactly as scheduleWiring.fire takes it. The scratch ROOT the entry's home resolves to is
+// returned beside the Config for the same division of labour: the roots are resolved once here, and
+// the dir under that root is per FIRING, so fire mints it the way it stamps the mode.
+func (w *daemonWiring) configFor(ctx context.Context, entry daemon.Entry) (apogee.Config, string, error) {
 	server, err := w.serverFor(entry)
 	if err != nil {
-		return apogee.Config{}, err
+		return apogee.Config{}, "", err
 	}
 	// The `model:` overlay, legal here because validation already refused it where a model name
 	// would be a request to ACTUATE a load rather than a per-request selection (ADR 0055 decision
@@ -220,7 +239,7 @@ func (w *daemonWiring) configFor(ctx context.Context, entry daemon.Entry) (apoge
 	// decides. Everything else these roots name is home-derived and shared by every Firing.
 	roots, err := resolveRoots(w.opts.ConfigDir, entry.Run.Workspace)
 	if err != nil {
-		return apogee.Config{}, err
+		return apogee.Config{}, "", err
 	}
 
 	// The bearer token this Firing sends, resolved from the bound entry's own key SOURCE — the
@@ -230,7 +249,7 @@ func (w *daemonWiring) configFor(ctx context.Context, entry daemon.Entry) (apoge
 	// would put the prompt on the wire unauthenticated and report a 401 as the model's answer.
 	apiKey, err := w.keys.Resolve(server)
 	if err != nil {
-		return apogee.Config{}, err
+		return apogee.Config{}, "", err
 	}
 
 	// The per-model half of the Config, resolved exactly as a rebind resolves it — the system
@@ -254,7 +273,7 @@ func (w *daemonWiring) configFor(ctx context.Context, entry daemon.Entry) (apoge
 	specOpts.ResponseReserve = config.ResolveResponseReserve(server.ResponseReserve, w.opts.ResponseReserve)
 	spec, _, err := rebindSpecFor(specOpts, roots, w.manualIDs, model, 0, pinnedWindow, server.MaxOutputTokens)
 	if err != nil {
-		return apogee.Config{}, fmt.Errorf("apogee: daemon: resolve the %q schedule's bindings: %w", entry.Name, err)
+		return apogee.Config{}, "", fmt.Errorf("apogee: daemon: resolve the %q schedule's bindings: %w", entry.Name, err)
 	}
 
 	// The share the Firing actually divides its window by, read back OFF the spec rather than
@@ -334,7 +353,7 @@ func (w *daemonWiring) configFor(ctx context.Context, entry daemon.Entry) (apoge
 	}
 	cfg.ParallelAgents = config.ResolveParallelAgents(server.ParallelAgents, slots)
 
-	return cfg, nil
+	return cfg, roots.scratch, nil
 }
 
 // serverFor resolves the `servers:` entry one schedule's Firings bind to: the entry it names, or

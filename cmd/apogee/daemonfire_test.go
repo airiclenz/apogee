@@ -145,6 +145,34 @@ func TestDaemonFireFallsBackToTheStartupServer(t *testing.T) {
 	}
 }
 
+// Every daemon Firing runs in a scratch dir of its OWN, named after the record it will be saved
+// under (residuals sweep item 6, 2026-08-24). A daemon has no session host to mint one for it, so
+// before this its model was offered no writable scratch inside the box at all and put its working
+// files wherever else it could reach; two entries firing on the same minute must land in separate
+// dirs for the same reason two sessions do.
+func TestDaemonFireGivesEachFiringItsOwnScratchDir(t *testing.T) {
+	harness := newDaemonFireHarness(t, config.Options{
+		HostAlias: "startup",
+		Endpoint:  "http://startup.invalid",
+		Model:     "startup-model",
+		Servers:   []config.ServerEntry{{Name: "startup", Endpoint: "http://startup.invalid", Model: "startup-model"}},
+	})
+	roots, err := resolveRoots(harness.wiring.opts.ConfigDir, "")
+	if err != nil {
+		t.Fatalf("resolveRoots: %v", err)
+	}
+
+	first := harness.fire(t, entryFor(t, "audit", daemon.Action{}))
+	assertFiringScratchDir(t, first.RecordID, first.Config.ScratchDir, roots.scratch)
+
+	second := harness.fire(t, entryFor(t, "audit", daemon.Action{}))
+	assertFiringScratchDir(t, second.RecordID, second.Config.ScratchDir, roots.scratch)
+	if second.Config.ScratchDir == first.Config.ScratchDir {
+		t.Errorf("two firings of the same schedule shared the scratch dir %q; each one owns its own",
+			first.Config.ScratchDir)
+	}
+}
+
 // A `model:` on the entry is a per-request selection, and it overlays the bound entry's own choice
 // (ADR 0055 decision 2). Validation has already refused the key where that is not what it would
 // mean, so the composition applies it without a second opinion.

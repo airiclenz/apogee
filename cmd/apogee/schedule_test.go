@@ -312,6 +312,51 @@ func TestScheduleFiringCarriesTheParallelAgentsWidth(t *testing.T) {
 	}
 }
 
+// A Firing writes into a scratch dir of its OWN, named after the record it will be saved under
+// (residuals sweep item 6, 2026-08-24). The dir the base Config carries is the seed minted when
+// this SESSION booted (wire_live.go), so a Firing that inherited it would put its working files in
+// a dir a /clear or a /sessions resume has since moved the session off — or, once the 14-day sweep
+// has been past it, in one that no longer exists at all.
+//
+// Composed against the package's runner seam rather than a live model, which is why this test does
+// not call t.Parallel: it replaces a package-level var, exactly as the width test above does.
+func TestScheduleFiringGetsItsOwnScratchDir(t *testing.T) {
+	roots, err := resolveRoots(t.TempDir(), t.TempDir())
+	if err != nil {
+		t.Fatalf("resolveRoots: %v", err)
+	}
+	stub := &stubRunner{}
+	prevRunner := runOnce
+	runOnce = stub.once
+	t.Cleanup(func() { runOnce = prevRunner })
+
+	// The session's own boot-time dir, exactly as the composition root seeds it onto the Config a
+	// Firing copies — the value this Firing must NOT run in.
+	seed := ensureScratchDir(roots.scratch, "2026-08-24T09-00-00-session")
+	if seed == "" {
+		t.Fatal("could not create the session's seed scratch dir")
+	}
+
+	w := scheduleWiring{
+		base:    apogee.Config{WorkspaceDir: roots.workspace, ScratchDir: seed},
+		roots:   roots,
+		live:    newLiveSettings(config.Options{}, nil),
+		binding: func() upstreamBinding { return upstreamBinding{Endpoint: "http://bound.invalid", Model: "bound-model"} },
+		width:   func() int { return 1 },
+	}
+
+	if _, err := w.fire(context.Background(), schedule.Firing{Prompt: "check the build", Mode: domain.ModePlan}); err != nil {
+		t.Fatalf("fire: %v", err)
+	}
+	if !stub.called {
+		t.Fatal("the firing composed no run at all")
+	}
+	assertFiringScratchDir(t, stub.spec.RecordID, stub.spec.Config.ScratchDir, roots.scratch)
+	if stub.spec.Config.ScratchDir == seed {
+		t.Error("the firing ran in the session's boot-time scratch dir; want one of its own, named after its record")
+	}
+}
+
 // A Firing's reply is bounded by the entry the session is ON, never by the one it launched against
 // (ADR 0046). The ceiling is a property of the SLOT, like the width above it, and the base Config a
 // Firing copies was seeded with the LAUNCH entry's `max-output-tokens:` (wire_boot.go) — so a Firing

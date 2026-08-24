@@ -271,7 +271,10 @@ run's own Result is still returned.
 
 ---
 
-## 6. Every Driver gives its Firing an own scratch dir named after the record
+## 6. Every Driver gives its Firing an own scratch dir named after the record — ✅ DONE (2026-08-24)
+
+NOTES (2026-08-24): the daemon half is spelled as `configFor` returning the entry's scratch ROOT beside the Config (the plan left that shape to the implementer); `fire` mints the dir there, so the Config is still composed once and `ScratchDir` is assigned exactly once per Driver file.
+NOTES (2026-08-24): the shared assertion (`assertFiringScratchDir`) and the `firingScratch` unit test live in `cmd/apogee/wire_test.go` — named by the item's Tests paragraph, though its Files list omits the file.
 
 Depends on item 5.
 

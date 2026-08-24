@@ -705,19 +705,6 @@ task's first line already rides the header as the name fallback, so a second ren
 beneath it has to earn its rows. Settle that before touching either path.
 
 
-### Scheduled-Firing Configs carry the construction-time scratch seed
-
-**Status:** parked 2026-08-22 — deferred from the workspace-clobber-hardening run: hook/MCP
-subprocess surfaces are outside that plan's scope.
-
-- [ ] A scheduled Firing's Config copy keeps the scratch seed it was composed with, not the live
-  session's: the Firing runs against the Config its caller composed at schedule time
-  (`internal/run/run.go:23`), while the agent's own scratch root follows the session
-  (`internal/agent/construct.go:111`, `Agent.SetScratchDir`) and `ConfinementBox` folds
-  `ScratchDir` into `WritablePaths` (`internal/domain/confinement.go:89`). So a Firing writes
-  against the seed scratch dir after a session swap, not the live one.
-
-
 ### The hero tape's knob 3 is a clock where a screen-state trigger is needed
 
 **Status:** parked 2026-08-24 — owner call at the close of the hero-GIF refresh plan

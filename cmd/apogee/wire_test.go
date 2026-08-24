@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -5576,5 +5577,60 @@ func TestSessionHostWithoutScratchRootIsInert(t *testing.T) {
 	host.Activate(session.Meta{ID: "some-id"})
 	if called {
 		t.Error("scratchMoved called on a host with no scratch root")
+	}
+}
+
+// assertFiringScratchDir pins the pair every Driver's Firing composition owes the run it raises:
+// a record id minted BEFORE the run, a scratch dir that is that id's own dir under this Driver's
+// scratch root, and a dir that actually exists 0700 — a path the confinement box advertises as
+// writable has to be there when the first tool call reaches for it, and scratch may hold anything
+// the run was working on. Shared by the three Driver composition tests so the invariant is stated
+// once rather than three times.
+func assertFiringScratchDir(t *testing.T, recordID, dir, root string) {
+	t.Helper()
+
+	if recordID == "" {
+		t.Fatal("the firing named no record id; want one minted up front so its scratch dir can carry that name")
+	}
+	if want := filepath.Join(root, recordID); dir != want {
+		t.Fatalf("the firing's scratch dir = %q, want %q — the dir and the record must share one name, "+
+			"which is what puts the dir on the sessions' own 14-day sweep", dir, want)
+	}
+	info, err := os.Stat(dir)
+	if err != nil {
+		t.Fatalf("the firing's scratch dir was named but not created: %v", err)
+	}
+	if !info.IsDir() {
+		t.Fatalf("the firing's scratch dir %q is not a directory", dir)
+	}
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o700 {
+		t.Errorf("the firing's scratch dir is mode %v, want 0700", info.Mode().Perm())
+	}
+}
+
+// TestFiringScratchMintsTheIDAndCreatesItsDir pins the helper all three Drivers compose a Firing
+// through: the id is minted and the dir under the root carries exactly that name, two Firings on
+// one root never share a dir, and a host with no scratch root still gets an id — the record is
+// filed under it whether or not there is a dir to advertise.
+func TestFiringScratchMintsTheIDAndCreatesItsDir(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+
+	id, dir := firingScratch(root, time.Now())
+	assertFiringScratchDir(t, id, dir, root)
+
+	// Two schedules due on the same minute must not land in one another's files.
+	otherID, otherDir := firingScratch(root, time.Now())
+	if otherID == id || otherDir == dir {
+		t.Errorf("two firings shared a scratch identity: %q/%q and %q/%q", id, dir, otherID, otherDir)
+	}
+
+	// Nothing to advertise: the id is minted anyway, and no path is named writable.
+	rootlessID, rootlessDir := firingScratch("", time.Now())
+	if rootlessID == "" {
+		t.Error("firingScratch minted no id on a host with no scratch root; the record is filed under one regardless")
+	}
+	if rootlessDir != "" {
+		t.Errorf("firingScratch answered dir %q with no root, want \"\" — an unnamed path must never be fenced writable", rootlessDir)
 	}
 }

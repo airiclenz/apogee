@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -244,6 +245,12 @@ func runHeadless(cmd *cobra.Command, args []string, opts *config.Options, noSave
 		return notStarted(err)
 	}
 
+	// The scratch sweep, run once here for the reason runRoot runs it at boot (wire.go): this run
+	// mints a dir of its own below and a host that is only ever driven headlessly never passes the
+	// TUI's boot, so this is the only beat on which the dirs earlier runs left behind are reclaimed.
+	// Best-effort and silent, exactly as it is there — GC is never a reason a run fails to start.
+	gcScratchDirs(roots.scratch, time.Now())
+
 	// A plaintext `api-key:` in the config file is worth saying out loud here too (ADR 0047), but
 	// only saying: the migration OFFER is the TUI's, because moving a key is a consented edit to the
 	// human's own config and an unattended run has nobody to consent (the ADR 0036 reasoning that
@@ -369,6 +376,13 @@ func runHeadless(cmd *cobra.Command, args []string, opts *config.Options, noSave
 		UseProjectSkills: opts.UseProjectSkills,
 	})
 
+	// This run's own scratch dir and the id its record will be filed under (wire.go). A headless
+	// run had neither before: nothing here mints a session id, so its model was offered no writable
+	// scratch inside the box and put its working files wherever else it could reach — the workspace
+	// itself, under an Auto fence. The dir carries the record's name, so a saved run and its scratch
+	// are one thing to find and the sweep above reclaims it on the sessions' own schedule.
+	recordID, scratchDir := firingScratch(roots.scratch, time.Now())
+
 	cfg := apogee.Config{
 		Endpoint:     opts.Endpoint,
 		Model:        spec.Model,
@@ -378,6 +392,7 @@ func runHeadless(cmd *cobra.Command, args []string, opts *config.Options, noSave
 		ConfigDir:    roots.config,
 		LibraryDir:   roots.library,
 		WorkspaceDir: roots.workspace,
+		ScratchDir:   scratchDir,
 		// Confiner and posture as the session's, so an Auto run here is fenced by the same box
 		// an Auto session would be. Whether this host may run Auto unattended at all is the
 		// eligibility gate, which belongs to the surface that offers the mode.
@@ -467,7 +482,7 @@ func runHeadless(cmd *cobra.Command, args []string, opts *config.Options, noSave
 	ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	res, runErr := runOnce(ctx, run.Spec{Config: cfg, Prompt: prompt, Store: store})
+	res, runErr := runOnce(ctx, run.Spec{Config: cfg, Prompt: prompt, Store: store, RecordID: recordID})
 
 	// A refusal that stopped the Firing before it began is exit 2, not exit 1 — nothing was sent
 	// and nothing was saved, so what a script must do about it is fix the invocation, not read an

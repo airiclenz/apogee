@@ -557,7 +557,10 @@ a confined agent nowhere safe for scratch work, so improvisations landed in the 
 allows, named to the model via the **`{{scratch}}`** prompt placeholder and one guidance line in
 the shipped default prompt. Created `0700` when the session id is minted, follows the **active**
 session across rotation, advertised writable only once it actually exists, and swept by a
-best-effort 14-day startup GC. Per-session constant, so prompt use is KV-cache safe.
+best-effort 14-day startup GC. Per-session constant, so prompt use is KV-cache safe. A **Firing**
+gets one of its own on every **Driver** — the in-session Schedule, the daemon and
+`apogee headless` each mint the record id before the run and create that id's dir, so the dir and
+the saved record share one name and the same sweep reclaims it.
 _Avoid_: "temp dir" (`/tmp` is exactly what confinement may deny), "cache" (it is disposable
 work space, not a cache with an invalidation story).
 

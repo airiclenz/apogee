@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
@@ -131,6 +132,13 @@ func (w scheduleWiring) fire(ctx context.Context, f schedule.Firing) (schedule.O
 	cfg.Mode = f.Mode
 	cfg.Tools = nil
 	cfg.Events, cfg.Approver, cfg.Asker, cfg.Presenter = nil, nil, nil, nil
+	// This Firing's own scratch dir, named after the record it will be saved under, replacing the
+	// one the base Config carries: that path was minted when this session BOOTED, so a Firing that
+	// inherited it would write into a dir a /clear or a session switch has since moved the session
+	// off — or, after the 14-day sweep, into one that is gone. Minting here instead gives every
+	// Firing a private dir the sweep reclaims under the record's own name (wire.go).
+	recordID, scratchDir := firingScratch(w.roots.scratch, time.Now())
+	cfg.ScratchDir = scratchDir
 
 	// Through the package's runner seam (headless.go) rather than run.Once directly: production never
 	// reassigns it, so this is the same call, and it is what lets a test read the Config a Firing
@@ -141,6 +149,7 @@ func (w scheduleWiring) fire(ctx context.Context, f schedule.Firing) (schedule.O
 		ScheduleID:   f.ScheduleID,
 		ScheduleName: f.ScheduleName,
 		Store:        w.store,
+		RecordID:     recordID,
 	})
 	// Everything the run learned about itself, mapped onto the scheduler's report in one place so
 	// both ends of this function tell the surface the same story. The library reads none of it — it
