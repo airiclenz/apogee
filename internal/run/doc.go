@@ -39,7 +39,9 @@
 // completed. That is a deliberate scoping of ADR 0022's per-Turn cadence to the
 // interactive TUI (whose worker owns that crash-safety policy — session.Store itself
 // prescribes no cadence): a Firing is bounded and unattended, so a crash loses only that
-// one run.
+// one run. The record's id is minted at that same completion unless Spec.RecordID names one
+// up front, which is what a Driver does when something it created BEFORE the run — the
+// Firing's scratch dir — has to already carry the record's name.
 //
 // A caller that wants to observe the run supplies Config.Events; a nil sink is a discard.
 // A Turn the loop abandoned reports domain.StepResult.Faulted and surfaces its own

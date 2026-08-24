@@ -232,7 +232,7 @@ in its doc comment; no production code changes.
 
 ---
 
-## 5. `run.Spec.RecordID` — a caller may name the record before the Firing runs
+## 5. `run.Spec.RecordID` — a caller may name the record before the Firing runs — ✅ DONE (2026-08-24)
 
 **What:** the engine half of design call 1. Add to `run.Spec` (`internal/run/run.go`, the `Spec`
 struct at ~line 23) a field:

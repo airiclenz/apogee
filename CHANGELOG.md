@@ -37,6 +37,17 @@ point is a **minor** bump, not a breaking change.
   text version — and never a fallback to raw bytes, because a wall of binary teaches the model
   nothing and costs it a context window to learn it. Non-PDF reads are byte-identical to before.
 
+- **`run.Spec.RecordID` — a caller may name a Firing's record before the run starts (plan item 5).**
+  A Driver that has to key something on the record's id *before* the model's first tool call — the
+  Firing's own scratch dir — mints the id up front and hands it to `run.Once` on the new
+  `Spec.RecordID`, so the saved record and whatever the caller created under that name are one
+  name rather than two. Empty is the unchanged path: `Once` mints the id at completion exactly as
+  it always has, so the bench and every existing caller are byte-for-byte untouched.
+  `Result.SessionID` keeps reporting the id actually used, either way. Nothing validates the id's
+  shape here — `session.Store.Save` already refuses one that cannot name a file inside the store,
+  and that refusal surfaces through the existing "save the firing's record" error with the run's
+  own `Result` still returned.
+
 ### Fixed
 
 - **The composition root now hands every rung of the roster ladder to the tool set it builds

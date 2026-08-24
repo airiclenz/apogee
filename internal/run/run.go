@@ -44,6 +44,12 @@ type Spec struct {
 	// all (the bench case) and Result.SessionID stays empty.
 	Store *session.Store
 
+	// RecordID is the id the saved record is filed under, minted by the CALLER before the
+	// Firing starts so anything the caller keys on that id — the Firing's scratch dir — exists
+	// under the same name from the first tool call. Empty ⇒ Once mints one at completion, as
+	// it always has; the bench and every caller that keys nothing on the id leave it empty.
+	RecordID string
+
 	// Title overrides the record's title. Empty ⇒ Once derives one: "<schedule name> —
 	// <HH:MM>" in local time when the Schedule identity is present, so a Schedule's runs
 	// read chronologically under its name, else the first-prompt heuristic.
@@ -240,9 +246,17 @@ func Once(ctx context.Context, spec Spec) (Result, error) {
 		return res, errors.Join(runErr, fmt.Errorf("apogee: snapshot the firing: %w", err))
 	}
 	finishedAt := now().UTC()
+	// The caller's id when it named one — it has already keyed something on it (its scratch
+	// dir) — else the mint that has always happened here. Nothing validates its shape: Store.Save
+	// refuses an id that cannot name a file inside the store, and that refusal is this function's
+	// "save the firing's record" error.
+	recordID := spec.RecordID
+	if recordID == "" {
+		recordID = session.NewID(finishedAt)
+	}
 	rec := session.Record{
 		Meta: session.Meta{
-			ID:           session.NewID(finishedAt),
+			ID:           recordID,
 			Title:        res.Title,
 			CreatedAt:    startedAt.UTC(),
 			UpdatedAt:    finishedAt,

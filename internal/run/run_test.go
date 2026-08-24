@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -38,6 +39,10 @@ func TestOncePersistsAFiringUnderItsScheduleIdentity(t *testing.T) {
 	}
 	if res.SessionID == "" {
 		t.Fatal("Result.SessionID is empty; the firing was not persisted")
+	}
+	if res.SessionID == callerRecordID {
+		t.Errorf("Result.SessionID = %q, the id a caller names elsewhere; an empty Spec.RecordID mints its own",
+			res.SessionID)
 	}
 	if want := "Nightly build — 09:30"; res.Title != want {
 		t.Errorf("Result.Title = %q, want %q", res.Title, want)
@@ -139,6 +144,77 @@ func TestOnceWithoutAStorePersistsNothing(t *testing.T) {
 	}
 	if up.calls() != 1 {
 		t.Errorf("the Upstream saw %d requests, want 1", up.calls())
+	}
+}
+
+// callerRecordID is the id a caller hands Once through Spec.RecordID below. It is shared with
+// the minting test above, whose point is that an empty RecordID never produces this id.
+const callerRecordID = "2026-08-24-090000-firing"
+
+// TestOnceFilesTheRecordUnderTheCallersRecordID pins Spec.RecordID: a caller that already keyed
+// something on the id before the run started — a Firing's scratch dir is created under it — gets
+// the record filed under exactly that id, and the Result reports the id actually used.
+func TestOnceFilesTheRecordUnderTheCallersRecordID(t *testing.T) {
+	t.Parallel()
+
+	up := newUpstream(t, alwaysFinal("filed where I asked"))
+	store := session.NewStore(t.TempDir())
+
+	spec := planSpec(up.url, "run under a name I chose")
+	spec.Store = store
+	spec.RecordID = callerRecordID
+	spec.Now = at(time.Date(2026, 8, 24, 9, 0, 0, 0, time.Local))
+
+	res, err := Once(context.Background(), spec)
+
+	if err != nil {
+		t.Fatalf("Once: %v", err)
+	}
+	if res.SessionID != callerRecordID {
+		t.Errorf("Result.SessionID = %q, want the caller's %q", res.SessionID, callerRecordID)
+	}
+	rec, err := store.Load(callerRecordID)
+	if err != nil {
+		t.Fatalf("Load(%q): %v", callerRecordID, err)
+	}
+	if rec.Meta.ID != callerRecordID {
+		t.Errorf("the loaded record's Meta.ID = %q, want %q", rec.Meta.ID, callerRecordID)
+	}
+}
+
+// TestOnceReportsARecordIDThatCannotNameAFile: Once validates nothing about a caller's id, so
+// one that cannot address a file inside the store is refused by session.Store and surfaces as
+// the ordinary "save the firing's record" error — with the run's own Result still returned,
+// because the Firing did reach its answer.
+func TestOnceReportsARecordIDThatCannotNameAFile(t *testing.T) {
+	t.Parallel()
+
+	up := newUpstream(t, alwaysFinal("the run itself was fine"))
+	store := session.NewStore(t.TempDir())
+
+	spec := planSpec(up.url, "file me outside the store")
+	spec.Store = store
+	spec.RecordID = "../escape"
+
+	res, err := Once(context.Background(), spec)
+
+	if err == nil {
+		t.Fatal("Once returned no error; an id that is not a safe filename component must be refused")
+	}
+	if !errors.Is(err, session.ErrInvalidID) {
+		t.Errorf("Once error = %v, want one wrapping session.ErrInvalidID", err)
+	}
+	if !strings.Contains(err.Error(), "save the firing's record") {
+		t.Errorf("Once error = %v, want the save-the-record error", err)
+	}
+	if res.FinalText != "the run itself was fine" {
+		t.Errorf("Result.FinalText = %q, want the answer the firing did reach", res.FinalText)
+	}
+	if res.Err != nil {
+		t.Errorf("Result.Err = %v, want nil: the run succeeded, only the save failed", res.Err)
+	}
+	if res.SessionID != "" {
+		t.Errorf("Result.SessionID = %q, want empty: nothing was saved", res.SessionID)
 	}
 }
 
