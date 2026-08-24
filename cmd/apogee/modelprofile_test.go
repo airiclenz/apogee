@@ -1,7 +1,9 @@
 package main
 
 import (
+	"errors"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -9,6 +11,7 @@ import (
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/profiles"
+	"github.com/airiclenz/apogee/internal/tools"
 )
 
 // The two tiers and the silence rule in one table (ADR 0044): a user entry outranks the shipped
@@ -165,6 +168,18 @@ func TestRebindSpecForCarriesThePerModelProfile(t *testing.T) {
 	}
 }
 
+// rosterEditTools is a live tool set for the config-edit door's tests: built from the global
+// `tools.disabled:` list it is handed and re-composed, on every rebuild, under the profile roster the
+// spec carries — the two rungs the door moves between.
+func rosterEditTools(workspace string, disabled []string) *liveTools {
+	build := func(spec toolSetSpec) *apogee.ToolRegistry {
+		return tools.NewDefaultRegistryWithHost(workspace,
+			tools.HostTools{Disabled: spec.disabled, ProfileRoster: spec.roster})
+	}
+	spec := toolSetSpec{disabled: disabled}
+	return newLiveTools(build(spec), spec, build)
+}
+
 // The config-EDIT door, the other half of ratified call 6: the model has not changed, so the map is
 // re-read, resolved for the model the session is bound to right now, and pushed at SetProfile —
 // never at a whole rebind, which an open Exchange would refuse.
@@ -178,6 +193,7 @@ func TestApplySettingModelProfilesResolvesForTheBoundModel(t *testing.T) {
 		live:       live,
 		binding:    func() upstreamBinding { return upstreamBinding{Model: "minimax-m3"} },
 		configPath: path,
+		tools:      rosterEditTools(t.TempDir(), nil),
 		// No rebind closure at all: this key must not need one.
 	})
 
@@ -205,6 +221,55 @@ func TestApplySettingModelProfilesResolvesForTheBoundModel(t *testing.T) {
 	}
 	if len(spy.profiles) != 2 || spy.profiles[1].Thinking.Start != "<mm:think>" {
 		t.Errorf("SetProfile = %+v, want the shipped minimax shape back", spy.profiles)
+	}
+}
+
+// The config-edit door carries the profile's THIRD axis too: an entry for the bound model that spells
+// a roster re-composes the tool set through the set's own swap door (ADR 0057's Bounds — the host
+// that built the set folds its deltas in), and only AFTER the dialect committed, so a profile the
+// engine refuses moves the set no more than it moves the parser.
+func TestApplySettingModelProfilesRecomposesTheToolSet(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	spy := &applySettingSpy{}
+	live := rosterEditTools(t.TempDir(), []string{"view_diff"})
+	apply := applySettingFor(settingsApplier{
+		engine:     spy,
+		live:       newLiveSettings(config.Options{}, nil),
+		binding:    func() upstreamBinding { return upstreamBinding{Model: "minimax-m3"} },
+		configPath: path,
+		tools:      live,
+	})
+
+	writeSettingsFixture(t, path, "model-profiles:\n  minimax:\n    tools:\n      enabled: [view_diff]\n")
+	if _, err := apply("model-profiles", "1 model profile"); err != nil {
+		t.Fatalf("apply model-profiles: %v", err)
+	}
+	if len(spy.profiles) != 1 {
+		t.Fatalf("SetProfile calls = %d, want 1", len(spy.profiles))
+	}
+	if len(spy.swaps) != 1 {
+		t.Fatalf("SwapTools calls = %d, want 1: which tools exist is a set-level change", len(spy.swaps))
+	}
+	if _, ok := spy.swaps[0].Lookup("view_diff"); !ok {
+		t.Error("the swapped-in set lacks the tool the bound model's entry lifts over the global list")
+	}
+	if want := []string{"view_diff"}; !slices.Equal(live.built().roster.Enabled, want) {
+		t.Errorf("the holder's roster = %+v, want Enabled %q carried for the next rebuild", live.built().roster, want)
+	}
+
+	// Validate-then-commit at the parser AND at the set: a profile the engine refuses is reported
+	// on the row and the tool set stays exactly where it was.
+	spy.profileErr = errors.New("a dialect this build cannot parse")
+	writeSettingsFixture(t, path, "model-profiles:\n  minimax:\n    tools:\n      enabled: [view_diff, python_exec]\n")
+	if _, err := apply("model-profiles", "1 model profile"); err == nil {
+		t.Fatal("a refused SetProfile must fail the apply")
+	}
+	if len(spy.swaps) != 1 {
+		t.Errorf("SwapTools calls = %d, want still 1: a refused profile must not move the set", len(spy.swaps))
+	}
+	if want := []string{"view_diff"}; !slices.Equal(live.built().roster.Enabled, want) {
+		t.Errorf("the holder's roster = %+v, want the committed %q untouched by the refused edit", live.built().roster, want)
 	}
 }
 

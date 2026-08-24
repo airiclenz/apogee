@@ -16,6 +16,7 @@ import (
 	"sync"
 
 	"github.com/airiclenz/apogee"
+	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/security"
 	"github.com/airiclenz/apogee/internal/tools"
 )
@@ -49,16 +50,23 @@ type liveTools struct {
 }
 
 // toolSetSpec is the configuration one live tool set is built from: the web-search endpoint, the
-// roster of built-in tools taken off the menu, and the two `url-safety:` host lists. They travel as
-// one value because every door below moves exactly ONE of them and has to hand the rest on
-// untouched — carrying them as separate arguments would make three adjacent name lists an argument
-// order away from silently applying a deny list as an allow list.
+// roster of built-in tools taken off the menu, the bound model's own roster axis, and the two
+// `url-safety:` host lists. They travel as one value because every door below moves exactly ONE of
+// them and has to hand the rest on untouched — carrying them as separate arguments would make the
+// adjacent name lists an argument order away from silently applying a deny list as an allow list.
 type toolSetSpec struct {
 	// endpoint is the web-search endpoint the set's web_search tool was built with.
 	endpoint string
 
 	// disabled is the `tools.disabled:` roster the set was pruned by.
 	disabled []string
+
+	// roster is the bound model's `tools:` profile axis the set was composed under — the most
+	// specific rung of the roster ladder (ADR 0057). It belongs to the SET rather than to any one
+	// tool for the same reason the host lists below do: which tools exist is what the set IS, and no
+	// tool exposes a setter for it, so a model whose profile lifts or drops a tool means building
+	// again.
+	roster domain.ToolRosterDelta
 
 	// allowHosts and denyHosts are the `url-safety:` host lists the set's URLGuard was built from.
 	// They belong to the SET rather than to any one tool: the guard is handed to every network tool
@@ -106,6 +114,19 @@ func (t *liveTools) setSearchEndpoint(endpoint string, engine settingsEngine) er
 func (t *liveTools) setDisabled(disabled []string, engine settingsEngine) error {
 	spec := t.built()
 	spec.disabled = disabled
+	return t.rebuildWith(spec, engine)
+}
+
+// setProfileRoster moves the session onto the roster axis of the model it is now bound to — the
+// profile's `tools:` deltas (ADR 0057). It is the swap door for setDisabled's reason rather than a
+// write on a tool: the roster decides which tools EXIST, which is the set's identity (ADR 0037
+// binding F), so the set is built again under the new axis and handed to the engine whole. It is
+// the composition root's half of the ADR's Bounds — the engine's own re-compose seam stands down
+// under the registry this root injects, so the host that assembled the set is the one that folds
+// the deltas in. Being idle-only, SwapTools can refuse mid-run, and then nothing has moved.
+func (t *liveTools) setProfileRoster(roster domain.ToolRosterDelta, engine settingsEngine) error {
+	spec := t.built()
+	spec.roster = roster
 	return t.rebuildWith(spec, engine)
 }
 

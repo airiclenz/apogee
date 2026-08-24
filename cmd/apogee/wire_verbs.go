@@ -11,6 +11,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"strings"
 
@@ -46,6 +47,18 @@ func (w *rootWiring) rebind(model string, window int) (tui.RebindResult, error) 
 	}
 	if err := w.engine.Rebind(spec); err != nil {
 		return tui.RebindResult{}, err
+	}
+	// The profile's roster axis takes effect HERE, in the composition root, because the engine's own
+	// re-compose seam stands down under the registry this root injects (ADR 0057's Bounds: the host
+	// that assembles the set folds its deltas in where it builds). It runs after the binding has
+	// COMMITTED, so a refusal from the swap door is a notice and never a failed rebind — the model
+	// did switch, and reporting a switch that happened as one that did not would be the worse lie.
+	// SwapTools can only refuse mid-Exchange, which the boundary the TUI rebinds at (ADR 0024) rules
+	// out; the line says the tools did not move and when they will.
+	if err := w.toolSet.setProfileRoster(spec.Profile.Tools, w.engine); err != nil {
+		notices = append(notices, fmt.Sprintf(
+			"tools: the profile roster for %s was not applied (%v) — it applies at the next model switch",
+			spec.Model, err))
 	}
 	// Session metadata follows the wire: a session that switched models mid-conversation is
 	// listed under the model it ends on, which is the one its last Turns actually ran against.

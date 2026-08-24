@@ -61,20 +61,26 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	// What the set the session runs was BUILT from — the values a later rebuild has to carry rather
 	// than take from this snapshot again. The url-safety host lists ride it beside the endpoint and
 	// the roster because the guard is built WITH the set (registryWithMCP hands one URLGuard to every
-	// network tool), so an edit of either list is a rebuild rather than a write on a tool.
+	// network tool), so an edit of either list is a rebuild rather than a write on a tool. The bound
+	// model's roster axis rides it for the same reason: a model switch re-composes the set under the
+	// profile it lands on (ADR 0057 decision 7), and the rebuild that does it must carry the axis
+	// forward, not the one the process launched under.
 	built := toolSetSpec{
 		endpoint:   w.cfg.WebSearchEndpoint,
 		disabled:   w.opts.ToolsDisabled,
+		roster:     w.cfg.Profile.Tools,
 		allowHosts: w.cfg.URLAllowHosts,
 		denyHosts:  w.cfg.URLDenyHosts,
 	}
 	w.toolSet = newLiveTools(w.cfg.Tools, built, func(spec toolSetSpec) *apogee.ToolRegistry {
-		// The set as this session would have built it with another search endpoint, another roster
-		// and another pair of url-safety host lists: the MCP tools are re-folded from the holder
-		// rather than remembered, so a rebuild always carries the connections that are live NOW.
+		// The set as this session would have built it with another search endpoint, another roster,
+		// another model's profile axis and another pair of url-safety host lists: the MCP tools are
+		// re-folded from the holder rather than remembered, so a rebuild always carries the
+		// connections that are live NOW.
 		host := w.cfg
 		host.WebSearchEndpoint = spec.endpoint
 		host.DisabledTools = spec.disabled
+		host.Profile.Tools = spec.roster
 		host.URLAllowHosts = spec.allowHosts
 		host.URLDenyHosts = spec.denyHosts
 		return registryWithMCP(w.roots.workspace, host, w.mcpSet.tools())

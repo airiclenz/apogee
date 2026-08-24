@@ -25,6 +25,7 @@ import (
 	"github.com/airiclenz/apogee/internal/mcp"
 	"github.com/airiclenz/apogee/internal/mechanisms"
 	"github.com/airiclenz/apogee/internal/platform"
+	"github.com/airiclenz/apogee/internal/profiles"
 	"github.com/airiclenz/apogee/internal/scheme"
 	"github.com/airiclenz/apogee/internal/security"
 	"github.com/airiclenz/apogee/internal/session"
@@ -145,6 +146,124 @@ func TestRunRootThreadsContextWindow(t *testing.T) {
 				t.Error("tui.Options.Version is empty; the build version was not threaded from apogee.Version")
 			}
 		})
+	}
+}
+
+// rosterSwitchWiring assembles a live session — the boot phase and the live phase, exactly as
+// runRoot runs them, short of the launch — bound to model-a on a server that advertises nothing,
+// with view_diff off globally and a model-b profile that lifts it back. It is the rebind harness
+// with the wiring kept in hand rather than handed to a launcher, because what a switch does to the
+// TOOL SET is observable only on the holder the composition root keeps.
+func rosterSwitchWiring(t *testing.T) *rootWiring {
+	t.Helper()
+	opts := config.Options{
+		Endpoint:      "http://127.0.0.1:1111",
+		Model:         "model-a",
+		Mode:          "ask-before",
+		Workspace:     t.TempDir(),
+		ConfigDir:     t.TempDir(),
+		AutoCompact:   true,
+		ToolsDisabled: []string{"view_diff"},
+		ModelProfiles: []profiles.Entry{{
+			Pattern:     "model-b",
+			Profile:     apogee.ModelProfile{Tools: domain.ToolRosterDelta{Enabled: []string{"view_diff"}}},
+			SpellsTools: true,
+		}},
+	}
+	roots, err := resolveRoots(opts.ConfigDir, opts.Workspace)
+	if err != nil {
+		t.Fatalf("resolveRoots: %v", err)
+	}
+	w := newRootWiring(opts, apogee.ModeAskBefore, roots)
+	t.Cleanup(w.close)
+	if err := w.resolveConfig(); err != nil {
+		t.Fatalf("resolveConfig: %v", err)
+	}
+	if err := w.wireSession(context.Background()); err != nil {
+		t.Fatalf("wireSession: %v", err)
+	}
+	return w
+}
+
+// liveSetHas reports whether the set the holder is on registers name — under the holder's own lock,
+// as every reader of the pointer is.
+func liveSetHas(live *liveTools, name string) bool {
+	live.mu.Lock()
+	defer live.mu.Unlock()
+	_, ok := live.current.Lookup(name)
+	return ok
+}
+
+// A model switch re-composes the tool set under the profile it lands on (ADR 0057 decision 7:
+// "/model to the big model and its enabled tools appear; switch back and they are gone"). The engine's
+// own re-compose seam stands down under the registry the composition root injects, so the root's
+// rebind verb drives the set's swap door itself — and the holder moves onto the new set only once
+// the engine has taken it, which is what makes the holder's set the one the loop now offers.
+func TestRebindRecomposesTheToolSetUnderTheProfileRoster(t *testing.T) {
+	t.Parallel()
+	w := rosterSwitchWiring(t)
+	if liveSetHas(w.toolSet, "view_diff") {
+		t.Fatal("view_diff is on the startup set; the global tools.disabled: did not prune it")
+	}
+
+	result, err := w.rebind("model-b", 8192)
+	if err != nil {
+		t.Fatalf("rebind onto model-b: %v", err)
+	}
+	if !liveSetHas(w.toolSet, "view_diff") {
+		t.Error("view_diff is missing after the switch onto model-b: the profile's roster was announced but never applied")
+	}
+	if !slices.Contains(result.Notices, "tools: +view_diff (profile)") {
+		t.Errorf("notices = %q, want the switch line for the lifted tool among them", result.Notices)
+	}
+
+	// Switching back onto a model with no roster axis composes the set the global lists describe:
+	// the lift belonged to model-b's profile, not to the session.
+	if _, err := w.rebind("model-a", 8192); err != nil {
+		t.Fatalf("rebind back onto model-a: %v", err)
+	}
+	if liveSetHas(w.toolSet, "view_diff") {
+		t.Error("view_diff is still on the set after switching back onto a model with no roster axis")
+	}
+}
+
+// A refusal from the swap door during a switch is a NOTICE, not a failed rebind (ratified design
+// call 4): the binding has already committed by then, so failing the rebind would report a switch
+// that did happen as one that did not. The result carries the model and window as the switch
+// resolved them, one line says the tools did not move and when they will, and the holder stays on
+// the set the engine still runs.
+func TestRebindReportsARefusedRosterSwapAsANotice(t *testing.T) {
+	t.Parallel()
+	w := rosterSwitchWiring(t)
+	// A build the engine refuses outright stands in for the mid-Exchange refusal: SwapTools has
+	// exactly those two, and the boundary the TUI rebinds at (ADR 0024) rules the other one out.
+	w.toolSet = newLiveTools(w.toolSet.current, w.toolSet.built(),
+		func(toolSetSpec) *apogee.ToolRegistry { return nil })
+
+	result, err := w.rebind("model-b", 8192)
+	if err != nil {
+		t.Fatalf("rebind must not fail over a refused swap, the binding had already committed: %v", err)
+	}
+	if result.Model != "model-b" || result.ContextWindow != 8192 {
+		t.Errorf("result = %+v, want Model model-b and ContextWindow 8192: the switch happened", result)
+	}
+	var lines []string
+	for _, n := range result.Notices {
+		if strings.Contains(n, "next model switch") {
+			lines = append(lines, n)
+		}
+	}
+	if len(lines) != 1 {
+		t.Fatalf("notices = %q, want exactly one line saying the roster applies at the next switch", result.Notices)
+	}
+	if !strings.Contains(lines[0], "model-b") || !strings.Contains(lines[0], "not applied") {
+		t.Errorf("notice = %q, want it to name the model and say the tools did not move", lines[0])
+	}
+	if liveSetHas(w.toolSet, "view_diff") {
+		t.Error("the holder moved onto a set the engine refused")
+	}
+	if got := w.holder.Binding().Model; got != "model-b" {
+		t.Errorf("bound model = %q, want model-b: the refused swap must not unwind the switch", got)
 	}
 }
 

@@ -133,7 +133,11 @@ go build ./... && go test ./cmd/apogee/ -count=1
 
 ---
 
-## 2. Re-compose the tool set when the bound model's roster changes
+## 2. Re-compose the tool set when the bound model's roster changes — ✅ DONE (2026-08-24)
+
+NOTES (2026-08-24): the door-two tests (`reloadModelProfiles` swaps the set; a refused `SetProfile` swaps nothing) live in `cmd/apogee/modelprofile_test.go` beside the existing `reloadModelProfiles` tests rather than in `wire_test.go`; the existing sibling `TestApplySettingModelProfilesResolvesForTheBoundModel` now carries a live tool set, because the door reaches `settingsApplier.tools` and the production applier always wires one.
+NOTES (2026-08-24): the door-one tests run the real wiring (`newRootWiring` + `resolveConfig` + `wireSession`, then `rootWiring.rebind`) because `rootWiring.engine` is the concrete `*lateEngine`, not the `settingsEngine` the spy implements; the refused-swap case therefore uses a build the engine refuses outright (a nil registry) in place of the mid-Exchange refusal, which `cmd/apogee` cannot stage on a real Agent — `SwapTools` has exactly those two refusals and the ADR 0024 boundary rules the other one out.
+NOTES (2026-08-24): `docs/manual/commands.md` now says a saved `model-profiles:` edit re-composes the tool set beside swapping the parser — user-facing behaviour the settings pane gained with door two.
 
 **Depends on item 1.**
 

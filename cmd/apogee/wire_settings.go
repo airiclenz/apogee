@@ -987,6 +987,13 @@ func (a settingsApplier) reconnectMCP() error {
 // format this build cannot parse leaves the session reading responses exactly as it did, and says so
 // on the row.
 //
+// The profile's roster axis follows through the tool set's own swap door, and only once the dialect
+// has committed: SetProfile is validate-then-commit, so a profile this build cannot parse must move
+// the tool set no more than it moves the parser. The engine's re-compose seam stands down under the
+// registry this root injects (ADR 0057's Bounds), so the host that built the set re-composes it here.
+// A refused swap IS returned — this path reports onto the settings row, which is the surface the
+// human is looking at.
+//
 // A map the human emptied resolves to whatever the shipped table says for this model, and to the zero
 // profile when it says nothing — which is what startup would have resolved it to. Deleting an entry
 // asks for apogee's own answer back, not for whatever the process happened to launch with.
@@ -1007,7 +1014,10 @@ func (a settingsApplier) reloadModelProfiles() error {
 	// The notice is dropped rather than returned: it is a resolution's narration for a model change
 	// nobody made, and the row the pane is about to paint already says the edit applied.
 	profile, _ := resolveModelProfile(model, file.ModelProfiles)
-	return a.engine.SetProfile(profile)
+	if err := a.engine.SetProfile(profile); err != nil {
+		return err
+	}
+	return a.tools.setProfileRoster(profile.Tools, a.engine)
 }
 
 // settingInt reads a whole count the same way (KindInt's own validators do, validateContextWindow),

@@ -51,6 +51,21 @@ point is a **minor** bump, not a breaking change.
   same roster from the same value on every Driver. Construction only: a mid-session model switch
   re-applying the roster is plan item 2.
 
+- **The tool set is re-composed when the bound model's roster changes (refocus plan item 2).**
+  ADR 0057 decision 7 makes the roster a per-model binding that rides `Rebind` — "`/model` to the
+  big model and its enabled tools appear; switch back and they are gone" — but the engine's own
+  re-compose seam stands down under the registry the composition root injects, so a switch
+  announced its roster deltas and none of them took effect. The root now drives the set's own swap
+  door from both doors onto the profile: `toolSetSpec` carries the bound model's `tools:` axis as
+  part of the set's identity, `liveTools.setProfileRoster` rebuilds under a new axis through
+  `Agent.SwapTools` (ADR 0037 binding F), `rootWiring.rebind` calls it once the binding has
+  committed, and a `model-profiles:` edit under a stable model calls it after `SetProfile`
+  succeeded — validate-then-commit at the parser and at the set alike. Per ratified design call 4,
+  a refused swap during a model switch is a transcript notice (`tools: the profile roster for
+  <model> was not applied (…) — it applies at the next model switch`), never a failed rebind: the
+  model did switch. On the settings-row path the refusal is returned, because that row is the
+  surface the human is looking at.
+
 - `internal/tools/doc.go`: corrected the package map's carrier-file count from "Twenty-nine" to
   "Thirty" — `pdf_text.go` had been added to the map without updating the count sentence.
 
