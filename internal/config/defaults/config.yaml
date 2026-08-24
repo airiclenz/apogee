@@ -41,7 +41,10 @@
 #              `/server <name>` takes, the value server: below points at, and the host name the
 #              status footer shows while the session is on it. Required, and no two entries may
 #              share one.
-#   endpoint   that server's OpenAI-compatible URL. Required.
+#   endpoint   that server's OpenAI-compatible URL — the BASE, without `/v1`: apogee appends
+#              `/v1/chat/completions` and `/v1/models` itself, so OpenRouter is
+#              `https://openrouter.ai/api`. Spelled with the suffix, every request lands on
+#              `/api/v1/v1/…` and 404s. Required.
 #   api-key    the bearer token that server wants, if it wants one — llama.cpp started with
 #              --api-key, LM Studio, a remote vLLM, any keyed OpenAI-compatible proxy. It is
 #              sent as `Authorization: Bearer <key>` on EVERY request to that server: your
@@ -173,7 +176,7 @@
 #     endpoint: https://llm.example.com
 #     api-key-cmd: security find-generic-password -s apogee -a keychain-box -w
 #   - name: openrouter
-#     endpoint: https://openrouter.ai/api/v1
+#     endpoint: https://openrouter.ai/api
 #     api-key-env: OPENROUTER_API_KEY
 
 # =============================================================================

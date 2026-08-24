@@ -113,6 +113,13 @@ point is a **minor** bump, not a breaking change.
   `v0.16.x`. Nothing else in either line moved — the ADR line's "Settled questions live here" half,
   and the Status section's SemVer, six-target and Homebrew sentences, were all already accurate.
 
+- The seeded config template's OpenRouter example endpoint no longer carries a `/v1` suffix.
+  `internal/provider/client.go` builds every request as `baseURL + "/v1/chat/completions"` (and
+  `/v1/models` for discovery) and only trims a trailing slash from the base, so the example's
+  `https://openrouter.ai/api/v1` sent every request to `/api/v1/v1/…` and 404'd. The example now
+  reads `https://openrouter.ai/api`, and the `endpoint` key's own documentation says the value is
+  the BASE URL without `/v1` and what happens when the suffix is spelled out.
+
 ## [0.16.3] — 2026-08-24
 
 ### Added
