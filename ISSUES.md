@@ -72,6 +72,24 @@ written to close, one level down, and the effort-only entry is a taught idiom (`
 
 ---
 
+### A PDF that parses to zero pages reads to the model as a scan
+
+**Status:** open 2026-08-24 — deferred at the close of the read_file PDF plan
+(`docs/plans/archived/2026-08-24 - 00 - read-file-pdf-plan.md`); no item of that plan owned the
+distinction.
+
+`extractPDFText` decides the no-text case on `hasText` alone (`internal/tools/pdf_text.go:97`), and
+that flag is false both for a document whose pages carry only images and for one whose page tree
+yields nothing to walk at all — `pages = reader.NumPage()` comes back 0
+(`internal/tools/pdf_text.go:80`) and the loop body never runs. A structurally broken file that
+`pdf.NewReader` accepts therefore fails with `pdfNoTextMessage` — "likely scanned images; OCR is not
+supported … ask the user for a text version" (`internal/tools/pdf_text.go:26`) — which tells the
+model the document is a scan when nothing was read from it. A `pages == 0` guard ahead of the
+`hasText` check would route it to `pdfUnreadableFormat`'s "may be corrupted or encrypted" wording
+(`internal/tools/pdf_text.go:31`) instead.
+
+---
+
 ## Parked / deferred work
 
 Live, deliberately deferred work only. Each entry records *enough* design that we don't re-derive
@@ -767,3 +785,17 @@ subprocess surfaces are outside that plan's scope.
   session (`internal/agent/construct.go:111`, `Agent.SetScratchDir`), and `ConfinementBox` folds
   `ScratchDir` into `WritablePaths` (`internal/domain/confinement.go:89`). So those two surfaces
   measure/write against the seed scratch dir after a session swap, not the live one.
+
+
+### `pdfDisplayPath`'s multi-page header is never exercised by a test
+
+**Status:** parked 2026-08-24 — deferred at the close of the read_file PDF plan: its committed
+fixtures (`internal/tools/testdata/minimal.pdf`, `notext.pdf`) are one-page documents, so a
+multi-page assertion had no fixture to stand on.
+
+- [ ] `pdfDisplayPath` branches on the page count — `"(PDF, 1 page)"` singular against
+  `fmt.Sprintf("%s (PDF, %d pages)", path, pages)` plural (`internal/tools/read_file.go:149-153`) —
+  and only the singular branch is covered: `read_file_test.go:688` asserts the
+  `[File: minimal.pdf (PDF, 1 page), …]` header and nothing asserts the plural form at any level.
+  Either commit a small multi-page fixture and assert the header through `Execute`, or unit-test
+  `pdfDisplayPath` directly for the counts 0, 1 and 2.
