@@ -50,6 +50,17 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **The Tool summary persistence contract now agrees with ADR 0052 §5 (plan item 1).** The domain
+  contract said a summary is "never persisted in the session record" (`internal/domain/toolsummary.go`,
+  on `ToolSummary` and on `EditRegions`) while ADR 0052 §5 ratifies — and `internal/tui/transcriptcodec.go`
+  performs — persisting the Edit-region structure on the codec's own wire type. Both comment sites and
+  ADR 0052 decision 1 now state the rule once and in two halves: the summary VALUE never reaches disk and
+  has no wire form (`domain.Message` carries `Content` only, and no `ToolSummary` is ever decoded back),
+  while a host's codec MAY mirror the FACTS a variant carries onto a wire type of its own where a replayed
+  view cannot be re-composed without them — which is what `wireEditRegion` is, so a resumed session repaints
+  its Split diffs at the live width. ADR 0052 gains a dated amendment recording the reconciliation; decision 5,
+  the codec and `TestTranscriptCodecRoundTripsRecordedRegions` are untouched. Text only — no behaviour change.
+
 - **The composition root now hands every rung of the roster ladder to the tool set it builds
   (refocus plan item 1).** `registryWithMCP` — the path every live session's registry is built on —
   passed only the `tools.disabled:` rung into `tools.HostTools`, so the global `tools.enabled:`

@@ -28,10 +28,14 @@ package domain
 // An embedder's tool emits none, ToolResult.Summary stays nil, and the host renders the
 // prose exactly as it does today.
 //
-// NEVER PERSISTED: a summary describes what a tool did during one call and has no wire
-// form. domain.Message carries only Content, and the TUI's session codec stores the
-// RENDERED tool view rather than the ToolResult, so no summary reaches disk and a
-// session written before a variant existed reopens unchanged.
+// NO WIRE FORM: a summary describes what a tool did during one call, and the summary VALUE
+// itself never reaches disk. domain.Message carries only Content, and the TUI's session codec
+// stores the RENDERED tool view rather than the ToolResult, so no ToolSummary is ever decoded
+// back (fromWireToolView re-runs no presenter) and a session written before a variant existed
+// reopens unchanged. What a HOST's codec may do is mirror the FACTS a variant carries onto a
+// wire type of its own, where a replayed view cannot be re-composed without them — the TUI does
+// exactly that for the Edit regions below (wireEditRegion, ADR 0052 §5). That mirror is the
+// codec's own additive contract about its rendering; it is not a wire form for this type.
 
 // ToolSummary is the sealed sum type of the structured outcomes a tool may report
 // alongside its prose Content. The variants are the seven below; the marker method is
@@ -117,11 +121,14 @@ type EditRegion struct {
 
 // EditRegions is the three edit tools' outcome — edit_existing_file, single_find_and_replace
 // and multi_find_and_replace: every changed region of the edit just applied, in file order.
-// It rides the Tool summary contract unchanged, which is to say it is DISPLAY DATA — never
-// sent to the model, never persisted in the session record — and it is what the Split diff
-// and its Stacked reading are painted from (ADR 0052). A result carrying no regions, because
-// the pair was over budget to diff or because an embedder's own tool attached nothing,
-// renders the argument-derived list exactly as before.
+// It rides the Tool summary contract unchanged, which is to say it is DISPLAY DATA — never sent
+// to the model, and the summary VALUE has no wire form — and it is what the Split diff and its
+// Stacked reading are painted from (ADR 0052). The TUI's session codec does mirror the region
+// FACTS onto a wire type of its own (wireEditRegion), because the Split reading is composed at
+// paint time against the live width and has nothing to compose from once the regions are gone;
+// that persistence is the codec's rendering contract (ADR 0052 §5), not this type's. A result
+// carrying no regions, because the pair was over budget to diff or because an embedder's own
+// tool attached nothing, renders the argument-derived list exactly as before.
 type EditRegions struct{ Regions []EditRegion }
 
 func (EditRegions) isToolSummary() {}

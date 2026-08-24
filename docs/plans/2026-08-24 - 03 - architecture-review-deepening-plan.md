@@ -104,7 +104,14 @@ Write-time calls by the plan author (mechanical, no user-visible difference):
 
 ---
 
-## 1. Make the `EditRegions` persistence contract text agree with ADR 0052 §5
+## 1. Make the `EditRegions` persistence contract text agree with ADR 0052 §5 — ✅ DONE (2026-08-24)
+
+NOTES (2026-08-24): the `NEVER PERSISTED:` heading of the Tool summary block comment is renamed to
+`NO WIRE FORM:` — the item required the contradicting phrase gone while the "no wire form" half stays
+load-bearing, and the paragraph needed a heading that says the surviving half.
+NOTES (2026-08-24): `CONTEXT.md`'s **Tool summary** and **Edit regions** entries carry the same
+contradicting wording ("A summary is **never persisted**", "never in the session record"); the item's
+Files list names only the two files above, so they were left untouched — see the DEFER line.
 
 **What.** The domain contract says the region structure is "never persisted in the session
 record" (`internal/domain/toolsummary.go:31-34` on `ToolSummary`, `:120-122` on `EditRegions`;

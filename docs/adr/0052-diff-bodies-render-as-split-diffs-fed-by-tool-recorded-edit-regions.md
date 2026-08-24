@@ -44,8 +44,11 @@ region takes up to three of them as its trailing context, the later takes whatev
 leading — and the renderers omit the `⋯` separator between regions that are contiguous in line
 numbering, so the paint reads exactly as a merge would. The variant is a new sealed
 `domain.ToolSummary`, so the Tool summary contract is untouched: display data, never sent to the
-model, never persisted in the session record
-([ADR 0022](0022-sessions-persist-per-turn-as-dual-representation-records.md)). The edit blocks'
+model, and with no wire form of its own — the session record carries `domain.Message`'s `Content`
+alone and no `ToolSummary` value ever reaches disk
+([ADR 0022](0022-sessions-persist-per-turn-as-dual-representation-records.md)); what the TUI's
+transcript codec mirrors of the regions for a width-dependent re-paint is decision 5's additive
+field on the codec's own wire type, not persistence of the summary. The edit blocks'
 `+A −R` slot reads the same summary instead of re-deriving from arguments.
 
 **2 — The other two diff blocks change no tool: the renderer recovers their positions.**
@@ -166,3 +169,31 @@ alone). What the merge was wanted for is delivered at the paint instead: both re
 separator between regions that are contiguous in line numbering, so a small gap reads end to end and
 the painted result is identical to a merge. Decision 1's text above is amended to match; no other
 decision recorded here changes.
+
+## Amendment (2026-08-24) — the summary has no wire form; the codec's region mirror is decision 5's
+
+Decision 1 above said the Edit regions variant is "display data, never sent to the model, never
+persisted in the session record", and `internal/domain/toolsummary.go` said the same in two places:
+the `NEVER PERSISTED` paragraph of the Tool summary block comment (on `ToolSummary`) and the
+`EditRegions` doc comment. Read literally, that contradicted **decision 5**, which ratifies the
+region structure travelling in an additive field on the transcript codec's wire — and
+`internal/tui/transcriptcodec.go` performs exactly that (`wireEditRegion`, `toWireToolView` /
+`fromWireToolView`).
+
+The rule, stated once so both halves are true:
+
+- **The summary VALUE never reaches disk and has no wire form.** `domain.Message` carries `Content`
+  only, the codec stores the RENDERED tool view rather than the `ToolResult`, and nothing on the
+  replay path re-runs a presenter or reconstructs a `ToolSummary` — so a session written before a
+  variant existed reopens unchanged and ADR 0022's contract is untouched. This half was always
+  load-bearing and stays.
+- **A host's codec MAY mirror the FACTS a variant carries onto a wire type of its own**, where a
+  replayed view cannot be re-composed without them. The TUI does that for the regions, because the
+  Split reading is composed at paint time against the live width and has nothing to compose from
+  once the regions are gone. That mirror is the codec's own additive contract (decision 5, the
+  `wireEntry` omitempty rule), not persistence of `domain.EditRegions`.
+
+The two Go comments are rewritten to that wording; decision 5, the codec and its round-trip test are
+untouched. The rejected alternative "Persisting the summary in the session record" stands as
+written: it rejects putting the summary itself into the session schema, which is what the first
+bullet keeps out.
