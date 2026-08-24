@@ -135,6 +135,13 @@ point is a **minor** bump, not a breaking change.
   number that was not the one in force. The stray sleep is deleted and the documented 12s stands, ~4x
   the measured ~3s tail; the banked clip is unaffected and is not re-recorded.
 
+- **`pdfDisplayPath`'s plural header is pinned by tests (residuals sweep plan item 3).** The PDF
+  header annotation branches on the page count — `(PDF, 1 page)` singular against `(PDF, N pages)`
+  plural — and only the singular branch was asserted, through `Execute` on the one-page fixture; a
+  new table-driven `TestPDFDisplayPath` exercises the function directly for the counts 0, 1 and 2, so
+  the plural branch and the zero-page reading are held by tests without committing a multi-page
+  binary fixture.
+
 ## [0.16.3] — 2026-08-24
 
 ### Added

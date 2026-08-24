@@ -787,3 +787,35 @@ func TestReadFile_Execute_JudgesAPDFByContentNotName(t *testing.T) {
 		t.Errorf("Content = %q, want %q", result.Content, want)
 	}
 }
+
+// TestPDFDisplayPath pins the header annotation's grammar across the page count: exactly one page
+// reads "1 page", every other count reads "N pages". Zero is in the table because the function
+// treats it as plural and the model reads the header verbatim — nothing else asserts that branch,
+// and the committed fixtures are all one-page documents.
+func TestPDFDisplayPath(t *testing.T) {
+	t.Parallel()
+
+	const path = "x.pdf"
+
+	cases := []struct {
+		name  string
+		pages int
+		want  string
+	}{
+		{name: "zero pages reads as plural", pages: 0, want: "x.pdf (PDF, 0 pages)"},
+		{name: "one page reads as singular", pages: 1, want: "x.pdf (PDF, 1 page)"},
+		{name: "two pages reads as plural", pages: 2, want: "x.pdf (PDF, 2 pages)"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := pdfDisplayPath(path, tc.pages)
+
+			if got != tc.want {
+				t.Errorf("pdfDisplayPath(%q, %d) = %q, want %q", path, tc.pages, got, tc.want)
+			}
+		})
+	}
+}

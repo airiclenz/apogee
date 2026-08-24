@@ -148,7 +148,9 @@ this item.
 
 ---
 
-## 3. Pin `pdfDisplayPath`'s plural header with a direct unit test
+## 3. Pin `pdfDisplayPath`'s plural header with a direct unit test — ✅ DONE (2026-08-24)
+
+NOTES (2026-08-24): ISSUES.md is edited by all three items of this batched dispatch in one working tree; an earlier item's commit may already carry this item's ISSUES.md removal.
 
 **What:** `pdfDisplayPath` (`internal/tools/read_file.go:149-153`) branches on the page count —
 `"<path> (PDF, 1 page)"` singular, `"<path> (PDF, N pages)"` plural — and only the singular
