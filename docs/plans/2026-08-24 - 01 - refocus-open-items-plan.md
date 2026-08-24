@@ -411,7 +411,7 @@ go build ./... && go test ./internal/tools/ -run 'PDF|Pdf' -count=1
 
 ---
 
-## 6. Correct the two false claims in the top-level docs
+## 6. Correct the two false claims in the top-level docs — ✅ DONE (2026-08-24)
 
 **What:** two claims in tracked top-level docs are false as of this commit.
 

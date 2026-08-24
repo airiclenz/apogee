@@ -105,6 +105,14 @@ point is a **minor** bump, not a breaking change.
 - `internal/tools/doc.go`: corrected the package map's carrier-file count from "Twenty-nine" to
   "Thirty" — `pdf_text.go` had been added to the map without updating the count sentence.
 
+- **The two false claims in the top-level docs are corrected (refocus plan item 6).** `AGENTS.md`
+  said "`docs/adr/` — 54 architectural decision records" while the directory held 58; the count is
+  now dropped rather than updated, because a number that re-breaks on every new ADR is a recurring
+  defect and the directory listing is the count. `README.md` § Status opened
+  "**`v0.15.x` on `main` — pre-production.**" while `VERSION` read `v0.16.5`; the band now reads
+  `v0.16.x`. Nothing else in either line moved — the ADR line's "Settled questions live here" half,
+  and the Status section's SemVer, six-target and Homebrew sentences, were all already accurate.
+
 ## [0.16.3] — 2026-08-24
 
 ### Added

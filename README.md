@@ -194,7 +194,7 @@ derivable from the code.
 
 ## Status
 
-**`v0.15.x` on `main` — pre-production.** Under SemVer a `0.x` version makes
+**`v0.16.x` on `main` — pre-production.** Under SemVer a `0.x` version makes
 no API-stability promise — the Go API may still move while the tool hardens —
 but every release ships prebuilt binaries for all six targets and a Homebrew
 formula. Functionally the loop is complete: full tool suite, MCP client,
