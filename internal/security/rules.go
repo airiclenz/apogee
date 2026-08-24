@@ -121,11 +121,19 @@ func DefaultDangerousRules() []Rule {
 		// hygiene: the home skill
 		// library lives under `~/.apogee/skills` and is a sanctioned extra READ root — every
 		// skill run starts by listing its own skill directory and copy_file-ing resources
-		// out of it, and without the class this rule hard-refused that first step.
+		// out of it, and without the class this rule hard-refused that first step. The Hint
+		// exists because WritesOnly only helps tools that DECLARE read-source keys — the
+		// terminal declares none, so a shell command that merely reads from the home skill
+		// library still trips this write rule, and the write-flavoured Reason alone sends a
+		// small model looping on rewrites of the write half. The hint names the sanctioned
+		// route instead.
 		{
-			ID:         "write-apogee-control-plane",
-			Tier:       TierHardRefuse,
-			Reason:     "write or delete under apogee's own control plane (~/.apogee)",
+			ID:     "write-apogee-control-plane",
+			Tier:   TierHardRefuse,
+			Reason: "write or delete under apogee's own control plane (~/.apogee)",
+			Hint: "a terminal command is refused whenever its text names ~/.apogee, even for a " +
+				"read; list, read or copy from there with the dedicated tools instead (list_dir, " +
+				"read_file, grep, find_files, or copy_file's source argument)",
 			Pattern:    homeAnchor + `/\.apogee\b`,
 			WritesOnly: true,
 		},

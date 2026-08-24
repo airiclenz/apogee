@@ -395,6 +395,46 @@ func TestResolve_GuardTier1Refuses(t *testing.T) {
 	}
 }
 
+// TestGuardRefusalMessageAppendsTheHint pins the model-facing rendering: a rule that
+// carries a Hint gets it appended after the reason (the way out, so the model reroutes
+// instead of looping on rewrites), and a hintless rule keeps the exact pre-Hint message —
+// no dangling separator.
+func TestGuardRefusalMessageAppendsTheHint(t *testing.T) {
+	t.Parallel()
+
+	withHint := security.PreCheck{
+		Outcome: security.GuardRefuse,
+		Reason:  "write under ~/.apogee",
+		Hint:    "use the dedicated read tools",
+		Audit:   security.AuditDangerousRefused,
+	}
+	if got, want := guardRefusalMessage(withHint),
+		"refused by the dangerous-action guard: write under ~/.apogee — use the dedicated read tools"; got != want {
+		t.Errorf("with hint = %q, want %q", got, want)
+	}
+
+	withoutHint := security.PreCheck{
+		Outcome: security.GuardRefuse,
+		Reason:  "rm -rf /",
+		Audit:   security.AuditDangerousRefused,
+	}
+	if got, want := guardRefusalMessage(withoutHint),
+		"refused by the dangerous-action guard: rm -rf /"; got != want {
+		t.Errorf("without hint = %q, want %q", got, want)
+	}
+
+	// The circuit-breaker branch never carries a rule hint — its message is fixed.
+	tripped := security.PreCheck{
+		Outcome: security.GuardRefuse,
+		Reason:  "identical failing call",
+		Hint:    "must not appear",
+		Audit:   security.AuditCircuitTripped,
+	}
+	if got := guardRefusalMessage(tripped); strings.Contains(got, "must not appear") {
+		t.Errorf("circuit-breaker message leaked the hint: %q", got)
+	}
+}
+
 // TestResolve_GuardTier2ForcesGate proves a Tier-2 force-approval upgrades any non-Refuse leaf
 // to a FORCED gate (the guardrail can only tighten): a Run leaf, a Confine leaf, and a Gate
 // leaf all become a forced gate whose reason is the guard's. A Plan-mode Refuse leaf is NOT

@@ -35,6 +35,7 @@ type Decision struct {
 	Tier   Tier
 	RuleID string // the matched rule's id ("" when Tier==TierNone)
 	Reason string // the human-facing why (empty when Tier==TierNone)
+	Hint   string // the matched rule's model-facing way out (empty when the rule offers none)
 }
 
 // Triggered reports whether the call matched any rule (Tier above TierNone).
@@ -60,6 +61,11 @@ type Rule struct {
 	Tier Tier
 	// Reason is the human-facing explanation surfaced in the error / approval prompt.
 	Reason string
+	// Hint is the model-facing way out — the sanctioned route to what the refused call
+	// was presumably after. It is surfaced only in the refusal / approval message shown
+	// to the model, never in the audit record (Reason alone is the record of why).
+	// Empty for rules with no better route to offer.
+	Hint string
 	// WritesOnly marks a rule whose Pattern names a WRITE or DELETE target (the write-*
 	// rules). Such a rule is skipped for a tool that declares itself read-only
 	// (domain.ReadOnlyTool), and is matched against text that omits any argument value
@@ -147,12 +153,12 @@ func (g *DangerousActionGuard) Inspect(call domain.ToolCall, tool domain.Tool) D
 				continue
 			}
 			if r.re.MatchString(writes) {
-				return Decision{Tier: r.Tier, RuleID: r.ID, Reason: r.Reason}
+				return Decision{Tier: r.Tier, RuleID: r.ID, Reason: r.Reason, Hint: r.Hint}
 			}
 			continue
 		}
 		if r.re.MatchString(full) {
-			return Decision{Tier: r.Tier, RuleID: r.ID, Reason: r.Reason}
+			return Decision{Tier: r.Tier, RuleID: r.ID, Reason: r.Reason, Hint: r.Hint}
 		}
 	}
 	return Decision{Tier: TierNone}
@@ -163,7 +169,7 @@ func (g *DangerousActionGuard) Inspect(call domain.ToolCall, tool domain.Tool) D
 func (g *DangerousActionGuard) Rules() []Rule {
 	out := make([]Rule, len(g.rules))
 	for i, r := range g.rules {
-		out[i] = Rule{ID: r.ID, Pattern: r.Pattern, Tier: r.Tier, Reason: r.Reason, WritesOnly: r.WritesOnly}
+		out[i] = Rule{ID: r.ID, Pattern: r.Pattern, Tier: r.Tier, Reason: r.Reason, Hint: r.Hint, WritesOnly: r.WritesOnly}
 	}
 	return out
 }

@@ -87,6 +87,7 @@ const (
 type PreCheck struct {
 	Outcome GuardOutcome
 	Reason  string        // why the guard fired ("" when GuardProceed)
+	Hint    string        // the way out, shown to the model alongside Reason ("" when the rule offers none)
 	Audit   AuditDecision // the decision to record for a fired guard
 }
 
@@ -111,9 +112,9 @@ func (g Guards) PreExecute(call domain.ToolCall, tool domain.Tool) PreCheck {
 		if d := g.Dangerous.Inspect(call, tool); d.Triggered() {
 			switch d.Tier {
 			case TierHardRefuse:
-				return PreCheck{Outcome: GuardRefuse, Reason: d.Reason, Audit: AuditDangerousRefused}
+				return PreCheck{Outcome: GuardRefuse, Reason: d.Reason, Hint: d.Hint, Audit: AuditDangerousRefused}
 			case TierForceApproval:
-				return PreCheck{Outcome: GuardForceApproval, Reason: d.Reason, Audit: AuditDangerousForceApproval}
+				return PreCheck{Outcome: GuardForceApproval, Reason: d.Reason, Hint: d.Hint, Audit: AuditDangerousForceApproval}
 			}
 		}
 	}

@@ -604,13 +604,19 @@ func (a *Agent) executeRefuse(turn int, call domain.ToolCall, verdict resolution
 	return result
 }
 
-// guardRefusalMessage renders the model-facing reason a guardrail refused a call.
+// guardRefusalMessage renders the model-facing reason a guardrail refused a call. A rule
+// that carries a Hint gets it appended — the way out, so the model reroutes instead of
+// looping on rewrites of a reason it cannot satisfy.
 func guardRefusalMessage(guard security.PreCheck) string {
 	switch guard.Audit {
 	case security.AuditCircuitTripped:
 		return "circuit-breaker open: this tool call has failed repeatedly with identical arguments and is refused"
 	default:
-		return "refused by the dangerous-action guard: " + guard.Reason
+		msg := "refused by the dangerous-action guard: " + guard.Reason
+		if guard.Hint != "" {
+			msg += " — " + guard.Hint
+		}
+		return msg
 	}
 }
 

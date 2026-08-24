@@ -243,6 +243,30 @@ func TestDefaultDangerousRules_ControlPlanesAreOnTheFloor(t *testing.T) {
 	}
 }
 
+// TestDefaultDangerousRules_ApogeeControlPlaneReadHintsTheSanctionedRoute pins the known
+// false positive the rule's Hint exists for: the terminal declares no read-source keys, so
+// a shell command that only READS from the home skill library still trips the write rule.
+// The refusal stands (WritesOnly narrows by declared class, not by parsing shell text) —
+// but the Decision must carry the Hint naming the dedicated tools, so a small model
+// reroutes instead of looping on rewrites of the write half of its command.
+func TestDefaultDangerousRules_ApogeeControlPlaneReadHintsTheSanctionedRoute(t *testing.T) {
+	t.Parallel()
+	g := DefaultDangerousActionGuard()
+
+	call := terminalCall("cp /home/u/.apogee/skills/x/prompts/a.md /tmp/")
+	d := g.Inspect(call, nil)
+
+	if d.Tier != TierHardRefuse {
+		t.Fatalf("Inspect tier = %d, want TierHardRefuse (rule=%q)", d.Tier, d.RuleID)
+	}
+	if d.RuleID != "write-apogee-control-plane" {
+		t.Fatalf("Inspect rule = %q, want %q", d.RuleID, "write-apogee-control-plane")
+	}
+	if d.Hint == "" {
+		t.Error("Decision.Hint is empty, want the rule's hint naming the sanctioned read route")
+	}
+}
+
 func TestDefaultDangerousRules_ControlPlaneNearMissesNotBlocked(t *testing.T) {
 	t.Parallel()
 	// Precision-over-recall (ADR 0012): the two control-plane rules stop at the control
