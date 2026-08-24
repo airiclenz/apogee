@@ -1,0 +1,360 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Architecture review — apogee</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script type="module">
+      import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+      mermaid.initialize({ startOnLoad: true, theme: "neutral", securityLevel: "loose" });
+    </script>
+    <style>
+      .seam { stroke-dasharray: 4 4; }
+      .leak { stroke: #dc2626; }
+      .deep { background: linear-gradient(135deg, #0f172a, #1e293b); }
+      .shallow { background: linear-gradient(135deg, #e11d48, #be123c); }
+    </style>
+  </head>
+  <body class="bg-stone-50 text-slate-900 font-sans">
+    <main class="max-w-5xl mx-auto px-6 py-12 space-y-12">
+
+      <header class="space-y-4">
+        <p class="text-xs uppercase tracking-widest text-stone-500">architecture review · 2026-08-24 · apogee</p>
+        <h1 class="text-4xl font-serif">Deepening the agent loop and its seams</h1>
+        <p class="text-sm text-stone-600">
+          The engine is well-shaped at the large scale — the single runner in <code>internal/run</code>, the one-responder
+          provider seam, the ADR-0010 module order. The friction concentrates where a deep module was <em>declared</em> but
+          its logic stayed scattered across thin siblings. Six deepening candidates follow.
+        </p>
+        <div class="flex flex-wrap gap-3 mt-4">
+          <span class="text-xs font-mono">▢ solid&nbsp;=&nbsp;module</span>
+          <span class="text-xs font-mono" style="border-bottom:1px dashed #334155">—— seam</span>
+          <span class="text-xs font-mono text-red-600">→ leak</span>
+          <span class="text-xs font-mono" style="background:#0f172a;color:#94a3b8;padding:0 4px">deep module</span>
+        </div>
+      </header>
+
+      <section id="candidates" class="space-y-14">
+
+        <!-- ============ CANDIDATE 1 ============ -->
+        <article class="rounded-2xl border border-slate-200 bg-white p-8" id="candidate-write-funnel">
+          <div class="flex items-center gap-3 flex-wrap">
+            <h2 class="text-2xl font-serif">One write-funnel for safety + undo</h2>
+            <span class="badge-emerald text-xs font-semibold px-2 py-1 rounded-full bg-emerald-600 text-white">Strong</span>
+            <span class="text-xs uppercase px-2 py-1 rounded-full bg-slate-100 text-slate-600">in-process</span>
+          </div>
+
+          <p class="font-mono text-sm text-slate-500 mt-4 leading-relaxed">
+            internal/tools/{write_file.go · file_ops.go · delete_file.go · path_safety.go · workspace_scoped.go} ·
+            internal/security/{safeio.go · writepermit.go · pathsafety.go} · internal/undo/journal.go · internal/agent/dispatch.go
+          </p>
+
+          <div class="mt-6">
+            <div class="rounded-lg border border-slate-200 bg-white p-4">
+              <pre class="mermaid">
+flowchart BT
+  subgraph before["Before — one verb, six hand-composed helpers"]
+    W[write tool W] --> A[capturePreImage]
+    W --> B[SafeWriteFile]
+    W --> C[openMutationRoot]
+    W --> D[permit check]
+    W --> E[journal.Record]
+  end
+  subgraph F["After — one deep funnel"]
+    FW[writeFunnel\nauthor supplies only the body]
+    FW --> G[path-safety]
+    FW --> H[capture ⟶ options write ⟶ journal]
+    FW --> I[permit]
+  end
+  B -.leak.-> D
+  style F fill:#0f172a,stroke:#1e293b,color:#94a3b8
+  classDef leak stroke:#dc2626,stroke-width:2px;
+  class D,B leak
+              </pre>
+            </div>
+          </div>
+
+          <p class="mt-6"><span class="font-semibold">Problem.</span>
+          Adding one write tool composes six-plus helpers across three packages by hand, and the undo capture is
+          re-invoked at four separate mutation sites (copy, move, delete each call <code>capturePreImage</code>+<code>commit</code> themselves),
+          so the "one funnel" guarantee ADR 0051 promises holds only because tests discipline pin it — a new verb that omits
+          the capture line silently falls out of <code>/undo</code> with no compile-time signal.</p>
+          <p class="mt-3"><span class="font-semibold">Solution.</span>
+              One deep <code>writeFunnel</code> module that executes a body function while marshalling path-safety → permit →
+              capture → OS write → journal atomically, and every writer of the family lands on it.</p>
+
+          <div class="mt-4">
+            <span class="text-xs uppercase tracking-wider text-slate-400">wins</span>
+            <ul class="mt-1 text-sm text-slate-700 space-y-1">
+              <li>· Locality: verdict, safety, capture concentrate in one module</li>
+              <li>· A new write tool cannot silently lose <code>/undo</code> coverage</li>
+              <li>· Deletion: six hand-composed helpers vanish, none reappear</li>
+              <li>· Interface shrinks; implementation absorbs the funnel</li>
+            </ul>
+          </div>
+        </article>
+
+        <!-- ============ CANDIDATE 2 ============ -->
+        <article class="rounded-2xl border border-slate-200 bg-white p-8" id="candidate-mechanisms">
+          <div class="flex items-center gap-3 flex-wrap">
+            <h2 class="text-2xl font-serif">Collapse the 19-Mechanism boilerplate</h2>
+            <span class="text-xs font-semibold px-2 py-1 rounded-full bg-emerald-600 text-white">Strong</span>
+            <span class="text-xs uppercase px-2 py-1 rounded-full bg-slate-100 text-slate-600">in-process</span>
+          </div>
+
+          <p class="font-mono text-sm text-slate-500 mt-4 leading-relaxed">
+            internal/mechanisms/{grammar · decompose · toolfilter · toolresultcap · readloop · filehint · cot ·
+            guideddecomposition · emptyresponse · validate · syntax · autofix · readrepeat · toolloop · truncatehistory ·
+            errorenrich · cachedcontent}.go · catalogue.go
+          </p>
+
+          <div class="mt-6 grid grid-cols-2 gap-6">
+            <div class="rounded-xl border border-slate-200 bg-white p-4">
+              <p class="text-xs uppercase tracking-wider text-slate-400 mb-3">before</p>
+              <div class="space-y-2">
+                <div class="h-5 bg-red-100 border-l-4 border-red-500 rounded"><span class="text-[10px] text-red-700 pl-2">Skeleton ~80% every Mechanism</span></div>
+                <div class="h-5 bg-slate-200"></div>
+                <div class="h-5 bg-slate-200"></div>
+                <div class="h-5 bg-slate-200"></div>
+                <div class="h-5 bg-slate-200"></div>
+                <div class="text-[10px] text-slate-400">× 19 near-empty constructors + descriptor literals</div>
+              </div>
+            </div>
+            <div class="rounded-xl border border-slate-200 bg-white p-4">
+              <p class="text-xs uppercase tracking-wider text-slate-400 mb-3">after</p>
+              <div class="h-6 rounded bg-slate-300" style="width:40%"></div>
+              <div class="mt-2 h-16 deep rounded"></div>
+              <p class="text-[10px] text-slate-500 mt-1"><code>registerMechanism(hook, descriptor, deps)</code> — one deep home</p>
+            </div>
+          </div>
+
+          <p class="mt-6"><span class="font-semibold">Problem.</span>
+              Every Mechanism repeats the same five-part template — init, register row, empty struct, trivial constructor,
+              hook closure — differing only in descriptor values and one hook method; only a handful need injected
+              dependencies, yet each file re-spells the register ceremony.</p>
+          <p class="mt-3"><span class="font-semibold">Solution.</span>
+              A shared <code>registerMechanism</code> in <code>catalogue.go</code> that fills the descriptor and constructor by
+              convention, dropping the ~19 near-empty <code>newZ</code> one-liners and the identical post-response
+              <code>ActionRetry{Inject}</code> delivery.</p>
+
+          <div class="mt-4">
+            <span class="text-xs uppercase tracking-wider text-slate-400">wins</span>
+            <ul class="mt-2 text-sm text-slate-700 space-y-1">
+              <li>Deletion test: 19 constructors are pass-throughs — complexity vanishes</li>
+              <li>Locality: the Mechanism shape is owned once, not nineteen times</li>
+              <li>Catalogue and descriptor cannot drift</li>
+              <li>New Mechanism = one hook + one row, not five parts</li>
+            </ul>
+          </div>
+        </article>
+
+        <!-- ============ CANDIDATE 3 ============ -->
+        <article class="border-slate-200 bg-white p-8">
+          <div class="flex items-center gap-3 flex-wrap">
+            <h2 class="text-2xl font-serif">Make the registry the one config home</h2>
+            <span class="text-xs font-semibold px-2 py-1 rounded-full bg-emerald-600 text-white">Strong</span>
+            <span class="text-xs uppercase px-2 py-1 rounded-full bg-slate-100 text-slate-600">in-process</span>
+          </div>
+
+          <p class="font-mono text-sm text-slate-500 mt-4">
+            internal/config/registry.go · config.go (keyAccessors) · options.go · defaults/ · cmd/apogee/wire_boot.go ·
+            cmd/apogee/wire_settings.go
+          </p>
+
+          <div class="mt-6">
+            <div class="rounded-xl border border-slate-200 bg-white p-4">
+              <div class="flex gap-6">
+                <div class="text-center">
+                  <p class="text-xs uppercase tracking-wider text-slate-400 mb-2">before · 5 tables to step</p>
+                  <div class="space-y-1 w-40">
+                    <div class="h-10 shallow rounded"></div>
+                    <div class="h-10 shallow rounded"></div>
+                    <div class="h-10 shallow rounded"></div>
+                    <div class="h-10 shallow rounded"></div>
+                    <div class="h-10 shallow rounded"></div>
+                  </div>
+                  <p class="text-[10px] text-slate-500 mt-1">registry row · keyAccessors · fileConfig · apogee.Config · applySettingFor</p>
+                </div>
+                <div class="text-5xl text-slate-400 self-center">→</div>
+                <div class="flex-1">
+                  <p class="text-xs uppercase tracking-wider text-slate-400 mb-2">after · one registry row spells it</p>
+                  <div class="h-4 rounded bg-slate-200"></div>
+                  <div class="deep h-24 rounded"></div>
+                  <p class="text-[10px] text-slate-500 mt-1">registry carries flag/env/projection/apply — one home</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <p class="mt-6"><span class="font-semibold">Problem.</span>
+              Every config key is hand-described twice — once as a registry row, once as a parallel <code>keyAccessors</code>
+              closure for from-file/from-env/from-flag — plus a fileConfig field, an Options field, a wire projection line,
+              and a live-apply switch case; so "adding a key" is a five-table surgery and the registry's "single source of
+              truth" claim is only true about the path, never the resolution.</p>
+          <p class="mt-3"><span class="font-semibold">Solution.</span>
+              Fold the source metadata (flag, env, apply, projection) into the registry row and generate the rest from it, so a
+              new key lands as one row — with a coverage test that fails when a row has no <code>Config</code> field or no
+              apply case.</p>
+
+          <div class="mt-4">
+            <span class="text-xs uppercase tracking-wider text-slate-400">wins</span>
+            <ul class="mt-2 text-sm text-slate-700 space-y-1">
+              <li>Leverage: one row pays back across every surface</li>
+              <li>Adding a key stops being a five-table restatement</li>
+              <li>Bijection guard would pin behaviour, not just the path</li>
+            </ul>
+          </div>
+        </article>
+
+        <!-- ============ CANDIDATE 4 ============ -->
+        <article class="border-slate-200 bg-white p-8">
+          <div class="flex items-center gap-3 flex-wrap">
+            <h2 class="text-2xl font-serif">One composer for every unattended run</h2>
+            <span class="text-xs font-semibold px-2 py-1 rounded-full bg-emerald-600 text-white">Strong</span>
+            <span class="text-xs uppercase px-2 py-1 rounded-full bg-slate-100 text-slate-600">in-process</span>
+          </div>
+
+          <p class="font-mono text-sm text-slate-500 mt-4">
+            cmd/apogee/headless.go:386 · schedule.go:81 · daemonfire.go:222
+          </p>
+
+          <p class="mt-6"><span class="font-semibold">Problem.</span>
+              The same "compose an unattended run's <code>apogee.Config</code>" is written three times — headless, the
+              TUI-hosted Schedule, and the daemon each carry ~150 near-identical lines — drifting a hair per Driver on
+              secret env vars, extra read roots, and response reserve.</p>
+          <p class="mt-3"><span class="font-semibold">Solution.</span>
+              One shared composer <code>firingConfig(binding, workspace, mode, delegates)</code> used by all three Drivers
+              — a single home for the unattended-run shape ADR-0031 already declares one shared runner for.</p>
+
+          <div class="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div class="rounded-xl border border-slate-200 bg-white p-4">
+              <pre class="mermaid">
+flowchart TB
+  H[headless] --- C1[150-line Config]
+  D[daemon] --- C2[150-line Config]
+  S[schedule] --- C3[150-line Config]
+  C1 -.drift.-> out
+  C2 -.drift.-> out
+  C3 -.drift.-> out
+  classDef drift stroke:#dc2626,stroke-width:2px;
+  class C1,C2,C3 drift
+              </pre>
+            </div>
+            <div class="rounded-xl border border-slate-200 bg-white p-4">
+              <pre class="mermaid">
+flowchart LR
+  H[headless] --> F[firingConfig]
+  D[daemon] --> F
+  S[schedule] --> F
+  F -.-> R[shared unattended-run shape]
+      </pre>
+            </div>
+          </div>
+
+          <div class="mt-4">
+            <span class="text-xs uppercase tracking-wider text-slate-400">wins</span>
+            <ul class="mt-2 text-sm text-slate-700 space-y-1">
+              <li>Fix the unattended-run shape once, fixed in all three</li>
+              <li>A security/config change stops being a three-way edit</li>
+              <li>Locality: the run's posture concentrates in one module</li>
+            </ul>
+          </div>
+        </article>
+
+        <!-- ────── CANDIDATE 5 ────── -->
+        <article class="border-slate-200 bg-white p-8">
+          <div class="flex items-center gap-3 flex-wrap">
+            <h2 class="text-2xl font-serif">Type the diff tools' outcome — stop re-parsing prose</h2>
+            <span class="text-xs font-semibold px-2 py-1 rounded-full bg-amber-500 text-white">Worth exploring</span>
+            <span class="text-xs uppercase px-2 py-1 rounded-full bg-slate-100 text-slate-600">in-process</span>
+          </div>
+
+          <p class="font-mono text-sm text-slate-500 mt-4">
+            internal/tui/diffbody.go (regions) · internal/tools/git.go · internal/tools/view_diff.go ·
+            internal/domain/toolsummary.go · internal/tools/diff.go
+          </p>
+
+          <p class="mt-6"><span class="font-semibold">Problem.</span>
+              <code>git_diff_range</code> never attaches a typed outcome at apply time, so the TUI re-walks the rendered diff
+              prose back into regions — restoring the exact ADR-0011 anti-pattern the edit tools solved with typed
+              EditRegions — and the wire' tag triple lives chopped across three files, string-typed with no import.</p>
+          <p class="mt-3"><span class="font-semibold">Solution.</span>
+              Attach a typed <code>domain.DiffStat</code> to <code>git_diff_range</code> like the edit tools do, and export the
+              shared tag constants from the seam so one move can't leave a set behind.</p>
+
+          <div class="mt-4">
+            <span class="text-xs uppercase tracking-wider text-slate-400">ADR</span>
+            <p class="mt-1 text-sm text-amber-700 rounded border border-amber-300 bg-amber-50 p-2">
+              Re-aligns with ADR-0011 (the view stays a thin renderer) — the recovery hooks exist only because the tool
+              carries no typed summary, so this deepens rather than reopens the ADR.
+            </p>
+          </div>
+
+          <div class="mt-4">
+            <span class="text-xs uppercase tracking-wider text-slate-400">wins</span>
+            <ul class="mt-2 text-sm text-slate-700 space-y-1">
+              <li>The diff's facts live with the tool that computed them</li>
+              <li>Renderer stops re-deriving the regions from prose</li>
+              <li>Seam stays typed: tag constants travel, not strings</li>
+            </ul>
+          </div>
+        </article>
+
+        <!-- ────── CANDIDATE 6 ────── -->
+        <article class="border-slate-200 bg-white p-8">
+          <div class="flex items-center gap-3 flex-wrap">
+            <h2 class="text-2xl font-serif">Stop persisting the TUI's render shape in the codec</h2>
+            <span class="text-xs font-semibold px-2 py-1 rounded-full bg-amber-500 text-white">Worth exploring</span>
+            <span class="text-xs uppercase px-2 py-1 rounded-full bg-slate-100 text-slate-600">in-process</span>
+          </div>
+
+          <p class="font-mono text-sm text-slate-500 mt-4">
+            internal/tui/transcriptcodec.go · internal/tui/transcript.go · internal/domain/toolsummary.go
+          </p>
+
+          <p class="mt-6"><span class="font-semibold">Problem.</span>
+              The transcript codec re-encodes the TUI's render shape — <code>EditRegions</code>/<code>RegionFiles</code> — into
+              the session record, directly contradicting domain's "never persisted in the Session record" contract; it exists
+              only to keep a diff's shape across a restart, which replay already carries.</p>
+          <p class="mt-3"><span class="font-semibold">Solution.</span>
+              Persist only the already-rendered stacked <code>Details</code> rows; the codec stops carrying a presentation copy the
+              engine owner explicitly disowned.</p>
+
+          <div class="mt-4">
+            <span class="text-xs uppercase tracking-wider text-slate-400">ADR</span>
+            <p class="mt-1 text-sm text-amber-600 rounded border border-amber-400 bg-amber-50 p-2">
+              Contradicts the domain's "EditRegions are never persisted" contract — worth fixing because the persisted rows
+              add a second home a schema change must find.
+            </p>
+          </div>
+
+          <div class="mt-4">
+            <span class="text-xs uppercase tracking-wider text-slate-400">wins</span>
+            <ul class="mt-2 text-sm text-slate-700 space-y-1">
+              <li>Session record stops holding presentation bytes</li>
+              <li>One fewer serialized copy of the region fact</li>
+              <li>Surface and engine contract re-align</li>
+            </ul>
+          </div>
+        </article>
+
+      </section>
+
+      <section id="top-recommendation" class="rounded-2xl border-2 border-slate-900 bg-slate-900 text-slate-100 p-8">
+        <h2 class="text-2xl font-serif">Top recommendation</h2>
+        <p class="mt-3 text-slate-200 leading-relaxed">
+          <span class="font-semibold">Tackle the write funnel first</span> — it is the daily cost of the whole safety axis.
+          Today adding one write tool is a six-helper, three-package assembly and the <code>/undo</code> guarantee is a
+          test-discipline fiction, not a construction guarantee. One deep <code>writeFunnel</code> collapses the top three
+          findings into one module, passes the deletion test on every shallow copy helper, and directly raises the seam's
+          test surface: a new write verb positively gains path-safety, permit, and journal interplay by construction.
+          When it lands, the config consolidation (candidate 3) is the strongest runner-up for broadest per-key leverage.
+        </p>
+        <p class="mt-3 text-sm text-slate-300">
+          <a href="#candidate-write-funnel" class="underline">Skip to the write-funnel card</a>
+        </p>
+      </section>
+
+    </main>
+  </body>
+</html>
