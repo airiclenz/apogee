@@ -309,7 +309,10 @@ go build ./... && go test ./internal/profiles/ -count=1
 
 ---
 
-## 4. Correct the profile doc surfaces that still teach pre-ADR-0057 resolution
+## 4. Correct the profile doc surfaces that still teach pre-ADR-0057 resolution — ✅ DONE (2026-08-24)
+
+NOTES (2026-08-24): in `internal/domain/config.go` the neighbouring zero-Profile anchor sentence ("native tool calls with no inline thinking == today's exact behaviour") also enumerated two axes, so it gained "and no roster deltas" — beyond the item's literal "name the third axis", but the same two-axis narration this item exists to correct, and it asserts nothing new (an unspelled roster is empty).
+NOTES (2026-08-24): the added `config.yaml` sentence says "the built-in table" rather than the plan's "shipped table" — that block calls the shape table "built-in" throughout and calls a user's own entries "yours"; same meaning, the file's own vocabulary.
 
 **Depends on item 3.**
 

@@ -1026,8 +1026,11 @@ type fileConfig struct {
 	// (ADR 0044) — and, since ADR 0057, the tool roster that model is offered. File-only, no
 	// flag/env, like mcp-servers. Absent/empty ⇒ nothing the user configured matches any model, so
 	// resolution falls back to apogee's shipped shape table and, failing that, to the zero profile
-	// (native tool calls, no inline thinking, no roster deltas). A matching entry replaces the WHOLE
-	// profile, every axis, and outranks every shipped entry.
+	// (native tool calls, no inline thinking, no roster deltas). A matching entry outranks every
+	// shipped entry on each axis it SPELLS; an axis it leaves out defers to the shipped table and,
+	// failing that, to the zero profile (ADR 0057 decision 5). The thinking axis defers in two
+	// halves (ADR 0058) — the channel style and the effort dial — so an entry dialling only
+	// `effort:` keeps the shipped channel style rather than wiping it.
 	//
 	// The retired GLOBAL `model-profile:` block this replaces is refused at startup with the map
 	// spelling to paste (configmigrate.go): a profile is per-model now, so a config that still

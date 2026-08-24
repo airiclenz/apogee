@@ -227,10 +227,11 @@ type Config struct {
 	// own assembly and is taken exactly as given (ADR 0001).
 	SecretEnvVars []string
 
-	// Profile describes how the configured model speaks the wire (CONTEXT: Model profile) —
-	// its tool-call format and inline thinking-channel style — so the loop selects the matching
-	// tool-call parser and content-stripper at the parse seam. A ZERO Profile == native tool
-	// calls with no inline thinking == today's exact behaviour (the byte-identical anchor): a
+	// Profile describes how apogee equips and speaks to the configured model (CONTEXT: Model
+	// profile) — its tool-call format, its inline thinking-channel style, and the tool roster it
+	// is equipped with (ADR 0057 decision 1) — so the loop selects the matching tool-call parser
+	// and content-stripper at the parse seam. A ZERO Profile == native tool calls with no inline
+	// thinking and no roster deltas == today's exact behaviour (the byte-identical anchor): a
 	// native profile selects no-op parsers, so the content path is unchanged. The host folds a
 	// configured profile in from config.yaml; an embedder sets it directly. It is declarative
 	// DATA translated to internal/processing's parsers at the boundary (ADR 0010) — not the

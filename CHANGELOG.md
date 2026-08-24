@@ -73,6 +73,22 @@ point is a **minor** bump, not a breaking change.
   shipped-match notice still names where the shape came from
   ([ADR 0058](docs/adr/0058-the-thinking-axis-resolves-as-two-sub-axes-style-and-effort.md)).
 
+- **The profile doc surfaces no longer teach whole-entry replacement or a two-axis profile
+  (refocus plan item 4).** The `ModelProfiles` field doc in `internal/config/config.go` still ended
+  "A matching entry replaces the WHOLE profile, every axis" — the rule ADR 0057 decision 5 retired —
+  and now states the axis-wise one: a matching entry outranks every shipped entry on each axis it
+  SPELLS, an axis it leaves out defers to the shipped table and then to the zero profile, and the
+  thinking axis defers in two halves, so an entry dialling only `effort:` keeps the shipped channel
+  style (ADR 0058). `domain.Config.Profile`'s doc named only the tool-call format and the inline
+  thinking-channel style; it now names the tool roster as the third axis (ADR 0057 decision 1),
+  matching `CONTEXT.md`'s glossary wording — "how apogee equips and speaks to" a model — and the
+  zero-Profile anchor sentence now enumerates the roster too. The shipped `config.yaml`'s
+  "Model profiles:" header framed the concept as wire shape alone and now covers the roster as well,
+  and the axis-by-axis paragraph in that block gained the one sentence the thinking axis needs:
+  `thinking:` resolves its style and its effort independently, so an `effort:`-only entry keeps
+  whatever channel style the built-in table carries. Comment prose only — no struct field, tag,
+  default value or live YAML key moved.
+
 - `internal/tools/doc.go`: corrected the package map's carrier-file count from "Twenty-nine" to
   "Thirty" — `pdf_text.go` had been added to the map without updating the count sentence.
 

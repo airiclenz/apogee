@@ -731,11 +731,12 @@ ui:
 #     # my-gemma-quant: gemma-4-e4b-it-qat         # transfer to a sibling quant (your call)
 
 # =============================================================================
-# Model profiles: how a model speaks the wire — the shape its tool calls arrive in, and the inline
-# thinking channel apogee strips out of what you are shown. That shape is a chat-template fact of a
-# model family rather than a preference, so it is keyed BY MODEL and re-resolved on every model
-# change: /model, a llama-launcher profile load, a /server move, or the server swapping the loaded
-# model under a running session. Config-file only (no flag or env).
+# Model profiles: how apogee equips and speaks to a model — the shape its tool calls arrive in, the
+# inline thinking channel apogee strips out of what you are shown, and the tool roster this model is
+# offered. The wire shape is a chat-template fact of a model family rather than a preference, and
+# which tools a model can carry is a fact about the model rather than a mood, so both are keyed BY
+# MODEL and re-resolved on every model change: /model, a llama-launcher profile load, a /server move,
+# or the server swapping the loaded model under a running session. Config-file only (no flag or env).
 #
 # Most configurations never spell this key. apogee ships a built-in SHAPE TABLE of known families
 # and applies it by model name, so an out-of-the-box run against one of them already reads correctly
@@ -764,7 +765,9 @@ ui:
 # nothing-stripped / no roster change). So a `tools:`-only entry for a model the table already knows
 # keeps that built-in's thinking style instead of silently wiping it. Turning a built-in axis OFF is
 # therefore a matter of SPELLING its off value — `tool-call-format: native`, a thinking `style: none`,
-# an empty `tools:` — rather than leaving the key out. The axes and their values:
+# an empty `tools:` — rather than leaving the key out. The thinking axis goes one step further and
+# resolves its style and its effort INDEPENDENTLY, so an entry spelling only `effort:` keeps whatever
+# channel style the built-in table carries for that model. The axes and their values:
 #
 #   tool-call-format   native (the default) — calls arrive structured, out of band
 #                      markdown-fenced      — calls are parsed back out of a fenced block in the reply
