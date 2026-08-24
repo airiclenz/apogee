@@ -475,7 +475,13 @@ sets (Mode and ScratchDir now arrive through the inputs).
 
 ---
 
-## 9. Port the in-session Schedule Firing onto `firingConfig`; pin the drift fix; amend ADR 0037
+## 9. Port the in-session Schedule Firing onto `firingConfig`; pin the drift fix; amend ADR 0037 — ✅ DONE (2026-08-24)
+
+NOTES (2026-08-24): the item's Files list gains `cmd/apogee/wire_settings.go`. `firingConfig` needs the bound `servers:` entry's four pins and the validated `mechanisms:` ids, and neither is reachable from `options()` or from the `upstreamBinding` — reading the holder's fields from `schedule.go` would bypass its mutex. `liveSettings` therefore gains `firingSources(bound) (Options, ServerEntry, []MechanismID)`, which builds the entry from the binding's wire plus the pins `followEntry` latched, and `options()`'s body is split into an `optionsLocked()` so all three come back under ONE read lock — rebindInputs' own rule, that a run must not be composed half from one instant and half from the next.
+NOTES (2026-08-24): `scheduleWiring.opts` is deleted beside `base`. Once `opts` comes from `liveSettings.options()` the launch snapshot has no reader left in `schedule.go`, and the item's own "remove the plumbing if nothing else reads it" applies to it identically.
+NOTES (2026-08-24): no `model:` overlay is handed to the composer — the entry `firingSources` builds already carries the binding's model, and passing it twice would be the two-routes-to-one-value the composer's contract refuses. `entry.ParallelAgents` is left 0 for the same reason: the width seam (design call 4) is the one route to the cap.
+NOTES (2026-08-24): `docs/manual/configuration.md` is not in the item's Files list but gains one sentence — the behaviour change is user-visible, and the watcher paragraph is where the manual carries ADR 0037's promise.
+NOTES (2026-08-24): five doc comments in `schedule_test.go` describing the retired "the base Config a Firing copies" mechanism were reworded to describe the seam that now decides each value; no assertion changed. The named test that injected a session-only tool through `base.Tools` drops the injection (there is no Tools seam left to inherit through, which is the stronger structural form of the same guarantee) and keeps its wire-menu assertion.
 
 **Depends on items 6 and 8.**
 

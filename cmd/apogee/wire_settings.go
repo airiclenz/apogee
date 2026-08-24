@@ -542,7 +542,15 @@ func (s *liveSettings) setInspector(on bool) {
 func (s *liveSettings) options() config.Options {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	return s.optionsLocked()
+}
 
+// optionsLocked is options' body, split out for the one caller that must read the projection and
+// something else beside it at a SINGLE instant: firingSources below, which composes a whole run out
+// of this holder. It requires the read lock to be held already — Go's RWMutex is not re-entrant for
+// a reader once a writer is queued behind it, so nesting the two would deadlock the Update
+// goroutine's next commit.
+func (s *liveSettings) optionsLocked() config.Options {
 	next := s.boot
 
 	// The keys that are PUSHED at a seam and are in force the moment their apply returns. Nothing
@@ -577,6 +585,37 @@ func (s *liveSettings) options() config.Options {
 		next.ContextFiles = slices.Clone(s.contextFileNames)
 	}
 	return next
+}
+
+// firingSources hands out everything a Firing raised inside this session composes from that lives in
+// this holder: the live Options (options above), the `servers:` entry the session is bound to as the
+// holder latches it, and the validated `mechanisms:` ids the per-model resolution arms. Three values
+// from one call under ONE read lock, for rebindInputs' reason — read separately they could describe
+// two different instants of a configuration the human is editing as the Scheduler reads it, and a
+// run composed half from one instant and half from the next is a configuration nobody ever had.
+//
+// The entry is BUILT rather than looked up. The wire is the Upstream binding's, which this holder
+// deliberately does not own (options above), and the four per-entry pins are the ones followEntry
+// latched when the session moved onto that server — so what comes back describes the server the
+// session is on NOW, pins and all, whether or not the `servers:` list still names it.
+//
+// `parallel-agents:` is deliberately left at 0. The cap is parallelAgentsCap's, which already
+// resolves that pin against what a beat observed, and a Firing takes it through the width seam
+// instead (schedule.go); repeating the pin here would give the composer two answers to one question.
+// The key SOURCE fields are left empty for the mirror-image reason: the session already resolved its
+// key, and a Firing is handed that value rather than asking the source a second time.
+func (s *liveSettings) firingSources(bound upstreamBinding) (config.Options, config.ServerEntry, []apogee.MechanismID) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	entry := config.ServerEntry{
+		Name:            s.entryName,
+		Endpoint:        bound.Endpoint,
+		Model:           bound.Model,
+		ContextWindow:   s.entryWindow,
+		MaxOutputTokens: s.entryCap,
+		ResponseReserve: s.entryReserve,
+	}
+	return s.optionsLocked(), entry, s.manualIDs
 }
 
 // rebindInputs projects the live values onto a COPY of the startup snapshot and hands back the

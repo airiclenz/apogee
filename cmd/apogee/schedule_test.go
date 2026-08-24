@@ -12,6 +12,9 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -26,6 +29,7 @@ import (
 	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/schedule"
 	"github.com/airiclenz/apogee/internal/session"
+	"github.com/airiclenz/apogee/internal/skills"
 	"github.com/airiclenz/apogee/internal/tui"
 )
 
@@ -87,10 +91,13 @@ func firingUpstream(t *testing.T, reply string) (url string, menus func() [][]st
 		}
 }
 
-// sessionOnlyTool stands for anything the interactive session's registry carries that a Firing must
-// not inherit — an MCP server's tool, in production (ADR 0008: external effects are re-established
-// per session, never shared into a second concurrent Agent). It declares itself read-only so Plan
-// mode would genuinely offer it, which is what makes its ABSENCE from the wire menu evidence.
+// sessionOnlyTool names anything the interactive session's registry carries that a Firing must not
+// inherit — an MCP server's tool, in production (ADR 0008: external effects are re-established per
+// session, never shared into a second concurrent Agent). Nothing hands it to a Firing any more:
+// scheduleWiring has no Tools seam at all since the Config is composed by firingConfig rather than
+// copied off the session's, which is the stronger, structural form of the same guarantee. It is
+// declared read-only so Plan mode would genuinely offer it, and its ABSENCE from the wire menu below
+// is what says the composed run reached the library's own registry and nothing else.
 type sessionOnlyTool struct{}
 
 func (sessionOnlyTool) Name() string            { return "session_only_tool" }
@@ -151,27 +158,14 @@ func TestScheduleFiringRunsAgainstTheCurrentBinding(t *testing.T) {
 		"evidence": {"campaign": "schedule-test"}
 	}`)
 
-	// The session's own surface: ask-before (a mode a Firing may NOT run in) and a registry carrying
-	// a tool of its own. If fire() inherited either, this run would fail rather than pass — the mode
-	// is refused by run.Once, and the tool would show up on the menu below.
-	base := apogee.Config{
-		Mode:         domain.ModeAskBefore,
-		WorkspaceDir: roots.workspace,
-		ConfigDir:    roots.config,
-		LibraryDir:   roots.library,
-	}
-	base.Tools = registryWithMCP(roots.workspace, base, []apogee.Tool{sessionOnlyTool{}})
-
 	launchOpts := config.Options{
 		Endpoint: "http://launch.invalid", Model: "launch-model", ValidatedSetsEnable: true,
 	}
 	w := scheduleWiring{
-		base:  base,
-		opts:  launchOpts,
 		roots: roots,
 		live:  newLiveSettings(launchOpts, nil),
 		// The binding the session has MOVED to since launch (a /server switch, a rebind). The Firing
-		// must follow it rather than the launch values in opts above.
+		// must follow it rather than the launch values the holder was seeded with.
 		binding: func() upstreamBinding { return upstreamBinding{Endpoint: url, Model: "bound-model"} },
 		width:   func() int { return 1 },
 		store:   store,
@@ -257,8 +251,6 @@ func TestScheduleFiringReportsAPerModelResolutionFailure(t *testing.T) {
 		Models: map[string]config.PromptSource{"bound-model": {File: "no-such-prompt.md"}},
 	}}
 	w := scheduleWiring{
-		base:  apogee.Config{WorkspaceDir: roots.workspace},
-		opts:  launchOpts,
 		roots: roots,
 		live:  newLiveSettings(launchOpts, nil),
 		binding: func() upstreamBinding {
@@ -273,9 +265,10 @@ func TestScheduleFiringReportsAPerModelResolutionFailure(t *testing.T) {
 }
 
 // A Firing fans out at the width the session's bound server resolves to (ADR 0039; ADR 0031 — every
-// Driver reaches the same engine behaviour). The number can only come from the wired width seam:
-// base is the pre-bind Config copy, so its ParallelAgents is a zero, and a Firing that inherited it
-// would run its delegations one at a time beneath a session running several.
+// Driver reaches the same engine behaviour). The number can only come from the wired width seam: the
+// entry firingSources builds pins no `parallel-agents:` of its own, so a Firing that reached past the
+// seam would take the composer's own one-shot probe — a round trip, on the Scheduler's goroutine, for
+// a number this session is already holding.
 //
 // Composed against the package's runner seam rather than a live model, which is why this test does
 // not call t.Parallel: it replaces a package-level var, exactly as every headless test that reads a
@@ -291,9 +284,6 @@ func TestScheduleFiringCarriesTheParallelAgentsWidth(t *testing.T) {
 	t.Cleanup(func() { runOnce = prevRunner })
 
 	w := scheduleWiring{
-		// The session's own construction surface as the binary hands it over: copied before the
-		// startup bind, so it pins no width at all.
-		base:    apogee.Config{WorkspaceDir: roots.workspace},
 		roots:   roots,
 		live:    newLiveSettings(config.Options{}, nil),
 		binding: func() upstreamBinding { return upstreamBinding{Endpoint: "http://bound.invalid", Model: "bound-model"} },
@@ -313,10 +303,10 @@ func TestScheduleFiringCarriesTheParallelAgentsWidth(t *testing.T) {
 }
 
 // A Firing writes into a scratch dir of its OWN, named after the record it will be saved under
-// (residuals sweep item 6, 2026-08-24). The dir the base Config carries is the seed minted when
-// this SESSION booted (wire_live.go), so a Firing that inherited it would put its working files in
-// a dir a /clear or a /sessions resume has since moved the session off — or, once the 14-day sweep
-// has been past it, in one that no longer exists at all.
+// (residuals sweep item 6, 2026-08-24). The seed below is the dir minted when this SESSION booted
+// (wire_live.go), and a Firing that took it would put its working files in a dir a /clear or a
+// /sessions resume has since moved the session off — or, once the 14-day sweep has been past it, in
+// one that no longer exists at all.
 //
 // Composed against the package's runner seam rather than a live model, which is why this test does
 // not call t.Parallel: it replaces a package-level var, exactly as the width test above does.
@@ -338,7 +328,6 @@ func TestScheduleFiringGetsItsOwnScratchDir(t *testing.T) {
 	}
 
 	w := scheduleWiring{
-		base:    apogee.Config{WorkspaceDir: roots.workspace, ScratchDir: seed},
 		roots:   roots,
 		live:    newLiveSettings(config.Options{}, nil),
 		binding: func() upstreamBinding { return upstreamBinding{Endpoint: "http://bound.invalid", Model: "bound-model"} },
@@ -358,11 +347,11 @@ func TestScheduleFiringGetsItsOwnScratchDir(t *testing.T) {
 }
 
 // A Firing's reply is bounded by the entry the session is ON, never by the one it launched against
-// (ADR 0046). The ceiling is a property of the SLOT, like the width above it, and the base Config a
-// Firing copies was seeded with the LAUNCH entry's `max-output-tokens:` (wire_boot.go) — so a Firing
-// raised after a `/server` move would be bounded by a server this session has left unless the
-// per-Firing resolution restates the number, which is exactly the case a runaway reply must not
-// happen in.
+// (ADR 0046). The ceiling is a property of the SLOT, like the width above it, and the launch
+// snapshot the settings holder is seeded from carries the LAUNCH entry's `max-output-tokens:`
+// (wire_boot.go) — so a Firing raised after a `/server` move would be bounded by a server this
+// session has left unless the entry firingSources builds restates the number, which is exactly the
+// case a runaway reply must not happen in.
 //
 // The unpinned case is the same invariant read from the other end: an entry that pins nothing
 // resolves to the STATED zero, which ADR 0046 decision 3 defines as "derive the cap from the reply
@@ -405,19 +394,15 @@ func TestScheduleFiringIsBoundedByTheEntryTheSessionMovedOnto(t *testing.T) {
 			runOnce = stub.once
 			t.Cleanup(func() { runOnce = prevRunner })
 
-			// The session as it LAUNCHED: bound to an entry pinning launchCap, which reached both the
-			// startup snapshot and the Config the scheduler copies.
+			// The session as it LAUNCHED: bound to an entry pinning launchCap, which is what the
+			// settings holder's own latch was seeded with.
 			launchOpts := config.Options{HostAlias: "launch", StartupMaxOutputTokens: launchCap}
-			base := apogee.Config{WorkspaceDir: roots.workspace}
-			base.Context.MaxOutputTokens = launchCap
 			live := newLiveSettings(launchOpts, nil)
 			// ...and the move: the one call `/server` makes once the engine's own switch committed
 			// (sessionMover.move), which is what makes the moved-onto entry's pins this session's.
 			live.followEntry(tt.moved)
 
 			w := scheduleWiring{
-				base:  base,
-				opts:  launchOpts,
 				roots: roots,
 				live:  live,
 				binding: func() upstreamBinding {
@@ -444,10 +429,11 @@ func TestScheduleFiringIsBoundedByTheEntryTheSessionMovedOnto(t *testing.T) {
 
 // How that window is SPLIT follows the ceiling's rule one key further in: the share is the bound
 // entry's `response-reserve:` resolved over the top-level key, read for the server the session is ON.
-// The base Config a Firing copies was seeded with the LAUNCH entry's share (wire_boot.go), so a
-// Firing raised after a `/server` move would otherwise hold back a slice of THIS server's window on
-// the say-so of a server this session has left — and a share that is too generous silently shrinks
-// the room an unattended answer has to land in, exactly where nobody is watching it happen.
+// The launch snapshot the settings holder is seeded from carries the LAUNCH entry's share
+// (wire_boot.go), so a Firing raised after a `/server` move would otherwise hold back a slice of THIS
+// server's window on the say-so of a server this session has left — and a share that is too generous
+// silently shrinks the room an unattended answer has to land in, exactly where nobody is watching it
+// happen.
 //
 // The unstated row is the same invariant read from the other end: an entry overriding nothing, under
 // a config whose top-level key states nothing either, resolves to the honest 0 — "nobody stated a
@@ -487,19 +473,15 @@ func TestScheduleFiringSplitsTheWindowTheEntryTheSessionMovedOntoStates(t *testi
 			runOnce = stub.once
 			t.Cleanup(func() { runOnce = prevRunner })
 
-			// The session as it LAUNCHED: bound to an entry stating launchShare, which reached both the
-			// startup snapshot and the Config the scheduler copies. The top-level key states nothing,
-			// so the entry the session moves onto is the only thing that can answer.
+			// The session as it LAUNCHED: bound to an entry stating launchShare, which is what the
+			// settings holder's own latch was seeded with. The top-level key states nothing, so the
+			// entry the session moves onto is the only thing that can answer.
 			launchOpts := config.Options{HostAlias: "launch", StartupResponseReserve: launchShare}
-			base := apogee.Config{WorkspaceDir: roots.workspace}
-			base.Context.ResponseReserveFraction = launchShare
 			live := newLiveSettings(launchOpts, nil)
 			// ...and the move `/server` makes once the engine's own switch committed (sessionMover.move).
 			live.followEntry(tt.moved)
 
 			w := scheduleWiring{
-				base:  base,
-				opts:  launchOpts,
 				roots: roots,
 				live:  live,
 				binding: func() upstreamBinding {
@@ -521,6 +503,149 @@ func TestScheduleFiringSplitsTheWindowTheEntryTheSessionMovedOntoStates(t *testi
 					got, tt.wantShare, launchShare)
 			}
 		})
+	}
+}
+
+// A Firing composes from the settings the session is running NOW, not from the ones it launched
+// with (ADR 0037, amended 2026-08-24). This is the drift the boot-Config inheritance had and the
+// whole reason the composition moved onto firingConfig: the pane's commit reaches the running
+// session's own seams the moment it lands, but the Config a Firing was built from was copied at
+// boot, so an unattended run raised an hour later offered the roster the human had disabled, dialled
+// hosts they had denied, and scrubbed the variables of a `servers:` list they had since edited.
+//
+// The three fields asserted are the ones the fact-check found stale, and each has teeth of its own:
+// a tool taken off the roster must not come back for the run nobody is watching, a host put on the
+// deny list must stay unreachable there, and a key variable named in the file must be scrubbed out
+// of every subprocess the Firing's model chooses the contents of.
+//
+// Driven through the real settings dispatcher rather than by writing the holder's fields, because
+// the claim is about the APPLY landing on the projection — a test that set the fields directly would
+// pass over a key whose apply forgot to record itself. Composed against the package's runner seam,
+// which is why it does not call t.Parallel.
+func TestScheduleFiringFollowsLiveSettingsEdits(t *testing.T) {
+	roots, err := resolveRoots(t.TempDir(), t.TempDir())
+	if err != nil {
+		t.Fatalf("resolveRoots: %v", err)
+	}
+	stub := &stubRunner{}
+	prevRunner := runOnce
+	runOnce = stub.once
+	t.Cleanup(func() { runOnce = prevRunner })
+
+	// The session as it LAUNCHED, with each of the three keys set to something its edit moves OFF: a
+	// value that came back unchanged would be the boot snapshot showing through rather than the edit
+	// following the Firing.
+	launchOpts := config.Options{
+		ToolsDisabled: []string{"python_exec"},
+		URLDenyHosts:  []string{"metadata.internal"},
+		Servers:       []config.ServerEntry{{Name: "here", Endpoint: "http://bound.invalid"}},
+	}
+	// The list the `servers:` apply re-reads. Its second entry names a key SOURCE rather than a key,
+	// which is the fact a run composed from these Options has to scrub for (SecretEnvVars).
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	const serversFile = "servers:\n" +
+		"  - name: here\n    endpoint: http://bound.invalid\n" +
+		"  - name: elsewhere\n    endpoint: http://other.invalid\n    api-key-env: ELSEWHERE_KEY\n"
+	if err := os.WriteFile(configPath, []byte(serversFile), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	live := newLiveSettings(launchOpts, nil)
+	set := newLiveTools(apogee.NewToolRegistry(), toolSetSpec{
+		disabled: launchOpts.ToolsDisabled, denyHosts: launchOpts.URLDenyHosts,
+	}, func(toolSetSpec) *apogee.ToolRegistry { return apogee.NewToolRegistry() })
+	apply := applySettingFor(settingsApplier{
+		engine: &applySettingSpy{}, live: live, tools: set, configPath: configPath,
+	})
+	// The human's session, three commits in. The `servers:` value is unread — that key re-reads the
+	// file the pane just persisted — which is why the file above is what carries the new entry.
+	for _, edit := range []struct{ key, value string }{
+		{"tools.disabled", "[grep, view_diff]"},
+		{"url-safety.deny-hosts", "[evil.example.com]"},
+		{"servers", ""},
+	} {
+		if _, err := apply(edit.key, edit.value); err != nil {
+			t.Fatalf("apply %s=%s: %v", edit.key, edit.value, err)
+		}
+	}
+
+	w := scheduleWiring{
+		roots:   roots,
+		live:    live,
+		binding: func() upstreamBinding { return upstreamBinding{Endpoint: "http://bound.invalid", Model: "bound-model"} },
+		width:   func() int { return 1 },
+	}
+
+	if _, err := w.fire(context.Background(), schedule.Firing{Prompt: "check the build", Mode: domain.ModePlan}); err != nil {
+		t.Fatalf("fire: %v", err)
+	}
+	if !stub.called {
+		t.Fatal("the firing composed no run at all")
+	}
+
+	cfg := stub.spec.Config
+	if want := []string{"grep", "view_diff"}; !slices.Equal(cfg.DisabledTools, want) {
+		t.Errorf("the firing runs with DisabledTools = %v, want the edited %v — it offered its model "+
+			"the roster the session LAUNCHED with", cfg.DisabledTools, want)
+	}
+	if want := []string{"evil.example.com"}; !slices.Equal(cfg.URLDenyHosts, want) {
+		t.Errorf("the firing runs with URLDenyHosts = %v, want the edited %v — it would reach a host "+
+			"the session has since denied", cfg.URLDenyHosts, want)
+	}
+	if !slices.Contains(cfg.SecretEnvVars, "ELSEWHERE_KEY") {
+		t.Errorf("the firing runs with SecretEnvVars = %v, want the re-read list's ELSEWHERE_KEY — a "+
+			"key variable named after launch would reach the environment of every command it runs",
+			cfg.SecretEnvVars)
+	}
+}
+
+// A Firing resolves its attached skills through the session's OWN catalogue, and mounts that
+// catalogue's dirs as its read roots (design call 5). Shared rather than rebuilt for the reason
+// every other live seam here is shared: `use-project-skills` is editable in the `/settings` pane and
+// a `/` menu open reloads the catalogue from disk, so a Firing holding a provider of its own would
+// resolve an attached id against a source layering the session has moved off — and mount the read
+// roots of one.
+//
+// The provider is built over dirs of its own rather than over the run's roots, which is what makes
+// the assertion evidence: a composer that fell back to its own nil default would build one from
+// roots.config and answer different dirs.
+//
+// Composed against the package's runner seam, which is why this test does not call t.Parallel.
+func TestScheduleFiringSharesTheSessionsSkillsProvider(t *testing.T) {
+	roots, err := resolveRoots(t.TempDir(), t.TempDir())
+	if err != nil {
+		t.Fatalf("resolveRoots: %v", err)
+	}
+	stub := &stubRunner{}
+	prevRunner := runOnce
+	runOnce = stub.once
+	t.Cleanup(func() { runOnce = prevRunner })
+
+	provider := skills.NewProvider(skills.Sources{Home: t.TempDir(), Workspace: t.TempDir()})
+	w := scheduleWiring{
+		roots:   roots,
+		live:    newLiveSettings(config.Options{}, nil),
+		binding: func() upstreamBinding { return upstreamBinding{Endpoint: "http://bound.invalid", Model: "bound-model"} },
+		width:   func() int { return 1 },
+		skills:  provider,
+	}
+
+	if _, err := w.fire(context.Background(), schedule.Firing{Prompt: "check the build", Mode: domain.ModePlan}); err != nil {
+		t.Fatalf("fire: %v", err)
+	}
+	if !stub.called {
+		t.Fatal("the firing composed no run at all")
+	}
+	if stub.spec.Config.Skills != provider {
+		t.Error("the firing resolves attached skills through a catalogue of its own; want the session's " +
+			"instance, so a use-project-skills flip keeps following the runs it raises")
+	}
+	if stub.spec.Config.ExtraReadRoots == nil {
+		t.Fatal("the firing mounts no extra read roots at all; want the session catalogue's own dirs")
+	}
+	if got, want := stub.spec.Config.ExtraReadRoots(), provider.SourceDirs(); !slices.Equal(got, want) {
+		t.Errorf("the firing mounts read roots %v, want the session provider's %v — the model could "+
+			"not read the bundled files of a skill it was given", got, want)
 	}
 }
 
@@ -593,11 +718,6 @@ func newScheduleHarness(t *testing.T, endpoint string) *scheduleHarness {
 	}
 	store := session.NewStore(roots.sessions)
 	w := scheduleWiring{
-		base: apogee.Config{
-			WorkspaceDir: roots.workspace,
-			ConfigDir:    roots.config,
-			LibraryDir:   roots.library,
-		},
 		roots:   roots,
 		live:    newLiveSettings(config.Options{}, nil),
 		binding: func() upstreamBinding { return upstreamBinding{Endpoint: endpoint, Model: "bound-model"} },

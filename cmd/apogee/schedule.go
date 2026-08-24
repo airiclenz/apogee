@@ -11,6 +11,7 @@ import (
 	"github.com/airiclenz/apogee/internal/run"
 	"github.com/airiclenz/apogee/internal/schedule"
 	"github.com/airiclenz/apogee/internal/session"
+	"github.com/airiclenz/apogee/internal/skills"
 )
 
 // ----------------------------------------------------------------------------
@@ -23,30 +24,21 @@ import (
 // WHERE its narration goes (the running Bubble Tea program). The library owns everything else — the
 // cycle, the overlap skip, the lifetime — and knows nothing about any of the above.
 
-// scheduleWiring turns one Firing into one headless run. It is the titleWiring split, made for the
+// scheduleWiring turns one Firing into one unattended run. It is the titleWiring split, made for the
 // same reason: the endpoint, the key, the model and the roots are wiring the binary resolves and a
-// `/server` switch moves, so the Config is composed PER FIRING from the binding read at that moment
-// rather than captured when the Schedule was created. A Schedule made before a switch fires against
-// the server the session is on now.
+// `/server` switch moves, so the Config is composed PER FIRING from the session as it stands at that
+// moment rather than captured when the Schedule was created. A Schedule made before a switch fires
+// against the server the session is on now, under the settings the session is running now.
 type scheduleWiring struct {
-	// base is this session's own construction surface — the workspace and config roots, the
-	// confinement backend and its posture, the tools, skills, context files and profile. A Firing
-	// inherits it wholesale so an unattended run has exactly the session's shape, and fire()
-	// overrides only what a Firing must decide differently (below).
-	base apogee.Config
-
-	// The inputs rebindSpecFor re-resolves a per-model binding from. They are held rather than folded
-	// into base because a Firing binds the model that is CURRENT, and the system prompt (ADR 0023) and
-	// the validated Mechanism set (ADR 0016) are both keyed on it: a session that rebound mid-run would
-	// otherwise fire the launch model's prompt at the model it has moved to. opts is the launch
-	// snapshot; live is the half of it a `/settings` edit can have moved since (ADR 0037), read at
-	// FIRING time for the same reason the binding is — and safely, because the holder is
-	// goroutine-safe and this runs on the Scheduler's own goroutine. The launch snapshot's own WIRE is
-	// never used: rebindInputs overlays the binding below onto the copy it hands the resolver, so the
-	// endpoint a Firing resolves against and the endpoint it dials are one value.
-	opts  config.Options
-	roots stateRoots
+	// live is this session's settings holder — the launch snapshot with every `/settings` commit and
+	// every config-watcher reload written back over it, plus the pins of the `servers:` entry the
+	// session is bound to. It is the whole configuration half of a Firing (firingSources), read at
+	// FIRING time rather than captured, and safely so: the holder is goroutine-safe and this runs on
+	// the Scheduler's own goroutine. Composing from it is what carries ADR 0037's promise into the
+	// runs a session raises — a Firing budgets, fences and arms itself from the configuration the
+	// human is looking at, not the one they launched with.
 	live  *liveSettings
+	roots stateRoots
 
 	// binding reads the CURRENT Upstream binding; wired to upstreamHolder.Binding, the same seam the
 	// naming call reads for the same reason. It decides BOTH halves of a Firing's upstream — the wire
@@ -56,11 +48,25 @@ type scheduleWiring struct {
 	// width reports the Parallel agents cap the bound server resolves to right now; wired to
 	// parallelAgentsCap.current, which already owns that number for the interactive session. It is a
 	// seam read at FIRING time for the binding's own reason — a `/server` switch moves the width with
-	// the server — and it exists at all because base cannot carry it: that Config was copied before
-	// the startup bind, so its ParallelAgents is a zero, and a Firing that inherited it would fan out
-	// one sub-agent at a time while the session it runs beneath fans out several (ADR 0039; ADR 0031,
-	// every Driver reaching the same engine behaviour).
+	// the server — and it is why this Driver hands the composer a width source of its own: an
+	// unattended run with no session behind it probes the server instead, and a Firing that did the
+	// same would spend its latency re-asking a question this session already has the answer to
+	// (ADR 0039; ADR 0031, every Driver reaching the same engine behaviour).
 	width func() int
+
+	// keys is the session's own key resolver — shared rather than fresh so an `api-key-cmd:` is not
+	// re-run per Firing. It answers only when the binding carries no key of its own, which is the
+	// pre-bind case; a bound session hands its resolved key straight over.
+	keys *config.KeyResolver
+
+	// skills is the session's LIVE skill catalogue, shared rather than rebuilt so a
+	// `use-project-skills` flip or a `/skills` reload keeps following the runs this session raises.
+	skills *skills.Provider
+
+	// confiner is the session's own OS confinement backend, so an Auto Firing sits in the same box an
+	// Auto session on this host would. Whether this host may run Auto unattended at all was ruled on
+	// at the surface that offered the mode (scheduleAutoBlocked, ADR 0033 decision 3).
+	confiner apogee.Confiner
 
 	// store is the session store a Firing's record lands in — the interactive session's own, so a
 	// Firing shows up in /sessions beside the conversations it ran beneath (items 2 and 7).
@@ -70,79 +76,64 @@ type scheduleWiring struct {
 // fire performs one Firing and reports the record it left behind. It is the value wired into
 // schedule.Config.Fire, and it runs on the scheduler's goroutine — never the Update loop's — which
 // is why everything it touches is either immutable, its own copy, or explicitly goroutine-safe (the
-// holder, the store, the skills Provider, the Confiner).
+// settings holder, the store, the skills Provider, the Confiner).
 //
-// The delegates that assume a human are cleared rather than passed: run.Once pins its own fail-safe
-// denier and leaves ask_user and present_document unregistered (ADR 0033, decision 2), and handing
-// it the Bridge's would only invite a Firing to rendezvous with a UI that is not listening for it.
-// Tools are cleared for the same class of reason: MCP connections are live host state re-established
-// per session (ADR 0008, ADR 0022 §8), so a Firing takes the library's own registry rather than the
-// session's MCP-augmented one, and reaches no external server at all.
+// The Config it runs against is composed by [firingConfig] (wire_firing.go), the one composer every
+// Driver's unattended run is built by — an unattended run is an unattended run whichever Driver
+// raised it (ADR 0031). What THIS Driver decides is what a live session, rather than a file or a
+// daemon's entry, decides: the settings the human has moved since launch, the server the session has
+// switched to, the width its heartbeat already resolved, and the skill catalogue it is sharing.
+//
+// The delegates that assume a human are never handed over: run.Once pins its own fail-safe denier and
+// leaves ask_user and present_document unregistered (ADR 0033, decision 2), and handing it the
+// Bridge's would only invite a Firing to rendezvous with a UI that is not listening for it. Tools are
+// left to the composer for the same class of reason: MCP connections are live host state
+// re-established per session (ADR 0008, ADR 0022 §8), so a Firing takes the library's own registry
+// rather than the session's MCP-augmented one, and reaches no external server at all.
 func (w scheduleWiring) fire(ctx context.Context, f schedule.Firing) (schedule.Outcome, error) {
 	binding := w.binding()
-	// The per-model half of the Config, resolved exactly as a rebind resolves it — a Firing must
-	// land in the state a session started on this model would be in. The observed window is passed
-	// as unknown because only the TUI tracks it; a `context-window:` pin still wins, and an unpinned
-	// Firing runs with the Budget inactive, which for one bounded prompt is the honest degrade
-	// rather than a guess. The per-session notices are dropped: they are a launch's narration, and a
-	// Firing's narration is its own session record. The binding is handed to rebindInputs as well as
-	// used for the wire below: every input the resolution keys on the ENDPOINT — the probe record
-	// behind the identity ladder's behavioral rung, and so the Validated-set decision above it — must
-	// be read for the server this session is on NOW, not the one it launched against.
-	base, manualIDs, pinnedWindow, outputCap := w.live.rebindInputs(w.opts, binding)
-	spec, _, err := rebindSpecFor(base, w.roots, manualIDs, binding.Model, 0, pinnedWindow, outputCap)
+	opts, entry, manualIDs := w.live.firingSources(binding)
+
+	// This Firing's own record id, minted here because the runner is handed it beside the Config
+	// (run.Spec) and the composer creates the run's scratch dir under that name. Minted per FIRING
+	// rather than inherited: the session's own dir was named when this session booted, so a Firing
+	// that took it would write into a dir a /clear or a /sessions resume has since moved the session
+	// off — or, once the 14-day sweep has been past it, into one that is gone.
+	recordID := session.NewID(time.Now())
+
+	// The construction surface every unattended run shares (wire_firing.go), reached from this
+	// Driver's own facts. No `model:` overlay is handed over: the model this session is bound to is
+	// already the entry's own above, and naming it twice would be two routes to one value. The mode
+	// is the Schedule's, chosen explicitly at creation and never inherited from the session's own
+	// (ADR 0033, decision 3): Auto's eligibility was ruled on there, at the surface that offered it,
+	// exactly as agent.New trusts a Config that says Auto.
+	//
+	// The rebind notices are dropped — they are a launch's narration, and a Firing's narration is the
+	// session record it leaves behind.
+	cfg, _, err := firingConfig(ctx, firingInputs{
+		opts:      opts,
+		entry:     entry,
+		apiKey:    binding.APIKey,
+		keys:      w.keys,
+		roots:     w.roots,
+		manualIDs: manualIDs,
+		confiner:  w.confiner,
+		mode:      f.Mode,
+		skills:    w.skills,
+		// The width the session's bound server already resolves to, handed over as the seam the
+		// composer probes through, so no Firing spends a round trip on a number this session is
+		// holding (design call 4). The endpoint, model and key it is offered are this Firing's own
+		// and go unread: the answer is about the server the SESSION is on, which is the same one.
+		width:    func(context.Context, string, string, string) int { return w.width() },
+		recordID: recordID,
+	})
 	if err != nil {
 		return schedule.Outcome{}, fmt.Errorf("apogee: resolve the firing's bindings: %w", err)
 	}
 
-	cfg := w.base
-	cfg.Endpoint, cfg.APIKey = binding.Endpoint, binding.APIKey
-	cfg.ParallelAgents = w.width()
-	cfg.Model, cfg.SystemPrompt = spec.Model, spec.SystemPrompt
-	cfg.EnableMechanisms = spec.EnableMechanisms
-	cfg.Context.MaxContextTokens = spec.MaxContextTokens
-	// And how that window is split for the reply: the bound entry's `response-reserve:` over the
-	// top-level key, resolved onto the options copy by rebindInputs. Taken from there rather than
-	// left on the base Config for the reply ceiling's reason below — the base carries the share the
-	// LAUNCH entry resolved to, so a Firing raised after a `/server` move would otherwise divide this
-	// server's window the way a server this session has left divided its own. 0 is the honest "nobody
-	// stated a share", which hands the split back to the engine's own built-in one.
-	cfg.Context.ResponseReserveFraction = base.ResponseReserve
-	// And the other bound the server states: how big ONE reply of this Firing may be (ADR 0046). It is
-	// taken off the spec for the window's own reason — the base Config was seeded with the LAUNCH
-	// entry's `max-output-tokens:` (wire_boot.go), so a Firing raised after a `/server` move would
-	// otherwise be bounded by the ceiling of a server this session has left, and an unattended run is
-	// precisely the one a runaway reply must not happen in. Guarded exactly as Agent.Rebind guards it
-	// (rebind.go): a spec that says NOTHING about the ceiling — a nil — leaves the bound this Config
-	// already carries standing, because un-bounding a reply by omission is the one thing a cap may
-	// never do, while a stated ZERO is the operator having dropped the pin and hands the derivation
-	// back to the engine's own reply budget, never "no cap".
-	if spec.MaxOutputTokens != nil {
-		cfg.Context.MaxOutputTokens = *spec.MaxOutputTokens
-	}
-	// The Model profile the same resolution matched (ADR 0044). Taken off the spec rather than left
-	// on the base Config for the reason every other field here is: the base carries what the SESSION
-	// launched with, and a Firing that runs on another model must read responses in that model's
-	// shape, not in the departed one's.
-	cfg.Profile = spec.Profile
-	// The mode is the Schedule's, chosen explicitly at creation and never inherited from the
-	// session's own (ADR 0033, decision 3). Auto's eligibility was ruled on there, at the surface
-	// that offered it — scheduleAutoBlocked below — exactly as agent.New trusts a Config that says
-	// Auto.
-	cfg.Mode = f.Mode
-	cfg.Tools = nil
-	cfg.Events, cfg.Approver, cfg.Asker, cfg.Presenter = nil, nil, nil, nil
-	// This Firing's own scratch dir, named after the record it will be saved under, replacing the
-	// one the base Config carries: that path was minted when this session BOOTED, so a Firing that
-	// inherited it would write into a dir a /clear or a session switch has since moved the session
-	// off — or, after the 14-day sweep, into one that is gone. Minting here instead gives every
-	// Firing a private dir the sweep reclaims under the record's own name (wire.go).
-	recordID, scratchDir := firingScratch(w.roots.scratch, time.Now())
-	cfg.ScratchDir = scratchDir
-
 	// Through the package's runner seam (headless.go) rather than run.Once directly: production never
 	// reassigns it, so this is the same call, and it is what lets a test read the Config a Firing
-	// composed — the width below being the whole point of one.
+	// composed — the width above being the whole point of one.
 	res, err := runOnce(ctx, run.Spec{
 		Config:       cfg,
 		Prompt:       f.Prompt,

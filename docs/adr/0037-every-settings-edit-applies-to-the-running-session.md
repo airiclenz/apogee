@@ -278,3 +278,32 @@ never rewrites what it just read.
   moments apogee has a reason to read it.
 - This is a user-visible feature wave, and it **warrants a minor bump** when the next version is cut.
   That call is the owner's, and no item of the implementing plan touches a version identifier.
+
+## Amendment (2026-08-24) — the promise reaches the runs a session raises
+
+This record's promise stopped at the session's own Agent. A **Firing** raised INSIDE a session — a
+Schedule due while the human works ([ADR 0033](0033-a-schedule-is-a-cycle-and-a-firing-is-one-headless-run.md))
+— is a second, short-lived Agent, and its `apogee.Config` was built by copying the one the session
+BOOTED with and overriding a handful of fields. Everything not overridden was therefore the launch
+snapshot: `tools.disabled`, the two `url-safety:` host lists, `web-search-endpoint`, `bypass`,
+`auto-compact`, `ui.inspector`, `context-files.*`, and the `api-key-env` union of a `servers:` list
+the human may have edited an hour earlier. An edit that was in force for the human's own turn was
+silently not in force for the unattended run raised beside it — the run nobody is watching, where a
+tool taken off the roster, a host put on a deny list or a key variable left unscrubbed matters most.
+
+A Firing now composes from the session's **live-overlaid Options**. `liveSettings.options()`
+(`cmd/apogee/wire_settings.go`) is this record's decision-2 apply classes read back as one
+`config.Options`: the launch snapshot with every key an apply has since put into force written over
+it — recorded at the apply, never re-read from `config.yaml`, because this record makes the running
+session and not the file the authority on what the session is configured as. `firingSources` hands
+that projection out together with the `servers:` entry the session is bound to and the validated
+`mechanisms:` ids, under one read lock, so a run cannot be composed half from one instant and half
+from the next. `firingConfig` (`cmd/apogee/wire_firing.go`) — the one composer all three Drivers'
+unattended runs are built by — turns those inputs into the Config.
+
+So: **every settings edit applies to the running session, and to the runs that session raises.** The
+scope of the promise is the only thing that moves. No decision here is reversed, no apply class
+changes, and no key gains or loses live-ness; a key that could not be applied mid-session still
+cannot, and a Firing sees exactly what the session sees. The mode is the one deliberate exception,
+and it is ADR 0033 decision 3's rather than this record's: a Firing runs the mode its Schedule was
+created with, never the session's.

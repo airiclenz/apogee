@@ -292,21 +292,23 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	// The scheduler this session's Schedules live in (ADR 0033), built beside the naming call for
 	// the same reason: both are out-of-band work against the single-slot server the session is bound
 	// to, and both read that binding at CALL time rather than capturing it. Three seams make it
-	// live — a runner that composes one headless Firing from the current binding (schedule.go), a
-	// Gate that holds a due Firing until this session is quiescent, and a Notify that carries the
-	// scheduler's narration into the running program through the Bridge the Sink already uses.
+	// live — a runner that composes one unattended Firing from the session as it stands at that
+	// moment, settings and binding alike (schedule.go), a Gate that holds a due Firing until this
+	// session is quiescent, and a Notify that carries the scheduler's narration into the running
+	// program through the Bridge the Sink already uses.
 	//
 	// New's only refusal is a Config with no runner, which this one has; the error is returned
 	// rather than ignored because a scheduler that failed to build must not be handed on as a
 	// working seam.
 	firings := scheduleWiring{
-		base:    w.cfg,
-		opts:    w.opts,
-		roots:   w.roots,
-		live:    w.live,
-		binding: w.holder.Binding,
-		width:   w.caps.current,
-		store:   w.store,
+		live:     w.live,
+		roots:    w.roots,
+		binding:  w.holder.Binding,
+		width:    w.caps.current,
+		keys:     w.keys,
+		skills:   w.skillProvider,
+		confiner: w.confiner,
+		store:    w.store,
 	}
 	w.gate = newIdleGate()
 	w.schedules, err = schedule.New(schedule.Config{

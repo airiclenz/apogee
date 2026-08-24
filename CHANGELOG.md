@@ -130,6 +130,14 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- A Schedule Firing raised inside a TUI session now composes its run from the session's LIVE
+  settings instead of the snapshot the session booted with: `tools.disabled`, the two
+  `url-safety:` host lists, `web-search-endpoint`, `bypass`, `auto-compact`, `ui.inspector`,
+  `context-files.*` and the `api-key-env` union of an edited `servers:` list all follow a
+  `/settings` commit or a config-file save into the runs the session raises (ADR 0037, amended).
+  In-session Firings are now composed by the shared `firingConfig` composer, the same one headless
+  and daemon Firings are built by.
+
 - **The Tool summary persistence contract now agrees with ADR 0052 §5 (plan item 1).** The domain
   contract said a summary is "never persisted in the session record" (`internal/domain/toolsummary.go`,
   on `ToolSummary` and on `EditRegions`) while ADR 0052 §5 ratifies — and `internal/tui/transcriptcodec.go`
