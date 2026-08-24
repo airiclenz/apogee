@@ -876,3 +876,105 @@ func TestUndoCaptureHasExactlyTwoCallers(t *testing.T) {
 		}
 	}
 }
+
+// undoProbe seeds root with whatever ONE representative successful call to its writer needs, then
+// returns that call's arguments. A probe's only job is to make the writer actually mutate the
+// workspace — the record SHAPES are the suites above's business, not a probe's.
+type undoProbe func(t *testing.T, root string) map[string]any
+
+// undoProbes maps a workspace-scoped writer's tool NAME to its probe.
+// TestUndoJournalCoversEveryWriter keeps the table complete against the real tool set, so the
+// table is a checklist rather than the second list of tool names ADR 0051 decision 3 refuses:
+// nothing here decides which tools are covered, it only says how each one is driven.
+var undoProbes = map[string]undoProbe{
+	"write_file": func(_ *testing.T, _ string) map[string]any {
+		return map[string]any{"path": "made.txt", "content": "fresh"}
+	},
+	"edit_existing_file": func(t *testing.T, root string) map[string]any {
+		writeFixtureFile(t, filepath.Join(root, "edited.txt"), "original")
+		return map[string]any{"path": "edited.txt", "content": "edited"}
+	},
+	"single_find_and_replace": func(t *testing.T, root string) map[string]any {
+		writeFixtureFile(t, filepath.Join(root, "single.txt"), "keep OLD keep")
+		return map[string]any{"path": "single.txt", "oldText": "OLD", "newText": "NEW"}
+	},
+	"multi_find_and_replace": func(t *testing.T, root string) map[string]any {
+		writeFixtureFile(t, filepath.Join(root, "multi.txt"), "A and B")
+		return map[string]any{"path": "multi.txt", "replacements": []any{
+			map[string]any{"oldText": "A", "newText": "X"},
+			map[string]any{"oldText": "B", "newText": "Y"},
+		}}
+	},
+	"copy_file": func(t *testing.T, root string) map[string]any {
+		writeFixtureFile(t, filepath.Join(root, "src.txt"), "payload")
+		return map[string]any{"source": "src.txt", "destination": "dst.txt"}
+	},
+	"move_file": func(t *testing.T, root string) map[string]any {
+		writeFixtureFile(t, filepath.Join(root, "from.txt"), "payload")
+		return map[string]any{"source": "from.txt", "destination": "to.txt"}
+	},
+	"delete_file": func(t *testing.T, root string) map[string]any {
+		writeFixtureFile(t, filepath.Join(root, "doomed.txt"), "bytes")
+		return map[string]any{"path": "doomed.txt"}
+	},
+}
+
+// defaultToolNamed returns the tool the REAL constructor registers under name, scoped to root —
+// the walk below never builds a writer by hand, so a tool dropped from the default set stops
+// being covered here in the same breath as it stops being offered.
+func defaultToolNamed(t *testing.T, root, name string) domain.Tool {
+	t.Helper()
+
+	for _, tool := range DefaultTools(root) {
+		if tool.Name() == name {
+			return tool
+		}
+	}
+	t.Fatalf("%q is not in the default tool set", name)
+	return nil
+}
+
+// TestUndoJournalCoversEveryWriter is the coverage boundary ADR 0051 decision 3 rests on — the
+// half TestUndoCaptureHasExactlyTwoCallers cannot see. That scan proves no tool captures OUTSIDE
+// the two funnels; this one proves every workspace-scoped writer captures at all. A new writer
+// that reaches the filesystem through neither funnel passes the scan (it has no capture call to
+// find) and would drop silently out of `/undo`, so this drives each writer's own successful call
+// under a journal and requires a record to come back. A writer with no probe fails here too: the
+// walk is over DefaultTools, never over this file's table, which is what keeps "holds
+// automatically for tools added later" a property rather than a hope.
+func TestUndoJournalCoversEveryWriter(t *testing.T) {
+	t.Parallel()
+
+	var writers []string
+	for _, tool := range DefaultTools(t.TempDir()) {
+		if IsWorkspaceScopedWriter(tool) {
+			writers = append(writers, tool.Name())
+		}
+	}
+	if len(writers) == 0 {
+		t.Fatal("no workspace-scoped writer in the default tool set — the walk would prove nothing; check DefaultTools")
+	}
+
+	for _, name := range writers {
+		probe, ok := undoProbes[name]
+		if !ok {
+			t.Errorf("new workspace writer %q has no undo probe — add one; a writer that skips the funnel silently loses /undo coverage", name)
+			continue
+		}
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			root := tempRoot(t)
+			writer := defaultToolNamed(t, root, name)
+			args := probe(t, root)
+
+			journal := undo.New()
+			runJournalledWrite(t, journal, writer, args)
+
+			step, ok := journal.Preview()
+			if !ok || len(step.Changes) == 0 {
+				t.Fatalf("%s mutated the workspace and left no undo record — it writes past safeWriteFile and journaledMutation; route it through one of them", name)
+			}
+		})
+	}
+}

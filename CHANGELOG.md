@@ -65,6 +65,14 @@ point is a **minor** bump, not a breaking change.
   the next item — and with no journal on the context every capture is nil and the body runs
   byte-for-byte as it would have alone.
 
+- `TestUndoJournalCoversEveryWriter` walks the real `DefaultTools` set and requires every
+  `workspaceScopedWriter` to leave an undo record for a representative successful call, so a new
+  workspace writer that reaches the filesystem past `safeWriteFile`/`journaledMutation` fails the
+  suite instead of silently dropping out of `/undo`. ADR 0051 gains a dated amendment recording
+  that the "funnel" of decision 3 is the PAIR of those two helpers, and that the new walk plus
+  `TestUndoCaptureHasExactlyTwoCallers` are what make the decision's "holds automatically for tools
+  added later" a property; its Context sentence now names both funnels.
+
 ### Changed
 
 - **One table behind the `/settings` live apply and its reachability check (plan item 2).**

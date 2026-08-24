@@ -290,7 +290,12 @@ and the permit tests `TestMoveSourceStaysInWorkspaceUnderAPermit`
 
 ---
 
-## 5. Pin undo coverage by walking the writer registry; amend ADR 0051 §3
+## 5. Pin undo coverage by walking the writer registry; amend ADR 0051 §3 — ✅ DONE (2026-08-24)
+
+NOTES (2026-08-24): the ADR amendment is a trailing `## Amendment (2026-08-24)` section rather than
+prose inserted beneath decision 3's paragraph — that is the format every amendment in this ADR family
+uses (ADR 0003 2026-07-25, ADR 0051 2026-08-19, ADR 0052 ×4) and the one the plan's write-time call 6
+names; the amendment states which decision it amends in its heading and body.
 
 **Depends on item 4.**
 

@@ -15,9 +15,10 @@ the claim is stale: no implementation exists there. There is no behavioural prec
 so every property below is a decision rather than a match.
 
 Two facts about the codebase bound the design before any preference does. First, the writes
-already funnel: every content mutation a first-party tool performs passes `safeWriteFile`
-(`internal/tools/path_safety.go`) into `internal/security`'s fenced primitives, and the tools
-that do it carry the unexported `workspaceScopedWriter` marker
+already funnel: every mutation a first-party tool performs passes a funnel in
+`internal/tools/path_safety.go` — `safeWriteFile` for the content verbs, `journaledMutation` for
+the byte-moving trio (see the 2026-08-24 amendment) — into `internal/security`'s fenced
+primitives, and the tools that do it carry the unexported `workspaceScopedWriter` marker
 (`internal/tools/workspace_scoped.go`) that dispatch uses to path-bound rather than confine them.
 Second, only filesystem writes are durable and reconstructible at all — [ADR
 0008](0008-stateless-tools-and-non-forkable-external-effects.md) settled that terminal, network
@@ -191,3 +192,35 @@ So the preview's disclosure claim stands with one word corrected: it names the j
 addresses — root-joined named paths, and for an escape the permit-pinned resolved one — never abbreviated.
 The rationale lives at `journalTarget`'s doc comment; the docs here and in `internal/undo` point at it rather
 than restating it.
+
+## Amendment (2026-08-24) — the funnel is a PAIR, and two tests make decision 3 a property
+
+Decision 3 says capture is "at the funnel" and reads that word as a singular: `safeWriteFile`. It never
+was. `copy_file`, `move_file` and `delete_file` move bytes they never hold in memory, so all three landed
+outside `safeWriteFile` and hand-wired their own `capturePreImage`/`commit` sequences at their own mutation
+sites — three of the seven `workspaceScopedWriter` members the decision equates with the covered set. The
+decision's own promise ("stays that set as tools are added, without a second list of tool names") was
+therefore true only by inspection, and nothing failed when a writer skipped capture altogether.
+
+The funnel is now a PAIR of siblings in `internal/tools/path_safety.go`, and the pair is the whole of the
+package's undo capture. `safeWriteFile` keeps the content verbs — `write_file`, `edit_existing_file`,
+`single_find_and_replace`, `multi_find_and_replace` — which hold their post-image bytes in memory anyway.
+`journaledMutation` takes the byte-moving trio: it captures a pre-image for EVERY path the mutation touches
+before the body runs, hands the body the write-escape target, and commits exactly the paths the body reports
+as landed, each under its own post-image policy (the path is absent afterwards, or its bytes are read back
+from disk). That shape is what a move needs and a single-path funnel cannot express — two paths, two roots,
+and the split failure where the copy lands and the removal does not. Nothing about coverage, ordering or
+record shape changes: decisions 2, 4 and 6 hold verbatim, and every journal test that pinned the old capture
+sites passes unedited.
+
+Two tests turn decision 3 from a claim into a property, one per direction.
+`TestUndoCaptureHasExactlyTwoCallers` (`internal/tools/undo_journal_test.go`) scans the package's own
+non-test source and fails if `capturePreImage` / `commit` / `commitReadBack` is reached from any file but
+`path_safety.go`, so no third capture site can appear. `TestUndoJournalCoversEveryWriter` closes the other
+direction, which a scan structurally cannot see: it walks the tools `DefaultTools` actually registers and,
+for each one carrying the `workspaceScopedWriter` marker, drives a representative successful call under a
+journal and requires a record to come back. A writer added with no capture at all has no call spelling for
+the scan to find and fails here instead of dropping silently out of `/undo`. The per-tool probe table it
+drives is a checklist, not the second list of tool names this decision refuses: the walk is over the real
+tool set, so a writer with no probe entry fails by name rather than going unchecked. Decision 3's "stays
+that set as tools are added" now rests on that walk.
