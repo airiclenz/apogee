@@ -972,6 +972,11 @@ func (a *Agent) readFileRef(ref string) (string, error) {
 	return string(data), nil
 }
 
+// skillDirToken is the placeholder a skill author may write anywhere in a SKILL.md body to
+// mean "this skill's absolute directory". resolveSkillRefs expands it only when the resolver
+// handed over a Dir; without one the token travels literal, by design.
+const skillDirToken = "{{SKILL_DIR}}"
+
 // resolveSkillRefs resolves each attached skill ID through Config.Skills and returns the
 // labeled instruction blocks to prepend to the user message — mirroring resolveFileRefs. The
 // blocks are emitted in the order the IDs were attached. An unknown ID (or any ID at all when
@@ -980,11 +985,19 @@ func (a *Agent) readFileRef(ref string) (string, error) {
 // IDs round-trip through a snapshot on UserInput, so a resumed session re-resolves them.
 //
 // A skill that carries a Dir gets one further fixed line directly after the opening tag, naming
-// the folder and the tools that can read it. It is hard-wired harness text, never the
-// user-definable system prompt: the address is only useful together with the read-only tools'
-// extra-roots mount (tools.HostTools.ExtraReadRoots), which the same harness wires, so the two
-// halves of the promise stay in one place. A resolver with no Dir omits the line entirely and
-// the block is byte-identical to what it was before.
+// the folder, the tools that can read or copy from it, and a warning off the terminal (a shell
+// command naming the home skill library trips the dangerous-action guard's ~/.apogee write
+// rule, dedicated reads do not). It is hard-wired harness text, never the user-definable
+// system prompt: the address is only useful together with the read-only tools' extra-roots
+// mount (tools.HostTools.ExtraReadRoots), which the same harness wires, so the two halves of
+// the promise stay in one place. The same Dir also expands every literal {{SKILL_DIR}} token
+// in the body (skillDirToken — a plain replace, no other tokens, no escaping), so a skill's
+// instructions can name exact bundled-file paths instead of sending the model off to derive
+// them from the files: line; the expansion lives here, beside that line, for the same reason.
+// A resolver with no Dir omits the line entirely, leaves the token literal — an unexpandable
+// token is the skill author's portability problem, and other hosts leave it untouched too, so
+// a cross-host skill carries its own fallback text — and the block is byte-identical to what
+// it was before.
 func (a *Agent) resolveSkillRefs(turn int, ids []string) string {
 	if len(ids) == 0 {
 		return ""
@@ -1017,11 +1030,15 @@ func (a *Agent) resolveSkillRefs(turn int, ids []string) string {
 			continue
 		}
 		fmt.Fprintf(&b, "<skill: %s>\n", s.DisplayName)
+		body := s.Body
 		if s.Dir != "" {
 			fmt.Fprintf(&b, "files: %s — this skill's bundled files; read one (read_file, "+
-				"list_dir, grep or find_files) only when these instructions call for it\n", s.Dir)
+				"list_dir, grep or find_files) or copy one out (copy_file) only when these "+
+				"instructions call for it — use these tools, never terminal commands, to "+
+				"touch this folder\n", s.Dir)
+			body = strings.ReplaceAll(body, skillDirToken, s.Dir)
 		}
-		fmt.Fprintf(&b, "%s\n</skill>\n\n", s.Body)
+		fmt.Fprintf(&b, "%s\n</skill>\n\n", body)
 	}
 	return b.String()
 }

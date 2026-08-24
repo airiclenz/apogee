@@ -264,7 +264,9 @@ func TestResolveSkillRefsNamesTheSkillFolder(t *testing.T) {
 	// Directly after the opening tag, before the body: the model reads the address first.
 	want := "<skill: Code Review>\n" +
 		"files: /home/u/.apogee/skills/review — this skill's bundled files; " +
-		"read one (read_file, list_dir, grep or find_files) only when these instructions call for it\n" +
+		"read one (read_file, list_dir, grep or find_files) or copy one out (copy_file) " +
+		"only when these instructions call for it — use these tools, never terminal " +
+		"commands, to touch this folder\n" +
 		"REVIEW INSTRUCTIONS\n</skill>"
 	if got := a.conv.At(0).Content; !strings.Contains(got, want) {
 		t.Errorf("skill block did not name the folder verbatim:\ngot:\n%s\nwant to contain:\n%s", got, want)
@@ -296,6 +298,73 @@ func TestResolveSkillRefsWithoutDirOmitsTheFilesLine(t *testing.T) {
 	}
 	if want := "<skill: Code Review>\nREVIEW INSTRUCTIONS\n</skill>"; !strings.Contains(got, want) {
 		t.Errorf("dirless block changed shape:\ngot:\n%s\nwant to contain:\n%s", got, want)
+	}
+}
+
+// A body that spells {{SKILL_DIR}} must reach the model with the token already replaced by
+// the skill's absolute directory — every occurrence, so instructions can name exact bundled
+// paths without making the model stitch them together from the files: line.
+func TestResolveSkillRefsExpandsSkillDirToken(t *testing.T) {
+	cfg := baseConfig(&recordingSink{})
+	cfg.Skills = fakeSkillResolver{skills: map[string]domain.ResolvedSkill{
+		"review": {
+			ID:          "review",
+			DisplayName: "Code Review",
+			Body:        "read {{SKILL_DIR}}/prompts/recon.md then copy {{SKILL_DIR}}/prompts/report.md",
+			Dir:         "/home/u/.apogee/skills/review",
+		},
+	}}
+	a, err := newAgent(cfg, echoResponder{reply: "ok"})
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+
+	if err := a.Submit(domain.UserInput{Text: "please look", SkillIDs: []string{"review"}}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if _, err := a.Step(context.Background()); err != nil {
+		t.Fatalf("Step: %v", err)
+	}
+
+	got := a.conv.At(0).Content
+	want := "read /home/u/.apogee/skills/review/prompts/recon.md then " +
+		"copy /home/u/.apogee/skills/review/prompts/report.md"
+	if !strings.Contains(got, want) {
+		t.Errorf("skill dir token not expanded in the body:\ngot:\n%s\nwant to contain:\n%s", got, want)
+	}
+	if strings.Contains(got, "{{SKILL_DIR}}") {
+		t.Errorf("an occurrence of the token survived expansion:\n%s", got)
+	}
+}
+
+// With no Dir there is nothing truthful to expand to, so the token stays literal — the skill
+// author's own fallback text has to carry the message, exactly as it must on hosts that never
+// heard of the token.
+func TestResolveSkillRefsWithoutDirLeavesSkillDirTokenLiteral(t *testing.T) {
+	cfg := baseConfig(&recordingSink{})
+	cfg.Skills = fakeSkillResolver{skills: map[string]domain.ResolvedSkill{
+		"review": {
+			ID:          "review",
+			DisplayName: "Code Review",
+			Body:        "read {{SKILL_DIR}}/prompts/recon.md then copy {{SKILL_DIR}}/prompts/report.md",
+		},
+	}}
+	a, err := newAgent(cfg, echoResponder{reply: "ok"})
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+
+	if err := a.Submit(domain.UserInput{Text: "please look", SkillIDs: []string{"review"}}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if _, err := a.Step(context.Background()); err != nil {
+		t.Fatalf("Step: %v", err)
+	}
+
+	got := a.conv.At(0).Content
+	want := "read {{SKILL_DIR}}/prompts/recon.md then copy {{SKILL_DIR}}/prompts/report.md"
+	if !strings.Contains(got, want) {
+		t.Errorf("dirless skill body was rewritten:\ngot:\n%s\nwant to contain:\n%s", got, want)
 	}
 }
 

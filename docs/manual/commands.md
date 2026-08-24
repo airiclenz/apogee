@@ -68,6 +68,17 @@ has smeared or eaten part of the frame. It sends nothing, edits nothing and inte
 nothing — the only thing it takes with it is a mouse drag-selection's highlight, which
 every keypress drops.
 
+## `{{SKILL_DIR}}` in skill bodies
+
+A skill's SKILL.md may write the literal token `{{SKILL_DIR}}` anywhere in its body; when
+the skill is attached, apogee replaces every occurrence with the skill's **absolute
+directory** — the folder holding the SKILL.md and the files bundled beside it. That lets a
+skill's instructions name exact paths ("read `{{SKILL_DIR}}/prompts/recon.md`") instead of
+asking the model to find the folder first. The expansion happens only when apogee knows the
+skill's directory — a skill resolved without one keeps the token as written. Other hosts
+leave the token literal too, so a skill meant to travel should not lean on it exclusively:
+phrase the surrounding text so it still reads sensibly unexpanded.
+
 ## Undoing the agent's file writes — `/undo`
 
 `/undo` takes back the files the agent wrote, **one exchange at a time** — one instruction
