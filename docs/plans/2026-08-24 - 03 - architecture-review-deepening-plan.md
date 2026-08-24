@@ -179,7 +179,7 @@ disagree on order) and contain no duplicates.
 
 ---
 
-## 3. Add `journaledMutation` — the multi-path undo funnel beside `safeWriteFile`
+## 3. Add `journaledMutation` — the multi-path undo funnel beside `safeWriteFile` — ✅ DONE (2026-08-24)
 
 **What.** In `internal/tools/path_safety.go`, next to `safeWriteFile` (`:70`), add the sibling
 helper ratified by design call 2:

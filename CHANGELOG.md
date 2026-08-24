@@ -48,6 +48,23 @@ point is a **minor** bump, not a breaking change.
   and that refusal surfaces through the existing "save the firing's record" error with the run's
   own `Result` still returned.
 
+- **`journaledMutation` — the multi-path undo funnel beside `safeWriteFile` (plan item 3).**
+  `internal/tools/path_safety.go` gains the sibling helper the byte-moving verbs need: it captures
+  a pre-image for EVERY path a mutation touches before the mutation runs, hands the body the
+  approved-escape target (ADR 0049), and then commits exactly the paths the body reports as landed
+  — each under its own `postImage` policy, `postAbsent` for a path the mutation removed (a delete's
+  target, a move's source) or `postReadBack` for one it landed bytes on that this process never
+  held (a copy's or a move's destination). Landing is reported by the body rather than inferred
+  from its error, so a move that fails half way — the copy landed, the removal was refused — keeps
+  the journal record for the half that really happened while the call still reports the failure.
+  Each `mutationPath` carries its OWN root, because a copy's ends do not share one: its source may
+  have matched a configured read-only root while its destination stays workspace-fenced. The fence
+  primitive stays the body's choice (`security.SafeRename`, `SafeCopyFileFrom`, `SafeRemove` differ
+  in what they take and in how their failures triage), so the helper owns only the permit lookup,
+  the capture and the commit. Nothing routes through it yet — copy, move and delete are ported in
+  the next item — and with no journal on the context every capture is nil and the body runs
+  byte-for-byte as it would have alone.
+
 ### Changed
 
 - **One table behind the `/settings` live apply and its reachability check (plan item 2).**

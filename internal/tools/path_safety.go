@@ -76,6 +76,82 @@ func safeWriteFile(ctx context.Context, input, root string, data []byte, perm os
 	return nil
 }
 
+// postImage says how a mutated path's after-state reaches the journal once the body of a
+// journaledMutation has landed it. There is deliberately no "bytes the caller already holds"
+// case: that is safeWriteFile's shape, and a verb that holds its own post-bytes belongs there.
+type postImage int
+
+const (
+	// postAbsent is the path the mutation removed — a delete's target, a move's source. Its
+	// record's post-state is "nothing", which is what makes an undo put the file back.
+	postAbsent postImage = iota
+	// postReadBack is the path the mutation landed bytes on that this process never held — a
+	// copy's or a move's destination — so the journal reads them back off the file it left.
+	postReadBack
+)
+
+// mutationPath names one path a multi-path mutation touches, in the spelling and under the root
+// that mutation reaches it through.
+//
+// root is per-path rather than per-call because the ends of a copy do not share one: a copy's
+// source may have matched a configured read-only root while its destination stays workspace-fenced
+// (checkFileOpsPathsFrom). input is the ARGUMENT's spelling rather than its resolution, because
+// that is what a record is identified by (journalTarget) and what a read-back re-resolves through
+// the mutation's own fence (commitReadBack).
+type mutationPath struct {
+	input string
+	root  string
+	post  postImage
+}
+
+// journaledMutation is safeWriteFile's sibling for the verbs that move or remove whole files:
+// copy_file, move_file and delete_file, none of which hold in memory the bytes they land, and one
+// of which changes two paths over two possible routes. It captures a pre-image for EVERY path
+// before body runs, hands body the approved-escape target (ADR 0049), then commits exactly the
+// paths body reports as landed — each under its own post-image policy — and returns body's error
+// unchanged. Together the two helpers are the whole of this package's undo capture (ADR 0051).
+//
+// landed carries one entry per path, in paths' order; a nil or short slice means the missing paths
+// did not land. It is REPORTED rather than inferred from err because a move can fail half way —
+// the copy landed, the removal was refused — and the journal has to keep the half that really
+// happened while the call still reports the failure.
+//
+// Capturing before body is the load-bearing ordering: after a move the source does not exist and
+// the destination holds the source's bytes, so neither pre-image is recoverable from the
+// filesystem the mutation leaves behind. A landed path whose read-back fails journals nothing, for
+// the reason an unreadable pre-image does: a record that describes a file it does not match turns
+// every later undo of that path into a conflict it never had.
+//
+// The fence primitive stays the BODY's choice — security.SafeRename, SafeCopyFileFrom and
+// SafeRemove differ in what they take and in how their failures triage — so this owns only the
+// permit lookup, the capture and the commit. Outside an engine, or under one that keeps no
+// journal, every capture is nil and body runs byte-for-byte as it would have alone.
+func journaledMutation(
+	ctx context.Context,
+	paths []mutationPath,
+	body func(escape string) (landed []bool, err error),
+) error {
+	captured := make([]*preImage, len(paths))
+	for i, path := range paths {
+		captured[i] = capturePreImage(ctx, path.input, path.root)
+	}
+
+	landed, err := body(writeEscapeTarget(ctx))
+
+	for i, path := range paths {
+		if i >= len(landed) || !landed[i] {
+			continue
+		}
+		switch path.post {
+		case postAbsent:
+			captured[i].commit(nil, false)
+		case postReadBack:
+			captured[i].commitReadBack(ctx)
+		}
+	}
+	return err
+}
+
 // safeReadFile reads input within root through the shared TOCTOU-safe guard, with the
 // workspace fence enforced at READ time so an escaping symlink component is refused
 // rather than followed (security review H1). It replaces the former resolveInRoot+
