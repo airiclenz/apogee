@@ -158,7 +158,7 @@
 //
 // # The tool files, one line each
 //
-// Twenty-nine files carry the built-ins, grouped by what a call to them can do — which is
+// Thirty files carry the built-ins, grouped by what a call to them can do — which is
 // also what the dispatch disposition keys on (ADR 0012). A file holds a tool FAMILY, not
 // always a single tool: the two-tool file_ops.go and the five-tool git.go each keep a
 // family's shared argument shape and error wording in one place.

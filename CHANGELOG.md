@@ -37,6 +37,11 @@ point is a **minor** bump, not a breaking change.
   text version — and never a fallback to raw bytes, because a wall of binary teaches the model
   nothing and costs it a context window to learn it. Non-PDF reads are byte-identical to before.
 
+### Fixed
+
+- `internal/tools/doc.go`: corrected the package map's carrier-file count from "Twenty-nine" to
+  "Thirty" — `pdf_text.go` had been added to the map without updating the count sentence.
+
 ## [0.16.3] — 2026-08-24
 
 ### Added
