@@ -23,38 +23,6 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 
 ## Open defects
 
-### The hero tape's knob-2 wait is 17s, not the 12s its comment reasons about
-
-**Status:** open 2026-08-24 — deferred at the close of the hero-GIF refresh plan
-(`docs/plans/archived/2026-08-24 - 00 - hero-gif-refresh-plan.md`); no item of that plan owned the
-stray sleep.
-
-Knob 2 is `Sleep 12s` at `graphics/demo/tapes/hero.tape:116`, but an uncommented `Sleep 5s` follows
-it immediately (`graphics/demo/tapes/hero.tape:117`), so the effective wait before the `/undo` beat
-is 17s. The knob comment above it (`graphics/demo/tapes/hero.tape:108-115`) reasons entirely about
-the 12s figure — the measured tail is ~3s, so 12s already overshoots ~4x — and its own point is that
-overshoot is *not* free, because `render.sh` trims only the head (`-ss`) and every idle second here
-ships as dead air in the middle of the clip. Anyone retuning the knob from its comment tunes a
-number that is not the one in force. The same 12s figure is what `graphics/demo/README.md:112`
-teaches.
-
----
-
-### The `endpoint` key's `/v1` warning overstates "every request"
-
-**Status:** open 2026-08-24 — shipped by this run's follow-up fix `d54cadff`
-(`fix(config): drop the /v1 suffix from the OpenRouter example endpoint`).
-
-The seeded template tells the reader that an endpoint spelled with the `/v1` suffix sends "every
-request" to `/api/v1/v1/…` (`internal/config/defaults/config.yaml:46-47`). That holds for the two
-OpenAI-compatible paths the client builds from the base — `/v1/chat/completions` and `/v1/models` —
-but not for the third path discovery touches: the capability probe is `propsPath = "/props"`
-(`internal/provider/client.go:20`), which carries no `/v1` and is unaffected by the suffix. The
-warning's conclusion (a suffixed base 404s the requests that matter) is right; the quantifier is
-wider than the code.
-
----
-
 ## Parked / deferred work
 
 Live, deliberately deferred work only. Each entry records *enough* design that we don't re-derive
@@ -750,20 +718,6 @@ subprocess surfaces are outside that plan's scope.
   session (`internal/agent/construct.go:111`, `Agent.SetScratchDir`), and `ConfinementBox` folds
   `ScratchDir` into `WritablePaths` (`internal/domain/confinement.go:89`). So those two surfaces
   measure/write against the seed scratch dir after a session swap, not the live one.
-
-
-### `pdfDisplayPath`'s multi-page header is never exercised by a test
-
-**Status:** parked 2026-08-24 — deferred at the close of the read_file PDF plan: its committed
-fixtures (`internal/tools/testdata/minimal.pdf`, `notext.pdf`) are one-page documents, so a
-multi-page assertion had no fixture to stand on.
-
-- [ ] `pdfDisplayPath` branches on the page count — `"(PDF, 1 page)"` singular against
-  `fmt.Sprintf("%s (PDF, %d pages)", path, pages)` plural (`internal/tools/read_file.go:149-153`) —
-  and only the singular branch is covered: `read_file_test.go:688` asserts the
-  `[File: minimal.pdf (PDF, 1 page), …]` header and nothing asserts the plural form at any level.
-  Either commit a small multi-page fixture and assert the header through `Execute`, or unit-test
-  `pdfDisplayPath` directly for the counts 0, 1 and 2.
 
 
 ### The hero tape's knob 3 is a clock where a screen-state trigger is needed

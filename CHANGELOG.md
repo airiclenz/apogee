@@ -120,6 +120,14 @@ point is a **minor** bump, not a breaking change.
   reads `https://openrouter.ai/api`, and the `endpoint` key's own documentation says the value is
   the BASE URL without `/v1` and what happens when the suffix is spelled out.
 
+- **The seeded config template's `/v1` warning now names the requests it actually breaks (residuals
+  sweep plan item 1).** The `endpoint` key's comment told the reader that a base URL spelled with the
+  `/v1` suffix sends "every request" to `/api/v1/v1/…` — true of the two paths the client builds from
+  the base, `/v1/chat/completions` and `/v1/models`, but not of the capability probe, which is
+  `/props` and carries no `/v1`. It now reads "the chat and model-list requests", keeping the
+  conclusion (a suffixed base 404s the requests that matter) and the OpenRouter example;
+  `graphics/demo/README.md` repeated the same sentence and is corrected the same way.
+
 ## [0.16.3] — 2026-08-24
 
 ### Added

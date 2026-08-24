@@ -80,7 +80,11 @@ Write-time calls by the plan author (mechanical, no user-visible difference):
 
 ---
 
-## 1. Narrow the `/v1` warning's quantifier to the requests it is true of
+## 1. Narrow the `/v1` warning's quantifier to the requests it is true of — ✅ DONE (2026-08-24)
+
+NOTES (2026-08-24): the item's acceptance grep `grep -n 'every request' internal/config/defaults/config.yaml` no longer matches the api-key line it predicts — that line spells "EVERY request" in capitals, so the case-sensitive grep never matched it. Its substantive half holds: no match anywhere in the `endpoint` block (the surviving matches are lines 212, 224 and 502, unrelated prompt/context prose).
+
+NOTES (2026-08-24): ISSUES.md is edited by all three items of this batched dispatch in one working tree, so file-level staging of item 1's commit necessarily carries items 2 and 3's ISSUES.md removals with it.
 
 **What:** the seeded template says an `endpoint` spelled with a `/v1` suffix sends "every
 request" to `/api/v1/v1/…`. That holds for the two paths the client builds from the base —

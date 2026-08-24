@@ -55,10 +55,10 @@ demo home and the footer shows a long absolute path that gives the staging away.
 
 **The endpoint is the server's base URL, without `/v1`.** apogee appends `/v1/chat/completions`
 and `/v1/models` itself, so OpenRouter is `https://openrouter.ai/api` — spelled with the `/v1`
-suffix, every request lands on `/api/v1/v1/…` and 404s. `apogee probe` from inside the demo home
-(`HOME=~/.cache/apogee-demo/home apogee probe`) is the two-second check; its `active:` line names
-the first advertised model rather than the pinned one, which is a probe quirk, not a mis-pin — the
-session binds the entry's `model:` verbatim.
+suffix, the chat and model-list requests land on `/api/v1/v1/…` and 404s. `apogee probe` from
+inside the demo home (`HOME=~/.cache/apogee-demo/home apogee probe`) is the two-second check; its
+`active:` line names the first advertised model rather than the pinned one, which is a probe
+quirk, not a mis-pin — the session binds the entry's `model:` verbatim.
 
 **The model id is pinned in the config, not picked on camera.** The entry carries `model:` so the
 clip never needs a `/model` beat; an OpenRouter "latest" alias starts with `~`, which is why

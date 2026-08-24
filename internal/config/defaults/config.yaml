@@ -43,8 +43,8 @@
 #              share one.
 #   endpoint   that server's OpenAI-compatible URL — the BASE, without `/v1`: apogee appends
 #              `/v1/chat/completions` and `/v1/models` itself, so OpenRouter is
-#              `https://openrouter.ai/api`. Spelled with the suffix, every request lands on
-#              `/api/v1/v1/…` and 404s. Required.
+#              `https://openrouter.ai/api`. Spelled with the suffix, the chat and model-list
+#              requests land on `/api/v1/v1/…` and 404s. Required.
 #   api-key    the bearer token that server wants, if it wants one — llama.cpp started with
 #              --api-key, LM Studio, a remote vLLM, any keyed OpenAI-compatible proxy. It is
 #              sent as `Authorization: Bearer <key>` on EVERY request to that server: your
