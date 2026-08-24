@@ -10,14 +10,20 @@ careful hand performance.
 ## Quick start
 
 ```sh
-brew install vhs                 # pulls ttyd + ffmpeg; VHS fetches its own headless Chromium
+brew install vhs gifsicle        # vhs pulls ttyd + ffmpeg and fetches its own headless Chromium
+export OPENROUTER_API_KEY=…      # the rig's default server is OpenRouter; the key is read from here
 ./setup.sh                       # build the rig (idempotent)
 ./record.sh hero                 # reset the stage, record tapes/hero.tape
 ./render.sh ~/.cache/apogee-demo/hero.mp4 ../demo.gif 1.8 3.8
 ```
 
-A model must be serving at the endpoint before recording — **the model name is on camera**
-in the footer for the whole clip, so pick it deliberately.
+**The server alias and the model id are on camera** in the footer for the whole clip, so pick
+both deliberately. The defaults are the `openrouter` alias with `~deepseek/deepseek-v4-flash-latest`
+(fast inference, so a take is short); `APOGEE_DEMO_ENDPOINT`, `APOGEE_DEMO_HOST_ALIAS`,
+`APOGEE_DEMO_MODEL` and `APOGEE_DEMO_KEY_ENV` override them — set `APOGEE_DEMO_KEY_ENV=` (empty)
+for a keyless local server. The key itself is never written anywhere: the generated config says
+`api-key-env: OPENROUTER_API_KEY` and apogee reads the variable from the shell `record.sh` runs in,
+which refuses to start a take while it is unset.
 
 ## Layout
 
@@ -29,6 +35,7 @@ in the footer for the whole clip, so pick it deliberately.
 | `reset.sh` | restores the planted bug + CHANGELOG stub, wipes session state |
 | `tapes/` | one tape per clip; `hero.tape` is the README clip |
 | `stage/` | templates for the taskman stage repo (copied out by `setup.sh`) |
+| `history/` | one folder per shipped clip: the GIF that shipped, its variants, and a `NOTES.md` of the recording facts |
 
 Nothing is built inside this repo. The rig lands in `~/.cache/apogee-demo` (override with
 `APOGEE_DEMO_WORK`), which keeps a 60 MB+ Go build cache and a generated apogee home out of
@@ -45,6 +52,17 @@ footer renders the workdir as a clean `~/Repos/taskman`. Put the stage anywhere 
 demo home and the footer shows a long absolute path that gives the staging away.
 
 ## Things that are settled, and why
+
+**The endpoint is the server's base URL, without `/v1`.** apogee appends `/v1/chat/completions`
+and `/v1/models` itself, so OpenRouter is `https://openrouter.ai/api` — spelled with the `/v1`
+suffix, every request lands on `/api/v1/v1/…` and 404s. `apogee probe` from inside the demo home
+(`HOME=~/.cache/apogee-demo/home apogee probe`) is the two-second check; its `active:` line names
+the first advertised model rather than the pinned one, which is a probe quirk, not a mis-pin — the
+session binds the entry's `model:` verbatim.
+
+**The model id is pinned in the config, not picked on camera.** The entry carries `model:` so the
+clip never needs a `/model` beat; an OpenRouter "latest" alias starts with `~`, which is why
+`setup.sh` quotes the value.
 
 **Use `--mode auto`, not `allow-edits`.** In `allow-edits`, apogee's own workspace edits run
 freely but shell commands still gate on approval — a hands-off tape stalls forever on
@@ -117,3 +135,18 @@ Worth knowing when scripting a new one:
   available as a demo scenario; broken *behaviour* is.
 - Sanity-check the stage before any take: `./reset.sh` prints `stage reset: bug present,
   tests red` and exits non-zero if the stage is wrong.
+
+## History
+
+Every clip that ships gets a folder under `history/<date>-<slug>/` holding a copy of the shipped
+GIF plus a `NOTES.md` with the facts a re-record needs and a screen recording cannot show: the
+model and server alias that were on camera, the endpoint, the tape and apogee commit, the
+`render.sh` arguments, and how many takes it took. Alternate renders of the same take (untimed,
+with-launch) live beside it rather than loose in `graphics/`.
+
+`graphics/demo.gif` stays the one path the README references; `history/` is the record, not the
+link.
+
+| folder | clip |
+|---|---|
+| `history/2026-08-05-hero/` | the first hero clip: red → green with a queued CHANGELOG interjection, local model |

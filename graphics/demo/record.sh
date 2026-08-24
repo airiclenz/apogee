@@ -17,6 +17,16 @@ SRC="$HERE/tapes/$TAPE.tape"
 [ -f "$SRC" ] || { echo "no such tape: $SRC" >&2; ls "$HERE/tapes/" >&2; exit 1; }
 [ -f "$WORK/env.sh" ] || { echo "no rig at $WORK — run setup.sh first" >&2; exit 1; }
 
+# The config names an env var as the key source (api-key-env); apogee reads it from the
+# environment VHS's shell inherits from this one. A missing key would only surface as the
+# first request failing on camera, so refuse here instead.
+KEY_ENV=""
+[ -f "$WORK/rig.env" ] && . "$WORK/rig.env"
+if [ -n "$KEY_ENV" ] && [ -z "${!KEY_ENV:-}" ]; then
+  echo "\$$KEY_ENV is not set — export it before recording (the config reads the key from it)" >&2
+  exit 1
+fi
+
 "$HERE/reset.sh"
 
 cp "$SRC" "$WORK/$TAPE.tape"

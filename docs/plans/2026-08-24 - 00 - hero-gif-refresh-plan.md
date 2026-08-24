@@ -6,7 +6,7 @@ interjection, and a closing `/undo` preview beat — recorded against OpenRouter
 `deepseek-v4-flash-latest` for fast inference, with the demo folder gaining a `history/`
 structure so past clips and their recording facts stop living loose in `graphics/`.
 
-**Date:** 2026-08-24 · **Status:** unexecuted · **sized for:** any host; recording needs macOS
+**Date:** 2026-08-24 · **Status:** items 1–2 done 2026-08-24, items 3–5 unexecuted · **sized for:** any host; recording needs macOS
 with `vhs` + an `OPENROUTER_API_KEY` in the environment
 
 **Authoritative sources** (an item that disagrees with these follows these):
@@ -69,7 +69,13 @@ interjection window (knob 1) to shrink to a few seconds.
 
 ---
 
-## 1. `graphics/demo/history/` — give past clips a home
+## 1. `graphics/demo/history/` — give past clips a home — ✅ DONE (2026-08-24)
+
+NOTES (2026-08-24): git recorded the identical `demo_in_app_1_8x.gif` as a RENAME to
+`history/2026-08-05-hero/demo.gif` (the shipped-copy the convention wants) rather than a delete +
+copy — same tree, cleaner history. `ffprobe` is not on this machine's PATH, so NOTES.md carries no
+clip durations.
+
 
 - Create `graphics/demo/history/2026-08-05-hero/` and `git mv` into it:
   - `graphics/demo_in_app.gif`
@@ -89,14 +95,36 @@ interjection window (knob 1) to shrink to a few seconds.
 **Acceptance:** `git status` shows only renames/deletes under `graphics/`; `graphics/` root
 holds exactly the two logo SVGs, `demo.gif`, and `demo/`; the NOTES.md facts match `git log`.
 
-## 2. Rig fixes — make `setup.sh` true on today's repo, pointed at OpenRouter
+## 2. Rig fixes — make `setup.sh` true on today's repo, pointed at OpenRouter — ✅ DONE (2026-08-24)
+
+NOTES (2026-08-24), three findings that change item 3–5 inputs:
+- **Endpoint is `https://openrouter.ai/api`, NOT `/api/v1`.** `internal/provider/client.go`
+  does `baseURL + "/v1/chat/completions"` with no `/v1` dedup; the `/api/v1` form 404s on
+  `/api/v1/v1/models` (verified with `apogee probe`). The shipped template's own OpenRouter
+  example at `internal/config/defaults/config.yaml:176` spells `/api/v1` and is therefore wrong —
+  an apogee bug, out of this plan's scope, flagged to the owner.
+- **Exact model id is `~deepseek/deepseek-v4-flash-latest`** (OpenRouter's tilde-prefixed
+  "latest" alias; queried live from `/api/v1/models`, ctx 1310720). That is the string the footer
+  will render — 36 chars with a leading `~`. The dated sibling `deepseek/deepseek-v4-flash-0731`
+  is the same model pinned and reads cleaner on camera; item 4's scout take decides. `setup.sh`
+  quotes the value (YAML) and `APOGEE_DEMO_MODEL` overrides it.
+- **`apogee probe`'s `active:` line ignores the entry's `model:`** (`internal/probe/host.go:84`
+  discovers with no hint) and names the first advertised model; the session itself binds the
+  entry's model verbatim (`cmd/apogee/wire_server.go:106`). Probe quirk, not a mis-pin.
+
+Also: the key travels as `api-key-env` only — never written; `record.sh` refuses without it
+(guard verified). `setup.sh` writes `<work>/rig.env` carrying the key-var NAME so `record.sh`
+knows what to check. `gifsicle` is not installed here (`render.sh` treats it as optional; README
+quick start now lists it). Real rig rebuilt at `~/.cache/apogee-demo`: `./reset.sh` prints
+`stage reset: bug present, tests red`.
+
 
 - **Stale template path (setup.sh:48):** `$REPO/cmd/apogee/defaults/config.yaml` no longer
   exists — the seeded template lives at `internal/config/defaults/config.yaml`. Fix the path.
 - **Server entry gains key + model:** the appended `servers:` entry becomes
   `name` / `endpoint` / `api-key-env: OPENROUTER_API_KEY` / `model:` — the template documents
   exactly these keys (`api-key-env` even uses `OPENROUTER_API_KEY` as its example). New
-  defaults: `APOGEE_DEMO_ENDPOINT` → `https://openrouter.ai/api/v1`,
+  defaults: `APOGEE_DEMO_ENDPOINT` → `https://openrouter.ai/api` (see NOTES: no `/v1`),
   `APOGEE_DEMO_HOST_ALIAS` → `openrouter`, new `APOGEE_DEMO_MODEL` →
   `deepseek-v4-flash-latest`. **Verify the exact OpenRouter model id before recording**
   (OpenRouter ids are usually `vendor/model`, e.g. `deepseek/deepseek-v4-flash-latest`) — the
