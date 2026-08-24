@@ -8,6 +8,23 @@ point is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+### Added
+
+- **Pure-Go PDF text extraction behind `read_file` (plan item 1).** `internal/tools/pdf_text.go`
+  is the one place the tools package knows anything about the format: `isPDF` decides by content
+  sniff alone — the leading `%PDF-` bytes, never the file name, so a text file called `notes.pdf`
+  is still text and a real PDF saved without the extension still extracts — and `extractPDFText`
+  parses the document from memory and returns it with a `[Page N]` marker line before each page's
+  text, exactly one blank line between a page and the next marker. Failures are worded FOR THE
+  MODEL and name the way out: a document that parses but yields no characters reads as
+  "likely scanned images; OCR is not supported — ask the user for a text version", and a reader
+  error or a parser panic reads as "could not extract text from this PDF: …". One page the parser
+  chokes on costs only that page — it becomes a `[Page N: text extraction failed]` placeholder and
+  the walk continues. The parser is `github.com/ledongthuc/pdf`, whose `rsc.io/pdf` ancestor panics
+  rather than errors on malformed input, so the whole parse-and-walk runs behind a `recover` and a
+  corrupt download can never take the agent down with it. The helper is not yet wired into any
+  tool; `read_file` still reads a PDF as bytes until plan item 2 lands.
+
 ## [0.16.3] — 2026-08-24
 
 ### Added

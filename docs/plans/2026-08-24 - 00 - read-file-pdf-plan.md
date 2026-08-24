@@ -49,7 +49,11 @@ fails with a clear, model-facing error message when a PDF has no extractable tex
 - Page-addressed parameters (`start_page` etc.) or any tool-schema change.
 - Version bump (see closing note).
 
-## 1. PDF text extraction helper
+## 1. PDF text extraction helper — ✅ DONE (2026-08-24)
+
+NOTES (2026-08-24): `go mod tidy` was run after adding the import so `github.com/ledongthuc/pdf` is recorded as a DIRECT requirement in `go.mod` rather than the `// indirect` line `go get` left before any code imported it.
+
+NOTES (2026-08-24): `TestDocMapNamesEveryFile` in this package is red until item 3 adds `pdf_text.go` to `internal/tools/doc.go`'s file map — the package map guard fails on any unnamed non-test file. Item 1's own acceptance (`go build ./...`, `go test ./internal/tools/ -run 'PDF|Pdf' -v`) passes; item 2's acceptance as written (`go test ./internal/tools/`) will also show this one failure until item 3 lands.
 
 **What:** Add the dependency and a self-contained extraction helper in the tools package —
 one deep module: detection, extraction, page markers, and failure wording all live here, and
