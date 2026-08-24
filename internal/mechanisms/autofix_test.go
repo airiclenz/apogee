@@ -515,24 +515,37 @@ func TestAutofixBoundsTheFormatterKillPath(t *testing.T) {
 // that is precisely the run whose argv[0] must not come out of the box. python is the language
 // under test because Go's ladder ends in the in-process gofmt tail, which would mask the
 // difference between a skipped rung and a repaired payload.
+//
+// The fence is the WHOLE box, not just its root: an operator-declared extra writable path (the
+// arm below) is as model-writable as the workspace, and the session scratch dir arrives as one of
+// those paths, so a formatter resolving inside either is refused the same way.
 func TestAutofixRefusesAFormatterInsideTheWritableBox(t *testing.T) {
 	t.Parallel()
 
+	// plant writes an executable stand-in for black at path, creating its parents — the shape a
+	// formatter shipped inside a writable tree (node_modules/.bin, a vendored venv) has.
+	plant := func(path string) string {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+			t.Fatalf("write formatter: %v", err)
+		}
+		return path
+	}
+
 	workspace := t.TempDir()
-	inside := filepath.Join(workspace, "node_modules", ".bin", "black")
-	if err := os.MkdirAll(filepath.Dir(inside), 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	if err := os.WriteFile(inside, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
-		t.Fatalf("write formatter: %v", err)
-	}
+	extra := t.TempDir() // an operator-declared writable path outside the workspace root
+	inside := plant(filepath.Join(workspace, "node_modules", ".bin", "black"))
+	inExtra := plant(filepath.Join(extra, "bin", "black"))
 	outside := fakeFormatter(t, fixedPy)
 
-	ladder := func(t *testing.T, path string) []repairer {
+	ladder := func(t *testing.T, box domain.ConfinementBox, path string) []repairer {
 		t.Helper()
 		m, err := Build(autofixID, Deps{
 			LookPath:    resolveOnly("black", path),
-			WritableBox: domain.ConfinementBox{WorkspaceRoot: workspace},
+			WritableBox: box,
 		})
 		if err != nil {
 			t.Fatalf("Build(%q): %v", autofixID, err)
@@ -544,12 +557,18 @@ func TestAutofixRefusesAFormatterInsideTheWritableBox(t *testing.T) {
 		return af.repairs["python"]
 	}
 
-	if rungs := ladder(t, inside); len(rungs) != 0 {
+	workspaceOnly := domain.ConfinementBox{WorkspaceRoot: workspace}
+	withExtra := domain.ConfinementBox{WorkspaceRoot: workspace, WritablePaths: []string{extra}}
+
+	if rungs := ladder(t, workspaceOnly, inside); len(rungs) != 0 {
 		t.Errorf("python ladder = %d rung(s), want 0 — a formatter inside the writable box must be left out", len(rungs))
+	}
+	if rungs := ladder(t, withExtra, inExtra); len(rungs) != 0 {
+		t.Errorf("python ladder = %d rung(s), want 0 — a formatter inside an extra writable path must be left out", len(rungs))
 	}
 	// The control arm: the same formatter OUTSIDE the box is still laddered, so the test pins
 	// the fence rather than a broken probe.
-	if rungs := ladder(t, outside); len(rungs) != 1 {
+	if rungs := ladder(t, withExtra, outside); len(rungs) != 1 {
 		t.Errorf("python ladder = %d rung(s), want 1 for a formatter outside the box", len(rungs))
 	}
 }

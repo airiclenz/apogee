@@ -177,7 +177,10 @@ sentence under a "tests" wording).
 
 ---
 
-## 4. Close the autofix exec-fence entry as by-design, with the reasoning pinned
+## 4. Close the autofix exec-fence entry as by-design, with the reasoning pinned — ✅ DONE (2026-08-24)
+
+NOTES (2026-08-24): the fence test already existed as `TestAutofixRefusesAFormatterInsideTheWritableBox` (workspace-root arm), so per the item's instruction it was EXTENDED — a `WritablePaths` arm plus a shared `plant` helper for the two planted formatters — rather than duplicated as a new test.
+NOTES (2026-08-24): the CHANGELOG entry text is delivered in this sidecar instead of written into `CHANGELOG.md` (the item's Files list names that file); the run protocol makes the verifier the single writer of the shared documents.
 
 **What:** `ISSUES.md` § "Parked / deferred work" › "Hook exec fence and scheduled-Firing Configs
 carry the construction-time scratch seed" names two surfaces. This item closes the FIRST (the

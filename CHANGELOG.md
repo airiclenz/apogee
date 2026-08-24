@@ -142,6 +142,19 @@ point is a **minor** bump, not a breaking change.
   the plural branch and the zero-page reading are held by tests without committing a multi-page
   binary fixture.
 
+- **The autofix exec fence's "construction-time scratch seed" residual closes as by-design
+  (residuals sweep plan item 4).** There is no behaviour change: autofix — the only reader of
+  `mechanisms.Deps.WritableBox` — resolves its formatters from `PATH` exactly once at construction,
+  before the model has written a byte, and never re-resolves, so the fence is measured at the same
+  instant as the paths it guards. The only box field that moves later is the session scratch dir,
+  and a moved-to scratch dir is a freshly created `~/.apogee/scratch/<id>/` that cannot contain an
+  already-resolved path, so a live box would measure the same formatter paths against a fence that
+  cannot include them. The reasoning is now pinned where the value is derived (`deriveDeps`) and
+  declared (`Deps.WritableBox`) — including why the tools' per-call `Agent.confinementBox()` does
+  follow the live dir — and by an extra arm on `TestAutofixRefusesAFormatterInsideTheWritableBox`
+  covering a formatter inside an operator-declared extra writable path (the shape a scratch dir
+  arrives as).
+
 ## [0.16.3] — 2026-08-24
 
 ### Added

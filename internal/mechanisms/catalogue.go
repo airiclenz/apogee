@@ -61,6 +61,17 @@ type Deps struct {
 	// UNCONDITIONALLY rather than behind a DepNeeds flag: the refusal has to hold on a host with
 	// no confinement backend too, so it cannot be derived from a fire-time permit's box, and a
 	// zero value simply names no fence (a Deps built by a test that has no workspace).
+	//
+	// It is the box as it stood at CONSTRUCTION, and that is the correct instant rather than a
+	// stale one: autofix probes PATH exactly once, in newAutofix, before the model has written
+	// a byte, and caches the resolved paths for the run's lifetime. The only box field that
+	// moves later is the session scratch dir (the engine's Agent.SetScratchDir), and a
+	// moved-to scratch dir is a freshly created ~/.apogee/scratch/<id>/ which cannot contain a
+	// path that was already resolved before it existed — so a live box would measure the very
+	// same formatter paths against a fence that cannot include them. The tools' per-call box
+	// (Agent.confinementBox) does follow the live scratch dir, because a tool resolves and
+	// spawns PER CALL against a tree the model has been writing to; a Mechanism that caches
+	// its resolutions at construction needs no such freshness.
 	WritableBox domain.ConfinementBox
 
 	// SecretEnvVars names the operator-declared credential variables a Mechanism that SPAWNS must

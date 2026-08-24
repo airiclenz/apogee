@@ -349,6 +349,17 @@ func deriveDeps(cfg domain.Config, needs mechanisms.DepNeeds) mechanisms.Deps {
 	// which says nothing about the paths a program may be resolved FROM. Building the full box
 	// and clearing the one field keeps that divergence one visible line rather than a silently
 	// short literal.
+	// The box is the CONSTRUCTION-TIME one deliberately, not a snapshot that went stale: its
+	// only reader, autofix, resolves every formatter from PATH exactly once in newAutofix
+	// (internal/mechanisms/autofix.go) — before the model has written a byte — and never
+	// re-resolves, so the fence is measured at the same instant the paths it guards are. The
+	// one box field that moves afterwards is the session scratch dir (Agent.SetScratchDir),
+	// and a moved-to scratch dir is a freshly created ~/.apogee/scratch/<id>/ that cannot
+	// contain an already-resolved formatter path: a live box would measure the same paths
+	// against a fence that cannot include them. That is why the tools' per-call
+	// Agent.confinementBox() (internal/agent/dispatch.go) follows the live scratch dir while
+	// this one does not — the tools resolve and spawn PER CALL, against a tree the model has
+	// been writing to in between; autofix resolves ONCE, ahead of all of it.
 	deps.WritableBox = cfg.ConfinementBox()
 	deps.WritableBox.NetworkAllow = nil
 	// The operator-declared credential names a spawning Mechanism drops from its child's
