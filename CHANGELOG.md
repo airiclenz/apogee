@@ -128,6 +128,13 @@ point is a **minor** bump, not a breaking change.
   conclusion (a suffixed base 404s the requests that matter) and the OpenRouter example;
   `graphics/demo/README.md` repeated the same sentence and is corrected the same way.
 
+- **The hero tape's knob 2 now waits the 12s its comment reasons about (residuals sweep plan item
+  2).** An uncommented `Sleep 5s` sat directly under knob 2's `Sleep 12s` in
+  `graphics/demo/tapes/hero.tape`, making the effective wait before the `/undo` beat 17s while the
+  knob's comment reasoned entirely about 12s — so anyone retuning the knob from its comment tuned a
+  number that was not the one in force. The stray sleep is deleted and the documented 12s stands, ~4x
+  the measured ~3s tail; the banked clip is unaffected and is not re-recorded.
+
 ## [0.16.3] — 2026-08-24
 
 ### Added

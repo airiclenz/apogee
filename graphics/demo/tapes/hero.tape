@@ -114,7 +114,6 @@ Sleep 500ms
 # so every idle second here ships as dead air in the middle of the clip. The old 45s left ~27s
 # of it. Give it margin for a slow take, not an unbounded cushion.
 Sleep 12s
-Sleep 5s
 
 # The closing beat. Bare `/undo` PREVIEWS and changes nothing: the preview is a plain
 # transcript note listing every path the exchange wrote — task.go and CHANGELOG.md together,

@@ -116,7 +116,13 @@ package's tests parse the seeded template).
 
 ---
 
-## 2. Delete knob 2's stray `Sleep 5s` from the hero tape
+## 2. Delete knob 2's stray `Sleep 5s` from the hero tape — ✅ DONE (2026-08-24)
+
+NOTES (2026-08-24): removing the entry also took the `---` separator that had divided it from the `/v1` entry item 1 removed, which leaves `## Open defects` as an empty section heading; the heading is kept because the file's own Conventions block names it as one of the two standing sections.
+
+NOTES (2026-08-24): `graphics/demo/README.md` needed no change, as the item says. `ISSUES.md` cited `README:112` as teaching the same 12s figure, but the README carries no `12s` (or `17s`) anywhere — line 112 states the overshoot reasoning without a number — so the plan's reading is the correct one and nothing there went stale.
+
+NOTES (2026-08-24): ISSUES.md is edited by all three items of this batched dispatch in one working tree; item 1's commit may already carry this item's ISSUES.md removal.
 
 **What:** `graphics/demo/tapes/hero.tape:116` is knob 2 (`Sleep 12s`) and line 117 is an
 uncommented `Sleep 5s` that makes the effective wait 17s while the knob comment (lines 108–115)
