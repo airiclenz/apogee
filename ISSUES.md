@@ -23,6 +23,38 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 
 ## Open defects
 
+### The hero tape's knob-2 wait is 17s, not the 12s its comment reasons about
+
+**Status:** open 2026-08-24 — deferred at the close of the hero-GIF refresh plan
+(`docs/plans/archived/2026-08-24 - 00 - hero-gif-refresh-plan.md`); no item of that plan owned the
+stray sleep.
+
+Knob 2 is `Sleep 12s` at `graphics/demo/tapes/hero.tape:116`, but an uncommented `Sleep 5s` follows
+it immediately (`graphics/demo/tapes/hero.tape:117`), so the effective wait before the `/undo` beat
+is 17s. The knob comment above it (`graphics/demo/tapes/hero.tape:108-115`) reasons entirely about
+the 12s figure — the measured tail is ~3s, so 12s already overshoots ~4x — and its own point is that
+overshoot is *not* free, because `render.sh` trims only the head (`-ss`) and every idle second here
+ships as dead air in the middle of the clip. Anyone retuning the knob from its comment tunes a
+number that is not the one in force. The same 12s figure is what `graphics/demo/README.md:112`
+teaches.
+
+---
+
+### The `endpoint` key's `/v1` warning overstates "every request"
+
+**Status:** open 2026-08-24 — shipped by this run's follow-up fix `d54cadff`
+(`fix(config): drop the /v1 suffix from the OpenRouter example endpoint`).
+
+The seeded template tells the reader that an endpoint spelled with the `/v1` suffix sends "every
+request" to `/api/v1/v1/…` (`internal/config/defaults/config.yaml:46-47`). That holds for the two
+OpenAI-compatible paths the client builds from the base — `/v1/chat/completions` and `/v1/models` —
+but not for the third path discovery touches: the capability probe is `propsPath = "/props"`
+(`internal/provider/client.go:20`), which carries no `/v1` and is unaffected by the suffix. The
+warning's conclusion (a suffixed base 404s the requests that matter) is right; the quantifier is
+wider than the code.
+
+---
+
 ## Parked / deferred work
 
 Live, deliberately deferred work only. Each entry records *enough* design that we don't re-derive
@@ -732,3 +764,23 @@ multi-page assertion had no fixture to stand on.
   `[File: minimal.pdf (PDF, 1 page), …]` header and nothing asserts the plural form at any level.
   Either commit a small multi-page fixture and assert the header through `Execute`, or unit-test
   `pdfDisplayPath` directly for the counts 0, 1 and 2.
+
+
+### The hero tape's knob 3 is a clock where a screen-state trigger is needed
+
+**Status:** parked 2026-08-24 — owner call at the close of the hero-GIF refresh plan
+(`docs/plans/archived/2026-08-24 - 00 - hero-gif-refresh-plan.md`): the fix is a mechanism, not a
+knob value, and the run had a frame-verified keeper in hand.
+
+- [ ] Knob 3 is the fixed `Sleep 10s` at `graphics/demo/tapes/hero.tape:95` that precedes the
+  block-cursor gesture (`Escape` + `Type "[1;3A"`, `graphics/demo/tapes/hero.tape:96-98`) which
+  opens the fix's collapsed edit card for beat 5. The window it must hit is the gap between the
+  `task.go` `Replace` card painting and the queued interjection being DELIVERED — delivery lands at
+  the very next tool boundary, so the window is UNDER A SECOND, while the run varies ~19s to ~29s
+  end to end and slides that window by ~8s. Measured hit rate ~1 take in 7. Tuning downward is the
+  wrong direction, not a better guess: at 3s nothing is settled for the block cursor to stand on,
+  the leading ESC of the CSI is read alone, and the run is CANCELLED (session JSON ends
+  `note: cancelled`, stage tree clean). Both failure shapes are written into the knob comment
+  (`graphics/demo/tapes/hero.tape:49-94`) and into `graphics/demo/README.md:116` ("Knob 3 is a coin
+  toss, not a setting"). A clock cannot track a window that slides with run length: what this needs
+  is a trigger keyed to screen state — the card having painted — rather than to elapsed time.

@@ -6,7 +6,7 @@ interjection, and a closing `/undo` preview beat — recorded against OpenRouter
 `deepseek-v4-flash-latest` for fast inference, with the demo folder gaining a `history/`
 structure so past clips and their recording facts stop living loose in `graphics/`.
 
-**Date:** 2026-08-24 · **Status:** items 1–4 done 2026-08-24, item 5 unexecuted · **sized for:** any host; recording needs macOS
+**Date:** 2026-08-24 · **Status:** complete — all five items done 2026-08-24 · **sized for:** any host; recording needs macOS
 with `vhs` + an `OPENROUTER_API_KEY` in the environment
 
 **Authoritative sources** (an item that disagrees with these follows these):
