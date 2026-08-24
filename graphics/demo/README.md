@@ -89,9 +89,24 @@ an ffmpeg run instead of another take of a nondeterministic model. The hero clip
 
 **The knobs are marked in `hero.tape`.** Knob 1 decides where the interjection
 lands — it must arrive while tool cards are still streaming, or it reads as an ordinary next
-message instead of a queued one. Knob 2 must outlast the run's tail; overshooting is free.
-Knob 3 is how long the fix takes to land: the tape opens that card, and the gesture only
-reaches the right one while the edit is still the most recent block.
+message instead of a queued one; the session JSON is the tell, where the entry reads
+`interjected` on a hit and `user` on a miss. Knob 2 must outlast the run's tail, but
+overshooting is **not** free the way this file used to claim: `render.sh` trims only the HEAD
+(`-ss`), so every idle second between the last beat and `/undo` ships as dead air in the middle
+of the clip. Give it margin for a slow run, not an unbounded cushion. Knob 3 is how long the fix
+takes to land: the tape opens that card, and the gesture only reaches the right one while the
+edit is still the most recent block.
+
+**Knob 3 is a coin toss, not a setting.** Measured against OpenRouter `deepseek-v4-flash`: the
+window it must hit is the gap between the fix's `Replace` card painting and the queued
+interjection being *delivered*, and delivery lands at the very next tool boundary — so the
+window is under a second, while the run itself varies ~19 s to ~29 s end to end and slides that
+window by ~8 s. A fixed `Sleep` cannot track it. Both directions of miss cost the take, and one
+of them is worse than the other: too late merely opens the CHANGELOG card instead (`+3 -0 ▼`
+while `task.go` stays `+1 -1 · +8 more lines ▶`), but too early leaves the block cursor nothing
+settled to stand on, the leading ESC of the CSI is read alone, and the run is **cancelled** —
+the session JSON ends `note: cancelled` with the stage tree clean. Never tune this knob downward
+hoping to catch a fast run.
 
 **Nothing on camera opens itself.** Tool blocks paint collapsed, always (`layout.md`, "Collapsed
 and expanded blocks"), so the fix arrives as a single `Replace ↳ task.go … +1 -1 · +N more lines
@@ -107,8 +122,13 @@ nothing about it is modal, so the `Escape` that follows it in the tape is a gest
 camera rather than a dismissal. What proves the fix survived is `git -C <stage> diff --stat`
 after the take, not the frame. `/undo confirm` would unfix the bug on camera and is never typed.
 
-**Expect 3–5 takes.** The model is nondeterministic. Take 2 fixed the bug but skipped the
-CHANGELOG; take 3 did everything. Check the outcome before judging a take by its video:
+**Expect 3–5 takes against a local model; budget more against OpenRouter.** The model is
+nondeterministic, and the 2026-08-24 session needed 8 takes to bank one that carried all eight
+beats — the keeper was take 2, and no later take beat it. Measured hit rates over those takes:
+the model reproduces the failure with a red `go test` before fixing in roughly 3 of 8 runs
+(beat 3), the interjection lands mid-run rather than as a fresh turn in about 6 of 8 (beat 4),
+and knob 3 opens the right card in about 1 of 7 (beat 5). Judge every take on all three before
+rendering. Check the outcome before judging a take by its video:
 
 ```sh
 cd ~/.cache/apogee-demo/home/Repos/taskman && git diff && go test ./...

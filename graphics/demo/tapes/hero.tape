@@ -33,8 +33,12 @@ Enter
 
 # KNOB 1 — when the interjection arrives. It has to land while tool cards are still
 # streaming, which is what makes it visibly *queued* rather than a normal next turn.
-# 18s puts it just after the first `go test` returns red. Retune if the model's pace changes.
-Sleep 18s
+# 8s against OpenRouter deepseek-v4-flash: the exchange runs ~29s end to end, so submitting at
+# ~10s (8s + the 1.5s of typing + 0.5s) lands mid-stream with margin on both sides. The old 18s
+# was tuned for the local model and now fires AFTER the exchange has closed — the tell is the
+# session JSON, where the entry reads `user` instead of `interjected` and `/undo` then covers
+# only the CHANGELOG write. Retune if the model's pace changes.
+Sleep 8s
 
 # Wording matters more than it looks: "also note the fix in the CHANGELOG" made the model
 # read CHANGELOG.md and then forget to write it. The imperative form lands it first try.
@@ -62,22 +66,54 @@ Enter
 # screen (layout.md), which detaches the viewport from the tail — leave it detached and the
 # CHANGELOG write, the green PASS and the /undo preview all paint below the fold. Paging back
 # to the bottom re-attaches it; the extra presses are clamped there and cost nothing.
-Sleep 12s
+#
+# The Escape after the toggle is what takes the highlight bar back off the card. ⏎ OPENS the
+# block but leaves the mode standing — only esc or a printable key ends it (blockcursor.go), and
+# PgDn is explicitly one of the keys that "leaves the mode standing" — so without this the bar
+# stays painted across the opened card's header row in the theme's SELECTION tone for the rest of
+# the clip, and the storyboard's showcase card wears a full-width band that reads as a selection
+# nobody made. Esc drops the bar and leaves the card open, because a block opened mid-flight
+# stays open. It cannot stop the run the way a bare ESC would: while the mode is active the block
+# cursor claims esc ahead of handleKey's cancel (model.go, keyClaimOrder — the block cursor
+# claims its keys "ahead of the switches in handleKey"), and ⏎ did not end the mode. The sleep
+# before it is what keeps it a lone ESC rather than the head of another CSI.
+#
+# 10s from the interjection's Enter, and this value is a coin toss rather than a setting — read
+# the measurement before you touch it. The window it has to hit is the gap between the fix's
+# Replace card painting and the queued interjection being DELIVERED, and delivery happens at the
+# very next tool boundary, so that gap is UNDER A SECOND. Against OpenRouter deepseek-v4-flash
+# the run varies ~19s to ~29s end to end, which slides that sub-second window by ~8s. A fixed
+# Sleep cannot track it: 10s hit on a ~29s run (the take that shipped) and missed on ~19s ones.
+#
+# Two distinct failures, both costing the take, both worth checking a frame for:
+#   - too LATE  → the CHANGELOG edit card opens instead: `+3 -0 ▼` while task.go stays
+#                 `+1 -1 · +8 more lines ▶`, and beat 5 has no split diff.
+#   - too EARLY → measured at 3s: the block cursor has nothing settled to stand on, the leading
+#                 ESC of the CSI is read on its own, and the run is CANCELLED — the session
+#                 JSON ends `note: cancelled` with the stage tree clean. Do not tune downward
+#                 hoping to catch the fast run; that is the direction that kills the take.
+Sleep 10s
 Set TypingSpeed 0ms
 Escape
 Type "[1;3A"
 Set TypingSpeed 40ms
 Sleep 700ms
 Enter
+Sleep 800ms
+Escape
 Sleep 4s
 PageDown 4
 Sleep 500ms
 
-# KNOB 2 — must outlast the run's tail. Overshooting is free (render.sh trims); undershooting
-# truncates the green PASS and costs a whole take.
-# It now counts from AFTER the knob-3 gesture, so it measures what is left of the tail — the
-# CHANGELOG write and the closing green `go test` — not the whole run.
-Sleep 45s
+# KNOB 2 — must outlast the run's tail. Undershooting is what costs a take: `/undo` typed while
+# the run is still going is QUEUED as a message instead of executing, and beat 7 is gone.
+# It counts from AFTER the knob-3 gesture (its Escape, not its Enter), so it measures what is
+# left of the tail — the CHANGELOG write and the closing green `go test` — not the whole run.
+# 12s against OpenRouter deepseek-v4-flash: that tail measures ~3s, so this overshoots ~4x.
+# Overshoot is NOT free the way the old comment claimed — render.sh only trims the HEAD (-ss),
+# so every idle second here ships as dead air in the middle of the clip. The old 45s left ~27s
+# of it. Give it margin for a slow take, not an unbounded cushion.
+Sleep 12s
 Sleep 5s
 
 # The closing beat. Bare `/undo` PREVIEWS and changes nothing: the preview is a plain

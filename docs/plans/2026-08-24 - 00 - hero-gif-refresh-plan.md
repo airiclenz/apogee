@@ -6,7 +6,7 @@ interjection, and a closing `/undo` preview beat — recorded against OpenRouter
 `deepseek-v4-flash-latest` for fast inference, with the demo folder gaining a `history/`
 structure so past clips and their recording facts stop living loose in `graphics/`.
 
-**Date:** 2026-08-24 · **Status:** items 1–3 done 2026-08-24, items 4–5 unexecuted · **sized for:** any host; recording needs macOS
+**Date:** 2026-08-24 · **Status:** items 1–4 done 2026-08-24, item 5 unexecuted · **sized for:** any host; recording needs macOS
 with `vhs` + an `OPENROUTER_API_KEY` in the environment
 
 **Authoritative sources** (an item that disagrees with these follows these):
@@ -193,7 +193,97 @@ away. It fits one line at the recording width; pick `APOGEE_DEMO_WORK` with that
 session JSON (inspection one-liner in the rig README) shows the interjection delivered
 mid-run, not as a separate turn.
 
-## 4. Scout, tune, record
+## 4. Scout, tune, record — ✅ DONE (2026-08-24)
+
+NOTES (2026-08-24): the Keychain read works only BEFORE `HOME` is remapped — `security
+find-generic-password` resolves the login keychain through `$HOME`, so reading it after
+`export HOME=<demo home>` returns empty and apogee then fails with `api-key-env:
+OPENROUTER_API_KEY is set but empty`. `record.sh` is safe because it exports the key in the
+invoking shell and VHS inherits it; anything that remaps HOME first is not. The key was never
+echoed, never written, and a `grep -rl` for its literal value across both `/tmp/taskman-demo`
+and the repo returns nothing.
+NOTES (2026-08-24): recorded on the installed `apogee v0.16.3` (`/opt/homebrew/bin/apogee`),
+24 commits behind HEAD (v0.16.6). Checked before trusting it: `git diff --stat v0.16.3..HEAD --
+internal/tui internal/agent internal/undo` shows ZERO `internal/tui` drift and no undo-grouping
+change in `internal/agent/loop.go`, so every mechanism the tape leans on (block cursor, split
+diff, one undo group per Exchange) is identical to HEAD. The footer therefore reads `version
+v0.16.3`, which is what the plan's goal line names as the current build.
+NOTES (2026-08-24): SCOUT TAKE (take 1, knobs as item 3 left them: 18s / 12s / 45s) — outcome
+passed (both files written, tests green) but the VIDEO failed two beats, and the session JSON
+said why. Entry 11 read `user`, not `interjected`: the exchange had already CLOSED before the
+18s knob fired, so beat 4 read as an ordinary next turn. That also breaks beat 7 by construction
+— a second Exchange opens its own undo group, so `/undo` would have named only `CHANGELOG.md`.
+Session ran 20.8s end to end against the 18s knob. The old values were tuned for the local
+model and are simply too slow for OpenRouter.
+NOTES (2026-08-24): KNOB 1 RETUNED 18s → 8s, measured. The exchange runs ~19–29s end to end, so
+submitting at ~10s (8s + 1.5s of typing + 0.5s) lands mid-stream with margin either side. Verified
+on the real frame at t=21s of the keeper: `Tests → error: FAIL (go test) — exit code 1` on camera
+with the status line reading `thinking · 3s · 1 queued` and the pending row `⧗ also add a CHANGELOG
+entry for the fix` held above the input box. That is beat 4 visibly queued, and beat 3's red test
+in the same frame.
+NOTES (2026-08-24): KNOB 2 RETUNED 45s → 12s, and the reason overturns a documented fact. The
+README said "overshooting is free (render.sh trims)" — it is not: `render.sh` trims only the HEAD
+(`-ss START`), with no mid- or tail-trim, so every idle second between the last beat and `/undo`
+ships as dead air in the MIDDLE of the clip. At 45s the keeper carries ~27s of it. The measured
+tail after the knob-3 gesture is ~3s, so 12s still overshoots ~4x for a slow take. README updated.
+NOTES (2026-08-24): KNOB 3 measured and left at 10s, but it is a coin toss rather than a setting,
+and this is the item's main finding. The window it must hit is the gap between the fix's `Replace`
+card painting and the queued interjection being DELIVERED — delivery lands at the very next tool
+boundary, so the window is UNDER A SECOND, while the run varies ~19s to ~29s and slides that window
+by ~8s. A fixed `Sleep` cannot track it: 10s hit on the one ~29s run and missed on the ~19s ones,
+opening the CHANGELOG card (`+3 -0 ▼`) while `task.go` stayed collapsed (`+1 -1 · +8 more lines ▶`).
+Measured hit rate ~1 in 7. Tuning DOWNWARD is worse, not better — see the next line.
+NOTES (2026-08-24): tuning knob 3 down to 3s to chase the fast run CANCELLED the take. With nothing
+settled for the block cursor to stand on, the leading ESC of the `Escape` + `"[1;3A"` CSI is read
+alone, which mid-run means stop: the session JSON ended `note: cancelled` after the `interjected`
+entry and the stage tree was clean — no fix, no CHANGELOG. Reverted to 10s and recorded the hazard
+in both the tape comment and the rig README so nobody retries that direction.
+NOTES (2026-08-24): DECISION (c) — CONFIRMED ON REAL FRAMES, replacing item 3's source-only reading.
+Scanning every scanline of the keeper for the theme's selection tone: at t=29.5s rows 369–388 paint
+`#3b5fd3`-ish across the opened card's header, and the frame shows the bar as a full-width band over
+`Replace` with the split diff already expanded beneath it — so ⏎ does leave the mode standing, exactly
+as claimed. At t=30.2, 31.5, 45.0 and 60.0 the same scan returns NO selection-tone row anywhere on
+the frame. The `Sleep 800ms` + `Escape` fix is what drops it, the card stays open afterwards, and the
+run was not stopped (the tail completed and the outcome checks pass). The bar is in fact gone.
+NOTES (2026-08-24): DECISION (a) — CONFIRMED ON A REAL FRAME. Beat 7's preview names BOTH files. At
+t=66s the keeper paints `· /undo — exchange 1, the most recent one that wrote files:` followed by
+`restore /tmp/taskman-demo/home/Repos/taskman/task.go` and `restore /tmp/taskman-demo/home/Repos/
+taskman/CHANGELOG.md`, then `/undo confirm applies this; anything else leaves the files alone`. Item
+3's mechanism argument (one undo group per depth-0 Exchange) is now frame-verified, and it holds only
+because the interjection is `interjected` rather than `user` — the scout take proved the other half.
+NOTES (2026-08-24): DECISION (b) — `APOGEE_DEMO_WORK=/tmp/taskman-demo` exercised; `setup.sh`
+untouched, item 2 stays closed. Both on-camera paths fit one line at the recording width, but they
+are NOT the same string: the `/undo` preview prints `/tmp/taskman-demo/…` while the edit card's
+"resolves to" line prints the symlink-resolved `/private/tmp/taskman-demo/…`. Neither is long enough
+to wrap; flagging the `/private` prefix only because it is a macOS tell on camera.
+NOTES (2026-08-24): footer verified on camera — `openrouter ✦ deepseek-v4-flash-latest ✦
+~/Repos/taskman` with `auto` at the right. The alias renders WITHOUT the leading `~` of the config's
+`~deepseek/deepseek-v4-flash-latest`, so it reads clean at 24 chars; no change needed, as instructed.
+NOTES (2026-08-24): KEEPER is take 2 of 8, installed at `/tmp/taskman-demo/hero.mp4` (68.48s,
+1250×680, 947 KB). Outcome checks passed live right after it ran: `git diff --stat` = `CHANGELOG.md
+| 3 +++`, `task.go | 2 +-`, and `go test ./...` = `ok taskman`. All eight beats verified on frames —
+1 footer/auto, 2 the prompt, 3 red `go test` FAIL, 4 `1 queued` + pending row, 5 the two-pane split
+diff with tinted add/del bands held from t=29.5 to the end, 6 the CHANGELOG write plus green `Tests
+→ PASS`, 7 the `/undo` preview naming both files, 8 the closing hold.
+NOTES (2026-08-24): deviation — the plan budgets 3–5 takes; this needed 8 and the keeper was still
+take 2. Rates over those takes: red test before the fix ~3/8, interjection landing mid-run ~6/8,
+knob 3 opening the right card ~1/7. Their product is why no later take beat take 2. Recorded in the
+rig README so the next session budgets honestly.
+NOTES (2026-08-24): deviation — the keeper predates the knob-2 retune, so it was recorded at 45s and
+carries ~27s of dead air between the green PASS (~t=38s) and the `/undo` (~t=65s). The committed tape
+now says 12s, which is the right value for the NEXT take but not the one that made this file. Item 5
+inherits the consequence: `render.sh` cannot trim that middle stretch, so a straight
+`render.sh hero.mp4 ../demo.gif 1.8 3.8` yields ~36s of which ~15s is a static frame. Item 5 either
+cuts the stretch with a two-segment ffmpeg concat or re-records on the committed tape.
+NOTES (2026-08-24): the stage tree at `/tmp/taskman-demo/home/Repos/taskman` currently holds take 8's
+run, not the keeper's — `record.sh` resets the stage at the start of every take. Take 8's outcome also
+passes (2 files changed, tests green), but anyone re-running the outcome check is reading the last
+take, not the shipped one. The keeper's own check is the one quoted above.
+NOTES (2026-08-24): the knob comments were re-marked with the measured values as item 3's last bullet
+asks, and each now carries what failure looks like rather than only the number. `vhs validate
+hero.tape` exits 0. `graphics/demo/README.md` gained the corrected knob-2 fact, a new "Knob 3 is a
+coin toss" paragraph, and the real take budget.
+
 
 - Scout take at current knob values against the real endpoint; then read the session JSON to
   find where the interjection actually landed and how long the run tail was; retune knob 1
