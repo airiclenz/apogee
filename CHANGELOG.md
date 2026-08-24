@@ -8,6 +8,8 @@ point is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+## [0.16.3] — 2026-08-24
+
 ### Added
 
 - A model switch whose Model profile carries roster deltas now says so in one transcript line —
