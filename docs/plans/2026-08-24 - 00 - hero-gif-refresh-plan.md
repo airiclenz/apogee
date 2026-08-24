@@ -299,7 +299,50 @@ coin toss" paragraph, and the real take budget.
 **Acceptance:** one keeper take at `<work>/hero.mp4` whose outcome checks pass and whose video
 shows every beat.
 
-## 5. Render, ship, record history
+## 5. Render, ship, record history — ✅ DONE (2026-08-24)
+
+NOTES (2026-08-24): DECISION, the dead-air choice — took the **ffmpeg concat**, not a re-record.
+The concat is verifiable in seconds and deterministic; a re-record would have to win item 4's take
+lottery again (red-test ~3/8 × interjection ~6/8 × card-open ~1/7 ≈ 1 in 25 takes) to merely tie a
+keeper whose eight beats are already frame-verified, and it would spend a live API key for the
+privilege. Cut source `46.0`–`61.9` s out of `/tmp/taskman-demo/hero.mp4` (68.48 s → 52.56 s) with
+`trim`/`concat` into `/tmp/taskman-demo/hero-cut.mp4`, then rendered from that. The splice is
+provably invisible: both boundary frames sit inside a single `freezedetect` window and compare at
+**66.0 dB PSNR** (h.264 noise only), and I read both as images before cutting — identical down to
+the `7k/1.3M 0%` counter. The longest remaining still stretch in the shipped GIF is 4.6 s, the
+deliberate hold on the finished split diff before `/undo`.
+NOTES (2026-08-24): rendered `render.sh /tmp/taskman-demo/hero-cut.mp4 ../demo.gif 1.25 3.8` →
+**39.0 s, 2.2 MB, 1250×680, loop forever**, inside the item's 35–45 s window and under the old
+2.5 MB. Speed is `1.25`, not the old clip's `1.8`: with the dead air spliced out the take is
+already lean (48.8 s of content after the head trim), so `1.8` would have shipped a 27 s clip and
+raced the split-diff card. The head trim stays at `3.8` s — measured, apogee's UI is up at 1.8 s
+and typing starts at 5.6 s, so 3.8 opens on a settled frame with 1.4 s to read the footer.
+NOTES (2026-08-24): deviation — installed `gifsicle` (`brew install gifsicle`, 1.96). The plan asks
+for the gifsicle pass and the rig README already lists it in the quick start, but item 2 recorded it
+as missing on this machine. Without it the render came out **3.3 MB** (the new clip has far less
+static content than the old one, so GIF inter-frame compression buys less); with it, 2.2 MB. No
+other change to the render path.
+NOTES (2026-08-24): deviation — the item names only `README.md:13`, but `graphics/demo/README.md` is
+the rig doc the plan lists as authoritative and this change moves three of its facts, so it got the
+minimum: the quick-start and pace-paragraph render args (`1.8` → `1.25`), a new "render.sh cannot
+cut from the middle — ffmpeg can" paragraph carrying the exact concat command plus the PSNR and
+`freezedetect` checks that make a splice safe, and the `history/2026-08-24-hero/` row in the History
+table. No other rig-doc edits.
+NOTES (2026-08-24): verified on real frames of the SHIPPED GIF (not the take): beat 1 footer
+`openrouter ✦ deepseek-v4-flash-latest ✦ ~/Repos/taskman` + `auto` at 0.2 s; 2 the prompt on camera;
+3 red `Tests → error: FAIL (go test) — exit code 1` at 13.8 s; 4 `thinking · 3s · 1 queued` with the
+pending `⧗ also add a CHANGELOG entry for the fix` row in that same frame; 5 the two-pane split diff
+with tinted add/del bands from 20.6 s onward; 6 the CHANGELOG `Replace` card, green `Tests → PASS`
+and the `Done. Tests pass.` summary at 33.6 s; 7 the `/undo` preview naming both `task.go` and
+`CHANGELOG.md` at 38.8 s with the input box back to `Send a message…`; 8 a 4.4 s hold. The splice
+lands at 33.9 s and is unnoticeable — the frame before it is the same static frame the clip had been
+holding, and the frame after it is the `/undo` command palette opening.
+NOTES (2026-08-24): the keeper `/tmp/taskman-demo/hero.mp4` and the derived `hero-cut.mp4` stay
+uncommitted and live in `/tmp`, so they will not survive a reboot; `history/2026-08-24-hero/NOTES.md`
+carries every number needed to reproduce both the cut and the render.
+NOTES (2026-08-24): `coding-standards` loaded; its topic references were not pulled in — this item
+ships a rendered asset and three prose edits, no code.
+
 
 - `./render.sh <work>/hero.mp4 ../demo.gif <speed> <start>` — start trims the shell+launch as
   before; pick speed so shipped length lands ~35–45 s and the split-diff card is readable;

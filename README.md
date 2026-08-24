@@ -10,7 +10,7 @@ A **terminal coding agent**, built for **smaller local models** — while workin
 even better with bigger ones.
 
 <p align="center">
-  <img src="graphics/demo.gif" alt="apogee, an AI coding agent in the terminal, finding and fixing a failing Go test against a local model, with a follow-up instruction queued mid-run and delivered at the next tool boundary">
+  <img src="graphics/demo.gif" alt="apogee, an AI coding agent in the terminal, finding a failing Go test, fixing the bug and proving the tests pass — with a follow-up instruction typed mid-run, queued and delivered at the next tool boundary, the fix shown as a side-by-side diff, and a closing /undo preview that reverts nothing">
 </p>
 
 apogee is an open-source **AI coding assistant that runs in your terminal** —

@@ -14,7 +14,7 @@ brew install vhs gifsicle        # vhs pulls ttyd + ffmpeg and fetches its own h
 export OPENROUTER_API_KEY=…      # the rig's default server is OpenRouter; the key is read from here
 ./setup.sh                       # build the rig (idempotent)
 ./record.sh hero                 # reset the stage, record tapes/hero.tape
-./render.sh ~/.cache/apogee-demo/hero.mp4 ../demo.gif 1.8 3.8
+./render.sh ~/.cache/apogee-demo/hero.mp4 ../demo.gif 1.25 3.8
 ```
 
 **The server alias and the model id are on camera** in the footer for the whole clip, so pick
@@ -85,7 +85,23 @@ first try. If a beat silently doesn't happen, suspect the verb before suspecting
 **Pace is decided in post, never in the tape.** Tapes record at real speed with generous
 `Sleep`s; `render.sh` trims and compresses. A re-pace or a different start point then costs
 an ffmpeg run instead of another take of a nondeterministic model. The hero clip ships as
-`1.8` speed from `3.8`s (dropping the shell + launch so it opens already inside apogee).
+`1.25` speed from `3.8`s (dropping the shell + launch so it opens already inside apogee).
+
+**`render.sh` cannot cut from the middle — ffmpeg can.** When a take carries dead air between
+two beats (a knob 2 overshoot, say), splice it out before rendering and feed the spliced file
+to `render.sh`:
+
+```sh
+ffmpeg -y -i hero.mp4 -filter_complex \
+  "[0:v]trim=0:46.0,setpts=PTS-STARTPTS[a];[0:v]trim=61.9,setpts=PTS-STARTPTS[b];\
+   [a][b]concat=n=2:v=1[o]" -map "[o]" -c:v libx264 -qp 0 -pix_fmt yuv420p hero-cut.mp4
+```
+
+Cut only where both boundary frames are the same frame, and prove it rather than eyeballing it:
+`ffmpeg -i A.png -i B.png -filter_complex psnr -f null -` above ~60 dB means the splice is
+invisible (h.264 noise is all that separates them). `freezedetect` finds the candidates —
+`ffmpeg -i take.mp4 -vf freezedetect=n=-55dB:d=1.5 -map 0:v -f null -` — but it also reports
+typing as frozen at that threshold, so confirm on real frames before trusting a window.
 
 **The knobs are marked in `hero.tape`.** Knob 1 decides where the interjection
 lands — it must arrive while tool cards are still streaming, or it reads as an ordinary next
@@ -190,3 +206,4 @@ link.
 | folder | clip |
 |---|---|
 | `history/2026-08-05-hero/` | the first hero clip: red → green with a queued CHANGELOG interjection, local model |
+| `history/2026-08-24-hero/` | the v0.16 refresh: same arc plus the split-diff edit card and a closing `/undo` preview, OpenRouter `deepseek-v4-flash` |
