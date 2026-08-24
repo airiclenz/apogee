@@ -331,7 +331,13 @@ temporarily delete one probe entry, run the test, confirm it fails naming that t
 
 ---
 
-## 6. `liveSettings` exposes the session's live-overlaid `config.Options`
+## 6. `liveSettings` exposes the session's live-overlaid `config.Options` — ✅ DONE (2026-08-24)
+
+NOTES (2026-08-24): `ui.inspector` was moved off `applyTheWriteAlone` (item 2 had it sharing that body with `response-reserve`) onto its own `applyInspector` — recording the value means parsing it, which the shared "the write alone" body deliberately does not do. Its `reaches` stays `reachesWithoutAMember` and the holder write is nil-guarded, so the zero-applier acceptance `TestApplySettingAcceptsTheStartupOnlyKeys` pins is unchanged; `applyTheWriteAlone`'s doc now speaks of the one key it still serves.
+NOTES (2026-08-24): the item says the overlay is "written at the apply"; it is written after the apply's seam RETURNED — a refused `SwapTools` or an unparsable bool must leave the projection on the configuration the session is still running. For the four swap-door keys that means recording `liveTools.built()` (the spec the live set was assembled from) rather than the committed string, which also covers `web-search-endpoint`'s fast path where the tool is re-pointed in place and no set is built.
+NOTES (2026-08-24): the holder write is nil-guarded on every one of the seven mirrored keys rather than tightening their `reaches` predicates — the posture `reloadServers` already takes toward `caps` and `delegation` (ADR 0031: a Driver composes the dispatcher out of what it has). Tightening would have refused `tools.disabled`, the two host lists and `web-search-endpoint` on any applier without a holder, which is what several existing apply tests construct.
+NOTES (2026-08-24): `settingKeysWithNoMemberToReach`'s doc comment in `wire_test.go` was reworded ("the apply REQUIRES no member") because `ui.inspector` now touches the optional holder; no assertion changed.
+NOTES (2026-08-24): `options()` has no production caller yet — plan items 7 and 9 are its readers. It is exercised only by the new test until then.
 
 **Depends on item 2** (same file; the table is where the overlay hooks in).
 

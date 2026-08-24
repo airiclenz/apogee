@@ -10,6 +10,27 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **`liveSettings` hands out the session's LIVE `config.Options` (plan item 6).** The live settings
+  holder (`cmd/apogee/wire_settings.go`) re-read only the rebind set — servers, mechanisms,
+  validated-sets, prompt, profiles, window, reserve — so anything composing a whole run out of the
+  session saw the boot snapshot for every other editable key. It now carries that launch snapshot as
+  a base (`boot`) plus a mirror of the seven keys whose apply moves something outside the holder
+  (`web-search-endpoint`, `tools.disabled`, the two `url-safety:` host lists, `bypass`,
+  `auto-compact`, `ui.inspector`), and the new `options()` projects the whole overlay — the
+  engine-pushed keys, the re-resolved ones, and the `context-files:` pair collapsed into the one
+  resolved list `ApplyConfig` resolves at startup. The four swap-door keys are recorded from the
+  spec the tool set was actually BUILT from and only after the swap committed, so a refused
+  `SwapTools` leaves the projection describing the set the session is still running, and the overlay
+  is always what the apply did rather than a re-read of a config file that can lag it (ADR 0037: the
+  running session is the authority). Every slice and map handed back is a copy, since the value
+  travels to another goroutine. `ui.inspector` moved off the shared "the write alone" apply onto its
+  own `applyInspector`, which parses the flip and mirrors it while still reaching no required member
+  — the capture is armed when a provider client is constructed, and the client this can still reach
+  is the next Firing's. Pinned by the new `TestLiveSettingsOptionsFollowEveryApply`, table-driven
+  over all ten keys and asserting the projection again after a caller has mauled every list and map
+  it was handed. No behaviour changes yet: `options()` is what plan items 7 and 9 compose an
+  unattended run from.
+
 - **Pure-Go PDF text extraction behind `read_file` (plan item 1).** `internal/tools/pdf_text.go`
   is the one place the tools package knows anything about the format: `isPDF` decides by content
   sniff alone — the leading `%PDF-` bytes, never the file name, so a text file called `notes.pdf`

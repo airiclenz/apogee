@@ -10,7 +10,9 @@ package main
 
 import (
 	"fmt"
+	"maps"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -38,7 +40,10 @@ import (
 // What lives here is the exception list, not a second configuration path. Everything else about a run
 // stays in the immutable `config.Options` snapshot the closures still carry, and a value only earns a field
 // here once a seam puts it into effect (ADR 0031: no value the human can move without the engine
-// hearing about it).
+// hearing about it). That snapshot is held here too, but only as the base the exception list is
+// projected onto (boot, options()): a caller that has to compose a WHOLE run out of this session —
+// a Firing raised inside it — needs the unmoved keys beside the moved ones, and reading them off a
+// second copy is how the two would come to disagree.
 //
 // The mutex is real work rather than ceremony. The writes come from the Update goroutine — the pane's
 // keypress, through the live-apply dispatcher below — while a scheduled Firing reads them from the
@@ -46,6 +51,16 @@ import (
 // RWMutex because reads are the common case (every rebind takes one) and they never nest.
 type liveSettings struct {
 	mu sync.RWMutex
+
+	// boot is the `config.Options` this run resolved at launch, held whole. It is the base every
+	// value below is projected back onto when options() hands the session's configuration to
+	// something that composes a whole run from it — a Firing raised inside the session (ADR 0037's
+	// promise, extended to the runs a session raises). Held whole rather than key by key because the
+	// overlay is an EXCEPTION list in the other direction too: the keys nothing applies mid-session —
+	// the workspace, the confinement flag, the MCP block — must come back exactly as they were
+	// resolved, and re-listing them here is how they would start to drift from what runRoot resolved.
+	// Nothing writes to it; the fields below are what a `/settings` commit moves.
+	boot config.Options
 
 	// pinnedWindow is the `context-window:` key in tokens: > 0 is the user's pin, which outranks
 	// whatever the server reports (ADR 0024 decision 9), and 0 means "discover it, live".
@@ -130,6 +145,32 @@ type liveSettings struct {
 	// launcher.go) — all ask long after launch, so a value left in the launch snapshot would be frozen
 	// for the life of the process and a `/settings` flip would govern nothing until the next start.
 	rememberModel bool
+
+	// searchEndpoint, disabledTools, allowHosts and denyHosts mirror the four keys that reach the
+	// session through the tool set's SWAP DOOR — `web-search-endpoint:`, `tools.disabled:` and the
+	// two `url-safety:` host lists. The set itself is liveTools' to own and nothing re-reads these
+	// four from here; they are held for options()' sake alone, so a Firing raised from this session
+	// runs the roster and the host layer the session is ON rather than the ones it launched with.
+	// They are written from the spec the set was BUILT from and only after the swap committed — a
+	// refused SwapTools leaves the session on the set it had, and the overlay has to say the same.
+	searchEndpoint string
+	disabledTools  []string
+	allowHosts     []string
+	denyHosts      []string
+
+	// bypass and autoCompact mirror the two engine toggles that are in force the moment their apply
+	// returns (`bypass:`, `auto-compact:`). The engine holds both and nothing re-resolves them, so
+	// they are held for the four above's reason: an unattended run raised from this session must run
+	// the floor and the compaction the human last chose, not the ones the process started with.
+	bypass      bool
+	autoCompact bool
+
+	// inspector mirrors `ui.inspector:`, whose live apply is the WRITE alone — the wire observer is
+	// installed while THIS session's provider client is constructed and there is no seam to arm one
+	// afterwards (applyTheWriteAlone). It is mirrored anyway, for the one reader that can still act
+	// on it: a Firing builds its own client, so a capture armed mid-session is armed for the runs the
+	// session raises even though the session itself keeps the client it opened with.
+	inspector bool
 }
 
 // newLiveSettings seeds the holder with what THIS run resolved. manualIDs is passed in rather than
@@ -141,6 +182,7 @@ type liveSettings struct {
 // list at startup, so an enable read back off that list and a row showing `false` say the same thing.
 func newLiveSettings(opts config.Options, manualIDs []apogee.MechanismID) *liveSettings {
 	return &liveSettings{
+		boot:         opts,
 		pinnedWindow: opts.ContextWindow,
 		// The latch a determined startup binds with, seeded rather than pushed: the entry this
 		// session STARTS on is the one the composition root already flattened onto options
@@ -162,6 +204,16 @@ func newLiveSettings(opts config.Options, manualIDs []apogee.MechanismID) *liveS
 		contextFileNames:   opts.ContextFiles,
 		modelProfiles:      opts.ModelProfiles,
 		rememberModel:      opts.RememberModel,
+		// And the seven keys this holder only MIRRORS — the tool set's four, the engine's two toggles
+		// and the inspector — seeded from the same snapshot for the reason the rest are: a session
+		// nobody edits must hand back exactly the configuration it launched with.
+		searchEndpoint: opts.WebSearchEndpoint,
+		disabledTools:  opts.ToolsDisabled,
+		allowHosts:     opts.URLAllowHosts,
+		denyHosts:      opts.URLDenyHosts,
+		bypass:         opts.Bypass,
+		autoCompact:    opts.AutoCompact,
+		inspector:      opts.UI.Inspector,
 	}
 }
 
@@ -427,6 +479,104 @@ func (s *liveSettings) setValidatedSets(enable bool, alias map[string]string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.validatedEnable, s.validatedAlias = enable, alias
+}
+
+// setToolSet mirrors the spec the live tool set was just BUILT from — the four keys that reach the
+// session through liveTools' swap door. It takes the whole spec rather than the one value that
+// moved because that spec IS what the running set was assembled from (liveTools.built), so the
+// overlay and the set cannot end up describing two different edits; the profile roster it also
+// carries is nobody's config key and is dropped here.
+//
+// It is called after the door returned, never before: a refused SwapTools leaves the session on the
+// set it already had, and an overlay written ahead of the swap would hand a Firing a roster this
+// session never ran.
+func (s *liveSettings) setToolSet(spec toolSetSpec) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.searchEndpoint, s.disabledTools = spec.endpoint, spec.disabled
+	s.allowHosts, s.denyHosts = spec.allowHosts, spec.denyHosts
+}
+
+// setBypass mirrors the `bypass:` floor the engine has just been put on. The engine is the authority
+// on what the SESSION is running — this is the copy a Firing composed out of this session is armed
+// from, since it builds an Agent of its own that nothing pushed the toggle at.
+func (s *liveSettings) setBypass(on bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.bypass = on
+}
+
+// setAutoCompact mirrors the `auto-compact:` toggle, for setBypass' reason and on its terms.
+func (s *liveSettings) setAutoCompact(on bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.autoCompact = on
+}
+
+// setInspector mirrors `ui.inspector:`. Unlike the two above there is no engine seam this shadows —
+// the capture is armed while a provider client is CONSTRUCTED — so the store is the whole of what
+// the value can reach in this process, and what it reaches is the next Firing's own client.
+func (s *liveSettings) setInspector(on bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.inspector = on
+}
+
+// options reports this session's configuration as it stands NOW: the Options this run launched with,
+// with every key a `/settings` commit has since applied written back over them. It is what an
+// unattended run raised INSIDE the session composes from (ADR 0037's promise carried into the runs a
+// session raises) — a Firing that budgeted, fenced and armed itself from the launch snapshot would
+// silently ignore every edit made since, which is exactly the drift the boot-Config inheritance had.
+//
+// The overlay is what the APPLY recorded, never a re-read of the config file. The file can lag: a
+// value the pane persisted and a seam then refused is written and not in force, and ADR 0037 makes
+// the running session — not the file — the authority on what this session is configured as.
+//
+// What it deliberately does NOT answer is the WIRE. The endpoint and the key belong to the Upstream
+// binding rather than to this holder (rebindInputs overlays them from the binding it is handed), and
+// a caller composing a run against a named server carries that entry itself.
+//
+// Every slice and map handed back is a COPY. The value travels to another goroutine — a Firing
+// composes on the Scheduler's — and a caller that sorted or appended to the roster it was given
+// would be editing the set this session is running.
+func (s *liveSettings) options() config.Options {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	next := s.boot
+
+	// The keys that are PUSHED at a seam and are in force the moment their apply returns. Nothing
+	// re-reads them from here; they are mirrored so this projection can answer for them at all.
+	next.WebSearchEndpoint = s.searchEndpoint
+	next.ToolsDisabled = slices.Clone(s.disabledTools)
+	next.URLAllowHosts = slices.Clone(s.allowHosts)
+	next.URLDenyHosts = slices.Clone(s.denyHosts)
+	next.Bypass = s.bypass
+	next.AutoCompact = s.autoCompact
+	next.UI.Inspector = s.inspector
+
+	// And the keys that are re-RESOLVED rather than pushed — the same values rebindInputs projects
+	// for a rebind, since a Firing and a rebind are two readings of one question: what would this
+	// session resolve right now? The window is the TOP-LEVEL pin alone, which is the field's own
+	// meaning (config.Options.ContextWindow) and what a caller resolves the bound entry's pin over.
+	next.ContextWindow = s.pinnedWindow
+	next.Servers = slices.Clone(s.servers)
+	next.Mechanisms = maps.Clone(s.mechanisms)
+	next.ValidatedSetsEnable = s.validatedEnable
+	next.ValidatedSetsAlias = maps.Clone(s.validatedAlias)
+	next.SystemPrompt = s.systemPrompt
+	next.SystemPrompt.Models = maps.Clone(s.systemPrompt.Models)
+	next.ModelProfiles = slices.Clone(s.modelProfiles)
+	next.RememberModel = s.rememberModel
+
+	// The `context-files:` block is TWO keys and ONE resolved list, so it is collapsed here exactly
+	// as ApplyConfig collapses it at startup: the names while the switch is on, and no list at all
+	// while it is off — which is what makes the two spellings of "off" one answer.
+	next.ContextFiles = nil
+	if s.contextFilesEnable {
+		next.ContextFiles = slices.Clone(s.contextFileNames)
+	}
+	return next
 }
 
 // rebindInputs projects the live values onto a COPY of the startup snapshot and hands back the
@@ -700,7 +850,11 @@ var settingsTable = []settingsEntry{
 		key:     "web-search-endpoint",
 		reaches: reachesTheSwapDoor,
 		apply: func(a settingsApplier, key, value string) (string, error) {
-			return "", a.tools.setSearchEndpoint(value, a.engine)
+			if err := a.tools.setSearchEndpoint(value, a.engine); err != nil {
+				return "", err
+			}
+			a.recordToolSet()
+			return "", nil
 		},
 	},
 	{
@@ -726,6 +880,7 @@ var settingsTable = []settingsEntry{
 			if err := a.tools.setDisabled(names, a.engine); err != nil {
 				return "", err
 			}
+			a.recordToolSet()
 			// A name that matches no tool is reported on the row rather than refused, exactly as it is
 			// at startup: the rest of the list has already applied, and saying so is the honest note.
 			if unknown := config.UnknownToolNames(names); len(unknown) > 0 {
@@ -776,6 +931,11 @@ var settingsTable = []settingsEntry{
 				return "", err
 			}
 			a.engine.SetCompactionEnabled(on)
+			// Mirrored onto the holder so a Firing raised from this session compacts the way the
+			// session does — the engine holds the toggle, and a Firing builds an engine of its own.
+			if a.live != nil {
+				a.live.setAutoCompact(on)
+			}
 			return "", nil
 		},
 	},
@@ -842,7 +1002,7 @@ var settingsTable = []settingsEntry{
 	{
 		key:     "ui.inspector",
 		reaches: reachesWithoutAMember,
-		apply:   applyTheWriteAlone,
+		apply:   applyInspector,
 	},
 	{
 		key:     "editor",
@@ -867,6 +1027,11 @@ var settingsTable = []settingsEntry{
 				return "", err
 			}
 			a.engine.SetBypass(on)
+			// The floor travels with the session onto the runs it raises, for `auto-compact:`'s
+			// reason: the engine holds it, and a Firing constructs one that nobody pushed it at.
+			if a.live != nil {
+				a.live.setBypass(on)
+			}
 			return "", nil
 		},
 	},
@@ -957,6 +1122,7 @@ func applyURLSafetyHosts(a settingsApplier, key, value string) (string, error) {
 	if err := move(hosts, a.engine); err != nil {
 		return "", err
 	}
+	a.recordToolSet()
 	// The same boundary the roster reports, because it is the same boundary: the set is
 	// swapped on commit and the next request runs against the guard it carries.
 	return toolRosterNote, nil
@@ -983,19 +1149,37 @@ func applyValidatedSets(a settingsApplier, key, value string) (string, error) {
 // applyTheWriteAlone is the apply for a key whose whole live effect IS the write the pane has
 // already made, so there is nothing left here to dispatch.
 func applyTheWriteAlone(a settingsApplier, key, value string) (string, error) {
-	// The two keys that are genuinely START-UP only. `ui.inspector` decides whether a wire
-	// observer is installed while the provider client is CONSTRUCTED (wire_boot.go), and
-	// `response-reserve` is read straight off the file into the budget the session opens with
-	// and has no setter anywhere behind it. Neither has a seam this build could reach, and
-	// neither is a candidate for one: the observer would need an engine seam and a client
-	// rebuild for a capture nobody starts mid-session.
+	// `response-reserve` is the key that is genuinely START-UP only: it is read straight off the
+	// file into the budget the session opens with and has no setter anywhere behind it. There is
+	// no seam this build could reach and none it is a candidate for.
 	//
-	// So they take `editor`'s answer rather than the default refusal, for `editor`'s reason
-	// turned around: the write IS everything this session can do about the key, and a refusal
-	// would report a failure over a save that did exactly what the key promises. The promise
-	// is the Description's own closing sentence ("takes effect at the next start"), which the
-	// pane's header carries — no row note, since ADR 0037 decision 3 gives a settings row a
-	// boundary note only when the session itself moves.
+	// So it takes `editor`'s answer rather than the default refusal, for `editor`'s reason turned
+	// around: the write IS everything this session can do about the key, and a refusal would
+	// report a failure over a save that did exactly what the key promises. The promise is the
+	// Description's own closing sentence ("takes effect at the next start"), which the pane's
+	// header carries — no row note, since ADR 0037 decision 3 gives a settings row a boundary
+	// note only when the session itself moves.
+	return "", nil
+}
+
+// applyInspector is `ui.inspector:`, which is the write alone for THIS session and not for the runs
+// it raises. The wire observer is installed while a provider client is CONSTRUCTED (wire_boot.go),
+// so nothing here can arm one on a session already talking to a server — but a Firing builds a
+// client of its own out of options(), and mirroring the flip onto the holder is what lets it.
+//
+// It therefore answers exactly as applyTheWriteAlone does — success, no note, the Description's
+// "takes effect at the next start" carrying the promise — while parsing the value, because a value
+// that is to be recorded has to be read. The holder is optional in the reloadServers sense: a
+// Driver that composed none has no Firing to compose either, and refusing the key over its absence
+// would report a failure over a save that did what the key promises.
+func applyInspector(a settingsApplier, key, value string) (string, error) {
+	on, err := settingBool(key, value)
+	if err != nil {
+		return "", err
+	}
+	if a.live != nil {
+		a.live.setInspector(on)
+	}
 	return "", nil
 }
 
@@ -1064,6 +1248,23 @@ func (a settingsApplier) unreachable(key string) error {
 // caps or a nil delegation leaves the width and the routing standing still.
 func (a settingsApplier) rides() bool {
 	return a.live != nil && a.binding != nil && a.rebind != nil
+}
+
+// recordToolSet mirrors the spec the live tool set was just built from onto the holder, so the four
+// keys that reach the session through the swap door (`web-search-endpoint:`, `tools.disabled:` and
+// the two `url-safety:` lists) are in the Options a Firing composes from. It reads the spec back off
+// liveTools rather than taking the committed value, which is what keeps the overlay and the running
+// set describing one edit — including the endpoint's fast path, where the tool is re-pointed in
+// place and no set was built at all.
+//
+// It is called only after the door has RETURNED, so a refused swap leaves the overlay on the set
+// the session is still running. A Driver that composed no holder records nothing, the posture
+// reloadServers takes toward its own optional members (ADR 0031): the tool set moved either way.
+func (a settingsApplier) recordToolSet() {
+	if a.live == nil {
+		return
+	}
+	a.live.setToolSet(a.tools.built())
 }
 
 // rideTheRebind re-drives the per-model resolution for the model the session is bound to right now.

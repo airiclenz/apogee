@@ -3408,10 +3408,12 @@ const startupOnlyContract = "takes effect at the next start."
 
 // settingKeysWithNoMemberToReach are the keys whose entire live apply is the write the pane has
 // already made. They hold the dispatcher's only exemption from the nil-member refusal, and they are
-// the only shape that can be one: no member of the applier is touched, so there is nothing a Driver
-// could have been composed without. `editor` is re-read off a fresh projection of the file every
-// time an external edit starts (ADR 0041 decision 1); the other two are read once, while the session
-// is being built, and say so in their Descriptions.
+// the only shape that can be one: the apply REQUIRES no member of the applier, so there is nothing a
+// Driver could have been composed without. `editor` is re-read off a fresh projection of the file
+// every time an external edit starts (ADR 0041 decision 1); the other two are read once, while the
+// session is being built, and say so in their Descriptions. `ui.inspector` still mirrors its flip
+// onto the live holder for the Firings a session raises, and does nothing at all where a Driver
+// composed none — which is why it is exempt rather than reaching for one.
 var settingKeysWithNoMemberToReach = []string{"editor", "ui.inspector", "response-reserve"}
 
 // The two START-UP-only keys are `editor`'s counter-case from the other side: keys with no seam that
@@ -3616,6 +3618,203 @@ func TestApplySettingRememberModelFlipsTheLiveToggle(t *testing.T) {
 	if live.remember() {
 		t.Error("a refused value moved the toggle")
 	}
+}
+
+// The holder is the session's live configuration, not just its exception list: a Firing raised
+// inside the session composes its whole Config from options(), so every key a `/settings` commit
+// applies has to be visible there (ADR 0037's promise carried into the runs a session raises).
+// The ten keys below are the ones whose apply moves something OUTSIDE the holder — the tool set's
+// four, the engine's two toggles, the start-up-only inspector, the context-file pair and the
+// `servers:` list an unattended run's secret-env union is read off — which is exactly the set that
+// used to leave the projection describing the launch snapshot.
+//
+// Each case is asserted twice: once on the projection, and once more after a caller has mauled every
+// list and map it was handed. A holder that returned its own backing arrays would come back changed.
+func TestLiveSettingsOptionsFollowEveryApply(t *testing.T) {
+	t.Parallel()
+
+	// The boot snapshot every case starts from, with each of the ten keys set to something its edit
+	// moves OFF: a value that came back unchanged would be the launch snapshot showing through rather
+	// than the apply landing.
+	boot := config.Options{
+		WebSearchEndpoint:  "https://boot.example.com/s",
+		ToolsDisabled:      []string{"python_exec"},
+		URLAllowHosts:      []string{"boot.example.com"},
+		URLDenyHosts:       []string{"metadata.internal"},
+		AutoCompact:        true,
+		ContextFiles:       []string{"AGENTS.md"},
+		Servers:            []config.ServerEntry{{Name: "here", Endpoint: "http://127.0.0.1:1111"}},
+		Mechanisms:         map[string]bool{"codeinfo": true},
+		ValidatedSetsAlias: map[string]string{"label": "entry"},
+	}
+	// The list the `servers:` apply re-reads. Its second entry names a key SOURCE rather than a key,
+	// which is the fact an unattended run composed from these Options has to see (SecretEnvVars).
+	const serversFile = "servers:\n" +
+		"  - name: here\n    endpoint: http://127.0.0.1:1111\n" +
+		"  - name: elsewhere\n    endpoint: http://127.0.0.1:2222\n    api-key-env: ELSEWHERE_KEY\n"
+
+	tests := []struct {
+		name  string
+		key   string
+		value string
+		want  func(t *testing.T, opts config.Options)
+	}{
+		{
+			name: "web-search-endpoint", key: "web-search-endpoint", value: "https://moved.example.com/s",
+			want: func(t *testing.T, opts config.Options) {
+				t.Helper()
+				if got := opts.WebSearchEndpoint; got != "https://moved.example.com/s" {
+					t.Errorf("WebSearchEndpoint = %q, want the endpoint the session moved to", got)
+				}
+			},
+		},
+		{
+			name: "tools.disabled", key: "tools.disabled", value: "[grep, view_diff]",
+			want: func(t *testing.T, opts config.Options) {
+				t.Helper()
+				if want := []string{"grep", "view_diff"}; !slices.Equal(opts.ToolsDisabled, want) {
+					t.Errorf("ToolsDisabled = %v, want %v", opts.ToolsDisabled, want)
+				}
+			},
+		},
+		{
+			name: "url-safety.allow-hosts", key: "url-safety.allow-hosts", value: "[docs.example.com]",
+			want: func(t *testing.T, opts config.Options) {
+				t.Helper()
+				if want := []string{"docs.example.com"}; !slices.Equal(opts.URLAllowHosts, want) {
+					t.Errorf("URLAllowHosts = %v, want %v", opts.URLAllowHosts, want)
+				}
+				if want := []string{"metadata.internal"}; !slices.Equal(opts.URLDenyHosts, want) {
+					t.Errorf("URLDenyHosts = %v, want %v: one list moving must not clear the other",
+						opts.URLDenyHosts, want)
+				}
+			},
+		},
+		{
+			name: "url-safety.deny-hosts", key: "url-safety.deny-hosts", value: "[evil.example.com]",
+			want: func(t *testing.T, opts config.Options) {
+				t.Helper()
+				if want := []string{"evil.example.com"}; !slices.Equal(opts.URLDenyHosts, want) {
+					t.Errorf("URLDenyHosts = %v, want %v", opts.URLDenyHosts, want)
+				}
+			},
+		},
+		{
+			name: "bypass", key: "bypass", value: "true",
+			want: func(t *testing.T, opts config.Options) {
+				t.Helper()
+				if !opts.Bypass {
+					t.Error("Bypass = false, want the floor the session was put on")
+				}
+			},
+		},
+		{
+			name: "auto-compact", key: "auto-compact", value: "false",
+			want: func(t *testing.T, opts config.Options) {
+				t.Helper()
+				if opts.AutoCompact {
+					t.Error("AutoCompact = true, want the toggle the session switched off")
+				}
+			},
+		},
+		{
+			name: "ui.inspector", key: "ui.inspector", value: "true",
+			want: func(t *testing.T, opts config.Options) {
+				t.Helper()
+				if !opts.UI.Inspector {
+					t.Error("UI.Inspector = false; the flip reaches no seam in THIS session, but the " +
+						"runs it raises build a client of their own")
+				}
+			},
+		},
+		{
+			// The block is two keys and ONE resolved list, so switching it off is the empty list a
+			// start-up with `enable: false` resolves — not the names left standing behind the switch.
+			name: "context-files.enable", key: "context-files.enable", value: "false",
+			want: func(t *testing.T, opts config.Options) {
+				t.Helper()
+				if len(opts.ContextFiles) != 0 {
+					t.Errorf("ContextFiles = %v, want none while the block is off", opts.ContextFiles)
+				}
+			},
+		},
+		{
+			name: "context-files.names", key: "context-files.names", value: "[NOTES.md, docs/HOWTO.md]",
+			want: func(t *testing.T, opts config.Options) {
+				t.Helper()
+				want := []string{"NOTES.md", "docs/HOWTO.md"}
+				if !slices.Equal(opts.ContextFiles, want) {
+					t.Errorf("ContextFiles = %v, want %v", opts.ContextFiles, want)
+				}
+			},
+		},
+		{
+			// The value is not read for this key — the list is re-read off the file — so what the
+			// projection must carry is the entry the file gained, key source and all.
+			name: "servers", key: "servers", value: "",
+			want: func(t *testing.T, opts config.Options) {
+				t.Helper()
+				if len(opts.Servers) != 2 {
+					t.Fatalf("Servers = %+v, want the two the re-read file lists", opts.Servers)
+				}
+				if got := opts.Servers[1].APIKeyEnv; got != "ELSEWHERE_KEY" {
+					t.Errorf("Servers[1].APIKeyEnv = %q, want ELSEWHERE_KEY", got)
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			path := filepath.Join(t.TempDir(), "config.yaml")
+			if err := os.WriteFile(path, []byte(serversFile), 0o600); err != nil {
+				t.Fatalf("write config: %v", err)
+			}
+			live := newLiveSettings(boot, nil)
+			set := newLiveTools(apogee.NewToolRegistry(), toolSetSpec{
+				endpoint:   boot.WebSearchEndpoint,
+				disabled:   boot.ToolsDisabled,
+				allowHosts: boot.URLAllowHosts,
+				denyHosts:  boot.URLDenyHosts,
+			}, func(toolSetSpec) *apogee.ToolRegistry { return apogee.NewToolRegistry() })
+			apply := applySettingFor(settingsApplier{
+				engine: &applySettingSpy{}, live: live, tools: set, configPath: path,
+			})
+
+			if _, err := apply(tt.key, tt.value); err != nil {
+				t.Fatalf("apply %s=%s: %v", tt.key, tt.value, err)
+			}
+
+			handed := live.options()
+			tt.want(t, handed)
+
+			clobberOptions(handed)
+			tt.want(t, live.options())
+		})
+	}
+}
+
+// clobberOptions does to a projection what a careless caller would: it overwrites every element of
+// every list it was handed and empties every map, in place. A holder that gave out its own backing
+// arrays rather than copies would come back changed by it.
+func clobberOptions(opts config.Options) {
+	for _, list := range [][]string{
+		opts.ToolsDisabled, opts.URLAllowHosts, opts.URLDenyHosts, opts.ContextFiles,
+	} {
+		for i := range list {
+			list[i] = "clobbered"
+		}
+	}
+	for i := range opts.Servers {
+		opts.Servers[i] = config.ServerEntry{Name: "clobbered"}
+	}
+	for i := range opts.ModelProfiles {
+		opts.ModelProfiles[i] = profiles.Entry{}
+	}
+	clear(opts.Mechanisms)
+	clear(opts.ValidatedSetsAlias)
+	clear(opts.SystemPrompt.Models)
 }
 
 // The same sentence answers a key whose seam this Driver did not COMPOSE. Every member of the
