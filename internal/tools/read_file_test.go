@@ -662,3 +662,128 @@ func TestReadFile_Execute_HonoursCancelledContext(t *testing.T) {
 		t.Fatalf("Execute on a cancelled ctx returned nil error, want ctx error")
 	}
 }
+
+// pdfWorkspace plants the committed PDF fixtures inside a fresh workspace root and returns it.
+// The suite below reads them through the tool's real path — off disk, sniffed, extracted — rather
+// than calling the extractor directly, which is pdf_text_test.go's job.
+func pdfWorkspace(t *testing.T, names ...string) string {
+	t.Helper()
+
+	root := tempRoot(t)
+	for _, name := range names {
+		writeFixtureFile(t, filepath.Join(root, name), string(readPDFFixture(t, name)))
+	}
+	return root
+}
+
+// TestReadFile_Execute_ReadsAPDFAsExtractedText is the whole point of PDF support: the model is
+// handed the document's words, behind a "[Page N]" marker, under a header that says which format
+// and how many pages it is reading — and every line-addressed parameter it already knows keeps
+// working, because the extracted text flows through the unchanged rendering pipeline. The
+// fixture's text is "Hello Apogee" on the third line of the extraction ("[Page 1]", a blank line,
+// then the page's own text).
+func TestReadFile_Execute_ReadsAPDFAsExtractedText(t *testing.T) {
+	t.Parallel()
+
+	const header = "[File: minimal.pdf (PDF, 1 page), 3 lines total, showing lines"
+
+	tool := NewReadFile(pdfWorkspace(t, "minimal.pdf"), nil)
+
+	cases := []struct {
+		name        string
+		args        map[string]any
+		wantContent string
+		wantSummary domain.ReadSpan
+	}{
+		{
+			name:        "whole document behind a page marker",
+			args:        map[string]any{"path": "minimal.pdf"},
+			wantContent: header + " 1-3]\n[Page 1]\n\nHello Apogee",
+			wantSummary: domain.ReadSpan{Start: 1, End: 3, Total: 3},
+		},
+		{
+			name:        "start_line addresses the extracted text",
+			args:        map[string]any{"path": "minimal.pdf", "start_line": 3},
+			wantContent: header + " 3-3]\nHello Apogee",
+			wantSummary: domain.ReadSpan{Start: 3, End: 3, Total: 3},
+		},
+		{
+			name:        "locate finds a word inside the document",
+			args:        map[string]any{"path": "minimal.pdf", "locate": "Apogee"},
+			wantContent: header + " 1-3]\nLocated \"Apogee\" on lines: 3\n[Page 1]\n\nHello Apogee",
+			wantSummary: domain.ReadSpan{Start: 1, End: 3, Total: 3, Locate: "Apogee", LocatedOn: []int{3}},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			result, err := tool.Execute(context.Background(), callWith(t, "c1", tc.args))
+
+			if err != nil {
+				t.Fatalf("Execute returned a Go error: %v", err)
+			}
+			if result.IsError {
+				t.Fatalf("IsError = true on a readable PDF (content: %q)", result.Content)
+			}
+			if result.Content != tc.wantContent {
+				t.Errorf("Content = %q, want %q", result.Content, tc.wantContent)
+			}
+			span, ok := result.Summary.(domain.ReadSpan)
+			if !ok {
+				t.Fatalf("Summary = %#v, want a domain.ReadSpan", result.Summary)
+			}
+			if !reflect.DeepEqual(span, tc.wantSummary) {
+				t.Errorf("Summary = %+v, want %+v", span, tc.wantSummary)
+			}
+		})
+	}
+}
+
+// TestReadFile_Execute_RefusesAPDFWithNoText pins the scanned-document case at the tool boundary:
+// an IsError result carrying the extractor's own sentence, and not one byte of the PDF falling
+// back into the transcript.
+func TestReadFile_Execute_RefusesAPDFWithNoText(t *testing.T) {
+	t.Parallel()
+
+	result, err := NewReadFile(pdfWorkspace(t, "notext.pdf"), nil).Execute(context.Background(),
+		callWith(t, "c1", map[string]any{"path": "notext.pdf"}))
+
+	if err != nil {
+		t.Fatalf("Execute returned a Go error: %v", err)
+	}
+	if !result.IsError {
+		t.Fatalf("IsError = false on a PDF with no extractable text (content: %q)", result.Content)
+	}
+	if result.Content != pdfNoTextMessage {
+		t.Errorf("Content = %q, want the no-extractable-text message %q", result.Content, pdfNoTextMessage)
+	}
+	if result.Summary != nil {
+		t.Errorf("Summary = %#v, want nil on a failed call", result.Summary)
+	}
+}
+
+// TestReadFile_Execute_JudgesAPDFByContentNotName bounds the detection: the extension decides
+// nothing. A text file someone called notes.pdf reads as the text it is — header unannotated, no
+// page marker, no extraction failure — which is also what keeps a mislabelled file readable at all.
+func TestReadFile_Execute_JudgesAPDFByContentNotName(t *testing.T) {
+	t.Parallel()
+
+	root := tempRoot(t)
+	writeFixtureFile(t, filepath.Join(root, "notes.pdf"), "plain words\nsecond line")
+
+	result, err := NewReadFile(root, nil).Execute(context.Background(),
+		callWith(t, "c1", map[string]any{"path": "notes.pdf"}))
+
+	if err != nil {
+		t.Fatalf("Execute returned a Go error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("IsError = true on a text file named .pdf (content: %q)", result.Content)
+	}
+	want := "[File: notes.pdf, 2 lines total, showing lines 1-2]\nplain words\nsecond line"
+	if result.Content != want {
+		t.Errorf("Content = %q, want %q", result.Content, want)
+	}
+}

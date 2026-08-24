@@ -22,8 +22,20 @@ point is a **minor** bump, not a breaking change.
   chokes on costs only that page — it becomes a `[Page N: text extraction failed]` placeholder and
   the walk continues. The parser is `github.com/ledongthuc/pdf`, whose `rsc.io/pdf` ancestor panics
   rather than errors on malformed input, so the whole parse-and-walk runs behind a `recover` and a
-  corrupt download can never take the agent down with it. The helper is not yet wired into any
-  tool; `read_file` still reads a PDF as bytes until plan item 2 lands.
+  corrupt download can never take the agent down with it.
+
+- **`read_file` returns a PDF's text instead of its bytes (plan item 2).** A file whose leading
+  bytes are `%PDF-` is extracted and rendered as plain text with a `[Page N]` marker line before
+  each page, under a header that names the format and the page count —
+  `[File: report.pdf (PDF, 12 pages), 480 lines total, showing lines 1-480]`. Detection is the
+  content sniff and nothing else, so a text file called `notes.pdf` still reads as the text it is
+  and a PDF saved without the extension still extracts. Nothing else about the tool moves: no new
+  parameter, no schema change, and `start_line`, `end_line`, `max_lines` and `locate` address the
+  extracted text's lines the way they address any file's, as does the `→ resolves to …`
+  disclosure on a symlinked read. A document that cannot be read is an `IsError` result carrying
+  the extractor's model-facing sentence — the scanned-image case sends the model to the user for a
+  text version — and never a fallback to raw bytes, because a wall of binary teaches the model
+  nothing and costs it a context window to learn it. Non-PDF reads are byte-identical to before.
 
 ## [0.16.3] — 2026-08-24
 

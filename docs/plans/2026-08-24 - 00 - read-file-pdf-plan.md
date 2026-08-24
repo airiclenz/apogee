@@ -105,9 +105,13 @@ go test ./internal/tools/ -run 'PDF|Pdf' -v
 
 **Commit:** `feat(tools): pure-Go PDF text extraction helper with page markers`
 
-## 2. Wire extraction into read_file
+## 2. Wire extraction into read_file — ✅ DONE (2026-08-24)
 
 Depends on item 1.
+
+NOTES (2026-08-24): `go test ./internal/tools/` shows exactly one failure, `TestDocMapNamesEveryFile` ("pdf_text.go is not named in tools/doc.go") — item 1 predicted it and item 3 owns the fix; every other test in the package passes, including the new PDF ones. Left untouched as out of scope.
+
+NOTES (2026-08-24): item 1's CHANGELOG entry closes with "The helper is not yet wired into any tool; `read_file` still reads a PDF as bytes until plan item 2 lands." That sentence is stale once this item's entry lands — recommend the verifier drop it while applying this entry (the implementer never edits the CHANGELOG).
 
 **What:** In `internal/tools/read_file.go` `Execute`, after `readBounded` succeeds and
 before `renderFile`:

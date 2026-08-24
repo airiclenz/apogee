@@ -12,7 +12,7 @@ import (
 
 var readFileSpec = toolSpec{
 	name:        "read_file",
-	description: "Read the contents of a file by path, optionally restricted to a line range, and optionally locating the line numbers where a substring occurs; absolute paths under a configured read-only root (such as the skills library) are also readable.",
+	description: "Read the contents of a file by path, optionally restricted to a line range, and optionally locating the line numbers where a substring occurs; absolute paths under a configured read-only root (such as the skills library) are also readable. PDF files are detected by content and returned as extracted plain text with [Page N] markers.",
 	schema: json.RawMessage(`{
   "type": "object",
   "required": ["path"],
@@ -76,6 +76,12 @@ func (t *ReadFile) ReadOnly() bool { return true }
 // A read that DOES follow a link discloses it: the result text ends with the same
 // ` → resolves to <path>` tail the write tools append when the argument named one path and the
 // operation landed on another (resolvedTargetNote). An ordinary read grows nothing.
+//
+// A file whose bytes say it is a PDF is returned as its EXTRACTED TEXT (pdf_text.go), never as
+// raw bytes: a document that cannot be read is an IsError result carrying the extractor's
+// model-facing sentence. Everything after the extraction is the plain-read pipeline unchanged —
+// start_line, end_line, max_lines and locate address the extracted text's lines, and only the
+// header's display path says the file was a PDF.
 func (t *ReadFile) Execute(ctx context.Context, call domain.ToolCall) (domain.ToolResult, error) {
 	if err := ctx.Err(); err != nil {
 		return domain.ToolResult{}, err
@@ -94,6 +100,11 @@ func (t *ReadFile) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 		return errorResult(call.ID, failMessage), nil
 	}
 
+	body, displayPath, extractFailure := readableText(content, args.Path)
+	if extractFailure != "" {
+		return errorResult(call.ID, extractFailure), nil
+	}
+
 	// Where these bytes REALLY came from, when that is not where the argument said
 	// (resolvedTargetNote — the writers' disclosure tail, appended to the rendered text so the
 	// model and the transcript read the same sentence the write tools give). A read FOLLOWS a
@@ -107,8 +118,39 @@ func (t *ReadFile) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 	// evaluation about anything this note says: a relative path never consults the extra roots
 	// at all (readScope.extraRoots), and for an absolute path the root argument is unused —
 	// resolveTargetUnbounded cleans such a path on its own.
-	text, span := renderFile(args.Path, string(content), args)
+	text, span := renderFile(displayPath, body, args)
 	return okSummary(call.ID, text+resolvedTargetNote(args.Path, t.scope.readRoot(args.Path)), span), nil
+}
+
+// readableText turns the bytes read off disk into the text renderFile should show and the path
+// its header should name. Plain files pass through untouched; a PDF — judged by its content, so
+// a text file called notes.pdf still reads as text — becomes its extracted text under a display
+// path annotated with the format and page count.
+//
+// A non-empty failMessage is the extractor's own model-facing sentence, meant to go straight to
+// errorResult: read_file never falls back to raw PDF bytes, because a wall of binary teaches the
+// model nothing and costs it a context window to learn it.
+func readableText(content []byte, path string) (body, displayPath, failMessage string) {
+	if !isPDF(content) {
+		return string(content), path, ""
+	}
+
+	extracted, pages, extractFailure := extractPDFText(content)
+	if extractFailure != "" {
+		return "", "", extractFailure
+	}
+	return extracted, pdfDisplayPath(path, pages), ""
+}
+
+// pdfDisplayPath annotates the path for renderFile's header so the model reads the lines below
+// as a document's extracted text rather than a file's own bytes, and knows how much document
+// they cover. It is a HEADER annotation only — the fence and the resolved-target note keep
+// using the argument's real path.
+func pdfDisplayPath(path string, pages int) string {
+	if pages == 1 {
+		return path + " (PDF, 1 page)"
+	}
+	return fmt.Sprintf("%s (PDF, %d pages)", path, pages)
 }
 
 // renderFile selects the requested line range and prepends a header naming the file
