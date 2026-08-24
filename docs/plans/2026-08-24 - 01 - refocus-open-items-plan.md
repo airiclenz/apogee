@@ -360,7 +360,11 @@ grep -n 'replaces the WHOLE profile' internal/config/config.go   # must print no
 
 ---
 
-## 5. Distinguish a zero-page PDF from a scanned one
+## 5. Distinguish a zero-page PDF from a scanned one — ✅ DONE (2026-08-24)
+
+NOTES (2026-08-24): the zero-page fixture does reach the guard rather than `pdf.NewReader`'s error path — verified, and the test pins it: both paths word the same `pdfUnreadableFormat` sentence, so the new test asserts on the guard's own literal cause ("the document has no pages"), which `pdf.NewReader` can never produce.
+NOTES (2026-08-24): the fixture is a new committed `internal/tools/testdata/nopages.pdf` (catalog ▸ `/Pages` with `/Kids []` and `/Count 0`, hand-built with real xref offsets), added beside `minimal.pdf`/`notext.pdf` per the item's "build the fixture the way the existing tests build theirs"; the item's Files list did not name a testdata path.
+NOTES (2026-08-24): `extractPDFText`'s doc comment was amended beyond the item's literal "one guard and its comment" — its sentence "A document that parses but yields no characters anywhere is the scanned-image case" now asserted the old contract for a zero-page document, and the plan's standing requirement forbids leaving a doc comment describing behaviour the item changed. It now reads "parses to at least one page and yields no characters anywhere", plus one sentence for the zero-page case. No message constant, no `hasText` logic, no per-page path and no recover was touched.
 
 **What:** `extractPDFText` decides the no-text case on `hasText` alone
 (`internal/tools/pdf_text.go:97`). That flag is false both for a document whose pages carry only

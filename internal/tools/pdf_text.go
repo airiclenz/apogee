@@ -63,8 +63,10 @@ func isPDF(data []byte) bool {
 // A panic out of the parser is a failure like any other; nothing escapes this function. A page
 // that fails on its own does NOT fail the document: its text becomes a
 // "[Page N: text extraction failed]" placeholder and the walk continues. A document that parses
-// but yields no characters anywhere is the scanned-image case and fails with pdfNoTextMessage —
-// read_file never falls back to raw bytes, because a wall of binary teaches the model nothing.
+// to at least one page and yields no characters anywhere is the scanned-image case and fails with
+// pdfNoTextMessage — read_file never falls back to raw bytes, because a wall of binary teaches the
+// model nothing. A document that parses to NO pages is a document-level failure instead: nothing
+// was read from it, so it cannot be reported as a scan.
 func extractPDFText(data []byte) (text string, pages int, failMessage string) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
@@ -78,6 +80,14 @@ func extractPDFText(data []byte) (text string, pages int, failMessage string) {
 	}
 
 	pages = reader.NumPage()
+	// Zero pages is the reader accepting bytes it could not walk: the page tree yields nothing, so
+	// the walk below never runs and every page-level signal stays untouched. That is a
+	// document-level failure — nothing was read from this file — and not the scan
+	// pdfNoTextMessage describes, so it goes out with the cause named.
+	if pages <= 0 {
+		return "", 0, fmt.Sprintf(pdfUnreadableFormat, "the document has no pages")
+	}
+
 	blocks := make([]string, 0, pages)
 	hasText := false
 	for number := 1; number <= pages; number++ {

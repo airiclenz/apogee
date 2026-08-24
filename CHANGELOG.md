@@ -89,6 +89,19 @@ point is a **minor** bump, not a breaking change.
   whatever channel style the built-in table carries. Comment prose only — no struct field, tag,
   default value or live YAML key moved.
 
+- **A PDF that parses to zero pages now reads as unreadable rather than as a scan (refocus plan
+  item 5).** `extractPDFText` decided the no-text case on its `hasText` flag alone, and that flag
+  is false both for a document whose pages carry only images and for one whose page tree yields
+  nothing to walk at all — `reader.NumPage()` comes back `0` and the walk never runs. A
+  structurally broken file the parser accepted therefore told the model "PDF contains no
+  extractable text (likely scanned images; OCR is not supported) — ask the user for a text
+  version", which sends it after a text version of a document nothing was ever read from. A
+  `pages <= 0` guard now routes that case to the document-level failure instead — "could not
+  extract text from this PDF: the document has no pages — the file may be corrupted or encrypted;
+  ask the user for a text version" — so the message stays evidence plus guess rather than a guess
+  about pixels that were never there. The genuine image-only scan is unchanged and the two are now
+  pinned apart by test.
+
 - `internal/tools/doc.go`: corrected the package map's carrier-file count from "Twenty-nine" to
   "Thirty" — `pdf_text.go` had been added to the map without updating the count sentence.
 

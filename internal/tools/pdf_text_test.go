@@ -91,6 +91,36 @@ func TestExtractPDFText_ReportsAScannedDocument(t *testing.T) {
 	if failMessage != pdfNoTextMessage {
 		t.Fatalf("failMessage = %q, want the no-extractable-text message", failMessage)
 	}
+	if strings.Contains(failMessage, "may be corrupted or encrypted") {
+		t.Errorf("failMessage = %q, want the scan message rather than the document-level failure", failMessage)
+	}
+	if text != "" || pages != 0 {
+		t.Errorf("failure returned text %q and pages %d, want both empty", text, pages)
+	}
+}
+
+// TestExtractPDFText_ReportsAZeroPageDocumentAsUnreadable covers the document the reader accepts
+// and cannot walk: its page tree yields no pages at all. Nothing was read from the file, so the
+// model must be told it is unreadable — telling it the document is a scan would send it to the
+// user for a "text version" of a file that never parsed.
+func TestExtractPDFText_ReportsAZeroPageDocumentAsUnreadable(t *testing.T) {
+	t.Parallel()
+
+	data := readPDFFixture(t, "nopages.pdf")
+
+	text, pages, failMessage := extractPDFText(data)
+
+	// The cause is the guard's own literal, so this also pins that the guard is the path taken
+	// rather than pdf.NewReader's error path, which words the same message with its own cause.
+	if !strings.Contains(failMessage, "the document has no pages") {
+		t.Fatalf("failMessage = %q, want the zero-page cause the guard supplies", failMessage)
+	}
+	if !strings.Contains(failMessage, "may be corrupted or encrypted") {
+		t.Errorf("failMessage = %q, want the could-not-extract message", failMessage)
+	}
+	if strings.Contains(failMessage, "likely scanned images") {
+		t.Errorf("failMessage = %q, want it NOT to report a scan", failMessage)
+	}
 	if text != "" || pages != 0 {
 		t.Errorf("failure returned text %q and pages %d, want both empty", text, pages)
 	}
