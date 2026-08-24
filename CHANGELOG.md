@@ -10,6 +10,11 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- Every unattended run's `apogee.Config` now comes out of ONE composer (`firingConfig`,
+  `cmd/apogee/wire_firing.go`) instead of a per-Driver copy of the same twenty-field literal;
+  `apogee headless` is the first Driver composed through it. No behaviour change — the composer
+  takes each value by one route and every Driver difference is an input rather than a branch.
+
 - **`liveSettings` hands out the session's LIVE `config.Options` (plan item 6).** The live settings
   holder (`cmd/apogee/wire_settings.go`) re-read only the rebind set — servers, mechanisms,
   validated-sets, prompt, profiles, window, reserve — so anything composing a whole run out of the

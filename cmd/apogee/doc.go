@@ -50,7 +50,10 @@
 // late-bound engine that stands in until a server is picked; wire_server.go the entry a
 // startup selection collapses to, the one step that binds any entry to a session, the
 // config-change wait the reload chain parks on, and the [tui.ServerHost] the six Upstream
-// acts cross to the renderer as.
+// acts cross to the renderer as; wire_firing.go the ONE composer every unattended run's
+// Config comes out of — the inputs a Driver decides and the twenty fields it does not, so
+// headless, a daemon Firing and a session's Schedule cannot read one configuration three
+// ways (ADR 0031, ADR 0033).
 //
 // The config cluster is no longer here: the schema, the precedence, the key registry, the
 // splice writer, the legacy fold and the [config.Options] the flags bind to all

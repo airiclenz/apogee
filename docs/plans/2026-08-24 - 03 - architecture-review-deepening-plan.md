@@ -372,7 +372,11 @@ uses for the apply tests), assert `options()` reflects the new value and that a 
 
 ---
 
-## 7. `firingConfig` composer; port headless onto it
+## 7. `firingConfig` composer; port headless onto it — ✅ DONE (2026-08-24)
+
+NOTES (2026-08-24): the composer derives `ScratchDir` with `ensureScratchDir(roots.scratch, recordID)`, not `firingScratch` as the item's helper list says — `firingScratch` MINTS the record id, and the plan's own `firingInputs` spec takes `recordID` as an input (the Driver needs it for `run.Spec.RecordID`). `runHeadless` therefore mints its id with `session.NewID(time.Now())` and lets the composer create the dir. `firingScratch` still serves the daemon and the schedule; after items 8 and 9 it will have no non-test caller left.
+NOTES (2026-08-24): the composer's spec overlay is the daemon's fuller route (`specOpts.Endpoint`, `specOpts.APIKey`, `specOpts.ContextWindow` on top of headless's `ResponseReserve`), so item 8's port stays a pure move. Verified inert for headless: `startupEntry(opts).Endpoint == opts.Endpoint`, and `rebindSpecFor` reads neither `APIKey` nor `ContextWindow` off the Options it is handed (the window arrives as its `pinnedWindow` argument).
+NOTES (2026-08-24): `cmd/apogee/doc.go` gained a `wire_firing.go` entry — `TestDocMapNamesEveryFile` fails on any composition-root file missing from the map — and `runHeadless`'s doc paragraph, which claimed the composition "mirrors scheduleWiring.fire", now names `firingConfig` as where the Config comes from. `headless_test.go` needed no edit: all seven named tests pass with their assertions untouched.
 
 **What.** Create `cmd/apogee/wire_firing.go` holding the one composer for an unattended run's
 `apogee.Config` (design calls 3–5, 7):

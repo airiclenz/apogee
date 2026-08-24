@@ -14,7 +14,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/format"
@@ -24,7 +23,6 @@ import (
 	"github.com/airiclenz/apogee/internal/probe"
 	"github.com/airiclenz/apogee/internal/run"
 	"github.com/airiclenz/apogee/internal/session"
-	"github.com/airiclenz/apogee/internal/skills"
 )
 
 // ----------------------------------------------------------------------------
@@ -202,11 +200,12 @@ func headlessArgs(cmd *cobra.Command, args []string) error {
 // runner is handed, run it once, and route what came back — the answer to stdout, everything else
 // to stderr. It is split out of RunE so the whole path is one testable function.
 //
-// The composition mirrors scheduleWiring.fire, because a headless run and a Firing are the same
-// thing reached by different Drivers: the per-model half is resolved through rebindSpecFor (the
-// system prompt keys on the model — ADR 0023 — and so does the validated Mechanism set — ADR
-// 0016), the delegates that assume a human are left nil for run.Once to pin, and no MCP tools are
-// wired at all.
+// The Config itself is not composed here: it comes out of firingConfig (wire_firing.go), the one
+// composer every unattended run shares, because a headless run and a Firing are the same thing
+// reached by different Drivers (ADR 0031). What stays in this function is only what this Driver
+// decides — the prompt, the mode gate, the confinement backend and its eligibility ruling, the
+// scratch sweep, the notices this command prints in its own voice, and the store the record lands
+// in.
 func runHeadless(cmd *cobra.Command, args []string, opts *config.Options, noSave bool) error {
 	// Before anything is resolved or constructed: with no prompt there is no run to configure.
 	prompt, err := resolveHeadlessPrompt(args, cmd.InOrStdin())
@@ -317,156 +316,36 @@ func runHeadless(cmd *cobra.Command, args []string, opts *config.Options, noSave
 		return notStarted(err)
 	}
 
-	// The bearer token this run sends, resolved from the startup entry's own key SOURCE — the
-	// literal, the command's output, or the named variable — exactly as a session resolves it, so
-	// one configuration means one credential whichever Driver reads it. Resolved ONCE and used by
-	// both halves that need it (the Config below and the slot probe beside it), which is also what
-	// keeps an unattended run from asking a keychain twice.
+	// This run's own record id, minted here because the runner is handed it beside the Config
+	// (run.Spec) and the composer creates its scratch dir under that name. A headless run had
+	// neither before: nothing on this path mints a session id, so its model was offered no writable
+	// scratch inside the box and put its working files wherever else it could reach — the workspace
+	// itself, under an Auto fence.
+	recordID := session.NewID(time.Now())
+
+	// The construction surface every unattended run shares (wire_firing.go), reached from this
+	// Driver's own inputs: the startup selection as the bound entry, this invocation's roots and
+	// mode, and no key resolver, skill catalog or width source of its own — a command that runs once
+	// has no longer-lived facility to share, so the composer's own defaults are exactly right here.
 	//
-	// A source that refuses fails the run before a single token is spent, carrying the entry's name
-	// and what the command said: an unattended run that degraded to sending no key would put the
-	// prompt on the wire unauthenticated and report a 401 as the model's answer.
-	apiKey, err := config.NewKeyResolver().Resolve(startupEntry(*opts))
-	if err != nil {
-		return notStarted(err)
-	}
-	// The per-model half of the Config: the system prompt selected for THIS model, the validated
-	// set matched against its fingerprint, and the enable list with the manual-suppresses-a-set
-	// rule applied. The observed window is passed as unknown — nothing beats here to observe one —
-	// so a `context-window:` pin binds the Budget and an unpinned run leaves it inactive, which
-	// for one bounded prompt is the honest degrade rather than a guess. The pin is the bound
-	// entry's own over the top-level key (ResolveContextWindow), honoured here for the reason its
-	// reply ceiling below is: one configuration, so a headless run budgets against the same window
-	// a session on that entry would.
-	//
-	// The copy handed to the resolver carries one overlay: the `response-reserve:` share the bound
-	// entry resolves to. rebindSpecFor reads that share off the Options it is given, and a session's
-	// copy arrives already overlaid by liveSettings.rebindInputs — a seam this Driver never passes
-	// through. Without the overlay the spec would state the TOP-LEVEL share while the Config below
-	// divided the window by the entry's, and one configuration would mean two splits of one window.
-	specOpts := *opts
-	specOpts.ResponseReserve = config.ResolveResponseReserve(opts.StartupResponseReserve, opts.ResponseReserve)
-	spec, notices, err := rebindSpecFor(specOpts, roots, manualIDs, opts.Model, 0,
-		config.ResolveContextWindow(opts.StartupContextWindow, opts.ContextWindow),
-		opts.StartupMaxOutputTokens)
+	// What comes back beside the Config is the per-model rebind's narration: a validated set
+	// applying, being offered or being suppressed, and a built-in Model profile announcing itself.
+	// It goes to stderr, where it cannot contaminate the answer.
+	cfg, notices, err := firingConfig(cmd.Context(), firingInputs{
+		opts:      *opts,
+		entry:     startupEntry(*opts),
+		roots:     roots,
+		manualIDs: manualIDs,
+		confiner:  confiner,
+		mode:      mode,
+		recordID:  recordID,
+	})
 	if err != nil {
 		return notStarted(err)
 	}
 	for _, n := range notices {
 		cmd.PrintErrln(n)
 	}
-
-	// The share the run actually divides its window by, read back OFF the spec rather than resolved a
-	// second time, so the spec and the Config below cannot state two different splits. rebindSpecFor
-	// always states one — the pointer is its "silence is still expressible" contract, and it never has
-	// anything to be silent about — and a nil would mean nobody said, which is the 0 that hands the
-	// split back to the engine's own built-in fifth.
-	reserve := 0.0
-	if spec.ResponseReserveFraction != nil {
-		reserve = *spec.ResponseReserveFraction
-	}
-
-	// The skill catalog for this run, held in a variable rather than built inline so the SAME
-	// provider serves both halves of the skills contract: it resolves an attached ID into the
-	// prompt (Config.Skills) AND names the dirs whose files the model may then read
-	// (Config.ExtraReadRoots below).
-	skillProvider := skills.NewProvider(skills.Sources{
-		Home:             roots.config,
-		Workspace:        roots.workspace,
-		UseProjectSkills: opts.UseProjectSkills,
-	})
-
-	// This run's own scratch dir and the id its record will be filed under (wire.go). A headless
-	// run had neither before: nothing here mints a session id, so its model was offered no writable
-	// scratch inside the box and put its working files wherever else it could reach — the workspace
-	// itself, under an Auto fence. The dir carries the record's name, so a saved run and its scratch
-	// are one thing to find and the sweep above reclaims it on the sessions' own schedule.
-	recordID, scratchDir := firingScratch(roots.scratch, time.Now())
-
-	cfg := apogee.Config{
-		Endpoint:     opts.Endpoint,
-		Model:        spec.Model,
-		APIKey:       apiKey,
-		Mode:         mode,
-		Bypass:       opts.Bypass,
-		ConfigDir:    roots.config,
-		LibraryDir:   roots.library,
-		WorkspaceDir: roots.workspace,
-		ScratchDir:   scratchDir,
-		// Confiner and posture as the session's, so an Auto run here is fenced by the same box
-		// an Auto session would be. Whether this host may run Auto unattended at all is the
-		// eligibility gate, which belongs to the surface that offers the mode.
-		Confiner:           confiner,
-		ConfineToWorkspace: opts.ConfineToWorkspace,
-		WebSearchEndpoint:  opts.WebSearchEndpoint,
-		// The `tools.disabled:` / `tools.enabled:` roster rungs, honoured here for the reason every
-		// other file-only key is: it is one configuration, and a headless run of it must offer the
-		// model the same tools an interactive session would.
-		DisabledTools: opts.ToolsDisabled,
-		EnabledTools:  opts.ToolsEnabled,
-		// The `url-safety:` host layer, honoured here for the reason every other file-only key is:
-		// it is one configuration, and an unattended run must not be the path on which the network
-		// tools reach a host the operator denied for every interactive session.
-		URLAllowHosts: opts.URLAllowHosts,
-		URLDenyHosts:  opts.URLDenyHosts,
-		// `ui.inspector:`, honoured here for the reason every other file-only key is: it is one
-		// configuration. This run has no /inspect pane to show the capture in, but its sink sees
-		// the WireEvents like any other — which is the benchable-all-the-way-up shape (ADR 0031).
-		Inspector: opts.UI.Inspector,
-		// The configured `api-key-env:` variables the execution tools scrub from a subprocess
-		// environment, honoured here for the reason every other file-only key is: one configuration,
-		// so an unattended run cannot be the path on which the operator's key stays inheritable by
-		// a subprocess the model chose the contents of.
-		SecretEnvVars: config.APIKeyEnvNames(*opts),
-		// The Model profile the resolution above matched for THIS model (ADR 0044) — off the spec
-		// rather than off opts, so a headless run reads responses in the same shape a session on the
-		// same model would, and a built-in match has already narrated itself through the notices.
-		Profile:      spec.Profile,
-		SystemPrompt: spec.SystemPrompt,
-		ContextFiles: opts.ContextFiles,
-		Skills:       skillProvider,
-		// The same read-only mounts a session gets, for the same reason every other file-only key
-		// is honoured here: one configuration, so a headless run's model can read the bundled
-		// files of a skill it was given exactly as an interactive one can. Sub-agents inherit them
-		// through the tool instances a Subset carries, so no per-child wiring exists.
-		ExtraReadRoots:   skillProvider.SourceDirs,
-		EnableMechanisms: spec.EnableMechanisms,
-		Context: apogee.ContextConfig{
-			MaxContextTokens: spec.MaxContextTokens,
-			// The `response-reserve:` share the bound entry resolves to — its own override over the
-			// top-level key (config.ResolveResponseReserve), honoured here for the same
-			// one-configuration reason: a headless run divides its window exactly as a session on the
-			// same config and the same server does. Unstated at both scopes it stays 0 and the Budget
-			// holds its own built-in fifth back. It is the share the spec states, read back above.
-			ResponseReserveFraction: reserve,
-			// The bound entry's `max-output-tokens:` pin, honoured here for the reason every other
-			// per-entry fact is: one configuration, so a headless run's reply is bounded exactly as
-			// a session's is (ADR 0046). Unpinned it stays 0 and the engine derives the cap — which
-			// for an unattended run with no window discovered is the clamp floor, deliberately.
-			MaxOutputTokens:   opts.StartupMaxOutputTokens,
-			CompactionEnabled: opts.AutoCompact,
-		},
-		// Tools stays nil: a headless run reaches no external MCP server (the Firing posture,
-		// ADR 0034), so the engine builds its own registry. Events, Approver, Asker and Presenter
-		// stay nil too — run.Once pins its own, and handing it any of them is how a run acquires
-		// a human it does not have.
-	}
-
-	// How wide this run may fan its delegations out — the same cap a session resolves, installed here
-	// so every Driver reaches the same width (ADR 0031's benchable-all-the-way-up; the resolution
-	// itself is ADR 0039 decision 2). The pin is the bound entry's own `parallel-agents:`, read back
-	// off the startup entry the way every other per-entry fact is; the discovery half is the one-shot
-	// probe above, standing in for the beat an unattended run does not have.
-	//
-	// A pin skips the probe outright. ResolveParallelAgents never lets discovery overrule a pin, so
-	// the round trip could not change the answer — it could only spend an unattended run's latency on
-	// a question already settled.
-	pin := startupEntry(*opts).ParallelAgents
-	slots := 0
-	if pin < 1 {
-		slots = discoverSlots(cmd.Context(), opts.Endpoint, spec.Model, apiKey)
-	}
-	cfg.ParallelAgents = config.ResolveParallelAgents(pin, slots)
 
 	// The store the record lands in: the shared sessions store, so a headless run is browsable in
 	// /sessions beside the conversations it ran beside. --no-save leaves it nil, which is
