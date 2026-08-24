@@ -266,9 +266,13 @@ case-insensitive substring on the model name (longest pattern wins within a laye
 entry beats any shipped one) and resolved **axis-wise**: each axis takes the nearest layer that
 spells it, an absent axis defers downward, an explicitly spelled zero overrides
 ([ADR 0057](docs/adr/0057-the-tool-roster-is-a-third-model-profile-axis-resolved-axis-wise.md),
-amending ADR 0044's whole-replacement rule). The shipped table carries wire-shape axes only —
-never a roster. A shipped match announces itself with a one-line notice (`model profile:
-<pattern> (built-in) — thinking: <style>`); a user match applies silently, except that a switch
+amending ADR 0044's whole-replacement rule). The thinking axis itself resolves in **two halves**
+— the channel **style**, carrying its delimiter tokens, and the **effort** dial — each on its own
+through the same three layers, so an entry that dials only `effort:` keeps the layer's channel
+style ([ADR 0058](docs/adr/0058-the-thinking-axis-resolves-as-two-sub-axes-style-and-effort.md)).
+The shipped table carries wire-shape axes only — never a roster. A shipped match announces itself
+with a one-line notice (`model profile: <pattern> (built-in) — thinking: <style>`); a user match
+applies silently, except that a switch
 whose roster deltas are non-empty announces them in one line. The resolution rides every model switch — the profile is
 one of the per-model bindings Rebind applies at the boundary
 ([ADR 0024](docs/adr/0024-the-heartbeat-observes-upstream-and-rebind-applies-at-the-boundary.md)) —
@@ -328,9 +332,12 @@ one harmony sub-channel, not the whole concept).
 The **emit-side dial** on the [Model profile](#identity-and-shape)'s thinking axis — `off | low |
 medium | high` — forwarded to the server's chat template with the request, where a family that
 reads it thinks less, briefer, or not at all. **Absent means send nothing**: the request stays
-byte-identical, and a model whose template reads no dial simply ignores a sent one. A session can
-overlay the resolved profile with the **`/effort` override** — the human's "keep it brief" intent,
-which rides above whatever profile each model switch resolves and is never persisted. Effort is
+byte-identical, and a model whose template reads no dial simply ignores a sent one. The dial
+resolves as its **own half of the thinking axis**: a profile entry that spells only `effort:`
+keeps the channel style the layer below carries, so dialling a shipped model's effort never drops
+its parsing ([ADR 0058](docs/adr/0058-the-thinking-axis-resolves-as-two-sub-axes-style-and-effort.md)).
+A session can overlay the resolved profile with the **`/effort` override** — the human's "keep it
+brief" intent, which rides above whatever profile each model switch resolves and is never persisted. Effort is
 **configuration, not a Mechanism** — it holds under Bypass. The deliberate contrast is the
 [Thinking channel](#identity-and-shape): the channel says what the reasoning stream *is* and how
 apogee parses it; effort says how much of it to ask for. See

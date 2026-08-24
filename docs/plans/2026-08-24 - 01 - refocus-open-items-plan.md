@@ -209,7 +209,10 @@ go build ./... && go test ./cmd/apogee/ -count=1
 
 ---
 
-## 3. Resolve the thinking axis as two sub-axes: channel style and effort
+## 3. Resolve the thinking axis as two sub-axes: channel style and effort — ✅ DONE (2026-08-24)
+
+NOTES (2026-08-24): `CONTEXT.md` § "Model profile" is amended at its axis-wise resolution sentence (the entry's "resolved per model in three layers … resolved **axis-wise**" clause) rather than at the three-orthogonal-axes sentence the plan points at — both are the same entry, and the resolution clause is where the two-halves rule belongs; the entry is otherwise untouched.
+NOTES (2026-08-24): one test case beyond the plan's five bullets — "tokens without a style never resolve on their own" — pins the Start/End-travel-with-Style rule from the other side (an entry spelling only `start`/`end` spells nothing on the style half and its tokens are dropped), which the plan's text asserts but its bullets did not cover.
 
 **What:** `Entry.spellsThinking` is true for any non-zero `ThinkingProfile`
 (`internal/profiles/entry.go:45`), and `Resolve` then takes that entry's WHOLE thinking half

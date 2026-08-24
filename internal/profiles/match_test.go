@@ -176,6 +176,107 @@ func TestResolve(t *testing.T) {
 			}},
 			wantSource: SourceUser, wantPattern: "profiled",
 		},
+		{
+			// The thinking axis resolves as TWO sub-axes (ADR 0058) — this is the ratifying case.
+			// An `effort:`-only entry is the taught idiom, and under a whole-axis rule it wiped the
+			// table's harmony parsing: the user spells only how MUCH to think, so the shipped tier
+			// keeps its word on how the reasoning arrives, and it still gets the notice.
+			name: "an effort-only user entry keeps the shipped channel style", model: "gpt-oss-20b",
+			user: []Entry{{
+				Pattern: "gpt-oss-20b",
+				Profile: domain.ModelProfile{Thinking: domain.ThinkingProfile{Effort: domain.EffortLow}},
+			}},
+			shipped: Shipped(), wantSource: SourceShipped, wantPattern: "gpt-oss",
+			wantProfile: domain.ModelProfile{
+				Thinking: domain.ThinkingProfile{Style: domain.ThinkingHarmony, Effort: domain.EffortLow},
+			},
+		},
+		{
+			// The mirror: a style-only entry says nothing about the dial, so a shipped effort
+			// survives underneath the user's channel style.
+			name: "a style-only user entry keeps a shipped effort", model: "dialled-7b",
+			user: []Entry{{
+				Pattern: "dialled",
+				Profile: domain.ModelProfile{Thinking: domain.ThinkingProfile{Style: domain.ThinkingHarmony}},
+			}},
+			shipped: []Entry{{
+				Pattern: "dialled",
+				Profile: domain.ModelProfile{Thinking: domain.ThinkingProfile{Effort: domain.EffortHigh}},
+			}},
+			wantSource: SourceShipped, wantPattern: "dialled",
+			wantProfile: domain.ModelProfile{
+				Thinking: domain.ThinkingProfile{Style: domain.ThinkingHarmony, Effort: domain.EffortHigh},
+			},
+		},
+		{
+			// The spelled zero is still a word on ITS half only: `style: none` turns the shipped
+			// channel off and leaves the shipped dial where it was.
+			name: "a spelled none style overrides the channel and not the effort", model: "gpt-oss-20b",
+			user: []Entry{{
+				Pattern: "gpt-oss-20b",
+				Profile: domain.ModelProfile{Thinking: domain.ThinkingProfile{Style: domain.ThinkingNone}},
+			}},
+			shipped: []Entry{{
+				Pattern: "gpt-oss",
+				Profile: domain.ModelProfile{Thinking: domain.ThinkingProfile{Style: domain.ThinkingHarmony, Effort: domain.EffortMedium}},
+			}},
+			wantSource: SourceShipped, wantPattern: "gpt-oss",
+			wantProfile: domain.ModelProfile{
+				Thinking: domain.ThinkingProfile{Style: domain.ThinkingNone, Effort: domain.EffortMedium},
+			},
+		},
+		{
+			// Start/End travel with Style: a user style brings its own tokens and replaces all three,
+			// while the shipped dial underneath is untouched.
+			name: "a user style replaces the shipped tokens with its own", model: "minimax-m3-Q4_K_M",
+			user: []Entry{{Pattern: "minimax-m3", Profile: delimited("<mine>", "</mine>")}},
+			shipped: []Entry{{
+				Pattern: "minimax-m3",
+				Profile: domain.ModelProfile{Thinking: domain.ThinkingProfile{
+					Style: domain.ThinkingDelimited, Start: "<mm:think>", End: "</mm:think>", Effort: domain.EffortHigh,
+				}},
+			}},
+			wantSource: SourceShipped, wantPattern: "minimax-m3",
+			wantProfile: domain.ModelProfile{Thinking: domain.ThinkingProfile{
+				Style: domain.ThinkingDelimited, Start: "<mine>", End: "</mine>", Effort: domain.EffortHigh,
+			}},
+		},
+		{
+			// ... and never alone: an effort-only entry leaves Style AND both tokens at the shipped
+			// values, because tokens are meaningless without the style that reads them.
+			name: "an effort-only user entry keeps the shipped tokens", model: "minimax-m3-Q4_K_M",
+			user: []Entry{{
+				Pattern: "minimax-m3",
+				Profile: domain.ModelProfile{Thinking: domain.ThinkingProfile{Effort: domain.EffortOff}},
+			}},
+			shipped: Shipped(), wantSource: SourceShipped, wantPattern: "minimax-m3",
+			wantProfile: domain.ModelProfile{Thinking: domain.ThinkingProfile{
+				Style: domain.ThinkingDelimited, Start: "<mm:think>", End: "</mm:think>", Effort: domain.EffortOff,
+			}},
+		},
+		{
+			// Tokens without a style do not spell the channel half at all: the shipped style wins
+			// and the orphaned tokens are dropped rather than grafted under it.
+			name: "tokens without a style never resolve on their own", model: "gpt-oss-20b",
+			user: []Entry{{
+				Pattern: "gpt-oss-20b",
+				Profile: domain.ModelProfile{Thinking: domain.ThinkingProfile{Start: "<orphan>", End: "</orphan>"}},
+			}},
+			shipped: Shipped(), wantSource: SourceShipped, wantPattern: "gpt-oss", wantProfile: harmony,
+		},
+		{
+			// An entry spelling BOTH halves is still that entry's word on both — the whole-axis
+			// outcome is unchanged when the entry actually writes the whole axis.
+			name: "a user entry spelling both halves owns the whole axis", model: "gpt-oss-20b",
+			user: []Entry{{
+				Pattern: "gpt-oss-20b",
+				Profile: domain.ModelProfile{Thinking: domain.ThinkingProfile{Style: domain.ThinkingNone, Effort: domain.EffortLow}},
+			}},
+			shipped: Shipped(), wantSource: SourceUser, wantPattern: "gpt-oss-20b",
+			wantProfile: domain.ModelProfile{
+				Thinking: domain.ThinkingProfile{Style: domain.ThinkingNone, Effort: domain.EffortLow},
+			},
+		},
 	}
 
 	for _, tc := range tests {

@@ -66,6 +66,13 @@ point is a **minor** bump, not a breaking change.
   model did switch. On the settings-row path the refusal is returned, because that row is the
   surface the human is looking at.
 
+- **Fixed:** a `model-profiles:` entry that spells only `thinking: {effort: …}` no longer drops the
+  shipped channel style for that model. The thinking axis now resolves as two sub-axes — the
+  channel style (with its `start`/`end` tokens) and the effort dial — each independently through
+  user ▸ shipped ▸ zero, so dialling a gpt-oss build's effort keeps its harmony parsing and the
+  shipped-match notice still names where the shape came from
+  ([ADR 0058](docs/adr/0058-the-thinking-axis-resolves-as-two-sub-axes-style-and-effort.md)).
+
 - `internal/tools/doc.go`: corrected the package map's carrier-file count from "Twenty-nine" to
   "Thirty" — `pdf_text.go` had been added to the map without updating the count sentence.
 

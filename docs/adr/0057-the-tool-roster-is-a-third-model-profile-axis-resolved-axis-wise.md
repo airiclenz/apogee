@@ -52,6 +52,11 @@ silently wipe the harmony parsing that table exists to provide. The 'inherit' sp
 deferred is thereby obsolete: absence IS the inherit spelling, and axis presence is a fact the
 config layer reads from the YAML (key present vs absent) before handing the engine one resolved
 `domain.ModelProfile` — the engine sees no layering, exactly as before.
+*(**Amended 2026-08-24 by [ADR 0058](0058-the-thinking-axis-resolves-as-two-sub-axes-style-and-effort.md):**
+the thinking axis named here as one of the three itself resolves as two sub-axes — the channel
+style, carrying its Start/End tokens, and the effort dial — each through user ▸ shipped ▸ zero on
+its own. The rule stands; an `effort:`-only entry had re-opened the same trap one level down,
+wiping a shipped style silently. The rest of this record stands.)*
 
 **6 — The shipped shape table carries no tools axis for now.** Rosters are bench-evidence
 territory ("nothing leaves the roster on poll evidence alone"); no shipped entry has per-family

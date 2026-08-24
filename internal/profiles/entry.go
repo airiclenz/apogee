@@ -39,10 +39,21 @@ type Entry struct {
 // custom-regex, so a pattern from one layer under a format from another could never fire.
 func (e Entry) spellsToolCall() bool { return e.Profile.ToolCallFormat != "" }
 
-// spellsThinking reports whether this entry writes the thinking axis. Self-describing for the
-// same reason: `style: none` is the spelled zero and "" is the unwritten one, and an entry that
-// sets only `effort:` still has a word to say about the axis.
-func (e Entry) spellsThinking() bool { return e.Profile.Thinking != (domain.ThinkingProfile{}) }
+// spellsThinkingStyle reports whether this entry writes the channel-style half of the thinking
+// axis — Style, together with the Start/End delimiter tokens that only mean something under it.
+// The domain value answers it alone, for the same reason as the tool-call axis: `style: none` is
+// the spelled zero and "" is the unwritten one. Start/End never make the entry speak by
+// themselves — tokens without a style name no channel to read them — so they travel with Style
+// and are never resolved on their own.
+func (e Entry) spellsThinkingStyle() bool { return e.Profile.Thinking.Style != "" }
+
+// spellsThinkingEffort reports whether this entry writes the effort half of the thinking axis.
+// Self-describing as well, though differently: "" is the ABSENCE of the dial and the wire anchor
+// (ADR 0050), and any of the four words is a spelled value — there is no spelled zero to tell
+// apart from the unwritten one, so no config-layer field is needed the way SpellsTools is. The
+// two halves resolve independently (ADR 0058): an entry that spells only `effort:` says nothing
+// about how the reasoning ARRIVES, so the layer below keeps that word.
+func (e Entry) spellsThinkingEffort() bool { return e.Profile.Thinking.Effort != "" }
 
 // spellsTools reports whether this entry writes the roster axis, so all three axes are asked the
 // same question the same way at the resolution seam.

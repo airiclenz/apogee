@@ -8,7 +8,12 @@
 // (`tool-call-format: native`, `thinking: {style: none}`, an empty `tools:`), which
 // overrides like any other value. Whole-entry replacement became a trap the moment the
 // roster joined the map — the likely user entry is a tools-only line for a model whose wire
-// shape the shipped table carries, and replacement would have wiped it silently.
+// shape the shipped table carries, and replacement would have wiped it silently. The thinking
+// axis itself resolves as two sub-axes (ADR 0058) — the channel style, carrying its Start/End
+// tokens, and the effort dial — because the same trap reappeared inside it: an `effort:`-only
+// entry took the whole axis and dropped the shipped style. Both halves are self-describing
+// from the domain value (`style: none` is a spelled zero, effort's "" is the absence of the
+// dial), so each defers downward on its own and needs no presence flag of its own.
 //
 // The match rule is a case-insensitive SUBSTRING of the entry's pattern in the advertised
 // or resolved model name: the name is what every Upstream reports, and quants, providers
