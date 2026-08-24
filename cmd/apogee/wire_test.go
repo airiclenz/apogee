@@ -3475,6 +3475,35 @@ var settingKeysAppliedByTheRenderer = []string{
 	"cursor-shape",
 }
 
+// The settings table is kept in config.KeyRegistry order — the order the pane renders the rows in —
+// so the surface and the table can be read side by side, and a key inserted into the registry cannot
+// quietly land at the bottom of the table. A subsequence is what is asserted rather than an exact
+// match, because most registry keys reach no live seam at all and so have no entry.
+//
+// Duplicates are checked here too: two entries for one key would give settingsEntryFor a silent
+// winner, and the loser's apply would be dead code nobody could see was dead.
+func TestSettingsTableIsInRegistryOrder(t *testing.T) {
+	t.Parallel()
+	seen := make(map[string]bool, len(settingsTable))
+	next := 0
+	for _, entry := range settingsTable {
+		if seen[entry.key] {
+			t.Errorf("%s has two table entries; settingsEntryFor would pick one and orphan the other",
+				entry.key)
+		}
+		seen[entry.key] = true
+
+		for next < len(config.KeyRegistry) && config.KeyRegistry[next].Path != entry.key {
+			next++
+		}
+		if next == len(config.KeyRegistry) {
+			t.Fatalf("%s is out of registry order (or is no registry key at all); the table and the "+
+				"settings surface would disagree about where the row belongs", entry.key)
+		}
+		next++
+	}
+}
+
 // Every Editable key has SOMETHING that applies it. This is the guard four keys went missing from:
 // `Editable: true` with no case in the dispatcher writes the file and then tells the human the save
 // could not be applied to the running session — a lying row, over an edit that landed. There are

@@ -140,7 +140,11 @@ load-bearing (`fromWireToolView` never re-runs a presenter, `transcriptcodec.go:
 
 ---
 
-## 2. One table behind the settings dispatcher and its `unreachable` mirror
+## 2. One table behind the settings dispatcher and its `unreachable` mirror — ✅ DONE (2026-08-24)
+
+NOTES (2026-08-24): six key GROUPS shared one apply body in the old switch (`system-prompt-*`, the two `url-safety:` lists, the four `present.` rows, `validated-sets.*`, and `ui.inspector`+`response-reserve`). A per-key table cannot hold one body in several entries, so those bodies moved verbatim into named package-level applies — `applySystemPromptBlock`, `applyURLSafetyHosts`, `applyPresentation`, `applyValidatedSets`, `applyTheWriteAlone` — which the entries reference instead of an inline closure.
+NOTES (2026-08-24): the `reaches` predicates several keys shared likewise became named funcs (`reachesTheEngine`, `reachesTheEngineAndTheHolder`, `reachesTheHolder`, `reachesTheSwapDoor`, `reachesThePresentation`, `reachesWithoutAMember`), with the existing `settingsApplier.rides` used as a method expression for the seven riding keys. The SwapTools group comment therefore lives once on `reachesTheSwapDoor` rather than duplicated on its four entries, its opening clause reworded into godoc form; the `model-profiles`, `remember-model` and `servers` prose sits on those entries as the item asked.
+NOTES (2026-08-24): two comment-truth fixes forced by the move — the `servers` apply body's "the top-level `context-window:` key above does" lost the word "above" (the table is in registry order, where `context-window` now sits below `servers`), and `applySettingFor`'s doc comment says "entry" where it said "case".
 
 **What.** `cmd/apogee/wire_settings.go` carries two switches over the same key set: the apply
 dispatcher (`:566-770`, one case per editable key) and `settingsApplier.unreachable`

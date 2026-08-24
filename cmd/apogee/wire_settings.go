@@ -527,6 +527,10 @@ type settingsApplier struct {
 // resolution from that string into whatever the seam takes happens here, where the schema lives
 // (ADR 0031: the engine is handed values, never config text).
 //
+// The keys themselves are settingsTable below — one entry per key, carrying both what the apply
+// needs composed and the apply itself — so this is a lookup rather than a switch, and the
+// reachability question the same lookup read one field over (unreachable).
+//
 // It returns the row's boundary note and the apply's refusal. A key this build cannot apply is an
 // ERROR naming the key rather than a silent success: the write has already landed, so the honest
 // report is that the file changed and the session did not.
@@ -537,7 +541,7 @@ type settingsApplier struct {
 // no setter for either — the same path a heartbeat-observed model change already takes.
 //
 // A key nothing HOLDS is a third answer rather than a third class: `editor` is read off the file at
-// the moment an external edit starts, so the write alone puts it in force and its case says success
+// the moment an external edit starts, so the write alone puts it in force and its entry says success
 // with nothing to do (ADR 0041 decision 1). That is not the refusal above, because the file changing
 // IS the session changing for a value only ever read from the file. `ui.inspector` and
 // `response-reserve` take that same answer from the other side — they are read only at START-UP, so
@@ -546,7 +550,7 @@ type settingsApplier struct {
 //
 // An EMPTY value means one thing for every key: the file no longer SETS this key, so resolve the
 // built-in default a fresh start would have resolved. That is what a reset of a key whose default is
-// unset hands in (the pane's settingsApplied), and every such key answers it through the case it
+// unset hands in (the pane's settingsApplied), and every such key answers it through the entry it
 // already has rather than a branch of its own — `web-search-endpoint` resolves "" to the built-in
 // provider, `present.command` and `present.host` rebuild the ladder from a block with the field
 // cleared, `tools.disabled` parses "" as the empty roster, the two `url-safety:` host lists parse it
@@ -562,37 +566,111 @@ func applySettingFor(a settingsApplier) func(key, value string) (string, error) 
 		if err := a.unreachable(key); err != nil {
 			return "", err
 		}
-		switch key {
-		case "mode":
+		// A key with no entry at all is the refusal from the other side: this build knows no seam for
+		// it, so the file changed and the session did not.
+		entry, ok := settingsEntryFor(key)
+		if !ok {
+			return "", cannotApply(key)
+		}
+		return entry.apply(a, key, value)
+	}
+}
+
+// settingsEntry is one key's row in the table below: everything the live apply has to know about
+// that key, in one place rather than spread across two switches that could disagree about which
+// keys exist at all.
+type settingsEntry struct {
+	// key is the registry path the pane names this setting by (config.KeyRegistry).
+	key string
+	// reaches reports whether this applier holds every member the apply below dereferences — the
+	// predicate unreachable answers with, negated.
+	reaches func(a settingsApplier) bool
+	// apply puts the committed value into effect and answers the row's boundary note. It is handed
+	// the key as well as the value because one apply can serve a GROUP of rows — the four `present.`
+	// keys rebuild one ladder, the two `url-safety:` lists move through one door — and the key is
+	// what tells those rows apart.
+	apply func(a settingsApplier, key, value string) (string, error)
+}
+
+// settingsTable is the ONE list of keys a committed edit can reach the running session through.
+// Both entry points are lookups over it — applySettingFor runs the entry's apply, unreachable
+// negates the entry's reaches — so the drift the two switches this replaced could fall into (a key
+// wired into one and not the other, which is a panic on the Update goroutine) has nowhere to
+// happen: there is no second list of keys to keep in step.
+//
+// It is kept in config.KeyRegistry order, which is the order the pane renders the rows in, so the
+// surface and the table can be read side by side (TestSettingsTableIsInRegistryOrder). A key with
+// no entry here cannot be applied to a running session at all: applySettingFor refuses it by name,
+// and TestEveryEditableSettingKeyHasAnApply is what fails if that key was Editable.
+var settingsTable = []settingsEntry{
+	{
+		key: "servers",
+		// The holder alone is enough to ACCEPT this key: the list itself reaches no engine seam (ADR
+		// 0036), and the rebind the bound entry's two token pins ride is conditional — asked for only
+		// by an edit that moved one of them. Requiring the whole riding triple here would refuse every
+		// list edit on a Driver that composed no rebind, for a ride most list edits never ask for.
+		reaches: reachesTheHolder,
+		apply: func(a settingsApplier, key, value string) (string, error) {
+			// Most of the `servers:` list reaches no engine seam at all: it is the single upstream
+			// definition (ADR 0036) that the picker, the `/server` switch and the choice recording
+			// resolve names against, and all three read the holder — so installing the re-read list is
+			// most of the apply. The value the pane persisted is not read, for the system-prompt keys'
+			// reason: a list of blocks is a shape no single string spells.
+			moved, err := a.reloadServers()
+			if err != nil {
+				return "", err
+			}
+			// The rest of it is three numbers the engine is already holding: the window the BOUND entry
+			// pins (ADR 0045 decision 3), the reply ceiling it pins beside it (ADR 0046) and the share
+			// of that window it holds back for the reply. Installing those on the latches alone would
+			// leave an edited bound describing the session only from the next rebind onwards — the next
+			// beat that happens to observe a change, seconds or minutes away — so this key rides the
+			// rebind exactly as the top-level `context-window:` key does, through the same door,
+			// for the same reason: not one of the three has an engine setter of its own.
+			//
+			// Only when a resolved bound actually MOVED, though — ANY of them, since all three ride the
+			// one spec and one ride carries them all. A rebind is not free: it re-resolves every per-model
+			// binding, resets the token estimator and the compaction latch, and is idle-only, so an
+			// edit to some OTHER entry that drove one would refuse mid-Exchange to install numbers
+			// nobody changed. And a Driver that composed no rebind to ride installs the list and stands
+			// still on both bounds, the posture reloadServers' own optional members take.
+			if !moved || !a.rides() {
+				return "", nil
+			}
+			return "", a.rideTheRebind()
+		},
+	},
+	{
+		key:     "mode",
+		reaches: reachesTheEngine,
+		apply: func(a settingsApplier, key, value string) (string, error) {
 			mode, err := domain.ParseMode(value)
 			if err != nil {
 				return "", err
 			}
 			a.engine.SetMode(mode)
-		case "bypass":
-			on, err := settingBool(key, value)
-			if err != nil {
-				return "", err
-			}
-			a.engine.SetBypass(on)
-		case "auto-compact":
-			on, err := settingBool(key, value)
-			if err != nil {
-				return "", err
-			}
-			a.engine.SetCompactionEnabled(on)
-		case "remember-model":
-			on, err := settingBool(key, value)
-			if err != nil {
-				return "", err
-			}
-			// The one toggle with no engine seam behind it and no re-resolution to ride: what it gates
-			// is a WRITE apogee will make later — the entry key an explicit `/model` pick or a committed
-			// profile load records — and a decision the next start-up makes. So the holder store is the
-			// whole apply, and the seams that ask (recordModelChoice, recordLaunchProfile,
-			// launcherWiring.restore) read it from there at the moment they have something to record.
-			a.live.setRememberModel(on)
-		case "context-files.enable":
+			return "", nil
+		},
+	},
+	{
+		key:     "system-prompt-text",
+		reaches: settingsApplier.rides,
+		apply:   applySystemPromptBlock,
+	},
+	{
+		key:     "system-prompt-file",
+		reaches: settingsApplier.rides,
+		apply:   applySystemPromptBlock,
+	},
+	{
+		key:     "system-prompt-models",
+		reaches: settingsApplier.rides,
+		apply:   applySystemPromptBlock,
+	},
+	{
+		key:     "context-files.enable",
+		reaches: reachesTheEngineAndTheHolder,
+		apply: func(a settingsApplier, key, value string) (string, error) {
 			on, err := settingBool(key, value)
 			if err != nil {
 				return "", err
@@ -603,7 +681,12 @@ func applySettingFor(a settingsApplier) func(key, value string) (string, error) 
 			// been given — which is why the two keys share one holder rather than one closure each.
 			a.engine.SetContextFiles(on, a.live.setContextFilesEnable(on))
 			return contextFileNote, nil
-		case "context-files.names":
+		},
+	},
+	{
+		key:     "context-files.names",
+		reaches: reachesTheEngineAndTheHolder,
+		apply: func(a settingsApplier, key, value string) (string, error) {
 			// The value arrives as the FILE spells it — the one-line flow sequence the writer just
 			// rendered — and is read back by the same parse, so the engine is handed the list a reader
 			// takes out of the file rather than a second reading of the keystrokes. The switch travels
@@ -611,7 +694,60 @@ func applySettingFor(a settingsApplier) func(key, value string) (string, error) 
 			names := config.ParseSettingList(value)
 			a.engine.SetContextFiles(a.live.setContextFileNames(names), names)
 			return contextFileNote, nil
-		case "use-project-skills":
+		},
+	},
+	{
+		key:     "web-search-endpoint",
+		reaches: reachesTheSwapDoor,
+		apply: func(a settingsApplier, key, value string) (string, error) {
+			return "", a.tools.setSearchEndpoint(value, a.engine)
+		},
+	},
+	{
+		key:     "mcp-servers",
+		reaches: func(a settingsApplier) bool { return a.mcp != nil && a.tools != nil && a.engine != nil },
+		apply: func(a settingsApplier, key, value string) (string, error) {
+			// The one key whose value is a set of live CONNECTIONS. It is not pushed and not
+			// re-resolved into a holder either: it is dialled, and the session moves onto the servers
+			// that answered (ADR 0037 decision 6). The value the pane persisted is not read, for the
+			// `servers:` reason — a list of blocks is a shape no single string spells.
+			return "", a.reconnectMCP()
+		},
+	},
+	{
+		key:     "tools.disabled",
+		reaches: reachesTheSwapDoor,
+		apply: func(a settingsApplier, key, value string) (string, error) {
+			// The roster reaches the session as a whole tool SET rather than as a value on a tool, so
+			// this is the swap door and not a re-point (setDisabled). The value arrives as the FILE
+			// spells it and is read back by the same parse the writer rendered it with, so the set the
+			// session runs and the line the file carries cannot be two readings of one edit.
+			names := config.ParseSettingList(value)
+			if err := a.tools.setDisabled(names, a.engine); err != nil {
+				return "", err
+			}
+			// A name that matches no tool is reported on the row rather than refused, exactly as it is
+			// at startup: the rest of the list has already applied, and saying so is the honest note.
+			if unknown := config.UnknownToolNames(names); len(unknown) > 0 {
+				return "no tool named " + strings.Join(unknown, ", "), nil
+			}
+			return toolRosterNote, nil
+		},
+	},
+	{
+		key:     "url-safety.allow-hosts",
+		reaches: reachesTheSwapDoor,
+		apply:   applyURLSafetyHosts,
+	},
+	{
+		key:     "url-safety.deny-hosts",
+		reaches: reachesTheSwapDoor,
+		apply:   applyURLSafetyHosts,
+	},
+	{
+		key:     "use-project-skills",
+		reaches: func(a settingsApplier) bool { return a.skills != nil },
+		apply: func(a settingsApplier, key, value string) (string, error) {
 			on, err := settingBool(key, value)
 			if err != nil {
 				return "", err
@@ -628,69 +764,44 @@ func applySettingFor(a settingsApplier) func(key, value string) (string, error) 
 			// it: Load never signals an unusable catalogue — a malformed skill is skipped and shown in
 			// the /skills report — so a partial scan is not a failed apply.
 			_ = a.skills.Reload()
-		case "web-search-endpoint":
-			return "", a.tools.setSearchEndpoint(value, a.engine)
-		case "tools.disabled":
-			// The roster reaches the session as a whole tool SET rather than as a value on a tool, so
-			// this is the swap door and not a re-point (setDisabled). The value arrives as the FILE
-			// spells it and is read back by the same parse the writer rendered it with, so the set the
-			// session runs and the line the file carries cannot be two readings of one edit.
-			names := config.ParseSettingList(value)
-			if err := a.tools.setDisabled(names, a.engine); err != nil {
+			return "", nil
+		},
+	},
+	{
+		key:     "auto-compact",
+		reaches: reachesTheEngine,
+		apply: func(a settingsApplier, key, value string) (string, error) {
+			on, err := settingBool(key, value)
+			if err != nil {
 				return "", err
 			}
-			// A name that matches no tool is reported on the row rather than refused, exactly as it is
-			// at startup: the rest of the list has already applied, and saying so is the honest note.
-			if unknown := config.UnknownToolNames(names); len(unknown) > 0 {
-				return "no tool named " + strings.Join(unknown, ", "), nil
-			}
-			return toolRosterNote, nil
-		case "url-safety.allow-hosts", "url-safety.deny-hosts":
-			// The host lists reach the session the way the roster above does and for a related
-			// reason: the guard is built WITH the set (registryWithMCP hands one URLGuard to every
-			// network tool) and no tool has a setter for it, so this is the swap door rather than a
-			// re-point. The value arrives as the FILE spells it and is read back by the same parse
-			// the writer rendered it with, and an EMPTY value is the empty list — which is the
-			// built-in default a fresh start resolves: no allow-list narrowing, no configured deny,
-			// and the guard's own SSRF floor still standing under both (it is not reachable from
-			// configuration). An entry that normalises to nothing is dropped where the guard is
-			// built, exactly as it is at startup, so there is nothing to report on the row.
-			hosts := config.ParseSettingList(value)
-			move := a.tools.setAllowHosts
-			if key == "url-safety.deny-hosts" {
-				move = a.tools.setDenyHosts
-			}
-			if err := move(hosts, a.engine); err != nil {
+			a.engine.SetCompactionEnabled(on)
+			return "", nil
+		},
+	},
+	{
+		key: "remember-model",
+		// The holder alone, and for once that is the literal whole of the apply: the toggle reaches no
+		// engine seam and rides no rebind — the seams it gates read it back out of this holder.
+		reaches: reachesTheHolder,
+		apply: func(a settingsApplier, key, value string) (string, error) {
+			on, err := settingBool(key, value)
+			if err != nil {
 				return "", err
 			}
-			// The same boundary the roster reports, because it is the same boundary: the set is
-			// swapped on commit and the next request runs against the guard it carries.
-			return toolRosterNote, nil
-		case "editor":
-			// The one key with nothing at all behind it to move: the editor ladder reads `editor` off a
-			// FRESH projection of the file every time an external edit starts (externalEdit.spec), so the
-			// write the pane has just made is the whole of the apply and the very next ⏎ that opens an
-			// editor runs the new command (ADR 0041 decision 1: "nothing to dispatch and nothing to
-			// journal beyond the write itself"). It is named here rather than left to the default because
-			// that default is a refusal — and a refusal over a value already in force would tell the user
-			// their change had not taken effect when it had.
-		case "ui.inspector", "response-reserve":
-			// The two keys that are genuinely START-UP only. `ui.inspector` decides whether a wire
-			// observer is installed while the provider client is CONSTRUCTED (wire_boot.go), and
-			// `response-reserve` is read straight off the file into the budget the session opens with
-			// and has no setter anywhere behind it. Neither has a seam this build could reach, and
-			// neither is a candidate for one: the observer would need an engine seam and a client
-			// rebuild for a capture nobody starts mid-session.
-			//
-			// So they take `editor`'s answer rather than the default refusal, for `editor`'s reason
-			// turned around: the write IS everything this session can do about the key, and a refusal
-			// would report a failure over a save that did exactly what the key promises. The promise
-			// is the Description's own closing sentence ("takes effect at the next start"), which the
-			// pane's header carries — no row note, since ADR 0037 decision 3 gives a settings row a
-			// boundary note only when the session itself moves.
-		case "present.auto-open", "present.command", "present.port", "present.host":
-			return "", a.present.apply(key, value)
-		case "context-window":
+			// The one toggle with no engine seam behind it and no re-resolution to ride: what it gates
+			// is a WRITE apogee will make later — the entry key an explicit `/model` pick or a committed
+			// profile load records — and a decision the next start-up makes. So the holder store is the
+			// whole apply, and the seams that ask (recordModelChoice, recordLaunchProfile,
+			// launcherWiring.restore) read it from there at the moment they have something to record.
+			a.live.setRememberModel(on)
+			return "", nil
+		},
+	},
+	{
+		key:     "context-window",
+		reaches: settingsApplier.rides,
+		apply: func(a settingsApplier, key, value string) (string, error) {
 			tokens, err := settingInt(key, value)
 			if err != nil {
 				return "", err
@@ -701,44 +812,68 @@ func applySettingFor(a settingsApplier) func(key, value string) (string, error) 
 			// moment the rebind commits.
 			a.live.setPin(tokens)
 			return "", a.rideTheRebind()
-		case "system-prompt-text", "system-prompt-file", "system-prompt-models":
-			// The value the pane persisted is deliberately not read here: these three keys are ONE
-			// prompt (ADR 0023, whole-entry selection) and `system-prompt-models:` is a map no single
-			// string spells, so the block is re-read from the file the pane just wrote and re-resolved
-			// per model by the rebind — exactly the resolution startup made.
-			if err := a.reloadSystemPrompt(); err != nil {
-				return "", err
-			}
-			return "", a.rideTheRebind()
-		case "servers":
-			// Most of the `servers:` list reaches no engine seam at all: it is the single upstream
-			// definition (ADR 0036) that the picker, the `/server` switch and the choice recording
-			// resolve names against, and all three read the holder — so installing the re-read list is
-			// most of the apply. The value the pane persisted is not read, for the system-prompt keys'
-			// reason: a list of blocks is a shape no single string spells.
-			moved, err := a.reloadServers()
+		},
+	},
+	{
+		key:     "response-reserve",
+		reaches: reachesWithoutAMember,
+		apply:   applyTheWriteAlone,
+	},
+	{
+		key:     "present.auto-open",
+		reaches: reachesThePresentation,
+		apply:   applyPresentation,
+	},
+	{
+		key:     "present.command",
+		reaches: reachesThePresentation,
+		apply:   applyPresentation,
+	},
+	{
+		key:     "present.port",
+		reaches: reachesThePresentation,
+		apply:   applyPresentation,
+	},
+	{
+		key:     "present.host",
+		reaches: reachesThePresentation,
+		apply:   applyPresentation,
+	},
+	{
+		key:     "ui.inspector",
+		reaches: reachesWithoutAMember,
+		apply:   applyTheWriteAlone,
+	},
+	{
+		key:     "editor",
+		reaches: reachesWithoutAMember,
+		apply: func(a settingsApplier, key, value string) (string, error) {
+			// The one key with nothing at all behind it to move: the editor ladder reads `editor` off a
+			// FRESH projection of the file every time an external edit starts (externalEdit.spec), so the
+			// write the pane has just made is the whole of the apply and the very next ⏎ that opens an
+			// editor runs the new command (ADR 0041 decision 1: "nothing to dispatch and nothing to
+			// journal beyond the write itself"). It is named here rather than left to the default because
+			// that default is a refusal — and a refusal over a value already in force would tell the user
+			// their change had not taken effect when it had.
+			return "", nil
+		},
+	},
+	{
+		key:     "bypass",
+		reaches: reachesTheEngine,
+		apply: func(a settingsApplier, key, value string) (string, error) {
+			on, err := settingBool(key, value)
 			if err != nil {
 				return "", err
 			}
-			// The rest of it is three numbers the engine is already holding: the window the BOUND entry
-			// pins (ADR 0045 decision 3), the reply ceiling it pins beside it (ADR 0046) and the share
-			// of that window it holds back for the reply. Installing those on the latches alone would
-			// leave an edited bound describing the session only from the next rebind onwards — the next
-			// beat that happens to observe a change, seconds or minutes away — so this key rides the
-			// rebind exactly as the top-level `context-window:` key above does, through the same door,
-			// for the same reason: not one of the three has an engine setter of its own.
-			//
-			// Only when a resolved bound actually MOVED, though — ANY of them, since all three ride the
-			// one spec and one ride carries them all. A rebind is not free: it re-resolves every per-model
-			// binding, resets the token estimator and the compaction latch, and is idle-only, so an
-			// edit to some OTHER entry that drove one would refuse mid-Exchange to install numbers
-			// nobody changed. And a Driver that composed no rebind to ride installs the list and stands
-			// still on both bounds, the posture reloadServers' own optional members take.
-			if !moved || !a.rides() {
-				return "", nil
-			}
-			return "", a.rideTheRebind()
-		case "mechanisms":
+			a.engine.SetBypass(on)
+			return "", nil
+		},
+	},
+	{
+		key:     "mechanisms",
+		reaches: settingsApplier.rides,
+		apply: func(a settingsApplier, key, value string) (string, error) {
 			// Neither block is a value the engine holds either: they are INPUTS to the per-model
 			// resolution — the enable list and the whole-set-or-nothing suppression rule (ADR 0016) —
 			// so they land in the holder and are committed by the rebind, the one door a model change
@@ -747,22 +882,25 @@ func applySettingFor(a settingsApplier) func(key, value string) (string, error) 
 				return "", err
 			}
 			return "", a.rideTheRebind()
-		case "validated-sets.enable", "validated-sets.alias":
-			// Two rows, one apply: the block's off-switch and its alias map are a single input to the
-			// per-model resolution (ADR 0016 — a set applies whole or not at all), so the re-read
-			// installs both whichever row asked for it. The pane writes only the off-switch; the alias
-			// map arrives from the human's own editor and comes back through this same door.
-			if err := a.reloadValidatedSets(); err != nil {
-				return "", err
-			}
-			return "", a.rideTheRebind()
-		case "mcp-servers":
-			// The one key whose value is a set of live CONNECTIONS. It is not pushed and not
-			// re-resolved into a holder either: it is dialled, and the session moves onto the servers
-			// that answered (ADR 0037 decision 6). The value the pane persisted is not read, for the
-			// `servers:` reason — a list of blocks is a shape no single string spells.
-			return "", a.reconnectMCP()
-		case "model-profiles":
+		},
+	},
+	{
+		key:     "validated-sets.enable",
+		reaches: settingsApplier.rides,
+		apply:   applyValidatedSets,
+	},
+	{
+		key:     "validated-sets.alias",
+		reaches: settingsApplier.rides,
+		apply:   applyValidatedSets,
+	},
+	{
+		key: "model-profiles",
+		// The engine for the swap and the binding for the model to resolve the map AGAINST — the one
+		// key that both pushes and re-resolves, so it needs a member from each class. The holder is
+		// in the list because the map it stores is what the NEXT rebind reads.
+		reaches: func(a settingsApplier) bool { return a.engine != nil && a.binding != nil && a.live != nil },
+		apply: func(a settingsApplier, key, value string) (string, error) {
 			// The map is an INPUT to the per-model resolution, like `mechanisms:` above — but the
 			// model has NOT changed, and re-driving a whole rebind to move one field would refuse the
 			// edit whenever an Exchange is open. So it takes the profile's own engine door instead
@@ -770,12 +908,123 @@ func applySettingFor(a settingsApplier) func(key, value string) (string, error) 
 			// config-edit one). The value the pane persisted is not read — a map of blocks is a shape
 			// no single string spells.
 			return "", a.reloadModelProfiles()
-		default:
-			return "", cannotApply(key)
-		}
-		return "", nil
-	}
+		},
+	},
 }
+
+// settingsEntryFor finds the table row for one registry path. The scan is linear because the table
+// is short and an apply happens at human speed — one keypress in the settings pane — so an index
+// beside it would be a second structure to keep in step for no gain anybody could measure.
+func settingsEntryFor(key string) (settingsEntry, bool) {
+	for _, entry := range settingsTable {
+		if entry.key == key {
+			return entry, true
+		}
+	}
+	return settingsEntry{}, false
+}
+
+// applySystemPromptBlock is the one apply behind all three `system-prompt-*` rows: they spell ONE
+// prompt (ADR 0023, whole-entry selection), so whichever row was committed re-resolves the block.
+func applySystemPromptBlock(a settingsApplier, key, value string) (string, error) {
+	// The value the pane persisted is deliberately not read here: these three keys are ONE
+	// prompt (ADR 0023, whole-entry selection) and `system-prompt-models:` is a map no single
+	// string spells, so the block is re-read from the file the pane just wrote and re-resolved
+	// per model by the rebind — exactly the resolution startup made.
+	if err := a.reloadSystemPrompt(); err != nil {
+		return "", err
+	}
+	return "", a.rideTheRebind()
+}
+
+// applyURLSafetyHosts is the one apply behind both `url-safety:` host lists — the key it is given
+// is what picks which of the two lists moves.
+func applyURLSafetyHosts(a settingsApplier, key, value string) (string, error) {
+	// The host lists reach the session the way the roster above does and for a related
+	// reason: the guard is built WITH the set (registryWithMCP hands one URLGuard to every
+	// network tool) and no tool has a setter for it, so this is the swap door rather than a
+	// re-point. The value arrives as the FILE spells it and is read back by the same parse
+	// the writer rendered it with, and an EMPTY value is the empty list — which is the
+	// built-in default a fresh start resolves: no allow-list narrowing, no configured deny,
+	// and the guard's own SSRF floor still standing under both (it is not reachable from
+	// configuration). An entry that normalises to nothing is dropped where the guard is
+	// built, exactly as it is at startup, so there is nothing to report on the row.
+	hosts := config.ParseSettingList(value)
+	move := a.tools.setAllowHosts
+	if key == "url-safety.deny-hosts" {
+		move = a.tools.setDenyHosts
+	}
+	if err := move(hosts, a.engine); err != nil {
+		return "", err
+	}
+	// The same boundary the roster reports, because it is the same boundary: the set is
+	// swapped on commit and the next request runs against the guard it carries.
+	return toolRosterNote, nil
+}
+
+// applyPresentation is the one apply behind all four `present.` rows: the ladder rebuilds from the
+// whole block, so the committed row only names which field of it changed.
+func applyPresentation(a settingsApplier, key, value string) (string, error) {
+	return "", a.present.apply(key, value)
+}
+
+// applyValidatedSets is the one apply behind both `validated-sets.` rows.
+func applyValidatedSets(a settingsApplier, key, value string) (string, error) {
+	// Two rows, one apply: the block's off-switch and its alias map are a single input to the
+	// per-model resolution (ADR 0016 — a set applies whole or not at all), so the re-read
+	// installs both whichever row asked for it. The pane writes only the off-switch; the alias
+	// map arrives from the human's own editor and comes back through this same door.
+	if err := a.reloadValidatedSets(); err != nil {
+		return "", err
+	}
+	return "", a.rideTheRebind()
+}
+
+// applyTheWriteAlone is the apply for a key whose whole live effect IS the write the pane has
+// already made, so there is nothing left here to dispatch.
+func applyTheWriteAlone(a settingsApplier, key, value string) (string, error) {
+	// The two keys that are genuinely START-UP only. `ui.inspector` decides whether a wire
+	// observer is installed while the provider client is CONSTRUCTED (wire_boot.go), and
+	// `response-reserve` is read straight off the file into the budget the session opens with
+	// and has no setter anywhere behind it. Neither has a seam this build could reach, and
+	// neither is a candidate for one: the observer would need an engine seam and a client
+	// rebuild for a capture nobody starts mid-session.
+	//
+	// So they take `editor`'s answer rather than the default refusal, for `editor`'s reason
+	// turned around: the write IS everything this session can do about the key, and a refusal
+	// would report a failure over a save that did exactly what the key promises. The promise
+	// is the Description's own closing sentence ("takes effect at the next start"), which the
+	// pane's header carries — no row note, since ADR 0037 decision 3 gives a settings row a
+	// boundary note only when the session itself moves.
+	return "", nil
+}
+
+// reachesTheEngine reports whether the anytime-safe mutator class is composed: the keys that are
+// PUSHED at the engine and are in force the moment their apply returns.
+func reachesTheEngine(a settingsApplier) bool { return a.engine != nil }
+
+// reachesTheEngineAndTheHolder reports whether the engine and the startup snapshot's mutable half
+// are BOTH composed — the pair the two `context-files.` rows need, since either row installs the
+// switch and the names together and only the holder remembers the half the row did not carry.
+func reachesTheEngineAndTheHolder(a settingsApplier) bool { return a.engine != nil && a.live != nil }
+
+// reachesTheHolder reports whether the live holder is composed. It is the whole of what two keys
+// need, for two different reasons their entries give.
+func reachesTheHolder(a settingsApplier) bool { return a.live != nil }
+
+// reachesTheSwapDoor reports whether the tool set and the engine are both composed: a registry with
+// no web_search to re-point is rebuilt and handed through SwapTools, which is the swap door and not
+// this holder's to skip — and the roster switch and the two host lists are that door every time.
+func reachesTheSwapDoor(a settingsApplier) bool { return a.tools != nil && a.engine != nil }
+
+// reachesThePresentation reports whether the presentation ladder is composed — the one member every
+// `present.` row's apply rebuilds through.
+func reachesThePresentation(a settingsApplier) bool { return a.present != nil }
+
+// reachesWithoutAMember is the predicate for a key whose apply reaches no member at all, so there
+// is nothing a Driver could have been composed without: it answers yes for every applier, the zero
+// one included. That is the honest answer for the keys whose apply is the write itself.
+func reachesWithoutAMember(settingsApplier) bool { return true }
 
 // cannotApply is the dispatcher's one refusal for a key that will not reach the session at all —
 // because this build knows no seam for it, or because this Driver composed the dispatcher without
@@ -792,47 +1041,13 @@ func cannotApply(key string) error {
 // 0031) — so a nil member has to degrade to the refusal above rather than panic on the Update
 // goroutine, halfway through an edit that has already been written to the file.
 //
-// It is a second switch over the same keys, which is a drift risk taken deliberately and closed by a
-// test: TestApplySettingRefusesEveryKeyItCannotReach drives EVERY registry key through a zero
-// applier, so a key added to the dispatcher without a line here fails as the panic it would be.
+// It reads the same table the dispatcher applies out of, one field over, so the two can no longer
+// disagree about which keys exist. A key with no entry is not unreachable here at all — it is
+// refused by the dispatcher's own lookup, in the same sentence. TestApplySettingRefusesEveryKeyItCannotReach
+// drives EVERY registry key through a zero applier and holds both halves of that.
 func (a settingsApplier) unreachable(key string) error {
-	reaches := true
-	switch key {
-	case "mode", "bypass", "auto-compact":
-		reaches = a.engine != nil
-	case "model-profiles":
-		// The engine for the swap and the binding for the model to resolve the map AGAINST — the one
-		// key that both pushes and re-resolves, so it needs a member from each class. The holder is
-		// in the list because the map it stores is what the NEXT rebind reads.
-		reaches = a.engine != nil && a.binding != nil && a.live != nil
-	case "context-files.enable", "context-files.names":
-		reaches = a.engine != nil && a.live != nil
-	case "remember-model":
-		// The holder alone, and for once that is the literal whole of the apply: the toggle reaches no
-		// engine seam and rides no rebind — the seams it gates read it back out of this holder.
-		reaches = a.live != nil
-	case "use-project-skills":
-		reaches = a.skills != nil
-	case "web-search-endpoint", "tools.disabled", "url-safety.allow-hosts", "url-safety.deny-hosts":
-		// The engine as well as the tool set: a registry with no web_search to re-point is rebuilt and
-		// handed through SwapTools, which is the swap door and not this holder's to skip — and the
-		// roster switch and the two host lists are that door every time.
-		reaches = a.tools != nil && a.engine != nil
-	case "present.auto-open", "present.command", "present.port", "present.host":
-		reaches = a.present != nil
-	case "context-window", "system-prompt-text", "system-prompt-file", "system-prompt-models",
-		"mechanisms", "validated-sets.enable", "validated-sets.alias":
-		reaches = a.rides()
-	case "servers":
-		// The holder alone is enough to ACCEPT this key: the list itself reaches no engine seam (ADR
-		// 0036), and the rebind the bound entry's two token pins ride is conditional — asked for only
-		// by an edit that moved one of them. Requiring the whole riding triple here would refuse every
-		// list edit on a Driver that composed no rebind, for a ride most list edits never ask for.
-		reaches = a.live != nil
-	case "mcp-servers":
-		reaches = a.mcp != nil && a.tools != nil && a.engine != nil
-	}
-	if reaches {
+	entry, ok := settingsEntryFor(key)
+	if !ok || entry.reaches(a) {
 		return nil
 	}
 	return cannotApply(key)

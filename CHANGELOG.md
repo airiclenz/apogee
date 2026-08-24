@@ -48,6 +48,21 @@ point is a **minor** bump, not a breaking change.
   and that refusal surfaces through the existing "save the firing's record" error with the run's
   own `Result` still returned.
 
+### Changed
+
+- **One table behind the `/settings` live apply and its reachability check (plan item 2).**
+  `cmd/apogee/wire_settings.go` carried two switches over the same key set — the apply dispatcher
+  and `settingsApplier.unreachable`, which names the members each key's apply dereferences — and the
+  file said so, calling the drift "taken deliberately and closed by a test". Both are now lookups
+  over one ordered `settingsTable`: each entry carries the registry path, a `reaches` predicate and
+  the `apply`, so `applySettingFor` runs the entry's apply and `unreachable` negates the entry's
+  `reaches`. A key wired into one and missed by the other — a nil dereference on the Update
+  goroutine, halfway through an edit already written to the file — has nowhere left to happen,
+  because there is no second list of keys. No apply changed: every body moved across as it stood.
+  The table is kept in `config.KeyRegistry` order (the order the pane renders the rows in), pinned
+  by the new `TestSettingsTableIsInRegistryOrder`, which also refuses a duplicate entry;
+  `TestEveryEditableSettingKeyHasAnApply` is what still fails if an editable key has no entry at all.
+
 ### Fixed
 
 - **The Tool summary persistence contract now agrees with ADR 0052 §5 (plan item 1).** The domain
