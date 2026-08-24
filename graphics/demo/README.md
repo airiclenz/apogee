@@ -87,9 +87,25 @@ first try. If a beat silently doesn't happen, suspect the verb before suspecting
 an ffmpeg run instead of another take of a nondeterministic model. The hero clip ships as
 `1.8` speed from `3.8`s (dropping the shell + launch so it opens already inside apogee).
 
-**The two timing knobs are marked in `hero.tape`.** Knob 1 decides where the interjection
+**The knobs are marked in `hero.tape`.** Knob 1 decides where the interjection
 lands — it must arrive while tool cards are still streaming, or it reads as an ordinary next
 message instead of a queued one. Knob 2 must outlast the run's tail; overshooting is free.
+Knob 3 is how long the fix takes to land: the tape opens that card, and the gesture only
+reaches the right one while the edit is still the most recent block.
+
+**Nothing on camera opens itself.** Tool blocks paint collapsed, always (`layout.md`, "Collapsed
+and expanded blocks"), so the fix arrives as a single `Replace ↳ task.go … +1 -1 · +N more lines
+▶` row and the split diff — two panes, tinted add/del bands — is not on camera unless the tape
+opens it. `hero.tape` opens it with the keyboard block cursor at knob 3 and then pages back to
+the bottom: a toggle keeps the toggled row at its screen position, which detaches the viewport
+from the live tail, and left detached every later beat paints below the fold.
+
+**`/undo` previews; the clip never confirms.** Bare `/undo` prints a transcript note listing
+every path the exchange wrote — the fix and the CHANGELOG entry in one group, because an
+interjection joins the Exchange it steered rather than opening an undo group of its own — and
+nothing about it is modal, so the `Escape` that follows it in the tape is a gesture for the
+camera rather than a dismissal. What proves the fix survived is `git -C <stage> diff --stat`
+after the take, not the frame. `/undo confirm` would unfix the bug on camera and is never typed.
 
 **Expect 3–5 takes.** The model is nondeterministic. Take 2 fixed the bug but skipped the
 CHANGELOG; take 3 did everything. Check the outcome before judging a take by its video:
@@ -112,7 +128,11 @@ paths — `record.sh` copies the tape into the work dir and runs there so all pa
 and relative. `Set FontFamily` takes a family name only: there is no weight setting, so
 `"Source Code Pro ExtraLight"` silently renders as regular-weight Source Code Pro (verified
 by diffing frames against a deliberately bogus font name). A missing font falls back
-silently rather than erroring — check a frame if you change it.
+silently rather than erroring — check a frame if you change it. And `Alt+<arrow>` does not
+exist in the tape language: `Alt+up` parses, then types the literal text `up` into the
+terminal. The way to send ⌥↑ is the raw sequence — `Escape` followed by `Type "[1;3A"` under
+`Set TypingSpeed 0ms`, so the bytes arrive as one CSI; split by a typing delay the ESC is read
+on its own, which during a run means "stop" and kills the take.
 
 ## Recording a new clip for a different feature
 

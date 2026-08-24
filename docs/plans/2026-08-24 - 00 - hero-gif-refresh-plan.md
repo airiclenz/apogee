@@ -6,7 +6,7 @@ interjection, and a closing `/undo` preview beat — recorded against OpenRouter
 `deepseek-v4-flash-latest` for fast inference, with the demo folder gaining a `history/`
 structure so past clips and their recording facts stop living loose in `graphics/`.
 
-**Date:** 2026-08-24 · **Status:** items 1–2 done 2026-08-24, items 3–5 unexecuted · **sized for:** any host; recording needs macOS
+**Date:** 2026-08-24 · **Status:** items 1–3 done 2026-08-24, items 4–5 unexecuted · **sized for:** any host; recording needs macOS
 with `vhs` + an `OPENROUTER_API_KEY` in the environment
 
 **Authoritative sources** (an item that disagrees with these follows these):
@@ -143,7 +143,38 @@ quick start now lists it). Real rig rebuilt at `~/.cache/apogee-demo`: `./reset.
 `stage reset: bug present, tests red`; `<demo home>/.apogee/config.yaml` carries the
 OpenRouter entry with `api-key-env` and no literal key anywhere in the work dir.
 
-## 3. The new tape — `tapes/hero.tape` evolves to the storyboard
+## 3. The new tape — `tapes/hero.tape` evolves to the storyboard — ✅ DONE (2026-08-24)
+
+NOTES (2026-08-24): DECISION observation — ran apogee itself in the recording geometry
+(1250×680, FontSize 15) under VHS against a stub OpenAI-compatible endpoint, driving one real
+`single_find_and_replace` on the stage's planted bug. The edit card paints **COLLAPSED**: a
+single `Replace ↳ task.go … +1 -1 · +8 more lines ▶` row, no diff visible. `layout.md`
+("Collapsed and expanded blocks") states it as the rule — "Collapsed is the default, always …
+nothing ever expands or collapses by itself". So the tape gained an open gesture (KNOB 3), per
+the item's "only if the card is collapsed" clause; expanded, the same card paints the two-pane
+split diff with tinted add/del bands exactly as the storyboard's beat 5 wants.
+NOTES (2026-08-24): VHS cannot send ⌥↑, the block cursor's entry key — `Alt+up` parses and then
+types the literal text "up" into the terminal (observed: it was sent as a message). The tape
+sends the raw sequence instead — `Escape` then `Type "[1;3A"` under `Set TypingSpeed 0ms` — which
+apogee reads as ⌥↑; verified mid-run, with the run still working and NOT stopped by the ESC.
+NOTES (2026-08-24): a toggle keeps the toggled row at its screen position (`layout.md`), which
+detaches the viewport from the live tail: the first dry take showed the interjection and the
+`/undo` preview painting below the fold. Added `PageDown 4` after the hold to re-attach
+(`m.detached = !m.viewport.AtBottom()`); the second dry take then showed every later beat.
+NOTES (2026-08-24): the `/undo` preview is a plain transcript NOTE — not a card, not modal,
+nothing to expand or dismiss. The plan's `Escape` beat is kept as written (it changed nothing on
+the frame, and the working tree still carried the fix after it: `git diff --stat` non-empty), but
+its tape comment now says what it actually is.
+NOTES (2026-08-24): knob 1 (18s) and knob 2 (45s) keep their local-model values and their
+comments verbatim — item 4 retunes them against the OpenRouter endpoint. Knob 2's comment gained
+one line: its wait now counts from after the knob-3 gesture, so it measures the remaining tail.
+NOTES (2026-08-24): the beat-7 acceptance ("the preview names `task.go` and `CHANGELOG.md`") was
+verified by mechanism, not by frame — the stub wrote only one file. `internal/agent/loop.go`
+opens an undo group once per depth-0 Exchange, and an interjection commits mid-Exchange (ADR
+0025/0051), so both writes land in one group. Item 4's real take is where the frame confirms it.
+NOTES (2026-08-24): fact for items 4–5 — the preview lists the journal's ABSOLUTE path, so beat 7
+puts `/Users/<you>/.cache/apogee-demo/home/Repos/taskman/task.go` on camera and gives the rig
+away. It fits one line at the recording width; pick `APOGEE_DEMO_WORK` with that frame in mind.
 
 - Keep: resolution/font/theme block, the `Hide`d `source ./env.sh`, bare `apogee --mode auto`
   on camera, the two prompts' exact wording, generous sleeps + pace-in-post.
