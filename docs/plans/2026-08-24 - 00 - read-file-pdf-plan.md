@@ -148,9 +148,13 @@ go test ./internal/tools/
 
 **Commit:** `feat(tools): read_file returns extracted text for PDF files`
 
-## 3. Documentation and follow-up ideas
+## 3. Documentation and follow-up ideas — ✅ DONE (2026-08-24)
 
 Depends on item 2.
+
+NOTES (2026-08-24): `IDEAS.md` does not exist in this checkout and never has in git history — it is GITIGNORED (`.gitignore:10`), exactly as the 2026-08-19 split-diff plan's item 12 recorded. The item's entry was written to a freshly created `IDEAS.md` (short conventions header modelled on `ISSUES.md`'s, then the one dated entry covering grep-in-PDFs and docx/epub extraction). The file is real in the working tree but cannot be staged, so it is deliberately absent from FILES above: a bare `git add IDEAS.md` errors and would break this item's commit.
+
+NOTES (2026-08-24): no CHANGELOG entry — this item ships no user-visible behavior; the run's item 1 and item 2 entries under `[Unreleased]` are its trail. The stale "not yet wired into any tool" sentence item 2 flagged is already gone from item 1's entry, so nothing was left to correct.
 
 **What:**
 

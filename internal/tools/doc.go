@@ -165,10 +165,13 @@
 //
 // Reading and discovery. read_file.go is read_file, the line-spanned read that attaches a
 // ReadSpan and, when its optional locate term is given, also reports the absolute line
-// numbers where a substring sits. list_dir.go is list_dir, the depth-bounded listing. grep.go is grep — the
-// pure-Go content search plus the include-glob parser, match spans and pagination that
-// find_files borrows so the two cannot drift. find_files.go is find_files, the NAME half of
-// discovery beside grep's content half.
+// numbers where a substring sits. pdf_text.go is read_file's PDF text extraction — a %PDF-
+// content sniff that ignores the file name, the in-memory parse-and-walk behind a recover because
+// the parser panics on malformed input, the [Page N] marker line before each page, and the
+// model-facing wording for a scanned-image or unreadable document. list_dir.go is list_dir, the
+// depth-bounded listing. grep.go is grep — the pure-Go content search plus the include-glob
+// parser, match spans and pagination that find_files borrows so the two cannot drift.
+// find_files.go is find_files, the NAME half of discovery beside grep's content half.
 //
 // Writing and editing (the P3.7 family). write_file.go is write_file, the whole-file atomic
 // write. file_edit.go is edit_existing_file, the patch-aware hunk apply. find_replace.go
