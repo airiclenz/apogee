@@ -68,7 +68,10 @@ before it was saved:
 
 ---
 
-## 1. Hand the roster ladder to the tool set the composition root builds
+## 1. Hand the roster ladder to the tool set the composition root builds — ✅ DONE (2026-08-24)
+
+NOTES (2026-08-24): no existing Config-assembly assertion covered `DisabledTools` per Driver, so the per-Driver check is one new table test (`TestEveryDriverHandsTheRosterRungsToTheConfig`) with a row per assembly — the session's boot phase through `newRootWiring`+`resolveConfig`, `apogee headless` through its stub runner, a Firing through its harness — rather than an extension of a test that did not exist.
+NOTES (2026-08-24): the `EnabledTools`-alone case cannot observe the rung being read through `registryWithMCP` today — no built-in ships default-off, and within one scope disabled wins — so its table row pins only that a name in `tools.enabled:` never subtracts from the built set; the test's comment says so and names the day a default-off built-in makes it the lift case.
 
 **What:** `registryWithMCP` builds the session's tool registry but passes only the `Disabled:` rung
 of the roster ladder into `tools.HostTools` (`cmd/apogee/wire_tools.go:191` and the literal that

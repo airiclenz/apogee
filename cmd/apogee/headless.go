@@ -384,10 +384,11 @@ func runHeadless(cmd *cobra.Command, args []string, opts *config.Options, noSave
 		Confiner:           confiner,
 		ConfineToWorkspace: opts.ConfineToWorkspace,
 		WebSearchEndpoint:  opts.WebSearchEndpoint,
-		// The `tools.disabled:` roster switch, honoured here for the reason every other file-only
-		// key is: it is one configuration, and a headless run of it must offer the model the same
-		// tools an interactive session would.
+		// The `tools.disabled:` / `tools.enabled:` roster rungs, honoured here for the reason every
+		// other file-only key is: it is one configuration, and a headless run of it must offer the
+		// model the same tools an interactive session would.
 		DisabledTools: opts.ToolsDisabled,
+		EnabledTools:  opts.ToolsEnabled,
 		// The `url-safety:` host layer, honoured here for the reason every other file-only key is:
 		// it is one configuration, and an unattended run must not be the path on which the network
 		// tools reach a host the operator denied for every interactive session.

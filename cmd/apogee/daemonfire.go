@@ -295,6 +295,7 @@ func (w *daemonWiring) configFor(ctx context.Context, entry daemon.Entry) (apoge
 		// allow/deny lists, scrub the same variables out of a subprocess and read responses in the
 		// same shape a session on this host would.
 		DisabledTools: w.opts.ToolsDisabled,
+		EnabledTools:  w.opts.ToolsEnabled,
 		URLAllowHosts: w.opts.URLAllowHosts,
 		URLDenyHosts:  w.opts.URLDenyHosts,
 		Inspector:     w.opts.UI.Inspector,

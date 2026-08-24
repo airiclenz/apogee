@@ -185,9 +185,11 @@ func (t *liveTools) webSearch() *tools.WebSearch {
 // qualified tool colliding with a built-in — unlikely given the alias prefix) is dropped with a
 // stderr notice rather than failing startup; the built-in wins.
 //
-// cfg.DisabledTools (`tools.disabled:`) prunes the BUILT-IN half only, which is the half it names:
-// an MCP server's tools come and go with the server, so the way to stop offering them is to stop
-// connecting it (`mcp-servers:`) rather than to list every tool it happens to advertise.
+// The roster ladder — cfg.DisabledTools / cfg.EnabledTools (`tools.disabled:` / `tools.enabled:`)
+// and the bound model's cfg.Profile.Tools axis (ADR 0057) — prunes and lifts the BUILT-IN half
+// only, which is the half it names: an MCP server's tools come and go with the server, so the way
+// to stop offering them is to stop connecting it (`mcp-servers:`) rather than to list every tool it
+// happens to advertise.
 func registryWithMCP(workspace string, cfg apogee.Config, mcpTools []apogee.Tool) *apogee.ToolRegistry {
 	registry := tools.NewDefaultRegistryWithHost(workspace, tools.HostTools{
 		// The `url-safety:` host layer, off the same Config the engine would have read it from and
@@ -199,6 +201,13 @@ func registryWithMCP(workspace string, cfg apogee.Config, mcpTools []apogee.Tool
 		Asker:             cfg.Asker,
 		Presenter:         cfg.Presenter,
 		Disabled:          cfg.DisabledTools,
+		// The two rungs above the global disable — the `tools.enabled:` lift and the bound model's
+		// `tools:` axis (ADR 0057) — off the same Config the engine would have read them from. This
+		// hand-assembly must not be the one path on which a configured roster quietly stops
+		// applying, or connecting an MCP server would silently re-broaden the menu in every
+		// session without MCP.
+		Enabled:       cfg.EnabledTools,
+		ProfileRoster: cfg.Profile.Tools,
 		// The credential variables the execution tools must drop, off the same Config the engine
 		// would have read them from — this hand-assembly must not be the one place a subprocess
 		// inherits the operator's `api-key-env:` key, or connecting an MCP server would quietly

@@ -39,6 +39,18 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **The composition root now hands every rung of the roster ladder to the tool set it builds
+  (refocus plan item 1).** `registryWithMCP` — the path every live session's registry is built on —
+  passed only the `tools.disabled:` rung into `tools.HostTools`, so the global `tools.enabled:`
+  lift and the bound model's `tools:` profile axis (ADR 0057 decision 4) were inert in every TUI
+  session. It now threads `Enabled: cfg.EnabledTools` and `ProfileRoster: cfg.Profile.Tools`
+  beside the existing `Disabled:`. Separately, `Config.EnabledTools` was never populated by any
+  Driver even though the config layer already parsed the key: the session's boot phase,
+  `apogee headless` and a daemon Firing now all fold `ToolsEnabled` into the `apogee.Config` they
+  hand the engine, for the reason `DisabledTools` already rides Config — one configuration, the
+  same roster from the same value on every Driver. Construction only: a mid-session model switch
+  re-applying the roster is plan item 2.
+
 - `internal/tools/doc.go`: corrected the package map's carrier-file count from "Twenty-nine" to
   "Thirty" — `pdf_text.go` had been added to the map without updating the count sentence.
 

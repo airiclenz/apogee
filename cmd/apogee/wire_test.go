@@ -18,6 +18,7 @@ import (
 
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
+	"github.com/airiclenz/apogee/internal/daemon"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/heartbeat"
 	"github.com/airiclenz/apogee/internal/library"
@@ -981,6 +982,170 @@ func TestRegistryWithMCPHonoursDisabledTools(t *testing.T) {
 	}
 	if _, ok := registry.Lookup("docs__search"); !ok {
 		t.Error("the MCP tool left the set; tools.disabled prunes the built-in half only")
+	}
+}
+
+// The two rungs above the global disable reach the assembly through the same Config, and
+// registryWithMCP is the path EVERY live session's registry is built on — so a rung it dropped
+// would leave ADR 0057's ladder inert everywhere while the config layer kept accepting the keys.
+// One row per step of decision 4: the profile axis is the last word in either direction, and a
+// same-scope conflict fails closed.
+//
+// The global lift alone has nothing to lift today — no built-in ships default-off — so its row can
+// only pin that a name in `tools.enabled:` never subtracts; it cannot tell a read rung from an
+// ignored one until a built-in ships default-off, at which point that tool is the name to put here.
+// The MCP tool rides every row untouched: the profile axis, like the global lists, prunes the
+// built-in half only.
+func TestRegistryWithMCPWalksTheRosterLadder(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		disabled []string
+		enabled  []string
+		profile  domain.ToolRosterDelta
+		wantOn   []string
+		wantOff  []string
+	}{
+		{
+			name:     "a profile enabled: entry lifts a globally disabled tool",
+			disabled: []string{"view_diff"},
+			profile:  domain.ToolRosterDelta{Enabled: []string{"view_diff"}},
+			wantOn:   []string{"view_diff"},
+		},
+		{
+			name:    "a profile disabled: entry turns off what global allows",
+			profile: domain.ToolRosterDelta{Disabled: []string{"python_exec", "docs__search"}},
+			wantOn:  []string{"grep"},
+			wantOff: []string{"python_exec"},
+		},
+		{
+			name:     "a same-scope conflict fails closed: the global disable wins the global lift",
+			disabled: []string{"view_diff"},
+			enabled:  []string{"view_diff"},
+			wantOff:  []string{"view_diff"},
+		},
+		{
+			name:    "a name only in tools.enabled: leaves the set as built",
+			enabled: []string{"grep"},
+			wantOn:  []string{"grep"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			cfg := validCfg(t)
+			cfg.DisabledTools = tt.disabled
+			cfg.EnabledTools = tt.enabled
+			cfg.Profile.Tools = tt.profile
+
+			registry := registryWithMCP(t.TempDir(), cfg, []apogee.Tool{mcpFixtureTool{name: "docs__search"}})
+
+			for _, name := range append(tt.wantOn, "docs__search") {
+				assertRegistryOffers(t, registry, name, true)
+			}
+			for _, name := range tt.wantOff {
+				assertRegistryOffers(t, registry, name, false)
+			}
+			if len(tt.wantOff) == 0 {
+				if got, want := len(registry.All()), len(registryWithMCP(t.TempDir(), validCfg(t), nil).All())+1; got != want {
+					t.Errorf("the roster left %d tools, want %d — the lift subtracted something", got, want)
+				}
+			}
+		})
+	}
+}
+
+// assertRegistryOffers checks both halves of what a registry is for — the tool list the engine
+// offers is built from All(), and a call is resolved through Lookup — so a roster verdict that
+// reached one and not the other is caught whichever way it leaked.
+func assertRegistryOffers(t *testing.T, registry *apogee.ToolRegistry, name string, want bool) {
+	t.Helper()
+	if _, ok := registry.Lookup(name); ok != want {
+		t.Errorf("Lookup(%q) = %v, want %v", name, ok, want)
+	}
+	offered := false
+	for _, tool := range registry.All() {
+		if tool.Name() == name {
+			offered = true
+		}
+	}
+	if offered != want {
+		t.Errorf("%q offered in the tool list = %v, want %v", name, offered, want)
+	}
+}
+
+// The global rungs ride Config rather than the assembly alone so every Driver prunes and lifts the
+// same roster from the same value (ADR 0057) — one row per Config assembly in the composition root:
+// the session's boot phase, `apogee headless`, and a daemon Firing, each fed the same two lists and
+// asked for the Config it hands the engine. Not parallel: the headless and Firing rows go through
+// harnesses that replace package-level seams.
+func TestEveryDriverHandsTheRosterRungsToTheConfig(t *testing.T) {
+	disabled, enabled := []string{"view_diff"}, []string{"grep"}
+	const rosterYAML = "tools:\n  disabled: [view_diff]\n  enabled: [grep]\n"
+	tests := []struct {
+		name     string
+		assemble func(t *testing.T) apogee.Config
+	}{
+		{
+			name: "the session's boot phase",
+			assemble: func(t *testing.T) apogee.Config {
+				opts := config.Options{
+					Mode:          "ask-before",
+					Workspace:     t.TempDir(),
+					ConfigDir:     t.TempDir(),
+					ToolsDisabled: disabled,
+					ToolsEnabled:  enabled,
+				}
+				roots, err := resolveRoots(opts.ConfigDir, opts.Workspace)
+				if err != nil {
+					t.Fatalf("resolveRoots: %v", err)
+				}
+				w := newRootWiring(opts, apogee.ModeAskBefore, roots)
+				t.Cleanup(w.close)
+				if err := w.resolveConfig(); err != nil {
+					t.Fatalf("resolveConfig: %v", err)
+				}
+				return w.cfg
+			},
+		},
+		{
+			name: "apogee headless",
+			assemble: func(t *testing.T) apogee.Config {
+				stub := &stubRunner{}
+				if _, _, err := headlessRunOn(t, stub, fenceableHost, testConfigHome(t, rosterYAML), "explain this repo"); err != nil {
+					t.Fatalf("headless: %v", err)
+				}
+				if !stub.called {
+					t.Fatal("the runner did not run")
+				}
+				return stub.spec.Config
+			},
+		},
+		{
+			name: "a daemon Firing",
+			assemble: func(t *testing.T) apogee.Config {
+				harness := newDaemonFireHarness(t, config.Options{
+					HostAlias:     "startup",
+					Endpoint:      "http://startup.invalid",
+					Servers:       []config.ServerEntry{{Name: "startup", Endpoint: "http://startup.invalid"}},
+					ToolsDisabled: disabled,
+					ToolsEnabled:  enabled,
+				})
+				return harness.fire(t, entryFor(t, "audit", daemon.Action{})).Config
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := tt.assemble(t)
+
+			if !slices.Equal(cfg.DisabledTools, disabled) {
+				t.Errorf("Config.DisabledTools = %q, want %q", cfg.DisabledTools, disabled)
+			}
+			if !slices.Equal(cfg.EnabledTools, enabled) {
+				t.Errorf("Config.EnabledTools = %q, want %q — the global lift never reached this Driver", cfg.EnabledTools, enabled)
+			}
+		})
 	}
 }
 

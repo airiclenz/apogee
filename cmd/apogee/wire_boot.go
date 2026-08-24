@@ -176,6 +176,11 @@ func (w *rootWiring) resolveConfig() error {
 		// Config rather than passed to the assembly alone so every Driver — this session, a headless
 		// run, an embedder — prunes the same roster from the same value.
 		DisabledTools: w.opts.ToolsDisabled,
+		// The `tools.enabled:` lift — the same global rung's ADD direction (ADR 0057): the built-in
+		// tools this config puts back on the menu when the build or the list above leaves them off.
+		// Empty ⇒ nothing is lifted. It rides Config for DisabledTools' reason: every Driver lifts
+		// the same names from the same value.
+		EnabledTools: w.opts.ToolsEnabled,
 		// The `url-safety:` host layer: the hosts the network tools may reach and the hosts they
 		// may not. Empty ⇒ every host, exactly the reach before this key existed — and never less
 		// safe either way, since the guard's SSRF floor is not reachable from configuration. It
