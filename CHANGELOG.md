@@ -28,6 +28,20 @@ point is a **minor** bump, not a breaking change.
   `doctext.PDFAnnotation`, so they cannot disagree about the same file; the count stays singular
   for a one-page document (`PDF, 1 page; …`).
 
+- **`@file` PDF extraction and the block size floor are documented (plan item 4).** `CONTEXT.md`'s
+  *File reference (`@file`)* entry now states that a reference is judged by its BYTES — content
+  opening `%PDF-` injects the document's extracted text with `[Page N]` markers under the
+  `(PDF, N pages; extracted text, read-only)` annotation, the same extraction `read_file` performs
+  via `internal/doctext`, while a text file named `notes.pdf` still injects its text under the
+  plain header — and that every block carries a structural floor (ADR 0006, no config key, never
+  disabled under Bypass): `resolveFileRefs` clamps a reference's content against the History
+  allocation split across that message's references, eliding anything past its share to the same
+  head/tail-plus-marker shape a capped tool result gets. The entry's stale `security.SafeReadFile`
+  name is corrected to `security.SafeOpen`. `docs/manual/commands.md` gains the user-facing
+  paragraph: a PDF reference reads the document's text, a scanned one is refused with a message
+  (ask for a text version), and a very large reference is shown head-and-tail with a note to read
+  ranges back through `read_file`.
+
 ### Fixed
 
 - **An `@file` reference to a PDF now injects the document's extracted text, never its bytes

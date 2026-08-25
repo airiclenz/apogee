@@ -289,7 +289,10 @@ go test ./internal/agent
 
 ---
 
-## 4. Documentation: `@file` PDF extraction and the size floor
+## 4. Documentation: `@file` PDF extraction and the size floor — ✅ DONE (2026-08-25)
+
+NOTES (2026-08-25): `docs/manual/README.md` was deliberately left unchanged, as the item's own condition allows — its Commands row lists the page's TOPICS (`@file` references among them), not what a reference does, so a PDF mention has nothing to attach to there.
+NOTES (2026-08-25): `ISSUES.md` was checked (grep for `@file` and `PDF`) and left unchanged — no open item describes this defect; the single `@file` hit is the apogee-code parity note about a stale upstream TDD, and there is no `PDF` hit at all.
 
 Depends on item 3.
 

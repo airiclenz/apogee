@@ -954,7 +954,7 @@ from a **File reference** (`@file`, turn-local and user-named) and from a **Skil
 **File reference (`@file`)**:
 A workspace file the user names with an `@path` token in their message. The loop resolves
 each reference at the start of the Turn — reading it within the workspace fence
-(`security.SafeReadFile`, `os.Root`-pinned) and injecting its content into the user message
+(`security.SafeOpen`, `os.Root`-pinned) and injecting its content into the user message
 as that request's *file context* — and reports-and-skips a missing or escaping ref. The token
 is **bare** (`@path`, a run of non-whitespace) or **quoted** (`@"path with spaces"` — `'` is
 accepted too, only `"` is ever produced), where the closing quote ends the token and an
@@ -962,7 +962,17 @@ unterminated one runs to the end of that line; there are no escape sequences. Pa
 the token is the TUI's job; resolution is the agent's. It is the same inline grammar a **Skill**
 `/token` uses, and the prompt box accents both on the same rule: a token lights up exactly when it
 resolves — the path is in the workspace listing, the id is in the catalog — so a typo visibly
-fails to light instead of failing at submit (ADR 0027).
+fails to light instead of failing at submit (ADR 0027). A reference is judged by its BYTES, not
+its name: content opening `%PDF-` is injected as the document's *extracted text* — the same
+extraction `read_file` performs (`internal/doctext`), `[Page N]` marker lines and all — under the
+annotation `(PDF, N pages; extracted text, read-only)`, and a document holding no extractable text
+(a scan) is reported-and-skipped like any other unresolvable ref, while a text file someone named
+`notes.pdf` still injects its text under the plain header. Each block also carries a **structural
+floor** (ADR 0006, no config key, never disabled under Bypass): `resolveFileRefs` clamps a
+reference's content — before its header is added — against the [Budget](#context-and-history)'s
+History allocation *split across the references of that one message*, so anything past that share
+is elided to the same head/tail-plus-marker shape a capped tool result gets and no reference can
+hand the emergency fold a most-recent message it cannot shed.
 _Avoid_: "attachment", "upload" (a reference is read live from the workspace, not stored).
 
 **Skill**:

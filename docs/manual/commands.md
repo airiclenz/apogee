@@ -52,6 +52,17 @@ apogee says `unknown command or skill: /…` and leaves your line in the box to 
 Anywhere else in a message a slash is just text, so paths like `/usr/bin` travel
 untouched.
 
+An `@` reference hands the model what the file **says**, not its bytes. A PDF is read for
+its text — page by page, with a `[Page N]` marker before each — and the header above it
+says as much: `(PDF, 27 pages; extracted text, read-only)`, so the model knows it is
+looking at a transcription and not at something it can edit in place. A scanned PDF has no
+text to read: apogee says so, sends your message without that reference, and the turn goes
+ahead — ask for a text version of that one. A very large reference is not dropped either.
+The model is shown its head and its tail with a note in between saying the middle was cut
+to fit the context budget, and it can pull back the parts it needs with `read_file` on the
+same path. Several references in one message share that room between them, so a message
+full of files still fits.
+
 The keys are few, and the empty prompt box advertises them: `⏎` sends — *queues*, while
 the model works — `⇧⏎`/`⌥⏎` opens a new line, `↑`/`↓` walk back and forward through the
 prompts you have already sent in this workspace, `esc` stops a run, `⌃c` quits. The box
