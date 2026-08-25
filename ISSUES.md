@@ -677,8 +677,8 @@ decision.
 - **(f)** is `edit_existing_file`'s patch mode ever discovered unprompted?
 - **(g)** unified `git` action-enum tool vs the named `git_*` family (recorded 2026-08-25; the
   family stays until the arm returns, new git verbs only on a replicated ask).
-- [ ] **Console family** (`console_open/send/read/close`, the persistent-terminal ask) —
-  designed 2026-08-25, ADR 0059; implementation plan not yet written. (Per-profile tool rosters:
+- [P] **Console family** (`console_open/send/read/close`, the persistent-terminal ask) —
+  designed 2026-08-25, ADR 0059; plan `docs/plans/2026-08-25 - 02 - console-family-plan.md`. (Per-profile tool rosters:
   grilled 2026-08-23 → ADR 0057, plan `2026-08-23 - 00`.)
 
 ---
