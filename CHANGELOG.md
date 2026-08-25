@@ -10,6 +10,25 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **The engine's Consoles get a registry and a context seam (Console family, plan item 2).** On
+  top of item 1's process mechanics, `internal/console` now holds the set of open Consoles:
+  `Registry.Open` starts a process and hands back a `Console` under a small id that climbs and is
+  never reused, so a stale id in a model's context can never come back pointing at a different
+  process. Each Console carries the delegation that opened it (empty at the top level) and the
+  command line it was opened with, and forwards read/write/kill/alive/exit-code/denial-stopped to
+  its process. A fixed cap of four open Consoles (ADR 0059 §6 — a constant, not a knob) refuses
+  the fifth with an error that names the ids already open, so the model is told what it could
+  close; a Console whose process has exited keeps its id, its last output and its exit code, and
+  still counts against the cap, until someone closes it. `CloseOwnedBy` is the delegation-end
+  sweep — a sub-agent's result is text, and a live orphan is not a result — and `CloseAll` is the
+  `/new` and engine-exit sweep; both are best-effort, never report, and tolerate an empty or nil
+  registry, so a shutdown path can run them unconditionally. Closing reaps the process before it
+  returns, so the exit code is final for the caller that reports it, and it drops the id either
+  way, which makes a second close an honest "no such console". A tool call reaches the registry
+  through `WithRegistry`/`FromContext` — the same shape as the undo journal's seam — rather than
+  by holding it, because tool instances are rebuilt when the roster changes mid-session while the
+  processes must not be. Still nothing wired to the engine, and no tools.
+
 - **A Console's process mechanics land as `internal/console` (Console family, plan item 1).** The
   first piece of the four-tool Console family (ADR 0059): a deep package holding ONE thing — a
   command running under a pseudo-terminal that outlives the tool call that started it. `Start`

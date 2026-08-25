@@ -10,7 +10,7 @@
 // 160x40 window, since no human is looking at it — and the escape sequences it paints with are
 // stripped on the way out, leaving the text a human would have seen.
 //
-// The shape of the thing. One Console is one [Process]: a command, a terminal, a goroutine
+// The shape of the thing. One [Console] is one [Process]: a command, a terminal, a goroutine
 // draining that terminal into a bounded [ring] of unread output, and a goroutine reaping the
 // exit. Reads are drain-on-read and may wait for the first new bytes, which is what lets a tool
 // collect a window of output without polling; when the buffer overflows the OLDEST bytes go and
@@ -24,14 +24,25 @@
 // setsid of its own is outside that reach — the same accepted residual the one-shot subprocess
 // path documents.
 //
+// How many, and whose. Above the process sits a [Registry]: the set of Consoles one engine holds,
+// each under a small id that is issued in order and never reused, so a stale id in a model's
+// context cannot come back pointing at a different process. It is live host state — built with the
+// engine, shared by pointer with every delegation, never written into a session — and a tool call
+// reaches it through the context seam rather than by holding it, because tool instances are
+// rebuilt when the roster changes mid-session while the processes must not be. The registry is
+// also where a Console's life ends: it caps how many are open at once, closes the ones a
+// delegation opened when that delegation ends, and closes every one of them at /new and at exit
+// (ADR 0059 §1, §6).
+//
 // What this package deliberately is NOT. It does not confine anything: the caller fences the
 // command and hands it in through [Spec.Prepare], and all this package does with that fact is
 // put the kill-on-denial watch on the output path when [Spec.Confined] says the command was
-// confined (ADR 0056 §2). It knows nothing about ids, owners, tools or the engine — it imports
-// internal/platform and the pseudo-terminal dependency and nothing else, which is what keeps the
-// file boundary at the process. Windows has no backend here yet: the build-tag pair keeps the
-// whole exported surface and [Start] returns [ErrUnsupported], because the tools above it are
-// registered on every platform.
+// confined (ADR 0056 §2). It knows nothing about tools, models or the engine's exchange — it
+// imports internal/platform and the pseudo-terminal dependency and nothing else, which is what
+// keeps the file boundary at the process; an owner is an opaque string it matches and never reads
+// meaning into. Windows has no backend here yet: the build-tag pair keeps the whole exported
+// surface and [Start] returns [ErrUnsupported], because the tools above it are registered on
+// every platform.
 //
 // Files:
 //   - doc.go — this map and the package's rationale.
@@ -39,4 +50,6 @@
 //   - process_other.go — the Windows stand-in, whose Start reports ErrUnsupported.
 //   - ring.go — the bounded drain-on-read buffer of unread output.
 //   - ansi.go — stripping the terminal control sequences out of what the model reads.
+//   - registry.go — the engine's open Consoles: ids, owners, the cap, closing by owner.
+//   - context.go — the context seam a tool call reaches the registry through.
 package console

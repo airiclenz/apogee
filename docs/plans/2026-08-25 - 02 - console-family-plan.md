@@ -155,7 +155,12 @@ kill). Windows stub compiles (`GOOS=windows go vet ./internal/console/`).
 
 ---
 
-## 2. `internal/console`: the Registry and its context seam
+## 2. `internal/console`: the Registry and its context seam — ✅ DONE (2026-08-25)
+
+NOTES (2026-08-25): `Registry.Close` tears the process down with the process layer's `Close` (kill + reap) rather than the item's literal "Kill + remove", so `Alive`/`ExitCode` are final when it returns — the binding contract's `console_close` ("kills the process group, reaps, returns … `exited with code N`") and item 5's read-the-code-after-close order both need the reap. The Console is removed from the map first and torn down outside the lock, so no registry call is ever blocked behind a teardown; `CloseOwnedBy`/`CloseAll` use the same order and swallow the teardown error by design (there is no caller left to report it to, and the error is the terminal's, not a still-running process).
+NOTES (2026-08-25): an id is issued only when the process actually starts, so a failed `Open` — `ErrUnsupported` on Windows, a refusing `Prepare` — consumes no id; "monotonic, never reused" is unaffected.
+NOTES (2026-08-25): the Windows `ErrUnsupported` case and the real-process cases share the single `registry_test.go` the item's file list names, split by `runtime.GOOS` guards rather than a build-tag pair (which would have needed a second test file the item does not name). GOOS in TEST code is what the standing requirement permits; `GOOS=windows go vet ./internal/console/` compiles it.
+NOTES (2026-08-25): `doc.go` gained the two file-map lines the item asks for, a paragraph on what the registry is, and one correction the registry made necessary — the package no longer "knows nothing about ids, owners, tools or the engine", so that sentence now reads "nothing about tools, models or the engine's exchange" with the owner named as an opaque string.
 
 Depends on item 1.
 
