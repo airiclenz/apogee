@@ -675,9 +675,11 @@ decision.
 - **(d)** do sub-35B models use `view_diff` at all? — decide with the `write_file` dry-run.
 - **(e)** `web_fetch` → `http_request` merge.
 - **(f)** is `edit_existing_file`'s patch mode ever discovered unprompted?
-- **Needs a grill session:** a unified `git` tool vs the growing `git_*` family; a persistent
-  terminal / PTY session. (Per-profile tool rosters: grilled 2026-08-23 → ADR 0057, plan
-  `2026-08-23 - 00`.)
+- **(g)** unified `git` action-enum tool vs the named `git_*` family (recorded 2026-08-25; the
+  family stays until the arm returns, new git verbs only on a replicated ask).
+- [ ] **Console family** (`console_open/send/read/close`, the persistent-terminal ask) —
+  designed 2026-08-25, ADR 0059; implementation plan not yet written. (Per-profile tool rosters:
+  grilled 2026-08-23 → ADR 0057, plan `2026-08-23 - 00`.)
 
 ---
 

@@ -45,8 +45,19 @@ experiment, not a decision:
   ExternalEffect-classified, so gating doesn't decide it.
 - **(f)** do sub-35B models ever discover `edit_existing_file`'s patch mode unprompted? — a
   discovery experiment feeding the explicit-patch-param idea.
+- **(g)** a unified `git` action-enum tool vs the named `git_*` family, on the small class —
+  recorded 2026-08-25 by the grill that closed the line below. Named tools are the discovery
+  surface (method lesson 2) and all five already ride the subproc row, so unifying gains a roster
+  slot and loses nothing on gating; which wins is a measurement. The family stays until the arm
+  returns; new git verbs are added only on a REPLICATED ask.
 
-**Needs a grill session:** a unified `git` tool with subcommands vs the growing `git_*` family.
+**Unified `git` tool vs the `git_*` family: GRILLED 2026-08-25 → arm (g) above.** The
+`git_pull`/`git_push` gating question the second round raised is answered by the existing table:
+a remote write is a subprocess (the subproc row — and `git push` is already reachable through
+`terminal` in Auto, where the network is open, ADR 0012), so a dedicated tool changes no
+boundary. A future `git_push` blocks `--force` and protected-branch pushes the way `git_commit`
+blocks amend-on-published; no dangerous-action guard rule is added ahead of the tool, and the
+candidate itself stays unreplicated.
 *(Per-profile tool rosters: GRILLED 2026-08-23 →
 [ADR 0057](../adr/0057-the-tool-roster-is-a-third-model-profile-axis-resolved-axis-wise.md);
 implementation plan `docs/plans/2026-08-23 - 00 - per-profile-tool-rosters-plan.md`.)*
@@ -95,14 +106,18 @@ model a tool-list slot.
 - **New candidate: `write_file` dry-run/preview** (deepseek) — diff a proposed full-file write
   before writing; preview exists today only for replace-style edits via `view_diff`. Pairs with
   arm (d): a write-preview is what would let `view_diff` fold away — decide them together.
-- **Needs a grill session (add): persistent terminal / PTY session** (Qwen3.8's single top pick) —
-  attach to a running dev server, drive REPLs/interactive programs via a start/send/poll session
-  pair. NOT covered by the first round's `concurrent terminal` denial (that was parallelism,
+- **Persistent terminal / PTY session** (Qwen3.8's single top pick) — attach to a running dev
+  server, drive REPLs/interactive programs via a start/send/poll session pair. NOT covered by the
+  first round's `concurrent terminal` denial (that was parallelism,
   [ADR 0039](../adr/0039-delegations-fan-out-concurrently-bounded-by-the-servers-parallel-agents-cap.md));
-  this is interactivity, with heavy confinement and lifecycle implications.
-- **Feeds the existing unified-git grill:** `git_add`/staging visibility and `git_blame`
-  (Qwen3.8); `git_pull`/`git_push` (Qwen3.6-35B — remote writes, a gating question before a
-  design question).
+  this is interactivity, with heavy confinement and lifecycle implications. **GRILLED
+  2026-08-25 → the Console family,
+  [ADR 0059](../adr/0059-a-console-is-live-host-state-the-model-drives-across-turns.md)**
+  (`console_open/send/read/close`, live host state, split along the classification line,
+  default-off/profile-enabled); implementation plan pending.
+- **Git verbs — deferred candidates, not arms:** `git_add`/staging visibility and `git_blame`
+  (Qwen3.8); `git_pull`/`git_push` (Qwen3.6-35B — its gating record is under arm (g) above).
+  Each is a single unreplicated ask; one is added only when a second poll asks for it by name.
 - **Re-filed and re-denied** (unchanged): env/system-info tool (Qwen3.6-35B) — `terminal` covers
   it. Task/todo persistence (Qwen3.8) — Mechanism territory (guided decomposition), not a tool.
 - Method lesson 1 re-confirmed: same roster, one model removes two tools, another removes none.

@@ -32,6 +32,11 @@ process per call, process-group kill, no persistent shell or REPL), so this is a
 This makes the copyable-state hygiene of ADR 0001 actually hold: a forked or resumed run
 inherits files and serialized conversation state, never a live handle.
 
+*(Amended 2026-08-25 by [ADR 0059](0059-a-console-is-live-host-state-the-model-drives-across-turns.md):
+a **Console** is the one deliberate exception — live across Turns, but never across a snapshot,
+fork, or resume, under the "production resume reconnects fresh" clause below. `terminal` and
+`python_exec` stay one-shot.)*
+
 **MCP and network are non-forkable external effects.** They reach state Apogee does not own
 and cannot snapshot:
 
