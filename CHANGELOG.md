@@ -10,6 +10,18 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **A push to `main` that changes `VERSION` now tags that commit.** A new workflow
+  (`.github/workflows/tag-on-version-bump.yml`) runs a detection script
+  (`.github/scripts/version-bump.sh`) over the pushed range and creates an **annotated** tag
+  named verbatim from the file (`v0.16.8`) at the commit that changed it — not at the push
+  head, and one tag per bump when a burst carries two. It is idempotent (an existing tag is
+  logged and left alone), it creates a git tag only — no GitHub Release, no binaries, no
+  Homebrew bump — and because the tag is created with `GITHUB_TOKEN` it triggers no other
+  workflow. The tag it makes **is** the release tag: a release cut lands the CHANGELOG rollup
+  first and ends with the VERSION bump as its final, code-free commit. The current `v0.16.8`
+  is never CI-tagged (no future push changes `VERSION` *to* it); the first CI tag is the next
+  bump.
+
 - **The daemon's Firings are composed through `firingConfig` too (plan item 8).**
   `daemonWiring.configFor` — the twin that mirrored `runHeadless` field for field — is gone:
   `fire` now resolves the three facts the ENTRY decides (the bound `servers:` entry, the entry's

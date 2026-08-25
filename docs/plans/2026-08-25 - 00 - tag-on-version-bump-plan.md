@@ -97,7 +97,9 @@ not just the last, and the transitional gap for the current `VERSION` value is r
 
 ---
 
-## 1. Add the tag-on-version-bump CI workflow
+## 1. Add the tag-on-version-bump CI workflow — ✅ DONE (2026-08-25)
+
+NOTES (2026-08-25): Script and workflow follow the plan's literal text; the only additions are a usage/output comment block above `set -euo pipefail` in the script and `name: tag the VERSION bump` on the job, both to match `ci.yml`'s documented-job house style. All eight Acceptance invocations reproduce the plan's expected `bumps=` lines exactly.
 
 **What.** Add two files: a detection script that decides *whether* and *what* to tag for a
 pushed range, and the workflow that calls it and creates the tag.
