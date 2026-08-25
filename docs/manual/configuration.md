@@ -152,7 +152,7 @@ Leave the key out and **nothing at all** is sent, so the model's own default sta
 which is exactly why you would set it: Qwen3.8's template reasons at its `xhigh` default
 unless told otherwise, which is a great deal of thinking for a one-line edit. `off` asks
 for no reasoning at all. The key is orthogonal to `style:` beside it, which only says how
-reasoning *arrives*; a value outside those seven is a startup error, and a server that
+reasoning *arrives*; a value outside those eight is a startup error, and a server that
 rejects an effort it does not support fails the turn with a message naming this key.
 
 **Apogee works out for itself whether the model has a dial at all**, from what the

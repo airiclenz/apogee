@@ -636,11 +636,11 @@ type Engine interface {
 	// SetEffortOverride states THIS session's Thinking effort (CONTEXT: Thinking effort) — the level
 	// layered ABOVE the bound model profile's own `thinking.effort:` (ADR 0050), and the engine half
 	// of the /effort command. The zero value CLEARS the override, so the profile's setting stands
-	// again; the four levels each stand until another call moves them. Like SetMode it is
-	// goroutine-safe and takes effect on the NEXT request, which is exactly why /effort is safe to
-	// run while a worker works: the Turn already in flight is untouched. It is configuration rather
-	// than a Mechanism, so it holds under Bypass, and it is never persisted — a session intent that
-	// dies with the session.
+	// again; any level in the widened effort vocabulary (domain.ThinkingEffort, ADR 0060) stands
+	// until another call moves it. Like SetMode it is goroutine-safe and takes effect on the NEXT
+	// request, which is exactly why /effort is safe to run while a worker works: the Turn already in
+	// flight is untouched. It is configuration rather than a Mechanism, so it holds under Bypass, and
+	// it is never persisted — a session intent that dies with the session.
 	SetEffortOverride(domain.ThinkingEffort)
 	// ThinkingEffort reports the two layers behind the effort the next request will carry: this
 	// session's override (SetEffortOverride) and the bound model profile's own setting, each "" when
