@@ -210,7 +210,11 @@ grep -n "EffortDialectOff" cmd/apogee/title.go
 
 ---
 
-## 3. Record the closure: ADR 0060 amendment and the ISSUES.md entry
+## 3. Record the closure: ADR 0060 amendment and the ISSUES.md entry — ✅ DONE (2026-08-25)
+
+NOTES (2026-08-25): removing the ISSUES.md entry also took the blank line that separated it from the
+preceding entry, not only the `---` rule the item names — leaving it would have ended the file on a
+trailing blank line; the neighbouring "Effort detection and the effort picker" entry is untouched.
 
 Depends on item 2.
 

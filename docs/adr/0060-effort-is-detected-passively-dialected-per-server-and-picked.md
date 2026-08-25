@@ -147,6 +147,10 @@ cap already uses: the composition-root rebind spec, into a private Agent field, 
 - **Threading the dialect into the out-of-band title/naming call** — deferred, not denied: the
   namer keeps its `chat_template_kwargs` `off` mapping, so on an OpenRouter thinking model a
   generated title may reason to the cap. Pre-existing edge, recorded rather than fixed here.
+  *Resolved 2026-08-25* — the namer now states the dialect the beat observed (`title.Prompt`
+  takes it; the composition root reads it off the same live latch the rebind path writes), so
+  `off` reaches every dialect in its own shape and the fallback re-send is skipped where the
+  dialect put nothing on the wire.
 
 ## Consequences
 
@@ -159,3 +163,5 @@ cap already uses: the composition-root rebind spec, into a private Agent field, 
 - `servers:` entries gain `effort-dialect:`; `CONTEXT.md`'s Thinking-effort entry and the
   configuration and commands manual pages state the widened vocabulary, the three dialects, the
   footer readout and the picker.
+- The out-of-band naming call carries the observed dialect, read from the composition root's
+  live latch, never from the engine (ADR 0022 addendum — it is not a Turn).

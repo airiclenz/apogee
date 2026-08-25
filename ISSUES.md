@@ -816,21 +816,3 @@ knob value, and the run had a frame-verified keeper in hand.
   (`graphics/demo/tapes/hero.tape:49-94`) and into `graphics/demo/README.md:116` ("Knob 3 is a coin
   toss, not a setting"). A clock cannot track a window that slides with run length: what this needs
   is a trigger keyed to screen state — the card having painted — rather than to elapsed time.
-
----
-
-### The out-of-band title/naming call is dialect-blind
-
-**Status:** deferred by the effort-detection/picker plan itself
-(`docs/plans/archived/2026-08-25 - 03 - effort-detection-picker-plan.md`, "Deferred (record at
-closeout)"), recorded 2026-08-25 so the deferral is deliberate rather than a silent drop.
-
-- [ ] The naming call builds its request with `ThinkingEffort: provider.EffortOff` and states no
-  dialect (`internal/title/title.go:166`), so it always emits the historical
-  `chat_template_kwargs` shape — the zero `provider.EffortDialect` — no matter which dialect the
-  bound server actually reads (ADR 0060). On a server whose dial is the `reasoning` or `openai`
-  shape (`internal/provider/wire.go:139`, `:143`) the kwarg is simply ignored and the model is free
-  to reason, so a generated title can run to the token cap and come back `title.ErrTruncated`. The
-  underlying edge predates this run; what it now wants is the per-server dialect threaded into the
-  out-of-band call the way the conversational path threads it (`internal/agent/wire.go:48`), which
-  means giving the title seam a way to learn the bound server's dialect rather than hardcoding one.
