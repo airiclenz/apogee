@@ -463,7 +463,10 @@ and is returned by `effortSupport()`.
 
 ---
 
-## 8. Add the effort segment to the footer
+## 8. Add the effort segment to the footer — ✅ DONE (2026-08-25)
+
+NOTES (2026-08-25): `layout.md` is edited too, beyond the item's Files list — it is the TUI layout spec and its "The footer's upstream slot" section stated the run as `host ✦ model ✦ workdir`, which this item makes wrong; the manual and CONTEXT.md already describe the segment (item 1), so nothing else needed touching.
+NOTES (2026-08-25): the call site gates on `footerEffortLabel`'s second return (`if effort, show := …; show`) rather than appending an always-empty word for `nonEmpty` to drop. Same rendered line — an absent segment still leaves with its separator through the existing `nonEmpty` join — but it uses both of the helper's returns instead of discarding the bool the item's own signature and test table specify.
 
 **What:** Insert an effort word into the footer run, between the upstream (model) segment and
 the workdir, so the line reads `host ✦ model ✦ <effort> ✦ ~/repo`. In

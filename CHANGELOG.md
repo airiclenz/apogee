@@ -10,6 +10,15 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **The footer says the effort the next request will carry (plan item 8).** The footer's upstream
+  run gains a thinking-effort word between the model and the workdir — `host ✦ model ✦ high ✦
+  ~/repo` — resolved session override ▸ profile `thinking.effort:` ▸ the level the server reported
+  as its own default ▸ `auto` when a supported dial has no default anyone can name. The segment is
+  present exactly when the bound model reports a dial: a model whose server advertises none
+  contributes no word and the segment leaves with its separator, so the line is unchanged from
+  before for every server with nothing to say. The resolution itself is a pure
+  `footerEffortLabel` beside the `/effort` note's own resolver, so the two readouts cannot drift.
+
 - **The TUI holds the detected thinking-effort dial (plan item 7).** Every landed beat now folds
   its `EffortSupport` — whether a dial exists, the wire dialect that reaches it, the level set the
   model reported and its own default — into the heartbeat state, read back through a single

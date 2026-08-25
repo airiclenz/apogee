@@ -2558,7 +2558,7 @@ func (m Model) footerView() string {
 	return m.footerContent(m.width)
 }
 
-// footerContent composes the footer's single line: host ✦ model ✦ workdir on the left, the mode
+// footerContent composes the footer's single line: host ✦ model ✦ effort ✦ workdir on the left, the mode
 // marker — its symbol and its word (modeMarker) — on the right, over one unbroken black field. It
 // takes the STATUS LINE's posture, one row below the box rather than one row above it — a
 // bodyIndent lead, the black field filled to the full window width, and the mode marker ending
@@ -2569,14 +2569,25 @@ func (m Model) footerView() string {
 // configured, and every segment nothing has named is dropped with its separator (nonEmpty).
 //
 // The workdir closes the run rather than opening it because the line reads outward-in — the server
-// this session talks to, the model it talks to there, and last the local directory it is pointed
-// at, the one fact of the three that no upstream state can change.
+// this session talks to, the model it talks to there, how hard that model is asked to think, and
+// last the local directory it is pointed at, the one fact of the four that no upstream state can
+// change.
 //
 // A window too narrow to hold both ends keeps today's shape: the left info truncates with an
 // ellipsis and the mode marker drops WHOLE, because a clipped mode word would name a blast radius
 // the session is not in.
 func (m Model) footerContent(w int) string {
 	segments := append([]string{hostDisplay(m.opts)}, m.upstreamSegments()...)
+	// The effort word joins the run with the upstream facts and BEFORE the workdir: how hard the
+	// model is asked to think is a property of the model answering, not of where the session is
+	// pointed, so it sits on the upstream side of the outward-in reading. A model whose dial the
+	// server reports nothing about contributes no word at all — the segment is present exactly when
+	// /effort is (ADR 0060) — and, like every unnamed segment, it leaves with its separator.
+	override, profile := m.eng.ThinkingEffort()
+	support := m.effortSupport()
+	if effort, show := footerEffortLabel(override, profile, support.Default, support.Supported); show {
+		segments = append(segments, effort)
+	}
 	info := strings.Join(nonEmpty(append(segments, m.workdir)...), " "+glyphAssistant+" ")
 	offline := ""
 	if m.hb.offline {

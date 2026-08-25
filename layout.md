@@ -1227,10 +1227,19 @@ fact goes the moment a server is bound.
 ## The footer's upstream slot
 
 **What it carries.** The footer's content row states the upstream on the left — `host ✦ model ✦
-workdir`, the sketch's `workstation ✦ qwen3.6-27B-Q4_K_S.gguf ✦ ~/Repos/apogee` — and the autonomy
-mode on the right. The host is the bound `servers:` entry's own name — the name IS a server's alias
-(ADR 0036 decision 1) — falling back to the endpoint's own host for the unlisted `--endpoint` start
-that has no name, and any segment nothing has named is dropped with its separator.
+effort ✦ workdir`, the sketch's `workstation ✦ qwen3.6-27B-Q4_K_S.gguf ✦ high ✦ ~/Repos/apogee` —
+and the autonomy mode on the right. The host is the bound `servers:` entry's own name — the name IS
+a server's alias (ADR 0036 decision 1) — falling back to the endpoint's own host for the unlisted
+`--endpoint` start that has no name, and any segment nothing has named is dropped with its
+separator.
+
+**The effort word.** The thinking-effort segment sits with the upstream facts and before the
+workdir, because how hard the model is asked to think is a property of the model answering, not of
+where the session is pointed. It states the level the NEXT request will actually carry, resolved
+session override ▸ profile `thinking.effort:` ▸ the level the server reported as its own default ▸
+the word `auto` when a supported dial has no default anyone can name (ADR 0060). It is present
+exactly when `/effort` is: a model whose server advertises no dial contributes no word, and the
+segment leaves with its separator like any other the run does not name.
 
 **The mode marker's symbol.** The mode is stated as a glyph and its word, one rung per shape:
 `⊞ plan`, `◐ ask before`, `✔ allow edits`, `⏵⏵ auto`. The glyph is rendered in the SAME styled run

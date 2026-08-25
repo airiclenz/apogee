@@ -79,3 +79,38 @@ func effortLayerLabel(e domain.ThinkingEffort) string {
 	}
 	return string(e)
 }
+
+// ----------------------------------------------------------------------------
+// The footer segment (pure)
+// ----------------------------------------------------------------------------
+
+// effortAutoLabel is the footer's word for a dial that is supported but that nothing has named a
+// level for. It is the honest reading of a /props sighting: the chat template proves the dial
+// exists and states neither a vocabulary nor a default, so the level the next request carries is
+// whatever the model itself decides — a word, not a level apogee ever asked for.
+const effortAutoLabel = "auto"
+
+// footerEffortLabel names the effort word the footer shows between the model and the workdir, and
+// reports whether there is a segment to show at all. It is the same resolution the /effort note
+// states (effortEffectiveLabel), one layer deeper: the SERVER's reported default stands under the
+// two session layers, because a server that names its own default has told us the level the next
+// request will actually carry even though apogee puts nothing on the wire for it (ADR 0031's wire
+// anchor — the footer reads the outcome, it does not create one).
+//
+// The order is override ▸ profile ▸ reported default ▸ "auto" (ADR 0060). Unsupported yields the
+// empty word and false together: the segment is present exactly when /effort is, so the footer and
+// the command menu can never disagree about whether this model has a dial.
+func footerEffortLabel(override, profile domain.ThinkingEffort, reportedDefault string, supported bool) (string, bool) {
+	switch {
+	case !supported:
+		return "", false
+	case override != "":
+		return string(override), true
+	case profile != "":
+		return string(profile), true
+	case reportedDefault != "":
+		return reportedDefault, true
+	default:
+		return effortAutoLabel, true
+	}
+}
