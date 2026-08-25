@@ -10,6 +10,25 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **A Console's process mechanics land as `internal/console` (Console family, plan item 1).** The
+  first piece of the four-tool Console family (ADR 0059): a deep package holding ONE thing — a
+  command running under a pseudo-terminal that outlives the tool call that started it. `Start`
+  runs the command in a 160x40 pty as a session leader (so job control, line editing and Ctrl-C
+  work inside it), after handing the assembled `*exec.Cmd` to the caller's `Prepare` hook — the
+  seam confinement and refusals will arrive through — and dropping whatever `Setpgid` that hook
+  asked for, because a session leader cannot also join a caller-chosen group and after `setsid`
+  the group id is the pid anyway, so the negative-pid kill still reaches every descendant. A
+  reader goroutine drains the terminal into a 1 MiB drain-on-read ring buffer that drops the
+  OLDEST bytes on overflow and reports how many, and whose read can wait for the first new bytes
+  rather than polling; terminal control sequences (CSI, OSC) are stripped on the way out, so the
+  model reads the text a human would have seen. A CONFINED Console gets the kill-on-denial watch
+  (ADR 0056 §2) in front of that ring. Teardown is by process group on every exit path —
+  cancellation, close, and after a clean exit — which is the confinement execution contract's
+  §2.4 amendment: a command that backgrounded a child and returned still leaves that child
+  holding the terminal. Windows keeps the whole exported surface and reports `ErrUnsupported`
+  from `Start` rather than dropping out of the build, because the tools above it are registered
+  on every platform. Nothing is wired to the engine yet — no ids, no owners, no tools.
+
 - **The tag convention is recorded where the repo states its conventions.** `AGENTS.md`'s
   `CHANGELOG.md` + `VERSION` bullet and a new **Versions and tags** paragraph in
   `docs/manual/building.md` now say that pushing a `VERSION` change to `main` auto-creates

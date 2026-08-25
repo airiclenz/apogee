@@ -100,7 +100,12 @@ line under the item):
 
 ---
 
-## 1. `internal/console`: the PTY process handle
+## 1. `internal/console`: the PTY process handle — ✅ DONE (2026-08-25)
+
+NOTES (2026-08-25): `Close` joins the WAITER goroutine as well as the reader, so `Alive`/`ExitCode` are final when it returns — the binding contract's `console_close` ("kills the process group, reaps, returns … `exited with code N`") needs that; both joins are bounded by a 5s deadline.
+NOTES (2026-08-25): `ErrUnsupported` is declared in BOTH halves of the build-tag pair rather than in a new shared file, keeping the item's file list exact — the `internal/tools/exec_pgroup_*.go` `processWaitDelay` precedent.
+NOTES (2026-08-25): `Process.Read` returns `(string, int)` (the ring's `([]byte, int)` after `stripEscapes`); the ring's own signature is the item's.
+NOTES (2026-08-25): the group-kill test backgrounds `sleep 60 &` inside `sh -c`, not inside an INTERACTIVE shell: an interactive shell turns job control on and puts each background job in a process group of its own — the contract's documented "descendant that left the group" residual, which no negative-pid kill reaches. Recorded in the test's doc comment.
 
 **What:** new package `internal/console` holding one Console's process mechanics, with no
 registry yet. `process.go` (POSIX, `//go:build !windows`): `type Process` wrapping a
