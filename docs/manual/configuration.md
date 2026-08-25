@@ -562,8 +562,10 @@ cache directory is a recorded follow-on (`ISSUES.md`), not something Apogee does
 If the machine is disposable and you would rather have Auto unfenced there, `/confine`
 is the route. `/confine` (or `/confine status`) reports the backend, what it can
 actually enforce here, this host's id, and the effective setting. `/confine off` runs
-Auto unconfined **for this session** and writes nothing; `/confine off --save` also
-records this machine in `~/.apogee/config.yaml`, comments and formatting intact:
+Auto unconfined **for this session** and writes nothing — a Schedule that fires from
+inside that session still runs with the fence the session started with, and `--save` is
+the route for later sessions' Firings. `/confine off --save` also records this machine
+in `~/.apogee/config.yaml`, comments and formatting intact:
 
 ```yaml
 # ~/.apogee/config.yaml

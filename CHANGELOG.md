@@ -109,6 +109,21 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **`confine-to-workspace` is a named exception to the Firing's live-settings rule (plan item 4).**
+  `/confine off|on` moves Auto's blast radius on the live engine (`internal/tui/confine.go` →
+  `cmd/apogee/wire_engine.go`) and nothing mirrors it onto `liveSettings`, so `options()` projects
+  the boot value and a Schedule fired from inside the session keeps the fence the session was
+  CONFIGURED with. Ratified on 2026-08-25 as intended behaviour rather than fixed: `/confine off` is
+  a per-session act on the blast radius, taken by a human who is watching their own turn, while the
+  unattended run raised beside it keeps the configured fence — `/confine off --save`, which writes
+  the host acknowledgement, is the route that loosens a LATER session's Firings. ADR 0037 gained a
+  dated note naming it the second deliberate exception to "a Firing sees exactly what the session
+  sees" (beside the mode, ADR 0033 decision 3); `firingConfig`'s comment now says the posture is the
+  session's CONFIGURED one and cites that note; the manual's `/confine` section says what a Schedule
+  fired from inside the session runs with; and `TestScheduleFiringKeepsTheBootFenceAfterConfineOff`
+  pins the exception so a future reader does not re-file it as a bug. No behaviour change — no
+  holder field, no apply change, one new test.
+
 - **`firingScratch` retired — the Firing's scratch dir is the composer's own now (follow-up to
   items 7–9).** With headless, the daemon and the in-session Schedule all composing through
   `firingConfig`, the helper had no production caller left: each Driver mints its record id with

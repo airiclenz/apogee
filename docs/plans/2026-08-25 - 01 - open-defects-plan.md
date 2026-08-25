@@ -165,7 +165,16 @@ go build ./internal/tools/ && go vet ./internal/tools/
 
 ---
 
-## 4. `confine-to-workspace` is a named exception to the Firing's live-settings rule
+## 4. `confine-to-workspace` is a named exception to the Firing's live-settings rule — ✅ DONE (2026-08-25)
+
+NOTES (2026-08-25): the CHANGELOG entry belongs under `### Changed`, not the `### Fixed` section
+items 1–3 used — the item's own text requires the close be recorded as a ratified exception, not a
+fix.
+NOTES (2026-08-25): removing the entry empties `ISSUES.md` § *Open defects*; the heading is left in
+place with nothing under it, matching the register's own precedent (commit `8bc08d41`).
+NOTES (2026-08-25): the ADR note and the test doc comment cite each other (the note names the test,
+the test names the note) beyond the item's literal text, so neither site can be moved without the
+other showing up in a grep.
 
 **What:** ratified above — the boot value stays. `/confine off|on` moves Auto's blast radius on the
 live engine (`internal/tui/confine.go:44` → `cmd/apogee/wire_engine.go:286`), nothing mirrors it

@@ -23,24 +23,6 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 
 ## Open defects
 
-### `/confine off|on` is not mirrored onto `liveSettings`, so a Firing fences by the boot value
-
-**Status:** open 2026-08-24 — deferred at the close of the architecture-review deepening plan
-(`docs/plans/archived/2026-08-24 - 03 - architecture-review-deepening-plan.md`); the key is outside
-the ten item 6 ratified. **Needs an owner call** on whether an unattended run should inherit a
-blast radius loosened in the session that raised it.
-
-`/confine off|on` moves Auto's blast radius on the live engine (`internal/tui/confine.go:44` →
-`cmd/apogee/wire_engine.go:286`), but nothing records the new value on the `liveSettings` holder,
-so `options()` (`cmd/apogee/wire_settings.go:542`) still projects `s.boot`'s
-`ConfineToWorkspace`. The in-session Schedule Firing composes from that projection
-(`cmd/apogee/schedule.go:113`) and the composer copies it onto the run's Config
-(`cmd/apogee/wire_firing.go:195`), so a Firing raised after a `/confine off` is still fenced by the
-value the session booted with — the one editable key where the ratified "in-session Firings honour
-live edits" rule does not hold.
-
----
-
 ## Parked / deferred work
 
 Live, deliberately deferred work only. Each entry records *enough* design that we don't re-derive

@@ -189,8 +189,14 @@ func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, []string
 		// session's own dir is. Per run rather than per Driver, so two Firings on the same minute
 		// stay out of each other's files.
 		ScratchDir: ensureScratchDir(in.roots.scratch, in.recordID),
-		// Confiner and posture as the session's, so an Auto run here is fenced by the same box an
-		// Auto session would be.
+		// Confiner and posture as the session's CONFIGURED one, so an Auto run here is fenced by the
+		// same box an Auto session on this configuration would be. The posture is the boot value and
+		// not a `/confine` toggled since: that command moves the blast radius on the live engine and
+		// nothing mirrors it onto the settings holder, so it never reaches `in.opts`. That is the
+		// second named exception to "a Firing sees exactly what the session sees" (ADR 0037, note of
+		// 2026-08-25) — a `/confine off` is a per-session act a watching human takes on their own
+		// turn, while `/confine off --save`, which writes the host acknowledgement, is what loosens
+		// the Firings a LATER session raises.
 		Confiner:           in.confiner,
 		ConfineToWorkspace: in.opts.ConfineToWorkspace,
 		WebSearchEndpoint:  in.opts.WebSearchEndpoint,

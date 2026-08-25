@@ -307,3 +307,17 @@ changes, and no key gains or loses live-ness; a key that could not be applied mi
 cannot, and a Firing sees exactly what the session sees. The mode is the one deliberate exception,
 and it is ADR 0033 decision 3's rather than this record's: a Firing runs the mode its Schedule was
 created with, never the session's.
+
+**Note (2026-08-25) — `confine-to-workspace` is the second deliberate exception.** `/confine off|on`
+moves Auto's blast radius ([ADR 0012](0012-confinement-attaches-to-blast-radius-and-confine-to-workspace-flag.md))
+on the live engine, and `liveSettings` deliberately carries no mirror for the key: `options()`
+projects `boot`'s `ConfineToWorkspace`, so a Firing is fenced by the fence the session was
+CONFIGURED with rather than by a toggle made since. That is intended, ratified on this date.
+`/confine off` is a per-session act on the blast radius, taken by a human who is watching their own
+turn; the run raised beside it is unattended, and nobody is watching that one. The route that
+loosens an unattended run is the route that writes the acknowledgement — `/confine off --save`
+records this host in `~/.apogee/config.yaml`, and a Firing raised from a LATER session then runs
+unfenced because the configuration says so, not because someone flipped a switch an hour ago. So
+the exceptions to "a Firing sees exactly what the session sees" are two, and both are named: the
+mode (ADR 0033 decision 3) and `confine-to-workspace` (this note). Pinned by
+`TestScheduleFiringKeepsTheBootFenceAfterConfineOff` (`cmd/apogee/schedule_test.go`).

@@ -599,6 +599,63 @@ func TestScheduleFiringFollowsLiveSettingsEdits(t *testing.T) {
 	}
 }
 
+// The one editable key an in-session Firing deliberately does NOT follow the session on: Auto's
+// blast radius. `/confine off|on` moves the fence on the live engine and nothing mirrors it onto
+// liveSettings, so `options()` projects the boot value and the Firing is fenced by the fence the
+// session was CONFIGURED with. Ratified 2026-08-25 as the second deliberate exception to "a Firing
+// sees exactly what the session sees" (ADR 0037's note of that date, beside the mode of ADR 0033
+// decision 3): a `/confine off` is a per-session act a human takes while watching their own turn,
+// and the unattended run raised beside it keeps the configured fence — `/confine off --save`, which
+// writes the host acknowledgement, is the route that loosens a LATER session's Firings. A failure
+// here is therefore not a composer bug to re-file; it means the exception stopped holding.
+//
+// The flip is driven through the engine seam `/confine off` itself calls
+// (tui.Engine.SetConfineToWorkspace — see confinement_e2e_test.go) rather than left out: a test that
+// toggled nothing would pass just as well against a composer that DID mirror the key.
+//
+// Composed against the package's runner seam, which is why this test does not call t.Parallel.
+func TestScheduleFiringKeepsTheBootFenceAfterConfineOff(t *testing.T) {
+	roots, err := resolveRoots(t.TempDir(), t.TempDir())
+	if err != nil {
+		t.Fatalf("resolveRoots: %v", err)
+	}
+	stub := &stubRunner{}
+	prevRunner := runOnce
+	runOnce = stub.once
+	t.Cleanup(func() { runOnce = prevRunner })
+
+	// The session as it LAUNCHED: fenced, which is the value the assertion below wants back.
+	live := newLiveSettings(config.Options{ConfineToWorkspace: true}, nil)
+
+	// The human's `/confine off`, on the live engine, exactly as the command drives it.
+	engine := newLateEngine(domain.ModeAskBefore, true)
+	t.Cleanup(func() { _ = engine.Close() })
+	engine.SetConfineToWorkspace(false)
+	if engine.ConfineToWorkspace() {
+		t.Fatal("the engine still reports confined after SetConfineToWorkspace(false) — the session-" +
+			"side flip this test is about never landed")
+	}
+
+	w := scheduleWiring{
+		roots:   roots,
+		live:    live,
+		binding: func() upstreamBinding { return upstreamBinding{Endpoint: "http://bound.invalid", Model: "bound-model"} },
+		width:   func() int { return 1 },
+	}
+
+	if _, err := w.fire(context.Background(), schedule.Firing{Prompt: "check the build", Mode: domain.ModePlan}); err != nil {
+		t.Fatalf("fire: %v", err)
+	}
+	if !stub.called {
+		t.Fatal("the firing composed no run at all")
+	}
+
+	if !stub.spec.Config.ConfineToWorkspace {
+		t.Error("the firing runs with ConfineToWorkspace = false, want the boot value true — a blast " +
+			"radius a human loosened for their own watched turn reached the run nobody is watching")
+	}
+}
+
 // A Firing resolves its attached skills through the session's OWN catalogue, and mounts that
 // catalogue's dirs as its read roots (design call 5). Shared rather than rebuilt for the reason
 // every other live seam here is shared: `use-project-skills` is editable in the `/settings` pane and
