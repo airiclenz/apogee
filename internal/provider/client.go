@@ -437,9 +437,10 @@ func (c *Client) inBandError(werr wireError, hasTemplateKwargs bool) error {
 // buildBody projects a Request onto the OpenAI chat-completions JSON body, faithfully to
 // the TS oracle: the configured model wins over the request's, sampling knobs are
 // included only when set, stream_options.include_usage rides every streamed request, and
-// tools (when present) switch message formatting into native-tool mode. The logprobs pair and
-// the chat-template kwargs are added only when the caller asked for them (`apogee probe model`
-// and the naming call respectively), so the loop's bytes are untouched.
+// tools (when present) switch message formatting into native-tool mode. The logprobs pair is
+// added only when the caller asked for it (`apogee probe model`), and the thinking-effort keys
+// only when a caller named an effort (applyEffort picks which one the bound server reads), so
+// the loop's bytes are untouched.
 func (c *Client) buildBody(req Request) chatRequest {
 	hasTools := len(req.Tools) > 0
 
@@ -474,20 +475,7 @@ func (c *Client) buildBody(req Request) chatRequest {
 		body.TopLogProbs = &n
 	}
 
-	// llama.cpp forwards chat_template_kwargs into the chat template: the Qwen-family templates
-	// read `enable_thinking` to pre-close the reasoning block, and the newer ones read
-	// `reasoning_effort` for how much of it to produce — so this is how a thinking-effort intent
-	// reaches the server today. This is the ONE canonical mapping (ADR 0050); it is
-	// template-dependent and a strict OpenAI-compatible server may reject the unknown field, so a
-	// caller must not rely on it alone. Emitted only when asked, keeping a request that asks for
-	// nothing byte-identical on the wire. An unrecognised non-empty value emits nothing: the
-	// config loader's enum already rejects typos, and the Client stays total.
-	switch req.ThinkingEffort {
-	case EffortOff:
-		body.ChatTemplateKwargs = map[string]any{"enable_thinking": false}
-	case EffortLow, EffortMedium, EffortHigh:
-		body.ChatTemplateKwargs = map[string]any{"reasoning_effort": string(req.ThinkingEffort)}
-	}
+	applyEffort(&body, req.EffortDialect, req.ThinkingEffort)
 
 	if hasTools {
 		body.Tools = make([]chatTool, 0, len(req.Tools))
@@ -503,6 +491,64 @@ func (c *Client) buildBody(req Request) chatRequest {
 		}
 	}
 	return body
+}
+
+// applyEffort expresses a request's thinking-effort intent in the dialect the bound server
+// reads, one canonical mapping per sighted dialect (ADR 0050, amended by ADR 0060):
+//
+//   - kwargs (llama.cpp, and the zero dialect): `chat_template_kwargs` is forwarded into the
+//     chat template, where the Qwen-family templates read `enable_thinking` to pre-close the
+//     reasoning block and the newer ones read a `reasoning_effort` ENTRY for how much of it to
+//     produce. Template-dependent, and a strict OpenAI-compatible server may reject the unknown
+//     field, so a caller must not rely on it alone.
+//   - reasoning (OpenRouter): a top-level `reasoning` object — a level, or `enabled: false` to
+//     switch thinking off, which is what the "off" rung means in that dialect.
+//   - openai (OpenAI, Groq): a top-level `reasoning_effort` FIELD — the same word as the kwargs
+//     entry above, in a different place on the wire. Those models cannot disable reasoning at
+//     all, so the "off" rung maps to their documented floor, "minimal".
+//
+// Nothing is emitted for an absent ("") or unrecognised effort: the config loader's enum
+// already rejects typos, the Client stays total, and a caller that asks for nothing puts
+// byte-identical bytes on the wire. Levels the bound template does not know pass through
+// verbatim — the server rejecting one is the enriched turn error, not this function's business.
+func applyEffort(body *chatRequest, dialect EffortDialect, effort Effort) {
+	if !isNamedEffort(effort) {
+		return
+	}
+
+	switch dialect {
+	case EffortDialectReasoning:
+		if effort == EffortOff || effort == EffortNone {
+			enabled := false
+			body.Reasoning = &reasoningField{Enabled: &enabled}
+			return
+		}
+		body.Reasoning = &reasoningField{Effort: string(effort)}
+	case EffortDialectOpenAI:
+		level := string(effort)
+		if effort == EffortOff || effort == EffortNone {
+			level = string(EffortMinimal)
+		}
+		body.ReasoningEffort = &level
+	case EffortDialectNone, EffortDialectKwargs:
+		if effort == EffortOff {
+			body.ChatTemplateKwargs = map[string]any{"enable_thinking": false}
+			return
+		}
+		body.ChatTemplateKwargs = map[string]any{"reasoning_effort": string(effort)}
+	}
+}
+
+// isNamedEffort reports whether e is one of the vocabulary's named levels — "" (absence) and
+// anything unrecognised are not, and emit nothing on every dialect.
+func isNamedEffort(e Effort) bool {
+	switch e {
+	case EffortOff, EffortNone, EffortMinimal, EffortLow,
+		EffortMedium, EffortHigh, EffortXHigh, EffortMax:
+		return true
+	default:
+		return false
+	}
 }
 
 // setAuth adds the bearer header when an API key is configured.

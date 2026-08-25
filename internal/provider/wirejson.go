@@ -36,6 +36,22 @@ type chatRequest struct {
 	// is omitted, so the byte-identical anchor the logprobs pair holds to applies here too: a
 	// caller that asks for nothing changes nothing on the wire.
 	ChatTemplateKwargs map[string]any `json:"chat_template_kwargs,omitempty"`
+	// Reasoning is OpenRouter's thinking-effort shape: an object carrying either a level or an
+	// `enabled: false` switch. ReasoningEffort is OpenAI's and Groq's: a TOP-LEVEL string, not to
+	// be confused with the `reasoning_effort` entry the kwargs map above carries into a llama.cpp
+	// chat template — same word, different place on the wire. Both are pointers so they are
+	// omitted unless the bound server's dialect asks for them, holding the byte-identical anchor
+	// the kwargs map and the logprobs pair hold to.
+	Reasoning       *reasoningField `json:"reasoning,omitempty"`
+	ReasoningEffort *string         `json:"reasoning_effort,omitempty"`
+}
+
+// reasoningField is the OpenRouter `reasoning` object. Effort names a level; Enabled is a
+// pointer so `enabled: false` — the way that dialect switches reasoning off — survives
+// marshalling instead of being omitted as a zero value.
+type reasoningField struct {
+	Effort  string `json:"effort,omitempty"`
+	Enabled *bool  `json:"enabled,omitempty"`
 }
 
 // chatMessage is one wire message. Content is a pointer so a tool-call-only assistant

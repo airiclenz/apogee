@@ -10,6 +10,17 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **The provider Client speaks three thinking-effort wire dialects (plan item 4).** A new
+  per-server `provider.Request.EffortDialect` seam picks how an effort intent is spelled on the
+  bound endpoint: llama.cpp's `chat_template_kwargs` (`enable_thinking: false` for the off rung,
+  otherwise a `reasoning_effort` entry), OpenRouter's top-level `reasoning` object (`{effort:
+  "<level>"}`, or `{enabled: false}` for the off rung), and OpenAI/Groq's top-level
+  `reasoning_effort` field (where the off rung maps to their documented floor, `minimal`, because
+  those models cannot disable reasoning). `provider.Effort` widens to the same seven-name union
+  the domain now carries, and the kwargs dialect forwards the new levels verbatim. The zero
+  dialect is the historical llama.cpp mapping, so every existing caller's request is
+  byte-identical; an absent or unrecognised effort still emits nothing on every dialect.
+
 - **The thinking-effort vocabulary widens from four levels to the seven real servers report
   (plan item 2).** `domain.ThinkingEffort` gains `minimal`, `xhigh` and `max` beside
   `off`/`low`/`medium`/`high`, plus `none` — the spelling the OpenRouter dialect gives the `off`

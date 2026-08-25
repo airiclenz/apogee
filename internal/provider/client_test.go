@@ -399,67 +399,230 @@ func TestBuildBody_ToolsArray(t *testing.T) {
 	}
 }
 
-// A request that wants no reasoning carries the exact kwarg object llama.cpp forwards to the
-// chat template — the Qwen-family templates key off `enable_thinking`. These are the bytes the
-// deleted DisableThinking field used to produce, asserted here so EffortOff stays its
-// byte-identical successor.
-func TestBuildBody_EffortOffEmitsEnableThinkingKwarg(t *testing.T) {
-	t.Parallel()
-
-	body := captureBody(t, Request{Messages: []Message{{Role: "user", Content: "hi"}}, ThinkingEffort: EffortOff})
-
-	kwargs, ok := body["chat_template_kwargs"].(map[string]any)
-	if !ok {
-		t.Fatalf("chat_template_kwargs = %v, want an object", body["chat_template_kwargs"])
+// dialectName labels a subtest for a dialect: the zero dialect spells itself "", which would
+// make an unreadable subtest name.
+func dialectName(d EffortDialect) string {
+	if d == EffortDialectNone {
+		return "zero"
 	}
-	if len(kwargs) != 1 || kwargs["enable_thinking"] != false {
-		t.Errorf("chat_template_kwargs = %v, want exactly {\"enable_thinking\": false}", kwargs)
+	return string(d)
+}
+
+// kwargsDialects are the two spellings that must produce the historical llama.cpp wire: the
+// explicit one, and the zero value a caller that names no dialect leaves behind.
+var kwargsDialects = []EffortDialect{EffortDialectNone, EffortDialectKwargs}
+
+// assertNoEffortKeys fails when a captured body carries any of the three thinking-effort wire
+// shapes — the byte-identical anchor's assertion (ADR 0031).
+func assertNoEffortKeys(t *testing.T, body map[string]any) {
+	t.Helper()
+
+	for _, key := range []string{"chat_template_kwargs", "reasoning", "reasoning_effort"} {
+		if value, present := body[key]; present {
+			t.Errorf("%s = %v, want the key omitted entirely", key, value)
+		}
 	}
 }
 
-// Every level rides as the template's `reasoning_effort` dial, verbatim — no per-family
-// translation table (ADR 0050), so "high" goes out as "high".
-func TestBuildBody_EffortLevelsEmitReasoningEffortKwarg(t *testing.T) {
+// A request that wants no reasoning carries the exact kwarg object llama.cpp forwards to the
+// chat template — the Qwen-family templates key off `enable_thinking`. These are the bytes the
+// deleted DisableThinking field used to produce, asserted here so EffortOff stays its
+// byte-identical successor — under the zero dialect too, which is what every caller that never
+// heard of dialects sends.
+func TestBuildBody_EffortOffEmitsEnableThinkingKwarg(t *testing.T) {
 	t.Parallel()
 
-	for _, level := range []Effort{EffortLow, EffortMedium, EffortHigh} {
-		t.Run(string(level), func(t *testing.T) {
+	for _, dialect := range kwargsDialects {
+		t.Run(dialectName(dialect), func(t *testing.T) {
 			t.Parallel()
 
-			body := captureBody(t, Request{Messages: []Message{{Role: "user", Content: "hi"}}, ThinkingEffort: level})
+			body := captureBody(t, Request{
+				Messages:       []Message{{Role: "user", Content: "hi"}},
+				ThinkingEffort: EffortOff,
+				EffortDialect:  dialect,
+			})
 
 			kwargs, ok := body["chat_template_kwargs"].(map[string]any)
 			if !ok {
 				t.Fatalf("chat_template_kwargs = %v, want an object", body["chat_template_kwargs"])
 			}
-			if len(kwargs) != 1 || kwargs["reasoning_effort"] != string(level) {
-				t.Errorf("chat_template_kwargs = %v, want exactly {\"reasoning_effort\": %q}", kwargs, level)
+			if len(kwargs) != 1 || kwargs["enable_thinking"] != false {
+				t.Errorf("chat_template_kwargs = %v, want exactly {\"enable_thinking\": false}", kwargs)
 			}
 		})
 	}
 }
 
-// The Client stays total: the config loader's enum rejects typos, so a value that reached the
-// seam anyway emits nothing rather than putting a word the template cannot read on the wire.
-func TestBuildBody_UnknownEffortEmitsNothing(t *testing.T) {
+// Every level rides as the template's `reasoning_effort` kwarg, verbatim — no per-family
+// translation table (ADR 0050), so "high" goes out as "high" and a widened level the template
+// may or may not know goes out as itself. "none" is a level here rather than the off switch:
+// only apogee's own "off" spelling closes the block via `enable_thinking`.
+func TestBuildBody_EffortLevelsEmitReasoningEffortKwarg(t *testing.T) {
 	t.Parallel()
 
-	body := captureBody(t, Request{Messages: []Message{{Role: "user", Content: "hi"}}, ThinkingEffort: Effort("hihg")})
+	levels := []Effort{EffortNone, EffortMinimal, EffortLow, EffortMedium, EffortHigh, EffortXHigh, EffortMax}
+	for _, dialect := range kwargsDialects {
+		for _, level := range levels {
+			t.Run(dialectName(dialect)+"/"+string(level), func(t *testing.T) {
+				t.Parallel()
 
-	if _, present := body["chat_template_kwargs"]; present {
-		t.Errorf("chat_template_kwargs = %v, want the key omitted for an unrecognised effort", body["chat_template_kwargs"])
+				body := captureBody(t, Request{
+					Messages:       []Message{{Role: "user", Content: "hi"}},
+					ThinkingEffort: level,
+					EffortDialect:  dialect,
+				})
+
+				kwargs, ok := body["chat_template_kwargs"].(map[string]any)
+				if !ok {
+					t.Fatalf("chat_template_kwargs = %v, want an object", body["chat_template_kwargs"])
+				}
+				if len(kwargs) != 1 || kwargs["reasoning_effort"] != string(level) {
+					t.Errorf("chat_template_kwargs = %v, want exactly {\"reasoning_effort\": %q}", kwargs, level)
+				}
+			})
+		}
 	}
 }
 
-// The byte-identical anchor: a caller that does not ask for the switch sends no such key, so
-// every existing caller's request is unchanged by the field's arrival.
+// OpenRouter reads a top-level `reasoning` object: a level under `effort`, and `enabled: false`
+// for the off rung — that dialect has no "off" level, it has a switch. Both of apogee's
+// spellings of that rung ("off" and the reported "none") reach the same switch.
+func TestBuildBody_ReasoningDialectEmitsReasoningObject(t *testing.T) {
+	t.Parallel()
+
+	for _, level := range []Effort{EffortOff, EffortNone} {
+		t.Run("switch/"+string(level), func(t *testing.T) {
+			t.Parallel()
+
+			body := captureBody(t, Request{
+				Messages:       []Message{{Role: "user", Content: "hi"}},
+				ThinkingEffort: level,
+				EffortDialect:  EffortDialectReasoning,
+			})
+
+			reasoning, ok := body["reasoning"].(map[string]any)
+			if !ok {
+				t.Fatalf("reasoning = %v, want an object", body["reasoning"])
+			}
+			if len(reasoning) != 1 || reasoning["enabled"] != false {
+				t.Errorf("reasoning = %v, want exactly {\"enabled\": false}", reasoning)
+			}
+			if _, present := body["chat_template_kwargs"]; present {
+				t.Errorf("chat_template_kwargs = %v, want the llama.cpp kwarg omitted on this dialect", body["chat_template_kwargs"])
+			}
+		})
+	}
+
+	for _, level := range []Effort{EffortMinimal, EffortLow, EffortMedium, EffortHigh, EffortXHigh, EffortMax} {
+		t.Run("level/"+string(level), func(t *testing.T) {
+			t.Parallel()
+
+			body := captureBody(t, Request{
+				Messages:       []Message{{Role: "user", Content: "hi"}},
+				ThinkingEffort: level,
+				EffortDialect:  EffortDialectReasoning,
+			})
+
+			reasoning, ok := body["reasoning"].(map[string]any)
+			if !ok {
+				t.Fatalf("reasoning = %v, want an object", body["reasoning"])
+			}
+			if len(reasoning) != 1 || reasoning["effort"] != string(level) {
+				t.Errorf("reasoning = %v, want exactly {\"effort\": %q}", reasoning, level)
+			}
+			if _, present := body["chat_template_kwargs"]; present {
+				t.Errorf("chat_template_kwargs = %v, want the llama.cpp kwarg omitted on this dialect", body["chat_template_kwargs"])
+			}
+		})
+	}
+}
+
+// OpenAI and Groq read a TOP-LEVEL `reasoning_effort` string — the same word the kwargs dialect
+// carries inside chat_template_kwargs, in a different place on the wire, so this asserts the
+// kwarg is absent. Those models cannot disable reasoning, so the off rung maps to the
+// documented floor, "minimal"; every other level passes through verbatim.
+func TestBuildBody_OpenAIDialectEmitsTopLevelReasoningEffort(t *testing.T) {
+	t.Parallel()
+
+	cases := map[Effort]string{
+		EffortOff:     string(EffortMinimal),
+		EffortNone:    string(EffortMinimal),
+		EffortMinimal: "minimal",
+		EffortLow:     "low",
+		EffortHigh:    "high",
+		EffortXHigh:   "xhigh",
+	}
+	for level, want := range cases {
+		t.Run(string(level), func(t *testing.T) {
+			t.Parallel()
+
+			body := captureBody(t, Request{
+				Messages:       []Message{{Role: "user", Content: "hi"}},
+				ThinkingEffort: level,
+				EffortDialect:  EffortDialectOpenAI,
+			})
+
+			if body["reasoning_effort"] != want {
+				t.Errorf("reasoning_effort = %v, want %q", body["reasoning_effort"], want)
+			}
+			if _, present := body["chat_template_kwargs"]; present {
+				t.Errorf("chat_template_kwargs = %v, want the llama.cpp kwarg omitted on this dialect", body["chat_template_kwargs"])
+			}
+			if _, present := body["reasoning"]; present {
+				t.Errorf("reasoning = %v, want the OpenRouter object omitted on this dialect", body["reasoning"])
+			}
+		})
+	}
+}
+
+// The Client stays total on every dialect: the config loader's enum rejects typos, so a value
+// that reached the seam anyway emits nothing rather than putting a word no server can read on
+// the wire.
+func TestBuildBody_UnknownEffortEmitsNothing(t *testing.T) {
+	t.Parallel()
+
+	dialects := []EffortDialect{EffortDialectNone, EffortDialectKwargs, EffortDialectReasoning, EffortDialectOpenAI}
+	for _, dialect := range dialects {
+		t.Run(dialectName(dialect), func(t *testing.T) {
+			t.Parallel()
+
+			body := captureBody(t, Request{
+				Messages:       []Message{{Role: "user", Content: "hi"}},
+				ThinkingEffort: Effort("hihg"),
+				EffortDialect:  dialect,
+			})
+
+			assertNoEffortKeys(t, body)
+		})
+	}
+}
+
+// The byte-identical anchor: a caller that does not ask for the switch sends none of the three
+// effort keys, so every existing caller's request is unchanged by the fields' arrival. Naming a
+// dialect without naming an effort changes nothing either — the dialect only says how an intent
+// would be spelled, never that there is one.
 func TestBuildBody_OmitsChatTemplateKwargsUnlessAsked(t *testing.T) {
 	t.Parallel()
 
-	body := captureBody(t, Request{Messages: []Message{{Role: "user", Content: "hi"}}})
+	t.Run("no effort, no dialect", func(t *testing.T) {
+		t.Parallel()
 
-	if _, present := body["chat_template_kwargs"]; present {
-		t.Errorf("an unasked-for request carried chat_template_kwargs; the field must be omitted entirely")
+		body := captureBody(t, Request{Messages: []Message{{Role: "user", Content: "hi"}}})
+
+		assertNoEffortKeys(t, body)
+	})
+
+	for _, dialect := range []EffortDialect{EffortDialectKwargs, EffortDialectReasoning, EffortDialectOpenAI} {
+		t.Run("no effort, dialect "+dialectName(dialect), func(t *testing.T) {
+			t.Parallel()
+
+			body := captureBody(t, Request{
+				Messages:      []Message{{Role: "user", Content: "hi"}},
+				EffortDialect: dialect,
+			})
+
+			assertNoEffortKeys(t, body)
+		})
 	}
 }
 

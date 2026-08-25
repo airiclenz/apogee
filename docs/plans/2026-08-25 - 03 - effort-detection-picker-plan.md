@@ -274,7 +274,21 @@ neither ⇒ unsupported; both present ⇒ reasoning dialect wins.
 
 ---
 
-## 4. Teach the provider Client the three wire dialects
+## 4. Teach the provider Client the three wire dialects — ✅ DONE (2026-08-25)
+
+NOTES (2026-08-25): item 2's text said item 4 "widens the provider side and its bridge together",
+but item 6 explicitly owns `internal/agent/wire.go`'s `toProviderEffort` widening and item 4's own
+Files list names provider files only — the bridge is therefore left to item 6, where its test is
+also specified. It still compiles and stays total in the meantime (an unmapped domain level yields
+`""`, which emits nothing).
+NOTES (2026-08-25): the mapping lives in a package-level `applyEffort` helper beside `buildBody`
+rather than as a fourth inline switch inside it; `buildBody` was already at the size limit and the
+three-dialect doc comment belongs on the mapping, not on the body projection.
+NOTES (2026-08-25): the item text says the reasoning/openai arms take "any other non-empty level".
+Implemented as "any other NAMED level" (the eight-word vocabulary) so the item's own "unrecognised
+non-empty value emits nothing / Client stays total" invariant holds identically on all three
+dialects; `TestBuildBody_UnknownEffortEmitsNothing` now asserts that across the four dialect
+spellings.
 
 **What:** Add the dialect type and the two new mappings. In `internal/provider/wire.go`:
 widen the `Effort` vocabulary to the seven-name union (add `EffortNone="none"`,

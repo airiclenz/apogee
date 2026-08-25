@@ -79,23 +79,68 @@ type Request struct {
 	// reasoning while a thinking model will otherwise spend its whole reply budget producing
 	// one.
 	ThinkingEffort Effort
+
+	// EffortDialect selects which wire shape expresses ThinkingEffort on this server. It is the
+	// semantic per-server seam that keeps the intent above dialect-free: the loop says how hard
+	// to think, this says which endpoint is listening, and the Client owns the mapping between
+	// them (ADR 0060). The zero value (EffortDialectNone) is the historical
+	// chat_template_kwargs mapping, so every existing caller's bytes are unchanged by the
+	// field's arrival; it is ignored entirely when ThinkingEffort is "".
+	EffortDialect EffortDialect
 }
 
 // Effort is how hard a call asks the Upstream to think. It mirrors the domain vocabulary
 // without importing it — the provider package stays domain-free, so the agent maps at the
-// boundary the way toProviderSampling does. "" is not a fifth level: it is the ABSENCE of the
-// setting, and absence emits nothing (ADR 0050).
+// boundary the way toProviderSampling does. The vocabulary is the seven-name union real servers
+// report (off/low/medium/high plus minimal/xhigh/max), with "none" the OpenRouter spelling of
+// the "off" rung; no one model offers all of them, and a level the bound model does not
+// understand fails the turn rather than this type. "" is not a further level: it is the ABSENCE
+// of the setting, and absence emits nothing (ADR 0050, amended by ADR 0060).
 type Effort string
 
 const (
 	// EffortOff asks for no chain-of-thought at all.
 	EffortOff Effort = "off"
+	// EffortNone is the same rung as EffortOff under the spelling the OpenRouter dialect uses.
+	EffortNone Effort = "none"
+	// EffortMinimal is the barely-there rung the OpenAI-shaped servers report below "low".
+	EffortMinimal Effort = "minimal"
 	// EffortLow is the shortest reasoning the template offers.
 	EffortLow Effort = "low"
 	// EffortMedium is the middle rung.
 	EffortMedium Effort = "medium"
 	// EffortHigh is the longest reasoning the template offers.
 	EffortHigh Effort = "high"
+	// EffortXHigh is the rung above "high" on the templates that offer one.
+	EffortXHigh Effort = "xhigh"
+	// EffortMax is the topmost rung reported in the wild, above "xhigh" where both exist.
+	EffortMax Effort = "max"
+)
+
+// EffortDialect names the wire shape a given server reads a thinking-effort intent in. It is a
+// per-server fact — a property of the endpoint, not of the call — so it is set once per binding
+// from what discovery saw (or from the server's `effort-dialect:` config key) and rides every
+// request unchanged. Three dialects have been sighted, each with its own arm in the Client's
+// mapping; growth is per-sighting, never a per-model-family table (ADR 0050, amended by
+// ADR 0060). The zero value is EffortDialectNone, which reproduces today's wire exactly: a
+// caller that names no dialect is served the llama.cpp kwargs mapping it was served before the
+// field existed.
+type EffortDialect string
+
+const (
+	// EffortDialectNone is the zero value: no dialect was named, so the request keeps the
+	// historical chat_template_kwargs mapping.
+	EffortDialectNone EffortDialect = ""
+	// EffortDialectKwargs is llama.cpp's: the intent rides inside `chat_template_kwargs`, which
+	// the server forwards into the chat template.
+	EffortDialectKwargs EffortDialect = "kwargs"
+	// EffortDialectReasoning is OpenRouter's: a top-level `reasoning` object carrying either an
+	// effort level or an `enabled: false` switch.
+	EffortDialectReasoning EffortDialect = "reasoning"
+	// EffortDialectOpenAI is OpenAI's and Groq's: a top-level `reasoning_effort` string. Note the
+	// spelling collision — this is a FIELD of the request body, whereas llama.cpp reads a
+	// `reasoning_effort` ENTRY inside chat_template_kwargs; the two are not interchangeable.
+	EffortDialectOpenAI EffortDialect = "openai"
 )
 
 // Usage is the token accounting an Upstream reply may carry (absent on servers that omit
