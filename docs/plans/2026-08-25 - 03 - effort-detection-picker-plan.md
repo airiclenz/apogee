@@ -120,7 +120,15 @@ codebase evidence, to keep items unambiguous):
 
 ---
 
-## 1. ADR 0060 + CONTEXT + manual: ratify detection, dialects, vocabulary and the picker
+## 1. ADR 0060 + CONTEXT + manual: ratify detection, dialects, vocabulary and the picker — ✅ DONE (2026-08-25)
+
+NOTES (2026-08-25): the item's Files list named four documents; a fifth,
+`docs/adr/0050-…`, gained three dated one-line amendment pointers (under decisions 2, 4
+and 5) because the plan header declares ADR 0060 amending and superseding those decisions
+and the repo's ADR convention records that on the amended record (as ADRs 0008/0057 carry
+for ADR 0059). Additive only — no decision text was altered.
+NOTES (2026-08-25): docs-only item, so no `make check`; acceptance greps and `go build
+./...` both clean.
 
 **What:** Write `docs/adr/0060-effort-is-detected-passively-dialected-per-server-and-picked.md`
 (status accepted, dated 2026-08-25) recording, as an amendment to ADR 0050, the seven

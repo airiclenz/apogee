@@ -135,9 +135,10 @@ for it fails the turn and names the cap and roughly what the reasoning cost, rat
 reporting an empty reply: the remedy is a bigger ceiling or a smaller task, not a retry.
 
 **How hard a model thinks** is a property of the model, so it rides its profile: a
-`model-profiles:` entry's `thinking:` block takes `effort:` — `off`, `low`, `medium` or
-`high` — and apogee forwards that to the server's chat template, which is where a
-reasoning model's dial actually lives:
+`model-profiles:` entry's `thinking:` block takes `effort:` — `off`, `low`, `medium` and
+`high`, plus the wider levels some servers report: `minimal`, `xhigh`, `max`, and `none`
+(which is how the OpenRouter wire spells `off`). Apogee forwards that to the server,
+which is where a reasoning model's dial actually lives:
 
 ```yaml
 # ~/.apogee/config.yaml
@@ -151,13 +152,45 @@ Leave the key out and **nothing at all** is sent, so the model's own default sta
 which is exactly why you would set it: Qwen3.8's template reasons at its `xhigh` default
 unless told otherwise, which is a great deal of thinking for a one-line edit. `off` asks
 for no reasoning at all. The key is orthogonal to `style:` beside it, which only says how
-reasoning *arrives*; a value outside those four is a startup error, and a template that
+reasoning *arrives*; a value outside those seven is a startup error, and a server that
 rejects an effort it does not support fails the turn with a message naming this key.
-`/effort <level>` layers a **session override** on top — `auto` drops it and hands the
-model back to its profile, bare `/effort` reports what the two layers resolved to. That
-override is session intent, not configuration: it survives a model switch, is never
-written to the file, and stays on the primary loop — a delegated sub-agent resolves
-effort from its own profile.
+
+**Apogee works out for itself whether the model has a dial at all**, from what the
+heartbeat already asks the server — a llama.cpp chat template that reads the kwarg, or a
+`/v1/models` entry naming that model's own levels. Nothing extra is asked for. When there
+is a dial, the effort the next request will carry shows in the status footer and
+`/effort` opens a **picker** of the levels this model reports; when there is none, the
+footer segment is gone and `/effort` is not offered in the command menu — type it anyway
+and it tells you the model reports no dial. Picking a level layers a **session override**
+on top of the profile, and the picker's `auto` row drops it again. That override is
+session intent, not configuration: it is never written to the file and stays on the
+primary loop — a delegated sub-agent resolves effort from its own profile — and it
+survives a model switch, unless the model you switch to reports a set of levels that does
+not include it, in which case it is cleared and the transcript says so.
+
+**Three different wires carry the same dial**, and apogee picks between them from what it
+detected: llama.cpp and other template-driven servers take `chat_template_kwargs`,
+OpenRouter takes a `reasoning` object, and OpenAI's own reasoning endpoints (o-series,
+gpt-5) and Groq take a top-level `reasoning_effort` field. That third one cannot be
+detected — those endpoints advertise nothing that gives it away — and neither can a
+self-hosted vLLM, SGLang or TGI, which honours the template kwargs but serves no `/props`.
+Reach for `effort-dialect:` on the `servers:` entry when you are on a provider like that:
+
+```yaml
+# ~/.apogee/config.yaml
+servers:
+  - name: openai
+    endpoint: https://api.openai.com/v1
+    api-key-env: OPENAI_API_KEY
+    effort-dialect: openai
+```
+
+`auto` — the default — detects as above. `kwargs`, `reasoning` and `openai` each force one
+of the three wires, and also tell apogee the dial exists, so the picker and the footer
+come back on a server it could not read. `off` forces the opposite: never send an effort
+at all, the escape hatch for a server that errors on the kwarg. Anything else is a startup
+error naming the entry and the key. See
+[ADR 0060](../adr/0060-effort-is-detected-passively-dialected-per-server-and-picked.md).
 
 A model that thinks for a long time can also go silent. `ui.stall-after` — a duration
 written the way Go spells one (`90s`, `2m`), default `90s`, `0` turns it off — sets how
@@ -215,9 +248,10 @@ An entry's `name` is the label `/server` lists it under, the argument
 `/server <name>` takes, the value `server:` points at, and the host name the status
 footer shows while the session is on it — one name for all four jobs, so no two
 entries may share one. `endpoint` is required; `api-key` (or `api-key-cmd` /
-`api-key-env` — exactly one of the three), `model`, `parallel-agents` and
-`sub-agents` are optional, as is `llama-launcher`, which lets apogee start,
-switch and stop that server itself — [below](#local-servers--llama-launcher).
+`api-key-env` — exactly one of the three), `model`, `parallel-agents`,
+`sub-agents` and `effort-dialect` (which of the three wires carries the
+thinking-effort dial, described above) are optional, as is `llama-launcher`,
+which lets apogee start, switch and stop that server itself — [below](#local-servers--llama-launcher).
 
 **Several sub-agents at once.** When one reply asks for several delegations, apogee
 runs them concurrently — as many at a time as that server's cap allows. Unset, the cap

@@ -10,6 +10,14 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- Ratified ADR 0060 — thinking effort is detected passively from the discovery payloads
+  apogee already fetches, carried in one of three per-server wire dialects
+  (`chat_template_kwargs`, OpenRouter's `reasoning` object, OpenAI/Groq's top-level
+  `reasoning_effort`) with a per-server `effort-dialect:` override for detection-blind
+  providers, shown as a footer segment and dialled through an `/effort` picker of the
+  model's own reported levels. Amends ADR 0050 (decisions 2, 4 and 5); `CONTEXT.md` and
+  the configuration/commands manual pages state the ratified end state.
+
 - **The Console family is documented where a user goes looking for it, and its register line is
   closed (plan item 9).** The manual's `tools:` block no longer promises that a default-off tool
   will exist one day: it names the four that do, its example `enabled:` list turns them on, and the

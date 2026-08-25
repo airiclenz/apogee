@@ -38,6 +38,11 @@ in the Client). The Client emits `{"enable_thinking": false}` for `off` and
 Qwen3.8 behaviour is live-verified, templates that read neither kwarg ignore them, and ADR
 0044's per-sighting rule extends to emission — a dialect knob grows only when a second
 verified family actually diverges.
+*(Amended 2026-08-25 by [ADR 0060](0060-effort-is-detected-passively-dialected-per-server-and-picked.md) §2: two further dialects have since been
+sighted — OpenRouter's `reasoning: {effort}` and OpenAI/Groq's top-level `reasoning_effort` —
+so the mapping here is the llama.cpp dialect, one of three. Still no per-family table: the
+dialect is a property of the endpoint, chosen by passive detection or the per-server
+`effort-dialect:` key.)*
 
 **3 — `DisableThinking` is deleted.** The title namer sets `ThinkingEffort = off`, producing
 byte-identical output to today. One field, one mapping, no precedence rules — whoever builds a
@@ -48,6 +53,9 @@ anything outside the four values. A template that still rejects a valid value st
 failure, but when the failed request carried `chat_template_kwargs` the error hint names
 `thinking.effort` as the likely culprit. No `/apply-template` probe — llama.cpp-specific
 machinery for an error the enum mostly prevents.
+*(Amended 2026-08-25 by [ADR 0060](0060-effort-is-detected-passively-dialected-per-server-and-picked.md) §4: the enum widens to the seven-name
+union `off|low|medium|high|minimal|xhigh|max`, plus `none` on the OpenRouter dialect. The
+probe stays rejected — detection is passive, from the discovery payloads already fetched.)*
 
 **5 — `/effort` is a session override layered above the profile.** Resolution is session
 override ▸ profile effort ▸ nothing. `/effort low` sets it, bare `/effort` shows the current
@@ -56,6 +64,11 @@ resolution, `/effort auto` clears it. It is the human's session intent, not a mo
 only — a routed sub-agent resolves its own model's profile
 ([ADR 0045](0045-sub-agents-route-to-the-flagged-server-with-its-own-posture.md)). The name is
 `/effort`, not `/thinking` — the latter is reserved for the deferred thinking-display feature.
+*(Amended 2026-08-25 by [ADR 0060](0060-effort-is-detected-passively-dialected-per-server-and-picked.md) §5–§8: `/effort` is a popup picker of the
+model's own reported levels — the level-word grammar is removed — hidden from the menu when
+the model reports no dial, with the resolved effort shown as a footer segment. The override
+still survives model switches, except into a model whose reported level set excludes it,
+where it is cleared with a transcript note.)*
 
 **6 — Engine stance.** Effort is configuration, not a Mechanism: it holds under `--bypass`
 (the [ADR 0046](0046-the-engine-bounds-every-reply-with-an-output-cap.md) precedent). The

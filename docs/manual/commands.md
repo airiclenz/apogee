@@ -31,7 +31,7 @@ a typo is visible before you send.
 | `/usage` | What this session has spent — one row for the main agent, one per sub-agent, and a session total | ✅ |
 | `/inspect` | The raw request and response traffic of the recent model calls — armed by `ui.inspector` (off by default) | ✅ |
 | `/confine` | Report or change Auto's blast radius — see [below](configuration.md#auto-modes-blast-radius) | ✅ report only |
-| `/effort` | Set how hard the model thinks this session — `off`, `low`, `medium`, `high`, or `auto` (back to the profile); bare reports what resolved — see [below](configuration.md) | ✅ |
+| `/effort` | Set how hard the model thinks this session — opens a picker of the levels this model supports, plus `auto` (back to the profile); the resolved effort reads in the footer, and the command is hidden when the model reports no dial — see [below](configuration.md) | ✅ |
 | `/schedule` | Run a prompt on a cycle — bare lists what is live, `/schedule <prompt>` asks for the cycle and mode, `/schedule <cycle> [auto] <prompt>` creates one outright | ✅ |
 | `/schedule-stop` | Take a schedule off the clock — the only one straight away, a picker when several are live | ✅ |
 | `/clear` (or `/new`) | Close this session into history and start a fresh one | — |
