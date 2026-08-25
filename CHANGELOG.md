@@ -8,6 +8,9 @@ point is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+
+## [0.17.1] — 2026-08-25
+
 ### Changed
 
 - **PDF text extraction moved into its own package, `internal/doctext` (plan item 1).** The
