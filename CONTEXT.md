@@ -270,7 +270,10 @@ amending ADR 0044's whole-replacement rule). The thinking axis itself resolves i
 — the channel **style**, carrying its delimiter tokens, and the **effort** dial — each on its own
 through the same three layers, so an entry that dials only `effort:` keeps the layer's channel
 style ([ADR 0058](docs/adr/0058-the-thinking-axis-resolves-as-two-sub-axes-style-and-effort.md)).
-The shipped table carries wire-shape axes only — never a roster. A shipped match announces itself
+The shipped table carries a roster only where an ADR ratified that one — first the Console family
+for Qwen3.8
+([ADR 0059](docs/adr/0059-a-console-is-live-host-state-the-model-drives-across-turns.md), amending
+ADR 0057 decision 6) — and wire-shape axes everywhere else. A shipped match announces itself
 with a one-line notice (`model profile: <pattern> (built-in) — thinking: <style>`); a user match
 applies silently, except that a switch
 whose roster deltas are non-empty announces them in one line. The resolution rides every model switch — the profile is

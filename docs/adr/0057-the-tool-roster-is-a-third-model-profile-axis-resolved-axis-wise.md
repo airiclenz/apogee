@@ -63,6 +63,10 @@ territory ("nothing leaves the roster on poll evidence alone"); no shipped entry
 bench evidence. The struct supports the axis everywhere — a future shipped roster needs its own
 ratification, not new machinery.
 
+*(**Amended 2026-08-25 by [ADR 0059](0059-a-console-is-live-host-state-the-model-drives-across-turns.md) §3:**
+the first shipped tools axis is the Console family on the qwen3.8 entry; the rule stands — each
+shipped roster is its own ratification.)*
+
 **7 — The resolved roster is a per-model binding and rides Rebind.** `/model` to the big model
 and its enabled tools appear; switch back and they are gone. Joins the profile, the Validated
 set and the system prompt in `RebindSpec`; switches commit at the ADR 0024 boundary, so the set

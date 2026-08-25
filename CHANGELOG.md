@@ -10,6 +10,26 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **The Console family is enabled out of the box for Qwen3.8 — the first roster any shipped Model
+  profile carries (plan item 7).** The built-in shape table gains a fourth entry, `qwen3.8`, and it
+  is the first that says nothing about the wire at all: no tool-call format, no thinking channel,
+  only a `tools:` axis lifting `console_open`, `console_send`, `console_read` and `console_close`.
+  Bind a Qwen3.8 build and the four tools are simply there, with the switch announcing
+  `tools: +console_close +console_open +console_read +console_send (profile)` so a menu that grew
+  by four leaves a trail; bind anything else — a `qwen3-32b` included, since the pattern is keyed
+  to the build that asked for the family by name — and nothing moved. This is the ratification ADR
+  0057 decision 6 asked for rather than a loophole in it: that decision now carries a dated
+  amendment saying so, and the rule it states is unchanged — each shipped roster needs its own ADR,
+  and ADR 0059 §3 is this one's. Turning it back off is the axis-wise rule doing its ordinary job:
+  a `model-profiles:` entry of your own that spells `tools:` for that model replaces the built-in
+  axis WHOLE, so `disabled: [console_open]` takes the whole family off rather than trimming one
+  tool out of it — the seeded config template now says that in the place a user reading about the
+  roster axis will be standing. The template also names the four default-off tools in the global
+  `tools:` block, where until today it could only promise that a default-off tool would exist one
+  day. `Shipped()` deep-copies the roster lists on the way out, because the table just gained its
+  first slice-valued field and a shallow copy would have handed callers the compiled constant's own
+  memory.
+
 - **The Console family is registered — the first built-ins on ADR 0057's default-off rung (plan
   item 6).** `console_open`, `console_send`, `console_read` and `console_close` now assemble with
   every other built-in, at the end of the build order, and every one of them declares itself

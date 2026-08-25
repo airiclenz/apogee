@@ -23,8 +23,10 @@ type Entry struct {
 	// empty one both project to the zero ToolRosterDelta, while the other two axes have a
 	// spelled zero distinct from their unwritten one (`tool-call-format: native`,
 	// `thinking: {style: none}`). The fact belongs to the FILE, so the config layer reads it off
-	// the YAML (modelProfileConfig.spellsToolsAxis) and hands it in here; a shipped entry carries
-	// no roster at all (ADR 0057 decision 6), so the table leaves it false.
+	// the YAML (modelProfileConfig.spellsToolsAxis) and hands it in here; a shipped entry MAY
+	// carry a roster, but only one an ADR ratified by name (ADR 0057 decision 6 as amended by
+	// ADR 0059 §3 — the Console family on qwen3.8), so the table spells the flag on exactly
+	// those entries and leaves it false everywhere else.
 	SpellsTools bool
 
 	// Note is provenance for humans reading the table (which sighting licensed the entry).

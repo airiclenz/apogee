@@ -393,8 +393,11 @@ context-files:
 # of them are on by default; list a name under disabled: and it is taken off the menu entirely — the
 # model is never shown it, and a call naming it is refused as a tool that does not exist. The other
 # direction is enabled:, for a tool this build leaves OFF the menu by default — present in the
-# binary, offered to nobody until you name it here. (No tool ships that way today; the key is how
-# the first one is turned on.)
+# binary, offered to nobody until you name it here. Four tools ship that way today: console_open,
+# console_send, console_read and console_close — the Console family, one long-lived interactive
+# process (a REPL, a dev server, a shell) the model opens once and drives across several turns.
+# They are off because four extra slots crowd a small model's menu; name them under enabled: and
+# every model this config runs is offered them.
 # Config-file only (no flag or env), and global: both lists apply to every model this config runs.
 #
 # It exists because a long tool list is itself a cost for a small model: fewer, clearer tools can
@@ -417,7 +420,7 @@ context-files:
 #
 # tools:
 #   disabled: [view_diff, single_find_and_replace]
-#   enabled: []
+#   enabled: [console_open, console_send, console_read, console_close]
 
 # =============================================================================
 # Which HOSTS the network tools (web_fetch, http_request, web_search) may reach. Both lists are
@@ -743,11 +746,12 @@ ui:
 #
 # Most configurations never spell this key. apogee ships a built-in SHAPE TABLE of known families
 # and applies it by model name, so an out-of-the-box run against one of them already reads correctly
-# with this file untouched. It ships as three verified entries, matched exactly the way your own are:
+# with this file untouched. It ships as four verified entries, matched exactly the way your own are:
 #
 #   gemma        delimited <think> … </think> reasoning
 #   gpt-oss      harmony channels
 #   minimax-m3   delimited <mm:think> … </mm:think> reasoning
+#   qwen3.8      no wire shape — a ROSTER: the Console family above, enabled for this model alone
 #
 # A BUILT-IN match announces itself, at startup and at every switch —
 # `model profile: minimax-m3 (built-in) — thinking: delimited` — because a built-in that matched the
@@ -801,6 +805,12 @@ ui:
 #                      per tool and in either direction. A name in both lists is a startup NOTICE and
 #                      disabled wins; a name that is no tool is the same NOTICE the global lists give.
 #                      MCP servers' tools are not addressable here — they ride their own surface.
+#
+#                      The built-in table carries one roster of its own: qwen3.8 is offered the
+#                      Console family. Your own tools: for that model REPLACES it whole, the way
+#                      every axis here replaces the built-in's — so `disabled: [console_open]` under
+#                      a qwen3.8 entry of yours turns the whole family back off rather than trimming
+#                      one tool out of it; re-list the three you still want under enabled:.
 #
 # `apogee probe model` prints the entry its findings suggest, keyed by the model it probed and ready
 # to paste here (it never edits this file). Editing this block while a session runs swaps the parser

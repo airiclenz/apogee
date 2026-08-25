@@ -393,7 +393,29 @@ conflict and disabled wins.
 
 ---
 
-## 7. The shipped Qwen3.8 roster, ADR 0057 §6 amendment, and the config template
+## 7. The shipped Qwen3.8 roster, ADR 0057 §6 amendment, and the config template — ✅ DONE (2026-08-25)
+
+NOTES (2026-08-25): the notice golden in `cmd/apogee/modelprofile_test.go` is
+`tools: +console_close +console_open +console_read +console_send (profile)`, not the item text's
+declaration-order rendering — `rosterDeltaNotice` sorts each half so one entry renders one line on
+every run. The order in the table entry itself is the item's.
+NOTES (2026-08-25): the profiles tests call `Resolve(model, user, Shipped())` rather than the item
+text's `Match(...)`; `Match` is not an exported name of the package (the tier-internal matcher is
+`best`, and `Resolve` is the seam `cmd/apogee` uses).
+NOTES (2026-08-25): `Shipped()` now clones each entry's `Tools.Enabled`/`Tools.Disabled` and
+`TestShippedReturnsACopy` asserts it. Not in the item text, but this item put the first slice into
+the compiled table: the existing shallow copy would have shared those lists with every caller, so
+the guarantee that doc comment already made would have become false with this change.
+NOTES (2026-08-25): `TestShippedTableIsTheVerifiedTrio` renamed to
+`TestShippedTableHoldsOnlyTheRatifiedEntries` — the table is four entries now, and the curation it
+pins is per-sighting for a wire shape and per-ADR for a roster.
+NOTES (2026-08-25): two prose passages beyond the item's named lines were corrected because this
+change made them false — `shippedTable`'s own doc comment ("the VERIFIED TRIO", "All three", "three
+entries") and the config template's built-in-table listing at `:746-754` ("three verified entries",
+which now names a fourth row for qwen3.8).
+NOTES (2026-08-25): `cmd/apogee/modelprofile_test.go` is not in the item's **Files** list but is
+where its **Tests** line puts the rebind-notice case; the case was added to
+`TestRebindSpecForAnnouncesRosterDeltas`, which resolves the shipped table end to end.
 
 Depends on item 6.
 

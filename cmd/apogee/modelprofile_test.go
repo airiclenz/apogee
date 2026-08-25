@@ -410,6 +410,15 @@ func TestRebindSpecForAnnouncesRosterDeltas(t *testing.T) {
 			}},
 		},
 		{
+			// The shipped roster, end to end (ADR 0059 §3): no user entry at all, and the switch
+			// still announces the Console family, because the built-in table is what equipped this
+			// model. The names are sorted, not written in table order — one entry, one line, every
+			// run.
+			name:       "a switch to a qwen3.8 model announces the shipped Console roster",
+			model:      "Qwen3.8-27B-Instruct",
+			wantNotice: "tools: +console_close +console_open +console_read +console_send (profile)",
+		},
+		{
 			name: "a switch to a model no tier knows stays silent", model: "some-unknown-14b",
 		},
 	}
