@@ -139,6 +139,16 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **The `internal/tools` file map names both undo write funnels (plan item 3).** The package
+  spine's `path_safety.go` entry (`internal/tools/doc.go`) described only the alias layer onto
+  `internal/security` and the approved escape's tools-side read (ADR 0049), so the one-line-per-file
+  map led no reader to the undo capture the same file now holds. The entry gained a second sentence
+  naming `safeWriteFile` — the one filesystem reach of the content verbs `write_file` and the three
+  edit tools — and `journaledMutation` — the sibling for the multi-path verbs `copy_file`,
+  `move_file` and `delete_file` — and stating why they are the only callers of `capturePreImage` /
+  `commit` / `commitReadBack` (ADR 0051 §3). Comment only; the spine's "Seven files register no
+  tool" count still matches the seven files it lists.
+
 - **`CONTEXT.md`'s persistence wording follows ADR 0052 §5 (plan item 2).** The **Tool summary**
   entry said a summary is "never persisted" and the **Edit regions** entry said the regions are
   "never in the session record" — the exact wording the 2026-08-24 deepening plan had already

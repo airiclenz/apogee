@@ -135,7 +135,7 @@ grep -n 'ADR 0052' CONTEXT.md                   # expect the two rewritten entri
 
 ---
 
-## 3. The `internal/tools` file map names the two undo write funnels
+## 3. The `internal/tools` file map names the two undo write funnels — ✅ DONE (2026-08-25)
 
 **What:** the package spine in `internal/tools/doc.go` (`# The package spine, one line each`,
 `doc.go:233-240`) describes `path_safety.go` as the thin alias layer onto `internal/security` plus

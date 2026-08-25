@@ -238,7 +238,13 @@
 // one symlink-aware boundary (ResolveInRoot, ErrPathEscape), so every tool and test here keeps
 // calling the same names while the rule lives in one place — plus the approved escape's
 // tools-side read (ADR 0049), which hands the security core the one permitted out-of-workspace
-// target and pins the write family's own read-back and pre-flight stat to it. path_read.go is
+// target and pins the write family's own read-back and pre-flight stat to it. It also holds BOTH
+// undo write funnels: safeWriteFile, the one filesystem reach of the content verbs (write_file
+// and the three edit tools, which hold the bytes they land), and journaledMutation, the sibling
+// for the multi-path verbs (copy_file, move_file, delete_file, which land bytes this process
+// never holds and may touch two paths over two roots) — the two are the ONLY callers of
+// capturePreImage / commit / commitReadBack, which is what makes them the whole of this
+// package's undo capture (ADR 0051 §3). path_read.go is
 // the READ half carved out beside it: the one-handle bounded read every read tool goes through,
 // the model-facing wording a fenced failure is rendered as, and readScope — the READ-only
 // multi-root resolver that tries the workspace first and then any extra read-only roots the

@@ -23,21 +23,6 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 
 ## Open defects
 
-### `internal/tools/doc.go`'s `path_safety.go` file-map entry names neither write funnel
-
-**Status:** open 2026-08-24 — deferred at the close of the architecture-review deepening plan
-(`docs/plans/archived/2026-08-24 - 03 - architecture-review-deepening-plan.md`).
-
-The package spine's `path_safety.go` line (`internal/tools/doc.go:233`) describes the file as the
-thin alias layer onto `internal/security` plus the approved escape's tools-side read (ADR 0049).
-Since item 3 the same file also holds both undo write funnels — `safeWriteFile` for the content
-verbs and `journaledMutation` for the multi-path verbs (`internal/tools/path_safety.go`), which
-after item 4 are the only callers of `capturePreImage` / `commit` / `commitReadBack` (ADR 0051 §3)
-— and the file map names neither, so the one-line-per-file spine no longer leads a reader to the
-funnel.
-
----
-
 ### `/confine off|on` is not mirrored onto `liveSettings`, so a Firing fences by the boot value
 
 **Status:** open 2026-08-24 — deferred at the close of the architecture-review deepening plan
