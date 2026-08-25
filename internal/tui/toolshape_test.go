@@ -269,6 +269,50 @@ func TestEveryToolShapeCollapsesInsideTheRowBudget(t *testing.T) {
 			},
 		},
 		{
+			name: "a console opened on a long command, printing a long body",
+			build: func() *transcript {
+				tr := &transcript{}
+				tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{
+					ID: "c1", Tool: "console_open", Arguments: []byte(`{"command":` + strconv.Quote(long) + `}`)}})
+				tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{
+					CallID: "c1", Content: "console 1 opened: " + long + "\n" + body}})
+				return tr
+			},
+		},
+		{
+			name: "a console sent a long input, answering with a long body",
+			build: func() *transcript {
+				tr := &transcript{}
+				tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{
+					ID: "c1", Tool: "console_send", Arguments: []byte(`{"id":3,"input":` + strconv.Quote(long) + `}`)}})
+				tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{
+					CallID: "c1", Content: body + "\nalive"}})
+				return tr
+			},
+		},
+		{
+			name: "a console read with a long body behind it",
+			build: func() *transcript {
+				tr := &transcript{}
+				tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{
+					ID: "c1", Tool: "console_read", Arguments: []byte(`{"id":3}`)}})
+				tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{
+					CallID: "c1", Content: long + "\n" + body + "\nalive"}})
+				return tr
+			},
+		},
+		{
+			name: "a console closed on a long unread tail",
+			build: func() *transcript {
+				tr := &transcript{}
+				tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{
+					ID: "c1", Tool: "console_close", Arguments: []byte(`{"id":3}`)}})
+				tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{
+					CallID: "c1", Content: long + "\n" + body + "\nexited with code 0"}})
+				return tr
+			},
+		},
+		{
 			name:  "a scheduled Firing",
 			build: func() *transcript { return firingBlock(long + "\n" + body) },
 		},

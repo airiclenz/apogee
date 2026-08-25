@@ -10,6 +10,28 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **The Console family reads as a console session in the transcript (plan item 8).** The four tools
+  have presenters now, so a Console run renders as four cards that say each of their facts once
+  rather than as four unregistered blobs of labelled arguments. `console_open` leads with the
+  command it started and holds the ID the model must drive the Console by in its outcome slot —
+  the one fact of an open that is nowhere else on the card — while the other three lead with
+  `console 3`, `console_send` qualifying it with what was typed (`console 3 · npm test`), which is
+  what tells one send from the next in a run of them. The slot for those three is the process's
+  own verdict, read off the status line every Console result ends with: `alive` while the program
+  is still running, `exit N` once it has ended, `killed` when a signal ended it. None of the three
+  is an error — a dev server the model asked to close exited exactly as asked — so the verdict
+  reaches the slot through the stat hook rather than through the failure layer a one-shot command's
+  non-zero exit goes down.
+  The reading itself is now ONE function rather than two spellings of it: `exitMarkerPhrase` takes
+  the marker as a parameter, and `terminal`'s `[exit code 2]` and a Console's `exited with code 2`
+  are two markers handed to the same reader — a code is worded `exit N` whatever sentence the tool
+  wrapped it in. Both markers stay anchored where their tool writes them, so a program that printed
+  the same phrase mid-stream cannot be read as the verdict on it. What the reader takes off is also
+  what the body drops: the status line and `console_open`'s `console 1 opened: …` header are both
+  already on the row, so neither is laid out a second time beneath it. The ratified tool table
+  (`docs/layout/tool-layout.md`) gained the four rows and a dated note on the one thing that makes
+  the family different — a slot that reports LIVENESS, not just an exit.
+
 - **The Console family is enabled out of the box for Qwen3.8 — the first roster any shipped Model
   profile carries (plan item 7).** The built-in shape table gains a fourth entry, `qwen3.8`, and it
   is the first that says nothing about the wire at all: no tool-call format, no thinking channel,

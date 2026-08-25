@@ -8,6 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/tools"
 )
 
 // The tool NAME is the one field of the approval pane apogee does not author — an MCP server names
@@ -75,6 +76,27 @@ func TestModelApprovalRendersTheDeclaredScope(t *testing.T) {
 	req.Scope = ""
 	if bare := ansiPattern.ReplaceAllString(m.approvalPrompt(req), ""); strings.Contains(bare, "Scope:") {
 		t.Errorf("a request carrying no scope drew a Scope line:\n%s", bare)
+	}
+}
+
+// The Console family is the second user of that line and the one it reads plainest: a console_send
+// carries a bare number for its console, and "→ console 3" is the sentence the human deciding
+// actually reads (ConsoleSend.ApprovalScope, ADR 0059). The tool words it and the pane paints it,
+// and both halves are asserted here — the wording is only worth having if it survives the pane.
+func TestModelApprovalNamesTheConsoleASendReaches(t *testing.T) {
+	m := step(t, newTestModel(t), tea.WindowSizeMsg{Width: 100, Height: 30})
+	call := domain.ToolCall{ID: "1", Tool: "console_send", Arguments: json.RawMessage(`{"id":3,"input":"npm test"}`)}
+	req := domain.ApprovalRequest{
+		Tool:      call.Tool,
+		Reason:    "subprocess execution",
+		Arguments: call.Arguments,
+		Scope:     tools.NewConsoleSend().ApprovalScope(call),
+	}
+	m = step(t, m, approvalReqMsg{Request: req, Reply: make(chan domain.ApprovalDecision, 1)})
+
+	got := ansiPattern.ReplaceAllString(m.approvalPrompt(req), "")
+	if !strings.Contains(got, "Scope: → console 3") {
+		t.Errorf("the console a send reaches did not reach the pane:\n%s", got)
 	}
 }
 

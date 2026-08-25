@@ -302,6 +302,39 @@ var toolRegistry = map[string]toolPresenter{
 		detail:  outputDetail,
 		stat:    exitCodeStat,
 	},
+	// The Console family (ADR 0059) drives ONE live process across four calls, so the four rows
+	// are written to be read together: the id the model steers by leads every branch but the
+	// open's, where the command leads and the id is what the call produced (consoleOpenStat).
+	// The labels stay distinct — a family whose members share one label would fold a close into
+	// the read above it, and "which call was that" is the one thing a console run needs to say.
+	"console_open": {
+		label:  "Console",
+		verb:   "opening",
+		target: stringArg("command"),
+		detail: consoleOpenDetail,
+		stat:   consoleOpenStat,
+	},
+	"console_send": {
+		label:  "Console Send",
+		verb:   "sending to",
+		target: consoleSendTarget,
+		detail: consoleDetail,
+		stat:   consoleStatusStat,
+	},
+	"console_read": {
+		label:  "Console Read",
+		verb:   "reading",
+		target: consoleTarget,
+		detail: consoleDetail,
+		stat:   consoleStatusStat,
+	},
+	"console_close": {
+		label:  "Console Close",
+		verb:   "closing",
+		target: consoleTarget,
+		detail: consoleDetail,
+		stat:   consoleStatusStat,
+	},
 	"git_branch": {
 		label:  "Git Branch",
 		verb:   "branching",
@@ -571,7 +604,37 @@ func exitCodeStat(domain.ToolResult) (statValue, bool) { return plainStat("exit 
 // the tool writes it, so a command that printed the same phrase cannot be read as the marker — the
 // real one is always appended after it. The code may be negative: a run whose leader exited but
 // whose pipe stayed held is reported as -1.
-var exitCodeMarker = regexp.MustCompile(`\n?\[exit code (-?\d+)\]\s*$`)
+//
+// Its two groups are the shape exitMarkerPhrase reads: the whole marker, then the code inside it.
+var exitCodeMarker = regexp.MustCompile(`\n?(\[exit code (-?\d+)\])\s*$`)
+
+// consoleStatusMarker matches the status line every Console result ends with — "alive", "exited
+// with code 2", "killed" (consoleStatus, internal/tools/console_common.go). It is anchored the way
+// exitCodeMarker is, so a program that printed "alive" mid-stream cannot be read as the verdict on
+// it; and it captures the status first and the code inside it second, exitMarkerPhrase's shape.
+var consoleStatusMarker = regexp.MustCompile(`\n?(alive|exited with code (-?\d+)|killed)\s*$`)
+
+// exitMarkerPhrase words one anchored process-status marker for the outcome slot and hands back
+// the output left once the marker has been taken off it — the body that then lays out beneath the
+// branch. It is one reading two families of execution tool share: a one-shot command ends its
+// FAILED output with "[exit code 2]", and a Console ends every result with how its process stands.
+// Two spellings of one fact, so the marker is a parameter rather than the difference between two
+// functions that would drift apart.
+//
+// A marker must capture the status it spells FIRST and, where that status carries an exit code,
+// the code SECOND: a code is worded "exit N" whatever sentence the tool wrapped it in, and a
+// status carrying none — "alive", "killed" — is its own word.
+func exitMarkerPhrase(marker *regexp.Regexp, content string) (phrase, output string, ok bool) {
+	m := marker.FindStringSubmatchIndex(content)
+	if m == nil {
+		return "", "", false
+	}
+	phrase = content[m[2]:m[3]]
+	if len(m) >= 6 && m[4] >= 0 {
+		phrase = "exit " + content[m[4]:m[5]]
+	}
+	return phrase, content[:m[0]], true
+}
 
 // exitCodeFailure words a failed subprocess call's slot from that marker — "exit 2", the red
 // counterpart of a clean exit's "exit 0" (exitCodeStat) — and hands back the output with the
@@ -583,11 +646,53 @@ var exitCodeMarker = regexp.MustCompile(`\n?\[exit code (-?\d+)\]\s*$`)
 // process started — so it falls back to that first line, where such a result does word its own
 // failure.
 func exitCodeFailure(content string) (string, string, bool) {
-	m := exitCodeMarker.FindStringSubmatchIndex(content)
-	if m == nil {
-		return "", "", false
+	return exitMarkerPhrase(exitCodeMarker, content)
+}
+
+// consoleStatusStat words the slot of the three Console calls that report on a live process
+// (console_send, console_read, console_close): "alive" while the program is still running, "exit
+// N" once it has ended, "killed" when a signal ended it. Unlike a one-shot command's exit, none of
+// those is an error — a dev server the model asked to close exited exactly as asked — so the
+// verdict reaches the slot through the stat hook rather than through the failure layer.
+//
+// A result in no such shape keeps its own prose floor: the Console refusals are error results
+// whose first line IS the message ("no console 7 (open consoles: 1, 2)").
+func consoleStatusStat(res domain.ToolResult) (statValue, bool) {
+	phrase, _, ok := exitMarkerPhrase(consoleStatusMarker, res.Content)
+	if !ok {
+		return statValue{}, false
 	}
-	return "exit " + content[m[2]:m[3]], content[:m[0]], true
+	return plainStat(phrase), true
+}
+
+// consoleOpenedHead matches the header console_open writes its result with — "console 3 opened:
+// npm run dev" (internal/tools/console_open.go) — anchored at the START, where the tool writes it,
+// so a line the program printed cannot be read as the header.
+var consoleOpenedHead = regexp.MustCompile(`^console (\d+) opened: `)
+
+// consoleOpenedID reads the Console id off that header and hands back the output beneath it. A
+// result in another shape — an id-less refusal — is handed back whole and unread.
+func consoleOpenedID(content string) (id, output string, ok bool) {
+	head, rest, _ := strings.Cut(content, "\n")
+	m := consoleOpenedHead.FindStringSubmatch(head)
+	if m == nil {
+		return "", content, false
+	}
+	return "console " + m[1], rest, true
+}
+
+// consoleOpenStat words console_open's slot with the ID the model must now drive the Console by,
+// which is what the call PRODUCED — the command it started is already the row's target, and the id
+// is nowhere else on the card. A program that was over before the call returned is worded by its
+// exit instead: an id nothing can address any more is not the outcome of that open.
+func consoleOpenStat(res domain.ToolResult) (statValue, bool) {
+	if phrase, _, ok := exitMarkerPhrase(consoleStatusMarker, res.Content); ok {
+		return plainStat(phrase), true
+	}
+	if id, _, ok := consoleOpenedID(res.Content); ok {
+		return plainStat(id), true
+	}
+	return statValue{}, false
 }
 
 // cleanStat words diagnostics' slot. Findings come back flagged as an error result, so a result
@@ -904,6 +1009,34 @@ func joinedArgs(keys ...string) func(map[string]any) string {
 	}
 }
 
+// consoleTarget leads a Console call's branch with the console it drives — "console 3" — which is
+// the whole of what console_read and console_close name. The id arrives as a JSON number, or as
+// the numeric STRING a model that quotes its arguments sends, which the tool accepts too
+// (consoleID, internal/tools/console_common.go): the row says the same thing either way rather
+// than losing its target to a quoting habit. An id in neither shape yields no target, and the
+// call's arguments lead the block instead.
+func consoleTarget(args map[string]any) string {
+	id := intArg(args, "id")
+	if id <= 0 {
+		if quoted, ok := args["id"].(string); ok {
+			id, _ = strconv.Atoi(strings.TrimSpace(quoted))
+		}
+	}
+	if id <= 0 {
+		return ""
+	}
+	return "console " + strconv.Itoa(id)
+}
+
+// consoleSendTarget carries what was TYPED as the qualifier on that console — `console 3 · npm
+// test` — because the console alone is what every send in a run has in common and the input is
+// what tells them apart. It is single-lined and clipped like any other multi-line argument
+// (firstLineArg), and a send of nothing at all — the empty input that presses Enter — is the
+// console standing alone rather than a row opening on a stray separator (qualifiedTarget).
+func consoleSendTarget(args map[string]any) string {
+	return qualifiedTarget(consoleTarget(args), firstLineArg("input")(args))
+}
+
 // refRangeTarget renders git_diff_range's base/head args as "base...head" (the three-dot
 // range the tool diffs).
 func refRangeTarget(args map[string]any) string {
@@ -1141,6 +1274,29 @@ func outputDetail(content string) toolOutcome {
 		return promotedOutput(body[0].Text, pluralStat(len(body), "line"))
 	}
 	return toolOutcome{Details: body}
+}
+
+// consoleDetail lays out what a Console printed, WITHOUT the status line the slot already words
+// (consoleStatusStat). The line is the tool's verdict on the process rather than something the
+// program said, and a body repeating "alive" under a branch that already reads "alive" spends a
+// row saying nothing twice. Everything else is free-form output and lays out as such.
+func consoleDetail(content string) toolOutcome {
+	if _, output, ok := exitMarkerPhrase(consoleStatusMarker, content); ok {
+		content = output
+	}
+	return outputDetail(content)
+}
+
+// consoleOpenDetail is consoleDetail for console_open, whose result opens with a header of the
+// tool's own — "console 3 opened: npm run dev". Both of its facts are already on the row: the
+// command IS the target, and the id is in the slot (consoleOpenStat). So the header comes off and
+// the body is what the program actually printed in the open's wait window, which is the one thing
+// on the card the model has not already been told.
+func consoleOpenDetail(content string) toolOutcome {
+	if _, output, ok := consoleOpenedID(content); ok {
+		content = output
+	}
+	return consoleDetail(content)
 }
 
 // outputBody is the body half of that split on its own: free-form output as the lines it lays out

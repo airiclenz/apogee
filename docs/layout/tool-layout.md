@@ -278,6 +278,10 @@ its body whole while collapsed, and it appears only when the two differ.
 | grep | Grep | pattern (`· include` glob) | `N hits · M files` | `path:line` matches + context |
 | terminal | Terminal | the command line | `exit 0 · 1.2s` | command + output |
 | python_exec | Python | first code line | `exit 0 · 0.4s` | code + output |
+| console_open | Console | the command line | `console N` (`exit N` when the program was already over) | the program's first output |
+| console_send | Console Send | `console N` (`· what was typed` when the input is not empty) | `alive` / `exit N` / `killed` | what the program printed back |
+| console_read | Console Read | `console N` | `alive` / `exit N` / `killed` | the output since the last read |
+| console_close | Console Close | `console N` | `exit N` / `killed` | the unread tail |
 | run_tests | Tests | path (`· filter` when set) | `PASS/FAIL · 3.1s` | runner summary + failing tests |
 | git_status | Git status | — | `N changed` | changed-file list |
 | git_log | Git log | ref | `N commits` | one line per commit |
@@ -306,6 +310,14 @@ Notes:
   deliberate); and `multi_find_and_replace`'s stat moved from `N changes` to
   `+A −R`, because the tool now records Edit regions and the slot reads their
   stat, keeping the argument-derived `N changes` only when a result carries none.
+- **2026-08-25** — the four Console rows above arrived with the family itself
+  (ADR 0059). They are the one family whose slot is a process's LIVENESS rather
+  than an exit alone: `alive` is what a console says while it is still running,
+  and none of the three verdicts is an error result — a dev server the model
+  asked to close exited exactly as asked. `console_open`'s slot holds the id
+  instead, because the command it started is already the row's target and the
+  id is nowhere else on the card. The header line and the status line are read
+  off the body they were taken from, so no Console card states a fact twice.
 - git_commit never promotes its one-line output into the slot at any width: the
   line repeats the subject the row already leads with, so the slot holds the
   short hash above and the line lays out in the body.

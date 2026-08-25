@@ -453,7 +453,27 @@ edit (the embedded default must parse).
 
 ---
 
-## 8. TUI presenters for the four tools
+## 8. TUI presenters for the four tools — ✅ DONE (2026-08-25)
+
+NOTES (2026-08-25): the item's parenthetical gives console_open the label "console" and the four
+verbs as stems ("open", "send", "read", "close"); the registry's own contract is a Title-Case label
+and a lowercase present participle, and it groups consecutive calls BY LABEL. So the labels are
+"Console" / "Console Send" / "Console Read" / "Console Close" (the git family's precedent — one
+shared label would fold a close into the read above it and lose which call was which) and the verbs
+are "opening" / "sending to" / "reading" / "closing".
+NOTES (2026-08-25): no `failure` hook was added to the four entries. `failure` is consulted only for
+an IsError result, and every Console error result is a refusal whose first line IS the message ("no
+console 7 (open consoles: 1, 2)") — the exit line never appears on one, so a hook keyed on it could
+never fire. The parametrised marker reader the item asked for is shared through the `stat` side
+instead (`exitMarkerPhrase`, used by `exitCodeFailure` and by `consoleStatusStat`).
+NOTES (2026-08-25): console_open's slot is the ID it produced rather than an exit phrase, falling
+back to the exit when the program was already over at return. The command is the row's target and
+the id is on the card nowhere else; an id nothing can address any more is not the outcome of that
+open.
+NOTES (2026-08-25): two files beyond the item's Files list. `internal/tui/toolpresent_test.go` is
+where the registry's label/verb/target rows and the stat table live (the item's Tests line asks for
+both), and `docs/layout/tool-layout.md` holds the ratified per-tool table this change is an entry
+in — leaving the four rows out would have left the table no longer covering the tool surface.
 
 Depends on item 5. Files are disjoint from items 6 and 7.
 

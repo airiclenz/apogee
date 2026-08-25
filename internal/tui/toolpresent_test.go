@@ -25,6 +25,16 @@ func detailsText(tv toolView) string {
 	return strings.Join(parts, "\n")
 }
 
+// bodyText joins the lines a view lays out BENEATH its branch, leaving the branch-riding summary
+// out — for assertions about what a body does not repeat from the row above it.
+func bodyText(tv toolView) string {
+	parts := make([]string, 0, tv.Details.len())
+	for _, d := range tv.Details.all() {
+		parts = append(parts, d.Text)
+	}
+	return strings.Join(parts, "\n")
+}
+
 // TestPresentToolCall proves the open registry: each default tool maps to its friendly label,
 // its active status-line verb, and a target pulled from the arguments, its result summarises
 // to one detail line, and an unknown or malformed call falls back to the raw name (verb
@@ -212,6 +222,38 @@ func TestPresentToolCall(t *testing.T) {
 			wantLabel:  "Python",
 			wantVerb:   "running python",
 			wantTarget: "print('hi')", wantDetail: "hi",
+		},
+		{
+			name:       "console_open → Console + the command as target and the id in the slot",
+			call:       domain.ToolCall{ID: "40", Tool: "console_open", Arguments: []byte(`{"command":"npm run dev"}`)},
+			result:     domain.ToolResult{CallID: "40", Content: "console 1 opened: npm run dev\n> dev\nready on :3000"},
+			wantLabel:  "Console",
+			wantVerb:   "opening",
+			wantTarget: "npm run dev", wantDetail: "ready on :3000",
+		},
+		{
+			name:       "console_send → the console it types into, qualified by what was typed",
+			call:       domain.ToolCall{ID: "41", Tool: "console_send", Arguments: []byte(`{"id":3,"input":"npm test"}`)},
+			result:     domain.ToolResult{CallID: "41", Content: "npm test\nPASS\nalive"},
+			wantLabel:  "Console Send",
+			wantVerb:   "sending to",
+			wantTarget: "console 3 · npm test", wantDetail: "PASS",
+		},
+		{
+			name:       "console_read → the console alone, an id the model quoted read as the same id",
+			call:       domain.ToolCall{ID: "42", Tool: "console_read", Arguments: []byte(`{"id":"3"}`)},
+			result:     domain.ToolResult{CallID: "42", Content: "still building…\nalive"},
+			wantLabel:  "Console Read",
+			wantVerb:   "reading",
+			wantTarget: "console 3", wantDetail: "still building…",
+		},
+		{
+			name:       "console_close → the console it ended, worded by how the process went",
+			call:       domain.ToolCall{ID: "43", Tool: "console_close", Arguments: []byte(`{"id":3}`)},
+			result:     domain.ToolResult{CallID: "43", Content: "bye\nexited with code 0"},
+			wantLabel:  "Console Close",
+			wantVerb:   "closing",
+			wantTarget: "console 3", wantDetail: "bye",
 		},
 		{
 			name:       "git_branch → action+name target",
@@ -1531,6 +1573,16 @@ func TestToolStat(t *testing.T) {
 		{name: "a commit in another shape keeps its floor", tool: "git_commit", result: domain.ToolResult{Content: "nothing to commit, working tree clean"}, wantOK: false},
 		{name: "git diff counts its tagged lines, not its file headers", tool: "git_diff_range", result: domain.ToolResult{Content: "--- a/x.go\n+++ b/x.go\n@@ -1 +1,2 @@\n-old\n+new\n+more"}, want: "+2 −1", wantOK: true},
 		{name: "a --stat diff has no tagged lines and keeps its floor", tool: "git_diff_range", result: domain.ToolResult{Content: " x.go | 3 +++\n 1 file changed"}, wantOK: false},
+
+		// The Console family's own trailing status line, read through the same parametrised marker
+		// (exitMarkerPhrase) as a one-shot command's exit code.
+		{name: "a send whose program is still running is alive", tool: "console_send", result: domain.ToolResult{Content: "npm test\nPASS\nalive"}, want: "alive", wantOK: true},
+		{name: "a send whose program exited words the code", tool: "console_send", result: domain.ToolResult{Content: "exit\nexited with code 2"}, want: "exit 2", wantOK: true},
+		{name: "a close that had to signal says so", tool: "console_close", result: domain.ToolResult{Content: "killed"}, want: "killed", wantOK: true},
+		{name: "a read of a console with nothing new is still alive", tool: "console_read", result: domain.ToolResult{Content: "alive"}, want: "alive", wantOK: true},
+		{name: "an open words the id the model drives it by", tool: "console_open", result: domain.ToolResult{Content: "console 3 opened: npm run dev"}, want: "console 3", wantOK: true},
+		{name: "an open whose program was already over words its exit", tool: "console_open", result: domain.ToolResult{Content: "console 3 opened: false\nexited with code 1"}, want: "exit 1", wantOK: true},
+		{name: "a console refusal keeps its prose floor", tool: "console_read", result: domain.ToolResult{Content: "no console 7 (open consoles: 1, 2)"}, wantOK: false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1574,6 +1626,37 @@ func TestDecliningStatKeepsTheProseFloor(t *testing.T) {
 	tv.enrichWithResult(domain.ToolResult{CallID: "1", Content: "\n"}, workspaceRoot{})
 	if tv.Summary.Text != "(no output)" {
 		t.Errorf("summary = %q, want the extractor's own phrase", tv.Summary.Text)
+	}
+}
+
+// A Console card says each of its facts ONCE. console_open's result opens with a header of the
+// tool's own ("console 1 opened: npm run dev") and every Console result closes with the process's
+// status line, and both are already on the row — the command is the target, the id and the status
+// are the slot — so neither may also be laid out as a body line. This is what the two hooks split
+// between them (consoleOpenDetail, consoleStatusStat), and it is the difference between a card that
+// reads as one console session and one that repeats itself twice per call.
+func TestConsoleCardStatesEachFactOnce(t *testing.T) {
+	open := presentToolCall(domain.ToolCall{ID: "1", Tool: "console_open",
+		Arguments: []byte(`{"command":"npm run dev"}`)}, "", workspaceRoot{})
+	open.enrichWithResult(domain.ToolResult{CallID: "1",
+		Content: "console 1 opened: npm run dev\n> dev\nready on :3000"}, workspaceRoot{})
+
+	if open.Summary.Text != "console 1" {
+		t.Errorf("open slot = %q, want the id the model must drive the Console by", open.Summary.Text)
+	}
+	if got := bodyText(open); strings.Contains(got, "opened:") {
+		t.Errorf("the open header was laid out again beneath the row it is already on:\n%s", got)
+	}
+
+	read := presentToolCall(domain.ToolCall{ID: "2", Tool: "console_read",
+		Arguments: []byte(`{"id":1}`)}, "", workspaceRoot{})
+	read.enrichWithResult(domain.ToolResult{CallID: "2", Content: "still building…\nstill\nalive"}, workspaceRoot{})
+
+	if read.Summary.Text != "alive" {
+		t.Errorf("read slot = %q, want the process status", read.Summary.Text)
+	}
+	if got := bodyText(read); strings.Contains(got, "alive") {
+		t.Errorf("the status line was laid out again beneath the row it is already on:\n%s", got)
 	}
 }
 
