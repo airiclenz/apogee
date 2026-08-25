@@ -429,19 +429,3 @@ func ensureScratchDir(root, id string) string {
 	}
 	return dir
 }
-
-// firingScratch mints the record id a Firing will be saved under and creates that id's scratch
-// dir under root — the pair every Driver hands the runner as the Spec's record id and the
-// Config's scratch dir, so the record and the dir share one name and gcScratchDirs reclaims the
-// dir on the same 14-day schedule a session's own dir is reclaimed on. It exists because a
-// Firing has no session host to mint for it (wire_session.go): the TUI's Schedule, the daemon
-// and `apogee headless` all raise one from a plain Config, and each of them would otherwise
-// either hand its model a stale dir or none at all.
-//
-// dir is "" when root is "" or creation failed, exactly as ensureScratchDir answers it; the id
-// is minted regardless, because the record is filed under it whether or not this host has a
-// scratch root to offer.
-func firingScratch(root string, now time.Time) (id, dir string) {
-	id = session.NewID(now)
-	return id, ensureScratchDir(root, id)
-}

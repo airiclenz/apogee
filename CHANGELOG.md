@@ -109,6 +109,15 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **`firingScratch` retired — the Firing's scratch dir is the composer's own now (follow-up to
+  items 7–9).** With headless, the daemon and the in-session Schedule all composing through
+  `firingConfig`, the helper had no production caller left: each Driver mints its record id with
+  `session.NewID` and `firingConfig` creates that id's dir through `ensureScratchDir`. The helper
+  and its unit test are gone; what they pinned is covered by `firingConfig`'s own tests and by
+  `assertFiringScratchDir` in all three Driver composition tests, plus a new
+  `TestFiringConfigNamesNoScratchDirWithoutARoot` that keeps the rootless degrade pinned — a host
+  with no scratch root names no dir, so nothing unnamed is ever advertised as writable.
+
 - **One table behind the `/settings` live apply and its reachability check (plan item 2).**
   `cmd/apogee/wire_settings.go` carried two switches over the same key set — the apply dispatcher
   and `settingsApplier.unreachable`, which names the members each key's apply dereferences — and the
@@ -266,10 +275,11 @@ point is a **minor** bump, not a breaking change.
   arrives as).
 
 - **Every Driver now gives its Firing a scratch dir of its own, named after the record (plan
-  item 6).** One helper, `firingScratch` (`cmd/apogee/wire.go`), mints the record id before the run
-  and creates `~/.apogee/scratch/<record-id>/` at 0700; the three Firing composition sites hand
-  that pair over as `Config.ScratchDir` and the new `run.Spec.RecordID`, so a Firing's `{{scratch}}`
-  is a real per-Firing dir and the existing 14-day sweep reclaims it under the record's own name.
+  item 6).** Each Driver mints the record id before the run with `session.NewID`, and the shared
+  `firingConfig` composer (`cmd/apogee/wire_firing.go`) creates `~/.apogee/scratch/<record-id>/` at
+  0700; the three Firing composition sites hand that pair over as `Config.ScratchDir` and the new
+  `run.Spec.RecordID`, so a Firing's `{{scratch}}` is a real per-Firing dir and the existing 14-day
+  sweep reclaims it under the record's own name.
   Before this, an in-session `/schedule` Firing inherited the scratch dir minted when the SESSION
   booted — stale after a `/clear` or a `/sessions` resume moved the session off it, and gone
   entirely once the sweep had been past it — while a daemon Firing and an `apogee headless` run had

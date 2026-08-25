@@ -264,3 +264,32 @@ func TestFiringConfigLeavesTheDriverSeamsNil(t *testing.T) {
 		t.Error("the composer wired a tool registry; a Firing takes the engine's own (no MCP)")
 	}
 }
+
+// A host with no scratch root names no scratch dir at all. The Config carries "" rather than a
+// half-formed path, because the dir named here is a path the confinement box then advertises as
+// writable: an unnamed one would be fenced writable and not be there when the first tool call
+// reached for it. The run is still filed under its record id either way — the id is the Driver's,
+// minted whether or not this host has a dir to offer.
+func TestFiringConfigNamesNoScratchDirWithoutARoot(t *testing.T) {
+	t.Parallel()
+
+	roots := firingRoots(t)
+	roots.scratch = ""
+
+	cfg, _, err := firingConfig(context.Background(), firingInputs{
+		opts:     config.Options{Bypass: true},
+		entry:    config.ServerEntry{Endpoint: "http://box.example/v1", ParallelAgents: 1},
+		apiKey:   "sk-test",
+		roots:    roots,
+		confiner: fenceableHost,
+		mode:     domain.ModePlan,
+		recordID: "2026-08-24T12-00-00-firing",
+	})
+	if err != nil {
+		t.Fatalf("firingConfig: %v", err)
+	}
+
+	if cfg.ScratchDir != "" {
+		t.Errorf("Config.ScratchDir = %q on a host with no scratch root, want \"\" — an unnamed path must never be fenced writable", cfg.ScratchDir)
+	}
+}
