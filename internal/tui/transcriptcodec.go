@@ -538,6 +538,38 @@ func fromWireEntry(w *wireEntry) (entry, bool) {
 	return e, true
 }
 
+// closeInterruptedCalls closes every tool call a decoded record left OPEN, wording each one with the
+// outcome that actually befell it (interruptedSummary), and reports how many it closed. It is the
+// firing rule one kind over (fromWireEntry): a record can now be written mid-Turn while a delegation
+// runs (the progress save, ADR 0022's 2026-08-25 addendum), so the blob's last sub_agent head — and
+// every child call standing under it — is stored open, and the work behind it died with the engine
+// that was running it. A resume that replayed those as stored would paint a dead child as running,
+// with no later fold able to correct it: the result those calls are waiting for is never coming,
+// because a resumed record re-attempts the delegating Turn from its boundary rather than rejoining
+// it (ADR 0007). It also covers records the cancelled-Turn path has always written with open calls.
+//
+// It is a POST-DECODE pass over the whole slice rather than a per-entry rewrite inside fromWireEntry,
+// for the two reasons the firing rule is the opposite: the caller needs the COUNT (one note is added
+// when anything was closed, replayScrollback), and this rule is about every kind of call rather than
+// the one kind a firing block is. An entry the firing rule already closed is skipped by the same
+// clause that skips every other settled call — it comes back done, and its own account of itself
+// (scheduleInterruptedSummary) stands.
+//
+// It mutates the entries in place, which is what a decoded slice is for: it is the caller's own
+// freshly built scrollback, not yet handed to the transcript.
+func closeInterruptedCalls(entries []entry) (closed int) {
+	for i := range entries {
+		e := &entries[i]
+		if e.kind != entryToolCall || e.done {
+			continue
+		}
+		e.done = true
+		e.tool.Summary = namedSummary(detailLine{Text: interruptedSummary})
+		closed++
+	}
+	return closed
+}
+
 // fromWireSkillSpans rebuilds the skill-token spans from the wire, verbatim. Nothing is validated
 // here — that is the caller's job, which alone holds the text the offsets must land in.
 func fromWireSkillSpans(ws []wireSkillSpan) []skillSpan {

@@ -295,6 +295,90 @@ func TestSessionBrowserResumeInterruptedNote(t *testing.T) {
 	}
 }
 
+// noteIndexes lists the positions of every note carrying want. The resume notices are read by COUNT
+// and by ORDER as well as by presence — a reopen must not stack a second copy of one, and the two a
+// progress-saved mid-Exchange record carries each say their own thing in their own place — and only
+// the positions answer all three.
+func noteIndexes(m Model, want string) []int {
+	var at []int
+	for i, e := range m.transcript.entries {
+		if e.kind == entryNote && e.text == want {
+			at = append(at, i)
+		}
+	}
+	return at
+}
+
+// A record written while a delegation was still running (the progress save) comes back with tool
+// calls stored open; the replay closes them and says so once, in the note that explains what the
+// ✓-less rows now mean. It is its OWN note: a record can be progress-saved without being
+// mid-Exchange (the Turn ended before the write reached disk) and mid-Exchange without holding an
+// open call (a cancel between two Turns), so the two notices are pinned independently — and where
+// both apply, the scrollback's own note leads and the engine's follows.
+func TestSessionBrowserResumeProgressSavedNote(t *testing.T) {
+	blobFor := func(t *testing.T, openDelegation bool) []byte {
+		t.Helper()
+		var src transcript
+		src.addUser("survey the tests", nil)
+		if openDelegation {
+			subAgentCall(&src, "s1", "survey", 0)
+		} else {
+			readCall(&src, "r1", "a.go", 1, 5, 0)
+		}
+		blob, err := encodeTranscript(&src)
+		if err != nil {
+			t.Fatalf("encode: %v", err)
+		}
+		return blob
+	}
+
+	for _, tc := range []struct {
+		name            string
+		openDelegation  bool
+		inExchange      bool
+		wantProgress    bool
+		wantInterrupted bool
+	}{
+		{name: "a delegation caught mid-run", openDelegation: true, wantProgress: true},
+		{
+			name:           "a delegation caught mid-run, mid-Exchange",
+			openDelegation: true, inExchange: true, wantProgress: true, wantInterrupted: true,
+		},
+		{name: "nothing left open", openDelegation: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			host := &fakeSessionHost{}
+			storeMeta(host, "sess-1", "long task", "/ws/a", time.Now(), 0, blobFor(t, tc.openDelegation))
+			m := newBrowserModel(t, &fakeEngine{inExchange: tc.inExchange}, host, "/ws/a")
+			m = openBrowser(t, m)
+
+			m, cmd := stepCmd(t, m, keyEnter())
+			m = foldResume(t, m, cmd)
+
+			progress, interrupted := noteIndexes(m, progressSavedNote), noteIndexes(m, interruptedNote)
+			if want := boolToCount(tc.wantProgress); len(progress) != want {
+				t.Errorf("progressSavedNote appeared %d times, want %d", len(progress), want)
+			}
+			if want := boolToCount(tc.wantInterrupted); len(interrupted) != want {
+				t.Errorf("interruptedNote appeared %d times, want %d", len(interrupted), want)
+			}
+			if len(progress) == 1 && len(interrupted) == 1 && progress[0] > interrupted[0] {
+				t.Errorf("the notes read %d (progress) then %d (interrupted); the scrollback's own note leads",
+					progress[0], interrupted[0])
+			}
+		})
+	}
+}
+
+// boolToCount reads a "the note is there" expectation as the number of copies of it the scrollback
+// must hold — which is one or none, never more, because every resume notice is ephemeral.
+func boolToCount(present bool) int {
+	if present {
+		return 1
+	}
+	return 0
+}
+
 // A RestoreSession failure leaves the view and the live engine untouched (the locked error rule):
 // the outgoing conversation stays painted, no start-up box is re-seeded, and only an honest
 // failure note is added.

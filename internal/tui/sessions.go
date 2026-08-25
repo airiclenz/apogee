@@ -90,6 +90,16 @@ const scheduleTagGlyph = "⟳"
 // work back up; the step-only /continue drive that actually resumes it is item 8's work.
 const interruptedNote = "this session was interrupted mid-task — /continue picks up where it left off; sending a new message discards the unfinished work"
 
+// progressSavedNote is the transcript note appended when a resumed record was written while a
+// delegation was still running (the progress save, ADR 0022's 2026-08-25 addendum) — the replay found
+// tool calls still open and closed them as interrupted (closeInterruptedCalls). It says what the ✓-less
+// rows now on screen mean: the child's work is gone, and neither continuing nor sending brings it back.
+//
+// It is its own note rather than a wording of interruptedNote because the two answer different
+// questions — that one is about the ENGINE being mid-Exchange, this one about the SCROLLBACK holding
+// work that outlived nothing — and a record can carry either, both, or neither.
+const progressSavedNote = "this record was saved while a delegation was still running — that unfinished work was not kept; /continue re-runs the step that started it, a new message discards it"
+
 // sessionListMsg carries the result of an off-loop Sessions.List() back to the Update loop: the
 // metas to render (newest first) or the error that aborts the open (foldSessionList).
 type sessionListMsg struct {

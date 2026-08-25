@@ -291,7 +291,7 @@ func summaryStyle(th theme, s branchSummary, expanded bool) lipgloss.Style {
 }
 
 // failedSummary reads the outcome's own wording for a verdict of failure (errorSummaryPrefix and
-// the two bare verdicts beside it), plus the count a TYPE ROW aggregates its run's failures into
+// the three bare verdicts beside it), plus the count a TYPE ROW aggregates its run's failures into
 // ("3 errors", runAggregate). It asks the TEXT because that is where the fact is: a summary carries
 // no verdict flag, and inventing one to be derived from the same words would be a second answer to a
 // question already settled at the presenter's seam.
@@ -300,9 +300,13 @@ func summaryStyle(th theme, s branchSummary, expanded bool) lipgloss.Style {
 // countPhrase's strict split of that same "<n> <word>" shape, so the two cannot come to disagree,
 // and only a count of one or more reads as a failure — "0 errors" is a clean run, and no aggregate
 // says it anyway.
+//
+// interruptedSummary is read here for the same reason the other two are: it is a verdict about a
+// call that produced no outcome, and the ONE place that answer has to reach is subAgentFinished — a
+// delegation closed at replay must not wear the done ✓ its row would otherwise earn from being done.
 func failedSummary(text string) bool {
 	if strings.HasPrefix(text, errorSummaryPrefix) ||
-		text == deniedSummary || text == cancelledSummary {
+		text == deniedSummary || text == cancelledSummary || text == interruptedSummary {
 		return true
 	}
 	n, noun, ok := countPhrase(text)

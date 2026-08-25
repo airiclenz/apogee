@@ -576,7 +576,9 @@ func (m *Model) replayResumed(r *ResumedSession) {
 // whose blob is empty (no scrollback was recorded) is never fatal — the view is left as the caller
 // seeded it and an honest note says the model still remembers even though the scrollback could not be
 // repainted. A session restored mid-task (inExchange) closes with the interrupted note, telling the
-// human /continue picks the work back up.
+// human /continue picks the work back up. A record written while a delegation was still running holds
+// tool calls stored OPEN; those are closed as interrupted before anything is painted, and one more
+// note (progressSavedNote) says the work behind them was not kept.
 //
 // It is the one repaint BOTH ways into a stored session run: --resume at construction (replayResumed,
 // reading the host's [ResumedSession]) and the /sessions browser's restore (resumeLoaded, reading the
@@ -585,7 +587,7 @@ func (m *Model) replayResumed(r *ResumedSession) {
 // hand in two files. The caller has already reset the transcript and reseeded the start-up box: this
 // only appends beneath it.
 //
-// All three notices are added EPHEMERALLY (addEphemeralNote): each is derived here from the record
+// All four notices are added EPHEMERALLY (addEphemeralNote): each is derived here from the record
 // being resumed, so the next resume derives it again — persisting one would stack another copy into
 // the record on every reopen while telling a re-read nothing it does not already know.
 //
@@ -596,8 +598,15 @@ func (m *Model) replayScrollback(blob []byte, title string, inExchange bool) {
 	if err != nil || len(entries) == 0 {
 		m.transcript.addEphemeralNote("resumed: " + title + " (no scrollback recorded — the model still remembers)")
 	} else {
+		// Every call the record stored OPEN is closed BEFORE the entries are replayed: what reaches the
+		// view has to be the scrollback as it is now true, and a row painted running for even one frame
+		// is a claim nothing later withdraws (closeInterruptedCalls).
+		closed := closeInterruptedCalls(entries)
 		m.transcript.replay(entries)
 		m.transcript.addEphemeralNote("resumed: " + title)
+		if closed > 0 {
+			m.transcript.addEphemeralNote(progressSavedNote)
+		}
 	}
 	if inExchange {
 		m.transcript.addEphemeralNote(interruptedNote)

@@ -94,6 +94,10 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **Resuming a session no longer paints a delegation that is already dead as still running
+  (plan item 3).** Every tool call a record stored open is closed as interrupted at replay, and one
+  note says the unfinished work was not kept and that `/continue` re-runs the step that started it.
+
 - **`go test ./cmd/apogee` no longer litters the developer's real `~/.apogee` (plan item 4).**
   Tests that wire a runtime with `ConfigDir: ""` resolve the apogee home through
   `os.UserHomeDir()`, so every run created a fresh empty `~/.apogee/scratch/<id>/` — 1,139 of

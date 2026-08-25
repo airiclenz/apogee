@@ -223,9 +223,19 @@ go test ./internal/tui/ -count=1
 
 ---
 
-## 3. Replay closes every open tool call as interrupted and says so
+## 3. Replay closes every open tool call as interrupted and says so — ✅ DONE (2026-08-25)
 
 Depends on item 2 (the shape of the record it must handle), independent in files.
+
+NOTES (2026-08-25): the item's "the painted run shows no running marker" is pinned by rendering the
+replayed run at BOTH star phases (`renderView(th, 80, false)` vs `…, true`) and asserting the lines
+are identical — the blink phase is the only place a live block differs in the plain paint, since
+`blockState.star` returns ✦ for live and settled alike at the settled phase.
+
+NOTES (2026-08-25): the firing round-trip the item asks for landed as its own test
+(`TestTranscriptCodecInterruptedPassLeavesAFiringBlockAlone`) rather than as a tail of the main codec
+test — it asserts a different rule (the two replay rules staying apart) and reads better named for
+it; both are in `transcriptcodec_test.go` beside the existing firing test.
 
 **What:** implement ratified call 5 so a progress-saved record never paints a dead child as running.
 

@@ -943,3 +943,55 @@ func TestSpanlessSubAgentHeadsGroupWithEachOther(t *testing.T) {
 		t.Errorf("refused delegations mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
 	}
 }
+
+// ----------------------------------------------------------------------------
+// A delegation the record caught mid-run (delegation progress save §3)
+// ----------------------------------------------------------------------------
+
+// A head closed at replay because the record was written while its child was still working
+// (closeInterruptedCalls) is REPORTED — its result is paired and there is nothing left to wait for —
+// but it is not FINISHED: it never reported anything, so it wears no done ✓ and its outcome slot
+// carries the interrupted verdict instead (failedSummary reads it as one). The block is not live
+// either: a run whose work died with the engine that was running it must not go on blinking at a
+// reader who resumed it hours later.
+func TestSubAgentInterruptedHeadIsNotFinished(t *testing.T) {
+	tr := &transcript{}
+	subAgentCall(tr, "s1", "survey", 0)
+	readCall(tr, "r1", "a.go", 1, 5, 1) // the child's work, settled — the head above it is not
+
+	blob, err := encodeTranscript(tr)
+	if err != nil {
+		t.Fatalf("encodeTranscript: %v", err)
+	}
+	entries, err := decodeTranscript(blob)
+	if err != nil {
+		t.Fatalf("decodeTranscript: %v", err)
+	}
+	if closed := closeInterruptedCalls(entries); closed != 1 {
+		t.Fatalf("closed = %d, want the one open head", closed)
+	}
+
+	head := entries[0].painted()
+	if !subAgentReported(head) {
+		t.Error("subAgentReported = false; a closed head has nothing left to wait for")
+	}
+	if subAgentFinished(head) {
+		t.Error("subAgentFinished = true; an interrupted run never reported and must wear no ✓")
+	}
+
+	replayed := &transcript{}
+	replayed.replay(entries)
+	settled := replayed.renderView(newTheme(scheme.Default()), 80, false)
+	blinked := replayed.renderView(newTheme(scheme.Default()), 80, true)
+	if !equalLines(settled.lines, blinked.lines) {
+		t.Error("the blink phase repainted the run; an interrupted delegation must wear no running star")
+	}
+
+	painted := renderPlain(replayed, 80)
+	if strings.Contains(painted, glyphDone) {
+		t.Errorf("the interrupted run wears the done ✓:\n%s", painted)
+	}
+	if !strings.Contains(painted, interruptedSummary) {
+		t.Errorf("the interrupted run does not say what became of it:\n%s", painted)
+	}
+}

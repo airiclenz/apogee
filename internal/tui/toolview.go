@@ -103,14 +103,21 @@ type branchSummary struct {
 }
 
 // The wordings that mark an outcome as a FAILURE, whatever produced it: the "error: …" line a
-// faulted result is summarised with (enrichWithResult), and the two bare verdicts a call that never
-// ran carries. The painter reads them to give the outcome slot its red (summaryStyle, render.go),
-// and design call 11 of docs/plans/"2026-08-10 - 04" makes that red the ONLY failure marking — no
-// glyph and no header changes colour — so the vocabulary and the mark stay one fact in one place.
+// faulted result is summarised with (enrichWithResult), and the three bare verdicts a call that
+// never ran — or never finished — carries. The painter reads them to give the outcome slot its red
+// (summaryStyle, render.go), and design call 11 of docs/plans/"2026-08-10 - 04" makes that red the
+// ONLY failure marking — no glyph and no header changes colour — so the vocabulary and the mark stay
+// one fact in one place.
+//
+// interruptedSummary is the one no live fold ever writes: it is what REPLAY closes a call with that
+// was still open when the record was written (closeInterruptedCalls), so a delegation the record
+// caught mid-run never replays as a run that reported. Being in this vocabulary is what makes
+// subAgentFinished answer false for such a head — an interrupted run wears no done ✓.
 const (
 	errorSummaryPrefix = "error: "
 	deniedSummary      = "denied"
 	cancelledSummary   = "cancelled"
+	interruptedSummary = "interrupted — the run did not finish"
 )
 
 // namedSummary is a summary in the presenter's OWN words — a typed phrase, or a sentence naming a

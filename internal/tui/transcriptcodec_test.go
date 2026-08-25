@@ -185,6 +185,91 @@ func TestTranscriptCodecClosesAnUnfinishedFiringBlock(t *testing.T) {
 	}
 }
 
+// TestTranscriptCodecClosesEveryInterruptedToolCall pins the general replay rule the firing one is a
+// special case of: a record written mid-Turn while a delegation ran (the progress save) stores the
+// delegation's head and every call standing under it OPEN, and the work behind them died with the
+// engine that was running it. closeInterruptedCalls closes each one with the outcome that actually
+// befell it and counts them, so the caller can say so once (progressSavedNote). A call that had
+// already settled when the record was written is left exactly as it was written.
+func TestTranscriptCodecClosesEveryInterruptedToolCall(t *testing.T) {
+	t.Parallel()
+	tr := &transcript{}
+	readCall(tr, "r1", "a.go", 1, 5, 0) // settled long before the record was written
+	subAgentCall(tr, "s1", "survey", 0) // the delegation the record caught mid-run
+	tr.apply(domain.ToolCallEvent{      // …and the child call it was standing on
+		EventBase: domain.EventBase{Depth: 1},
+		Call:      domain.ToolCall{ID: "c1", Tool: "read_file", Arguments: []byte(`{"path":"b.go"}`)},
+	})
+
+	data, err := encodeTranscript(tr)
+	if err != nil {
+		t.Fatalf("encodeTranscript: %v", err)
+	}
+	got, err := decodeTranscript(data)
+	if err != nil {
+		t.Fatalf("decodeTranscript: %v", err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("decoded %d entries, want the settled read, the head and its child", len(got))
+	}
+	settled := got[0].tool.Summary.Text
+
+	if closed := closeInterruptedCalls(got); closed != 2 {
+		t.Errorf("closed = %d, want 2 (the head and the child beneath it)", closed)
+	}
+	for _, tc := range []struct {
+		name  string
+		index int
+	}{
+		{name: "the delegation head", index: 1},
+		{name: "the child call beneath it", index: 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := got[tc.index]
+			if !e.done {
+				t.Error("done = false; a replayed call must not claim its work is still going")
+			}
+			if e.tool.Summary.Text != interruptedSummary {
+				t.Errorf("summary = %q, want %q", e.tool.Summary.Text, interruptedSummary)
+			}
+		})
+	}
+	if !got[0].done || got[0].tool.Summary.Text != settled {
+		t.Errorf("the settled read came back done=%v summary=%q; want it untouched (true, %q)",
+			got[0].done, got[0].tool.Summary.Text, settled)
+	}
+}
+
+// TestTranscriptCodecInterruptedPassLeavesAFiringBlockAlone keeps the two replay rules apart: the
+// firing block is closed per entry on the way in, with the account only it can give
+// (scheduleInterruptedSummary), and the general pass must not word over it. It never sees it — a
+// firing block is a kind of its own and comes back already done — which is what this pins.
+func TestTranscriptCodecInterruptedPassLeavesAFiringBlockAlone(t *testing.T) {
+	t.Parallel()
+	tr := &transcript{}
+	tr.addFiring(schedule.Event{
+		Kind: schedule.EventFired, ScheduleID: "sch-1", ScheduleName: "nightly tidy",
+		Prompt: "check the log",
+	})
+
+	data, err := encodeTranscript(tr)
+	if err != nil {
+		t.Fatalf("encodeTranscript: %v", err)
+	}
+	got, err := decodeTranscript(data)
+	if err != nil {
+		t.Fatalf("decodeTranscript: %v", err)
+	}
+
+	if closed := closeInterruptedCalls(got); closed != 0 {
+		t.Errorf("closed = %d, want 0; the firing rule had already closed the only entry", closed)
+	}
+	if got[0].tool.Summary.Text != scheduleInterruptedSummary {
+		t.Errorf("summary = %q, want the firing block's own account %q",
+			got[0].tool.Summary.Text, scheduleInterruptedSummary)
+	}
+}
+
 // TestTranscriptCodecDecodesALegacyBlobUnchanged proves the new kind is additive in the direction
 // that matters for records already on disk: a v1 blob written before the firing block existed
 // decodes exactly as it did then. Hand-written bytes rather than a re-encode, because what is being
