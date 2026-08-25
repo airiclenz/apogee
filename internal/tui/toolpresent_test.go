@@ -593,6 +593,13 @@ func TestPresentToolCallFailedSubprocessNamesItsExitCode(t *testing.T) {
 		wantSummary: "error: exit 3",
 		wantBody:    []string{"[exit code 0]"},
 	}, {
+		// The terminal writes WHY a fail-fast line stopped inside the brackets; the slot still
+		// wants the code alone, and the whole marker still comes off the body.
+		name:        "a fail-fast note inside the marker still reads as the code",
+		call:        domain.ToolCall{ID: "8", Tool: "terminal", Arguments: []byte(`{"command":"false; echo after"}`)},
+		content:     "\n[exit code 1 — fail-fast: the line stopped at the first command that failed; guard expected non-zero exits with `|| true`]",
+		wantSummary: "error: exit 1",
+	}, {
 		name:        "a subprocess result with no marker keeps the first line",
 		call:        domain.ToolCall{ID: "6", Tool: "terminal", Arguments: []byte(`{"command":"sleep 90"}`)},
 		content:     "command timed out\npartial output",

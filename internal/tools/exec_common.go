@@ -64,6 +64,13 @@ type subprocessSpec struct {
 	// cmd.exe on Windows sets it, because os/exec's argv joining mangles the quotes the
 	// shell needs (exec_cmdline_other.go).
 	cmdline string
+	// failFast reports that the caller prepended platform.FailFastPreamble to the line it is
+	// running, so a non-zero exit may be the preamble aborting the script at its first failed
+	// command rather than the line as a whole finishing badly. It rides through onto the
+	// result, where subprocessToolResult says so on the exit-code line — the model acts on the
+	// last tool result, not on a system-prompt line from a dozen calls earlier. Only the
+	// terminal's POSIX branch sets it: python_exec, git and the Console family prepend nothing.
+	failFast bool
 }
 
 // apogeeSecretEnvVars names the environment variables that carry apogee's OWN credentials. A
@@ -196,6 +203,12 @@ type subprocessResult struct {
 	// cleanly (the match landed after the process was already done, or matched output that
 	// was not a fatal denial) keeps its success result untouched.
 	denialStopped bool
+	// failFast carries the spec's failFast through to the rendering: the run was launched under
+	// the fail-fast preamble, so subprocessToolResult can tell the model that a non-zero exit
+	// stopped the rest of the line. It says nothing about whether the preamble actually fired —
+	// a line whose LAST command failed exits the same way — so the note it drives is worded as
+	// the mode that was in force, not as a verdict on which command failed.
+	failFast bool
 }
 
 // confinementDenialLabel is the line appended to a FAILED confined result whose output looks
@@ -365,6 +378,7 @@ func runSubprocess(ctx context.Context, spec subprocessSpec) (subprocessResult, 
 		res.exitCode = -1
 	}
 	res.denialStopped = denialWatch != nil && denialWatch.Detected()
+	res.failFast = spec.failFast
 	return res, nil
 }
 

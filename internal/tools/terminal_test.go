@@ -554,6 +554,84 @@ func TestTerminal_NoPreambleOnRawCmdLines(t *testing.T) {
 	}
 }
 
+// TestTerminal_DescriptionDisclosesFailFast pins the first half of the disclosure: the tool's
+// own description tells the model the POSIX line runs fail-fast and how to guard a command whose
+// non-zero exit is expected. Static, and scoped "On POSIX" so it stays true on a Windows host.
+func TestTerminal_DescriptionDisclosesFailFast(t *testing.T) {
+	t.Parallel()
+	desc := NewTerminal(t.TempDir(), nil).Description()
+	for _, want := range []string{"fail-fast", "set -e", "|| true"} {
+		if !strings.Contains(desc, want) {
+			t.Errorf("description does not name %q: %q", want, desc)
+		}
+	}
+}
+
+// TestSubprocessToolResultFailFastNote pins the second half as a pure table over
+// subprocessToolResult: a failed run launched under the preamble says so INSIDE its exit-code
+// line, a run without the preamble keeps the plain line, a clean exit gets no line at all, and a
+// timeout keeps the plain line — a run its own clock cut short did not stop at a failed command.
+func TestSubprocessToolResultFailFastNote(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name     string
+		res      subprocessResult
+		wantLine string
+		wantNote bool
+	}{
+		{"fail-fast failure names the mode", subprocessResult{exitCode: 1, failFast: true},
+			"[exit code 1", true},
+		{"failure without the preamble keeps the plain line", subprocessResult{exitCode: 1},
+			"[exit code 1]", false},
+		{"clean exit under the preamble has no exit-code line", subprocessResult{
+			combinedOutput: "hello\n", exitCode: 0, failFast: true}, "", false},
+		{"a timeout is not a fail-fast stop", subprocessResult{
+			exitCode: -1, failFast: true, timedOut: true}, "[exit code -1]", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			res := subprocessToolResult("c1", tc.res)
+
+			if got := strings.Contains(res.Content, failFastExitNote); got != tc.wantNote {
+				t.Errorf("fail-fast note present = %v, want %v (content = %q)", got, tc.wantNote, res.Content)
+			}
+			if tc.wantLine == "" {
+				if strings.Contains(res.Content, "[exit code") {
+					t.Errorf("content = %q, want no exit-code line", res.Content)
+				}
+			} else if !strings.Contains(res.Content, tc.wantLine) {
+				t.Errorf("content = %q, want it to contain %q", res.Content, tc.wantLine)
+			}
+			if tc.res.timedOut && !strings.Contains(res.Content, "command timed out") {
+				t.Errorf("content = %q, want the timeout line", res.Content)
+			}
+		})
+	}
+}
+
+// TestTerminal_FailFastNoteReachesTheModelEndToEnd drives a real POSIX run of the incident
+// shape and asserts both halves the model actually sees: the aborted line never ran, and the
+// result says WHY on its own exit-code line rather than leaving an empty failure to guess at.
+func TestTerminal_FailFastNoteReachesTheModelEndToEnd(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX fail-fast preamble; cmd.exe has no set -e analogue")
+	}
+	t.Parallel()
+
+	res, err := NewTerminal(t.TempDir(), nil).Execute(context.Background(), terminalCall("c1", "false; echo after"))
+	if err != nil {
+		t.Fatalf("Execute err = %v, want nil", err)
+	}
+
+	if !res.IsError || !strings.Contains(res.Content, failFastExitNote) {
+		t.Errorf("result = %q (IsError=%v), want a failure whose exit-code line names fail-fast", res.Content, res.IsError)
+	}
+	if strings.Contains(res.Content, "after") {
+		t.Errorf("result = %q, want the line after the failure never to have run", res.Content)
+	}
+}
+
 // TestSubprocessToolResultDenialLabel pins the denial-label rendering as a pure table over
 // subprocessToolResult: the label lands only on a CONFINED, non-zero-exit result whose output
 // carries an OS-denial signature — every other combination stays label-free, and a clean exit

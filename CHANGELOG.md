@@ -38,6 +38,20 @@ point is a **minor** bump, not a breaking change.
   amendment recording the third, engine-composed part of §6's composition; `CONTEXT.md` gains an
   **Orientation block** term beside *Scratch dir*.
 
+- **The `terminal` tool now discloses its POSIX fail-fast preamble — in its description and,
+  more importantly, at the point of failure (plan item 2).** The tool description gains one
+  sentence saying a POSIX line runs fail-fast (`set -e`, plus `pipefail` where the shell
+  supports it) and how to guard an expected non-zero exit (`grep … || true`). A failed run that
+  carried the preamble now says so inside its own exit-code line —
+  ``[exit code 1 — fail-fast: the line stopped at the first command that failed; guard expected
+  non-zero exits with `|| true`]`` — because a small model acts on the last tool result, not on a
+  system-prompt line from a dozen calls earlier, and an aborted script prints nothing about
+  having aborted. `subprocessSpec`/`subprocessResult` gained a `failFast` flag that only the
+  terminal's POSIX branch sets: `python_exec`, `git` and the Console family keep the plain
+  `[exit code N]`, and so does a timeout on the terminal itself (a run its own clock cut short
+  did not stop at a failed command). The confinement labels still follow on their own line,
+  unchanged in order.
+
 ## [0.17.1] — 2026-08-25
 
 ### Changed

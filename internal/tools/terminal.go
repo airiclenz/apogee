@@ -15,7 +15,7 @@ import (
 
 var terminalSpec = toolSpec{
 	name:        "terminal",
-	description: "Run a shell command line and capture its output and exit code. One-shot (a fresh process per call); supports pipes, redirection, and globbing through the platform shell.",
+	description: "Run a shell command line and capture its output and exit code. One-shot (a fresh process per call); supports pipes, redirection, and globbing through the platform shell. On POSIX the line runs fail-fast (`set -e`, and `pipefail` where the shell supports it): the first command that exits non-zero stops the rest of the line, so guard expected non-zero exits (`grep … || true`).",
 	schema: json.RawMessage(`{
   "type": "object",
   "required": ["command"],
@@ -48,7 +48,11 @@ type terminalArgs struct {
 // On the POSIX path every script runs under a fail-fast preamble
 // (platform.FailFastPreamble: `set -e`, plus `set -o pipefail` where the host sh accepts
 // it), so a failed plain command aborts the whole script instead of letting an unguarded
-// later line run against a half-done state. `set -e` does NOT cover a failure inside an
+// later line run against a half-done state. The preamble is DISCLOSED rather than silent:
+// the tool description says the POSIX line runs fail-fast and how to guard an expected
+// non-zero exit, and a failed run's exit-code line repeats it at the point of failure
+// (failFastExitNote) — a script that aborted early prints nothing about having done so, and
+// the reviewed 2026-08-25 session shows a model spending six calls re-running one. `set -e` does NOT cover a failure inside an
 // AND-OR list other than its last command (POSIX exempts them), so a denied
 // `mkdir d && cd d && …` chain still falls through to the lines after it — the 2026-08-22
 // incident's shape; that gap is closed by the live kill-on-denial watch every CONFINED
@@ -121,15 +125,17 @@ func (t *Terminal) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 	// parse verdict is about what the model wrote, and cmd.exe — which has no `set -e`
 	// analogue — gets the line verbatim.
 	command := args.Command
-	if cmdline == "" {
+	failFast := cmdline == ""
+	if failFast {
 		command = platform.FailFastPreamble() + command
 	}
 
 	spec := subprocessSpec{
-		argv:    shellHost.Command(command),
-		cmdline: cmdline,
-		dir:     dir,
-		timeout: time.Duration(args.TimeoutSeconds) * time.Second,
+		argv:     shellHost.Command(command),
+		cmdline:  cmdline,
+		dir:      dir,
+		timeout:  time.Duration(args.TimeoutSeconds) * time.Second,
+		failFast: failFast,
 		// The command line runs in the operator's own environment — minus the credential
 		// variables, which a model-chosen command line has no use for and could exfiltrate,
 		// and minus the PATH entries that resolve inside the workspace, which would let the
@@ -164,12 +170,23 @@ func preflightCommandLine(command string, posix bool) error {
 	return err
 }
 
+// failFastExitNote is what the exit-code line adds when the run was launched under the
+// fail-fast preamble (subprocessResult.failFast): the non-zero code may be `set -e` stopping
+// the line at its first failed command, which is invisible in the output — the aborted lines
+// simply never printed. Naming it at the point of failure is what a small model acts on; a
+// sentence in the tool description a dozen calls back is not (ratified design call 5).
+const failFastExitNote = " — fail-fast: the line stopped at the first command that failed;" +
+	" guard expected non-zero exits with `|| true`"
+
 // subprocessToolResult renders a captured subprocess outcome as a ToolResult. A non-zero
 // exit is an error result (so the model sees the command failed) carrying the captured
-// output and exit code; a clean exit is a success result with the output. An error result
-// the kill-on-denial watch stopped carries confinementDenialStopLabel; any other error
+// output and exit code; a clean exit is a success result with the output. A failed run that
+// carried the fail-fast preamble says so inside the exit-code line (failFastExitNote), except
+// on a timeout — a run cut short by its own clock did not stop at a failed command. An error
+// result the kill-on-denial watch stopped carries confinementDenialStopLabel; any other error
 // result from a CONFINED run whose output looks like an OS denial carries
-// confinementDenialLabel — both best-effort, never forced onto a clean exit.
+// confinementDenialLabel — both best-effort, never forced onto a clean exit, and both still
+// follow on their own line after the exit-code line.
 func subprocessToolResult(callID string, res subprocessResult) domain.ToolResult {
 	var b strings.Builder
 	if res.timedOut {
@@ -183,7 +200,11 @@ func subprocessToolResult(callID string, res subprocessResult) domain.ToolResult
 	}
 	b.WriteString(res.combinedOutput)
 	if res.exitCode != 0 {
-		fmt.Fprintf(&b, "\n[exit code %d]", res.exitCode)
+		note := ""
+		if res.failFast && !res.timedOut {
+			note = failFastExitNote
+		}
+		fmt.Fprintf(&b, "\n[exit code %d%s]", res.exitCode, note)
 		switch {
 		case res.denialStopped:
 			b.WriteString("\n" + confinementDenialStopLabel)

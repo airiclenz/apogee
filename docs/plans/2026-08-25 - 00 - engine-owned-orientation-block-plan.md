@@ -176,7 +176,10 @@ prompt → context files → **orientation** → mechanism directives → tool b
 
 ---
 
-## 2. Terminal discloses fail-fast — in its description and on the exit-code line
+## 2. Terminal discloses fail-fast — in its description and on the exit-code line — ✅ DONE (2026-08-25)
+
+NOTES (2026-08-25): the item's Tests line asks for the end-to-end POSIX check in a `//go:build !windows` file; it landed in `terminal_test.go` behind the `runtime.GOOS == "windows"` skip its sibling fail-fast tests already use (same POSIX-only scope, no new file, consistent with the surrounding convention).
+NOTES (2026-08-25): two files beyond the item's Files list were touched because this item's own change breaks them otherwise — `internal/tui/toolregistry.go`'s `exitCodeMarker` regex is anchored on a bracket immediately after the digits, so the new in-bracket note would have made the TUI outcome slot fall back to the first output line for nearly every failed POSIX terminal call. The regex now tolerates trailing text inside the brackets and still captures the code; `internal/tui/toolpresent_test.go` gains the matching table case. No item owns that regex, so it could not be declined as out of scope.
 
 **What:** two halves, both about the POSIX `set -e` preamble the terminal prepends
 (`internal/tools/terminal.go:125`, `platform.FailFastPreamble`).

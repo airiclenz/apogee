@@ -603,10 +603,12 @@ func exitCodeStat(domain.ToolResult) (statValue, bool) { return plainStat("exit 
 // subprocess result (internal/tools/terminal.go). It is anchored at the end of the output, where
 // the tool writes it, so a command that printed the same phrase cannot be read as the marker — the
 // real one is always appended after it. The code may be negative: a run whose leader exited but
-// whose pipe stayed held is reported as -1.
+// whose pipe stayed held is reported as -1, and the code may be followed inside the brackets by a
+// note the tool added about WHY the run failed (the terminal's fail-fast note) — the slot wants the
+// code, so everything after it up to the closing bracket is matched and dropped.
 //
 // Its two groups are the shape exitMarkerPhrase reads: the whole marker, then the code inside it.
-var exitCodeMarker = regexp.MustCompile(`\n?(\[exit code (-?\d+)\])\s*$`)
+var exitCodeMarker = regexp.MustCompile(`\n?(\[exit code (-?\d+)[^\]]*\])\s*$`)
 
 // consoleStatusMarker matches the status line every Console result ends with — "alive", "exited
 // with code 2", "killed" (consoleStatus, internal/tools/console_common.go). It is anchored the way
