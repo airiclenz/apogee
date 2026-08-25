@@ -838,7 +838,7 @@ func TestPresentToolCallInFlightHasNoOutcome(t *testing.T) {
 
 // TestAskUserAnswerRecord pins the permanent record an ANSWERED ask_user block keeps of an
 // exchange the popup showed and then took away: the question as it was put, every offered choice
-// behind "[x]" or "[ ]", and any answer line no choice accounts for.
+// behind "[✔]" or "[ ]", and any answer line no choice accounts for.
 //
 // The branch line is the invariant across every row — the human's own answer, quoted, never
 // respelled — because the record is an ADDITION beneath it and not a re-wording of it. The rows
@@ -860,14 +860,14 @@ func TestAskUserAnswerRecord(t *testing.T) {
 			args:        `{"question":"Which mode?","choices":["Plan","Ask before","Auto"]}`,
 			answer:      "Ask before",
 			wantSummary: "Ask before",
-			wantBody:    []string{"Which mode?", "[ ] Plan", "[x] Ask before", "[ ] Auto"},
+			wantBody:    []string{"Which mode?", "[ ] Plan", "[✔] Ask before", "[ ] Auto"},
 		},
 		{
 			name:        "multi-select ticks every label the answer names",
 			args:        `{"question":"Which files?","choices":["main.go","doc.go","render.go"],"multi_select":true}`,
 			answer:      "main.go\nrender.go",
 			wantSummary: "main.go",
-			wantBody:    []string{"Which files?", "[x] main.go", "[ ] doc.go", "[x] render.go"},
+			wantBody:    []string{"Which files?", "[✔] main.go", "[ ] doc.go", "[✔] render.go"},
 		},
 		{
 			name:        "a typed answer ticks nothing and is recorded after the list",
@@ -889,7 +889,7 @@ func TestAskUserAnswerRecord(t *testing.T) {
 			args:        `{"question":"Ship it?\nThe migration is irreversible.","choices":["Ship","Hold"]}`,
 			answer:      "Hold",
 			wantSummary: "Hold",
-			wantBody:    []string{"Ship it?", "The migration is irreversible.", "[ ] Ship", "[x] Hold"},
+			wantBody:    []string{"Ship it?", "The migration is irreversible.", "[ ] Ship", "[✔] Hold"},
 		},
 		{
 			name:        "a free-text question still gets the record, with no boxes",
@@ -910,7 +910,7 @@ func TestAskUserAnswerRecord(t *testing.T) {
 			args:        `{"question":"Pick one","choices":["  ","Only this one",7]}`,
 			answer:      "Only this one",
 			wantSummary: "Only this one",
-			wantBody:    []string{"Pick one", "[x] Only this one"},
+			wantBody:    []string{"Pick one", "[✔] Only this one"},
 		},
 	}
 	for _, tc := range cases {

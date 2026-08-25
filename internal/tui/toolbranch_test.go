@@ -657,7 +657,7 @@ func TestAnsweredAskUserBlockPaintsTheRecord(t *testing.T) {
 		leaderEdgeRow("  ┕ Which mode? ⋯ Ask before", glyphExpanded),
 		"    Which mode?",
 		"    [ ] Plan",
-		"    [x] Ask before",
+		"    [✔] Ask before",
 		"    [ ] Auto",
 		seeLessFooterLine(t, 80),
 	}, "\n")
@@ -703,7 +703,7 @@ func TestAnsweredAskUserBlockIsAToggleTarget(t *testing.T) {
 			{line: 1, kind: targetHeader, entry: 0, text: leaderEdgeRow("  ┕ Which mode? ⋯ Ask before", glyphExpanded)},
 			{line: 2, kind: targetHeader, entry: 0, text: "    Which mode?"},
 			{line: 3, kind: targetHeader, entry: 0, text: "    [ ] Plan"},
-			{line: 4, kind: targetHeader, entry: 0, text: "    [x] Ask before"},
+			{line: 4, kind: targetHeader, entry: 0, text: "    [✔] Ask before"},
 			{line: 5, kind: targetHeader, entry: 0, text: "    [ ] Auto"},
 			{line: 6, kind: targetHeader, entry: 0, text: seeLessFooterLine(t, 80)},
 		}

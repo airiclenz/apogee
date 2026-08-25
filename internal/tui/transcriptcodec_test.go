@@ -286,10 +286,10 @@ func TestTranscriptCodecReDerivesAnsweredQuestionSolo(t *testing.T) {
 		data := []byte(`{"version":1,"entries":[` +
 			`{"kind":"toolCall","callID":"a1","done":true,"tool":{"label":"Ask User","verb":"asking",` +
 			`"target":"Ship it?","name":"ask_user","summary":{"text":"Yes"},` +
-			`"details":[{"text":"Ship it?"},{"text":"[x] Yes"},{"text":"[ ] No"}]}},` +
+			`"details":[{"text":"Ship it?"},{"text":"[✔] Yes"},{"text":"[ ] No"}]}},` +
 			`{"kind":"toolCall","callID":"a2","done":true,"tool":{"label":"Ask User","verb":"asking",` +
 			`"target":"Tag it?","name":"ask_user","summary":{"text":"No"},` +
-			`"details":[{"text":"Tag it?"},{"text":"[ ] Yes"},{"text":"[x] No"}]}}` +
+			`"details":[{"text":"Tag it?"},{"text":"[ ] Yes"},{"text":"[✔] No"}]}}` +
 			`]}`)
 		got, err := decodeTranscript(data)
 		if err != nil {

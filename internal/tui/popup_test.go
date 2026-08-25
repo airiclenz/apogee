@@ -1546,7 +1546,7 @@ func TestRenderPopupWrappedColumnedRowsHangUnderTheirLastColumn(t *testing.T) {
 	const long = "Implement the config redesign first, commit it, then do the TUI part in a separate commit."
 	spec := popupSpec{
 		rows: []popupRow{
-			{"[x]", "Just do it all in one shot."},
+			{"[✔]", "Just do it all in one shot."},
 			{"[ ]", long},
 		},
 		menuRows: true,

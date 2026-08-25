@@ -213,12 +213,13 @@ const askQuestionFloor = 3
 
 // askCheckedMarker and askUncheckedMarker are the checkbox glyphs a MULTI-SELECT question draws in
 // front of every option — the mockup's own, pinned by the owner
-// (docs/layout/user-questions-layout.md): ASCII boxes rather than ☑/☐, because the pane is painted
+// (docs/layout/user-questions-layout.md): a bracketed tick rather than ☑/☐, because the pane is painted
 // in whatever font the terminal is set to and a box-drawing checkbox is exactly the kind of glyph
-// that lands as a blank or a double-width tofu there. They are the same width as each other, so
+// that lands as a blank or a double-width tofu there; ✔ (U+2714) is a one-cell text-presentation
+// glyph that stays one cell in every width table. They are the same width as each other, so
 // ticking a row repaints three cells and moves nothing.
 const (
-	askCheckedMarker   = "[x]"
+	askCheckedMarker   = "[✔]"
 	askUncheckedMarker = "[ ]"
 )
 
@@ -279,7 +280,7 @@ func askChoiceRows(labels []string, multi bool, checked []bool) []popupRow {
 // delegation existed.
 //
 // A MULTI-SELECT question (domain.AskRequest.MultiSelect) draws one thing more: a checkbox in front
-// of every option, "[x]" where the row is ticked and "[ ]" where it is not (askChoiceRows), and a
+// of every option, "[✔]" where the row is ticked and "[ ]" where it is not (askChoiceRows), and a
 // hint that names ␣ among the live keys. The boxes are a COLUMN of the popup's own rather than three
 // characters glued onto the label — so they align down the pane whatever the labels do, and a
 // wrapped option hangs under its label instead of under its box — and the pointer, the dim rows and

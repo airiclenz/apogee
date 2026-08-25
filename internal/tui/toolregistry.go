@@ -1138,7 +1138,7 @@ func askUserAnswerRecord(args map[string]any, content string) toolOutcome {
 }
 
 // askExchangeLines lays the answered exchange out beneath the branch, in three groups: the
-// question's own lines, the offered choices each behind "[x]" or "[ ]", and then every answer line
+// question's own lines, the offered choices each behind "[✔]" or "[ ]", and then every answer line
 // that named no choice. A question offering none still gets the first group — the record is uniform,
 // and a free-text question with its answer on the branch above it reads as one card either way.
 //

@@ -655,7 +655,7 @@ whose text it is — one row lower the identical line would have been a body. Th
 `Ask User` question rides the row on the same footing: it is the human's own words, not a report
 the block wrote, so it prints exactly as they typed it. Only its **first line** rides there, and
 what hangs beneath an answered question is the **record of the exchange** the popup showed and then
-took away: every line of the question as it was put, then one line per offered choice behind `[x]`
+took away: every line of the question as it was put, then one line per offered choice behind `[✔]`
 where the answer named that choice and `[ ]` where it did not — the same ASCII pair the popup ticks
 with, box-drawing checkboxes rendering as tofu — and then any answer line no choice accounts for,
 which is where a typed reply lands and where the later lines of a multi-line answer land with it, so
@@ -1690,7 +1690,7 @@ single-select ask prompt's answers. The **approval prompt's rows are two-cell** 
 `[a]`-style shortcut — so the letters stack into a right-hand column the module derives rather than
 the prompt hand-pads, and a pane too narrow for both loses the shortcut cell off the right by the
 same whole-row truncation every other grammar takes. The key it drew still answers the prompt. A
-**multi-select ask prompt's rows are two-cell the other way round** — a `[x]`/`[ ]` box first, the
+**multi-select ask prompt's rows are two-cell the other way round** — a `[✔]`/`[ ]` box first, the
 answer after it across the module's own two-space gutter — so the boxes stack into a left-hand
 column nothing hand-pads, and an answer too long for the pane **wraps under its own label** rather
 than under the box beside it: the continuation lines hang at the label's column, so one option still
