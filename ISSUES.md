@@ -55,6 +55,68 @@ because the session-switch case wants an owner call.
   by a different door. Whether a session switch should close them, or a restored session should
   adopt them, is the call to settle before touching either path.
 
+---
+
+### Effort detection and the effort picker — residuals deferred out of the 2026-08-25 run
+
+**Status:** found 2026-08-25 at the close of the effort-detection/picker plan
+(`docs/plans/archived/2026-08-25 - 03 - effort-detection-picker-plan.md`), deferred out of that run.
+
+- [ ] **The enriched turn-error hint reaches only the kwargs dialect.** Every seam that raises it
+  gates on `len(wire.ChatTemplateKwargs) > 0` — `internal/provider/client.go:263` and `:274`,
+  `internal/provider/stream.go:82` and `:85` — and its text names that one field
+  (`thinkingEffortHint`, `internal/provider/client.go:413`). A server that refuses a level on the
+  `reasoning` or `openai` dialect (`internal/provider/wire.go:139`, `:143`) sends no
+  `chat_template_kwargs` at all, so its rejection surfaces as a bare status with nothing naming
+  `thinking.effort` or the `/effort` override — the case the hint exists for, on the two dialects
+  this run added. Widening it means gating on "the request carried an effort intent" rather than on
+  the kwargs map, and rewording the hint so it does not name one dialect's field.
+
+- [ ] **The Agent's effort dialect has no construction seed.** `a.effortDialect`
+  (`internal/agent/agent.go:171`) is written in exactly one place — `Rebind`
+  (`internal/agent/rebind.go:261`) — and read into every request at `internal/agent/wire.go:48`. A
+  Driver that builds an engine and never rebinds always sends the zero dialect, i.e. the historical
+  `chat_template_kwargs` shape, whatever the bound server actually reads. The firing-block path is
+  that Driver: `cmd/apogee/wire_firing.go:134` resolves a spec through `rebindSpecFor` and hands
+  back an `apogee.Config`, which carries no dialect field for the construction path to state.
+
+- [ ] **ADR 0060 D6's "the segment drops whole" is not what the footer does.** The ADR
+  (`docs/adr/0060-effort-is-detected-passively-dialected-per-server-and-picked.md:101`) says the
+  effort segment drops whole when the footer is too narrow, "like the other optional segments". The
+  word is appended into `info` (`internal/tui/model.go:2589`, joined at `:2591`) and the narrow
+  branch truncates `bodyIndent+info+offline` with an ellipsis (`internal/tui/model.go:2607`) — only
+  the mode marker drops whole. A narrow footer therefore clips the effort word mid-word. Either the
+  footer grows a drop rule for the segment, or D6 is amended to the truncation the left run of segments
+  has always had.
+
+- [ ] **A `/model` pick judges the override against the PREVIOUS model's level set.** `applyRebind`
+  clears an override the newly bound model excludes by reading `m.effortSupport()`
+  (`internal/tui/heartbeat.go:384`), which is the last landed beat's report
+  (`internal/tui/heartbeat.go:145`). `bindPickedModel` calls it with no beat for the picked model
+  (`internal/tui/picker.go:761`, which deliberately carries the outgoing `m.hb.observedDialect`
+  through), so a pick into a model that excludes the live override is tested against the outgoing
+  model's vocabulary and can leave the override standing until the next beat re-observes. The
+  beat-driven switch is correct; only the pick path is blind.
+
+- [ ] **The cleared-override note says "back to auto" even when a profile level sits underneath.**
+  `effortClearedNote` (`internal/tui/heartbeat.go:418`) words every clear as "cleared; back to
+  auto", but clearing the override hands resolution back to the profile's `thinking.effort:`, which
+  the footer then renders as that level rather than as `auto` (`footerEffortLabel`, called at
+  `internal/tui/model.go:2588`). Where a profile level is configured, the note names a state the
+  session is not in.
+
+- [ ] **`SetEffortOverride`'s doc still says "four levels".** `internal/agent/agent.go:734` reads
+  "The four levels (domain.EffortOff … domain.EffortHigh) each stand until another call moves them"
+  — stale since the vocabulary widened to the seven-name union (`internal/domain/config.go:452`,
+  `EffortOff` … `EffortMax`).
+
+- [ ] **`pickerKindCases()` no longer covers every overlay kind.** Its doc says it does
+  (`internal/tui/picker_test.go:1711`), on the grounds that the filtered accept is one uniform
+  mechanism rather than a `/model` feature, but the six arms it returns
+  (`internal/tui/picker_test.go:1714`) gained no `pickerEffort` case when the effort picker landed
+  (`internal/tui/picker.go:88`, offering arm at `:900`). The new kind's filtered-accept seam is
+  unpinned.
+
 ## Parked / deferred work
 
 Live, deliberately deferred work only. Each entry records *enough* design that we don't re-derive
@@ -754,3 +816,21 @@ knob value, and the run had a frame-verified keeper in hand.
   (`graphics/demo/tapes/hero.tape:49-94`) and into `graphics/demo/README.md:116` ("Knob 3 is a coin
   toss, not a setting"). A clock cannot track a window that slides with run length: what this needs
   is a trigger keyed to screen state — the card having painted — rather than to elapsed time.
+
+---
+
+### The out-of-band title/naming call is dialect-blind
+
+**Status:** deferred by the effort-detection/picker plan itself
+(`docs/plans/archived/2026-08-25 - 03 - effort-detection-picker-plan.md`, "Deferred (record at
+closeout)"), recorded 2026-08-25 so the deferral is deliberate rather than a silent drop.
+
+- [ ] The naming call builds its request with `ThinkingEffort: provider.EffortOff` and states no
+  dialect (`internal/title/title.go:166`), so it always emits the historical
+  `chat_template_kwargs` shape — the zero `provider.EffortDialect` — no matter which dialect the
+  bound server actually reads (ADR 0060). On a server whose dial is the `reasoning` or `openai`
+  shape (`internal/provider/wire.go:139`, `:143`) the kwarg is simply ignored and the model is free
+  to reason, so a generated title can run to the token cap and come back `title.ErrTruncated`. The
+  underlying edge predates this run; what it now wants is the per-server dialect threaded into the
+  out-of-band call the way the conversational path threads it (`internal/agent/wire.go:48`), which
+  means giving the title seam a way to learn the bound server's dialect rather than hardcoding one.
