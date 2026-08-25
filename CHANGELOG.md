@@ -28,6 +28,23 @@ point is a **minor** bump, not a breaking change.
   `doctext.PDFAnnotation`, so they cannot disagree about the same file; the count stays singular
   for a one-page document (`PDF, 1 page; …`).
 
+### Fixed
+
+- **An `@file` reference to a PDF now injects the document's extracted text, never its bytes
+  (plan item 2).** `resolveFileRefs` read a reference and inlined it verbatim, so
+  `@"docs/whitepaper.pdf"` put 2.2 MB of `%PDF-1.7` into the user message — an estimated ~1.39M
+  tokens that overflowed a 1.3M-token window, and then overflowed the emergency fold too, because
+  the fold keeps the most recent message unconditionally and that message WAS the PDF. The same
+  document extracts to ~45k characters. Every resolved reference is now sniffed by CONTENT
+  through `internal/doctext` — the extractor `read_file` already used — so a PDF injects its text
+  with `[Page N]` markers under a header that names what it is:
+  ``Referenced file `docs/whitepaper.pdf` (PDF, 27 pages; extracted text, read-only):``. A text
+  file someone called `notes.pdf` still injects its text under the plain header; the name decides
+  nothing. A document with no extractable text (a scan) is skipped like any other unresolvable
+  reference — the extractor's own sentence on a loop `ErrorEvent`, nothing injected, the Turn
+  proceeds — because a wall of binary teaches the model nothing and costs it a window to learn it.
+  `Interject` calls the same resolver, so a document delivered mid-Exchange behaves identically.
+
 
 ## [0.17.0] — 2026-08-25
 

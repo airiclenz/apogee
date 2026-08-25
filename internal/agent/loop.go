@@ -10,6 +10,7 @@ import (
 	"time"
 
 	apogeectx "github.com/airiclenz/apogee/internal/context"
+	"github.com/airiclenz/apogee/internal/doctext"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/processing"
 	"github.com/airiclenz/apogee/internal/prompt"
@@ -911,24 +912,53 @@ const maxRefFileBytes = 10 * 1024 * 1024
 // skipped: the Turn proceeds with whatever resolved, and a partly-consumed input is never
 // mistaken for working. The refs round-trip through a snapshot on UserInput, so a resumed
 // session re-resolves them.
+//
+// A ref whose BYTES are a PDF injects the document's extracted text instead — the same
+// extraction, the same "[Page N]" markers and the same failure wording the read_file tool
+// produces, because both seams call internal/doctext. The sniff is on content, never on the
+// name: a text file someone called notes.pdf still injects its text, and a PDF saved without
+// the extension still extracts. A document that yields no text (a scan) is skipped like any
+// other unresolvable ref — an ErrorEvent carrying the extractor's own model-facing sentence,
+// and nothing injected — because a wall of raw PDF bytes teaches the model nothing and costs
+// it a context window to learn it. The block header quotes doctext's annotation for an
+// extracted document, so the model is told the format, the page count, and that the lines
+// below are read-only before it tries to edit what it cannot write back.
 func (a *Agent) resolveFileRefs(turn int, refs []string) string {
 	if len(refs) == 0 {
 		return ""
 	}
 	var b strings.Builder
 	for _, ref := range refs {
-		content, err := a.readFileRef(ref)
+		data, err := a.readFileRef(ref)
 		if err != nil {
-			a.cfg.Events.Emit(domain.ErrorEvent{
-				EventBase: a.base(turn),
-				Source:    "loop",
-				Err:       fmt.Sprintf("@%s could not be resolved and was ignored: %v", ref, err),
-			})
+			a.refIgnored(turn, ref, err.Error())
 			continue
 		}
-		fmt.Fprintf(&b, "Referenced file `%s`:\n```\n%s\n```\n\n", ref, content)
+		content, annotation := string(data), ""
+		if doctext.IsPDF(data) {
+			extracted, pages, failMessage := doctext.ExtractPDF(data)
+			if failMessage != "" {
+				a.refIgnored(turn, ref, failMessage)
+				continue
+			}
+			content, annotation = extracted, " ("+doctext.PDFAnnotation(pages)+")"
+		}
+		fmt.Fprintf(&b, "Referenced file `%s`%s:\n```\n%s\n```\n\n", ref, annotation, content)
 	}
 	return b.String()
+}
+
+// refIgnored reports an @file reference that produced no block — unreadable bytes, or a
+// document whose text could not be extracted — and lets the Turn proceed without it. Both
+// failures share the one sentence, so a skipped ref reads the same way whatever skipped it.
+// reason is handed on unwrapped: for an extraction failure it is the model-facing wording
+// doctext wrote, which no re-phrasing here can improve.
+func (a *Agent) refIgnored(turn int, ref, reason string) {
+	a.cfg.Events.Emit(domain.ErrorEvent{
+		EventBase: a.base(turn),
+		Source:    "loop",
+		Err:       fmt.Sprintf("@%s could not be resolved and was ignored: %s", ref, reason),
+	})
 }
 
 // readFileRef resolves one workspace-relative reference to its bounded content. An empty
@@ -939,26 +969,29 @@ func (a *Agent) resolveFileRefs(turn int, refs []string) string {
 // memory and a name flipped mid-call cannot swap a small stat for a large read — a file
 // grown past the cap mid-read is refused too, with a fresh fstat of the same fd (see the
 // SCOPE note in security/safeio.go).
-func (a *Agent) readFileRef(ref string) (string, error) {
+//
+// It returns the BYTES, not a string: the caller sniffs them for a document format, and a PDF
+// round-tripped through a Go string before that sniff would be re-encoded, not read.
+func (a *Agent) readFileRef(ref string) ([]byte, error) {
 	if a.cfg.WorkspaceDir == "" {
-		return "", errors.New("no workspace is configured for file references")
+		return nil, errors.New("no workspace is configured for file references")
 	}
 	f, err := security.SafeOpen(a.cfg.WorkspaceDir, ref)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	defer f.Close()
 
 	info, err := f.Stat()
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	if info.Size() > maxRefFileBytes {
-		return "", fmt.Errorf("file too large: %d bytes (max %d)", info.Size(), maxRefFileBytes)
+		return nil, fmt.Errorf("file too large: %d bytes (max %d)", info.Size(), maxRefFileBytes)
 	}
 	data, err := io.ReadAll(io.LimitReader(f, maxRefFileBytes+1))
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	if int64(len(data)) > maxRefFileBytes {
 		// The ref grew past the cap between the fstat and the read; re-fstat the same fd
@@ -967,9 +1000,9 @@ func (a *Agent) readFileRef(ref string) (string, error) {
 		if fresh, statErr := f.Stat(); statErr == nil {
 			size = fresh.Size()
 		}
-		return "", fmt.Errorf("file too large: %d bytes (max %d)", size, maxRefFileBytes)
+		return nil, fmt.Errorf("file too large: %d bytes (max %d)", size, maxRefFileBytes)
 	}
-	return string(data), nil
+	return data, nil
 }
 
 // skillDirToken is the placeholder a skill author may write anywhere in a SKILL.md body to

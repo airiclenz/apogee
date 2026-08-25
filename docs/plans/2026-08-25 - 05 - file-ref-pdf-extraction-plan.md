@@ -157,7 +157,10 @@ grep -q "extracted text, read-only" internal/doctext/pdf.go
 
 ---
 
-## 2. `@file` references inject a PDF's extracted text
+## 2. `@file` references inject a PDF's extracted text — ✅ DONE (2026-08-25)
+
+NOTES (2026-08-25): the item asks to re-point a stale `security.SafeReadFile` mention in the `resolveFileRefs` doc comment — that comment already names `security.SafeOpen` (it was corrected in an earlier change), so nothing was edited. The stale name survives only in `CONTEXT.md`, which item 4 owns.
+NOTES (2026-08-25): the two ErrorEvent sites (unreadable ref, unextractable document) emit through one new unexported helper, `Agent.refIgnored`, so both failures keep the one sentence verbatim. It is a failure-channel helper, not a second `readableText` — the sniff-then-extract sequence itself is written once, inline in `resolveFileRefs`, as the item's binding standards require.
 
 Depends on item 1.
 
