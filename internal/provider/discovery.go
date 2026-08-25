@@ -75,6 +75,38 @@ type ModelInfo struct {
 	// strictly serial — when it is 0. Nothing here decides that; the number is reported and the
 	// resolution belongs to whoever configured the pin.
 	TotalSlots int
+
+	// EffortSupport is what the same two probes said about the ACTIVE model's thinking-effort
+	// dial (ADR 0060). Like the window and the slot count it is one best-effort observation: a
+	// server that advertises no tell yields the zero value — Supported false — and never an
+	// error, so a caller reads "not supported" and "not detectable" the same way.
+	EffortSupport EffortSupport
+}
+
+// EffortSupport records what discovery saw about the active model's thinking-effort dial: whether
+// the dial exists at all, which wire dialect reaches it, and — when the server states them — the
+// level vocabulary the model reports and the level it defaults to.
+//
+// It is detected PASSIVELY, from the two payloads discovery already fetches, never from a probe
+// call (ADR 0050's rejected bind-time probe, re-affirmed by ADR 0060): llama.cpp's GET /props
+// carries the chat template, and an OpenAI-shaped GET /v1/models may carry a per-model `reasoning`
+// object. Neither tell present is indistinguishable from a model with no dial, and both resolve to
+// the zero value: Supported false, EffortDialectNone, no vocabulary, no default — which keeps the
+// wire byte-identical for a caller that asks for nothing (ADR 0031).
+type EffortSupport struct {
+	// Supported reports that the dial is usable on this model. Everything below is meaningless
+	// when it is false.
+	Supported bool
+	// Dialect is the wire shape that reaches the dial on this server — the shape the tell that
+	// was seen implies, never a guess from the model's family.
+	Dialect EffortDialect
+	// Efforts is the level set the server reported, and nil when the source states none: the
+	// /props chat template proves a dial exists but names no vocabulary, so a caller that needs
+	// a list falls back to the canonical levels itself.
+	Efforts []string
+	// Default is the level the server said it uses when a request names none, and "" when the
+	// source states none.
+	Default string
 }
 
 // Discover resolves the active model and its context window from the Upstream. It runs two
@@ -87,6 +119,7 @@ type ModelInfo struct {
 // empty model list when nothing is configured to fall back to; the /props probe is best-effort (a non-llama.cpp server has
 // no /props, so any failure there just leaves the /v1/models value untouched). That same probe
 // also reports how many generation slots the server was launched with (ModelInfo.TotalSlots).
+// Both payloads are read once more for the thinking-effort tell described on EffortSupport.
 func (c *Client) Discover(ctx context.Context) (ModelInfo, error) {
 	ctx, cancel := context.WithTimeout(ctx, discoveryTimeout)
 	defer cancel()
@@ -96,11 +129,17 @@ func (c *Client) Discover(ctx context.Context) (ModelInfo, error) {
 		return ModelInfo{}, err
 	}
 
-	runtime, slots := c.discoverProps(ctx)
+	runtime, slots, templateEffort := c.discoverProps(ctx)
 	if runtime > 0 {
 		info.setRuntimeContextWindow(runtime)
 	}
 	info.TotalSlots = slots
+	// The /v1/models `reasoning` object wins when both tells appear: a server that advertises the
+	// structured field is speaking the more specific dialect, and its own template may still
+	// mention the kwarg it no longer reads.
+	if !info.EffortSupport.Supported {
+		info.EffortSupport = templateEffort
+	}
 	return info, nil
 }
 
@@ -137,35 +176,36 @@ func (c *Client) discoverModels(ctx context.Context) (ModelInfo, error) {
 	return info, nil
 }
 
-// discoverProps probes llama.cpp's GET /props for the two facts it reports about how the server was
-// launched: the runtime context window (default_generation_settings.n_ctx — the per-slot context)
-// and the number of generation slots (total_slots — the `--parallel N` width). It is best-effort: a
-// non-llama.cpp server returns a non-200 or omits either field, and any failure (including a
-// cancelled context) yields 0 for both, so the caller keeps the /v1/models window and treats the
-// slot count as unknown. It shares the caller's discovery deadline.
+// discoverProps probes llama.cpp's GET /props for the three facts it reports about how the server
+// was launched: the runtime context window (default_generation_settings.n_ctx — the per-slot
+// context), the number of generation slots (total_slots — the `--parallel N` width) and whether the
+// loaded chat template exposes a thinking-effort dial (chat_template). It is best-effort: a
+// non-llama.cpp server returns a non-200 or omits any of them, and any failure (including a
+// cancelled context) yields the zero value for all three, so the caller keeps the /v1/models window
+// and treats the slot count and the dial as unknown. It shares the caller's discovery deadline.
 //
-// Both come out of ONE response because they are one observation: asking twice would cost a second
-// round trip and could straddle a restart that moved both numbers at once.
-func (c *Client) discoverProps(ctx context.Context) (window, slots int) {
+// All three come out of ONE response because they are one observation: asking again would cost a
+// second round trip and could straddle a restart that moved every number at once.
+func (c *Client) discoverProps(ctx context.Context) (window, slots int, effort EffortSupport) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+propsPath, nil)
 	if err != nil {
-		return 0, 0
+		return 0, 0, EffortSupport{}
 	}
 	c.setAuth(req.Header)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return 0, 0
+		return 0, 0, EffortSupport{}
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return 0, 0
+		return 0, 0, EffortSupport{}
 	}
 
 	var decoded propsResponse
 	if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
-		return 0, 0
+		return 0, 0, EffortSupport{}
 	}
 	if decoded.DefaultGenerationSettings.NCtx > 0 {
 		window = decoded.DefaultGenerationSettings.NCtx
@@ -173,17 +213,39 @@ func (c *Client) discoverProps(ctx context.Context) (window, slots int) {
 	if decoded.TotalSlots > 0 {
 		slots = decoded.TotalSlots
 	}
-	return window, slots
+	return window, slots, effortFromTemplate(decoded.ChatTemplate)
+}
+
+// The two Jinja names a llama.cpp chat template reads when it exposes a thinking-effort dial. The
+// server forwards `chat_template_kwargs` verbatim into the template, so a template that mentions
+// either name is a template that acts on the kwargs dialect — and a template with no dial mentions
+// neither.
+const (
+	templateEffortName   = "reasoning_effort"
+	templateThinkingName = "enable_thinking"
+)
+
+// effortFromTemplate reads the /props chat template for the llama.cpp tell. A hit proves only that
+// a dial EXISTS: the template text states no vocabulary and no default, so the level set and the
+// default stay empty and a caller falls back to the canonical levels. A miss — including an absent
+// or unparsable template — is the zero value, i.e. unsupported.
+func effortFromTemplate(template string) EffortSupport {
+	if !strings.Contains(template, templateEffortName) && !strings.Contains(template, templateThinkingName) {
+		return EffortSupport{}
+	}
+	return EffortSupport{Supported: true, Dialect: EffortDialectKwargs}
 }
 
 // propsResponse is the subset of llama.cpp's GET /props payload we read: the runtime context
-// window the server was launched with, reported per generation slot, and how many of those slots
-// there are (the `--parallel N` width — ADR 0039's discovery source for the Parallel agents cap).
+// window the server was launched with, reported per generation slot, how many of those slots
+// there are (the `--parallel N` width — ADR 0039's discovery source for the Parallel agents cap),
+// and the Jinja chat template the server loaded (the thinking-effort tell — see EffortSupport).
 type propsResponse struct {
 	DefaultGenerationSettings struct {
 		NCtx int `json:"n_ctx"`
 	} `json:"default_generation_settings"`
-	TotalSlots int `json:"total_slots"`
+	TotalSlots   int    `json:"total_slots"`
+	ChatTemplate string `json:"chat_template"`
 }
 
 // setRuntimeContextWindow overrides the active model's window with the authoritative runtime
@@ -213,11 +275,26 @@ type modelsResponse struct {
 		Meta          struct {
 			NCtxTrain int `json:"n_ctx_train"`
 		} `json:"meta"`
+		Reasoning json.RawMessage `json:"reasoning"`
 	} `json:"data"`
 }
 
+// modelReasoning is the per-model `reasoning` object an OpenRouter-shaped /v1/models entry carries.
+// Its mere PRESENCE is the tell (see EffortSupport): a server that describes the dial at all
+// supports it, even when it names neither a vocabulary nor a default — so the entry holds the field
+// raw and decodeReasoning distinguishes an absent object from an empty one.
+type modelReasoning struct {
+	SupportedEfforts []string `json:"supported_efforts"`
+	DefaultEffort    string   `json:"default_effort"`
+}
+
+// jsonNullLiteral is the encoding of an explicit JSON null, which a raw field carries as bytes
+// rather than as an absent value.
+const jsonNullLiteral = "null"
+
 // toModelInfo projects the payload onto ModelInfo, dropping id-less entries and resolving
-// the active model from hint (the configured model) per resolveHint.
+// the active model from hint (the configured model) per resolveHint, then reading that model's
+// thinking-effort tell per effortSupport.
 func (r modelsResponse) toModelInfo(hint string) ModelInfo {
 	var models []DiscoveredModel
 	for _, m := range r.Data {
@@ -237,7 +314,60 @@ func (r modelsResponse) toModelInfo(hint string) ModelInfo {
 
 	info := ModelInfo{AvailableModels: models}
 	info.ActiveModel, info.ContextWindow, info.Resolution = resolveHint(models, hint)
+	info.EffortSupport = r.effortSupport(info.ActiveModel)
 	return info
+}
+
+// effortSupport reports what the advertised entry describing the active model says about its
+// thinking-effort dial. It resolves that entry the way resolveHint sources the context window — the
+// exact id, else the base slug before the first ':' of a routing variant — so a variant that the
+// server does not list separately inherits the base model's answer instead of reading as a model
+// with no dial. No entry, or an entry with no `reasoning` object, is the zero value: unsupported.
+func (r modelsResponse) effortSupport(active string) EffortSupport {
+	reasoning := r.reasoningFor(active)
+	if reasoning == nil {
+		if base, _, hasVariant := strings.Cut(active, ":"); hasVariant {
+			reasoning = r.reasoningFor(base)
+		}
+	}
+	if reasoning == nil {
+		return EffortSupport{}
+	}
+	return EffortSupport{
+		Supported: true,
+		Dialect:   EffortDialectReasoning,
+		Efforts:   reasoning.SupportedEfforts,
+		Default:   reasoning.DefaultEffort,
+	}
+}
+
+// reasoningFor returns the `reasoning` object of the entry with exactly this id, and nil when no
+// entry has it or the entry carries none. An empty id matches nothing: an id-less entry is dropped
+// from the advertised list, so it must not answer for an unresolved active model either.
+func (r modelsResponse) reasoningFor(id string) *modelReasoning {
+	if id == "" {
+		return nil
+	}
+	for _, m := range r.Data {
+		if m.ID == id {
+			return decodeReasoning(m.Reasoning)
+		}
+	}
+	return nil
+}
+
+// decodeReasoning decodes one entry's raw `reasoning` value into the object it should be. An
+// absent, null or malformed value yields nil: the field is a passive tell, so a server that writes
+// something unexpected there reads as "no tell" and never fails the discovery that surrounds it.
+func decodeReasoning(raw json.RawMessage) *modelReasoning {
+	if len(raw) == 0 || string(raw) == jsonNullLiteral {
+		return nil
+	}
+	var reasoning modelReasoning
+	if err := json.Unmarshal(raw, &reasoning); err != nil {
+		return nil
+	}
+	return &reasoning
 }
 
 // resolveHint resolves the configured model id against the advertised list and reports the

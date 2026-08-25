@@ -10,6 +10,14 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **Discovery detects the active model's thinking-effort dial (plan item 3).** Discovery now
+  detects, passively from the payloads it already fetches, whether the active model exposes a
+  thinking-effort dial: a llama.cpp `GET /props` chat template that mentions `reasoning_effort` or
+  `enable_thinking` reports the `chat_template_kwargs` dialect, and an OpenAI-shaped
+  `GET /v1/models` entry carrying a `reasoning` object reports the `reasoning` dialect along with
+  the model's own level set and default. The result rides on `ModelInfo.EffortSupport` and stays
+  best-effort — an absent or malformed tell reads as "no dial", never as an error.
+
 - **The provider Client speaks three thinking-effort wire dialects (plan item 4).** A new
   per-server `provider.Request.EffortDialect` seam picks how an effort intent is spelled on the
   bound endpoint: llama.cpp's `chat_template_kwargs` (`enable_thinking: false` for the off rung,

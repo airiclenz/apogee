@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"testing"
 )
 
@@ -452,5 +453,159 @@ func TestDiscover_SendsAuth(t *testing.T) {
 	}
 	if rec.auth != "Bearer tok" {
 		t.Errorf("Authorization = %q, want %q", rec.auth, "Bearer tok")
+	}
+}
+
+// Effort detection is PASSIVE (ADR 0060): the two payloads discovery already fetches carry the
+// tell, and nothing here calls the model. A /props chat template that mentions the dial proves it
+// exists but names no vocabulary; a /v1/models `reasoning` object both proves it and states the
+// vocabulary; neither is indistinguishable from a model with no dial and stays the zero value.
+func TestDiscover_EffortSupport(t *testing.T) {
+	t.Parallel()
+
+	const plainModels = `{"data":[{"id":"m","context_length":32768}]}`
+	const reasoningModels = `{"data":[{"id":"m","context_length":32768,` +
+		`"reasoning":{"supported_efforts":["low","medium","high"],"default_effort":"medium"}}]}`
+
+	tests := []struct {
+		name   string
+		models string
+		props  string
+		hint   string
+		want   EffortSupport
+	}{
+		{
+			name:   "chat template naming reasoning_effort ⇒ kwargs dialect, no vocabulary",
+			models: plainModels,
+			props:  `{"chat_template":"{% if reasoning_effort == 'high' %}...{% endif %}"}`,
+			want:   EffortSupport{Supported: true, Dialect: EffortDialectKwargs},
+		},
+		{
+			name:   "chat template naming enable_thinking ⇒ kwargs dialect",
+			models: plainModels,
+			props:  `{"chat_template":"{% if enable_thinking %}<think>{% endif %}"}`,
+			want:   EffortSupport{Supported: true, Dialect: EffortDialectKwargs},
+		},
+		{
+			name:   "reasoning object on the active model ⇒ reasoning dialect with set and default",
+			models: reasoningModels,
+			props:  "",
+			want: EffortSupport{
+				Supported: true,
+				Dialect:   EffortDialectReasoning,
+				Efforts:   []string{"low", "medium", "high"},
+				Default:   "medium",
+			},
+		},
+		{
+			name:   "bare reasoning object still means supported",
+			models: `{"data":[{"id":"m","context_length":32768,"reasoning":{}}]}`,
+			props:  "",
+			want:   EffortSupport{Supported: true, Dialect: EffortDialectReasoning},
+		},
+		{
+			name:   "neither tell ⇒ unsupported",
+			models: plainModels,
+			props:  `{"default_generation_settings":{"n_ctx":8192},"chat_template":"{{ message }}"}`,
+			want:   EffortSupport{},
+		},
+		{
+			name:   "no /props and no reasoning object ⇒ unsupported",
+			models: plainModels,
+			props:  "",
+			want:   EffortSupport{},
+		},
+		{
+			name:   "both tells ⇒ the reasoning object wins",
+			models: reasoningModels,
+			props:  `{"chat_template":"{% if reasoning_effort %}...{% endif %}"}`,
+			want: EffortSupport{
+				Supported: true,
+				Dialect:   EffortDialectReasoning,
+				Efforts:   []string{"low", "medium", "high"},
+				Default:   "medium",
+			},
+		},
+		{
+			name:   "an unlisted routing variant inherits its base slug's answer",
+			models: reasoningModels,
+			props:  "",
+			hint:   "m:exacto",
+			want: EffortSupport{
+				Supported: true,
+				Dialect:   EffortDialectReasoning,
+				Efforts:   []string{"low", "medium", "high"},
+				Default:   "medium",
+			},
+		},
+		{
+			name:   "an unadvertised model reports no dial",
+			models: reasoningModels,
+			props:  "",
+			hint:   "someone-elses-model",
+			want:   EffortSupport{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			srv, _ := discoveryServer(tt.models, tt.props)
+			defer srv.Close()
+
+			info, err := NewClient(srv.URL, tt.hint).Discover(context.Background())
+
+			if err != nil {
+				t.Fatalf("Discover: %v", err)
+			}
+			if !reflect.DeepEqual(info.EffortSupport, tt.want) {
+				t.Errorf("EffortSupport = %+v, want %+v", info.EffortSupport, tt.want)
+			}
+		})
+	}
+}
+
+// A parse miss is never an error: discovery keeps reporting the model it resolved, and the dial
+// simply reads as undetected — the same best-effort contract the window and slot probes hold.
+func TestDiscover_MalformedEffortPayloadsStayBestEffort(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		models string
+		props  string
+	}{
+		{
+			name:   "reasoning is not an object",
+			models: `{"data":[{"id":"m","context_length":32768,"reasoning":"high"}]}`,
+			props:  "",
+		},
+		{
+			name:   "reasoning is an explicit null",
+			models: `{"data":[{"id":"m","context_length":32768,"reasoning":null}]}`,
+			props:  "",
+		},
+		{
+			name:   "chat_template is not a string",
+			models: `{"data":[{"id":"m","context_length":32768}]}`,
+			props:  `{"default_generation_settings":{"n_ctx":8192},"chat_template":{"jinja":"reasoning_effort"}}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			srv, _ := discoveryServer(tt.models, tt.props)
+			defer srv.Close()
+
+			info, err := NewClient(srv.URL, "").Discover(context.Background())
+
+			if err != nil {
+				t.Fatalf("Discover: %v", err)
+			}
+			if info.EffortSupport.Supported {
+				t.Errorf("EffortSupport = %+v, want the zero value on an unparsable payload", info.EffortSupport)
+			}
+		})
 	}
 }

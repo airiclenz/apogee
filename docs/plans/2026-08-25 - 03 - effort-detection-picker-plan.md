@@ -218,7 +218,11 @@ message.
 
 ---
 
-## 3. Detect effort support during provider discovery
+## 3. Detect effort support during provider discovery — ✅ DONE (2026-08-25)
+
+NOTES (2026-08-25): the item says the `reasoning` object is read when "the ACTIVE model carries one"; implemented as the advertised entry that DESCRIBES the active model — the exact id, else the base slug before the first ':' — mirroring how `resolveHint` already sources the context window, so an unlisted OpenRouter routing variant (`vendor/model:exacto`) inherits its base model's answer instead of reading as a model with no dial. Covered by its own test case.
+NOTES (2026-08-25): the per-entry `reasoning` field is held as `json.RawMessage` and decoded by a `decodeReasoning` helper rather than as a typed pointer. A typed `*modelReasoning` made a server that writes a non-object there (e.g. `"reasoning":"high"`) fail the whole `/v1/models` decode, turning discovery into an error — the opposite of the item's "any parse miss yields the zero value, never an error". Regression caught by `TestDiscover_MalformedEffortPayloadsStayBestEffort`, which now also pins an explicit `"reasoning":null`.
+NOTES (2026-08-25): `internal/provider/discovery.go` is now 411 lines, just past the coding-standards ~400-line guidance. Not split — the item's Files list scopes the change to this file and splitting it would move existing content between files.
 
 **What:** Teach `provider.Discover` to report, per the ratified detection rule, whether the
 active model supports an effort dial and (when the server says) which levels and its default.
