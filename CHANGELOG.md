@@ -8,6 +8,9 @@ point is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+
+## [0.17.0] — 2026-08-25
+
 ### Added
 
 - **The out-of-band naming call speaks the bound server's effort dialect (plan item 1).** The
