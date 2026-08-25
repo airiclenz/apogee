@@ -62,25 +62,30 @@ func TestTighterMode(t *testing.T) {
 	}
 }
 
-// TestThinkingEffortValid pins the effort vocabulary the config loader gates on (ADR 0050): the
-// four levels pass, the ZERO value passes because absence is a legitimate configuration — the one
-// that emits nothing and leaves the model's own template default alone — and everything else is
-// refused, including a near-miss typo and a case variant (the wire mapping is verbatim, so "High"
-// is not "high").
+// TestThinkingEffortValid pins the effort vocabulary the config loader gates on (ADR 0050, widened
+// by ADR 0060): every level of the seven-name union passes — plus "none", the spelling the
+// OpenRouter dialect gives the "off" rung — the ZERO value passes because absence is a legitimate
+// configuration (the one that emits nothing and leaves the model's own template default alone), and
+// everything else is refused, including a near-miss typo and a case variant (the wire mapping is
+// verbatim, so "High" is not "high").
 func TestThinkingEffortValid(t *testing.T) {
 	cases := []struct {
 		effort domain.ThinkingEffort
 		want   bool
 	}{
 		{domain.EffortOff, true},
+		{domain.EffortNone, true},
+		{domain.EffortMinimal, true},
 		{domain.EffortLow, true},
 		{domain.EffortMedium, true},
 		{domain.EffortHigh, true},
+		{domain.EffortXHigh, true},
+		{domain.EffortMax, true},
 		{domain.ThinkingEffort(""), true}, // unset: the send-nothing anchor, not a defect
 		{domain.ThinkingEffort("hihg"), false},
 		{domain.ThinkingEffort("High"), false},
-		{domain.ThinkingEffort("none"), false}, // the thinking STYLE vocabulary is a different axis
-		{domain.ThinkingEffort("xhigh"), false},
+		{domain.ThinkingEffort("xhi"), false},
+		{domain.ThinkingEffort("maximum"), false},
 	}
 	for _, tc := range cases {
 		if got := tc.effort.Valid(); got != tc.want {
@@ -95,9 +100,13 @@ func TestThinkingEffortValid(t *testing.T) {
 		want   string
 	}{
 		{domain.EffortOff, "off"},
+		{domain.EffortNone, "none"},
+		{domain.EffortMinimal, "minimal"},
 		{domain.EffortLow, "low"},
 		{domain.EffortMedium, "medium"},
 		{domain.EffortHigh, "high"},
+		{domain.EffortXHigh, "xhigh"},
+		{domain.EffortMax, "max"},
 	} {
 		if string(tc.effort) != tc.want {
 			t.Errorf("effort constant = %q, want %q", string(tc.effort), tc.want)

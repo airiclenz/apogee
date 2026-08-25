@@ -787,11 +787,14 @@ ui:
 #                                           model ACTUALLY emits (the tokens vary per build, not
 #                                           just per family)
 #                      harmony            — gpt-oss channels, which need no tokens
-#     effort           off | low | medium | high — how hard this model is asked to think, forwarded
-#                      to the server's chat template. Absent (the default) sends nothing at all, so
-#                      the model's own default stands; off asks for no reasoning. Orthogonal to
-#                      style: above, which only says how the reasoning ARRIVES. A value outside
-#                      those four is a startup error.
+#     effort           off | low | medium | high, plus the wider levels some servers report:
+#                      minimal | xhigh | max, and none (the OpenRouter spelling of off) — how
+#                      hard this model is asked to think, forwarded to the server's chat
+#                      template. Absent (the default) sends nothing at all, so the model's own
+#                      default stands; off asks for no reasoning. Orthogonal to style: above,
+#                      which only says how the reasoning ARRIVES. A value outside that
+#                      vocabulary is a startup error, and a server that rejects a level it does
+#                      not offer fails the turn naming this key.
 #   tools:             THIS model's tool roster — the same disabled: / enabled: pair the global
 #                      tools: block above takes, written as a CHANGE to the menu rather than as a
 #                      replacement for it, so a tool added by a later release reaches this model too.

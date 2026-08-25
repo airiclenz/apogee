@@ -128,15 +128,21 @@ const (
 	ThinkingHarmony   = domain.ThinkingHarmony
 )
 
-// ThinkingEffort names how hard a model is asked to think (off / low / medium / high); the zero
-// value is the ABSENCE of the setting, which leaves the model's own template default alone.
+// ThinkingEffort names how hard a model is asked to think — the seven-name union real servers
+// report (off / minimal / low / medium / high / xhigh / max, plus none for off's OpenRouter
+// spelling); the zero value is the ABSENCE of the setting, which leaves the model's own template
+// default alone.
 type ThinkingEffort = domain.ThinkingEffort
 
 const (
-	EffortOff    = domain.EffortOff
-	EffortLow    = domain.EffortLow
-	EffortMedium = domain.EffortMedium
-	EffortHigh   = domain.EffortHigh
+	EffortOff     = domain.EffortOff
+	EffortNone    = domain.EffortNone
+	EffortMinimal = domain.EffortMinimal
+	EffortLow     = domain.EffortLow
+	EffortMedium  = domain.EffortMedium
+	EffortHigh    = domain.EffortHigh
+	EffortXHigh   = domain.EffortXHigh
+	EffortMax     = domain.EffortMax
 )
 
 // Mode is the autonomy level governing whether tool calls need human approval.

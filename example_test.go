@@ -127,9 +127,13 @@ var (
 	_ = apogee.ThinkingHarmony
 
 	_ = apogee.EffortOff
+	_ = apogee.EffortNone
+	_ = apogee.EffortMinimal
 	_ = apogee.EffortLow
 	_ = apogee.EffortMedium
 	_ = apogee.EffortHigh
+	_ = apogee.EffortXHigh
+	_ = apogee.EffortMax
 
 	_ = apogee.ModePlan
 	_ = apogee.ModeAskBefore

@@ -10,6 +10,17 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **The thinking-effort vocabulary widens from four levels to the seven real servers report
+  (plan item 2).** `domain.ThinkingEffort` gains `minimal`, `xhigh` and `max` beside
+  `off`/`low`/`medium`/`high`, plus `none` — the spelling the OpenRouter dialect gives the `off`
+  rung — so a model's own reported set is always spellable in a `model-profiles:` entry's
+  `thinking.effort:`. `""` is unchanged: it stays the absence anchor that emits nothing, so a
+  config written before the key existed still produces byte-identical requests. A value outside
+  the vocabulary is still a startup error, now naming the full list, and the seeded config
+  template's `effort` reference documents the widened set. The embeddable engine's façade
+  re-exports the new levels (`apogee.EffortMinimal`, `EffortXHigh`, `EffortMax`, `EffortNone`).
+  The wire mapping is untouched here — the enum only gates the spelling.
+
 - Ratified ADR 0060 — thinking effort is detected passively from the discovery payloads
   apogee already fetches, carried in one of three per-server wire dialects
   (`chat_template_kwargs`, OpenRouter's `reasoning` object, OpenAI/Groq's top-level

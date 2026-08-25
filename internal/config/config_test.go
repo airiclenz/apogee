@@ -3600,9 +3600,10 @@ func TestApplyConfigModelProfiles(t *testing.T) {
 	}
 }
 
-// The thinking block's `effort:` reaches the domain profile as the typed level (ADR 0050), and an
-// entry that leaves the key out keeps the ZERO effort — the anchor that means "emit nothing", so a
-// config written before the key existed still produces byte-identical requests.
+// The thinking block's `effort:` reaches the domain profile as the typed level (ADR 0050), across
+// the whole widened vocabulary (ADR 0060) rather than just the original four, and an entry that
+// leaves the key out keeps the ZERO effort — the anchor that means "emit nothing", so a config
+// written before the key existed still produces byte-identical requests.
 func TestApplyConfigModelProfileEffort(t *testing.T) {
 	t.Parallel()
 	home := testConfigHome(t, "")
@@ -3616,6 +3617,9 @@ func TestApplyConfigModelProfileEffort(t *testing.T) {
   no-effort-here:
     thinking:
       style: harmony
+  wide-effort:
+    thinking:
+      effort: xhigh
 `
 	writeConfigHome(t, home, configYAML)
 	opts := Options{ConfigDir: home}
@@ -3639,6 +3643,12 @@ func TestApplyConfigModelProfileEffort(t *testing.T) {
 					End:    "</think>",
 					Effort: domain.EffortLow,
 				},
+			},
+		},
+		{
+			Pattern: "wide-effort",
+			Profile: domain.ModelProfile{
+				Thinking: domain.ThinkingProfile{Effort: domain.EffortXHigh},
 			},
 		},
 	}
@@ -3713,7 +3723,7 @@ func TestApplyConfigBadModelProfileAxisErrors(t *testing.T) {
 			},
 		},
 		{
-			name: "an effort outside the four levels",
+			name: "an effort outside the widened vocabulary",
 			configYAML: `model-profiles:
   qwen3.8:
     thinking:
@@ -3721,7 +3731,7 @@ func TestApplyConfigBadModelProfileAxisErrors(t *testing.T) {
 `,
 			wantIn: []string{
 				"model-profiles.qwen3.8.thinking.effort", "hihg",
-				"off", "low", "medium", "high",
+				"off", "low", "medium", "high", "minimal", "xhigh", "max", "none",
 			},
 		},
 		{

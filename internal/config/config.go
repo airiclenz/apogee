@@ -1954,7 +1954,7 @@ func validateToolCallPattern(pattern, toolCallPattern string) error {
 
 // validateThinkingAxes checks one profile's thinking half: the style against the three strippers the
 // parse seam builds, the delimited style against the token pair it strips with, and the effort
-// against the four levels the wire mapping knows (ADR 0050).
+// against the vocabulary the wire mappings know (ADR 0050, widened by ADR 0060).
 func validateThinkingAxes(pattern string, t thinkingConfig) error {
 	if !isKnownThinkingStyle(t.Style) {
 		return fmt.Errorf("apogee: invalid model-profiles.%s.thinking.style %q: want none, "+
@@ -1966,7 +1966,8 @@ func validateThinkingAxes(pattern string, t thinkingConfig) error {
 	}
 	if effort := domain.ThinkingEffort(t.Effort); !effort.Valid() {
 		return fmt.Errorf("apogee: invalid model-profiles.%s.thinking.effort %q: want off, low, "+
-			"medium, or high, or leave the key out for the model's own default", pattern, string(effort))
+			"medium, high, minimal, xhigh, max, or none, or leave the key out for the model's own "+
+			"default", pattern, string(effort))
 	}
 	return nil
 }

@@ -442,29 +442,45 @@ const (
 
 // ThinkingEffort names how hard a model is asked to think (CONTEXT: Thinking effort). It is a
 // profile axis rather than a global knob because the vocabulary a template understands is a fact
-// about the model, and the provider Client owns the ONE mapping from these four words onto the
-// wire (ADR 0050). "" is not a fifth level — it is the ABSENCE of the setting, and absence emits
-// nothing.
+// about the model, and the provider Client owns the mapping from these words onto the wire, one
+// per dialect (ADR 0050, amended by ADR 0060). The vocabulary is the seven-name union of what real
+// servers report — off, low, medium, high, minimal, xhigh, max — so a model's own reported set is
+// always spellable; no single model offers all seven, and a level its template does not understand
+// fails the turn rather than this type. "off" is the apogee-canonical spelling of "no reasoning at
+// all", and "none" is the same rung under the spelling the OpenRouter dialect renders it as. "" is
+// not a level at all — it is the ABSENCE of the setting, and absence emits nothing.
 type ThinkingEffort string
 
 const (
 	// EffortOff asks for no chain-of-thought at all.
 	EffortOff ThinkingEffort = "off"
+	// EffortNone is the same rung as EffortOff under the spelling the OpenRouter dialect uses; a
+	// server that reports "none" is configurable with the word it reported.
+	EffortNone ThinkingEffort = "none"
+	// EffortMinimal is the barely-there rung the OpenAI-shaped servers report below "low".
+	EffortMinimal ThinkingEffort = "minimal"
 	// EffortLow is the shortest reasoning the template offers.
 	EffortLow ThinkingEffort = "low"
 	// EffortMedium is the middle rung.
 	EffortMedium ThinkingEffort = "medium"
 	// EffortHigh is the longest reasoning the template offers.
 	EffortHigh ThinkingEffort = "high"
+	// EffortXHigh is the rung above "high" on the templates that offer one (Qwen3.8 defaults to it).
+	EffortXHigh ThinkingEffort = "xhigh"
+	// EffortMax is the topmost rung reported in the wild, above "xhigh" where both exist.
+	EffortMax ThinkingEffort = "max"
 )
 
-// Valid reports whether e is a value this build understands: one of the four levels, or the zero
-// value meaning unset — which is a legitimate configuration, not a defect, because absence is how
-// a profile leaves the model's own template default alone. The config loader asks this so a typo'd
-// `effort:` is a startup error naming the key rather than a setting that silently does nothing.
+// Valid reports whether e is a value this build understands: any level in the union above, or the
+// zero value meaning unset — which is a legitimate configuration, not a defect, because absence is
+// how a profile leaves the model's own template default alone. The config loader asks this so a
+// typo'd `effort:` is a startup error naming the key rather than a setting that silently does
+// nothing. It gates the SPELLING only: whether the bound model actually offers the rung is the
+// server's answer, and the enriched turn error naming `thinking.effort` stays that backstop.
 func (e ThinkingEffort) Valid() bool {
 	switch e {
-	case "", EffortOff, EffortLow, EffortMedium, EffortHigh:
+	case "", EffortOff, EffortNone, EffortMinimal,
+		EffortLow, EffortMedium, EffortHigh, EffortXHigh, EffortMax:
 		return true
 	default:
 		return false

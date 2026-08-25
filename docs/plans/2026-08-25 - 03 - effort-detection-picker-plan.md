@@ -172,7 +172,21 @@ Then update the docs to match the ratified end state (the code items below imple
 
 ---
 
-## 2. Widen the effort vocabulary in the domain and config layers
+## 2. Widen the effort vocabulary in the domain and config layers — ✅ DONE (2026-08-25)
+
+NOTES (2026-08-25): the item's text says `Valid()` accepts "all seven plus `""`", but it also
+adds four constants beside the existing four and dictates an error string naming eight words;
+`Valid()` therefore accepts all EIGHT named levels (the seven-name union plus `none`) plus `""`,
+which is the only reading consistent with both, with ADR 0060 decision 4 and with the manual.
+NOTES (2026-08-25): two files beyond the item's Files list were updated because this change
+falsified what they state and no later plan item owns them — `apogee.go` (+`example_test.go`,
+whose "one reference each" list pins the façade's re-exports) mirrors the domain constants for
+the embeddable engine, and `internal/config/defaults/config.yaml`'s `effort` key reference said
+"off | low | medium | high … a value outside those four is a startup error".
+NOTES (2026-08-25): the required "effort: bogus fails with the widened message" coverage was
+added by widening the existing `hihg` case in `TestApplyConfigBadModelProfileAxisErrors` rather
+than adding a second near-identical case; the "loads" half is a new `wide-effort` profile with
+`effort: xhigh` in `TestApplyConfigModelProfileEffort`.
 
 **What:** Extend `domain.ThinkingEffort` (`internal/domain/config.go:448`) with four new
 constants — `EffortNone = "none"`, `EffortMinimal = "minimal"`, `EffortXHigh = "xhigh"`,
