@@ -217,7 +217,9 @@ go test ./internal/agent
 
 ---
 
-## 3. Structural size floor for `@file` blocks
+## 3. Structural size floor for `@file` blocks — ✅ DONE (2026-08-25)
+
+NOTES (2026-08-25): `submitOneRef` (item 2's test helper) now delegates to a new variadic `submitRefs`, which the two-reference split test needs; no existing test's behaviour or call site changed.
 
 Depends on item 2.
 

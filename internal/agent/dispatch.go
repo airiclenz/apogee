@@ -1009,51 +1009,47 @@ func (a *Agent) appendToolResult(turn int, result domain.ToolResult) {
 	a.cfg.Events.Emit(domain.ToolResultEvent{EventBase: a.base(turn), Result: result})
 }
 
-// clampToolResult is the STRUCTURAL floor on a single tool result: content whose estimated tokens
-// exceed the ENTIRE History allocation is replaced by the shared head/tail-plus-marker elision
-// (context.TruncateToolResult — the same shape `tool_result_cap` renders) before it is committed.
-// A result bigger than everything History may hold can never survive ANY reducer, so appending it
-// whole buys nothing and can doom the Turn outright: the emergency fold's own summary call keeps
-// the most recent message unconditionally (renderBudgetedTranscript), so a fresh giant result IS
-// that message and overflows the fold that was supposed to rescue the Turn.
-//
-// It is structural, not a Mechanism (ADR 0006's floor): it consults no config, is never disabled
-// under Bypass, and self-regulation cannot withdraw it. The `tool_result_cap` Mechanism stays the
-// A/B-able tuning valve above it and cannot substitute for it — it is default-off, bypass-disabled,
-// withdrawable, and caps only the turns BEFORE the most recent tool call, so the freshly appended
-// result (the one that overflows) is exactly the one it never touches. The two thresholds are
-// deliberately far apart: this floor fires only on the pathological — the whole History allocation
-// (~60% of the working room, ~48% of the window at the default reserve), chosen because it sits
-// BELOW the emergency fold's own transcript budget at every window an agent can realistically run
-// in, which is the property that keeps the fold survivable — while the Mechanism's tighter
-// 40%-of-working-room nudge shapes the ordinary case. That ordering is arithmetic, not an
-// invariant: the fold budgets its transcript at window - compactMaxTokens -
-// compactPromptOverheadTokens (= window - 4608), so the floor stays under it only while
-// 0.6*(window - reserve) < window - 4608 — windows above ~8.9k tokens at the default reserve.
-// Smaller windows invert the two and lose the property; they sit far under the ~32k target window
-// and are too small to run a coding Turn in (ADR 0018 §8 states the same condition).
-//
-// Unlike the Mechanism, which edits only the projected request, this clamp edits the conversation
-// itself: the raw result never reaches history, and so never reaches a snapshot or the rendered
-// transcript. That is the price of a floor that must hold for every later reducer — and the model
-// is told, in the marker, to re-read the omitted range.
+// structuralFloor is the BOUND behind both structural clamps: the whole History allocation — the
+// most any single body could occupy and still leave the conversation renderable. Content past it
+// can never survive ANY reducer, so committing it whole buys nothing and can doom the Turn
+// outright: the emergency fold's own summary call keeps the most recent message unconditionally
+// (renderBudgetedTranscript), so a fresh giant body IS that message and overflows the fold that was
+// supposed to rescue the Turn.
 //
 // With an unknown window (a zero History allocation — Allocate had no basis to allocate) the floor
 // measures against compactUnknownWindowTranscriptTokens instead of standing down. Being inert there
 // was not the conservative choice it looked like: the fold's transcript render keeps the most recent
-// message UNCONDITIONALLY, so an unclamped giant result becomes the one message the emergency fold
+// message UNCONDITIONALLY, so an unclamped giant body becomes the one message the emergency fold
 // cannot shed and re-wedges the session bounding the fold was meant to un-wedge (audit 2026-08-01,
 // follow-up B). Keying the floor to the fold's own unknown-window budget makes the two meet exactly:
-// a result that survives the clamp is, by construction, one the fold can still render.
+// content that survives the clamp is, by construction, content the fold can still render.
 //
-// It never GROWS a result: a pathological few-very-long-lines body the head/tail form cannot shrink
-// is left whole (the same guard tool_result_cap applies).
-func (a *Agent) clampToolResult(content string) string {
-	b := a.budget()
-	bound := b.History
-	if bound <= 0 {
-		bound = compactUnknownWindowTranscriptTokens
+// The threshold sits deliberately far above the `tool_result_cap` Mechanism's: the whole History
+// allocation (~60% of the working room, ~48% of the window at the default reserve), chosen because
+// it sits BELOW the emergency fold's own transcript budget at every window an agent can
+// realistically run in, which is the property that keeps the fold survivable — while the
+// Mechanism's tighter 40%-of-working-room nudge shapes the ordinary case. That ordering is
+// arithmetic, not an invariant: the fold budgets its transcript at window - compactMaxTokens -
+// compactPromptOverheadTokens (= window - 4608), so the floor stays under it only while
+// 0.6*(window - reserve) < window - 4608 — windows above ~8.9k tokens at the default reserve.
+// Smaller windows invert the two and lose the property; they sit far under the ~32k target window
+// and are too small to run a coding Turn in (ADR 0018 §8 states the same condition).
+func (a *Agent) structuralFloor() int {
+	if history := a.budget().History; history > 0 {
+		return history
 	}
+	return compactUnknownWindowTranscriptTokens
+}
+
+// clampToBound is the RENDERING both structural clamps share: content whose estimated tokens exceed
+// bound is replaced by the head/tail-plus-marker elision (context.TruncateToolResult — the same
+// shape `tool_result_cap` renders), so the model reads ONE "the middle was dropped, re-read the
+// range" idiom whichever seam produced it. Content within bound is returned untouched.
+//
+// It never GROWS content: a pathological few-very-long-lines body the head/tail form cannot shrink
+// is left whole (the same guard tool_result_cap applies).
+func (a *Agent) clampToBound(content string, bound int) string {
+	b := a.budget()
 	if b.EstimateTokens(len(content)) <= bound {
 		return content
 	}
@@ -1062,6 +1058,29 @@ func (a *Agent) clampToolResult(content string) string {
 		return content
 	}
 	return clamped
+}
+
+// clampToolResult is the STRUCTURAL floor on a single tool result: a result whose estimated tokens
+// exceed the ENTIRE History allocation is committed to the conversation as the shared elision
+// instead of whole.
+//
+// It is structural, not a Mechanism (ADR 0006's floor): it consults no config, is never disabled
+// under Bypass, and self-regulation cannot withdraw it. The `tool_result_cap` Mechanism stays the
+// A/B-able tuning valve above it and cannot substitute for it — it is default-off, bypass-disabled,
+// withdrawable, and caps only the turns BEFORE the most recent tool call, so the freshly appended
+// result (the one that overflows) is exactly the one it never touches.
+//
+// Unlike the Mechanism, which edits only the projected request, this clamp edits the conversation
+// itself: the raw result never reaches history, and so never reaches a snapshot or the rendered
+// transcript. That is the price of a floor that must hold for every later reducer — and the model
+// is told, in the marker, to re-read the omitted range.
+//
+// A tool result is not the only body with this floor: resolveFileRefs (loop.go) clamps every @file
+// block against the same bound, divided across the references of one message, so an assembled block
+// of references can no more outgrow the allocation than a result can. The two seams share
+// structuralFloor and clampToBound because they have one reason to change — the fold's arithmetic.
+func (a *Agent) clampToolResult(content string) string {
+	return a.clampToBound(content, a.structuralFloor())
 }
 
 // errorToolResult builds a tool-level failure result surfaced to the model (IsError) rather

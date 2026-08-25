@@ -45,6 +45,22 @@ point is a **minor** bump, not a breaking change.
   proceeds — because a wall of binary teaches the model nothing and costs it a window to learn it.
   `Interject` calls the same resolver, so a document delivered mid-Exchange behaves identically.
 
+- **An `@file` block now carries the same structural size floor a tool result has (plan item 3).**
+  A tool result past the whole History allocation has been clamped to the shared
+  head/tail-plus-marker elision since the overflow-recovery work; a reference had no such floor,
+  only the 10 MiB sanity cap `readFileRef` describes as "not a context budget" — so a single
+  oversized reference could still hand the emergency fold the one message it keeps unconditionally
+  and cannot shed. `resolveFileRefs` now clamps every block's content before its header is added,
+  against the History allocation SPLIT across the references of that message (never below a token,
+  and the divisor counts the references submitted, not the ones that resolved). A lone reference
+  therefore gets exactly the bound a tool result gets, and a message of ten references still fits
+  the allocation. The bound and the rendering are the tool floor's own — `structuralFloor` and
+  `clampToBound`, now shared by both seams — so the model reads ONE "the middle was dropped,
+  re-read the range" idiom whichever seam elided it, with the file name (and, for a document, its
+  page count) still on the header above it. Like the tool floor it is structural, not a Mechanism
+  (ADR 0006): no config key, never disabled under Bypass, and it never grows content a head/tail
+  form cannot shrink.
+
 
 ## [0.17.0] — 2026-08-25
 

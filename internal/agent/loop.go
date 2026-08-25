@@ -923,11 +923,28 @@ const maxRefFileBytes = 10 * 1024 * 1024
 // it a context window to learn it. The block header quotes doctext's annotation for an
 // extracted document, so the model is told the format, the page count, and that the lines
 // below are read-only before it tries to edit what it cannot write back.
+//
+// Every block carries the same STRUCTURAL floor a tool result has (clampToolResult, dispatch.go):
+// content past its share of the History allocation is elided to the shared head/tail-plus-marker
+// shape BEFORE the header is added, so the model still reads which file an elided block came from
+// and, for a document, how many pages it had. The floor is structural (ADR 0006), not a Mechanism:
+// it consults no config, is never disabled under Bypass, and self-regulation cannot withdraw it.
+// Like the tool floor it edits the conversation itself — the raw block never reaches history, and
+// so never reaches a snapshot or the rendered transcript. That is the price of a floor every later
+// reducer can rely on, and it is why the emergency fold's keep-the-most-recent-message rule can no
+// longer be defeated by one reference: the block the fold cannot shed is now bounded by
+// construction. The marker's "re-read with start_line/end_line" hint is actionable here, because
+// read_file reaches the very same file.
 func (a *Agent) resolveFileRefs(turn int, refs []string) string {
 	if len(refs) == 0 {
 		return ""
 	}
 	var b strings.Builder
+	// The floor is SPLIT across the references of one message, so however many a message carries
+	// their assembled blocks still fit the allocation. The divisor counts the references SUBMITTED,
+	// not the ones that resolve: a ref that fails leaves the survivors a stricter bound, never a
+	// looser one, and a lone reference keeps the whole floor — the number a tool result gets.
+	bound := max(a.structuralFloor()/len(refs), 1)
 	for _, ref := range refs {
 		data, err := a.readFileRef(ref)
 		if err != nil {
@@ -943,7 +960,7 @@ func (a *Agent) resolveFileRefs(turn int, refs []string) string {
 			}
 			content, annotation = extracted, " ("+doctext.PDFAnnotation(pages)+")"
 		}
-		fmt.Fprintf(&b, "Referenced file `%s`%s:\n```\n%s\n```\n\n", ref, annotation, content)
+		fmt.Fprintf(&b, "Referenced file `%s`%s:\n```\n%s\n```\n\n", ref, annotation, a.clampToBound(content, bound))
 	}
 	return b.String()
 }
