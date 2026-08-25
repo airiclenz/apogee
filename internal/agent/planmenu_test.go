@@ -173,3 +173,33 @@ func TestToolMenuOutsidePlanIsUnfiltered(t *testing.T) {
 		})
 	}
 }
+
+// TestPlanAdmitsTheReadOnlyHalfOfTheConsoleFamily pins the split ADR 0059 §2 draws through the
+// Console family: console_read and console_close take the read-only floor, so Plan admits them
+// with no engine code of their own — a model planning can watch, and stop, a program an earlier
+// mode left running — while console_open and console_send carry the Subprocess marker and Plan
+// refuses them however read-only they might one day declare themselves.
+//
+// It asserts planAdmits directly rather than through the registry, because the family is
+// registered default-off: the whole-registry agreement test above never sees it.
+func TestPlanAdmitsTheReadOnlyHalfOfTheConsoleFamily(t *testing.T) {
+	t.Parallel()
+	ws := t.TempDir()
+	tests := []struct {
+		tool     domain.Tool
+		admitted bool
+	}{
+		{tools.NewConsoleRead(), true},
+		{tools.NewConsoleClose(), true},
+		{tools.NewConsoleOpen(ws, nil), false},
+		{tools.NewConsoleSend(), false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.tool.Name(), func(t *testing.T) {
+			t.Parallel()
+			if got := planAdmits(tt.tool); got != tt.admitted {
+				t.Errorf("planAdmits(%s) = %v, want %v", tt.tool.Name(), got, tt.admitted)
+			}
+		})
+	}
+}

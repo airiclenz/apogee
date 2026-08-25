@@ -303,7 +303,11 @@ carries `confinementDenialStopLabel`, the Console is not alive, and the file doe
 
 ---
 
-## 5. Tools: `console_read` and `console_close`
+## 5. Tools: `console_read` and `console_close` — ✅ DONE (2026-08-25)
+
+NOTES (2026-08-25): two files beyond the item's Files list were touched, both because the item's own text asks for what is in them. `internal/tools/console_common.go` gains `consoleReadWaitDefaultMS`/`consoleReadWaitMaxMS` beside the family's other four wait ceilings — the shared floor is where item 4 put them, and splitting one tool's ceilings off into its own file would hide the contrast the const block exists to show. `internal/agent/planmenu_test.go` gains the Plan-admission assertion the item's Tests line requires: `planAdmits` and `classifyTool` are unexported in `internal/agent`, so no test in `internal/tools` can make it, and the file's existing whole-registry agreement test cannot cover a family that is registered default-off (item 6) — hence a direct four-tool assertion rather than a new registry row.
+NOTES (2026-08-25): `console_close` takes the unread tail AFTER `registry.Close(id)` rather than draining before it as the item's literal "drain unread → registry.Close(id)" order says. The registry's close waits for the process's output to finish draining into the ring, and the ring stays readable once closed (`Process.Close`), so reading afterwards is the only order that returns the WHOLE tail: a program's parting line — or output the kill itself produced — falls between a pre-drain and the signal and is lost. The result shape the binding contract names is unchanged.
+NOTES (2026-08-25): a teardown error from `registry.Close` (the pseudo-terminal refusing to be released, not a program still running) is reported on a line ABOVE the tail inside an ok result, not as an error result. The Console is out of the registry whatever the teardown said, so an error result would invite a retry that can only answer "no console N" — while swallowing the error silently would hide a host leaking terminals from the transcript.
 
 Depends on item 4.
 

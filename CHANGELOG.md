@@ -10,6 +10,28 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **`console_read` and `console_close` — the read-only half of the Console family (plan item 5).**
+  `console_read` reports what a Console has printed since the model last heard from it, without
+  typing anything into it: with no `wait_ms` it answers immediately with whatever is waiting, and
+  with one it returns the moment new output arrives rather than at the end of the window — so
+  watching a program that is still working costs one call instead of a poll loop that costs a Turn
+  each time round. Output that overflowed the Console's 1 MiB buffer is announced rather than
+  spliced (`[… N bytes of earlier output dropped …]`), so a model never reads a hole in a stream as
+  though it were continuous. `console_close` ends a Console: it stops the program and everything
+  that program started, retires the id for good, and hands back the tail nobody had read together
+  with how the process ended — `exited with code N`, or `killed` when the close itself stopped it.
+  The tail is taken after the teardown, which is what makes it the whole tail: a parting line, or
+  output the kill produced, would be lost by a drain that ran before the signal.
+  Both are DEFAULT-OFF beside the rest of the family (ADR 0057) and both take the read-only floor
+  (ADR 0059 §2) — `console_close` too, which reads oddly for a tool that kills a process and is
+  nonetheless right: the blast radius the class measures is what a call leaves BEHIND, and closing
+  a Console leaves strictly less behind than opening one did. That classification is the whole of
+  their engine wiring: Plan mode admits them through the existing class predicate with no new code,
+  so a model planning can watch — and stop — a program an earlier mode left running, while
+  `console_open` and `console_send` stay Subprocess-marked and Plan refuses them. An unknown or
+  already-closed id is an error result naming the ids that ARE open, the family's convention, so a
+  stale id from before a `/new` is something the model can act on rather than a failed Turn.
+
 - **`console_open` and `console_send` — the Subprocess-marked half of the Console family (plan
   item 4).** The registry from item 3 gets its first two callers. `console_open` runs a command
   line through the platform shell inside a pseudo-terminal and hands the model a small id back

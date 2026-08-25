@@ -20,12 +20,16 @@ import (
 // Wait-window ceilings for one Console call, in milliseconds. A window is how long a call is
 // willing to sit collecting output before it answers, and each tool's default is what its own
 // question is worth: opening a program asks the short "did it start, and what did it say",
-// sending it a line asks the longer "what did that produce".
+// sending it a line asks the longer "what did that produce", and reading asks "what has happened
+// since I last looked" — which the buffer can answer with no window at all, so read's default is
+// none and its window is something the model asks for when it means to wait.
 const (
 	consoleOpenWaitDefaultMS = 500
 	consoleOpenWaitMaxMS     = 10_000
 	consoleSendWaitDefaultMS = 1_000
 	consoleSendWaitMaxMS     = 30_000
+	consoleReadWaitDefaultMS = 0
+	consoleReadWaitMaxMS     = 30_000
 )
 
 // consoleAliveStatus is the verdict on a Console whose process is still running — the word every

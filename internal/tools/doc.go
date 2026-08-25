@@ -200,7 +200,9 @@
 // Console's output into a result. console_open.go is console_open, the Subprocess-marked tool
 // that starts the program under a pseudo-terminal, and console_send.go is console_send, which
 // types into one — Subprocess-marked too, because the shell on the other end executes what it
-// is sent. Both ship DEFAULT-OFF (ADR 0057).
+// is sent. console_read.go and console_close.go are the family's read-only half: console_read
+// reports what a Console has printed since it was last heard from, and console_close stops one
+// and hands back the tail nobody read. All four ship DEFAULT-OFF (ADR 0057).
 //
 // The subprocess plumbing. exec_common.go is the single runSubprocess every execution tool
 // above calls — the ceilings, the default timeout, the capped output buffer, and the
