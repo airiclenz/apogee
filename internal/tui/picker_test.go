@@ -2119,6 +2119,7 @@ func TestPickerCycleAcceptClearsTheFilter(t *testing.T) {
 func TestPickerHintsLeadWithTypeToFilter(t *testing.T) {
 	kinds := []pickerKind{
 		pickerModel, pickerServer, pickerLoad, pickerCycle, pickerScheduleMode, pickerScheduleStop,
+		pickerEffort,
 	}
 	for _, kind := range kinds {
 		if got := pickerHintFor(kind); !strings.HasPrefix(got, "type to filter · ") {
@@ -2347,5 +2348,74 @@ func TestPickerRoomyWindowKeepsTheRowTasteAndBothSpacers(t *testing.T) {
 	granted := m.frameRowPlan(m.openPanes().with(panePicker)).panes[panePicker]
 	if got := len(popupLines(m.renderPicker())); got > granted {
 		t.Errorf("the pane is %d rows tall, want no more than the %d the frame granted it", got, granted)
+	}
+}
+
+// ----------------------------------------------------------------------------
+// /effort — the offering the levels come from
+// ----------------------------------------------------------------------------
+
+// The pane lists the model's OWN vocabulary when the server reported one, and the canonical fallback
+// its dialect implies when it did not — a llama.cpp /props sighting proves the dial and names no
+// levels at all (ADR 0060 D4) — with the "auto" row appended under either. The openai dialect is the
+// fallback's one variation: those endpoints have no "off" rung and offer a "minimal" below "low".
+func TestEffortPickerRowsFollowTheReportedVocabulary(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name    string
+		support provider.EffortSupport
+		want    []string
+	}{
+		{
+			name: "a reported set is offered as reported, in the server's own order",
+			support: provider.EffortSupport{
+				Supported: true,
+				Dialect:   provider.EffortDialectReasoning,
+				Efforts:   []string{"none", "low", "medium", "high", "xhigh"},
+				Default:   "medium",
+			},
+			want: []string{"none", "low", "medium", "high", "xhigh", "auto"},
+		},
+		{
+			name:    "a template sighting names no levels, so the canonical four stand",
+			support: provider.EffortSupport{Supported: true, Dialect: provider.EffortDialectKwargs},
+			want:    []string{"off", "low", "medium", "high", "auto"},
+		},
+		{
+			name:    "the openai dialect trades off for minimal",
+			support: provider.EffortSupport{Supported: true, Dialect: provider.EffortDialectOpenAI},
+			want:    []string{"minimal", "low", "medium", "high", "auto"},
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			var got []string
+			for _, row := range effortRows(c.support) {
+				got = append(got, row[0])
+			}
+			if !reflect.DeepEqual(got, c.want) {
+				t.Errorf("effortRows = %v, want %v", got, c.want)
+			}
+		})
+	}
+}
+
+// The open pane derives those same rows through the offering seam every kind shares, names the dial
+// it is asking about, and takes the "⏎ choose" legend: nothing it accepts re-points the session at
+// another model or server, which is the only thing "switch" may promise.
+func TestEffortPickerPaneNamesTheDialAndChooses(t *testing.T) {
+	m := newTestModel(t)
+	m.hb.effort = provider.EffortSupport{Supported: true, Dialect: provider.EffortDialectKwargs}
+	m.picker = picker{open: true, kind: pickerEffort}
+
+	if got, want := len(m.pickerRows()), len(canonicalEfforts)+1; got != want {
+		t.Errorf("pane rows = %d, want the %d levels plus the auto row", got, want)
+	}
+	if got := m.pickerTitle(); !strings.Contains(got, "thinking effort") {
+		t.Errorf("title = %q, want it to name the thinking-effort dial", got)
+	}
+	if got := pickerHintFor(pickerEffort); !strings.Contains(got, "⏎ choose") {
+		t.Errorf("hint = %q, want the choosing verb rather than a switch", got)
 	}
 }

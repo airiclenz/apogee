@@ -148,15 +148,20 @@
 // never invalidates the session toggle that already happened.
 //
 // effort.go is the routing half of `/effort`, the session end of the Thinking-effort dial (ADR
-// 0050): [Model.runEffort] layers a level above the bound model profile's own `thinking.effort:`
-// through [Engine.SetEffortOverride], clears it again on `auto` with the zero value, and — in every
-// form, the bare report included — closes with one note built by the pure [effortResolutionNote]
-// stating the effective effort AND both layers behind it, because the same word means one thing as
-// an override (it survives a model switch) and another as a profile setting (a switch replaces it).
-// The layers are re-read off [Engine.ThinkingEffort] AFTER the write rather than taken from the
-// argument, the /confine posture. Nothing here persists: the override is session intent, the config
-// key is the durable door, and the verb is safe mid-Exchange because the value is read when the next
-// request is built.
+// 0050, amended by ADR 0060): the verb reads no arguments — [Model.runEffortCommand] opens the
+// shared picker over pickerEffort, whose rows [effortRows] derives from the levels the model itself
+// reported (else the canonical fallback its wire dialect implies) with an `auto` row appended, and
+// a model detection saw no dial on earns the one note saying so instead of a pane. [Model.runEffort]
+// is the accept: it layers the picked level above the bound model profile's own `thinking.effort:`
+// through [Engine.SetEffortOverride], clears it again on `auto` with the zero value, and either way
+// closes with one note built by the pure [effortResolutionNote] stating the effective effort AND
+// both layers behind it, because the same word means one thing as an override (it survives a model
+// switch) and another as a profile setting (a switch replaces it). The layers are re-read off
+// [Engine.ThinkingEffort] AFTER the write rather than taken from the picked row, the /confine
+// posture. The file also words the footer's effort segment ([footerEffortLabel]), which reads the
+// same resolution one layer deeper and is present exactly when the verb is. Nothing here persists:
+// the override is session intent, the config key is the durable door, and the verb is safe
+// mid-Exchange because the value is read when the next request is built.
 //
 // undo.go is the routing half of `/undo`, the human end of the engine's per-exchange pre-image
 // journal (ADR 0051): [Model.runUndo] reads the top un-undone group off [Engine.UndoPreview] and

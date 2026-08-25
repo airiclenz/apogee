@@ -338,7 +338,7 @@ func (f *fakeEngine) ThinkingEffort() (override, profile domain.ThinkingEffort) 
 }
 
 // effortsSet reports the levels SetEffortOverride was called with, in order — empty when the UI
-// never drove it (what a bare /effort and a parse error must both leave behind).
+// never drove it (what /effort leaves behind until a row of its picker is accepted).
 func (f *fakeEngine) effortsSet() []domain.ThinkingEffort {
 	f.mu.Lock()
 	defer f.mu.Unlock()

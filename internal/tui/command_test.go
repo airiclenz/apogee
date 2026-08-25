@@ -93,63 +93,24 @@ func TestCommandTableDrivesParserAndMenu(t *testing.T) {
 }
 
 // ----------------------------------------------------------------------------
-// /effort — the thinking-effort verb (command.go's grammar, effort.go's routing)
+// /effort — the thinking-effort verb (effort.go's popup and its accept)
 // ----------------------------------------------------------------------------
 
-// TestParseEffortVocabulary pins the whole argument grammar: the bare report, the four levels, the
-// "auto" that clears the override, and the two ways a line can be wrong. An out-of-vocabulary word
-// must be an ERROR carrying the usage line rather than a guess — a level the template does not
-// understand fails the next turn, far from the line that caused it.
-func TestParseEffortVocabulary(t *testing.T) {
-	cases := []struct {
-		line    string
-		want    effortArgs
-		wantErr bool
-	}{
-		{line: "/effort", want: effortArgs{action: effortReport}},
-		{line: "/effort off", want: effortArgs{action: effortSet, level: domain.EffortOff}},
-		{line: "/effort low", want: effortArgs{action: effortSet, level: domain.EffortLow}},
-		{line: "/effort medium", want: effortArgs{action: effortSet, level: domain.EffortMedium}},
-		{line: "/effort high", want: effortArgs{action: effortSet, level: domain.EffortHigh}},
-		{line: "/effort auto", want: effortArgs{action: effortClear}},
-		{line: "/effort hihg", wantErr: true},     // a typo'd level
-		{line: "/effort low high", wantErr: true}, // exactly one level, never two
-	}
-	for _, c := range cases {
-		t.Run(c.line, func(t *testing.T) {
-			got := parseInput(c.line, nil)
-			if got.kind != kindCommand || got.command != "effort" {
-				t.Fatalf("parseInput(%q) = {kind:%v cmd:%q}, want the /effort command", c.line, got.kind, got.command)
-			}
-			if c.wantErr {
-				if got.err == nil {
-					t.Fatalf("parseInput(%q).err = nil, want an argument error", c.line)
-				}
-				if !strings.Contains(got.err.Error(), effortUsage) {
-					t.Errorf("error %q does not teach the vocabulary %q", got.err, effortUsage)
-				}
-				if effort := verbArgsOf[effortArgs](got); effort != (effortArgs{}) {
-					t.Errorf("effort = %+v on a rejected line, want the zero value", effort)
-				}
-				return
-			}
-			if got.err != nil {
-				t.Fatalf("parseInput(%q).err = %v, want none", c.line, got.err)
-			}
-			if effort := verbArgsOf[effortArgs](got); effort != c.want {
-				t.Errorf("parseInput(%q).effort = %+v, want %+v", c.line, effort, c.want)
-			}
-		})
-	}
+// dialledEffort is a bound model that reports a dial and nothing else about it — the llama.cpp
+// /props sighting, whose chat template proves the dial exists and names no vocabulary, which is what
+// makes the picker fall back to the canonical four.
+func dialledEffort() provider.EffortSupport {
+	return provider.EffortSupport{Supported: true, Dialect: provider.EffortDialectKwargs}
 }
 
-// runEffortLine drives one /effort line through the real key path and returns the model plus the
-// note it left ([lastNote]), so a test asserts on the exact sentence rather than on a view the frame
-// has already wrapped.
-func runEffortLine(t *testing.T, eng *fakeEngine, line string) (Model, string) {
+// openEffortPicker drives "/effort" through the real key path against a model with the given dial and
+// hands back the Model it left, so a test asserts on the pane a human would be looking at rather than
+// on a picker some helper opened behind the verb's back.
+func openEffortPicker(t *testing.T, eng *fakeEngine, support provider.EffortSupport) Model {
 	t.Helper()
 	m := newTestModelEng(t, eng, testOpts)
-	m.input.SetValue(line)
+	m.hb.effort = support
+	m.input.SetValue("/effort")
 	m, cmd := stepCmd(t, m, keyEnter())
 	if cmd != nil {
 		t.Error("/effort returned a Cmd; it is synchronous and must not launch a worker")
@@ -157,101 +118,156 @@ func runEffortLine(t *testing.T, eng *fakeEngine, line string) (Model, string) {
 	if m.state != stateIdle {
 		t.Errorf("state = %v, want idle (/effort must not launch a worker)", m.state)
 	}
-	return m, lastNote(m)
+	return m
 }
 
-// TestEffortCommandDrivesTheEngineDoor is the run half: a level and "auto" reach
-// Engine.SetEffortOverride with the mapped value, a bare line drives nothing, and every form ends on
-// the binding resolution format — with both layers named, because a level means one thing as an
-// override and another as a profile setting.
-func TestEffortCommandDrivesTheEngineDoor(t *testing.T) {
+// The verb ASKS rather than reads: the level-word grammar is deleted (ADR 0060 D7), so /effort opens
+// the popup and — until a row is taken — has moved nothing and said nothing.
+func TestEffortCommandOpensThePicker(t *testing.T) {
+	eng := &fakeEngine{effortProfile: domain.EffortLow}
+	m := openEffortPicker(t, eng, dialledEffort())
+
+	if !m.picker.open || m.picker.kind != pickerEffort {
+		t.Fatalf("picker = {open:%v kind:%v}, want the effort picker up", m.picker.open, m.picker.kind)
+	}
+	if got := eng.effortsSet(); len(got) != 0 {
+		t.Errorf("SetEffortOverride calls = %v, want none until a row is accepted", got)
+	}
+	if got := lastNote(m); got != "" {
+		t.Errorf("note = %q, want none — the pane is the answer", got)
+	}
+}
+
+// A model with no dial keeps the verb ROUTABLE and answers it with one note: the menu withholds the
+// row (ADR 0060 D5), but a hand-typed line still lands, and a verb that resolved and then did nothing
+// would read as a broken command rather than as an absent dial.
+func TestEffortWithoutADialAnswersWithOneNote(t *testing.T) {
+	eng := &fakeEngine{effortProfile: domain.EffortLow}
+	m := openEffortPicker(t, eng, provider.EffortSupport{})
+
+	if m.picker.open {
+		t.Errorf("picker kind %v opened over a model with no dial", m.picker.kind)
+	}
+	if got := lastNote(m); got != noEffortDialNote {
+		t.Errorf("note = %q, want %q", got, noEffortDialNote)
+	}
+	if got := eng.effortsSet(); len(got) != 0 {
+		t.Errorf("SetEffortOverride calls = %v, want none — there is no dial to move", got)
+	}
+}
+
+// TestEffortPickerAcceptDrivesTheEngineDoor is the run half, over the rows a human walks to: a level
+// row reaches Engine.SetEffortOverride as itself, the appended "auto" row reaches it as the zero
+// value that CLEARS the override, and every accept closes the pane on the binding resolution — both
+// layers named, because a level means one thing as an override and another as a profile setting.
+func TestEffortPickerAcceptDrivesTheEngineDoor(t *testing.T) {
+	reported := provider.EffortSupport{
+		Supported: true,
+		Dialect:   provider.EffortDialectReasoning,
+		Efforts:   []string{"none", "low", "high"},
+		Default:   "low",
+	}
 	cases := []struct {
 		name     string
+		support  provider.EffortSupport
 		profile  domain.ThinkingEffort
-		override domain.ThinkingEffort // what the session already carried before the line ran
-		line     string
+		override domain.ThinkingEffort // what the session already carried before the pick
+		down     int                   // ↓ presses before ⏎
 		wantSet  []domain.ThinkingEffort
 		wantNote string
 	}{
 		{
-			name:     "a level layers above the profile",
-			profile:  domain.EffortLow,
-			line:     "/effort high",
-			wantSet:  []domain.ThinkingEffort{domain.EffortHigh},
-			wantNote: "thinking effort: high (session override: high; profile: low)",
-		},
-		{
-			name:     "auto clears the override with the zero value",
-			profile:  domain.EffortLow,
-			override: domain.EffortHigh,
-			line:     "/effort auto",
-			wantSet:  []domain.ThinkingEffort{""},
-			wantNote: "thinking effort: low (session override: —; profile: low)",
-		},
-		{
-			name:     "off is a level like any other",
-			line:     "/effort off",
+			name:     "the highlighted first row is the first level offered",
+			support:  dialledEffort(),
 			wantSet:  []domain.ThinkingEffort{domain.EffortOff},
 			wantNote: "thinking effort: off (session override: off; profile: —)",
 		},
 		{
-			name:     "bare reports the override standing over a profile",
-			profile:  domain.EffortMedium,
-			override: domain.EffortHigh,
-			line:     "/effort",
-			wantNote: "thinking effort: high (session override: high; profile: medium)",
+			name:     "a level layers above the profile",
+			support:  dialledEffort(),
+			profile:  domain.EffortLow,
+			down:     3, // off, low, medium, HIGH
+			wantSet:  []domain.ThinkingEffort{domain.EffortHigh},
+			wantNote: "thinking effort: high (session override: high; profile: low)",
 		},
 		{
-			name:     "bare with neither layer set says the model decides",
-			line:     "/effort",
+			name:     "the auto row clears the override with the zero value",
+			support:  dialledEffort(),
+			profile:  domain.EffortLow,
+			override: domain.EffortHigh,
+			down:     4, // past the canonical four, onto "auto"
+			wantSet:  []domain.ThinkingEffort{""},
+			wantNote: "thinking effort: low (session override: —; profile: low)",
+		},
+		{
+			name:     "a reported set is picked in the server's own words",
+			support:  reported,
+			down:     2, // none, low, HIGH
+			wantSet:  []domain.ThinkingEffort{domain.EffortHigh},
+			wantNote: "thinking effort: high (session override: high; profile: —)",
+		},
+		{
+			name:     "auto sits under a reported set too",
+			support:  reported,
+			override: domain.EffortHigh,
+			down:     3, // past the three reported levels
+			wantSet:  []domain.ThinkingEffort{""},
 			wantNote: "thinking effort: the model's own default (session override: —; profile: —)",
 		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			eng := &fakeEngine{effortProfile: c.profile, effortOverride: c.override}
-			_, note := runEffortLine(t, eng, c.line)
+			m := openEffortPicker(t, eng, c.support)
+			for range c.down {
+				m = step(t, m, keyDown())
+			}
 
+			m, cmd := stepCmd(t, m, keyEnter())
+
+			if cmd != nil {
+				t.Error("the accept returned a Cmd; it moves session state and launches no worker")
+			}
+			if m.picker.open {
+				t.Error("the accept left the picker open")
+			}
 			if got := eng.effortsSet(); !slices.Equal(got, c.wantSet) {
 				t.Errorf("SetEffortOverride calls = %v, want %v", got, c.wantSet)
 			}
-			if note != c.wantNote {
-				t.Errorf("note = %q, want %q", note, c.wantNote)
+			if got := lastNote(m); got != c.wantNote {
+				t.Errorf("note = %q, want %q", got, c.wantNote)
 			}
 		})
 	}
 }
 
-// A mistyped level must leave the session thinking exactly as it was: the usage line is reported and
-// the engine door is never driven, so a human who typo'd cannot be left believing the level took.
-func TestEffortParseErrorDrivesNothing(t *testing.T) {
-	eng := &fakeEngine{effortProfile: domain.EffortLow}
-	_, note := runEffortLine(t, eng, "/effort hihg")
-
-	if got := eng.effortsSet(); len(got) != 0 {
-		t.Errorf("SetEffortOverride calls = %v, want none on a parse error", got)
-	}
-	if !strings.Contains(note, effortUsage) {
-		t.Errorf("note = %q, want the usage line %q", note, effortUsage)
-	}
-}
-
-// /effort is safe while a worker works in EVERY form, unlike /confine beside it in the table: the
-// override is read when the NEXT request is built, so a level set mid-Turn changes nothing about the
-// one in flight — and mid-Turn is exactly when a human notices the model is thinking too hard.
+// /effort is safe while a worker works, unlike /confine beside it in the table — the pane opens over
+// a running Exchange and its accept moves the dial — because the override is read when the NEXT
+// request is built: a level set mid-Turn changes nothing about the one in flight, and mid-Turn is
+// exactly when a human notices the model is thinking too hard.
 func TestEffortRunsWhileTheWorkerWorks(t *testing.T) {
 	eng := &fakeEngine{effortProfile: domain.EffortLow}
 	m := newTestModelEng(t, eng, testOpts)
+	m.hb.effort = dialledEffort()
 	m.input.SetValue("open the exchange")
 	m, _ = stepCmd(t, m, keyEnter())
 	if m.state != stateRunning {
 		t.Fatalf("precondition: state = %v, want running", m.state)
 	}
 
-	m.input.SetValue("/effort high")
+	m.input.SetValue("/effort")
 	m = step(t, m, keyEnter())
+	if !m.picker.open || m.picker.kind != pickerEffort {
+		t.Fatalf("picker = {open:%v kind:%v}, want the effort picker up mid-Exchange", m.picker.open, m.picker.kind)
+	}
+
+	m = step(t, m, keyDown()) // off → low
+	m = step(t, m, keyDown()) // low → medium
+	m = step(t, m, keyDown()) // medium → high
+	m = step(t, m, keyEnter())
+
 	if got := eng.effortsSet(); !slices.Equal(got, []domain.ThinkingEffort{domain.EffortHigh}) {
-		t.Errorf("SetEffortOverride calls = %v, want [high] — the mutating form runs mid-Exchange too", got)
+		t.Errorf("SetEffortOverride calls = %v, want [high] — the pick lands mid-Exchange too", got)
 	}
 	if got := lastNote(m); got != "thinking effort: high (session override: high; profile: low)" {
 		t.Errorf("note = %q, want the resolution stated mid-run", got)
@@ -405,7 +421,7 @@ func TestTheActuationLatchRefusesExactlyTheServerAndExchangeVerbs(t *testing.T) 
 // hook on a row that does not take arguments is dead code. Every grammar here words its BARE form
 // as a report rather than an error, which is what lets verbArgsOf answer the zero value for a line
 // the hook never ran for. And the set carrying one is named: it is exactly the switch that was
-// deleted, so a fifth grammar is a deliberate edit at this line rather than a silent one.
+// deleted, so a fourth grammar is a deliberate edit at this line rather than a silent one.
 func TestOnlyTheGrammarVerbsCarryAParseArgsHook(t *testing.T) {
 	var got []string
 	for _, spec := range commandSpecs {
@@ -422,7 +438,7 @@ func TestOnlyTheGrammarVerbsCarryAParseArgsHook(t *testing.T) {
 		}
 	}
 
-	if want := []string{"color-scheme", "confine", "effort", "undo"}; !reflect.DeepEqual(got, want) {
+	if want := []string{"color-scheme", "confine", "undo"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("verbs with a grammar of their own = %v, want exactly %v", got, want)
 	}
 }

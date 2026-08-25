@@ -10,6 +10,16 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **`/effort` is a popup picker of the model's own levels (plan item 10).** The
+  `off|low|medium|high|auto` word grammar is gone — parser, usage line and all — and `/effort`
+  now opens the shared picker instead. Its rows are exactly the levels the bound model reported
+  (in the server's own order and spelling) or, when the server named none, the canonical four its
+  wire dialect implies — `off/low/medium/high`, or `minimal/low/medium/high` on the OpenAI
+  dialect, which has no "off" rung — with an `auto` row under them that drops the session
+  override. Picking a level layers the override and closes on the same resolution note the verb
+  always ended with. Typed by hand on a model that reports no dial, the verb still routes and
+  answers with one note saying so.
+
 - **The `/` menu hides `/effort` when the model has no dial (plan item 9).** The `/` menu no
   longer offers `/effort` when the bound model reports no thinking-effort dial: the row is
   dropped rather than greyed out, matching the footer, which omits its effort word by the same

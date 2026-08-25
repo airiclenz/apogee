@@ -644,8 +644,9 @@ type Engine interface {
 	SetEffortOverride(domain.ThinkingEffort)
 	// ThinkingEffort reports the two layers behind the effort the next request will carry: this
 	// session's override (SetEffortOverride) and the bound model profile's own setting, each "" when
-	// unset. Bare /effort renders BOTH, because the same level means something different depending
-	// on which layer it sits in — one survives a model switch, the other is replaced by it.
+	// unset. The note every /effort pick ends on renders BOTH, because the same level means something
+	// different depending on which layer it sits in — one survives a model switch, the other is
+	// replaced by it.
 	// Goroutine-safe like ConfineToWorkspace.
 	ThinkingEffort() (override, profile domain.ThinkingEffort)
 	// Close releases the Agent's resources.

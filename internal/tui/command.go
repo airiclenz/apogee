@@ -3,8 +3,6 @@ package tui
 import (
 	"fmt"
 	"strings"
-
-	"github.com/airiclenz/apogee/internal/domain"
 )
 
 // ----------------------------------------------------------------------------
@@ -35,8 +33,8 @@ const (
 // grammar of its own — ONE opaque value rather than one typed field per such verb, produced by that
 // verb's commandSpec.parseArgs hook and read back through [verbArgsOf], which answers the zero value
 // of the type asked for on every line the hook did not run for (that zero value IS each grammar's
-// bare form: a status report for /confine, a listing for /color-scheme, a resolution report for
-// /effort, a preview for /undo, so no reader needs to test which verb it holds); and err is set when a
+// bare form: a status report for /confine, a listing for /color-scheme, a preview for /undo, so no
+// reader needs to test which verb it holds); and err is set when a
 // recognised verb was given arguments it does not understand. An arguments error stays a
 // kindCommand: the router reports the usage line rather than sending the line to the agent or
 // silently doing nothing. For kindMessage, text is the line (trimmed, with @tokens and "/id"
@@ -189,12 +187,15 @@ func verbGrammar[T any](parse func([]string) (T, error)) func([]string) (any, er
 // built-in into the human's schemes folder. Idle-only like every other verb that writes config, and
 // argument-taking like /confine, whose grammar it follows down to the usage line.
 //
-// /effort is the Thinking-effort dial (ADR 0050): bare it states the resolution this session landed
-// on, a level layers a session override above the bound model profile's own `thinking.effort:`, and
-// `auto` drops that override so the profile's setting stands again. It is argument-taking like
-// /confine, whose grammar and usage line it follows, and safe while a worker works for the reason
-// the Schedule pair is: the override reaches the model on the NEXT request, so setting it mid-run
-// changes nothing about the Turn already in flight and is precisely when a human wants it.
+// /effort is the Thinking-effort dial (ADR 0050, amended by ADR 0060): it opens a picker of the
+// levels the bound model itself reports, a picked level layers a session override above that model
+// profile's own `thinking.effort:`, and the picker's `auto` row drops the override so the profile's
+// setting stands again. It reads no arguments at all — the level word grammar it used to carry was
+// DELETED with the picker rather than deprecated, because a half-removed parser is worse than
+// either end state — so its menu row RUNS at accept like /clear's. It is safe while a worker works
+// for the reason the Schedule pair is: the override reaches the model on the NEXT request, so
+// setting it mid-run changes nothing about the Turn already in flight and is precisely when a human
+// wants it.
 //
 // /undo is the two-step revert of the agent's own file writes (undo.go, ADR 0051): bare it PREVIEWS
 // what putting the last exchange's writes back would do, `confirm` executes exactly that preview.
@@ -233,7 +234,7 @@ var commandSpecs = []commandSpec{
 	{name: "compact", summary: "summarise the conversation to reclaim context", opensExchange: true},
 	{name: "confine", summary: "report or change auto mode's blast radius", takesArgs: true, whileRunning: true, parseArgs: verbGrammar(parseConfine)},
 	{name: "continue", summary: "ask the model to keep going", opensExchange: true},
-	{name: "effort", summary: "set how hard the model thinks — off, low, medium, high, or auto", takesArgs: true, whileRunning: true, gatedByEffort: true, parseArgs: verbGrammar(parseEffort)},
+	{name: "effort", summary: "set how hard the model thinks — a picker of this model's levels", whileRunning: true, gatedByEffort: true},
 	{name: "inspect", summary: "show the recent raw request and response traffic", whileRunning: true, noRecall: true},
 	{name: "model", summary: "switch model — the launcher's profiles, or what the server serves", takesArgs: true, runsBareAtAccept: true, touchesServer: true},
 	{name: "new", summary: "start a fresh conversation (same as /clear)", noRecall: true},
@@ -565,66 +566,12 @@ func parseColorScheme(args []string) (colorSchemeArgs, error) {
 }
 
 // ----------------------------------------------------------------------------
-// /effort — the thinking-effort command's argument grammar
-// ----------------------------------------------------------------------------
-
-// effortAction is the subcommand of a parsed /effort line. The zero value is effortReport, so a
-// bare "/effort" states the resolution rather than moving it — the /confine and /color-scheme
-// posture, and for the same reason: the verb that changes something must be the one the human
-// spelled out.
-type effortAction int
-
-const (
-	effortReport effortAction = iota // state the effective effort and the two layers behind it
-	effortSet                        // layer one of the four levels above the profile
-	effortClear                      // "auto": drop the override, leaving the profile's own setting
-)
-
-// effortArgs is the parsed argument list of an /effort line: what was asked for, and the level it
-// was asked of (the zero value for the report and for "auto", neither of which names one — which is
-// also what makes effortClear's level the value SetEffortOverride reads as "no override").
-type effortArgs struct {
-	action effortAction
-	level  domain.ThinkingEffort
-}
-
-// effortUsage is the one-line grammar every /effort argument error carries, so a mistyped level
-// teaches the vocabulary instead of silently leaving the session thinking at the old one.
-const effortUsage = "usage: /effort | /effort off|low|medium|high|auto"
-
-// parseEffort parses the argument tokens that followed an "/effort" verb. No arguments means the
-// report. "auto" is the one word that is not a level: it clears the session override so the bound
-// model profile's own `thinking.effort:` stands again (ADR 0050's resolution ladder, minus its top
-// rung). Everything else must be one of the four levels the domain defines — an out-of-vocabulary
-// word is an error carrying effortUsage, never a guess, because a level the template does not
-// understand fails the NEXT turn rather than this line.
-//
-// The empty string is rejected explicitly even though ThinkingEffort.Valid accepts it: absence is a
-// legitimate CONFIGURATION but never a legitimate argument, and this grammar must not let one
-// through as a silent "auto".
-func parseEffort(args []string) (effortArgs, error) {
-	switch {
-	case len(args) == 0:
-		return effortArgs{action: effortReport}, nil
-	case len(args) > 1:
-		return effortArgs{}, fmt.Errorf("/effort takes exactly one level. %s", effortUsage)
-	case args[0] == "auto":
-		return effortArgs{action: effortClear}, nil
-	}
-	level := domain.ThinkingEffort(args[0])
-	if level == "" || !level.Valid() {
-		return effortArgs{}, fmt.Errorf("unknown thinking effort %q. %s", args[0], effortUsage)
-	}
-	return effortArgs{action: effortSet, level: level}, nil
-}
-
-// ----------------------------------------------------------------------------
 // /undo — the revert command's argument grammar
 // ----------------------------------------------------------------------------
 
 // undoAction is the subcommand of a parsed /undo line. The zero value is undoPreviewOnly, so a bare
-// "/undo" describes what it WOULD put back and changes nothing — the /confine, /color-scheme and
-// /effort posture, sharpened by what this verb does: the only line that touches the human's files
+// "/undo" describes what it WOULD put back and changes nothing — the /confine and /color-scheme
+// posture, sharpened by what this verb does: the only line that touches the human's files
 // is the one they spelled out (ADR 0051, ratified call 4).
 type undoAction int
 

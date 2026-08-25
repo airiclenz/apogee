@@ -60,6 +60,13 @@ import (
 // stopped under the open pane moves with it. Their verbs and their wording live in schedule.go;
 // what lives here is only what every kind shares.
 //
+// /effort brings one more of that answering shape (ADR 0060): the levels the bound model's own
+// thinking-effort dial offers, with an "auto" row under them, and an accept that layers (or drops)
+// this session's override and states the resolution. It re-points the session at nothing — the dial
+// is a property of the binding the session already has — so it takes pickerCycle's "⏎ choose"
+// legend, and its rows are derived per frame like /model's, because the beat that lands under the
+// open pane is exactly what could change which levels this model reports.
+//
 // Whichever offering /model lists, what the session is already on is NOT in it: a row that switches
 // nothing is not a choice, and pickerHint's "⏎ switch" would be a promise it could not keep. /server
 // keeps its "· current" row instead, because where the session IS is half of what a server list is
@@ -78,6 +85,7 @@ const (
 	pickerScheduleMode                   // the mode that Schedule's Firings run in — /schedule's second
 	pickerScheduleStop                   // the live Schedules — /schedule-stop with more than one
 	pickerKeyMigration                   // what to do about one entry's plaintext key — the start-up offer
+	pickerEffort                         // the levels the bound model's thinking-effort dial offers — /effort
 )
 
 // picker is the overlay's inline state on the Model. Its zero value is "closed", so it lives inline
@@ -130,11 +138,13 @@ const maxPickerRows = 8
 const pickerHint = "type to filter · ↑/↓ select · ⏎ switch · esc close"
 
 // pickerHintFor names what ⏎ does on the open kind. /schedule's two popups answer a question rather
-// than move anything (the Schedule is created after the LAST of them), and /schedule-stop's ⏎ ends
-// something — three verbs, because a legend that promised a switch would be wrong on all three.
+// than move anything (the Schedule is created after the LAST of them), /effort's ⏎ chooses a level
+// for a dial this session already has rather than re-pointing the session at anything, and
+// /schedule-stop's ⏎ ends something — three verbs, because a legend that promised a switch would be
+// wrong on every kind that is not one.
 func pickerHintFor(k pickerKind) string {
 	switch k {
-	case pickerCycle, pickerScheduleMode:
+	case pickerCycle, pickerScheduleMode, pickerEffort:
 		return "type to filter · ↑/↓ select · ⏎ choose · esc close"
 	case pickerScheduleStop:
 		return "type to filter · ↑/↓ select · ⏎ stop · esc close"
@@ -700,6 +710,8 @@ func (m Model) acceptPicker() (tea.Model, tea.Cmd) {
 		return m.acceptScheduleStop(offered)
 	case pickerKeyMigration:
 		return m.acceptKeyMigration(offered)
+	case pickerEffort:
+		return m.acceptEffort(offered)
 	}
 	return m, nil
 }
@@ -850,6 +862,8 @@ func (m Model) pickerTitle() string {
 		return "stop a schedule"
 	case pickerKeyMigration:
 		return m.keyMigrationTitle()
+	case pickerEffort:
+		return "thinking effort — how hard the model thinks"
 	}
 	return ""
 }
@@ -883,6 +897,8 @@ func (m Model) pickerOfferingRows() []popupRow {
 		return scheduleStopRows(m.liveSchedules())
 	case pickerKeyMigration:
 		return keyMigrationRows(m.opts.KeyMigration.StoreName)
+	case pickerEffort:
+		return effortRows(m.effortSupport())
 	}
 	return nil
 }

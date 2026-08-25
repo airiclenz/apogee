@@ -539,7 +539,10 @@ regardless (parser unchanged).
 
 ---
 
-## 10. Replace the /effort text grammar with a popup picker
+## 10. Replace the /effort text grammar with a popup picker — ✅ DONE (2026-08-25)
+
+NOTES (2026-08-25): the row builder and the level vocabulary (`effortRows`, `effortLevels`, `canonicalEfforts`, `openAIEfforts`) live in effort.go rather than picker.go, called from picker.go's `pickerOfferingRows` switch — the arrangement `cycleRows`/`scheduleModeRows` already use from schedule.go; picker.go holds only the enum, title, hint, offering and accept arms.
+NOTES (2026-08-25): four files beyond the item's Files list were touched for prose the deletion made stale — doc.go (the effort.go map paragraph, required by the package-map contract), tui.go (the `Engine.ThinkingEffort` doc's "Bare /effort renders BOTH"), seam_test.go (the `effortsSet` helper comment) — plus command_test.go's `TestOnlyTheGrammarVerbsCarryAParseArgsHook`, whose named grammar set had to drop `effort`.
 
 **What:** Turn `/effort` into a fixed-choice popup, removing the level word grammar.
 - `internal/tui/picker.go`: add `pickerEffort` to the `pickerKind` enum

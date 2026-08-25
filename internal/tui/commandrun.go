@@ -178,8 +178,9 @@ func (m Model) startNewSession() (tea.Model, tea.Cmd) {
 // (settings.go), /version records the build version as a note the same synchronous way,
 // /skills records the discovered skill catalog the same synchronous way (skills.go), /color-scheme
 // lists, switches or exports a palette the same synchronous way (colorscheme.go), and /confine
-// reports or swaps Auto's blast radius the same synchronous way (confine.go), /effort reports
-// or moves this session's Thinking effort the same synchronous way (effort.go), and /undo previews
+// reports or swaps Auto's blast radius the same synchronous way (confine.go), /effort opens the
+// thinking-effort picker over the levels the model reports the same synchronous way (effort.go),
+// and /undo previews
 // or executes the revert of the last exchange's file writes the same synchronous way (undo.go).
 //
 // It is reached at stateIdle — where the engine is quiescent and ClearContext/Compact are safe to
@@ -189,9 +190,10 @@ func (m Model) startNewSession() (tea.Model, tea.Cmd) {
 // /skills are synchronous notes touching no engine at all, and /confine's status form reads
 // [Engine.ConfineToWorkspace], which the Agent serves under its own RWMutex precisely so the UI may
 // ask while a Step dispatches (agent.go — the SetMode class). /effort belongs to that last class in
-// EVERY form, not only its reporting one: both doors it drives are served under the Agent's own
-// RWMutex, and the override it writes is read when the NEXT request is built, so the Turn already
-// in flight is untouched (ADR 0050). Everything else is idle-only and is refused before it gets
+// both of its halves: the verb itself only opens a popup, and the accept behind it drives two doors
+// the Agent serves under that same RWMutex, writing an override that is read when the NEXT request
+// is built — so the Turn already in flight is untouched (ADR 0050). Everything else is idle-only
+// and is refused before it gets
 // here.
 //
 // It never touches the editor: the CALLER has already put the box where it belongs, and the two
@@ -386,10 +388,13 @@ func (m Model) runCommand(parsed parsedInput) (tea.Model, tea.Cmd) {
 		return m.runConfine(verbArgsOf[confineArgs](parsed))
 
 	case "effort":
-		// Report or move this session's Thinking effort (ADR 0050). Synchronous like /confine and
-		// safe mid-Exchange for the reason /confine's status form is: the engine door it drives is
-		// goroutine-safe and is read when the NEXT request is built, never during the one in flight.
-		return m.runEffort(verbArgsOf[effortArgs](parsed))
+		// Open the thinking-effort picker over the levels the bound model reports, or — on a model
+		// that reports no dial, which the menu withholds the row from but a hand-typed line still
+		// reaches — answer with the one note saying so (effort.go, ADR 0060). Synchronous like
+		// /confine and safe mid-Exchange for the reason /confine's status form is: the engine doors
+		// the accept drives are goroutine-safe and are read when the NEXT request is built, never
+		// during the one in flight.
+		return m.runEffortCommand()
 
 	case "undo":
 		// Preview, or execute, the revert of the last exchange's file writes (undo.go, ADR 0051).
