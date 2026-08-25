@@ -40,6 +40,17 @@ installs straight from the tip of `main` into your Go bin dir (pin a commit with
 `@<sha>` instead). Only `@latest` is off-limits — proxy.golang.org immutably retains
 the retired `v1.x` module versions, so `@latest` resolves to stale `v1.7.0`.
 
+**Versions and tags.** The top-level `VERSION` file is the single source of truth for the
+release version — one line, carrying the leading `v` (`v0.16.8`); `make dist` strips that
+`v` for the archive names and nothing else re-states the number. Pushing a commit that
+changes `VERSION` to `main` is what creates the tag: a CI workflow
+(`.github/workflows/tag-on-version-bump.yml`) puts an **annotated** tag on that exact
+commit, named verbatim from the file, one per bump the push carries. So a version bump is
+always a commit of its own and, at a release cut, the *last* one — the `CHANGELOG.md`
+rollup lands first, so the tree the tag pins already contains it. Publishing a GitHub
+Release on top of that tag, with the archives `make dist` packs, stays a separate manual
+act; CI creates the tag and nothing more.
+
 Prefer the raw toolchain? `go build -o apogee ./cmd/apogee` does the same thing — the
 Makefile just gives the common commands one-word names. Releases are cross-compiled to
 all **six** targets — Linux, macOS and Windows × `amd64` and `arm64` — from any one of

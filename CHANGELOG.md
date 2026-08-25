@@ -10,6 +10,14 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **The tag convention is recorded where the repo states its conventions.** `AGENTS.md`'s
+  `CHANGELOG.md` + `VERSION` bullet and a new **Versions and tags** paragraph in
+  `docs/manual/building.md` now say that pushing a `VERSION` change to `main` auto-creates
+  the annotated tag at that commit (every bump in the push, each at its own commit), that
+  the tag is named verbatim from the file, that the bump is therefore always a commit of
+  its own and — at a release cut — the last one, with the `CHANGELOG.md` rollup landing
+  first, and that publishing a GitHub Release on top of the tag stays a manual act.
+
 - **A push to `main` that changes `VERSION` now tags that commit.** A new workflow
   (`.github/workflows/tag-on-version-bump.yml`) runs a detection script
   (`.github/scripts/version-bump.sh`) over the pushed range and creates an **annotated** tag

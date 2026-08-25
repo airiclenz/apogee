@@ -268,7 +268,9 @@ the seven Ratified design calls above, not from the implementer's description.
 
 ---
 
-## 2. Record the new tag convention where the repo states its conventions
+## 2. Record the new tag convention where the repo states its conventions — ✅ DONE (2026-08-25)
+
+NOTES (2026-08-25): The manual's new **Versions and tags** section uses building.md's own bold-lead-in idiom (as `**Prerequisites:**` and `**Reading the code?**` do) rather than an `##` heading — the file has no H2s, so a heading there would have swallowed the three paragraphs that follow it. Placement is as the plan says, directly after the `go install …@main` paragraph. No "intermediate bumps go untagged" claim existed in either file, so this item only adds; nothing had to be corrected.
 
 **What.** Design call 6 changes a documented practice — "between releases VERSION bumps as
 `0.x.N` dev values **without tags**" is now false, and the release cut no longer tags by

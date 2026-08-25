@@ -13,7 +13,7 @@
 - `docs/reviews/` — saved review reports.
 - `layout.md` - the TUI layout/rendering spec in prose.
 - `ISSUES.md` - known issues and deferred work; **open only**. A resolved or executed item is REMOVED from it and recorded in `CHANGELOG.md` (under `[Unreleased]`) — the changelog is the sole closed trail. Never leave a done item, or a narration of one, in `ISSUES.md`.
-- `CHANGELOG.md` + `VERSION` — `VERSION` micro-bumps per shipped feature; `CHANGELOG.md` collects those under `[Unreleased]` and only gains a release heading when a release is cut. Versioning is deliberately 0.x while pre-production.
+- `CHANGELOG.md` + `VERSION` — `VERSION` micro-bumps per shipped feature; `CHANGELOG.md` collects those under `[Unreleased]` and only gains a release heading when a release is cut. Versioning is deliberately 0.x while pre-production. Pushing a `VERSION` change to `main` auto-creates the annotated `vX.Y.Z` tag at that commit — every bump in the push, each at its own commit — so a bump is always a commit of its own and, at a release cut, the **last** one: the `CHANGELOG.md` rollup lands first, so the tagged tree already carries it.
 
 ## Conventions not derivable from the code
 
