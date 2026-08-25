@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/skills"
 )
 
@@ -67,7 +68,9 @@ func TestCommandTableDrivesParserAndMenu(t *testing.T) {
 	}
 
 	// The empty partial lists EVERY row, in table order, with its cells read off the same table — no
-	// verb of the registry is withheld from the menu. The row is CELLS, not one concatenated label:
+	// verb of the registry is withheld from the menu when the moment allows it (the one gated row,
+	// /effort, is offered here because the model reports a dial). The row is CELLS, not one
+	// concatenated label:
 	// the verb, its summary and the (here empty, because idle) idle-only tag, each its own column.
 	var want []string
 	var wantCells []popupRow
@@ -77,7 +80,7 @@ func TestCommandTableDrivesParserAndMenu(t *testing.T) {
 	}
 	var got []string
 	var gotCells []popupRow
-	for _, it := range commandSuggestions("", false) {
+	for _, it := range commandSuggestions("", false, true) {
 		got = append(got, it.value)
 		gotCells = append(gotCells, it.cells)
 	}
@@ -443,7 +446,7 @@ func TestServerVerbsAreOffered(t *testing.T) {
 	} {
 		for _, busy := range []bool{false, true} {
 			var got []string
-			for _, it := range commandSuggestions(tc.partial, busy) {
+			for _, it := range commandSuggestions(tc.partial, busy, true) {
 				got = append(got, it.value)
 			}
 			if !containsString(got, tc.want) {
@@ -482,7 +485,7 @@ func TestSlashMenuOffersTheServerVerbs(t *testing.T) {
 // ISSUES #12 symptom — but the rows that cannot run there say so. The tag follows commandSpecs'
 // whileRunning column exactly, so a future verb flipping that flag needs no second edit here.
 func TestCommandSuggestionsTagIdleOnlyRowsWhileBusy(t *testing.T) {
-	rows := commandSuggestions("", true)
+	rows := commandSuggestions("", true, true)
 	if len(rows) != len(commandSpecs) {
 		t.Fatalf("rows = %d, want every one of the %d verbs listed while busy", len(rows), len(commandSpecs))
 	}
@@ -493,6 +496,76 @@ func TestCommandSuggestionsTagIdleOnlyRowsWhileBusy(t *testing.T) {
 			t.Errorf("row %q cells = %q; tagged = %v, want %v (whileRunning = %v)",
 				spec.name, it.cells, tagged, !spec.whileRunning, spec.whileRunning)
 		}
+	}
+}
+
+// A model with no thinking-effort dial is not offered a way to set one: the menu DROPS /effort's row
+// rather than greying it out, because absence is the whole signal (ADR 0060 D5). The gate follows
+// commandSpecs' gatedByEffort column, so every ungated verb stays offered either way, and it reaches
+// only as far as the dropdown — the registry and the parser are untouched below.
+func TestCommandSuggestionsHideEffortWithoutADial(t *testing.T) {
+	t.Parallel()
+
+	for _, partial := range []string{"", "e", "eff", "effort"} {
+		for _, supported := range []bool{false, true} {
+			var got []string
+			for _, it := range commandSuggestions(partial, false, supported) {
+				got = append(got, it.value)
+			}
+			if offered := containsString(got, "effort"); offered != supported {
+				t.Errorf("commandSuggestions(%q, effortSupported=%v) = %v; /effort offered = %v, want %v",
+					partial, supported, got, offered, supported)
+			}
+		}
+	}
+
+	// The gate withholds the gated row and nothing else: a bare partial still lists every other verb
+	// of the registry when the dial is absent.
+	var offered []string
+	for _, it := range commandSuggestions("", false, false) {
+		offered = append(offered, it.value)
+	}
+	for _, spec := range commandSpecs {
+		if spec.gatedByEffort {
+			continue
+		}
+		if !containsString(offered, spec.name) {
+			t.Errorf("/%s was withheld from the dial-less menu %v, want every ungated verb offered",
+				spec.name, offered)
+		}
+	}
+}
+
+// The merged "/" menu the human actually sees reads the gate off the landed beat, so the row appears
+// and disappears with the bound model rather than with a setting.
+func TestSlashMenuHidesEffortWithoutADial(t *testing.T) {
+	t.Parallel()
+
+	for _, supported := range []bool{false, true} {
+		m := newTestModel(t)
+		m.hb.effort = provider.EffortSupport{Supported: supported, Dialect: provider.EffortDialectKwargs}
+
+		var got []string
+		for _, it := range m.slashSuggestions("eff", "") {
+			got = append(got, it.value)
+		}
+		if offered := containsString(got, "effort"); offered != supported {
+			t.Errorf("slashSuggestions(\"eff\") with supported=%v = %v; /effort offered = %v, want %v",
+				supported, got, offered, supported)
+		}
+	}
+}
+
+// Hiding the row never un-routes the verb: a hand-typed /effort still parses as the command whatever
+// the bound model reports, because parseInput reads the registry and knows nothing of the menu's
+// gate. That is what lets the typed verb answer with its own note instead of being read as a message.
+func TestTypedEffortStillParsesWithoutADial(t *testing.T) {
+	t.Parallel()
+
+	got := parseInput("/effort", nil)
+	if got.kind != kindCommand || got.command != "effort" {
+		t.Fatalf("parseInput(%q) = {kind:%v cmd:%q}, want the /effort command however the menu is gated",
+			"/effort", got.kind, got.command)
 	}
 }
 

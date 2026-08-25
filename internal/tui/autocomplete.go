@@ -416,10 +416,21 @@ const idleOnlyTag = "— idle only"
 // row carries the tag and earns commandsAtIdleNote if accepted. The tag is a property of the
 // MOMENT, not of the verb, so it is a parameter rather than a second table column. At idle no row
 // fills that cell at all and the whole column collapses (layoutPopupRow), costing the pane nothing.
-func commandSuggestions(partial string, busy bool) []acItem {
+//
+// effortSupported says the bound model has a thinking-effort dial, and it is the one fact that
+// WITHHOLDS a row rather than tagging it: the verbs commandSpec.gatedByEffort marks — /effort alone
+// — are dropped from the menu when detection saw no dial, because a dial that does not exist is not
+// a thing to offer setting (ADR 0060 D5). It is a property of the moment for the same reason busy
+// is: the same verb is offered again the moment a model that reports one is bound. Only the MENU is
+// gated — parseInput and matchCommand read the registry whole, so a hand-typed /effort still routes
+// and answers with its own note.
+func commandSuggestions(partial string, busy, effortSupported bool) []acItem {
 	var items []acItem
 	for _, c := range commandSpecs {
 		if !strings.HasPrefix(c.name, partial) {
+			continue
+		}
+		if c.gatedByEffort && !effortSupported {
 			continue
 		}
 		tag := ""
@@ -464,7 +475,9 @@ func commandSuggestions(partial string, busy bool) []acItem {
 //
 // The skill rows are never tagged, whatever the model is doing: a skill token is message content
 // that rides an interjection to the running Exchange, so it is as invocable mid-run as at idle. Only
-// the command half answers to the while-running policy (commandSuggestions takes m.busy()).
+// the command half answers to the while-running policy (commandSuggestions takes m.busy()) and to
+// the bound model's effort dial (it takes m.effortSupport().Supported, which drops /effort's row
+// when there is none).
 //
 // A skill row follows the merged menu's schema: ["✦ /id · source", what the skill is]. The
 // two kinds of row therefore share one second column, so a skill's description starts exactly where
@@ -476,7 +489,7 @@ func commandSuggestions(partial string, busy bool) []acItem {
 // is bounded and folded by skillTokenLabel, so nothing a SKILL.md chooses can move it, hide it, or
 // paint a second row beneath it.
 func (m Model) slashSuggestions(partial, outside string) []acItem {
-	items := commandSuggestions(partial, m.busy())
+	items := commandSuggestions(partial, m.busy(), m.effortSupport().Supported)
 	for _, sk := range m.skillSuggestions(partial, outside) {
 		// Keyed on the id's FIRST TOKEN, the same cut matchCommand makes (firstCommandToken,
 		// command.go) — never on the whole id, or the guard and the parser read different things

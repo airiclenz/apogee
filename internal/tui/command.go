@@ -61,7 +61,7 @@ type parsedInput struct {
 
 // commandSpec is one verb of the "/" namespace: what the parser does with it and what the
 // dropdown shows for it. name is the verb without its leading slash; summary is the one-line
-// description the dropdown displays beside it. The six flags say how the verb behaves:
+// description the dropdown displays beside it. The seven flags say how the verb behaves:
 //
 //   - takesArgs — the verb reads what follows it, and parseInput hands it the tokens in
 //     parsedInput.args. A verb whose grammar is richer than a token list declares that grammar on
@@ -70,6 +70,7 @@ type parsedInput struct {
 //     dropdown reads to COMPLETE such a verb rather than run it
 //     (acceptAutocomplete), unless the row also carries runsBareAtAccept: firing a verb that is not
 //     finished would be wrong.
+//
 //   - runsBareAtAccept — the verb takes arguments, but its BARE form is meaningful and safe to fire
 //     from the completion menu: it opens a chooser and mutates nothing until the picker's own accept.
 //     /model and /server are the only rows of that shape, so accepting one RUNS it — the same answer
@@ -77,6 +78,7 @@ type parsedInput struct {
 //     box. It qualifies takesArgs at the accept path alone: the parser still reads the flag above it,
 //     so the argument form "/model qwen" is untouched (an argument token never reaches the accept
 //     path — caretSlashToken completes a NAME).
+//
 //   - whileRunning — the verb is safe to run while a worker is working, because nothing it does
 //     needs this session's engine quiescent: it either only REPORTS, or — the Schedule pair
 //     /schedule and /schedule-stop — writes only to the scheduler library, whose Schedules fire as
@@ -84,6 +86,7 @@ type parsedInput struct {
 //     quiescent boundary needed. Every other verb is idle-only and earns commandsAtIdleNote mid-run
 //     instead of running (parsedInput.safeWhileRunning is where the flag is read, and /confine's
 //     reporting FORM is the one nuance it adds).
+//
 //   - noRecall — a sent invocation of this verb is NEVER recorded as a recallable prompt, in memory
 //     or on disk. The session-reset pair /clear and /new carry it because recall exists so a line
 //     can be handed back and re-sent with one ⏎, and a walk that hands back a session wipe arms that
@@ -92,6 +95,7 @@ type parsedInput struct {
 //     spend a walk step on a keystroke the human can retype. Every other sent line — messages,
 //     Interjections, every other whole-line /command — stays recallable (parsedInput.recallable is
 //     where the flag is read).
+//
 //   - opensExchange — running this verb opens an Exchange with the model, so it answers to the
 //     heartbeat exactly as a typed message does: /continue and /compact are refused with
 //     upstreamBlockNote while there is nothing to send to (parsedInput.opensExchange is where the
@@ -99,12 +103,20 @@ type parsedInput struct {
 //     switching to another server is the one useful thing to do with an unreachable one — and
 //     /model consults the heartbeat itself, because "which models are served" is a question only a
 //     reachable server can answer (modelSwitchBlocked owns that ladder).
+//
 //   - touchesServer — the verb switches the session's server or actuates it, so the actuation latch
 //     refuses it while a launcher verb is in flight: the server is mid-restart, and there is nothing
 //     stable to switch (actuationBlocked, ADR 0029 D5). The latch refuses the opensExchange pair for
 //     the neighbouring reason — there is nothing to send to — so it reads the two flags together
 //     rather than keeping a verb list of its own, and a future verb that opens an Exchange is
 //     latched by declaring that one flag.
+//
+//   - gatedByEffort — the verb is only worth offering when the bound model has a thinking-effort
+//     dial, so the dropdown DROPS its row when detection says there is none (ADR 0060 D5). /effort
+//     is the only row of that shape. It gates PRESENTATION alone: the registry and the parser stay
+//     complete, so a hand-typed /effort still routes and answers with a note saying the model
+//     reports no dial. Absence is the whole signal — there is no greyed-out disabled row — and the
+//     footer's effort segment is dropped by the same fact, so menu and footer can never disagree.
 //
 // parseArgs is the verb's own grammar, for the rows whose arguments are richer than a token list.
 // parseInput calls it with the verb's tokens and puts what it returns on parsedInput.verbArgs,
@@ -122,6 +134,7 @@ type commandSpec struct {
 	noRecall         bool
 	opensExchange    bool
 	touchesServer    bool
+	gatedByEffort    bool
 	parseArgs        func([]string) (any, error)
 }
 
@@ -220,7 +233,7 @@ var commandSpecs = []commandSpec{
 	{name: "compact", summary: "summarise the conversation to reclaim context", opensExchange: true},
 	{name: "confine", summary: "report or change auto mode's blast radius", takesArgs: true, whileRunning: true, parseArgs: verbGrammar(parseConfine)},
 	{name: "continue", summary: "ask the model to keep going", opensExchange: true},
-	{name: "effort", summary: "set how hard the model thinks — off, low, medium, high, or auto", takesArgs: true, whileRunning: true, parseArgs: verbGrammar(parseEffort)},
+	{name: "effort", summary: "set how hard the model thinks — off, low, medium, high, or auto", takesArgs: true, whileRunning: true, gatedByEffort: true, parseArgs: verbGrammar(parseEffort)},
 	{name: "inspect", summary: "show the recent raw request and response traffic", whileRunning: true, noRecall: true},
 	{name: "model", summary: "switch model — the launcher's profiles, or what the server serves", takesArgs: true, runsBareAtAccept: true, touchesServer: true},
 	{name: "new", summary: "start a fresh conversation (same as /clear)", noRecall: true},

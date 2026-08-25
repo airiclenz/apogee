@@ -1526,6 +1526,12 @@ letters somewhere inside. Every verb the parser knows is in it — `/stop-server
 included. Those two act on the session's own server and say so in their names, and a verb the human
 cannot discover is a verb they will not find.
 
+**One row answers to the bound model: `/effort`.** When the model reports no thinking-effort dial
+the menu simply omits that row (ADR 0060), the way the footer omits its effort word — a dial that
+does not exist is not a thing to offer setting, and absence is the whole signal, so there is no
+greyed-out disabled row. The withholding is presentation only: typed by hand the verb still runs,
+and answers by saying the model reports no dial. Bind a model that has one and the row is back.
+
 **A skill row says where the skill came from.** After its id, a skill row carries the source dir it
 was loaded from — `✦ /clean-code · workspace` for one the opened project ships, `· library` for one
 from the user's own `~/.apogee/skills`, `· elsewhere` for a dir neither root accounts for. It is the

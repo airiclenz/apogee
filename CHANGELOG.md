@@ -10,6 +10,11 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **The `/` menu hides `/effort` when the model has no dial (plan item 9).** The `/` menu no
+  longer offers `/effort` when the bound model reports no thinking-effort dial: the row is
+  dropped rather than greyed out, matching the footer, which omits its effort word by the same
+  fact. The verb stays routable — typed by hand it still runs and answers.
+
 - **The footer says the effort the next request will carry (plan item 8).** The footer's upstream
   run gains a thinking-effort word between the model and the workdir — `host ✦ model ✦ high ✦
   ~/repo` — resolved session override ▸ profile `thinking.effort:` ▸ the level the server reported

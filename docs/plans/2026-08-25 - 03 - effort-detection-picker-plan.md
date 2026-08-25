@@ -504,7 +504,10 @@ between model and workdir and an unsupported one omits it.
 
 ---
 
-## 9. Hide /effort from the command menu when the dial is unsupported
+## 9. Hide /effort from the command menu when the dial is unsupported — ✅ DONE (2026-08-25)
+
+NOTES (2026-08-25): `layout.md` is edited beyond the item's Files list — its dropdown section stated "Every verb the parser knows is in it", which this item makes untrue; a short paragraph now names `/effort` as the one row the bound model can withhold (item 8 set the same precedent for the footer's layout.md claim).
+NOTES (2026-08-25): three tests outside the item's Files list needed the new third argument's premise restated — `TestSlashMenuKeepsScanOrderWithinOneRankTier` (skill_test.go), `TestAutocompleteSelectionStaysOnScreenAtEveryBudget` (autocomplete_test.go) and the command-dropdown row of `TestOverlayNamesTheRowsItCannotShow` (sessions_test.go) each assert the menu holds `len(commandSpecs)` rows, so each now binds a model that reports a dial. No assertion was weakened.
 
 **What:** Drop the `/effort` row from the autocomplete dropdown when the bound model reports
 no dial, while leaving the typed verb fully routable. In

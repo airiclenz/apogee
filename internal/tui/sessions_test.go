@@ -15,6 +15,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/scheme"
 	"github.com/airiclenz/apogee/internal/session"
 )
@@ -1923,6 +1924,9 @@ func TestOverlayNamesTheRowsItCannotShow(t *testing.T) {
 		// "↑/↓ select · ⏎/tab accept", so nothing distinguishes a menu the window swallowed from a
 		// filter that matched nothing.
 		{"command dropdown", "/clear", len(commandSpecs), 0, 4, 1, []int{smallestOverlayWindow, 13, 14, 15, 16}, func(m Model) string {
+			// A bound model with a thinking-effort dial, so the menu holds all len(commandSpecs) rows
+			// above: /effort is the one row a dial-less binding withholds (commandSpec.gatedByEffort).
+			m.hb.effort = provider.EffortSupport{Supported: true}
 			m.input.SetValue("/")
 			m.autocomplete = m.computeAutocomplete(m.caretByteOffset())
 			return m.renderAutocomplete()
