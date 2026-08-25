@@ -10,6 +10,17 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **The TUI caches the last quiescent-boundary engine snapshot and can save the record from it
+  (delegation progress-save, plan item 1).** A second save entry (`Model.progressSave`,
+  `internal/tui/sessionsave.go`) writes the session record MID-Turn by pairing the cached engine
+  half with the LIVE transcript, so persisting while a Turn is still open never asks the engine for
+  a snapshot inside a Step (ADR 0007 is untouched). The cache is filled at every boundary the Model
+  can see — a completed Turn's `turnSnapshotMsg`, the idle snapshot each worker launch takes just
+  before handing the engine over (so it can never carry `pendingInput`), and a resumed record's own
+  payload — and is dropped by `/clear`, so a rotated session's transcript is never paired with the
+  closed conversation's engine state. Nothing calls the new entry yet: the delegation cadence that
+  fires it arrives with the next item.
+
 - **An engine-owned orientation block now rides on the standing system message (plan item 1).**
   The host facts a model needs to get oriented — the workspace path, this session's scratch dir
   with the `/tmp` caveat, and the read-only library roots with the tools that reach them — are

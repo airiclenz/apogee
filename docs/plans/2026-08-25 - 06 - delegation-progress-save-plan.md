@@ -92,7 +92,19 @@ from the session record until the Turn ends* (observed 2026-08-25 in session
 
 ---
 
-## 1. Cache the boundary snapshot on the Model and add the progress-save entry
+## 1. Cache the boundary snapshot on the Model and add the progress-save entry — ✅ DONE (2026-08-25)
+
+NOTES (2026-08-25): the `boundary`/`hasBoundary` field pair is declared on the `Model` struct in
+`internal/tui/model.go` (where the struct lives) rather than in `internal/tui/sessionsave.go`; the
+methods that own it (`cacheBoundary`, `cacheBoundaryAtIdle`, `progressSave`) are in
+`sessionsave.go` as the item asks, and both files are in the item's Files list.
+
+NOTES (2026-08-25): the item names three worker launches in `commandrun.go` but its line anchors
+(`:83`, `:246`, `:262`) point at the prompt path and BOTH `/continue` launches (the resume and the
+canned turn), while its third label names `/compact` (`:374`). All four launches now cache the
+boundary, which satisfies both the anchors and the labels and matches the item's rule ("every point
+the engine is at a quiescent boundary the Model can see"). A `/compact` worker can never trigger a
+progress save (it drives no tools), so the extra site is inert until a later Turn re-caches.
 
 **What:** give the TUI a second save entry that needs no fresh engine snapshot.
 

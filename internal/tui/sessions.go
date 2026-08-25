@@ -528,6 +528,11 @@ func (m *Model) resumeLoaded(msg sessionLoadedMsg) tea.Cmd {
 	// saves resolve against. Nothing else in this fold waits on it: the view below repaints from the
 	// record already in hand, not from the host.
 	cmd := m.scheduleWrite(recordWrite{kind: writeActivate, meta: msg.rec.Meta})
+	// The engine now holds exactly the record's own payload, at the boundary it was stored at, so
+	// that payload IS this session's current boundary — cached here rather than re-Snapshotted,
+	// being already in hand and identical. Without it a delegation in the resumed session's first
+	// Turn would have no engine half to pair its live transcript with (progressSave).
+	m.cacheBoundary(msg.rec.Session)
 	// Saves now target a record that already HAS a name, so the automatic naming call is latched off
 	// for the rest of this session exactly as it is for a --resume start (replayResumed), and a title
 	// still waiting for an id is dropped: it was stashed for the session this restore just replaced.

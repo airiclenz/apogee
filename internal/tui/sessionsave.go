@@ -90,6 +90,59 @@ func (m *Model) saveAtIdle() tea.Cmd {
 }
 
 // ----------------------------------------------------------------------------
+// The progress save: the boundary snapshot paired with a live transcript
+// ----------------------------------------------------------------------------
+
+// cacheBoundary records sess as the latest quiescent-boundary engine snapshot — the engine half a
+// progress save pairs with the live transcript (progressSave). It is the one site that FILLS the
+// pair — startNewSession is the one that empties it — so every caller holding such a snapshot hands
+// it here rather than assigning the fields: the per-Turn fold (turnSnapshotMsg), the idle capture
+// each worker launch takes (cacheBoundaryAtIdle), and a restore adopting the record it just put
+// into the engine (resumeLoaded).
+func (m *Model) cacheBoundary(sess domain.Session) {
+	m.boundary = sess
+	m.hasBoundary = true
+}
+
+// cacheBoundaryAtIdle takes the Model's OWN engine Snapshot and caches it as the boundary a
+// progress save will pair with. Every worker launch calls it just before handing the engine over
+// (commandrun.go), which is the last moment the Model can see a boundary of its own: from there the
+// engine belongs to the worker goroutine until the Turn ends, and the launch's Submit has not run
+// yet, so what is cached can never carry pendingInput — a snapshot holding one is unresumable
+// (Submit refuses with ErrInputPending, /continue refuses because InExchange is false). It is
+// valid for the same reason saveAtIdle's snapshot is: the Update loop owns the engine here (C1).
+//
+// A Snapshot error leaves the cache exactly as it was rather than dropping it: the previous
+// boundary is still a boundary, and pairing a progress save with one Turn's worth of older engine
+// state beats writing no progress at all.
+func (m *Model) cacheBoundaryAtIdle() {
+	sess, err := m.eng.Snapshot()
+	if err != nil {
+		return
+	}
+	m.cacheBoundary(sess)
+}
+
+// progressSave re-persists the record MID-Turn, and is what keeps a running delegation visible to
+// anyone reading the record while it runs (ADR 0022 addendum). It returns nil until a boundary has
+// been cached, and otherwise hands the cached snapshot to persist — whose gates (a wired host, a
+// sent prompt) stay the whole gate.
+//
+// The two halves of the record deliberately come from different moments. The engine half is the
+// LAST quiescent-boundary snapshot (cacheBoundary): the engine is mid-Step while a delegation runs
+// and ADR 0007 admits no snapshot there, so the alternative to an older engine half is none at all.
+// The transcript half is live — the assistant message that delegated, the prompt it carried, and
+// the child's tool boundaries as they land. A resume therefore re-attempts the open Turn exactly as
+// a cancelled one does: the engine resumes from the boundary the Turn started at, the record's open
+// tool calls are closed as interrupted at replay, and the unfinished work is not kept.
+func (m *Model) progressSave() tea.Cmd {
+	if !m.hasBoundary {
+		return nil
+	}
+	return m.persist(m.boundary)
+}
+
+// ----------------------------------------------------------------------------
 // The session-record write queue
 // ----------------------------------------------------------------------------
 //

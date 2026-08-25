@@ -107,6 +107,19 @@ type Model struct {
 	saveFailing   bool
 	pendingWrites []recordWrite
 
+	// boundary is the most recent engine snapshot the Model saw taken at a QUIESCENT boundary —
+	// a completed Turn's turnSnapshotMsg, the idle capture each worker launch takes
+	// (cacheBoundaryAtIdle), or a restored record's own payload — and it is the engine half a
+	// progress save pairs with the LIVE transcript while a Turn is still open (progressSave,
+	// sessionsave.go). hasBoundary is its presence flag, because a zero domain.Session is itself a
+	// legal envelope and so cannot say whether one was ever cached. cacheBoundary is the only site
+	// that fills the pair; startNewSession is the only one that empties it.
+	//
+	// A domain.Session is plain values (a version and an opaque blob), so it rides the
+	// value-copied Model like the queue above it (ADR 0011).
+	boundary    domain.Session
+	hasBoundary bool
+
 	// sessionBrowser is the /sessions history-browser overlay's state (sessions.go): the loaded
 	// session metas, the current selection, the current-workspace ⇄ all toggle, and any inline
 	// delete-confirm or rename edit. Its zero value is "closed", so it lives inline in the
@@ -858,6 +871,11 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		// asynchronously through the SessionHost; the worker keeps stepping, so this never stalls
 		// the conversation, and the transcript is consistent with the snapshot (the Turn's Events
 		// were delivered before this Msg — see turnSnapshotMsg's doc).
+		//
+		// It is also the freshest boundary the Model will see until the next Turn ends, so it
+		// becomes the engine half every progress save inside the NEXT Turn pairs its live
+		// transcript with (progressSave).
+		m.cacheBoundary(msg.Sess)
 		return m, m.persist(msg.Sess)
 
 	case saveDoneMsg:
