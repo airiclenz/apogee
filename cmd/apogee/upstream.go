@@ -264,7 +264,10 @@ func (m sessionMover) move(entry config.ServerEntry) (tui.ServerSwitchResult, er
 	}); err != nil {
 		return tui.ServerSwitchResult{}, err
 	}
-	m.holder.Swap(entry.Endpoint, apiKey, heartbeat.NewMonitor(entry.Endpoint, entry.Model, apiKey))
+	// The replacement Monitor carries the new entry's forced effort dialect, the way the first
+	// bind's does: the dial is a per-server fact, so it moves with the server (ADR 0060 decision 3).
+	m.holder.Swap(entry.Endpoint, apiKey, heartbeat.NewMonitor(entry.Endpoint, entry.Model, apiKey,
+		provider.WithEffortDialect(provider.EffortDialectFor(entry.EffortDialect))))
 	m.host.SetModel("")
 	m.live.followEntry(entry)
 	// What the display adopts: the endpoint now on the wire, the alias the footer calls it, and the

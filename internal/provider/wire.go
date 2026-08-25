@@ -141,6 +141,12 @@ const (
 	// spelling collision — this is a FIELD of the request body, whereas llama.cpp reads a
 	// `reasoning_effort` ENTRY inside chat_template_kwargs; the two are not interchangeable.
 	EffortDialectOpenAI EffortDialect = "openai"
+	// EffortDialectOff is the absence of a dialect stated deliberately: this server takes no
+	// effort key at all, in any shape, however loudly the caller asks. It is what a server entry's
+	// `effort-dialect: off` forces (ADR 0060 decision 3) — the escape hatch for a server that
+	// errors on a kwarg it does not know — and it is distinct from the zero EffortDialectNone,
+	// which says only that nobody named a dialect and so keeps the historical kwargs mapping.
+	EffortDialectOff EffortDialect = "off"
 )
 
 // Usage is the token accounting an Upstream reply may carry (absent on servers that omit

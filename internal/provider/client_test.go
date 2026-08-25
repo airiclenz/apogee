@@ -805,3 +805,25 @@ func TestWireObserver_RecordsSanitisedErrorBody(t *testing.T) {
 		t.Errorf("error record = %q, want the sanitised body", responses[0])
 	}
 }
+
+// The `off` dialect is the one that drops a stated intent on purpose: a server entry spelled
+// `effort-dialect: off` because that server ERRORS on the effort key, so the only mapping that
+// cannot break it is no key at all — on every rung of the vocabulary, including the "off" rung the
+// other dialects still spell out loud (ADR 0060 decision 3).
+func TestBuildBody_OffDialectEmitsNothingOnEveryLevel(t *testing.T) {
+	t.Parallel()
+
+	for _, level := range []Effort{EffortOff, EffortNone, EffortMinimal, EffortLow, EffortMedium, EffortHigh, EffortXHigh, EffortMax} {
+		t.Run(string(level), func(t *testing.T) {
+			t.Parallel()
+
+			body := captureBody(t, Request{
+				Messages:       []Message{{Role: "user", Content: "hi"}},
+				ThinkingEffort: level,
+				EffortDialect:  EffortDialectOff,
+			})
+
+			assertNoEffortKeys(t, body)
+		})
+	}
+}

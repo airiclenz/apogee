@@ -1256,6 +1256,18 @@ type UnconfinedHost struct {
 // its choice in `model:` instead: same feature, the key each server class already has for it.
 // Whether the named profile still EXISTS is not asked here — the launcher's config is read fresh at
 // use time (ADR 0029 D4), so a profile renamed since is a note at startup, not a refusal to start.
+//
+// EffortDialect is which wire shape this server reads a thinking-effort intent in, for the servers
+// passive detection cannot see (ADR 0060 decision 3). `auto` — the default, and what an absent key
+// means — leaves the two tells discovery already reads to answer: llama.cpp's chat template, an
+// OpenAI-shaped `/v1/models` `reasoning` object. `kwargs`, `reasoning` and `openai` each FORCE one
+// of the three sighted dialects and, with it, the verdict that the dial exists at all, so the
+// picker and the footer segment come back on a server that advertises nothing — which is what
+// reaches OpenAI's own o-series and gpt-5, Groq, and a self-hosted vLLM/SGLang/TGI that honours the
+// template kwargs but serves no `/props`. `off` forces the opposite verdict: no effort is sent at
+// all, the escape hatch for a server that errors on a kwarg it does not know. The key names a
+// DIALECT, never a model family — it is the fallback ADR 0050 decision 2 anticipated, one statement
+// per endpoint, and not a table of who speaks what.
 type ServerEntry struct {
 	Name            string          `yaml:"name"`
 	Endpoint        string          `yaml:"endpoint"`
@@ -1273,6 +1285,7 @@ type ServerEntry struct {
 	ContextWindow   int             `yaml:"context-window,omitempty"`
 	MaxOutputTokens int             `yaml:"max-output-tokens,omitempty"`
 	ResponseReserve float64         `yaml:"response-reserve,omitempty"`
+	EffortDialect   string          `yaml:"effort-dialect,omitempty"`
 }
 
 // ValidateServers rejects an entry that could never be switched to, at the startup boundary where
@@ -1327,6 +1340,14 @@ type ServerEntry struct {
 // because a share has two ways to be unusable rather than one: it is the top-level key's own rule
 // applied one scope in (isResponseReserveShare), so a number the file states for this server is a
 // number the Budget can spend on it.
+//
+// The entry's optional `effort-dialect:` value is checked against the five words it may take —
+// `auto`, `kwargs`, `reasoning`, `openai`, `off` (ADR 0060 decision 3). This one is an ENUM rather
+// than a number, so its defect is a different shape: an unknown word is not a magnitude nothing can
+// spend but a value that means nothing at all, and resolving it silently would leave the entry
+// reading as configured while the session went on detecting the wire for itself. The refusal names
+// the entry, the key and what may stand there, the way the thinking axes' own enum refusal does
+// (validateThinkingAxes). Absent is `auto` spelled by omission and is not a defect.
 //
 // The entry's optional `sub-agents:` flag and the posture keys that ride it carry two defects
 // between them (ADR 0045 decisions 1 and 2). A SECOND flagged entry is refused with BOTH entries
@@ -1425,6 +1446,12 @@ func ValidateServers(servers []ServerEntry) error {
 				"reply, above 0 and below 1 (0.2 ⇒ a fifth), or remove the key to take the top-level "+
 				"response-reserve:", i+1, s.Name, s.ResponseReserve)
 		}
+		if dialect := s.EffortDialect; dialect != "" && !isKnownEffortDialect(dialect) {
+			return fmt.Errorf("apogee: servers: entry %d (%q): effort-dialect: %q is not a dialect — "+
+				"want auto to read the wire off what this server advertises, kwargs, reasoning or "+
+				"openai to force one of the three, or off to send no thinking effort at all; or "+
+				"remove the key, which is auto", i+1, s.Name, dialect)
+		}
 		if s.SubAgents {
 			if flagged >= 0 {
 				return fmt.Errorf("apogee: servers: entry %d (%q): sub-agents: true, but entry %d (%q) is "+
@@ -1439,6 +1466,21 @@ func ValidateServers(servers []ServerEntry) error {
 		}
 	}
 	return nil
+}
+
+// isKnownEffortDialect reports whether name is one of the five words an entry's `effort-dialect:`
+// may take: the `auto` that leaves detection to answer, the three sighted dialects that force a wire
+// (ADR 0060 decision 3), and the `off` that forces none at all. The empty value is `auto` spelled by
+// omission and is answered by the caller, so it is not one of the names here. The words are matched
+// exactly, as the thinking axes' own enums are: one spelling per value is what keeps two files that
+// look different from meaning the same thing.
+func isKnownEffortDialect(name string) bool {
+	switch name {
+	case "auto", "kwargs", "reasoning", "openai", "off":
+		return true
+	default:
+		return false
+	}
 }
 
 // posturedKeys names the sub-agent posture keys this entry carries, in file order, for the refusal

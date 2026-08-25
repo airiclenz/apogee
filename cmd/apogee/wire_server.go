@@ -145,8 +145,13 @@ func (b serverBinder) bind(entry config.ServerEntry) error {
 	}); err != nil {
 		return err
 	}
+	// The Monitor is built with this entry's forced thinking-effort dialect, because the beat it
+	// runs is where the dial is answered from: detection reads the server, this key answers for a
+	// server that tells it nothing (ADR 0060 decision 3), and both arrive as the one EffortSupport
+	// the picker, the footer and the wire all read.
 	b.holder.Bind(entry.Endpoint, apiKey, entry.Model,
-		heartbeat.NewMonitor(entry.Endpoint, entry.Model, apiKey))
+		heartbeat.NewMonitor(entry.Endpoint, entry.Model, apiKey,
+			provider.WithEffortDialect(provider.EffortDialectFor(entry.EffortDialect))))
 	return nil
 }
 

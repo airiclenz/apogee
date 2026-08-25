@@ -93,6 +93,11 @@ type ModelInfo struct {
 // object. Neither tell present is indistinguishable from a model with no dial, and both resolve to
 // the zero value: Supported false, EffortDialectNone, no vocabulary, no default — which keeps the
 // wire byte-identical for a caller that asks for nothing (ADR 0031).
+//
+// A server whose entry FORCES a dialect (WithEffortDialect) is answered from that instead, because
+// the providers the key exists for advertise no tell at all: the forced value fills this same
+// struct, so nothing downstream can tell a detected answer from a configured one — one channel from
+// either source to the picker, the footer and the wire (ADR 0060 decision 3).
 type EffortSupport struct {
 	// Supported reports that the dial is usable on this model. Everything below is meaningless
 	// when it is false.
@@ -119,7 +124,8 @@ type EffortSupport struct {
 // empty model list when nothing is configured to fall back to; the /props probe is best-effort (a non-llama.cpp server has
 // no /props, so any failure there just leaves the /v1/models value untouched). That same probe
 // also reports how many generation slots the server was launched with (ModelInfo.TotalSlots).
-// Both payloads are read once more for the thinking-effort tell described on EffortSupport.
+// Both payloads are read once more for the thinking-effort tell described on EffortSupport, and a
+// dialect this Client was built with (WithEffortDialect) overrides whatever they said.
 func (c *Client) Discover(ctx context.Context) (ModelInfo, error) {
 	ctx, cancel := context.WithTimeout(ctx, discoveryTimeout)
 	defer cancel()
@@ -140,7 +146,59 @@ func (c *Client) Discover(ctx context.Context) (ModelInfo, error) {
 	if !info.EffortSupport.Supported {
 		info.EffortSupport = templateEffort
 	}
+	// And a dialect the server's own entry FORCED outranks both tells: it is there precisely
+	// because this provider advertises none (see WithEffortDialect).
+	info.EffortSupport = forceEffortDialect(c.effortDialect, info.EffortSupport)
 	return info, nil
+}
+
+// forceEffortDialect applies a server entry's forced `effort-dialect:` over what the two payloads
+// detected (ADR 0060 decision 3). A forced WIRE dialect is also a verdict — the dial exists, because
+// the human who wrote the key knows this provider better than a payload that mentions nothing — so
+// it declares support as well as the shape. The forced EffortDialectOff is the opposite verdict, and
+// is the one place a detected dial is overruled downwards: no vocabulary, no default, nothing on the
+// wire, for the server that errors on a kwarg it does not know.
+//
+// The detected VOCABULARY survives only when the forced dialect is the one that was detected — the
+// levels a server reported describe the dial it advertised, and carrying them onto a different wire
+// would offer the picker a set from a shape this server does not read. Forcing the dialect detection
+// already found is therefore a no-op rather than a downgrade, which is what makes the key safe to
+// leave in a file after a provider grows a tell.
+//
+// It is total: EffortDialectNone forces nothing (the `auto` an absent key means), and any other
+// value is applied as the wire dialect it names — the config loader's enum is what refuses a word
+// that names no dialect, one boundary further out.
+func forceEffortDialect(forced EffortDialect, detected EffortSupport) EffortSupport {
+	switch forced {
+	case EffortDialectNone:
+		return detected
+	case EffortDialectOff:
+		return EffortSupport{Dialect: EffortDialectOff}
+	}
+	support := EffortSupport{Supported: true, Dialect: forced}
+	if detected.Supported && detected.Dialect == forced {
+		support.Efforts, support.Default = detected.Efforts, detected.Default
+	}
+	return support
+}
+
+// EffortDialectFor maps a server entry's `effort-dialect:` value onto the dialect it forces. The
+// three wire names are the dialect constants' own spellings, so they map to themselves; `off` is
+// the forced-unsupported verdict; and both spellings of "detect for me" — the absent key and an
+// explicit `auto` — map to the zero EffortDialectNone, which forces nothing.
+//
+// It is total, and deliberately silent about a word it does not know: the config loader's enum
+// refuses that at startup, naming the entry and the key (config.ValidateServers), so a value that
+// reached here unrecognised has already been through the one boundary that can explain it to a
+// human. Answering with "detect" is then the safe reading — the behaviour the file would have had
+// without the key at all.
+func EffortDialectFor(name string) EffortDialect {
+	switch EffortDialect(name) {
+	case EffortDialectKwargs, EffortDialectReasoning, EffortDialectOpenAI, EffortDialectOff:
+		return EffortDialect(name)
+	default:
+		return EffortDialectNone
+	}
 }
 
 // discoverModels probes GET /v1/models and resolves the model list plus the active model.

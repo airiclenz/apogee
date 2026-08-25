@@ -609,3 +609,111 @@ func TestDiscover_MalformedEffortPayloadsStayBestEffort(t *testing.T) {
 		})
 	}
 }
+
+// A server entry that FORCES a dialect outranks both passive tells (ADR 0060 decision 3): the key
+// exists for the providers that advertise nothing, so what it says is what discovery reports — the
+// wire shape and, with it, the verdict that the dial exists at all. `off` is the one forcing that
+// goes the other way, and the detected vocabulary survives only onto the dialect it described.
+func TestDiscover_ForcedEffortDialect(t *testing.T) {
+	t.Parallel()
+
+	const plainModels = `{"data":[{"id":"m","context_length":32768}]}`
+	const reasoningModels = `{"data":[{"id":"m","context_length":32768,` +
+		`"reasoning":{"supported_efforts":["low","medium","high"],"default_effort":"medium"}}]}`
+	const kwargsProps = `{"chat_template":"{% if reasoning_effort %}...{% endif %}"}`
+
+	tests := []struct {
+		name   string
+		forced EffortDialect
+		models string
+		props  string
+		want   EffortSupport
+	}{
+		{
+			name:   "openai forced over a server that detected nothing ⇒ supported, openai wire",
+			forced: EffortDialectOpenAI,
+			models: plainModels,
+			want:   EffortSupport{Supported: true, Dialect: EffortDialectOpenAI},
+		},
+		{
+			name:   "kwargs forced over a server that detected nothing ⇒ supported, kwargs wire",
+			forced: EffortDialectKwargs,
+			models: plainModels,
+			want:   EffortSupport{Supported: true, Dialect: EffortDialectKwargs},
+		},
+		{
+			name:   "off forced over a server that DID detect a dial ⇒ unsupported, nothing sent",
+			forced: EffortDialectOff,
+			models: reasoningModels,
+			props:  kwargsProps,
+			want:   EffortSupport{Dialect: EffortDialectOff},
+		},
+		{
+			name:   "auto (the zero) leaves detection untouched",
+			forced: EffortDialectNone,
+			models: reasoningModels,
+			want: EffortSupport{
+				Supported: true,
+				Dialect:   EffortDialectReasoning,
+				Efforts:   []string{"low", "medium", "high"},
+				Default:   "medium",
+			},
+		},
+		{
+			name:   "forcing the dialect detection already found keeps its vocabulary",
+			forced: EffortDialectReasoning,
+			models: reasoningModels,
+			want: EffortSupport{
+				Supported: true,
+				Dialect:   EffortDialectReasoning,
+				Efforts:   []string{"low", "medium", "high"},
+				Default:   "medium",
+			},
+		},
+		{
+			name:   "forcing a different dialect drops the set that described the other one",
+			forced: EffortDialectOpenAI,
+			models: reasoningModels,
+			want:   EffortSupport{Supported: true, Dialect: EffortDialectOpenAI},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			srv, _ := discoveryServer(tt.models, tt.props)
+			defer srv.Close()
+
+			info, err := NewClient(srv.URL, "", WithEffortDialect(tt.forced)).Discover(context.Background())
+
+			if err != nil {
+				t.Fatalf("Discover: %v", err)
+			}
+			if !reflect.DeepEqual(info.EffortSupport, tt.want) {
+				t.Errorf("EffortSupport = %+v, want %+v", info.EffortSupport, tt.want)
+			}
+		})
+	}
+}
+
+// The five words an entry may write map onto the four dialects and the "detect for me" zero — and
+// a word that is not one of them reads as detect, because the config loader is the boundary that
+// refuses it (config.ValidateServers) and this one has to stay total.
+func TestEffortDialectFor(t *testing.T) {
+	t.Parallel()
+
+	cases := map[string]EffortDialect{
+		"":          EffortDialectNone,
+		"auto":      EffortDialectNone,
+		"kwargs":    EffortDialectKwargs,
+		"reasoning": EffortDialectReasoning,
+		"openai":    EffortDialectOpenAI,
+		"off":       EffortDialectOff,
+		"gibberish": EffortDialectNone,
+	}
+	for name, want := range cases {
+		if got := EffortDialectFor(name); got != want {
+			t.Errorf("EffortDialectFor(%q) = %q, want %q", name, got, want)
+		}
+	}
+}

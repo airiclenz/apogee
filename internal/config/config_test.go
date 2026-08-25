@@ -2358,6 +2358,36 @@ server: workstation
 				{Name: "openrouter", Endpoint: "https://openrouter.ai/api/v1"},
 			},
 		},
+		{
+			// The forced thinking-effort dialect rides the entry it describes and reaches the root
+			// as written (ADR 0060 decision 3): mapping the word onto a wire is the provider
+			// package's job, and `auto` — like the absent key — travels as the word the user wrote.
+			name: "the optional effort-dialect override travels per entry, as written",
+			configYAML: `servers:
+  - name: openai
+    endpoint: https://api.openai.com/v1
+    effort-dialect: openai
+  - name: vllm
+    endpoint: http://192.168.64.1:8000
+    effort-dialect: kwargs
+  - name: fussy
+    endpoint: https://llm.example.com
+    effort-dialect: off
+  - name: detected
+    endpoint: http://192.168.64.1:1111
+    effort-dialect: auto
+  - name: absent
+    endpoint: http://192.168.64.1:2222
+server: openai
+`,
+			want: []ServerEntry{
+				{Name: "openai", Endpoint: "https://api.openai.com/v1", EffortDialect: "openai"},
+				{Name: "vllm", Endpoint: "http://192.168.64.1:8000", EffortDialect: "kwargs"},
+				{Name: "fussy", Endpoint: "https://llm.example.com", EffortDialect: "off"},
+				{Name: "detected", Endpoint: "http://192.168.64.1:1111", EffortDialect: "auto"},
+				{Name: "absent", Endpoint: "http://192.168.64.1:2222"},
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -2571,6 +2601,18 @@ func TestApplyConfigServersInvalid(t *testing.T) {
 			wantErr: []string{
 				"servers: entry 1", "box", "bypass: and mechanisms: without sub-agents: true",
 				"ride the sub-agents: flag",
+			},
+		},
+		{
+			// The dialect key is an ENUM, so its defect is a word that names nothing rather than a
+			// number nothing can spend (ADR 0060 decision 3) — and the refusal names the entry, the
+			// key and the words that may stand there.
+			name: "an entry whose effort-dialect names no dialect",
+			configYAML: "servers:\n  - name: box\n    endpoint: http://one:1111\n" +
+				"    effort-dialect: bogus\n",
+			wantErr: []string{
+				"servers: entry 1", "box", `effort-dialect: "bogus" is not a dialect`,
+				"auto", "kwargs", "reasoning", "openai", "off",
 			},
 		},
 		{

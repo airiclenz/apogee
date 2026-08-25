@@ -307,3 +307,22 @@ func TestBeatUnreachableIsObservation(t *testing.T) {
 		t.Errorf("unreachable beat carries findings: %+v", beat)
 	}
 }
+
+// A per-server option reaches the client the beat is taken with: the entry's forced effort dialect
+// is what the composition root passes, and a server that advertises no tell at all must still beat
+// the dial the file declared (ADR 0060 decision 3). The forcing matrix itself is proved in
+// internal/provider/discovery_test.go; what is asserted here is only that the option is not dropped
+// on its way into the Monitor's own client.
+func TestNewMonitorPassesProviderOptionsToDiscovery(t *testing.T) {
+	t.Parallel()
+
+	srv := discoveryServer(t, `{"data":[{"id":"m","context_length":32768}]}`, "")
+
+	beat := NewMonitor(srv.URL, "", "", provider.WithEffortDialect(provider.EffortDialectOpenAI)).
+		Beat(context.Background())
+
+	got := beat.EffortSupport
+	if !got.Supported || got.Dialect != provider.EffortDialectOpenAI {
+		t.Errorf("EffortSupport = %+v, want the forced openai dialect, supported", got)
+	}
+}

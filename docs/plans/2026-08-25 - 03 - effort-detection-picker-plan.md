@@ -623,7 +623,19 @@ switch where the override is in the set keeps it silently.
 
 ---
 
-## 12. Per-server `effort-dialect:` config override for detection-blind providers
+## 12. Per-server `effort-dialect:` config override for detection-blind providers — ✅ DONE (2026-08-25)
+
+NOTES (2026-08-25): `effort-dialect: off` maps to a new `provider.EffortDialectOff` (which emits
+nothing on any level) rather than the item's literal `EffortDialectNone` — plan precedence rule 1
+(ADR 0060 D3, "`off` forces unsupported — never send anything") over the item text: `EffortDialectNone`
+is the historical kwargs mapping, so an entry with a profile `thinking.effort:` would still have sent
+`chat_template_kwargs` to the very server the escape hatch exists for.
+NOTES (2026-08-25): `cmd/apogee/wire_server.go` is edited alongside the item's named
+`cmd/apogee/upstream.go` — the startup bind's `NewMonitor` call lives there (the holder's `Bind`
+method is in upstream.go), and both session bind paths need the option.
+NOTES (2026-08-25): `internal/heartbeat/heartbeat_test.go`, `internal/provider/client_test.go` added
+beyond the item's Files list — one pass-through test for the new variadic `NewMonitor` tail, one for
+the `off` dialect emitting nothing on every level.
 
 **What:** Let a `servers:` entry force the effort dialect when passive detection cannot see it
 (OpenAI, Groq, vLLM/SGLang/TGI). The forced dialect overrides detection for BOTH the wire and

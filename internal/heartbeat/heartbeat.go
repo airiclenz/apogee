@@ -105,8 +105,17 @@ type Monitor struct {
 // it, mirroring provider.Client's own "switching servers means a new Client" contract. What
 // DOES move within a Monitor's life is only the discovery hint, through SetModel below, which
 // is a property of the binding and not of the server.
-func NewMonitor(endpoint, modelHint, apiKey string) *Monitor {
-	return &Monitor{client: provider.NewClient(endpoint, modelHint, provider.WithAPIKey(apiKey))}
+//
+// opts are per-server provider options the caller states about THIS server, applied after the key:
+// the composition root passes the entry's forced thinking-effort dialect that way
+// (provider.WithEffortDialect), so what the beat reports about the dial is what the file said for a
+// provider that advertises nothing (ADR 0060 decision 3). They are options rather than parameters
+// because they are all per-server facts of the same class — one variadic tail absorbs the next one
+// without moving every caller — and because the Monitor itself has no opinion on any of them: it
+// hands them to the one client it owns and reads the beat that comes back.
+func NewMonitor(endpoint, modelHint, apiKey string, opts ...provider.Option) *Monitor {
+	return &Monitor{client: provider.NewClient(endpoint, modelHint,
+		append([]provider.Option{provider.WithAPIKey(apiKey)}, opts...)...)}
 }
 
 // SetModel moves the discovery hint to model. The hint is a property of the BINDING, not of

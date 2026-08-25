@@ -10,6 +10,17 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **A `servers:` entry can force the effort dialect detection cannot see (plan item 12).** Passive
+  detection recognises llama.cpp and OpenRouter only, so OpenAI's own reasoning endpoints, Groq and
+  a self-hosted vLLM/SGLang/TGI advertised nothing and lost the dial. An entry may now spell
+  `effort-dialect:` — `auto` (the default: detect), `kwargs`, `reasoning`, `openai`, or `off`. Any
+  value but `auto` overrides detection for BOTH the wire and the UI: it forces the dialect and
+  declares the dial supported, so the picker and the footer segment come back on a server that
+  tells apogee nothing. `off` forces the opposite — unsupported, and no effort key on the wire in
+  any shape — the escape hatch for a server that errors on a kwarg it does not know. A word that
+  names no dialect is a startup error naming the entry and the key. The forced value rides the same
+  heartbeat `EffortSupport` channel a detected one does, so nothing downstream can tell them apart.
+
 - **A model switch drops an effort override the new model rules out (plan item 11).** When a
   switch binds a model whose server reports its own set of thinking-effort levels and that set
   does not list the live session override, the override is cleared and one transcript note says

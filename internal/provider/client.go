@@ -104,6 +104,13 @@ type Client struct {
 	retryBaseDelay time.Duration
 	requestTimeout time.Duration    // per-attempt bound for Respond; 0 ⇒ caller's ctx governs
 	wireObserver   func(WireRecord) // nil ⇒ no wire capture at all (see WithWireObserver)
+
+	// effortDialect is the thinking-effort dialect this server's entry FORCED, and the zero
+	// EffortDialectNone when it forced none — the `auto` that leaves Discover's passive detection
+	// to answer (see WithEffortDialect). Unlike model it is written once by NewClient and never
+	// again, so it needs no lock: a server's wire shape is a property of the endpoint, and moving
+	// to another endpoint means another Client.
+	effortDialect EffortDialect
 }
 
 // Option configures a Client (functional-options pattern — most fields have a sane
@@ -134,6 +141,19 @@ func WithRetryBaseDelay(d time.Duration) Option { return func(c *Client) { c.ret
 // governed by the caller's context). Streaming is never bounded this way — a long
 // generation is not a fault.
 func WithRequestTimeout(d time.Duration) Option { return func(c *Client) { c.requestTimeout = d } }
+
+// WithEffortDialect forces the thinking-effort dialect Discover reports for this server, for the
+// providers passive detection cannot see (ADR 0060 decision 3): a forced dialect overrides what the
+// two discovery payloads said, and — for the three wire dialects — also declares the dial supported,
+// so a server that advertises no tell still offers one. EffortDialectOff forces the opposite verdict:
+// unsupported, and nothing on the wire. The zero EffortDialectNone forces nothing, which is the
+// default and leaves detection to answer.
+//
+// It governs DISCOVERY, not the request: what a completion carries is the dialect on the Request,
+// and this one reaches it by riding the reported EffortSupport back out to whoever binds the
+// session. That keeps one channel from detection to the wire whether the answer was detected or
+// configured (ADR 0060).
+func WithEffortDialect(d EffortDialect) Option { return func(c *Client) { c.effortDialect = d } }
 
 // WithWireObserver installs a callback that is handed one WireRecord per direction per
 // Respond/Stream call — the request bytes as posted and, at stream end, the raw SSE
@@ -506,6 +526,9 @@ func (c *Client) buildBody(req Request) chatRequest {
 //   - openai (OpenAI, Groq): a top-level `reasoning_effort` FIELD — the same word as the kwargs
 //     entry above, in a different place on the wire. Those models cannot disable reasoning at
 //     all, so the "off" rung maps to their documented floor, "minimal".
+//   - off (an entry's `effort-dialect: off`): nothing is emitted in any shape. A server that
+//     errors on a kwarg it does not know is told nothing at all, which is the only mapping that
+//     cannot make it fail — and the one case where a stated effort is deliberately dropped.
 //
 // Nothing is emitted for an absent ("") or unrecognised effort: the config loader's enum
 // already rejects typos, the Client stays total, and a caller that asks for nothing puts
@@ -517,6 +540,8 @@ func applyEffort(body *chatRequest, dialect EffortDialect, effort Effort) {
 	}
 
 	switch dialect {
+	case EffortDialectOff:
+		return
 	case EffortDialectReasoning:
 		if effort == EffortOff || effort == EffortNone {
 			enabled := false
