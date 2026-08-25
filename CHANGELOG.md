@@ -68,6 +68,21 @@ point is a **minor** bump, not a breaking change.
   `platform.LooksLikeConfinementDenial`, the kill-on-denial watch and the label ORDER are
   untouched: only the wording changed. ADR 0056's quoted label carries a dated amendment.
 
+### Fixed
+
+- **`go test ./cmd/apogee` no longer litters the developer's real `~/.apogee` (plan item 4).**
+  Tests that wire a runtime with `ConfigDir: ""` resolve the apogee home through
+  `os.UserHomeDir()`, so every run created a fresh empty `~/.apogee/scratch/<id>/` — 1,139 of
+  them had accumulated on the owner's machine. A new `TestMain` in `cmd/apogee/main_test.go`
+  points `HOME` (and `USERPROFILE`, which is what `os.UserHomeDir` reads on Windows) at an
+  `os.MkdirTemp` dir for the whole test binary and removes it after the run, so no test in the
+  package can reach the real home; the tests that set `HOME` themselves keep working, because
+  `t.Setenv` restores to the `TestMain` value. `TestNoTestWritesTheRealApogeeHome` guards the
+  override — it compares the resolved home against the process's original one, captured before
+  `TestMain` overrode it, so a future test file that points `HOME` back at the real home trips
+  it. The dirs already on disk are the existing 14-day sweep's to collect; this change deletes
+  nothing.
+
 ## [0.17.1] — 2026-08-25
 
 ### Changed

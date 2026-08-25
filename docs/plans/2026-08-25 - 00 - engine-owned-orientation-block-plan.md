@@ -293,7 +293,7 @@ the existing label tests in `internal/tools/*_test.go`
 
 ---
 
-## 4. `cmd/apogee` tests never touch the real `~/.apogee`
+## 4. `cmd/apogee` tests never touch the real `~/.apogee` — ✅ DONE (2026-08-25)
 
 **What:** `go test ./cmd/apogee` currently creates 15 empty `~/.apogee/scratch/<id>/` dirs
 per run (1,139 accumulated on the owner's machine as of 2026-08-25), because tests that wire
