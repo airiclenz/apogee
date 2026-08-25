@@ -43,7 +43,9 @@ Three things set it apart from other AI coding agents:
   of running it unbounded.
 - **A complete agent with a UX that gets out of your way.** The full agentic
   loop — a 27-tool suite (file ops, grep, git, terminal, tests, web,
-  sub-agents), an MCP client, sessions that survive a crash — inside a
+  sub-agents) plus a default-off Console family (`console_open` and its three
+  companions) for the REPLs, shells and dev servers a model keeps alive across
+  turns, an MCP client, sessions that survive a crash — inside a
   terminal UI built with care: type your next message while the model streams
   and queue it into the running task, recall any prompt you have sent,
   collapse what you are done reading, click every path it prints, undo the
@@ -157,7 +159,9 @@ menu, `@` references a file, and `esc` stops a run. The full tour is in
   tool menus injected as text, fenced or custom-regex calls parsed back out,
   thinking channels stripped, reasoning effort set per model — while native
   models stay byte-identical on the wire. A per-model profile can also carry
-  its own tool roster, so a small model sees fewer, clearer tools.
+  its own tool roster, so a small model sees fewer, clearer tools — or more of
+  them where one asked for it: a qwen3.8 build is offered the default-off
+  Console family out of the box, and nothing else is.
 - **Small-model mechanisms** — context compaction is built in; the other 20
   catalogued mechanisms ship off until bench evidence turns them on, and
   Validated sets apply the measured winners per model automatically.

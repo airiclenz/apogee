@@ -501,7 +501,26 @@ result; the row-budget walk covers the four names; the approval Scope line.
 
 ---
 
-## 9. User docs and the register
+## 9. User docs and the register — ✅ DONE (2026-08-25)
+
+NOTES (2026-08-25): the item's "Console subsection ... on whichever manual page documents the tool
+surface" landed in `docs/manual/configuration.md` as a `## The Console family` section rather than in
+a new `docs/manual/tools.md`. No manual page is a per-tool reference, but the manual's own index row
+names Configuration as the page covering "tools", and the item's own other two edits (the `tools:`
+block, the roster axis) are already there — a new page holding one tool family would have promised a
+tool reference the manual does not have.
+NOTES (2026-08-25): `docs/design/technical-design.md` was NOT edited: it lives at
+`docs/design/archived/technical-design.md` and carries an ARCHIVED banner ("history, not ground
+truth ... Its §5 component rows are no longer amended — component narration stops here"), which is
+the row the item's "tool table" means. The live per-tool table is `docs/layout/tool-layout.md`, and
+item 8 already gave it the four rows.
+NOTES (2026-08-25): the removed `[P] Console family` bullet also carried a trailing parenthetical
+pointing at the per-profile-roster grill (ADR 0057, plan `2026-08-23 - 00`); that plan is executed and
+archived, so the whole bullet went. Arms (a)–(g) above it are untouched.
+NOTES (2026-08-25): the working tree also holds changes that are NOT this item's and were left
+exactly as found — a rename of `docs/layout/archived/prompt-box-layout.md` to
+`docs/layout/prompt-box-layout.md`, and an untracked `docs/plans/2026-08-25 - 03 -
+effort-detection-picker-plan.md`. They must not be staged with this item.
 
 Depends on items 7 and 8.
 

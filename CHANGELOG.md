@@ -10,6 +10,25 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **The Console family is documented where a user goes looking for it, and its register line is
+  closed (plan item 9).** The manual's `tools:` block no longer promises that a default-off tool
+  will exist one day: it names the four that do, its example `enabled:` list turns them on, and the
+  per-model roster paragraph says that a `qwen3.8` build is offered them by the built-in table with
+  the config file silent — and that a `tools:` axis of your own for that model replaces the built-in
+  one whole rather than trimming it. A new **The Console family** section in the configuration page
+  is the prose the tools' own descriptions cannot carry: what one shot buys you (a REPL that keeps
+  its imports, a shell that keeps its directory, a dev server that keeps serving), that a Console is
+  live host state belonging to this process and to nothing else — never written into a session, so a
+  resumed session comes back with none and a remembered id is simply an id this process does not
+  know, and `/clear` and quitting close them all — the fixed cap of four with an exited program
+  still holding its slot until closed, the Resolution taken per `console_send` rather than once per
+  Console, and POSIX only, with the four tools still on the menu on Windows so a config that enables
+  them is not a startup notice about tools that do not exist. The API-key page's scrub sentence adds
+  `console_open` to the tools whose subprocess never sees a configured key, and the README says the
+  suite now has a default-off Console family beside it and that qwen3.8 is the one build shipped with
+  it on. `ISSUES.md` loses the `[P] Console family` line — the work is done, and the closed trail is
+  this changelog.
+
 - **The Console family reads as a console session in the transcript (plan item 8).** The four tools
   have presenters now, so a Console run renders as four cards that say each of their facts once
   rather than as four unregistered blobs of labelled arguments. `console_open` leads with the

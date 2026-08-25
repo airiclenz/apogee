@@ -63,16 +63,19 @@ catalogue currently counts **21** mechanisms — see
 [`docs/design/mechanism-catalogue.md`](../design/mechanism-catalogue.md) for
 what each one does.
 
-The **built-in tools** are all on by default, and `tools:` (a file-only block) is how you change
-that: `disabled:` takes a tool off the menu — the model is never shown it, and a call naming it is
+The **built-in tools** are all on by default — all but the default-off **Console family**
+(`console_open`, `console_send`, `console_read`, `console_close`;
+[what they do](#the-console-family)) — and `tools:` (a file-only block) is how you change that:
+`disabled:` takes a tool off the menu — the model is never shown it, and a call naming it is
 refused as a tool that does not exist — while `enabled:` puts one back on, for a tool this build
-leaves off by default (no tool ships that way today; the key is how the first one is turned on):
+leaves off by default. The Console family is what that second list is for today: the four tools
+are in the binary and offered to nobody until you name them.
 
 ```yaml
 # ~/.apogee/config.yaml
 tools:
   disabled: [view_diff, single_find_and_replace]
-  enabled: []
+  enabled: [console_open, console_send, console_read, console_close]
 ```
 
 It exists because a long tool list is itself a cost for a small model: fewer, clearer tools can
@@ -89,7 +92,12 @@ server's tools are not listed here — they come and go with the server, so drop
 A single model can also carry a roster of its own: a `model-profiles:` entry
 takes the same two keys as a third axis, and what it says about a tool beats what the global block
 says about it — that is how a tool stays off for the models that drown in it and on for the one that
-wants it.
+wants it. One roster ships that way already: bind a **qwen3.8** build and the built-in shape table
+offers it the Console family without your config saying anything, because that is the model that
+asked for the family by name. A `tools:` axis of your own for that model replaces the built-in one
+whole, the way every axis here replaces the built-in's — so `disabled: [console_open]` under a
+`qwen3.8` entry of yours turns the whole family back off rather than trimming one tool out of it;
+re-list the ones you still want under `enabled:`.
 
 Automatic context **Compaction** keeps a long session from overflowing the model's
 window: when the conversation history outgrows its budgeted share, apogee folds the
@@ -326,8 +334,8 @@ shell** — pipes, redirections and `$VARIABLES` need a wrapper script of your o
 the command's stdout, trailing whitespace trimmed, is the key. `api-key-env:` names an
 environment variable rather than holding a key (`api-key-env: OPENROUTER_API_KEY`), read
 from the environment apogee itself was started in — and dropped from the environment the
-`terminal`, `python_exec` and `run_tests` tools hand a subprocess, so a command the model
-chose cannot read that key back out. Both resolve the first time this session actually
+`terminal`, `python_exec`, `run_tests` and `console_open` tools hand a subprocess, so a command
+the model chose cannot read that key back out. Both resolve the first time this session actually
 needs that server's key — never at startup for entries you do not use — and the answer is
 remembered for the rest of the session. A non-zero exit, a 60-second timeout, empty output,
 or an unset or empty variable is an **error** naming the entry, never a silent keyless
@@ -586,3 +594,51 @@ host. Both keys are **global-config-file-only** — no flag, no environment vari
 no project config — because editing that file is the deliberate acknowledgement, and a
 repo you cloned must never be able to make that claim for you.
 
+## The Console family
+
+Nearly every tool apogee gives a model is one shot: `terminal` runs a command, the command ends,
+the process is gone — nothing of it is left to talk to. The **Console family** is the exception.
+`console_open` starts an interactive program under a pseudo-terminal and *leaves it running*, so a
+Python REPL keeps its imports, a shell keeps the directory it was `cd`'d into, and a dev server
+keeps serving while the model goes on working around it. The open answers with an id — `console 3`
+— and the other three tools drive that id: `console_send` types into it (a line of input, or raw
+bytes for a control key like Ctrl-C), `console_read` collects whatever it has printed since the
+last look, and `console_close` ends it and reports how it exited. What the model gets back is the
+program's output with terminal escape sequences stripped out, so a progress bar that repaints
+itself a thousand times does not spend the context window on cursor motion nobody can see.
+
+The four tools ship **off**, which is what the `tools:` block above is for: name them under
+`enabled:` and every model this config runs is offered them, or put them on one model's roster with
+a `model-profiles:` entry — as the built-in table already does for `qwen3.8`. They are off because
+four extra menu slots are a real cost to a small model, and a model that never needs an interactive
+program should not pay for them.
+
+**A Console is live host state, not part of your conversation.** It belongs to the running apogee
+process and to nothing else: it is never written into a session file, so a session you resume — or
+one restored on another machine — comes back with no Consoles at all, and an id the model remembers
+from before is simply an id this process does not know (`no console 3 (open consoles: 1, 2)`).
+`/clear` — and its `/new` alias — closes every open Console along with the history that named them,
+quitting apogee closes them, and the Consoles a sub-agent opened close when its delegation ends.
+Nothing here is undone by `/undo` either — a Console that dropped your database table dropped it
+for real.
+
+**Four at a time.** One apogee process holds at most **4** open Consoles — a fixed number, not a
+setting — and a fifth open is refused, naming the ids that could be closed instead. A program that
+has already exited still holds its slot until it is closed, because it still holds an id and the
+output nobody has read yet. The cap is what keeps a forgotten dev server from quietly outliving the
+task that started it.
+
+**Approval and the fence are decided per call, never per Console.** Opening one and typing into it
+count as command execution, exactly like `terminal`: they are what the mode gates in Ask-Before,
+and what the OS fence confines in Auto. The Resolution is taken again for every single
+`console_send`, so the mode a Console was opened under never becomes a standing permission —
+switching to Plan, or `/confine on`, changes what the *next* send is allowed to do, though neither
+reaches back to touch a process that is already running. If the fence stops a confined Console's
+program mid-run, the next read says so in the same words the one-shot tools use (`[blocked by
+workspace confinement: …]`). Reading and closing ask nobody: they run in every mode, because
+neither one can start anything.
+
+**POSIX only, for now.** Consoles need a pseudo-terminal, and apogee has one on macOS, Linux and
+the BSDs. On Windows the four tools are still on the menu — so a config that enables them is not a
+startup notice about tools that do not exist — but `console_open` answers `console is not supported
+on Windows yet` rather than pretending. ConPTY support is a later change.
