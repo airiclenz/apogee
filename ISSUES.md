@@ -117,6 +117,23 @@ because the session-switch case wants an owner call.
   (`internal/tui/picker.go:88`, offering arm at `:900`). The new kind's filtered-accept seam is
   unpinned.
 
+---
+
+### The `cmd/apogee` suite's temporary home is never removed when the key-command fixture re-execs
+
+**Status:** found 2026-08-25 at the close of the engine-owned orientation-block plan
+(`docs/plans/archived/2026-08-25 - 00 - engine-owned-orientation-block-plan.md`), deferred out of
+that run.
+
+- [ ] `TestMain` creates the suite's throwaway home with `os.MkdirTemp`
+  (`cmd/apogee/main_test.go:26`) and removes it after `m.Run` returns
+  (`cmd/apogee/main_test.go:36`). The key-command fixture re-execs the test binary and exits from
+  inside the test — `os.Exit(0)`, `cmd/apogee/keysource_test.go:47` — so in every child process
+  `m.Run` never returns, the `os.RemoveAll` never runs, and the child's own temp home survives the
+  run: an ordinary `go test ./cmd/apogee` leaves six empty `/tmp/apogee-cmd-test-home-*` dirs
+  behind, one per re-exec through `keyCommandFor` (`cmd/apogee/keysource_test.go:53`). The fix is
+  one line — remove the temp home in the fixture before it exits.
+
 ## Parked / deferred work
 
 Live, deliberately deferred work only. Each entry records *enough* design that we don't re-derive
