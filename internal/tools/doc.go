@@ -193,6 +193,15 @@
 // whole git family: git_branch, git_commit, git_diff_range, git_status and git_log, with the
 // ref guards and porcelain-v2 parsing they share.
 //
+// The Console family (ADR 0059) — a persistent interactive program the model drives across
+// Turns, held as live host state on the engine rather than as one process per call.
+// console_common.go is the family's shared floor: the id argument, the registry lookup and the
+// refusal it renders, the wait-window ceilings, and the collector-and-renderer that turns a
+// Console's output into a result. console_open.go is console_open, the Subprocess-marked tool
+// that starts the program under a pseudo-terminal, and console_send.go is console_send, which
+// types into one — Subprocess-marked too, because the shell on the other end executes what it
+// is sent. Both ship DEFAULT-OFF (ADR 0057).
+//
 // The subprocess plumbing. exec_common.go is the single runSubprocess every execution tool
 // above calls — the ceilings, the default timeout, the capped output buffer, and the
 // exit-code result shape — plus RunHookSubprocess, the one exported door onto that funnel, so

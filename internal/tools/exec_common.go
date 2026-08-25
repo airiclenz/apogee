@@ -198,6 +198,37 @@ type subprocessResult struct {
 	denialStopped bool
 }
 
+// confinementDenialLabel is the line appended to a FAILED confined result whose output looks
+// like an OS confinement denial, so the model learns the write-fence exists instead of
+// treating the EPERM as a broken command and routing around it blind.
+const confinementDenialLabel = "[likely blocked by workspace confinement: writes are allowed" +
+	" only inside the workspace and the session scratch dir]"
+
+// confinementDenialStopLabel is the line appended when the live kill-on-denial watch stopped
+// the run itself (subprocessResult.denialStopped, console.Console.DenialStopped): stronger than
+// the "likely" label above, because here the harness matched the denial as it streamed and
+// killed the process group, so the model is told plainly that the rest of its script did not
+// run. The OS-denial spellings both labels key on live in internal/platform
+// (platform.LooksLikeConfinementDenial), which is also what the watch scans with.
+//
+// Both labels sit beside the funnel rather than beside one tool: the one-shot execution tools
+// read them off subprocessResult and the Console family reads the stop label off a live
+// Console, and there is one wording for the fence however the model met it.
+const confinementDenialStopLabel = "[blocked by workspace confinement: an operation was" +
+	" denied, so the command was stopped; writes are allowed only inside the workspace and" +
+	" the session scratch dir]"
+
+// resolveWorkdirInRoot resolves an execution tool's optional working directory within root
+// (path-safe), or returns the root itself when none is given. Every tool taking a `workdir`
+// argument resolves it the one way, so a path that escapes the workspace is refused with the
+// same sentinel wherever the model tried it.
+func resolveWorkdirInRoot(workdir, root string) (string, error) {
+	if workdir == "" {
+		return root, nil
+	}
+	return resolveInRoot(workdir, root)
+}
+
 // runSubprocess runs spec as a one-shot subprocess (ADR 0008 — fresh process per call, no
 // persistent shell/REPL) and captures its combined output and exit code. It is the single
 // place the §2.4 confinement-and-teardown contract is honoured for every execution tool:

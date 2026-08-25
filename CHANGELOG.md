@@ -10,6 +10,39 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **`console_open` and `console_send` — the Subprocess-marked half of the Console family (plan
+  item 4).** The registry from item 3 gets its first two callers. `console_open` runs a command
+  line through the platform shell inside a pseudo-terminal and hands the model a small id back
+  (`console 1 opened: sh`), then whatever the program printed inside a short wait window; a
+  program that was already over reports its exit code rather than pretending there is something to
+  talk to. `console_send` types into that id as if at its keyboard — a newline appended unless
+  `raw` asks for the bytes verbatim, which is how a lone control character (`"\u0003"` for Ctrl-C)
+  is sent — and returns what the program produced over its own window, ending early when the
+  process exits, followed by `alive` or `exited with code N`. Both are DEFAULT-OFF (ADR 0057): the
+  family is registered code nobody is offered until configuration lifts it, so no model pays a
+  tool slot for consoles it never opens.
+  Both also carry the Subprocess marker, `console_send` deliberately although it spawns nothing:
+  the shell on the other end executes what it is sent, so the marker is what makes the disposition
+  confine-or-gate the call instead of waving it through as an in-process write, and the Resolution
+  is taken per send — a Console opened in one mode is never a standing permission in another. The
+  open path reuses the one-shot tools' hardening whole: the POSIX command-line pre-flight, the
+  workspace-scoped working directory, the credential scrub and workspace-scoped PATH
+  (`subprocessEnvScopedPath`, plus `TERM=dumb`), and the exec fence at its own resolution site —
+  the shell is resolved on PATH and refused by name when it lands inside the workspace, so bytes
+  the model was allowed to write cannot become the shell it then drives. What it does NOT reuse is
+  the fail-fast preamble: `set -e` ends a script at its first failure, and a shell that exits the
+  moment a typed command fails is not a console. A confinement handle carrying no Confiner fails
+  closed as `ErrConfinementUnavailable`, so the loop gates the call rather than leaving an
+  unfenced shell alive past the Turn that asked for it; everything else the model can act on —
+  an unparseable line, a workdir escaping the root, a fifth console past the cap of four (the
+  refusal names the ids that are open), an unknown id, a platform with no pseudo-terminal — is an
+  error result, the `terminal` convention. `console_send` also declares its approval scope
+  (`→ console 3`), the one line an approval pane cannot derive from a bare number, and accepts an
+  id given as a quoted string, because a model that quotes its numbers still means console 3.
+  A live enforcement proof runs against the host's real Confiner where the kernel can enforce one:
+  a confined Console told to write outside its box is stopped where it was denied, the model is
+  told so in the fence's own words, and the file never appears.
+
 - **The engine holds the Consoles as live host state (Console family, plan item 3).** The registry
   from item 2 is now built with every Agent and installed on every tool dispatch context beside the
   undo journal, so a console tool will reach it where the call is rather than by holding it —

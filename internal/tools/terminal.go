@@ -111,7 +111,7 @@ func (t *Terminal) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 		return errorResult(call.ID, "could not parse command line: "+err.Error()), nil
 	}
 
-	dir, err := t.resolveWorkdir(args.Workdir)
+	dir, err := resolveWorkdirInRoot(args.Workdir, t.root)
 	if err != nil {
 		return errorResult(call.ID, err.Error()), nil
 	}
@@ -163,31 +163,6 @@ func preflightCommandLine(command string, posix bool) error {
 	_, err := shlex.Split(command)
 	return err
 }
-
-// resolveWorkdir resolves the optional working directory within the root (path-safe), or
-// returns the root itself when none is given.
-func (t *Terminal) resolveWorkdir(workdir string) (string, error) {
-	if workdir == "" {
-		return t.root, nil
-	}
-	return resolveInRoot(workdir, t.root)
-}
-
-// confinementDenialLabel is the line appended to a FAILED confined result whose output looks
-// like an OS confinement denial, so the model learns the write-fence exists instead of
-// treating the EPERM as a broken command and routing around it blind.
-const confinementDenialLabel = "[likely blocked by workspace confinement: writes are allowed" +
-	" only inside the workspace and the session scratch dir]"
-
-// confinementDenialStopLabel is the line appended when the live kill-on-denial watch stopped
-// the call itself (subprocessResult.denialStopped): stronger than the "likely" label above,
-// because here the harness matched the denial as it streamed and killed the process group, so
-// the model is told plainly that the rest of its script did not run. The OS-denial spellings
-// both labels key on live in internal/platform (platform.LooksLikeConfinementDenial), which
-// is also what the watch scans with.
-const confinementDenialStopLabel = "[blocked by workspace confinement: an operation was" +
-	" denied, so the command was stopped; writes are allowed only inside the workspace and" +
-	" the session scratch dir]"
 
 // subprocessToolResult renders a captured subprocess outcome as a ToolResult. A non-zero
 // exit is an error result (so the model sees the command failed) carrying the captured
