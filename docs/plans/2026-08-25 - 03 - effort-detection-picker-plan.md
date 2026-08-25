@@ -589,7 +589,9 @@ clears it. Assert `/effort` on an unsupported model adds the no-dial note and op
 
 ---
 
-## 11. Clear the effort override on a switch to a model that excludes it
+## 11. Clear the effort override on a switch to a model that excludes it — ✅ DONE (2026-08-25)
+
+NOTES (2026-08-25): the newly bound model's level set is read through `m.effortSupport()` (item 7's accessor) rather than off a beat — `applyRebind` takes no beat parameter, and on the beat path `foldBeat` has already folded the new model's `EffortSupport` before the rebind runs, so the accessor holds exactly the set the item names.
 
 **What:** When a rebind binds a model whose reported `supported_efforts` set does not contain
 the live session override, clear the override and add a transcript note. In

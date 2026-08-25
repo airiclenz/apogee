@@ -11,6 +11,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/format"
 	"github.com/airiclenz/apogee/internal/heartbeat"
 	"github.com/airiclenz/apogee/internal/provider"
@@ -661,6 +662,70 @@ func TestBeatCarriesTheEffortDialectIntoTheRebind(t *testing.T) {
 	}
 	if len(rb.calls) != 2 || rb.calls[1].dialect != provider.EffortDialectReasoning {
 		t.Errorf("rebind calls = %+v, want the pick re-stating the observed dialect", rb.calls)
+	}
+}
+
+// A model switch keeps the session effort override (ADR 0050 decision 5) — except into a model that
+// RULES IT OUT: a server that reports its own level set and does not list the override has told us
+// the next turn would fail on it, so the switch drops it and says so once (ADR 0060 D8). A model
+// that reports no set at all says nothing of the kind and keeps it, the enriched turn error being
+// that case's backstop.
+func TestSwitchClearsAnExcludedEffortOverride(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name         string
+		support      provider.EffortSupport
+		wantOverride domain.ThinkingEffort
+		wantNote     string
+	}{
+		{
+			name: "a reported set without the override clears it",
+			support: provider.EffortSupport{
+				Supported: true, Dialect: provider.EffortDialectReasoning, Efforts: []string{"low", "medium"},
+			},
+			wantNote: `effort override "high" is not offered by new-model — cleared; back to auto`,
+		},
+		{
+			name:         "a model that reports no set keeps it",
+			support:      provider.EffortSupport{Supported: true, Dialect: provider.EffortDialectKwargs},
+			wantOverride: domain.EffortHigh,
+		},
+		{
+			name: "a reported set containing the override keeps it silently",
+			support: provider.EffortSupport{
+				Supported: true, Dialect: provider.EffortDialectReasoning, Efforts: []string{"low", "high"},
+			},
+			wantOverride: domain.EffortHigh,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			m := wireRebind(t, testOpts, &fakeHeartbeat{}, &fakeRebind{})
+			m = foldBeatMsg(t, m, upBeat("test-model", 32768)) // the first beat observes what is bound
+			m.eng.SetEffortOverride(domain.EffortHigh)
+
+			switched := upBeat("new-model", 32768)
+			switched.EffortSupport = tt.support
+			m = foldBeatMsg(t, m, switched)
+
+			if override, _ := m.eng.ThinkingEffort(); override != tt.wantOverride {
+				t.Errorf("override after the switch = %q, want %q", override, tt.wantOverride)
+			}
+			notes := countNotes(m, "effort override")
+			if tt.wantNote == "" {
+				if notes != 0 {
+					t.Errorf("clear notes = %d, want none — a kept override is silent; notes = %q", notes, noteTexts(m))
+				}
+				return
+			}
+			if notes != 1 || countNotes(m, tt.wantNote) != 1 {
+				t.Errorf("notes = %q, want exactly one reading %q", noteTexts(m), tt.wantNote)
+			}
+		})
 	}
 }
 

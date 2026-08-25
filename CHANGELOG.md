@@ -10,6 +10,15 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **A model switch drops an effort override the new model rules out (plan item 11).** When a
+  switch binds a model whose server reports its own set of thinking-effort levels and that set
+  does not list the live session override, the override is cleared and one transcript note says
+  so — `effort override "high" is not offered by new-model — cleared; back to auto` — instead of
+  the next turn failing on a level the model refuses. An override the new model does list, and an
+  override on a model whose server reports no level set at all (a llama.cpp `/props` sighting,
+  which proves the dial exists and names no vocabulary), both survive the switch untouched as
+  before; the enriched turn error stays the backstop for that second case.
+
 - **`/effort` is a popup picker of the model's own levels (plan item 10).** The
   `off|low|medium|high|auto` word grammar is gone — parser, usage line and all — and `/effort`
   now opens the shared picker instead. Its rows are exactly the levels the bound model reported

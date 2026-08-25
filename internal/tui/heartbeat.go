@@ -1,10 +1,13 @@
 package tui
 
 import (
+	"fmt"
+	"slices"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/format"
 	"github.com/airiclenz/apogee/internal/heartbeat"
 	"github.com/airiclenz/apogee/internal/provider"
@@ -372,7 +375,49 @@ func (m Model) applyRebind(intent rebindIntent) (Model, bool) {
 	if m.opts.ContextWindow == 0 {
 		m.transcript.addNote(unknownWindowNote)
 	}
+	// The session effort override the newly bound model rules out, dropped rather than left to fail
+	// the next turn (ADR 0060 D8). It is decided HERE because this is the one seam every model switch
+	// funnels through — a beat-observed change and a `/model` pick alike — and from the two facts the
+	// host already holds: the override, read back off the engine, and the level set the last landed
+	// beat reported for the model now bound. The engine never learns that set; the clear is host
+	// policy, exactly as the menu gate, the footer segment and the picker rows are (ADR 0060 D9).
+	if override, _ := m.eng.ThinkingEffort(); effortExcluded(m.effortSupport(), override) {
+		m.eng.SetEffortOverride("")
+		m.transcript.addNote(effortClearedNote(override, m.opts.Model))
+	}
 	return m, true
+}
+
+// effortExcluded reports whether a live session effort override is one the bound model has ruled
+// out — the only case a switch clears it in. It answers true only where the model REPORTED a
+// vocabulary and the override is not in it: an absent override has nothing to clear, and an empty
+// set is a `/props` sighting, which proves the dial exists and names no levels at all — absence of
+// evidence is not evidence the level is refused, and the enriched turn error stays that case's
+// backstop (ADR 0060 D8).
+//
+// The comparison is against the SERVER's own spelling, taken as it stands the way the picker takes
+// its rows (effortLevels): a level this build has no constant for is still the level that server
+// asked to be called by.
+func effortExcluded(support provider.EffortSupport, override domain.ThinkingEffort) bool {
+	if override == "" || len(support.Efforts) == 0 {
+		return false
+	}
+	return !slices.Contains(support.Efforts, string(override))
+}
+
+// effortClearedNote words a dropped override: the level that went, the model that does not offer it,
+// and where the dial stands now — "auto" being the picker's own word for the absence of an override,
+// so the note lands the human back on a row they have seen. A plain fact in the shape of the other
+// rebind notes beside it (rebindNote), with no verdict: the human asked for the level and for the
+// switch, not for the collision between them.
+//
+// The model is rendered through displayModel like every id the chrome shows, so this note and the
+// footer beside it can never name the same model two different ways. The level is quoted because it
+// is a vocabulary word rather than one of apogee's own; neither half is escape-stripped here, since
+// the note's one destination is addNote, which strips at the seam for every producer.
+func effortClearedNote(override domain.ThinkingEffort, model string) string {
+	return fmt.Sprintf("effort override %q is not offered by %s — cleared; back to auto",
+		override, displayModel(model))
 }
 
 // applyPendingRebind binds a change that was captured while the engine was not the Update loop's to
