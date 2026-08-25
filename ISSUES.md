@@ -18,10 +18,44 @@ only the still-open, ACTIONABLE findings — a defect, or a concrete missing tes
 costs a plan already ratified, and cosmetic observations belong in the run's closing report (the
 closeout commit message), never here; the work the run completed belongs in `CHANGELOG.md`.
 
-[ ] New/Open Items not handled yet <br>
-[P] Planned Items - if you add an item to an implementation plan, mark it with `P`
+- [ ] New/Open Items not handled yet <br>
+- [P] Planned Items - if you add an item to an implementation plan, mark it with `P`
+
+
+## Improvements / Ideas
+
+- [ ] display somewhere id apogee is confined or not
+- [ ] 
 
 ## Open defects
+
+### A running delegation — and the whole Turn around it — is absent from the session record until the Turn ends
+
+**Status:** observed 2026-08-25 in session `20260825T164640Z-ca180f38` (Qwen3.6-35B, `/code-audit`)
+while reviewing it from a second session; recorded for its own investigation (owner call) — the
+right fix is not yet settled, only the gap is.
+
+- [P] The record is written only at `StatusTurnComplete` — the worker snapshots between Steps
+  (`internal/tui/worker.go:162`, payload `internal/tui/sessionsave.go:34`;
+  [ADR 0022](docs/adr/0022-sessions-persist-per-turn-as-dual-representation-records.md) §1,
+  "a crash loses at most one Turn"). A `sub_agent` call runs synchronously inside its Turn
+  (`internal/tools/sub_agent.go:80`), so the Turn that dispatches a delegation stays open for as
+  long as the child runs — 15+ minutes in the observed session, and a whole lens batch under the
+  ADR 0039 fan-out. For that whole time the saved record ends at the PREVIOUS tool call (`ls …/prompts/`
+  in the observed file): the assistant message that issued the delegation, the prompt it carried
+  and every child event are nowhere on disk while the TUI shows the run. Two consequences: a reader
+  of the record mid-run (a second session, a reviewer, `apogee headless` tooling) concludes that no
+  sub-agent was dispatched; and a crash or kill loses the delegation entirely — the child's
+  internals are a documented persistence non-goal (parked *Session system follow-ons*, below), but
+  the parent's own dispatching Step is not, and ADR 0022's "at most one Turn" bound is unbounded in
+  wall-clock and tokens when the Turn holds a fan-out. To settle before touching code: whether a
+  snapshot may fire at the Step that *issues* the delegation (ADR 0007 makes the Turn's quiescent
+  boundary the only valid snapshot point today — that rule is what an earlier save would have to
+  re-examine), whether the record should instead carry an in-flight marker the browser and the
+  resume path understand, or whether the bound is accepted for delegations and stated so in
+  ADR 0022 and the sessions manual.
+
+---
 
 ### A Console status word inside the program's own output mis-reads as the verdict
 
