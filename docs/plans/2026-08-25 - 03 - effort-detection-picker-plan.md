@@ -432,7 +432,11 @@ level.
 
 ---
 
-## 7. Fold detected effort support into the TUI heartbeat state
+## 7. Fold detected effort support into the TUI heartbeat state — ✅ DONE (2026-08-25)
+
+NOTES (2026-08-25): the fold test is a new table-driven `TestBeatFoldsEffortSupportIntoState` rather than extra asserts inside an existing `foldBeat` test — same file, same harness, keeping one logical subject per test (the shape item 5 settled on for the Beat half).
+
+NOTES (2026-08-25): `heartbeatState.observedDialect` is kept, not dropped. Item 6's NOTES line offered item 7 as the place to remove it, but item 7's text and Files list are silent on it and name neither `picker.go` (its only reader, `picker.go:749`) nor a behaviour change; removing it is a one-line follow-up, recorded on the run's DEFER line instead.
 
 **What:** Store the detected support host-side so the menu, footer, picker and clear-on-switch
 can read it. Add an `effort provider.EffortSupport` field to `heartbeatState`

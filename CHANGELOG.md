@@ -10,6 +10,14 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **The TUI holds the detected thinking-effort dial (plan item 7).** Every landed beat now folds
+  its `EffortSupport` — whether a dial exists, the wire dialect that reaches it, the level set the
+  model reported and its own default — into the heartbeat state, read back through a single
+  `effortSupport()` accessor. Nothing is visible yet: it is the one observation the command menu,
+  the footer segment, the effort picker and the clear-on-switch will all answer from, instead of
+  four readers reaching into the state themselves. A beat that reports no tell leaves the zero
+  value ("no dial"), and a beat that could not read the server leaves the last one in place.
+
 - **The detected effort dialect reaches the request (plan item 6).** The wire dialect a beat
   observed for the server now rides the rebind all the way to `provider.Request`: `RebindSpec`
   gains an `EffortDialect` field, the Agent holds it as the one server-scoped effort fact, and

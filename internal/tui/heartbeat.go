@@ -57,6 +57,15 @@ type heartbeatState struct {
 	// beat of its own is built from: a `/model` pick re-states the binding, and re-stating it with a
 	// zero dialect would silently un-dial a session the heartbeat had already dialled.
 	observedDialect provider.EffortDialect
+	// effort is what the last landed beat reported about the ACTIVE model's thinking-effort dial
+	// (ADR 0060): whether one exists at all, the wire dialect that reaches it on this server, the
+	// level vocabulary the model named for itself and the level it defaults to. It is HOST state —
+	// the command menu, the footer segment, the picker and the clear-on-switch are what read it,
+	// while the only half that crosses into the engine travels on the rebind intent above. Read it
+	// through [Model.effortSupport] rather than here. It is a plain struct holding plain values and
+	// one slice of them, so it copies with the Model (ADR 0011); the zero value is "no dial", which
+	// is also what a beat that could not read the server leaves in place.
+	effort provider.EffortSupport
 	// pendingRebind is a captured change waiting for the engine to be quiescent — set when a beat
 	// lands while a worker owns the engine (applied in finishWorker) or while a launcher verb owns
 	// the server it talks to (applied in foldActuationDone). Latest-wins: a second change inside the
@@ -125,6 +134,12 @@ func (m Model) observesUpstream() bool { return m.serverActs().CanObserve }
 // False is the display-frozen heartbeat: the beats still land and still light the offline state, but
 // nothing captures a change and nothing claims a binding moved.
 func (m Model) appliesRebinds() bool { return m.serverActs().CanRebind }
+
+// effortSupport reports what the last landed beat saw of the bound model's thinking-effort dial
+// (ADR 0060) — the one seam the host-side readers ask, so the menu, the footer, the picker and the
+// clear-on-switch all answer from the same observation rather than reaching into the state
+// themselves. Before any beat lands it is the zero value: no dial, which is the quiet answer.
+func (m Model) effortSupport() provider.EffortSupport { return m.hb.effort }
 
 // heartbeatLive reports whether gen belongs to the current tick chain of a WIRED monitor — the
 // guard both heartbeat Msgs pass through. An unwired Model (gen 0) folds nothing, so a stray beat
@@ -247,6 +262,7 @@ func (m Model) foldBeat(beat heartbeat.Beat) (Model, bool) {
 		shownBefore = m.pickerCount()
 	}
 	m.hb.models = beat.AvailableModels // the /model picker's rows are derived from it (picker.go)
+	m.hb.effort = beat.EffortSupport   // what the menu, the footer and the picker read (effortSupport)
 	// A shorter offering must not leave an open picker highlighting a row that no longer exists.
 	m.picker.clampSelection(m.pickerCount())
 	offeringMoved := m.picker.open && m.pickerCount() != shownBefore

@@ -581,6 +581,55 @@ func TestDisplayModelEmpty(t *testing.T) {
 	}
 }
 
+// What discovery saw of the bound model's thinking-effort dial rides every landed beat into host
+// state (ADR 0060), whole: the dialect, the vocabulary the model named and its own default, not just
+// the half that crosses into the engine. The menu, the footer, the picker and the clear-on-switch
+// all read it back through the one accessor, so a beat that reports no tell must leave the zero
+// value there rather than a stale claim that a dial exists.
+func TestBeatFoldsEffortSupportIntoState(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		effort provider.EffortSupport
+	}{
+		{
+			name: "a reported vocabulary and default are carried whole",
+			effort: provider.EffortSupport{
+				Supported: true,
+				Dialect:   provider.EffortDialectReasoning,
+				Efforts:   []string{"low", "medium", "high"},
+				Default:   "medium",
+			},
+		},
+		{
+			name:   "a dialled server that names no vocabulary",
+			effort: provider.EffortSupport{Supported: true, Dialect: provider.EffortDialectKwargs},
+		},
+		{
+			name: "no tell at all is the zero value",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			m := wireHeartbeat(t, unbound(testOpts), &fakeHeartbeat{})
+			beat := upBeat("served-model", 16384)
+			beat.EffortSupport = tt.effort
+			m = foldBeatMsg(t, m, beat)
+
+			if !reflect.DeepEqual(m.hb.effort, tt.effort) {
+				t.Errorf("hb.effort = %+v, want %+v", m.hb.effort, tt.effort)
+			}
+			if got := m.effortSupport(); !reflect.DeepEqual(got, tt.effort) {
+				t.Errorf("effortSupport() = %+v, want %+v — the accessor reads the folded fact", got, tt.effort)
+			}
+		})
+	}
+}
+
 // ----------------------------------------------------------------------------
 // Rebind orchestration
 // ----------------------------------------------------------------------------
