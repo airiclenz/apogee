@@ -10,6 +10,29 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **The Console family is registered — the first built-ins on ADR 0057's default-off rung (plan
+  item 6).** `console_open`, `console_send`, `console_read` and `console_close` now assemble with
+  every other built-in, at the end of the build order, and every one of them declares itself
+  DEFAULT-OFF: the menu a model is offered is byte-identical to the menu it was offered before the
+  family existed, while `tools.enabled: [console_open]` — or a Model profile's `tools:` axis — is
+  now a lift rather than a startup NOTICE about a misspelled tool. That is the whole point of the
+  rung ADR 0057 built and left empty: a tool aimed at one class of model ships without costing
+  every other model a slot in the tool list it re-reads on every request.
+  Registering them is what makes the rung's two directions testable for the first time, and the
+  roster tests were amended to say so rather than to keep passing: the catalogue a host checks a
+  configured name against is now *composed + default-off*, not *composed*, and a default-off tool
+  MUST be a name apogee knows — the day it stopped being one, the only valid entry for
+  `tools.enabled:` would be reported to the user as a typo. Beside that: an unlifted registry
+  cannot look up a console tool either, so a call naming one cannot resolve; a lift appends all
+  four in build order rather than reshuffling the menu; a profile `enabled:` overrides a global
+  `disabled:` and a profile `disabled:` overrides a global `enabled:`, the ladder in both
+  directions; and a name given to both lists of one scope stays off, with the conflict handed back
+  for the host to report. The mechanisms drift-pin that asks "did this call mutate a file" now
+  walks the whole build rung instead of the default menu, so the classification question is
+  answered for a default-off tool on the day it is registered rather than the day someone turns it
+  on — `console_open` and `console_send` are write-capable and name no file they write, beside
+  `terminal`.
+
 - **`console_read` and `console_close` — the read-only half of the Console family (plan item 5).**
   `console_read` reports what a Console has printed since the model last heard from it, without
   typing anything into it: with no `wait_ms` it answers immediately with whatever is waiting, and

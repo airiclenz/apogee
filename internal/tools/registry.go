@@ -39,8 +39,10 @@ type HostTools struct {
 
 	// Enabled names the built-in tools this host must offer even though the BUILD leaves them out
 	// of the default menu — the global `tools.enabled:` key, the lift a tool registered default-off
-	// (domain.DefaultOffTool) needs. Empty/nil ⇒ nothing is lifted, which is today's whole state:
-	// no built-in ships default-off (ADR 0057).
+	// (domain.DefaultOffTool) needs. Empty/nil ⇒ nothing is lifted, which leaves the four tools of
+	// the Console family — console_open, console_send, console_read, console_close — registered and
+	// unoffered: they are the first built-ins to ship default-off (ADR 0059 §3, on ADR 0057's build
+	// rung), so naming one here is what this key is for.
 	//
 	// It is the enable direction of the same GLOBAL rung Disabled spells, so a name in BOTH lists
 	// is a conflict DISABLED wins — fail closed. Like an unknown name, that conflict is the HOST's
@@ -213,6 +215,13 @@ func builtinTools(root string, host HostTools) []domain.Tool {
 		NewHTTPRequest(host.URLGuard),
 		NewWebSearch(host.URLGuard, host.WebSearchEndpoint),
 		NewSubAgent(),
+		// The Console family (ADR 0059) sits last because it is the first family registered
+		// DEFAULT-OFF: nothing here reaches a default menu, so its place in build order costs no
+		// model a slot, and a roster that lifts it appends it after the tools every model gets.
+		NewConsoleOpen(root, host.SecretEnvVars),
+		NewConsoleSend(),
+		NewConsoleRead(),
+		NewConsoleClose(),
 	}
 	if host.Asker != nil {
 		all = append(all, NewAskUser(host.Asker))

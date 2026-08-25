@@ -189,15 +189,30 @@ func TestEffectiveRoster_LeavesTheGivenSetUntouched(t *testing.T) {
 }
 
 // TestDefaultToolsHonourTheRoster pins the assembly's own use of the ladder against the shipped
-// menu: with no deltas and no built-in registered default-off, today's set is byte-identical to the
-// one built before the ladder existed, and the global lists still subtract exactly what they name.
+// menu: with no deltas the default set is the whole build MINUS the tools registered default-off
+// (the Console family, ADR 0059 — the build rung's first users), and the global lists still
+// subtract exactly what they name.
 func TestDefaultToolsHonourTheRoster(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
 	full := DefaultTools(root)
-	if got, want := rosterNamesOf(full), rosterNamesOf(builtinTools(root, HostTools{})); got != want {
-		t.Errorf("default menu = %q, want the whole build %q — no built-in ships default-off", got, want)
+
+	build := builtinTools(root, HostTools{})
+	onMenu := make([]domain.Tool, 0, len(build))
+	var offMenu []string
+	for _, tool := range build {
+		if domain.IsDefaultOff(tool) {
+			offMenu = append(offMenu, tool.Name())
+			continue
+		}
+		onMenu = append(onMenu, tool)
+	}
+	if got, want := rosterNamesOf(full), rosterNamesOf(onMenu); got != want {
+		t.Errorf("default menu = %q, want the build minus the default-off tools %q", got, want)
+	}
+	if got, want := strings.Join(offMenu, ","), strings.Join(consoleFamilyNames, ","); got != want {
+		t.Errorf("default-off built-ins = %q, want the Console family %q", got, want)
 	}
 	if len(KnownToolNames()) < len(full) {
 		t.Error("KnownToolNames must name at least every tool the default menu offers")
@@ -219,6 +234,59 @@ func TestDefaultToolsHonourTheRoster(t *testing.T) {
 	}
 	if len(pruned) != len(full)-2 {
 		t.Errorf("the roster left %d tools, want %d", len(pruned), len(full)-2)
+	}
+}
+
+// TestDefaultToolsLiftTheConsoleFamily is the positive half of the ladder the shipped menu could
+// not show until a built-in went default-off: a name in `enabled:` ADDS a tool rather than merely
+// failing to remove one, and the two configuration rungs settle the same tool in the order ADR
+// 0057 spells — profile over global, in BOTH directions.
+func TestDefaultToolsLiftTheConsoleFamily(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	base := rosterNamesOf(DefaultTools(root))
+
+	cases := []struct {
+		name string
+		host HostTools
+		want string // the whole menu, in order
+	}{
+		{
+			name: "the global rung lifts all four",
+			host: HostTools{Enabled: consoleFamilyNames},
+			want: base + ",console_open,console_send,console_read,console_close",
+		},
+		{
+			name: "a profile `enabled:` lifts what the global rung disabled — the profile is the last word",
+			host: HostTools{
+				Disabled:      consoleFamilyNames,
+				ProfileRoster: domain.ToolRosterDelta{Enabled: []string{"console_read"}},
+			},
+			want: base + ",console_read",
+		},
+		{
+			name: "a profile `disabled:` keeps off what the global rung lifted",
+			host: HostTools{
+				Enabled:       consoleFamilyNames,
+				ProfileRoster: domain.ToolRosterDelta{Disabled: []string{"console_open", "console_send"}},
+			},
+			want: base + ",console_read,console_close",
+		},
+		{
+			name: "naming nothing leaves the family where the build left it",
+			host: HostTools{},
+			want: base,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := rosterNamesOf(DefaultToolsWithHost(root, tc.host)); got != tc.want {
+				t.Errorf("menu = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 

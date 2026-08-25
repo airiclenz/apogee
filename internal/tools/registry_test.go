@@ -267,9 +267,21 @@ func TestDefaultTools_DeclareReadOnlyNature(t *testing.T) {
 		// present_document (ADR 0019): showing a document writes nothing — read-only, runs in
 		// Plan, mode-independent through the Presenter.
 		"present_document": true,
+		// The Console family (ADR 0059) splits along this line rather than sitting on one side of
+		// it. open and send are write-capable: a shell executes what it is sent, so the subprocess
+		// marker outranks any declaration and the call is confined or gated per send. read and
+		// close take the read-only floor and run in Plan — close too, which reads oddly for a tool
+		// that kills a process and is nonetheless right: the blast radius the class measures is
+		// what a call leaves BEHIND, and closing a Console leaves strictly less behind than
+		// opening one did. They are asserted on a LIFTED roster because all four ship default-off.
+		"console_open":  false,
+		"console_send":  false,
+		"console_read":  true,
+		"console_close": true,
 	}
 
-	for _, tool := range DefaultToolsWithHost(t.TempDir(), HostTools{Asker: stubAsker{}, Presenter: stubPresenter{}}) {
+	lifted := HostTools{Asker: stubAsker{}, Presenter: stubPresenter{}, Enabled: consoleFamilyNames}
+	for _, tool := range DefaultToolsWithHost(t.TempDir(), lifted) {
 		if got := domain.IsReadOnly(tool); got != want[tool.Name()] {
 			t.Errorf("IsReadOnly(%q) = %v, want %v", tool.Name(), got, want[tool.Name()])
 		}
@@ -352,6 +364,11 @@ func TestHostToolsDisabled_TrimsTheNamesItIsGiven(t *testing.T) {
 // TestKnownToolNamesCoversTheComposedSet pins the catalogue a host checks a configured name against
 // to the assembly itself: every tool a fully-composed registry holds must be a name KnownToolNames
 // answers for, or a valid `tools.disabled:` entry would be reported to the user as a typo.
+//
+// Since the Console family (ADR 0059) the two sets are no longer the same size, and the gap is the
+// point: known = composed + the tools registered DEFAULT-OFF. A default-off tool must be a name
+// apogee knows precisely because `tools.enabled:` exists to name one — the day KnownToolNames
+// stopped listing it, the only valid entry for that key would be reported as a typo.
 func TestKnownToolNamesCoversTheComposedSet(t *testing.T) {
 	t.Parallel()
 
@@ -365,8 +382,92 @@ func TestKnownToolNamesCoversTheComposedSet(t *testing.T) {
 			t.Errorf("%q is a built-in tool but KnownToolNames does not list it", tool.Name())
 		}
 	}
-	if got := len(KnownToolNames()); got != len(composed) {
-		t.Errorf("KnownToolNames lists %d names for %d composed tools", got, len(composed))
+
+	offMenu := make(map[string]bool)
+	for _, tool := range builtinTools(t.TempDir(), HostTools{}) {
+		if domain.IsDefaultOff(tool) {
+			offMenu[tool.Name()] = true
+		}
+	}
+	for _, name := range consoleFamilyNames {
+		if !known[name] {
+			t.Errorf("%q ships default-off but KnownToolNames does not list it: `tools.enabled: [%s]` would be reported as a typo", name, name)
+		}
+		if !offMenu[name] {
+			t.Errorf("%q must declare itself default-off — the Console family is not on the composed menu", name)
+		}
+	}
+	for _, tool := range composed {
+		if offMenu[tool.Name()] {
+			t.Errorf("%q is registered default-off but reached the composed menu", tool.Name())
+		}
+	}
+
+	if got, want := len(KnownToolNames()), len(composed)+len(offMenu); got != want {
+		t.Errorf("KnownToolNames lists %d names for %d composed tools plus %d default-off, want %d", got, len(composed), len(offMenu), want)
+	}
+}
+
+// consoleFamilyNames is the Console family in menu order — the four tools ADR 0059 registers and
+// ADR 0057's build rung leaves off the default menu until configuration lifts them.
+var consoleFamilyNames = []string{"console_open", "console_send", "console_read", "console_close"}
+
+// TestNewDefaultRegistry_OmitsTheConsoleFamily pins the default-off rung where a model meets it: an
+// unlifted registry cannot LOOK UP a console tool either, so a call naming one cannot resolve — the
+// set the model is offered and the set a call resolves against are one registry.
+func TestNewDefaultRegistry_OmitsTheConsoleFamily(t *testing.T) {
+	t.Parallel()
+
+	registry := NewDefaultRegistry(t.TempDir())
+	for _, name := range consoleFamilyNames {
+		if _, ok := registry.Lookup(name); ok {
+			t.Errorf("%q ships default-off but a call could resolve it with nothing lifting it", name)
+		}
+	}
+	if got := len(registry.All()); got != 25 {
+		t.Errorf("default registry holds %d tools, want the 25 it held before the Console family — a default-off family must not grow the default menu", got)
+	}
+}
+
+// TestHostToolsEnabled_LiftsTheConsoleFamilyInMenuOrder pins the lift itself: the global
+// `tools.enabled:` key puts all four back, at the END of the menu where builtinTools assembles
+// them, so a lifted roster is the default one plus the family rather than a reshuffle of it.
+func TestHostToolsEnabled_LiftsTheConsoleFamilyInMenuOrder(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	base := rosterNamesOf(DefaultTools(root))
+	lifted := DefaultToolsWithHost(root, HostTools{Enabled: consoleFamilyNames})
+
+	want := base + ",console_open,console_send,console_read,console_close"
+	if got := rosterNamesOf(lifted); got != want {
+		t.Errorf("lifted menu = %q, want %q", got, want)
+	}
+}
+
+// TestRosterConflicts_ConsoleFamilyNamedBothWays pins the fail-closed tie on a default-off tool,
+// where it bites hardest: `enabled:` is the only thing that could have lifted console_open, so a
+// same-scope `disabled:` entry leaves it exactly where the build left it — and the user is told,
+// because a roster that silently ignored half of what it was given is unreadable.
+func TestRosterConflicts_ConsoleFamilyNamedBothWays(t *testing.T) {
+	t.Parallel()
+
+	deltas := RosterDeltas{Global: domain.ToolRosterDelta{
+		Enabled:  []string{"console_open"},
+		Disabled: []string{"console_open"},
+	}}
+
+	conflicts := RosterConflicts(deltas)
+	if len(conflicts) != 1 || conflicts[0].Tool != "console_open" || conflicts[0].Scope != RosterScopeGlobal {
+		t.Fatalf("RosterConflicts = %+v, want one global conflict on console_open", conflicts)
+	}
+
+	kept, alsoConflicts := EffectiveRoster(builtinTools(t.TempDir(), HostTools{}), deltas)
+	if len(alsoConflicts) != len(conflicts) {
+		t.Errorf("EffectiveRoster reported %d conflicts, RosterConflicts %d — the two must not drift", len(alsoConflicts), len(conflicts))
+	}
+	if strings.Contains(rosterNamesOf(kept), "console_open") {
+		t.Error("console_open is named in both directions of one scope: disabled must win and leave it off the menu")
 	}
 }
 

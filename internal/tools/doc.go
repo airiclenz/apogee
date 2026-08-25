@@ -160,6 +160,25 @@
 // supplied, and its result names the rung actually reached so the model can relay it
 // truthfully; a failed mechanism degrades to the baseline rather than failing the call.
 //
+// The Console family (ADR 0059) breaks this package's one-process-per-call shape: console_open,
+// console_send, console_read and console_close drive ONE interactive program — a REPL, a dev
+// server, a shell — across many Turns, through a small integer id the model carries. The process
+// itself is live host state on the engine (the console registry, internal/console, held on the
+// Agent beside the undo journal), never on a tool instance, because SwapTools rebuilds these four
+// mid-session and a rebuilt tool must find the same Consoles; and it is PROCESS-lived, so a
+// snapshot, a fork or a resumed session comes back holding no Consoles at all and a stale id is
+// simply an unknown one. The family splits across the classification line rather than sitting on
+// one side of it: open and send carry the subprocess marker (the shell on the other end executes
+// what it is sent, so the call is confined or gated, and the Resolution is taken per send —
+// an open Console is never a standing permission), while read and close take the read-only floor
+// and run in Plan.
+//
+// All four ship DEFAULT-OFF (domain.DefaultOffTool) — the first built-ins to do so, and the
+// ratification ADR 0057 §6 asked for. They are registered code nobody is offered until a global
+// `tools.enabled:` entry or a matching Model profile's roster axis lifts them, so the default
+// menu is exactly the menu it was before the family existed while KnownToolNames still spells all
+// four: `tools.enabled: [console_open]` is a lift, never a typo.
+//
 // # The tool files, one line each
 //
 // Thirty files carry the built-ins, grouped by what a call to them can do — which is

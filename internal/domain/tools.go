@@ -139,9 +139,12 @@ func IsSubprocessTool(t Tool) bool {
 // It is the BUILD rung of the roster precedence ladder — profile > global > build default — and
 // therefore the least specific word: either configuration scope overrides it, in both directions.
 // A Tool that does not implement it — or implements it returning false, the same carve-out
-// SubprocessTool keeps for a degraded build — is on the default menu, which is where every
-// built-in tool sits today (the state ships empty). IsDefaultOff is the helper the registry
-// assembly calls rather than the type assertion directly.
+// SubprocessTool keeps for a degraded build — is on the default menu, which is where every other
+// built-in tool sits. Its first users are the four tools of the Console family — console_open,
+// console_send, console_read, console_close (ADR 0059 §3) — the case this interface was written
+// for: a persistent interactive process is worth a tool slot to the models that drive one and
+// worth nothing to the models that never will. IsDefaultOff is the helper the registry assembly
+// calls rather than the type assertion directly.
 //
 // It says nothing about blast radius or trust: default-off is a menu decision, not a gate, and a
 // lifted tool is dispatched, confined and approved exactly like any other.

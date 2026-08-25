@@ -310,6 +310,12 @@ var writeCapableNonFileBuiltins = map[string]bool{
 	"http_request": true,
 	"web_search":   true,
 	"sub_agent":    true,
+	// The Console family's write-capable half (ADR 0059): what a Console writes is whatever the
+	// model typed into a live shell, so no NAME in the call classifies it — the same reason
+	// terminal sits here. Its read-only half (console_read, console_close) never reaches this
+	// table, which only classifies write-capable tools.
+	"console_open": true,
+	"console_send": true,
 }
 
 // stubAsker and stubPresenter are non-nil host delegates: the registry omits ask_user and
@@ -337,7 +343,15 @@ func (stubPresenter) Present(context.Context, domain.PresentRequest) (domain.Pre
 // walks the menu, never the map, so those stay additive.
 func TestWave4WriteToolsCoversEveryWorkspaceWritingBuiltin(t *testing.T) {
 	t.Parallel()
-	menu := tools.DefaultToolsWithHost("", tools.HostTools{Asker: stubAsker{}, Presenter: stubPresenter{}})
+	// Every built-in, default-off ones included: a tool registered default-off (the Console family,
+	// ADR 0059) is still a tool a configured roster can lift, so the classification question has to
+	// be answered for it here rather than the day someone turns it on. Lifting the whole build rung
+	// by name is what makes the menu the pin walks the same set KnownToolNames spells.
+	menu := tools.DefaultToolsWithHost("", tools.HostTools{
+		Asker:     stubAsker{},
+		Presenter: stubPresenter{},
+		Enabled:   tools.KnownToolNames(),
+	})
 	if len(menu) != len(tools.KnownToolNames()) {
 		t.Fatalf("menu has %d tools, KnownToolNames %d: the pin is not walking the whole roster", len(menu), len(tools.KnownToolNames()))
 	}

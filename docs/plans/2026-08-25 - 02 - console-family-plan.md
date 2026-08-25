@@ -340,7 +340,23 @@ both and refuses `console_open`/`console_send` in Plan.
 
 ---
 
-## 6. Registration, the default-off rung, and the roster tests
+## 6. Registration, the default-off rung, and the roster tests — ✅ DONE (2026-08-25)
+
+NOTES (2026-08-25): the `TestWave4WriteToolsCoversEveryWorkspaceWritingBuiltin` pin
+(`internal/mechanisms/decompose_test.go`) was amended by LIFTING the whole build rung
+(`Enabled: tools.KnownToolNames()`) rather than by comparing against a composed set as the item's
+text suggests. The pin's job is to fail when a new write-capable built-in reaches the codebase
+unclassified; walking the composed menu would have let a default-off write tool land unclassified
+and only fire the day a roster turned it on. Lifting by name keeps the existing menu-length
+assertion meaningful (menu == KnownToolNames) and needs no second set.
+NOTES (2026-08-25): `TestKnownToolNamesCoversTheComposedSet` derives the default-off set from
+`builtinTools` rather than hard-coding four, and asserts the family against it — so a future
+default-off tool that forgets its `DefaultOff()` declaration, or one that leaks onto the composed
+menu, fails here too rather than only shifting a count.
+NOTES (2026-08-25): pre-existing prose drift left untouched (out of this item's scope) —
+`internal/tools/doc.go`'s file map opens "Thirty files carry the built-ins" while the package holds
+43 non-test files; it already read "Thirty" at 39 files before this plan run began. The structural
+`TestDocMapNamesEveryFile` pins the NAMES, not the count, so nothing fails.
 
 Depends on item 5.
 
