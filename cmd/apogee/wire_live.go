@@ -287,7 +287,12 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	// rebind carries the naming call with it, and neither needs a seam of its own. It is wired
 	// unconditionally: `auto-title:` gates only the AUTOMATIC firing (below), while a bare `/rename`
 	// regenerates on demand even with the toggle off (Ratified design 7).
-	w.titles = newTitleWiring(w.holder.Binding, w.roots.workspace)
+	//
+	// Its "answer without thinking" ask needs the server's effort wire DIALECT to land in a shape that
+	// server reads (ADR 0060), and that fact is read off the same live latch the rebind path writes on
+	// every beat — so the naming call and the conversational path can never disagree about the dial of
+	// the server the session is on.
+	w.titles = newTitleWiring(w.holder.Binding, w.live.observedDialect, w.roots.workspace)
 
 	// The scheduler this session's Schedules live in (ADR 0033), built beside the naming call for
 	// the same reason: both are out-of-band work against the single-slot server the session is bound

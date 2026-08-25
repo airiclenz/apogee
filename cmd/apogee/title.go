@@ -31,17 +31,21 @@ const finishReasonLength = "length"
 //
 // The split is the one every seam here takes. The TUI owns WHEN a session is named and whether the
 // answer is applied — that is Session-record state it holds and the binary does not — while this
-// side owns everything the CALL is made of, because the endpoint, the model, and the key are wiring
-// the binary resolves and a `/server` switch moves. Which is also why the client is constructed per
-// call rather than held: a session that switched servers or rebound its model between two namings
-// must name through the server it is on now, and reading [upstreamHolder.Binding] at call time is
-// the whole of that.
+// side owns everything the CALL is made of, because the endpoint, the model, the key and the effort
+// wire dialect are wiring the binary resolves and a `/server` switch moves. Which is also why the
+// client is constructed per call rather than held: a session that switched servers or rebound its
+// model between two namings must name through the server it is on now, and reading
+// [upstreamHolder.Binding] and the observed dialect at call time is the whole of that.
 //
 // It emits no events, touches no engine state, and is never the Agent's business (the Agent is
 // single-goroutine — ADR 0011 — and this call runs on a Bubble Tea Cmd goroutine).
 type titleWiring struct {
 	// binding reads the CURRENT Upstream binding; wired to upstreamHolder.Binding.
 	binding func() upstreamBinding
+	// dialect reads the effort wire dialect the last beat observed for the bound server; wired to
+	// liveSettings.observedDialect. Read at call time for the reason binding is: a `/server` switch
+	// or a rebind between two namings must name in the dialect of the server the session is on NOW.
+	dialect func() provider.EffortDialect
 	// workspaceBase is the workspace directory's basename — context for the model, never title
 	// text (Ratified design 6): the session browser already renders the workspace beside the title.
 	workspaceBase string
@@ -52,10 +56,11 @@ type titleWiring struct {
 }
 
 // newTitleWiring builds the wiring for a session rooted at workspace, reading its live Upstream
-// binding through binding.
-func newTitleWiring(binding func() upstreamBinding, workspace string) titleWiring {
+// binding through binding and the dialect that server's thinking dial speaks through dialect.
+func newTitleWiring(binding func() upstreamBinding, dialect func() provider.EffortDialect, workspace string) titleWiring {
 	return titleWiring{
 		binding:        binding,
+		dialect:        dialect,
 		workspaceBase:  filepath.Base(workspace),
 		now:            time.Now,
 		requestTimeout: titleRequestTimeout,
@@ -85,7 +90,7 @@ func (w titleWiring) generate(ctx context.Context, prompts []string) (string, er
 		provider.WithRequestTimeout(w.requestTimeout), provider.WithAPIKey(binding.APIKey),
 		provider.WithMaxRetries(0))
 
-	resp, err := respondDroppingThinkingOff(ctx, client, title.Prompt(prompts, w.workspaceBase, w.now()))
+	resp, err := respondDroppingThinkingOff(ctx, client, title.Prompt(prompts, w.workspaceBase, w.now(), w.dialect()))
 	if err != nil {
 		return "", err
 	}

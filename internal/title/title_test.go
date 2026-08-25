@@ -19,7 +19,7 @@ var promptDate = time.Date(2026, 7, 31, 14, 30, 0, 0, time.UTC)
 // the expected system+user pair.
 func userContent(t *testing.T, prompts []string, workspace string) string {
 	t.Helper()
-	req := Prompt(prompts, workspace, promptDate)
+	req := Prompt(prompts, workspace, promptDate, provider.EffortDialectNone)
 	if len(req.Messages) != 2 {
 		t.Fatalf("Prompt built %d messages, want 2 (system + user)", len(req.Messages))
 	}
@@ -91,7 +91,7 @@ func window(n int, body string) []string {
 func TestPromptCarriesWorkspaceDateAndInstruction(t *testing.T) {
 	t.Parallel()
 
-	req := Prompt([]string{"add a retry to the uploader"}, "apogee", promptDate)
+	req := Prompt([]string{"add a retry to the uploader"}, "apogee", promptDate, provider.EffortDialectNone)
 
 	if req.Messages[0].Role != "system" {
 		t.Fatalf("first message role = %q, want system", req.Messages[0].Role)
@@ -111,7 +111,7 @@ func TestPromptCarriesWorkspaceDateAndInstruction(t *testing.T) {
 func TestPromptLeavesModelToTheClient(t *testing.T) {
 	t.Parallel()
 
-	req := Prompt([]string{"hello"}, "apogee", promptDate)
+	req := Prompt([]string{"hello"}, "apogee", promptDate, provider.EffortDialectNone)
 	if req.Model != "" {
 		t.Errorf("Model = %q, want empty so the Client's current binding wins", req.Model)
 	}
@@ -138,7 +138,7 @@ func TestPromptSetsSamplingConstants(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			req := Prompt(prompts, "apogee", promptDate)
+			req := Prompt(prompts, "apogee", promptDate, provider.EffortDialectNone)
 			if req.Sampling.Temperature == nil || *req.Sampling.Temperature != titleTemperature {
 				t.Errorf("Temperature = %v, want %v", req.Sampling.Temperature, titleTemperature)
 			}
@@ -150,6 +150,38 @@ func TestPromptSetsSamplingConstants(t *testing.T) {
 			}
 			if req.ThinkingEffort != provider.EffortOff {
 				t.Errorf("ThinkingEffort = %q, want %q — the naming call asks for no reasoning pass",
+					req.ThinkingEffort, provider.EffortOff)
+			}
+		})
+	}
+}
+
+// The naming call's "answer without thinking" ask only reaches the server if it is spelled in the
+// dialect that server reads (ADR 0060), so Prompt states the dialect it is handed and states it
+// beside the unchanged intent. Which bytes each dialect becomes is provider.Client's business —
+// pinned there — so all this asks is that the caller's dialect survives the trip verbatim, the zero
+// included: the un-dialected request is the historical chat_template_kwargs shape.
+func TestPromptCarriesTheDialectItIsHanded(t *testing.T) {
+	t.Parallel()
+
+	for name, dialect := range map[string]provider.EffortDialect{
+		"the zero dialect": provider.EffortDialectNone,
+		"kwargs":           provider.EffortDialectKwargs,
+		"reasoning":        provider.EffortDialectReasoning,
+		"openai":           provider.EffortDialectOpenAI,
+		"off":              provider.EffortDialectOff,
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			req := Prompt([]string{"the parser test fails every other run"}, "apogee", promptDate, dialect)
+
+			if req.EffortDialect != dialect {
+				t.Errorf("EffortDialect = %q, want %q — the caller's dialect did not reach the request",
+					req.EffortDialect, dialect)
+			}
+			if req.ThinkingEffort != provider.EffortOff {
+				t.Errorf("ThinkingEffort = %q, want %q — the dialect names the shape, never the ask",
 					req.ThinkingEffort, provider.EffortOff)
 			}
 		})

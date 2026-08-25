@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/title"
@@ -23,6 +24,10 @@ import (
 // call is abandoned within milliseconds — so it exists purely so a broken deadline leaves a failed
 // assertion rather than a hung suite.
 const stalledReplyBackstop = 5 * time.Second
+
+// noDialect is the dialect closure every case that is NOT about the dialect wires: the zero, which
+// emits the historical chat_template_kwargs shape these tests were all written against.
+func noDialect() provider.EffortDialect { return provider.EffortDialectNone }
 
 // titleRequest is the part of the naming call's body the assertions read back: which model it was
 // addressed to, and what the model was actually asked.
@@ -132,7 +137,7 @@ func TestTitleGeneratorFollowsTheCurrentBinding(t *testing.T) {
 	second, secondReq := titleServer(t, "rename the session browser rows")
 
 	binding := upstreamBinding{Endpoint: first.URL, Model: "model-a", APIKey: "key-a"}
-	wiring := newTitleWiring(func() upstreamBinding { return binding }, "/home/dev/apogee")
+	wiring := newTitleWiring(func() upstreamBinding { return binding }, noDialect, "/home/dev/apogee")
 
 	got, err := wiring.generate(context.Background(), []string{"the parser test fails every other run"})
 	if err != nil {
@@ -171,6 +176,63 @@ func TestTitleGeneratorFollowsTheCurrentBinding(t *testing.T) {
 	}
 }
 
+// The other half of "the call is built from the server the session is on NOW": its "answer without
+// thinking" ask has to be SPELLED the way that server reads it (ADR 0060), so the wiring reads the
+// dialect the last beat observed at call time exactly as it reads the binding. Three namings across
+// three dialects therefore put three different shapes of the same ask on the wire. WHICH bytes each
+// dialect becomes is provider.applyEffort's business and pinned there; asserted here on the raw body
+// the way TestTitleGeneratorFallsBackWhenTheThinkingKwargIsRejected already is.
+func TestTitleGeneratorFollowsTheObservedDialect(t *testing.T) {
+	t.Parallel()
+
+	reply := titleAttempt{content: "fix the flaky parser test", finishReason: "stop"}
+	srv, bodies := scriptedTitleServer(t, reply, reply, reply)
+
+	binding := upstreamBinding{Endpoint: srv.URL, Model: "model-a"}
+	observed := provider.EffortDialectNone
+	wiring := newTitleWiring(
+		func() upstreamBinding { return binding },
+		func() provider.EffortDialect { return observed },
+		"/home/dev/apogee")
+
+	for _, dialect := range []provider.EffortDialect{
+		provider.EffortDialectReasoning, provider.EffortDialectKwargs, provider.EffortDialectOff,
+	} {
+		observed = dialect
+		if _, err := wiring.generate(context.Background(), []string{"the parser test fails every other run"}); err != nil {
+			t.Fatalf("generate on the %q dialect: %v", dialect, err)
+		}
+	}
+
+	sent := bodies()
+	if len(sent) != 3 {
+		t.Fatalf("server saw %d naming POSTs; want one per dialect", len(sent))
+	}
+
+	// OpenRouter's shape: the ask is a `reasoning` object switched off, and llama.cpp's field is
+	// nowhere on the wire.
+	if !strings.Contains(sent[0], `"reasoning"`) || !strings.Contains(sent[0], `"enabled":false`) {
+		t.Errorf("reasoning-dialect body = %s; want the ask as a reasoning object switched off", sent[0])
+	}
+	if strings.Contains(sent[0], "chat_template_kwargs") {
+		t.Errorf("reasoning-dialect body = %s; want no chat_template_kwargs — that is another server's shape", sent[0])
+	}
+	// llama.cpp's shape: the historical kwarg, and no top-level reasoning key.
+	if !strings.Contains(sent[1], "chat_template_kwargs") || !strings.Contains(sent[1], `"enable_thinking":false`) {
+		t.Errorf("kwargs-dialect body = %s; want the ask inside chat_template_kwargs", sent[1])
+	}
+	if strings.Contains(sent[1], `"reasoning"`) {
+		t.Errorf("kwargs-dialect body = %s; want no reasoning object", sent[1])
+	}
+	// The `off` dialect is a server that takes no dial at all: nothing effort-related is emitted in
+	// any shape, which is the only mapping that cannot make such a server refuse the naming call.
+	for _, unwanted := range []string{"chat_template_kwargs", `"reasoning"`, "reasoning_effort"} {
+		if strings.Contains(sent[2], unwanted) {
+			t.Errorf("off-dialect body = %s; want nothing effort-related on the wire, found %s", sent[2], unwanted)
+		}
+	}
+}
+
 // A naming call that never lands must fail as an error the caller can drop, not hang the Cmd
 // goroutine that fired it — from either bound: the caller's own context, or the wiring's
 // request timeout (titleRequestTimeout in production, generous because a queued call is expected).
@@ -194,7 +256,7 @@ func TestTitleGeneratorSurfacesADeadline(t *testing.T) {
 
 	t.Run("the caller's context", func(t *testing.T) {
 		t.Parallel()
-		wiring := newTitleWiring(binding, "/home/dev/apogee")
+		wiring := newTitleWiring(binding, noDialect, "/home/dev/apogee")
 		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 		defer cancel()
 
@@ -206,7 +268,7 @@ func TestTitleGeneratorSurfacesADeadline(t *testing.T) {
 
 	t.Run("the wiring's request timeout", func(t *testing.T) {
 		t.Parallel()
-		wiring := newTitleWiring(binding, "/home/dev/apogee")
+		wiring := newTitleWiring(binding, noDialect, "/home/dev/apogee")
 		wiring.requestTimeout = 30 * time.Millisecond
 
 		got, err := wiring.generate(context.Background(), []string{"name this session"})
@@ -234,7 +296,7 @@ func TestTitleGeneratorDoesNotRetry(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	binding := upstreamBinding{Endpoint: srv.URL, Model: "model-a"}
-	wiring := newTitleWiring(func() upstreamBinding { return binding }, "/home/dev/apogee")
+	wiring := newTitleWiring(func() upstreamBinding { return binding }, noDialect, "/home/dev/apogee")
 
 	got, err := wiring.generate(context.Background(), []string{"name this session"})
 	if err == nil {
@@ -273,7 +335,7 @@ func TestTitleGeneratorNamesATruncatedReply(t *testing.T) {
 			t.Parallel()
 			srv, _ := scriptedTitleServer(t, titleAttempt{content: tc.content, finishReason: tc.finishReason})
 			binding := upstreamBinding{Endpoint: srv.URL, Model: "model-a"}
-			wiring := newTitleWiring(func() upstreamBinding { return binding }, "/home/dev/apogee")
+			wiring := newTitleWiring(func() upstreamBinding { return binding }, noDialect, "/home/dev/apogee")
 
 			got, err := wiring.generate(context.Background(), []string{"name this session"})
 			switch {
@@ -300,7 +362,7 @@ func TestTitleGeneratorFallsBackWhenTheThinkingKwargIsRejected(t *testing.T) {
 		titleAttempt{content: "fix the flaky parser test", finishReason: "stop"},
 	)
 	binding := upstreamBinding{Endpoint: srv.URL, Model: "model-a"}
-	wiring := newTitleWiring(func() upstreamBinding { return binding }, "/home/dev/apogee")
+	wiring := newTitleWiring(func() upstreamBinding { return binding }, noDialect, "/home/dev/apogee")
 
 	got, err := wiring.generate(context.Background(), []string{"the parser test fails every other run"})
 	if err != nil {
@@ -396,7 +458,7 @@ func TestTitleGeneratorFallsBackAtMostOnce(t *testing.T) {
 			titleAttempt{status: http.StatusBadRequest, errBody: "bad request"},
 		)
 		binding := upstreamBinding{Endpoint: srv.URL, Model: "model-a"}
-		wiring := newTitleWiring(func() upstreamBinding { return binding }, "/home/dev/apogee")
+		wiring := newTitleWiring(func() upstreamBinding { return binding }, noDialect, "/home/dev/apogee")
 
 		got, err := wiring.generate(context.Background(), []string{"name this session"})
 		if err == nil {
@@ -413,7 +475,7 @@ func TestTitleGeneratorFallsBackAtMostOnce(t *testing.T) {
 			titleAttempt{status: http.StatusBadRequest, errBody: `{"error":"maximum context length exceeded"}`},
 		)
 		binding := upstreamBinding{Endpoint: srv.URL, Model: "model-a"}
-		wiring := newTitleWiring(func() upstreamBinding { return binding }, "/home/dev/apogee")
+		wiring := newTitleWiring(func() upstreamBinding { return binding }, noDialect, "/home/dev/apogee")
 
 		got, err := wiring.generate(context.Background(), []string{"name this session"})
 		if !errors.Is(err, provider.ErrContextOverflow) {
@@ -463,6 +525,52 @@ func TestRunRootWiresTheTitleSeam(t *testing.T) {
 	}
 }
 
+// The dialect the naming call states is only ever right if the closure the composition root wires
+// IS the live latch the rebind path writes on every beat — a constant captured at assembly time
+// would name a `/server` switch's successor in its predecessor's dialect forever. runRoot hands the
+// TUI the seam but not the wiring behind it, so the property is pinned here, on the assembled
+// rootWiring: observe a dialect on the latch and the naming call's own reader answers with it.
+func TestRunRootTitleSeamReadsTheObservedDialect(t *testing.T) {
+	t.Parallel()
+
+	opts := config.Options{
+		Endpoint:  "http://127.0.0.1:1111",
+		Model:     "model-a",
+		Mode:      "ask-before",
+		Workspace: t.TempDir(),
+		ConfigDir: t.TempDir(),
+	}
+	roots, err := resolveRoots(opts.ConfigDir, opts.Workspace)
+	if err != nil {
+		t.Fatalf("resolveRoots: %v", err)
+	}
+	w := newRootWiring(opts, apogee.ModeAskBefore, roots)
+	t.Cleanup(w.close)
+	if err := w.resolveConfig(); err != nil {
+		t.Fatalf("resolveConfig: %v", err)
+	}
+	if err := w.wireSession(context.Background()); err != nil {
+		t.Fatalf("wireSession: %v", err)
+	}
+
+	if w.titles.dialect == nil {
+		t.Fatal("the title wiring has no dialect reader; the naming call would not compile a dialect at all")
+	}
+	if got := w.titles.dialect(); got != provider.EffortDialectNone {
+		t.Errorf("dialect before any beat = %q; want the zero, which keeps the historical shape", got)
+	}
+
+	w.live.observe(0, provider.EffortDialectReasoning)
+
+	if got, want := w.titles.dialect(), w.live.observedDialect(); got != want {
+		t.Errorf("dialect after the beat = %q; want the latch's %q — the root wired a constant, not the latch",
+			got, want)
+	}
+	if got := w.titles.dialect(); got != provider.EffortDialectReasoning {
+		t.Errorf("dialect after the beat = %q; want %q", got, provider.EffortDialectReasoning)
+	}
+}
+
 // The live half: a scripted server proves the plumbing, never that a real model answers a naming
 // prompt with something the sanitizer accepts. Opt-in on APOGEE_LIVE_ENDPOINT exactly like
 // TestE2ELiveModel, so the default suite stays offline and deterministic:
@@ -478,7 +586,7 @@ func TestLiveGenerateTitle(t *testing.T) {
 	}
 
 	binding := upstreamBinding{Endpoint: endpoint, Model: os.Getenv("APOGEE_LIVE_MODEL")}
-	wiring := newTitleWiring(func() upstreamBinding { return binding }, "/home/dev/apogee")
+	wiring := newTitleWiring(func() upstreamBinding { return binding }, noDialect, "/home/dev/apogee")
 
 	ctx, cancel := context.WithTimeout(context.Background(), titleRequestTimeout)
 	defer cancel()

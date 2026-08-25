@@ -10,6 +10,18 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **The out-of-band naming call speaks the bound server's effort dialect (plan item 1).** The
+  session-naming completion asks for no reasoning pass, but stated that ask in no dialect at all, so
+  it always went out in the historical `chat_template_kwargs` shape — which an OpenRouter or
+  OpenAI/Groq server ignores. A thinking model there reasoned to the token cap on an eight-word
+  title and the naming call came back as `title.ErrTruncated` every time. `title.Prompt` now takes
+  the dialect and stamps it beside the intent, and the composition root wires the naming call's
+  reader to `liveSettings.observedDialect` — the same live latch the rebind path writes on every
+  beat — so a `/server` switch between two namings carries the dialect with it and the naming call
+  can never disagree with the conversational path about the server's dial. Which bytes each dialect
+  becomes is unchanged: `provider.applyEffort` remains the only mapping, and the zero dialect
+  (before the first beat lands) reproduces the historical bytes exactly.
+
 - **A `servers:` entry can force the effort dialect detection cannot see (plan item 12).** Passive
   detection recognises llama.cpp and OpenRouter only, so OpenAI's own reasoning endpoints, Groq and
   a self-hosted vLLM/SGLang/TGI advertised nothing and lost the dial. An entry may now spell

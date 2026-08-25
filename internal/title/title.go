@@ -154,8 +154,14 @@ var windowHeader = mustPrompt("window-header.txt")
 // is what binds the naming call to the session's current server and model (Ratified design 3).
 // The request carries no tools and does not stream — it is one round-trip for one line of text.
 // It also asks for no reasoning pass: an eight-word title needs no chain-of-thought, while a
-// thinking model left to itself will happily spend the entire reply budget arriving at one.
-func Prompt(prompts []string, workspaceBase string, date time.Time) provider.Request {
+// thinking model left to itself will happily spend the entire reply budget arriving at one. That
+// ask reaches the server in whichever dialect the caller names — the bound server's, as the beat
+// observed it (ADR 0060) — so the same "off" lands as llama.cpp's chat_template_kwargs, as
+// OpenRouter's reasoning object, or as OpenAI's reasoning_effort, according to which one the
+// server on the other end reads. The zero dialect names none of them and keeps the historical
+// chat_template_kwargs shape. Which bytes each dialect becomes is provider.Client's business and
+// never this package's: Prompt states an intent and a dialect, and nothing more.
+func Prompt(prompts []string, workspaceBase string, date time.Time, dialect provider.EffortDialect) provider.Request {
 	temperature, maxTokens := titleTemperature, titleMaxTokens
 	return provider.Request{
 		Messages: []provider.Message{
@@ -164,6 +170,7 @@ func Prompt(prompts []string, workspaceBase string, date time.Time) provider.Req
 		},
 		Sampling:       provider.Sampling{Temperature: &temperature, MaxTokens: &maxTokens},
 		ThinkingEffort: provider.EffortOff,
+		EffortDialect:  dialect,
 	}
 }
 
