@@ -89,9 +89,11 @@ func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall) (domain.T
 	if err != nil {
 		return errorToolResult(call.ID, "could not construct sub-agent: "+err.Error()), dispatchDone
 	}
-	// The delegation is the child's whole life, so this scope is the only one that knows when a
-	// ROUTED child's own client stops being needed — nothing else holds the child to close it later.
-	// For an unrouted child, which borrowed the parent's client, Close is a no-op (ownsUpstream).
+	// The delegation is the child's whole life, so this scope is the only one that knows when the
+	// child's resources stop being needed — nothing else holds the child to close it later. Close
+	// reaps the Consoles this delegation opened (ADR 0059 §6), routed or not, and tears down a
+	// ROUTED child's own client; an unrouted child borrowed the parent's client, so that one is
+	// left running for the parent (ownsUpstream).
 	defer func() { _ = sub.Close() }()
 
 	if err := sub.Submit(domain.UserInput{Text: args.Task}); err != nil {
