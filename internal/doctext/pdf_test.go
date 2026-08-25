@@ -1,4 +1,4 @@
-package tools
+package doctext
 
 import (
 	"os"
@@ -42,27 +42,27 @@ func TestIsPDF(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			t.Parallel()
 
-			got := isPDF(testCase.data)
+			got := IsPDF(testCase.data)
 
 			if got != testCase.want {
-				t.Fatalf("isPDF(%q) = %v, want %v", truncateForMessage(testCase.data), got, testCase.want)
+				t.Fatalf("IsPDF(%q) = %v, want %v", truncateForMessage(testCase.data), got, testCase.want)
 			}
 		})
 	}
 }
 
-// TestExtractPDFText_ReturnsTheTextWithAPageMarker is the success path: a one-page document
+// TestExtractPDF_ReturnsTheTextWithAPageMarker is the success path: a one-page document
 // comes back as its own text behind a single "[Page 1]" marker line, with the page count the
 // header will quote.
-func TestExtractPDFText_ReturnsTheTextWithAPageMarker(t *testing.T) {
+func TestExtractPDF_ReturnsTheTextWithAPageMarker(t *testing.T) {
 	t.Parallel()
 
 	data := readPDFFixture(t, "minimal.pdf")
 
-	text, pages, failMessage := extractPDFText(data)
+	text, pages, failMessage := ExtractPDF(data)
 
 	if failMessage != "" {
-		t.Fatalf("extractPDFText failed: %s", failMessage)
+		t.Fatalf("ExtractPDF failed: %s", failMessage)
 	}
 	if pages != 1 {
 		t.Errorf("pages = %d, want 1", pages)
@@ -78,15 +78,15 @@ func TestExtractPDFText_ReturnsTheTextWithAPageMarker(t *testing.T) {
 	}
 }
 
-// TestExtractPDFText_ReportsAScannedDocument covers a document that parses cleanly and carries
+// TestExtractPDF_ReportsAScannedDocument covers a document that parses cleanly and carries
 // no text operators at all — the scan case, whose message must send the model to the user for a
 // text version rather than leave it guessing.
-func TestExtractPDFText_ReportsAScannedDocument(t *testing.T) {
+func TestExtractPDF_ReportsAScannedDocument(t *testing.T) {
 	t.Parallel()
 
 	data := readPDFFixture(t, "notext.pdf")
 
-	text, pages, failMessage := extractPDFText(data)
+	text, pages, failMessage := ExtractPDF(data)
 
 	if failMessage != pdfNoTextMessage {
 		t.Fatalf("failMessage = %q, want the no-extractable-text message", failMessage)
@@ -99,16 +99,16 @@ func TestExtractPDFText_ReportsAScannedDocument(t *testing.T) {
 	}
 }
 
-// TestExtractPDFText_ReportsAZeroPageDocumentAsUnreadable covers the document the reader accepts
+// TestExtractPDF_ReportsAZeroPageDocumentAsUnreadable covers the document the reader accepts
 // and cannot walk: its page tree yields no pages at all. Nothing was read from the file, so the
 // model must be told it is unreadable — telling it the document is a scan would send it to the
 // user for a "text version" of a file that never parsed.
-func TestExtractPDFText_ReportsAZeroPageDocumentAsUnreadable(t *testing.T) {
+func TestExtractPDF_ReportsAZeroPageDocumentAsUnreadable(t *testing.T) {
 	t.Parallel()
 
 	data := readPDFFixture(t, "nopages.pdf")
 
-	text, pages, failMessage := extractPDFText(data)
+	text, pages, failMessage := ExtractPDF(data)
 
 	// The cause is the guard's own literal, so this also pins that the guard is the path taken
 	// rather than pdf.NewReader's error path, which words the same message with its own cause.
@@ -126,10 +126,10 @@ func TestExtractPDFText_ReportsAZeroPageDocumentAsUnreadable(t *testing.T) {
 	}
 }
 
-// TestExtractPDFText_ReportsUnreadableBytes feeds the parser input it cannot make sense of. The
+// TestExtractPDF_ReportsUnreadableBytes feeds the parser input it cannot make sense of. The
 // parser's ancestor panics on malformed documents, so this asserts both halves of the contract:
 // the model gets the could-not-extract sentence, and nothing escapes as a panic.
-func TestExtractPDFText_ReportsUnreadableBytes(t *testing.T) {
+func TestExtractPDF_ReportsUnreadableBytes(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
@@ -145,7 +145,7 @@ func TestExtractPDFText_ReportsUnreadableBytes(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			t.Parallel()
 
-			text, pages, failMessage := extractPDFText(testCase.data)
+			text, pages, failMessage := ExtractPDF(testCase.data)
 
 			if !strings.HasPrefix(failMessage, "could not extract text from this PDF:") {
 				t.Fatalf("failMessage = %q, want the could-not-extract message", failMessage)
@@ -155,6 +155,38 @@ func TestExtractPDFText_ReportsUnreadableBytes(t *testing.T) {
 			}
 			if text != "" || pages != 0 {
 				t.Errorf("failure returned text %q and pages %d, want both empty", text, pages)
+			}
+		})
+	}
+}
+
+// TestPDFAnnotation pins the header annotation's exact wording across the page count: exactly
+// one page reads "1 page", every other count reads "N pages", and every count carries the
+// read-only hint. Both headers that quote a document — read_file's [File: …] line and the @file
+// block's Referenced file line — are built from this string, so these literals are what the
+// model actually reads; zero is in the table because the function treats it as plural and
+// nothing else asserts that branch.
+func TestPDFAnnotation(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name  string
+		pages int
+		want  string
+	}{
+		{name: "zero pages reads as plural", pages: 0, want: "PDF, 0 pages; extracted text, read-only"},
+		{name: "one page reads as singular", pages: 1, want: "PDF, 1 page; extracted text, read-only"},
+		{name: "two pages reads as plural", pages: 2, want: "PDF, 2 pages; extracted text, read-only"},
+	}
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := PDFAnnotation(testCase.pages)
+
+			if got != testCase.want {
+				t.Errorf("PDFAnnotation(%d) = %q, want %q", testCase.pages, got, testCase.want)
 			}
 		})
 	}

@@ -181,17 +181,16 @@
 //
 // # The tool files, one line each
 //
-// Thirty files carry the built-ins, grouped by what a call to them can do — which is
+// Twenty-nine files carry the built-ins, grouped by what a call to them can do — which is
 // also what the dispatch disposition keys on (ADR 0012). A file holds a tool FAMILY, not
 // always a single tool: the two-tool file_ops.go and the five-tool git.go each keep a
 // family's shared argument shape and error wording in one place.
 //
 // Reading and discovery. read_file.go is read_file, the line-spanned read that attaches a
 // ReadSpan and, when its optional locate term is given, also reports the absolute line
-// numbers where a substring sits. pdf_text.go is read_file's PDF text extraction — a %PDF-
-// content sniff that ignores the file name, the in-memory parse-and-walk behind a recover because
-// the parser panics on malformed input, the [Page N] marker line before each page, and the
-// model-facing wording for a scanned-image or unreadable document. list_dir.go is list_dir, the
+// numbers where a substring sits. Its PDF text extraction is NOT here: the sniff, the walk, the
+// [Page N] markers and the model-facing failure wording live in internal/doctext, which the @file
+// resolver reads the same documents through. list_dir.go is list_dir, the
 // depth-bounded listing. grep.go is grep — the pure-Go content search plus the include-glob
 // parser, match spans and pagination that find_files borrows so the two cannot drift.
 // find_files.go is find_files, the NAME half of discovery beside grep's content half.

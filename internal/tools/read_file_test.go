@@ -663,9 +663,24 @@ func TestReadFile_Execute_HonoursCancelledContext(t *testing.T) {
 	}
 }
 
+// readPDFFixture returns the bytes of a committed PDF under the doctext package's testdata. The
+// fixtures are hand-built minimal documents rather than generated at test time, so what the
+// parser is fed here is exactly the bytes a reviewer can read in the repository — and they are
+// the SAME bytes the extractor's own suite runs on, which is why this reaches across the package
+// boundary for them instead of keeping a second copy that could drift.
+func readPDFFixture(t *testing.T, name string) []byte {
+	t.Helper()
+
+	data, err := os.ReadFile(filepath.Join("..", "doctext", "testdata", name))
+	if err != nil {
+		t.Fatalf("read fixture %s: %v", name, err)
+	}
+	return data
+}
+
 // pdfWorkspace plants the committed PDF fixtures inside a fresh workspace root and returns it.
 // The suite below reads them through the tool's real path — off disk, sniffed, extracted — rather
-// than calling the extractor directly, which is pdf_text_test.go's job.
+// than calling the extractor directly, which is internal/doctext's own suite's job.
 func pdfWorkspace(t *testing.T, names ...string) string {
 	t.Helper()
 
@@ -685,7 +700,7 @@ func pdfWorkspace(t *testing.T, names ...string) string {
 func TestReadFile_Execute_ReadsAPDFAsExtractedText(t *testing.T) {
 	t.Parallel()
 
-	const header = "[File: minimal.pdf (PDF, 1 page), 3 lines total, showing lines"
+	const header = "[File: minimal.pdf (PDF, 1 page; extracted text, read-only), 3 lines total, showing lines"
 
 	tool := NewReadFile(pdfWorkspace(t, "minimal.pdf"), nil)
 
@@ -756,8 +771,12 @@ func TestReadFile_Execute_RefusesAPDFWithNoText(t *testing.T) {
 	if !result.IsError {
 		t.Fatalf("IsError = false on a PDF with no extractable text (content: %q)", result.Content)
 	}
-	if result.Content != pdfNoTextMessage {
-		t.Errorf("Content = %q, want the no-extractable-text message %q", result.Content, pdfNoTextMessage)
+	// The sentence itself belongs to internal/doctext, whose own suite pins it word for word and
+	// keeps the constant unexported. What this asserts is the boundary's half of the contract:
+	// the tool hands the extractor's sentence on whole instead of wording a failure of its own.
+	if !strings.Contains(result.Content, "no extractable text") ||
+		!strings.Contains(result.Content, "ask the user for a text version") {
+		t.Errorf("Content = %q, want the extractor's no-extractable-text sentence", result.Content)
 	}
 	if result.Summary != nil {
 		t.Errorf("Summary = %#v, want nil on a failed call", result.Summary)
@@ -788,10 +807,11 @@ func TestReadFile_Execute_JudgesAPDFByContentNotName(t *testing.T) {
 	}
 }
 
-// TestPDFDisplayPath pins the header annotation's grammar across the page count: exactly one page
-// reads "1 page", every other count reads "N pages". Zero is in the table because the function
-// treats it as plural and the model reads the header verbatim — nothing else asserts that branch,
-// and the committed fixtures are all one-page documents.
+// TestPDFDisplayPath pins what the read_file header says about an extracted document: the path
+// the argument named, then doctext's annotation in parentheses — the format, the page count, and
+// the read-only hint that tells the model these lines are a rendering rather than the file. The
+// grammar of the count itself belongs to doctext.PDFAnnotation and is pinned there; what this
+// asserts is that the tool's header carries it verbatim and punctuates it the tool's way.
 func TestPDFDisplayPath(t *testing.T) {
 	t.Parallel()
 
@@ -802,9 +822,9 @@ func TestPDFDisplayPath(t *testing.T) {
 		pages int
 		want  string
 	}{
-		{name: "zero pages reads as plural", pages: 0, want: "x.pdf (PDF, 0 pages)"},
-		{name: "one page reads as singular", pages: 1, want: "x.pdf (PDF, 1 page)"},
-		{name: "two pages reads as plural", pages: 2, want: "x.pdf (PDF, 2 pages)"},
+		{name: "zero pages reads as plural", pages: 0, want: "x.pdf (PDF, 0 pages; extracted text, read-only)"},
+		{name: "one page reads as singular", pages: 1, want: "x.pdf (PDF, 1 page; extracted text, read-only)"},
+		{name: "two pages reads as plural", pages: 2, want: "x.pdf (PDF, 2 pages; extracted text, read-only)"},
 	}
 
 	for _, tc := range cases {

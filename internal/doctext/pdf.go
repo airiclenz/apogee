@@ -1,4 +1,4 @@
-package tools
+package doctext
 
 import (
 	"bytes"
@@ -8,10 +8,10 @@ import (
 	"github.com/ledongthuc/pdf"
 )
 
-// The PDF text extraction read_file leans on. Everything the rest of the package needs to know
-// about the format lives behind the two functions below — detection, extraction, the page
-// markers, and the model-facing wording of every failure — so a caller decides nothing about
-// PDFs beyond "is this one" and "what came out".
+// PDF text extraction. Everything a caller needs to know about the format lives behind the
+// three functions below — detection, extraction, the page markers, the model-facing wording of
+// every failure, and the header annotation — so a caller decides nothing about PDFs beyond "is
+// this one", "what came out" and "how do I say so".
 //
 // The parser is github.com/ledongthuc/pdf, a fork of rsc.io/pdf whose ancestor PANICS on
 // malformed input rather than returning an error. A tool that crashes the agent on a corrupt
@@ -39,6 +39,14 @@ const (
 	// pdfPageMarkerFormat labels each page's text. It sits alone on its line so the line-addressed
 	// read_file pipeline (start_line, locate) can point at a page the way it points at anything.
 	pdfPageMarkerFormat = "[Page %d]"
+
+	// pdfAnnotationSingular and pdfAnnotationFormat word the header annotation every caller
+	// stamps on a document it extracted. They say three things in one breath: the format, how
+	// much document the text below covers, and that those lines are a RENDERING rather than the
+	// file — a model that reads "extracted text, read-only" has been told, before it tries, that
+	// there is nothing here to edit in place and nothing to write back.
+	pdfAnnotationSingular = "PDF, 1 page; extracted text, read-only"
+	pdfAnnotationFormat   = "PDF, %d pages; extracted text, read-only"
 )
 
 // pdfMagic is the signature every PDF file opens with. Detection is a content sniff and nothing
@@ -46,13 +54,13 @@ const (
 // extension must still extract.
 var pdfMagic = []byte("%PDF-")
 
-// isPDF reports whether data is a PDF document, judged solely by its leading bytes. Input
+// IsPDF reports whether data is a PDF document, judged solely by its leading bytes. Input
 // shorter than the signature — the empty file included — is not a PDF.
-func isPDF(data []byte) bool {
+func IsPDF(data []byte) bool {
 	return bytes.HasPrefix(data, pdfMagic)
 }
 
-// extractPDFText parses an in-memory PDF and returns its text with a "[Page N]" marker line
+// ExtractPDF parses an in-memory PDF and returns its text with a "[Page N]" marker line
 // before each page's text, exactly one blank line between one page's text and the next marker.
 //
 // The three results are one of two shapes, never a mix: failMessage != "" is a failure and both
@@ -64,10 +72,10 @@ func isPDF(data []byte) bool {
 // that fails on its own does NOT fail the document: its text becomes a
 // "[Page N: text extraction failed]" placeholder and the walk continues. A document that parses
 // to at least one page and yields no characters anywhere is the scanned-image case and fails with
-// pdfNoTextMessage — read_file never falls back to raw bytes, because a wall of binary teaches the
+// pdfNoTextMessage — no caller falls back to raw bytes, because a wall of binary teaches the
 // model nothing. A document that parses to NO pages is a document-level failure instead: nothing
 // was read from it, so it cannot be reported as a scan.
-func extractPDFText(data []byte) (text string, pages int, failMessage string) {
+func ExtractPDF(data []byte) (text string, pages int, failMessage string) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			text, pages, failMessage = "", 0, fmt.Sprintf(pdfUnreadableFormat, recovered)
@@ -108,6 +116,22 @@ func extractPDFText(data []byte) (text string, pages int, failMessage string) {
 		return "", 0, pdfNoTextMessage
 	}
 	return strings.Join(blocks, "\n\n"), pages, ""
+}
+
+// PDFAnnotation is the parenthetical every header quotes for an extracted document: the format,
+// the page count, and the standing fact that what follows is extracted text rather than the
+// file's own bytes. It is returned WITHOUT surrounding parentheses so each header punctuates it
+// in its own idiom.
+//
+// One page reads "1 page" and every other count reads "N pages" — zero included, which is the
+// plural because a header is read verbatim and "0 pages" is the sentence a reader expects.
+// Every caller builds its header from this one function, so two headers can never disagree about
+// what the same document is.
+func PDFAnnotation(pages int) string {
+	if pages == 1 {
+		return pdfAnnotationSingular
+	}
+	return fmt.Sprintf(pdfAnnotationFormat, pages)
 }
 
 // pageBlock renders one page as its marker line plus its text. An empty page is its marker

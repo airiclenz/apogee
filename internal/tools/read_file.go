@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/airiclenz/apogee/internal/doctext"
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
@@ -77,7 +78,7 @@ func (t *ReadFile) ReadOnly() bool { return true }
 // ` → resolves to <path>` tail the write tools append when the argument named one path and the
 // operation landed on another (resolvedTargetNote). An ordinary read grows nothing.
 //
-// A file whose bytes say it is a PDF is returned as its EXTRACTED TEXT (pdf_text.go), never as
+// A file whose bytes say it is a PDF is returned as its EXTRACTED TEXT (internal/doctext), never as
 // raw bytes: a document that cannot be read is an IsError result carrying the extractor's
 // model-facing sentence. Everything after the extraction is the plain-read pipeline unchanged —
 // start_line, end_line, max_lines and locate address the extracted text's lines, and only the
@@ -131,11 +132,11 @@ func (t *ReadFile) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 // errorResult: read_file never falls back to raw PDF bytes, because a wall of binary teaches the
 // model nothing and costs it a context window to learn it.
 func readableText(content []byte, path string) (body, displayPath, failMessage string) {
-	if !isPDF(content) {
+	if !doctext.IsPDF(content) {
 		return string(content), path, ""
 	}
 
-	extracted, pages, extractFailure := extractPDFText(content)
+	extracted, pages, extractFailure := doctext.ExtractPDF(content)
 	if extractFailure != "" {
 		return "", "", extractFailure
 	}
@@ -145,12 +146,10 @@ func readableText(content []byte, path string) (body, displayPath, failMessage s
 // pdfDisplayPath annotates the path for renderFile's header so the model reads the lines below
 // as a document's extracted text rather than a file's own bytes, and knows how much document
 // they cover. It is a HEADER annotation only — the fence and the resolved-target note keep
-// using the argument's real path.
+// using the argument's real path. The words come from doctext, which is also where the @file
+// block's header gets them, so one document never announces itself two ways.
 func pdfDisplayPath(path string, pages int) string {
-	if pages == 1 {
-		return path + " (PDF, 1 page)"
-	}
-	return fmt.Sprintf("%s (PDF, %d pages)", path, pages)
+	return path + " (" + doctext.PDFAnnotation(pages) + ")"
 }
 
 // renderFile selects the requested line range and prepends a header naming the file

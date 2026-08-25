@@ -8,6 +8,26 @@ point is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+### Changed
+
+- **PDF text extraction moved into its own package, `internal/doctext` (plan item 1).** The
+  extractor lived inside `internal/tools`, reachable only through the `read_file` tool, which put
+  the whole built-in surface between the agent loop and a question about bytes. It is now a
+  format-only package exporting `IsPDF`, `ExtractPDF` and `PDFAnnotation`, imported by the tool
+  layer and (next item) by the `@file` resolver. Behaviour is unchanged: the same `%PDF-` content
+  sniff that ignores the file name, the same parse-and-walk behind a recover because the parser
+  panics on malformed input, the same `[Page N]` marker lines, and the same model-facing sentences
+  for a scanned or unreadable document. The failure CHANNELS stay each caller's own — an IsError
+  result for a tool call, an ErrorEvent for a reference — which is why `doctext` returns the
+  sentence rather than a Go error.
+
+- **`read_file`'s header now says a PDF's lines are extracted, read-only text.** The annotation
+  reads `[File: docs/report.pdf (PDF, 27 pages; extracted text, read-only), …]`, so a model is
+  told before it tries that there is nothing here to edit in place and nothing to write back.
+  Both headers that quote an extracted document are built from the single
+  `doctext.PDFAnnotation`, so they cannot disagree about the same file; the count stays singular
+  for a one-page document (`PDF, 1 page; …`).
+
 
 ## [0.17.0] — 2026-08-25
 
