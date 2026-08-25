@@ -153,7 +153,11 @@ grep -n "w.live.observedDialect" cmd/apogee/wire_live.go
 
 ---
 
-## 2. The fallback re-send knows the dialect it is dropping
+## 2. The fallback re-send knows the dialect it is dropping — ✅ DONE (2026-08-25)
+
+NOTES (2026-08-25): the renamed table test's doc comment was rewritten to match the new name and the
+two added rows (it named the kwarg dialect as the only shape); the item's text prescribes the rename
+but not the comment, and leaving the old wording would have contradicted the test it heads.
 
 Depends on item 1.
 

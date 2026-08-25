@@ -108,11 +108,18 @@ func (w titleWiring) generate(ctx context.Context, prompts []string) (string, er
 // exactly once with the "answer without thinking" ask dropped — the one thing about the naming call
 // that is free to give up.
 //
-// That intent rides as a chat_template_kwargs object, which llama.cpp accepts and a stricter
-// OpenAI-compatible server may reject as an unknown field. Without this one re-send, asking for it
+// That intent rides in whichever dialect the request states (ADR 0060) — llama.cpp's
+// chat_template_kwargs object, OpenRouter's `reasoning` object, OpenAI's and Groq's
+// `reasoning_effort` field (spelled "minimal" for off) — and a server that does not read the shape
+// it was handed may reject the field outright as unknown. Without this one re-send, asking for it
 // would trade "naming fails on big sessions" for "naming fails always" on such a server; dropping
-// the flag falls back on the raised token cap, which is the backstop it was raised to be
+// the ask falls back on the raised token cap, which is the backstop it was raised to be
 // (internal/title).
+//
+// [provider.EffortDialectOff] is the one dialect excluded: it puts nothing effort-related on the
+// wire in any shape, so the re-send would be byte-identical to the request that was just refused —
+// the rejection cannot be about an ask that was never sent, and a pointless second POST would only
+// take a queue slot ahead of the user's next Exchange.
 //
 // The re-send is for [provider.EffortOff] and NOTHING else. A request that asked for a LEVEL of
 // reasoning asked for reply content, not for a cap backstop, so silently stripping it would send a
@@ -125,7 +132,8 @@ func (w titleWiring) generate(ctx context.Context, prompts []string) (string, er
 // next Exchange nothing, where a re-POST of a faulted attempt would have cost it a whole generation.
 func respondDroppingThinkingOff(ctx context.Context, client *provider.Client, req provider.Request) (provider.RawResponse, error) {
 	resp, err := client.Respond(ctx, req)
-	if err != nil && req.ThinkingEffort == provider.EffortOff && rejectedOutright(err) {
+	if err != nil && req.ThinkingEffort == provider.EffortOff &&
+		req.EffortDialect != provider.EffortDialectOff && rejectedOutright(err) {
 		req.ThinkingEffort = ""
 		resp, err = client.Respond(ctx, req)
 	}

@@ -488,6 +488,16 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **The naming call's fallback re-send no longer repeats a request byte for byte (plan item 2).**
+  When a server rejects the naming call outright (4xx), the wiring re-sends it once with the
+  "answer without thinking" ask dropped — the one thing about a title that is free to give up. On a
+  server whose `effort-dialect:` is `off`, though, nothing effort-related was ever on the wire, so
+  that re-send was an identical request that could only fail the same way while taking a queue slot
+  ahead of the user's next Exchange. The guard now skips the re-send on the `off` dialect and keeps
+  it, unchanged, for every other one — so the ask is dropped in whichever shape it actually rode:
+  llama.cpp's `chat_template_kwargs`, OpenRouter's `reasoning` object, or OpenAI/Groq's
+  `reasoning_effort` field.
+
 - **The `internal/tools` file map names both undo write funnels (plan item 3).** The package
   spine's `path_safety.go` entry (`internal/tools/doc.go`) described only the alias layer onto
   `internal/security` and the approved escape's tools-side read (ADR 0049), so the one-line-per-file

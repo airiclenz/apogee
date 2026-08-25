@@ -384,30 +384,62 @@ func TestTitleGeneratorFallsBackWhenTheThinkingKwargIsRejected(t *testing.T) {
 	}
 }
 
-// The re-send exists for the thinking-OFF kwarg and nothing else. A namer that asks for a LEVEL of
-// reasoning asked for reply content rather than for the token cap's backstop, so stripping it would
-// send a request nobody wrote; that rejection escapes on the first POST instead. A request that
-// asked for no effort at all carries no kwarg to drop, so it is never re-sent either.
-func TestTitleGeneratorDropsOnlyTheThinkingOffKwarg(t *testing.T) {
+// The re-send exists for the thinking-OFF ask and nothing else, in whatever dialect that ask was
+// written in. A namer that asks for a LEVEL of reasoning asked for reply content rather than for the
+// token cap's backstop, so stripping it would send a request nobody wrote; that rejection escapes on
+// the first POST instead. A request that asked for no effort at all carries nothing to drop, and
+// neither does one on the `off` dialect — that server was told nothing effort-related in any shape,
+// so the re-send would repeat the refused request byte for byte.
+func TestTitleGeneratorDropsOnlyTheThinkingOffAsk(t *testing.T) {
 	t.Parallel()
 
 	rejection := titleAttempt{status: http.StatusBadRequest, errBody: `{"error":"unknown field: chat_template_kwargs"}`}
 	for _, tc := range []struct {
 		name      string
 		effort    provider.Effort
+		dialect   provider.EffortDialect
 		script    []titleAttempt
 		wantPosts int
 		wantErr   bool
+		// askField is the wire field this dialect writes the ask in: asserted present on the first
+		// attempt and gone from the re-send. Empty where the case makes no such claim.
+		askField string
 	}{
 		{
 			name:      "thinking off is dropped and re-sent",
 			effort:    provider.EffortOff,
+			dialect:   provider.EffortDialectNone,
 			script:    []titleAttempt{rejection, {content: "a title", finishReason: "stop"}},
 			wantPosts: 2,
 		},
 		{
+			name:      "thinking off on the reasoning dialect is dropped and re-sent",
+			effort:    provider.EffortOff,
+			dialect:   provider.EffortDialectReasoning,
+			script:    []titleAttempt{rejection, {content: "a title", finishReason: "stop"}},
+			wantPosts: 2,
+			askField:  `"reasoning"`,
+		},
+		{
+			name:      "thinking off on the openai dialect is dropped and re-sent",
+			effort:    provider.EffortOff,
+			dialect:   provider.EffortDialectOpenAI,
+			script:    []titleAttempt{rejection, {content: "a title", finishReason: "stop"}},
+			wantPosts: 2,
+			askField:  "reasoning_effort",
+		},
+		{
+			name:      "thinking off on the off dialect has nothing on the wire to drop",
+			effort:    provider.EffortOff,
+			dialect:   provider.EffortDialectOff,
+			script:    []titleAttempt{rejection},
+			wantPosts: 1,
+			wantErr:   true,
+		},
+		{
 			name:      "a requested level is left as written",
 			effort:    provider.EffortLow,
+			dialect:   provider.EffortDialectNone,
 			script:    []titleAttempt{rejection},
 			wantPosts: 1,
 			wantErr:   true,
@@ -415,6 +447,7 @@ func TestTitleGeneratorDropsOnlyTheThinkingOffKwarg(t *testing.T) {
 		{
 			name:      "a request that asked for nothing has nothing to drop",
 			effort:    "",
+			dialect:   provider.EffortDialectNone,
 			script:    []titleAttempt{rejection},
 			wantPosts: 1,
 			wantErr:   true,
@@ -427,6 +460,7 @@ func TestTitleGeneratorDropsOnlyTheThinkingOffKwarg(t *testing.T) {
 			req := provider.Request{
 				Messages:       []provider.Message{{Role: "user", Content: "name this session"}},
 				ThinkingEffort: tc.effort,
+				EffortDialect:  tc.dialect,
 			}
 
 			resp, err := respondDroppingThinkingOff(context.Background(), client, req)
@@ -437,8 +471,18 @@ func TestTitleGeneratorDropsOnlyTheThinkingOffKwarg(t *testing.T) {
 			if !tc.wantErr && err != nil {
 				t.Fatalf("respondDroppingThinkingOff: %v; want the fallback attempt's reply", err)
 			}
-			if n := len(bodies()); n != tc.wantPosts {
-				t.Errorf("server saw %d naming POSTs; want %d", n, tc.wantPosts)
+			sent := bodies()
+			if len(sent) != tc.wantPosts {
+				t.Fatalf("server saw %d naming POSTs; want %d", len(sent), tc.wantPosts)
+			}
+			if tc.askField == "" {
+				return
+			}
+			if !strings.Contains(sent[0], tc.askField) {
+				t.Errorf("first request body = %s; want the %s ask on the attempt that is allowed to fail", sent[0], tc.askField)
+			}
+			if strings.Contains(sent[1], tc.askField) {
+				t.Errorf("fallback request body = %s; want %s dropped, not re-sent", sent[1], tc.askField)
 			}
 		})
 	}
