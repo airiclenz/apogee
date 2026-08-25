@@ -798,6 +798,14 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		// it just wrote. The widget's height IS the transcript's drawn row count (layout()), so a
 		// report pane that grew under a stale one strands the tail below the scroll clamp.
 		m.layout()
+		// A delegation was just issued, or a child of one crossed a tool boundary: re-persist the
+		// record so anyone reading it while the Turn runs sees the delegation and its progress
+		// (progressSaveTrigger, fold.go). Scheduled AFTER the fold, so the transcript it encodes
+		// already holds the event that asked for it; every other Event leaves the record where the
+		// last save put it.
+		if progressSaveTrigger(msg.Event) {
+			return m, m.progressSave()
+		}
 		return m, nil
 
 	case approvalReqMsg:

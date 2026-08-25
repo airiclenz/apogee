@@ -47,6 +47,12 @@ type foldCase struct {
 	wantPhrase       string    // the activity phrase after the fold ("" = the slot is left idle)
 	wantStats        statsFold // the stats after the fold (the zero value = foldStats moved nothing)
 	wantReasoning    string    // the retained reasoning tail after the fold ("" = it holds nothing)
+	// wantProgressSave is progressSaveTrigger's answer for this Event: whether folding it leaves
+	// the record worth re-persisting mid-Turn. It rides the variant table rather than a table of
+	// its own so the coverage guard below holds the predicate to the same standard as the folds —
+	// a new Event variant must state what the delegation progress save does with it, "nothing"
+	// (the zero value, and the answer for all but three shapes) included.
+	wantProgressSave bool
 }
 
 // foldCases is the variant table: every domain.Event, what it does to the view, and — by way
@@ -96,10 +102,22 @@ func foldCases() []foldCase {
 			wantPhrase:  "thinking",
 		},
 		{
-			name:        "ToolCallEvent records the call and names it in the phrase",
+			name: "ToolCallEvent records the call and names it in the phrase",
+			// A leaf tool at depth 0, and so no progress save: this Turn's own calls are saved by
+			// the per-Turn snapshot that follows them, and a long leaf tool is out of scope.
 			event:       domain.ToolCallEvent{Call: domain.ToolCall{ID: "1", Tool: "read_file", Arguments: []byte(`{"path":"main.go"}`)}},
 			wantEntries: 1,
 			wantPhrase:  "reading",
+		},
+		{
+			name: "ToolCallEvent for sub_agent at depth 0 also fires the progress save",
+			// The delegation is issued: the record is re-persisted here so a reader mid-Turn sees
+			// the assistant message that delegated and the prompt it carried, instead of a
+			// conversation that stops at the previous tool call (progressSaveTrigger).
+			event:            domain.ToolCallEvent{Call: domain.ToolCall{ID: "s1", Tool: subAgentToolName, Arguments: []byte(`{"task":"survey the tests"}`)}},
+			wantEntries:      1,
+			wantPhrase:       "delegating",
+			wantProgressSave: true,
 		},
 		{
 			name: "ToolResultEvent with no call to pair appends the orphan and returns to thinking",
@@ -111,15 +129,39 @@ func foldCases() []foldCase {
 			wantPhrase:  "thinking",
 		},
 		{
+			name: "ToolResultEvent at Depth 1 is a running delegation's progress and fires the save",
+			// Same orphan fold as the depth-0 row above — what differs is only the progress save: a
+			// CHILD crossing a tool boundary is the one thing that moves a running delegation's
+			// record forward, and no per-Turn snapshot is coming until the whole Turn ends.
+			event:            domain.ToolResultEvent{EventBase: domain.EventBase{Depth: 1, CallID: "s1"}, Result: domain.ToolResult{CallID: "1", Content: "ok"}},
+			wantEntries:      1,
+			wantPhrase:       subAgentActivityName + " · thinking",
+			wantProgressSave: true,
+		},
+		{
 			name: "SubAgentPhaseEvent moves nothing on a Model with no run to move",
 			// The delegation's lifecycle phase lands ON the sub_agent block its call id names, so
 			// on this fresh Model — which has no such block — it appends nothing, says nothing and
 			// counts nothing. It never appends an entry of its own at any time: the timing it
 			// carries is a property of a block the transcript already holds.
+			// No progress save either: the head's own ToolCallEvent already fired one, and under a
+			// fan-out a queued child's start adds nothing the record does not already show.
 			event: domain.SubAgentPhaseEvent{
 				EventBase: domain.EventBase{Depth: 1, CallID: "1"},
 				Phase:     domain.SubAgentStarted,
 			},
+		},
+		{
+			name: "SubAgentPhaseEvent finished moves nothing either, but fires the progress save",
+			// The fold is the same as the started phase's on a Model with no run block. The save is
+			// not: one delegation of a group has reached its boundary and its report is in the
+			// record, while under a fan-out its siblings run on — a progress point of its own.
+			event: domain.SubAgentPhaseEvent{
+				EventBase: domain.EventBase{Depth: 1, CallID: "1"},
+				Phase:     domain.SubAgentFinished,
+				Result:    domain.ToolResult{CallID: "1", Content: "report"},
+			},
+			wantProgressSave: true,
 		},
 		{
 			name:        "ApprovalEvent is a transcript note and no activity at all",
@@ -277,6 +319,26 @@ func TestFoldEventFoldsEveryVariant(t *testing.T) {
 			}
 			if got := m.reasoning.text; got != tc.wantReasoning {
 				t.Errorf("retained reasoning = %q, want %q", got, tc.wantReasoning)
+			}
+		})
+	}
+}
+
+// TestProgressSaveTriggerAnswersEveryVariant runs the same variant table through
+// progressSaveTrigger, pinning the delegation progress save's cadence one row at a time: which
+// Events re-persist the record mid-Turn and which leave it where the last save put it. It shares
+// the table with the folds deliberately — TestFoldEventCoversEveryEventVariant then guarantees the
+// predicate has an answer on record for every Event variant the domain declares, including the
+// "deliberately nothing" ones.
+func TestProgressSaveTriggerAnswersEveryVariant(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range foldCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := progressSaveTrigger(tc.event); got != tc.wantProgressSave {
+				t.Errorf("progressSaveTrigger = %v, want %v", got, tc.wantProgressSave)
 			}
 		})
 	}

@@ -218,3 +218,133 @@ func TestRestoreCachesBoundarySnapshot(t *testing.T) {
 		t.Error("a progress save in the resumed session scheduled nothing")
 	}
 }
+
+// ----------------------------------------------------------------------------
+// The progress save's cadence: the delegation boundaries that fire it (§2)
+// ----------------------------------------------------------------------------
+
+// openRunHead reports whether decoded entries hold a sub_agent call block that is still open — the
+// in-flight marker a progress-saved record carries, and what a reader of that record sees as a
+// delegation still running.
+func openRunHead(entries []entry) bool {
+	for _, e := range entries {
+		if e.kind == entryToolCall && e.tool.name == subAgentToolName && !e.done {
+			return true
+		}
+	}
+	return false
+}
+
+// delegationIssued is the Event that opens a delegation: the depth-0 sub_agent tool call the model
+// asked for.
+func delegationIssued() eventMsg {
+	return eventMsg{Event: domain.ToolCallEvent{
+		Call: domain.ToolCall{ID: "s1", Tool: subAgentToolName, Arguments: []byte(`{"task":"survey the tests"}`)},
+	}}
+}
+
+// delegateChildCall and delegateChildResult are one tool boundary inside the running delegation:
+// the child's own call, then its result, both stamped with the spawning call's id (ADR 0039 decision 5).
+func delegateChildCall() eventMsg {
+	return eventMsg{Event: domain.ToolCallEvent{
+		EventBase: domain.EventBase{Depth: 1, CallID: "s1"},
+		Call:      domain.ToolCall{ID: "c1", Tool: "read_file", Arguments: []byte(`{"path":"main.go"}`)},
+	}}
+}
+
+func delegateChildResult() eventMsg {
+	return eventMsg{Event: domain.ToolResultEvent{
+		EventBase: domain.EventBase{Depth: 1, CallID: "s1"},
+		Result:    domain.ToolResult{CallID: "c1", Content: "read 42 lines"},
+	}}
+}
+
+// The cadence end to end, through the Update loop rather than the entry alone: a completed Turn
+// caches the boundary, the delegation's own call re-persists the record on the spot, and each tool
+// boundary the CHILD crosses re-persists it again — while the Events between them (the child's own
+// call announcement, its streamed tokens) leave the record where the last save put it. Every
+// progress save carries the cached boundary as its engine half and a live transcript in which the
+// delegation is still open.
+func TestDelegationBoundariesFireTheProgressSave(t *testing.T) {
+	host := &fakeSessionHost{}
+	m := newBrowserModel(t, &fakeEngine{}, host, "/ws/a")
+	seedConversation(&m)
+	boundary := domain.Session{Version: domain.SessionVersion, State: json.RawMessage(`{"turn":1}`)}
+
+	m, turnSave := stepCmd(t, m, turnSnapshotMsg{Sess: boundary})
+	m = runWrites(t, m, turnSave) // the per-Turn save lands and the boundary is cached
+	m, issuedSave := stepCmd(t, m, delegationIssued())
+	m = runWrites(t, m, issuedSave)
+	m, announced := stepCmd(t, m, delegateChildCall())
+	m, progressed := stepCmd(t, m, delegateChildResult())
+	m = runWrites(t, m, progressed)
+	m, streamed := stepCmd(t, m, eventMsg{Event: domain.TokenEvent{
+		EventBase: domain.EventBase{Depth: 1, CallID: "s1"}, Text: "still working",
+	}})
+
+	if issuedSave == nil {
+		t.Error("the delegation's own tool call scheduled no progress save")
+	}
+	if progressed == nil {
+		t.Error("the child's tool result scheduled no progress save")
+	}
+	if announced != nil {
+		t.Error("the child's tool call announcement scheduled a save; only its RESULT is a boundary")
+	}
+	if streamed != nil {
+		t.Error("a child's streamed token scheduled a save")
+	}
+	calls := host.savedCalls()
+	if len(calls) != 3 {
+		t.Fatalf("Save calls = %d, want 3 (the per-Turn save, the delegation, the child's boundary)", len(calls))
+	}
+	for i, progress := range calls[1:] {
+		if !bytes.Equal(progress.sess.State, boundary.State) {
+			t.Errorf("progress save %d paired engine half %s, want the cached boundary %s", i+1, progress.sess.State, boundary.State)
+		}
+		entries, err := decodeTranscript(progress.transcript)
+		if err != nil {
+			t.Fatalf("decode progress save %d: %v", i+1, err)
+		}
+		if !openRunHead(entries) {
+			t.Errorf("progress save %d holds no open sub_agent head: the record does not show the delegation running", i+1)
+		}
+	}
+}
+
+// Delegation boundaries arrive in bursts — a fan-out's children cross them together — and the
+// record-write queue already answers for that: a save scheduled while one is in flight WAITS, and a
+// save waiting behind it is REPLACED rather than appended (queueWrite, latest-wins). So two triggers
+// folded during an in-flight save leave exactly one pending write, and the one that lands is the
+// later one, holding everything the transcript gained in between.
+func TestProgressSaveTriggersCoalesceBehindAnInFlightSave(t *testing.T) {
+	host := &fakeSessionHost{}
+	m := newBrowserModel(t, &fakeEngine{}, host, "/ws/a")
+	seedConversation(&m)
+
+	m, turnSave := stepCmd(t, m, turnSnapshotMsg{Sess: domain.Session{Version: domain.SessionVersion, State: json.RawMessage(`{"turn":1}`)}})
+	if turnSave == nil {
+		t.Fatal("the per-Turn snapshot scheduled no save to be in flight behind")
+	}
+	m, issued := stepCmd(t, m, delegationIssued()) // both fold while that save is still running
+	m, progressed := stepCmd(t, m, delegateChildResult())
+
+	if issued != nil || progressed != nil {
+		t.Error("a progress save dispatched a second write while one was in flight")
+	}
+	if n := len(m.pendingWrites); n != 1 {
+		t.Fatalf("pending writes = %d, want 1 — the two triggers must coalesce into one", n)
+	}
+	m = runWrites(t, m, turnSave)
+	calls := host.savedCalls()
+	if len(calls) != 2 {
+		t.Fatalf("Save calls = %d, want 2 (the per-Turn save and ONE coalesced progress save)", len(calls))
+	}
+	entries, err := decodeTranscript(calls[1].transcript)
+	if err != nil {
+		t.Fatalf("decode the coalesced progress save's transcript: %v", err)
+	}
+	if !openRunHead(entries) {
+		t.Error("the coalesced save is not the later one: it holds no open sub_agent head")
+	}
+}

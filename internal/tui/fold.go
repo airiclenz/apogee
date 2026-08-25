@@ -138,3 +138,40 @@ func (m Model) foldStats(e domain.Event) Model {
 	}
 	return m
 }
+
+// progressSaveTrigger reports whether folding e has left the record worth re-persisting MID-Turn —
+// the cadence of the delegation progress save (Model.progressSave, sessionsave.go; ADR 0022
+// addendum). It is a pure function of the Event, so the eventMsg case can ask it beside the fold
+// and no other surface has to carry the rule.
+//
+// Exactly three arms answer true, and each marks a point at which a reader of the record — a second
+// session, a reviewer, headless tooling — would otherwise be looking at a conversation that stopped
+// at the previous tool call:
+//
+//   - A depth-0 ToolCallEvent for sub_agent: the delegation is ISSUED. This is the save that puts
+//     the assistant message that delegated, and the prompt it carried, into the record. Without it a
+//     Turn holding a fan-out shows nothing of the delegation until the whole Turn ends.
+//   - A ToolResultEvent at depth 1 or deeper: a CHILD crossed a tool boundary, which is the running
+//     delegation's progress. A depth-0 result is deliberately not one — the Turn's own tool calls
+//     are followed by the per-Turn snapshot that saves them (turnSnapshotMsg), and a long LEAF tool
+//     is out of scope (the plan's ratified call 3: generalising is one predicate away, later).
+//   - A SubAgentPhaseEvent reporting SubAgentFinished: one delegation of a group reached its
+//     boundary and its report is in the record. Under a fan-out its siblings run on, so this is a
+//     progress point of its own rather than the Turn's end.
+//
+// SubAgentStarted is deliberately NOT one: the head's own ToolCallEvent already fired the save, and
+// under a fan-out a queued child's start adds nothing the record does not already show. Every other
+// variant answers false — streamed tokens, reasoning, approvals, usage, audit and wire records
+// either move nothing a reader of the record could act on or are already covered by the per-Turn
+// save that follows the Turn they belong to.
+func progressSaveTrigger(e domain.Event) bool {
+	switch e := e.(type) {
+	case domain.ToolCallEvent:
+		return e.Depth == 0 && e.Call.Tool == subAgentToolName
+	case domain.ToolResultEvent:
+		return e.Depth >= 1
+	case domain.SubAgentPhaseEvent:
+		return e.Phase == domain.SubAgentFinished
+	}
+	return false
+}

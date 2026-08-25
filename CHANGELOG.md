@@ -10,6 +10,19 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **A running delegation now reaches the session record while it runs (delegation progress-save,
+  plan item 2).** The TUI re-persists the record on the depth-0 `sub_agent` tool call that issues a
+  delegation, on every tool result a CHILD produces (depth ≥ 1), and on every
+  `SubAgentPhaseEvent` reporting `SubAgentFinished` — a pure predicate (`progressSaveTrigger`,
+  `internal/tui/fold.go`) asked beside the event fold in `internal/tui/model.go`. Each of those
+  saves pairs the last quiescent-boundary engine snapshot with the LIVE transcript, so a second
+  session, a reviewer or `apogee headless` tooling reading the record mid-run sees the assistant
+  message that delegated, the prompt it carried and the child's progress, instead of a conversation
+  that stops at the previous tool call. Bursts (a fan-out's children crossing boundaries together)
+  collapse in the existing latest-wins write queue, so the cadence adds at most one pending record
+  write. Depth-0 tool results are deliberately not a trigger — the per-Turn snapshot already covers
+  them — and a long LEAF tool keeps today's behaviour.
+
 - **The TUI caches the last quiescent-boundary engine snapshot and can save the record from it
   (delegation progress-save, plan item 1).** A second save entry (`Model.progressSave`,
   `internal/tui/sessionsave.go`) writes the session record MID-Turn by pairing the cached engine

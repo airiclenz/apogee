@@ -160,9 +160,21 @@ go test ./internal/tui/ -run 'TestModelNoBuilderByValue|Session|AutoTitle' -coun
 
 ---
 
-## 2. Fire the progress save at delegation boundaries
+## 2. Fire the progress save at delegation boundaries — ✅ DONE (2026-08-25)
 
 Depends on item 1.
+
+NOTES (2026-08-25): the predicate's per-variant answers are registered as a `wantProgressSave` field
+on `fold_test.go`'s existing `foldCase` table rather than in a table of its own, which is what keeps
+`TestFoldEventCoversEveryEventVariant` holding the new switch to the same standard as the folds (the
+item's "register the predicate's answers the way the other folds do"). The three discriminating
+rows the item names — a depth-0 `sub_agent` call, a depth-1 `ToolResultEvent`, the finished
+`SubAgentPhase` — were added to that table beside their existing depth-0 / started kin, and
+`TestProgressSaveTriggerAnswersEveryVariant` runs it through the predicate.
+
+NOTES (2026-08-25): the cadence test also folds the CHILD's own `ToolCallEvent` (depth 1) and
+asserts it schedules nothing — not named by the item, but it is the event that sits between the two
+triggers in a real stream, so pinning it proves the depth-0 arm of the `ToolCallEvent` rule.
 
 **What:** wire the cadence of ratified call 2 into the event fold.
 
