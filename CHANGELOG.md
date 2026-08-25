@@ -8,6 +8,35 @@ point is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+### Added
+
+- **An engine-owned orientation block now rides on the standing system message (plan item 1).**
+  The host facts a model needs to get oriented — the workspace path, this session's scratch dir
+  with the `/tmp` caveat, and the read-only library roots with the tools that reach them — are
+  composed by the ENGINE (`internal/agent/orientation.go`, embedded asset
+  `prompts/orientation.txt`) instead of riding only in the shipped default `system-prompt-text`.
+  That template is seeded into `~/.apogee/config.yaml` once and never refreshed, so every install
+  seeded before a fact existed was missing it; harness text has no such gap and no edit to the
+  user's prompt can lose it. The wire order is now
+  prompt → context files → orientation → mechanism directives → tool block.
+
+  The block **rides along**: it is appended only when a standing system message exists anyway (a
+  rendered template and/or workspace context files), never on its own — so the documented "delete
+  the prompt to send no system prompt" configuration stays byte-identical on the wire and the
+  Bypass floor is untouched. Every input is read fresh per request (the lock-guarded
+  `ScratchDir()`, the live `Config.ExtraReadRoots` func), and each is a per-session constant, so
+  the block is prefix-KV-cache stable; a fact the session does not have is omitted rather than
+  rendered as an empty path. Sub-agents render their own `standingSystem` from the inherited
+  config, so they get the block with no wiring of their own.
+
+### Changed
+
+- **The shipped default system prompt no longer spends two lines on the scratch dir and `/tmp`.**
+  The orientation block carries those facts now, so `internal/config/defaults/config.yaml` keeps
+  the template persona-only. The `{{scratch}}` placeholder stays fully supported for a user's own
+  prose — its comment block now says the block already names the path. ADR 0023 gains a dated
+  amendment recording the third, engine-composed part of §6's composition; `CONTEXT.md` gains an
+  **Orientation block** term beside *Scratch dir*.
 
 ## [0.17.1] — 2026-08-25
 

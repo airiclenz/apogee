@@ -338,11 +338,11 @@ func TestPromptSeam_ConfiguredPromptNativeSingleSystemMessage(t *testing.T) {
 	if n := countSystemMessages(got.Messages); n != 1 {
 		t.Fatalf("wire request has %d system messages, want exactly 1 (the seeded prompt)", n)
 	}
-	want := prompt.Render(promptTemplate, prompt.Inputs{
+	want := withOrientation(a, prompt.Render(promptTemplate, prompt.Inputs{
 		Workspace: promptWorkspace,
 		Mode:      string(domain.ModeAskBefore),
 		Now:       promptNow,
-	})
+	}))
 	if got.Messages[0].Role != string(domain.RoleSystem) || got.Messages[0].Content != want {
 		t.Errorf("first wire message = %+v\nwant a system message %q", got.Messages[0], want)
 	}
@@ -392,7 +392,7 @@ func TestPromptSeam_ConfiguredPromptMergesDirectivesAndToolBlock(t *testing.T) {
 		Mode:      string(domain.ModeAskBefore),
 		Now:       promptNow,
 	})
-	want := rendered + "\n\n" + directive + "\n\n" + block
+	want := withOrientation(a, rendered) + "\n\n" + directive + "\n\n" + block
 	if got.Messages[0].Role != string(domain.RoleSystem) || got.Messages[0].Content != want {
 		t.Errorf("merged system message = %q\nwant %q", got.Messages[0].Content, want)
 	}
@@ -522,7 +522,7 @@ func TestPromptSeam_ScratchPlaceholderRendersSessionScratchDir(t *testing.T) {
 	a.now = func() time.Time { return promptNow }
 
 	got := seedSystemMessage(t, a, responder, "hi")
-	want := "Workspace " + promptWorkspace + ". Scratch and test files go in " + scratch + "."
+	want := withOrientation(a, "Workspace "+promptWorkspace+". Scratch and test files go in "+scratch+".")
 	if got != want {
 		t.Errorf("seeded system message = %q, want %q", got, want)
 	}
@@ -590,7 +590,7 @@ func TestContextSeam_FilesSeedWithoutAPrompt(t *testing.T) {
 
 	got := seedSystemMessage(t, a, responder, "hi")
 
-	want := contextBlock("AGENTS.md", "Run make check before committing.")
+	want := withOrientation(a, contextBlock("AGENTS.md", "Run make check before committing."))
 	if got != want {
 		t.Errorf("seeded system message = %q\nwant %q", got, want)
 	}
@@ -617,9 +617,9 @@ func TestContextSeam_PromptThenBlocksInListOrder(t *testing.T) {
 		Mode:      string(domain.ModeAskBefore),
 		Now:       promptNow,
 	})
-	want := rendered + "\n\n" +
-		contextBlock("CONVENTIONS.md", "conventions guidance") + "\n\n" +
-		contextBlock("AGENTS.md", "agents guidance")
+	want := withOrientation(a, rendered+"\n\n"+
+		contextBlock("CONVENTIONS.md", "conventions guidance")+"\n\n"+
+		contextBlock("AGENTS.md", "agents guidance"))
 	if got != want {
 		t.Errorf("seeded system message = %q\nwant %q", got, want)
 	}
@@ -640,7 +640,7 @@ func TestContextSeam_UnreadableFileNeverReachesTheModel(t *testing.T) {
 
 	got := seedSystemMessage(t, a, responder, "hi")
 
-	if want := contextBlock("CONVENTIONS.md", "conventions guidance"); got != want {
+	if want := withOrientation(a, contextBlock("CONVENTIONS.md", "conventions guidance")); got != want {
 		t.Errorf("seeded system message = %q\nwant %q (the unreadable file contributes nothing)", got, want)
 	}
 }
@@ -661,7 +661,7 @@ func TestContextSeam_EscapingSymlinkNeverReachesTheModel(t *testing.T) {
 
 	got := seedSystemMessage(t, a, responder, "hi")
 
-	if want := contextBlock("CONVENTIONS.md", "conventions"); got != want {
+	if want := withOrientation(a, contextBlock("CONVENTIONS.md", "conventions")); got != want {
 		t.Errorf("seeded system message = %q\nwant %q (the escaping file contributes nothing)", got, want)
 	}
 	if strings.Contains(got, marker) {
@@ -708,7 +708,8 @@ func TestContextSeam_MergesDirectivesAndToolBlock(t *testing.T) {
 		Mode:      string(domain.ModeAskBefore),
 		Now:       promptNow,
 	})
-	want := rendered + "\n\n" + contextBlock("AGENTS.md", "agents guidance") + "\n\n" + directive + "\n\n" + block
+	want := withOrientation(a, rendered+"\n\n"+contextBlock("AGENTS.md", "agents guidance")) +
+		"\n\n" + directive + "\n\n" + block
 	if got != want {
 		t.Errorf("merged system message = %q\nwant %q", got, want)
 	}
@@ -761,7 +762,7 @@ func TestContextSeam_ContentStableWithinASession(t *testing.T) {
 	if turn1 != turn2 {
 		t.Errorf("Turn 2 seeded %q, want Turn 1's byte-identical %q", turn2, turn1)
 	}
-	if want := contextBlock("AGENTS.md", "first"); turn2 != want {
+	if want := withOrientation(a, contextBlock("AGENTS.md", "first")); turn2 != want {
 		t.Errorf("seeded system message = %q, want the session's original %q", turn2, want)
 	}
 }
@@ -784,7 +785,7 @@ func TestContextSeam_NewSessionCarriesTheNewBytes(t *testing.T) {
 
 	got := seedSystemMessage(t, a, responder, "two")
 
-	if want := contextBlock("AGENTS.md", "second"); got != want {
+	if want := withOrientation(a, contextBlock("AGENTS.md", "second")); got != want {
 		t.Errorf("seeded system message after /clear = %q, want the re-read %q", got, want)
 	}
 }
@@ -809,7 +810,7 @@ func TestContextSeam_SubAgentRequestCarriesParentBlocks(t *testing.T) {
 	}
 	got := seedSystemMessage(t, child, responder, "delegated task")
 
-	if want := contextBlock("AGENTS.md", "parent bytes"); got != want {
+	if want := withOrientation(child, contextBlock("AGENTS.md", "parent bytes")); got != want {
 		t.Errorf("sub-agent seeded %q, want the parent session's %q", got, want)
 	}
 }
@@ -878,11 +879,11 @@ func TestRestoreSeam_StoredSystemMessageDroppedAndNotDoubledOnTheWire(t *testing
 	// seedSystemMessage fails unless the wire request opens with EXACTLY one system message.
 	got := seedSystemMessage(t, a, responder, "two")
 
-	want := prompt.Render(promptTemplate, prompt.Inputs{
+	want := withOrientation(a, prompt.Render(promptTemplate, prompt.Inputs{
 		Workspace: promptWorkspace,
 		Mode:      string(domain.ModeAskBefore),
 		Now:       promptNow,
-	})
+	}))
 	if got != want {
 		t.Errorf("wire system message = %q\nwant the freshly rendered prompt %q", got, want)
 	}

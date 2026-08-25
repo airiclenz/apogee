@@ -82,12 +82,14 @@ func TestEmbeddedDefaultConfigSetsOnlyTheSystemPrompt(t *testing.T) {
 	if text == "" {
 		t.Fatal("embedded default config carries no system prompt; the shipped default must be active")
 	}
+	// {{scratch}} is deliberately absent: the engine's own orientation block names the scratch
+	// dir now, so the shipped persona template no longer spends a line on it. The placeholder
+	// itself stays supported — the closed set is pinned by the validation test in config_test.go.
 	for _, want := range []string{
 		"You are apogee",
 		prompt.PlaceholderWorkspace,
 		prompt.PlaceholderDatetime,
 		prompt.PlaceholderMode,
-		prompt.PlaceholderScratch,
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("shipped system prompt does not contain %q:\n%s", want, text)

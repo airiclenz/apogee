@@ -568,15 +568,32 @@ The per-session writable directory **outside the workspace** —
 box carries as an extra writable root (ADR 0056). It exists because a workspace-only fence left
 a confined agent nowhere safe for scratch work, so improvisations landed in the workspace (the
 2026-08-22 clobber incident): now scratch tests, probes, and temp files have a home the fence
-allows, named to the model via the **`{{scratch}}`** prompt placeholder and one guidance line in
-the shipped default prompt. Created `0700` when the session id is minted, follows the **active**
-session across rotation, advertised writable only once it actually exists, and swept by a
+allows, named to the model via the **`{{scratch}}`** prompt placeholder — for a user's own prose —
+and, unconditionally, by the **Orientation block** that rides on every standing system message.
+Created `0700` when the session id is minted, follows the **active** session across rotation,
+advertised writable only once it actually exists, and swept by a
 best-effort 14-day startup GC. Per-session constant, so prompt use is KV-cache safe. A **Firing**
 gets one of its own on every **Driver** — the in-session Schedule, the daemon and
 `apogee headless` each mint the record id before the run and create that id's dir, so the dir and
 the saved record share one name and the same sweep reclaims it.
 _Avoid_: "temp dir" (`/tmp` is exactly what confinement may deny), "cache" (it is disposable
 work space, not a cache with an invalidation story).
+
+**Orientation block**:
+The engine-composed part of the **standing system content** that states the host facts a model
+needs to get oriented — the **workspace** path, its **Scratch dir**, the `/tmp` caveat, and the
+read-only library roots with the tools that reach them. It is **harness text, not persona text**:
+the engine writes it, so no edit to the user's `system-prompt-text` — and no install whose config
+was seeded before a fact existed — can lose it. It **rides along**: appended only when a standing
+system message exists anyway (a rendered template and/or **Context files** blocks), never
+on its own, so "delete the prompt to send none" stays byte-identical on the wire and the **Bypass**
+floor is untouched. Wire position is LAST of the standing parts —
+prompt → context files → orientation → mechanism directives → tool block — and every fact it
+states is a per-session constant, so it is prefix-KV-cache safe. A fact the session does not have
+is omitted rather than rendered empty. See
+[ADR 0023](docs/adr/0023-the-system-prompt-is-a-configured-template-rendered-per-request.md) §6.
+_Avoid_: "system prompt" (that is the user's configured template; this is the engine's own text),
+"preamble" (the terminal tool's fail-fast preamble is a different thing).
 
 **Console**:
 A persistent interactive program — a REPL, a dev server, a shell — the model opens and drives
@@ -919,7 +936,8 @@ vocabulary is three strictly-spelled placeholders — `{{workspace}}`, `{{dateti
 one is a startup error, never raw braces on the wire. It is **request-scoped**: seeded into the
 request projection at position 0 and never committed to the conversation, so it appears in no
 history and in no Session record, and a Mechanism's directives and the Model profile's rendered
-tool menu fold in **after** it within that one message (prompt → directives → tool block). A
+tool menu fold in **after** it within that one message, as does the engine's
+**Orientation block** (prompt → context files → orientation → directives → tool block). A
 **Sub-agent inherits** it. Distinct from apogee's two **internal** prompts, which it never
 reaches by construction: the Compaction summariser's instruction and the probe battery's. See
 [ADR 0023](docs/adr/0023-the-system-prompt-is-a-configured-template-rendered-per-request.md).
@@ -933,8 +951,8 @@ The **project's** standing text: files apogee **discovers** in the workspace roo
 NAME (`context-files:`, default `AGENTS.md`; file-only, root-only, no walk-up) — whose content is
 folded into the standing system content beside the [System prompt](#context-and-history). Every
 listed name that exists is included, in list order, each under a `## Workspace context: <name>`
-header, and the merged first system message reads **prompt → context files → Mechanism directives
-→ tool menu**; either source alone seeds the message. Content is **data, never a template**: it
+header, and the merged first system message reads **prompt → context files → Orientation block →
+Mechanism directives → tool menu**; either configured source alone seeds the message. Content is **data, never a template**: it
 bypasses the placeholder language entirely, so a repo's own `{{braces}}` travel verbatim and can
 never fail startup. The read is **session-scoped** — at construction and at each session boundary
 (`/clear`, `/new`, a restore), never per request and never mid-conversation — so the bytes are

@@ -786,20 +786,34 @@ func (a *Agent) buildRequest(turn int) (*domain.Request, []string) {
 }
 
 // standingSystem composes this request's standing system content — what buildRequest seeds as
-// the position-0 system message — from the two INDEPENDENT sources of it: the rendered prompt
-// template and the workspace context files' blocks, in that order, separated by a blank line.
-// Either source alone seeds a message; only with neither is the result "" and nothing seeded
-// at all (the no-prompt-AND-no-context-files native anchor).
+// the position-0 system message — from the two INDEPENDENT CONFIGURED sources of it, the
+// rendered prompt template and the workspace context files' blocks, in that order, plus the
+// engine's own orientation block last, all separated by blank lines. Either configured source
+// alone seeds a message; only with neither is the result "" and nothing seeded at all (the
+// no-prompt-AND-no-context-files native anchor).
+//
+// The orientation block RIDES ALONG (orientation.go) — it is appended only when a configured
+// source already put something in the message, never on its own. That is what keeps the
+// documented "delete it to send no system prompt" configuration byte-identical on the wire, and
+// with it the Bypass floor; every session that seeds anything at all also carries the host facts
+// no edit to the user-editable template can lose.
 //
 // The order is the wire order: standing instructions first, then the workspace's own conventions,
-// then whatever the mechanism directives and the tool block append after both.
+// then the harness's own orientation, then whatever the mechanism directives and the tool block
+// append after all three.
 func (a *Agent) standingSystem() string {
-	parts := make([]string, 0, 2)
+	parts := make([]string, 0, 3)
 	if rendered := a.systemPrompt(); rendered != "" {
 		parts = append(parts, rendered)
 	}
 	if blocks := a.contextBlocks(); blocks != "" {
 		parts = append(parts, blocks)
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	if orientation := a.orientationBlock(); orientation != "" {
+		parts = append(parts, orientation)
 	}
 	return strings.Join(parts, "\n\n")
 }

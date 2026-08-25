@@ -260,3 +260,35 @@ the next snapshot — is clean by construction.
 - **Discarding beats preserving.** The dropped message is a stale rendering of standing content that
   §5 says must be re-rendered from live inputs anyway; keeping it would either duplicate the
   standing content on the wire or require the seam to guess which of the two is authoritative.
+
+## Amendment (2026-08-25) — §6's composition gains a THIRD, engine-composed part
+
+§6's decision stands: one system message at position 0, seeded per request, in one fixed order.
+Only the composition list grows. Alongside the rendered template and the workspace context files'
+blocks ([ADR 0026](0026-workspace-context-files-are-session-scoped-prompt-data.md)) the engine now
+appends its own **orientation block** (`internal/agent/orientation.go`,
+`prompts/orientation.txt`), so the wire order reads **prompt → context files → orientation →
+mechanism directives → tool block**.
+
+- **Why the engine owns it.** The block states host facts — the workspace path, the session
+  **scratch dir** and the `/tmp` caveat, the read-only library roots and the tools that reach them
+  — that a model cannot work without and that no persona template should have to carry. §8's
+  no-compiled-in-fallback rule means a seeded `~/.apogee/config.yaml` is never refreshed, so a
+  fact added to the shipped template after a user's first run reaches that user never. Harness text
+  the engine composes has no such gap, and no edit to `system-prompt-text` can delete it.
+- **Ride-along, not a fourth source.** The block is appended only when the standing system content
+  is already non-empty — a rendered template and/or context-file blocks. With neither configured
+  `standingSystem()` still returns `""` and nothing is seeded, so §6's "`""` seeds **nothing**"
+  anchor and the Bypass floor beneath it stay byte-identical. The block never opens a system
+  message of its own.
+- **Live inputs, per-session constants.** Like §5's render inputs the facts are read fresh per
+  request — `cfg.WorkspaceDir`, the lock-guarded `ScratchDir()`, the live `cfg.ExtraReadRoots` func
+  — so a session boundary that moves the scratch dir lands on the next request. All three are
+  constant *within* a session, so the block is prefix-KV-cache stable exactly as `{{scratch}}` is.
+  A fact the session does not have (no scratch dir yet, no mounted roots) is **omitted**, never
+  rendered as an empty path.
+- **§7 unchanged.** `newChildAgent` copies `cfg` wholesale and the child renders its own
+  `standingSystem`, so a sub-agent gets the block with no carve-out and no wiring of its own.
+- **The shipped template drops what the block now carries.** `defaults/config.yaml` no longer
+  spends two lines on the scratch dir and `/tmp`; the `{{scratch}}` placeholder stays supported for
+  a user's own prose. The template is persona, the block is orientation.

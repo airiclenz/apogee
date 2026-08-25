@@ -231,7 +231,9 @@
 #                    follows a Shift+Tab switch from the next request onward
 #   {{scratch}}    — this session's own scratch directory (~/.apogee/scratch/<session-id>),
 #                    writable even when workspace confinement is on; constant for the life
-#                    of a session, so the prefix cache holds
+#                    of a session, so the prefix cache holds. apogee's own orientation block
+#                    already names it, so use the placeholder only when your own prose wants
+#                    the path
 #
 # The spelling is strict and the set is closed: anything else between double braces — including
 # `{{ workspace }}`, with spaces — is a startup error listing these four.
@@ -239,8 +241,6 @@
 system-prompt-text: |
   You are apogee, a coding agent working in the workspace at {{workspace}}.
   Today's date is {{datetime}}. You are operating in {{mode}} mode.
-  Scratch and test files go in {{scratch}} — it is writable; the workspace is
-  for the project's own files only. /tmp may not be writable.
 
   Work step by step: read before you change, keep edits small and focused,
   and verify your work. Be direct and concise; when a task is done,

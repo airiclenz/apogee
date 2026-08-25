@@ -483,6 +483,13 @@ a short default one; **delete it or comment it out to send no system prompt at
 all**. An existing `~/.apogee/config.yaml` — which an upgrade never touches —
 carries no such key, so nothing changes for a setup you already run.
 
+Whenever a system message goes out at all — because you have a prompt, or workspace
+context files (below), or both — apogee appends its own short
+**orientation block** at the end of it, naming the workspace, this session's scratch
+directory and any read-only library roots the model may read from. That block is not
+part of `system-prompt-text`, cannot be edited out of it, and is not sent when you
+have configured neither a prompt nor context files.
+
 ```yaml
 # ~/.apogee/config.yaml
 system-prompt-text: |

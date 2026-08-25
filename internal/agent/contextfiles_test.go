@@ -463,8 +463,10 @@ func TestContextFilesReportMeasuresStandingContent(t *testing.T) {
 
 	report := a.ContextFilesReport()
 
-	// The seed is prompt + blank line + header + blank line + content (item 2's composition).
-	seedChars := len(systemPrompt) + len("\n\n") + len(contextFileHeader+"AGENTS.md") + len("\n\n") + len(content)
+	// The seed is prompt + blank line + header + blank line + content (item 2's composition),
+	// then a blank line and the engine's own orientation block, which rides last on it.
+	seedChars := len(systemPrompt) + len("\n\n") + len(contextFileHeader+"AGENTS.md") + len("\n\n") + len(content) +
+		len("\n\n") + len(a.orientationBlock())
 	want := int(math.Ceil(float64(seedChars) / apogeectx.DefaultCharsPerToken))
 	if report.StandingTokens != want {
 		t.Errorf("StandingTokens = %d, want %d (the estimate over the whole seeded system content)",

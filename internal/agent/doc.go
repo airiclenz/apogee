@@ -63,7 +63,8 @@
 // Delegation-target latch: the never-idle-gated door a host's second heartbeat pushes the
 // Sub-agent server through, held by one handle for a whole agent tree (ADR 0045).
 // contextfiles.go owns the workspace context files' discovery half — the session-scoped cache,
-// its loader, and the construction-time name gate.
+// its loader, and the construction-time name gate. orientation.go composes the engine-owned
+// orientation block that rides last on that same standing system message (prompts/orientation.txt).
 //
 // And doc.go this map.
 package agent
