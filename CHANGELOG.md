@@ -139,6 +139,16 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **`CONTEXT.md`'s persistence wording follows ADR 0052 §5 (plan item 2).** The **Tool summary**
+  entry said a summary is "never persisted" and the **Edit regions** entry said the regions are
+  "never in the session record" — the exact wording the 2026-08-24 deepening plan had already
+  removed from `internal/domain/toolsummary.go` and ADR 0052, because the TUI's transcript codec
+  mirrors the edit-region facts onto a wire type of its own (`wireEditRegion`). Both entries now
+  state the rule the code holds: a summary is never SENT to the model and the summary VALUE has no
+  wire form, while the edit-region FACTS are the one part a host's codec may mirror into the session
+  record so a resumed session renders the same split diffs (ADR 0052 §5, cited inline in both
+  entries). Voice and `_Avoid_` lines unchanged; no other entry touched.
+
 - **The daemon's startup scratch sweep is pinned (plan item 1).** `newDaemonWiring` sweeps the
   stale per-Firing scratch dirs once at startup because a host driven only by a daemon never passes
   the TUI's boot sweep, but nothing asserted it — the daemon suite stayed green with the call

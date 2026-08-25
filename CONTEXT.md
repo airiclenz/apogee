@@ -995,9 +995,13 @@ whose outcome the view used to re-derive carry one (`read_file`, `write_file`, `
 `grep`, `view_diff`, `web_search`, and — as **Edit regions** — the three edit tools
 `edit_existing_file`, `single_find_and_replace`, `multi_find_and_replace`) — `read_file`'s
 carries the locate facts too, the substring asked for and the absolute line numbers it fell
-on. A summary is **never persisted** and never
-sent to the model, and a Mechanism that rewrites `Content` on the `PostToolResult` seam does
-not invalidate it: a summary records what the tool *did*, not what the text *says*.
+on. A summary is **never sent to the model** — it is display data a host consumes, and the
+summary *value* has no wire form; what a host's codec may mirror into the session record are
+the **facts** a variant carries, which is what the TUI's transcript codec does for the **Edit
+regions** below
+([ADR 0052](docs/adr/0052-diff-bodies-render-as-split-diffs-fed-by-tool-recorded-edit-regions.md) §5).
+A Mechanism that rewrites `Content` on the `PostToolResult` seam does not invalidate it: a
+summary records what the tool *did*, not what the text *says*.
 _Avoid_: "tool metadata", "tool result type" (the result already has a type; this is its
 structured outcome).
 
@@ -1005,10 +1009,13 @@ structured outcome).
 The typed summary an edit tool records **at apply time**: each changed region's before/after
 start lines, its removed and inserted lines, and up to three merged unchanged lines of context
 each side — counted from the applied change itself, so a view never re-reads the file or
-re-derives positions from arguments. It rides the **Tool summary** contract unchanged (display
-data — never sent to the model, never in the session record), and a result carrying none
-renders the argument-derived list exactly as before, which is what keeps tools an open
-extension point ([ADR 0002](docs/adr/0002-tools-are-an-open-extension-point-mechanisms-are-curated.md)).
+re-derives positions from arguments. It rides the **Tool summary** contract unchanged — display
+data, never sent to the model, and no wire form for the summary value — and the region facts are
+the one part of a summary the TUI's session codec mirrors onto a wire type of its own, so a
+resumed session renders the same split diffs
+([ADR 0052](docs/adr/0052-diff-bodies-render-as-split-diffs-fed-by-tool-recorded-edit-regions.md) §5).
+A result carrying none renders the argument-derived list exactly as before, which is what keeps
+tools an open extension point ([ADR 0002](docs/adr/0002-tools-are-an-open-extension-point-mechanisms-are-curated.md)).
 The [Split diff](#deliverables-and-presentation) is its consumer. See
 [ADR 0052](docs/adr/0052-diff-bodies-render-as-split-diffs-fed-by-tool-recorded-edit-regions.md).
 _Avoid_: "hunks" (a hunk is a unit of the *patch input format* `edit_existing_file` accepts;

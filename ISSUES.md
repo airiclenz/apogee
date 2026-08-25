@@ -23,21 +23,6 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 
 ## Open defects
 
-### `CONTEXT.md`'s persistence wording still contradicts ADR 0052 §5
-
-**Status:** open 2026-08-24 — deferred at the close of the architecture-review deepening plan
-(`docs/plans/archived/2026-08-24 - 03 - architecture-review-deepening-plan.md`); item 1's Files
-list named `internal/domain/toolsummary.go` and the ADR only.
-
-The **Tool summary** entry still reads "A summary is **never persisted**" (`CONTEXT.md:998`) and
-the **Edit regions** entry still reads "never in the session record" (`CONTEXT.md:1009`) — the
-exact wording item 1 removed from the two Go comment sites because
-[ADR 0052](docs/adr/0052-diff-bodies-render-as-split-diffs-fed-by-tool-recorded-edit-regions.md) §5
-ratifies the codec mirroring the region facts (`internal/tui/transcriptcodec.go:158-173, 461-478`).
-The domain language therefore now says the opposite of the code comments it governs.
-
----
-
 ### `internal/tools/doc.go`'s `path_safety.go` file-map entry names neither write funnel
 
 **Status:** open 2026-08-24 — deferred at the close of the architecture-review deepening plan

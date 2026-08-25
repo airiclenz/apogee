@@ -100,7 +100,7 @@ go vet ./cmd/apogee/
 
 ---
 
-## 2. `CONTEXT.md`'s persistence wording follows ADR 0052 §5
+## 2. `CONTEXT.md`'s persistence wording follows ADR 0052 §5 — ✅ DONE (2026-08-25)
 
 **What:** two entries in `CONTEXT.md` say the opposite of the code they govern. **Tool summary**
 (`CONTEXT.md:998`) reads "A summary is **never persisted** and never sent to the model"; **Edit
