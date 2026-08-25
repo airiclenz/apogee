@@ -638,29 +638,30 @@ func TestTerminal_FailFastNoteReachesTheModelEndToEnd(t *testing.T) {
 // never gains one however EPERM-shaped its output.
 func TestSubprocessToolResultDenialLabel(t *testing.T) {
 	t.Parallel()
+	box := domain.ConfinementBox{WorkspaceRoot: "/ws", WritablePaths: []string{"/scratch/s1"}}
 	cases := []struct {
 		name      string
 		res       subprocessResult
 		wantLabel bool
 	}{
 		{"confined error with strerror text", subprocessResult{
-			combinedOutput: "touch: /etc/f: Operation not permitted", exitCode: 1, confined: true}, true},
+			combinedOutput: "touch: /etc/f: Operation not permitted", exitCode: 1, confined: true, box: box}, true},
 		{"confined error with Go errno text", subprocessResult{
-			combinedOutput: "open /etc/f: operation not permitted", exitCode: 1, confined: true}, true},
+			combinedOutput: "open /etc/f: operation not permitted", exitCode: 1, confined: true, box: box}, true},
 		{"confined error with bare EPERM", subprocessResult{
-			combinedOutput: "write failed: EPERM", exitCode: 2, confined: true}, true},
+			combinedOutput: "write failed: EPERM", exitCode: 2, confined: true, box: box}, true},
 		{"unconfined error with strerror text", subprocessResult{
 			combinedOutput: "touch: /etc/f: Operation not permitted", exitCode: 1, confined: false}, false},
 		{"confined success with strerror text", subprocessResult{
-			combinedOutput: "grep found: Operation not permitted", exitCode: 0, confined: true}, false},
+			combinedOutput: "grep found: Operation not permitted", exitCode: 0, confined: true, box: box}, false},
 		{"confined error without a signature", subprocessResult{
-			combinedOutput: "no such file or directory", exitCode: 1, confined: true}, false},
+			combinedOutput: "no such file or directory", exitCode: 1, confined: true, box: box}, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			res := subprocessToolResult("c1", tc.res)
-			if got := strings.Contains(res.Content, confinementDenialLabel); got != tc.wantLabel {
+			if got := strings.Contains(res.Content, confinementDenialLabel(tc.res.box)); got != tc.wantLabel {
 				t.Errorf("label present = %v, want %v (content = %q)", got, tc.wantLabel, res.Content)
 			}
 			if wantErr := tc.res.exitCode != 0; res.IsError != wantErr {
@@ -683,24 +684,25 @@ func TestTerminal_ConfinementDenialLabelEndToEnd(t *testing.T) {
 	term := NewTerminal(t.TempDir(), nil)
 	denial := `echo "touch: cannot touch '/etc/f': Operation not permitted" >&2; exit 1`
 
+	box := domain.ConfinementBox{WorkspaceRoot: t.TempDir(), WritablePaths: []string{t.TempDir()}}
 	ctx := domain.WithConfinement(context.Background(), domain.Confinement{
 		Confiner: &fakeConfiner{caps: domain.ConfinementCaps{FSWrite: true}},
-		Box:      domain.ConfinementBox{WorkspaceRoot: t.TempDir()},
+		Box:      box,
 	})
 	res, err := term.Execute(ctx, terminalCall("c1", denial))
 	if err != nil {
 		t.Fatalf("Execute err = %v, want nil", err)
 	}
-	if !res.IsError || !strings.Contains(res.Content, confinementDenialStopLabel) {
-		t.Errorf("confined denial result = %q (IsError=%v), want the stopped-by-confinement label", res.Content, res.IsError)
+	if !res.IsError || !strings.Contains(res.Content, confinementDenialStopLabel(box)) {
+		t.Errorf("confined denial result = %q (IsError=%v), want the stopped-by-confinement label naming %v",
+			res.Content, res.IsError, box)
 	}
 
 	res, err = term.Execute(context.Background(), terminalCall("c2", denial))
 	if err != nil {
 		t.Fatalf("Execute err = %v, want nil", err)
 	}
-	if !res.IsError || strings.Contains(res.Content, confinementDenialLabel) ||
-		strings.Contains(res.Content, confinementDenialStopLabel) {
+	if !res.IsError || strings.Contains(res.Content, "blocked by workspace confinement") {
 		t.Errorf("unconfined result = %q (IsError=%v), want the same failure WITHOUT any confinement label", res.Content, res.IsError)
 	}
 }
@@ -712,6 +714,7 @@ func TestTerminal_ConfinementDenialLabelEndToEnd(t *testing.T) {
 // finished must never turn a success into an error.
 func TestSubprocessToolResultDenialStopLabel(t *testing.T) {
 	t.Parallel()
+	box := domain.ConfinementBox{WorkspaceRoot: "/ws", WritablePaths: []string{"/scratch/s1"}}
 	cases := []struct {
 		name          string
 		res           subprocessResult
@@ -721,25 +724,25 @@ func TestSubprocessToolResultDenialStopLabel(t *testing.T) {
 	}{
 		{"stopped kill (signalled exit)", subprocessResult{
 			combinedOutput: "mkdir: /tmp/srtest: Operation not permitted", exitCode: -1,
-			confined: true, denialStopped: true}, true, true, false},
+			confined: true, denialStopped: true, box: box}, true, true, false},
 		{"stopped but self-exited non-zero", subprocessResult{
 			combinedOutput: "mkdir: /tmp/srtest: Operation not permitted", exitCode: 1,
-			confined: true, denialStopped: true}, true, true, false},
+			confined: true, denialStopped: true, box: box}, true, true, false},
 		{"watch matched but the run finished cleanly", subprocessResult{
 			combinedOutput: "grep found: Operation not permitted", exitCode: 0,
-			confined: true, denialStopped: true}, false, false, false},
+			confined: true, denialStopped: true, box: box}, false, false, false},
 		{"confined failure without the watch verdict keeps the likely label", subprocessResult{
 			combinedOutput: "touch: /etc/f: Operation not permitted", exitCode: 1,
-			confined: true}, false, true, true},
+			confined: true, box: box}, false, true, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			res := subprocessToolResult("c1", tc.res)
-			if got := strings.Contains(res.Content, confinementDenialStopLabel); got != tc.wantStopLabel {
+			if got := strings.Contains(res.Content, confinementDenialStopLabel(tc.res.box)); got != tc.wantStopLabel {
 				t.Errorf("stop label present = %v, want %v (content = %q)", got, tc.wantStopLabel, res.Content)
 			}
-			if got := strings.Contains(res.Content, confinementDenialLabel); got != tc.wantAnyLikely {
+			if got := strings.Contains(res.Content, confinementDenialLabel(tc.res.box)); got != tc.wantAnyLikely {
 				t.Errorf("likely label present = %v, want %v (content = %q)", got, tc.wantAnyLikely, res.Content)
 			}
 			if res.IsError != tc.wantErr {

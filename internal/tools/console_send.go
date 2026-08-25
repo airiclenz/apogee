@@ -115,7 +115,7 @@ func (t *ConsoleSend) Execute(ctx context.Context, call domain.ToolCall) (domain
 	}
 
 	wait := consoleWait(args.WaitMS, consoleSendWaitDefaultMS, consoleSendWaitMaxMS)
-	return okResult(call.ID, consoleWindowTail(target, wait)), nil
+	return okResult(call.ID, consoleWindowTail(ctx, target, wait)), nil
 }
 
 var (

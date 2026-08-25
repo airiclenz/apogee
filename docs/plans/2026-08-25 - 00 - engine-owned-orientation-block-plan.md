@@ -230,7 +230,16 @@ NOTES (2026-08-25): two files beyond the item's Files list were touched because 
 
 ---
 
-## 3. Confinement denial labels name the writable roots by path
+## 3. Confinement denial labels name the writable roots by path — ✅ DONE (2026-08-25)
+
+NOTES (2026-08-25): the item's text renders the tail straight from `box.WorkspaceRoot`; the
+implementation nil-guards an EMPTY `WorkspaceRoot` too (falling back to the previous abstract
+"the workspace and the session scratch dir" wording), because a zero box would otherwise render
+"the workspace " with a dangling empty path — same guard item 1 applied to its own renderer.
+NOTES (2026-08-25): the item's Files list names no docs, but `docs/adr/0056-...md` quoted the
+old label VERBATIM and would have been left stale, so its quote was updated with a dated
+"amended 2026-08-25" sentence (the `docs/design/confinement-execution-contract.md` mention
+elides the tail with `…` and needed no change).
 
 **What:** both labels in `internal/tools/exec_common.go:204-219` stop saying "the session
 scratch dir" abstractly and name the paths (ratified call 5). Replace the two string

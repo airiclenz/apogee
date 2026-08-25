@@ -85,7 +85,7 @@ func (t *ConsoleClose) Execute(ctx context.Context, call domain.ToolCall) (domai
 	// lookupConsole reports a Console only when it FOUND one in this context's registry, so
 	// registry is the one holding target and is never nil on this path.
 	closeErr := registry.Close(target.ID)
-	tail := consoleTail(target, 0)
+	tail := consoleTail(ctx, target, 0)
 	if closeErr != nil {
 		// The Console is gone from the registry whatever the teardown said, so this is not a
 		// call to retry: an error here is the pseudo-terminal refusing to be released, not a

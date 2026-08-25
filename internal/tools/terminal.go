@@ -186,7 +186,8 @@ const failFastExitNote = " — fail-fast: the line stopped at the first command 
 // result the kill-on-denial watch stopped carries confinementDenialStopLabel; any other error
 // result from a CONFINED run whose output looks like an OS denial carries
 // confinementDenialLabel — both best-effort, never forced onto a clean exit, and both still
-// follow on their own line after the exit-code line.
+// follow on their own line after the exit-code line. Both are rendered from the box the run
+// was fenced by (subprocessResult.box), so the model reads the writable roots by path.
 func subprocessToolResult(callID string, res subprocessResult) domain.ToolResult {
 	var b strings.Builder
 	if res.timedOut {
@@ -207,9 +208,9 @@ func subprocessToolResult(callID string, res subprocessResult) domain.ToolResult
 		fmt.Fprintf(&b, "\n[exit code %d%s]", res.exitCode, note)
 		switch {
 		case res.denialStopped:
-			b.WriteString("\n" + confinementDenialStopLabel)
+			b.WriteString("\n" + confinementDenialStopLabel(res.box))
 		case res.confined && platform.LooksLikeConfinementDenial(res.combinedOutput):
-			b.WriteString("\n" + confinementDenialLabel)
+			b.WriteString("\n" + confinementDenialLabel(res.box))
 		}
 		return errorResult(callID, b.String())
 	}

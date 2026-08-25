@@ -167,7 +167,7 @@ func (t *ConsoleOpen) Execute(ctx context.Context, call domain.ToolCall) (domain
 	}
 
 	header := fmt.Sprintf("console %d opened: %s", opened.ID, args.Command)
-	tail := consoleOpenTail(opened, consoleWait(args.WaitMS, consoleOpenWaitDefaultMS, consoleOpenWaitMaxMS))
+	tail := consoleOpenTail(ctx, opened, consoleWait(args.WaitMS, consoleOpenWaitDefaultMS, consoleOpenWaitMaxMS))
 	if tail == "" {
 		return okResult(call.ID, header), nil
 	}

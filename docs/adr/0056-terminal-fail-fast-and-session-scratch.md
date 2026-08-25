@@ -47,10 +47,13 @@ watch that forwards every byte and kills the call's process group (contract §2.
 the first streamed OS-denial signature. A denied command therefore ends the script instead of
 handing its remaining lines a half-done state — the job `set -e` cannot do. The stopped call
 renders a definitive error label (`[blocked by workspace confinement: an operation was
-denied, so the command was stopped; writes are allowed only inside the workspace and the
-session scratch dir]`); a confined *unstopped* failure whose output merely looks denial-shaped
-gets the weaker `[likely blocked by workspace confinement: …]` heuristic label; a clean exit
-is never forced into an error. The **shared signature set lives in `internal/platform`**
+denied, so the command was stopped; writes are allowed only inside the workspace <root> and
+<the box's other writable paths>]` — **amended 2026-08-25**: both labels are rendered from the
+`domain.ConfinementBox` the run was fenced by and NAME the writable roots by path, the session
+scratch dir among them, because a model that is only told a fence exists has nowhere to put the
+file); a confined *unstopped* failure whose output merely looks denial-shaped gets the weaker
+`[likely blocked by workspace confinement: …]` heuristic label; a clean exit is never forced
+into an error. The **shared signature set lives in `internal/platform`**
 (`platform.LooksLikeConfinementDenial` — the watch and both labels key on the same list) and
 is the source of truth. It matches **both errnos' spellings**: strerror(EPERM) ("Operation
 not permitted" — what macOS seatbelt denials print) *and* strerror(EACCES) ("Permission

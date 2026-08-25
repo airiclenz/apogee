@@ -200,3 +200,30 @@ func TestConsoleSend_QuotedIDAddressesTheSameConsole(t *testing.T) {
 		t.Errorf("result = %q (isError=%v), want the quoted id to address console %d", res.Content, res.IsError, id)
 	}
 }
+
+// TestConsoleSend_DenialStopLabelNamesTheWritableRoots proves the Console family's fence label
+// travels with the box the Console was opened under: a confined Console whose output carries an
+// OS-denial signature is stopped, and the line the model then reads NAMES the roots it may write
+// to — the workspace and the session scratch dir among them — instead of describing them.
+func TestConsoleSend_DenialStopLabelNamesTheWritableRoots(t *testing.T) {
+	skipWithoutPOSIXShell(t)
+	t.Parallel()
+	ctx, _ := consoleTestCtx(t)
+	scratch := t.TempDir()
+	box := domain.ConfinementBox{WorkspaceRoot: t.TempDir(), WritablePaths: []string{scratch}}
+	ctx = domain.WithConfinement(ctx, domain.Confinement{
+		Confiner: &fakeConfiner{caps: domain.ConfinementCaps{FSWrite: true}},
+		Box:      box,
+	})
+	id := openTestConsole(t, ctx, "sh")
+
+	res, err := NewConsoleSend().Execute(ctx,
+		consoleSendCall("c1", id, `echo "touch: /etc/f: Operation not permitted" >&2`, false, 5000))
+
+	if err != nil {
+		t.Fatalf("Execute err = %v, want nil", err)
+	}
+	if !strings.Contains(res.Content, confinementDenialStopLabel(box)) {
+		t.Errorf("send result = %q, want the stop label naming %s and %s", res.Content, box.WorkspaceRoot, scratch)
+	}
+}

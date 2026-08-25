@@ -124,26 +124,26 @@ func consoleInputBytes(input string, raw bool) []byte {
 
 // consoleTail renders what a Console has to say, returning as soon as SOME output arrives — the
 // polling shape console_read wants, where the question is "has anything happened yet".
-func consoleTail(c *console.Console, wait time.Duration) string {
+func consoleTail(ctx context.Context, c *console.Console, wait time.Duration) string {
 	output, dropped := c.Read(wait)
-	return renderConsoleTail(c, output, dropped, true)
+	return renderConsoleTail(c, output, dropped, true, confinementBox(ctx))
 }
 
 // consoleWindowTail renders what a Console produces over the WHOLE window rather than stopping
 // at the first byte, ending early when the process exits. It is what console_send needs: a
 // terminal echoes the line it was sent before the program answers it, so a collector returning
 // at the first output would hand the model back its own keystrokes and nothing else.
-func consoleWindowTail(c *console.Console, wait time.Duration) string {
+func consoleWindowTail(ctx context.Context, c *console.Console, wait time.Duration) string {
 	output, dropped := collectConsoleWindow(c, wait)
-	return renderConsoleTail(c, output, dropped, true)
+	return renderConsoleTail(c, output, dropped, true, confinementBox(ctx))
 }
 
 // consoleOpenTail is consoleWindowTail without the "alive" line: console_open's first line has
 // already said the Console is open, so the only liveness fact left worth adding is the one that
 // contradicts it — a program that exited before anyone could speak to it.
-func consoleOpenTail(c *console.Console, wait time.Duration) string {
+func consoleOpenTail(ctx context.Context, c *console.Console, wait time.Duration) string {
 	output, dropped := collectConsoleWindow(c, wait)
-	return renderConsoleTail(c, output, dropped, false)
+	return renderConsoleTail(c, output, dropped, false, confinementBox(ctx))
 }
 
 // consoleExitPollInterval is how often collectConsoleWindow re-asks whether a Console's exit has
@@ -197,10 +197,18 @@ func awaitConsoleExit(c *console.Console, deadline time.Time) {
 // so one flooding program cannot fill the model's context from a single read.
 //
 // withAlive is false only for console_open, whose first line already says the Console is open.
-func renderConsoleTail(c *console.Console, output string, dropped int, withAlive bool) string {
+//
+// box is the confinement policy the Console was opened under, whose roots the fence label names
+// by path; nil is the unconfined case, where DenialStopped is always false and the label cannot
+// fire at all.
+func renderConsoleTail(c *console.Console, output string, dropped int, withAlive bool, box *domain.ConfinementBox) string {
 	lines := make([]string, 0, 4)
 	if c.DenialStopped() {
-		lines = append(lines, confinementDenialStopLabel)
+		var fence domain.ConfinementBox
+		if box != nil {
+			fence = *box
+		}
+		lines = append(lines, confinementDenialStopLabel(fence))
 	}
 	if dropped > 0 {
 		lines = append(lines, fmt.Sprintf(consoleDroppedFormat, dropped))

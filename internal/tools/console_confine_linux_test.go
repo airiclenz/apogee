@@ -69,9 +69,10 @@ func TestConsoleOpen_LiveConfinementDenialStopsTheConsole(t *testing.T) {
 	escape := filepath.Join(t.TempDir(), "apogee-console-escape")
 	registry := console.New()
 	t.Cleanup(registry.CloseAll)
+	box := domain.ConfinementBox{WorkspaceRoot: root}
 	ctx := domain.WithConfinement(
 		console.WithRegistry(context.Background(), registry),
-		domain.Confinement{Confiner: confiner, Box: domain.ConfinementBox{WorkspaceRoot: root}},
+		domain.Confinement{Confiner: confiner, Box: box},
 	)
 
 	opened, err := NewConsoleOpen(root, nil).Execute(ctx, consoleOpenCall("c1", "sh", 500))
@@ -92,7 +93,7 @@ func TestConsoleOpen_LiveConfinementDenialStopsTheConsole(t *testing.T) {
 	if err != nil {
 		t.Fatalf("console_send err = %v, want nil", err)
 	}
-	if !strings.Contains(sent.Content, confinementDenialStopLabel) {
+	if !strings.Contains(sent.Content, confinementDenialStopLabel(box)) {
 		t.Errorf("send result = %q, want the kill-on-denial label", sent.Content)
 	}
 	if !waitFor(2*time.Second, func() bool { return !fenced.Alive() }) {

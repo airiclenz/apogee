@@ -386,3 +386,63 @@ func TestRunSubprocessDenialWatchNeverWatchesUnconfined(t *testing.T) {
 		t.Errorf("exitCode = %d, want 0 — the run must complete untouched", res.exitCode)
 	}
 }
+
+// TestConfinementDenialLabelsNameTheWritableRoots pins what the two fence labels now tell the
+// model: the roots it MAY write to, by path. A box with a scratch dir beside the workspace names
+// both, in that order; a box with the workspace alone stops there rather than trailing an empty
+// "and"; and a box naming nothing keeps the abstract wording rather than pointing at "".
+func TestConfinementDenialLabelsNameTheWritableRoots(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name      string
+		box       domain.ConfinementBox
+		want      []string
+		wantNoAnd bool
+	}{
+		{
+			name: "workspace and scratch",
+			box:  domain.ConfinementBox{WorkspaceRoot: "/ws", WritablePaths: []string{"/home/u/.apogee/scratch/s1"}},
+			want: []string{"the workspace /ws", "/home/u/.apogee/scratch/s1"},
+		},
+		{
+			name:      "workspace alone",
+			box:       domain.ConfinementBox{WorkspaceRoot: "/ws"},
+			want:      []string{"the workspace /ws"},
+			wantNoAnd: true,
+		},
+		{
+			name:      "no roots at all",
+			box:       domain.ConfinementBox{},
+			want:      []string{"the workspace and the session scratch dir"},
+			wantNoAnd: false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			labels := map[string]string{
+				"likely": confinementDenialLabel(tc.box),
+				"stop":   confinementDenialStopLabel(tc.box),
+			}
+			for kind, label := range labels {
+				for _, want := range tc.want {
+					if !strings.Contains(label, want) {
+						t.Errorf("%s label = %q, want it to name %q", kind, label, want)
+					}
+				}
+				if tc.wantNoAnd && strings.Contains(label, " and ") {
+					t.Errorf("%s label = %q, want no \" and \" tail when the box names one root", kind, label)
+				}
+				if !strings.HasPrefix(label, "[") || !strings.HasSuffix(label, "]") {
+					t.Errorf("%s label = %q, want it bracketed like every other result marker", kind, label)
+				}
+			}
+			if !strings.Contains(labels["likely"], "likely blocked by workspace confinement") {
+				t.Errorf("likely label = %q, want it to stay the hedged wording", labels["likely"])
+			}
+			if !strings.Contains(labels["stop"], "the command was stopped") {
+				t.Errorf("stop label = %q, want it to stay the definitive wording", labels["stop"])
+			}
+		})
+	}
+}

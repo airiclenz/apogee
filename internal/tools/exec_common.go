@@ -196,6 +196,10 @@ type subprocessResult struct {
 	// failed confined run) so the model learns WHY a write outside the box failed; an
 	// unconfined run must never carry that label, however EPERM-shaped its output.
 	confined bool
+	// box is the confinement policy the run actually executed under, carried through so the
+	// denial labels can name the writable roots BY PATH instead of describing them. It is the
+	// zero box on an unconfined run, where no label is rendered at all.
+	box domain.ConfinementBox
 	// denialStopped reports that the live kill-on-denial watch on a CONFINED run matched an
 	// OS-denial signature and issued the process-group kill (fix A of the 2026-08-22
 	// workspace-clobber incident). subprocessToolResult keys on it for the definitive
@@ -212,24 +216,51 @@ type subprocessResult struct {
 }
 
 // confinementDenialLabel is the line appended to a FAILED confined result whose output looks
-// like an OS confinement denial, so the model learns the write-fence exists instead of
-// treating the EPERM as a broken command and routing around it blind.
-const confinementDenialLabel = "[likely blocked by workspace confinement: writes are allowed" +
-	" only inside the workspace and the session scratch dir]"
+// like an OS confinement denial. It NAMES the roots the run may write to, because a model that
+// is only told a fence exists has nowhere to put the file: the paths are what let it route the
+// write instead of treating the EPERM as a broken command and blindly retrying around it.
+func confinementDenialLabel(box domain.ConfinementBox) string {
+	return "[likely blocked by workspace confinement: writes are allowed only inside " +
+		confinementWritableRoots(box) + "]"
+}
 
 // confinementDenialStopLabel is the line appended when the live kill-on-denial watch stopped
 // the run itself (subprocessResult.denialStopped, console.Console.DenialStopped): stronger than
 // the "likely" label above, because here the harness matched the denial as it streamed and
 // killed the process group, so the model is told plainly that the rest of its script did not
-// run. The OS-denial spellings both labels key on live in internal/platform
-// (platform.LooksLikeConfinementDenial), which is also what the watch scans with.
+// run. It names the writable roots for the same reason that one does — the model's next act is
+// to re-aim the write, and it can only do that against real paths. The OS-denial spellings both
+// labels key on live in internal/platform (platform.LooksLikeConfinementDenial), which is also
+// what the watch scans with.
 //
 // Both labels sit beside the funnel rather than beside one tool: the one-shot execution tools
 // read them off subprocessResult and the Console family reads the stop label off a live
 // Console, and there is one wording for the fence however the model met it.
-const confinementDenialStopLabel = "[blocked by workspace confinement: an operation was" +
-	" denied, so the command was stopped; writes are allowed only inside the workspace and" +
-	" the session scratch dir]"
+func confinementDenialStopLabel(box domain.ConfinementBox) string {
+	return "[blocked by workspace confinement: an operation was denied, so the command was" +
+		" stopped; writes are allowed only inside " + confinementWritableRoots(box) + "]"
+}
+
+// confinementWritableRoots renders the box's writable roots as the tail both denial labels end
+// with: the workspace by path, then every extra writable path the box carries — the session
+// scratch dir among them, which Config.ConfinementBox already folds in. A box naming no root at
+// all (an unconfined zero box reaching a label, which the callers below never do) falls back to
+// the abstract wording rather than pointing the model at an empty path.
+func confinementWritableRoots(box domain.ConfinementBox) string {
+	roots := make([]string, 0, len(box.WritablePaths)+1)
+	if box.WorkspaceRoot != "" {
+		roots = append(roots, "the workspace "+box.WorkspaceRoot)
+	}
+	roots = append(roots, box.WritablePaths...)
+	switch len(roots) {
+	case 0:
+		return "the workspace and the session scratch dir"
+	case 1:
+		return roots[0]
+	default:
+		return roots[0] + " and " + strings.Join(roots[1:], ", ")
+	}
+}
 
 // resolveWorkdirInRoot resolves an execution tool's optional working directory within root
 // (path-safe), or returns the root itself when none is given. Every tool taking a `workdir`
@@ -329,6 +360,7 @@ func runSubprocess(ctx context.Context, spec subprocessSpec) (subprocessResult, 
 	// fails closed the same way, so the escape surfaces as the truthful demote instead of a
 	// silent unconfined run.
 	confined := false
+	var box domain.ConfinementBox
 	if conf, ok := domain.ConfinementFromContext(ctx); ok {
 		if conf.Confiner == nil {
 			return subprocessResult{}, fmt.Errorf("confine %s: %w: the installed handle carries no Confiner",
@@ -338,6 +370,9 @@ func runSubprocess(ctx context.Context, spec subprocessSpec) (subprocessResult, 
 			return subprocessResult{}, fmt.Errorf("confine %s: %w", spec.argv[0], err)
 		}
 		confined = true
+		// The box the run was fenced by rides along on the result: it is what the denial
+		// labels name the writable roots from, and this is the only place it is in hand.
+		box = conf.Box
 	}
 
 	// A CONFINED run's output is watched live for an OS-denial signature; the first match
@@ -366,7 +401,7 @@ func runSubprocess(ctx context.Context, spec subprocessSpec) (subprocessResult, 
 		return subprocessResult{}, ctx.Err()
 	}
 
-	res := subprocessResult{combinedOutput: out.String(), stdout: stdoutOnly.String(), confined: confined}
+	res := subprocessResult{combinedOutput: out.String(), stdout: stdoutOnly.String(), confined: confined, box: box}
 	res.timedOut = runCtx.Err() == context.DeadlineExceeded
 	res.exitCode = exitCodeOf(cmd, runErr)
 	// exec.ErrWaitDelay is not an *exec.ExitError, so exitCodeOf falls through to the leader's

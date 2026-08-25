@@ -52,6 +52,22 @@ point is a **minor** bump, not a breaking change.
   did not stop at a failed command). The confinement labels still follow on their own line,
   unchanged in order.
 
+- **Both confinement denial labels now name the writable roots by path (plan item 3).** The two
+  string constants in `internal/tools/exec_common.go` became functions over the
+  `domain.ConfinementBox` the run was fenced by, so a model that just hit the fence reads
+  ``[blocked by workspace confinement: an operation was denied, so the command was stopped;
+  writes are allowed only inside the workspace /home/u/code/proj and /home/u/.apogee/scratch/<id>]``
+  instead of an abstract "the workspace and the session scratch dir". Naming the roots is what
+  lets it re-aim the write at the point of failure rather than merely learn a fence exists —
+  the same point-of-failure reasoning as the fail-fast exit note. The box travels on
+  `subprocessResult.box` for the one-shot execution tools and as a `*domain.ConfinementBox`
+  parameter into `renderConsoleTail` for the Console family (its three wrappers now take the
+  `ctx` their callers already hold and read the box off it with `confinementBox`). A box that
+  names no writable path at all — never reached from either caller, since an unconfined run is
+  never labelled — keeps the old abstract wording rather than pointing at an empty path.
+  `platform.LooksLikeConfinementDenial`, the kill-on-denial watch and the label ORDER are
+  untouched: only the wording changed. ADR 0056's quoted label carries a dated amendment.
+
 ## [0.17.1] — 2026-08-25
 
 ### Changed

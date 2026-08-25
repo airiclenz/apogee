@@ -75,7 +75,7 @@ func (t *ConsoleRead) Execute(ctx context.Context, call domain.ToolCall) (domain
 	}
 
 	wait := consoleWait(args.WaitMS, consoleReadWaitDefaultMS, consoleReadWaitMaxMS)
-	return okResult(call.ID, consoleTail(target, wait)), nil
+	return okResult(call.ID, consoleTail(ctx, target, wait)), nil
 }
 
 var (
