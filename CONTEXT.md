@@ -200,10 +200,15 @@ notice (with its no-scrollback degrade variant and the interrupted-mid-exchange 
 `context: …` notice; persisting any of them would append a fresh copy on every resume. The
 record is saved **per-Turn** (at each quiescent boundary, so a crash loses at most one Turn),
 listed and resumed from inside the TUI through the `/sessions` **browser**, and replayed on
-resume so the view repaints instead of showing a bare box over a remembering engine. Each of the
-three schema versions is rejected/degraded only by its owning layer (store / TUI / engine). Agent
-mode, approvals, Confinement, and MCP connections are **not** in the record — live host state,
-re-confirmed on resume (ADR [0008](docs/adr/0008-stateless-tools-and-non-forkable-external-effects.md)).
+resume so the view repaints instead of showing a bare box over a remembering engine. A
+**progress save** is the one write that does not wait for the boundary: while a delegation runs
+the TUI re-persists the record at the child's tool boundaries, pairing the LIVE transcript with
+the last boundary snapshot (never a fresh one), so a record read mid-run shows the delegation
+instead of ending at the previous tool call — and a resumed one closes those still-open calls as
+*interrupted*. Each of the three schema versions is rejected/degraded only by its owning layer
+(store / TUI / engine). Agent mode, approvals, Confinement, and MCP connections are **not** in the
+record — live host state, re-confirmed on resume
+(ADR [0008](docs/adr/0008-stateless-tools-and-non-forkable-external-effects.md)).
 See [ADR 0022](docs/adr/0022-sessions-persist-per-turn-as-dual-representation-records.md).
 _Avoid_: "session file" for the Session itself (the *record* is the file; the Session is its
 engine payload), "history" (that is the browser's list of records, not one Session — and it is not

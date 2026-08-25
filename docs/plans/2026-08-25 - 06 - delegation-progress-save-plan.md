@@ -289,10 +289,21 @@ go test ./internal/tui/ -count=1
 
 ---
 
-## 4. Record the decision: ADR 0022 addendum, manual, CONTEXT.md, ISSUES.md
+## 4. Record the decision: ADR 0022 addendum, manual, CONTEXT.md, ISSUES.md — ✅ DONE (2026-08-25)
 
 Depends on items 1–3 (documents what landed). Docs only — no code, no `make check` needed per the
 repo's docs-only convention.
+
+NOTES (2026-08-25): inserting the new sentences re-wrapped a few neighbouring lines in the same
+paragraph in `CONTEXT.md` (the § Session / Session record paragraph tail) and in `docs/manual/sessions.md`
+(the intro paragraph), so the prose keeps each file's existing wrap width; no wording other than the
+inserted sentences changed.
+
+NOTES (2026-08-25): `**progress save**` is deliberately kept unbroken on one line in `CONTEXT.md`
+so the item's acceptance grep (`grep -c "progress save" CONTEXT.md`) matches.
+
+NOTES (2026-08-25): no `CHANGELOG.md` line was added — the item's own condition ("unless a line is
+missing") does not fire: `[Unreleased]` already carries all three entries for items 1, 2 and 3.
 
 **What:**
 

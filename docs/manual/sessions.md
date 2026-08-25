@@ -2,10 +2,14 @@
 
 Every conversation is a session, saved continuously: after each completed turn the
 session is written to `~/.apogee/sessions/` (asynchronously, best-effort), so a
-crash or `kill -9` costs at most the turn in flight. A saved session stores the
-engine's conversation **and** the TUI scrollback, so resuming repaints the
-transcript you actually saw — tool cards included — and relights the context
-gauge, instead of opening an empty view over a model that still remembers.
+crash or `kill -9` costs at most the turn in flight. A turn that hands work to a
+sub-agent is saved as that work runs — a **progress save** fires when the
+delegation is issued and each time the sub-agent finishes a tool — so a long
+delegation is on disk while it happens, not only once its turn ends. A saved
+session stores the engine's conversation **and** the TUI scrollback, so
+resuming repaints the transcript you actually saw — tool cards included — and
+relights the context gauge, instead of opening an empty view over a model that
+still remembers.
 
 - `apogee --continue` resumes this workspace's most recent session; `--resume`
   takes a session id (from `/sessions`) or a file path.
@@ -29,7 +33,10 @@ gauge, instead of opening an empty view over a model that still remembers.
   one — neither deletes; discarding is an explicit `^d` in the browser.
 - A session killed mid-task resumes to the last completed turn and says so;
   `/continue` then picks the unfinished work back up, while sending a new message
-  instead discards it and continues fresh.
+  instead discards it and continues fresh. A delegation that was still running when
+  the session was written comes back marked **interrupted**, with a note saying the
+  sub-agent's unfinished work was not kept: `/continue` re-runs the step that
+  started it, and a new message discards it.
 - The session's **name is written on the top rule**, the hairline above the status
   line — `▔▔▔▔ the name ▔▔▔▔` — so a screen full of panes says which conversation
   each one is. It shows whatever named the session, from `/rename` or from the automatic
