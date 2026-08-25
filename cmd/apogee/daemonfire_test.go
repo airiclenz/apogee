@@ -5,8 +5,11 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
@@ -29,11 +32,14 @@ type daemonFireHarness struct {
 }
 
 // newDaemonFireHarness builds the harness for one host configuration. The apogee home is temporary
-// so no real ~/.apogee can reach the resolution.
+// so no real ~/.apogee can reach the resolution — a caller that needs to prepare that home before
+// the wiring is built (planting a stale scratch dir, say) sets ConfigDir itself and keeps it.
 func newDaemonFireHarness(t *testing.T, opts config.Options) *daemonFireHarness {
 	t.Helper()
 
-	opts.ConfigDir = t.TempDir()
+	if opts.ConfigDir == "" {
+		opts.ConfigDir = t.TempDir()
+	}
 	harness := &daemonFireHarness{runner: &stubRunner{}}
 
 	prevRunner, prevSlots, prevConfiner := runOnce, discoverSlots, newConfiner
@@ -357,5 +363,33 @@ func TestDaemonFireRefusesAnUnadoptedSchedule(t *testing.T) {
 	}
 	if harness.runner.called {
 		t.Error("the firing reached the runner with no entry behind it")
+	}
+}
+
+// The daemon sweeps the stale scratch dirs its own Firings left behind, once at startup — the
+// daemon twin of TestHeadlessRunGetsItsOwnScratchDirAndSweepsStaleOnes (headless_test.go). A host
+// driven only by a daemon never passes the TUI's boot sweep (wire.go), so a Firing's dir would
+// otherwise accumulate one per run forever. The claim is about the START, so the stale dir is
+// planted before the wiring is built and asserted gone the moment it is — no Firing involved.
+func TestDaemonStartupSweepsStaleScratchDirs(t *testing.T) {
+	configDir := t.TempDir()
+	roots, err := resolveRoots(configDir, "")
+	if err != nil {
+		t.Fatalf("resolveRoots: %v", err)
+	}
+	stale := filepath.Join(roots.scratch, "2026-01-01T00-00-00-stale")
+	if err := os.MkdirAll(stale, 0o700); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	aged := time.Now().Add(-scratchMaxAge - time.Hour)
+	if err := os.Chtimes(stale, aged, aged); err != nil {
+		t.Fatalf("Chtimes: %v", err)
+	}
+
+	newDaemonFireHarness(t, config.Options{ConfigDir: configDir})
+
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Errorf("a stale scratch dir survived the daemon's startup (stat err = %v); a host driven "+
+			"only by a daemon never passes the TUI's boot sweep", err)
 	}
 }

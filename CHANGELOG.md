@@ -139,6 +139,15 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **The daemon's startup scratch sweep is pinned (plan item 1).** `newDaemonWiring` sweeps the
+  stale per-Firing scratch dirs once at startup because a host driven only by a daemon never passes
+  the TUI's boot sweep, but nothing asserted it — the daemon suite stayed green with the call
+  deleted. `TestDaemonStartupSweepsStaleScratchDirs` (`cmd/apogee/daemonfire_test.go`), the twin of
+  the headless `TestHeadlessRunGetsItsOwnScratchDirAndSweepsStaleOnes`, plants an aged scratch dir
+  under the config home's scratch root before the wiring is built and asserts it is gone the moment
+  it is. Test-only: `newDaemonFireHarness` now keeps a caller-set `ConfigDir` instead of always
+  minting its own, leaving its existing callers untouched.
+
 - A Schedule Firing raised inside a TUI session now composes its run from the session's LIVE
   settings instead of the snapshot the session booted with: `tools.disabled`, the two
   `url-safety:` host lists, `web-search-endpoint`, `bypass`, `auto-compact`, `ui.inspector`,

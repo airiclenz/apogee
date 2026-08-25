@@ -23,23 +23,6 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 
 ## Open defects
 
-### The daemon's startup scratch sweep is unpinned
-
-**Status:** open 2026-08-24 — deferred at the close of the residuals sweep plan
-(`docs/plans/archived/2026-08-24 - 02 - residuals-sweep-plan.md`); the plan's item-6 Tests
-paragraph named the per-Firing dir assertions only.
-
-`newDaemonWiring` runs `gcScratchDirs(roots.scratch, time.Now())` once at startup
-(`cmd/apogee/daemonfire.go:102`) for the same reason headless does: a host only ever driven by a
-daemon never passes the TUI's boot sweep at `cmd/apogee/wire.go:84`, so this is the only beat on
-which it reclaims the dirs its Firings left behind. Nothing asserts it. The headless twin IS pinned
-— `TestHeadlessRunGetsItsOwnScratchDirAndSweepsStaleOnes` (`cmd/apogee/headless_test.go:570`) plants
-a stale dir and checks it is gone — while the daemon's own test
-(`TestDaemonFireGivesEachFiringItsOwnScratchDir`, `cmd/apogee/daemonfire_test.go:153`) covers only
-the per-Firing dirs, so deleting the sweep call leaves the daemon suite green.
-
----
-
 ### `CONTEXT.md`'s persistence wording still contradicts ADR 0052 §5
 
 **Status:** open 2026-08-24 — deferred at the close of the architecture-review deepening plan
