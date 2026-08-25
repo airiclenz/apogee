@@ -23,6 +23,38 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 
 ## Open defects
 
+### A Console status word inside the program's own output mis-reads as the verdict
+
+**Status:** found 2026-08-25 at the close of the Console-family plan
+(`docs/plans/archived/2026-08-25 - 02 - console-family-plan.md`), deferred out of that run.
+
+- [ ] `consoleStatusMarker` (`internal/tui/toolregistry.go:615`) is
+  `\n?(alive|exited with code (-?\d+)|killed)\s*$` — the leading `\n?` is OPTIONAL and nothing
+  anchors the alternation to the start of a line, so the marker is word-anchored where it means to
+  be line-anchored. A live `console_open` whose last output line ENDS in one of those words ("the
+  dev server is alive") has that word read as the status line: the outcome slot is worded from the
+  program's own prose, and `exitMarkerPhrase` (`internal/tui/toolregistry.go:627`) hands back the
+  body with those characters cut off its end. The fix is one token — `(?:^|\n)` in place of `\n?`.
+  The neighbouring `exitCodeMarker` needs no such change: its `[exit code N]` brackets already keep
+  it off prose.
+
+---
+
+### Resuming a stored session leaves the outgoing conversation's Consoles running
+
+**Status:** found 2026-08-25 at the close of the Console-family plan; recorded rather than fixed
+because the session-switch case wants an owner call.
+
+- [ ] `ClearContext` closes every Console at the `/new` boundary — the ids live in the history that
+  call drops, so leaving the shells running would be the forgotten-process leak the cap exists to
+  prevent (`internal/agent/agent.go:809`, ADR 0059 §1) — and the engine's `Close` sweeps the same
+  set at exit (`internal/agent/agent.go:377`). `RestoreSession` (`internal/agent/agent.go:834`)
+  sweeps nothing: resuming a stored session from the TUI picker
+  (`internal/tui/sessions.go:514`) swaps the conversation and leaves the previous one's Consoles
+  alive under ids the restored conversation cannot name — the same unnameable-shell leak, reached
+  by a different door. Whether a session switch should close them, or a restored session should
+  adopt them, is the call to settle before touching either path.
+
 ## Parked / deferred work
 
 Live, deliberately deferred work only. Each entry records *enough* design that we don't re-derive
