@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"sync"
 	"testing"
 
@@ -98,6 +99,64 @@ func TestBeatCarriesTotalSlots(t *testing.T) {
 			t.Errorf("TotalSlots = %d, want 0 — a server with no /props names no width", beat.TotalSlots)
 		}
 	})
+}
+
+// The dial the bound model exposes is a property of the BINDING, so it rides the same beat as the
+// window and the slot count rather than being probed for separately. The monitor copies what
+// discovery reported and judges none of it: the detection matrix itself is proved in
+// internal/provider/discovery_test.go, and what is asserted here is only that the observation
+// reaches the caller intact — including the "no tell" zero value, which changes no behaviour.
+func TestBeatCarriesEffortSupport(t *testing.T) {
+	t.Parallel()
+
+	const plainModels = `{"data":[{"id":"m","context_length":32768}]}`
+
+	tests := []struct {
+		name   string
+		models string
+		props  string
+		want   provider.EffortSupport
+	}{
+		{
+			name:   "a chat template naming the dial rides the beat as the kwargs dialect",
+			models: plainModels,
+			props:  `{"default_generation_settings":{"n_ctx":16384},"chat_template":"{% if reasoning_effort %}...{% endif %}"}`,
+			want:   provider.EffortSupport{Supported: true, Dialect: provider.EffortDialectKwargs},
+		},
+		{
+			name: "an advertised reasoning object rides the beat with its set and default",
+			models: `{"data":[{"id":"m","context_length":32768,` +
+				`"reasoning":{"supported_efforts":["low","high"],"default_effort":"high"}}]}`,
+			props: "",
+			want: provider.EffortSupport{
+				Supported: true,
+				Dialect:   provider.EffortDialectReasoning,
+				Efforts:   []string{"low", "high"},
+				Default:   "high",
+			},
+		},
+		{
+			name:   "a server with neither tell beats an unsupported dial",
+			models: plainModels,
+			props:  `{"default_generation_settings":{"n_ctx":16384}}`,
+			want:   provider.EffortSupport{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			srv := discoveryServer(t, tt.models, tt.props)
+
+			beat := NewMonitor(srv.URL, "", "").Beat(context.Background())
+
+			got := beat.EffortSupport
+			if got.Supported != tt.want.Supported || got.Dialect != tt.want.Dialect ||
+				got.Default != tt.want.Default || !slices.Equal(got.Efforts, tt.want.Efforts) {
+				t.Errorf("EffortSupport = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
 }
 
 func TestBeatHintPinsActiveWindow(t *testing.T) {

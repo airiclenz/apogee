@@ -63,6 +63,14 @@ type Beat struct {
 	// at the next boundary (ADR 0039 decision 2, ADR 0024's rebind). One more field on the
 	// observation that already lands every Interval, never a probe of its own.
 	TotalSlots int
+	// EffortSupport is what the same discovery saw about the ACTIVE model's thinking-effort dial
+	// (ADR 0060): whether the dial exists, which wire dialect reaches it, and the vocabulary and
+	// default the server stated. Like TotalSlots it is a property of the BINDING rather than of the
+	// launch — a rebind, or an operator swapping the model under a running server, moves it — so it
+	// is re-observed every Interval on the beat that already lands, never probed for on its own.
+	// Only the host acts on it (the /effort menu entry, the footer segment and the picker's rows);
+	// the zero value is both "no dial" and "no tell to read", and changes no behaviour.
+	EffortSupport provider.EffortSupport
 	// AvailableModels is every advertised model, in the order the server listed them.
 	AvailableModels []ModelSummary
 	// Resolution grades HOW discovery reached ActiveModel — advertised verbatim, matched on the
@@ -130,6 +138,7 @@ func (m *Monitor) Beat(ctx context.Context) Beat {
 		ActiveModel:     info.ActiveModel,
 		ContextWindow:   info.ContextWindow,
 		TotalSlots:      info.TotalSlots,
+		EffortSupport:   info.EffortSupport,
 		Resolution:      info.Resolution,
 		AvailableModels: make([]ModelSummary, 0, len(info.AvailableModels)),
 	}

@@ -10,6 +10,13 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **The heartbeat carries the detected thinking-effort dial (plan item 5).** `heartbeat.Beat`
+  gains an `EffortSupport` field, copied from discovery beside the context window and the slot
+  count, so the host re-observes the bound model's dial — support, wire dialect, reported level
+  set and default — every interval instead of capturing it at launch. No second probe and no
+  extra call: it rides the beat that already lands. The zero value ("no dial", or "no tell to
+  read") changes no behaviour.
+
 - **Discovery detects the active model's thinking-effort dial (plan item 3).** Discovery now
   detects, passively from the payloads it already fetches, whether the active model exposes a
   thinking-effort dial: a llama.cpp `GET /props` chat template that mentions `reasoning_effort` or

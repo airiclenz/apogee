@@ -347,7 +347,9 @@ three keys (byte-identical anchor).
 
 ---
 
-## 5. Carry effort detection on the heartbeat Beat
+## 5. Carry effort detection on the heartbeat Beat — ✅ DONE (2026-08-25)
+
+NOTES (2026-08-25): the beat test is a new table-driven `TestBeatCarriesEffortSupport` (mirroring `TestBeatCarriesTotalSlots`) rather than extra asserts inside `TestBeatCarriesDiscovery` — same file, same stub server, keeps one logical subject per test.
 
 **What:** Add `EffortSupport provider.EffortSupport` to `heartbeat.Beat`
 (`internal/heartbeat/heartbeat.go:46`) and populate it in `Monitor.Beat`
