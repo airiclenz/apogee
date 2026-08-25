@@ -12,6 +12,7 @@ import (
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/heartbeat"
+	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/schedule"
 	"github.com/airiclenz/apogee/internal/scheme"
 	"github.com/airiclenz/apogee/internal/session"
@@ -274,7 +275,14 @@ type ServerHost interface {
 	// exchange-terminal fold when a worker owns the engine — the quiescent boundary Agent.Rebind
 	// demands (ADR 0024). It returns what was actually BOUND, which is not always what was observed
 	// (a `context-window:` pin outranks the server's window), plus any notices to surface.
-	Rebind(model string, contextWindow int) (RebindResult, error)
+	//
+	// effortDialect is the wire shape the SERVER reads a thinking-effort intent in, as the beat
+	// that carried this observation reported it (ADR 0060). The TUI passes it through untouched:
+	// it is the one effort fact the engine needs, and the only one that crosses — what a model
+	// reports as its level vocabulary and its default stays here, in [heartbeatState]. The zero
+	// value is "this server advertises no dial", which keeps the historical `chat_template_kwargs`
+	// shape and so reproduces the request bytes that predate the dialect seam.
+	Rebind(model string, contextWindow int, effortDialect provider.EffortDialect) (RebindResult, error)
 
 	// List names the upstream servers this session can be switched to — the `/server` picker's
 	// rows and the `/settings` server row's popup, in the order the binary assembled them: every

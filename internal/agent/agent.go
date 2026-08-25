@@ -157,6 +157,19 @@ type Agent struct {
 	effortMu       sync.RWMutex
 	effortOverride domain.ThinkingEffort
 
+	// effortDialect is the wire shape THIS server reads a thinking-effort intent in — the one
+	// effort fact that crosses into the engine (ADR 0060). It is a property of the SERVER, not of
+	// the model, so it arrives the way the other server-scoped bounds do: on the RebindSpec the
+	// composition root computes whole, committed by Rebind. Unlike the override above it carries
+	// NO lock, because it moves only at the idle-only Rebind boundary that a.cfg itself moves at
+	// (the boundary IS the synchronization — see Rebind), while the wire projection reads it once
+	// per request on the worker goroutine.
+	//
+	// The zero value (provider.EffortDialectNone) is the wire anchor: it reproduces the request
+	// bytes that predate the dialect seam, so a session nobody has rebound with a detected dialect
+	// speaks exactly as it always did (ADR 0031).
+	effortDialect provider.EffortDialect
+
 	// liveMode, when non-nil, is a sub-agent's read-only view of its PARENT's live mode: the
 	// parent's effectiveMode accessor, captured at spawn (ADR 0013). The per-call
 	// Resolution takes the TIGHTER of this and the child's own spawn mode, so a parent that

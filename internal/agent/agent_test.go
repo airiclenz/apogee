@@ -2,12 +2,14 @@ package agent
 
 // The engine doors on the Agent itself. Today that is the Thinking-effort override
 // (SetEffortOverride / ThinkingEffort): what the door does to the session, what it deliberately
-// does NOT do to a delegated child, and how it composes with a model switch.
+// does NOT do to a delegated child, and how it composes with a model switch — plus the effort WIRE
+// DIALECT the same switch carries in from the server (ADR 0060).
 
 import (
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/provider"
 )
 
 // TestEffortOverrideLayersOverTheProfile is the door's own contract: the two layers are reported
@@ -120,5 +122,45 @@ func TestEffortOverrideSurvivesARebind(t *testing.T) {
 	a.SetEffortOverride("")
 	if got := a.resolvedEffort(); got != domain.EffortMedium {
 		t.Errorf("resolved effort after clearing = %q, want the new profile's %q", got, domain.EffortMedium)
+	}
+}
+
+// TestRebindCarriesTheEffortDialectOntoTheRequest is the server half of the effort seam: the
+// dialect is not a per-model binding but a fact about the server the session is on, and it reaches
+// the engine through the one channel a server fact has — the RebindSpec (ADR 0060). What the next
+// request carries is what the last spec stated.
+func TestRebindCarriesTheEffortDialectOntoTheRequest(t *testing.T) {
+	t.Parallel()
+
+	a, err := newAgent(baseConfig(&recordingSink{}), &scriptedResponder{})
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+
+	// The anchor first: a session nobody has dialled asks for no dialect at all, so the request is
+	// byte-identical to the pre-dialect loop (ADR 0031).
+	if got := a.toProviderRequest(effortTestRequest()).EffortDialect; got != provider.EffortDialectNone {
+		t.Fatalf("dialect before any rebind = %q, want the zero anchor", got)
+	}
+
+	if err := a.Rebind(RebindSpec{
+		Model:            "another-model",
+		MaxContextTokens: 8192,
+		EffortDialect:    provider.EffortDialectReasoning,
+	}); err != nil {
+		t.Fatalf("Rebind: %v", err)
+	}
+	if got := a.toProviderRequest(effortTestRequest()).EffortDialect; got != provider.EffortDialectReasoning {
+		t.Errorf("dialect after the rebind = %q, want the spec's %q", got, provider.EffortDialectReasoning)
+	}
+
+	// And a move onto a server that advertises no dial states the zero rather than staying silent:
+	// keeping the departed server's shape would express this session's effort in a dialect the
+	// server it is now on does not read.
+	if err := a.Rebind(RebindSpec{Model: "third-model", MaxContextTokens: 8192}); err != nil {
+		t.Fatalf("Rebind onto an undialled server: %v", err)
+	}
+	if got := a.toProviderRequest(effortTestRequest()).EffortDialect; got != provider.EffortDialectNone {
+		t.Errorf("dialect after rebinding onto an undialled server = %q, want the zero", got)
 	}
 }

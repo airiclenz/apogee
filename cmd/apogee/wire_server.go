@@ -17,6 +17,7 @@ import (
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/filewatch"
 	"github.com/airiclenz/apogee/internal/heartbeat"
+	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/session"
 	"github.com/airiclenz/apogee/internal/tui"
 )
@@ -195,9 +196,11 @@ func (h serverHost) Acts() tui.ServerActs {
 func (h serverHost) Beat(ctx context.Context) heartbeat.Beat { return h.w.beat(ctx) }
 
 // Rebind re-resolves the per-model bindings for an observed change — the composition root's half of
-// ADR 0024's split, run on the Update goroutine at the quiescent boundary the renderer picked.
-func (h serverHost) Rebind(model string, contextWindow int) (tui.RebindResult, error) {
-	return h.w.rebind(model, contextWindow)
+// ADR 0024's split, run on the Update goroutine at the quiescent boundary the renderer picked. The
+// effort wire dialect rides past it untouched: it is the renderer's observation, not this root's
+// resolution (ADR 0060).
+func (h serverHost) Rebind(model string, contextWindow int, effortDialect provider.EffortDialect) (tui.RebindResult, error) {
+	return h.w.rebind(model, contextWindow, effortDialect)
 }
 
 // List projects the switchable servers from the HOLDER on every ask rather than from a snapshot, so

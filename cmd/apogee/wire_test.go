@@ -27,6 +27,7 @@ import (
 	"github.com/airiclenz/apogee/internal/mechanisms"
 	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/profiles"
+	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/scheme"
 	"github.com/airiclenz/apogee/internal/security"
 	"github.com/airiclenz/apogee/internal/session"
@@ -133,7 +134,7 @@ func TestRunRootThreadsContextWindow(t *testing.T) {
 			if !serverActsOf(rec.opts).CanRebind {
 				t.Fatal("tui.ServerActs.CanRebind is false; the composition root did not wire the rebind closure")
 			}
-			result, err := rec.opts.Server.Rebind("fake", tt.observed)
+			result, err := rec.opts.Server.Rebind("fake", tt.observed, provider.EffortDialectNone)
 			if err != nil {
 				t.Fatalf("Rebind: %v", err)
 			}
@@ -207,7 +208,7 @@ func TestRebindRecomposesTheToolSetUnderTheProfileRoster(t *testing.T) {
 		t.Fatal("view_diff is on the startup set; the global tools.disabled: did not prune it")
 	}
 
-	result, err := w.rebind("model-b", 8192)
+	result, err := w.rebind("model-b", 8192, provider.EffortDialectNone)
 	if err != nil {
 		t.Fatalf("rebind onto model-b: %v", err)
 	}
@@ -220,7 +221,7 @@ func TestRebindRecomposesTheToolSetUnderTheProfileRoster(t *testing.T) {
 
 	// Switching back onto a model with no roster axis composes the set the global lists describe:
 	// the lift belonged to model-b's profile, not to the session.
-	if _, err := w.rebind("model-a", 8192); err != nil {
+	if _, err := w.rebind("model-a", 8192, provider.EffortDialectNone); err != nil {
 		t.Fatalf("rebind back onto model-a: %v", err)
 	}
 	if liveSetHas(w.toolSet, "view_diff") {
@@ -241,7 +242,7 @@ func TestRebindReportsARefusedRosterSwapAsANotice(t *testing.T) {
 	w.toolSet = newLiveTools(w.toolSet.current, w.toolSet.built(),
 		func(toolSetSpec) *apogee.ToolRegistry { return nil })
 
-	result, err := w.rebind("model-b", 8192)
+	result, err := w.rebind("model-b", 8192, provider.EffortDialectNone)
 	if err != nil {
 		t.Fatalf("rebind must not fail over a refused swap, the binding had already committed: %v", err)
 	}
@@ -462,7 +463,7 @@ func TestRebindResolutionKeysOnTheBoundEndpoint(t *testing.T) {
 	// The rebind closure the composition root wires, reconstructed as the other rebind tests do.
 	var spec apogee.RebindSpec
 	var notices []string
-	rebind := func(model string, window int) (tui.RebindResult, error) {
+	rebind := func(model string, window int, _ provider.EffortDialect) (tui.RebindResult, error) {
 		bound := upstreamBinding{Endpoint: boundEndpoint, Model: model}
 		base, manualIDs, pinnedWindow, outputCap := live.rebindInputs(launchOpts, bound)
 		got, ns, err := rebindSpecFor(base, roots, manualIDs, model, window, pinnedWindow, outputCap)
@@ -473,7 +474,7 @@ func TestRebindResolutionKeysOnTheBoundEndpoint(t *testing.T) {
 		return tui.RebindResult{Model: got.Model, ContextWindow: got.MaxContextTokens}, nil
 	}
 
-	if _, err := rebind(gemmaKey, 8192); err != nil {
+	if _, err := rebind(gemmaKey, 8192, provider.EffortDialectNone); err != nil {
 		t.Fatalf("rebind: %v", err)
 	}
 	if len(spec.EnableMechanisms) == 0 {
@@ -3863,14 +3864,15 @@ type rebindProbe struct {
 }
 
 // rebindCall is one drive: the model the session was bound to, and the observation it was re-driven
-// with (0 until a beat has named a window).
+// with (0 until a beat has named a window, and the zero dialect until one has named that).
 type rebindCall struct {
-	model  string
-	window int
+	model   string
+	window  int
+	dialect provider.EffortDialect
 }
 
-func (p *rebindProbe) rebind(model string, window int) (tui.RebindResult, error) {
-	p.calls = append(p.calls, rebindCall{model: model, window: window})
+func (p *rebindProbe) rebind(model string, window int, dialect provider.EffortDialect) (tui.RebindResult, error) {
+	p.calls = append(p.calls, rebindCall{model: model, window: window, dialect: dialect})
 	if p.err != nil {
 		return tui.RebindResult{}, p.err
 	}
@@ -3884,7 +3886,7 @@ func (p *rebindProbe) rebind(model string, window int) (tui.RebindResult, error)
 func TestApplySettingContextWindowPinRidesTheRebind(t *testing.T) {
 	t.Parallel()
 	live := newLiveSettings(config.Options{ContextWindow: 4096}, nil)
-	live.observe(8192) // what the last landed beat could name about the server's own window
+	live.observe(8192, provider.EffortDialectNone) // what the last landed beat could name about the server's own window
 	probe := &rebindProbe{}
 	spy := &applySettingSpy{}
 	apply := applySettingFor(settingsApplier{
@@ -3990,12 +3992,13 @@ func TestApplySettingSystemPromptReResolvesFromTheFile(t *testing.T) {
 	// The rebind closure the composition root wires: it re-resolves through the holder, so what the
 	// dispatcher installed there is what the spec carries.
 	var spec apogee.RebindSpec
-	rebind := func(model string, window int) (tui.RebindResult, error) {
+	rebind := func(model string, window int, dialect provider.EffortDialect) (tui.RebindResult, error) {
 		base, manualIDs, pinnedWindow, outputCap := live.rebindInputs(launchOpts, upstreamBinding{Model: "bound-model"})
 		got, _, err := rebindSpecFor(base, roots, manualIDs, model, window, pinnedWindow, outputCap)
 		if err != nil {
 			return tui.RebindResult{}, err
 		}
+		got.EffortDialect = dialect
 		spec = got
 		return tui.RebindResult{Model: got.Model, ContextWindow: got.MaxContextTokens}, nil
 	}
@@ -4972,7 +4975,7 @@ func TestStartupBindHonoursTheEntrysContextWindow(t *testing.T) {
 			}
 			// And the first beat cannot undo it: the rebind that observation drives re-resolves the
 			// pin off the same latch, so a server advertising 131,072 does not displace it.
-			result, err := rec.opts.Server.Rebind("fake", 131072)
+			result, err := rec.opts.Server.Rebind("fake", 131072, provider.EffortDialectNone)
 			if err != nil {
 				t.Fatalf("Rebind: %v", err)
 			}
@@ -5067,19 +5070,20 @@ func TestApplySettingServersRidesTheRebindForTheBoundEntrysWindow(t *testing.T) 
 	// 16,384, and a beat that has since reported what the server itself advertises.
 	launchOpts := config.Options{ContextWindow: 16384, HostAlias: "here", StartupContextWindow: 32768}
 	live := newLiveSettings(launchOpts, nil)
-	live.observe(131072)
+	live.observe(131072, provider.EffortDialectNone)
 
 	// The rebind closure the composition root wires: it re-resolves through the holder, so the spec
 	// it builds is what the engine would be handed.
 	var spec apogee.RebindSpec
 	drives := 0
-	rebind := func(model string, window int) (tui.RebindResult, error) {
+	rebind := func(model string, window int, dialect provider.EffortDialect) (tui.RebindResult, error) {
 		drives++
 		base, manualIDs, pinnedWindow, outputCap := live.rebindInputs(launchOpts, upstreamBinding{Model: model})
 		got, _, err := rebindSpecFor(base, roots, manualIDs, model, window, pinnedWindow, outputCap)
 		if err != nil {
 			return tui.RebindResult{}, err
 		}
+		got.EffortDialect = dialect
 		spec = got
 		return tui.RebindResult{Model: got.Model, ContextWindow: got.MaxContextTokens}, nil
 	}
@@ -5223,19 +5227,20 @@ func TestApplySettingServersRidesTheRebindForTheBoundEntrysReplyCap(t *testing.T
 	// top-level window key, and a beat that has since reported what the server advertises.
 	launchOpts := config.Options{ContextWindow: 16384, HostAlias: "here", StartupMaxOutputTokens: 2048}
 	live := newLiveSettings(launchOpts, nil)
-	live.observe(131072)
+	live.observe(131072, provider.EffortDialectNone)
 
 	// The rebind closure the composition root wires: it re-resolves through the holder, so the spec it
 	// builds is what the engine would be handed.
 	var spec apogee.RebindSpec
 	drives := 0
-	rebind := func(model string, window int) (tui.RebindResult, error) {
+	rebind := func(model string, window int, dialect provider.EffortDialect) (tui.RebindResult, error) {
 		drives++
 		base, manualIDs, pinnedWindow, outputCap := live.rebindInputs(launchOpts, upstreamBinding{Model: model})
 		got, _, err := rebindSpecFor(base, roots, manualIDs, model, window, pinnedWindow, outputCap)
 		if err != nil {
 			return tui.RebindResult{}, err
 		}
+		got.EffortDialect = dialect
 		spec = got
 		return tui.RebindResult{Model: got.Model, ContextWindow: got.MaxContextTokens}, nil
 	}
@@ -5379,19 +5384,20 @@ func TestApplySettingServersRidesTheRebindForTheBoundEntrysResponseReserve(t *te
 	// top-level window key, and a beat that has since reported what the server advertises.
 	launchOpts := config.Options{ContextWindow: 16384, HostAlias: "here", StartupResponseReserve: 0.25}
 	live := newLiveSettings(launchOpts, nil)
-	live.observe(131072)
+	live.observe(131072, provider.EffortDialectNone)
 
 	// The rebind closure the composition root wires: it re-resolves through the holder, so the spec it
 	// builds is what the engine would be handed.
 	var spec apogee.RebindSpec
 	drives := 0
-	rebind := func(model string, window int) (tui.RebindResult, error) {
+	rebind := func(model string, window int, dialect provider.EffortDialect) (tui.RebindResult, error) {
 		drives++
 		base, manualIDs, pinnedWindow, outputCap := live.rebindInputs(launchOpts, upstreamBinding{Model: model})
 		got, _, err := rebindSpecFor(base, roots, manualIDs, model, window, pinnedWindow, outputCap)
 		if err != nil {
 			return tui.RebindResult{}, err
 		}
+		got.EffortDialect = dialect
 		spec = got
 		return tui.RebindResult{Model: got.Model, ContextWindow: got.MaxContextTokens}, nil
 	}

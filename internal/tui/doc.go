@@ -422,7 +422,9 @@
 // The upstream heartbeat is the package's SECOND tick chain, and it deliberately reuses the
 // first one's shape. [ServerHost.Beat] is a narrow seam the binary backs with an
 // internal/heartbeat monitor — this package imports that one for the Beat value and the Interval
-// cadence, never internal/provider (ADR 0010) — and the Model owns only WHEN: [Model.Init] fires
+// cadence, and internal/provider for the effort-detection VALUE TYPES a beat now carries
+// (provider.EffortSupport and its dialect, ADR 0060), never for the wire itself: no request is
+// built here and no HTTP is spoken here (ADR 0010) — and the Model owns only WHEN: [Model.Init] fires
 // the first beat immediately, because startup discovery IS that beat now (the binary paints before
 // the server has answered), and the beatMsg fold re-arms from the LANDED beat rather than off a
 // fixed clock, so an observation and its wait are strictly sequential and two beats can never

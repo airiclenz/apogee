@@ -22,6 +22,7 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/mechanisms"
 	"github.com/airiclenz/apogee/internal/profiles"
+	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/skills"
 	"github.com/airiclenz/apogee/internal/tui"
 )
@@ -69,6 +70,11 @@ type liveSettings struct {
 	// the rebind closure with no beat of its own, and a pin CLEARED to 0 must then bind the discovered
 	// window rather than unbind it. Nothing outside a beat knows this number.
 	observedWindow int
+	// effortDialect is the effort wire dialect the last beat reported for this server (ADR 0060),
+	// remembered for observedWindow's reason and read back the same way: a `/settings` edit re-drives
+	// the rebind closure with no beat of its own, and passing a zero there would tell the engine a
+	// server the heartbeat had already dialled advertises no thinking-effort dial at all.
+	effortDialect provider.EffortDialect
 	// entryWindow is the BOUND `servers:` entry's own `context-window:` pin (ADR 0045), 0 when that
 	// entry pins none. It is held beside the top-level key rather than folded into it because the two
 	// are different statements — this one describes the server the session is on, and a move replaces
@@ -278,16 +284,20 @@ func (s *liveSettings) window() int {
 	return config.ResolveContextWindow(s.entryWindow, s.pinnedWindow)
 }
 
-// observe records the context window a landed beat reported. A beat that could not name one (0) is
-// not evidence the window changed — only that this beat could not say — so it is dropped rather than
-// written, exactly as the TUI's own observation treats it.
-func (s *liveSettings) observe(window int) {
-	if window <= 0 {
-		return
-	}
+// observe records what a landed beat reported about the server: the context window, and the effort
+// wire dialect that reaches its thinking-effort dial (ADR 0060).
+//
+// The two are written under different rules because their zeroes say different things. A beat that
+// could not name a window (0) is not evidence the window changed — only that this beat could not say
+// — so it is dropped rather than written, exactly as the TUI's own observation treats it. The
+// dialect's zero IS the answer, "this server advertises no dial", so it is always written.
+func (s *liveSettings) observe(window int, dialect provider.EffortDialect) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.observedWindow = window
+	if window > 0 {
+		s.observedWindow = window
+	}
+	s.effortDialect = dialect
 }
 
 // observed reports the last window a beat could name (0 until one has). It is what a rebind driven by
@@ -297,6 +307,17 @@ func (s *liveSettings) observed() int {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.observedWindow
+}
+
+// observedDialect reports the effort wire dialect the last beat named for this server (the zero
+// until one has, which keeps the historical `chat_template_kwargs` shape and so reproduces the
+// request bytes that predate the dialect seam). It is [liveSettings.observed]'s counterpart for
+// the dial, and it exists for the same reason: a rebind driven by a `/settings` edit rather than by
+// a beat has to re-state the server fact the heartbeat observed instead of clearing it.
+func (s *liveSettings) observedDialect() provider.EffortDialect {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.effortDialect
 }
 
 // serverList reports the `servers:` entries as they stand now — the question the `server:` recording
@@ -679,7 +700,7 @@ type settingsApplier struct {
 	binding func() upstreamBinding
 	// rebind is [tui.ServerHost.Rebind]'s own closure: the per-model re-resolution, which reads live
 	// through rebindInputs and commits through the engine's idle-only Rebind.
-	rebind func(model string, window int) (tui.RebindResult, error)
+	rebind func(model string, window int, effortDialect provider.EffortDialect) (tui.RebindResult, error)
 	// configPath is the config.yaml this session resolved — re-read whole for the keys whose value is
 	// a structure no single string can spell.
 	configPath string
@@ -1322,7 +1343,10 @@ func (a settingsApplier) rideTheRebind() error {
 	if model == "" {
 		return nil
 	}
-	_, err := a.rebind(model, a.live.observed())
+	// The server facts a beat observed, re-stated rather than re-derived: this rebind is driven by a
+	// config edit, so the window and the effort dialect the heartbeat last named are what it has to
+	// carry (ADR 0060 for the dialect, [liveSettings.observe] for both).
+	_, err := a.rebind(model, a.live.observed(), a.live.observedDialect())
 	return err
 }
 

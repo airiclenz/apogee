@@ -121,16 +121,33 @@ type RebindSpec struct {
 	// that injected Config.Tools or took the SwapTools door owns its set and folds its own deltas
 	// in where it builds (applyRoster).
 	Profile domain.ModelProfile
+	// EffortDialect is the wire shape the server this session is on reads a thinking-effort intent
+	// in — `chat_template_kwargs`, OpenRouter's `reasoning` object, or OpenAI's top-level
+	// `reasoning_effort` (ADR 0060). It is the THIRD field here that is not a per-MODEL fact, and
+	// it rides this spec for the two bounds' reason: the dialect is detected per SERVER (or pinned
+	// by that entry's `effort-dialect:`), and neither the detection nor the pin has an engine
+	// setter of its own, so the atomic commit a rebind already makes is the only door either can
+	// reach the engine through.
+	//
+	// A plain value rather than a pointer, and that is deliberate: the caller resolving a binding
+	// always knows what the server said about the dial, so there is nothing to be silent about, and
+	// the zero (provider.EffortDialectNone) is itself the meaningful answer — "this server
+	// advertises no dial", which keeps the historical `chat_template_kwargs` shape and so
+	// reproduces the request bytes that predate the dialect seam (ADR 0031). It is the ONLY effort
+	// fact that crosses into the engine: the level vocabulary a server reports, and the level it
+	// defaults to, stay host-side.
+	EffortDialect provider.EffortDialect
 }
 
 // Rebind swaps the Agent's per-model bindings at a quiescent boundary — the wire model, the
 // system-prompt template, the context window the Budget and Compaction measure against, the
 // catalogued Mechanism set, and the profile with the tool roster its third axis spells (ADR 0057)
 // — and rebinds the provider client's wire model with them. It is the
-// engine half of the heartbeat's observed model change (ADR 0024). A spec may carry two bounds that
-// are NOT per-model, the reply ceiling (ADR 0046) and the share of the window reserved for that
-// reply, for the reason their fields state: neither pin has a setter of its own, so a live edit of
-// them reaches the engine through this same atomic commit.
+// engine half of the heartbeat's observed model change (ADR 0024). A spec may carry three facts that
+// are NOT per-model — the reply ceiling (ADR 0046), the share of the window reserved for that reply,
+// and the wire dialect the server reads a thinking-effort intent in (ADR 0060) — for the reason
+// their fields state: none of the three has a setter of its own, so a live edit of them reaches the
+// engine through this same atomic commit.
 //
 // Idle-only, like ClearContext and RestoreSession: it refuses mid-Exchange (ErrInputPending), and
 // the host applies a change observed mid-Exchange at the terminal boundary instead. That
@@ -155,6 +172,9 @@ type RebindSpec struct {
 // applyProfile SetProfile uses installs it, so the next response is read in the new model's
 // dialect rather than the departed model's, and the next request offers the new model's menu
 // rather than the departed model's.
+// What MOVES with the SERVER, since ADR 0060: the effort wire dialect, applied as the spec states
+// it — the zero included, since "this server advertises no dial" is an answer about the server the
+// session is on rather than a licence to keep the departed one's shape.
 // What resets: the token estimator (its chars→token calibration described the OLD model) and the
 // compaction saturation latch (it was judged against the old window).
 func (a *Agent) Rebind(spec RebindSpec) error {
@@ -232,6 +252,13 @@ func (a *Agent) Rebind(spec RebindSpec) error {
 	if binder, ok := a.upstream.(interface{ SetModel(string) }); ok {
 		binder.SetModel(spec.Model)
 	}
+	// The dialect the next request expresses its effort in, taken as the spec states it — the zero
+	// included, which is this server advertising no dial and keeps the historical
+	// `chat_template_kwargs` shape, reproducing the request bytes that predate the dialect seam.
+	// Written here, inside the commit, so a spec that failed a gate above moves it no more than it
+	// moves the bindings beside it; it needs no lock for the reason the a.cfg assignment above
+	// needs none (see this method's doc).
+	a.effortDialect = spec.EffortDialect
 	a.tokens = apogeectx.NewTokenEstimator()
 	a.compactSat = false
 	return nil

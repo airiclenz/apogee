@@ -374,7 +374,17 @@ is copied onto the Beat.
 
 ---
 
-## 6. Plumb the wire dialect from the beat into the engine request
+## 6. Plumb the wire dialect from the beat into the engine request — ✅ DONE (2026-08-25)
+
+NOTES (2026-08-25): `RebindSpec.EffortDialect` is a plain value, not a pointer like `MaxOutputTokens`. The item said "documented like `MaxOutputTokens`" (its per-server rationale), and the plan's own TUI seam signature takes a value; a caller that resolves a binding always knows what the server said, so there is nothing to be silent about and the zero is itself the meaningful answer ("no dial").
+
+NOTES (2026-08-25): `heartbeatState` gained a narrow `observedDialect` beside `observedModel`/`observedWindow`, because the `picker.go:746` call site the item names has no beat of its own — passing a zero there would silently un-dial a session the heartbeat had already dialled. Item 7's fuller `effort provider.EffortSupport` field supersedes it: that item can drop `observedDialect` and read `m.hb.effort.Dialect` at both sites.
+
+NOTES (2026-08-25): `cmd/apogee/wire_settings.go` is touched beyond the item's Files list, unavoidably — `settingsApplier.rebind` holds the same closure type, so the signature had to move. `liveSettings` gained an `effortDialect` remembered by `observe` and read back by `observedDialect()`, exactly mirroring the existing `observedWindow`/`observed()` pair, so a `/settings` edit that rides the rebind re-states the observed dialect instead of clearing it.
+
+NOTES (2026-08-25): `internal/tui/doc.go`'s claim that the package imports "never internal/provider (ADR 0010)" is amended, not deleted — it now says the package imports provider for the effort-detection VALUE TYPES a beat carries (ADR 0060 ratifies exactly this: "it rides the Beat to the TUI"), never for the wire itself.
+
+NOTES (2026-08-25): one test beyond the item's list — `TestBeatCarriesTheEffortDialectIntoTheRebind` (internal/tui) — because the item's TUI half (observeBinding → seam, and the pick's re-statement) had no coverage otherwise; `rebindCall` in both TUI and cmd tests grew a `dialect` field to record it.
 
 **What:** Deliver the per-server dialect from the beat down to `provider.Request`, through
 the existing rebind channel.

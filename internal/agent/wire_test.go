@@ -67,7 +67,9 @@ func TestProviderRequestOmitsInterjected(t *testing.T) {
 
 // TestProviderRequestCarriesResolvedEffort pins the resolution the projection applies — session
 // override ▸ profile ▸ nothing (ADR 0050) — including the anchor at its foot: a session with
-// neither asks for no effort at all, so the request stays byte-identical to the pre-effort loop.
+// neither asks for no effort at all, so the request stays byte-identical to the pre-effort loop. It
+// covers toProviderEffort's whole widened vocabulary too (ADR 0060), the level names being all this
+// mapping has to say.
 func TestProviderRequestCarriesResolvedEffort(t *testing.T) {
 	t.Parallel()
 
@@ -82,6 +84,16 @@ func TestProviderRequestCarriesResolvedEffort(t *testing.T) {
 		{name: "override alone", override: domain.EffortMedium, want: provider.EffortMedium},
 		{name: "override beats profile", profile: domain.EffortLow, override: domain.EffortHigh, want: provider.EffortHigh},
 		{name: "override off beats a thinking profile", profile: domain.EffortHigh, override: domain.EffortOff, want: provider.EffortOff},
+		// The four levels ADR 0060 added to the vocabulary: the mapping is one conversion across the
+		// whole eight-name union, so a widened level reaches the wire instead of degrading to "".
+		{name: "widened: none", profile: domain.EffortNone, want: provider.EffortNone},
+		{name: "widened: minimal", profile: domain.EffortMinimal, want: provider.EffortMinimal},
+		{name: "widened: xhigh", profile: domain.EffortXHigh, want: provider.EffortXHigh},
+		{name: "widened: max", override: domain.EffortMax, want: provider.EffortMax},
+		// And the totality guard the widening must not lose: a level outside the union emits
+		// nothing, so a value that slipped past the config loader's enum degrades to the model's own
+		// template default rather than to a template error mid-Turn.
+		{name: "unknown level emits nothing", profile: domain.ThinkingEffort("extreme"), want: ""},
 	}
 
 	for _, tt := range tests {

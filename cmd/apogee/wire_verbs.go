@@ -17,6 +17,7 @@ import (
 
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/heartbeat"
+	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/tui"
 )
 
@@ -27,16 +28,28 @@ import (
 // on the Update goroutine, at a quiescent boundary Agent.Rebind demands, so nothing here needs a
 // lock of its own. A resolution error returns WITHOUT touching the engine, and Agent.Rebind is
 // itself validate-then-commit, so a refused rebind leaves the session bound exactly where it was.
-func (w *rootWiring) rebind(model string, window int) (tui.RebindResult, error) {
-	// What the beat could name about the server's own window, remembered before it is resolved
-	// against the pin: a later pin EDIT re-drives this seam with no beat of its own, and a
-	// cleared pin has to bind the discovered window rather than unbind it (ADR 0024).
-	w.live.observe(window)
+//
+// effortDialect is the one input it does NOT decide: detection is passive and belongs to the beat
+// (ADR 0060), so the observation is forwarded onto the spec verbatim.
+func (w *rootWiring) rebind(model string, window int, effortDialect provider.EffortDialect) (tui.RebindResult, error) {
+	// What the beat could name about the server itself — its own window, remembered before that is
+	// resolved against the pin, and the effort wire dialect it reads a thinking-effort intent in
+	// (ADR 0060). Both are remembered for one reason: a later `/settings` EDIT re-drives this seam
+	// with no beat of its own, and it has to re-state the server's facts rather than clear them — a
+	// cleared window pin binds the discovered window rather than unbinding it (ADR 0024), and a
+	// dialled server stays dialled.
+	w.live.observe(window, effortDialect)
 	base, manualIDs, pinnedWindow, outputCap := w.live.rebindInputs(w.opts, w.holder.Binding())
 	spec, notices, err := rebindSpecFor(base, w.roots, manualIDs, model, window, pinnedWindow, outputCap)
 	if err != nil {
 		return tui.RebindResult{}, err
 	}
+	// The wire shape this server reads a thinking-effort intent in, forwarded from the observation
+	// rather than resolved here (ADR 0060): detection is the heartbeat's, so this root has nothing to
+	// add to it, and the spec is the channel every other server-scoped fact already takes. The zero
+	// is the honest answer for a server that advertises no dial — it keeps the historical
+	// `chat_template_kwargs` shape, reproducing the request bytes that predate the dialect seam.
+	spec.EffortDialect = effortDialect
 	// The model a session runs is now the id the human configured even when the server never
 	// advertised it (provider's trusted-hint resolution), so the binding that lands on such an id
 	// says so — once, here, where the beat that resolved it and the window it actually bound are

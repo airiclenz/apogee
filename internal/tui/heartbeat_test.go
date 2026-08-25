@@ -13,6 +13,7 @@ import (
 
 	"github.com/airiclenz/apogee/internal/format"
 	"github.com/airiclenz/apogee/internal/heartbeat"
+	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/scheme"
 )
 
@@ -78,10 +79,10 @@ func foldBeatMsg(t *testing.T, m Model, beat heartbeat.Beat) Model {
 	return step(t, m, beatMsg{gen: m.hb.gen, beat: beat})
 }
 
-// fakeRebind stands in for the composition root's rebind closure: it records every (model, window)
-// it was asked to bind and answers with what the binary would have bound — by default exactly what
-// was observed, which is the unpinned case. It is called synchronously from the beat fold, on the
-// test's own goroutine, so it needs no guard.
+// fakeRebind stands in for the composition root's rebind closure: it records every
+// (model, window, dialect) it was asked to bind and answers with what the binary would have bound —
+// by default exactly what was observed, which is the unpinned case. It is called synchronously from
+// the beat fold, on the test's own goroutine, so it needs no guard.
 type fakeRebind struct {
 	calls  []rebindCall
 	answer func(model string, window int) (RebindResult, error)
@@ -89,12 +90,13 @@ type fakeRebind struct {
 
 // rebindCall is one binding the TUI asked the composition root to resolve and apply.
 type rebindCall struct {
-	model  string
-	window int
+	model   string
+	window  int
+	dialect provider.EffortDialect
 }
 
-func (f *fakeRebind) rebind(model string, window int) (RebindResult, error) {
-	f.calls = append(f.calls, rebindCall{model: model, window: window})
+func (f *fakeRebind) rebind(model string, window int, dialect provider.EffortDialect) (RebindResult, error) {
+	f.calls = append(f.calls, rebindCall{model: model, window: window, dialect: dialect})
 	if f.answer != nil {
 		return f.answer(model, window)
 	}
@@ -582,6 +584,36 @@ func TestDisplayModelEmpty(t *testing.T) {
 // ----------------------------------------------------------------------------
 // Rebind orchestration
 // ----------------------------------------------------------------------------
+
+// The effort wire dialect the beat reports for the SERVER rides the observation into the seam
+// (ADR 0060): it is the one effort fact that crosses into the engine, and it is carried whole rather
+// than re-derived, so the binding the composition root commits expresses effort in the shape the
+// server it is on actually reads. A `/model` pick, which has no beat of its own, re-states the
+// dialect the heartbeat last observed instead of clearing it.
+func TestBeatCarriesTheEffortDialectIntoTheRebind(t *testing.T) {
+	t.Parallel()
+
+	rb := &fakeRebind{}
+	m := wireRebind(t, unbound(testOpts), &fakeHeartbeat{}, rb)
+
+	dialled := upBeat("served-model", 16384)
+	dialled.EffortSupport = provider.EffortSupport{Supported: true, Dialect: provider.EffortDialectReasoning}
+	m = foldBeatMsg(t, m, dialled)
+
+	want := []rebindCall{{model: "served-model", window: 16384, dialect: provider.EffortDialectReasoning}}
+	if !reflect.DeepEqual(rb.calls, want) {
+		t.Fatalf("rebind calls = %+v, want %+v — the dialect the beat observed is what the binary binds", rb.calls, want)
+	}
+
+	// The pick: same server, no beat, so the observed dialect is re-stated rather than zeroed.
+	picked, _ := m.bindPickedModel("other-model", 16384)
+	if _, ok := picked.(Model); !ok {
+		t.Fatalf("bindPickedModel returned %T, want a Model", picked)
+	}
+	if len(rb.calls) != 2 || rb.calls[1].dialect != provider.EffortDialectReasoning {
+		t.Errorf("rebind calls = %+v, want the pick re-stating the observed dialect", rb.calls)
+	}
+}
 
 // The cold start binds LATE: the binary launches with no model at all and the first landed beat is
 // startup discovery. It runs the ordinary rebind path from empty — the seam is asked for the

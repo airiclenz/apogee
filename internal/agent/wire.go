@@ -10,7 +10,8 @@ import (
 // translation boundary between the loop's domain state and the domain-free provider.Request
 // (ADR 0010). It carries messages (with tool calls + tool-call IDs, load-bearing for a
 // multi-Turn tool exchange), the tool menu, the sampling a pre-request hook shaped, and the
-// resolved Thinking effort (resolvedEffort — override ▸ profile ▸ nothing); the provider wire has
+// resolved Thinking effort (resolvedEffort — override ▸ profile ▸ nothing) in the wire dialect the
+// bound SERVER reads it in (a.effortDialect, committed by Rebind — ADR 0060); the provider wire has
 // no carrier for SetExtra fields yet (response_format is a Phase-4 concern).
 func (a *Agent) toProviderRequest(req *domain.Request) provider.Request {
 	st := req.State()
@@ -44,6 +45,7 @@ func (a *Agent) toProviderRequest(req *domain.Request) provider.Request {
 		Tools:          tools,
 		Sampling:       toProviderSampling(st.Sampling),
 		ThinkingEffort: toProviderEffort(a.resolvedEffort()),
+		EffortDialect:  a.effortDialect,
 	}
 }
 
@@ -63,12 +65,17 @@ func (a *Agent) resolvedEffort() domain.ThinkingEffort {
 
 // toProviderEffort maps the domain effort onto the provider's own vocabulary at this translation
 // boundary — the provider package holds no domain import (ADR 0010) — exactly as toProviderSampling
-// maps the sampling knobs. It is TOTAL: anything outside the four levels maps to "", which emits
-// nothing on the wire, so a value that somehow slipped past the config loader's enum degrades to
-// the model's own template default rather than to a template error mid-Turn.
+// maps the sampling knobs. The two vocabularies are the same eight names spelled twice, one per
+// side of the boundary (ADR 0060's widened set), so the mapping is a conversion under a guard
+// rather than a table.
+//
+// It is TOTAL: anything outside the named levels maps to "", which emits nothing on the wire, so a
+// value that somehow slipped past the config loader's enum degrades to the model's own template
+// default rather than to a template error mid-Turn.
 func toProviderEffort(e domain.ThinkingEffort) provider.Effort {
 	switch e {
-	case domain.EffortOff, domain.EffortLow, domain.EffortMedium, domain.EffortHigh:
+	case domain.EffortOff, domain.EffortNone, domain.EffortMinimal, domain.EffortLow,
+		domain.EffortMedium, domain.EffortHigh, domain.EffortXHigh, domain.EffortMax:
 		return provider.Effort(e)
 	default:
 		return ""

@@ -10,6 +10,18 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **The detected effort dialect reaches the request (plan item 6).** The wire dialect a beat
+  observed for the server now rides the rebind all the way to `provider.Request`: `RebindSpec`
+  gains an `EffortDialect` field, the Agent holds it as the one server-scoped effort fact, and
+  the wire projection stamps it on every request. `tui.ServerHost.Rebind` carries the dialect
+  from the observation, and the composition root forwards it onto the spec — so an OpenRouter
+  server is asked in `reasoning: {effort}` and an OpenAI/Groq one in top-level
+  `reasoning_effort`, instead of the effort being spelled in a dialect the server ignores.
+  `toProviderEffort` also widens to the full eight-name vocabulary, so `none`/`minimal`/
+  `xhigh`/`max` reach the wire rather than degrading to nothing. A server that advertises no
+  dial states the zero dialect, which keeps the historical `chat_template_kwargs` shape and so
+  reproduces the request bytes that predate the dialect seam — the wire anchor is unmoved.
+
 - **The heartbeat carries the detected thinking-effort dial (plan item 5).** `heartbeat.Beat`
   gains an `EffortSupport` field, copied from discovery beside the context window and the slot
   count, so the host re-observes the bound model's dial — support, wire dialect, reported level

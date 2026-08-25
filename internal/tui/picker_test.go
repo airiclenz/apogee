@@ -14,6 +14,7 @@ import (
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/heartbeat"
+	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/schedule"
 )
 
@@ -621,7 +622,7 @@ type fakeServerHost struct {
 	bind     func(name string) (ServerSwitchResult, error)
 	record   func(name string) (bool, error)
 	beat     func(context.Context) heartbeat.Beat
-	rebind   func(model string, window int) (RebindResult, error)
+	rebind   func(model string, window int, dialect provider.EffortDialect) (RebindResult, error)
 }
 
 // Acts reports exactly the members this fake was wired with, so one nil func is one per-member
@@ -644,11 +645,11 @@ func (h *fakeServerHost) Beat(ctx context.Context) heartbeat.Beat {
 }
 
 // Rebind answers with an error when nothing was wired; CanRebind is false then, so nothing asks it.
-func (h *fakeServerHost) Rebind(model string, window int) (RebindResult, error) {
+func (h *fakeServerHost) Rebind(model string, window int, dialect provider.EffortDialect) (RebindResult, error) {
 	if h.rebind == nil {
 		return RebindResult{}, errors.New("this host does not rebind")
 	}
-	return h.rebind(model, window)
+	return h.rebind(model, window, dialect)
 }
 
 // List answers with no servers — the "nothing to switch to" degrade, which `/server` words itself.

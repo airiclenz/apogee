@@ -7,6 +7,7 @@ import (
 
 	"github.com/airiclenz/apogee/internal/format"
 	"github.com/airiclenz/apogee/internal/heartbeat"
+	"github.com/airiclenz/apogee/internal/provider"
 )
 
 // ----------------------------------------------------------------------------
@@ -50,6 +51,12 @@ type heartbeatState struct {
 	// baseline a model/window change is measured against; the rebind orchestration owns them.
 	observedModel  string
 	observedWindow int
+	// observedDialect is the effort wire dialect that same beat reported for the SERVER (ADR 0060).
+	// It is not part of the change TEST beside it — a dial is a fact about the server, so it moves
+	// when the model or the window does and never on its own — it is what a rebind driven with no
+	// beat of its own is built from: a `/model` pick re-states the binding, and re-stating it with a
+	// zero dialect would silently un-dial a session the heartbeat had already dialled.
+	observedDialect provider.EffortDialect
 	// pendingRebind is a captured change waiting for the engine to be quiescent — set when a beat
 	// lands while a worker owns the engine (applied in finishWorker) or while a launcher verb owns
 	// the server it talks to (applied in foldActuationDone). Latest-wins: a second change inside the
@@ -63,7 +70,8 @@ type heartbeatState struct {
 }
 
 // rebindIntent is one captured binding change: the model the last beat observed the server to be
-// serving, the window it reported for it, and whether the beat that saw it was the session's first
+// serving, the window it reported for it, the effort wire dialect it reported for the server, and
+// whether the beat that saw it was the session's first
 // contact. It is what the deferred apply stashes and what the [ServerHost.Rebind] seam is called
 // with — plain values, so the value-copied Model carries it safely. It is the OBSERVATION, not the
 // binding: what the binary makes of it (a pinned window outranking the observed one) comes back in
@@ -71,6 +79,14 @@ type heartbeatState struct {
 type rebindIntent struct {
 	model  string
 	window int
+	// dialect is the wire shape the beat reported this SERVER reads a thinking-effort intent in
+	// (ADR 0060) — the one effort fact that crosses into the engine, carried here so a change
+	// stashed for the quiescent boundary binds the dialect the observation actually saw rather than
+	// one re-read from a later beat. The zero value is "no dial advertised", which keeps the
+	// historical `chat_template_kwargs` shape and so reproduces the request bytes that predate the
+	// dialect seam; it is a plain value, so the value-copied Model carries it exactly as the two
+	// fields above.
+	dialect provider.EffortDialect
 	// quietSeed records that this change was observed at FIRST CONTACT — no beat had ever landed
 	// and none had ever failed. It is an observation FACT, captured before the fold erases the
 	// evidence, rather than presentation state; [rebindNote] is what decides the wording it buys.
@@ -268,7 +284,16 @@ func (m Model) observeBinding(beat heartbeat.Beat, firstContact bool) (Model, bo
 		return m, false
 	}
 	m.hb.observedModel, m.hb.observedWindow = beat.ActiveModel, beat.ContextWindow
-	intent := rebindIntent{model: beat.ActiveModel, window: beat.ContextWindow, quietSeed: firstContact}
+	m.hb.observedDialect = beat.EffortSupport.Dialect
+	intent := rebindIntent{
+		model:  beat.ActiveModel,
+		window: beat.ContextWindow,
+		// The dialect the beat reported for this server, carried whole with the rest of the
+		// observation. It is deliberately NOT part of the changed test above: the dial is a fact
+		// about the server, so it moves when the model or the window does and never on its own.
+		dialect:   beat.EffortSupport.Dialect,
+		quietSeed: firstContact,
+	}
 	if m.busy() || m.actuation.inFlight {
 		// The engine is not the Update loop's to re-point right now, and Agent.Rebind is idle-only by
 		// construction. Stash the intent for the boundary rather than refuse it — finishWorker for a
@@ -307,7 +332,7 @@ func (m Model) applyRebind(intent rebindIntent) (Model, bool) {
 	rebind := m.opts.Server.Rebind
 	oldModel, oldWindow := m.opts.Model, m.opts.ContextWindow
 
-	result, err := rebind(intent.model, intent.window)
+	result, err := rebind(intent.model, intent.window, intent.dialect)
 	if err != nil {
 		if m.hb.lastRebindFailed == intent.model {
 			return m, false

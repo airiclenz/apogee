@@ -743,7 +743,10 @@ func (m Model) bindPickedModel(id string, window int) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.hb.observedModel, m.hb.observedWindow = id, window
-	next, _ := m.applyRebind(rebindIntent{model: id, window: window})
+	// The dialect the last beat reported for the server this pick stays on, carried through rather
+	// than re-derived: a pick has no beat of its own, and a zero here would tell the engine this
+	// server advertises no thinking-effort dial (ADR 0060). The next beat re-observes it.
+	next, _ := m.applyRebind(rebindIntent{model: id, window: window, dialect: m.hb.observedDialect})
 	if next.opts.Model == id {
 		record := recordModelChoice(next.opts.RecordModelChoice, id)
 		if record.saved {
