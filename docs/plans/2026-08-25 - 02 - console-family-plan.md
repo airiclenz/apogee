@@ -193,7 +193,11 @@ empty registry is a no-op; `FromContext` on a bare ctx is nil; `Open` on Windows
 
 ---
 
-## 3. Engine wiring: the registry is live host state on the Agent
+## 3. Engine wiring: the registry is live host state on the Agent — ✅ DONE (2026-08-25)
+
+NOTES (2026-08-25): the delegation-end and engine-exit close live in a `closeConsoles` helper that `Close` calls, rather than inline in `Close` — the depth split needed a doc comment of its own and `Close` was a one-line method whose comment already carried three paragraphs about the upstream client.
+NOTES (2026-08-25): the "snapshot carries no console state" test asserts over the state object's KEYS rather than the raw JSON: the conversation legitimately quotes the fake tool's name and its result text, so a substring scan of the payload fails on content that has nothing to do with the registry.
+NOTES (2026-08-25): the sub-agent lifetime tests drive `newChildAgent` + `child.Close()` directly rather than a real `sub_agent` call — that is the same handle `subagent.go`'s deferred `sub.Close()` holds, and the direct form lets the test hold both Consoles and assert on their liveness after the delegation ends. The real-process tests skip on Windows via a `runtime.GOOS` guard (GOOS in test code, per the standing requirement); `GOOS=windows go vet ./internal/agent/` compiles them.
 
 Depends on item 2.
 

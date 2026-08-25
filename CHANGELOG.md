@@ -10,6 +10,22 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **The engine holds the Consoles as live host state (Console family, plan item 3).** The registry
+  from item 2 is now built with every Agent and installed on every tool dispatch context beside the
+  undo journal, so a console tool will reach it where the call is rather than by holding it —
+  `SwapTools` rebuilds tool instances mid-session, and a registry that went with them would be a set
+  of running processes nothing could close. A delegated child is handed the PARENT's registry, which
+  is what makes the cap of four mean four across a whole tree rather than four per delegation;
+  ownership is carried by the Console itself, stamped from the spawning call id the dispatch context
+  already carries. That gives the three close sites their meaning: a delegation's end closes the
+  Consoles that delegation opened and leaves its parent's running, the top-level Agent's `Close`
+  closes every Console at engine exit, and `/new` closes them all too — the one place a Console's
+  lifetime deliberately diverges from the undo journal's, because `/new` drops the history the
+  Console ids live in and four unnameable shells is exactly the leak the cap exists to prevent. None
+  of it is serialized: a Session snapshot says nothing about Consoles, a resumed session inherits no
+  shells from the process that ended, and an id from an earlier run is simply an id this registry
+  does not have. Still no tools — item 4 is the first caller.
+
 - **The engine's Consoles get a registry and a context seam (Console family, plan item 2).** On
   top of item 1's process mechanics, `internal/console` now holds the set of open Consoles:
   `Registry.Open` starts a process and hands back a `Console` under a small id that climbs and is

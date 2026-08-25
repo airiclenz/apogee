@@ -50,6 +50,12 @@ import (
 // on this one after the workspace moved on — would hand the human pre-images to write over
 // bytes that are no longer the agent's. So a resumed Session starts with an empty journal and
 // `/undo` reaches back no further than the current process.
+//
+// The console registry (Agent.consoles, ADR 0059) is withheld on that same ground, taken to its
+// limit: what it holds are RUNNING PROCESSES, which cannot be written into a file at all. A
+// resumed Session therefore has no Consoles, and an id the model remembers from the snapshot's
+// own run addresses nothing — which the tools report as an unknown id, the whole truth about a
+// Console whose process is gone.
 type agentState struct {
 	Conversation  *domain.Conversation `json:"conversation"`
 	TurnIndex     int                  `json:"turnIndex"`

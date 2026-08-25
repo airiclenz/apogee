@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/airiclenz/apogee/internal/console"
 	apogeectx "github.com/airiclenz/apogee/internal/context"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/security"
@@ -791,6 +792,14 @@ func (a *Agent) executeTool(ctx context.Context, turn int, tool domain.Tool, cal
 	// filesystem some other way (a subprocess, an MCP server, a third-party tool) records
 	// nothing precisely because it never asks. A nil journal installs nothing.
 	ctx = undo.WithJournal(ctx, a.journal)
+
+	// Install the console registry for EVERY call too (ADR 0059), and for the same reason the
+	// journal rides here rather than sitting on a tool: SwapTools rebuilds tool instances
+	// mid-session, so a registry held by a console tool would be a set of running processes
+	// nothing could reach to close. The engine owns it and the call context carries it. Beside it
+	// the dispatch already carries the spawn call id (WithSpawnCallID, above), which is what a
+	// console tool stamps on the Consoles it opens — so a delegation's end can close its own.
+	ctx = console.WithRegistry(ctx, a.consoles)
 
 	if box != nil {
 		// Install the Confinement handle so the subprocess tool confines the command it

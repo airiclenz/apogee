@@ -334,6 +334,13 @@ func (a *Agent) newChildAgent(spawnCallID, task, name string) (*Agent, error) {
 	// once (ADR 0039); the child never opens a GROUP of its own (loop.go), so its records join
 	// the parent's current one however deep the delegation nests.
 	child.journal = a.journal
+	// The console registry is shared by HANDLE for the same structural reason and one of its own
+	// (ADR 0059 §6): the Consoles are the ENGINE's live processes, not a per-Agent resource, so
+	// one registry per engine is what makes the cap of four mean four across the whole tree rather
+	// than four per delegation. Ownership is not lost by the sharing — a Console records the call
+	// id that opened it (dispatch stamps it from the ctx), so the child's Close reaps exactly the
+	// Consoles this delegation opened and leaves the parent's untouched.
+	child.consoles = a.consoles
 	return child, nil
 }
 

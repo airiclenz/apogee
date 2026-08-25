@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/airiclenz/apogee/internal/console"
 	apogeectx "github.com/airiclenz/apogee/internal/context"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/library"
@@ -121,6 +122,7 @@ func newAgent(cfg domain.Config, up provider.Responder) (*Agent, error) {
 		tokens:             apogeectx.NewTokenEstimator(),
 		prompts:            domain.NewPromptSlot(),               // the one prompt surface this Agent tree queues on
 		journal:            undo.New(),                           // the per-Exchange undo record, empty and per-process (ADR 0051)
+		consoles:           console.New(),                        // the engine's live Consoles, empty and per-process (ADR 0059)
 		tree:               newTreeSnapshotter(cfg.WorkspaceDir), // the tracked-file mutation floor around subprocess calls (treesnapshot.go)
 		now:                time.Now,                             // the request-render clock for the system prompt's {{datetime}}
 	}

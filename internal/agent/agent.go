@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/airiclenz/apogee/internal/console"
 	apogeectx "github.com/airiclenz/apogee/internal/context"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/processing"
@@ -228,6 +229,18 @@ type Agent struct {
 	// group on it (loop.go).
 	journal *undo.Journal
 
+	// consoles is the set of interactive processes the model drives across Turns — the Console
+	// family's live state (ADR 0059). Like the journal it is LIVE HOST STATE, not session state
+	// (ADR 0022 §8) — in-memory, for this process only, never serialized — because what it holds
+	// are running processes: a resumed session inherits no shells from the process that ended,
+	// and an id from an earlier run is simply an id this registry does not have. newAgent always
+	// supplies it; the nil receiver its close paths tolerate is the honest "no consoles" engine.
+	// A delegated child is handed the PARENT's instance (newChildAgent), so one engine has one
+	// set of Consoles however deep the delegation nests, and ownership is carried by the Console's
+	// Owner field rather than by which Agent holds the registry: a delegation's end closes the
+	// Consoles that delegation opened (Close) and nothing else.
+	consoles *console.Registry
+
 	// tree is the tracked-file mutation floor around subprocess tool calls
 	// (treesnapshot.go): git-status snapshots taken before and after each subprocess
 	// run so the result names the workspace files the command changed. A structural
@@ -333,11 +346,36 @@ func Resume(cfg domain.Config, snap domain.Session) (*Agent, error) {
 // the session's connection survives every delegation that borrowed it, and an in-process
 // Responder injected through the internal seam has no connection to close at all.
 //
+// The Consoles this Agent's run opened are the one live resource it DOES tear down (ADR 0059 §6),
+// because Close is the only place that knows the run has ended: a delegated child closes the
+// Consoles its own call id owns and leaves its parent's alone, and the top-level Agent closes
+// every Console the engine holds. That makes this both the delegation-end site — subagent.go's
+// deferred sub.Close() covers the normal, error, cancelled and faulted exits alike — and the
+// engine-exit site (cmd/apogee's lateEngine.Close, internal/run).
+//
 // It is idempotent, and it does not end the Agent: closing a client only returns its idle
 // sockets, so a later request dials again. The other live resources of a running session belong
 // to the host that wired them rather than to this call: cmd/apogee closes the MCP connections
 // alongside it, and the log sink is torn down by the TUI that opened it (internal/tui).
-func (a *Agent) Close() error { return a.closeOwnedUpstream(a.upstream) }
+func (a *Agent) Close() error {
+	a.closeConsoles()
+	return a.closeOwnedUpstream(a.upstream)
+}
+
+// closeConsoles ends the Consoles this Agent's run is responsible for. Ownership is the Console's
+// own Owner field, not the registry (one registry serves the whole tree): a child at depth ≥ 1
+// closes the Consoles stamped with its spawn call id, and the top-level Agent — whose own id is
+// empty, and which is the last thing standing — closes them all.
+//
+// Best-effort by contract, like every close on the way out: a process that resists teardown must
+// not stop the Agent from closing its client, and there is no caller left to report it to.
+func (a *Agent) closeConsoles() {
+	if a.depth > 0 {
+		a.consoles.CloseOwnedBy(a.callID)
+		return
+	}
+	a.consoles.CloseAll()
+}
 
 // closeOwnedUpstream tears down up when this Agent owns it and it actually holds a connection —
 // the io.Closer seam provider.Client satisfies and no in-process fake does. It is the single
@@ -757,10 +795,18 @@ func (a *Agent) Snapshot() (domain.Session, error) {
 //
 // It is also a session boundary, so the workspace context files are re-read here: the new
 // session speaks from whatever the repo's AGENTS.md says NOW. A refused call changes nothing.
+//
+// It is a boundary for the Consoles too, and that is the ONE place their lifetime diverges from
+// the undo journal's: the journal survives /clear so `/undo` can still reach the writes of the
+// conversation just forgotten, while every Console is closed here (ADR 0059 §1). A Console is a
+// live process the model steers by id, and the ids live in the history this call drops — leaving
+// four shells running that nothing in the new session can name is exactly the forgotten-process
+// leak the cap exists to prevent.
 func (a *Agent) ClearContext() error {
 	if a.turns.inExchange {
 		return domain.ErrInputPending
 	}
+	a.consoles.CloseAll()
 	a.reloadContextFiles()
 	a.conv = *domain.NewConversation(nil)
 	return nil
