@@ -10,6 +10,23 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **A delegate that keeps asking for tools is now stopped at its step cap, and hands back what it
+  has (delegate token runaway, plan item 2).** `Agent.Run` counts the Turns of the open Exchange
+  and, at `delegate-max-steps`, ends the Exchange itself through a new `turnLifecycle` exit row
+  (`endStepCapped`) — cleanly, NOT faulted: the boundary carries the new `StepResult.StepCapped`
+  beside `Faulted`, and one `ErrorEvent` on the child's own stream tells the human the delegation
+  was stopped and which key raises the bound. The parent model receives a NON-error tool result
+  whose first line marks it partial, followed by the child's last visible text (or `(no visible
+  text)` for a delegate that spent every Turn calling tools and never said anything), so Turns of
+  real work are not thrown away and the delegation is not booked as harmful for self-regulation.
+  The cap is enforced in exactly one place, `Run`, so a host driving `Step` itself is unbounded as
+  before, and a top-level Agent is never capped however the key is set — only `newChildAgent`
+  seeds it, and a routed sub-agent (ADR 0045) takes the same one, since the key is top-level
+  rather than per-server. The `sub_agent` tool gains an optional integer `max_steps` argument that
+  can only LOWER the configured cap for that one delegation: `min(configured, requested)` when
+  both are positive, ignored otherwise — a model may make a delegation cheaper, never longer than
+  the host allows. CONTEXT.md gains the **Step cap** term.
+
 - **A `delegate-max-steps:` key now states how far a delegated sub-agent may run (delegate token
   runaway, plan item 1).** The top-level, file-only key (default **80**; `0` = unbounded) is a
   count of TURNS a child agent may take in its one Exchange, carried to the engine as

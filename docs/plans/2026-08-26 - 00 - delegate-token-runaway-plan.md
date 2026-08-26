@@ -125,7 +125,12 @@ and `80`; a `config_test.go` case loads a YAML with `delegate-max-steps: 12` and
 
 ---
 
-## 2. Enforce the step cap in the child's Exchange loop; `sub_agent` gains `max_steps`
+## 2. Enforce the step cap in the child's Exchange loop; `sub_agent` gains `max_steps` — ✅ DONE (2026-08-26)
+
+NOTES (2026-08-26): `internal/domain/config.go` is not on the item's Files list but had to change — the item mandates that "the returned `StepResult` carries a new `StepCapped bool`", and `domain.StepResult` is declared there. No other domain type moved.
+NOTES (2026-08-26): the `endStepCapped` row deliberately does NOT call `tracker.endTurn()`, which `endExchangeDone` does. `Run` reaches the row only AFTER `endTurnDone` already judged the Turn that just completed, so a second judge would rotate the self-regulator's pending set against an emptied scratch and silently lose a judgment (R3). All three pieces of bookkeeping the item text enumerates — `closeExchange`, index advance, `StatusExchangeComplete`, and not `Faulted` — are present, and `turn_test.go` pins both the three and the absent re-judge.
+NOTES (2026-08-26): `finalMessageText` gained a `lastVisibleText()` seam beneath it and the capped path reads that instead. The item text says the marker is followed by `sub.finalMessageText()` "(or the literal `(no visible text)` when empty)", but `finalMessageText` can never return empty — it substitutes "(sub-agent completed with no final message)", which claims a completion a capped child did not reach. The seam returns "" when the child produced no text, which is what the `(no visible text)` fallback needs; `finalMessageText`'s own behaviour is byte-identical.
+NOTES (2026-08-26): CONTEXT.md's **Turn** entry named "its four exits (complete, Exchange-complete, abandoned, cancelled)" — the sentence describes the very table this item adds a fifth row to, so it now reads "its five exits (…, step-capped)". Beyond that, the only CONTEXT.md change is the **Step cap** term the item calls for.
 
 Depends on item 1.
 

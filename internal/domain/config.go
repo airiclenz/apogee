@@ -651,6 +651,17 @@ type StepResult struct {
 	// Exchange's RESULT onward — a sub-agent delegation answering its parent — must not present a
 	// faulted Exchange as a success. The fault itself was already surfaced as an ErrorEvent.
 	Faulted bool
+
+	// StepCapped marks an Exchange the engine ENDED at the delegate step cap
+	// (Config.Delegation.MaxSteps) rather than one the model finished: the child was still
+	// asking for tools when the bound was reached, so what it has is a PARTIAL result. Like
+	// Faulted it is orthogonal to Status — a capped Exchange closes on StatusExchangeComplete
+	// exactly as a real final answer does — and unlike Faulted it is NOT a failure: the work up
+	// to the cap stands. A host that merely resumes at the boundary can ignore it; anything
+	// reporting the Exchange's RESULT onward — a sub-agent delegation answering its parent —
+	// must say the result is partial rather than present it as the finished task. The cap
+	// itself was already surfaced as an ErrorEvent.
+	StepCapped bool
 }
 
 // StepStatus is the disposition of a completed Step. The set is open (additively

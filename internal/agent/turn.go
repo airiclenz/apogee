@@ -18,6 +18,13 @@ type turnLifecycle struct {
 	index         int  // 0-based index of the next Turn (was Agent.turnIndex)
 	inExchange    bool // true between Submit and the Step that completes the Exchange
 	exchangeStart int  // cached rollback boundary of the open Exchange (ADR 0017 §2's recorded fallback)
+
+	// exchangeTurns counts the Turns COMPLETED in the open Exchange — the quantity the delegate
+	// step cap bounds (Agent.stepCap). It is written by Run, the one place the cap is enforced,
+	// and reset by openExchange so the bound is per-Exchange rather than per-Agent. It is
+	// deliberately not serialized: a snapshot is taken at a quiescent boundary, and a resumed
+	// Exchange's cap starts counting again from there.
+	exchangeTurns int
 }
 
 // turnRun is the working state of one Turn attempt — the values step() used to thread as five
@@ -51,7 +58,7 @@ type turnRun struct {
 	restreamSpent bool
 }
 
-// turnEnd names the four ways a Turn exits. One row per exit; end() is the whole table.
+// turnEnd names the five ways a Turn exits. One row per exit; end() is the whole table.
 type turnEnd int
 
 const (
@@ -59,6 +66,7 @@ const (
 	endExchangeDone                // judged · advance · Exchange closes       · StatusExchangeComplete
 	endAbandoned                   // discarded · advance · Exchange closes    · StatusExchangeComplete + Faulted
 	endCancelled                   // discarded · roll back + restore deferred · no advance · Exchange stays open · StatusCancelled
+	endStepCapped                  // already judged · advance · Exchange closes · StatusExchangeComplete + StepCapped
 )
 
 // end exits the Turn t on the row how names — the single table that replaced the three exit
@@ -69,6 +77,7 @@ const (
 func (l *turnLifecycle) end(t *turnRun, how turnEnd) domain.StepResult {
 	var status domain.StepStatus
 	var faulted bool
+	var stepCapped bool
 	switch how {
 	case endTurnDone, endExchangeDone:
 		// Resolve the completed Turn for self-regulation (R3, next-Turn judgment): this Turn's
@@ -133,8 +142,28 @@ func (l *turnLifecycle) end(t *turnRun, how turnEnd) domain.StepResult {
 		// template rejects). Clearing it here contradicted the un-advanced index (which says
 		// "re-attempt"), opening that exact hole.
 		status = domain.StatusCancelled
+	case endStepCapped:
+		// The delegate step cap: the child was still asking for tools when its bound was reached,
+		// so the ENGINE ends the Exchange the model would have kept going. This row is reached only
+		// from Run, and only right after endTurnDone closed a Turn that completed normally — so
+		// the Turn is already judged and this row deliberately does NOT judge it again (a second
+		// tracker.endTurn would rotate the pending set against an empty scratch and lose a
+		// judgment, R3). What is left is the Exchange half: close it (F6 — the deferred queue dies
+		// with it), advance past the Turn, and report the same StatusExchangeComplete a real final
+		// answer does. NOT Faulted: nothing failed — the work up to the cap stands and the parent
+		// receives it — so StepCapped is the flag that tells a capped Exchange from a finished one.
+		l.closeExchange()
+		l.index++
+		status = domain.StatusExchangeComplete
+		stepCapped = true
 	}
-	return domain.StepResult{Status: status, TurnIndex: t.turn, Elapsed: time.Since(t.start), Faulted: faulted}
+	return domain.StepResult{
+		Status:     status,
+		TurnIndex:  t.turn,
+		Elapsed:    time.Since(t.start),
+		Faulted:    faulted,
+		StepCapped: stepCapped,
+	}
 }
 
 // closeExchange ends the open Exchange — the ONE engine-side owner of Exchange end (ADR 0017
@@ -169,6 +198,9 @@ func (l *turnLifecycle) restoreDeferred(deferred []string) {
 func (l *turnLifecycle) openExchange() {
 	l.exchangeStart = l.conv.Len()
 	l.inExchange = true
+	// A new Exchange is a new step-cap budget: the cap bounds the Turns of ONE Exchange, so the
+	// count starts over here rather than accumulating across a delegation's life (Agent.Run).
+	l.exchangeTurns = 0
 }
 
 // reanchorAfterShrink repairs the cached Exchange boundary (S2) after a mid-Exchange history

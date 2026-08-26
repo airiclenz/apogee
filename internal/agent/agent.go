@@ -271,7 +271,22 @@ type Agent struct {
 	callID       string              // this Agent's run identity: the id of the sub_agent call that spawned it, stamped on every Event it emits (domain.EventBase.CallID); empty at depth 0
 	task         string              // the task this Agent was delegated, from the spawning sub_agent call's arguments — what an Approval prompt names it by (domain.ApprovalRequest.SubAgentTask); empty at depth 0
 	name         string              // this Agent's display identity in words: the optional short name the spawning sub_agent call supplied, normalised to a trimmed first line; empty = unnamed, and every display falls back to task. Display only, never privilege (ADR 0005)
+
+	// stepCap bounds the Turns this Agent may take in ONE Exchange before Run ends it; 0 =
+	// unbounded. It is a DELEGATE bound: only newChildAgent seeds it (from
+	// Config.Delegation.MaxSteps, the `delegate-max-steps` key), and a sub_agent call's optional
+	// max_steps may lower it further for that one delegation — a top-level Agent is left at 0,
+	// because the main loop is the human's to stop and a delegate's is nobody's. Structural
+	// (ADR 0006), not a Mechanism: it stays on under Bypass. Run is the ONE enforcement site.
+	stepCap int
 }
+
+// stepCapErrFormat is the ErrorEvent text a delegate's Exchange ends on when it reaches its step
+// cap — the human-facing half of the bound, and the only thing that says the delegation was
+// STOPPED rather than finished. It is a package constant, pinned by test, because the line names
+// the key that raises the bound and a watcher acts on it. %d is the cap actually applied.
+const stepCapErrFormat = "delegate stopped at its step cap (%d steps) — returning what it has; " +
+	"narrow the task or raise delegate-max-steps"
 
 // usageTally is one Agent's running token accounting: the sums and the call count behind the
 // cumulative fields of every domain.UsageEvent that Agent emits. It is deliberately a plain
@@ -452,13 +467,46 @@ func (a *Agent) Step(ctx context.Context) (domain.StepResult, error) { return a.
 // Run owns the between-Steps boundaries it loops over, so there is no seam to interject at:
 // an embedder that wants to commit a mid-Exchange user message (Interject) drives Step
 // itself and calls it between the Steps it makes.
+//
+// It is also the one place the DELEGATE STEP CAP is enforced (Agent.stepCap): a child agent that
+// is still asking for tools after its capped number of Turns has its Exchange ended here rather
+// than looping on, and the boundary returned carries StepCapped. A Step-driving host is not
+// capped — it decides when to stop stepping itself — and neither is a top-level Agent, whose cap
+// is always 0.
 func (a *Agent) Run(ctx context.Context) (domain.StepResult, error) {
 	for {
 		res, err := a.step(ctx)
 		if err != nil || res.Status != domain.StatusTurnComplete {
 			return res, err
 		}
+		// The delegate step cap, counted and enforced HERE and nowhere else (stepCap): step() is
+		// the Turn, and a Turn cannot know how many came before it. The count is taken AFTER the
+		// Turn completed, which is after its tool calls were dispatched and their results
+		// appended — so the history the parent snapshots ends on a complete tool round and stays
+		// alternation-clean. A top-level Agent has no cap and never leaves this loop early.
+		a.turns.exchangeTurns++
+		if a.stepCap > 0 && a.turns.exchangeTurns >= a.stepCap {
+			return a.endAtStepCap(res), nil
+		}
 	}
+}
+
+// endAtStepCap ends the open Exchange at the delegate step cap: it surfaces the bound to the human
+// as one ErrorEvent (the child's own stream, at its Depth) and closes the Exchange through the
+// exit table's endStepCapped row. The Exchange is NOT faulted — the Turns up to the cap did real
+// work and the parent receives what they produced (runSubAgent) — so the returned boundary carries
+// StepCapped rather than Faulted.
+//
+// last is the StepResult of the Turn that just completed, and it is what the returned boundary
+// reports: no new Turn ran here, so the index is that Turn's and its wall time is reconstructed
+// from the elapsed step() already measured for it rather than invented as ~0.
+func (a *Agent) endAtStepCap(last domain.StepResult) domain.StepResult {
+	a.cfg.Events.Emit(domain.ErrorEvent{
+		EventBase: a.base(last.TurnIndex),
+		Source:    "loop",
+		Err:       fmt.Sprintf(stepCapErrFormat, a.stepCap),
+	})
+	return a.turns.end(&turnRun{turn: last.TurnIndex, start: time.Now().Add(-last.Elapsed)}, endStepCapped)
 }
 
 // AbortExchange discards an interrupted Exchange and returns the Agent to a clean quiescent

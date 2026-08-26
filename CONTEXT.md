@@ -372,8 +372,8 @@ feature).
 One iteration of the loop — a single *primary* Upstream call and the work that follows it
 (parse → dispatch tools → apply Mechanisms). Compaction's summarisation call is *internal*
 to a Turn, not a Turn of its own. The unit of self-regulation and of bench measurement. The
-Turn's lifecycle — its opening, its one permitted overflow fold, and its four exits (complete,
-Exchange-complete, abandoned, cancelled) — is owned by the loop's `turnLifecycle` module
+Turn's lifecycle — its opening, its one permitted overflow fold, and its five exits (complete,
+Exchange-complete, abandoned, cancelled, step-capped) — is owned by the loop's `turnLifecycle` module
 (`internal/agent/turn.go`), the way the Exchange anchors on `ExchangeView`.
 
 **Exchange**:
@@ -397,6 +397,20 @@ v1** (designed swappable for nested stepping later). See
 [ADR 0007](docs/adr/0007-step-turn-and-the-quiescent-boundary.md).
 _Avoid_: "tick", "cycle" (Turn is the loop iteration; Step is the externally-driven advance
 of one Turn).
+
+**Step cap**:
+The number of **Turns** a **delegate** may take in its one Exchange before the engine ends it —
+the `delegate-max-steps` key, default **80**, `0` = unbounded. It bounds child agents ONLY: the
+main loop is the human's to stop, a delegate's is nobody's, and an uncapped delegation is how a
+single `/code-audit` run reached 633 Turns and a billion prompt tokens. A `sub_agent` call's
+optional `max_steps` argument may LOWER the cap for that one delegation, never raise it. On a
+hit the child's Exchange ends **cleanly, not faulted** (`StepResult.StepCapped`): the parent
+receives a non-error result whose first line marks it partial, followed by the child's last
+visible text, so Turns of real work are not thrown away. It is a **structural floor**
+([ADR 0006](docs/adr/0006-bypass-mode-is-the-mechanisms-off-floor.md)), not a Mechanism — it stays on
+under **Bypass** and is never withdrawn by Adaptive Suppression. Enforced in exactly one place,
+`Agent.Run`.
+_Avoid_: "turn limit", "iteration cap" (the unit is the Step/Turn the model spends).
 
 **Interjection**:
 A message the human interjects into a **running** Exchange — the remark that reaches the model

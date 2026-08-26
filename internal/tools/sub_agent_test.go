@@ -121,3 +121,63 @@ func TestSubAgentArgsParsesTheOptionalName(t *testing.T) {
 		})
 	}
 }
+
+// TestSubAgentSchemaOffersAnOptionalMaxSteps pins the model-facing half of the delegate step cap:
+// the published schema advertises an integer `max_steps` property, `task` stays the ONLY required
+// argument, and the description says what the model can actually do with it — LOWER the host's
+// cap for this one delegation. A model that never names it must keep making valid calls (the
+// configured cap applies), and a `max_steps` that crept into `required` would break every caller.
+func TestSubAgentSchemaOffersAnOptionalMaxSteps(t *testing.T) {
+	t.Parallel()
+
+	var schema struct {
+		Required   []string                  `json:"required"`
+		Properties map[string]map[string]any `json:"properties"`
+	}
+	if err := json.Unmarshal(NewSubAgent().Schema(), &schema); err != nil {
+		t.Fatalf("schema is not valid JSON: %v", err)
+	}
+
+	prop, ok := schema.Properties["max_steps"]
+	if !ok {
+		t.Fatal("schema is missing the max_steps property")
+	}
+	if prop["type"] != "integer" {
+		t.Errorf("max_steps type = %v, want integer", prop["type"])
+	}
+	desc, _ := prop["description"].(string)
+	if !strings.Contains(desc, "lower cap") {
+		t.Errorf("max_steps description = %q, want it to say the argument only LOWERS the cap", desc)
+	}
+	if len(schema.Required) != 1 || schema.Required[0] != "task" {
+		t.Errorf("required = %v, want [task] — max_steps must stay optional", schema.Required)
+	}
+}
+
+// TestSubAgentArgsParsesTheOptionalMaxSteps proves the exported argument shape carries the
+// lowered cap across the JSON boundary, and that a call omitting it yields 0 — the value the
+// orchestrator reads as "use the configured cap" — rather than failing to parse.
+func TestSubAgentArgsParsesTheOptionalMaxSteps(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		payload   string
+		wantSteps int
+	}{
+		{"capped", `{"task":"summarise the repo","max_steps":12}`, 12},
+		{"uncapped", `{"task":"summarise the repo"}`, 0},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			var args SubAgentArgs
+			if err := json.Unmarshal([]byte(tc.payload), &args); err != nil {
+				t.Fatalf("unmarshal %s: %v", tc.payload, err)
+			}
+			if args.MaxSteps != tc.wantSteps {
+				t.Errorf("MaxSteps = %d, want %d", args.MaxSteps, tc.wantSteps)
+			}
+		})
+	}
+}

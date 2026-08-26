@@ -31,21 +31,30 @@ var subAgentSpec = toolSpec{
   "required": ["task"],
   "properties": {
     "task": {"type": "string", "description": "The focused sub-task to delegate to a nested agent. Describe it self-containedly: the sub-agent starts with a fresh conversation and reports a single result back."},
-    "name": {"type": "string", "description": "Optional short name for this delegation, shown in the UI."}
+    "name": {"type": "string", "description": "Optional short name for this delegation, shown in the UI."},
+    "max_steps": {"type": "integer", "description": "optional; lower cap for this delegation only; ignored when 0 or above the configured cap"}
   }
 }`),
 }
 
 // SubAgentArgs is the sub_agent tool's argument shape: a self-contained task string plus an
-// OPTIONAL short name for the delegation. It is exported so the dispatch layer parses the
-// delegated task without re-declaring the schema.
+// OPTIONAL short name for the delegation and an OPTIONAL lowered step cap. It is exported so the
+// dispatch layer parses the delegated task without re-declaring the schema.
 //
 // Name is display identity only, never privilege (ADR 0005): it is what the session chat calls
 // the child instead of the task's first line. It is not required — an absent or blank name
 // leaves every display on that fallback.
+//
+// MaxSteps is the Turns this ONE delegation may take before the engine ends it, and it can only
+// ever LOWER the host's configured cap (`delegate-max-steps`): the orchestrator applies
+// min(configured, requested) when both are positive and ignores the request otherwise — 0 or
+// absent means "use the configured cap", a value at or above it changes nothing, and a request
+// against a cap the host switched off is likewise ignored. Like Name it is never privilege: it
+// tightens a bound, so it can only make a delegation cheaper.
 type SubAgentArgs struct {
-	Task string `json:"task"`
-	Name string `json:"name"`
+	Task     string `json:"task"`
+	Name     string `json:"name"`
+	MaxSteps int    `json:"max_steps"`
 }
 
 // SubAgent is the model-facing descriptor for delegating a sub-task to a nested agent

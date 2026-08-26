@@ -117,6 +117,44 @@ func TestTurnEnd_Table(t *testing.T) {
 		assertJudged(t, tracker)
 	})
 
+	t.Run("endStepCapped advances, closes the Exchange and marks the boundary partial", func(t *testing.T) {
+		conv := domain.NewConversation(nil)
+		conv.Append(domain.Message{Role: domain.RoleUser, Content: "u"})
+		conv.Defer("pending-correction")
+		tracker := seededTracker()
+		l := &turnLifecycle{conv: conv, tracker: tracker, index: 5, inExchange: true}
+
+		res := l.end(&turnRun{turn: 5, start: past}, endStepCapped)
+
+		if res.Status != domain.StatusExchangeComplete {
+			t.Errorf("Status = %q, want %q", res.Status, domain.StatusExchangeComplete)
+		}
+		if !res.StepCapped {
+			t.Error("StepCapped not set; it is the only thing that tells a capped Exchange from a finished one")
+		}
+		if res.Faulted {
+			t.Error("Faulted set on a step-capped Exchange; nothing failed — the work up to the cap stands")
+		}
+		if l.index != 6 {
+			t.Errorf("index = %d, want 6 (advanced)", l.index)
+		}
+		if l.inExchange {
+			t.Error("inExchange still set; the step cap ends the Exchange")
+		}
+		if l.conv.DeferredLen() != 0 {
+			t.Errorf("deferred queue len = %d, want 0 (closeExchange clears it — F6)", l.conv.DeferredLen())
+		}
+		// Run reaches this row only AFTER endTurnDone judged the Turn that just completed, so the
+		// row must not judge it a second time: the pending set stays exactly as it was rather than
+		// rotating against an emptied scratch and losing a judgment (R3).
+		if !tracker.pendingJudgment[domain.MechanismID("prev")] {
+			t.Error("step-capped exit re-judged an already-judged Turn: the pending set rotated")
+		}
+		if !tracker.firedThisTurn[domain.MechanismID("cur")] {
+			t.Error("step-capped exit cleared the per-Turn scratch; the Turn was already resolved by endTurnDone")
+		}
+	})
+
 	t.Run("endAbandoned discards, advances, closes the Exchange and empties the queue", func(t *testing.T) {
 		conv := domain.NewConversation(nil)
 		conv.Append(domain.Message{Role: domain.RoleUser, Content: "u"})

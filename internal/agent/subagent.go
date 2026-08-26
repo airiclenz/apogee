@@ -41,6 +41,19 @@ import (
 // structurally impossible.
 const maxSubAgentDepth = 2
 
+// stepCapResultFormat is the marker line the PARENT model receives when a delegation ended at its
+// step cap (Agent.stepCap): a NON-error result whose first line says the answer that follows is
+// partial, so the parent can re-delegate a narrower task instead of treating a half-finished
+// investigation as the finding. It is a package constant, pinned by test, because the parent model
+// reads it as the contract for what the rest of the result is. %d is the cap actually applied.
+const stepCapResultFormat = "[delegate stopped at its step cap (%d steps); partial result — its last visible text follows]"
+
+// stepCapNoTextMarker stands in for the child's last visible text when it produced none — a
+// delegate that spent every capped Turn calling tools and never wrote a word. The marker keeps
+// the result intelligible: the parent is told the delegation was stopped AND that it has nothing
+// to show, rather than being handed a bare marker line with an empty body.
+const stepCapNoTextMarker = "(no visible text)"
+
 // isSubAgentCall reports whether call targets the sub_agent recursion point — the signal
 // resolveAndExecute drives a nested Agent for the call rather than executing a leaf tool.
 func isSubAgentCall(call domain.ToolCall) bool {
@@ -64,7 +77,9 @@ func delegationName(raw string) string {
 // out as dispatchCancelled so the parent rolls the whole Turn back (atomic-within-the-Turn);
 // a FAULTED child Exchange — abandoned rather than completed, which closes on the same
 // StatusExchangeComplete a real completion does — returns an ERROR result naming the fault
-// instead of the child's last assistant text (StepResult.Faulted).
+// instead of the child's last assistant text (StepResult.Faulted). A STEP-CAPPED child
+// (StepResult.StepCapped) is the third outcome and the only one that is neither success nor
+// failure: the engine stopped it mid-task, so the parent gets a NON-error result marked partial.
 //
 // The nested loop's events already reached the parent's EventSink at Depth+1 as they ran; the
 // returned ToolResult is what the PARENT model sees on its next Turn (the delegated work
@@ -88,6 +103,14 @@ func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall) (domain.T
 	sub, err := a.newChildAgent(call.ID, args.Task, delegationName(args.Name))
 	if err != nil {
 		return errorToolResult(call.ID, "could not construct sub-agent: "+err.Error()), dispatchDone
+	}
+	// The call's optional max_steps can only ever LOWER the configured cap: a model may say "this
+	// one is small, stop it sooner", never "let me run longer than the host allows". Both values
+	// must be positive for the request to bite — a request against an UNBOUNDED cap (0, the key
+	// switched off) is ignored too, because the host turning the bound off is a deliberate posture
+	// the model does not get to reinstate per call.
+	if args.MaxSteps > 0 && sub.stepCap > 0 && args.MaxSteps < sub.stepCap {
+		sub.stepCap = args.MaxSteps
 	}
 	// The delegation is the child's whole life, so this scope is the only one that knows when the
 	// child's resources stop being needed — nothing else holds the child to close it later. Close
@@ -125,6 +148,24 @@ func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall) (domain.T
 		// reached the shared EventSink at Depth+1, so the human sees the cause.
 		return errorToolResult(call.ID, "sub-agent faulted before finishing the delegated task: "+
 			"its exchange was abandoned (see the preceding error), so no result was produced"), dispatchDone
+	}
+
+	if res.StepCapped {
+		// The engine STOPPED the child at its step cap (Agent.Run) — it was still asking for tools,
+		// so what it has is partial. That is not a failure and must not be reported as one: an error
+		// result would throw away Turns of real work AND book the delegation as harmful for
+		// self-regulation (noteToolProductivity, R3). So the parent gets a NON-error result whose
+		// first line is the marker saying the answer below is partial, followed by whatever the
+		// child last said out loud. The child's own ErrorEvent already told the human the cap hit.
+		text := sub.lastVisibleText()
+		if text == "" {
+			text = stepCapNoTextMarker
+		}
+		return domain.ToolResult{
+			CallID:  call.ID,
+			Content: fmt.Sprintf(stepCapResultFormat, sub.stepCap) + "\n" + text,
+			IsError: false,
+		}, dispatchDone
 	}
 
 	return domain.ToolResult{CallID: call.ID, Content: sub.finalMessageText(), IsError: false}, dispatchDone
@@ -300,6 +341,13 @@ func (a *Agent) newChildAgent(spawnCallID, task, name string) (*Agent, error) {
 	// newChildAgent never copies the parent's, so a routed child starts uncalibrated by
 	// construction.
 	child.depth = a.depth + 1
+	// The delegate step cap, seeded HERE and only here: a top-level Agent stays at 0 (uncapped)
+	// however the key is set, because the bound is on delegates alone. It rides childCfg, which is
+	// the parent's whole Config, so a ROUTED spawn takes the same cap as an unrouted one — the key
+	// is top-level, not per-server (ADR 0045 replaces only the dial facts and the two posture
+	// keys) — and a grandchild inherits it the same way. runSubAgent may lower it for this one
+	// delegation from the spawning call's max_steps.
+	child.stepCap = childCfg.Delegation.MaxSteps
 	child.callID = spawnCallID
 	child.task = task
 	child.name = name
@@ -381,12 +429,24 @@ func (a *Agent) defaultSubAgentTools() *domain.ToolRegistry {
 // runSubAgent answers a faulted one with an error result before it gets here, so neither that
 // note nor a stale mid-task message can stand in for a delegation that never finished.
 func (a *Agent) finalMessageText() string {
+	if text := a.lastVisibleText(); text != "" {
+		return text
+	}
+	return "(sub-agent completed with no final message)"
+}
+
+// lastVisibleText returns the text of the last assistant message that carried any — the child's
+// last words, whether or not they were its final answer — and "" when it produced none. It is the
+// seam under finalMessageText, split out because a STEP-CAPPED delegation needs the raw answer:
+// the neutral note finalMessageText substitutes says "completed", which is exactly what a capped
+// child did not do, so the capped path supplies its own marker (stepCapNoTextMarker) instead.
+func (a *Agent) lastVisibleText() string {
 	for _, m := range reverseMessages(a.conv.Messages()) {
 		if m.Role == domain.RoleAssistant && m.Content != "" {
 			return m.Content
 		}
 	}
-	return "(sub-agent completed with no final message)"
+	return ""
 }
 
 // reverseMessages returns msgs in reverse order so finalMessageText can scan from the most

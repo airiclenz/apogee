@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -898,5 +899,314 @@ func TestUnroutedChildNeverClosesTheParentsClient(t *testing.T) {
 	}
 	if shared.closes != 1 {
 		t.Errorf("the owning parent closed its client %d times, want exactly 1", shared.closes)
+	}
+}
+
+// ----------------------------------------------------------------------------
+// The delegate step cap (plan 2026-08-26 - 00, item 2)
+// ----------------------------------------------------------------------------
+//
+// A delegate that keeps asking for tools is bounded by Config.Delegation.MaxSteps: Agent.Run
+// ends its Exchange at the cap, cleanly rather than faulted, and the parent receives a NON-error
+// partial result. These tests drive the bound end to end through the same scripted responder the
+// tests above share (scripts[N] is consumed in run order across BOTH loops).
+
+// narratedToolCallScript is a stream that emits visible text AND a tool call in one reply — a
+// delegate narrating as it works. It is what makes a step-capped child's "last visible text"
+// non-empty, which is exactly what the partial result hands back to the parent.
+func narratedToolCallScript(id, name, args, text string) []provider.Delta {
+	return []provider.Delta{
+		{Kind: provider.DeltaContent, Content: text},
+		{Kind: provider.DeltaToolCall, ToolCall: &provider.ToolCall{
+			ID:       id,
+			Type:     "function",
+			Function: provider.FunctionCall{Name: name, Arguments: args},
+		}},
+		{Kind: provider.DeltaDone, FinishReason: "tool_calls"},
+	}
+}
+
+// cappedChildTurns returns n Turns of a child that reads a file and narrates each time — the
+// shape the cap exists for (the 633-Turn lens delegation in the plan's evidence).
+func cappedChildTurns(n int) [][]provider.Delta {
+	out := make([][]provider.Delta, 0, n)
+	for i := 0; i < n; i++ {
+		out = append(out, narratedToolCallScript(
+			fmt.Sprintf("t%d", i), "read_thing", `{}`, fmt.Sprintf("reading file %d", i)))
+	}
+	return out
+}
+
+// subAgentArgsCapped builds the sub_agent argument payload for a delegation that asks for a
+// LOWER step cap than the host configured.
+func subAgentArgsCapped(task string, maxSteps int) string {
+	b, _ := json.Marshal(tools.SubAgentArgs{Task: task, MaxSteps: maxSteps})
+	return string(b)
+}
+
+// countCapErrors returns how many ErrorEvents at the given Depth name the step cap.
+func countCapErrors(events []domain.Event, depth int) int {
+	n := 0
+	for _, e := range events {
+		if ev, ok := e.(domain.ErrorEvent); ok && ev.Depth == depth &&
+			strings.Contains(ev.Err, "step cap") {
+			n++
+		}
+	}
+	return n
+}
+
+// TestRunEndsTheExchangeAtTheStepCap pins the bound at its enforcement site: an Agent with a cap
+// that keeps asking for tools has its Exchange ENDED by Run, on a clean StatusExchangeComplete
+// boundary marked StepCapped and NOT Faulted, after exactly cap Turns.
+func TestRunEndsTheExchangeAtTheStepCap(t *testing.T) {
+	sink := &recordingSink{}
+	reader := fakeTool{name: "read_thing", readOnly: true, result: "package main"}
+	cfg := subAgentConfig(sink, domain.ModeAskBefore, reader)
+
+	responder := &scriptedResponder{scripts: cappedChildTurns(10)}
+	a, err := newAgent(cfg, responder)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	a.stepCap = 3 // what newChildAgent seeds on a delegate; a top-level Agent is left at 0
+
+	if err := a.Submit(domain.UserInput{Text: "trawl the repo"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	res, err := a.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if res.Status != domain.StatusExchangeComplete {
+		t.Errorf("Status = %q, want %q — the cap ends the Exchange", res.Status, domain.StatusExchangeComplete)
+	}
+	if !res.StepCapped {
+		t.Error("StepCapped not set on a capped Exchange")
+	}
+	if res.Faulted {
+		t.Error("Faulted set on a capped Exchange; the cap is not a failure")
+	}
+	if responder.calls != 3 {
+		t.Errorf("upstream calls = %d, want 3 — Run must stop AT the cap, not past it", responder.calls)
+	}
+	if got := countCapErrors(sink.events, 0); got != 1 {
+		t.Errorf("step-cap ErrorEvents = %d, want exactly 1", got)
+	}
+	if !hasErrorContaining(sink.events, 0, "raise delegate-max-steps") {
+		t.Error("the step-cap ErrorEvent does not name the key that raises the bound")
+	}
+}
+
+// TestSubAgent_StepCapReturnsAPartialResultToTheParent proves the parent's side of the bound: a
+// delegation stopped at its cap is NOT an error result — it carries the marker line plus the
+// child's last visible text — and the parent's own Turn continues to a normal Exchange end.
+func TestSubAgent_StepCapReturnsAPartialResultToTheParent(t *testing.T) {
+	sink := &recordingSink{}
+	reader := fakeTool{name: "read_thing", readOnly: true, result: "package main"}
+	cfg := subAgentConfig(sink, domain.ModeAskBefore, reader)
+	cfg.Delegation.MaxSteps = 3
+
+	scripts := [][]provider.Delta{subAgentCallScript("c1", "trawl the repo")}
+	scripts = append(scripts, cappedChildTurns(3)...)
+	scripts = append(scripts, contentScript("parent done"))
+	responder := &scriptedResponder{scripts: scripts}
+
+	a, err := newAgent(cfg, responder)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	if err := a.Submit(domain.UserInput{Text: "please research"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	res, err := a.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// The child's cap is localised to the delegation: the PARENT's Exchange still completes.
+	if res.Status != domain.StatusExchangeComplete || res.Faulted || res.StepCapped {
+		t.Errorf("parent result = %+v, want a clean uncapped exchange-complete", res)
+	}
+	if responder.calls != len(scripts) {
+		t.Errorf("upstream calls = %d, want %d — the parent Turn must continue after the capped child",
+			responder.calls, len(scripts))
+	}
+
+	sub, ok := lastSubAgentResult(sink.events)
+	if !ok {
+		t.Fatal("no sub_agent tool result emitted")
+	}
+	if sub.IsError {
+		t.Errorf("sub_agent result IsError = true for a capped delegation; the partial work stands: %q", sub.Content)
+	}
+	marker := fmt.Sprintf(stepCapResultFormat, 3)
+	if !strings.HasPrefix(sub.Content, marker+"\n") {
+		t.Errorf("sub_agent result = %q, want it to open with %q", sub.Content, marker)
+	}
+	if !strings.Contains(sub.Content, "reading file 2") {
+		t.Errorf("sub_agent result = %q, want the child's LAST visible text", sub.Content)
+	}
+	// The human sees the cause on the child's own stream, once.
+	if got := countCapErrors(sink.events, 1); got != 1 {
+		t.Errorf("step-cap ErrorEvents at Depth 1 = %d, want exactly 1", got)
+	}
+}
+
+// TestSubAgent_StepCapMarksAWordlessDelegate covers the child that spent every capped Turn
+// calling tools and never said anything: the parent still gets an intelligible result rather than
+// a bare marker with an empty body, and never the "completed" note a finished child would get.
+func TestSubAgent_StepCapMarksAWordlessDelegate(t *testing.T) {
+	sink := &recordingSink{}
+	reader := fakeTool{name: "read_thing", readOnly: true, result: "package main"}
+	cfg := subAgentConfig(sink, domain.ModeAskBefore, reader)
+	cfg.Delegation.MaxSteps = 2
+
+	scripts := [][]provider.Delta{
+		subAgentCallScript("c1", "trawl the repo"),
+		toolCallScript("t0", "read_thing", `{}`), // no visible text on either child Turn
+		toolCallScript("t1", "read_thing", `{}`),
+		contentScript("parent done"),
+	}
+	a, err := newAgent(cfg, &scriptedResponder{scripts: scripts})
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	_ = a.Submit(domain.UserInput{Text: "please research"})
+	if _, err := a.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	sub, ok := lastSubAgentResult(sink.events)
+	if !ok {
+		t.Fatal("no sub_agent tool result emitted")
+	}
+	if want := fmt.Sprintf(stepCapResultFormat, 2) + "\n" + stepCapNoTextMarker; sub.Content != want {
+		t.Errorf("sub_agent result = %q, want %q", sub.Content, want)
+	}
+	if strings.Contains(sub.Content, "completed") {
+		t.Errorf("sub_agent result = %q — a capped delegation must never be reported as completed", sub.Content)
+	}
+}
+
+// TestSubAgent_StepCapZeroIsUnbounded proves 0 means OFF: a child that takes more Turns than any
+// cap in these tests still runs to its own final answer and reports it as a plain success.
+func TestSubAgent_StepCapZeroIsUnbounded(t *testing.T) {
+	sink := &recordingSink{}
+	reader := fakeTool{name: "read_thing", readOnly: true, result: "package main"}
+	cfg := subAgentConfig(sink, domain.ModeAskBefore, reader)
+	cfg.Delegation.MaxSteps = 0
+
+	scripts := [][]provider.Delta{subAgentCallScript("c1", "trawl the repo")}
+	scripts = append(scripts, cappedChildTurns(4)...)
+	scripts = append(scripts, contentScript("the child's own final answer"), contentScript("parent done"))
+	a, err := newAgent(cfg, &scriptedResponder{scripts: scripts})
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	_ = a.Submit(domain.UserInput{Text: "please research"})
+	if _, err := a.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	sub, ok := lastSubAgentResult(sink.events)
+	if !ok {
+		t.Fatal("no sub_agent tool result emitted")
+	}
+	if sub.IsError || sub.Content != "the child's own final answer" {
+		t.Errorf("sub_agent result = %+v, want the child's own final answer (cap 0 = unbounded)", sub)
+	}
+	if got := countCapErrors(sink.events, 1); got != 0 {
+		t.Errorf("step-cap ErrorEvents = %d with the cap switched off, want 0", got)
+	}
+}
+
+// TestSubAgent_MaxStepsArgumentOnlyLowersTheCap pins the argument's one direction: a request
+// BELOW the configured cap binds this delegation, a request ABOVE it changes nothing. The model
+// may make a delegation cheaper, never longer than the host allows.
+func TestSubAgent_MaxStepsArgumentOnlyLowersTheCap(t *testing.T) {
+	cases := []struct {
+		name       string
+		configured int
+		requested  int
+		wantSteps  int
+	}{
+		{"a lower request binds", 3, 2, 2},
+		{"a higher request is ignored", 3, 9, 3},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			sink := &recordingSink{}
+			reader := fakeTool{name: "read_thing", readOnly: true, result: "package main"}
+			cfg := subAgentConfig(sink, domain.ModeAskBefore, reader)
+			cfg.Delegation.MaxSteps = tc.configured
+
+			scripts := [][]provider.Delta{
+				toolCallScript("c1", tools.SubAgentToolName, subAgentArgsCapped("trawl the repo", tc.requested)),
+			}
+			scripts = append(scripts, cappedChildTurns(tc.wantSteps)...)
+			scripts = append(scripts, contentScript("parent done"))
+			responder := &scriptedResponder{scripts: scripts}
+
+			a, err := newAgent(cfg, responder)
+			if err != nil {
+				t.Fatalf("newAgent: %v", err)
+			}
+			_ = a.Submit(domain.UserInput{Text: "please research"})
+			if _, err := a.Run(context.Background()); err != nil {
+				t.Fatalf("Run: %v", err)
+			}
+
+			if responder.calls != len(scripts) {
+				t.Errorf("upstream calls = %d, want %d — the child ran a different number of Turns than the effective cap",
+					responder.calls, len(scripts))
+			}
+			sub, ok := lastSubAgentResult(sink.events)
+			if !ok {
+				t.Fatal("no sub_agent tool result emitted")
+			}
+			if want := fmt.Sprintf(stepCapResultFormat, tc.wantSteps); !strings.HasPrefix(sub.Content, want+"\n") {
+				t.Errorf("sub_agent result = %q, want it to open with %q", sub.Content, want)
+			}
+		})
+	}
+}
+
+// TestStepCapNeverBoundsTheMainAgent holds the delegates-only line: the key is set, the top-level
+// Agent takes more Turns than it, and nothing stops it — the main loop is the human's to stop.
+func TestStepCapNeverBoundsTheMainAgent(t *testing.T) {
+	sink := &recordingSink{}
+	reader := fakeTool{name: "read_thing", readOnly: true, result: "package main"}
+	cfg := baseConfig(sink)
+	cfg.Mode = domain.ModeAskBefore
+	reg := domain.NewToolRegistry()
+	_ = reg.Register(reader)
+	cfg.Tools = reg
+	cfg.Delegation.MaxSteps = 1
+
+	scripts := cappedChildTurns(3)
+	scripts = append(scripts, contentScript("the main agent's own final answer"))
+	a, err := newAgent(cfg, &scriptedResponder{scripts: scripts})
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	if a.stepCap != 0 {
+		t.Fatalf("top-level Agent constructed with stepCap = %d, want 0 — the cap is a delegate bound", a.stepCap)
+	}
+	_ = a.Submit(domain.UserInput{Text: "do the work"})
+	res, err := a.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if res.StepCapped {
+		t.Error("the top-level Agent was step-capped; the key bounds delegates only")
+	}
+	if got := countCapErrors(sink.events, 0); got != 0 {
+		t.Errorf("step-cap ErrorEvents at Depth 0 = %d, want 0", got)
+	}
+	if !hasMessageAtDepth(sink.events, 0, "the main agent's own final answer") {
+		t.Error("the main agent did not reach its own final answer")
 	}
 }
