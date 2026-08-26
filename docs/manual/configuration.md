@@ -516,11 +516,12 @@ all**. An existing `~/.apogee/config.yaml` — which an upgrade never touches �
 carries no such key, so nothing changes for a setup you already run.
 
 Whenever a system message goes out at all — because you have a prompt, or workspace
-context files (below), or both — apogee appends its own short
-**orientation block** at the end of it, naming the workspace, this session's scratch
-directory and any read-only library roots the model may read from. That block is not
-part of `system-prompt-text`, cannot be edited out of it, and is not sent when you
-have configured neither a prompt nor context files.
+context files (below), or both — apogee places its own short **orientation block**
+right after your prompt, ahead of any workspace context files, naming the workspace,
+this session's scratch directory and any read-only library roots the model may read
+from. Ahead of them is deliberate: nothing a repository ships can then precede the
+host's own facts. That block is not part of `system-prompt-text`, cannot be edited out
+of it, and is not sent when you have configured neither a prompt nor context files.
 
 ```yaml
 # ~/.apogee/config.yaml
@@ -553,17 +554,21 @@ inherit your prompt; apogee's own internal calls (the conversation summariser,
 prompt never enters your conversation history or a saved session.
 
 Beside your prompt, apogee folds in the **project's own** standing text: it looks
-for `AGENTS.md` in the workspace root at the start of every session and appends it
-to that same first system message, under a header naming the file — so a repo that
-already keeps one for other agents is picked up with nothing to configure. The
-file-only `context-files:` block is where you change that: `names:` is the list of
+for `AGENTS.md` in the workspace root at the start of every session and adds it to
+that same first system message, between a header and a footer naming the file — so a
+repo that already keeps one for other agents is picked up with nothing to configure.
+The file-only `context-files:` block is where you change that: `names:` is the list of
 names to look for (all of the ones that exist are included, in your order) and
 `enable: false` turns the whole thing off. A name that is not there is skipped
 silently — one config travels across repos that carry different files, or none —
 and a file that is present but unreadable is reported in the transcript rather than
 stopping apogee. The content goes out **verbatim**: the placeholders above do not
-apply to it, so a repo's own `{{braces}}` can never fail your startup. The files
-are read when a session starts and re-read on `/clear`, `/new`, or a resume, never
+apply to it, so a repo's own `{{braces}}` can never fail your startup. The one line
+apogee touches is one that spells its own headers: a content line beginning with a
+`## Workspace context:` / `## End of workspace context:` header or with the
+orientation block's first line is sent behind a `[workspace text] ` prefix, so a file
+cannot pass its own prose off as apogee's. The files are read when a session starts
+and re-read on `/clear`, `/new`, or a resume, never
 mid-conversation, so editing `AGENTS.md` while apogee runs takes effect on your
 next `/new`; apogee names each file it loaded, with its size, and warns you (never
 truncates) when the standing content outgrows its share of the context window.

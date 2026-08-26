@@ -42,10 +42,15 @@ func orientationConfig(t *testing.T) domain.Config {
 	return cfg
 }
 
-// TestOrientation_RidesLastOnTheStandingSystemMessage: with a template, a scratch dir and two
-// read roots the seeded content ENDS with the block, and every bullet names its exact path.
-func TestOrientation_RidesLastOnTheStandingSystemMessage(t *testing.T) {
-	cfg := orientationConfig(t)
+// TestOrientation_RidesDirectlyAfterThePrompt: with a template, a scratch dir, two read roots and
+// a workspace context file, the seeded content opens with the rendered prompt, the block follows
+// it immediately, and the first context-file header comes only AFTER the block — no workspace
+// text ever precedes the engine's own facts. Every bullet names its exact path.
+func TestOrientation_RidesDirectlyAfterThePrompt(t *testing.T) {
+	dir := t.TempDir()
+	writeWorkspaceFile(t, dir, "AGENTS.md", "Run make check before committing.")
+	cfg := contextSeamConfig(t, &recordingSink{}, dir, "AGENTS.md")
+	cfg.SystemPrompt = "You are apogee working in {{workspace}}."
 	cfg.ScratchDir = orientationScratchDir
 	cfg.ExtraReadRoots = func() []string { return []string{orientationFirstRoot, orientationSecondRoot} }
 
@@ -54,14 +59,17 @@ func TestOrientation_RidesLastOnTheStandingSystemMessage(t *testing.T) {
 	got := a.standingSystem()
 
 	block := a.orientationBlock()
-	if !strings.HasSuffix(got, "\n\n"+block) {
-		t.Fatalf("standing content does not end with the orientation block:\n%q", got)
+	if !strings.HasPrefix(got, "You are apogee working in "+dir+".\n\n"+block+"\n\n") {
+		t.Fatalf("standing content does not read prompt → orientation block → the rest:\n%q", got)
+	}
+	if headerAt := strings.Index(got, contextFileHeader+"AGENTS.md"); headerAt <= strings.Index(got, orientationHeaderText) {
+		t.Errorf("a context-file header precedes the orientation block:\n%q", got)
 	}
 	if !strings.HasPrefix(block, orientationHeaderText+"\n") {
 		t.Errorf("block does not open with the header: %q", block)
 	}
 	for _, want := range []string{
-		workspaceBullet(orientationWorkspaceDir),
+		workspaceBullet(dir),
 		scratchBullet(orientationScratchDir),
 		rootsBullet(orientationFirstRoot, orientationSecondRoot),
 	} {
@@ -138,7 +146,8 @@ func TestOrientation_NoTemplateAndNoContextFilesSeedsNothing(t *testing.T) {
 }
 
 // TestOrientation_RidesOnContextFilesAlone: the context files are an independent standing
-// source, so the block joins a message they seeded with no template configured at all.
+// source, so the block joins a message they seeded with no template configured at all — and with
+// no prompt to follow it leads the content outright, ahead of the file's own block.
 func TestOrientation_RidesOnContextFilesAlone(t *testing.T) {
 	dir := t.TempDir()
 	writeWorkspaceFile(t, dir, "AGENTS.md", "Run make check before committing.\n")
@@ -150,11 +159,36 @@ func TestOrientation_RidesOnContextFilesAlone(t *testing.T) {
 
 	got := seedSystemMessage(t, a, responder, "hi")
 
-	if !strings.HasPrefix(got, contextBlock("AGENTS.md", "Run make check before committing.")) {
-		t.Fatalf("the context block no longer leads the standing content:\n%q", got)
+	if !strings.HasPrefix(got, a.orientationBlock()+"\n\n") {
+		t.Fatalf("the orientation block does not lead the standing content:\n%q", got)
+	}
+	if !strings.HasSuffix(got, contextBlock("AGENTS.md", "Run make check before committing.")) {
+		t.Errorf("the context block no longer closes the standing content:\n%q", got)
 	}
 	if !strings.Contains(got, workspaceBullet(dir)) || !strings.Contains(got, scratchBullet(orientationScratchDir)) {
 		t.Errorf("the orientation block did not ride along on the context files:\n%q", got)
+	}
+}
+
+// TestOrientation_NamesTheContextFilesOnlyWhenTheyExist: the fifth bullet speaks about what
+// FOLLOWS the block, so it is rendered exactly when the session holds a readable context file —
+// and a session with none never claims blocks the model cannot see.
+func TestOrientation_NamesTheContextFilesOnlyWhenTheyExist(t *testing.T) {
+	const bullet = `- Workspace context files follow under "## Workspace context: <name>" headers:`
+
+	dir := t.TempDir()
+	writeWorkspaceFile(t, dir, "AGENTS.md", "Run make check before committing.")
+	withFiles := contextSeamConfig(t, &recordingSink{}, dir, "AGENTS.md")
+	withFiles.SystemPrompt = "You are apogee working in {{workspace}}."
+
+	loaded := newProfileAgent(t, withFiles, &recordingResponder{reply: "All done."})
+	none := newProfileAgent(t, orientationConfig(t), &recordingResponder{reply: "All done."})
+
+	if block := loaded.orientationBlock(); !strings.Contains(block, bullet) {
+		t.Errorf("a session holding AGENTS.md does not name the context files: %q", block)
+	}
+	if block := none.orientationBlock(); strings.Contains(block, bullet) {
+		t.Errorf("a session holding no context file still names blocks: %q", block)
 	}
 }
 
@@ -205,14 +239,22 @@ func TestOrientation_FollowsAScratchDirMove(t *testing.T) {
 	}
 }
 
-// withOrientation returns the standing system content a seam test expects: the parts THAT test
-// configures, then the engine's own orientation block appended last. The block's own text is
-// pinned by the tests above; taken from the agent under test here, so a seam test keeps
-// asserting the exact bytes of the part it owns without restating text it does not.
-func withOrientation(a *Agent, parts string) string {
-	block := a.orientationBlock()
-	if block == "" {
-		return parts
+// withOrientation returns the standing system content a seam test expects: the rendered prompt
+// THAT test configures, then the engine's own orientation block, then the context-file blocks it
+// configures — the wire order standingSystem composes, with either configured part passed as ""
+// when the test does not have one. The block's own text is pinned by the tests above; taken from
+// the agent under test here, so a seam test keeps asserting the exact bytes of the parts it owns
+// without restating text it does not.
+func withOrientation(a *Agent, rendered, blocks string) string {
+	parts := make([]string, 0, 3)
+	if rendered != "" {
+		parts = append(parts, rendered)
 	}
-	return parts + "\n\n" + block
+	if block := a.orientationBlock(); block != "" {
+		parts = append(parts, block)
+	}
+	if blocks != "" {
+		parts = append(parts, blocks)
+	}
+	return strings.Join(parts, "\n\n")
 }

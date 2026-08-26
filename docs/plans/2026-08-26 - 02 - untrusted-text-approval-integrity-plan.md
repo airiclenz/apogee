@@ -452,7 +452,23 @@ form (`renderFileGroup`) with `context: 1`.
 
 ---
 
-## 7. Orientation block rides FIRST after the prompt; context files are fenced (F-19)
+## 7. Orientation block rides FIRST after the prompt; context files are fenced (F-19) — ✅ DONE (2026-08-26)
+
+NOTES (2026-08-26): `standingSystem`'s ride-along guard is spelled as an explicit
+`rendered == "" && blocks == ""` check on the two configured sources instead of the literal
+`len(parts) == 0` the item names — same evaluation, same inputs, still taken before the
+orientation is composed in; keeping the literal spelling would have required inserting the block
+into the middle of the already-built slice.
+NOTES (2026-08-26): two doc sentences the change made stale that the item's line references did
+not name were corrected in the same commit — `docs/manual/configuration.md`'s context-files
+paragraph ("under a header naming the file" → header and footer, plus one clause on the prefix)
+and `internal/config/defaults/config.yaml`'s `context-files:` comment block (header → header and
+footer, and the order relative to the orientation block). `internal/agent/doc.go`'s package map
+line for `orientation.go` ("rides last") was corrected for the same reason.
+NOTES (2026-08-26): the test helper `withOrientation` now takes the rendered prompt and the
+context blocks as two arguments (was one joined string) — the old shape could only append the
+block last, which is exactly the order this item changes. All 13 call sites updated in place; the
+name is unchanged.
 
 **What:** `internal/agent/loop.go:847-862` `standingSystem` joins prompt → context files →
 orientation, so a workspace `AGENTS.md` can precede the real orientation block with a forged

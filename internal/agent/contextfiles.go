@@ -150,14 +150,74 @@ func (a *Agent) reloadContextFiles() {
 // content ends and the next one's begins.
 const contextFileHeader = "## Workspace context: "
 
+// contextFileFooter closes each file's content under the same name the header opened it with, so
+// the extent of a repo-controlled block is stated at BOTH ends. A header alone marks where
+// content begins and leaves where it ends to be inferred from the next header — which is exactly
+// the inference a file can play with by spelling structure of its own.
+const contextFileFooter = "## End of workspace context: "
+
+// workspaceTextPrefix marks a content line that spells one of the standing system message's own
+// structural lines. It is the ONE rewrite ADR 0026 §3's "content is data, verbatim" admits: the
+// line still travels, every byte of it, behind a prefix that says who wrote it.
+const workspaceTextPrefix = "[workspace text] "
+
+// hasContextBlocks reports whether this session holds at least one READABLE context file — the
+// exact condition under which contextBlocks renders anything, asked without building the string.
+// The orientation block (orientation.go) states that workspace blocks follow only when they do.
+func (a *Agent) hasContextBlocks() bool {
+	for _, f := range a.contextFiles {
+		if f.err == nil && f.content != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// forgesStandingStructure reports whether one content line spells a line the standing system
+// message uses as its OWN furniture: a context-file header or footer, or the orientation block's
+// header. Leading whitespace is trimmed before the test — an indented forgery reads as furniture
+// to a model just as well as a flush one — but the line itself is never trimmed, only prefixed.
+func forgesStandingStructure(line string) bool {
+	trimmed := strings.TrimSpace(line)
+	return strings.HasPrefix(trimmed, contextFileHeader) ||
+		strings.HasPrefix(trimmed, contextFileFooter) ||
+		strings.HasPrefix(trimmed, orientationHeader())
+}
+
+// fenceContent prefixes every line of a context file that spells the standing message's own
+// structure with workspaceTextPrefix, and returns the content untouched when no line does — the
+// common case, which costs one Split and no copy.
+//
+// This is the fence's second half: the header/footer pair states where a repo's text begins and
+// ends, and this keeps the text between them from spelling either one, or the orientation
+// header, convincingly. Nothing else is rewritten — {{braces}}, markdown, indentation and every
+// other byte travel exactly as written (ADR 0026 §3).
+func fenceContent(content string) string {
+	lines := strings.Split(content, "\n")
+	fenced := false
+	for i, line := range lines {
+		if !forgesStandingStructure(line) {
+			continue
+		}
+		lines[i] = workspaceTextPrefix + line
+		fenced = true
+	}
+	if !fenced {
+		return content
+	}
+	return strings.Join(lines, "\n")
+}
+
 // contextBlocks renders the session's cached content as the blocks that ride the seeded system
-// message: one headed block per readable entry, in list order, joined by a blank line. An entry
-// carrying only an error contributes nothing (an unreadable file is reported to the user, never
-// to the model), so a cache of nothing but errors renders "".
+// message: one block per readable entry, in list order, each opened by a header and closed by a
+// footer naming the file, joined by a blank line. An entry carrying only an error contributes
+// nothing (an unreadable file is reported to the user, never to the model), so a cache of
+// nothing but errors renders "".
 //
 // The content goes out verbatim — no internal/prompt anywhere on this path — so a repo's own
-// {{braces}} reach the model as written. Only trailing newlines are trimmed, so the blank line
-// between blocks is exactly one however the file happened to end.
+// {{braces}} reach the model as written; the ONE exception is the fence above, which prefixes a
+// line that spells this message's own structure. Only trailing newlines are trimmed, so the
+// blank line between blocks is exactly one however the file happened to end.
 //
 // The result is a pure function of the cache, and the cache only moves at a session boundary:
 // every request of a session therefore seeds byte-identical content and the server's prefix KV
@@ -172,7 +232,9 @@ func (a *Agent) contextBlocks() string {
 		if f.err != nil || f.content == "" {
 			continue
 		}
-		blocks = append(blocks, contextFileHeader+f.name+"\n\n"+strings.TrimRight(f.content, "\r\n"))
+		blocks = append(blocks, contextFileHeader+f.name+"\n\n"+
+			fenceContent(strings.TrimRight(f.content, "\r\n"))+"\n\n"+
+			contextFileFooter+f.name)
 	}
 	return strings.Join(blocks, "\n\n")
 }

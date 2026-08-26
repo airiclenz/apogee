@@ -64,7 +64,8 @@
 // Sub-agent server through, held by one handle for a whole agent tree (ADR 0045).
 // contextfiles.go owns the workspace context files' discovery half — the session-scoped cache,
 // its loader, and the construction-time name gate. orientation.go composes the engine-owned
-// orientation block that rides last on that same standing system message (prompts/orientation.txt).
+// orientation block that rides directly after the prompt on that same standing system message,
+// ahead of those files' fenced blocks (prompts/orientation.txt).
 //
 // And doc.go this map.
 package agent

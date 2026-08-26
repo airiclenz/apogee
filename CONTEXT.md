@@ -606,10 +606,11 @@ the engine writes it, so no edit to the user's `system-prompt-text` — and no i
 was seeded before a fact existed — can lose it. It **rides along**: appended only when a standing
 system message exists anyway (a rendered template and/or **Context files** blocks), never
 on its own, so "delete the prompt to send none" stays byte-identical on the wire and the **Bypass**
-floor is untouched. Wire position is LAST of the standing parts —
-prompt → context files → orientation → mechanism directives → tool block — and every fact it
-states is a per-session constant, so it is prefix-KV-cache safe. A fact the session does not have
-is omitted rather than rendered empty. See
+floor is untouched. Wire position is directly after the prompt —
+prompt → orientation → context files → mechanism directives → tool block — so no workspace text
+precedes it and a repo file cannot open with a forged copy the real one then reads as a
+correction of; every fact it states is a per-session constant, so it is prefix-KV-cache safe. A
+fact the session does not have is omitted rather than rendered empty. See
 [ADR 0023](docs/adr/0023-the-system-prompt-is-a-configured-template-rendered-per-request.md) §6.
 _Avoid_: "system prompt" (that is the user's configured template; this is the engine's own text),
 "preamble" (the terminal tool's fail-fast preamble is a different thing).
@@ -969,7 +970,7 @@ one is a startup error, never raw braces on the wire. It is **request-scoped**: 
 request projection at position 0 and never committed to the conversation, so it appears in no
 history and in no Session record, and a Mechanism's directives and the Model profile's rendered
 tool menu fold in **after** it within that one message, as does the engine's
-**Orientation block** (prompt → context files → orientation → directives → tool block). A
+**Orientation block** (prompt → orientation → context files → directives → tool block). A
 **Sub-agent inherits** it. Distinct from apogee's two **internal** prompts, which it never
 reaches by construction: the Compaction summariser's instruction and the probe battery's. See
 [ADR 0023](docs/adr/0023-the-system-prompt-is-a-configured-template-rendered-per-request.md).
@@ -982,11 +983,15 @@ turn-local and invoked from one message.
 The **project's** standing text: files apogee **discovers** in the workspace root — configured by
 NAME (`context-files:`, default `AGENTS.md`; file-only, root-only, no walk-up) — whose content is
 folded into the standing system content beside the [System prompt](#context-and-history). Every
-listed name that exists is included, in list order, each under a `## Workspace context: <name>`
-header, and the merged first system message reads **prompt → context files → Orientation block →
-Mechanism directives → tool menu**; either configured source alone seeds the message. Content is **data, never a template**: it
+listed name that exists is included, in list order, each **fenced** between a
+`## Workspace context: <name>` header and a `## End of workspace context: <name>` footer, and the
+merged first system message reads **prompt → Orientation block → context files → Mechanism
+directives → tool menu** — the engine's own block first, so no workspace text precedes it; either
+configured source alone seeds the message. Content is **data, never a template**: it
 bypasses the placeholder language entirely, so a repo's own `{{braces}}` travel verbatim and can
-never fail startup. The read is **session-scoped** — at construction and at each session boundary
+never fail startup — the one rewrite is the fence, which prefixes a content line spelling that
+header, that footer or the Orientation block's own header with `[workspace text] `. The read is
+**session-scoped** — at construction and at each session boundary
 (`/clear`, `/new`, a restore), never per request and never mid-conversation — so the bytes are
 fixed for a session (the server's prefix cache survives) and an edit lands on the next `/new`; a
 **Sub-agent inherits the parent's bytes**, copied rather than re-read. A missing or empty file is

@@ -286,9 +286,10 @@ system-prompt-text: |
 # Config-file only (no flag or env), like the system prompt it stands beside. Defaults below.
 #
 # EVERY listed name that exists is included, in list order — the list is an inclusion set, not a
-# priority chain — each under a `## Workspace context: <name>` header, appended after the system
-# prompt inside that same one first system message. Names are looked up in the workspace root
-# ONLY: no parent-directory walk-up and no global context file (standing text that follows you
+# priority chain — each between a `## Workspace context: <name>` header and a matching
+# `## End of workspace context: <name>` footer, after the system prompt and apogee's own
+# orientation block inside that same one first system message. Names are looked up in the
+# workspace root ONLY: no parent-directory walk-up and no global context file (standing text that follows you
 # from project to project is exactly what system-prompt-text/-file above are). A name must be a
 # plain workspace-relative one: an absolute path, a name climbing out with "..", an empty entry,
 # or the same name twice is a startup error naming the entry.

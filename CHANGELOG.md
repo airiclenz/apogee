@@ -234,6 +234,16 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **Security: a workspace context file can no longer forge the harness's own orientation.** The
+  engine-composed orientation block now rides directly after your system prompt and **ahead of**
+  any workspace context files, so nothing a repository ships can precede — and thereby reframe —
+  the host facts. Each context file is now fenced between a `## Workspace context: <name>` header
+  and a `## End of workspace context: <name>` footer, and a content line that spells either of
+  those or the orientation block's own header travels behind a literal `[workspace text] ` prefix.
+  Content is otherwise still verbatim: a repo's `{{braces}}` are untouched. The orientation block
+  gains a line naming the header the workspace blocks ride under, rendered only for a session that
+  actually loaded one.
+
 - **`find_files`, `grep` and `list_dir` escape line breaks in the paths they render.** All three
   results use a grammar of one row per line, where the path is DATA inside the row — so a
   filename carrying a `\n` (legal on POSIX) forged rows the model read as the tool's own words:
