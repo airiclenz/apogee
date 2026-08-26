@@ -1238,3 +1238,50 @@ func TestSubAgentPromptDetailsLeadsWithTheTask(t *testing.T) {
 		})
 	}
 }
+
+// ----------------------------------------------------------------------------
+// A delegation never folds into a super-group (design call 12)
+// ----------------------------------------------------------------------------
+
+// TestUnframedSubAgentNeverFoldsIntoASuperGroup pins the invariant that makes the two substitution
+// sites above enough. Every construction site marks a delegation solo (presentToolCall, and the
+// decode path that re-derives it), so it is never groupable: it heads no umbrella and lets none
+// span it (toolSuperGroup), and renderSuperGroup's member painter can therefore never be handed
+// one — which is why a delegation that never ran only ever reaches the reader through the lone
+// block above.
+//
+// The fixture is the case that WOULD fold if the mark were ever lost: a never-ran delegation
+// between two reads is three adjacent runs of different labels at one depth, an umbrella by every
+// other rule. It must still paint as three separate blocks, with the delegation opening onto the
+// prompt it carried rather than shrinking to an umbrella member row that has nowhere to show it.
+func TestUnframedSubAgentNeverFoldsIntoASuperGroup(t *testing.T) {
+	const width = 80
+
+	tr := &transcript{}
+	readCall(tr, "r1", "a.go", 1, 5, 0)
+	refusedDelegation(tr, "s1", refusedTask)
+	readCall(tr, "r2", "b.go", 1, 5, 0)
+	for i := range tr.entries {
+		if !tr.setExpanded(i, true) {
+			t.Fatalf("setExpanded(%d, true) = false; want every block open", i)
+		}
+	}
+
+	for at := range tr.entries {
+		if got := toolSuperGroup(tr.entries, at); got != nil {
+			t.Errorf("toolSuperGroup(…, %d) = %v; a delegation neither heads an umbrella nor lets one span it", at, got)
+		}
+	}
+
+	// Its own header, its own leader row, and the prompt beneath them — the lone-block reading.
+	want := strings.Join([]string{
+		"✦ Sub-Agent",
+		leaderEdgeRow("  ┕ survey the tests ⋯ done", glyphExpanded),
+		"    " + unframedSubAgentPromptLead + "survey the tests",
+		"    and report back",
+		"    with detail",
+	}, "\n")
+	if got := renderPlain(tr, width); !strings.Contains(got, want) {
+		t.Errorf("a delegation among reads lost its own block:\n--- got ---\n%s\n--- want it to contain ---\n%s", got, want)
+	}
+}
