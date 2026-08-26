@@ -508,7 +508,14 @@ served.
 
 ---
 
-## 7. Manual and CONTEXT truth: four placeholders, a trusted `model:`, root-command trace flags (R-1, R-2, R-4)
+## 7. Manual and CONTEXT truth: four placeholders, a trusted `model:`, root-command trace flags (R-1, R-2, R-4) — ✅ DONE (2026-08-26)
+
+NOTES (2026-08-26): the three PROPOSED texts are reproduced verbatim in wording; only the
+line wrapping differs, chosen so each phrase the item's Acceptance greps for
+(`is a **trusted** id, never substituted`, ``they sit on the root command, not on `apogee probe` ``)
+sits on ONE line — a natural re-wrap would have split both across a newline and failed the check.
+Line widths stay inside each file's existing maximum (configuration.md ~80, CONTEXT.md ~108,
+probe.md ~97).
 
 **What:** three stale claims, each replaced by the PROPOSED text from
 `docs/skill-runs/refocus/2026-08-25/corrections.md` verbatim. Docs-only commit, no `make check`.

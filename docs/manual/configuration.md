@@ -542,12 +542,13 @@ system-prompt-text: |
 #     system-prompt-text: "Be terse. Use tools; do not narrate."
 ```
 
-Three placeholders are substituted fresh on every request: `{{workspace}}` (the
+Four placeholders are substituted fresh on every request: `{{workspace}}` (the
 workspace path), `{{datetime}}` (today's **date** — not a timestamp, which would
-change the prompt every turn and throw away your server's prefix cache), and
-`{{mode}}` (the autonomy mode, so a Shift+Tab shows up from the next request on).
-The spelling is strict and the set is closed — anything else in double braces,
-`{{ workspace }}` included, is a startup error listing the three.
+change the prompt every turn and throw away your server's prefix cache),
+`{{mode}}` (the autonomy mode, so a Shift+Tab shows up from the next request on),
+and `{{scratch}}` (this session's scratch directory). The spelling is strict and
+the set is closed — anything else in double braces, `{{ workspace }}` included,
+is a startup error listing the four.
 
 A `system-prompt-models:` entry keyed by the model name apogee resolves at startup
 **replaces** the global prompt for that model, whole; an entry naming a model you

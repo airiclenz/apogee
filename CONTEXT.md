@@ -1278,10 +1278,12 @@ apogee paints before the server has answered and can be started **before** its s
 together — wire model id, [System prompt](#context-and-history) template, context window, and the
 [Mechanism](#mechanism-and-hook-points) set — at a **quiescent boundary** (idle, or deferred to the
 end of the running [Exchange](#turns-and-stepping)), never mid-Exchange. A configured
-`context-window:` is a **pin** the heartbeat never overrides; a `servers:` entry's `model` is a **hint**
-that yields to what the server actually serves — and the hint **follows the binding**, restated on
-every commit, so discovery keeps resolving the model the session actually runs rather than the one
-config named at launch.
+`context-window:` is a **pin** the heartbeat never overrides; a `servers:` entry's `model`
+is a **trusted** id, never substituted: whenever it is set it is the active model verbatim, and an
+advertised entry supplies only its context window (an id the server does not list runs as
+configured, with no window known). Only an empty `model` falls back to the first model the server
+advertises — and the resolved id **follows the binding**, restated on every commit, so discovery
+keeps resolving the model the session actually runs rather than the one config named at launch.
 The same two halves are what the human's own switches are made of, never a third path to bind.
 **`/model`** picks among the models the beat reported and drives *Rebind by hand* — same seam, same
 words, and the pick is recorded as the last observation so the next beat measures it as nothing
