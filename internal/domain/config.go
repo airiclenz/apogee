@@ -304,6 +304,17 @@ type ContextConfig struct {
 	MaxContextTokens int // 0 ⇒ window unknown; the CLI discovers it or the context-window key supplies it (the Budget then allocates nothing and the engine's growth bounds fall back to one conservative assumed ceiling — internal/agent, ADR 0018)
 	ResponseReserve  int
 
+	// WorkingWindow is the soft ceiling the Budget and every reducer read: how much of the window
+	// above a session actually works in, in tokens. 0 ⇒ the advertised window is the whole working
+	// room, which is what every session did before this key existed; > 0 ⇒ the smaller of the two
+	// bounds the allocation, the tool-result cap and the compaction triggers, while the ADVERTISED
+	// window still drives overflow detection and the reply-cap derivation. It is fed the
+	// `working-window:` key (top-level, or the bound server entry's override), the way
+	// MaxContextTokens is fed `context-window:`, and it exists for the model that advertises a very
+	// large window: every guard that scales with the window becomes expensive at once, and a run is
+	// made affordable by bounding the room rather than by lying about the window.
+	WorkingWindow int
+
 	// ResponseReserveFraction is the share of the discovered window held back for the model's
 	// reply when no explicit token reserve is pinned — the `response-reserve:` config key
 	// (top-level, or the bound server entry's override), expressed as a fraction. The reserve

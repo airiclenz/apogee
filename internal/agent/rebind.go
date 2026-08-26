@@ -291,6 +291,14 @@ type UpstreamSpec struct {
 	// server's window instead would budget against a number describing a machine this session no
 	// longer talks to.
 	MaxContextTokens int
+	// WorkingWindow is the room INSIDE that window the session works in on the new server — the new
+	// entry's `working-window:` resolved over the top-level key by the caller
+	// (config.ResolveWorkingWindow), like the window beside it and for its reason: how much room is
+	// affordable is a statement about the slot. 0 ⇒ neither scope bounds anything, which leaves the
+	// advertised window as the whole working room. The zero is applied rather than skipped for the
+	// reply cap's reason below — keeping the RETIRED server's bound would work in a room describing
+	// a machine this session no longer talks to.
+	WorkingWindow int
 	// MaxOutputTokens is the ceiling on ONE reply from the new server — the new entry's
 	// `max-output-tokens:` pin, carried as written (ADR 0046). 0 ⇒ that entry pins no cap, and the
 	// engine derives one from the reply room the Budget reserves out of the window above. The zero is
@@ -331,10 +339,10 @@ type UpstreamSpec struct {
 // Mechanism registry and the model profile also stand, both still describing the model that just
 // went away, until the follow-up Rebind re-resolves them for the new one; they are unreachable
 // meanwhile, since no request can open while nothing is bound.
-// What MOVES with the server: the two token bounds the new entry pins — the context window the
-// Budget and Compaction measure against, and the ceiling the loop states on the wire for one reply —
-// and the share of that window the new server holds back for the reply. All three are applied as the
-// spec states them, the zeroes included, because an absent pin is a fact about the new server rather
+// What MOVES with the server: the token bounds the new entry states — the context window the Budget
+// and Compaction measure against, the room inside it the session works in, and the ceiling the loop
+// states on the wire for one reply — and the share of that window the new server holds back for the
+// reply. All four are applied as the spec states them, the zeroes included, because an absent pin is a fact about the new server rather
 // than a licence to keep the old server's number (see the spec's fields).
 // What resets, with Rebind's own rationale: the token estimator (its chars→token calibration
 // described a model this session no longer speaks to) and the compaction saturation latch (it was
@@ -371,6 +379,7 @@ func (a *Agent) SwitchUpstream(spec UpstreamSpec) error {
 	a.cfg.APIKey = spec.APIKey
 	a.cfg.Model = ""
 	a.cfg.Context.MaxContextTokens = spec.MaxContextTokens
+	a.cfg.Context.WorkingWindow = spec.WorkingWindow
 	a.cfg.Context.MaxOutputTokens = spec.MaxOutputTokens
 	a.cfg.Context.ResponseReserveFraction = spec.ResponseReserveFraction
 	a.tokens = apogeectx.NewTokenEstimator()

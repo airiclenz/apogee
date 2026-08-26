@@ -878,7 +878,8 @@ func TestApplyConfigStartupLauncherComesFromTheSelectedEntry(t *testing.T) {
 	}
 }
 
-// The window a session STARTS bounded by is the selected entry's own `context-window:`, flattened
+// The window a session STARTS bounded by is the selected entry's own `context-window:` — and the
+// room it works INSIDE that window, its `working-window:` — flattened
 // exactly as the launcher key above is and for the same reason: the pin belongs to the entry, so the
 // composition root resolves it over the top-level key at the bind rather than a beat later. An entry
 // that pins none carries a zero, which leaves that top-level key answering — and so does the
@@ -887,15 +888,17 @@ func TestApplyConfigStartupContextWindowComesFromTheSelectedEntry(t *testing.T) 
 	t.Parallel()
 	const servers = "servers:\n" +
 		"  - name: cloud\n    endpoint: https://openrouter.ai/api/v1\n    context-window: 65536\n" +
+		"    working-window: 32768\n" +
 		"  - name: workstation\n    endpoint: http://192.168.1.9:1111\n"
 
 	tests := []struct {
-		name     string
-		start    string
-		endpoint string
-		want     int
+		name        string
+		start       string
+		endpoint    string
+		want        int
+		wantWorking int
 	}{
-		{name: "the selected entry pins its own window", start: "cloud", want: 65536},
+		{name: "the selected entry pins its own window", start: "cloud", want: 65536, wantWorking: 32768},
 		{name: "the selected entry pins none", start: "workstation"},
 		{name: "an endpoint override pins nothing", start: "cloud", endpoint: "http://rented.example:8080/v1"},
 	}
@@ -915,6 +918,12 @@ func TestApplyConfigStartupContextWindowComesFromTheSelectedEntry(t *testing.T) 
 			if opts.StartupContextWindow != tt.want {
 				t.Errorf("startupContextWindow = %d; want %d — the pin travels from the SELECTED entry, unresolved",
 					opts.StartupContextWindow, tt.want)
+			}
+			// And the room INSIDE it, flattened off the same entry and for the same reason: a session
+			// that starts on a bounded entry must work in that room from its first Turn.
+			if opts.StartupWorkingWindow != tt.wantWorking {
+				t.Errorf("startupWorkingWindow = %d; want %d — the bound travels from the SELECTED entry, unresolved",
+					opts.StartupWorkingWindow, tt.wantWorking)
 			}
 		})
 	}
@@ -1675,6 +1684,69 @@ func TestLoadFileConfigAcceptsAResponseReserveShare(t *testing.T) {
 	}
 	if file.ResponseReserve != 0.2 {
 		t.Errorf("resolved response-reserve = %v; want the file's explicit 0.2", file.ResponseReserve)
+	}
+}
+
+// The working-window config block parses into opts.workingWindow: a file-only key (no flag/env),
+// like the context-window pin it stands beside, and spelled the same way — presence IS the positive
+// value, so 0 and an absent key both leave the whole advertised window as the working room. The
+// downstream opts → ContextConfig.WorkingWindow threading is the composition root's, pinned by
+// TestBindServerResolvesTheWorkingWindow in wire_test.go.
+func TestApplyConfigWorkingWindow(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		name string
+		file string
+		want int
+	}{
+		{"a stated bound", "working-window: 200000\n", 200000},
+		{"an absent key leaves the whole window", "", 0},
+		{"an explicit 0 is the absent state spelled out", "working-window: 0\n", 0},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			home := testConfigHome(t, "")
+			writeConfigHome(t, home, tt.file)
+			opts := Options{ConfigDir: home}
+			if err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" },
+				os.ReadFile, noNotify); err != nil {
+				t.Fatalf("ApplyConfig: %v", err)
+			}
+			if opts.WorkingWindow != tt.want {
+				t.Errorf("opts.workingWindow = %d; want %d", opts.WorkingWindow, tt.want)
+			}
+		})
+	}
+}
+
+// The per-entry half of the working room: a `servers:` entry's own `working-window:` outranks the
+// top-level one for the server the session is ON, and 0 at either scope is the absent state that
+// falls through — to the top-level key first, then to the 0 that leaves the advertised window as the
+// whole room. The ranks are ResolveContextWindow's, one key over, so the table is that one's.
+//
+// The negative rows are the defensive floor rather than a second validation: ValidateServers and the
+// registry refuse those numbers where the file can still be named, so anything reaching here arrived
+// from a caller that never saw the file — and falling through beats budgeting against it.
+func TestResolveWorkingWindow(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name       string
+		entry, top int
+		want       int
+	}{
+		{name: "the entry's own bound wins", entry: 200000, top: 65536, want: 200000},
+		{name: "an entry bounding nothing falls through to the top-level key", top: 65536, want: 65536},
+		{name: "neither bounds anything — the whole window is the room", want: 0},
+		{name: "a negative entry bound falls through", entry: -1, top: 65536, want: 65536},
+		{name: "a negative bound at both ranks falls through to 0", entry: -1, top: -1, want: 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := ResolveWorkingWindow(tt.entry, tt.top); got != tt.want {
+				t.Errorf("ResolveWorkingWindow(%d, %d) = %d; want %d", tt.entry, tt.top, got, tt.want)
+			}
+		})
 	}
 }
 
@@ -2625,6 +2697,25 @@ func TestApplyConfigServersInvalid(t *testing.T) {
 			configYAML: "servers:\n  - name: box\n    endpoint: http://one:1111\n" +
 				"    context-window: -8192\n",
 			wantErr: []string{"servers: entry 1", "box", "context-window: -8192 is negative", "1 or more"},
+		},
+		{
+			// The working room is refused on the window pin's reasoning one key over: absent and 0
+			// already mean "work in the whole window", every N ≥ 1 is a bound, so a negative one has
+			// nothing left to mean.
+			name: "an entry whose working-window is negative",
+			configYAML: "servers:\n  - name: box\n    endpoint: http://one:1111\n" +
+				"    working-window: -8192\n",
+			wantErr: []string{"servers: entry 1", "box", "working-window: -8192 is negative", "1 or more"},
+		},
+		{
+			// And the one refusal the room has that no other pin does: it is the space INSIDE the
+			// window, so a bound above this entry's own pin is a ceiling above its roof. The refusal
+			// names both numbers, because which of the two is wrong is the user's call.
+			name: "an entry working in more room than its own context-window pins",
+			configYAML: "servers:\n  - name: box\n    endpoint: http://one:1111\n" +
+				"    context-window: 200000\n    working-window: 300000\n",
+			wantErr: []string{"servers: entry 1", "box", "working-window: 300000 is larger",
+				"context-window: 200000"},
 		},
 		{
 			// The reply ceiling is refused on that same reasoning (ADR 0046): absent and 0 mean

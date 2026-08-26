@@ -513,6 +513,26 @@ remember-model: true
 # context-window: 32768
 
 # =============================================================================
+# How much of that window you actually work in. A model advertising a very large window makes every
+# guard that scales with it expensive at once — the budget it allocates, the tool output it lets
+# through, the point it compacts at — so a single delegated task on a 1M-token model can re-send
+# hundreds of thousands of tokens on every step. This key bounds the working room instead: apogee
+# budgets, caps and compacts inside it, while the window above still says what the model can hold.
+# On a 1M-window model, working-window: 200000 is a sane place to start. Leave it unset and the
+# working room IS the advertised window, which is what apogee always did. Config-file only (no flag
+# or env).
+# working-window: 0
+#
+# The same key also lives on a servers: entry above, where it bounds the room on THAT server — one
+# scope in, for the endpoint whose window dwarfs the rest. The entry's own bound wins over the key
+# above wherever the session is pointed, and it follows a /server switch, a scheduled run and a
+# delegation onto that server. It may not exceed that entry's own context-window: pin, which is the
+# roof it sits under.
+#
+#   - name: big-window-cloud
+#     working-window: 200000
+
+# =============================================================================
 # How much of that window is held back for the model's REPLY, as a fraction of it. apogee splits
 # every request's window in two: the part the prompt may fill (your message, the history, the file
 # context, the system prompt) and the part left free for the model to answer into. This key sets

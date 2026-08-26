@@ -578,6 +578,17 @@ var keyAccessors = []keyAccessor{
 		},
 	},
 	{
+		// Presence is the positive value here too, for the pin above's reason: 0 and absent both mean
+		// "this run bounds nothing of its own", which leaves the advertised window as the working room.
+		row: mustKey("working-window"),
+		fromFile: func(o *Options, fc fileConfig) {
+			o.WorkingWindow = 0
+			if fc.WorkingWindow > 0 {
+				o.WorkingWindow = fc.WorkingWindow
+			}
+		},
+	},
+	{
 		// Presence is the positive value here too, for context-window's reason: the loader accepts
 		// nothing but 0 and the open range (0, 1), so 0 is "unset" and apogee's built-in share stands.
 		row: mustKey("response-reserve"),
@@ -1015,6 +1026,16 @@ type fileConfig struct {
 	// advertises one that is wrong for how it is run. It feeds ContextConfig.MaxContextTokens,
 	// which the Budget and automatic Compaction bind against.
 	ContextWindow int `yaml:"context-window"`
+	// WorkingWindow BOUNDS the room the Budget hands its reducers, in tokens — a soft ceiling INSIDE
+	// the window above rather than a second pin of it. File-only (no flag/env), like context-window
+	// beside it, and a plain int for that key's reason: presence IS the positive value, so absent or
+	// ≤ 0 ⇒ the advertised window is the whole working room, exactly today's behaviour. It earns its
+	// keep on a model that advertises a very large window, where every guard that scales with the
+	// window — the allocation, the tool-result cap, the compaction trigger — becomes expensive at
+	// once; bounding the working room here is how such a model is run affordably without lying to
+	// overflow detection, which still measures against the ADVERTISED window. It feeds
+	// ContextConfig.WorkingWindow.
+	WorkingWindow int `yaml:"working-window"`
 	// ResponseReserve is how much of that window is held back for the model's REPLY, as a FRACTION
 	// of it (`response-reserve: 0.2` ⇒ a fifth). File-only (no flag/env), like context-window:
 	// beside it. Absent or 0 ⇒ unset, so apogee's built-in 0.20 share stands; a value in the open
@@ -1231,6 +1252,16 @@ type UnconfinedHost struct {
 // window at all, so the pin is how such a server is usable at all — as a Sub-agent server, as one a
 // session moves onto, or as the one a session starts on.
 //
+// WorkingWindow BOUNDS the room a session on this server actually works in, in tokens — the
+// top-level `working-window:` key, per entry, and the `context-window:` idiom's three states with
+// one difference in what the number means: it is a soft ceiling INSIDE the window above, not a
+// second statement of it. Absent (or 0) ⇒ this entry bounds nothing of its own and the top-level
+// key answers; N ≥ 1 ⇒ the Budget and every reducer that reads it work in N tokens whatever the
+// server advertises; negative ⇒ refused by ValidateServers. It rides the entry for the window pin's
+// reason — how much room is affordable is a property of the SLOT, and a 1M-window server is exactly
+// the entry that wants one — and it is refused when it exceeds this entry's own `context-window:`
+// pin, where it would be a ceiling above the roof it is meant to sit under.
+//
 // MaxOutputTokens PINS the ceiling on ONE reply from this server, in tokens — the number the engine
 // states on the wire so a reply stops at a bound it chose rather than at the server's context wall
 // (ADR 0046). It is the `context-window:` idiom verbatim, with the same three states and no fourth:
@@ -1302,6 +1333,7 @@ type ServerEntry struct {
 	Bypass          *bool           `yaml:"bypass,omitempty"`
 	Mechanisms      map[string]bool `yaml:"mechanisms,omitempty"`
 	ContextWindow   int             `yaml:"context-window,omitempty"`
+	WorkingWindow   int             `yaml:"working-window,omitempty"`
 	MaxOutputTokens int             `yaml:"max-output-tokens,omitempty"`
 	ResponseReserve float64         `yaml:"response-reserve,omitempty"`
 	EffortDialect   string          `yaml:"effort-dialect,omitempty"`
@@ -1453,6 +1485,16 @@ func ValidateServers(servers []ServerEntry) error {
 			return fmt.Errorf("apogee: servers: entry %d (%q): context-window: %d is negative — give the "+
 				"context window this server serves, in tokens (1 or more), or remove the key to take the "+
 				"window the server advertises", i+1, s.Name, s.ContextWindow)
+		}
+		if s.WorkingWindow < 0 {
+			return fmt.Errorf("apogee: servers: entry %d (%q): working-window: %d is negative — give the "+
+				"room a session on this server should work in, in tokens (1 or more), or remove the key to "+
+				"work in the whole window", i+1, s.Name, s.WorkingWindow)
+		}
+		if s.ContextWindow >= 1 && s.WorkingWindow > s.ContextWindow {
+			return fmt.Errorf("apogee: servers: entry %d (%q): working-window: %d is larger than this "+
+				"entry's context-window: %d — the working window is the room INSIDE the context window, so "+
+				"lower it, or raise the pin it has to fit in", i+1, s.Name, s.WorkingWindow, s.ContextWindow)
 		}
 		if s.MaxOutputTokens < 0 {
 			return fmt.Errorf("apogee: servers: entry %d (%q): max-output-tokens: %d is negative — give the "+
@@ -1612,6 +1654,31 @@ func ResolveContextWindow(entry, session int) int {
 	}
 	if session >= 1 {
 		return session
+	}
+	return 0
+}
+
+// ResolveWorkingWindow answers the same question one key over again: how much of that window a
+// session running on a `servers:` entry actually works in. entry is that entry's own
+// `working-window:` value (0 when the key is absent, which yaml cannot tell from an explicit 0) and
+// top is the top-level `working-window:` key the whole run carries.
+//
+// The ranks are ResolveContextWindow's exactly, for its reason: a number written on the ENTRY bounds
+// THAT server's slot, while the top-level key bounds whatever server the session happens to be
+// pointed at — so a session moved onto a 1M-window server that names its own working room takes that
+// room rather than the one the last server was run in. Bounded at neither scope ⇒ 0, which is not a
+// window but the honest "nobody said": the working room is then the advertised window itself, which
+// is what every session did before this key existed.
+//
+// Both inputs are guarded rather than trusted — ValidateServers refuses a negative entry bound (and
+// one larger than that entry's own `context-window:` pin) at startup, and the registry refuses a
+// negative top-level one — so anything below 1 falls through to the next rank.
+func ResolveWorkingWindow(entry, top int) int {
+	if entry >= 1 {
+		return entry
+	}
+	if top >= 1 {
+		return top
 	}
 	return 0
 }
@@ -2542,6 +2609,12 @@ func ApplyConfig(opts *Options, changed func(string) bool, getenv func(string) s
 	// (ResolveContextWindow) at the bind. The ephemeral override entry pins nothing, which leaves an
 	// override run on that top-level key and, unpinned there too, on what the first beat observes.
 	opts.StartupContextWindow = startup.ContextWindow
+	// And how much of that window a session on it actually works in. Flattened for the pin's reason
+	// and travelling the same way — the SELECTED entry's own value, carried as written for the
+	// composition root to resolve over the top-level `working-window:` key (ResolveWorkingWindow) at
+	// the bind. The ephemeral override entry bounds nothing, which leaves an override run on that
+	// top-level key and, unbounded there too, working in the whole advertised window.
+	opts.StartupWorkingWindow = startup.WorkingWindow
 	// And how that entry's server divides it (item 13). Flattened for the window's reason and
 	// travelling the same way — the SELECTED entry's own value, carried as written for the
 	// composition root to resolve over the top-level `response-reserve:` key

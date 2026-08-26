@@ -36,6 +36,15 @@ type Options struct {
 	HostAlias     string
 	ContextWindow int
 
+	// workingWindow is the `working-window:` key in tokens — how much of the context window above a
+	// session actually works in. Resolved-not-flag-bound like the pin beside it, and file-only for
+	// the same reason: how much room is affordable on a machine is a per-machine tuning fact. 0 means
+	// the key is unset and the working room IS the advertised window, which is what every session did
+	// before this key existed; a positive value bounds the Budget and every reducer that reads it,
+	// while overflow detection and the reply-cap derivation keep measuring against the window. The
+	// composition root hands it to ContextConfig.WorkingWindow.
+	WorkingWindow int
+
 	// responseReserve is the `response-reserve:` share — how much of the context window, as a
 	// fraction of it, is held back for the model's reply. Resolved-not-flag-bound like the pin
 	// above, and file-only for the same reason: how a window is divided is a per-machine tuning
@@ -137,6 +146,17 @@ type Options struct {
 	// that STARTS on a pinned entry budgets against the pin from its first Turn rather than from its
 	// first beat.
 	StartupContextWindow int
+
+	// startupWorkingWindow is the SELECTED startup entry's own `working-window:` value, exactly as
+	// the user wrote it: 0 (the key absent) ⇒ that entry bounds nothing, so the top-level
+	// `working-window:` key answers and, unbounded there too, the session works in the whole
+	// advertised window. It is a fact about the entry this session starts ON for the reason the field
+	// above is — the room is a property of the SLOT, not of the run — and the ephemeral
+	// `--endpoint`/`APOGEE_ENDPOINT` override entry carries none, which leaves an override run on the
+	// top-level key. Resolved-not-flag-bound; ApplyConfig sets it from the startup entry, and the
+	// composition root resolves it over that key (ResolveWorkingWindow) at the bind, so a session
+	// that STARTS on a bounded entry works in that room from its first Turn.
+	StartupWorkingWindow int
 
 	// startupResponseReserve is the SELECTED startup entry's own `response-reserve:` value, exactly
 	// as the user wrote it: 0 (the key absent) ⇒ that entry states no share, so the top-level

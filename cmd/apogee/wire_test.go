@@ -3442,20 +3442,20 @@ const startupOnlyContract = "takes effect at the next start."
 // already made. They hold the dispatcher's only exemption from the nil-member refusal, and they are
 // the only shape that can be one: the apply REQUIRES no member of the applier, so there is nothing a
 // Driver could have been composed without. `editor` is re-read off a fresh projection of the file
-// every time an external edit starts (ADR 0041 decision 1); the other three are read once, while
-// the session is being built, and say so in their Descriptions. `ui.inspector` and
-// `delegate-max-steps` still mirror their value onto the live holder for the Firings a session
-// raises, and do nothing at all where a Driver composed none — which is why they are exempt rather
-// than reaching for one.
+// every time an external edit starts (ADR 0041 decision 1); the other four are read once, while
+// the session is being built, and say so in their Descriptions. `ui.inspector`,
+// `delegate-max-steps` and `working-window` still mirror their value onto the live holder for the
+// Firings a session raises, and do nothing at all where a Driver composed none — which is why they
+// are exempt rather than reaching for one.
 var settingKeysWithNoMemberToReach = []string{
-	"editor", "ui.inspector", "response-reserve", "delegate-max-steps",
+	"editor", "ui.inspector", "response-reserve", "delegate-max-steps", "working-window",
 }
 
-// The three START-UP-only keys are `editor`'s counter-case from the other side: keys with no seam
+// The four START-UP-only keys are `editor`'s counter-case from the other side: keys with no seam
 // that must not refuse either. `ui.inspector` decides whether a wire observer is installed while
 // the provider client is constructed, `response-reserve` is read into the budget the session opens
-// with, and `delegate-max-steps` is a field of the Config the engine was constructed with, so this
-// session genuinely cannot move any of them — but the file the next one starts from HAS moved,
+// with, and `delegate-max-steps` and `working-window` are fields of the Config the engine was
+// constructed with, so this session genuinely cannot move any of them — but the file the next one starts from HAS moved,
 // which is the whole of what the key promises. Refusing would report a failed apply over a
 // save that did exactly that, which is the defect this pins.
 //
@@ -3467,6 +3467,7 @@ func TestApplySettingAcceptsTheStartupOnlyKeys(t *testing.T) {
 		{key: "ui.inspector", value: "true"},
 		{key: "response-reserve", value: "0.25"},
 		{key: "delegate-max-steps", value: "40"},
+		{key: "working-window", value: "200000"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.key, func(t *testing.T) {
@@ -5742,6 +5743,65 @@ func TestServerBindHandsTheEntrysResponseReserveToTheEngine(t *testing.T) {
 				t.Errorf("Config.Context.ResponseReserveFraction = %v; want %v — the share this "+
 					"session's very first Turn budgets its reply room by",
 					handed.Context.ResponseReserveFraction, tt.want)
+			}
+		})
+	}
+}
+
+// The same bind, one key further over: the entry's own `working-window:` reaches the Config the
+// Agent is CONSTRUCTED from, so the session's very first Turn works in the room the file names for
+// THIS server. The unpinned row is the precedence's other half — an entry bounding nothing leaves
+// the top-level key the Config arrived carrying answering, rather than zeroing the bound away into
+// "work in the whole advertised window".
+func TestBindServerResolvesTheWorkingWindow(t *testing.T) {
+	t.Parallel()
+	const topLevelRoom = 65536
+
+	tests := []struct {
+		name  string
+		entry config.ServerEntry
+		want  int
+	}{
+		{
+			name: "the entry's own bound outranks the top-level key",
+			entry: config.ServerEntry{
+				Name: "big-window-cloud", Endpoint: "http://127.0.0.1:1111",
+				ContextWindow: 1310720, WorkingWindow: 200000,
+			},
+			want: 200000,
+		},
+		{
+			name:  "an entry bounding nothing keeps the top-level room",
+			entry: config.ServerEntry{Name: "laptop", Endpoint: "http://127.0.0.1:8080"},
+			want:  topLevelRoom,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			base := validCfg(t)
+			base.Context.WorkingWindow = topLevelRoom
+
+			engine := newLateEngine(apogee.ModeAskBefore, true)
+			t.Cleanup(func() { _ = engine.Close() })
+			var handed apogee.Config
+			binder := serverBinder{
+				cfg:    base,
+				engine: engine,
+				holder: newUpstreamHolder(),
+				caps:   newParallelAgentsCap(engine),
+				keys:   config.NewKeyResolver(),
+				build: func(cfg apogee.Config, resumed *session.Record) (*apogee.Agent, error) {
+					handed = cfg
+					return buildAgent(cfg, resumed)
+				},
+			}
+			if err := binder.bind(tt.entry); err != nil {
+				t.Fatalf("bind: %v", err)
+			}
+			if handed.Context.WorkingWindow != tt.want {
+				t.Errorf("Config.Context.WorkingWindow = %d; want %d — the room this session's very "+
+					"first Turn budgets inside", handed.Context.WorkingWindow, tt.want)
 			}
 		})
 	}

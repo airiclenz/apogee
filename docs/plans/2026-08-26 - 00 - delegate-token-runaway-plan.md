@@ -224,7 +224,25 @@ the run completes; a child with `auto-compact` off never folds.
 
 ---
 
-## 4. `working-window` config key (top-level + per-server entry) → `ContextConfig.WorkingWindow`
+## 4. `working-window` config key (top-level + per-server entry) → `ContextConfig.WorkingWindow` — ✅ DONE (2026-08-26)
+
+NOTES (2026-08-26): the item's Files list named `cmd/apogee/upstream.go` but not the seams the
+`/server` move needs to carry the bound through — `internal/agent/rebind.go` (`UpstreamSpec`
+gained `WorkingWindow`, applied in `SwitchUpstream` beside the window pin) and
+`cmd/apogee/wire_settings.go` (`liveSettings` gained `pinnedWorking`/`entryWorking`, `workingPin`,
+`setWorkingWindow`, the `followEntry`/`setServers`/`firingSources`/`optionsLocked` projections).
+Both were also forced by the row's `Editable: true`: `TestEveryEditableSettingKeyHasAnApply`
+fails without a settings apply, and the apply is the write-alone posture `delegate-max-steps`
+already uses. `internal/config/options.go` likewise gained `StartupWorkingWindow` beside
+`StartupContextWindow`, without which a session STARTING on a bounded entry would not see the
+bound until its first `/server` move.
+NOTES (2026-08-26): `rebindInputs` deliberately does NOT project the working room — nothing a
+rebind carries reads it (`apogee.RebindSpec` states no working room), so `setServers` re-reads
+the entry's bound but leaves it out of the moved-answer that drives a re-resolution.
+NOTES (2026-08-26): the registry validator refuses only a NEGATIVE top-level bound, not one
+above the window — the top-level key describes no particular server, and item 5's Budget takes
+the smaller of the two. The "larger than the pin" refusal is per-entry only, where both numbers
+describe one server.
 
 **What:** plumbing only; the Budget split is item 5.
 - `internal/config/config.go`: `fileConfig` top-level `working-window` leaf; `ServerEntry`

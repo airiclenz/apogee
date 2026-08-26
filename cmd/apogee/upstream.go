@@ -247,6 +247,11 @@ func (m sessionMover) move(entry config.ServerEntry) (tui.ServerSwitchResult, er
 	// here, with the window, so the engine takes one statement about one server — 0 at both scopes
 	// hands the split back to the engine's own built-in share.
 	reserve := config.ResolveResponseReserve(entry.ResponseReserve, m.live.reservePin())
+	// And the room inside that window the session works in on the new server: that entry's own
+	// `working-window:` over the top-level key, which survives a move the way the pin does
+	// (config.ResolveWorkingWindow). Resolved here, with the window, so the engine takes one
+	// statement about one server — 0 at both scopes leaves the whole advertised window as the room.
+	working := config.ResolveWorkingWindow(entry.WorkingWindow, m.live.workingPin())
 	// The key that server takes, resolved from the source its entry names and resolved FIRST, in
 	// front of the engine's own validate-then-commit switch: a source that refuses is one more way
 	// this move cannot be made, and it must fail like the others — with the session still on the
@@ -259,6 +264,7 @@ func (m sessionMover) move(entry config.ServerEntry) (tui.ServerSwitchResult, er
 		Endpoint:                entry.Endpoint,
 		APIKey:                  apiKey,
 		MaxContextTokens:        window,
+		WorkingWindow:           working,
 		MaxOutputTokens:         entry.MaxOutputTokens,
 		ResponseReserveFraction: reserve,
 	}); err != nil {

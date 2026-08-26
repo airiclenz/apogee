@@ -23,7 +23,8 @@ type firingInputs struct {
 	// configuration the human is looking at rather than the one they launched with (ADR 0037).
 	opts config.Options
 	// entry is the bound `servers:` entry — the endpoint dialled, the key SOURCE resolved, and the
-	// four per-entry pins (parallel-agents, max-output-tokens, context-window, response-reserve).
+	// five per-entry pins (parallel-agents, max-output-tokens, context-window, working-window,
+	// response-reserve).
 	// It is one input rather than a scatter of fields because a Firing binds to a server exactly as
 	// a session does, and every per-entry fact must come off the SAME entry the run talks to.
 	entry config.ServerEntry
@@ -227,6 +228,10 @@ func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, []string
 		ParallelAgents:   config.ResolveParallelAgents(in.entry.ParallelAgents, slots),
 		Context: apogee.ContextConfig{
 			MaxContextTokens: spec.MaxContextTokens,
+			// The room inside it this run works in: the bound entry's own `working-window:` over the
+			// top-level key (config.ResolveWorkingWindow, the ranks the window pin above spells).
+			// Unbounded at both scopes it stays 0 and the run works in the whole advertised window.
+			WorkingWindow: config.ResolveWorkingWindow(in.entry.WorkingWindow, in.opts.WorkingWindow),
 			// The `response-reserve:` share the bound entry resolves to, read back off the spec
 			// above. Unstated at both scopes it stays 0 and the Budget holds its own built-in fifth
 			// back.

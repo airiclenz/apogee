@@ -42,6 +42,7 @@ func startupEntry(opts config.Options) config.ServerEntry {
 		ParallelAgents:  opts.StartupParallelAgents,
 		MaxOutputTokens: opts.StartupMaxOutputTokens,
 		ContextWindow:   opts.StartupContextWindow,
+		WorkingWindow:   opts.StartupWorkingWindow,
 		ResponseReserve: opts.StartupResponseReserve,
 	}
 }
@@ -57,9 +58,10 @@ func startupEntry(opts config.Options) config.ServerEntry {
 // runs within seconds, for a late bind exactly as it does for the cold start a launch-time bind
 // with no model already is.
 type serverBinder struct {
-	// cfg is everything about the session the server does not decide. The six fields it does —
-	// endpoint, key, model hint, fan-out width, reply cap, context window — are overwritten from the
-	// entry, so nothing that reached this struct can contradict the server being bound.
+	// cfg is everything about the session the server does not decide. The eight fields it does —
+	// endpoint, key, model hint, fan-out width, reply cap, context window, working window, reply
+	// share — are overwritten from the entry, so nothing that reached this struct can contradict the
+	// server being bound.
 	cfg     apogee.Config
 	resumed *session.Record
 	engine  *lateEngine
@@ -124,8 +126,14 @@ func (b serverBinder) bind(entry config.ServerEntry) error {
 	// its first Turn rather than from the first beat that rebinds. Unpinned at both scopes it stays
 	// 0, the honest "unknown until the first beat binds one".
 	cfg.Context.MaxContextTokens = config.ResolveContextWindow(entry.ContextWindow, cfg.Context.MaxContextTokens)
-	// And the seventh: how that window is SPLIT on this server — the entry's own `response-reserve:`
-	// over the top-level key already in cfg (config.ResolveResponseReserve, the ranks the window one
+	// And the seventh, the room INSIDE that window a session on this server actually works in: the
+	// entry's own `working-window:` over the top-level key already in cfg (config.ResolveWorkingWindow,
+	// the ranks the pin above spells). It goes in through the Config for the pin's reason — a session
+	// that STARTS on a bounded entry must work in that room from its first Turn — and 0 at both scopes
+	// is the honest absent value: the whole advertised window is then the working room.
+	cfg.Context.WorkingWindow = config.ResolveWorkingWindow(entry.WorkingWindow, cfg.Context.WorkingWindow)
+	// And the eighth: how that window is SPLIT on this server — the entry's own `response-reserve:`
+	// over the top-level key already in cfg (config.ResolveResponseReserve, the ranks the window two
 	// above spells). It goes in through the Config for the two bounds' reason — the split must hold
 	// from the session's very first Turn, not from the first beat — and 0 at both scopes is the
 	// honest absent value: the engine then holds its own built-in share back.

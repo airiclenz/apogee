@@ -10,6 +10,16 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **`working-window:` config key.** A new file-only key, top-level and per `servers:` entry,
+  bounding the room a session actually works in — the ceiling every Budget reducer and cost
+  guard will read — without changing the window the model advertises. `0` (the default) keeps
+  today's behaviour: the advertised window is the whole working room. The entry's own bound
+  outranks the top-level key and follows a `/server` switch, a scheduled firing and a
+  delegation onto that server, exactly as `context-window:` does; a bound larger than that
+  entry's own `context-window:` pin, or a negative one, is refused at startup. On a 1M-window
+  model, `working-window: 200000` is the documented starting point. This item is the plumbing
+  — the key reaches `ContextConfig.WorkingWindow`; the Budget split that spends it is next.
+
 - **A child agent now folds its history at Turn boundaries under budget pressure, not only at
   Exchange boundaries (delegate token runaway, plan item 3).** A delegation is ONE Exchange from
   its first Turn to its report, so the Exchange boundary the estimate-driven Compaction trigger

@@ -367,6 +367,18 @@ var KeyRegistry = []Key{
 		Read:     func(o Options) string { return strconv.Itoa(o.ContextWindow) },
 	},
 	{
+		// Editable, and the edit is honoured at the NEXT start, for `response-reserve`'s reason below:
+		// the room is read off the file into the Budget the session opens with, and no seam behind it
+		// can be re-pointed. The description says so out loud so a row that took the write without
+		// changing the session reads as the key's contract rather than as a failure.
+		Path: "working-window", Kind: KindInt, Default: "0",
+		Editable: true,
+		Validate: validateWorkingWindow,
+		Desc: "Bound the room the Budget works in to this many tokens; 0 uses the whole " +
+			"window; takes effect at the next start.",
+		Read: func(o Options) string { return strconv.Itoa(o.WorkingWindow) },
+	},
+	{
 		// Editable, and the edit is honoured at the NEXT start — the share is read off the file into
 		// the budget the session opens with and no seam behind it can be re-pointed — which the
 		// description says out loud for `ui.inspector`'s reason: a row that took the write without
@@ -639,6 +651,21 @@ func validateContextWindow(value string) error {
 	if err != nil || n < 0 {
 		return fmt.Errorf("apogee: invalid context-window %q: want a token count of 0 or more "+
 			"(0 — the default — follows the window the server reports)", value)
+	}
+	return nil
+}
+
+// validateWorkingWindow refuses a negative working room, in validateContextWindow's shape and for
+// its reason one key over. Zero is the default and means "work in the whole advertised window" —
+// what every session did before this key existed — and a positive value bounds the Budget and the
+// reducers that read it; a negative one would reach them as a room no request fits in. A value
+// ABOVE the window is not refused here: the top-level key describes no particular server, and the
+// engine already takes the smaller of the two.
+func validateWorkingWindow(value string) error {
+	n, err := strconv.Atoi(value)
+	if err != nil || n < 0 {
+		return fmt.Errorf("apogee: invalid working-window %q: want a token count of 0 or more "+
+			"(0 — the default — works in the whole window the model advertises)", value)
 	}
 	return nil
 }

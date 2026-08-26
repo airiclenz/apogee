@@ -82,6 +82,19 @@ type liveSettings struct {
 	// would live for one beat: the rebind that follows re-resolves from the pin and would bind the new
 	// server's observation over the number its entry pinned.
 	entryWindow int
+	// pinnedWorking is the top-level `working-window:` key in tokens: > 0 bounds the room the Budget
+	// works in, 0 leaves the whole advertised window as that room. It is held beside the window pin
+	// because the entry override below is resolved against it at a `/server` move, and the two must
+	// be read as one statement. Unlike pinnedWindow it reaches no seam of a RUNNING session — the
+	// room is read off the file into the Config the engine was constructed with — so its setter is
+	// the write alone, for the runs this session raises (setWorkingWindow).
+	pinnedWorking int
+	// entryWorking is the BOUND `servers:` entry's own `working-window:` bound, 0 when that entry
+	// bounds none and the top-level key above answers. It is latched beside the window pin, moves
+	// with it (followEntry, setServers), and is resolved over the top-level key exactly as that pin
+	// is (config.ResolveWorkingWindow) — how much room is affordable describes the server the session
+	// is on, so a move must replace it whole rather than work a new server in the retired one's room.
+	entryWorking int
 	// entryCap is the BOUND entry's own `max-output-tokens:` pin (ADR 0046), 0 when that entry pins
 	// none and the engine derives the ceiling from the reply room the Budget reserves. It is held
 	// beside the window for the window's reasons — it describes THIS server's slot, a move replaces
@@ -196,14 +209,16 @@ type liveSettings struct {
 // list at startup, so an enable read back off that list and a row showing `false` say the same thing.
 func newLiveSettings(opts config.Options, manualIDs []apogee.MechanismID) *liveSettings {
 	return &liveSettings{
-		boot:         opts,
-		pinnedWindow: opts.ContextWindow,
+		boot:          opts,
+		pinnedWindow:  opts.ContextWindow,
+		pinnedWorking: opts.WorkingWindow,
 		// The latch a determined startup binds with, seeded rather than pushed: the entry this
 		// session STARTS on is the one the composition root already flattened onto options
 		// (startupEntry), and its bind runs before this holder exists. A pre-bound start flattened
 		// nothing, so both fields are the honest zero until the human's first pick latches one
 		// through followEntry.
 		entryWindow:        opts.StartupContextWindow,
+		entryWorking:       opts.StartupWorkingWindow,
 		entryCap:           opts.StartupMaxOutputTokens,
 		pinnedReserve:      opts.ResponseReserve,
 		entryReserve:       opts.StartupResponseReserve,
@@ -267,6 +282,10 @@ func (s *liveSettings) followEntry(entry config.ServerEntry) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.entryWindow, s.entryCap, s.entryName = entry.ContextWindow, entry.MaxOutputTokens, entry.Name
+	// The room inside that window this server is worked in, moving with the pin it sits under and for
+	// its reason: a bound describes ONE server, so carrying the retired server's onto the new one
+	// would work a 32K slot in the room a 1M one was bounded to.
+	s.entryWorking = entry.WorkingWindow
 	// The third statement the entry makes about its own slot: how its window is split for the reply.
 	// It follows the two pins for their reason — an entry that states no share writes 0, which leaves
 	// the top-level key answering — and it is assigned apart from them only because it is the one
@@ -281,6 +300,25 @@ func (s *liveSettings) reservePin() float64 {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.pinnedReserve
+}
+
+// workingPin reports the top-level `working-window:` bound — what a server move resolves an entry's
+// own bound over, the way pin above is what it resolves an entry's window pin over. 0 is the honest
+// "the key is unset", which leaves the whole advertised window as the room the session works in.
+func (s *liveSettings) workingPin() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.pinnedWorking
+}
+
+// setWorkingWindow mirrors `working-window:`. Like setDelegateMaxSteps there is no engine seam this
+// shadows — the room is a field of the Config an Agent was constructed with — so the store is the
+// whole of what the value can reach in this process, and what it reaches is the next Firing's own
+// Budget and the next `/server` move's resolution.
+func (s *liveSettings) setWorkingWindow(tokens int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.pinnedWorking = tokens
 }
 
 // window reports the context window in force right now for the server this session is on: the bound
@@ -435,6 +473,11 @@ func (s *liveSettings) setServers(servers []config.ServerEntry) bool {
 	for _, e := range servers {
 		if e.Name != "" && e.Name == s.entryName {
 			s.entryWindow, s.entryCap = e.ContextWindow, e.MaxOutputTokens
+			// The re-read entry's own working room travels with them so the next bind, move or Firing
+			// works in the room the file names NOW. It is deliberately absent from the moved-answer
+			// below: nothing a rebind carries reads it (apogee.RebindSpec states no working room), so
+			// riding on it would drive a re-resolution that changes nothing anybody sees.
+			s.entryWorking = e.WorkingWindow
 			// The re-read entry's own share travels with the two bounds so the next bind, move or
 			// Firing divides this server's window the way the file says NOW — and it is part of the
 			// moved-answer below, because a rebind now carries the share too
@@ -610,6 +653,10 @@ func (s *liveSettings) optionsLocked() config.Options {
 	// session resolve right now? The window is the TOP-LEVEL pin alone, which is the field's own
 	// meaning (config.Options.ContextWindow) and what a caller resolves the bound entry's pin over.
 	next.ContextWindow = s.pinnedWindow
+	// The working room is the TOP-LEVEL key alone, for the window's reason above: that is the field's
+	// own meaning (config.Options.WorkingWindow), and it is what a caller resolves the bound entry's
+	// own bound over (firingSources hands that entry back beside this projection).
+	next.WorkingWindow = s.pinnedWorking
 	next.Servers = slices.Clone(s.servers)
 	next.Mechanisms = maps.Clone(s.mechanisms)
 	next.ValidatedSetsEnable = s.validatedEnable
@@ -654,6 +701,7 @@ func (s *liveSettings) firingSources(bound upstreamBinding) (config.Options, con
 		Endpoint:        bound.Endpoint,
 		Model:           bound.Model,
 		ContextWindow:   s.entryWindow,
+		WorkingWindow:   s.entryWorking,
 		MaxOutputTokens: s.entryCap,
 		ResponseReserve: s.entryReserve,
 	}
@@ -1063,6 +1111,13 @@ var settingsTable = []settingsEntry{
 		},
 	},
 	{
+		key: "working-window",
+		// No member of the applier is needed: the room reaches no engine seam and rides no
+		// re-resolution — the holder it is mirrored onto is optional in reloadServers' sense.
+		reaches: reachesWithoutAMember,
+		apply:   applyWorkingWindow,
+	},
+	{
 		key:     "response-reserve",
 		reaches: reachesWithoutAMember,
 		apply:   applyTheWriteAlone,
@@ -1266,6 +1321,26 @@ func applyDelegateMaxSteps(a settingsApplier, key, value string) (string, error)
 	}
 	if a.live != nil {
 		a.live.setDelegateMaxSteps(steps)
+	}
+	return "", nil
+}
+
+// applyWorkingWindow is `working-window:`, which is the write alone for THIS session and not for the
+// runs it raises. The room is a field of the Config an Agent was CONSTRUCTED with, so nothing here
+// can re-bound the session's own Budget — but a Firing builds a Config of its own out of options(),
+// and a `/server` move resolves an entry's bound over this number, so mirroring it onto the holder
+// is what lets a room the human just set bound both.
+//
+// It answers exactly as applyDelegateMaxSteps does — success, no note, the Description's "takes
+// effect at the next start" carrying the promise — while parsing the value, for that apply's reason:
+// a value that is to be recorded has to be read.
+func applyWorkingWindow(a settingsApplier, key, value string) (string, error) {
+	tokens, err := settingInt(key, value)
+	if err != nil {
+		return "", err
+	}
+	if a.live != nil {
+		a.live.setWorkingWindow(tokens)
 	}
 	return "", nil
 }

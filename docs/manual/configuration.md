@@ -135,6 +135,20 @@ The same key on a `servers:` entry sets that share for one server only and outra
 top-level one while the session is on it, following a `/server` switch, a scheduled run and a
 delegation onto that server the way its `context-window:` pin does.
 
+How much of that window you actually **work in** is a separate number. Every guard apogee
+runs scales with the window — the budget it allocates, the tool output it lets through, the
+point it decides to compact — so a model advertising a very large one makes all of them
+expensive at once, and a single delegated task can re-send hundreds of thousands of tokens
+on every step. `working-window:` (a file-only key, in tokens) bounds the room those guards
+work in without changing what the model can hold: apogee budgets, caps and compacts inside
+your number, while the advertised window still says when a request genuinely will not fit
+and still sets the reply ceiling. On a 1M-window model, `working-window: 200000` is a sane
+place to start. Leave it unset (`0`) and the working room is the whole advertised window,
+which is what apogee always did. The same key on a `servers:` entry bounds that one server's
+room and outranks the top-level one while the session is on it — following a `/server`
+switch, a scheduled run and a delegation exactly as the two keys above do — and it may not
+exceed that entry's own `context-window:` pin, which is the roof it sits under.
+
 Every reply is **bounded**, and by the same budget: apogee tells the server how many tokens
 one answer may take, using the room it already reserves for the reply — clamped to between
 4,096 and 32,768 tokens, and to the floor when no window is known. Without that ceiling a
@@ -260,7 +274,8 @@ An entry's `name` is the label `/server` lists it under, the argument
 footer shows while the session is on it — one name for all four jobs, so no two
 entries may share one. `endpoint` is required; `api-key` (or `api-key-cmd` /
 `api-key-env` — exactly one of the three), `model`, `parallel-agents`,
-`sub-agents` and `effort-dialect` (which of the three wires carries the
+`sub-agents`, `working-window` (the room a session on that server works in, above)
+and `effort-dialect` (which of the three wires carries the
 thinking-effort dial, described above) are optional, as is `llama-launcher`,
 which lets apogee start, switch and stop that server itself — [below](#local-servers--llama-launcher).
 

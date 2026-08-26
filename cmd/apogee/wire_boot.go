@@ -235,12 +235,16 @@ func (w *rootWiring) resolveConfig() error {
 		// engine derives the reply cap from the room its Budget reserves — ADR 0046). It is seeded
 		// here as well as at the bind, because this Config is also what a scheduled Firing copies:
 		// a Firing running while nobody watches is exactly the case a runaway reply must not.
+		// WorkingWindow is the top-level `working-window:` key (0 ⇒ unbounded, and the working room
+		// IS the advertised window). It rides here for the reply cap's reason too: this Config is
+		// what a scheduled Firing copies, so a run nobody watches works in the room the human bounded.
 		// ResponseReserveFraction is the top-level `response-reserve:` share (0 ⇒ unset, and the
 		// Budget holds its own built-in fifth back). It rides here for the reply cap's reason: this
 		// Config is what a scheduled Firing copies, so the window is divided the same way whether a
 		// human is watching or not.
 		Context: apogee.ContextConfig{
 			MaxContextTokens:        w.opts.ContextWindow,
+			WorkingWindow:           w.opts.WorkingWindow,
 			ResponseReserveFraction: w.opts.ResponseReserve,
 			MaxOutputTokens:         w.opts.StartupMaxOutputTokens,
 			CompactionEnabled:       w.opts.AutoCompact,
