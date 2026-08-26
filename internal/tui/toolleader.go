@@ -273,8 +273,9 @@ func toolRowCells(th theme, width int) int {
 // hex the leader dots run in, which left the one part of the row that says what HAPPENED as quiet as
 // the filler pointing at it.
 //
-// The verdict is read off the SUMMARY and never off the joined slot: a remainder count appended to
-// "denied" must not be able to talk the row out of its red (failedSummary matches the whole word).
+// The verdict is the summary's OWN ([branchSummary.failed]) and never a reading of the joined slot
+// or of the text in it: a remainder count appended to "denied" must not be able to talk the row out
+// of its red, and a line the TOOL printed must not be able to talk a clean call into one (F-29).
 //
 // Every kind takes it, the promoted and quoted ones included: the slot's colour answers for the
 // slot, and a summary that changed voice with the kind of thing it summarises would make the row's
@@ -284,17 +285,21 @@ func summaryStyle(th theme, s branchSummary, expanded bool) lipgloss.Style {
 	if expanded {
 		slot = th.toolMarkerBright
 	}
-	if failedSummary(s.Text) {
+	if s.failed {
 		return th.errorText
 	}
 	return slot
 }
 
-// failedSummary reads the outcome's own wording for a verdict of failure (errorSummaryPrefix and
-// the three bare verdicts beside it), plus the count a TYPE ROW aggregates its run's failures into
-// ("3 errors", runAggregate). It asks the TEXT because that is where the fact is: a summary carries
-// no verdict flag, and inventing one to be derived from the same words would be a second answer to a
-// question already settled at the presenter's seam.
+// failedSummary reads a WORDING for a verdict of failure (errorSummaryPrefix and the three bare
+// verdicts beside it), plus the count a TYPE ROW aggregates its run's failures into ("3 errors",
+// runAggregate).
+//
+// The text is read ONCE, at the seam that words it: namedSummary puts its own sentence to this
+// vocabulary on the way in and the answer rides the summary from there ([branchSummary.failed]), so
+// no painter and no counter asks the words again. The one other caller is subAgentSummary, which
+// composes a reading of a run whose verdict lives on the HEAD's summary and carries that verdict
+// onto the composed line rather than leaving it to be re-derived from it.
 //
 // The aggregate is worded by the house plural (plural, runAggregate) and read back here by
 // countPhrase's strict split of that same "<n> <word>" shape, so the two cannot come to disagree,

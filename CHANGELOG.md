@@ -276,6 +276,22 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **A delegation that failed now paints its outcome slot red.** A sub-agent row's slot is a reading
+  composed at paint time — `2 tool calls · 12k/32k · <the report's gist>` — and the painter judged
+  failure by re-reading that composed text for an `error: …` opening. It never found one, because
+  the line opens with a count of the work, so every failed delegation painted in the ordinary tone,
+  lone or grouped, shut or open (F-28). The verdict now rides the summary as a field
+  (`branchSummary.failed`), set where the summary is WORDED and carried onto the composed line off
+  the head's own outcome — the same fact that already withholds the done ✓, so the red slot and the
+  missing ✓ are one answer rather than two readings that could drift apart.
+
+- **A line the tool printed can no longer wear apogee's failure tone.** A result that came to one
+  line is promoted verbatim into the outcome slot — a `cat` of a log, a command's single line of
+  output — and the painter read those words for a verdict: an output opening `error: not found`
+  painted the slot red and counted toward its run's `N errors` tally, though the call itself
+  succeeded (F-29). Only a summary apogee WORDED carries a verdict now, and `summaryStyle`,
+  `failedCalls` and `subAgentFinished` all ask that field instead of re-reading the slot's text.
+
 - **`git_diff_range`'s diffstat counts the diff it is painting, not the lines that look like
   headers.** The slot was counted by prefix over git's raw output, skipping every line beginning
   `---` or `+++` as a file header — but git tags a hunk's lines in ONE cell, so a removed line whose

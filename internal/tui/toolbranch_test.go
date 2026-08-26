@@ -1048,3 +1048,93 @@ func TestSplitDiffPaintsAFileHeaderPerSection(t *testing.T) {
 		}
 	}
 }
+
+// ----------------------------------------------------------------------------
+// The outcome slot's verdict rides the summary (surfaces-that-lie plan, item 12)
+// ----------------------------------------------------------------------------
+
+// The red an outcome slot takes is the block's VERDICT about the call ([branchSummary.failed]) and
+// never a reading of the words standing in the slot. A terminal call whose whole output came to one
+// line has that line promoted into the slot verbatim — the tool's own words, quoted
+// (promotedOutput) — so a log line opening "error: …" fills the slot without colouring it and counts
+// nothing in a run's failure tally. The same sentence in the PRESENTER's words (summaryOnly) is
+// apogee's verdict about the call and does paint red. Telling those two apart by their spelling is
+// exactly what F-29 could not do.
+func TestOutcomeSlotPaintsTheSummarysOwnVerdict(t *testing.T) {
+	th := newTheme(scheme.Default())
+	if !colorActive(th) {
+		t.Skip("no colour profile in this environment; the SGR assertion would be vacuous")
+	}
+
+	promoted := presentToolCall(domain.ToolCall{ID: "c1", Tool: "terminal",
+		Arguments: []byte(`{"command":"check"}`)}, "", workspaceRoot{})
+	promoted.enrichWithResult(domain.ToolResult{CallID: "c1", Content: "error: not really"}, workspaceRoot{})
+
+	for _, tc := range []struct {
+		name       string
+		view       toolView
+		slot       string
+		wantFailed bool
+	}{
+		{
+			name:       "a line the tool printed carries no verdict",
+			view:       promoted,
+			slot:       "error: not really",
+			wantFailed: false,
+		},
+		{
+			name:       "a sentence the block worded is its verdict",
+			view:       toolView{Target: "check", Summary: summaryOnly("error: boom").Summary},
+			slot:       "error: boom",
+			wantFailed: true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.view.Summary.Text; got != tc.slot {
+				t.Fatalf("outcome slot = %q, want %q", got, tc.slot)
+			}
+			if got := tc.view.Summary.failed; got != tc.wantFailed {
+				t.Errorf("summary verdict = %v, want %v", got, tc.wantFailed)
+			}
+
+			row := leaderRow(th, tc.view, branchMarker(true), 60, false, noRemainder)
+
+			if got := strings.Contains(row, th.errorText.Render(tc.slot)); got != tc.wantFailed {
+				t.Errorf("slot %q painted in the failure tone = %v, want %v: %q",
+					tc.slot, got, tc.wantFailed, row)
+			}
+			if !tc.wantFailed && !strings.Contains(row, th.toolMarker.Render(tc.slot)) {
+				t.Errorf("slot %q does not wear the ordinary marker tone: %q", tc.slot, row)
+			}
+			want := 0
+			if tc.wantFailed {
+				want = 1
+			}
+			if got := failedCalls([]toolView{tc.view}); got != want {
+				t.Errorf("failedCalls over %q = %d, want %d", tc.slot, got, want)
+			}
+		})
+	}
+}
+
+// A type row's own aggregate is worded from the count it took of its members' verdicts, and it
+// carries one of its own: the row reads red because the summary says so, not because a painter
+// recognised the house plural on its way past (runAggregate, namedSummary).
+func TestRunAggregateCarriesItsFailureVerdict(t *testing.T) {
+	run := []toolView{
+		{Summary: summaryOnly(errorSummaryPrefix + "no such file").Summary},
+		{Summary: typedSummary(pluralStat(5, "line"))},
+		{Summary: summaryOnly(deniedSummary).Summary},
+	}
+
+	if got := failedCalls(run); got != 2 {
+		t.Errorf("failedCalls = %d, want 2", got)
+	}
+	got := runAggregate(run)
+	if got.Text != "2 errors" {
+		t.Errorf("aggregate = %q, want %q", got.Text, "2 errors")
+	}
+	if !got.failed {
+		t.Error("the aggregate carries no failure verdict; the type row would paint in the ordinary tone")
+	}
+}

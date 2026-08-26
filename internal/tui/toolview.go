@@ -90,6 +90,19 @@ type branchSummary struct {
 	detailLine
 	quoted bool
 
+	// failed is the block's OWN verdict that this call failed — the red the outcome slot takes
+	// (summaryStyle), which design call 11 makes the whole of the failure marking. Only a summary
+	// the block WORDED carries it: a named summary spelled in the failure vocabulary above
+	// (namedSummary), a run's count of its failed members (runAggregate), a delegation whose head
+	// reported one (subAgentSummary). A quoted line never does — a `cat` of a log opening
+	// "error: no such host" is the FILE's word about itself, and lifting it into the slot moved
+	// where it sits without making it apogee's verdict about the call (F-29).
+	//
+	// It rides WITH the text for the reason quoted does: the wording is put to the vocabulary once,
+	// at the seam that words it (failedSummary), and every reader downstream asks the field instead
+	// of reading the same sentence back out — summaryStyle, failedCalls, subAgentFinished.
+	failed bool
+
 	// stat is the ARITHMETIC the text spells out, for the summaries a presenter worded from a fact
 	// it had counted: a run's type row adds its members' stats up from these rather than reading its
 	// own wording back out of them (sumStats). It is empty on every other summary — a quoted
@@ -122,12 +135,20 @@ const (
 
 // namedSummary is a summary in the presenter's OWN words — a typed phrase, or a sentence naming a
 // path — so the shortening seam spells that path relative to the workspace.
+//
+// It is the ONE place named wording is put to the failure vocabulary (failedSummary): the words
+// here are the block's own, so a verdict spelled in them IS the block's verdict, and it is settled
+// onto the summary rather than re-derived by each seam that later has to know it.
 func namedSummary(line detailLine) branchSummary {
-	return branchSummary{detailLine: line}
+	return branchSummary{detailLine: line, failed: failedSummary(line.Text)}
 }
 
 // quotedSummary is a summary carrying text the block QUOTES rather than words of its own — a
 // one-line tool output promoted onto the branch — which no seam respells.
+//
+// It carries no verdict either (branchSummary.failed), for the same reason: whether the call failed
+// is not the tool's to spell, so a promoted line reading "error: …" fills the slot without
+// colouring it.
 func quotedSummary(line detailLine) branchSummary {
 	return branchSummary{detailLine: line, quoted: true}
 }
@@ -144,7 +165,10 @@ func quotedSummary(line detailLine) branchSummary {
 func typedSummary(v statValue) branchSummary {
 	line := detailLine{Text: v.spell()}
 	if !v.sums() {
-		return namedSummary(line)
+		// A stat's phrase is a READING and never a verdict (branchSummary.failed): "exit 0" says
+		// what the call came to whatever number stands in it, so it is not put to the failure
+		// vocabulary the way a worded sentence is.
+		return branchSummary{detailLine: line}
 	}
 	return branchSummary{detailLine: line, stat: v}
 }
@@ -864,8 +888,9 @@ const errorNoun = "error"
 //   - a run of ONE is its own member's summary, verbatim, whatever kind that is. Summing one call is
 //     that call, so nothing has to be invented: a lone failure keeps its "error: …" sentence instead
 //     of being counted as "1 error", and a promoted line stays the quoted line it is.
-//   - any FAILED member and the row counts them, "N errors", which reads red for exactly the reason
-//     a member's own failure does — the wording (failedSummary).
+//   - any FAILED member and the row counts them, "N errors", and that count is the row's OWN
+//     verdict: the summary it words goes through namedSummary like any other sentence in the
+//     failure vocabulary, so the type row carries failed and needs nothing read back out of it.
 //   - otherwise the run's natural sum, where the members' typed stats sum at all (sumStats), and
 //     nothing when they do not: an empty slot lets the dots run to the ▶, which is the spec's "else
 //     blank".
@@ -888,14 +913,14 @@ func runAggregate(views []toolView) branchSummary {
 	return branchSummary{}
 }
 
-// failedCalls counts the members of a run whose outcome says the call failed. It asks
-// [failedSummary] (render.go) rather than restating the three wordings, because "does this outcome
-// say failure" is one question and a second answer to it would drift the first time the vocabulary
-// moved.
+// failedCalls counts the members of a run whose outcome says the call failed. It reads each
+// member's own verdict ([branchSummary.failed]) and never its wording: the question was answered
+// where the summary was worded, and asking the text again here would count a line the TOOL printed
+// as a failure the call never had (F-29).
 func failedCalls(views []toolView) int {
 	n := 0
 	for _, tv := range views {
-		if failedSummary(tv.Summary.Text) {
+		if tv.Summary.failed {
 			n++
 		}
 	}

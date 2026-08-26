@@ -318,12 +318,12 @@ func renderSubAgentGroup(th theme, count int, members []subAgentMember, width in
 // failure marking (summaryStyle); a ✓ and a red verdict on one row would be the block saying both
 // at once.
 //
-// The verdict is read off the head's OWN summary and never off the collapsed reading composed for
-// the row (collapsedSubAgentView): that one folds the report's gist behind a count of the work, and
-// failedSummary anchors its prefix at the start of the text, so asking it there would answer "not a
-// failure" for every failed delegation in a group.
+// The verdict is the head's OWN summary's ([branchSummary.failed]) and never a reading of the
+// collapsed line composed for the row (collapsedSubAgentView): that line carries the same verdict
+// on purpose (subAgentSummary), but its TEXT opens with a count of the work, so words read out of
+// it would answer "not a failure" for every failed delegation there is.
 func subAgentFinished(head paintInput) bool {
-	return subAgentReported(head) && !failedSummary(head.tool.Summary.Text)
+	return subAgentReported(head) && !head.tool.Summary.failed
 }
 
 // subAgentReported is the display's question "is this delegation over?", and the two answers that
@@ -510,7 +510,13 @@ func subAgentSummary(head paintInput, span []paintInput) branchSummary {
 	if model := subAgentModel(head); model != "" {
 		text += " · " + model
 	}
-	return quotedSummary(detailLine{Text: text})
+	summary := quotedSummary(detailLine{Text: text})
+	// The verdict is the HEAD's, carried onto the composed reading rather than re-derived from it:
+	// this line opens with a count of the work, so its own words say nothing about how the run ended
+	// and a painter reading them would find no failure to paint (F-28). It is the same fact
+	// subAgentFinished withholds the done ✓ on, so the red slot and the missing ✓ are one answer.
+	summary.failed = failedSummary(head.tool.Summary.Text)
+	return summary
 }
 
 // subAgentModel spells the run head's model cell, or nothing at all. The entry holds a model only

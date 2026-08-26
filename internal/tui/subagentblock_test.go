@@ -995,3 +995,95 @@ func TestSubAgentInterruptedHeadIsNotFinished(t *testing.T) {
 		t.Errorf("the interrupted run does not say what became of it:\n%s", painted)
 	}
 }
+
+// ----------------------------------------------------------------------------
+// A failed delegation's outcome slot (surfaces-that-lie plan, item 12)
+// ----------------------------------------------------------------------------
+
+// A delegation that FAILED paints its outcome slot red wherever it is drawn — lone or grouped, shut
+// or open — and wears no done ✓, since design call 6 makes that red the whole of the failure
+// marking. The row's line is a COMPOSED reading, "1 tool call · error: …", whose own opening words
+// say nothing about how the run ended: the verdict is the HEAD's, carried onto that line
+// (subAgentSummary), and reading the composed words instead is what left every failed delegation
+// painted in the ordinary tone (F-28).
+//
+// A report that merely MENTIONS an error past its first word is the other half of the claim: the
+// vocabulary is anchored at the start of the head's own summary, so such a run keeps the ordinary
+// tone and the ✓ it earned.
+func TestFailedDelegationPaintsItsSlotRed(t *testing.T) {
+	th := newTheme(scheme.Default())
+	if !colorActive(th) {
+		t.Skip("no colour profile in this environment; the SGR assertion would be vacuous")
+	}
+	// Wide enough that no row has to give up its outcome slot: what is under test is the slot's
+	// tone, and a clipped slot would assert the geometry instead.
+	const width = 100
+
+	// paintedRow is the ONE painted row carrying text, styling and all — a fatal error where there
+	// is no such row or more than one, so an assertion cannot pass by finding nothing.
+	paintedRow := func(t *testing.T, tr *transcript, text string) string {
+		t.Helper()
+		found := ""
+		for _, ln := range tr.renderLines(th, width) {
+			if !strings.Contains(strip(ln), text) {
+				continue
+			}
+			if found != "" {
+				t.Fatalf("two painted rows carry %q", text)
+			}
+			found = ln
+		}
+		if found == "" {
+			t.Fatalf("no painted row carries %q", text)
+		}
+		return found
+	}
+	assertSlot := func(t *testing.T, row, slot string, wantRed, wantDone bool) {
+		t.Helper()
+		if got := strings.Contains(row, th.errorText.Render(slot)); got != wantRed {
+			t.Errorf("slot %q painted in the failure tone = %v, want %v: %q", slot, got, wantRed, row)
+		}
+		if got := strings.Contains(strip(row), glyphDone); got != wantDone {
+			t.Errorf("row %q wears the done ✓ = %v, want %v", strip(row), got, wantDone)
+		}
+	}
+
+	const failedSlot = "1 tool call · error: it fell over"
+
+	t.Run("a lone failed run is red shut and open", func(t *testing.T) {
+		tr := &transcript{}
+		loneDelegation(tr, "s1", "broken", "a.go", "")
+		tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{
+			CallID: "s1", Content: "it fell over", IsError: true}})
+
+		assertSlot(t, paintedRow(t, tr, failedSlot), failedSlot, true, false)
+
+		if !tr.setExpanded(0, true) {
+			t.Fatal("setExpanded(0, true) = false; want the delegation open")
+		}
+		assertSlot(t, paintedRow(t, tr, failedSlot), failedSlot, true, false)
+	})
+
+	t.Run("a failed member of a fan-out is red beside its sibling", func(t *testing.T) {
+		tr := &transcript{}
+		subAgentCall(tr, "s1", "working", 0)
+		readCall(tr, "r1", "a.go", 1, 5, 1)
+		subAgentCall(tr, "s2", "broken", 0)
+		readCall(tr, "r2", "b.go", 1, 5, 1)
+		tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{
+			CallID: "s2", Content: "it fell over", IsError: true}})
+
+		assertSlot(t, paintedRow(t, tr, failedSlot), failedSlot, true, false)
+		// The sibling is still working: no verdict, so no red and no ✓ either.
+		assertSlot(t, paintedRow(t, tr, "working"), "1 tool call", false, false)
+	})
+
+	t.Run("a report that only mentions an error is not a failure", func(t *testing.T) {
+		const slot = "1 tool call · recovered from an error: all good"
+
+		tr := &transcript{}
+		loneDelegation(tr, "s1", "calm", "a.go", "recovered from an error: all good")
+
+		assertSlot(t, paintedRow(t, tr, slot), slot, false, true)
+	})
+}

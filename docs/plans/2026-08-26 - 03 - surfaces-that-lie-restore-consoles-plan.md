@@ -696,7 +696,11 @@ fallback answers agree on `TestGitDiffRangeRecoversARegionPerFileSection`'s (`:2
 
 ---
 
-## 12. The failure verdict is a field the presenter sets, never a re-reading of composed text
+## 12. The failure verdict is a field the presenter sets, never a re-reading of composed text — ✅ DONE (2026-08-26)
+
+NOTES (2026-08-26): `typedSummary`'s non-summing path no longer delegates to `namedSummary` — it builds the summary literal itself, so a stat's phrase ("exit 0", "clean", a short hash) is a reading and never a verdict, which is the item's "typedSummary never sets it". No behaviour moved: no stat hook produces a phrase in the failure vocabulary or an `error`-nouned count.
+
+NOTES (2026-08-26): `runAggregate`'s `plural(n, errorNoun)` summary takes its `failed` through `namedSummary` rather than by an assignment of its own — the aggregate is worded in the block's own words, so the one seam that judges named wording answers for it too, and the test pins `failed == true` on the result.
 
 **What:** F-28 + F-29 (ratified call 6). `internal/tui/toolview.go` `branchSummary` (`:89`) gains
 `failed bool` — "the block's own verdict that this call failed; set only by a summary the block
