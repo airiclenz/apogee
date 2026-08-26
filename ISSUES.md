@@ -143,6 +143,46 @@ that run.
   behind, one per re-exec through `keyCommandFor` (`cmd/apogee/keysource_test.go:53`). The fix is
   one line — remove the temp home in the fixture before it exits.
 
+---
+
+### Delegate token-runaway residuals — deferred out of the 2026-08-26 run
+
+**Status:** found 2026-08-26 at the close of the delegate token-runaway plan
+(`docs/plans/archived/2026-08-26 - 00 - delegate-token-runaway-plan.md`), deferred out of that run.
+
+- [ ] **The step cap advances the Turn index twice.** `endAtStepCap`
+  (`internal/agent/agent.go:535`) reaches the exit table's `endStepCapped` row only right after
+  `endTurnDone` closed a Turn normally — and that row has already run `l.index++`
+  (`internal/agent/turn.go:98`). `endStepCapped` advances again (`internal/agent/turn.go:156`), so a
+  capped child's next-Turn index skips one (observed: index 4 after 3 Turns). Harmless today, since
+  no capped delegate runs a further Turn, but the counter a snapshot stores and a resume reads is
+  off by one.
+
+- [ ] **A child's post-fold request ends on the assistant summary and no test pins it.** The
+  mid-Exchange exception a child agent takes (`shouldAutoCompact`, `internal/agent/compact.go:190`)
+  folds at a quiescent Turn boundary, so the request that follows ends on the fold's assistant
+  summary with no user bridge behind it — the very shape the main loop's guard defers a fold to
+  avoid, and which the emergency fold pays for with `overflowBridge`
+  (`internal/agent/compact.go:258`). The path passes `assertRequestTemplateLegal`, but that helper
+  checks only dangling tool results and role alternation
+  (`internal/agent/overflowrecovery_test.go:87`) and never requires a trailing user/tool message, so
+  what a strict local chat template does with an assistant-terminated request is untested here.
+
+- [ ] **A child's EMPTY capped reply lost the reasoning-spend number.** `replyFault` tests the
+  delegate rule first (`internal/agent/loop.go:528`), so at depth > 0 a `finish: length` reply with
+  NO visible text takes `cappedDelegateReplyErrFmt` and never reaches `emptyReplyFault`
+  (`internal/agent/loop.go:561`), whose `cappedReplyErrFmt` wording is the one that reports roughly
+  what the reasoning burned (`internal/agent/loop.go:470`) — the diagnostic the 20,653-token
+  incident motivated. A child's fault now names the ceiling without saying what was spent under it.
+
+- [ ] **A resumed delegate row loses its cached share.** `wireEntry` carries a head's prompt and
+  completion tokens only (`internal/tui/transcriptcodec.go:95-96`, written at `:410-411`, read back
+  at `:517-518`), so `usageSubAgentRows` (`internal/tui/usage.go:211`) draws an empty cached cell for
+  every delegate restored from a stored session even where its server reported a share — while the
+  session record itself keeps the sum (`internal/session/store.go:147`). The structural guard test
+  refuses the extra field without its own decision (`internal/tui/transcriptcodec_test.go:1150`), so
+  widening the wire is the call to settle first.
+
 ## Parked / deferred work
 
 Live, deliberately deferred work only. Each entry records *enough* design that we don't re-derive
