@@ -552,7 +552,14 @@ probe.md ~97).
 
 ---
 
-## 8. README status and mechanisms lines (R-5, R-6, R-7)
+## 8. README status and mechanisms lines (R-5, R-6, R-7) — ✅ DONE (2026-08-26)
+
+NOTES (2026-08-26): the status line took the item's RECOMMENDED wording
+("**Pre-production `0.x` on `main`.**", which names no series) rather than
+corrections.md §5's literal `v0.17.x` — the item's own text and its Acceptance both
+name the recommended form, so this is the instruction, not a deviation from it.
+NOTES (2026-08-26): the mechanisms bullet and the status sentence are the item's verbatim
+text, re-wrapped to README's ~76-column prose width; no word changed.
 
 **What:** three README sentences corrected; docs-only commit, no `make check`.
 - `README.md:209` — replace "**`v0.16.x` on `main` — pre-production.**" with

@@ -162,9 +162,10 @@ menu, `@` references a file, and `esc` stops a run. The full tour is in
   its own tool roster, so a small model sees fewer, clearer tools — or more of
   them where one asked for it: a qwen3.8 build is offered the default-off
   Console family out of the box, and nothing else is.
-- **Small-model mechanisms** — context compaction is built in; the other 20
-  catalogued mechanisms ship off until bench evidence turns them on, and
-  Validated sets apply the measured winners per model automatically.
+- **Small-model mechanisms** — context compaction is built in and structural,
+  not one of them; all 21 catalogued mechanisms ship off until bench evidence
+  turns them on, and Validated sets apply the measured winners per model
+  automatically.
 - **MCP support** — connect external tool servers over stdio, SSE, or
   streamable-http.
 - **A settings screen and a watched config** — `/settings` shows every
@@ -206,13 +207,13 @@ derivable from the code.
 
 ## Status
 
-**`v0.16.x` on `main` — pre-production.** Under SemVer a `0.x` version makes
+**Pre-production `0.x` on `main`.** Under SemVer a `0.x` version makes
 no API-stability promise — the Go API may still move while the tool hardens —
 but every release ships prebuilt binaries for all six targets and a Homebrew
 formula. Functionally the loop is complete: full tool suite, MCP client,
 parallel sub-agents, skills, sessions, schedules, and OS-confined Auto mode on
-all three platforms. What changed lately and what is next live in the
-[CHANGELOG](CHANGELOG.md) and [`docs/plans/`](docs/plans/).
+all three platforms. What changed lately lives in the
+[CHANGELOG](CHANGELOG.md); what is next lives in [`ISSUES.md`](ISSUES.md).
 
 ## Why Go
 
