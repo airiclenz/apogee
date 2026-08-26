@@ -8,6 +8,7 @@
 *.test
 *.out
 IDEAS.md
+.go-cache
 
 # Release archives staged by `make dist` — published as GitHub release assets, never committed
 /dist/
