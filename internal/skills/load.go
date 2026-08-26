@@ -9,6 +9,8 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+
+	"github.com/airiclenz/apogee/internal/security"
 )
 
 // skillFileName is the marker file that makes a folder a skill. The match is case-insensitive
@@ -124,6 +126,45 @@ func sourceDirs(src Sources) []string {
 		dirs = append(dirs, a.dir())
 	}
 	return dirs
+}
+
+// readRoots renders the same anchors as the MOUNT view: the host hands these to the read tools as
+// extra read-only roots (domain.Config.ExtraReadRoots), and every entry is the anchor's
+// symlink-RESOLVED real path rather than the path as configured. It is openAnchor's two-way rule
+// restated for the mount (audit 2026-08-25 F-13). An untrusted anchor — the workspace's
+// .apogee/skills and its bare skills/ — is resolved THROUGH its base, so a repo that ships any
+// component of it as a symlink leaving the workspace has that anchor DROPPED from the list: the
+// walk already refuses to scan it, and mounting it anyway would have let grep, read_file, list_dir
+// and find_files read the very tree discovery would not. The trusted home anchor is followed and
+// the mount pinned at what it resolves to, because the operator's dotfiles symlink is exactly how
+// a managed library is named and openAnchor re-pins the walk there for the same reason.
+//
+// The trust decision lives in this package and nowhere else: only here are the anchors paired with
+// the base a "does this still belong to the workspace" judgement can be made against. internal/
+// tools receives resolved paths and merely refuses to mount one that is not its own real path
+// (path_read.go's matchRoot) — the two layers must agree, and neither can take the other's
+// decision.
+//
+// A missing dir is still listed, exactly as sourceDirs lists it: this reports where skills come
+// from, and the mount side skips an unusable root of its own accord. Beyond resolving symlinks the
+// function does no I/O.
+func readRoots(src Sources) []string {
+	anchors := sourceAnchors(src)
+	roots := make([]string, 0, len(anchors))
+	for _, a := range anchors {
+		if a.trusted {
+			roots = append(roots, security.EvalRealPath(a.dir()))
+			continue
+		}
+		resolved, err := security.ResolveInRoot(filepath.FromSlash(a.rel), a.base)
+		if err != nil {
+			// security.ErrPathEscape, the only error this returns: the anchor — or a component
+			// of it — is a symlink leaving the base. Drop it rather than mount a relocated fence.
+			continue
+		}
+		roots = append(roots, resolved)
+	}
+	return roots
 }
 
 // loadDir walks one source dir through os.Root and loads every SKILL.md it finds, recording a

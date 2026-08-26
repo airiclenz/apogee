@@ -6,8 +6,11 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
+
+	"github.com/airiclenz/apogee/internal/security"
 )
 
 // writeSkill creates <base>/<id>/SKILL.md with the given content (a skill folder).
@@ -506,5 +509,135 @@ func TestLoadWalkWidthBounded(t *testing.T) {
 	}
 	if got := cat.Skipped(); len(got) != 1 || !strings.Contains(got[0].Reason(), "directory cap") {
 		t.Errorf("Skipped() = %+v, want one entry naming the directory cap", got)
+	}
+}
+
+// realDir resolves a fixture dir through symlinks — the form readRoots answers in, and the form a
+// temp dir needs on a box where /tmp or /var is itself a symlink (macOS).
+func realDir(t *testing.T, dir string) string {
+	t.Helper()
+	real, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatalf("eval symlinks %s: %v", dir, err)
+	}
+	return real
+}
+
+// underDir reports whether path is dir or sits below it, both already resolved.
+func underDir(path, dir string) bool {
+	return path == dir || strings.HasPrefix(path, dir+string(filepath.Separator))
+}
+
+// TestReadRootsRefuseARelocatedWorkspaceAnchor is TestLoadAnchorSymlinkRefused's mount half. The
+// walk already refuses a workspace anchor whose own path leaves the workspace; until F-13 the
+// MOUNT did not, so a cloned repo shipping `.apogee/skills` as a symlink to /home or /etc handed
+// grep, read_file, list_dir and find_files the tree discovery would not scan. The relocated anchor
+// is dropped from the list entirely, and only it — the other sources still mount.
+func TestReadRootsRefuseARelocatedWorkspaceAnchor(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink semantics differ on Windows")
+	}
+
+	for _, tc := range []struct {
+		name string
+		// setup plants the fixture and answers the sources plus the workspace roots that must
+		// SURVIVE it — the relocated anchor is the only one that goes.
+		setup func(t *testing.T, ws, outside string) (src Sources, keptWorkspaceRoots []string)
+	}{
+		{
+			name: "workspace .apogee/skills is the symlink",
+			setup: func(t *testing.T, ws, outside string) (Sources, []string) {
+				mustMkdirAll(t, filepath.Join(ws, ".apogee"))
+				mustSymlink(t, outside, filepath.Join(ws, ".apogee", "skills"))
+				return Sources{Workspace: ws}, nil
+			},
+		},
+		{
+			name: "workspace .apogee is the symlink",
+			setup: func(t *testing.T, ws, outside string) (Sources, []string) {
+				mustSymlink(t, outside, filepath.Join(ws, ".apogee"))
+				return Sources{Workspace: ws}, nil
+			},
+		},
+		{
+			name: "workspace skills/ is the symlink",
+			setup: func(t *testing.T, ws, outside string) (Sources, []string) {
+				mustMkdirAll(t, filepath.Join(ws, ".apogee", "skills"))
+				mustSymlink(t, outside, filepath.Join(ws, "skills"))
+				return Sources{Workspace: ws, UseProjectSkills: true},
+					[]string{filepath.Join(realDir(t, ws), ".apogee", "skills")}
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ws, outside, home := t.TempDir(), t.TempDir(), t.TempDir()
+			mustMkdirAll(t, filepath.Join(home, "skills"))
+			src, kept := tc.setup(t, ws, outside)
+			src.Home = home
+
+			roots := readRoots(src)
+			want := append(append([]string{}, kept...), filepath.Join(realDir(t, home), "skills"))
+			if !slices.Equal(roots, want) {
+				t.Errorf("readRoots() = %v, want %v — the relocated anchor must be dropped and nothing else with it",
+					roots, want)
+			}
+			// Belt and braces: no entry may REACH the outside tree either, however it is spelled.
+			for _, root := range roots {
+				if underDir(security.EvalRealPath(root), realDir(t, outside)) {
+					t.Errorf("readRoots() = %v mounts %s, which resolves outside the workspace; the read fence moved",
+						roots, root)
+				}
+			}
+		})
+	}
+}
+
+// The rule is CONTAINMENT, not "no symlinks", and the mount says so the same way the walk does: an
+// anchor symlinked WITHIN the workspace still mounts — as the path it RESOLVES to, which is the
+// only spelling the read fence and the mount can both agree on.
+func TestReadRootsResolveAnInBaseSymlinkedAnchor(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink semantics differ on Windows")
+	}
+	ws := t.TempDir()
+	mustMkdirAll(t, filepath.Join(ws, "vendored"))
+	mustMkdirAll(t, filepath.Join(ws, ".apogee"))
+	mustSymlink(t, filepath.Join("..", "vendored"), filepath.Join(ws, ".apogee", "skills"))
+
+	want := []string{filepath.Join(realDir(t, ws), "vendored")}
+	if got := readRoots(Sources{Workspace: ws}); !slices.Equal(got, want) {
+		t.Errorf("readRoots() = %v, want the resolved in-workspace target %v", got, want)
+	}
+}
+
+// The home library is the operator's own, so its symlink is followed and the mount pinned at what
+// it resolves to — the dotfiles-managed library reads, exactly as
+// TestLoadHomeLibraryAnchorSymlinkFollowed pins for the walk.
+func TestReadRootsFollowTheHomeLibrarySymlink(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink semantics differ on Windows")
+	}
+	home, library := t.TempDir(), t.TempDir()
+	mustSymlink(t, library, filepath.Join(home, "skills"))
+
+	want := []string{realDir(t, library)}
+	if got := readRoots(Sources{Home: home}); !slices.Equal(got, want) {
+		t.Errorf("readRoots() = %v, want the resolved library %v", got, want)
+	}
+}
+
+// A source dir nothing has created yet is still listed, exactly as sourceDirs lists it: readRoots
+// reports where skills come from, and the mount side skips an unusable root of its own accord.
+func TestReadRootsListADirThatDoesNotExist(t *testing.T) {
+	ws, home := t.TempDir(), t.TempDir()
+
+	want := []string{
+		filepath.Join(realDir(t, ws), ".apogee", "skills"),
+		filepath.Join(realDir(t, ws), "skills"),
+		filepath.Join(realDir(t, home), "skills"),
+	}
+	got := readRoots(Sources{Workspace: ws, Home: home, UseProjectSkills: true})
+	if !slices.Equal(got, want) {
+		t.Errorf("readRoots() = %v, want every source listed in scan order %v", got, want)
 	}
 }

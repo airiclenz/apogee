@@ -163,3 +163,34 @@ func TestProviderSourceDirsFollowSetSources(t *testing.T) {
 		t.Errorf("SourceDirs() = %v dropped the global library; only the gated dir moves", p.SourceDirs())
 	}
 }
+
+// TestProviderReadRootsFollowSetSources pins the read-root seam's live-ness where the host now
+// takes it: ReadRoots, not SourceDirs. A mount frozen at construction would leave the model reading
+// a dir the catalogue no longer scans — or refusing one it does — so a `use-project-skills` flip
+// must move it with no Reload and no re-wiring, exactly as it moves the display list.
+func TestProviderReadRootsFollowSetSources(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+	projectRoot := filepath.Join(realDir(t, workspace), "skills")
+
+	src := Sources{Home: home, Workspace: workspace, UseProjectSkills: true}
+	p := NewProvider(src)
+
+	if got, want := p.ReadRoots(), readRoots(src); !slices.Equal(got, want) {
+		t.Fatalf("ReadRoots() = %v, want the layered mount list %v", got, want)
+	}
+	if !slices.Contains(p.ReadRoots(), projectRoot) {
+		t.Fatalf("ReadRoots() = %v, missing the bare project folder the flag admits", p.ReadRoots())
+	}
+
+	src.UseProjectSkills = false
+	p.SetSources(src)
+
+	if slices.Contains(p.ReadRoots(), projectRoot) {
+		t.Errorf("ReadRoots() = %v still mounts the project folder after the flag went off; the mount is stale",
+			p.ReadRoots())
+	}
+	if !slices.Contains(p.ReadRoots(), filepath.Join(realDir(t, home), "skills")) {
+		t.Errorf("ReadRoots() = %v dropped the global library; only the gated dir moves", p.ReadRoots())
+	}
+}

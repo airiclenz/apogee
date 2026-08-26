@@ -222,9 +222,24 @@ func (s readScope) readRoot(input string) string {
 // input resolves to there. A root that is absent or is not a directory — the skills library on
 // a box where nothing has created it yet, the creation-deferred convention — is skipped: a
 // per-root refusal, never an error of its own.
+//
+// A root that is not its OWN real path — one reached through a symlink — is skipped the same way
+// (audit 2026-08-25 F-13), for two reasons that are really one. The host's contract
+// (domain.Config.ExtraReadRoots) is that every root it mounts is already symlink-resolved, so a
+// root that is not was never vouched for by anybody. And the mount and the fence would disagree
+// about it anyway: resolveInRoot judges containment on REAL paths while the bounded read's
+// rootRelative relativises LEXICALLY, so on a symlinked root the two answer different questions.
+//
+// The trust decision itself is deliberately NOT taken here. This layer holds a bare list of paths
+// with no base to judge them against, so it cannot tell an operator's dotfiles symlink from a
+// repo's relocation of the fence. internal/skills owns the anchors and makes that call, handing
+// over resolved paths (its readRoots); this is only the check that the two layers agree.
 func matchRoot(input string, roots []string) (root, resolved string, ok bool) {
 	for _, candidate := range roots {
-		if candidate == "" || !rootUsable(candidate) {
+		if candidate == "" || security.EvalRealPath(candidate) != filepath.Clean(candidate) {
+			continue
+		}
+		if !rootUsable(candidate) {
 			continue
 		}
 		candidateResolved, err := resolveInRoot(input, candidate)

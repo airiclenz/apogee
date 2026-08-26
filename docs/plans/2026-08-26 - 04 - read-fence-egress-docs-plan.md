@@ -137,7 +137,16 @@ stale (three placeholders, `model:` "hint", probe-command flags, `v0.16.x`, "the
 
 ---
 
-## 1. Mount skill dirs by their resolved path; refuse a relocated workspace anchor (F-13, engine half)
+## 1. Mount skill dirs by their resolved path; refuse a relocated workspace anchor (F-13, engine half) — ✅ DONE (2026-08-26)
+
+NOTES (2026-08-26): the plan folded every `load_test.go` case under one name; the fixtures need
+different shapes (a relocated anchor is table-driven over three symlink placements, the in-base,
+home-library and missing-dir cases are single fixtures), so they landed as four functions —
+`TestReadRootsRefuseARelocatedWorkspaceAnchor` plus `TestReadRootsResolveAnInBaseSymlinkedAnchor`,
+`TestReadRootsFollowTheHomeLibrarySymlink`, `TestReadRootsListADirThatDoesNotExist`. Same coverage,
+one assertion per behaviour. Two helpers came with them (`realDir`, `underDir`).
+NOTES (2026-08-26): both guards were checked to be load-bearing by temporarily reverting each half
+(`readRoots` → `sourceDirs`, and `matchRoot`'s resolved-path skip) and confirming the new tests fail.
 
 **What:** the read tools mount only what `internal/skills` vouches for, and never through a
 symlink.

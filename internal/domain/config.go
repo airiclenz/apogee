@@ -140,6 +140,15 @@ type Config struct {
 	// Each root keeps its own fence, so a symlink inside one that escapes it is still refused,
 	// and a root that does not exist yet is skipped rather than failing the call.
 	//
+	// Every root MUST be the host's symlink-RESOLVED real path: a root reached through a symlink
+	// is refused at the mount and simply never matches, because the fence resolves containment
+	// through real paths while the read relativises lexically, and the two must not disagree
+	// about the same root. Resolving is also where the TRUST decision lives, and it belongs to
+	// the host, not here: a dir a WORKSPACE contributed has to be vouched for by whoever knows
+	// which base it may not leave — a repo that ships its skills folder as a symlink out of the
+	// workspace must not widen the fence by being mounted (the TUI's skill provider makes exactly
+	// that call in its ReadRoots).
+	//
 	// It is a GENERIC seam and the engine never defaults it: the TUI mounts its skill source
 	// dirs through it, but nothing here knows what a skill is — the engine stays skill-agnostic
 	// and any Driver can mount whatever its user has opened up (ADR 0031). Read-only is

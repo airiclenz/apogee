@@ -298,6 +298,46 @@ func TestReadScopeRefusesSymlinkEscapingExtraRoot(t *testing.T) {
 	}
 }
 
+// TestReadScopeRefusesAnExtraRootReachedThroughASymlink is the MOUNT side of the same fence
+// (audit 2026-08-25 F-13): a root that is not its own real path was never resolved by the host,
+// so it never matches at all — resolve, open and readBounded all answer the workspace's own
+// refusal, and the file behind the symlink stays unread. Mounting the SAME directory by its real
+// path still reads, because the rule is "resolved", not "no mounts".
+func TestReadScopeRefusesAnExtraRootReachedThroughASymlink(t *testing.T) {
+	t.Parallel()
+
+	workspace, target := tempRoot(t), tempRoot(t)
+	writeFixtureFile(t, filepath.Join(target, "secret.txt"), "not yours")
+
+	link := filepath.Join(tempRoot(t), "link")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	linked := readScope{root: workspace, extra: func() []string { return []string{link} }}
+	throughLink := filepath.Join(link, "secret.txt")
+
+	if _, _, err := linked.resolve(throughLink); !errors.Is(err, ErrPathEscape) {
+		t.Errorf("resolve(%q) error = %v, want ErrPathEscape", throughLink, err)
+	}
+	if _, _, err := linked.open(throughLink); !errors.Is(err, ErrPathEscape) {
+		t.Errorf("open(%q) error = %v, want ErrPathEscape", throughLink, err)
+	}
+	if data, failMessage := linked.readBounded(throughLink); failMessage == "" {
+		t.Errorf("readBounded(%q) returned %d bytes, want a refusal", throughLink, len(data))
+	}
+
+	resolvedMount := readScope{root: workspace, extra: func() []string { return []string{target} }}
+	direct := filepath.Join(target, "secret.txt")
+	data, failMessage := resolvedMount.readBounded(direct)
+	if failMessage != "" {
+		t.Fatalf("readBounded(%q) under the resolved mount: %s", direct, failMessage)
+	}
+	if string(data) != "not yours" {
+		t.Errorf("content = %q, want %q", data, "not yours")
+	}
+}
+
 // TestReadScopeOpen pins the handle half: the matched root comes back beside the file, and a
 // missing file under a root that DOES contain the path keeps its own I/O error rather than
 // being reported as an escape.
