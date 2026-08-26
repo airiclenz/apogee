@@ -119,6 +119,10 @@ func newAutofix(deps Deps) (any, error) {
 		look = exec.LookPath
 	}
 
+	// The fence the construction probe judges a formatter against, and the same root the spawn
+	// door re-judges argv[0] with at fire time.
+	workspaceRoot := deps.WritableBox.WorkspaceRoot
+
 	resolved := map[string]string{} // command → path ("" = absent); each command probed once
 	probe := func(command string) string {
 		path, done := resolved[command]
@@ -134,7 +138,7 @@ func newAutofix(deps Deps) (any, error) {
 			// backend), which is precisely the run that must not execute bytes the model
 			// wrote. Autofix has no result surface to explain a refusal on, and a skipped
 			// rung is its documented degradation, so the fence is applied silently.
-			if p != "" && refuseExecFromWritablePath(p, deps.WritableBox.WorkspaceRoot, &deps.WritableBox) != nil {
+			if p != "" && refuseExecFromWritablePath(p, workspaceRoot, &deps.WritableBox) != nil {
 				p = ""
 			}
 			resolved[command] = p
@@ -153,7 +157,7 @@ func newAutofix(deps Deps) (any, error) {
 		repairs[entry.language] = append(repairs[entry.language], repairer{
 			external: true,
 			run: func(ctx context.Context, gate spawnGate, content string) (string, bool) {
-				return runExternalFormatter(ctx, cmdPath, spec, gate, content)
+				return runExternalFormatter(ctx, cmdPath, spec, workspaceRoot, gate, content)
 			},
 		})
 	}
@@ -306,6 +310,10 @@ var externalFormatters = []struct {
 // The FIRE's ctx bounds the run — a user cancel stops an in-flight formatter instead of leaving the
 // loop waiting on it — narrowed by gate.timeout.
 //
+// workspaceRoot is the construction-time fence (deps.WritableBox.WorkspaceRoot) handed on to the
+// door so it re-judges argv[0] at spawn time: the construction probe answered before the run, and
+// what is on disk at that path may have changed since.
+//
 // The permit's box reaches the funnel the way every subprocess site names one: on the context
 // (confinement-execution-contract §2.2). A permit carrying no box authorises an unfenced spawn, so
 // nothing is installed and the funnel runs the command as-is; a box with no Confiner behind it is
@@ -313,13 +321,13 @@ var externalFormatters = []struct {
 // when the subprocess fails or times out, or when it produced empty output: every failure mode
 // degrades silently to "leave the payload as-is" (standing requirement #2), and a refused
 // confinement NEVER degrades to running unconfined.
-func runExternalFormatter(ctx context.Context, cmdPath string, spec formatterSpec, gate spawnGate, content string) (string, bool) {
+func runExternalFormatter(ctx context.Context, cmdPath string, spec formatterSpec, workspaceRoot string, gate spawnGate, content string) (string, bool) {
 	if conf := gate.confinement; conf != nil {
 		ctx = domain.WithConfinement(ctx, *conf)
 	}
 
 	argv := append([]string{cmdPath}, spec.args...)
-	out, err := tools.RunHookSubprocess(ctx, argv, "", gate.secretEnv, gate.timeout, content)
+	out, err := tools.RunHookSubprocess(ctx, argv, "", workspaceRoot, gate.secretEnv, gate.timeout, content)
 	if err != nil || strings.TrimSpace(out) == "" {
 		return content, false
 	}

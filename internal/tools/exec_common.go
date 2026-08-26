@@ -438,6 +438,17 @@ const maxSubprocessErrorExcerptBytes = 256
 // apogee's own working directory. timeout zero takes the funnel's default and a timeout past the
 // ceiling is clamped to it. stdin empty gives the child no input.
 //
+// workspaceRoot names the fence argv[0] is judged against: before the spec is built, argv[0] goes
+// through security.ResolveProgram with that root and the box a Confinement handle on ctx carries
+// (nil when there is none), and the absolute path it answers with replaces argv[0]. The funnel
+// therefore fences its OWN argv[0] rather than trusting the caller to have done it: a caller's
+// earlier resolution (autofix probes its formatter once at construction) is belt, this is braces,
+// and a caller that never fenced at all cannot spawn an unfenced program through this door. A
+// refusal — the program resolves inside a path the model can write, or PATH answered with a
+// relative entry — is returned as the funnel's error and nothing is spawned. An empty
+// workspaceRoot with no box on ctx names no fence, which by security's empty-fence rule refuses
+// nothing.
+//
 // secretEnv names the operator-declared credential variables to drop beside apogee's own — the
 // same `api-key-env:` names (ADR 0047) the execution tools take from HostTools.SecretEnvVars,
 // carried to a hook on mechanisms.Deps.SecretEnvVars and handed in here. A hook's child therefore
@@ -452,10 +463,19 @@ func RunHookSubprocess(
 	ctx context.Context,
 	argv []string,
 	dir string,
+	workspaceRoot string,
 	secretEnv []string,
 	timeout time.Duration,
 	stdin string,
 ) (string, error) {
+	if len(argv) > 0 {
+		program, err := security.ResolveProgram(nil, argv[0], workspaceRoot, confinementBox(ctx))
+		if err != nil {
+			return "", err
+		}
+		argv = append([]string{program}, argv[1:]...)
+	}
+
 	res, err := runSubprocess(ctx, subprocessSpec{
 		argv:        argv,
 		dir:         dir,

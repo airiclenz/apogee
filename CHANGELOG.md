@@ -220,6 +220,21 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **The fail-fast preamble no longer probes the host shell, and a hook's subprocess resolves its
+  own `argv[0]` through the exec fence.** `platform.FailFastPreamble` was a `sync.OnceValue` that
+  spawned `sh -c "set -o pipefail"` once per process to decide whether the option was available —
+  the last `exec.Command` outside the subprocess funnel, fired before anything scrubbed the
+  environment or applied confinement, with `sh` resolved over apogee's inherited PATH (security
+  audit F-02 / code audit C-01). It is now a compile-time constant,
+  `"set -e\n(set -o pipefail) 2>/dev/null && set -o pipefail\n"`, that asks the shell itself: the
+  subshell tries the option, a shell without it fails inside the subshell with its diagnostic
+  discarded, and POSIX's AND-OR exemption from `set -e` lets the script carry on. Same bytes on
+  every host, no per-process state, and `internal/platform` now spawns nothing at all. Separately,
+  `tools.RunHookSubprocess` takes the workspace root and resolves `argv[0]` through
+  `security.ResolveProgram` before building the spec, so the one exported door onto the funnel
+  fences its own program instead of trusting the caller to have done it — autofix's formatter was
+  fenced once at construction, and what is on disk at that path may have changed since.
+
 - **The step cap no longer advances the Turn counter twice.** `endStepCapped` is reached only from
   `Run`, and only right after `endTurnDone` closed a Turn normally — a row that has already
   advanced the counter — so its own `l.index++` advanced a second time for a Turn that never ran:

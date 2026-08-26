@@ -483,15 +483,17 @@ func TestTerminal_FailFastAbortsTheScriptAtTheFirstFailure(t *testing.T) {
 	}
 }
 
-// TestTerminal_PipefailFailsAPipelineWhereSupported asserts the probed half of the
-// preamble: where the host sh accepts pipefail, a failing left side of a pipe fails the
-// whole call. Where the probe found no support the preamble cannot carry it, so skip.
+// TestTerminal_PipefailFailsAPipelineWhereSupported asserts the self-detecting half of
+// the preamble: where the host sh accepts pipefail, a failing left side of a pipe fails
+// the whole call. The preamble always NAMES pipefail now, so it can no longer say whether
+// this host honours it — the test asks the host shell itself and skips when it does not
+// (test code may spawn; production no longer does).
 func TestTerminal_PipefailFailsAPipelineWhereSupported(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("POSIX fail-fast preamble; cmd.exe has no set -e analogue")
 	}
-	if !strings.Contains(platform.FailFastPreamble(), "pipefail") {
-		t.Skip("host sh does not accept `set -o pipefail`; the preamble omits it")
+	if exec.Command("sh", "-c", "set -o pipefail").Run() != nil {
+		t.Skip("host sh does not accept `set -o pipefail`; the preamble's subshell skips it")
 	}
 	t.Parallel()
 	term := NewTerminal(t.TempDir(), nil)

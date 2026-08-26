@@ -3,6 +3,7 @@ package platform
 import (
 	"os/exec"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -497,32 +498,67 @@ func countPrefix(entries []string, prefix string) int {
 	return n
 }
 
-func TestComposeFailFastPreamble(t *testing.T) {
+// TestFailFastPreambleIsTheSelfDetectingConstant pins the exact bytes: one constant, identical on
+// every host, whose middle line asks the shell itself for pipefail instead of a probe subprocess.
+func TestFailFastPreambleIsTheSelfDetectingConstant(t *testing.T) {
 	t.Parallel()
 
-	if got, want := composeFailFastPreamble(false), "set -e\n"; got != want {
-		t.Errorf("composeFailFastPreamble(false) = %q, want %q", got, want)
-	}
-	if got, want := composeFailFastPreamble(true), "set -e\nset -o pipefail\n"; got != want {
-		t.Errorf("composeFailFastPreamble(true) = %q, want %q", got, want)
+	want := "set -e\n(set -o pipefail) 2>/dev/null && set -o pipefail\n"
+	if got := FailFastPreamble(); got != want {
+		t.Errorf("FailFastPreamble() = %q, want %q", got, want)
 	}
 }
 
-// TestFailFastPreambleMatchesTheHostProbe pins the probe against the ground truth on this
-// host: the cached preamble carries pipefail exactly when `sh -c "set -o pipefail"` exits 0
-// here, and repeated calls return the identical (cached) string.
-func TestFailFastPreambleMatchesTheHostProbe(t *testing.T) {
+// TestFailFastPreambleRunsUnderEveryHostShell is the ground truth the deleted host probe used to
+// stand in for: the preamble must be silent, must not abort the script, and must honour pipefail
+// precisely where the shell has it — on every shell a host may point `sh` at. Each row skips when
+// that shell is not installed, so the table asserts whatever this host actually offers.
+func TestFailFastPreambleRunsUnderEveryHostShell(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX preamble; cmd.exe has no `set -e` analogue")
+	}
 	t.Parallel()
 
-	got := FailFastPreamble()
-	if !strings.HasPrefix(got, "set -e\n") {
-		t.Fatalf("FailFastPreamble() = %q, want a `set -e` first line always", got)
-	}
-	wantPipefail := exec.Command("sh", "-c", "set -o pipefail").Run() == nil
-	if want := composeFailFastPreamble(wantPipefail); got != want {
-		t.Errorf("FailFastPreamble() = %q, want %q (host sh pipefail support = %v)", got, want, wantPipefail)
-	}
-	if again := FailFastPreamble(); again != got {
-		t.Errorf("FailFastPreamble() second call = %q, want the cached %q", again, got)
+	preamble := FailFastPreamble()
+	for _, shell := range []string{"sh", "bash", "dash", "zsh", "ksh"} {
+		shell := shell
+		t.Run(shell, func(t *testing.T) {
+			t.Parallel()
+
+			path, err := exec.LookPath(shell)
+			if err != nil {
+				t.Skipf("%s not installed on this host", shell)
+			}
+
+			// (a) The preamble is silent and aborts nothing, whether or not this shell has
+			// pipefail: the subshell's diagnostic goes to /dev/null and the AND-list's first
+			// command is exempt from `set -e`.
+			out, err := exec.Command(path, "-c", preamble+"echo ok").Output()
+			if err != nil {
+				t.Fatalf("%s: preamble + `echo ok` failed: %v", shell, err)
+			}
+			if got := string(out); got != "ok\n" {
+				t.Errorf("%s: stdout = %q, want exactly %q — the preamble must print nothing", shell, got, "ok\n")
+			}
+
+			// (b) pipefail is honoured exactly where this shell supports it, and its absence
+			// never breaks the line.
+			supportsPipefail := exec.Command(path, "-c", "set -o pipefail").Run() == nil
+			pipelineFailed := exec.Command(path, "-c", preamble+"false | cat").Run() != nil
+			if pipelineFailed != supportsPipefail {
+				t.Errorf("%s: `false | cat` failed = %v, want %v (shell supports pipefail = %v)",
+					shell, pipelineFailed, supportsPipefail, supportsPipefail)
+			}
+
+			// (c) `set -e` is still in force after the AND-list: a plain failing command aborts
+			// the script before the next line runs.
+			out, err = exec.Command(path, "-c", preamble+"false; echo reached").Output()
+			if err == nil {
+				t.Errorf("%s: `false; echo reached` exited 0, want `set -e` to abort it", shell)
+			}
+			if got := string(out); got != "" {
+				t.Errorf("%s: stdout = %q, want nothing — the script must stop at the failure", shell, got)
+			}
+		})
 	}
 }

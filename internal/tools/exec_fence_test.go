@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
-	"github.com/airiclenz/apogee/internal/platform"
 )
 
 // plantExecutable writes an executable file at root/rel and returns its absolute path — the
@@ -30,14 +29,8 @@ func plantExecutable(t *testing.T, root, rel string) string {
 // prependPATH puts dir ahead of the inherited PATH for the duration of one test — the everyday
 // shape of the collision the fence judges: an activated .venv or a node_modules/.bin sitting
 // ahead of the system entries and winning the lookup.
-//
-// It fires platform's one-shot pipefail probe against the AMBIENT PATH first. That probe
-// memoizes its answer for the life of the process (sync.OnceValue), so a planted `sh` — which
-// exits 0 for anything — would otherwise teach it that this host's shell accepts
-// `set -o pipefail`, and every later terminal test would run a preamble the real shell rejects.
 func prependPATH(t *testing.T, dir string) {
 	t.Helper()
-	platform.FailFastPreamble()
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 

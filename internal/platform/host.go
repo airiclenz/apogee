@@ -2,9 +2,7 @@ package platform
 
 import (
 	"os"
-	"os/exec"
 	"strings"
-	"sync"
 )
 
 // hostRules is the per-OS behaviour table behind Host: the shell argv prefix, the
@@ -522,39 +520,30 @@ func caretEscape(line string) string {
 	return b.String()
 }
 
-// failFastPreambleOnce probes the host `sh` once per process and caches the composed
-// preamble: `set -o pipefail` is in POSIX.1-2024 but older shells still reject it, and
-// the answer cannot change while apogee runs, so one subprocess settles it for good. A
-// probe that cannot run at all (no `sh` on this host) reads as unsupported — the caller
-// that would prepend the result is the POSIX shell path, which such a host never takes.
-var failFastPreambleOnce = sync.OnceValue(func() string {
-	return composeFailFastPreamble(exec.Command("sh", "-c", "set -o pipefail").Run() == nil)
-})
+// failFastPreamble is the fail-fast prefix the terminal tool prepends to every POSIX script.
+// It is a CONSTANT — the same bytes on every host, composed once at compile time — because the
+// line self-detects pipefail instead of asking a subprocess whether the host shell has it.
+//
+// Why the middle line is correct on every POSIX `sh`: the subshell `(set -o pipefail)` tries the
+// option in a child of the script's shell. On a shell without it (dash before 0.5.13) `set`
+// fails INSIDE that subshell, its diagnostic goes to /dev/null, and the AND-list's right-hand
+// side — the real `set -o pipefail` — is never reached; POSIX exempts every command of an AND-OR
+// list but the last from `set -e`, and the failing command here is the FIRST, so the script
+// carries on with pipefail simply absent. On bash, zsh, ksh and newer dash the subshell succeeds
+// and the option is then set for the script itself. Either way the line is silent and the script
+// survives it, so no host probe is needed and apogee spawns nothing to learn the answer.
+const failFastPreamble = "set -e\n(set -o pipefail) 2>/dev/null && set -o pipefail\n"
 
-// FailFastPreamble returns the fail-fast prefix the terminal tool prepends to every
-// POSIX script: `set -e` always, plus `set -o pipefail` when a one-time cached probe
-// shows the host `sh` accepts it (`sh -c "set -o pipefail"` exiting 0 ⇒ supported).
-// With `set -e` in force, a failed plain command aborts the whole script instead of
-// letting an unguarded later line run — but NOT a failure inside an AND-OR list other
-// than its last command: POSIX exempts those, so a denied `mkdir d && cd d && …` chain
-// falls through to the lines after it with the cwd unchanged (the 2026-08-22 incident's
-// exact shape). That gap is closed elsewhere, by the kill-on-denial output watch a
-// confined run is wired through (DenialKillWriter; internal/tools wires it). The
-// preamble is exported so the escape-probe battery can prepend exactly what the
-// terminal tool would. It is meaningful only for a POSIX `sh`: cmd.exe has no `set -e`
-// analogue, so callers apply it on the POSIX shell path alone.
-func FailFastPreamble() string { return failFastPreambleOnce() }
-
-// composeFailFastPreamble builds the preamble for a host whose `sh` does (or does not)
-// accept pipefail — the pure half of FailFastPreamble, so both compositions are
-// table-testable without a shell.
-func composeFailFastPreamble(pipefail bool) string {
-	preamble := "set -e\n"
-	if pipefail {
-		preamble += "set -o pipefail\n"
-	}
-	return preamble
-}
+// FailFastPreamble returns that prefix. With `set -e` in force, a failed plain command aborts
+// the whole script instead of letting an unguarded later line run — but NOT a failure inside an
+// AND-OR list other than its last command: POSIX exempts those, so a denied `mkdir d && cd d && …`
+// chain falls through to the lines after it with the cwd unchanged (the 2026-08-22 incident's
+// exact shape). That gap is closed elsewhere, by the kill-on-denial output watch a confined run
+// is wired through (DenialKillWriter; internal/tools wires it). The preamble is exported so the
+// escape-probe battery can prepend exactly what the terminal tool would. It is meaningful only
+// for a POSIX `sh`: cmd.exe has no `set -e` analogue, so callers apply it on the POSIX shell path
+// alone.
+func FailFastPreamble() string { return failFastPreamble }
 
 // The rule table must satisfy the Host contract at compile time, on every target.
 var _ Host = hostRules{}

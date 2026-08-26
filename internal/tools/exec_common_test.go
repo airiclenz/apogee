@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/security"
 )
 
 // TestRunSubprocessNilConfinerFailsClosed pins the §2.2 posture on the one handle shape the
@@ -190,6 +191,7 @@ func TestRunHookSubprocessScrubsApogeeCredentials(t *testing.T) {
 		context.Background(),
 		[]string{"/bin/sh", "-c", `printf 'key=[%s] endpoint=[%s]' "$APOGEE_API_KEY" "$APOGEE_TEST_ENDPOINT"`},
 		"",
+		t.TempDir(),
 		nil,
 		30*time.Second,
 		"",
@@ -223,6 +225,7 @@ func TestRunHookSubprocessScrubsTheConfiguredSecretNames(t *testing.T) {
 		context.Background(),
 		[]string{"/bin/sh", "-c", `printf 'own=[%s] configured=[%s] endpoint=[%s]' "$APOGEE_API_KEY" "$APOGEE_TEST_PROVIDER_KEY" "$APOGEE_TEST_ENDPOINT"`},
 		"",
+		t.TempDir(),
 		[]string{"apogee_test_provider_key"},
 		30*time.Second,
 		"",
@@ -248,6 +251,7 @@ func TestRunHookSubprocessReturnsStdoutAloneAndFeedsStdin(t *testing.T) {
 		context.Background(),
 		[]string{"/bin/sh", "-c", `echo "warning: noisy formatter" >&2; cat`},
 		"",
+		t.TempDir(),
 		nil,
 		30*time.Second,
 		"payload\n",
@@ -273,6 +277,7 @@ func TestRunHookSubprocessFailsOnANonZeroExit(t *testing.T) {
 		context.Background(),
 		[]string{"/bin/sh", "-c", `echo "cannot parse input" >&2; exit 3`},
 		"",
+		t.TempDir(),
 		nil,
 		30*time.Second,
 		"",
@@ -444,5 +449,62 @@ func TestConfinementDenialLabelsNameTheWritableRoots(t *testing.T) {
 				t.Errorf("stop label = %q, want it to stay the definitive wording", labels["stop"])
 			}
 		})
+	}
+}
+
+// TestRunHookSubprocessRefusesAProgramInsideTheWorkspace pins the funnel's own fence: the door
+// resolves argv[0] itself, so a hook handing it a program that lands inside the workspace is
+// refused rather than spawned — even though the caller (autofix) fenced the same path once at
+// construction. The construction probe answered before the run; what is on disk at that path may
+// have been rewritten since, and this is the check that reads it at spawn time.
+func TestRunHookSubprocessRefusesAProgramInsideTheWorkspace(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	planted := plantExecutable(t, root, "node_modules/.bin/formatter")
+
+	out, err := RunHookSubprocess(
+		context.Background(),
+		[]string{planted, "--quiet"},
+		"",
+		root,
+		nil,
+		30*time.Second,
+		"",
+	)
+	if !errors.Is(err, security.ErrExecFromWritablePath) {
+		t.Fatalf("err = %v, want it to wrap security.ErrExecFromWritablePath (out = %q)", err, out)
+	}
+	if !strings.Contains(err.Error(), planted) {
+		t.Errorf("err = %v, want it to name the resolved program %q", err, planted)
+	}
+	if out != "" {
+		t.Errorf("stdout = %q, want it empty — nothing may be spawned on a refusal", out)
+	}
+}
+
+// TestRunHookSubprocessResolvesABareProgramNameToAnAbsolutePath pins the other half of the door's
+// resolution: a bare name on PATH is looked up and argv[0] becomes the absolute program, so the
+// child is never started from a name the OS would re-resolve against its own environment.
+func TestRunHookSubprocessResolvesABareProgramNameToAnAbsolutePath(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell canary; the resolution it pins is platform-independent")
+	}
+	t.Parallel()
+
+	out, err := RunHookSubprocess(
+		context.Background(),
+		[]string{"sh", "-c", "printf ok"},
+		"",
+		t.TempDir(),
+		nil,
+		30*time.Second,
+		"",
+	)
+	if err != nil {
+		t.Fatalf("RunHookSubprocess: %v", err)
+	}
+	if out != "ok" {
+		t.Errorf("stdout = %q, want %q — a bare name must still resolve and run", out, "ok")
 	}
 }

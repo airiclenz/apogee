@@ -243,7 +243,24 @@ stays green unchanged. A terminal row also asserts the SUCCESS shape: with a nor
 
 ---
 
-## 2. The `pipefail` probe is deleted — the preamble self-detects; `RunHookSubprocess` resolves its argv[0]
+## 2. The `pipefail` probe is deleted — the preamble self-detects; `RunHookSubprocess` resolves its argv[0] — ✅ DONE (2026-08-26)
+
+NOTES (2026-08-26): `internal/tools/exec_fence_test.go` is not in the item's Files list but had to be
+touched. Item 1 added a `platform.FailFastPreamble()` call plus an explaining paragraph to
+`prependPATH`, purely to fire the one-shot probe against the ambient PATH before a fake `sh` was
+planted. This item deletes that probe, so the call is inert and the paragraph describes a mechanism
+that no longer exists; both are removed, along with the file's now-unused `platform` import.
+NOTES (2026-08-26): `internal/tools/doc.go` is not in the item's Files list either — its
+`RunHookSubprocess` sentence enumerates what the door gives a hook ("the same scrub, teardown, cap
+and clamp"), and the exec fence is now one of them, so "exec fence on its argv[0]" joins the list.
+NOTES (2026-08-26): `runExternalFormatter` gained a `workspaceRoot string` parameter to carry
+`deps.WritableBox.WorkspaceRoot` to the call at `autofix.go:322` — `deps` is not in scope inside
+that function, only in `newAutofix`, where the closure that builds the external rung now passes it.
+NOTES (2026-08-26): the Tests section names four existing `TestRunHookSubprocess*` tests to update;
+they were updated and `TestRunHookSubprocessRefusesAProgramInsideTheWorkspace` added as specified,
+plus one extra — `TestRunHookSubprocessResolvesABareProgramNameToAnAbsolutePath` — pinning the
+success half (a bare name still resolves and runs, and argv[0] becomes absolute), because the
+refusal test alone would pass against a door that refused everything.
 
 Depends on item 1.
 
