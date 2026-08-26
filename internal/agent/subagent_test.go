@@ -721,6 +721,19 @@ func hasToolResultContaining(events []domain.Event, depth int, sub string) bool 
 	return false
 }
 
+// lastErrorAtDepth returns the Err of the most recent ErrorEvent emitted at the given Depth — the
+// cause the human read for that agent's run, and what a caller asserts a derived message against.
+func lastErrorAtDepth(events []domain.Event, depth int) (string, bool) {
+	var out string
+	var found bool
+	for _, e := range events {
+		if ev, ok := e.(domain.ErrorEvent); ok && ev.Depth == depth {
+			out, found = ev.Err, true
+		}
+	}
+	return out, found
+}
+
 // hasErrorContaining reports whether an ErrorEvent at the given Depth has an Err containing sub.
 func hasErrorContaining(events []domain.Event, depth int, sub string) bool {
 	for _, e := range events {
@@ -1343,5 +1356,129 @@ func TestNewChildAgent_CompactsMidExchange(t *testing.T) {
 	defer child.Close()
 	if !child.midExchangeCompaction {
 		t.Error("a child agent does not compact mid-Exchange; its whole life is one Exchange, so it would never fold")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// A child's output-capped reply is a fault, and the parent is told why
+// ---------------------------------------------------------------------------
+
+// truncatedChildText is the visible text a capped child reply carries — a real answer that simply
+// stops mid-sentence, which is exactly why it must not be handed on as the delegated result.
+const truncatedChildText = "the parser mishandles nested quotes; the second finding is that"
+
+// cappedChildScripts drives one delegation whose child answers at LENGTH, with no tool call, and is
+// cut off at the engine's own output cap (ADR 0046) — the 2026-08-25 shape. The parent then
+// finishes.
+func cappedChildScripts() [][]provider.Delta {
+	return [][]provider.Delta{
+		subAgentCallScript("c1", "audit the parser"),
+		{
+			{Kind: provider.DeltaContent, Content: truncatedChildText},
+			{Kind: provider.DeltaDone, FinishReason: "length"},
+		},
+		contentScript("parent done"),
+	}
+}
+
+// TestSubAgent_CappedChildReplyReportsAsErrorNamingTheCause proves both halves of the delegate rule
+// end to end: the child's truncated answer faults instead of posing as the delegation's result, and
+// the error result the parent MODEL receives carries the child's own cause sentence rather than
+// pointing at an error only the human can see.
+func TestSubAgent_CappedChildReplyReportsAsErrorNamingTheCause(t *testing.T) {
+	sink := &recordingSink{}
+	cfg := subAgentConfig(sink, domain.ModeAskBefore)
+
+	a, err := newAgent(cfg, &scriptedResponder{scripts: cappedChildScripts()})
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	if err := a.Submit(domain.UserInput{Text: "please research"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	res, err := a.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	// The child's fault is localised to the delegation: the PARENT's Exchange still completes.
+	if res.Status != domain.StatusExchangeComplete || res.Faulted {
+		t.Errorf("parent result = %+v, want a clean exchange-complete (the child's fault must not fault the parent)", res)
+	}
+
+	sub, ok := lastSubAgentResult(sink.events)
+	if !ok {
+		t.Fatal("no sub_agent tool result emitted")
+	}
+	if !sub.IsError {
+		t.Errorf("sub_agent result IsError = false for a capped delegate reply; content = %q", sub.Content)
+	}
+	if strings.Contains(sub.Content, truncatedChildText) {
+		t.Errorf("sub_agent result = %q — a truncated answer passed off as the delegated result", sub.Content)
+	}
+
+	childErr, ok := lastErrorAtDepth(sink.events, 1)
+	if !ok {
+		t.Fatal("expected the child's fault to surface as an ErrorEvent at Depth 1")
+	}
+	if !strings.Contains(childErr, "truncated answer is not a result") {
+		t.Errorf("child ErrorEvent = %q, want the capped-delegate wording", childErr)
+	}
+	// The cause the human read at Depth 1 is the cause the parent model reads in the result.
+	if want := subAgentFaultPrefix + childErr; sub.Content != want {
+		t.Errorf("sub_agent result = %q, want %q", sub.Content, want)
+	}
+}
+
+// TestSubAgent_CappedChildReplyWithToolCallContinues pins what the rule must NOT touch: a capped
+// reply that still asked for a tool is not a truncated ANSWER — the loop has work to do — so the
+// tool runs, the child answers on a later Turn, and the parent receives that answer as a success.
+func TestSubAgent_CappedChildReplyWithToolCallContinues(t *testing.T) {
+	sink := &recordingSink{}
+	reads := 0
+	reader := fakeTool{name: "read_thing", readOnly: true, result: "package main", ran: &reads}
+	cfg := subAgentConfig(sink, domain.ModeAskBefore, reader)
+
+	scripts := [][]provider.Delta{
+		subAgentCallScript("c1", "audit the parser"),
+		{
+			{Kind: provider.DeltaContent, Content: "reading the entry point first"},
+			{Kind: provider.DeltaToolCall, ToolCall: &provider.ToolCall{
+				ID:       "c2",
+				Type:     "function",
+				Function: provider.FunctionCall{Name: "read_thing", Arguments: `{}`},
+			}},
+			{Kind: provider.DeltaDone, FinishReason: "length"},
+		},
+		contentScript("the parser is fine"), // the child's next Turn answers normally
+		contentScript("parent done"),
+	}
+
+	a, err := newAgent(cfg, &scriptedResponder{scripts: scripts})
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	if err := a.Submit(domain.UserInput{Text: "please research"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	res, err := a.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.Status != domain.StatusExchangeComplete || res.Faulted {
+		t.Errorf("parent result = %+v, want a clean exchange-complete", res)
+	}
+
+	sub, ok := lastSubAgentResult(sink.events)
+	if !ok {
+		t.Fatal("no sub_agent tool result emitted")
+	}
+	if sub.IsError {
+		t.Errorf("sub_agent result IsError = true; a capped reply carrying a tool call must not fault: %q", sub.Content)
+	}
+	if sub.Content != "the parser is fine" {
+		t.Errorf("sub_agent result = %q, want the child's completed answer", sub.Content)
+	}
+	if reads != 1 {
+		t.Errorf("read_thing ran %d times, want 1 — the tool on the capped reply must still run", reads)
 	}
 }

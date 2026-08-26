@@ -48,6 +48,17 @@ const maxSubAgentDepth = 2
 // reads it as the contract for what the rest of the result is. %d is the cap actually applied.
 const stepCapResultFormat = "[delegate stopped at its step cap (%d steps); partial result — its last visible text follows]"
 
+// subAgentFaultPrefix opens the error result a FAULTED delegation becomes. What follows it is the
+// child's own fault sentence (Agent.lastFault) — the same line the human read at Depth+1 — so the
+// parent model reads the cause in the result itself instead of being sent to an error it cannot see.
+const subAgentFaultPrefix = "sub-agent faulted before finishing the delegated task: "
+
+// subAgentFaultNoCause is the tail used when the child's Exchange was abandoned without surfacing
+// a fault of its own (a recovered extension panic, a pre-request hook that refused): there is no
+// cause to name, so the result says so and points at the transcript, which is what this message
+// said in full before causes travelled.
+const subAgentFaultNoCause = "its exchange was abandoned (see the preceding error), so no result was produced"
+
 // stepCapNoTextMarker stands in for the child's last visible text when it produced none — a
 // delegate that spent every capped Turn calling tools and never wrote a word. The marker keeps
 // the result intelligible: the parent is told the delegation was stopped AND that it has nothing
@@ -145,9 +156,14 @@ func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall) (domain.T
 		// result. An error result also books the delegation as HARMFUL rather than as a
 		// productive write for self-regulation (noteToolProductivity, R3), so a failure can no
 		// longer clear the parent's strikes and Turn Budget. The child's own ErrorEvent already
-		// reached the shared EventSink at Depth+1, so the human sees the cause.
-		return errorToolResult(call.ID, "sub-agent faulted before finishing the delegated task: "+
-			"its exchange was abandoned (see the preceding error), so no result was produced"), dispatchDone
+		// reached the shared EventSink at Depth+1, so the human sees the cause — and the cause now
+		// rides the RESULT too, because "see the preceding error" addresses a reader the parent
+		// MODEL is not: it reads one tool result and has no transcript to look back through.
+		cause := sub.lastFault
+		if cause == "" {
+			cause = subAgentFaultNoCause
+		}
+		return errorToolResult(call.ID, subAgentFaultPrefix+cause), dispatchDone
 	}
 
 	if res.StepCapped {

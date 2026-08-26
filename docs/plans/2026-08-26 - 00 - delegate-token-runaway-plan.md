@@ -364,7 +364,15 @@ below 32768. `toolresultcap_test.go` — `capMaxChars` shrinks with the working 
 
 ---
 
-## 6. Fault a child's capped reply that carries no tool call
+## 6. Fault a child's capped reply that carries no tool call — ✅ DONE (2026-08-26)
+
+NOTES (2026-08-26): the item assumed `runSubAgent` "already observes the child's last loop
+ErrorEvent via the child's event stream" — it does not; it holds no sink and the child emits into
+the parent's. Implemented instead as `Agent.lastFault`, written by a new `emitLoopFault` helper at
+the three loop sites whose ErrorEvent abandons an Exchange, and read by `runSubAgent` after
+`sub.Run` returns (single-goroutine write, happens-before read). Wrapping the child's EventSink was
+rejected: `serializedEvents` is idempotent only for `*serialEventSink`, so a wrapper would stack a
+second mutex per nesting level and break the one-mutex-per-tree invariant.
 
 **What:**
 - `internal/agent/loop.go` `reviewedOutcome` (:493) / `emptyReplyFault` (:518): when

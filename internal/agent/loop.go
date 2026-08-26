@@ -170,7 +170,7 @@ func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 			// degrades to a clean boundary. No re-queue: the abandoned Exchange clears the deferred
 			// queue regardless (end → closeExchange → F6).
 			if outcome == turnOverflowed {
-				a.cfg.Events.Emit(domain.ErrorEvent{EventBase: a.base(turn), Source: "loop", Err: a.overflowGiveUpErr(overflowMsg)})
+				a.emitLoopFault(turn, a.overflowGiveUpErr(overflowMsg))
 			}
 			return a.turns.end(t, endAbandoned), nil
 		}
@@ -190,7 +190,7 @@ func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 			// surfaced that one from source "compaction") — so the same request would overflow
 			// identically. Give up exactly as above; the corrections went back on the queue inside
 			// refold, and the abandoned Exchange clears them (F6).
-			a.cfg.Events.Emit(domain.ErrorEvent{EventBase: a.base(turn), Source: "loop", Err: a.overflowGiveUpErr(overflowMsg)})
+			a.emitLoopFault(turn, a.overflowGiveUpErr(overflowMsg))
 			return a.turns.end(t, endAbandoned), nil
 		case foldFolded:
 			// The fold rewrote the conversation and refold re-derived every stale local (rollback,
@@ -407,7 +407,7 @@ func (a *Agent) respondAndReview(ctx context.Context, t *turnRun) (*domain.Respo
 					return nil, turnCancelled, ""
 				}
 			}
-			a.cfg.Events.Emit(domain.ErrorEvent{EventBase: a.base(turn), Source: "loop", Err: reply.errMsg})
+			a.emitLoopFault(turn, reply.errMsg)
 			return nil, turnFailed, ""
 		}
 
@@ -470,6 +470,16 @@ const emptyReplyErrFmt = "upstream returned an empty reply (finish: %s)"
 const cappedReplyErrFmt = "reply hit the output cap apogee set (%d tokens) with no visible text to " +
 	"show for it%s — raise max-output-tokens: for this server or narrow the task; a retry meets the same ceiling"
 
+// cappedDelegateReplyErrFmt is the fault text for a CHILD's reply that ran into the same ceiling
+// while carrying no tool call — with or without visible text, which is the whole difference from
+// cappedReplyErrFmt above. A truncated answer is not a result: it reads as one to the parent MODEL,
+// which sees a tool result and no cut, so on 2026-08-25 a capped delegate reply was accepted as a
+// delegation's final answer and flowed back to a coordinator as a 223K-character "finding" that
+// stopped mid-sentence. A human reading the main agent's transcript can see the cut and ask for the
+// rest, so depth 0 keeps the old rule; a parent has no such recourse and gets a fault instead.
+const cappedDelegateReplyErrFmt = "delegate's reply hit the output cap apogee set (%d tokens) — " +
+	"a truncated answer is not a result; narrow the task or raise max-output-tokens: for this server"
+
 // reviewedOutcome resolves a reviewed response into respondAndReview's return, guarding the one
 // case the Turn must not commit: a reply with nothing in it for the user — no visible text and no
 // tool calls. That is an Upstream failure wearing a success's clothes (an in-band error delivered
@@ -486,20 +496,53 @@ const cappedReplyErrFmt = "reply hit the output cap apogee set (%d tokens) with 
 // through untouched. Being engine-level, the guard also fires in Bypass, where no Mechanism is there
 // to catch the empty reply — failure honesty is provider/engine correctness, not a Mechanism's job.
 //
-// What the fault SAYS splits by finish reason (emptyReplyFault): a reply cut off at the engine's own
-// output cap names that cap instead of calling a 20k-token reply "empty". What the fault DOES is
-// unchanged for every reply — one ErrorEvent from source "loop", then turnFailed — so the split is a
-// message, not a second control flow: no retry, no salvage of the reasoning, no Mechanism.
+// WHAT counts as a non-answer is replyFault's judgment, and it is one rule wider on a DELEGATE: a
+// child's output-capped reply with no tool call faults even when it carries visible text, because
+// that text is a truncated answer no parent model can tell from a whole one. What the fault SAYS
+// splits by finish reason too (emptyReplyFault): a reply cut off at the engine's own output cap
+// names that cap instead of calling a 20k-token reply "empty". What the fault DOES is unchanged for
+// every reply and every depth — one ErrorEvent from source "loop", then turnFailed — so both splits
+// are messages, not a second control flow: no retry, no salvage of the reasoning, no Mechanism.
 func (a *Agent) reviewedOutcome(turn int, resp *domain.Response) (*domain.Response, turnOutcome, string) {
-	if strings.TrimSpace(resp.Text()) != "" || len(resp.ToolCalls()) > 0 {
+	fault, faulted := a.replyFault(resp)
+	if !faulted {
 		return resp, turnOK, ""
 	}
-	a.cfg.Events.Emit(domain.ErrorEvent{
-		EventBase: a.base(turn),
-		Source:    "loop",
-		Err:       a.emptyReplyFault(resp),
-	})
+	a.emitLoopFault(turn, fault)
 	return nil, turnFailed, ""
+}
+
+// replyFault decides whether a reviewed reply is a non-answer and, when it is, what the fault says.
+// A reply carrying tool calls is never one: the loop has work to do, so a cut-off reply that still
+// asked for a tool runs it and continues, at every depth.
+//
+// With no tool calls, two rules apply in this order. A DELEGATE's reply (a.depth > 0) that hit the
+// output cap faults whatever visible text it carries — see cappedDelegateReplyErrFmt for why a
+// truncated delegate answer cannot be allowed to pose as the delegation's result. Otherwise the
+// historical rule stands unchanged for every depth: only a reply with no visible text either is
+// empty, and emptyReplyFault picks between the empty and the capped wording for it.
+func (a *Agent) replyFault(resp *domain.Response) (string, bool) {
+	if len(resp.ToolCalls()) > 0 {
+		return "", false
+	}
+	if a.depth > 0 && resp.FinishReason() == domain.FinishLength {
+		return fmt.Sprintf(cappedDelegateReplyErrFmt, a.maxOutputTokens()), true
+	}
+	if strings.TrimSpace(resp.Text()) != "" {
+		return "", false
+	}
+	return a.emptyReplyFault(resp), true
+}
+
+// emitLoopFault surfaces a loop-level fault as the ErrorEvent it has always been AND records its
+// text on the Agent (lastFault), so a parent converting a faulted CHILD Exchange into a tool result
+// can name the cause rather than point the parent model at an error only the human can see
+// (runSubAgent). Every fault that ends an Exchange ABANDONED goes through here; the loop's
+// non-fatal notices — an ignored @file reference, an unknown attached skill — deliberately do not,
+// because nothing ended because of them.
+func (a *Agent) emitLoopFault(turn int, err string) {
+	a.lastFault = err
+	a.cfg.Events.Emit(domain.ErrorEvent{EventBase: a.base(turn), Source: "loop", Err: err})
 }
 
 // emptyReplyFault picks the fault text for a reply with nothing in it, on the one diagnostic that

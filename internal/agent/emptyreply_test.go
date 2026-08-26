@@ -8,10 +8,14 @@ package agent
 // that retried and recovered real content keeps first claim, so the off-ramp still owns the Turn.
 // A third set pins what the guard SAYS: a reply cut off at the engine's own output cap (ADR 0046)
 // is told apart from an upstream that answered with nothing, because calling a 20k-token reasoning
-// run "empty" names neither the cap nor what was burned reaching it.
+// run "empty" names neither the cap nor what was burned reaching it. A fourth pins the one place
+// the guard judges MORE than emptiness: on a delegate, a capped reply with no tool call faults
+// even when it carries text, because a truncated answer reaches a parent MODEL that cannot see the
+// cut.
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -211,6 +215,84 @@ func TestCutOffReplyNamesTheOutputCap(t *testing.T) {
 			// Naming the cap changes the message, not the control flow: still no retry.
 			if got := len(responder.got); got != 1 {
 				t.Errorf("provider was called %d times, want 1 (the branch re-requests nothing)", got)
+			}
+		})
+	}
+}
+
+// cappedWithTextScript is a stream that answers at length and is cut off mid-sentence: visible
+// text present, no tool call, finish reason "length". It is the shape the 2026-08-25 delegate
+// incident produced — an answer that LOOKS complete to whoever reads only the tokens.
+func cappedWithTextScript() []provider.Delta {
+	return []provider.Delta{
+		{Kind: provider.DeltaContent, Content: "the audit found 14 issues; the first is that the parser"},
+		{Kind: provider.DeltaDone, FinishReason: "length"},
+	}
+}
+
+// TestCappedReplyWithTextFaultsOnlyOnADelegate pins the depth split the delegate rule introduces.
+// At depth 0 a truncated reply commits exactly as it always did — the human reading it can see the
+// cut and ask for the rest. At depth > 0 it faults instead, because the reader is the parent MODEL:
+// it receives one tool result with no cut to see, and on 2026-08-25 accepted 223K characters of
+// half-finished audit as a delegation's finding.
+func TestCappedReplyWithTextFaultsOnlyOnADelegate(t *testing.T) {
+	tests := []struct {
+		name      string
+		depth     int
+		wantFault bool
+	}{
+		{name: "a delegate's truncated answer is not a result", depth: 1, wantFault: true},
+		{name: "the main agent's truncated answer still commits", depth: 0, wantFault: false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			sink := &recordingSink{}
+			cfg := baseConfig(sink)
+			cfg.Context.MaxContextTokens = 98304 // the incident's window: a 19,660-token derived cap
+			responder := &captureAllResponder{scripts: [][]provider.Delta{cappedWithTextScript()}}
+			a, err := newAgent(cfg, responder)
+			if err != nil {
+				t.Fatalf("newAgent: %v", err)
+			}
+			a.depth = tc.depth
+			if err := a.Submit(domain.UserInput{Text: "audit the repository"}); err != nil {
+				t.Fatalf("Submit: %v", err)
+			}
+
+			res, err := a.Step(context.Background())
+			if err != nil {
+				t.Fatalf("Step: %v", err)
+			}
+
+			if res.Status != domain.StatusExchangeComplete || res.Faulted != tc.wantFault {
+				t.Errorf("StepResult = {Status:%q Faulted:%v}, want {Status:%q Faulted:%v}",
+					res.Status, res.Faulted, domain.StatusExchangeComplete, tc.wantFault)
+			}
+			errs := errorEvents(sink.events)
+			if !tc.wantFault {
+				if len(errs) != 0 {
+					t.Fatalf("ErrorEvents = %v, want none — depth 0 is untouched by the delegate rule", errs)
+				}
+				if got := a.conv.Len(); got != 2 {
+					t.Errorf("conv.Len() = %d, want 2 (the user message + the committed reply)", got)
+				}
+				return
+			}
+			if len(errs) != 1 {
+				t.Fatalf("ErrorEvents = %d (%v), want exactly 1", len(errs), errs)
+			}
+			want := fmt.Sprintf(cappedDelegateReplyErrFmt, 19660)
+			if errs[0].Source != "loop" || errs[0].Err != want {
+				t.Errorf("ErrorEvent = {Source:%q Err:%q}, want {Source:%q Err:%q}",
+					errs[0].Source, errs[0].Err, "loop", want)
+			}
+			if got := a.conv.Len(); got != 1 {
+				t.Errorf("conv.Len() = %d, want 1 — the truncated text is discarded, never committed", got)
+			}
+			// The rule changes what is JUDGED, not what a fault does: still no retry.
+			if got := len(responder.got); got != 1 {
+				t.Errorf("provider was called %d times, want 1 (the rule re-requests nothing)", got)
 			}
 		})
 	}

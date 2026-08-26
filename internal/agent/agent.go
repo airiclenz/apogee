@@ -288,6 +288,16 @@ type Agent struct {
 	// the main loop keeps folding at Exchange boundaries only so bench arms stay comparable.
 	// Structural (ADR 0006), not a Mechanism: there is no config key and it stays on under Bypass.
 	midExchangeCompaction bool
+
+	// lastFault is the text of the most recent loop-level fault this Agent surfaced as an
+	// ErrorEvent — the very sentence the human already read (emitLoopFault). It exists for the
+	// PARENT of a delegation: runSubAgent turns a faulted child Exchange into an error tool
+	// result, and without this the result could only point at "the preceding error", which the
+	// parent MODEL never sees. A fault ends the Exchange, so the last one recorded is always the
+	// one that abandoned it; an Exchange abandoned with no ErrorEvent at all (a recovered hook
+	// panic) leaves this empty and the caller falls back to wording that names no cause. Written
+	// on this Agent's own loop goroutine, read by the parent only after Run has returned.
+	lastFault string
 }
 
 // stepCapErrFormat is the ErrorEvent text a delegate's Exchange ends on when it reaches its step

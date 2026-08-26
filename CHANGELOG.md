@@ -168,6 +168,25 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **A delegate's output-capped reply no longer poses as the delegation's answer (plan item 6).**
+  Decision 4 of ADR 0046 faulted a reply cut off at the engine's own ceiling only when it carried
+  no visible text — a rule written for a HUMAN reader, who can see a cut answer and ask for the
+  rest. A delegate has no such reader: its reply becomes one tool result for a parent model. On
+  2026-08-25 a capped delegate reply flowed back to a coordinator as a 223K-character "finding"
+  that stopped mid-sentence and was acted on as complete. So on a child (`depth > 0`) a
+  `finish: length` reply carrying no tool call now faults the Turn whatever text it holds, with
+  wording that names the cap and the two remedies (`delegate's reply hit the output cap apogee set
+  (N tokens) — a truncated answer is not a result; narrow the task or raise max-output-tokens: for
+  this server`). The main agent is unchanged, and so is any capped reply that still asked for a
+  tool — the loop has work to do, so the tool runs and the child continues. The error result the
+  parent model receives now ends with the child's OWN fault sentence rather than pointing at "the
+  preceding error", which is a thing only the human can see: every loop fault that abandons an
+  Exchange is recorded on the Agent as it is emitted, and `runSubAgent` appends it after the
+  `sub-agent faulted before finishing the delegated task: ` prefix. That applies to every faulted
+  delegation, so an Upstream fault now reads as `…delegated task: upstream: connection reset by
+  peer` instead of a dead-end pointer; a child abandoned without surfacing a fault of its own
+  keeps the old no-cause wording verbatim.
+
 - **Resuming a session no longer paints a delegation that is already dead as still running
   (plan item 3).** Every tool call a record stored open is closed as interrupted at replay, and one
   note says the unfinished work was not kept and that `/continue` re-runs the step that started it.

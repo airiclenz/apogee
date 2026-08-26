@@ -159,7 +159,11 @@ thinking model can reason for an hour and hit the context wall instead of answer
 server, whatever its window says — which is how you let a cloud endpoint that advertises no
 window answer at length. A reply that runs into that ceiling with nothing visible to show
 for it fails the turn and names the cap and roughly what the reasoning cost, rather than
-reporting an empty reply: the remedy is a bigger ceiling or a smaller task, not a retry.
+reporting an empty reply: the remedy is a bigger ceiling or a smaller task, not a retry. A
+**sub-agent** is held to a stricter rule, because its answer is read by a model rather than by
+you: a delegate's reply that runs into the ceiling without asking for a tool fails the turn
+even when it carries text, and the delegating agent is told the cap was the cause — a
+truncated answer is never passed back as the delegated result.
 
 **How hard a model thinks** is a property of the model, so it rides its profile: a
 `model-profiles:` entry's `thinking:` block takes `effort:` — `off`, `low`, `medium` and
