@@ -348,6 +348,13 @@ func (a *Agent) newChildAgent(spawnCallID, task, name string) (*Agent, error) {
 	// keys) — and a grandchild inherits it the same way. runSubAgent may lower it for this one
 	// delegation from the spawning call's max_steps.
 	child.stepCap = childCfg.Delegation.MaxSteps
+	// And the child's other structural bound on runaway context: it folds under budget pressure at
+	// quiescent TURN boundaries, not only at Exchange boundaries (shouldAutoCompact's S2 guard). A
+	// delegation is ONE Exchange from its first Turn to its report, so the boundary the main loop's
+	// trigger waits for never arrives for a child — without this its history simply grows until the
+	// window is blown. Set on EVERY child, routed or not: it is the child's contract, not a
+	// Mechanism and not a per-server posture, so there is no key to disagree about.
+	child.midExchangeCompaction = true
 	child.callID = spawnCallID
 	child.task = task
 	child.name = name

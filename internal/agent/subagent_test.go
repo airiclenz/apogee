@@ -1210,3 +1210,138 @@ func TestStepCapNeverBoundsTheMainAgent(t *testing.T) {
 		t.Error("the main agent did not reach its own final answer")
 	}
 }
+
+// foldedSummaryRequest returns the first recorded request carrying a message with the canned
+// summary text — the request the model saw immediately AFTER an auto-fold, which is the one whose
+// shape a fold can break.
+func foldedSummaryRequest(reqs []provider.Request, summary string) (provider.Request, bool) {
+	for _, req := range reqs {
+		for _, m := range req.Messages {
+			if strings.Contains(m.Content, summary) {
+				return req, true
+			}
+		}
+	}
+	return provider.Request{}, false
+}
+
+// TestSubAgent_ChildFoldsMidDelegationAndFinishes is the delegate half of the child's mid-Exchange
+// fold: a delegation whose tool result pushes its history past its Budget allocation folds DURING
+// the delegation — there is no Exchange boundary to wait for, the whole delegation being one
+// Exchange — and still reports its answer to the parent. The request the child sends after the
+// fold is template-legal (no orphaned tool result, no unanswered tool call, strict alternation),
+// which is what makes the quiescent Turn boundary a safe place to fold.
+func TestSubAgent_ChildFoldsMidDelegationAndFinishes(t *testing.T) {
+	sink := &recordingSink{}
+	// ~25k chars ≈ 6.2k tokens, past the ~3.9k-token History allocation of the 8k window below.
+	bulky := fakeTool{name: "read_thing", readOnly: true, result: strings.Repeat("x", 25000)}
+	cfg := subAgentConfig(sink, domain.ModeAskBefore, bulky)
+	cfg.Context.MaxContextTokens = 8192
+	cfg.Context.CompactionEnabled = true
+
+	up := &scriptedCompactResponder{
+		summaryReply: "CHILD-SUMMARY",
+		scripts: [][]provider.Delta{
+			subAgentCallScript("c1", "trawl the repo"),    // parent Turn 0: delegate
+			toolCallScript("t1", "read_thing", `{}`),      // child Turn 0: the oversized read
+			contentScript("the child's own final answer"), // child Turn 1: folds at its top, then answers
+			contentScript("parent done"),                  // parent Turn 1: finish
+		},
+	}
+	a, err := newAgent(cfg, up)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	if err := a.Submit(domain.UserInput{Text: "please research"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if _, err := a.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if up.summaryCalls != 1 {
+		t.Fatalf("folds during the delegation = %d, want exactly 1 — the child must fold mid-Exchange", up.summaryCalls)
+	}
+	sub, ok := lastSubAgentResult(sink.events)
+	if !ok {
+		t.Fatal("no sub_agent tool result emitted")
+	}
+	if sub.IsError || sub.Content != "the child's own final answer" {
+		t.Errorf("sub_agent result = %+v, want the child's own final answer after its mid-run fold", sub)
+	}
+	if n := countCompactionErrors(sink.events); n != 0 {
+		t.Errorf("the child's fold emitted %d compaction ErrorEvents, want 0", n)
+	}
+
+	req, ok := foldedSummaryRequest(up.requests, "CHILD-SUMMARY")
+	if !ok {
+		t.Fatal("no request carried the folded summary; the child's post-fold request was not observed")
+	}
+	assertRequestTemplateLegal(t, req)
+}
+
+// TestSubAgent_ChildNeverFoldsWithAutoCompactOff holds the one gate the child's mid-Exchange fold
+// does NOT lift: `auto-compact: false` opts a delegation out exactly as it opts the main loop out.
+// The same over-budget delegation runs to its answer with no summarizer call at all.
+func TestSubAgent_ChildNeverFoldsWithAutoCompactOff(t *testing.T) {
+	sink := &recordingSink{}
+	bulky := fakeTool{name: "read_thing", readOnly: true, result: strings.Repeat("x", 25000)}
+	cfg := subAgentConfig(sink, domain.ModeAskBefore, bulky)
+	cfg.Context.MaxContextTokens = 8192
+	cfg.Context.CompactionEnabled = false
+
+	up := &scriptedCompactResponder{
+		summaryReply: "CHILD-SUMMARY",
+		scripts: [][]provider.Delta{
+			subAgentCallScript("c1", "trawl the repo"),
+			toolCallScript("t1", "read_thing", `{}`),
+			contentScript("the child's own final answer"),
+			contentScript("parent done"),
+		},
+	}
+	a, err := newAgent(cfg, up)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	if err := a.Submit(domain.UserInput{Text: "please research"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if _, err := a.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if up.summaryCalls != 0 {
+		t.Errorf("summarizer calls = %d with `auto-compact` off, want 0 — the child's fold obeys the same gate", up.summaryCalls)
+	}
+	sub, ok := lastSubAgentResult(sink.events)
+	if !ok {
+		t.Fatal("no sub_agent tool result emitted")
+	}
+	if sub.IsError || sub.Content != "the child's own final answer" {
+		t.Errorf("sub_agent result = %+v, want the child's own final answer", sub)
+	}
+}
+
+// TestNewChildAgent_CompactsMidExchange pins the seam itself: every child agent — the contract has
+// no config key and no per-server override — is constructed folding at Turn boundaries, while the
+// parent that spawned it keeps the Exchange-boundary-only trigger.
+func TestNewChildAgent_CompactsMidExchange(t *testing.T) {
+	sink := &recordingSink{}
+	cfg := subAgentConfig(sink, domain.ModeAskBefore)
+	parent, err := newAgent(cfg, &scriptedResponder{})
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	if parent.midExchangeCompaction {
+		t.Error("the top-level Agent compacts mid-Exchange; the lifted guard is a delegate contract")
+	}
+
+	child, err := parent.newChildAgent("c1", "summarise the repo", "")
+	if err != nil {
+		t.Fatalf("newChildAgent: %v", err)
+	}
+	defer child.Close()
+	if !child.midExchangeCompaction {
+		t.Error("a child agent does not compact mid-Exchange; its whole life is one Exchange, so it would never fold")
+	}
+}

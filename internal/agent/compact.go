@@ -93,10 +93,11 @@ func (a *Agent) Compact(ctx context.Context) (skipped bool, err error) {
 // conversation untouched (Compact's own guarantee), so a failed auto-fold never corrupts history and
 // the Turn proceeds with the full conversation. A cancellation is not a fault: the Turn's own stream
 // carries the cancel to a clean boundary. Two S2 refinements govern WHEN it folds: the trigger is
-// Exchange-boundary-only (shouldAutoCompact's inExchange guard — a mid-Exchange over-budget Turn
-// defers to the next opening; the sibling emergencyFold below is the ONE fold that may run
-// mid-Exchange, and it amends that rule for its own overflow-driven trigger alone — ADR 0018, never
-// for this estimate-driven one), and a fold that RAN and STILL leaves the history over its allocation
+// Exchange-boundary-only on the MAIN agent (shouldAutoCompact's inExchange guard — a mid-Exchange
+// over-budget Turn defers to the next opening; a CHILD agent lifts that guard and folds at
+// quiescent Turn boundaries too, and the sibling emergencyFold below runs mid-Exchange on any Agent
+// for its own overflow-driven trigger alone — ADR 0018), and a fold that RAN and STILL leaves the
+// history over its allocation
 // saturates the trigger (one ErrorEvent, then it stands down until the estimate drops). A skip
 // (Result.Skipped — too few messages past the protected prefix to be worth folding) folds nothing,
 // so it proves nothing and never saturates: the trigger simply re-checks at the next opening, when a
@@ -122,6 +123,16 @@ func (a *Agent) autoCompact(ctx context.Context, turn int) {
 	if res.Skipped {
 		return
 	}
+	// Repair the cached Exchange boundary when this fold ran MID-Exchange (a child agent): the
+	// Replace dropped everything past the protected prefix, so the recorded exchangeStart now
+	// points past the conversation's end and AbortExchange would roll back to nothing. It is the
+	// same S2 repair step() performs after a mid-Exchange history rewrite and emergencyFold's
+	// anchorAtBridge performs after ITS fold — the boundary is a CACHED value (ADR 0017 §2)
+	// precisely because a fold can drop the Exchange's opening user message. reanchorAfterShrink
+	// clamps to just past the prefix, which after this fold is the summary's far side: the folded
+	// summary is retained history, so an abort has nothing of the Exchange left to drop. It is a
+	// no-op at an Exchange boundary, so the main agent's path is untouched.
+	a.turns.reanchorAfterShrink(res.Before - res.After)
 	// S2 saturation: a fold that RAN and still leaves the history over its allocation cannot help —
 	// the folded shape is the protected prefix (leading system messages + the first user message) plus
 	// the single compaction summary, and together they still exceed the History allocation. Latch the
@@ -149,8 +160,9 @@ func (a *Agent) autoCompact(ctx context.Context, turn int) {
 // shouldAutoCompact reports whether the automatic Compaction trigger should fire. It fires only when
 // compaction is enabled (the live `auto-compact` gate, seeded from cfg.Context.CompactionEnabled and
 // on by default, swappable mid-session via SetCompactionEnabled; the on-demand /compact ignores this
-// gate and always folds), at an Exchange boundary (NOT inExchange —
-// S2), and when the history has outgrown its Budget History allocation
+// gate and always folds), at an Exchange boundary (NOT inExchange — S2) or, on an Agent that folds
+// mid-Exchange (midExchangeCompaction — every child agent), at any Turn boundary,
+// and when the history has outgrown its Budget History allocation
 // (domain.Budget.HistoryExceedsAllocation) AND the trigger is not saturated (compactSat). It
 // clears the saturation latch the moment the estimate falls back under the allocation, so growth
 // alone cannot re-trigger a fold that already proved it cannot help. An unbudgeted Agent (no window
@@ -167,7 +179,15 @@ func (a *Agent) shouldAutoCompact() bool {
 	// the request mid-Exchange, and emergencyFold rescues it once the window is actually blown
 	// (ADR 0018). Folding on THIS estimate mid-Exchange would leave the request ending in an
 	// assistant summary; the emergency fold pays for the exception with its user bridge.
-	if a.turns.inExchange {
+	//
+	// A CHILD agent (midExchangeCompaction, set by newChildAgent alone) is the standing exception:
+	// its whole life is ONE Exchange, so the boundary this guard waits for never comes and the
+	// history grows unbounded until the window is blown — the delegate token runaway this lifts.
+	// The placement is what makes it safe: the top of step() is a QUIESCENT Turn boundary — the
+	// previous Turn's tool calls are all answered — so the fold's prefix → summary Replace strands
+	// no tool result and role alternation holds. The main loop keeps the guard, so bench arms
+	// comparing Mechanisms against Bypass are unchanged by this exception.
+	if a.turns.inExchange && !a.midExchangeCompaction {
 		return false
 	}
 	if !a.historyExceedsAllocation() {
@@ -244,8 +264,9 @@ var overflowBridge = mustPrompt("overflow-bridge.txt")
 // is STRUCTURAL (D6/ADR 0006): the gates below never consult cfg.Bypass, because a naked model
 // overflows its window just as surely as a Mechanism-laden one.
 //
-// It is the ONE fold allowed to run MID-EXCHANGE, deliberately amending S2's
-// Exchange-boundary-only rule for this path alone. The asymmetry is the point: the estimate-driven
+// It is the ONE fold allowed to run MID-EXCHANGE on the MAIN agent, deliberately amending S2's
+// Exchange-boundary-only rule for this path alone (a child agent lifts that rule for the
+// estimate-driven trigger as well — midExchangeCompaction). The asymmetry is the point: the estimate-driven
 // trigger (shouldAutoCompact) and the on-demand /compact both defer to the next opening because
 // their caller can wait, while a Turn whose request the server just rejected cannot — deferring
 // here means abandoning the Exchange, which is precisely the failure this recovery exists to

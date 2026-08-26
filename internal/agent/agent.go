@@ -279,6 +279,15 @@ type Agent struct {
 	// because the main loop is the human's to stop and a delegate's is nobody's. Structural
 	// (ADR 0006), not a Mechanism: it stays on under Bypass. Run is the ONE enforcement site.
 	stepCap int
+
+	// midExchangeCompaction lifts shouldAutoCompact's Exchange-boundary-only gate (S2) for this
+	// Agent, so the estimate-driven fold may also run at a quiescent TURN boundary — the top of
+	// step(), where the previous Turn's tool results are already committed. It is a DELEGATE
+	// contract, set by newChildAgent alone: a child's whole life is ONE Exchange, so a
+	// boundary-only trigger never fires for it however far its history outgrows the Budget, while
+	// the main loop keeps folding at Exchange boundaries only so bench arms stay comparable.
+	// Structural (ADR 0006), not a Mechanism: there is no config key and it stays on under Bypass.
+	midExchangeCompaction bool
 }
 
 // stepCapErrFormat is the ErrorEvent text a delegate's Exchange ends on when it reaches its step

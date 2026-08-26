@@ -3,10 +3,13 @@ package agent
 // Second-review fixes for the automatic Compaction trigger (phase-4-second-review-fixes item 2,
 // design record S2). Three properties beyond the four baseline autocompact tests: (a) the trigger
 // is Exchange-boundary-only — a mid-Exchange over-budget Turn defers the fold to the next Exchange
-// opening; (b) a fold that cannot bring the history under its allocation (an oversized protected
-// prefix) saturates — exactly one ErrorEvent, then it stands down until the estimate drops under the
-// allocation, then re-arms; (c) exchangeStart is repaired after a mid-Exchange history rewrite so
-// AbortExchange still rolls back exactly to the Exchange boundary (no orphaned tool results).
+// opening — and its twin, that an Agent which compacts mid-Exchange (midExchangeCompaction, what
+// every child agent carries) folds on that same Turn instead; (b) a fold that cannot bring the
+// history under its allocation (an oversized protected prefix) saturates — exactly one ErrorEvent,
+// then it stands down until the estimate drops under the allocation, then re-arms; (c)
+// exchangeStart is repaired after a mid-Exchange history rewrite — and after a mid-Exchange fold —
+// so AbortExchange still rolls back exactly to the Exchange boundary (no orphaned tool results, no
+// over-drop into the protected prefix).
 
 import (
 	"context"
@@ -28,6 +31,7 @@ type scriptedCompactResponder struct {
 	summaryReply string
 	summaryCalls int
 	calls        int
+	requests     []provider.Request // every MAIN-turn request, in order — what the model actually saw
 }
 
 func (r *scriptedCompactResponder) Stream(_ context.Context, req provider.Request) iter.Seq[provider.Delta] {
@@ -35,6 +39,7 @@ func (r *scriptedCompactResponder) Stream(_ context.Context, req provider.Reques
 		r.summaryCalls++
 		return streamReply(r.summaryReply)
 	}
+	r.requests = append(r.requests, req)
 	i := r.calls
 	r.calls++
 	return func(yield func(provider.Delta) bool) {
@@ -310,5 +315,90 @@ func TestExchangeStartRepairedAfterMidExchangeTruncation(t *testing.T) {
 		if a.conv.At(i).Role == domain.RoleTool {
 			t.Errorf("message %d is an orphaned tool result after abort: %+v", i, a.conv.At(i))
 		}
+	}
+}
+
+// TestAutoCompactFoldsMidExchangeOnAnAgentThatCompactsMidExchange is the twin of the guard above:
+// the SAME over-budget continuation Turn the main agent defers is folded on the spot by an Agent
+// carrying midExchangeCompaction — what newChildAgent sets on every delegate, whose whole life is
+// one Exchange and for whom the deferred-to opening never comes. It pins the fold firing exactly
+// once at the quiescent Turn boundary, the saturation latch staying clear (the fold DID bring the
+// history back under its allocation), and the cached Exchange boundary being repaired to the folded
+// conversation — without that repair the stale boundary sits BELOW the protected prefix and
+// AbortExchange eats the first user message along with the summary.
+func TestAutoCompactFoldsMidExchangeOnAnAgentThatCompactsMidExchange(t *testing.T) {
+	sink := &recordingSink{}
+	up := &scriptedCompactResponder{
+		summaryReply: "FOLDED",
+		scripts: [][]provider.Delta{
+			toolCallScript("c1", "probe", "{}"), // Turn 0 (opening): ask for the oversized tool
+			toolCallScript("c2", "peek", "{}"),  // Turn 1: over budget at its top → fold, then keep the Exchange open
+		},
+	}
+	cfg := autoCompactConfig(sink)
+	toolReg := domain.NewToolRegistry()
+	// The oversized result (~25k chars ≈ 6.2k tokens) exceeds the ~3.9k-token History allocation for
+	// the 8k window, so committing it mid-Exchange puts the NEXT Turn over budget; the small one
+	// keeps the Exchange open afterwards without pushing it back over.
+	if err := toolReg.Register(fakeTool{name: "probe", readOnly: true, result: strings.Repeat("x", 25000)}); err != nil {
+		t.Fatalf("Register(probe): %v", err)
+	}
+	if err := toolReg.Register(fakeTool{name: "peek", readOnly: true, result: "ok"}); err != nil {
+		t.Fatalf("Register(peek): %v", err)
+	}
+	cfg.Tools = toolReg
+	a, err := newAgent(cfg, up)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	a.midExchangeCompaction = true // what newChildAgent stamps on a delegate
+
+	if err := a.Submit(domain.UserInput{Text: "start"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	res0, err := a.Step(context.Background()) // opening Turn: under budget at the top → no fold
+	if err != nil {
+		t.Fatalf("Step 0: %v", err)
+	}
+	if res0.Status != domain.StatusTurnComplete {
+		t.Fatalf("Turn 0 status = %q, want %q (a tool Turn)", res0.Status, domain.StatusTurnComplete)
+	}
+	if up.summaryCalls != 0 {
+		t.Fatalf("a fold fired on the opening Turn before the history was over budget: %d", up.summaryCalls)
+	}
+	if !a.historyExceedsAllocation() {
+		t.Fatalf("setup: history is not over budget after the large tool result; the fold would be untested")
+	}
+
+	res1, err := a.Step(context.Background()) // continuation Turn: over budget AND inExchange → it folds
+	if err != nil {
+		t.Fatalf("Step 1: %v", err)
+	}
+	if res1.Status != domain.StatusTurnComplete {
+		t.Fatalf("Turn 1 status = %q, want %q (the fold does not end the Exchange)", res1.Status, domain.StatusTurnComplete)
+	}
+	if up.summaryCalls != 1 {
+		t.Fatalf("mid-Exchange fold fired %d times, want exactly 1", up.summaryCalls)
+	}
+	if a.historyExceedsAllocation() {
+		t.Error("the fold ran but did not bring the history under its allocation; the setup drifted")
+	}
+	if a.compactSat {
+		t.Error("a fold that DID bring the history under its allocation saturated the trigger")
+	}
+	if n := countCompactionErrors(sink.events); n != 0 {
+		t.Errorf("a successful fold emitted %d compaction ErrorEvents, want 0", n)
+	}
+
+	// The repair: the Exchange is still open, so aborting it must roll back to the folded
+	// conversation — protected prefix + summary — not through it.
+	a.AbortExchange()
+	prefix := a.conv.PrefixEnd()
+	if a.conv.Len() != prefix+1 {
+		t.Fatalf("after abort conv.Len() = %d, want %d (protected prefix + the folded summary); the cached exchangeStart was not repaired after the mid-Exchange fold",
+			a.conv.Len(), prefix+1)
+	}
+	if last := a.conv.At(a.conv.Len() - 1); !strings.Contains(last.Content, "FOLDED") {
+		t.Errorf("last message after abort = %+v, want the folded summary", last)
 	}
 }

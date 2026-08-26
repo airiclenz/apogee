@@ -25,7 +25,10 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 ## Improvements / Ideas
 
 - [ ] display somewhere id apogee is confined or not
-- [ ] 
+- [ ] sub agent names are often not descriptive. the model seems to not set it at all (sub-agent name just showing input proompt) -> separate auto-name call for sub agents if enabled and name was not set? (grill)
+- [ ] when many sub agents are running - the activity status often flickers back and forth between the different sub agents. the stati of the sub-agents need to be unified / merged (grill)
+- [ ] all content print-out of any tool need to display line numbers. The write tool does not do that currently. Verify all tools that print file diffs.
+- [ ] Navigating sub-agents is not as smooth as it could be. when "expanding" a sub agent, I'd like to open it "full screen" automatically jumping to the bottom/latest response - meaning that it is taking the session space fully (excluding prompt box and so on..). A button to navigate one level up needs to be added as well (grill)
 
 ## Open defects
 
@@ -491,17 +494,18 @@ documented at the code (`gitHardeningEnv`'s filter-driver note; `goVetEnv`'s `GO
 
 ---
 
-### Mid-Exchange auto-compaction (fire at Turn boundaries under budget pressure)
+### Mid-Exchange auto-compaction for the MAIN loop (fire at Turn boundaries under budget pressure)
 
-**Status:** parked 2026-07-05 (guided-decomposition grill). Auto-compaction fires only at
-Exchange boundaries (`internal/agent/compact.go`), so a long multi-Turn Exchange — e.g. a
-serialized sub-agent fan-out, where every child report lands inside *one* Exchange — has no
-generative reducer available for its entire life; only `tool_result_cap` (default-off) can
-reduce mid-Exchange. Guided decomposition covers this with a descriptor `Requires` on
-`tool_result_cap`; the structural alternative is letting auto-compaction also fire at
-quiescent *Turn* boundaries under pressure. That changes a structural reducer's contract
-(interacts with the saturation logic, the protected prefix, and bench comparability), so it
-needs its own grill and bench evidence — deliberately not a rider on the decomposition work.
+**Status:** parked 2026-07-05 (guided-decomposition grill); the CHILD half shipped 2026-08-26.
+A child agent now folds at quiescent *Turn* boundaries under budget pressure
+(`midExchangeCompaction` — `internal/agent/compact.go`, set by `newChildAgent`), because a
+delegation's whole life is one Exchange and the boundary the trigger waits for never comes for it.
+What stays parked is the same lift for the MAIN loop, where a long multi-Turn Exchange still has
+no generative reducer available for its entire life — only `tool_result_cap` (default-off) can
+reduce mid-Exchange there, and guided decomposition covers it with a descriptor `Requires` on
+`tool_result_cap`. That change touches a structural reducer's contract on the very arm the bench
+measures (it interacts with the saturation logic, the protected prefix, and bench comparability),
+so it needs its own grill and bench evidence — deliberately not a rider on the decomposition work.
 
 ---
 

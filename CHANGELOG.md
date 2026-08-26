@@ -10,6 +10,22 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **A child agent now folds its history at Turn boundaries under budget pressure, not only at
+  Exchange boundaries (delegate token runaway, plan item 3).** A delegation is ONE Exchange from
+  its first Turn to its report, so the Exchange boundary the estimate-driven Compaction trigger
+  waits for never arrives for a child: its history simply grew until the window was blown. Every
+  child agent (routed or not) is now constructed lifting that guard — `newChildAgent` sets it,
+  there is no config key, and like the trigger it belongs to it is structural (ADR 0006), so it
+  stays on under Bypass. The fold still runs where it always did, at the top of `step()` — a
+  quiescent Turn boundary, where the previous Turn's tool calls are all answered — so the
+  prefix → summary Replace strands no tool result and the request the child sends afterwards stays
+  template-legal. Every other gate is unchanged: `auto-compact: false` opts a delegation out
+  exactly as it opts the main loop out, the saturation latch and the re-entrancy guard behave as
+  before, and the MAIN loop keeps folding at Exchange boundaries only, so bench arms comparing
+  Mechanisms against Bypass are untouched. A fold that runs mid-Exchange now also re-anchors the
+  cached Exchange boundary, so aborting the Exchange afterwards rolls back to the folded
+  conversation instead of through the protected prefix.
+
 - **A delegate that keeps asking for tools is now stopped at its step cap, and hands back what it
   has (delegate token runaway, plan item 2).** `Agent.Run` counts the Turns of the open Exchange
   and, at `delegate-max-steps`, ends the Exchange itself through a new `turnLifecycle` exit row

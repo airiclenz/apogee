@@ -1102,9 +1102,11 @@ summary via the model, when the conversation exceeds a threshold. Meaning-preser
 costs an extra model call. One fold, **two automatic triggers**: the *estimate-driven* one
 fires at an Exchange boundary when the history outgrows its Budget allocation, and the
 *overflow-driven* **emergency fold** fires when a request will not fit the window — the only
-fold allowed to run **mid-Exchange**, closing with a user-role bridge so the retried request
-stays template-legal. `auto-compact: false` opts out of both; the on-demand `/compact` stays
-boundary-only. See
+fold allowed to run **mid-Exchange** on the main agent, closing with a user-role bridge so the
+retried request stays template-legal. A **child agent** also folds mid-Exchange, at any quiescent
+Turn boundary under budget pressure, because its whole life is one Exchange and the boundary the
+main agent waits for never comes. `auto-compact: false` opts out of all of them; the on-demand
+`/compact` stays boundary-only. See
 [ADR 0018](docs/adr/0018-context-overflow-recovers-structurally-the-emergency-fold-and-one-retry.md).
 _Avoid_: "compression", "truncation" (Compaction is generative and summarises).
 

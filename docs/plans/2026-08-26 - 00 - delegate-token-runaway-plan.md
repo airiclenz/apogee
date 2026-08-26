@@ -181,7 +181,12 @@ advances the index, is not Faulted. `sub_agent_test.go` — schema lists `max_st
 
 ---
 
-## 3. Auto-compaction at Turn boundaries for child agents
+## 3. Auto-compaction at Turn boundaries for child agents — ✅ DONE (2026-08-26)
+
+NOTES (2026-08-26): `autoCompact` gained one line the item text does not name — `a.turns.reanchorAfterShrink(res.Before - res.After)` after a fold that RAN — because the item makes the estimate-driven fold a third mid-Exchange conversation shrink, and the two existing ones each repair the cached `exchangeStart` (loop.go's S2 repair after a history rewrite, `anchorAtBridge` after the emergency fold). Without it the stale boundary sits BELOW the protected prefix and `AbortExchange` drops the first user message together with the summary — pinned by the new guard test, which fails with `conv.Len() = 0, want 1` when the line is removed. It is a no-op outside an Exchange, so the main agent's path is byte-identical.
+NOTES (2026-08-26): the item names only `shouldAutoCompact`'s doc comment, but `autoCompact`'s and `emergencyFold`'s both asserted that the emergency fold is the ONE fold that may run mid-Exchange — false the moment a child folds there. Both were amended to say "on the MAIN agent" and to point at `midExchangeCompaction`; no behaviour rides on either comment.
+NOTES (2026-08-26): CONTEXT.md's **Compaction** entry took the one added sentence the item asks for plus a two-clause repair of the sentences around it ("the only fold allowed to run mid-Exchange" → "… on the main agent"; "opts out of both" → "opts out of all of them"), which the added sentence would otherwise contradict on the same line.
+NOTES (2026-08-26): the alternation assertion the item asks for needs the request the child sent AFTER its fold, so the shared `scriptedCompactResponder` gained a `requests` field rather than a second near-identical responder being added to `subagent_test.go`; the post-fold request is found by the canned summary text and checked with the package's existing `assertRequestTemplateLegal`.
 
 **What:**
 - `internal/agent/compact.go` `shouldAutoCompact` (:159-181): the `inExchange` gate (:170)
