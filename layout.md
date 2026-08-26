@@ -1416,8 +1416,15 @@ stands right now — and a fill says nothing about the tokens a long run burned 
 away, nor anything at all about a delegate whose window closed when its run ended. Both readings are
 on the screen for the same session and they are different questions.
 
-**Six columns, one row per agent.** `agent · calls · prompt · completion · total · ctx`, under a
-header row painted a weight above the rows so the labels are found without being read. `main` comes
+**Six columns, one row per agent — seven where a cache share was reported.** `agent · calls ·
+prompt · completion · total · ctx`, under a header row painted a weight above the rows so the labels
+are found without being read. A `cached` column joins them directly after `prompt` — the count it
+qualifies, since it is a share of those very tokens rather than a spend beside them — and it is
+drawn only when some agent on the pane reported one.
+Servers that report no cache breakdown at all are still the majority, and a header over a column of
+blanks would send the reader looking for a number nobody said; the verdict is taken once for the
+whole pane, so an agent that reported no share leaves an empty cell under a column its neighbour
+filled rather than shortening its row out of the columns beside it. `main` comes
 first, then each delegate **in transcript order** — indented under it, named by the delegation's own
 name or, unnamed, the first line of its task, clipped where it is longer than the column — and last
 a `session` row, the agents above it added up. The counts are spelled in the coarse form the gauge
@@ -1428,7 +1435,11 @@ fill leaves `ctx` blank, because a fill without its limit is a number with no sc
 `session` row leaves it blank always, because two windows do not add up to a third.
 
 **The total row appears only where there is something to total.** With no delegate the main row IS
-the session, and a second row restating it would be noise. A delegate that never reported a count is
+the session, and a second row restating it would be noise. A **resumed** record whose stored delegate
+spend outlived the blocks that earned it is the one case where the row stands with no delegate row
+above it to point at: the tokens were spent by this session, and the runs that spent them are no
+longer on the pane to be asked — a live run head's own reading replaces that stored figure the
+moment one reports. A delegate that never reported a count is
 not listed at all: a run whose child got no usage back is a fact about the server rather than a
 spend, and a row of empty cells under the totals would read as one.
 

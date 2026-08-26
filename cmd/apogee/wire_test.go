@@ -1861,7 +1861,7 @@ func TestSessionHostRoundTripsThroughResume(t *testing.T) {
 
 	store := session.NewStore(filepath.Join(t.TempDir(), "sessions"))
 	host := newSessionHost(store, t.TempDir(), "fake", nil, "", nil)
-	if err := host.Save(snap, nil, "hi", 1, 0, session.Usage{}); err != nil {
+	if err := host.Save(snap, nil, "hi", 1, 0, session.Usage{}, session.Usage{}); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
 	id := host.ActiveID()
@@ -1928,7 +1928,7 @@ func TestSessionHostMintsIDOnceAndUpdatesInPlace(t *testing.T) {
 	if host.ActiveID() != "" {
 		t.Errorf("ActiveID before any Save = %q; want empty", host.ActiveID())
 	}
-	if err := host.Save(apogee.Session{}, nil, "first title", 1, 100, session.Usage{}); err != nil {
+	if err := host.Save(apogee.Session{}, nil, "first title", 1, 100, session.Usage{}, session.Usage{}); err != nil {
 		t.Fatalf("Save #1: %v", err)
 	}
 	id := host.ActiveID()
@@ -1936,7 +1936,7 @@ func TestSessionHostMintsIDOnceAndUpdatesInPlace(t *testing.T) {
 		t.Fatal("Save minted no id")
 	}
 	// A second Save keeps the same id (update-in-place) and never overwrites the create-time title.
-	if err := host.Save(apogee.Session{}, nil, "SECOND title", 2, 200, session.Usage{}); err != nil {
+	if err := host.Save(apogee.Session{}, nil, "SECOND title", 2, 200, session.Usage{}, session.Usage{}); err != nil {
 		t.Fatalf("Save #2: %v", err)
 	}
 	if host.ActiveID() != id {
@@ -1971,11 +1971,11 @@ func TestSessionHostSetModelStampsSaves(t *testing.T) {
 	store := session.NewStore(t.TempDir())
 	host := newSessionHost(store, "/ws", "", nil, "", nil) // a cold start: nothing bound yet
 
-	if err := host.Save(apogee.Session{}, nil, "cold", 1, 0, session.Usage{}); err != nil {
+	if err := host.Save(apogee.Session{}, nil, "cold", 1, 0, session.Usage{}, session.Usage{}); err != nil {
 		t.Fatalf("Save before the bind: %v", err)
 	}
 	host.SetModel("bound-model")
-	if err := host.Save(apogee.Session{}, nil, "cold", 2, 0, session.Usage{}); err != nil {
+	if err := host.Save(apogee.Session{}, nil, "cold", 2, 0, session.Usage{}, session.Usage{}); err != nil {
 		t.Fatalf("Save after the bind: %v", err)
 	}
 
@@ -2000,7 +2000,7 @@ func TestSessionHostRotateAndLoadActivate(t *testing.T) {
 	store := session.NewStore(t.TempDir())
 	host := newSessionHost(store, "/ws", "m", nil, "", nil)
 
-	if err := host.Save(apogee.Session{}, nil, "A", 1, 0, session.Usage{}); err != nil {
+	if err := host.Save(apogee.Session{}, nil, "A", 1, 0, session.Usage{}, session.Usage{}); err != nil {
 		t.Fatalf("Save A: %v", err)
 	}
 	first := host.ActiveID()
@@ -2009,7 +2009,7 @@ func TestSessionHostRotateAndLoadActivate(t *testing.T) {
 	if host.ActiveID() != "" {
 		t.Errorf("ActiveID after Rotate = %q; want empty", host.ActiveID())
 	}
-	if err := host.Save(apogee.Session{}, nil, "B", 1, 0, session.Usage{}); err != nil {
+	if err := host.Save(apogee.Session{}, nil, "B", 1, 0, session.Usage{}, session.Usage{}); err != nil {
 		t.Fatalf("Save B: %v", err)
 	}
 	second := host.ActiveID()
@@ -2033,7 +2033,7 @@ func TestSessionHostRotateAndLoadActivate(t *testing.T) {
 	if host.ActiveID() != first {
 		t.Errorf("Activate did not make %q current (active %q)", first, host.ActiveID())
 	}
-	if err := host.Save(apogee.Session{}, nil, "ignored", 3, 0, session.Usage{}); err != nil {
+	if err := host.Save(apogee.Session{}, nil, "ignored", 3, 0, session.Usage{}, session.Usage{}); err != nil {
 		t.Fatalf("Save after Load: %v", err)
 	}
 	if metas, _ := store.List(); len(metas) != 2 {
@@ -2047,14 +2047,14 @@ func TestSessionHostRenameActiveSticks(t *testing.T) {
 	t.Parallel()
 	store := session.NewStore(t.TempDir())
 	host := newSessionHost(store, "/ws", "m", nil, "", nil)
-	if err := host.Save(apogee.Session{}, nil, "original", 1, 0, session.Usage{}); err != nil {
+	if err := host.Save(apogee.Session{}, nil, "original", 1, 0, session.Usage{}, session.Usage{}); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
 	id := host.ActiveID()
 	if err := host.Rename(id, "renamed"); err != nil {
 		t.Fatalf("Rename: %v", err)
 	}
-	if err := host.Save(apogee.Session{}, nil, "original", 2, 0, session.Usage{}); err != nil {
+	if err := host.Save(apogee.Session{}, nil, "original", 2, 0, session.Usage{}, session.Usage{}); err != nil {
 		t.Fatalf("Save after Rename: %v", err)
 	}
 	rec, err := store.Load(id)
@@ -2077,7 +2077,7 @@ func TestSessionHostResumeBeginsActive(t *testing.T) {
 	if host.ActiveID() != seed.Meta.ID {
 		t.Errorf("ActiveID of a resumed host = %q; want the resumed id %q", host.ActiveID(), seed.Meta.ID)
 	}
-	if err := host.Save(apogee.Session{}, nil, "derived", 1, 0, session.Usage{}); err != nil {
+	if err := host.Save(apogee.Session{}, nil, "derived", 1, 0, session.Usage{}, session.Usage{}); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
 	rec, err := store.Load(seed.Meta.ID)
@@ -2158,7 +2158,7 @@ func TestResolveResumeByPathRemintsID(t *testing.T) {
 	if host.ActiveID() != rec.Meta.ID {
 		t.Errorf("host active id = %q; want the re-minted %q", host.ActiveID(), rec.Meta.ID)
 	}
-	if err := host.Save(apogee.Session{}, nil, "continued", 1, 0, session.Usage{}); err != nil {
+	if err := host.Save(apogee.Session{}, nil, "continued", 1, 0, session.Usage{}, session.Usage{}); err != nil {
 		t.Fatalf("Save after a path resume: %v", err)
 	}
 	got, err := store.Load(victimID)
@@ -2221,7 +2221,7 @@ func saveAt(t *testing.T, store *session.Store, ws string, when time.Time, title
 	t.Helper()
 	h := newSessionHost(store, ws, "m", nil, "", nil)
 	h.now = func() time.Time { return when }
-	if err := h.Save(apogee.Session{}, nil, title, 1, 0, session.Usage{}); err != nil {
+	if err := h.Save(apogee.Session{}, nil, title, 1, 0, session.Usage{}, session.Usage{}); err != nil {
 		t.Fatalf("saveAt %q: %v", title, err)
 	}
 	return h.ActiveID()
@@ -2238,6 +2238,37 @@ func TestResolveResumeMutuallyExclusive(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "mutually exclusive") {
 		t.Errorf("error = %q; want it to mention mutual exclusion", err)
+	}
+}
+
+// The host stores the two token accountings apart, exactly as the renderer hands them over, and the
+// resume projection carries both back: what the main agent spent and what its delegates did. The
+// halves stay separate on disk because the session total is their sum, and a store that folded them
+// together could never say which was which again (session.Meta).
+func TestSessionHostStoresBothTokenAccountings(t *testing.T) {
+	t.Parallel()
+	store := session.NewStore(t.TempDir())
+	host := newSessionHost(store, "/ws", "model-x", nil, "", nil)
+
+	main := session.Usage{Calls: 4, PromptTokens: 60000, CachedPromptTokens: 12000, TotalTokens: 64000}
+	delegates := session.Usage{Calls: 300, PromptTokens: 900000, TotalTokens: 936000}
+	if err := host.Save(apogee.Session{}, nil, "delegating run", 1, 100, main, delegates); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	rec, err := store.Load(host.ActiveID())
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if rec.Meta.Usage != main {
+		t.Errorf("stored usage = %+v; want the main agent's own %+v", rec.Meta.Usage, main)
+	}
+	if rec.Meta.DelegateUsage != delegates {
+		t.Errorf("stored delegate usage = %+v; want %+v", rec.Meta.DelegateUsage, delegates)
+	}
+	rs := resumedSession(&rec, false)
+	if rs == nil || rs.Usage != main || rs.DelegateUsage != delegates {
+		t.Errorf("resumedSession = %+v; want both accountings carried into the replay payload", rs)
 	}
 }
 
@@ -5867,7 +5898,7 @@ func TestSessionHostScratchFollowsTheActiveSession(t *testing.T) {
 	}
 
 	// The first Save adopts the pre-minted id — the name the boot dir already carries.
-	if err := host.Save(apogee.Session{}, nil, "t", 1, 0, session.Usage{}); err != nil {
+	if err := host.Save(apogee.Session{}, nil, "t", 1, 0, session.Usage{}, session.Usage{}); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
 	if got, want := host.ActiveID(), filepath.Base(bootDir); got != want {

@@ -15,6 +15,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/format"
 	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/scheme"
 	"github.com/airiclenz/apogee/internal/session"
@@ -867,6 +868,37 @@ func TestSessionRowCells(t *testing.T) {
 	want = popupRow{"old · unknown workspace", "· 1h ago", "· 1 msg"}
 	if got := sessionRowCells(legacy, "/home/me/proj", true, now); !reflect.DeepEqual(got, want) {
 		t.Errorf("legacy all-view cells = %v, want %v", got, want)
+	}
+}
+
+// The row's spend cell is the SESSION's total — the main agent's tokens plus its delegates' — so a
+// run that handed most of its work out reads as what it cost rather than as what its coordinator
+// spent. A record that reported no tokens grows no cell at all, which is what a session written
+// before the accounting existed, and one whose server never reported usage, both are.
+func TestSessionRowCellsSpendIsTheSessionTotal(t *testing.T) {
+	now := time.Date(2026, 7, 24, 12, 0, 0, 0, time.UTC)
+	meta := session.Meta{
+		Title: "a task", UpdatedAt: now.Add(-5 * time.Minute), UserMsgs: 3, Workspace: "/ws/a",
+		Usage:         session.Usage{Calls: 4, PromptTokens: 60000, TotalTokens: 64000},
+		DelegateUsage: session.Usage{Calls: 300, PromptTokens: 900000, TotalTokens: 936000},
+	}
+
+	want := popupRow{"a task", "· 5m ago", "· 3 msgs", "· " + format.Tokens(1_000_000)}
+	if got := sessionRowCells(meta, "/ws/a", false, now); !reflect.DeepEqual(got, want) {
+		t.Errorf("cells = %v, want the session total in a cell of its own (%v)", got, want)
+	}
+
+	main := meta
+	main.DelegateUsage = session.Usage{}
+	want = popupRow{"a task", "· 5m ago", "· 3 msgs", "· " + format.Tokens(64000)}
+	if got := sessionRowCells(main, "/ws/a", false, now); !reflect.DeepEqual(got, want) {
+		t.Errorf("cells with no delegate spend = %v, want the main agent's own total (%v)", got, want)
+	}
+
+	silent := session.Meta{Title: "a task", UpdatedAt: now.Add(-5 * time.Minute), UserMsgs: 3, Workspace: "/ws/a"}
+	want = popupRow{"a task", "· 5m ago", "· 3 msgs"}
+	if got := sessionRowCells(silent, "/ws/a", false, now); !reflect.DeepEqual(got, want) {
+		t.Errorf("cells for a record that reported nothing = %v, want no spend cell (%v)", got, want)
 	}
 }
 

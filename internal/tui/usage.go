@@ -57,7 +57,7 @@ const maxUsageRows = 12
 
 // usageNameCells is how wide a delegate's name may be before it is clipped. A name is the one cell
 // here whose width the pane does not control — it is the `name` a model gave the delegation, or the
-// first line of the task where it named none — and five numeric columns beside it need the room
+// first line of the task where it named none — and the numeric columns beside it need the room
 // more than a long task line does.
 const usageNameCells = 24
 
@@ -77,7 +77,17 @@ const (
 // usageHeaderCells are the column labels, in the order ratified for this pane (plan
 // "2026-08-11 - 02", design call 4). They are a row of the spec rather than body prose so the
 // popup module's own column machinery aligns them over the cells they name.
-var usageHeaderCells = popupRow{"agent", "calls", "prompt", "completion", "total", "ctx"}
+//
+// The cached column is drawn only when some agent reported a cache share, and every row on the
+// pane answers to that one verdict so the columns stay square (usageRows). A pane that always
+// carried it would head a column of blanks on the servers that report no breakdown at all — which
+// is nearly all of them — and a reader would scan that column for a number no server ever said.
+func usageHeaderCells(cached bool) popupRow {
+	if cached {
+		return popupRow{"agent", "calls", "prompt", "cached", "completion", "total", "ctx"}
+	}
+	return popupRow{"agent", "calls", "prompt", "completion", "total", "ctx"}
+}
 
 // runUsageCommand drives the /usage verb: it opens the pane and does nothing else. Synchronous like
 // /settings and /sessions — no engine call, no worker, no I/O — and, unlike either of them, safe
@@ -171,38 +181,76 @@ func usageRowKinds(rows int) []popupRowKind {
 // child never got a usage report back is a fact about the server, not a spend, and a row of empty
 // cells under the totals would read as one.
 func (m Model) usageRows() []popupRow {
-	subs, total := m.usageSubAgentRows()
-	if m.usage.Calls <= 0 && len(subs) == 0 {
+	delegates := m.delegateUsageTotal()
+	// One verdict for the whole pane: a cached cell on one row and none on the next would put two
+	// different column counts under one header (usageHeaderCells).
+	cached := m.usage.CachedPromptTokens > 0 || delegates.CachedPromptTokens > 0
+	subs := m.usageSubAgentRows(cached)
+	if m.usage.Calls <= 0 && delegates.Calls <= 0 {
 		return nil
 	}
 	rows := make([]popupRow, 0, len(subs)+3)
-	rows = append(rows, usageHeaderCells)
-	rows = append(rows, usageRow(usageMainLabel, m.usage, m.ctxUsed, m.opts.ContextWindow))
+	rows = append(rows, usageHeaderCells(cached))
+	rows = append(rows, usageRow(usageMainLabel, m.usage, m.ctxUsed, m.opts.ContextWindow, cached))
 	rows = append(rows, subs...)
-	if len(subs) == 0 {
+	if delegates.Calls <= 0 {
 		return rows
 	}
 	// The session row is the one number the rows above cannot be read off: an agent's own total is
 	// what it spent, and what the SESSION spent is the sum of them. It is drawn only where there is
-	// something to sum — with no delegate the main row already is the session — and it carries no
-	// fill, because two windows do not add up to a third.
-	return append(rows, usageRow(usageSessionLabel, usageSum(m.usage, total), 0, 0))
+	// a delegate spend to sum — with none the main row already is the session — and it carries no
+	// fill, because two windows do not add up to a third. A resumed record whose delegate spend
+	// outlived its blocks is summed here with no row of its own to point at (delegateUsageTotal),
+	// which is the honest reading: the tokens were spent by this session, and the runs that spent
+	// them are no longer on the pane to be asked.
+	return append(rows, usageRow(usageSessionLabel, usageSum(m.usage, delegates), 0, 0, cached))
 }
 
 // usageSubAgentRows composes one row per delegate that reported a count, in transcript order — the
-// order their blocks stand in, so a reader matches a row to the run above it by position — and
-// reports their totals summed for the session row.
-func (m Model) usageSubAgentRows() (rows []popupRow, total usageTotals) {
+// order their blocks stand in, so a reader matches a row to the run above it by position.
+func (m Model) usageSubAgentRows(cached bool) []popupRow {
+	heads := m.delegateUsageHeads()
+	rows := make([]popupRow, 0, len(heads))
+	for _, head := range heads {
+		name, _ := clipCells(m.th, usageIndent+usageAgentName(head), usageNameCells)
+		rows = append(rows, usageRow(name, head.usage, head.ctxUsed, head.ctxLimit, cached))
+	}
+	return rows
+}
+
+// delegateUsageHeads are the sub-agent run heads that reported a count, in transcript order. It is
+// the one walk both readers of a delegate's spend take — the pane's rows and the session record's
+// delegate sum — so a run that appears on the /usage pane is exactly a run the record counts.
+func (m Model) delegateUsageHeads() []entry {
+	var heads []entry
 	for i := range m.transcript.entries {
 		head := m.transcript.entries[i]
 		if !head.headsRun() || head.usage.Calls <= 0 {
 			continue
 		}
-		name, _ := clipCells(m.th, usageIndent+usageAgentName(head), usageNameCells)
-		rows = append(rows, usageRow(name, head.usage, head.ctxUsed, head.ctxLimit))
+		heads = append(heads, head)
+	}
+	return heads
+}
+
+// delegateUsageTotal is what this session's DELEGATES have spent: the sum of the latest reading of
+// every run head that reported one. It is what the session record stores beside the main agent's
+// accounting (savePayload) and what the pane's session row adds to it, so the two never disagree
+// about the same session.
+//
+// Where no live head reports a count it falls back to the delegate sum a RESUMED record carried
+// (Model.delegateUsage), which is the only reading left when a record's scrollback could not be
+// repainted — a legacy or undecodable blob replays no run blocks at all. A live head replaces it
+// the moment one reports, so the fallback never adds to the runs it is standing in for.
+func (m Model) delegateUsageTotal() usageTotals {
+	var total usageTotals
+	for _, head := range m.delegateUsageHeads() {
 		total = usageSum(total, head.usage)
 	}
-	return rows, total
+	if total.Calls <= 0 {
+		return m.delegateUsage
+	}
+	return total
 }
 
 // usageAgentName is what the pane calls a delegate: the short name its call was given, else the
@@ -224,19 +272,28 @@ func usageAgentName(head entry) string {
 // status gauge and a run's own reading are already spelled in — so the three readings on screen are
 // read in one language, and a zero leaves its cell empty rather than printing a 0 the column would
 // have to be scanned past.
-func usageRow(name string, totals usageTotals, used, limit int) popupRow {
+func usageRow(name string, totals usageTotals, used, limit int, cached bool) popupRow {
 	calls := ""
 	if totals.Calls > 0 {
 		calls = strconv.Itoa(totals.Calls)
 	}
-	return popupRow{
+	row := popupRow{
 		name,
 		calls,
 		format.Tokens(totals.PromptTokens),
+	}
+	// The cached cell sits INSIDE the prompt count it qualifies, right after it, because that is
+	// what it is: the share of those very tokens the server answered from its cache, not a spend
+	// beside them. An agent that reported none while another did leaves it empty, on the same rule
+	// every other zero on the row follows.
+	if cached {
+		row = append(row, format.Tokens(totals.CachedPromptTokens))
+	}
+	return append(row,
 		format.Tokens(totals.CompletionTokens),
 		format.Tokens(totals.TotalTokens),
 		usageFillCell(used, limit),
-	}
+	)
 }
 
 // usageFillCell spells a context reading as the percentage the gauge labels its bar with, clamped
@@ -254,9 +311,10 @@ func usageFillCell(used, limit int) string {
 // not: each agent's reading is its own running total, so the parts never overlap.
 func usageSum(a, b usageTotals) usageTotals {
 	return usageTotals{
-		Calls:            a.Calls + b.Calls,
-		PromptTokens:     a.PromptTokens + b.PromptTokens,
-		CompletionTokens: a.CompletionTokens + b.CompletionTokens,
-		TotalTokens:      a.TotalTokens + b.TotalTokens,
+		Calls:              a.Calls + b.Calls,
+		PromptTokens:       a.PromptTokens + b.PromptTokens,
+		CachedPromptTokens: a.CachedPromptTokens + b.CachedPromptTokens,
+		CompletionTokens:   a.CompletionTokens + b.CompletionTokens,
+		TotalTokens:        a.TotalTokens + b.TotalTokens,
 	}
 }

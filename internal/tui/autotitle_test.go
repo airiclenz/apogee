@@ -242,7 +242,7 @@ func TestAutoTitleStashedUntilTheFirstSave(t *testing.T) {
 	}
 
 	// The first Save mints the id (as the real host does, before its saveDoneMsg lands).
-	if err := host.Save(domain.Session{}, nil, "heuristic title", 1, 0, session.Usage{}); err != nil {
+	if err := host.Save(domain.Session{}, nil, "heuristic title", 1, 0, session.Usage{}, session.Usage{}); err != nil {
 		t.Fatalf("seeding the first Save: %v", err)
 	}
 	m, cmd = stepCmd(t, m, saveDoneMsg{})
@@ -999,7 +999,7 @@ func TestRenameBeforeTheFirstSaveStashesTheName(t *testing.T) {
 		t.Errorf("note = %q, claims a rename before any record existed to rename", note)
 	}
 
-	if err := host.Save(domain.Session{}, nil, "heuristic title", 1, 0, session.Usage{}); err != nil {
+	if err := host.Save(domain.Session{}, nil, "heuristic title", 1, 0, session.Usage{}, session.Usage{}); err != nil {
 		t.Fatalf("seeding the first Save: %v", err)
 	}
 	m, cmd = stepCmd(t, m, saveDoneMsg{})
@@ -1043,7 +1043,7 @@ func TestAutoTitleStashDroppedWhenAHumanNamesFirst(t *testing.T) {
 	}
 
 	// The first Save mints the id the stash was waiting for — and it must not be spent.
-	if err := host.Save(domain.Session{}, nil, "heuristic title", 1, 0, session.Usage{}); err != nil {
+	if err := host.Save(domain.Session{}, nil, "heuristic title", 1, 0, session.Usage{}, session.Usage{}); err != nil {
 		t.Fatalf("seeding the first Save: %v", err)
 	}
 	m, cmd = stepCmd(t, m, saveDoneMsg{})
@@ -1148,7 +1148,7 @@ func TestSessionNameSurvivesDroppedAutoTitle(t *testing.T) {
 	// The first Save mints the id (as the real host does, before its saveDoneMsg lands) and the human
 	// names the session inside that window, so their name goes straight at the record while the
 	// generated one is still on the stash waiting for a flush.
-	if err := host.Save(domain.Session{}, nil, "heuristic title", 1, 0, session.Usage{}); err != nil {
+	if err := host.Save(domain.Session{}, nil, "heuristic title", 1, 0, session.Usage{}, session.Usage{}); err != nil {
 		t.Fatalf("seeding the first Save: %v", err)
 	}
 	m, cmd = sendPrompt(t, m, "/rename my own name")
@@ -1205,7 +1205,7 @@ func TestSessionNameGivesUpADroppedAutoTitle(t *testing.T) {
 	}
 
 	// The first Save mints the id the stash was waiting for, and the flush drops it.
-	if err := host.Save(domain.Session{}, nil, "heuristic title", 1, 0, session.Usage{}); err != nil {
+	if err := host.Save(domain.Session{}, nil, "heuristic title", 1, 0, session.Usage{}, session.Usage{}); err != nil {
 		t.Fatalf("seeding the first Save: %v", err)
 	}
 	m, cmd = stepCmd(t, m, saveDoneMsg{})

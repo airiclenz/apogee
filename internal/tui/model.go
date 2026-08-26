@@ -341,6 +341,13 @@ type Model struct {
 	// head instead (transcript.applyUsage), which is where the per-agent grouping already is.
 	usage usageTotals
 
+	// delegateUsage is the delegate half of a RESUMED record's accounting (session.Meta), and only
+	// ever a fallback: a live run head's own reading replaces it the moment one reports, so the two
+	// are never added together (delegateUsageTotal). It exists for the record whose scrollback did
+	// not come back — a legacy or undecodable blob replays no run blocks — where the sum the record
+	// stored is the only thing left that knows a delegate spent anything at all.
+	delegateUsage usageTotals
+
 	// transcriptSel is the transcript viewport's screen-space drag-selection (mouse.go), anchored
 	// in content coordinates into m.lines; the zero value is "no selection". A re-render keeps it
 	// exactly while the lines it spans are unchanged (refreshViewport's keep-if-unchanged rule), so
@@ -567,6 +574,7 @@ func (m *Model) replayResumed(r *ResumedSession) {
 	// last took, so a resumed session reports its spend instead of starting from nothing. A record
 	// written before the feature carries zeros, which is exactly the nothing-reported state.
 	m.usage = usageTotals(r.Usage)
+	m.delegateUsage = usageTotals(r.DelegateUsage) // …and the delegate half beside it, until a head reports
 	m.replayScrollback(r.Transcript, r.Title, r.InExchange)
 }
 

@@ -65,10 +65,15 @@ func (m Model) foldEvent(e domain.Event) Model {
 // Model (ADR 0011). Its field set matches session.Usage exactly, which is what lets the
 // save/restore boundary convert between the two instead of mapping them member by member.
 type usageTotals struct {
-	Calls            int
-	PromptTokens     int
-	CompletionTokens int
-	TotalTokens      int
+	Calls        int
+	PromptTokens int
+	// CachedPromptTokens is the share of PromptTokens the server answered from its own cache
+	// (domain.UsageEvent). It is INFORMATIONAL and inside the prompt count, never beside it: the
+	// pane reports it because it is what a repeated prompt actually costs, and nothing subtracts
+	// it from a total.
+	CachedPromptTokens int
+	CompletionTokens   int
+	TotalTokens        int
 }
 
 // usageReading projects the cumulative half of a UsageEvent onto the view's own shape, and says
@@ -80,10 +85,11 @@ func usageReading(e domain.UsageEvent) (usageTotals, bool) {
 		return usageTotals{}, false
 	}
 	return usageTotals{
-		Calls:            e.CumulativeCalls,
-		PromptTokens:     e.CumulativePromptTokens,
-		CompletionTokens: e.CumulativeCompletionTokens,
-		TotalTokens:      e.CumulativeTotalTokens,
+		Calls:              e.CumulativeCalls,
+		PromptTokens:       e.CumulativePromptTokens,
+		CachedPromptTokens: e.CumulativeCachedPromptTokens,
+		CompletionTokens:   e.CumulativeCompletionTokens,
+		TotalTokens:        e.CumulativeTotalTokens,
 	}, true
 }
 

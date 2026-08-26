@@ -28,7 +28,7 @@ a typo is visible before you send.
 | `@<path>` | Hand a workspace file to the model | ✅ rides the queued message |
 | `/skills` | List the discovered skills — id, name, summary and where each came from | ✅ |
 | `/version` | Show the apogee version | ✅ |
-| `/usage` | What this session has spent — one row for the main agent, one per sub-agent, and a session total | ✅ |
+| `/usage` | What this session has spent — one row for the main agent, one per sub-agent, and a session total; a `cached` column joins them when the server reports how much of a prompt it answered from its own cache | ✅ |
 | `/inspect` | The raw request and response traffic of the recent model calls — armed by `ui.inspector` (off by default) | ✅ |
 | `/confine` | Report or change Auto's blast radius — see [below](configuration.md#auto-modes-blast-radius) | ✅ report only |
 | `/effort` | Set how hard the model thinks this session — opens a picker of the levels this model supports, plus `auto` (back to the profile); the resolved effort reads in the footer, and the command is hidden when the model reports no dial — see [below](configuration.md) | ✅ |

@@ -348,3 +348,33 @@ func TestProgressSaveTriggersCoalesceBehindAnInFlightSave(t *testing.T) {
 		t.Error("the coalesced save is not the later one: it holds no open sub_agent head")
 	}
 }
+
+// The record keeps the two halves of a session's spend apart, and a save is where they part: the
+// main agent's own accounting in usage, and the SUM of every run head's latest reading beside it in
+// delegateUsage (Model.delegateUsageTotal). A record carrying only the first understates a session
+// that fanned out by whatever its children spent, which on a delegating run is most of it.
+func TestSaveCarriesBothHalvesOfTheSessionsSpend(t *testing.T) {
+	host := &fakeSessionHost{}
+	m := newBrowserModel(t, &fakeEngine{}, host, "/ws/a")
+	seedConversation(&m)
+	m.usage = mainTotals
+	m = delegate(t, m, "s1", "survey the tests", childTotals, 0)
+	m = delegate(t, m, "s2", "survey the docs", childTotals, 0)
+
+	m, cmd := stepCmd(t, m, turnSnapshotMsg{Sess: domain.Session{Version: domain.SessionVersion}})
+	if cmd == nil {
+		t.Fatal("the per-Turn snapshot scheduled no save")
+	}
+	runWrites(t, m, cmd)
+
+	calls := host.savedCalls()
+	if len(calls) != 1 {
+		t.Fatalf("Save calls = %d, want the one per-Turn save", len(calls))
+	}
+	if got, want := calls[0].usage, session.Usage(mainTotals); got != want {
+		t.Errorf("saved usage = %+v, want the MAIN agent's own %+v", got, want)
+	}
+	if got, want := calls[0].delegateUsage, session.Usage(usageSum(childTotals, childTotals)); got != want {
+		t.Errorf("saved delegate usage = %+v, want the two heads' readings summed %+v", got, want)
+	}
+}

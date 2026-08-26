@@ -10,6 +10,22 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **A session record now says what its DELEGATES spent, and the browser reports the session's whole
+  bill (delegate token runaway, plan item 8).** `session.Meta` gained `delegateUsage` beside `usage`
+  — the sum of the latest reading of every sub-agent run head the Driver held at Save — so the two
+  halves of a session's spend are stored apart and neither can be mistaken for the other: `usage`
+  stays main-agent-only, and the SESSION total is their sum. The `/sessions` browser row shows that
+  sum as one figure, which is the number a delegating run actually cost: a session that hands its
+  work out spends most of its tokens in child windows that close with those runs, and a row
+  reporting only the conversation you steered understated such a session by orders of magnitude.
+  Both accountings survive Save/Load and reach the list from `Meta` alone, and a record written
+  before either existed decodes to zero rather than failing — an older build ignores the key it
+  cannot place. `session.Usage` also gained `cachedPromptTokens`, and the `/usage` pane a matching
+  `cached` column between `prompt` and `completion`: it is drawn only when some agent on the pane
+  reported a cache share, since a header over a column of blanks would send a reader looking for a
+  number the server never said. The reading stays informational throughout — a cached prompt token
+  is still context the model read, so nothing subtracts it from a total or a budget.
+
 - **The engine now reads how much of a prompt the server answered from its own cache, and says so
   (delegate token runaway, plan item 7).** The OpenAI-shaped `prompt_tokens_details.cached_tokens`
   member is parsed off both the streamed and the non-streamed reply into

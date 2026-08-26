@@ -115,12 +115,21 @@ type Meta struct {
 	CtxUsed      int       `json:"ctxUsed,omitempty"` // last observed context fill, for the gauge relight
 	// Usage is the MAIN agent's cumulative token accounting as of this Save — the latest reading
 	// its Driver took off a UsageEvent, not a sum the store computed. It is restored on reopen, so
-	// a session says what it has spent instead of reporting nothing until its next completion. A
-	// sub-agent's totals are not here: they ride in the Driver's own transcript blob, on the run
-	// head each child filled. Like ScheduleID above it is deliberately NOT a RecordVersion bump —
-	// a record written before it existed decodes to the zero Usage (a pre-feature session simply
-	// reports zero), and an older build ignores a key it cannot place.
+	// a session says what it has spent instead of reporting nothing until its next completion. It
+	// stays main-agent-only, so the SESSION's spend is Usage + DelegateUsage and never this field
+	// alone. A delegate's per-run detail is not here either — that rides in the Driver's own
+	// transcript blob, on the run head each child filled — only its sum, in DelegateUsage below,
+	// does. Like ScheduleID above it is deliberately NOT a RecordVersion bump — a record written
+	// before it existed decodes to the zero Usage (a pre-feature session simply reports zero), and
+	// an older build ignores a key it cannot place.
 	Usage Usage `json:"usage,omitzero"`
+	// DelegateUsage is the sum of the latest reading of every sub-agent run head the Driver held at
+	// Save; zero when no delegate spent. It is kept BESIDE Usage rather than folded into it so the
+	// record answers both questions a session raises — what the conversation the human steered
+	// cost, and what the work it handed out cost — and so a reader that wants the session total
+	// adds the two deliberately rather than mistaking one for it. Like Usage it is compatible in
+	// both directions: an older record decodes to the zero Usage, an older build ignores the key.
+	DelegateUsage Usage `json:"delegateUsage,omitzero"`
 }
 
 // Usage is one agent's cumulative token accounting over a session: how many completions it
@@ -128,11 +137,16 @@ type Meta struct {
 // Cumulative* fields an engine UsageEvent stamps (domain.UsageEvent) and keeps their latest-wins
 // rule — the emitting agent owns the running sum, an observer only ever holds its newest reading —
 // so storing it is a copy of that reading rather than a total the store re-derives.
+//
+// CachedPromptTokens is the share of PromptTokens the server answered from its own prompt cache
+// (provider.Usage). It is INFORMATIONAL and part of the prompt count, never beside it: a cached
+// token is still context the model read, so nothing may subtract it from a total or a budget.
 type Usage struct {
-	Calls            int `json:"calls,omitempty"`
-	PromptTokens     int `json:"promptTokens,omitempty"`
-	CompletionTokens int `json:"completionTokens,omitempty"`
-	TotalTokens      int `json:"totalTokens,omitempty"`
+	Calls              int `json:"calls,omitempty"`
+	PromptTokens       int `json:"promptTokens,omitempty"`
+	CachedPromptTokens int `json:"cachedPromptTokens,omitempty"`
+	CompletionTokens   int `json:"completionTokens,omitempty"`
+	TotalTokens        int `json:"totalTokens,omitempty"`
 }
 
 // Record is the on-disk shape: the metadata wrapper around the two opaque payloads.

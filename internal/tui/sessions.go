@@ -8,6 +8,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/airiclenz/apogee/internal/format"
 	"github.com/airiclenz/apogee/internal/session"
 )
 
@@ -572,7 +573,11 @@ func (m *Model) resumeLoaded(msg sessionLoadedMsg) tea.Cmd {
 	m.liveStats.reset()
 	m.ctxUsed = msg.rec.Meta.CtxUsed          // relight the gauge near the resumed session's last fill
 	m.usage = usageTotals(msg.rec.Meta.Usage) // …and reopen its accounting where the record left it
-	m.detached = false                        // re-arm follow-the-tail: the resumed view opens at its tail like a launch
+	// The delegate half is restored beside it as the fallback it is: the replayed scrollback below
+	// brings back the run heads that carry their own readings, and those replace this the moment
+	// one reports (delegateUsageTotal). A record whose blob no longer decodes keeps it instead.
+	m.delegateUsage = usageTotals(msg.rec.Meta.DelegateUsage)
+	m.detached = false // re-arm follow-the-tail: the resumed view opens at its tail like a launch
 	m.flash = ""
 	m.layout()
 	return cmd // the queued Activate, when this fold's schedule found the queue idle
@@ -634,7 +639,7 @@ func (m Model) renderSessionBrowser() string {
 // — the workspace scope narrowed by what the human has typed), newest first. On the selected row an
 // armed rename replaces the whole row with a single cell holding the edit buffer — an edit is prose
 // being typed, not a session being described, so it has no columns to keep — and an armed delete adds
-// the confirm as a fourth cell; every other row is its plain cells. The module adds the marker, the
+// the confirm as a cell past the row's own; every other row is its plain cells. The module adds the marker, the
 // highlight, the column padding, and the truncation.
 //
 // The decoration is applied AFTER the filter and so takes no part in it: "delete? y/n" is the pane
@@ -655,10 +660,11 @@ func sessionRows(b sessionBrowser, workspace string, now time.Time) []popupRow {
 	return rows
 }
 
-// sessionRowCells is one row's three cells — ["title", "· relative time", "· N msgs"] — rather than
-// one concatenated label, so the times start at one column down the pane and the counts at another,
-// whatever the titles beside them measure and however the list scrolls. Each separator leads the
-// cell it introduces, so the "·" glyphs line up as well as the words after them.
+// sessionRowCells is one row's three cells — ["title", "· relative time", "· N msgs"], and a fourth
+// where the record reported a spend — rather than one concatenated label, so the times start at one
+// column down the pane and the counts at another, whatever the titles beside them measure and
+// however the list scrolls. Each separator leads the cell it introduces, so the "·" glyphs line up
+// as well as the words after them.
 //
 // In the all-workspaces view a foreign session's workspace base joins the TITLE cell instead of
 // claiming a tier of its own: it says WHICH "fix the parser" this is, so it belongs with the title
@@ -689,11 +695,35 @@ func sessionRowCells(meta session.Meta, currentWorkspace string, all bool, now t
 	if meta.ScheduleName != "" {
 		title += " · " + scheduleTagGlyph + " " + stripEscapes(meta.ScheduleName)
 	}
-	return popupRow{
+	row := popupRow{
 		title,
 		"· " + relativeTime(meta.UpdatedAt, now),
 		"· " + msgsLabel(meta.UserMsgs),
 	}
+	if spend := sessionSpendCell(meta); spend != "" {
+		row = append(row, spend)
+	}
+	return row
+}
+
+// sessionSpendCell is what the session SPENT: the main agent's total plus its delegates'
+// (session.Meta), in the coarse form every other token count on screen is spelled in
+// ([format.Tokens]). One number and no breakdown — a row here is a whole session, and which half of
+// it was the conversation and which the work it handed out is a question the /usage pane answers.
+// The SUM is the point: a run that fanned out spends most of its tokens in children whose windows
+// closed with them, and a row reporting only the main agent's share understates such a session by
+// orders of magnitude.
+//
+// A record that reported no tokens gets no cell at all rather than an empty one: a session written
+// before the accounting existed, and a server that omits usage entirely, both land there, and
+// neither of them spent nothing — they never said. It is the last cell, so a row without it simply
+// ends where it always did.
+func sessionSpendCell(meta session.Meta) string {
+	spend := format.Tokens(meta.Usage.TotalTokens + meta.DelegateUsage.TotalTokens)
+	if spend == "" {
+		return ""
+	}
+	return "· " + spend
 }
 
 // msgsLabel renders the user-message count, singularising "1 msg".

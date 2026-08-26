@@ -721,7 +721,9 @@ func TestScheduleIdentityKeepsTheRecordVersion(t *testing.T) {
 
 // A session's cumulative usage totals survive Save/Load and reach List, so a reopened session
 // reports what it spent from Meta alone — and a session that spent nothing writes no key at all,
-// which is what lets a record predating the accounting read back as the same nothing.
+// which is what lets a record predating the accounting read back as the same nothing. Both halves
+// of the accounting ride along: the main agent's and the delegates' sum beside it, whose own cached
+// share is part of the reading rather than a second one.
 func TestUsageTotalsRoundTrip(t *testing.T) {
 	t.Parallel()
 
@@ -731,7 +733,12 @@ func TestUsageTotalsRoundTrip(t *testing.T) {
 		st := NewStore(dir)
 
 		want := sampleRecord("20260811T120000Z-aaaa1111", time.Date(2026, 8, 11, 12, 0, 0, 0, time.UTC))
-		want.Meta.Usage = Usage{Calls: 4, PromptTokens: 9000, CompletionTokens: 600, TotalTokens: 9600}
+		want.Meta.Usage = Usage{
+			Calls: 4, PromptTokens: 9000, CachedPromptTokens: 2400, CompletionTokens: 600, TotalTokens: 9600,
+		}
+		want.Meta.DelegateUsage = Usage{
+			Calls: 31, PromptTokens: 800000, CachedPromptTokens: 640000, CompletionTokens: 9000, TotalTokens: 809000,
+		}
 		if err := st.Save(want); err != nil {
 			t.Fatalf("Save: %v", err)
 		}
@@ -743,12 +750,19 @@ func TestUsageTotalsRoundTrip(t *testing.T) {
 		if got.Meta.Usage != want.Meta.Usage {
 			t.Errorf("loaded usage = %+v, want %+v", got.Meta.Usage, want.Meta.Usage)
 		}
+		if got.Meta.DelegateUsage != want.Meta.DelegateUsage {
+			t.Errorf("loaded delegate usage = %+v, want %+v", got.Meta.DelegateUsage, want.Meta.DelegateUsage)
+		}
 		metas, err := st.List()
 		if err != nil {
 			t.Fatalf("List: %v", err)
 		}
 		if len(metas) != 1 || metas[0].Usage != want.Meta.Usage {
 			t.Errorf("listed usage = %+v, want %+v (the browser reads Meta alone)", metas, want.Meta.Usage)
+		}
+		if len(metas) != 1 || metas[0].DelegateUsage != want.Meta.DelegateUsage {
+			t.Errorf("listed delegate usage = %+v, want %+v — the list totals the session, not the main agent",
+				metas, want.Meta.DelegateUsage)
 		}
 	})
 
@@ -790,6 +804,10 @@ func TestUsageTotalsRoundTrip(t *testing.T) {
 		}
 		if (got.Meta.Usage != Usage{}) {
 			t.Errorf("a record predating the accounting loaded usage %+v, want the zero totals", got.Meta.Usage)
+		}
+		if (got.Meta.DelegateUsage != Usage{}) {
+			t.Errorf("a record predating the accounting loaded delegate usage %+v, want the zero totals",
+				got.Meta.DelegateUsage)
 		}
 	})
 }

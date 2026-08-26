@@ -51,7 +51,7 @@ func TestUsageRowsReportEveryAgentThatSpent(t *testing.T) {
 		if len(rows) != 2 {
 			t.Fatalf("rows = %q, want the header and the main agent alone", rows)
 		}
-		if got, want := rows[0], usageHeaderCells; !equalRow(got, want) {
+		if got, want := rows[0], usageHeaderCells(false); !equalRow(got, want) {
 			t.Errorf("first row = %q, want the column header %q", got, want)
 		}
 		want := popupRow{usageMainLabel, "3", format.Tokens(20000), format.Tokens(1500), format.Tokens(21500), "25%"}
@@ -137,7 +137,7 @@ func TestUsagePanePaintsItsRowsAndSaysWhenThereAreNone(t *testing.T) {
 	pane := strip(m.renderUsage())
 
 	for _, want := range []string{usageTitle, usageHint, usageMainLabel, usageSessionLabel,
-		"survey the tests", usageHeaderCells[1], format.Tokens(21500)} {
+		"survey the tests", usageHeaderCells(false)[1], format.Tokens(21500)} {
 		if !strings.Contains(pane, want) {
 			t.Errorf("the pane does not show %q:\n%s", want, pane)
 		}
@@ -295,5 +295,64 @@ func TestUsageKeysLeaveTheRestOfTheFrameAlone(t *testing.T) {
 	}
 	if !typed.usagePane.open {
 		t.Error("typing closed the report")
+	}
+}
+
+// TestUsageCachedColumnIsDrawnOnlyWhereAServerReportedOne pins the pane's self-hiding column: a
+// cache share is a fact only some servers state, so the column is present when one did and absent
+// when none did — a header over a column of blanks would send the reader looking for a number
+// nobody said. Present, it is one column for the WHOLE pane: an agent that reported no share
+// leaves its cell empty rather than shortening its row out of the columns beside it.
+func TestUsageCachedColumnIsDrawnOnlyWhereAServerReportedOne(t *testing.T) {
+	t.Run("no agent reported a share", func(t *testing.T) {
+		rows := usageModel(t, mainTotals, 8192).usageRows()
+
+		if got := rows[0]; !equalRow(got, usageHeaderCells(false)) {
+			t.Errorf("header = %q, want the columns without a cached one %q", got, usageHeaderCells(false))
+		}
+		if got := len(rows[1]); got != len(usageHeaderCells(false)) {
+			t.Errorf("main row has %d cells, want %d — one per column", got, len(usageHeaderCells(false)))
+		}
+	})
+
+	t.Run("one agent reported a share", func(t *testing.T) {
+		cachedMain := mainTotals
+		cachedMain.CachedPromptTokens = 12000
+		m := usageModel(t, cachedMain, 8192)
+		m = delegate(t, m, "s1", "survey the tests", childTotals, 0)
+		rows := m.usageRows()
+
+		if got := rows[0]; !equalRow(got, usageHeaderCells(true)) {
+			t.Fatalf("header = %q, want the cached column %q", got, usageHeaderCells(true))
+		}
+		if got, want := rows[1][3], format.Tokens(12000); got != want {
+			t.Errorf("main cached cell = %q, want %q", got, want)
+		}
+		if got := rows[2][3]; got != "" {
+			t.Errorf("the delegate's cached cell = %q, want it empty — its server reported no share", got)
+		}
+		if got, want := rows[3][3], format.Tokens(12000); got != want {
+			t.Errorf("session cached cell = %q, want %q — the one share reported, summed", got, want)
+		}
+	})
+}
+
+// TestDelegateUsageTotalPrefersLiveHeadsOverTheResumedReading pins what the record's delegate sum is
+// for. A resumed session carries the sum its record stored, and that is the reading until a run head
+// reports one of its own — the heads REPLACE it rather than adding to it, or a resumed session whose
+// blocks came back with the scrollback would count every delegate twice.
+func TestDelegateUsageTotalPrefersLiveHeadsOverTheResumedReading(t *testing.T) {
+	m := usageModel(t, mainTotals, 0)
+	m.delegateUsage = childTotals
+
+	if got := m.delegateUsageTotal(); got != childTotals {
+		t.Errorf("with no run heads the total = %+v, want the resumed record's own %+v", got, childTotals)
+	}
+
+	m = delegate(t, m, "s1", "survey the tests", childTotals, 0)
+
+	if got := m.delegateUsageTotal(); got != childTotals {
+		t.Errorf("with one live head the total = %+v, want that head's own %+v — the restored sum is replaced",
+			got, childTotals)
 	}
 }

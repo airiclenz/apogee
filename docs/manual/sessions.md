@@ -29,6 +29,12 @@ still remembers.
   the browser tags it `⟳ <schedule>` beside its title, so a run reads as one of a
   series rather than as a session nobody remembers starting. Ordering, resume,
   rename and delete treat it exactly like a session you held yourself.
+- A record stores what the session spent in two halves — the main agent's tokens
+  and the sum its sub-agents reported — and the browser row shows their **sum**,
+  the whole session's spend. A run that hands most of its work to delegates costs
+  most of its tokens in windows that closed with those runs, so a row reporting
+  only the conversation you steered would understate it by a wide margin; `/usage`
+  is where the two halves are read apart again.
 - `/clear` (or `/new`) closes the current session into history and starts a fresh
   one — neither deletes; discarding is an explicit `^d` in the browser.
 - A session killed mid-task resumes to the last completed turn and says so;

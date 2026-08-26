@@ -43,9 +43,17 @@ type SkillCatalog interface {
 type SessionHost interface {
 	// Save persists the active session's current state, minting its ID on the first call and
 	// updating that same file thereafter. transcript is the TUI's opaque scrollback blob
-	// (transcriptcodec.go); title, userMsgs, ctxUsed and usage — the main agent's cumulative token
-	// accounting as of this save — populate the browsable metadata.
-	Save(sess domain.Session, transcript []byte, title string, userMsgs, ctxUsed int, usage session.Usage) error
+	// (transcriptcodec.go); title, userMsgs, ctxUsed, usage — the main agent's cumulative token
+	// accounting as of this save — and delegateUsage — the sum its sub-agents reported by then —
+	// populate the browsable metadata. The two accountings arrive apart and are stored apart: what
+	// the SESSION spent is their sum, which is the browser's business rather than the host's.
+	Save(
+		sess domain.Session,
+		transcript []byte,
+		title string,
+		userMsgs, ctxUsed int,
+		usage, delegateUsage session.Usage,
+	) error
 	// Rotate closes the active session so the next Save mints a fresh ID — the /clear|/new and
 	// load-a-different-session boundary. It is idempotent on an already-inactive session.
 	Rotate()
@@ -1313,6 +1321,11 @@ type ResumedSession struct {
 	// reopened session reports its spend rather than nothing. Zero on a record written before the
 	// accounting existed — the same nothing-reported state a fresh session opens in.
 	Usage session.Usage
+	// DelegateUsage is the delegate half of that accounting, restored on the same terms and used on
+	// weaker ones: the replayed scrollback brings back the run heads that carry their own readings,
+	// and those replace it (Model.delegateUsageTotal). It is what a record whose blob no longer
+	// replays has left to say that a delegate spent anything at all.
+	DelegateUsage session.Usage
 	// InExchange marks a session interrupted mid-task — the resumed Agent reports an open Exchange
 	// (the binary reads agent.InExchange() after building it). newModel then appends the interrupted
 	// note so the human knows /continue picks up the unfinished work; false for a cleanly-closed

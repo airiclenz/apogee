@@ -25,24 +25,31 @@ type savePayload struct {
 	userMsgs   int
 	ctxUsed    int
 	usage      session.Usage // the main agent's cumulative token accounting at snapshot time
+	// delegateUsage is what this session's sub-agents have spent at snapshot time: the sum of every
+	// run head's own latest reading (Model.delegateUsageTotal). It rides beside usage rather than
+	// inside it so the record keeps the two halves of a session's spend apart, which is what lets
+	// the browser report the whole of it (session.Meta).
+	delegateUsage session.Usage
 }
 
 // snapshotPayload assembles a savePayload around a captured engine snapshot: it encodes the
 // current transcript (transcriptcodec.go), derives the browsable title from the first user
-// message, counts the user messages, and reads the live context fill and usage totals. A transcript that fails to
-// encode yields ok=false so the caller drops the save rather than persisting a half-record.
+// message, counts the user messages, and reads the live context fill and both halves of the usage
+// totals — the main agent's and its delegates'. A transcript that fails to encode yields ok=false
+// so the caller drops the save rather than persisting a half-record.
 func (m Model) snapshotPayload(sess domain.Session) (savePayload, bool) {
 	blob, err := encodeTranscript(&m.transcript)
 	if err != nil {
 		return savePayload{}, false
 	}
 	return savePayload{
-		sess:       sess,
-		transcript: blob,
-		title:      sessionTitle(m.transcript.firstUserText()),
-		userMsgs:   m.transcript.userMessageCount(),
-		ctxUsed:    m.ctxUsed,
-		usage:      session.Usage(m.usage),
+		sess:          sess,
+		transcript:    blob,
+		title:         sessionTitle(m.transcript.firstUserText()),
+		userMsgs:      m.transcript.userMessageCount(),
+		ctxUsed:       m.ctxUsed,
+		usage:         session.Usage(m.usage),
+		delegateUsage: session.Usage(m.delegateUsageTotal()),
 	}, true
 }
 
@@ -301,7 +308,8 @@ func (m Model) writeCmd(w recordWrite) tea.Cmd {
 	if w.kind == writeSave {
 		p := w.payload
 		return func() tea.Msg {
-			return saveDoneMsg{Err: sessions.Save(p.sess, p.transcript, p.title, p.userMsgs, p.ctxUsed, p.usage)}
+			return saveDoneMsg{Err: sessions.Save(
+				p.sess, p.transcript, p.title, p.userMsgs, p.ctxUsed, p.usage, p.delegateUsage)}
 		}
 	}
 	return func() tea.Msg {

@@ -99,8 +99,16 @@ func newSessionHost(store *session.Store, workspace, model string, resumed *sess
 // first call and updating that same file thereafter. Title is set at create and never overwritten
 // by a later Save — Rename is the only writer that changes it, so a user rename sticks — while
 // UpdatedAt, the transcript blob, and the browsable counts refresh every Save. Workspace and Model
-// come from the wiring, the facts the renderer cannot know.
-func (h *sessionHost) Save(sess apogee.Session, transcript []byte, title string, userMsgs, ctxUsed int, usage session.Usage) error {
+// come from the wiring, the facts the renderer cannot know. The two token accountings are stored
+// exactly as they arrive — the main agent's and its delegates' — because the record keeps the halves
+// of a session's spend apart (session.Meta).
+func (h *sessionHost) Save(
+	sess apogee.Session,
+	transcript []byte,
+	title string,
+	userMsgs, ctxUsed int,
+	usage, delegateUsage session.Usage,
+) error {
 	now := h.now().UTC()
 	h.mu.Lock()
 	if h.active == nil {
@@ -119,15 +127,16 @@ func (h *sessionHost) Save(sess apogee.Session, transcript []byte, title string,
 
 	return h.store.Save(session.Record{
 		Meta: session.Meta{
-			ID:        a.id,
-			Title:     a.title,
-			CreatedAt: a.createdAt,
-			UpdatedAt: now,
-			Workspace: h.workspace,
-			Model:     model,
-			UserMsgs:  userMsgs,
-			CtxUsed:   ctxUsed,
-			Usage:     usage,
+			ID:            a.id,
+			Title:         a.title,
+			CreatedAt:     a.createdAt,
+			UpdatedAt:     now,
+			Workspace:     h.workspace,
+			Model:         model,
+			UserMsgs:      userMsgs,
+			CtxUsed:       ctxUsed,
+			Usage:         usage,
+			DelegateUsage: delegateUsage,
 		},
 		Transcript: transcript,
 		Session:    sess,
@@ -349,11 +358,12 @@ func resumedSession(rec *session.Record, inExchange bool) *tui.ResumedSession {
 		return nil
 	}
 	return &tui.ResumedSession{
-		Transcript: rec.Transcript,
-		Title:      rec.Meta.Title,
-		CtxUsed:    rec.Meta.CtxUsed,
-		Usage:      rec.Meta.Usage,
-		UserMsgs:   rec.Meta.UserMsgs,
-		InExchange: inExchange,
+		Transcript:    rec.Transcript,
+		Title:         rec.Meta.Title,
+		CtxUsed:       rec.Meta.CtxUsed,
+		Usage:         rec.Meta.Usage,
+		DelegateUsage: rec.Meta.DelegateUsage,
+		UserMsgs:      rec.Meta.UserMsgs,
+		InExchange:    inExchange,
 	}
 }

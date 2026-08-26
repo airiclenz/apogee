@@ -468,7 +468,52 @@ readings; a child's tally starts at zero (`TestSubAgentUsageIsChildLocal` extend
 
 ---
 
-## 8. Session record: `delegateUsage` sum + cached column; sessions list shows the session total
+## 8. Session record: `delegateUsage` sum + cached column; sessions list shows the session total — ✅ DONE (2026-08-26)
+
+NOTES (2026-08-26): the item's premise for the sessions list — "the row that renders `Meta.Usage`
+tokens" — describes a cell that did not exist: `sessionRowCells` rendered title, relative time and
+message count only, and no TUI or CLI surface rendered a session's tokens at all. The row therefore
+GAINED a spend cell rather than having one corrected.
+
+NOTES (2026-08-26): that cell is spelled with `format.Tokens` ("1.0M"), not `strconv.Itoa`. "One
+plain number, no second figure, no suffix" is implemented as one figure with no breakdown and no
+trailing label; a raw `1037452118` would be unreadable in a list row and the only token count in the
+TUI spelled in its own dialect (`usage.go`'s own rule: the readings on screen are read in one
+language). A record that reported nothing grows no cell at all rather than an empty one — an empty
+trailing cell would pad every row of a legacy list and would move the armed delete confirm into a
+different column per row.
+
+NOTES (2026-08-26): the cached column self-hides for the WHOLE pane, header included, rather than
+per cell. `format.Tokens` already blanks a zero cell, so a per-cell rule would have been no change at
+all, and the item's own test line asks that "the cached column appears only when non-zero". One
+verdict per pane also keeps every row the same width under one header.
+
+NOTES (2026-08-26): `CachedPromptTokens` sits after `PromptTokens` in BOTH `session.Usage` and the
+TUI's `usageTotals` because the save/restore boundary converts the two by struct conversion
+(`usageTotals(r.Usage)`), which requires an identical field ORDER, not merely an identical field set.
+
+NOTES (2026-08-26): `ResumedSession.DelegateUsage` is restored into a new `Model.delegateUsage` used
+ONLY as a fallback (`delegateUsageTotal`): a resumed record's run blocks come back carrying their own
+readings (`transcriptcodec` persists per-head usage), so adding the stored sum to them would count
+every delegate twice. A live head replaces it the moment one reports; it survives `/clear` exactly as
+`m.usage` does, under the asymmetry `commandrun.go` records as a deferred defect (2026-08-20).
+
+NOTES (2026-08-26): `internal/tui/transcriptcodec.go` was deliberately NOT widened to persist a
+head's cached share. It was implemented, and
+`TestTranscriptCodecPersistsANamedDelegationAsItsTarget`'s structural guard rejected it — "widening
+the wire needs its own decision" — which the item does not make and its Files list does not name; the
+change was reverted. Consequence on the DEFER line.
+
+NOTES (2026-08-26): four files outside the item's list changed because the seam's `Save` signature
+gained an argument and every caller must follow — `internal/tui/seam_test.go` (the fake host),
+`internal/tui/autotitle_test.go`, `cmd/apogee/wire_test.go`, `cmd/apogee/upstream_test.go`.
+`cmd/apogee/wire_test.go` also gained `TestSessionHostStoresBothTokenAccountings`, since nothing else
+pins that the host stores the two accountings apart and projects both back onto a resume.
+
+NOTES (2026-08-26): `layout.md` is not on the item's Files list but is the repo's TUI rendering spec
+and states the `/usage` pane's columns ("Six columns, one row per agent") and when its total row is
+drawn. Both sentences became false with this item, so the section was amended rather than left
+standing as a wrong user-visible spec.
 
 Depends on item 7 (the `session.Usage` shape and the tui `usageTotals` shape both change here, once).
 
