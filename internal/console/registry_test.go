@@ -177,6 +177,40 @@ func TestRegistryClosingToleratesANilOrEmptyRegistry(t *testing.T) {
 	}
 }
 
+// TestRegistryMintOwnerIssuesDistinctNonEmptyKeys pins the privilege namespace the ownership sweep
+// matches on. The registry that COMPARES the key mints it, so no two delegations of one engine can
+// share one however the model numbers its tool calls, and no minted key can collide with the ""
+// that means "the top level owns this".
+func TestRegistryMintOwnerIssuesDistinctNonEmptyKeys(t *testing.T) {
+	t.Parallel()
+
+	registry := New()
+	seen := make(map[string]bool, 100)
+	for range 100 {
+		key := registry.MintOwner()
+		if key == "" {
+			t.Fatal(`MintOwner() = "", want a key no top-level Console can be mistaken for`)
+		}
+		if seen[key] {
+			t.Fatalf("MintOwner() reissued %q", key)
+		}
+		seen[key] = true
+	}
+}
+
+// TestRegistryMintOwnerOnANilRegistryIsTheTopLevelKey pins the other half of the nil contract: an
+// engine with no registry holds no Console for a key to reach, so minting on one is the honest ""
+// rather than a panic the caller has to guard against.
+func TestRegistryMintOwnerOnANilRegistryIsTheTopLevelKey(t *testing.T) {
+	t.Parallel()
+
+	var absent *Registry
+
+	if key := absent.MintOwner(); key != "" {
+		t.Fatalf("MintOwner() on a nil registry = %q, want the top-level key", key)
+	}
+}
+
 // TestRegistryOpenWithoutAPseudoTerminalBackend pins what a Windows host gets: the tools are
 // registered there like everywhere else, so the answer has to be the honest ErrUnsupported rather
 // than a panic or an unknown-tool notice.

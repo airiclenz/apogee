@@ -269,6 +269,7 @@ type Agent struct {
 	compactSat   bool                // saturation latch: a prior auto-fold could not bring history under its allocation, so further automatic folds stand down until the estimate drops back under it (S2)
 	depth        int                 // sub-agent nesting level: 0 = top-level; a sub-agent runs at parent+1 (ADR 0013)
 	callID       string              // this Agent's run identity: the id of the sub_agent call that spawned it, stamped on every Event it emits (domain.EventBase.CallID); empty at depth 0
+	consoleOwner string              // this Agent's Console PRIVILEGE identity: the engine-minted key (console.Registry.MintOwner) its Consoles are stamped with and its end reaps by; empty at depth 0. Deliberately not callID — that id is the model's to choose, and two siblings of one Turn can collide on it (ADR 0059 §6)
 	task         string              // the task this Agent was delegated, from the spawning sub_agent call's arguments — what an Approval prompt names it by (domain.ApprovalRequest.SubAgentTask); empty at depth 0
 	name         string              // this Agent's display identity in words: the optional short name the spawning sub_agent call supplied, normalised to a trimmed first line; empty = unnamed, and every display falls back to task. Display only, never privilege (ADR 0005)
 
@@ -418,14 +419,14 @@ func (a *Agent) Close() error {
 
 // closeConsoles ends the Consoles this Agent's run is responsible for. Ownership is the Console's
 // own Owner field, not the registry (one registry serves the whole tree): a child at depth ≥ 1
-// closes the Consoles stamped with its spawn call id, and the top-level Agent — whose own id is
-// empty, and which is the last thing standing — closes them all.
+// closes the Consoles stamped with its own minted owner key, and the top-level Agent — whose key
+// is empty, and which is the last thing standing — closes them all.
 //
 // Best-effort by contract, like every close on the way out: a process that resists teardown must
 // not stop the Agent from closing its client, and there is no caller left to report it to.
 func (a *Agent) closeConsoles() {
 	if a.depth > 0 {
-		a.consoles.CloseOwnedBy(a.callID)
+		a.consoles.CloseOwnedBy(a.consoleOwner)
 		return
 	}
 	a.consoles.CloseAll()

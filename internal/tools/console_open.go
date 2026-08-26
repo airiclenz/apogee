@@ -148,8 +148,10 @@ func (t *ConsoleOpen) Execute(ctx context.Context, call domain.ToolCall) (domain
 
 	opened, err := openConsole(registry, console.OpenSpec{
 		// A delegation owns what it opened: when the sub-agent ends, its Consoles are closed
-		// and the parent's are not (ADR 0059 §6). Empty at the top level.
-		Owner:    domain.SpawnCallIDFromContext(ctx),
+		// and the parent's are not (ADR 0059 §6). The key is the engine's, minted per delegation
+		// and never the model-supplied call id — two siblings can collide on that. Empty at the
+		// top level.
+		Owner:    domain.ConsoleOwnerFromContext(ctx),
 		Command:  args.Command,
 		Argv:     argv,
 		Dir:      dir,

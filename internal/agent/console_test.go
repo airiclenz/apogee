@@ -25,13 +25,13 @@ import (
 
 // consoleOpener is the fake tool this file drives the engine with: on every call it opens one
 // `sh` Console through the two things dispatch is supposed to have installed — the registry seam
-// and the spawning call id — and records what it saw. Opening through the CONTEXT rather than
-// through a held registry is the whole point: it is the path a real console tool takes, so a
+// and the engine-minted owner key — and records what it saw. Opening through the CONTEXT rather
+// than through a held registry is the whole point: it is the path a real console tool takes, so a
 // dispatch that forgot to install either would fail here rather than in item 4.
 type consoleOpener struct {
 	registries []*console.Registry // the registry each call found on its context, in call order
 	consoles   []*console.Console  // the Console each call opened
-	owners     []string            // the spawn call id each call stamped on it
+	owners     []string            // the owner key each call stamped on it
 	failure    error               // the first thing that went wrong inside a call, if any
 }
 
@@ -51,7 +51,7 @@ func (o *consoleOpener) execute(ctx context.Context, call domain.ToolCall) (doma
 	}
 	o.registries = append(o.registries, registry)
 
-	owner := domain.SpawnCallIDFromContext(ctx)
+	owner := domain.ConsoleOwnerFromContext(ctx)
 	opened, err := registry.Open(console.OpenSpec{Owner: owner, Command: "sh", Argv: []string{"sh"}})
 	if err != nil {
 		o.failure = fmt.Errorf("open a console: %w", err)
@@ -139,9 +139,9 @@ func assertOpenedCleanly(t *testing.T, opener *consoleOpener, wantCalls int) {
 // ---------------------------------------------------------------------------
 
 // TestDispatchCarriesTheConsoleRegistryAndTheOwner is the seam itself: a tool call reaches the
-// engine's registry through the context, and the spawn call id rides beside it so the Console it
-// opens is stamped with the run that owns it — empty at the top level, the delegation's call id
-// under one.
+// engine's registry through the context, and the engine-minted owner key rides beside it so the
+// Console it opens is stamped with the run that owns it — empty at the top level, the delegation's
+// own key under one, and never the call id the model chose.
 func TestDispatchCarriesTheConsoleRegistryAndTheOwner(t *testing.T) {
 	t.Parallel()
 
@@ -161,9 +161,12 @@ func TestDispatchCarriesTheConsoleRegistryAndTheOwner(t *testing.T) {
 				i, registry, parent.consoles)
 		}
 	}
-	if want := []string{"", "call_sub"}; opener.owners[0] != want[0] || opener.owners[1] != want[1] {
+	if want := []string{"", child.consoleOwner}; opener.owners[0] != want[0] || opener.owners[1] != want[1] {
 		t.Errorf("console owners = %v, want %v — the top level owns nothing, the delegation owns its own",
 			opener.owners, want)
+	}
+	if opener.owners[1] == "call_sub" {
+		t.Error("the delegation's Console is keyed on the model-supplied call id, want the engine's minted key")
 	}
 }
 
@@ -227,6 +230,70 @@ func TestDelegationEndClosesOnlyItsOwnConsoles(t *testing.T) {
 	}
 	if opener.consoles[1].Alive() {
 		t.Error("the delegation's Console is still alive after its delegation ended")
+	}
+}
+
+// TestSiblingDelegationsSharingACallIDReapOnlyTheirOwnConsoles is F-43: the ownership key cannot be
+// the model's to choose. A text-format parser numbering calls per Turn hands two siblings of one
+// fan-out the SAME sub_agent call id, and keyed on that id the first sibling to finish would reap
+// the other's live shells. Keyed on the engine's minted key it reaps exactly its own.
+func TestSiblingDelegationsSharingACallIDReapOnlyTheirOwnConsoles(t *testing.T) {
+	t.Parallel()
+
+	parent, opener := newConsoleAgent(t, 2)
+	first, err := parent.newChildAgent("call_1", "the first task", "")
+	if err != nil {
+		t.Fatalf("newChildAgent (first sibling): %v", err)
+	}
+	second, err := parent.newChildAgent("call_1", "the second task", "")
+	if err != nil {
+		t.Fatalf("newChildAgent (second sibling): %v", err)
+	}
+
+	runOneExchange(t, first, "open one under the first delegation")
+	runOneExchange(t, second, "open one under the second delegation")
+	assertOpenedCleanly(t, opener, 2)
+	if err := first.Close(); err != nil {
+		t.Fatalf("first sibling Close: %v", err)
+	}
+
+	assertOpenIDs(t, parent.consoles, opener.consoles[1].ID)
+	if opener.consoles[0].Alive() {
+		t.Error("the first sibling's Console outlived the delegation that opened it")
+	}
+	if !opener.consoles[1].Alive() {
+		t.Error("a sibling sharing the call id reaped another delegation's Console (F-43)")
+	}
+}
+
+// TestDelegationOwnerKeysAreDistinctDownTheTree pins the key namespace the sweep matches on: the
+// top level owns by "", every delegation owns by a key of its own, and depth buys no exemption —
+// a grandchild's key differs from its parent's, so a nested delegation's end reaps only its own.
+func TestDelegationOwnerKeysAreDistinctDownTheTree(t *testing.T) {
+	t.Parallel()
+
+	parent, err := newAgent(baseConfig(&recordingSink{}), &scriptedResponder{})
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	child, err := parent.newChildAgent("call_sub", "the delegated task", "")
+	if err != nil {
+		t.Fatalf("newChildAgent: %v", err)
+	}
+	grandchild, err := child.newChildAgent("call_sub", "the nested task", "")
+	if err != nil {
+		t.Fatalf("newChildAgent (depth 2): %v", err)
+	}
+
+	if parent.consoleOwner != "" {
+		t.Errorf("top-level owner key = %q, want empty", parent.consoleOwner)
+	}
+	if child.consoleOwner == "" || grandchild.consoleOwner == "" {
+		t.Fatalf("delegation owner keys = %q, %q; want neither to read as the top level",
+			child.consoleOwner, grandchild.consoleOwner)
+	}
+	if child.consoleOwner == grandchild.consoleOwner {
+		t.Errorf("parent and grandchild share owner key %q, want distinct keys", child.consoleOwner)
 	}
 }
 

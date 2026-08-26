@@ -188,6 +188,31 @@ func SpawnCallIDFromContext(ctx context.Context) string {
 	return id
 }
 
+// consoleOwnerCtxKey keys the running Agent's Console owner key in a tool call's context.
+type consoleOwnerCtxKey struct{}
+
+// WithConsoleOwner returns a context carrying key as the Console ownership identity of the agent
+// whose tool call runs under it: the engine-minted key a Console opened by that agent is stamped
+// with, and the one its delegation's end reaps by (ADR 0059 §6).
+//
+// It rides beside WithSpawnCallID and is installed just as unconditionally, with the same
+// convention — "" is the top-level agent, which no delegation owns — but it is deliberately a
+// SEPARATE key rather than a second reader of the spawn call id. The spawn call id is display and
+// attribution identity, and the model chooses it: a text-format parser numbering calls per Turn
+// can hand two siblings the same one. This key is PRIVILEGE identity, minted by the engine
+// (console.Registry.MintOwner), and privilege must not be collidable by anything the model writes.
+func WithConsoleOwner(ctx context.Context, key string) context.Context {
+	return context.WithValue(ctx, consoleOwnerCtxKey{}, key)
+}
+
+// ConsoleOwnerFromContext returns the Console owner key installed by WithConsoleOwner, or "" when
+// the call belongs to the top-level agent (or nothing installed one) — the emptiness that means
+// "owned by no delegation", which is what outlives every delegation's end sweep.
+func ConsoleOwnerFromContext(ctx context.Context) string {
+	key, _ := ctx.Value(consoleOwnerCtxKey{}).(string)
+	return key
+}
+
 // AskAnswer is the human's free-text reply. A STRUCT for the same freeze-safety reason
 // (a post-v1 Choice index is an additive field).
 type AskAnswer struct {

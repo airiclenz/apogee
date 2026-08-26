@@ -378,6 +378,12 @@ func (a *Agent) newChildAgent(spawnCallID, task, name string) (*Agent, error) {
 	// Mechanism and not a per-server posture, so there is no key to disagree about.
 	child.midExchangeCompaction = true
 	child.callID = spawnCallID
+	// The Console privilege key, minted by the registry that compares it rather than taken from
+	// the spawning call's id: that id is the model's to choose, and a text-format parser numbering
+	// calls per Turn can hand two siblings the same one — a collision that would let one sibling's
+	// end reap the other's shells (ADR 0059 §6). A nil registry mints "", which is the top-level
+	// key; that is harmless on a child, because an engine with no registry holds no Console.
+	child.consoleOwner = a.consoles.MintOwner()
 	child.task = task
 	child.name = name
 	// Bind the routed spawn's own capture seam AFTER its identity is stamped, so its WireEvents
@@ -416,9 +422,10 @@ func (a *Agent) newChildAgent(spawnCallID, task, name string) (*Agent, error) {
 	// The console registry is shared by HANDLE for the same structural reason and one of its own
 	// (ADR 0059 §6): the Consoles are the ENGINE's live processes, not a per-Agent resource, so
 	// one registry per engine is what makes the cap of four mean four across the whole tree rather
-	// than four per delegation. Ownership is not lost by the sharing — a Console records the call
-	// id that opened it (dispatch stamps it from the ctx), so the child's Close reaps exactly the
-	// Consoles this delegation opened and leaves the parent's untouched.
+	// than four per delegation. Ownership is not lost by the sharing — a Console records the
+	// engine-minted owner key of the run that opened it (dispatch stamps it from the ctx), so the
+	// child's Close reaps exactly the Consoles this delegation opened and leaves the parent's
+	// untouched.
 	child.consoles = a.consoles
 	return child, nil
 }

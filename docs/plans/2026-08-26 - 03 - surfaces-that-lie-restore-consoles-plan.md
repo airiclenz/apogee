@@ -335,7 +335,9 @@ neither.
 
 ---
 
-## 5. Console ownership is keyed by an engine-minted owner key, not the model's call id
+## 5. Console ownership is keyed by an engine-minted owner key, not the model's call id — ✅ DONE (2026-08-26)
+
+NOTES (2026-08-26): no ISSUES.md entry existed for F-43, so nothing was removed there.
 
 **What:** F-43. The key that decides whose Consoles a delegation may reap — and, after item 6,
 drive — must be minted by the engine: a model-supplied tool-call id can collide across siblings

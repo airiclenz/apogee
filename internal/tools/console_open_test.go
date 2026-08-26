@@ -143,6 +143,52 @@ func TestConsoleOpen_ScrubsCredentialsAndAsksForADumbTerminal(t *testing.T) {
 	}
 }
 
+// TestConsoleOpen_StampsTheEngineMintedOwnerKey pins WHICH identity ownership rides on. The tool
+// reads the engine-minted owner key, which is what a delegation's end reaps by; the spawn call id
+// beside it is display identity the model chose, and two siblings of one Turn can carry the same
+// one — so a context carrying only that owns nothing.
+func TestConsoleOpen_StampsTheEngineMintedOwnerKey(t *testing.T) {
+	// Not parallel: the package-level opener swap.
+	cases := []struct {
+		name  string
+		stamp func(context.Context) context.Context
+		want  string
+	}{
+		{
+			name:  "the engine's owner key is what the Console records",
+			stamp: func(ctx context.Context) context.Context { return domain.WithConsoleOwner(ctx, "run-7") },
+			want:  "run-7",
+		},
+		{
+			name:  "a spawn call id alone owns nothing",
+			stamp: func(ctx context.Context) context.Context { return domain.WithSpawnCallID(ctx, "call_sub") },
+			want:  "",
+		},
+	}
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			var captured console.OpenSpec
+			restore := openConsole
+			openConsole = func(registry *console.Registry, spec console.OpenSpec) (*console.Console, error) {
+				captured = spec
+				return registry.Open(spec)
+			}
+			t.Cleanup(func() { openConsole = restore })
+			ctx, _ := consoleTestCtx(t)
+
+			_, err := NewConsoleOpen(t.TempDir(), nil).Execute(testCase.stamp(ctx), consoleOpenCall("c1", "sh", 10))
+
+			if err != nil {
+				t.Fatalf("Execute err = %v, want nil", err)
+			}
+			if captured.Owner != testCase.want {
+				t.Errorf("Owner = %q, want %q", captured.Owner, testCase.want)
+			}
+		})
+	}
+}
+
 // TestConsoleOpen_RefusesAShellResolvingInsideTheWorkspace pins the exec fence at the one
 // resolution site this tool has: an `sh` the model could have written is not an `sh`, so a PATH
 // leading into the workspace is refused by name rather than executed.

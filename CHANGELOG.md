@@ -256,6 +256,21 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **Console ownership no longer rides the model-supplied call id.** Which Consoles a delegation's
+  end reaps was keyed on the id of the `sub_agent` call that spawned it — a value the MODEL writes,
+  and one a text-format parser numbering calls per Turn can hand to two siblings of the same
+  fan-out alike. Keyed on that id, the first sibling to finish reaped the other's live shells. The
+  key is now minted by the thing that compares it: `console.Registry.MintOwner()` issues a
+  monotonic `run-<n>` under the registry's own lock, never empty and never reused within a
+  registry, and a nil registry mints `""` (an engine with no registry holds no Console for a key to
+  reach). `newChildAgent` mints one per delegation, dispatch installs it on every tool call beside
+  the spawn call id (`domain.WithConsoleOwner` / `ConsoleOwnerFromContext`), and `console_open`
+  stamps it on the Console it opens. The two identities stay deliberately separate: the spawn call
+  id is display and attribution identity (`EventBase.CallID`, ADR 0039, still read by
+  `present_document`), the owner key is privilege identity — and privilege must not be collidable
+  by anything the model writes. The top level keeps `""`, so its Consoles still outlive every
+  delegation's sweep (ADR 0059 §6).
+
 - **A resumed session's accounting now accumulates instead of collapsing to the first post-resume
   reading.** The engine's cumulative usage reading is its own running sum SINCE THE SESSION WAS
   OPENED, and every resume restarts it at zero — a freshly built Agent on `--resume`, and now

@@ -829,6 +829,11 @@ func (a *Agent) executeTool(ctx context.Context, turn int, tool domain.Tool, cal
 	// run when a depth-0 fan-out has siblings running at once (ADR 0039).
 	ctx = domain.WithSubAgentDepth(ctx, a.depth)
 	ctx = domain.WithSpawnCallID(ctx, a.callID)
+	// And beside them the Console PRIVILEGE key, which the spawn call id must not double as: this
+	// one is minted by the registry that compares it, so no two runs can share it however the
+	// model numbers its calls (ADR 0059 §6). Installed unconditionally too — "" is the top-level
+	// agent, whose Consoles no delegation's end may reap.
+	ctx = domain.WithConsoleOwner(ctx, a.consoleOwner)
 
 	if a.task != "" {
 		// Install this Agent's delegated task so a tool that puts a QUESTION to the human can name

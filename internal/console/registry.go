@@ -40,9 +40,9 @@ type Console struct {
 	// ID is the small positive integer the model addresses this Console by. Ids are issued in
 	// order and never reused within an engine.
 	ID int
-	// Owner is the call id of the delegation that opened this Console, empty for one the
-	// top-level agent opened. It is what [Registry.CloseOwnedBy] matches on when a delegation
-	// ends (ADR 0059 §6).
+	// Owner is the engine-minted owner key of the delegation that opened this Console
+	// ([Registry.MintOwner]), empty for the top-level agent. It is what
+	// [Registry.CloseOwnedBy] matches on when a delegation ends (ADR 0059 §6).
 	Owner string
 	// Command is the command line as the model gave it, kept for display: the open result
 	// names it, and a transcript reading "console 3" is only useful next to what console 3 is.
@@ -82,7 +82,8 @@ func (c *Console) close() error { return c.proc.Close() }
 // already prepared the command. Everything below Owner and Command is handed straight to the
 // process layer's [Spec] — the registry adds identity and ownership to it and nothing else.
 type OpenSpec struct {
-	// Owner is the call id of the delegation opening this Console, empty at the top level.
+	// Owner is the engine-minted owner key of the delegation opening this Console
+	// ([Registry.MintOwner]), empty at the top level.
 	Owner string
 	// Command is the command line as given, for display in results and transcripts.
 	Command string
@@ -119,11 +120,38 @@ type Registry struct {
 	// closed id is never handed to a second process and a stale id in a model's context can
 	// never silently address a different Console.
 	nextID int
+	// nextOwner is the number the next minted owner key renders. It climbs like nextID and for
+	// the same reason: a key handed to a second delegation would let that delegation reap — and
+	// drive — the Consoles of the one that retired the key.
+	nextOwner int
 }
 
 // New returns an empty registry.
 func New() *Registry {
-	return &Registry{consoles: make(map[int]*Console), nextID: 1}
+	return &Registry{consoles: make(map[int]*Console), nextID: 1, nextOwner: 1}
+}
+
+// MintOwner returns a fresh owner key for one delegation: never empty, and never handed out twice
+// by this registry.
+//
+// The registry mints because the registry is what COMPARES the key ([Registry.CloseOwnedBy]), so
+// the namespace has exactly one author. The alternative — the tool-call id of the sub_agent call
+// that spawned the delegation — is the model's to choose, and two siblings of one Turn can carry
+// the same id: a collision there reaps another delegation's shells.
+//
+// A nil registry mints "" — the top-level key — because an engine with no registry holds no
+// Console for any key to reach, so the caller needs no nil check of its own.
+func (r *Registry) MintOwner() string {
+	if r == nil {
+		return ""
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	key := "run-" + strconv.Itoa(r.nextOwner)
+	r.nextOwner++
+	return key
 }
 
 // Open starts spec's process and registers it as a new Console.
