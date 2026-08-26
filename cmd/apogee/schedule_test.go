@@ -700,9 +700,9 @@ func TestScheduleFiringSharesTheSessionsSkillsProvider(t *testing.T) {
 	if stub.spec.Config.ExtraReadRoots == nil {
 		t.Fatal("the firing mounts no extra read roots at all; want the session catalogue's own dirs")
 	}
-	if got, want := stub.spec.Config.ExtraReadRoots(), provider.SourceDirs(); !slices.Equal(got, want) {
-		t.Errorf("the firing mounts read roots %v, want the session provider's %v — the model could "+
-			"not read the bundled files of a skill it was given", got, want)
+	if got, want := stub.spec.Config.ExtraReadRoots(), provider.ReadRoots(); !slices.Equal(got, want) {
+		t.Errorf("the firing mounts read roots %v, want the session provider's resolved %v — the model "+
+			"could not read the bundled files of a skill it was given", got, want)
 	}
 }
 

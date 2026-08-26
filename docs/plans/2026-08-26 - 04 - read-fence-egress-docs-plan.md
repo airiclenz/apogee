@@ -203,7 +203,18 @@ Fixtures keep using `tempRoot` (`path_safety_test.go:50`, already `realPath`-res
 
 ---
 
-## 2. Wire `ReadRoots` at both mount sites; replicate the audit's exploit end to end (F-13, Driver half)
+## 2. Wire `ReadRoots` at both mount sites; replicate the audit's exploit end to end (F-13, Driver half) — ✅ DONE (2026-08-26)
+
+NOTES (2026-08-26): the plan's own end-to-end case passes with EITHER mount wired, because item 1's
+`matchRoot` guard already refuses a symlinked root at the consuming end — it pins the exploit, not
+this item's wiring. A third case was added to make the Driver half load-bearing:
+`TestSymlinkedHomeLibraryStaysReadableThroughTheMount` — a `~/.apogee/skills` symlink into a
+dotfiles dir stays readable, which only `ReadRoots` delivers (with `SourceDirs` the operator's whole
+library goes unreadable). Verified by reverting `wire_boot.go` to `SourceDirs` and confirming it
+fails.
+NOTES (2026-08-26): the plan's sibling "real `.apogee/skills` still reads" case landed as its own
+test function (`TestRealSkillsDirStillMountsItsBundledFiles`) rather than a sub-case, matching item
+1's one-assertion-per-behaviour split.
 
 Depends on item 1.
 

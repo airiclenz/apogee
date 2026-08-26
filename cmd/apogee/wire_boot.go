@@ -217,13 +217,17 @@ func (w *rootWiring) resolveConfig() error {
 		// The skill source dirs, mounted as read-only roots for the model's read tools: an
 		// attached skill names its folder, and this is what makes that address readable
 		// (read_file, list_dir, grep, find_files — nothing else; the dirs stay unwritable).
+		// ReadRoots rather than SourceDirs, which only DISPLAYS the sources: it hands back each
+		// dir's symlink-RESOLVED real path and drops a workspace anchor that resolves outside the
+		// workspace, so a cloned repo shipping `.apogee/skills` as a symlink to /home or /etc
+		// cannot relocate the read fence the way it could before (audit 2026-08-25 F-13).
 		// It is the PROVIDER's method value, so the mount is live in both senses — it follows a
 		// mid-session `use-project-skills` flip through SetSources, and it is re-read per tool
 		// call rather than frozen here.
 		// Sub-agents need no wiring of their own: a child's registry is a Subset of the parent's
 		// tool INSTANCES (domain.ToolRegistry.Subset), so the same read tools — and with them
 		// this same func — ride along at every depth.
-		ExtraReadRoots: w.skillProvider.SourceDirs,
+		ExtraReadRoots: w.skillProvider.ReadRoots,
 		// The `context-window:` PIN (0 when unpinned — nothing probes at startup any more). It is
 		// the budget /compact and the automatic Compaction trigger bound their summary request
 		// against so compaction survives high fill (the summary call would otherwise overflow near

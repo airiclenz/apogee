@@ -276,6 +276,20 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **A repo-shipped symlink could relocate the model's read fence.** A cloned repo that shipped
+  `.apogee/skills` (or `.apogee`, or — under `use-project-skills:` — a bare `skills/`) as a symlink
+  to `/home`, `/etc` or any other tree had that tree mounted as a read-only root for `grep`,
+  `read_file`, `list_dir` and `find_files`: the mount was the anchor's UNRESOLVED path, and
+  `os.OpenRoot` follows symlinks in the root path itself. Skill discovery had always refused to walk
+  such an anchor, so the read tools reached exactly what the walk would not. Skill dirs are now
+  mounted by their symlink-RESOLVED real path, and a workspace anchor that resolves outside the
+  workspace is not mounted at all — the same two-way rule discovery already applied, now stated once
+  for the mount (`skills.Provider.ReadRoots`) and checked again where the roots are consumed (a root
+  that is not its own real path is skipped). The operator's own `~/.apogee/skills` symlink into a
+  dotfiles repo keeps working: the home library is trusted, so it is followed and the mount pinned
+  at what it resolves to. Both mount sites take the resolved view — an interactive session and a
+  scheduled Firing — and sub-agents inherit it through the tool instances a Subset carries.
+
 - **A Console status word now has to BEGIN a line to be read as the verdict.** `consoleStatusMarker`
   was `\n?(alive|exited with code (-?\d+)|killed)\s*$` — the leading newline was OPTIONAL, so
   nothing anchored the alternation to the start of a line and the marker was word-anchored where its

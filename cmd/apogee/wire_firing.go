@@ -223,7 +223,10 @@ func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, []string
 		// The same read-only mounts a session gets: the model can read the bundled files of a skill
 		// it was given exactly as an interactive one can. Sub-agents inherit them through the tool
 		// instances a Subset carries, so no per-child wiring exists.
-		ExtraReadRoots:   skillProvider.SourceDirs,
+		// ReadRoots, like the session's own mount, is the resolved-path view of the same sources —
+		// a workspace anchor that is a symlink out of the workspace is dropped rather than mounted
+		// (audit 2026-08-25 F-13), and it stays a method value so the mount follows SetSources.
+		ExtraReadRoots:   skillProvider.ReadRoots,
 		EnableMechanisms: spec.EnableMechanisms,
 		ParallelAgents:   config.ResolveParallelAgents(in.entry.ParallelAgents, slots),
 		Context: apogee.ContextConfig{

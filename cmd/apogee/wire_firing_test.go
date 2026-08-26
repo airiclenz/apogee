@@ -161,8 +161,8 @@ func TestFiringConfigSetsEveryUnattendedField(t *testing.T) {
 	if cfg.ExtraReadRoots == nil {
 		t.Fatal("Config.ExtraReadRoots is nil; the model could not read the files of a skill it was given")
 	}
-	if !slices.Equal(cfg.ExtraReadRoots(), provider.SourceDirs()) {
-		t.Errorf("Config.ExtraReadRoots() = %v; want the provider's own %v", cfg.ExtraReadRoots(), provider.SourceDirs())
+	if !slices.Equal(cfg.ExtraReadRoots(), provider.ReadRoots()) {
+		t.Errorf("Config.ExtraReadRoots() = %v; want the provider's own resolved mounts %v", cfg.ExtraReadRoots(), provider.ReadRoots())
 	}
 	if !slices.Equal(cfg.EnableMechanisms, manual) {
 		t.Errorf("Config.EnableMechanisms = %v; want the validated manual list %v", cfg.EnableMechanisms, manual)
