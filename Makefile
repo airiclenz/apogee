@@ -40,7 +40,11 @@ ARGS ?=
 
 # The default endpoint for `make live-eval` (override: make live-eval LIVE_ENDPOINT=...).
 # Set APOGEE_LIVE_MODEL in the environment to pin the model (and bust the result cache on a swap).
-LIVE_ENDPOINT ?= http://192.168.64.1:1111
+# The default is a local server, matching the addresses the live tests document themselves. A
+# server on another host is an override, never a default: an address baked in here is stale the
+# moment that host's gateway moves, and a live test that cannot reach its endpoint fails where an
+# unset APOGEE_LIVE_ENDPOINT would have skipped.
+LIVE_ENDPOINT ?= http://127.0.0.1:1111
 
 # Where `install` drops the binary. Leave empty to let `install` auto-pick the
 # first candidate dir that is already on $PATH *and* writable without sudo,
