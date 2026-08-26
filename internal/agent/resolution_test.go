@@ -754,6 +754,74 @@ func TestResolve_ConfineFallbackShape(t *testing.T) {
 }
 
 // ----------------------------------------------------------------------------
+// A workspace-scoped writer's own git child (confineChildren)
+// ----------------------------------------------------------------------------
+
+// TestResolve_WorkspaceWriteRunCarriesTheBoxInTheConfiningCell pins the ONE cell where a
+// workspace-scoped writer's Run carries a box. move_file / delete_file stage the index through a
+// git subprocess of apogee's own (tools/git_stage.go), so where a SUBPROCESS call would be
+// Confined — Auto, confine-to-workspace, caps sufficient — the writer's Run carries the same box
+// and the executor installs the handle for that child. Every other cell carries none: the child's
+// bound there is its hardened argv, and ADR 0012 D5 keeps Confine out of the lower modes.
+func TestResolve_WorkspaceWriteRunCarriesTheBoxInTheConfiningCell(t *testing.T) {
+	t.Parallel()
+	ws := t.TempDir()
+	wsw := tools.NewWriteFile(ws) // carries the workspaceScopedWriter marker
+
+	cases := []struct {
+		name      string
+		mode      domain.Mode
+		confine   bool
+		fsConfine bool
+		writeIn   bool
+		wantKind  resolutionKind
+		wantBox   bool
+	}{
+		{"auto/confine/caps", domain.ModeAuto, true, true, true, resolveRun, true},
+		{"allow-edits", domain.ModeAllowEdits, true, true, true, resolveRun, false},
+		{"auto/caps-insufficient", domain.ModeAuto, true, false, true, resolveRun, false},
+		{"auto/i-am-the-sandbox", domain.ModeAuto, false, true, true, resolveRun, false},
+		{"auto/out-of-workspace still gates", domain.ModeAuto, true, true, false, resolveGate, false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := resolve(resolutionInput{
+				mode:                   tc.mode,
+				call:                   domain.ToolCall{ID: "c1", Tool: wsw.Name()},
+				tool:                   wsw,
+				guard:                  proceed,
+				confineToWorkspace:     tc.confine,
+				fsConfineAvailable:     tc.fsConfine,
+				writeTargetInWorkspace: tc.writeIn,
+				approverPresent:        true,
+				box:                    domain.ConfinementBox{WorkspaceRoot: ws},
+			})
+
+			if got.kind != tc.wantKind {
+				t.Fatalf("kind = %s, want %s", got.kind, tc.wantKind)
+			}
+			if got.confineChildren != tc.wantBox {
+				t.Errorf("confineChildren = %v, want %v", got.confineChildren, tc.wantBox)
+			}
+			if tc.wantBox {
+				if got.box.WorkspaceRoot != ws {
+					t.Errorf("box WorkspaceRoot = %q, want %q", got.box.WorkspaceRoot, ws)
+				}
+			} else if got.box.WorkspaceRoot != "" {
+				t.Errorf("box = %+v, want none outside the confining cell", got.box)
+			}
+			// The demote net stays Confine-only: an unconfinable staging child is the tool's
+			// own best-effort skip, so there is nothing here to fall back to.
+			if got.fallback != nil {
+				t.Errorf("a Run must carry no fallback (fallback is Confine-only)")
+			}
+		})
+	}
+}
+
+// ----------------------------------------------------------------------------
 // The allow-for-session GRAIN (gateCacheKey)
 // ----------------------------------------------------------------------------
 

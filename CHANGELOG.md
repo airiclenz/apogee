@@ -234,6 +234,22 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **A workspace write's git child runs inside the box where Auto would confine it (F-03).**
+  `move_file` and `delete_file` reproduce the index half of `git mv` / `git rm` by spawning git
+  (`stageGitPaths`), and that child ran with no confinement handle in any mode — the one subprocess
+  apogee's own in-process writers launch, outside the very fence a `git_status` call gets. The
+  resolver now marks a workspace-scoped writer's **Run** with `confineChildren` in the ONE cell where
+  a subprocess call would be Confined (Auto · `confine-to-workspace` · fs-confinement capable), and
+  `executeRun` installs the Confinement handle for it, so `runGit` fences the staging child exactly
+  as a git tool's child is fenced. Nothing about classification, gating or the lower rungs changes:
+  on every other rung the child's bound stays its hardened argv — apogee's own fixed
+  `git add -A -- :(literal)<path>`, with the repository's command-valued config refused — which is
+  the blast radius the workspace-write class already declares, so ADR 0012 D5's "no Confine in the
+  lower modes" is kept. The runtime demote (D4) stays Confine-only: a box that cannot be established
+  for the staging `add` is reported as the existing "(git staging skipped: …)" note, and one that
+  fails at the trackedness probe joins the silent skips — never a demote, because the file operation
+  has already happened.
+
 - **Security — a stdio MCP server is a fenced absolute program, reaped as a process tree**
   (F-36 / F-42). A configured `mcp-servers:` stdio command is now resolved on PATH through the exec
   fence (`security.ResolveProgram`): what is launched is an absolute program, and one resolving

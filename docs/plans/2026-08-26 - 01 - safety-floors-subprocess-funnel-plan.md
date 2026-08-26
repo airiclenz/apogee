@@ -640,7 +640,10 @@ whichever test drives `wireSession` passes with the workspace threaded through.
 
 ---
 
-## 8. A workspace-scoped writer's git child gets the box in the confining cell
+## 8. A workspace-scoped writer's git child gets the box in the confining cell — ✅ DONE (2026-08-26)
+
+NOTES (2026-08-26): the plan's dispatch test asks for "a fake `workspaceScopedWriter` tool"; the marker's method is unexported by design (contract §3.2), so no fake in `internal/agent` can carry it — `TestDisposition_WorkspaceWriteChildGetsTheBox` drives the REAL `delete_file` and proves the handle through the recording Confiner (Confine is reached only through the ctx handle) in three cells: Auto·confine (confined, box = the workspace), Allow-Edits and Auto·no-confine (never confined).
+NOTES (2026-08-26): `TestStageGitPaths_UnconfinableChildIsANote` needs a Confiner that refuses the box for the staging `add` ALONE — a Confiner refusing every call fails at the trackedness probe first, which is the earlier SILENT skip, not the note. Both paths are asserted, as two subtests.
 
 **What:** F-03, per call 8. The Run verdict of `move_file`/`delete_file` (and every other
 `workspaceScopedWriter`) in the cell where a subprocess would be Confined carries the box, and the

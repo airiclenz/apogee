@@ -495,8 +495,18 @@ func writeEscapeCtx(ctx context.Context, verdict resolution) context.Context {
 // (writeEscapeCtx): every in-process write that may land outside the workspace — the approved
 // gate, the "I am the sandbox" cell, the declared writable path — passes through here, and
 // nothing that was refused or denied ever does.
+//
+// A Run the resolver marked confineChildren also carries the Confinement handle, so a subprocess
+// apogee's OWN in-process tool spawns — the workspace-scoped writers' git staging — is fenced by
+// the same box a subprocess call would have been Confined in. The box PARAMETER stays nil
+// deliberately: it is what executeTool keys the D4 demote translation on, and an unconfinable
+// child here is the staging's own best-effort skip, not a call to demote.
 func (a *Agent) executeRun(ctx context.Context, turn int, tool domain.Tool, call domain.ToolCall, verdict resolution) (domain.ToolResult, dispatchOutcome) {
-	result, outcome := a.executeTool(writeEscapeCtx(ctx, verdict), turn, tool, call, nil /* no confinement box */)
+	ctx = writeEscapeCtx(ctx, verdict)
+	if verdict.confineChildren {
+		ctx = domain.WithConfinement(ctx, domain.Confinement{Confiner: a.cfg.Confiner, Box: verdict.box})
+	}
+	result, outcome := a.executeTool(ctx, turn, tool, call, nil /* no confinement box */)
 	if outcome == dispatchCancelled {
 		return result, dispatchCancelled
 	}

@@ -21,6 +21,17 @@ import (
 // caller's own wording to the tool result, so the model reads that the index changed rather than
 // discovering it later through git_status.
 //
+// Confinement (2026-08-26). This is the one in-process tool path that spawns a subprocess of
+// apogee's own, so in Auto with confine-to-workspace the Run verdict carries the Confinement
+// handle (internal/agent's confineChildren) and runGit fences the git child in the very box a git
+// TOOL's child would have run in. On every other rung the child's bound is its HARDENED ARGV
+// instead — apogee's own fixed `git add -A -- :(literal)<path>`, with the repository's own
+// command-valued config refused — which is the blast radius a workspace-scoped write already
+// declares. Best-effort survives a box that cannot be established: ErrConfinementUnavailable
+// reaches the staging `add` as a Go error and is reported as a "(git staging skipped: …)" note,
+// and at the trackedness probe it joins the silent skips. Neither is a demote and neither fails
+// the call — the file operation has already happened.
+//
 // Undo interplay (ADR 0051, ratified 2026-08-22 as accept-and-document). /undo restores WORKTREE
 // bytes from the per-exchange pre-image journal and deliberately does not touch the index. After
 // undoing a staged rename or deletion the staged entry therefore remains — visible in

@@ -146,8 +146,18 @@ type resolution struct {
 	// gate the human denied, never reach a permit. Run / Gate only.
 	writeEscapeTarget string
 
-	// box is the confinement box a Confine subprocess runs inside. Confine only.
+	// box is the confinement box a Confine subprocess runs inside. Confine, and a Run with
+	// confineChildren.
 	box domain.ConfinementBox
+
+	// confineChildren says this Run executes with the Confinement handle installed: a Run whose
+	// in-process tool may spawn a subprocess of apogee's own (the workspace-scoped writers' git
+	// staging, tools/git_stage.go) executes with the box installed, so that child confines as a
+	// git tool's would. The demote logic (D4) stays Confine-only — an unconfinable child here is
+	// the tool's own best-effort skip, never a demote, because the file operation has already
+	// happened by the time it runs. Run only, and only in the cell where a subprocess would be
+	// Confined (applyOverlays).
+	confineChildren bool
 
 	// fallback is the precomputed runtime-demote contingency for a Confine (D4): a forced
 	// Gate (re-run unconfined on allow) or, with no Approver, a Refuse. Structurally bounded
@@ -429,7 +439,8 @@ func resolveLadderAuto(in resolutionInput, class toolClass) resolution {
 // (nil-Approver ⇒ Refuse, else its class reason + cache key, plus the write-escape target its
 // allow would authorise); a Confine is finished (box + runtime-demote fallback); a Run / Refuse
 // carries the guard's audit metadata where today's trail records it, and a Run also carries the
-// write-escape target the ladder already answered for.
+// write-escape target the ladder already answered for — plus, in the confining Auto cell, the box
+// a workspace-scoped writer's own git child runs inside.
 func applyOverlays(in resolutionInput, leaf resolution) resolution {
 	// A Tier-2 dangerous action forces the Approver even where the ladder would not (the
 	// guardrail can only tighten — ADR 0012). A Refuse leaf stays refused.
@@ -454,6 +465,22 @@ func applyOverlays(in resolutionInput, leaf resolution) resolution {
 		// writable paths. It executes with the permit, which is the only way those two cells
 		// stop being nullified by a fence pinned to the workspace root (ADR 0049 Q3/Q7).
 		leaf.writeEscapeTarget = in.writeEscapeTarget
+		// A workspace-scoped writer's Run in the very cell where a SUBPROCESS call would be
+		// Confined carries the box, so the git child its staging spawns (tools/git_stage.go)
+		// is fenced exactly as a git tool's child would be. Auto + confine-to-workspace + caps
+		// is the whole condition, because that is the cell — and the only cell — whose answer
+		// for a subprocess is "the OS fences it".
+		//
+		// The lower rungs deliberately get nothing: in Allow-Edits and in the gate cell the
+		// child's bound is its HARDENED ARGV — apogee's own fixed `git add -A -- :(literal)<path>`
+		// with the repository's command-config refused, not a model-chosen program — which is
+		// the blast radius classWorkspaceWrite already declares, so ADR 0012 D5's "no Confine in
+		// the lower modes" is kept intact.
+		if classifyTool(in.tool) == classWorkspaceWrite && in.mode == domain.ModeAuto &&
+			in.confineToWorkspace && in.fsConfineAvailable {
+			leaf.box = in.box
+			leaf.confineChildren = true
+		}
 		return leaf
 	}
 }

@@ -2,11 +2,16 @@ package tools
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
+
+	"github.com/airiclenz/apogee/internal/domain"
 )
 
 // stagedNote is the wording a caller injects; the helper must return it verbatim on a stage and
@@ -168,4 +173,123 @@ func TestStageGitPaths_SkippedNoteKeepsOneLine(t *testing.T) {
 			}
 		})
 	}
+}
+
+// ----------------------------------------------------------------------------
+// The staging child and the confinement box
+// ----------------------------------------------------------------------------
+
+// stagingConfiner records the git SUBCOMMAND of every cmd handed to Confine, and can refuse to
+// establish the box for one named subcommand. The selective refusal is what makes the two failure
+// paths separable: the staging `add` reports a note, while the trackedness probe ahead of it (and
+// the command-config probe behind that) is one of the silent skips.
+type stagingConfiner struct {
+	// failFor is the subcommand whose Confine reports ErrConfinementUnavailable ("" = all succeed).
+	failFor string
+
+	mu   sync.Mutex
+	seen []string
+}
+
+func (c *stagingConfiner) Capabilities() domain.ConfinementCaps {
+	return domain.ConfinementCaps{FSWrite: true}
+}
+
+// Confine leaves cmd untouched, so a "confined" run still executes the real git in these
+// hermetic tests (the dev host has no landlock — contract §6). What is asserted is that the box
+// was ASKED for, which is the whole of the handoff this helper is responsible for.
+func (c *stagingConfiner) Confine(_ context.Context, _ domain.ConfinementBox, cmd *exec.Cmd) error {
+	sub := gitSubcommandOf(cmd.Args)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.seen = append(c.seen, sub)
+	if c.failFor != "" && sub == c.failFor {
+		return fmt.Errorf("%w: fake", domain.ErrConfinementUnavailable)
+	}
+	return nil
+}
+
+func (c *stagingConfiner) subcommands() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return slices.Clone(c.seen)
+}
+
+// gitSubcommandOf picks the subcommand out of a git argv, stepping over the `-c <name=value>`
+// hardening pairs gitRunSpec puts ahead of it.
+func gitSubcommandOf(argv []string) string {
+	for i := 1; i < len(argv); i++ {
+		if argv[i] == "-c" {
+			i++
+			continue
+		}
+		return argv[i]
+	}
+	return ""
+}
+
+// confinedStagingCtx is the context a workspace-scoped writer's call carries in Auto with
+// confine-to-workspace: the Confinement handle the Run verdict installed (internal/agent's
+// confineChildren), which is what runGit reads to fence the staging child.
+func confinedStagingCtx(c domain.Confiner, root string) context.Context {
+	return domain.WithConfinement(context.Background(), domain.Confinement{
+		Confiner: c,
+		Box:      domain.ConfinementBox{WorkspaceRoot: root},
+	})
+}
+
+// TestStageGitPaths_ConfinesTheGitChild is the staging half of F-03: with the handle on ctx every
+// git child this helper spawns is handed to the Confiner before it runs, so a move_file in Auto
+// fences its index update exactly as a git_status call would be fenced.
+func TestStageGitPaths_ConfinesTheGitChild(t *testing.T) {
+	root := gitRepo(t)
+	renameOnDisk(t, root, "README.md", "GUIDE.md")
+	conf := &stagingConfiner{}
+
+	note := stageGitPaths(confinedStagingCtx(conf, root), root, stagedNote, "README.md", "GUIDE.md")
+
+	if note != stagedNote {
+		t.Fatalf("note = %q, want %q", note, stagedNote)
+	}
+	seen := conf.subcommands()
+	for _, want := range []string{"ls-files", "add"} {
+		if !slices.Contains(seen, want) {
+			t.Errorf("git %s was not confined; Confine saw %v", want, seen)
+		}
+	}
+	if status := gitStatusPorcelain(t, root); !strings.Contains(status, "R  README.md -> GUIDE.md") {
+		t.Fatalf("the confined run did not stage the rename:\n%s", status)
+	}
+}
+
+// TestStageGitPaths_UnconfinableChildIsANote pins the best-effort floor when the box cannot be
+// established: the file operation has already happened, so neither branch may fail the call or
+// signal the D4 demote. A staging `add` that could not be confined is reported as the skipped
+// note the model reads; a probe that could not be confined joins the silent skips, exactly as an
+// absent git or an untracked source does.
+func TestStageGitPaths_UnconfinableChildIsANote(t *testing.T) {
+	t.Run("the staging add reports the note", func(t *testing.T) {
+		root := gitRepo(t)
+		renameOnDisk(t, root, "README.md", "GUIDE.md")
+		conf := &stagingConfiner{failFor: "add"}
+
+		note := stageGitPaths(confinedStagingCtx(conf, root), root, stagedNote, "README.md", "GUIDE.md")
+
+		if !strings.HasPrefix(note, " (git staging skipped:") {
+			t.Fatalf("note = %q, want a staging-skipped note", note)
+		}
+		if strings.Contains(gitStatusPorcelain(t, root), "R  ") {
+			t.Error("nothing may be staged when the add was never confined")
+		}
+	})
+
+	t.Run("the trackedness probe skips silently", func(t *testing.T) {
+		root := gitRepo(t)
+		renameOnDisk(t, root, "README.md", "GUIDE.md")
+		conf := &stagingConfiner{failFor: "ls-files"}
+
+		if note := stageGitPaths(confinedStagingCtx(conf, root), root, stagedNote, "README.md", "GUIDE.md"); note != "" {
+			t.Fatalf("note = %q, want empty: an unconfinable probe is a silent skip", note)
+		}
+	})
 }

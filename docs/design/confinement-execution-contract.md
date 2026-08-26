@@ -399,6 +399,20 @@ package edge and no cycle (`tools` imports only `domain`).
   marker-bounded); `web-fetch`/`http-request`/MCP (`ExternalEffectTool`); `sub_agent` (the recursion
   point — D2, carries no disposition marker); any third-party tool (structurally cannot).
 
+**A marker-carrier's own subprocess child gets the box (2026-08-26).** The marker says the tool's
+own writes are path-safety-bounded; it says nothing about a subprocess the tool spawns. `move_file`
+and `delete_file` stage the index half of the operation through git (`internal/tools/git_stage.go`),
+so in the ONE cell where a subprocess call would be **Confined** — Auto · `confine-to-workspace` ·
+`Capabilities().FSWrite` — the writer's **Run** verdict carries the box (`resolution.confineChildren`)
+and `executeRun` installs the Confinement handle, so that child confines exactly as a `git_status`
+call's would. Nothing about classification, gating or the lower rungs changes: on every other rung
+the child's bound is its **hardened argv** — apogee's own fixed `git add -A -- :(literal)<path>`,
+with the repository's command-valued config refused (§ `gitHardeningOptions`, `runGit`) — which is
+the blast radius `classWorkspaceWrite` already declares, so D5's "no Confine in the lower modes"
+stands. The runtime demote (D4) stays **Confine-only**: an unconfinable child here is the staging's
+own best-effort skip (a `(git staging skipped: …)` note), never a demote, because the file operation
+has already happened by the time the child runs.
+
 ### 3.4 Survives `Subset`; sub-agents inherit it
 
 `registry.Subset(names…)` returns the **same tool values** under a new registry (it copies pointers, not

@@ -436,6 +436,77 @@ func TestDisposition_AutoConfineTrue_WorkspaceWrites(t *testing.T) {
 	})
 }
 
+// TestDisposition_WorkspaceWriteChildGetsTheBox proves F-03's fix end to end: move_file and
+// delete_file stage the index half of the operation through a git subprocess of apogee's OWN, and
+// in the ONE cell where a subprocess call would be Confined that child must run inside the same
+// box. The Confiner is the proof: the staging child can only reach it through the Confinement
+// handle executeRun installs, so a recorded Confine call IS the handle being present and carrying
+// the Agent's Confiner and box, and no recorded call is the handle being absent.
+//
+// The workspace is deliberately NOT a repository. The trackedness probe still spawns git — that
+// child is the whole subject — and then skips the staging, so the proof needs no fixture repo
+// while exercising the exact spawn path a tracked file would take.
+//
+// A fake carrier is impossible here by design: the workspaceScopedWriter marker's method is
+// unexported (contract §3.2), so only Apogee's own writers can be classified as one. The real
+// delete_file is therefore the fixture.
+func TestDisposition_WorkspaceWriteChildGetsTheBox(t *testing.T) {
+	t.Parallel()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("no git on PATH; the staging child cannot spawn")
+	}
+
+	run := func(t *testing.T, mode domain.Mode, confine bool) (*fakeConfiner, string) {
+		t.Helper()
+		ws := t.TempDir()
+		doomed := filepath.Join(ws, "doomed.txt")
+		if err := os.WriteFile(doomed, []byte("x\n"), 0o644); err != nil {
+			t.Fatalf("setup: %v", err)
+		}
+		sink := &recordingSink{}
+		conf := &fakeConfiner{caps: capsBoth()}
+		cfg := autoConfigWS(sink, conf, confine, ws, tools.NewDeleteFile(ws))
+		cfg.Mode = mode
+		// A denying Approver is the tripwire: this call must never gate, and if it did the
+		// removal below would not have happened.
+		cfg.Approver = &fakeApprover{decision: domain.ApprovalDeny}
+
+		driveToolCall(t, cfg, sink, "c1", "delete_file", `{"path":"doomed.txt"}`)
+
+		if _, err := os.Stat(doomed); !os.IsNotExist(err) {
+			t.Fatalf("delete_file did not run (stat error = %v)", err)
+		}
+		return conf, ws
+	}
+
+	t.Run("auto/confine → the staging git child runs in the box", func(t *testing.T) {
+		t.Parallel()
+		conf, ws := run(t, domain.ModeAuto, true)
+		if conf.confineCount() == 0 {
+			t.Fatal("Confine was never called: the staging git child ran outside the box")
+		}
+		if got := conf.lastConfinedBox().WorkspaceRoot; got != ws {
+			t.Errorf("confined box WorkspaceRoot = %q, want the workspace %q", got, ws)
+		}
+	})
+
+	t.Run("allow-edits → no handle; the hardened argv is the bound", func(t *testing.T) {
+		t.Parallel()
+		conf, _ := run(t, domain.ModeAllowEdits, true)
+		if n := conf.confineCount(); n != 0 {
+			t.Errorf("Confine called %d times in Allow-Edits; ADR 0012 D5 keeps Confine out of the lower modes", n)
+		}
+	})
+
+	t.Run("auto/I-am-the-sandbox → no handle", func(t *testing.T) {
+		t.Parallel()
+		conf, _ := run(t, domain.ModeAuto, false)
+		if n := conf.confineCount(); n != 0 {
+			t.Errorf("Confine called %d times with confine-to-workspace off; there is no box to install", n)
+		}
+	})
+}
+
 // TestDisposition_AutoConfineTrue_SubprocCapsInsufficient proves "confine if you can, gate
 // if you can't": when fs-confinement is unavailable, a subprocess tool GATES rather than
 // running unconfined.
