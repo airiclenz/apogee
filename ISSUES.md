@@ -24,7 +24,6 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 
 ## Improvements / Ideas
 
-- [P] display somewhere if apogee is confined or not — planned 2026-08-26: `docs/plans/2026-08-26 - 03 - surfaces-that-lie-restore-consoles-plan.md` item 8 (footer word `confined` / `unconfined` / `gated` in Auto)
 - [ ] sub agent names are often not descriptive. the model seems to not set it at all (sub-agent name just showing input proompt) -> separate auto-name call for sub agents if enabled and name was not set? (grill)
 - [ ] when many sub agents are running - the activity status often flickers back and forth between the different sub agents. the stati of the sub-agents need to be unified / merged (grill)
 - [ ] all content print-out of any tool need to display line numbers. The write tool does not do that currently. Verify all tools that print file diffs.

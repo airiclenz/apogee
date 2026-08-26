@@ -2642,7 +2642,8 @@ func (m Model) footerView() string {
 }
 
 // footerContent composes the footer's single line: host ✦ model ✦ effort ✦ workdir on the left, the mode
-// marker — its symbol and its word (modeMarker) — on the right, over one unbroken black field. It
+// marker — its symbol, its word (modeMarker), and in Auto the blast radius that word runs with
+// (confinementWord) — on the right, over one unbroken black field. It
 // takes the STATUS LINE's posture, one row below the box rather than one row above it — a
 // bodyIndent lead, the black field filled to the full window width, and the mode marker ending
 // bodyIndent short of the window edge, the very column the gauge above it ends in (layout.md,
@@ -2685,8 +2686,26 @@ func (m Model) footerContent(w int) string {
 	// and word go through that ONE Render, so the glyph can never take a tone of its own. The
 	// trailing bodyIndent is the slot's own margin, not the marker's — the same seam statusLine
 	// appends its right slot's margin at.
-	mode := m.th.footerText.Foreground(m.th.modeColor(m.opts.Mode)).Render(modeMarker(m.opts.Mode)) +
-		m.th.footerText.Render(bodyIndent)
+	//
+	// In Auto the marker carries a second word for the blast radius (confinementWord), read LIVE off
+	// the engine — /confine moves it mid-session, so a boot Option would say the wrong thing the
+	// moment it mattered. "confined" and "gated" ride the mode's own colour inside that same single
+	// Render; "unconfined" is split off into the error tone on the footer's own black field, the
+	// offline segment's treatment below, because it is the one state where Auto runs with the user's
+	// full privileges. Its separator travels with the word, exactly as offline's ✦ does, so no
+	// styled run ever ends on a space.
+	markerStyle := m.th.footerText.Foreground(m.th.modeColor(m.opts.Mode))
+	marker := modeMarker(m.opts.Mode)
+	var mode string
+	switch word := confinementWord(m.opts.Confinement, m.opts.Mode, m.eng.ConfineToWorkspace()); word {
+	case "":
+		mode = markerStyle.Render(marker)
+	case unconfinedWord:
+		mode = markerStyle.Render(marker) + m.th.footerText.Foreground(m.th.errorFg).Render(" · "+word)
+	default:
+		mode = markerStyle.Render(marker + " · " + word)
+	}
+	mode += m.th.footerText.Render(bodyIndent)
 
 	gap := w - m.th.measure.Width(bodyIndent) - m.th.measure.Width(info) -
 		m.th.measure.Width(offline) - m.th.measure.Width(mode)
@@ -2844,6 +2863,46 @@ func modeMarker(m domain.Mode) string {
 		return sym + " " + modeLabel(m)
 	}
 	return modeLabel(m)
+}
+
+// The three words the footer's mode marker can carry about Auto's blast radius (confinementWord).
+// They are constants because footerContent reads one of them back — unconfined is the cell it
+// paints in the error tone — and a marker that named a state by a literal the word function no
+// longer produces would say nothing at all.
+const (
+	confinedWord   = "confined"
+	unconfinedWord = "unconfined"
+	gatedWord      = "gated"
+)
+
+// confinementWord is the second half of the footer's mode marker: the one word for what Auto's
+// blast radius actually IS on this host. It is empty on every other rung, because confinement
+// attaches to Auto alone (ADR 0012) — the three lower rungs gate every subprocess call through
+// Approval whatever the flag says, so a word there would name a fence nothing reads.
+//
+// Auto has exactly three cells, and each gets its own word rather than a shared "fenced/not":
+// the flag on with a backend that can fence is "confined"; the flag off is "unconfined", the
+// user's own "I am the sandbox" and the one state where Auto runs with their full privileges,
+// which is why the footer paints that word alone in the error tone; and the flag on where the
+// backend cannot fence the filesystem is "gated" — the vocabulary probe.DegradedNotice already
+// uses for it ("auto mode is gating terminal commands"), and not a fault: it is the ladder doing
+// what the ADR says ("confine if you can, gate if you can't").
+//
+// Pure, so the wording is table-testable without a Model. confine is the LIVE setting the next
+// Resolution would read ([Engine.ConfineToWorkspace]), not a boot Option; info is the host
+// situation the composition root resolved ([ConfinementInfo]), whose zero value — a binary that
+// wired no backend — cannot promise a fence and so reads as gated, the honest end.
+func confinementWord(info ConfinementInfo, mode domain.Mode, confine bool) string {
+	switch {
+	case mode != domain.ModeAuto:
+		return ""
+	case !confine:
+		return unconfinedWord
+	case info.Caps.FSWrite:
+		return confinedWord
+	default:
+		return gatedWord
+	}
 }
 
 // throughputSuffix is the status line's "· N tok/s" readout while a Turn generates, timed off

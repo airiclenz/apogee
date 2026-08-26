@@ -10,6 +10,18 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **The footer says whether Auto is confined.** On the `auto` rung — and only there, because
+  confinement attaches to Auto's blast radius alone (ADR 0012) — the footer's mode marker now
+  carries a second word for what the next tool call would actually run under: `confined` (fenced
+  to the workspace by a backend that can enforce it), `gated` (the backend cannot fence here, so
+  every terminal command falls back to approval — the wording `probe.DegradedNotice` already uses),
+  or `unconfined` (the user's own "I am the sandbox"). The word is read LIVE off the engine, so a
+  `/confine off` or `/confine on` moves it on the next frame rather than repeating a boot value.
+  `confined` and `gated` ride inside the marker's own styled run in the mode's colour; `unconfined`
+  takes the error tone on the footer's black field — the offline segment's treatment — because it
+  is the one state where Auto runs with the user's full privileges. A window too narrow for both
+  ends still drops the whole marker, so the word can never be the half that survives a clip.
+
 - **A Firing whose final Turn was abandoned now says so where a Firing is read.** `schedule.Outcome`
   gained `Faulted` and `Fault` beside `Denied` — pass-through fields the scheduler library reads no
   more than it reads the others (ADR 0033) — and both runners copy them off `run.Result`, so the

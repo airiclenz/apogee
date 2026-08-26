@@ -684,6 +684,15 @@ repo you cloned must never be able to make that claim for you.
 row's `auto` value carries that sentence beside it in the value list — before the ⏎ that
 takes the rung — and repeats it as the row's note once the escalation lands.
 
+The footer says it while Auto runs. On the auto rung the mode marker at the footer's right
+edge carries a second word for the blast radius: **`confined`** — commands run fenced to the
+workspace by a backend that can enforce it — **`gated`**, where the backend cannot fence, so
+each terminal command asks for approval instead, and **`unconfined`**, painted in the error
+colour, where Auto runs every command with your full privileges. The word is the live setting,
+so a `/confine off` or `/confine on` shows up in the footer the moment it takes; the three
+lower rungs carry no word at all, because the flag is read by auto mode only. `/confine` is
+where it changes, and `/confine status` is the long form of the same fact.
+
 ## The Console family
 
 Nearly every tool apogee gives a model is one shot: `terminal` runs a command, the command ends,

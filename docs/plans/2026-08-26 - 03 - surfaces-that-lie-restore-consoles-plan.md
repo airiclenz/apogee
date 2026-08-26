@@ -489,7 +489,13 @@ records the value it was asked to apply).
 
 ---
 
-## 8. The footer says whether Auto is confined
+## 8. The footer says whether Auto is confined — ✅ DONE (2026-08-26)
+
+NOTES (2026-08-26): the item's binding standard asks that `TestFooterModeMarkerLeadsWithTheModeSymbol` pass unchanged; it cannot — its Auto case builds a fake engine whose blast radius is off, so that rung's marker now legitimately ends `⏵⏵ auto · unconfined` and the flat-suffix assertion had to grow a per-case `tail`. The two assertions the standard is about are untouched and still pass as written: the symbol leads (`modeMarker`), and the symbol+word are ONE styled run in the mode's colour.
+
+NOTES (2026-08-26): `layout.md` is edited though it is not in the item's Files list — it is the TUI layout/rendering spec and enumerates the mode marker's content paragraph by paragraph, so a footer element missing from it would make the spec lie. One new paragraph, beside the marker's symbol paragraph.
+
+NOTES (2026-08-26): the `ISSUES.md` line removed reads "display somewhere **if** apogee is confined or not" — the acceptance command's `grep` spells it "id"; the line is gone either way.
 
 **What:** the "display confined" idea (`ISSUES.md:27`) plus ratified call 4's footer half. The mode
 marker at the footer's right edge (`model.go:2644-2645`, `modeMarker :2797`) gains a confinement

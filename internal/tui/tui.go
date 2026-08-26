@@ -1336,12 +1336,13 @@ type ResumedSession struct {
 }
 
 // ConfinementInfo is the host's confinement situation, resolved once by the composition root
-// and rendered by the /confine status report: which Confiner backend answered, what that
-// backend can actually enforce here, and the host id an `unconfined-hosts:` acknowledgement is
-// matched against (ADR 0012, amendment 2026-07-21). It is the diagnostic half of /confine —
-// the *effective* setting is read live off the [Engine], not from here, because the user can
-// change it mid-session. The zero value means "the binary wired nothing"; the report says
-// unknown rather than guessing.
+// and rendered by the /confine status report and the footer's confinement word: which Confiner
+// backend answered, what that backend can actually enforce here, and the host id an
+// `unconfined-hosts:` acknowledgement is matched against (ADR 0012, amendment 2026-07-21).
+// It is the diagnostic half of /confine — the *effective* setting is read live off the [Engine],
+// not from here, because the user can change it mid-session. The zero value means "the binary
+// wired nothing"; the report says unknown rather than guessing, and the footer's word reads it as
+// a backend that cannot promise a fence.
 type ConfinementInfo struct {
 	Backend string                 // the backend's human label ("landlock", "seatbelt", "deny"); "" ⇒ unknown
 	Caps    domain.ConfinementCaps // what it can enforce on THIS host — FSWrite false is the degraded case

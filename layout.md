@@ -1256,6 +1256,18 @@ confinement overlay's "the current mode is ask before") it is the word by itself
 would only be noise. A mode off the ladder states its word with no glyph rather than borrowing
 another rung's shape.
 
+**And its confinement word.** On the `auto` rung — and only there — the marker carries a second
+word after a `·`, for the blast radius that rung is actually running with: `confined` (fenced to
+the workspace by a backend that can enforce it), `gated` (the backend cannot fence here, so every
+terminal command falls back to approval), or `unconfined` (the user's own "I am the sandbox").
+Confinement attaches to Auto alone (ADR 0012), so the three lower rungs carry no word: they gate
+every subprocess call through Approval whatever the flag says, and a word there would name a fence
+nothing reads. `confined` and `gated` ride inside the marker's own styled run, taking the mode's
+colour with the glyph and the word; `unconfined` is split off into the `error` tone on the same
+black field — the offline segment's treatment — because it is the one state where Auto runs with
+the user's full privileges, and the footer says so in the colour that means it. The word is read
+live, so a `/confine off` moves it on the next frame.
+
 **What it is.** ONE frameless row below the prompt box, which closes its own `╰─╯` frame. The
 footer used to be three rows of chrome — a `├──┤` divider standing in for the edge the box was
 missing, the content between two `│` bars, and a `╰──╯` rule under it — and it now takes the

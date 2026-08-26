@@ -83,15 +83,20 @@ func TestModeColorDistinct(t *testing.T) {
 // — and the glyph is part of the SAME styled run as the word rather than a separately coloured
 // badge beside it. The styled assertion is the point: a glyph rendered under its own style would
 // read identically once the escapes are stripped, and is the exact defect this forbids.
+//
+// Auto's marker now carries a second word — the blast radius (confinementWord) — so the rung whose
+// marker grew states its tail here: a freshly built fake engine confines nothing, so the word is
+// "unconfined" and it trails the marker's own styled run in the error tone. The symbol still leads,
+// which is what this test is for.
 func TestFooterModeMarkerLeadsWithTheModeSymbol(t *testing.T) {
 	for _, tc := range []struct {
-		mode          domain.Mode
-		symbol, label string
+		mode                domain.Mode
+		symbol, label, tail string
 	}{
-		{domain.ModePlan, "⊞", "plan"},
-		{domain.ModeAskBefore, "◐", "ask before"},
-		{domain.ModeAllowEdits, "✔", "allow edits"},
-		{domain.ModeAuto, "⏵⏵", "auto"},
+		{domain.ModePlan, "⊞", "plan", ""},
+		{domain.ModeAskBefore, "◐", "ask before", ""},
+		{domain.ModeAllowEdits, "✔", "allow edits", ""},
+		{domain.ModeAuto, "⏵⏵", "auto", " · " + unconfinedWord},
 	} {
 		t.Run(string(tc.mode), func(t *testing.T) {
 			m, _ := newModeModel(t, tc.mode)
@@ -103,8 +108,9 @@ func TestFooterModeMarkerLeadsWithTheModeSymbol(t *testing.T) {
 			}
 			// The marker still ends the line bodyIndent short of the edge — the symbol joined the
 			// slot, it did not displace the word from the column the gauge above it ends in.
-			if flat := ansiPattern.ReplaceAllString(footer, ""); !strings.HasSuffix(flat, want+bodyIndent) {
-				t.Errorf("footer = %q, want it to end %q", flat, want+bodyIndent)
+			end := want + tc.tail + bodyIndent
+			if flat := ansiPattern.ReplaceAllString(footer, ""); !strings.HasSuffix(flat, end) {
+				t.Errorf("footer = %q, want it to end %q", flat, end)
 			}
 			if run := m.th.footerText.Foreground(m.th.modeColor(tc.mode)).Render(want); !strings.Contains(footer, run) {
 				t.Errorf("footer does not carry %q as ONE styled run in the mode's own colour: %q", want, footer)
@@ -147,6 +153,40 @@ func TestModelShiftTabCyclesWhileBusy(t *testing.T) {
 			}
 			if got := eng.modesSet(); len(got) != 1 || got[0] != domain.ModeAllowEdits {
 				t.Fatalf("engine SetMode = %v, want [allow-edits]", got)
+			}
+		})
+	}
+}
+
+// TestConfinementWordFollowsModeFlagAndBackend pins the footer's confinement word to the three
+// cells Auto actually has, and to silence everywhere else. The rung is the gate: confinement
+// attaches to Auto alone (ADR 0012), so the lower three say nothing about it however the flag and
+// the backend stand — a word there would name a fence nothing reads. Inside Auto the flag outranks
+// the backend ("unconfined" is the user's own decision, capable host or not) and the backend
+// decides the remaining two: a fence it can keep reads "confined", one it cannot reads "gated" —
+// the same word probe.DegradedNotice uses for that host.
+func TestConfinementWordFollowsModeFlagAndBackend(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name    string
+		info    ConfinementInfo
+		mode    domain.Mode
+		confine bool
+		want    string
+	}{
+		{"auto confined on a fencing backend", capableHost, domain.ModeAuto, true, "confined"},
+		{"auto gated where the backend cannot fence", degradedHost, domain.ModeAuto, true, "gated"},
+		{"auto unconfined by the user's own decision", capableHost, domain.ModeAuto, false, "unconfined"},
+		{"auto unconfined outranks a degraded backend", degradedHost, domain.ModeAuto, false, "unconfined"},
+		{"auto with no backend wired reads as gated", ConfinementInfo{}, domain.ModeAuto, true, "gated"},
+		{"allow edits says nothing", capableHost, domain.ModeAllowEdits, true, ""},
+		{"ask before says nothing", capableHost, domain.ModeAskBefore, false, ""},
+		{"plan says nothing", degradedHost, domain.ModePlan, true, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := confinementWord(tc.info, tc.mode, tc.confine); got != tc.want {
+				t.Errorf("confinementWord(%+v, %q, confine=%v) = %q, want %q",
+					tc.info, tc.mode, tc.confine, got, tc.want)
 			}
 		})
 	}

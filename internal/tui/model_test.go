@@ -5678,6 +5678,57 @@ func TestFooterContentStripsEscapes(t *testing.T) {
 	}
 }
 
+// TestFooterMarkerSaysWhetherAutoIsConfined pins the footer's confinement word to the LIVE blast
+// radius: Auto's marker states what the next tool call would actually run under, and /confine moves
+// that mid-session, so the word is read off the engine rather than off the boot Options the pane
+// was built with. The three assertions are the three things a human reads it for — that a fenced
+// Auto says so, that turning the fence off changes the word (in the error tone, the one state where
+// Auto runs with their full privileges), and that a rung which never reads the flag stays silent.
+func TestFooterMarkerSaysWhetherAutoIsConfined(t *testing.T) {
+	eng := &fakeEngine{confine: true}
+	m := newTestModelEng(t, eng, confineOpts(capableHost, domain.ModeAuto))
+
+	flat := ansiPattern.ReplaceAllString(m.footerContent(120), "")
+	if want := "auto · confined" + bodyIndent; !strings.HasSuffix(flat, want) {
+		t.Errorf("footer = %q, want it to end %q", flat, want)
+	}
+
+	// /confine off through the real key path: the same model, the same width, one word different.
+	m.input.SetValue("/confine off")
+	m = step(t, m, keyEnter())
+
+	footer := m.footerContent(120)
+	flat = ansiPattern.ReplaceAllString(footer, "")
+	if want := "auto · unconfined" + bodyIndent; !strings.HasSuffix(flat, want) {
+		t.Errorf("footer after /confine off = %q, want it to end %q", flat, want)
+	}
+	if run := m.th.footerText.Foreground(m.th.errorFg).Render(" · " + unconfinedWord); !strings.Contains(footer, run) {
+		t.Errorf("footer does not carry %q in the error tone: %q", unconfinedWord, footer)
+	}
+
+	// A window too narrow for both ends drops the marker WHOLE — the confinement word cannot be the
+	// half that survives, because a clipped marker would name a blast radius the session is not in.
+	if narrow := ansiPattern.ReplaceAllString(m.footerContent(30), ""); strings.Contains(narrow, "auto") ||
+		strings.Contains(narrow, confinedWord) {
+		t.Errorf("narrow footer = %q, want the whole mode marker dropped", narrow)
+	}
+}
+
+// TestFooterMarkerCarriesNoConfinementWordBelowAuto proves the lower rungs' markers are untouched:
+// they gate every subprocess call through Approval whatever the flag says, so there is no blast
+// radius to name — and the word must not leak in from a confined engine underneath them.
+func TestFooterMarkerCarriesNoConfinementWordBelowAuto(t *testing.T) {
+	for _, mode := range []domain.Mode{domain.ModePlan, domain.ModeAskBefore, domain.ModeAllowEdits} {
+		t.Run(string(mode), func(t *testing.T) {
+			m := newTestModelEng(t, &fakeEngine{confine: true}, confineOpts(capableHost, mode))
+			flat := ansiPattern.ReplaceAllString(m.footerContent(120), "")
+			if want := modeMarker(mode) + bodyIndent; !strings.HasSuffix(flat, want) {
+				t.Errorf("footer = %q, want it to end %q with no confinement word", flat, want)
+			}
+		})
+	}
+}
+
 // TestPopupBudgetShrinksToNothing pins the D2 floor change (item 7) and the body floor that
 // followed it. The row budget used to bottom out at six rows — `max(6, viewport.Height()-3)` — so
 // on a window with four rows to give it promised a pane the frame could not hold, and the surplus
