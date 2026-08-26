@@ -217,6 +217,53 @@ of that run.
   fixed the ordering (sentence, then marker); a narrow-width treatment — marker first, or a wrapped
   row — was out of its scope and is the design call to settle.
 
+### Surfaces-that-lie / restore-consoles residuals — deferred out of the 2026-08-26 run
+
+**Status:** found 2026-08-26 at the close of the surfaces-that-lie / restore-consoles plan
+(`docs/plans/archived/2026-08-26 - 03 - surfaces-that-lie-restore-consoles-plan.md`), deferred out
+of that run.
+
+- [ ] **`settingsPersistedValue` still answers `mode` from the journal.** The `mode` row now reads
+  the live engine wherever a sub-list opens on it (`settingsCurrentValue`,
+  `internal/tui/settings.go:1130`), but `settingsPersistedValue`
+  (`internal/tui/settings.go:1000`) still answers from the pane's own edit journal
+  (`internal/tui/settings.go:1001`). Only the reset path reads it — the one remaining stale-mode
+  read left standing by the run.
+
+- [ ] **ADR 0041 still says a watcher apply journals the ` *` marker.** Decision 8
+  (`docs/adr/0041-the-config-file-is-watched.md:155`) and its decision-9 recap (`:165`) both state
+  that a key the watcher applies journals its ` *` marker exactly as a pane edit does — superseded
+  by the ` ~` marker this run gave watcher-sourced edits, and left unamended.
+
+- [ ] **`internal/domain/doc.go:71` still counts seven `ToolSummary` variants.** The package tour
+  says toolsummary.go carries "ToolSummary and its seven variants"; with `ChangedFiles` there are
+  now eight.
+
+- [ ] **A red slot and a ✓ can land on one delegation row.** A collapsed delegation's verdict is
+  derived from the head's summary TEXT (`summary.failed = failedSummary(head.tool.Summary.Text)`,
+  `internal/tui/subagentblock.go:595`), so a delegation that SUCCEEDED whose quoted one-line
+  report happens to open `error: …` paints the slot red while `subAgentFinished`
+  (`internal/tui/subagentblock.go:403`) grants it the done ✓ — the two answers the landed comment
+  says are one.
+
+- [ ] **A never-ran delegation whose refusal stays promoted wears no ▶.** At roughly 110 columns
+  and wider the promote-guard keeps the one-line refusal in the outcome slot (`guardRefuses`,
+  `internal/tui/toolleader.go:88`; the demote it would otherwise force is
+  `internal/tui/subagentblock.go:261`), and the row then carries no expand indicator — so the
+  prompt body `unframedSubAgentView` (`internal/tui/subagentblock.go:249`) lays out is unreachable
+  at exactly those widths.
+
+- [ ] **At 80 columns a long refusal clips the target off a never-ran delegation's collapsed row.**
+  The header's target (`subAgentTarget`, `internal/tui/toolregistry.go:1037`) is cut away
+  entirely by a long refusal in the slot and only reappears around 120 columns, so the narrowest
+  terminals see neither the target nor the prompt.
+
+- [ ] **`loop.go` dispatches native tool calls unfiltered — the probe is now stricter than the
+  loop.** `probe model` no longer counts a `tool_calls` entry missing a name or an id as native
+  evidence, but `assembleResponse` (`internal/agent/loop.go:582`; the pass-through is
+  `calls := nativeCalls` at `:584`) applies no such filter, so a real id-less native call still
+  runs and sends back a tool result whose `tool_call_id` drops off the wire.
+
 ## Parked / deferred work
 
 Live, deliberately deferred work only. Each entry records *enough* design that we don't re-derive
