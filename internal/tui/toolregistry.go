@@ -183,7 +183,8 @@ const askUserToolName = "ask_user"
 // dumped into the transcript. A summary-bearing tool whose floor lays out a BODY has to register a
 // body hook as well, because the typed path skips the extractor altogether
 // (toolView.absorbProse) and the body would simply go missing: read_file, view_diff and git_status
-// each set one. The rest quote their fixed sentence or hand free-form output (a command run, a
+// each set one. git_diff_range sets one ahead of that need — its floor lays out a body too, so the
+// day it reports a typed outcome the card keeps the output git printed instead of losing it. The rest quote their fixed sentence or hand free-form output (a command run, a
 // sub-agent report) on as a body the collapsed paint shows the gist of: the chat compresses it
 // to a first line plus a remainder count until the block is expanded, and the model gets the
 // full text either way. One tool's result is nobody's words but the human's — ask_user's, which is
@@ -360,7 +361,8 @@ var toolRegistry = map[string]toolPresenter{
 		verb:    "diffing",
 		target:  refRangeTarget,
 		detail:  outputDetail,        // the plain floor: output this package cannot walk as a diff
-		stat:    diffLinesStat,       // "+A −R", counted off the unified diff the tool printed
+		stat:    diffLinesStat,       // "+A −R", counted off the regions that walk recovers
+		body:    gitDiffRangeBody,    // that same plain floor, kept beneath the row on the typed path
 		regions: gitDiffRangeRegions, // git's own diff, cut into numbered regions file by file
 	},
 	"git_status": {
@@ -447,11 +449,14 @@ var toolRegistry = map[string]toolPresenter{
 //   - off the call's OWN ARGUMENTS (writtenLinesStat, the edit stats) — a write's line count and
 //     an edit's diffstat are facts about the REQUEST, so the slot can say them without the tool
 //     reporting anything and without a byte more crossing the wire (ADR 0031);
-//   - off a fixed HEADER the tool writes into its own output (testVerdictStat, foundFilesStat,
-//     commitCountStat, commitHashStat, diffLinesStat). This is the reading the
+//   - off the OUTPUT the tool printed (testVerdictStat, foundFilesStat, commitCountStat,
+//     commitHashStat off a fixed header the tool writes into it; diffLinesStat off git's own diff
+//     grammar, read through the very walk the body beneath it is painted from, so the slot and
+//     those rows cannot come to count different things). This is the reading the
 //     file's opening note warns about, and it is taken only because design call 14 rules out
-//     growing the engine for presentation. Every one of them is anchored on a token the tool
-//     formats deliberately and every one is TOTAL: a shape it does not recognise returns false,
+//     growing the engine for presentation. Every one of them is anchored on a token its writer
+//     formats deliberately — the tool's own header, or git's diff grammar — and every one is
+//     TOTAL: a shape it does not recognise returns false,
 //     which leaves that tool's prose floor in the slot rather than a wrong number. A wording
 //     change in internal/tools degrades such a card to what it showed before this existed.
 //
@@ -818,24 +823,69 @@ func commitHashStat(res domain.ToolResult) (statValue, bool) {
 }
 
 // diffLinesStat words git_diff_range's slot as the diffstat of the unified diff the tool printed,
-// counting the tagged lines and skipping the "+++"/"---" file headers that are not content. A call
-// asking for `--stat` or `--name-only` prints no tagged lines at all and keeps its prose floor,
-// which is the honest answer: that output states its own totals.
+// counted off the SAME walk the body beneath it is painted from (gitDiffFileSections): a region
+// holds changed lines only (diffRegionCutter), so every section's regions add up to exactly the
+// lines git tagged. Added is the sum of the Inserted lines and removed the sum of the Removed
+// ones. Reading the walk rather than the raw text is what keeps the slot and the rows under it
+// counting one thing — and it is the fix for a removed line whose content begins "--" (a
+// "--flag"), or an added one beginning "++" (a "++i"), which a bare prefix test over the output
+// mistakes for the "---"/"+++" file headers and drops.
+//
+// A walk that REFUSES — it is all-or-nothing, so a binary section, a rename, a `--stat` call or
+// any line it cannot place yields nothing (gitDiffFileSections) — falls back to counting the
+// tagged lines directly, with the one state bit whose absence made the old prefix test wrong: a
+// "---"/"+++" line is a file header only OUTSIDE a hunk, so the fallback tracks inHunk exactly as
+// gitDiffWalk does (a "diff --git" line clears it, an "@@" line sets it) and a "--"-prefixed line
+// standing inside a hunk counts as the removal it is.
+//
+// Either path answers the same way when nothing was tagged at all: a call asking for `--stat` or
+// `--name-only` keeps its prose floor, which is the honest answer — that output states its own
+// totals.
 func diffLinesStat(res domain.ToolResult) (statValue, bool) {
-	added, removed := 0, 0
-	for _, ln := range splitLines(res.Content) {
+	added, removed := walkedDiffCounts(res.Content)
+	if added == 0 && removed == 0 {
+		return statValue{}, false
+	}
+	return diffedStat(added, removed), true
+}
+
+// walkedDiffCounts is diffLinesStat's counting half: the regions the diff walk recovered, or —
+// when it recovered none — the header-aware tagged-line count that stands in for them.
+func walkedDiffCounts(content string) (added, removed int) {
+	sections := gitDiffFileSections(content)
+	if len(sections) == 0 {
+		return taggedDiffCounts(content)
+	}
+	for _, section := range sections {
+		for _, region := range section.Regions {
+			added += len(region.Inserted)
+			removed += len(region.Removed)
+		}
+	}
+	return added, removed
+}
+
+// taggedDiffCounts counts the tagged lines of output the walk refused. It is the old loop plus the
+// state bit it was missing — inHunk, kept exactly as gitDiffWalk keeps it — and not a second
+// parser: it places no line, it only knows whether the one in front of it stands inside a hunk,
+// which is the whole difference between a file header and a line of content that happens to spell
+// one.
+func taggedDiffCounts(content string) (added, removed int) {
+	inHunk := false
+	for _, ln := range splitLines(content) {
 		switch {
-		case strings.HasPrefix(ln, "+++"), strings.HasPrefix(ln, "---"):
+		case strings.HasPrefix(ln, gitDiffFilePrefix):
+			inHunk = false
+		case strings.HasPrefix(ln, gitDiffHunkPrefix):
+			inHunk = true
+		case !inHunk && (strings.HasPrefix(ln, "+++") || strings.HasPrefix(ln, "---")):
 		case strings.HasPrefix(ln, "+"):
 			added++
 		case strings.HasPrefix(ln, "-"):
 			removed++
 		}
 	}
-	if added == 0 && removed == 0 {
-		return statValue{}, false
-	}
-	return diffedStat(added, removed), true
+	return added, removed
 }
 
 // ----------------------------------------------------------------------------
@@ -1376,5 +1426,18 @@ func readFileBody(res domain.ToolResult) []detailLine {
 // body's, so the two halves of the card say different things about one report rather than the
 // same thing twice.
 func gitStatusBody(res domain.ToolResult) []detailLine {
+	return outputBody(res.Content)
+}
+
+// gitDiffRangeBody keeps git's printed output beneath the branch on the typed path, for the same
+// reason gitStatusBody does: this entry's floor is outputDetail, and a result carrying a
+// domain.ToolSummary skips the detail extractor altogether (toolView.absorbProse), so without a
+// body hook such a result would leave a diffstat sitting over nothing.
+//
+// It is a FLOOR and rarely the reading that shows: output the diff walk can place is repainted as
+// the numbered per-file regions (gitDiffRangeRegions), which replace the body wholesale. What
+// renders from here is the output that walk refuses — a binary section, a rename, a `--stat`
+// call — which is the plain reading such a result has always had.
+func gitDiffRangeBody(res domain.ToolResult) []detailLine {
 	return outputBody(res.Content)
 }

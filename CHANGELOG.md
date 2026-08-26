@@ -276,6 +276,21 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **`git_diff_range`'s diffstat counts the diff it is painting, not the lines that look like
+  headers.** The slot was counted by prefix over git's raw output, skipping every line beginning
+  `---` or `+++` as a file header — but git tags a hunk's lines in ONE cell, so a removed line whose
+  content is `--flag` arrives as `---flag` and an added `++i` as `+++i`. Both were silently dropped,
+  and a card painting three additions and two removals said `+2 −1` (F-24). `diffLinesStat` now sums
+  the `Inserted`/`Removed` lines of the very regions the body beneath it is painted from
+  (`gitDiffFileSections`), where a line's role is settled by WHERE it stands rather than by what it
+  spells — so the slot and the rows under it can no longer count different things. Output that walk
+  refuses (a binary section, a rename, a `--stat` call) falls back to the old tagged-line loop plus
+  the one state bit it lacked: a `---`/`+++` line is a file header only OUTSIDE a hunk, tracked
+  exactly as the walk tracks it. Output that tags nothing at all still declines and keeps the tool's
+  prose floor, which is the honest answer — a `--stat` call states its own totals. The entry also
+  gains a body hook, so the day this tool reports a typed outcome the card keeps the diff git
+  printed instead of leaving a diffstat over nothing.
+
 - **`git_status`' outcome slot counts what the tool reported, not what its sentences say.** The
   card's slot was worded by matching the report's prose: any result containing `Working tree clean`
   read `0 changed`, and a path is DATA inside a section list — a file literally named

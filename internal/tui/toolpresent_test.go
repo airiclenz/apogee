@@ -2767,18 +2767,13 @@ func gitDiffCard(t *testing.T, output []string) toolView {
 	return tv
 }
 
-// TestGitDiffRangeRecoversARegionPerFileSection pins the recovery ratified call 10 asks for. git
-// prints a diff that SPANS files and elides everything between its hunks, so neither the file a
-// line belongs to nor the number it sits on can be counted from the body the way view_diff's can —
-// both are read off git's own headers, the "diff --git" line and the "@@" line.
-//
-// The body that comes back is one section per file: a muted row naming the file, then that file's
-// regions beneath it. Each section sizes its OWN number gutter (alpha's two digits, beta's three),
-// which is what keeps two files' numbering from being read as one file's.
-func TestGitDiffRangeRecoversARegionPerFileSection(t *testing.T) {
-	t.Parallel()
-
-	tv := gitDiffCard(t, []string{
+// regionPerFileSectionDiff is the two-file diff TestGitDiffRangeRecoversARegionPerFileSection pins
+// the recovered regions of. It is shared rather than repeated because the diffstat in that card's
+// slot is counted off those same regions (diffLinesStat), and the two readings are only worth
+// comparing while they are readings of ONE output
+// (TestGitDiffRangeCountsAgreeAcrossTheWalkAndTheFallback).
+func regionPerFileSectionDiff() []string {
+	return []string{
 		"diff --git a/alpha.go b/alpha.go",
 		"index 1111111..2222222 100644",
 		"--- a/alpha.go",
@@ -2798,7 +2793,21 @@ func TestGitDiffRangeRecoversARegionPerFileSection(t *testing.T) {
 		"+BETA",
 		"+extra",
 		" gamma",
-	})
+	}
+}
+
+// TestGitDiffRangeRecoversARegionPerFileSection pins the recovery ratified call 10 asks for. git
+// prints a diff that SPANS files and elides everything between its hunks, so neither the file a
+// line belongs to nor the number it sits on can be counted from the body the way view_diff's can —
+// both are read off git's own headers, the "diff --git" line and the "@@" line.
+//
+// The body that comes back is one section per file: a muted row naming the file, then that file's
+// regions beneath it. Each section sizes its OWN number gutter (alpha's two digits, beta's three),
+// which is what keeps two files' numbering from being read as one file's.
+func TestGitDiffRangeRecoversARegionPerFileSection(t *testing.T) {
+	t.Parallel()
+
+	tv := gitDiffCard(t, regionPerFileSectionDiff())
 
 	wantRegions := []domain.EditRegion{
 		{
@@ -2975,6 +2984,153 @@ func TestGitDiffRangeFallsBackToPlainOutputWholesale(t *testing.T) {
 				t.Errorf("body:\n--- got ---\n%s--- want (the plain output rendering) ---\n%s", got, want)
 			}
 		})
+	}
+}
+
+// TestGitDiffRangeStatCountsContentThatSpellsAFileHeader is F-24. git tags a hunk's lines in ONE
+// cell, so a removed line whose content begins "--" arrives as "---flag" and an added one
+// beginning "++" as "+++i" — indistinguishable, by prefix alone, from the "---"/"+++" file headers
+// that are not content. Counting by prefix therefore SKIPPED exactly those lines and the card
+// under-reported the change it was painting ("+2 −1" for this diff).
+//
+// The count now comes off the walk that paints the body, where a line's role is settled by WHERE
+// it stands rather than by what it spells, so the slot and the rows beneath it say the same thing.
+func TestGitDiffRangeStatCountsContentThatSpellsAFileHeader(t *testing.T) {
+	t.Parallel()
+
+	tv := gitDiffCard(t, []string{
+		"diff --git a/alpha.go b/alpha.go",
+		"index 1111111..2222222 100644",
+		"--- a/alpha.go",
+		"+++ b/alpha.go",
+		"@@ -1,3 +1,3 @@",
+		" one",
+		"---flag",
+		"+++i",
+		" three",
+		"diff --git a/beta.go b/beta.go",
+		"index 3333333..4444444 100644",
+		"--- a/beta.go",
+		"+++ b/beta.go",
+		"@@ -10,3 +10,4 @@",
+		" alpha",
+		"-beta",
+		"+BETA",
+		"+extra",
+		" gamma",
+	})
+
+	if want := "+3 −2"; tv.Summary.Text != want {
+		t.Errorf("slot = %q, want %q — the two lines spelling a file header are content, not headers", tv.Summary.Text, want)
+	}
+	body := bodyText(tv)
+	for _, want := range []string{"- --flag", "+ ++i"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("the body lost %q, which the slot counted:\n%s", want, body)
+		}
+	}
+}
+
+// TestGitDiffRangeStatFallsBackHeaderAware: the walk is all-or-nothing, so a diff whose second file
+// is binary yields no regions at all and the count falls back to reading the tagged lines. The
+// fallback is the old loop plus the one state bit it lacked — a "---"/"+++" line is a file header
+// only OUTSIDE a hunk — so the first file's "--flag" removal is still counted where the old loop
+// dropped it, and the two file headers above it are still skipped.
+//
+// Output that tags nothing at all (a `--stat` call, which states its own totals) declines, leaving
+// the tool's prose floor in the slot rather than a number this package invented.
+func TestGitDiffRangeStatFallsBackHeaderAware(t *testing.T) {
+	t.Parallel()
+
+	binary := []string{
+		"diff --git a/alpha.go b/alpha.go",
+		"index 1111111..2222222 100644",
+		"--- a/alpha.go",
+		"+++ b/alpha.go",
+		"@@ -1,3 +1,3 @@",
+		" one",
+		"---flag",
+		"+FLAG",
+		" three",
+		"diff --git a/logo.png b/logo.png",
+		"index 3333333..4444444 100644",
+		"Binary files a/logo.png and b/logo.png differ",
+	}
+	tv := gitDiffCard(t, binary)
+	if len(tv.Regions) != 0 {
+		t.Fatalf("regions = %v, want none — the binary section takes the whole walk with it", tv.Regions)
+	}
+	if want := "+1 −1"; tv.Summary.Text != want {
+		t.Errorf("slot = %q, want %q — the fallback counts a removal that spells a file header", tv.Summary.Text, want)
+	}
+
+	stat := []string{
+		" alpha.go | 2 +-",
+		" 1 file changed, 1 insertion(+), 1 deletion(-)",
+	}
+	if got, ok := diffLinesStat(domain.ToolResult{Content: strings.Join(stat, "\n")}); ok {
+		t.Errorf("diffLinesStat = %v on a --stat call, want the prose floor: that output states its own totals", got)
+	}
+}
+
+// TestGitDiffRangeCountsAgreeAcrossTheWalkAndTheFallback: the fallback exists for output the walk
+// refuses, so the two must never be able to answer differently about output it accepts. Run over
+// the same fixture the region recovery is pinned on, both count the diff git printed.
+func TestGitDiffRangeCountsAgreeAcrossTheWalkAndTheFallback(t *testing.T) {
+	t.Parallel()
+
+	content := strings.Join(regionPerFileSectionDiff(), "\n")
+	walkedAdded, walkedRemoved := walkedDiffCounts(content)
+	if walkedAdded != 3 || walkedRemoved != 2 {
+		t.Errorf("walked = +%d −%d, want +3 −2", walkedAdded, walkedRemoved)
+	}
+	fallbackAdded, fallbackRemoved := taggedDiffCounts(content)
+	if fallbackAdded != walkedAdded || fallbackRemoved != walkedRemoved {
+		t.Errorf("fallback = +%d −%d, walk = +%d −%d — one output, two answers",
+			fallbackAdded, fallbackRemoved, walkedAdded, walkedRemoved)
+	}
+}
+
+// The day git_diff_range reports a typed outcome must not COST it the diff it printed. A result
+// carrying a domain.ToolSummary skips the prose extractor altogether (toolView.absorbProse), which
+// is exactly the trap git_status walked into: a count on a row with nothing under it. This block is
+// covered twice over — the regions hook repaints a walkable diff as its numbered rows, and the body
+// hook keeps the plain output for the diff that walk refuses — and this pins both.
+func TestGitDiffRangeBodySurvivesATypedSummary(t *testing.T) {
+	t.Parallel()
+
+	card := func(output []string) toolView {
+		tv := presentToolCall(domain.ToolCall{ID: "1", Tool: "git_diff_range",
+			Arguments: []byte(`{"base":"main","head":"HEAD"}`)}, "", workspaceRoot{})
+		tv.enrichWithResult(domain.ToolResult{
+			CallID:  "1",
+			Content: strings.Join(output, "\n"),
+			Summary: domain.DiffStat{Added: 3, Removed: 2},
+		}, workspaceRoot{})
+		return tv
+	}
+
+	walked := card(regionPerFileSectionDiff())
+	if len(walked.Regions) == 0 {
+		t.Fatalf("a walkable diff carrying a typed summary lost its regions")
+	}
+	body := bodyText(walked)
+	for _, want := range []string{"alpha.go", "- four", "+ FOUR", "beta.go", "- beta", "+ BETA"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("the diff lost %q beneath its typed slot:\n%s", want, body)
+		}
+	}
+	if want := "+3 −2"; walked.Summary.Text != want {
+		t.Errorf("slot = %q, want %q", walked.Summary.Text, want)
+	}
+
+	unwalkable := []string{
+		" alpha.go | 2 +-",
+		" 1 file changed, 1 insertion(+), 1 deletion(-)",
+	}
+	plain := card(unwalkable)
+	if got, want := detailDump(plain.Details.all()), detailDump(outputBody(strings.Join(unwalkable, "\n"))); got != want {
+		t.Errorf("body:\n--- got ---\n%s--- want (the plain output the floor renders) ---\n%s", got, want)
 	}
 }
 

@@ -618,9 +618,11 @@
 // verb, target, stat — plus the detail extractor that stays the FLOOR for a result carrying no summary:
 // a third-party tool, or any built-in that attaches none, still renders its first line exactly as
 // before. What did NOT fully go is the READING: five stat hooks — testVerdictStat, foundFilesStat,
-// commitCountStat, commitHashStat, diffLinesStat — still word their slot off a
-// fixed header the tool writes into its own output, because design call 14 rules out growing the
-// engine for presentation. That residue is a documented trade rather than an oversight, and
+// commitCountStat, commitHashStat, diffLinesStat — still word their slot off the OUTPUT the tool
+// printed rather than a summary it reported, because design call 14 rules out growing the engine
+// for presentation. Four of them read a fixed header the tool writes into that output; the fifth,
+// diffLinesStat, reads git's own diff grammar through the very walk the body beneath it is painted
+// from ([gitDiffFileSections]), so a card's diffstat and its rows count one thing. That residue is a documented trade rather than an oversight, and
 // toolregistry.go states it beside the hooks: each reading is anchored on a token the tool formats
 // deliberately and each is TOTAL, so a shape it does not recognise returns false and leaves that
 // tool's prose floor in the slot rather than a wrong number — a wording change over there degrades

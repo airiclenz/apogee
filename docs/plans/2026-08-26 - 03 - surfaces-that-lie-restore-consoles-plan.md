@@ -646,7 +646,26 @@ passes at 8.
 
 ---
 
-## 11. `git_diff_range`'s diffstat is counted off the walked regions
+## 11. `git_diff_range`'s diffstat is counted off the walked regions — ✅ DONE (2026-08-26)
+
+NOTES (2026-08-26): the dispatch's binding DECISION (item 10's verifier warning) is implemented as
+`body: gitDiffRangeBody` on the `git_diff_range` entry plus `TestGitDiffRangeBodySurvivesATypedSummary`
+(toolpresent_test.go), which pins BOTH halves of the cover: a walkable diff carrying a
+`domain.DiffStat` keeps its numbered per-file regions (the `regions` hook replaces the body
+wholesale), and output the walk refuses keeps the plain `outputBody` reading its `detail: outputDetail`
+floor renders — the layer `absorbProse` skips the moment a typed summary rides. `git_diff_range`
+attaches no summary today; the hook is the standing cover the warning asked for.
+
+NOTES (2026-08-26): `internal/tui/doc.go` is edited beyond the item's Files list — its narration
+said all five residual stat hooks "word their slot off a fixed header the tool writes into its own
+output", which this change makes false for `diffLinesStat` (it now reads git's own diff grammar
+through the body's walk). One clause corrected; the same claim in `toolregistry.go`'s stat-hook
+note, which IS in the Files list, is corrected the same way.
+
+NOTES (2026-08-26): the two-file fixture inside `TestGitDiffRangeRecoversARegionPerFileSection` was
+extracted to a `regionPerFileSectionDiff()` helper (same bytes, same test) so the item's
+"the region and the fallback answers agree on that fixture" test can assert over the SAME output
+rather than a copy that could drift.
 
 **What:** F-24. `internal/tui/toolregistry.go` `diffLinesStat` (`:832-847`) counts from the same
 walk the body is painted from: call `gitDiffFileSections(res.Content)` (`diffbody.go:419`); when it
