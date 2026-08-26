@@ -237,6 +237,9 @@ func (h *uiHarness) runExchange(t *testing.T, ctx context.Context, m Model, eng 
 				t.Fatalf("after approvalReqMsg state = %v, want awaitingApproval", m.state)
 			}
 			h.approvals++
+			// The pane's decision keys are dead until its arming tick lands (approval.go), so
+			// deliver that message first — the real runtime's approvalArmDelay, without the wait.
+			m = step(t, m, approvalArmedMsg{seq: m.approvalSeq})
 			// Model the human pressing "a" (allow): the keypress sends the decision back over
 			// the rendezvous reply channel and unblocks the worker's Approve.
 			m = step(t, m, tea.KeyPressMsg{Code: 'a'})

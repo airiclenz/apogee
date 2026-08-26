@@ -262,6 +262,13 @@ type Model struct {
 	// eight bytes with no no-copy type, riding the value-copied Model exactly as the bare int did
 	// (ADR 0011).
 	approvalSel listCursor
+	// approvalSeq is the approval pane's generation clock: incremented every time a request is
+	// folded in, carried by that pane's arming tick, and matched when the tick lands so a tick
+	// outliving its pane arms nothing (approval.go). It is the spinner's and the heartbeat's gen
+	// idiom, and like theirs it lives on the Model rather than on the payload it names — a clock
+	// that is reset with the question it timed would hand the next pane a number a tick still in
+	// flight already carries. A plain int, riding the value-copied Model (ADR 0011).
+	approvalSeq int
 	// askDraft holds what was in the input box when an ask_user question BORROWED it: the question
 	// empties the box for the answer (D5 pre-selects the first choice on an empty box), and an
 	// unsent message the human was part-way through typing is not the question's to throw away.
@@ -441,24 +448,33 @@ func (s *liveStats) reset() {
 //   - askChecked the ticked set of a MULTI-SELECT ask_user question: one bool per offered choice,
 //     ␣-toggled on the highlighted row, and nil for a single-select question — which has no checked
 //     set at all, so every single-select path stays exactly what it always was.
+//   - approvalArmed is the approval pane's arming latch (approval.go): it rides here because it is
+//     per-QUESTION state, so the one call that forgets the question forgets it too and no dead pane
+//     leaves its keys armed for the next one. The generation that WRITES it is not per-question and
+//     lives on the Model itself (Model.approvalSeq).
 //
 // The state↔payload invariant lives where it always did (finishWorker and the two folds that open a
 // question): pending is non-nil exactly in stateAwaitingApproval, pendingAsk exactly in
 // stateAwaitingAsk. Grouping them changes none of that — it gives the FORGETTING one call site
 // instead of three assignments a fourth payload could quietly be left out of.
 //
-// Two pointers and a bare []bool, no self-referential no-copy type, so it rides the value-copied
-// Model (ADR 0011); the ␣ toggle writes askChecked in place, which is safe because the slice is
+// Two pointers, a bare []bool and a bool — no self-referential no-copy type, so it rides the
+// value-copied Model (ADR 0011); the ␣ toggle writes askChecked in place, which is safe because the slice is
 // allocated fresh for each question (the askReqMsg fold) and no copy of the Model outlives the
 // Update that produced it.
 type pendingDecision struct {
 	pending    *approvalReqMsg
 	pendingAsk *askReqMsg
 	askChecked []bool
+	// approvalArmed reports whether the open approval pane's DECISION keys (a/s/d and the ⏎ that
+	// takes the highlighted row) are live yet. False from the fold until the approvalArmedMsg that
+	// approvalArmDelay schedules lands, so a keystroke already in flight when the pane appeared
+	// cannot answer a call the human has not read (approval.go). Esc is deliberately outside it.
+	approvalArmed bool
 }
 
 // reset lets go of the question and its payload together — the whole value, so a payload added to it
-// later is dropped by the same line that drops these three. It is the Exchange's own boundary
+// later is dropped by the same line that drops these four. It is the Exchange's own boundary
 // (finishWorker): a stop or a fault kills the question along with the worker that asked it, and no
 // path may leave a dead request or a dead checked set standing. The DRAFT the question borrowed the
 // input box from is not in here: handing that back is restoreAskDraft's, because it writes the box
@@ -829,6 +845,11 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		// The worker's Approver hands the gate to the Update loop: record the request and switch
 		// state (approval.go).
 		return m.foldApprovalRequest(msg)
+
+	case approvalArmedMsg:
+		// The tick foldApprovalRequest scheduled has landed, so the frame carrying the pane has
+		// been painted: the decision keys may start answering it (approval.go).
+		return m.foldApprovalArmed(msg)
 
 	case askReqMsg:
 		// The worker's Asker hands a free-text question to the Update loop; record it, switch
@@ -1307,6 +1328,14 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			// Take the approval menu's highlighted row. The menu IS the decision surface now — the
 			// legend that used to spell the letters out is gone, so ⏎ on the pointed-at row is the
 			// way in for a human who has not learnt a/s/d yet (resolveApproval).
+			//
+			// Latched with the decision letters, and for the same reason: the menu opens on Allow,
+			// so an ⏎ already in the buffer when the pane appeared would allow a call nobody read.
+			// Unarmed it is swallowed here rather than falling through to the states below
+			// (approval.go). Esc, the safe direction, is claimed above and stays live throughout.
+			if !m.approvalArmed {
+				return m, nil
+			}
 			return m.resolveApproval()
 		case stateErrored:
 			// Dismiss the error and return to idle so the next message can be sent. With a queue

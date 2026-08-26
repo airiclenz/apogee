@@ -55,6 +55,19 @@ type approvalReqMsg struct {
 	Reply   chan domain.ApprovalDecision
 }
 
+// approvalArmedMsg arms the pending approval prompt's decision keys, one tick after the pane was
+// folded in (approvalArmDelay). It is the answer to "a keystroke already in the input buffer when
+// the pane appears must not answer it": the pane claims a/s/d and ⏎ the moment it opens, so without
+// this the frame that shows the human what they are ruling on can be overtaken by a key they aimed
+// at whatever was on the screen before it.
+//
+// seq names WHICH pane the tick was scheduled for (the spinner's and the heartbeat's gen idiom):
+// Update arms only when it still matches the open pane's approvalSeq, so a tick left over from a
+// pane that has since been answered or cancelled arms nothing.
+type approvalArmedMsg struct {
+	seq int
+}
+
 // askReqMsg hands a pending ask-user question to the Update loop. The uiAsker sends it from
 // the worker goroutine and blocks on Reply; the model renders the question and, on the
 // human's typed-then-submitted answer, sends it back over Reply (P3.11 — the free-text

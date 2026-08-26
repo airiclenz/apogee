@@ -697,7 +697,21 @@ to the executor's rule, not to a literal.
 
 ---
 
-## 11. Approval decision keys arm after one painted frame (F-12)
+## 11. Approval decision keys arm after one painted frame (F-12) — ✅ DONE (2026-08-26)
+
+NOTES (2026-08-26): `approvalSeq` lives on the `Model` beside `approvalSel`, not inside
+`pendingDecision` as the item's text has it — `pendingDecision.reset()` drops the whole value at
+every Exchange boundary, which would reset the generation clock to 0 and hand the next pane a
+number a tick still in flight already carries. Only `approvalArmed` (genuinely per-question) rides
+`pendingDecision`. This is what lets `TestModelApprovalStaleArmDoesNotArmTheNextPane` be written
+exactly as the item specifies it — fold, cancel through the structural path, fold again, deliver
+the FIRST pane's seq.
+NOTES (2026-08-26): `internal/tui/interject_test.go` is touched beyond the item's Files list —
+`TestApprovalAndAskKeysUnchanged/approval decides and stages nothing` drives `'a'` on a folded
+pane of its own and needed the same `armApproval` call the item's named helpers got.
+NOTES (2026-08-26): `sendApproval` also clears `approvalArmed` alongside `m.pending`, so the latch
+never outlives the pane it belongs to (the guard already requires a standing request, so this is
+hygiene rather than a second gate).
 
 **What:** `internal/tui/approval.go:85-87` `handleApprovalKey` sends a decision on `a`/`s`/`d`
 the moment `m.pending != nil`, and `model.go:1305-1310` routes ⏎ to `resolveApproval` on the

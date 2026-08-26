@@ -2,6 +2,7 @@ package tui
 
 import (
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -40,6 +41,14 @@ var approvalMenu = []approvalOption{
 // approval routing is reached (handleKey's "esc" case) precisely so the cancel path is one path.
 var approvalKeys = approvalMenuKeys()
 
+// approvalArmDelay is how long after the approval pane is folded in that its DECISION keys start
+// answering it. It is longer than one painted frame at any sane refresh rate — the Bubble Tea
+// runtime paints on the Update that opened the pane, so the human has seen the call before the
+// tick lands — and far shorter than a human reaction, so an operator who reads the pane and rules
+// on it never waits for anything. What it costs is the only thing it means to cost: a keystroke
+// already in the input buffer when the pane appeared can no longer answer it.
+const approvalArmDelay = 100 * time.Millisecond
+
 func approvalMenuKeys() map[string]domain.ApprovalDecision {
 	keys := make(map[string]domain.ApprovalDecision, len(approvalMenu))
 	for _, opt := range approvalMenu {
@@ -51,17 +60,42 @@ func approvalMenuKeys() map[string]domain.ApprovalDecision {
 }
 
 // foldApprovalRequest folds the worker's approval request into the view: record the request,
-// switch state, and open the menu on Allow.
+// switch state, open the menu on Allow, and arm its decision keys a tick later.
 //
 // The worker's Approver hands the gate to the Update loop; this fold records the request and
 // switches state. View renders the prompt and handleApprovalKey replies on msg.Reply (the C3
 // rendezvous; P2.4).
+//
+// The pane opens with its decision keys DEAD (approvalArmed false) and the returned Tick is what
+// brings them to life one approvalArmDelay later. The arm has to be written from here rather than
+// from the paint because the paint cannot write: View is a value receiver (model.go) and
+// frameOverlays is documented pure, so "the frame has been shown" is only ever knowable in Update,
+// and a Tick scheduled by the Update that opened the pane is the Update-side proof that the frame
+// which followed it is on the screen. approvalSeq names this pane for its own tick so a tick that
+// outlives its pane — answered, cancelled, replaced by the next queued child's request — arms
+// nothing (Update's approvalArmedMsg case) — the counter lives on the Model, not on the question,
+// so it is never reset back onto a number a tick still in flight already carries.
 func (m Model) foldApprovalRequest(msg approvalReqMsg) (tea.Model, tea.Cmd) {
 	m.state = stateAwaitingApproval
 	m.pending = &msg
 	m.approvalSel = listCursor{} // the menu opens on Allow for every request (docs/layout/user-questions-layout.md)
-	m.dismissAutocomplete()      // a stale menu never shares the frame with a decision surface
-	m.layout()                   // the pane the decision turns on outranks the draft's extra rows
+	m.approvalArmed = false      // a key already in flight must not answer the pane it arrived with
+	m.approvalSeq++
+	seq := m.approvalSeq
+	m.dismissAutocomplete() // a stale menu never shares the frame with a decision surface
+	m.layout()              // the pane the decision turns on outranks the draft's extra rows
+	return m, tea.Tick(approvalArmDelay, func(time.Time) tea.Msg { return approvalArmedMsg{seq: seq} })
+}
+
+// foldApprovalArmed brings the open approval pane's decision keys to life. It arms only the pane
+// the tick was scheduled for: a stale generation, or a pane that has since been answered or
+// cancelled, leaves the latch exactly where it was — so a tick can never arm a pane the human has
+// been looking at for less than approvalArmDelay.
+func (m Model) foldApprovalArmed(msg approvalArmedMsg) (tea.Model, tea.Cmd) {
+	if m.pending == nil || msg.seq != m.approvalSeq {
+		return m, nil
+	}
+	m.approvalArmed = true
 	return m, nil
 }
 
@@ -82,8 +116,21 @@ func (m Model) foldApprovalRequest(msg approvalReqMsg) (tea.Model, tea.Cmd) {
 // overlays, where every unclaimed key is swallowed, and this prompt is soft-modal — esc and ⏎ are
 // claimed upstream (handleKey) and everything else has somewhere else to be, the transcript. So the
 // menu claims ↑/↓ and the decision letters and nothing more.
+//
+// The decision letters are also the one thing on this pane that is not live the instant it opens:
+// they answer only once approvalArmed is set (foldApprovalArmed), in the same guard-on-Model-state
+// shape [Model.askChoiceKey] uses, because a pane that claims a/s/d on the frame it appears on can
+// be answered by a keystroke aimed at whatever the human was looking at a moment earlier. An
+// unarmed letter is SWALLOWED rather than passed on: falling through would scroll the transcript
+// under a human who thinks they just ruled, and the pane's own reading of "any other key" is that
+// it was aimed at the transcript. Esc stays live throughout — it is claimed upstream (handleKey),
+// it is the safe direction, and the operator's stop path is never the one made harder to reach.
+// ↑/↓ and the wheel move a highlight rather than answer, so they are outside the latch too.
 func (m Model) handleApprovalKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if decision, ok := approvalKeys[msg.String()]; ok && m.pending != nil {
+		if !m.approvalArmed {
+			return m, nil
+		}
 		return m.sendApproval(decision)
 	}
 	switch msg.String() {
@@ -166,6 +213,7 @@ func (m Model) resolveApproval() (tea.Model, tea.Cmd) {
 func (m Model) sendApproval(decision domain.ApprovalDecision) (tea.Model, tea.Cmd) {
 	m.pending.Reply <- decision
 	m.pending = nil
+	m.approvalArmed = false // the latch belongs to the pane that just closed, not to the next one
 	m.state = stateRunning
 	m.layout() // the pane is gone: a draft the prompt had clamped grows back (draftRowsCeiling)
 	return m, m.spin.arm()
@@ -249,6 +297,13 @@ func (m Model) sendApproval(decision domain.ApprovalDecision) (tea.Model, tea.Cm
 // box's draft rows give way to it (draftRowsCeiling), so there is no window a pane can be drawn in
 // where a/d/s are live and this pane is not on the frame. The "" below is the sub-twelve-row case,
 // where the frame draws no pane at all.
+//
+// The other half of that promise is TIME rather than geometry, and it is the fold's, not the
+// paint's: a/s/d and ⏎ are dead until one approvalArmDelay after the pane opened
+// (foldApprovalRequest, foldApprovalArmed), so the frame this function returns is on the screen
+// before any key can answer it. Without that the pane could be drawn and answered by the same
+// keystroke — one already in the input buffer, aimed at whatever the human was reading a moment
+// earlier — and the pane's whole guarantee is about what the human was shown before they ruled.
 func (m Model) approvalPrompt(req domain.ApprovalRequest) string {
 	var parts []string
 	if line := subAgentPromptLine(req.SubAgentName, req.SubAgentTask); line != "" {

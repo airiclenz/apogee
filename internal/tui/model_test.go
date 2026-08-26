@@ -689,8 +689,19 @@ func TestModelStopKeys(t *testing.T) {
 // ----------------------------------------------------------------------------
 
 // newApprovalModel drives a fresh model to awaitingApproval with a buffered reply channel,
-// returning both so a test can assert on the decision the keys send back.
+// returning both so a test can assert on the decision the keys send back. The pane's decision keys
+// are armed before it returns (armApproval), which is what every test below wants: the arming
+// LATCH is the subject of three tests of its own, and everywhere else it is just the state a human
+// reaches by looking at the pane for a moment.
 func newApprovalModel(t *testing.T, req domain.ApprovalRequest) (Model, chan domain.ApprovalDecision) {
+	t.Helper()
+	m, reply := newUnarmedApprovalModel(t, req)
+	return armApproval(t, m), reply
+}
+
+// newUnarmedApprovalModel folds an approval request in and stops there — the pane is up and its
+// decision keys are still dead, the state the arming tests act on.
+func newUnarmedApprovalModel(t *testing.T, req domain.ApprovalRequest) (Model, chan domain.ApprovalDecision) {
 	t.Helper()
 	reply := make(chan domain.ApprovalDecision, 1)
 	m := step(t, newTestModel(t), approvalReqMsg{Request: req, Reply: reply})
@@ -698,6 +709,18 @@ func newApprovalModel(t *testing.T, req domain.ApprovalRequest) (Model, chan dom
 		t.Fatalf("state = %v, want awaitingApproval", m.state)
 	}
 	return m, reply
+}
+
+// armApproval delivers the open pane's own arming message, standing in for the approvalArmDelay
+// tick the fold scheduled. It reads the generation off the model rather than sleeping, so the
+// suite never pays the delay and never races it.
+func armApproval(t *testing.T, m Model) Model {
+	t.Helper()
+	m = step(t, m, approvalArmedMsg{seq: m.approvalSeq})
+	if !m.approvalArmed {
+		t.Fatal("approval pane did not arm on its own approvalArmedMsg")
+	}
+	return m
 }
 
 // Each decision key yields the matching ApprovalDecision on the reply channel, clears the
@@ -736,6 +759,120 @@ func TestModelApprovalDecisionKeys(t *testing.T) {
 				t.Error("spinner tick not re-armed on the return to running")
 			}
 		})
+	}
+}
+
+// The pane's decision keys are DEAD until its arming tick lands (F-12): a keystroke already in the
+// input buffer when the prompt appeared — a/s/d, or the ⏎ that takes the highlighted Allow row —
+// must not answer a call the human has not read. Once the arm arrives the same key rules as always.
+func TestModelApprovalKeysAreDeadUntilArmed(t *testing.T) {
+	m, reply := newUnarmedApprovalModel(t, domain.ApprovalRequest{Tool: "write_file", Reason: "write"})
+
+	for _, key := range []tea.KeyPressMsg{
+		{Code: 'a'}, {Code: 's'}, {Code: 'd'}, keyEnter(),
+	} {
+		m = step(t, m, key)
+		select {
+		case got := <-reply:
+			t.Fatalf("%q answered the prompt before it was armed (sent %q)", key.String(), got)
+		default:
+		}
+		if m.state != stateAwaitingApproval {
+			t.Fatalf("%q moved the state to %v before the prompt was armed", key.String(), m.state)
+		}
+		if m.pending == nil {
+			t.Fatalf("%q cleared the pending request before the prompt was armed", key.String())
+		}
+	}
+
+	m = armApproval(t, m)
+
+	m = step(t, m, tea.KeyPressMsg{Code: 'a'})
+	select {
+	case got := <-reply:
+		if got != domain.ApprovalAllow {
+			t.Errorf("decision = %v, want ApprovalAllow", got)
+		}
+	default:
+		t.Error("'a' sent no decision after the prompt was armed")
+	}
+}
+
+// The arm names the pane it was scheduled for: a tick left over from a prompt that has since been
+// cancelled arms nothing, so the NEXT prompt still gets its own full look-at-it window.
+func TestModelApprovalStaleArmDoesNotArmTheNextPane(t *testing.T) {
+	m, _ := newUnarmedApprovalModel(t, domain.ApprovalRequest{Tool: "write_file", Reason: "first"})
+	stale := m.approvalSeq
+
+	m.cancel = func() {}
+	m = step(t, m, keyEsc())
+	m = step(t, m, cancelledMsg{Result: domain.StepResult{Status: domain.StatusCancelled}})
+	if m.state != stateIdle {
+		t.Fatalf("state = %v, want idle after the first prompt was cancelled", m.state)
+	}
+
+	reply := make(chan domain.ApprovalDecision, 1)
+	m = step(t, m, approvalReqMsg{
+		Request: domain.ApprovalRequest{Tool: "run", Reason: "second"},
+		Reply:   reply,
+	})
+
+	m = step(t, m, approvalArmedMsg{seq: stale})
+	if m.approvalArmed {
+		t.Fatal("the first prompt's arming tick armed the second prompt")
+	}
+	m = step(t, m, tea.KeyPressMsg{Code: 'a'})
+	select {
+	case got := <-reply:
+		t.Fatalf("'a' answered the second prompt on the first one's stale arm (sent %q)", got)
+	default:
+	}
+
+	m = armApproval(t, m)
+	m = step(t, m, tea.KeyPressMsg{Code: 'a'})
+	select {
+	case got := <-reply:
+		if got != domain.ApprovalAllow {
+			t.Errorf("decision = %v, want ApprovalAllow", got)
+		}
+	default:
+		t.Error("'a' sent no decision after the second prompt's own arm")
+	}
+}
+
+// Esc is deliberately OUTSIDE the latch: cancelling is the safe direction and the operator's stop
+// path, so it is never the key made harder to reach.
+func TestModelApprovalEscapeIsLiveBeforeArming(t *testing.T) {
+	m, _ := newUnarmedApprovalModel(t, domain.ApprovalRequest{Tool: "write_file", Reason: "write"})
+	cancelled := false
+	m.cancel = func() { cancelled = true }
+
+	m = step(t, m, keyEsc())
+
+	if !cancelled {
+		t.Error("esc before the arm did not cancel the in-flight worker")
+	}
+	if m.state != stateAwaitingApproval {
+		t.Errorf("state = %v, want still awaitingApproval until the worker reports back", m.state)
+	}
+}
+
+// The fold that opens the prompt is what schedules its own arm: without that Cmd the keys would
+// never come alive at all.
+func TestModelApprovalFoldReturnsTheArmTick(t *testing.T) {
+	reply := make(chan domain.ApprovalDecision, 1)
+	m := newTestModel(t)
+
+	next, cmd := stepCmd(t, m, approvalReqMsg{
+		Request: domain.ApprovalRequest{Tool: "write_file", Reason: "write"},
+		Reply:   reply,
+	})
+
+	if next.approvalArmed {
+		t.Error("the prompt opened with its decision keys already armed")
+	}
+	if cmd == nil {
+		t.Fatal("the approval fold returned no arming tick")
 	}
 }
 

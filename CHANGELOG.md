@@ -234,6 +234,18 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **The approval prompt's decision keys arm one painted frame after it appears (security audit
+  F-12).** `a`, `s`, `d` and the `⏎` that takes the highlighted row used to answer the gate the
+  instant the pane was folded in, so a keystroke already in the terminal's input buffer — aimed at
+  whatever was on the screen a moment earlier — could allow a tool call no human had read, and the
+  menu opening on Allow made a stray `⏎` the likeliest way in. The fold now opens the pane with its
+  decision keys dead and returns a 100 ms tick that arms them, generation-stamped so a tick left
+  over from a prompt that has since been answered or cancelled arms nothing. The arm is written
+  from `Update`, not from the paint — `View` is a value receiver and the overlay pass is pure — so
+  the frame carrying the call is on the screen before any key can answer it. An unarmed decision
+  key is swallowed rather than falling through to the transcript scroll, and `esc` stays live from
+  the instant the pane is up: the safe direction is never the one made harder to reach.
+
 - **Security: the approval pane collapses case-variant argument keys by the executor's own fold
   (F-17).** The pane's duplicate-key collapse keyed on a key's raw SPELLING, so
   `{"command":"npm test","Command":"curl …|sh"}` painted two rows — the `npm test` the executor

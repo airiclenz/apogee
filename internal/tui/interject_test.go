@@ -1036,6 +1036,7 @@ func TestApprovalAndAskKeysUnchanged(t *testing.T) {
 		m := runningModel(t)
 		reply := make(chan domain.ApprovalDecision, 1)
 		m = step(t, m, approvalReqMsg{Request: domain.ApprovalRequest{Tool: "write_file"}, Reply: reply})
+		m = armApproval(t, m) // the decision keys go live one arming tick after the pane opens
 		m = step(t, m, keyRune('a'))
 		select {
 		case got := <-reply:
