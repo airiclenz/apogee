@@ -762,7 +762,11 @@ transition / site-local ranges (6to4 `2002::/16`, IPv4-compatible `::a.b.c.d`, `
 dissolvable by config —
 and applied through the **one network funnel** every one of Apogee's own network tools reaches the
 network through, so such a tool cannot reach the network unfiltered, and one that does not route
-through it is not vouched for and gates), tool-argument-guard (incl. the **Dangerous-action guard**
+through it is not vouched for and gates; the network tools and the MCP transports honour the
+process's `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY` the way the LLM client already does, and the
+order of judgement is unchanged by one: the guard judges the **destination** before the request
+leaves, while the dial-time control pins the **proxy's own** resolved addresses, since the proxy
+is what a proxied transport actually dials), tool-argument-guard (incl. the **Dangerous-action guard**
 floor, the `http_request` header filter, a leading-`-` guard on git ref args, and **network
 failure-message redaction** — every network tool's failure message names only the bare host, never
 the key-bearing request URL), circuit-breaker, and a
@@ -813,7 +817,8 @@ their description / schema / result are untrusted data shown to the model, never
 server (sse / streamable-http) passes **url-safety**'s scheme/host allow-deny and dials **pinned to
 the configured endpoint's own addresses** — the endpoint is exempt from the resolved-IP SSRF floor
 (you named it in your own config; the floor is the anti-*model* control), while any *other* private
-address that connection is pointed at is still refused, and redirects are not followed (ADR 0012,
+address that connection is pointed at is still refused, redirects are not followed and the
+connection goes out through the configured egress proxy when one applies (ADR 0012,
 Amendment 2026-07-26); a stdio server is a trusted local launch (no URL check), its calls still gate. **Resume reconnects
 fresh** — no server-side state is restored (ADR 0008). The *client shape* is
 [docs/design/mcp-client.md](docs/design/mcp-client.md); the *gating* is ADR 0004/0008/0012.

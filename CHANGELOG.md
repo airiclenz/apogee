@@ -276,6 +276,20 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **Model-driven egress ignored the operator's proxy.** Neither the network tools
+  (`web_fetch`, `http_request`, `web_search`) nor the `sse` / `streamable-http` MCP transports
+  set a `Transport.Proxy`, so an operator who routes the box's traffic through
+  `HTTP_PROXY` / `HTTPS_PROXY` had it bypassed for exactly the destinations the model chooses —
+  the LLM client honoured the environment through Go's default transport while everything the
+  model reached went around it. All three now honour `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY`,
+  and the order of judgement is spelled out where it matters: `url-safety` still judges the
+  DESTINATION before the request leaves (string lists plus the resolved-IP SSRF floor), so a
+  proxy cannot launder a private target, while the dial-time control pins what is actually
+  DIALLED — the proxy's own resolved addresses when one applies, so a proxy on loopback or the
+  LAN works, and the blanket floor over the destination when none does. A configured MCP
+  endpoint is pinned alongside its proxy. Redirects are still never followed on any of the
+  three paths. There is no per-server proxy key: the environment is the whole surface.
+
 - **`url-safety:` did not apply to MCP endpoints.** Both places the composition root connects an
   `mcp-servers:` entry — the startup connect and the reconnect a live `mcp-servers:` edit drives —
   handed the transport a ZERO `security.URLGuard`, so an `sse` or `streamable-http` endpoint was

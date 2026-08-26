@@ -266,43 +266,53 @@ func (g URLGuard) SafeDialControl() func(network, address string, c syscall.RawC
 }
 
 // PinnedDialControl is the ENDPOINT-AWARE form of SafeDialControl: it permits the addresses
-// host itself resolves to — even ones the floor denies — and applies the floor, unchanged, to
-// every other address.
+// the named hosts themselves resolve to — even ones the floor denies — and applies the floor,
+// unchanged, to every other address.
 //
-// It exists for the one address a caller has already made a HOST trust decision about. A
-// configured MCP endpoint is named in the user's own config file and is never model-supplied,
-// so the floor — the anti-MODEL control — is the wrong bound over it (ADR 0012, Amendment
-// 2026-07-26); the user asking for http://192.168.64.1:7331/mcp means that address and nothing
-// else. Pinning is what keeps the exemption honest: only the endpoint's OWN resolved addresses
-// are exempt, so a redirect, an SSE endpoint event, or a DNS rebind pointing the transport at a
-// DIFFERENT private address is still refused by the floor. Every model-driven path keeps the
-// blanket SafeDialControl.
+// hosts are the addresses a caller has made a HOST trust decision about — the endpoint, and the
+// egress proxy that carries it. A configured MCP endpoint is named in the user's own config file
+// and is never model-supplied, so the floor — the anti-MODEL control — is the wrong bound over it
+// (ADR 0012, Amendment 2026-07-26); the user asking for http://192.168.64.1:7331/mcp means that
+// address and nothing else. An operator's HTTP(S)_PROXY is the same class of decision: when a
+// proxy applies, the transport dials the PROXY rather than the destination, so the proxy's own
+// addresses are what has to be permitted for the connection to happen at all — while the guard's
+// pre-flight still judges the destination by string and resolved IP, so a private destination is
+// refused before anything leaves. Pinning is what keeps both exemptions honest: only the named
+// hosts' OWN resolved addresses are exempt, so a redirect, an SSE endpoint event, or a DNS rebind
+// pointing the transport at a DIFFERENT private address is still refused by the floor. Every
+// model-driven path with no such decision behind it keeps the blanket SafeDialControl.
 //
-// host is resolved ONCE, here, through the guard's resolver (ctx bounds the lookup), so the
-// permitted set is fixed before any connection is made and nothing the transport learns later
-// can widen it. An IP-literal host needs no lookup. A host that cannot be resolved, or that
-// resolves to nothing, is an ErrURLBlocked error rather than an unpinned control — an endpoint
-// whose addresses are unknown cannot be pinned, and refusing to build the client is the
-// fail-closed direction (it is also what the pre-flight floor did for the same cause).
+// Each host is resolved ONCE, here, through the guard's resolver (ctx bounds the lookups), and
+// the UNION is the permitted set — fixed before any connection is made, so nothing the transport
+// learns later can widen it. An IP-literal host needs no lookup. No hosts at all, or a host that
+// cannot be resolved or resolves to nothing, is an ErrURLBlocked error rather than an unpinned
+// control — an endpoint whose addresses are unknown cannot be pinned, and refusing to build the
+// client is the fail-closed direction (it is also what the pre-flight floor did for the same
+// cause).
 //
 // With the floor off (DisableIPFloor) it resolves nothing and returns a Control that permits
 // everything, exactly as SafeDialControl does.
-func (g URLGuard) PinnedDialControl(ctx context.Context, host string) (func(network, address string, c syscall.RawConn) error, error) {
+func (g URLGuard) PinnedDialControl(ctx context.Context, hosts ...string) (func(network, address string, c syscall.RawConn) error, error) {
 	if !g.floorEnabled() {
 		return func(string, string, syscall.RawConn) error { return nil }, nil
 	}
-	if host == "" {
+	if len(hosts) == 0 {
 		return nil, fmt.Errorf("%w: no host to pin", ErrURLBlocked)
 	}
 	var pinned []net.IP
-	if ip := net.ParseIP(host); ip != nil {
-		pinned = []net.IP{ip}
-	} else {
+	for _, host := range hosts {
+		if host == "" {
+			return nil, fmt.Errorf("%w: no host to pin", ErrURLBlocked)
+		}
+		if ip := net.ParseIP(host); ip != nil {
+			pinned = append(pinned, ip)
+			continue
+		}
 		ips, err := g.resolveHost(ctx, host)
 		if err != nil {
 			return nil, err
 		}
-		pinned = ips
+		pinned = append(pinned, ips...)
 	}
 
 	floor := g.SafeDialControl()

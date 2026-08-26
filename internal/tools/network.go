@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -30,10 +31,13 @@ import (
 // the single path from a tool to the network, and it runs the host's URLGuard (scheme/host
 // allow-deny + the default-on, resolved-IP SSRF floor) BEFORE the request and, via the
 // guard's SafeDialControl, at DIAL time too — so a DNS-rebinding name that passes the
-// pre-flight check still cannot connect to a private IP (security/ssrf.go). Embedding the
-// funnel is the only way to obtain the urlFilteredNetworker marker, and that marker — not a
-// declared effect kind — is what dispatch trusts when it auto-runs a network tool unattended
-// in Auto. A tool that reaches the network some other way therefore carries no marker and
+// pre-flight check still cannot connect to a private IP (security/ssrf.go). With the
+// operator's HTTP(S)_PROXY in force the dial-time half becomes the proxy's own pin instead,
+// because the proxy is then what the transport connects to; the pre-flight over the
+// destination is unchanged, so a proxy cannot launder a private target (newHTTPClient).
+// Embedding the funnel is the only way to obtain the urlFilteredNetworker marker, and that
+// marker — not a declared effect kind — is what dispatch trusts when it auto-runs a network
+// tool unattended in Auto. A tool that reaches the network some other way therefore carries no marker and
 // gates in Auto instead of running unsupervised.
 
 // maxNetworkResponseBytes caps the body a network tool reads into a result so a huge
@@ -60,8 +64,15 @@ const (
 // property of the code path rather than of each tool author's discipline. Embedding it is
 // also the only way to obtain the urlFilteredNetworker marker — the marker therefore cannot
 // exist without the guard.
+//
+// proxy is the operator's egress proxy resolver. A nil proxy means http.ProxyFromEnvironment
+// — the process's HTTP_PROXY / HTTPS_PROXY / NO_PROXY, the same environment the LLM client
+// already honours through Go's default transport — read when a call is made rather than when
+// the tool is built, so the constructors take no proxy argument. It is a field only so a test
+// can supply its own forward proxy; there is no per-server proxy config key.
 type networkTool struct {
 	guard security.URLGuard
+	proxy func(*http.Request) (*url.URL, error)
 }
 
 // urlFilteredNetworker is the unexported marker carried ONLY by a tool that reaches the
@@ -162,8 +173,13 @@ func (n networkTool) do(ctx context.Context, req netRequest) (netResponse, strin
 	// is passed through untouched (target stays req.url, which is then also the string the
 	// request would carry) and the CheckContext below refuses it with the guard's message.
 	target := req.url
+	// targetURL is the same form as a *url.URL: the client builder needs it to ask the proxy
+	// resolver whether a proxy applies to this destination. It stays nil only for a URL that
+	// does not parse, which the CheckContext below refuses before any client is built.
+	var targetURL *url.URL
 	if normalized, err := security.NormalizeURL(req.url); err == nil {
 		target = normalized.String()
+		targetURL = normalized
 	}
 
 	// ONE deadline for the whole call. rctx is started here, before the pre-flight, and carries
@@ -193,7 +209,16 @@ func (n networkTool) do(ctx context.Context, req netRequest) (netResponse, strin
 	// always the LOOSER of the two bounds and rctx — running since before the pre-flight — is
 	// what actually ends a call; it stays as the backstop for a transport that somehow outlives
 	// its request context.
-	client := newHTTPClient(n.guard, budget)
+	client, err := newHTTPClient(rctx, n.guard, targetURL, n.proxy, budget)
+	if err != nil {
+		// An unusable egress proxy, or one whose addresses cannot be pinned, refuses the call
+		// with the pre-flight's own wording: nothing left the process, and the cause is the
+		// same policy layer.
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return netResponse{}, "", ctxErr
+		}
+		return netResponse{}, blockedMessage(label, err, target), nil
+	}
 	// The client is built per call, so its pooled connection would OUTLIVE it: net/http keeps
 	// an idle connection — and the readLoop/writeLoop goroutines that pin the transport with
 	// it — alive for IdleConnTimeout after do returns. Network tools auto-run unattended in
@@ -282,10 +307,25 @@ func blockedReason(err error, rawURL string) string {
 	return strings.Trim(reason, ": ")
 }
 
-// newHTTPClient builds an http.Client whose transport validates the ACTUAL connected IP at
-// dial time against the guard's SSRF floor (the DNS-rebinding defence), with the given
-// overall timeout. It is the single place the network tools obtain a client so the dial-time
-// floor is never accidentally skipped.
+// newHTTPClient builds an http.Client for ONE outbound call: it resolves the operator's
+// egress proxy for target, sets the dial-time control the resulting connection needs, and
+// applies the given overall timeout. It is the single place the network tools obtain a
+// client so neither the proxy nor the dial-time floor is ever accidentally skipped.
+//
+// The order of judgement is the point. The PRE-FLIGHT (do, above) judges the DESTINATION —
+// the scheme/host allow-deny lists and the resolved-IP SSRF floor — and it runs whether or
+// not a proxy applies, so a private destination is refused before anything leaves the
+// process and a proxy can never launder one. The dial-time control judges what is actually
+// DIALLED: with a proxy in force the transport connects to the PROXY rather than to the
+// destination, so the control pins the proxy's own resolved addresses (a proxy on loopback
+// or the LAN is the normal case, and the blanket floor would refuse it); with no proxy —
+// NO_PROXY, or none configured — it stays the blanket SafeDialControl, the DNS-rebinding
+// backstop over the destination itself. Redirects are still never followed either way.
+//
+// A nil proxy means http.ProxyFromEnvironment: the process's HTTP_PROXY / HTTPS_PROXY /
+// NO_PROXY, which is what the LLM client already honours through Go's default transport.
+// An unusable proxy value, or a proxy whose addresses cannot be resolved, fails the call
+// closed rather than dialling around it.
 //
 // The timeout is a backstop, not the operative bound: do runs the request under a context whose
 // deadline is the same budget started BEFORE the pre-flight lookup, so that deadline always
@@ -295,12 +335,37 @@ func blockedReason(err error, rawURL string) string {
 // pool on the way out; nothing here may outlive the request. (internal/mcp builds the same
 // shape but keeps it long-lived, which is right for a session-long server connection and wrong
 // for a one-shot tool call.)
-func newHTTPClient(guard security.URLGuard, timeout time.Duration) *http.Client {
+func newHTTPClient(
+	ctx context.Context,
+	guard security.URLGuard,
+	target *url.URL,
+	proxy func(*http.Request) (*url.URL, error),
+	timeout time.Duration,
+) (*http.Client, error) {
+	if proxy == nil {
+		proxy = http.ProxyFromEnvironment
+	}
+	control := guard.SafeDialControl() // re-check the connected IP — closes DNS-rebinding TOCTOU
+	if target != nil {
+		proxyURL, err := proxy(&http.Request{URL: target})
+		if err != nil {
+			// The proxy value is deliberately NOT interpolated: the resolver quotes it back and
+			// a proxy URL may carry credentials (the reasoning mcp's checkEndpoint rests on).
+			return nil, fmt.Errorf("%w: the configured egress proxy is not a usable URL", security.ErrURLBlocked)
+		}
+		if proxyURL != nil {
+			control, err = guard.PinnedDialControl(ctx, proxyURL.Hostname())
+			if err != nil {
+				return nil, fmt.Errorf("egress proxy %s could not be pinned: %w", proxyURL.Hostname(), err)
+			}
+		}
+	}
 	dialer := &net.Dialer{
 		Timeout: 10 * time.Second,
-		Control: guard.SafeDialControl(), // re-check the connected IP — closes DNS-rebinding TOCTOU
+		Control: control,
 	}
 	transport := &http.Transport{
+		Proxy:                 proxy,
 		DialContext:           dialer.DialContext,
 		ForceAttemptHTTP2:     true,
 		MaxIdleConns:          10,
@@ -317,7 +382,7 @@ func newHTTPClient(guard security.URLGuard, timeout time.Duration) *http.Client 
 		CheckRedirect: func(*http.Request, []*http.Request) error {
 			return http.ErrUseLastResponse
 		},
-	}
+	}, nil
 }
 
 // readCappedBody reads at most maxNetworkResponseBytes from r. It reports truncated when the

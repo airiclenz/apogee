@@ -183,6 +183,15 @@ func buildStreamableTransport(ctx context.Context, cfg ServerConfig, guard secur
 	}, nil
 }
 
+// proxyForRequest resolves the operator's egress proxy for one outbound request: the process's
+// HTTP_PROXY / HTTPS_PROXY / NO_PROXY, the same environment the LLM client already honours
+// through Go's default transport. There is no per-server `proxy:` config key — the environment
+// is the whole surface.
+//
+// It is a package var only to give the tests a seam (a test that swaps it must not run in
+// parallel); production never reassigns it.
+var proxyForRequest = http.ProxyFromEnvironment
+
 // vetEndpoint turns a configured HTTP endpoint into the two things an SDK transport needs: the
 // ONE normalised endpoint string and the http.Client to speak it over. Both come from the same
 // checked form, which is the point — the SDK used to be handed the RAW cfg.Endpoint while the
@@ -194,11 +203,23 @@ func vetEndpoint(ctx context.Context, cfg ServerConfig, guard security.URLGuard)
 	if err != nil {
 		return "", nil, err
 	}
-	// Pin the connection to the endpoint's own resolved addresses. This is where a private
-	// endpoint becomes reachable — and where a redirect or a rebind to a DIFFERENT private
-	// address stays refused. An endpoint that cannot be resolved fails the connect here, as it
-	// did under the pre-flight floor.
-	control, err := guard.PinnedDialControl(ctx, u.Hostname())
+	// Pin the connection to the endpoint's own resolved addresses — and, when an egress proxy
+	// applies to this endpoint, to the PROXY's addresses too, because that is what the transport
+	// actually dials. This is where a private endpoint (or a proxy on loopback or the LAN)
+	// becomes reachable — and where a redirect or a rebind to a DIFFERENT private address stays
+	// refused. An endpoint, or a proxy, that cannot be resolved fails the connect here, as the
+	// endpoint did under the pre-flight floor.
+	pinned := []string{u.Hostname()}
+	proxyURL, err := proxyForRequest(&http.Request{URL: u})
+	if err != nil {
+		// The proxy value is deliberately NOT interpolated: the resolver quotes it back and a
+		// proxy URL may carry credentials — the same reasoning checkEndpoint's bare wording rests on.
+		return "", nil, fmt.Errorf("mcp: server %q: the configured egress proxy is not a usable URL", cfg.Name)
+	}
+	if proxyURL != nil {
+		pinned = append(pinned, proxyURL.Hostname())
+	}
+	control, err := guard.PinnedDialControl(ctx, pinned...)
 	if err != nil {
 		return "", nil, fmt.Errorf("mcp: server %q endpoint blocked by url-safety: %w", cfg.Name, err)
 	}
@@ -238,8 +259,15 @@ func checkEndpoint(ctx context.Context, cfg ServerConfig, guard security.URLGuar
 }
 
 // newGuardedHTTPClient builds the http.Client the HTTP transports use: control is the dial-time
-// check on the ACTUAL connected IP (PinnedDialControl — the endpoint's own addresses pass, every
-// other address meets the SSRF floor), so an MCP HTTP connection can never skip it.
+// check on the ACTUAL connected IP (PinnedDialControl — the endpoint's own addresses, and the
+// egress proxy's when one applies, pass; every other address meets the SSRF floor), so an MCP
+// HTTP connection can never skip it.
+//
+// The order of judgement matches the native network funnel's. The pre-flight (checkEndpoint)
+// judges the DESTINATION by string — the operator's scheme/host allow-deny lists — whether or not
+// a proxy applies, so a denied host is refused before anything leaves the process. The dial-time
+// control judges what is actually DIALLED: the proxy when one is in force, the endpoint itself
+// otherwise.
 //
 // Redirects are NOT followed, the same policy the native network tools apply: a redirect could
 // send a vetted connection to an unvetted host, sidestepping the endpoint check. The dial-time
@@ -258,6 +286,7 @@ func newGuardedHTTPClient(control func(network, address string, c syscall.RawCon
 	}
 	return &http.Client{
 		Transport: &http.Transport{
+			Proxy:                 proxyForRequest,
 			DialContext:           dialer.DialContext,
 			ForceAttemptHTTP2:     true,
 			MaxIdleConns:          10,

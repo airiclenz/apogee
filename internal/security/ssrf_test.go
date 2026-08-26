@@ -423,6 +423,74 @@ func TestPinnedDialControl_PinsAnIPLiteralWithoutResolving(t *testing.T) {
 	}
 }
 
+// TestPinnedDialControl_PinsEveryNamedHost pins the variadic form: a caller that has made a
+// HOST trust decision about more than one address — an endpoint AND the egress proxy that
+// carries it — gets the UNION of their resolved addresses exempted, and nothing else. The
+// proxy case is why the union exists: with a proxy in force the transport dials the proxy, so
+// its own (often loopback or LAN) addresses have to pass, while every other private address on
+// that connection still meets the floor.
+func TestPinnedDialControl_PinsEveryNamedHost(t *testing.T) {
+	t.Parallel()
+
+	// One resolver, two names: the endpoint and the proxy each resolve to their own private
+	// address, and both are named to the control.
+	resolve := func(_ context.Context, host string) ([]net.IP, error) {
+		switch host {
+		case "mcp.local":
+			return []net.IP{net.ParseIP("192.168.64.1")}, nil
+		case "proxy.local":
+			return []net.IP{net.ParseIP("127.0.0.1")}, nil
+		}
+		return nil, errNoSuchHost
+	}
+	guard := URLGuard{}.WithResolver(resolve)
+
+	ctrl, err := guard.PinnedDialControl(context.Background(), "mcp.local", "proxy.local")
+	if err != nil {
+		t.Fatalf("PinnedDialControl: %v", err)
+	}
+
+	for _, tc := range []struct {
+		name      string
+		address   string
+		wantBlock bool
+	}{
+		{"the first host's address is permitted", "192.168.64.1:7331", false},
+		{"the second host's address is permitted", "127.0.0.1:3128", false},
+		{"a third private address is blocked", "10.0.0.1:3128", true},
+		{"the IMDS is blocked", "169.254.169.254:80", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			err := ctrl("tcp", tc.address, syscallRawConnNil())
+
+			if tc.wantBlock {
+				if !errors.Is(err, ErrSSRFBlocked) {
+					t.Fatalf("control(%q) err = %v, want ErrSSRFBlocked", tc.address, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("control(%q) = %v, want permitted", tc.address, err)
+			}
+		})
+	}
+
+	t.Run("no hosts at all fails closed", func(t *testing.T) {
+		t.Parallel()
+
+		ctrl, err := guard.PinnedDialControl(context.Background())
+
+		if ctrl != nil {
+			t.Error("PinnedDialControl returned a control with nothing to pin")
+		}
+		if !errors.Is(err, ErrURLBlocked) {
+			t.Fatalf("err = %v, want ErrURLBlocked", err)
+		}
+	})
+}
+
 // TestPinnedDialControl_FailsClosedWithoutAddressesToPin pins the fail-closed direction: an
 // endpoint whose addresses cannot be learned has nothing to exempt, so no control is returned
 // and the caller must refuse the connection rather than dial it unpinned.

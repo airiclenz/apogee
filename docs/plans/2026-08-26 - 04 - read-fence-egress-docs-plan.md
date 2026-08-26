@@ -353,7 +353,35 @@ network, made the difference).
 
 ---
 
-## 5. Network tools and MCP transports honour `HTTP(S)_PROXY`/`NO_PROXY`; the dial pins the proxy (F-41)
+## 5. Network tools and MCP transports honour `HTTP(S)_PROXY`/`NO_PROXY`; the dial pins the proxy (F-41) — ✅ DONE (2026-08-26)
+
+NOTES (2026-08-26): `docs/design/mcp-client.md` is not in the item's Files list, but its
+"pinned to that endpoint's own resolved addresses" bullet became untrue the moment the pin grew
+the proxy host, so one clause was added there — the design doc the change affects (procedure
+step 6), not new scope.
+NOTES (2026-08-26): `newHTTPClient` takes `ctx` as its first parameter (five in all) — the plan
+names the target URL and the proxy func but the pin resolves through the guard's resolver, which
+needs a ctx to bound the lookup. It also defaults a nil proxy to `http.ProxyFromEnvironment`
+itself rather than through a helper on `networkTool`, so the "nil means the environment" contract
+lives in one place.
+NOTES (2026-08-26): a proxy resolver's own error is deliberately NOT interpolated into the
+model-facing message in either package — the resolver quotes the proxy value back and a proxy URL
+may carry credentials, the same reasoning `mcp`'s `checkEndpoint` already rests on. The message is
+the bare "the configured egress proxy is not a usable URL", rendered through the pre-flight's
+`blockedMessage` shape.
+NOTES (2026-08-26): `TestPinnedDialControl_PinsEveryNamedHost` also carries a "no hosts at all
+fails closed" subtest — the zero-host branch is new with the variadic signature and the existing
+failure table (which the plan asked to leave compiling unchanged) passes an empty host string, not
+an empty list.
+NOTES (2026-08-26): the MCP test's second case exercises the NO_PROXY shape (the seam returns the
+proxy for the endpoint host only), because with `http.ProxyURL` every destination — including the
+"different private address" the plan names — would be carried by the proxy and so reach it. As
+written, the unproxied private address dials direct and still meets the floor, which is the bound
+the case is there to pin.
+NOTES (2026-08-26): all four halves were checked to be load-bearing by temporarily neutralising
+each (`Transport.Proxy` dropped, and the proxy host removed from the pin, in both packages) and
+confirming `TestWebFetch_ProxiedDialPinsTheProxy` / `TestGuardedClient_ProxiedEndpointPinsBothHosts`
+fail with the connect error the missing half produces.
 
 **What:** the two model-facing client builders gain the proxy the LLM client already honours,
 without loosening the dial-time floor (design call 7).

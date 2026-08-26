@@ -4,10 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
@@ -841,5 +844,124 @@ func TestNetworkTools_CancelledCtxIsGoError(t *testing.T) {
 		if !errors.Is(err, context.Canceled) {
 			t.Errorf("%s: cancelled ctx should be a Go error; got %v", name, err)
 		}
+	}
+}
+
+// publicNameGuard is a floor-ON guard whose resolver answers every host with one public
+// address, so a hermetic test can use a name that is NOT loopback and still pass the
+// pre-flight without reaching real DNS. It is the counterpart of loopbackGuard for the proxy
+// tests, where the floor has to stay on for the dial-time pin to mean anything.
+func publicNameGuard() security.URLGuard {
+	return security.URLGuard{}.WithResolver(func(context.Context, string) ([]net.IP, error) {
+		return []net.IP{net.ParseIP("93.184.216.34")}, nil
+	})
+}
+
+// forwardProxy starts an httptest server that behaves like an HTTP forward proxy: a proxied
+// request arrives with an ABSOLUTE request URI and the DESTINATION's host in r.Host, which is
+// what the handler asserts before answering. Every request it saw is counted, so a test can
+// prove the proxy was never reached as well as that it was.
+func forwardProxy(t *testing.T, wantHost string) (*httptest.Server, *int32) {
+	t.Helper()
+	var hits int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		if !strings.HasPrefix(r.RequestURI, "http://") {
+			t.Errorf("proxy saw request URI %q, want an absolute URL", r.RequestURI)
+		}
+		if r.Host != wantHost {
+			t.Errorf("proxy saw Host %q, want %q", r.Host, wantHost)
+		}
+		w.Header().Set("Content-Type", "text/plain")
+		_, _ = w.Write([]byte("via proxy"))
+	}))
+	t.Cleanup(srv.Close)
+	return srv, &hits
+}
+
+// TestWebFetch_ProxiedDialPinsTheProxy pins the whole point of honouring HTTP(S)_PROXY: the
+// request goes OUT through the operator's proxy, and the dial-time control pins the PROXY's own
+// addresses because the proxy is what the transport actually connects to. The proxy here is on
+// loopback under a floor-ON guard, so the fetch only succeeds if the pin replaced the blanket
+// floor — the floor would refuse that dial.
+func TestWebFetch_ProxiedDialPinsTheProxy(t *testing.T) {
+	t.Parallel()
+	proxySrv, hits := forwardProxy(t, "example.test")
+	proxyURL, err := url.Parse(proxySrv.URL)
+	if err != nil {
+		t.Fatalf("parse proxy URL: %v", err)
+	}
+	tool := NewWebFetch(publicNameGuard())
+	tool.proxy = http.ProxyURL(proxyURL)
+
+	res, err := tool.Execute(context.Background(), domain.ToolCall{
+		ID: "c1", Tool: "web_fetch", Arguments: jsonArgs(t, map[string]any{"url": "http://example.test/"}),
+	})
+
+	if err != nil {
+		t.Fatalf("Execute Go error: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("proxied fetch must succeed; got: %q", res.Content)
+	}
+	if !strings.Contains(res.Content, "via proxy") {
+		t.Errorf("expected the proxy's body, got: %q", res.Content)
+	}
+	if got := atomic.LoadInt32(hits); got != 1 {
+		t.Errorf("proxy saw %d requests, want 1", got)
+	}
+}
+
+// TestWebFetch_ProxyDoesNotLaunderAPrivateDestination pins the order of judgement: the
+// pre-flight judges the DESTINATION whether or not a proxy applies, so a private target is
+// refused before anything leaves the process and the proxy is never asked to fetch it. Without
+// that order a configured proxy would be a hole straight through the SSRF floor.
+func TestWebFetch_ProxyDoesNotLaunderAPrivateDestination(t *testing.T) {
+	t.Parallel()
+	proxySrv, hits := forwardProxy(t, "10.0.0.1")
+	proxyURL, err := url.Parse(proxySrv.URL)
+	if err != nil {
+		t.Fatalf("parse proxy URL: %v", err)
+	}
+	tool := NewWebFetch(publicNameGuard())
+	tool.proxy = http.ProxyURL(proxyURL)
+
+	res, err := tool.Execute(context.Background(), domain.ToolCall{
+		ID: "c1", Tool: "web_fetch", Arguments: jsonArgs(t, map[string]any{"url": "http://10.0.0.1/"}),
+	})
+
+	if err != nil {
+		t.Fatalf("Execute Go error: %v", err)
+	}
+	if !res.IsError || !strings.Contains(res.Content, "blocked by url-safety") {
+		t.Fatalf("a private destination must be blocked pre-flight; got: %q", res.Content)
+	}
+	if got := atomic.LoadInt32(hits); got != 0 {
+		t.Errorf("proxy saw %d requests, want 0", got)
+	}
+}
+
+// TestWebFetch_NoProxyDialsDirectUnderTheFloor pins that a nil proxy answer leaves the funnel
+// exactly as it was: the dial takes the blanket SafeDialControl, so the refused-redirect
+// behaviour is unchanged for every operator who configures no proxy (or excludes this host
+// through NO_PROXY).
+func TestWebFetch_NoProxyDialsDirectUnderTheFloor(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "http://169.254.169.254/latest/meta-data/", http.StatusFound)
+	}))
+	defer srv.Close()
+	tool := NewWebFetch(loopbackGuard())
+	tool.proxy = func(*http.Request) (*url.URL, error) { return nil, nil }
+
+	res, err := tool.Execute(context.Background(), domain.ToolCall{
+		ID: "c1", Tool: "web_fetch", Arguments: jsonArgs(t, map[string]any{"url": srv.URL}),
+	})
+
+	if err != nil {
+		t.Fatalf("Execute Go error: %v", err)
+	}
+	if !strings.Contains(res.Content, "HTTP 302") {
+		t.Errorf("expected the raw 302 (no auto-follow, no proxy), got: %q", res.Content)
 	}
 }

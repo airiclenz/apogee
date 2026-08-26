@@ -37,7 +37,9 @@ tools execute on the server side, outside any OS fence. Two consequences shape t
   kind** tools, which auto-run url-filtered — MCP is unfenceable, so it asks.
 - **A network-transported server is url-safety-checked and dial-pinned.** An SSE / streamable-http
   server's endpoint passes `security.URLGuard`'s scheme/host allow-deny before connecting, and the
-  connection dials under a control **pinned** to that endpoint's own resolved addresses: those pass,
+  connection dials under a control **pinned** to that endpoint's own resolved addresses — and, when
+  the process's `HTTP_PROXY` / `HTTPS_PROXY` carries that endpoint, to the **proxy's** addresses too,
+  since a proxied transport dials the proxy rather than the destination: those pass,
   every other address still meets the resolved-IP SSRF floor (DNS-rebinding closed), and redirects
   are not followed. The endpoint itself is **exempt from the floor** — it is config-file-only and
   never model-supplied, so a localhost / LAN server is a supported configuration rather than a fatal

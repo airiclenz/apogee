@@ -247,6 +247,74 @@ func TestGuardedClient_PinsTheEndpointAndRefusesEverythingElsePrivate(t *testing
 	})
 }
 
+// TestGuardedClient_ProxiedEndpointPinsBothHosts pins the proxy half of the dial-time control:
+// when the operator's HTTP(S)_PROXY applies to a configured endpoint, the transport connects to
+// the PROXY, so the proxy's own addresses have to be pinned alongside the endpoint's or the
+// connection cannot happen at all. The proxy here is on loopback, which the blanket floor
+// refuses (the sibling test above is that negative control), so the successful GET is the pin.
+//
+// The second case is the bound: a destination the proxy does NOT carry (the NO_PROXY shape)
+// dials direct and still meets the floor, so pinning the proxy widens the exemption by exactly
+// two hosts and not by "every address this client reaches".
+//
+// It swaps the proxyForRequest seam, so it must not run in parallel.
+func TestGuardedClient_ProxiedEndpointPinsBothHosts(t *testing.T) {
+	var proxied atomic.Int64
+	proxySrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		proxied.Add(1)
+		if !strings.HasPrefix(r.RequestURI, "http://") {
+			t.Errorf("proxy saw request URI %q; want an absolute URL", r.RequestURI)
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("via proxy"))
+	}))
+	defer proxySrv.Close()
+	proxyURL, err := url.Parse(proxySrv.URL)
+	if err != nil {
+		t.Fatalf("parse proxy URL: %v", err)
+	}
+
+	// A proxy that carries the endpoint's host only — the NO_PROXY shape, and what makes the
+	// second case a direct dial rather than another trip through the proxy.
+	const endpoint = "http://mcp.example/mcp"
+	restore := proxyForRequest
+	proxyForRequest = func(r *http.Request) (*url.URL, error) {
+		if r.URL.Hostname() == "mcp.example" {
+			return proxyURL, nil
+		}
+		return nil, nil
+	}
+	t.Cleanup(func() { proxyForRequest = restore })
+
+	client := endpointClient(t, ServerConfig{Name: "proxied", Transport: TransportStreamableHTTP, Endpoint: endpoint},
+		security.URLGuard{}.WithResolver(publicResolver))
+
+	t.Run("the endpoint connects through the proxy", func(t *testing.T) {
+		resp, err := client.Get(endpoint)
+		if err != nil {
+			t.Fatalf("GET the proxied endpoint: %v; want it to connect", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("status = %d; want 200", resp.StatusCode)
+		}
+		if got := proxied.Load(); got != 1 {
+			t.Errorf("the proxy saw %d request(s); want 1", got)
+		}
+	})
+
+	t.Run("an unproxied private address is still refused", func(t *testing.T) {
+		resp, err := client.Get("http://10.9.8.7:9/mcp")
+		if err == nil {
+			resp.Body.Close()
+			t.Fatal("a direct dial to an unpinned private address succeeded; want the SSRF floor to refuse it")
+		}
+		if !errors.Is(err, security.ErrSSRFBlocked) {
+			t.Errorf("error = %v; want the SSRF floor", err)
+		}
+	})
+}
+
 // TestGuardedClient_DoesNotFollowRedirects pins the redirect policy the MCP client builder
 // reproduced field-for-field from the native funnel except for this one line: a redirect could
 // send a vetted connection to an unvetted host, stepping around the endpoint's string-level
