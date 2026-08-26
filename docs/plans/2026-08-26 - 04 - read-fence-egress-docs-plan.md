@@ -660,7 +660,11 @@ code before writing it; a sentence the code does not support is left out, not so
 
 ---
 
-## 10. Manual: the environment overrides and the built-in tool names (R-undoc, env + roster)
+## 10. Manual: the environment overrides and the built-in tool names (R-undoc, env + roster) — ✅ DONE (2026-08-26)
+
+NOTES (2026-08-26): the item places `## Environment overrides` "directly after the precedence intro (`:1-18`)", but the page has no heading between `# Configuration` and its first `##`, so a heading there would have swallowed the whole untitled intro — the `/settings` and config-watch paragraphs, the mechanisms block and the `tools:` roster — under "Environment overrides". The section landed at the END of that intro, immediately before the first existing `##` (`## What the network tools may reach — url-safety:`), which is the earliest position where the heading captures only its own prose; the precedence intro gained one sentence pointing down to it, so a reader at the top still finds it.
+NOTES (2026-08-26): the item's parenthetical "(absent in `headless`/`daemon`, so naming them there is a notice)" is not what the code does — `KnownToolNames()` includes `ask_user` and `present_document` by CONSTRUCTION (`registry.go:386-395`, "a fact about the build, not about one Driver's wiring"), so `UnknownToolNames` never flags them and `EffectiveRoster` just matches nothing (`registry.go:290-292`). The manual states the true behaviour instead: naming one in a run that does not wire it is no typo and raises nothing, it simply matches no tool that run offers.
+NOTES (2026-08-26): the drift test was checked to be load-bearing by renaming `` `git_diff_range` `` in the manual and confirming `TestManualListsEveryKnownToolName` fails naming that tool.
 
 **What:** two additions to `docs/manual/configuration.md`, and the drift test that keeps the
 second one true (design call 4). Not a docs-only commit: the test rides with the text.

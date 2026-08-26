@@ -16,7 +16,9 @@ while `APOGEE_API_KEY` and `--model` / `APOGEE_MODEL` carry that server's token
 and model hint or overlay those two fields of the listed entry a session starts
 on (see [The servers you run models on](#the-servers-you-run-models-on)). The
 upstream key has an environment variable but deliberately **no flag** (see
-[The upstream API key](#the-upstream-api-key)).
+[The upstream API key](#the-upstream-api-key)). Every `APOGEE_*` variable the binary
+reads, with its flag and its precedence, is listed under [Environment
+overrides](#environment-overrides).
 
 That file is also readable and editable from inside apogee:
 [`/settings`](commands.md#the-settings-screen--settings) lists every setting with the value this
@@ -88,11 +90,25 @@ beat more of them, and this is the switch that lets you find out on your own wor
 guess. The names are the ones the model calls a tool by — the same names the transcript shows
 while a tool runs — and a name that is not a tool is a startup **notice** rather than an error,
 with the rest of the list still applying, so a typo costs you the tool you meant to disable and
-nothing else. A name written under both lists is a notice too, and `disabled:` wins. The block is
-global (it applies to every model this config runs) and it is live like every other: save the file,
-or commit the row in `/settings`, and the next request is built from the roster that is left. An MCP
-server's tools are not listed here — they come and go with the server, so drop the server from
-`mcp-servers:` instead.
+nothing else. A name written under both lists is a notice too, and `disabled:` wins.
+
+The names this build knows are fixed. In menu order they are `read_file`, `write_file`, `list_dir`,
+`grep`, `find_files`, `single_find_and_replace`, `multi_find_and_replace`, `edit_existing_file`,
+`view_diff`, `copy_file`, `move_file`, `delete_file`, `terminal`, `python_exec`, `git_branch`,
+`git_commit`, `git_diff_range`, `git_status`, `git_log`, `diagnostics`, `run_tests`, `web_fetch`,
+`http_request`, `web_search`, `sub_agent`, the default-off Console four `console_open`,
+`console_send`, `console_read` and `console_close`, and the two the **host** supplies rather than
+the build — `ask_user` and `present_document`, which the TUI wires and a `headless` or `daemon` run
+does not, so a list naming one of those in a run without them is no typo and raises nothing: it
+simply matches no tool that run offers. That list is what `tools.disabled:`, `tools.enabled:` and a
+`model-profiles:` entry's `tools:` axis are all checked against, and a name outside it is the notice
+above (as of this build; `KnownToolNames` in `internal/tools` is the source, and a test fails when
+this list falls behind it).
+
+The block is global (it applies to every model this config runs) and it is live like every other:
+save the file, or commit the row in `/settings`, and the next request is built from the roster that
+is left. An MCP server's tools are not listed here — they come and go with the server, so drop the
+server from `mcp-servers:` instead.
 
 A single model can also carry a roster of its own: a `model-profiles:` entry
 takes the same two keys as a third axis, and what it says about a tool beats what the global block
@@ -103,6 +119,45 @@ asked for the family by name. A `tools:` axis of your own for that model replace
 whole, the way every axis here replaces the built-in's — so `disabled: [console_open]` under a
 `qwen3.8` entry of yours turns the whole family back off rather than trimming one tool out of it;
 re-list the ones you still want under `enabled:`.
+
+## Environment overrides
+
+Eight `APOGEE_*` variables are read, and they divide by what each one can reach. Three of them carry
+ordinary config keys and so ride the four-layer precedence above — flag, then variable, then file,
+then default: `APOGEE_SERVER` (`--server`) names the `servers:` entry this session starts on,
+`APOGEE_MODE` (`--mode`) the autonomy mode it starts in, and `APOGEE_BYPASS` (`--bypass`) the
+Mechanisms switch spelled out below. A value one of these cannot parse — `APOGEE_MODE=fast`,
+`APOGEE_BYPASS=maybe` — is a startup **error** naming the variable and the value, never a setting
+that quietly falls back to its default. Being config keys, they appear in `/settings`: a row a
+variable won says which variable won it, and committing an edit to that row applies now and then
+tells you the variable outranks the file again at the next launch.
+
+Three more override the **upstream one run talks to** rather than any key, which is why nothing ever
+writes them back: `APOGEE_ENDPOINT` (`--endpoint`) points the session at a server `servers:` does
+not list, `APOGEE_MODEL` (`--model`) asks for a different model than the entry it starts on names,
+and `APOGEE_API_KEY` carries that server's bearer token. The key has **no flag** on purpose — a
+secret typed on the command line lands in your shell history and in `ps` output (see
+[The upstream API key](#the-upstream-api-key)). Inside each pair the flag still beats the variable,
+and a flag you spelled out wins even when what you spelled is empty.
+
+The last two the config file cannot set at all, because they say WHERE resolution itself runs — the
+file would have to be found before it could name them. `APOGEE_CONFIG` (`--config`, then the
+variable, then `~/.apogee`) is the apogee home holding `config.yaml`, the library and your saved
+sessions. `APOGEE_WORKSPACE` (`--workspace`, then the variable, then the current directory) is the
+workspace root — the fence every file tool is scoped to, so it decides what the model may read and
+write at all, not merely which directory a session opens in.
+
+`APOGEE_BYPASS` earns a paragraph of its own, because it gives something up. It turns apogee's
+**Mechanisms off for the whole session**: every catalogued mechanism is skipped wherever it would
+have fired, and the Validated set your bound model would otherwise be given is not applied either —
+so a small model runs with none of the help apogee exists to give it. That is the point of it.
+Bypass is the honest "Mechanisms-off" floor every mechanism is measured against on the bench
+([ADR 0006](../adr/0006-bypass-mode-is-the-mechanisms-off-floor.md)), and it is the very code path
+you can run yourself. What stays on is the agent's structure — context compaction, the Budget, the
+empty-response off-ramp, the rest of the loop — so the floor is a working agent rather than a naked
+model. The same switch is the `bypass` row in `/settings`, and it is live: flip it mid-session and
+the next hook evaluation already sees it. [**Bypass mode**](../../CONTEXT.md) in `CONTEXT.md` is the
+full definition.
 
 ## What the network tools may reach — `url-safety:`
 
