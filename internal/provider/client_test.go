@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 )
 
@@ -831,4 +832,121 @@ func TestBuildBody_OffDialectEmitsNothingOnEveryLevel(t *testing.T) {
 			assertNoEffortKeys(t, body)
 		})
 	}
+}
+
+// redirectingUpstream is an httptest server that answers every path but /elsewhere with a
+// redirect to /elsewhere, and counts the hits /elsewhere gets — the requests a followed
+// redirect would have delivered to an address nobody configured.
+type redirectingUpstream struct {
+	*httptest.Server
+	followed atomic.Int64
+}
+
+// newRedirectingUpstream starts a redirectingUpstream answering with the given 3xx status.
+// Its /elsewhere handler answers a well-formed completion, so a client that DOES follow
+// succeeds visibly rather than failing for an unrelated reason.
+func newRedirectingUpstream(t *testing.T, status int) *redirectingUpstream {
+	t.Helper()
+
+	upstream := &redirectingUpstream{}
+	upstream.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/elsewhere" {
+			upstream.followed.Add(1)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"choices":[{"message":{"content":"followed"},"finish_reason":"stop"}]}`)
+			return
+		}
+		w.Header().Set("Location", "/elsewhere")
+		w.WriteHeader(status)
+	}))
+	t.Cleanup(upstream.Close)
+	return upstream
+}
+
+// A redirect from the endpoint must never re-aim the request: the per-Turn POST carries the
+// whole conversation, so following a 307 would hand every message and tool result to whatever
+// host the Location names (F-18). The 3xx surfaces as the status instead, on both the
+// non-streaming and the streaming path, and on discovery. The policy belongs to the client
+// NewClient builds — an injected one is the embedder's, redirect behaviour included.
+func TestClientNeverFollowsARedirect(t *testing.T) {
+	t.Parallel()
+
+	t.Run("respond surfaces the 3xx as a StatusError", func(t *testing.T) {
+		t.Parallel()
+		upstream := newRedirectingUpstream(t, http.StatusTemporaryRedirect)
+
+		_, err := NewClient(upstream.URL, "m").Respond(context.Background(), Request{
+			Messages: []Message{{Role: "user", Content: "hi"}},
+		})
+
+		var status *StatusError
+		if !errors.As(err, &status) {
+			t.Fatalf("Respond error = %v (%T), want a *StatusError", err, err)
+		}
+		if status.Code != http.StatusTemporaryRedirect {
+			t.Errorf("StatusError.Code = %d, want %d", status.Code, http.StatusTemporaryRedirect)
+		}
+		if got := upstream.followed.Load(); got != 0 {
+			t.Errorf("redirect target was hit %d time(s), want 0 — the request was re-aimed", got)
+		}
+	})
+
+	t.Run("stream surfaces the 3xx as an error delta", func(t *testing.T) {
+		t.Parallel()
+		upstream := newRedirectingUpstream(t, http.StatusTemporaryRedirect)
+
+		var last Delta
+		for delta := range NewClient(upstream.URL, "m").Stream(context.Background(), Request{
+			Messages: []Message{{Role: "user", Content: "hi"}},
+		}) {
+			last = delta
+		}
+
+		if last.Kind != DeltaError {
+			t.Fatalf("last delta kind = %v, want DeltaError (delta: %+v)", last.Kind, last)
+		}
+		if !strings.Contains(last.Err, "307") {
+			t.Errorf("delta error = %q, want it to name the 307 status", last.Err)
+		}
+		if got := upstream.followed.Load(); got != 0 {
+			t.Errorf("redirect target was hit %d time(s), want 0 — the stream was re-aimed", got)
+		}
+	})
+
+	t.Run("discovery surfaces the 3xx as an upstream error", func(t *testing.T) {
+		t.Parallel()
+		upstream := newRedirectingUpstream(t, http.StatusMovedPermanently)
+
+		_, err := NewClient(upstream.URL, "m").Discover(context.Background())
+
+		if err == nil {
+			t.Fatal("Discover returned no error, want the 301 surfaced")
+		}
+		if !strings.Contains(err.Error(), "301") {
+			t.Errorf("Discover error = %q, want it to name the 301 status", err)
+		}
+		if got := upstream.followed.Load(); got != 0 {
+			t.Errorf("redirect target was hit %d time(s), want 0 — discovery was re-aimed", got)
+		}
+	})
+
+	t.Run("an injected client keeps the embedder's policy", func(t *testing.T) {
+		t.Parallel()
+		upstream := newRedirectingUpstream(t, http.StatusTemporaryRedirect)
+
+		client := NewClient(upstream.URL, "m", WithHTTPClient(&http.Client{}))
+		resp, err := client.Respond(context.Background(), Request{
+			Messages: []Message{{Role: "user", Content: "hi"}},
+		})
+
+		if err != nil {
+			t.Fatalf("Respond with an injected client: %v", err)
+		}
+		if resp.Content != "followed" {
+			t.Errorf("Respond content = %q, want the redirect target's reply", resp.Content)
+		}
+		if got := upstream.followed.Load(); got != 1 {
+			t.Errorf("redirect target was hit %d time(s), want 1 — the policy is not on the option", got)
+		}
+	})
 }

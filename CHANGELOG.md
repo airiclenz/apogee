@@ -276,6 +276,20 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **The LLM client could be re-aimed by a redirect.** The provider client was built as a bare
+  `&http.Client{}`, so a `307` or `308` from the configured endpoint was followed automatically —
+  and the request it re-aimed is the per-Turn POST, which carries the WHOLE conversation: every
+  message and every tool result, handed to whatever address the `Location` header named. It now
+  takes the same `CheckRedirect` refusal the network tools and the MCP HTTP transports already
+  carried: a 3xx comes back as the response itself and surfaces as the HTTP status error naming the
+  code (`apogee: upstream HTTP 307: …`) — on `Respond`, on `Stream` and on model discovery alike —
+  and it is not retried, since only a 429 or a 5xx is retryable. A server that redirects has to be
+  configured at the URL it redirects to, the same rule an `mcp-servers:` endpoint already follows.
+  A client injected with `WithHTTPClient` still carries the embedder's own redirect policy, which
+  is unchanged; `NewClient` now documents both that and why this client is not additionally pinned
+  to a resolved address (a pin taken at construction would break a session whose LAN endpoint
+  moves IP, and refusing the redirect already closes the re-aim vector).
+
 - **A repo-shipped symlink could relocate the model's read fence.** A cloned repo that shipped
   `.apogee/skills` (or `.apogee`, or — under `use-project-skills:` — a bare `skills/`) as a symlink
   to `/home`, `/etc` or any other tree had that tree mounted as a read-only root for `grep`,

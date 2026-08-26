@@ -253,7 +253,17 @@ file's bytes. A sibling case with `.apogee/skills` a REAL dir holding `demo/SKIL
 
 ---
 
-## 3. The provider client never follows a redirect (F-18)
+## 3. The provider client never follows a redirect (F-18) — ✅ DONE (2026-08-26)
+
+NOTES (2026-08-26): the plan's discovery case says a `301` on `/v1/models` makes `Discover` "fail
+the same way". It cannot be the same error TYPE: `discoverModels` has never produced a
+`*StatusError` — its non-200 branch is `fmt.Errorf("apogee: model discovery: upstream HTTP %d")` —
+and giving it one is a wire-shape change no item asked for. The subtest therefore asserts the same
+BEHAVIOUR (the error names the 301, the redirect target is never hit) without the type assertion.
+NOTES (2026-08-26): the three cases landed as four subtests of one `TestClientNeverFollowsARedirect`
+(Respond and Stream split, because Stream's 3xx is a `DeltaError`, not a returned error). The
+refusal was checked to be load-bearing by temporarily restoring the bare `&http.Client{}` and
+confirming the Respond, Stream and Discover subtests all fail.
 
 **What:** the LLM endpoint's HTTP client takes the same redirect policy the network tools and
 the MCP transports already have.

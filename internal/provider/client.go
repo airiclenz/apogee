@@ -126,6 +126,11 @@ func WithChatPath(path string) Option { return func(c *Client) { c.chatPath = pa
 // WithHTTPClient injects the underlying *http.Client (for custom transports or test
 // servers). Its Timeout must stay 0 — a client-level timeout would also abort streams;
 // bound a request with WithRequestTimeout or the caller's context instead.
+//
+// The injected client is the embedder's, redirect policy included: the refusal NewClient
+// builds in is on the DEFAULT client, and an embedder that hands in a bare &http.Client{}
+// gets net/http's follow-up-to-ten behaviour. Carry CheckRedirect over unless following a
+// redirect is what the embedder means to do (see NewClient for why the default refuses).
 func WithHTTPClient(h *http.Client) Option { return func(c *Client) { c.httpClient = h } }
 
 // WithMaxRetries sets how many times a retryable attempt is re-tried (default 2 ⇒ up to
@@ -174,12 +179,33 @@ func WithWireObserver(observe func(WireRecord)) Option {
 // model when a Request leaves it empty. A trailing slash on baseURL is trimmed so path
 // joins are clean. Construction never fails — a malformed endpoint surfaces as a request
 // error, matching the TS oracle (a bad fetch URL throws at call time, not at construction).
+//
+// The client it builds never follows a redirect, the policy the network tools and the MCP
+// transports already carry. The per-Turn POST carries the WHOLE conversation — every message,
+// every tool result — so a 307 or 308 from the endpoint would re-aim all of it at an address
+// nobody configured. A 3xx therefore comes back as the response itself and reaches the caller
+// as a *StatusError naming the code (send does not retry it: isRetryableStatus is 429 and 5xx
+// only, and discovery reports it as an upstream-HTTP error the same way). A server that
+// redirects must be configured at the URL it redirects to.
+//
+// Refusing redirects is the whole of the fix: this client deliberately does NOT dial under
+// URLGuard.PinnedDialControl the way an MCP HTTP transport does, because NewClient and
+// Agent.Rebind promise that construction never fails, and an address pinned once at
+// construction would break a running session whose LAN endpoint moves IP — the local-server
+// case apogee exists for. With the re-aim vector closed at the redirect, the pin buys
+// fragility rather than reach.
 func NewClient(baseURL, model string, opts ...Option) *Client {
 	c := &Client{
-		baseURL:        strings.TrimRight(baseURL, "/"),
-		chatPath:       defaultChatPath,
-		model:          model,
-		httpClient:     &http.Client{}, // no client-level Timeout: it would also kill streams
+		baseURL:  strings.TrimRight(baseURL, "/"),
+		chatPath: defaultChatPath,
+		model:    model,
+		httpClient: &http.Client{
+			// No client-level Timeout: it would also kill streams. A 3xx is handed back as
+			// the response instead of being followed (see above).
+			CheckRedirect: func(*http.Request, []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
+		},
 		maxRetries:     defaultMaxRetries,
 		retryBaseDelay: defaultRetryBaseDelay,
 	}
