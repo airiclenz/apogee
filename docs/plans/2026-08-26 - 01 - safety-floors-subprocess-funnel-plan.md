@@ -693,7 +693,22 @@ returns `ErrConfinementUnavailable` ⇒ result carries "(git staging skipped: �
 
 ---
 
-## 9. Landlock ABI 1–2: `truncate(2)` is disclosed as a residual, in the caps, the notices, the contract and the battery
+## 9. Landlock ABI 1–2: `truncate(2)` is disclosed as a residual, in the caps, the notices, the contract and the battery — ✅ DONE (2026-08-26)
+
+NOTES (2026-08-26): the plan named `cmd/apogee/wire_options.go:253` as the boot announce site; the one
+site that prints `probe.DegradedNotice` is `announceConfinement` in `cmd/apogee/wire_boot.go` (wire_options.go:253
+is the unrelated `scheduleAutoBlocked` seam), so `ResidualNotice` was added there beside it.
+NOTES (2026-08-26): two files outside the plan's Files list were touched for consequences of the
+prescribed change — `internal/probe/doc.go` (the package file map names the wording functions, so it gains
+`ResidualNotice`), and `cmd/apogee/headless_test.go`, where `fenceableHost` became a POINTER because
+`ConfinementCaps` is no longer comparable once it carries a slice and `TestFiringConfigSetsEveryUnattendedField`
+compares the interface value (it panicked with "comparing uncomparable type"). No production code compares caps.
+NOTES (2026-08-26): the daemon has no per-run mode at startup, so its `ResidualNotice` call fixes the mode to
+Auto — the only mode the disclosure is about, and the mode a Firing runs in — printed to `errOut` right after the
+confinement backend is wired.
+NOTES (2026-08-26): row #12 runs coreutils `truncate` rather than a `>` redirect so the syscall under test is
+unambiguously `truncate(2)` (a redirect opens with `O_TRUNC`, a different right on some ABIs); the row skips
+where that program is absent, as the plan specified for macOS and `cmd.exe`.
 
 **What:** C-06, per call 1.
 - `internal/domain/confinement.go:54` `ConfinementCaps` gains `Residuals []string` — doc:

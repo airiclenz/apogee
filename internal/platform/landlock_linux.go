@@ -109,6 +109,7 @@ const landlockFSWriteAccessABI1 = unix.LANDLOCK_ACCESS_FS_WRITE_FILE |
 //   - ABI 1: the write-class baseline. TRUNCATE has no bit here, so truncating an existing file
 //     is the one write landlock cannot fence on a 5.13–6.1 kernel — the alternative, asking for
 //     it anyway, made every confined call die with EINVAL while Capabilities reported FSWrite.
+//     The gap is not silent: it is disclosed through Capabilities().Residuals.
 //   - ABI >= 2: + REFER. Landlock denies cross-directory rename and link by DEFAULT, even when
 //     the right is unhandled, so handling it and re-granting it beneath the writable roots is
 //     what lets a confined child `git mv` or mkdir-then-rename inside its own box.
@@ -180,11 +181,23 @@ func probeLandlockABI() int {
 // construction (confinement-execution-contract §5). FSWrite is true at ABI >= 1
 // (kernel >= 5.13); NetworkEgress is true only at ABI >= 4 (kernel >= 6.7). A kernel
 // without landlock reports {false, false}.
+//
+// On a kernel that fences writes but predates LANDLOCK_ACCESS_FS_TRUNCATE (ABI 1-2,
+// kernel 5.13-6.1 — Ubuntu 22.04, Debian 12, RHEL 9) the fence is real but incomplete:
+// a confined command can still empty an existing file outside the box. Reporting
+// FSWrite alone would overstate it, and reporting FSWrite=false would gate Auto on a
+// kernel that does fence creation and writing, so the gap is DISCLOSED instead — it
+// rides in Residuals, named by its syscall, and every surface that words the caps says
+// so (internal/probe's CapabilityLine and ResidualNotice).
 func (c *landlockConfiner) Capabilities() domain.ConfinementCaps {
-	return domain.ConfinementCaps{
+	caps := domain.ConfinementCaps{
 		FSWrite:       c.abi >= landlockABIFSWrite,
 		NetworkEgress: c.abi >= landlockABINetwork,
 	}
+	if c.abi >= landlockABIFSWrite && c.abi < landlockABITruncate {
+		caps.Residuals = []string{"truncate(2)"}
+	}
+	return caps
 }
 
 // Confine prepares cmd to execute confined to box, then returns — it does not run cmd

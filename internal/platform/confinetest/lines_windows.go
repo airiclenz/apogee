@@ -42,6 +42,11 @@ func userProfileEscapeTarget(home string) string {
 // no cmd.exe spelling either. The probe skips loudly instead.
 func chainedClobberLine(Shell, string) (string, bool) { return "", false }
 
+// truncateLine declines on Windows: row #12 probes coreutils `truncate`, which cmd.exe does not
+// have, and the Windows token backend fences by mandatory integrity label rather than by a
+// per-access mask, so it has no truncate residual to disclose in the first place.
+func truncateLine(Shell, string) (string, bool) { return "", false }
+
 // setRawCommandLine hands raw to CreateProcess verbatim, bypassing os/exec's EscapeArg
 // joining, which mangles the redirect's quotes (internal/tools/exec_cmdline_other.go carries
 // the full reasoning; this is the same fix for the harness). It only sets the command line:

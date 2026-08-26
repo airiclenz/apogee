@@ -47,6 +47,19 @@ func chainedClobberLine(sh Shell, outside string) (string, bool) {
 		"echo clobbered > inside.txt\n", true
 }
 
+// truncateLine returns the shell line that truncates target to zero bytes through the
+// coreutils `truncate` program, and whether the platform has it. It is the row-#12 probe: the
+// one write-class access landlock cannot fence before ABI 3, spelled as its own program rather
+// than as a shell redirect so the syscall under test is unambiguously truncate(2) — a `> file`
+// redirect opens with O_TRUNC, which is a different landlock right on some ABIs and would make
+// the row assert something other than what it claims.
+func truncateLine(sh Shell, target string) (string, bool) {
+	if _, err := exec.LookPath("truncate"); err != nil {
+		return "", false // macOS ships no coreutils `truncate`; the row skips rather than lying.
+	}
+	return "truncate -s 0 " + sh.Quote(target), true
+}
+
 // setRawCommandLine is a no-op off Windows: execve takes a real argv, so os/exec's joining
 // is faithful and syscall.SysProcAttr has no CmdLine field to set.
 func setRawCommandLine(_ *exec.Cmd, _ string) {}

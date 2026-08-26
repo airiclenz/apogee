@@ -234,6 +234,28 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **Landlock ABI 1–2 now DISCLOSES the `truncate(2)` it cannot fence, instead of reporting a
+  complete fence (C-06).** On a kernel between 5.13 and 6.1 — Ubuntu 22.04, Debian 12, RHEL 9 —
+  landlock has no `LANDLOCK_ACCESS_FS_TRUNCATE` bit, so a confined command cannot create or write
+  a file outside the workspace but can still **empty** one that is already there, while
+  `Capabilities().FSWrite` reported `true` and nothing said otherwise (live-reproduced
+  2026-08-25). `domain.ConfinementCaps` gained `Residuals []string` — the write-class accesses a
+  backend knowingly cannot fence on this host while `FSWrite` is true, each named by its syscall —
+  and the landlock backend fills it with `truncate(2)` below ABI 3. It is disclosure, never a gate:
+  `AutoEligible()` still reads `FSWrite` alone, so Auto stays eligible and nothing is refused.
+  `probe.CapabilityLine` appends `· unfenced: truncate(2)`, which carries the fact to `/confine
+  status`, `apogee probe` and the startup line from one function; the new `probe.ResidualNotice`
+  states the consequence once — auto's fence is create-and-write only until kernel 6.2 — beside
+  `DegradedNotice` at the TUI boot announce, and on stderr from `apogee headless` and the daemon,
+  which print it precisely because their cell is a backend that DOES fence (the unfenceable cell is
+  refused there, so `DegradedNotice` could never speak). The two notices are mutually exclusive by
+  construction, and neither ever blocks a run. Escape-battery row **#12**
+  (`truncate_outside_box`, confinement-execution-contract §6.2) asserts behaviour and disclosure
+  together against every backend — `Residuals` empty ⇒ the truncate is denied and the bytes
+  survive; `Residuals` naming `truncate(2)` ⇒ it succeeds and the file is empty — so neither half
+  can drift silently, and the landlock driver additionally pins the disclosure to the ABI of the
+  kernel the tests run on.
+
 - **A workspace write's git child runs inside the box where Auto would confine it (F-03).**
   `move_file` and `delete_file` reproduce the index half of `git mv` / `git rm` by spawning git
   (`stageGitPaths`), and that child ran with no confinement handle in any mode — the one subprocess

@@ -33,6 +33,7 @@ import (
 
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/daemon"
+	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/filewatch"
 	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/probe"
@@ -219,6 +220,17 @@ func runDaemon(ctx context.Context, opts *config.Options, changed func(string) b
 			fmt.Fprintln(errOut, notice)
 		}
 	}()
+	// The confinement posture a Firing will run under, said once at startup where a supervisor
+	// journals it. Only the residual cell speaks here: a backend that fences but knowingly leaves
+	// a write-class access open (landlock ABI 1–2 and truncate(2)) — disclosure, never a blocker.
+	// The degraded cell has no notice to print because it is REFUSED instead, by the
+	// autoUnattendedBlocked verdict daemonHost hands internal/daemon below. The mode is fixed to
+	// Auto because that is the only mode the disclosure is about, and an auto Firing is what this
+	// process exists to run.
+	if notice := probe.ResidualNotice(probe.BackendName(wiring.confiner),
+		wiring.confiner.Capabilities(), domain.ModeAuto, opts.ConfineToWorkspace); notice != "" {
+		fmt.Fprintln(errOut, notice)
+	}
 
 	// The facts internal/daemon's validation cannot learn from the file, resolved once: config.yaml
 	// is startup-only (ADR 0055), so the same host answers every reload as answered the first load.

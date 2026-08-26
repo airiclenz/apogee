@@ -622,6 +622,14 @@ each shell call instead of running it unbounded ("confine if you can, gate if yo
 can't"). That is not a fault, so Apogee says so at startup rather than letting Auto
 look broken.
 
+One Linux fence is real but incomplete: on a kernel older than **6.2** (landlock ABI 1–2 —
+Ubuntu 22.04, Debian 12, RHEL 9) the kernel has no way to restrict *truncation*, so a confined
+command still cannot create or write a file outside the workspace but can empty one that is
+already there. Auto is still fenced and still eligible; Apogee names the gap rather than
+implying a fence it does not have — `apogee probe` and `/confine` show it as
+`unfenced: truncate(2)` on the backend line, and Auto says it once at startup. A kernel 6.2 or
+newer closes it; until then, treat Auto's fence as create-and-write only.
+
 **On Windows the fence is a token, and the box is a mark on your disk.** No Windows
 facility takes "these paths are writable" as an argument, so the command runs under a
 restricted, *low-integrity* token — the kernel then denies it any write to an object

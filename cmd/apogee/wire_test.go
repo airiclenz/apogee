@@ -807,18 +807,23 @@ func TestRunRootResolvesTheColorScheme(t *testing.T) {
 	})
 }
 
-// The two Auto startup lines are mirror branches at the same site and never both fire:
+// The three Auto startup lines are branches at the same site, and the first two never both fire:
 // confine=false is the blanket-loosen WARNING, confine=true on an unfenceable backend is the
-// degradation notice. The degraded cell is host-dependent (this machine's real backend decides
-// whether it can fence at all), so it is asserted against that backend's own Capabilities
-// rather than against an assumption about the test runner.
+// degradation notice. The third is the residual disclosure — confine=true on a backend that CAN
+// fence but leaves a write-class access open (landlock ABI 1–2 and truncate(2)) — which is the
+// degradation notice's mirror in FSWrite and so can never accompany it. All three cells are
+// host-dependent (this machine's real backend decides what it can fence), so each is asserted
+// against that backend's own Capabilities rather than against an assumption about the test runner.
 func TestRunRootConfinementStartupNotices(t *testing.T) {
 	// Deliberately NOT parallel: captureStderr swaps the process-global os.Stderr.
 	const (
 		unconfinedWarning = "running UNCONFINED"
 		degradedNotice    = "auto mode is gating terminal commands"
+		residualNotice    = "cannot fence"
 	)
-	hostCanFence := platform.NewConfiner().Capabilities().FSWrite
+	hostCaps := platform.NewConfiner().Capabilities()
+	hostCanFence := hostCaps.FSWrite
+	hostHasResidual := hostCanFence && len(hostCaps.Residuals) > 0
 
 	tests := []struct {
 		name         string
@@ -826,9 +831,11 @@ func TestRunRootConfinementStartupNotices(t *testing.T) {
 		confine      bool
 		wantWarning  bool
 		wantDegraded bool
+		wantResidual bool
 	}{
 		{name: "auto unconfined → warning only", mode: "auto", confine: false, wantWarning: true},
-		{name: "auto confined → degraded notice iff the host cannot fence", mode: "auto", confine: true, wantDegraded: !hostCanFence},
+		{name: "auto confined → degraded notice iff the host cannot fence", mode: "auto", confine: true,
+			wantDegraded: !hostCanFence, wantResidual: hostHasResidual},
 		{name: "ask-before makes no confinement promise → silent", mode: "ask-before", confine: true},
 	}
 	for _, tt := range tests {
@@ -856,6 +863,10 @@ func TestRunRootConfinementStartupNotices(t *testing.T) {
 			if got := strings.Contains(stderr, degradedNotice); got != tt.wantDegraded {
 				t.Errorf("degradation notice present = %v; want %v (host FSWrite = %v, stderr = %q)",
 					got, tt.wantDegraded, hostCanFence, stderr)
+			}
+			if got := strings.Contains(stderr, residualNotice); got != tt.wantResidual {
+				t.Errorf("residual notice present = %v; want %v (host residuals = %v, stderr = %q)",
+					got, tt.wantResidual, hostCaps.Residuals, stderr)
 			}
 		})
 	}

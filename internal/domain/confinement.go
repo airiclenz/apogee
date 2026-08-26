@@ -50,10 +50,17 @@ type Confiner interface {
 }
 
 // ConfinementCaps is the capability matrix a Confiner reports (ADR 0012 — extensible
-// beyond these two).
+// beyond the two enforcement bits).
 type ConfinementCaps struct {
 	FSWrite       bool
 	NetworkEgress bool
+
+	// Residuals names the write-class accesses this backend knowingly cannot fence on this
+	// host while FSWrite is true, each named by its syscall; empty when the fence is complete.
+	// Capability honesty (confinement-execution-contract §5): a backend that leaves an access
+	// open says so rather than reporting a fence it does not have. It is disclosure only —
+	// AutoEligible reads FSWrite alone, so a residual never blocks Auto, it only gets said.
+	Residuals []string
 }
 
 // AutoEligible reports whether these capabilities satisfy the Auto gate. Under ADR 0012

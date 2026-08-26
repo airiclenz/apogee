@@ -687,7 +687,10 @@ never optimistic:
 
 - **Linux:** call `landlock_create_ruleset(NULL, 0, LANDLOCK_CREATE_RULESET_VERSION)` to read the
   supported ABI. ABI ≥ 1 (kernel ≥ 5.13) ⇒ `FSWrite = true`. ABI ≥ 4 (kernel ≥ 6.7) ⇒ `NetworkEgress =
-  true`. A kernel without landlock ⇒ `{false, false}`.
+  true`. A kernel without landlock ⇒ `{false, false}`. **ABI 1–2 ⇒ `FSWrite = true` with
+  `Residuals = [truncate(2)]`** (the ruleset cannot handle `LANDLOCK_ACCESS_FS_TRUNCATE` before
+  ABI 3): the fence is real but a confined command can still *empty* an existing file outside the
+  box, and a kernel ≥ 6.2 closes it.
 - **macOS:** probe for `/usr/bin/sandbox-exec` (present on stock macOS). Present ⇒ `{true, true}` (one
   profile enforces both). Absent ⇒ `{false, false}`.
 - **Windows** *(added 2026-07-22, §9 / ADR 0020)*: read the un-shimmed build number
@@ -698,6 +701,15 @@ never optimistic:
   per-run *path-labelling* failure is a `Confine`-time `ErrConfinementUnavailable` (§9) — the one
   place capability honesty splits in two.
 - **Other OSes:** `denyConfiner` ⇒ `{false, false}`.
+
+`Residuals` is the disclosure half of capability honesty (added 2026-08-26): the write-class
+accesses a backend **knowingly cannot fence on this host while `FSWrite` is true**, each named by
+its syscall, empty when the fence is complete. A backend that leaves an access open *says so*
+rather than reporting a fence it does not have. It is disclosure only — `AutoEligible()` reads
+`FSWrite` alone, so a residual never gates Auto and is never a refusal; `probe.CapabilityLine`
+appends `· unfenced: <a, b>` and `probe.ResidualNotice` states the consequence once at startup,
+beside (never instead of) `DegradedNotice`, which stays the `FSWrite = false` story headless runs
+and Firings are refused on.
 
 P3.4 changes `AutoEligible()` from `FSWrite && NetworkEgress` to **`FSWrite` only** (ADR 0012: the
 network is open by default, so network-egress confinement is an *optional tightening*, not an Auto
@@ -763,6 +775,7 @@ harness asserts on exit status / error.
 | 9 | after teardown, the box roots' mandatory labels | **back to their prior state** — the disk mutation is reverted | **Windows** |
 | 10 | `Confine` a box with a non-empty `NetworkAllow` | **`ErrConfinementUnavailable`** — a requested tightening is never a silent no-op | **Windows** |
 | 11 | multi-command script: a denied `mkdir … && cd … && cat > …` heredoc chain, then an unguarded **relative** write — fail-fast preamble and kill-on-denial watch wired exactly as the terminal tool composes them | **stopped** — the watch matched the streamed denial; non-zero exit; the workspace file absent | POSIX (skips under `cmd.exe`) |
+| 12 | the parent seeds `<sibling-temp>/truncate.txt`, then the confined child runs `truncate -s 0 <path>` | keyed on the backend's own disclosure: `Residuals` empty ⇒ **denied** and the bytes intact; `Residuals` names `truncate(2)` ⇒ **succeeds** and the file is empty | POSIX with coreutils `truncate` (skips on macOS / `cmd.exe`) |
 
 #3/#4 are the core "escape is OS-blocked" proof; #5 is the "no per-thread landlock, parent untouched"
 proof; #6 is the "after fork, before execve, inherited across exec" proof specific to the re-exec
@@ -792,6 +805,21 @@ wrapper; #7/#8 encode ADR 0012's network-open default with deny as a tightening.
 > preamble (confinetest cannot import `internal/platform` — the documented Shell import cycle). The
 > row skips under `cmd.exe`: no fail-fast analogue, and Windows denials ("Access is denied.") are
 > deliberately outside the POSIX signature set.
+
+> **Amended 2026-08-26 (C-06, live-reproduced 2026-08-25).** Row **#12**
+> (`truncate_outside_box`) covers the one write-class access a backend may knowingly leave open
+> while reporting `FSWrite`: landlock has no `LANDLOCK_ACCESS_FS_TRUNCATE` bit before ABI 3, so on
+> Ubuntu 22.04, Debian 12 and RHEL 9 a confined command can still empty an existing file outside
+> the box. Its assertion is **keyed on the backend's own `Residuals`** rather than on a hard-coded
+> expectation, so the behaviour and the disclosure are asserted together and neither can drift
+> silently — a backend that closes the gap without clearing `Residuals` fails the row, and so does
+> one that opens a gap without disclosing it. The file is seeded by the **parent**, so what is
+> probed is truncation of an existing file rather than creation; the line is coreutils `truncate`
+> rather than a `>` redirect, so the syscall under test is unambiguously `truncate(2)`. The row
+> skips where that program is absent (macOS, `cmd.exe`), and the landlock driver additionally pins
+> the disclosure against the ABI of the kernel the tests run on
+> (`TestLandlockResidualsMatchHostABI`), which is what makes the row un-fakeable in either
+> direction.
 
 ### 6.3 Per-backend acceptance checklists (now mechanical)
 

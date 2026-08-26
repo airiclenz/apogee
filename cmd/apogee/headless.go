@@ -306,6 +306,16 @@ func runHeadless(cmd *cobra.Command, args []string, opts *config.Options, noSave
 		// (`/confine off`) are slash commands a headless run has no way to type. What the TUI
 		// degrades to, this command refuses; the equivalence is pinned by a test rather than left
 		// to the reader (headless_test.go, the degraded-cell test).
+		//
+		// probe.ResidualNotice IS printed, for the opposite reason: its cell is a backend that
+		// fences — so the run is never refused — which knowingly leaves a write-class access open
+		// (landlock ABI 1–2 and truncate(2)). An unattended run is exactly where that goes
+		// unnoticed otherwise, and it names no slash command. It is disclosure on stderr, never a
+		// blocker: the answer on stdout is untouched.
+		if notice := probe.ResidualNotice(
+			probe.BackendName(confiner), confiner.Capabilities(), mode, opts.ConfineToWorkspace); notice != "" {
+			cmd.PrintErrln(notice)
+		}
 	}
 
 	// Every `mechanisms:` key is validated here — enabled AND disabled — exactly as startup

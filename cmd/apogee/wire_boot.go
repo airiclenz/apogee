@@ -277,6 +277,16 @@ func (w *rootWiring) announceConfinement() {
 		fmt.Fprintln(os.Stderr, notice)
 	}
 
+	// The third cell, and the sibling of the branch above rather than a third exclusive one: a
+	// backend that DOES fence, on a host where it knowingly leaves a write-class access open
+	// (landlock ABI 1–2 cannot fence truncate(2)). Auto is not degraded and nothing is refused —
+	// the operator is told the one thing the fence does not stop, once, at the same moment the
+	// posture is announced. It cannot fire together with the degradation notice: that one needs
+	// FSWrite false, this one needs it true.
+	if notice := probe.ResidualNotice(probe.BackendName(w.confiner), w.confiner.Capabilities(), w.mode, w.opts.ConfineToWorkspace); notice != "" {
+		fmt.Fprintln(os.Stderr, notice)
+	}
+
 	// The unknown-window honesty line used to print here, before the alt-screen. It has moved into
 	// the TUI's rebind fold (ADR 0024): at this point in startup NOTHING has asked the server yet,
 	// so a launch-time notice would fire on every cold start and be wrong ten seconds later. The

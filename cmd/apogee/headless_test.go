@@ -51,7 +51,10 @@ func (fakeConfiner) Confine(context.Context, apogee.ConfinementBox, *exec.Cmd) e
 
 // fenceableHost is the backend most of this file assumes: one that can enforce a filesystem box,
 // so the Auto gate has nothing to say and every other assertion is about what it was written for.
-var fenceableHost = fakeConfiner{caps: apogee.ConfinementCaps{FSWrite: true}}
+// It is a POINTER because apogee.ConfinementCaps carries a Residuals slice and is therefore not
+// comparable: a test that asserts "the Config got THIS backend" compares the interface value, and
+// pointer identity is both comparable and the stronger claim.
+var fenceableHost = &fakeConfiner{caps: apogee.ConfinementCaps{FSWrite: true}}
 
 // headlessRun executes one `apogee headless` invocation against the stub and hermetic roots, and
 // returns what landed on each stream plus the error the command returned. The apogee home and the

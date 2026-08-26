@@ -80,6 +80,12 @@ func TestCapabilityLine(t *testing.T) {
 		{"nothing enforced", domain.ConfinementCaps{}, "landlock (fs-write: unavailable · network: unavailable)"},
 		{"fs only", domain.ConfinementCaps{FSWrite: true}, "landlock (fs-write: available · network: unavailable)"},
 		{"both", domain.ConfinementCaps{FSWrite: true, NetworkEgress: true}, "landlock (fs-write: available · network: available)"},
+		// The fence is real but incomplete (landlock ABI 1–2): the line names what it does not
+		// cover, so /confine status, `apogee probe` and the startup line all carry it.
+		{"fs with a residual", domain.ConfinementCaps{FSWrite: true, Residuals: []string{"truncate(2)"}},
+			"landlock (fs-write: available · network: unavailable · unfenced: truncate(2))"},
+		{"more than one residual", domain.ConfinementCaps{FSWrite: true, Residuals: []string{"truncate(2)", "refer(2)"}},
+			"landlock (fs-write: available · network: unavailable · unfenced: truncate(2), refer(2))"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -98,3 +104,55 @@ type stubConfiner struct{}
 func (stubConfiner) Capabilities() domain.ConfinementCaps { return domain.ConfinementCaps{} }
 
 func (stubConfiner) Confine(context.Context, domain.ConfinementBox, *exec.Cmd) error { return nil }
+
+// The residual notice fires in EXACTLY one cell of the {mode} × {FSWrite} × {confine} ×
+// {residual} matrix: Auto, asking for confinement, on a backend that CAN fence but discloses a
+// write-class access it cannot cover (landlock ABI 1–2 and truncate(2)). It is the sibling of the
+// degradation notice, never its overlap — that one needs FSWrite false, this one needs it true —
+// so the last assertion here is that no input makes both speak.
+func TestResidualNotice(t *testing.T) {
+	t.Parallel()
+	modes := []domain.Mode{domain.ModePlan, domain.ModeAskBefore, domain.ModeAllowEdits, domain.ModeAuto}
+	residualSets := [][]string{nil, {"truncate(2)"}}
+	fired := 0
+	for _, mode := range modes {
+		for _, fsWrite := range []bool{true, false} {
+			for _, confine := range []bool{true, false} {
+				for _, residuals := range residualSets {
+					caps := domain.ConfinementCaps{FSWrite: fsWrite, Residuals: residuals}
+					got := probe.ResidualNotice("landlock", caps, mode, confine)
+					want := mode == domain.ModeAuto && confine && fsWrite && len(residuals) > 0
+					if (got != "") != want {
+						t.Errorf("ResidualNotice(landlock, FSWrite=%v, residuals=%v, %q, confine=%v) = %q; wantNotice = %v",
+							fsWrite, residuals, mode, confine, got, want)
+					}
+					// Mutually exclusive by construction: a residual is a disclosure, the
+					// degradation notice is the unfenceable-host story, and a user must never
+					// be handed both at once.
+					if got != "" && probe.DegradedNotice("landlock", caps, mode, confine) != "" {
+						t.Errorf("both notices fire for FSWrite=%v, residuals=%v, %q, confine=%v; they must be exclusive",
+							fsWrite, residuals, mode, confine)
+					}
+					if got == "" {
+						continue
+					}
+					fired++
+					// It names the backend that answered and the access it leaves open, states
+					// the consequence in the user's terms, and points at the kernel that closes
+					// it — never at a remedy that loosens anything.
+					for _, want := range []string{"landlock", "truncate(2)", "empty an existing file", "6.2"} {
+						if !strings.Contains(got, want) {
+							t.Errorf("residual notice %q does not mention %q", got, want)
+						}
+					}
+					if strings.Contains(got, "/confine off") {
+						t.Errorf("residual notice offers /confine off; a disclosure must not read as a remedy to loosen:\n%s", got)
+					}
+				}
+			}
+		}
+	}
+	if fired != 1 {
+		t.Errorf("notice fired in %d cells of the matrix; want exactly 1 (auto + confine + FSWrite + a residual)", fired)
+	}
+}

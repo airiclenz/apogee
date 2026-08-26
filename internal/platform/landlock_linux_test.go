@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -68,6 +69,27 @@ func TestLandlockProbeNetwork(t *testing.T) {
 	confinetest.ProbeNetwork(t, newTestConfiner(t), Current())
 }
 
+// The battery's row #12 branches on the backend's OWN disclosure, so on its own it cannot catch a
+// backend that discloses the wrong thing consistently. This pins the disclosure to the kernel the
+// tests actually run on: below ABI 3 landlock has no LANDLOCK_ACCESS_FS_TRUNCATE bit and must say
+// so; at ABI 3 and above the fence is complete and must say nothing (C-06, live-reproduced
+// 2026-08-25). Together the two make the truncate residual un-fakeable in either direction.
+func TestLandlockResidualsMatchHostABI(t *testing.T) {
+	t.Parallel()
+	c := NewLandlockConfiner()
+	caps := c.Capabilities()
+	if !caps.FSWrite {
+		t.Skip("no landlock on this kernel; there is no fence to disclose a residual in")
+	}
+	wantResiduals := []string(nil)
+	if c.abi < landlockABITruncate {
+		wantResiduals = []string{"truncate(2)"}
+	}
+	if !slices.Equal(caps.Residuals, wantResiduals) {
+		t.Errorf("host landlock ABI %d discloses Residuals = %v, want %v", c.abi, caps.Residuals, wantResiduals)
+	}
+}
+
 func TestLandlockCapabilitiesHonest(t *testing.T) {
 	t.Parallel()
 
@@ -77,19 +99,23 @@ func TestLandlockCapabilitiesHonest(t *testing.T) {
 		wantFSWrite      bool
 		wantNetwork      bool
 		wantAutoEligible bool
-		wantAccess       uint64 // mask applyLandlock would request; asserted only when wantFSWrite
+		wantAccess       uint64   // mask applyLandlock would request; asserted only when wantFSWrite
+		wantResiduals    []string // write-class accesses this ABI leaves unfenced while FSWrite is true
 	}{
-		{"no_landlock", -1, false, false, false, 0},
+		{"no_landlock", -1, false, false, false, 0, nil},
 		// fs-only; AutoEligible on fs alone (ADR 0012). Its mask must stay at the ABI-1
-		// baseline: asking for TRUNCATE (ABI 3) here was EINVAL on every create_ruleset.
-		{"abi1_kernel_5_13", 1, true, false, true, baselineFSWriteAccess},
+		// baseline: asking for TRUNCATE (ABI 3) here was EINVAL on every create_ruleset — so
+		// the access goes unfenced and is DISCLOSED instead (C-06, live-reproduced 2026-08-25).
+		{"abi1_kernel_5_13", 1, true, false, true, baselineFSWriteAccess, []string{"truncate(2)"}},
 		// Debian 12 (6.1). REFER exists from here, and must be handled or the kernel denies
-		// cross-directory rename/link outright — including inside the workspace.
-		{"abi2_kernel_5_19", 2, true, false, true, baselineFSWriteAccess | unix.LANDLOCK_ACCESS_FS_REFER},
-		// still fs-only, still Auto-eligible; TRUNCATE is finally requestable.
-		{"abi3_kernel_6_2", 3, true, false, true, fullFSWriteAccess},
-		{"abi4_kernel_6_7", 4, true, true, true, fullFSWriteAccess}, // network egress now enforceable
-		{"abi6_newer", 6, true, true, true, fullFSWriteAccess},
+		// cross-directory rename/link outright — including inside the workspace. TRUNCATE still
+		// does not, so the residual still stands.
+		{"abi2_kernel_5_19", 2, true, false, true, baselineFSWriteAccess | unix.LANDLOCK_ACCESS_FS_REFER, []string{"truncate(2)"}},
+		// still fs-only, still Auto-eligible; TRUNCATE is finally requestable, so the fence is
+		// complete and nothing is disclosed.
+		{"abi3_kernel_6_2", 3, true, false, true, fullFSWriteAccess, nil},
+		{"abi4_kernel_6_7", 4, true, true, true, fullFSWriteAccess, nil}, // network egress now enforceable
+		{"abi6_newer", 6, true, true, true, fullFSWriteAccess, nil},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -108,6 +134,19 @@ func TestLandlockCapabilitiesHonest(t *testing.T) {
 			// level, independent of the (P3.4) AutoEligible predicate.
 			if got := caps.FSWrite; got != tt.wantAutoEligible {
 				t.Errorf("abi %d: fs-confinement availability = %v, want %v (Auto needs fs only, ADR 0012)", tt.abi, got, tt.wantAutoEligible)
+			}
+			// Capability honesty's second half (contract §5): a fence that leaves a write-class
+			// access open must SAY which one. Disclosing it is what keeps FSWrite=true honest at
+			// ABI 1–2 — and a backend that grows a residual without disclosing it, or keeps
+			// disclosing one it has since closed, fails here.
+			if !slices.Equal(caps.Residuals, tt.wantResiduals) {
+				t.Errorf("abi %d: Residuals = %v, want %v (an unfenced write-class access must be disclosed)",
+					tt.abi, caps.Residuals, tt.wantResiduals)
+			}
+			// A residual is disclosure, never a gate: Auto still keys on FSWrite alone.
+			if caps.AutoEligible() != tt.wantFSWrite {
+				t.Errorf("abi %d: AutoEligible = %v, want %v (a residual must not change the Auto gate)",
+					tt.abi, caps.AutoEligible(), tt.wantFSWrite)
 			}
 			if !tt.wantFSWrite {
 				return // nothing is advertised, so no mask is ever handed to this kernel
@@ -150,26 +189,34 @@ func TestAccessMaskForABI(t *testing.T) {
 	// The exact mask per ABI. Both call sites (ruleset creation and every path-beneath rule)
 	// derive from this function, and the kernel cross-checks them: a rule's allowed_access must
 	// be a subset of the ruleset's handled_access_fs, so one shared derivation is the invariant.
+	// wantTruncate is spelled per row rather than left implicit in the mask constants: it is the
+	// bit Capabilities().Residuals answers for, so the mask and the disclosure are pinned against
+	// the same table and cannot drift apart (C-06).
 	tests := []struct {
-		name string
-		abi  int
-		want uint64
+		name         string
+		abi          int
+		want         uint64
+		wantTruncate bool
 	}{
 		// Not a valid input (applyLandlock refuses below the floor); pinned so the clamp can
 		// never become a mask that handles nothing — a ruleset fencing no write at all.
-		{"below_floor_clamps_to_baseline", -1, baselineFSWriteAccess},
-		{"abi1_kernel_5_13", 1, baselineFSWriteAccess},
-		{"abi2_kernel_5_19", 2, baselineFSWriteAccess | unix.LANDLOCK_ACCESS_FS_REFER},
-		{"abi3_kernel_6_2", 3, fullFSWriteAccess},
-		{"abi4_kernel_6_7", 4, fullFSWriteAccess},
-		{"abi6_newer", 6, fullFSWriteAccess},
-		{"abi99_future", 99, fullFSWriteAccess},
+		{"below_floor_clamps_to_baseline", -1, baselineFSWriteAccess, false},
+		{"abi1_kernel_5_13", 1, baselineFSWriteAccess, false},
+		{"abi2_kernel_5_19", 2, baselineFSWriteAccess | unix.LANDLOCK_ACCESS_FS_REFER, false},
+		{"abi3_kernel_6_2", 3, fullFSWriteAccess, true},
+		{"abi4_kernel_6_7", 4, fullFSWriteAccess, true},
+		{"abi6_newer", 6, fullFSWriteAccess, true},
+		{"abi99_future", 99, fullFSWriteAccess, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			if got := accessMaskForABI(tt.abi); got != tt.want {
 				t.Errorf("accessMaskForABI(%d) = %#x, want %#x", tt.abi, got, tt.want)
+			}
+			if got := accessMaskForABI(tt.abi)&unix.LANDLOCK_ACCESS_FS_TRUNCATE != 0; got != tt.wantTruncate {
+				t.Errorf("accessMaskForABI(%d) handles TRUNCATE = %v, want %v (below ABI %d it is unfenced and disclosed as a residual)",
+					tt.abi, got, tt.wantTruncate, landlockABITruncate)
 			}
 		})
 	}

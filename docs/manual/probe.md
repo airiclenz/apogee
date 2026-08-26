@@ -22,6 +22,13 @@ confinement (ADR 0012)
   auto:          eligible — the backend can fence terminal commands, so auto runs them confined
 ```
 
+The `backend:` line gains a third field where the fence is real but incomplete —
+`landlock (fs-write: available · network: unavailable · unfenced: truncate(2))` — naming each
+access the backend knows it cannot cover on this host. On Linux that is truncation on a kernel
+older than 6.2 (landlock ABI 1–2: Ubuntu 22.04, Debian 12, RHEL 9), where a confined command
+cannot create or write outside the workspace but can still *empty* a file that is already there.
+Auto stays eligible; the field exists so the report never claims a fence it does not have.
+
 `apogee probe model` is the other half, and it is deliberately an **explicit act**
 rather than something the bare noun triggers, because it costs live model calls *and*
 writes. It runs a three-part capability battery — a native tool call, JSON/structured

@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -52,15 +53,15 @@ type DenialKiller interface {
 type DenialKillerFactory func(next io.Writer, kill func()) DenialKiller
 
 // Probe drives c through the filesystem escape battery (confinement-execution-contract
-// §6.2 rows #1–#6 plus the chained-script clobber probe) under a box rooted at fresh temp
-// dirs. The caller passes the OS-specific backend (any domain.Confiner), the platform
-// shell (platform.Current()), and the two pieces of the terminal tool's own hardening the
-// chained-script probe reproduces exactly as that tool composes them: the fail-fast
-// prefix (platform.FailFastPreamble()) and the kill-on-denial watch factory
-// (platform.NewDenialKillWriter) — handed in rather than imported for the same
-// import-cycle reason Shell is redeclared above. The battery and its assertions are
-// identical across backends, so "confined" means the same thing on landlock, seatbelt
-// and the Windows token backend.
+// §6.2 rows #1–#6 plus the chained-script clobber probe and the truncate-residual probe)
+// under a box rooted at fresh temp dirs. The caller passes the OS-specific backend (any
+// domain.Confiner), the platform shell (platform.Current()), and the two pieces of the
+// terminal tool's own hardening the chained-script probe reproduces exactly as that tool
+// composes them: the fail-fast prefix (platform.FailFastPreamble()) and the
+// kill-on-denial watch factory (platform.NewDenialKillWriter) — handed in rather than
+// imported for the same import-cycle reason Shell is redeclared above. The battery and
+// its assertions are identical across backends, so "confined" means the same thing on
+// landlock, seatbelt and the Windows token backend.
 //
 // When c reports FSWrite==false (e.g. a kernel built without landlock) enforcement cannot be
 // exercised on this host, so Probe skips — the backend is still constructed and Capabilities
@@ -135,6 +136,51 @@ func Probe(t *testing.T, c domain.Confiner, sh Shell, failFastPreamble string, n
 		target := filepath.Join(outside, "inherited-escape.txt")
 		err := runNestedWriteProbe(t, c, sh, box, target)
 		assertDenied(t, err, target)
+	})
+
+	t.Run("truncate_outside_box", func(t *testing.T) {
+		// Row #12: the ONE write-class access a backend may knowingly leave open while
+		// reporting FSWrite — landlock cannot handle LANDLOCK_ACCESS_FS_TRUNCATE before ABI 3
+		// (kernel 6.2), so on Ubuntu 22.04, Debian 12 and RHEL 9 a confined command can still
+		// empty an existing file outside the box. The assertion is keyed on the backend's OWN
+		// disclosure rather than on a hard-coded expectation: caps.Residuals empty means the
+		// fence is claimed complete and the truncate must be DENIED with the bytes intact;
+		// caps.Residuals naming truncate(2) means the gap is admitted and the truncate must
+		// SUCCEED. Asserting behaviour and disclosure together is what stops either drifting
+		// silently — a backend that closes the gap without clearing Residuals fails here, and
+		// so does one that opens a gap without disclosing it.
+		//
+		// The file is created by the PARENT (unconfined) so the probe truncates something that
+		// already exists: creating it from inside the box would be denied for the wrong reason.
+		target := filepath.Join(outside, "truncate.txt")
+		if err := os.WriteFile(target, []byte("keepme"), 0o600); err != nil {
+			t.Fatalf("parent seed %q: %v", target, err)
+		}
+		line, ok := truncateLine(sh, target)
+		if !ok {
+			t.Skip("confinetest: no coreutils `truncate` on PATH (macOS, cmd.exe); truncate residual probe is skipped")
+		}
+		err := runConfined(t, c, sh, box, line)
+		size := fileSize(t, target)
+		if discloses(c.Capabilities().Residuals, "truncate(2)") {
+			if err != nil {
+				t.Fatalf("confined `truncate` failed (%v) although the backend discloses truncate(2) as unfenced; "+
+					"the disclosure and the behaviour disagree", err)
+			}
+			if size != 0 {
+				t.Fatalf("confined `truncate` left %q at %d bytes although the backend discloses truncate(2) as "+
+					"unfenced; the disclosure and the behaviour disagree", target, size)
+			}
+			return
+		}
+		if err == nil {
+			t.Fatalf("confined `truncate` of %q succeeded although the backend discloses NO residual; "+
+				"an unfenced write-class access must be disclosed in Capabilities().Residuals", target)
+		}
+		if size == 0 {
+			t.Fatalf("confined `truncate` emptied %q despite error %v; the fence did not hold and nothing "+
+				"disclosed the gap", target, err)
+		}
 	})
 
 	t.Run("chained_script_clobber_denied", func(t *testing.T) {
@@ -319,6 +365,23 @@ func assertDenied(t *testing.T, err error, target string) {
 	} else if !errors.Is(statErr, os.ErrNotExist) {
 		t.Fatalf("stat %q: %v", target, statErr)
 	}
+}
+
+// discloses reports whether residuals names access — the backend's own admission that it
+// cannot fence that syscall on this host (domain.ConfinementCaps.Residuals).
+func discloses(residuals []string, access string) bool {
+	return slices.Contains(residuals, access)
+}
+
+// fileSize returns target's size in bytes, failing the test if it cannot be stat'd. Row #12
+// reads it rather than the content: "was it emptied" is the whole question truncate(2) asks.
+func fileSize(t *testing.T, target string) int64 {
+	t.Helper()
+	info, err := os.Stat(target)
+	if err != nil {
+		t.Fatalf("stat %q: %v", target, err)
+	}
+	return info.Size()
 }
 
 // assertFileExists fails the test unless target exists (the in-box write landed).
