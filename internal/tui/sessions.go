@@ -571,8 +571,9 @@ func (m *Model) resumeLoaded(msg sessionLoadedMsg) tea.Cmd {
 	// gauge is relit from the record — the same one call /clear makes, differing only in having a
 	// stored fill to reopen at (liveStats.reset).
 	m.liveStats.reset()
-	m.ctxUsed = msg.rec.Meta.CtxUsed          // relight the gauge near the resumed session's last fill
-	m.usage = usageTotals(msg.rec.Meta.Usage) // …and reopen its accounting where the record left it
+	m.ctxUsed = msg.rec.Meta.CtxUsed              // relight the gauge near the resumed session's last fill
+	m.usageBase = usageTotals(msg.rec.Meta.Usage) // …and reopen its accounting where the record left it
+	m.usage = m.usageBase                         // RestoreSession zeroed the engine's tally; the fold adds onto the base
 	// The delegate half is restored beside it as the fallback it is: the replayed scrollback below
 	// brings back the run heads that carry their own readings, and those replace this the moment
 	// one reports (delegateUsageTotal). A record whose blob no longer decodes keeps it instead.

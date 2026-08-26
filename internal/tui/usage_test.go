@@ -1,12 +1,15 @@
 package tui
 
 import (
+	"context"
 	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/format"
+	"github.com/airiclenz/apogee/internal/session"
 )
 
 // ----------------------------------------------------------------------------
@@ -355,4 +358,72 @@ func TestDelegateUsageTotalPrefersLiveHeadsOverTheResumedReading(t *testing.T) {
 		t.Errorf("with one live head the total = %+v, want that head's own %+v — the restored sum is replaced",
 			got, childTotals)
 	}
+}
+
+// ----------------------------------------------------------------------------
+// The resumed base the engine's reading is folded onto (Model.usageBase)
+// ----------------------------------------------------------------------------
+
+// resumedUsageModel builds a model opened on a record that already carried the given totals — the
+// startup-resume path, which is where the base is seeded (replayResumed).
+func resumedUsageModel(t *testing.T, stored session.Usage) Model {
+	t.Helper()
+	return newModel(context.Background(), &fakeEngine{}, Options{
+		Resumed: &ResumedSession{Title: "france question", Usage: stored},
+	}, nil)
+}
+
+// TestUsageAccumulatesOverAResumedReading pins the offset half of the session's accounting. The
+// engine's cumulative reading is its own running sum SINCE THE SESSION WAS OPENED, and a resume
+// restarts it at zero — a fresh Agent on --resume, RestoreSession's reset on a browser restore — so
+// the view folds that reading ON TOP of what the record carried in. A fixed base added to each
+// latest-wins reading is added once, not once per event, and a session that resumed nothing has no
+// base to add.
+func TestUsageAccumulatesOverAResumedReading(t *testing.T) {
+	t.Parallel()
+	stored := session.Usage{Calls: 40, PromptTokens: 480000, CompletionTokens: 20000, TotalTokens: 500000}
+
+	t.Run("the first post-resume reading adds to the record's totals", func(t *testing.T) {
+		t.Parallel()
+		m := resumedUsageModel(t, stored)
+
+		m = m.foldEvent(mainUsage(5000, 300, 5300, 5000, 300, 5300, 1))
+
+		want := usageTotals{Calls: 41, PromptTokens: 485000, CompletionTokens: 20300, TotalTokens: 505300}
+		if m.usage != want {
+			t.Errorf("totals = %+v, want %+v — the engine's reading rides on the resumed base", m.usage, want)
+		}
+		payload, ok := m.snapshotPayload(domain.Session{})
+		if !ok {
+			t.Fatal("snapshotPayload declined to build a payload")
+		}
+		if got := payload.usage; got != session.Usage(want) {
+			t.Errorf("saved totals = %+v, want the same %+v the pane reports", got, want)
+		}
+	})
+
+	t.Run("the base is added once, not once per event", func(t *testing.T) {
+		t.Parallel()
+		m := resumedUsageModel(t, stored)
+
+		m = m.foldEvent(mainUsage(5000, 300, 5300, 5000, 300, 5300, 1))
+		m = m.foldEvent(mainUsage(4000, 400, 4400, 9000, 700, 9700, 2))
+
+		want := usageTotals{Calls: 42, PromptTokens: 489000, CompletionTokens: 20700, TotalTokens: 509700}
+		if m.usage != want {
+			t.Errorf("totals = %+v, want %+v — a latest-wins reading plus one fixed offset", m.usage, want)
+		}
+	})
+
+	t.Run("a session that resumed nothing reports the reading alone", func(t *testing.T) {
+		t.Parallel()
+		m := newTestModel(t)
+
+		m = m.foldEvent(mainUsage(5000, 300, 5300, 5000, 300, 5300, 1))
+
+		want := usageTotals{Calls: 1, PromptTokens: 5000, CompletionTokens: 300, TotalTokens: 5300}
+		if m.usage != want {
+			t.Errorf("totals = %+v, want exactly the event's reading %+v — a fresh launch has no base", m.usage, want)
+		}
+	})
 }

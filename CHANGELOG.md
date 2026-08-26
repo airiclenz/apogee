@@ -234,6 +234,19 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **A resumed session's accounting now accumulates instead of collapsing to the first post-resume
+  reading.** The engine's cumulative usage reading is its own running sum SINCE THE SESSION WAS
+  OPENED, and every resume restarts it at zero — a freshly built Agent on `--resume`, and now
+  `RestoreSession`'s reset on a `/sessions` restore. The view folded that reading latest-wins over
+  whatever the record had carried in, so a session reopened with 500,000 tokens on its record
+  reported 5,300 the moment its first Turn reported usage — and the next save wrote that number
+  back, permanently losing the spend the record already knew about. The Model now keeps the
+  record's totals as a base (`usageBase`, seeded on both resume paths, zero on a fresh launch) and
+  folds the engine's reading ON TOP of it, so `/usage`'s main row and the record's stored totals
+  both read the session's whole spend across any number of resumes. The base is a fixed offset
+  added to each latest-wins reading, so it is counted once rather than once per event, and a
+  session that resumed nothing still reports exactly what the engine reports.
+
 - **A `/sessions` restore now closes the outgoing conversation's Consoles and resets the engine's
   usage reading.** `RestoreSession` swept nothing: resuming a stored session swapped the
   conversation and left the previous one's Consoles running under ids the restored conversation

@@ -22,9 +22,10 @@ import (
 // running total in the engine and stamps it on every UsageEvent it emits (domain.UsageEvent), the
 // folds keep the LATEST reading per agent (foldStats for the main agent, transcript.applyUsage for
 // each run head), and this pane reads those readings out. That is what makes the report survive a
-// dropped event, a resumed session (the main agent's totals ride the session record) and a
-// compaction (whose tokens arrive as a flagged maintenance event the gauge skips and the totals
-// take).
+// dropped event, a resumed session (the main agent's totals ride the session record, and the fold
+// adds the engine's post-resume reading onto that stored base — Model.usageBase — because the
+// engine's own count restarts at zero on every resume) and a compaction (whose tokens arrive as a
+// flagged maintenance event the gauge skips and the totals take).
 //
 // It is the lightest pane in the frame: no filter, no selection, and the only keys it owns are esc
 // and the four that scroll it. The verb is whileRunning — the pane reads Model state and calls

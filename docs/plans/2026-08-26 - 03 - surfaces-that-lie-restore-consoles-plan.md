@@ -186,7 +186,9 @@ future-version snapshot: both Consoles still open, cumulative count unchanged).
 
 ---
 
-## 2. A resumed session's accounting accumulates through a per-resume offset
+## 2. A resumed session's accounting accumulates through a per-resume offset — ✅ DONE (2026-08-26)
+
+NOTES (2026-08-26): the item's Tests line asks the browser subtest of `TestSessionUsageTotalsSurviveTheRecord` to assert the next save carries the record's totals plus the folded event's. That replaces its previous final assertion (`saved == want`) rather than adding to it — the same save cannot be both — so the round-trip check now pins base+reading; the "reopened at exactly the stored totals" fact it used to carry is still asserted, unchanged, immediately after the resume in the same subtest and in the startup-resume subtest beside it.
 
 Depends on item 1.
 

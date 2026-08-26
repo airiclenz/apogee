@@ -122,7 +122,13 @@ func (m Model) foldStats(e domain.Event) Model {
 			break // a delegate's fill, which is its run block's business and not the gauge's
 		}
 		if totals, ok := usageReading(e); ok {
-			m.usage = totals // the main agent's own running sum, latest-wins — maintenance included
+			// The reading is the ENGINE's own running sum since THIS session was opened — latest-wins,
+			// maintenance included — and the base is what the record carried into it (Model.usageBase,
+			// zero on a fresh launch). Adding the two is the only sum here: a resume restarts the
+			// engine's count at zero, so replacing rather than offsetting would drop everything the
+			// reopened record had already spent. The base is a fixed offset, so adding it to each
+			// latest reading adds it once, not once per event.
+			m.usage = usageSum(m.usageBase, totals)
 		}
 		if e.Maintenance {
 			break // accounted for above; the gauge and the generation clock skip it

@@ -348,6 +348,16 @@ type Model struct {
 	// head instead (transcript.applyUsage), which is where the per-agent grouping already is.
 	usage usageTotals
 
+	// usageBase is the accounting the session record carried when this session was (re)opened: the
+	// main agent's stored totals on either resume path (replayResumed, resumeLoaded), and the zero
+	// value on a fresh launch. It exists because the ENGINE's cumulative reading restarts at zero on
+	// every resume — a fresh Agent on --resume, RestoreSession's reset on a browser restore — so the
+	// usage fold adds that reading ON TOP of this base instead of letting it replace what the record
+	// carried in (foldStats). Without it a resumed session's spend collapses to whatever the first
+	// post-resume reading says. The offset is the renderer's own because it is the Driver that seeds
+	// a view from a record: the engine never sees one.
+	usageBase usageTotals
+
 	// delegateUsage is the delegate half of a RESUMED record's accounting (session.Meta), and only
 	// ever a fallback: a live run head's own reading replaces it the moment one reports, so the two
 	// are never added together (delegateUsageTotal). It exists for the record whose scrollback did
@@ -589,7 +599,8 @@ func (m *Model) replayResumed(r *ResumedSession) {
 	// …and reopen the accounting where the record left it: the totals are the reading this session
 	// last took, so a resumed session reports its spend instead of starting from nothing. A record
 	// written before the feature carries zeros, which is exactly the nothing-reported state.
-	m.usage = usageTotals(r.Usage)
+	m.usageBase = usageTotals(r.Usage)
+	m.usage = m.usageBase                          // the engine counts from zero; the fold adds its reading on top
 	m.delegateUsage = usageTotals(r.DelegateUsage) // …and the delegate half beside it, until a head reports
 	m.replayScrollback(r.Transcript, r.Title, r.InExchange)
 }

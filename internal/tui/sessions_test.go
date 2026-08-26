@@ -2090,8 +2090,10 @@ func TestOverlayNamesTheRowsItCannotShow(t *testing.T) {
 // TestSessionUsageTotalsSurviveTheRecord pins the persistence half of the session's accounting: the
 // main agent's cumulative totals are written with the record and reopened with it, by BOTH resume
 // paths — the startup replay and the in-app browser — so a reopened session reports what it has
-// spent instead of nothing. The save that follows carries the restored totals straight back, which
-// is the round trip through the SessionHost seam.
+// spent instead of nothing. The save that follows carries the restored totals PLUS what the session
+// has spent since — the engine's reading restarts at zero on a restore, so it is folded onto the
+// record's base (Model.usageBase) rather than replacing it — which is the round trip through the
+// SessionHost seam.
 func TestSessionUsageTotalsSurviveTheRecord(t *testing.T) {
 	want := session.Usage{Calls: 3, PromptTokens: 21000, CompletionTokens: 1500, TotalTokens: 22500}
 
@@ -2127,14 +2129,20 @@ func TestSessionUsageTotalsSurviveTheRecord(t *testing.T) {
 			t.Errorf("totals after a browser resume = %+v, want the stored %+v", got, want)
 		}
 
+		// RestoreSession zeroed the engine's tally, so the first reading of the reopened session counts
+		// one call — it must ADD to the record's totals, or the save writes back less than the session
+		// had already spent.
+		m = m.foldEvent(mainUsage(6000, 400, 6400, 6000, 400, 6400, 1))
+
 		m.transcript.addUser("and its population?", nil) // a save is gated on a sent prompt
 		m = driveOneSave(t, m, domain.Session{})
 		calls := host.savedCalls()
 		if len(calls) == 0 {
 			t.Fatal("the resumed session saved nothing")
 		}
-		if got := calls[len(calls)-1].usage; got != want {
-			t.Errorf("saved totals = %+v, want the reopened %+v", got, want)
+		wantSaved := session.Usage{Calls: 4, PromptTokens: 27000, CompletionTokens: 1900, TotalTokens: 28900}
+		if got := calls[len(calls)-1].usage; got != wantSaved {
+			t.Errorf("saved totals = %+v, want the reopened %+v plus the reading since = %+v", got, want, wantSaved)
 		}
 	})
 }
