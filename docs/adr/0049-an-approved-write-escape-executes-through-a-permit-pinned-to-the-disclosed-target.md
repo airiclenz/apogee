@@ -59,13 +59,22 @@ native tool less recreated the asymmetry decision 1 kills. The fence becomes one
 bounds writes — and the parked Windows box-local `%TEMP%` work lands onto a fence that already
 understands it. (The field still has no writer; the semantics are latent but tested.)
 
-**4 — Approval is final: no hard-deny set above the Gate.** The dangerous-action floor (`.git/`,
-`~/.apogee`) keeps exactly its documented meaning — a Tier-2 *forced look*, never a boundary
+**4 — Approval is final: no hard-deny set above the Gate.** The dangerous-action floor
+(`~/.apogee`) keeps exactly its documented meaning — a Tier-2 *forced look*, never a boundary
 (`internal/security/doc.go`) — and the human's informed yes then runs the write, `~/.apogee`
 included. A hard-deny would protect the operator from their own informed answer, a concept this
 threat model rejects (the operator is trusted), and would fence the legible path while an
 approved `terminal` call could always take the opaque one. If approval fatigue ever proves real,
 a hard-deny tier is a later additive tightening under the security-matrix's tighten-only law.
+
+> **Note (2026-08-26, security audit lead, §3.5).** The parenthetical above originally read
+> "(`.git/`, `~/.apogee`)" and is narrowed to `~/.apogee`. The `.git/hooks|config|modules` rule
+> stays **Tier-1 hard-refuse**: a write there is delayed code execution outside every
+> confinement — the shell-rc class, not a control plane the operator edits by hand. Only
+> `~/.apogee` is the Tier-2 forced look this decision describes. The code was reconciled to that
+> reading on this date: `write-apogee-control-plane` shipped as `TierHardRefuse` and is now
+> `TierForceApproval`, with the rule's Hint carried to the Approval prompt as its remedy and
+> appended to a denied call's result.
 
 **5 — The whole WS-write family honours the permit, uniformly.** The enforcement point is the
 shared funnel, so `write_file`, `file_edit` (patch), `find_replace` (single + multi) and

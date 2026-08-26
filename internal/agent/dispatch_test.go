@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -747,6 +748,83 @@ func TestDispatch_ApprovedForcedGateFallsBackOnUnconfinableBox(t *testing.T) {
 			t.Error("a denied forced gate must produce an error result")
 		}
 	})
+}
+
+// TestDispatch_ForcedGateCarriesTheRulesWayOutToBothReaders proves the Tier-2 Hint reaches the
+// two people who need it: the HUMAN, as the Approval prompt's remedy line beside the question,
+// and the MODEL, appended to the refusal when the human says no. A denied forced look is
+// otherwise indistinguishable, to the model, from a human who simply declined this call — so it
+// re-issues rewrites of a command it can never satisfy instead of taking the sanctioned route.
+// The ~/.apogee rule is the shipped case: reading the home skill library through the terminal
+// trips the write rule (the terminal declares no read-source keys), and the Hint names the
+// dedicated tools that do the same job. A rule with no Hint keeps today's bare sentence.
+func TestDispatch_ForcedGateCarriesTheRulesWayOutToBothReaders(t *testing.T) {
+	t.Parallel()
+
+	hint := shippedRuleHint(t, "write-apogee-control-plane")
+
+	for _, tc := range []struct {
+		name       string
+		command    string
+		wantRemedy string
+		wantDenial string
+	}{
+		{
+			name:       "a hinted rule",
+			command:    "cp /home/u/.apogee/skills/review/prompts/recon.md /tmp/",
+			wantRemedy: hint,
+			wantDenial: "tool call denied by approver — " + hint,
+		},
+		{
+			name:       "a hintless rule",
+			command:    "sudo apt-get install ripgrep",
+			wantRemedy: "",
+			wantDenial: "tool call denied by approver",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			sink := &recordingSink{}
+			sub := &subprocTool{name: "terminal"}
+			cfg := autoConfig(sink, &fakeConfiner{caps: capsBoth()}, true, sub)
+			approver := &fakeApprover{decision: domain.ApprovalDeny}
+			cfg.Approver = approver
+
+			driveToolCall(t, cfg, sink, "c1", "terminal", `{"command":`+strconv.Quote(tc.command)+`}`)
+
+			req := requestOnApproval(t, sink.events)
+			if req.Reason != forceApprovalReason {
+				t.Fatalf("approval reason = %q, want %q — this gate was not the Tier-2 force, so the case is not exercised", req.Reason, forceApprovalReason)
+			}
+			if req.Remedy != tc.wantRemedy {
+				t.Errorf("prompt remedy = %q, want %q", req.Remedy, tc.wantRemedy)
+			}
+			res, ok := lastToolResult(sink.events)
+			if !ok {
+				t.Fatal("no ToolResult recorded")
+			}
+			if !res.IsError || res.Content != tc.wantDenial {
+				t.Errorf("denial = %q (IsError=%v), want %q", res.Content, res.IsError, tc.wantDenial)
+			}
+		})
+	}
+}
+
+// shippedRuleHint returns the Hint the named shipped dangerous rule carries, failing when the
+// rule is gone or hintless. The test reads the sentence from the ruleset rather than repeating
+// it, so a reworded Hint stays one edit rather than two that can drift apart.
+func shippedRuleHint(t *testing.T, ruleID string) string {
+	t.Helper()
+	for _, r := range security.DefaultDangerousRules() {
+		if r.ID == ruleID {
+			if r.Hint == "" {
+				t.Fatalf("shipped rule %q carries no Hint; this test needs one", ruleID)
+			}
+			return r.Hint
+		}
+	}
+	t.Fatalf("shipped rule %q not found in DefaultDangerousRules", ruleID)
+	return ""
 }
 
 // approvalRequests returns every ApprovalEvent's request, in order — the sequence of questions

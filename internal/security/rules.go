@@ -19,7 +19,9 @@ package security
 // `$'…'`, base64) is not, and that is the boundary `doc.go` states.
 //
 // Tiers (ADR 0012): TierHardRefuse has no per-call override; TierForceApproval forces
-// the Approver even in Auto (a legitimate-but-risky idiom — a speed-bump, not a block).
+// the Approver even in Auto — a legitimate-but-risky idiom (`curl … | bash`, `sudo`), or a
+// control plane whose write the human must LOOK at (`~/.apogee`, ADR 0049 §4): a speed-bump,
+// not a block.
 
 // homeAnchor matches the start of a user's home directory in the normalized text the guard
 // inspects. The three write-* rules below share it byte-for-byte, so a home form is spelled
@@ -142,10 +144,20 @@ func DefaultDangerousRules() []Rule {
 			Pattern:    `\.git/(?:hooks|config|modules)\b`,
 			WritesOnly: true,
 		},
-		// Writes / deletes reaching apogee's own control plane. `~/.apogee` holds the global
-		// config.yaml — the one source a dangerous-rule REMOVAL is honoured from
-		// (MergeDangerousRules below) — plus the skill library and the session records, so a
-		// write here can dissolve this floor for every later run. The boundary is the HOME
+		// Writes / deletes reaching apogee's own control plane — a Tier-2 forced LOOK, the one
+		// force-approval rule written among the hard refuses above, because its subject is the
+		// control plane next door to `.git/` and the tier belongs to the rule rather than to the
+		// block it is spelled in (NewDangerousActionGuard sorts by tier, so ordering here is
+		// documentation, not precedence). ADR 0049 §4 states the floor: `~/.apogee` is a forced
+		// look, never a boundary — the human is made to SEE the write, and their informed yes
+		// runs it, `~/.apogee` included. What earns the softer tier is what a write there does:
+		// `.git/hooks|config` above is delayed code execution outside every confinement (the
+		// shell-rc class), while `~/.apogee` holds the global config.yaml — the one source a
+		// dangerous-rule REMOVAL is honoured from (MergeDangerousRules below) — plus the skill
+		// library and the session records, so a write here can dissolve this floor for every
+		// later run: catastrophic as a model's mistake, ordinary as the operator's own step
+		// (curating the skill library, editing a scheme), which is the shape a look answers and
+		// a refusal does not. The boundary is the HOME
 		// copy: a project's own `<workspace>/.apogee/skills` is workspace territory and never
 		// matches, and a home relocated by `--config` / `APOGEE_CONFIG` is out of a text
 		// pattern's reach (this is a footgun-guard, not a boundary — see doc.go). The home
@@ -153,15 +165,17 @@ func DefaultDangerousRules() []Rule {
 		// hygiene: the home skill
 		// library lives under `~/.apogee/skills` and is a sanctioned extra READ root — every
 		// skill run starts by listing its own skill directory and copy_file-ing resources
-		// out of it, and without the class this rule hard-refused that first step. The Hint
+		// out of it, and without the class this rule refused that first step outright. The Hint
 		// exists because WritesOnly only helps tools that DECLARE read-source keys — the
 		// terminal declares none, so a shell command that merely reads from the home skill
 		// library still trips this write rule, and the write-flavoured Reason alone sends a
 		// small model looping on rewrites of the write half. The hint names the sanctioned
-		// route instead.
+		// route instead — and at Tier 2 it now rides the Approval prompt as its remedy line and
+		// the deny result's tail (internal/agent's resolution.go / dispatch.go), which is where
+		// a small model actually reads it.
 		{
 			ID:     "write-apogee-control-plane",
-			Tier:   TierHardRefuse,
+			Tier:   TierForceApproval,
 			Reason: "write or delete under apogee's own control plane (~/.apogee)",
 			Hint: "a terminal command is refused whenever its text names ~/.apogee, even for a " +
 				"read; list, read or copy from there with the dedicated tools instead (list_dir, " +

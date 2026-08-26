@@ -520,6 +520,10 @@ func (a *Agent) executeRun(ctx context.Context, turn int, tool domain.Tool, call
 // Refuse — Resolution D5), so nothing runs unapproved here. A forced gate skips the
 // allow-for-session cache; a deny (or a nil Approver defensively) refuses the call.
 //
+// A DENIED forced gate carries the guard rule's Hint into its refusal text, which is the only
+// place a Tier-2 rule's way out reaches the model: a forced look that ends in "no" is otherwise
+// indistinguishable, to the model, from a human who simply declined this call.
+//
 // The confineOnAllow branch is a Tier-2 forced look on a call Auto would have Confined: approval
 // decides WHETHER it runs, confinement decides WHERE, so the allow executes as the Confine would
 // have — box installed, and a run-time ErrConfinementUnavailable following the verdict's own D4
@@ -531,7 +535,16 @@ func (a *Agent) executeGate(ctx context.Context, turn int, tool domain.Tool, cal
 		return domain.ToolResult{}, dispatchCancelled
 	}
 	if !allowed {
-		result := errorToolResult(call.ID, "tool call denied by approver")
+		// A denied gate the guard FORCED answers the model with the rule's way out appended,
+		// so a small model reroutes to the sanctioned route instead of re-issuing rewrites of a
+		// call the human just said no to (guardRefusalMessage does the same for a Tier-1
+		// refusal). Every other gate — and a forced gate whose rule offers no Hint — keeps
+		// today's bare sentence.
+		denial := "tool call denied by approver"
+		if verdict.hint != "" {
+			denial += " — " + verdict.hint
+		}
+		result := errorToolResult(call.ID, denial)
 		a.recordBlocked(turn, call, verdict.auditDecision, verdict.auditReason, result)
 		return result, dispatchDone
 	}

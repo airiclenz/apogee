@@ -439,8 +439,10 @@ func TestGuardRefusalMessageAppendsTheHint(t *testing.T) {
 // to a FORCED gate (the guardrail can only tighten): a Run leaf, a Confine leaf, and a Gate
 // leaf all become a forced gate whose reason is the guard's. The CONFINE leaf's upgrade keeps
 // its box and its D4 fallback — approval decides whether the call runs, confinement where — so
-// a forced look never loosens the fence the ladder chose. A Plan-mode Refuse leaf is NOT
-// upgraded, and a nil Approver turns the forced gate into a Refuse.
+// a forced look never loosens the fence the ladder chose. The matched rule's Hint rides the
+// upgrade to both of its readers (remedy for the human's prompt, hint for a denied model), and
+// a rule without one leaves both empty. A Plan-mode Refuse leaf is NOT upgraded, and a nil
+// Approver turns the forced gate into a Refuse.
 func TestResolve_GuardTier2ForcesGate(t *testing.T) {
 	t.Parallel()
 	forceGuard := security.PreCheck{Outcome: security.GuardForceApproval, Reason: "curl | bash", Audit: security.AuditDangerousForceApproval}
@@ -472,6 +474,43 @@ func TestResolve_GuardTier2ForcesGate(t *testing.T) {
 		}
 		if got.fallback != nil {
 			t.Error("a Run leaf's forced gate carries no Confine fallback (nothing is confined)")
+		}
+		// This guard's rule offers no way out, so neither reader is handed a dangling one.
+		if got.remedy != "" || got.hint != "" {
+			t.Errorf("remedy/hint = %q/%q, want both empty for a hintless rule — today's prompt, unchanged", got.remedy, got.hint)
+		}
+	})
+
+	// The rule's own way out reaches BOTH readers: the human as the prompt's remedy line, the
+	// model as the sentence a denial hands back (dispatch.go). It rides both construction
+	// branches — the bare upgrade and the Confine leaf's box-keeping one — because which leaf
+	// was upgraded has nothing to do with which rule forced the look.
+	t.Run("a hinted rule's way out rides the forced gate", func(t *testing.T) {
+		t.Parallel()
+		const hint = "list, read or copy from there with the dedicated tools instead"
+
+		for _, tc := range []struct {
+			name string
+			tool domain.Tool
+		}{
+			{"a Run leaf's upgrade", ro},
+			{"a Confine leaf's upgrade", sub},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				in := base(tc.tool, domain.ModeAuto)
+				in.guard.Hint = hint
+
+				got := resolve(in)
+
+				assertForcedGate(t, got, tc.tool.Name())
+				if got.remedy != hint {
+					t.Errorf("remedy = %q, want the rule's hint %q — the human reads the way out beside the question", got.remedy, hint)
+				}
+				if got.hint != hint {
+					t.Errorf("hint = %q, want the rule's hint %q — a denied look must answer the model with the route", got.hint, hint)
+				}
+			})
 		}
 	})
 

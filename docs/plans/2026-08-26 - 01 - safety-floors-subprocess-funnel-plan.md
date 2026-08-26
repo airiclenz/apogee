@@ -905,7 +905,15 @@ never reaches the Confiner.
 
 ---
 
-## 12. `~/.apogee` writes are a Tier-2 forced look (code follows ADR 0049 §4); the Hint rides the prompt
+## 12. `~/.apogee` writes are a Tier-2 forced look (code follows ADR 0049 §4); the Hint rides the prompt — ✅ DONE (2026-08-26)
+
+NOTES (2026-08-26): `internal/security/rules_test.go` is not in the item's Files list but had to be touched — it is where the shipped rule's tier is actually pinned. Three tests asserted `TierHardRefuse` for `~/.apogee` rows (`ControlPlanesAreOnTheFloor`, `ApogeeControlPlaneReadHintsTheSanctionedRoute`, `HomeAnchoredRulesMatchTheWindowsHome`); the two tables gained a per-row want-tier so the git rows keep asserting Tier 1 in the same breath, and the doc comments that said "both are tier 1" were rewritten to state which tier each control plane gets and why.
+NOTES (2026-08-26): `internal/tools/file_ops_test.go` is not in the item's Files list either — `TestCopyFile_GuardJudgesOnlyTheDestination` asserts the same two control-plane tiers from the tools side (a copy INTO and a move OUT of `~/.apogee`), so it fails to compile-clean against the new tier without the same edit.
+NOTES (2026-08-26): the rule stays where it is written, among the Tier-1 rules, rather than moving into the `--- Tier 2 ---` block: `NewDangerousActionGuard` stable-sorts by tier, so source order is documentation and not precedence, and moving a list entry is out of an item's scope. The rewritten comment block says so in its first sentence, so the one force-approval rule spelled among the hard refuses cannot read as an oversight.
+NOTES (2026-08-26): `internal/domain/approval.go` and `internal/tui/approval.go` gained one doc sentence each (no code): both said the prompt's `Remedy` / `Fix:` line belongs to "the confinement-unavailable pair", which this item makes false by giving a hinted forced look a remedy too.
+NOTES (2026-08-26): `CONTEXT.md`'s **Dangerous-action guard** force-approval parenthetical named only the `curl | bash` class; the tier now also holds a control-plane write, so `~/.apogee` and the hint's two destinations were added there. The item's Files list does not name CONTEXT.md — the domain map is where the tier examples live, and item 11 amended the same entry.
+NOTES (2026-08-26): `internal/security/doc.go` is in the item's Files list but was left untouched, as the item's own text directs ("names no rule and needs no change") — it describes the guard as "two tiers" without assigning any rule to one.
+NOTES (2026-08-26): negative control run — with `remedy`/`hint` removed from both `applyOverlays` branches and the deny-message append removed from `executeGate`, the two new tests fail on all four assertions (empty remedy and hint on both upgrade branches; the bare denial sentence and an empty prompt remedy) and pass with the change restored.
 
 Depends on item 11.
 

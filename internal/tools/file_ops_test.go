@@ -534,8 +534,8 @@ func TestCopyFileAndMoveFile_AreRegistered(t *testing.T) {
 // DESTINATION alone, because `source` is declared a read-only source path. The first case
 // is the skill-materialization step every skill run performs — copying a resource OUT of
 // the home skill library (an extra read root under ~/.apogee). The other two hold the
-// floor where it belongs: copy_file writing INTO the control plane, and move_file naming
-// the same source — move_file deliberately makes NO ReadSourceTool declaration, because
+// floor where it belongs — as the Tier-2 forced look `~/.apogee` is (ADR 0049 §4): copy_file
+// writing INTO the control plane, and move_file naming the same source — move_file deliberately makes NO ReadSourceTool declaration, because
 // its source is deleted, a write by another name (the var block's missing assertion is
 // that deliberateness; this test is its behavioural pin).
 func TestCopyFile_GuardJudgesOnlyTheDestination(t *testing.T) {
@@ -564,8 +564,8 @@ func TestCopyFile_GuardJudgesOnlyTheDestination(t *testing.T) {
 		"destination": "/root/.apogee/skills/evil/SKILL.md",
 	})
 	poison.Tool = copyFileSpec.name
-	if d := guard.Inspect(poison, copier); d.Tier != security.TierHardRefuse {
-		t.Errorf("copy INTO the control plane tier = %d, want TierHardRefuse", d.Tier)
+	if d := guard.Inspect(poison, copier); d.Tier != security.TierForceApproval {
+		t.Errorf("copy INTO the control plane tier = %d, want TierForceApproval", d.Tier)
 	}
 
 	drain := callWith(t, "c3", map[string]any{
@@ -573,8 +573,8 @@ func TestCopyFile_GuardJudgesOnlyTheDestination(t *testing.T) {
 		"destination": "docs/x.md",
 	})
 	drain.Tool = moveFileSpec.name
-	if d := guard.Inspect(drain, mover); d.Tier != security.TierHardRefuse {
-		t.Errorf("move OUT of the control plane tier = %d, want TierHardRefuse", d.Tier)
+	if d := guard.Inspect(drain, mover); d.Tier != security.TierForceApproval {
+		t.Errorf("move OUT of the control plane tier = %d, want TierForceApproval", d.Tier)
 	}
 }
 

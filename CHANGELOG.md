@@ -234,6 +234,21 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- The `~/.apogee` write rule is the Tier-2 forced LOOK ADR 0049 §4 always described, and its way
+  out now reaches both readers (security audit §3.5, design calls 3 and 11). The code shipped
+  `write-apogee-control-plane` as `TierHardRefuse` — a hard refusal with no per-call override —
+  while the decision it implements says the floor there is a forced look, never a boundary: the
+  human is made to SEE the write and their informed yes runs it, which is what curating the home
+  skill library or editing the global config actually is. The rule is now `TierForceApproval`
+  (Reason, Hint, Pattern and WritesOnly unchanged), and the Hint it carries — the sanctioned route
+  through the dedicated read tools — rides the verdict to both people who need it: the Approval
+  prompt shows it as its `Fix:` line, and a call the human DENIES hands it back to the model
+  appended to the refusal ("tool call denied by approver — …"), so a small model reroutes instead
+  of looping on rewrites of a call it can never satisfy. A gate whose rule offers no hint reads
+  exactly as it always has. `.git/hooks|config|modules` deliberately stays Tier-1: a write there is
+  delayed code execution outside every confinement, the shell-rc class — ADR 0049 §4's
+  parenthetical is narrowed to `~/.apogee` with a dated note recording that split.
+
 - A Tier-2 forced approval on a call Auto would have confined now KEEPS the box once the
   human allows it (design call 4). The guard is tighten-only (ADR 0012), but the forced-gate
   upgrade used to build a bare `Gate` and run the allow unconfined — a forced *look* silently

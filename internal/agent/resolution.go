@@ -114,9 +114,19 @@ type resolution struct {
 	reason string
 
 	// remedy is the optional one-line route out of the condition that forced a Gate, carried to
-	// the Approval prompt beside the reason. Only the two confinement-unavailable gates set it —
-	// a gate the autonomy rung itself asked for has nothing to fix. Gate only.
+	// the Approval prompt beside the reason. The two confinement-unavailable gates set it, and so
+	// does a Tier-2 forced gate whose rule carries a Hint — the guard's own way out is the route
+	// out of the condition that forced this look. A gate the autonomy rung itself asked for has
+	// nothing to fix and leaves it empty. Gate only.
 	remedy string
+
+	// hint is the guard's MODEL-facing way out on a Tier-2 forced gate: the matched rule's Hint,
+	// empty for a rule that offers none and for every gate the guard did not force. It is the
+	// same sentence remedy carries, aimed at the other reader — remedy reaches the human on the
+	// Approval prompt, hint reaches the model on the deny result, so a denied look tells the
+	// model where to go instead of leaving it to loop on rewrites of a call it cannot satisfy
+	// (guardRefusalMessage does this for a Tier-1 refusal; this is the Tier-2 half). Gate only.
+	hint string
 
 	// force marks a Gate that must SKIP the allow-for-session cache (a Tier-2 force-approval
 	// or a runtime-demote fallback). Gate only.
@@ -444,9 +454,10 @@ func resolveLadderAuto(in resolutionInput, class toolClass) resolution {
 }
 
 // applyOverlays folds the leaf-verdict overlays onto the bare ladder verdict, in order (D5):
-// a Tier-2 force-approval upgrades any non-Refuse leaf to a forced Gate — and a Confine leaf
-// keeps its box and its D4 fallback through that upgrade, so an approved forced look still runs
-// confined; a Gate is finished
+// a Tier-2 force-approval upgrades any non-Refuse leaf to a forced Gate — carrying the matched
+// rule's Hint to both of its readers (remedy for the human's prompt, hint for a denied model),
+// and a Confine leaf keeps its box and its D4 fallback through that upgrade, so an approved
+// forced look still runs confined; a Gate is finished
 // (nil-Approver ⇒ Refuse, else its class reason + cache key, plus the write-escape target its
 // allow would authorise); a Confine is finished (box + runtime-demote fallback); a Run / Refuse
 // carries the guard's audit metadata where today's trail records it, and a Run also carries the
@@ -455,6 +466,12 @@ func resolveLadderAuto(in resolutionInput, class toolClass) resolution {
 func applyOverlays(in resolutionInput, leaf resolution) resolution {
 	// A Tier-2 dangerous action forces the Approver even where the ladder would not (the
 	// guardrail can only tighten — ADR 0012). A Refuse leaf stays refused.
+	//
+	// The rule's Hint rides the upgrade in both directions: as the prompt's remedy line, so the
+	// human reads the sanctioned route beside the question, and as the gate's model-facing hint,
+	// so a DENIED look answers the model with that route instead of a bare refusal (the Tier-1
+	// half of this is guardRefusalMessage). A rule without a Hint leaves both empty — today's
+	// prompt, unchanged.
 	//
 	// A CONFINE leaf keeps its box and its D4 fallback across the upgrade — both taken from the
 	// input, exactly as finishConfine would have taken them (the bare ladder leaf carries neither
@@ -470,12 +487,20 @@ func applyOverlays(in resolutionInput, leaf resolution) resolution {
 				kind:           resolveGate,
 				force:          true,
 				reason:         forceApprovalReason,
+				remedy:         in.guard.Hint,
+				hint:           in.guard.Hint,
 				box:            in.box,
 				confineOnAllow: true,
 				fallback:       confineFallback(in),
 			}
 		} else {
-			leaf = resolution{kind: resolveGate, force: true, reason: forceApprovalReason}
+			leaf = resolution{
+				kind:   resolveGate,
+				force:  true,
+				reason: forceApprovalReason,
+				remedy: in.guard.Hint,
+				hint:   in.guard.Hint,
+			}
 		}
 	}
 
@@ -525,8 +550,10 @@ func applyOverlays(in resolutionInput, leaf resolution) resolution {
 // gate can never end up blaming one condition and prescribing the fix for another).
 //
 // It only ADDS to the gate it is handed, so a forced Gate upgraded from a Confine keeps the box,
-// confineOnAllow and fallback applyOverlays put on it. The nil-Approver branch is the one
-// exception, and deliberately so: it builds a fresh Refuse, and a refused call confines nothing.
+// confineOnAllow and fallback applyOverlays put on it, and a forced gate of any leaf keeps the
+// remedy and hint its rule's Hint supplied (the class remedy is reached only through the same
+// empty-reason branch the class reason is). The nil-Approver branch is the one exception, and
+// deliberately so: it builds a fresh Refuse, and a refused call confines nothing.
 func finishGate(in resolutionInput, gate resolution) resolution {
 	if !in.approverPresent {
 		return resolution{

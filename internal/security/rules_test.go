@@ -206,25 +206,31 @@ func TestDefaultDangerousRules_ControlPlanesAreOnTheFloor(t *testing.T) {
 	// The two control planes a coding host hands the model by default: the repository's
 	// own `.git/` (whose hooks and config the next git command executes, outside any
 	// confinement) and apogee's `~/.apogee` (whose config.yaml is the one place a floor
-	// rule may be REMOVED). Both are tier 1: no per-call override, in every mode.
+	// rule may be REMOVED). Both are on the floor in every mode; the TIERS differ by what a
+	// write there does. `.git/hooks|config|modules` is delayed code execution outside every
+	// confinement, so it hard-refuses with no per-call override. `~/.apogee` is the Tier-2
+	// forced LOOK ADR 0049 §4 describes: the human is made to see the write, and their
+	// informed yes runs it — curating the skill library and editing the config are the
+	// operator's own ordinary steps.
 	g := DefaultDangerousActionGuard()
 
 	cases := []struct {
-		name   string
-		call   domain.ToolCall
-		ruleID string
+		name     string
+		call     domain.ToolCall
+		ruleID   string
+		wantTier Tier
 	}{
-		{"write a pre-commit hook", writeCall(".git/hooks/pre-commit"), "write-git-control-plane"},
-		{"write a hook in a nested repo", writeCall("vendor/dep/.git/hooks/post-checkout"), "write-git-control-plane"},
-		{"rewrite the repo-local git config", writeCall("./.git/config"), "write-git-control-plane"},
-		{"write a submodule's hook", writeCall(".git/modules/sub/hooks/pre-push"), "write-git-control-plane"},
-		{"write a bare repo's config", writeCall("mirror.git/config"), "write-git-control-plane"},
-		{"delete the hooks directory", terminalCall("rm -rf .git/hooks"), "write-git-control-plane"},
-		{"chmod a hook executable", terminalCall("chmod +x .git/hooks/pre-commit"), "write-git-control-plane"},
-		{"write the apogee config", writeCall("~/.apogee/config.yaml"), "write-apogee-control-plane"},
-		{"write the apogee library", writeCall("/home/alice/.apogee/library/probes.yaml"), "write-apogee-control-plane"},
-		{"write the apogee config on macOS", writeCall("/Users/alice/.apogee/config.yaml"), "write-apogee-control-plane"},
-		{"copy over the apogee config", terminalCall("cp evil.yaml $HOME/.apogee/config.yaml"), "write-apogee-control-plane"},
+		{"write a pre-commit hook", writeCall(".git/hooks/pre-commit"), "write-git-control-plane", TierHardRefuse},
+		{"write a hook in a nested repo", writeCall("vendor/dep/.git/hooks/post-checkout"), "write-git-control-plane", TierHardRefuse},
+		{"rewrite the repo-local git config", writeCall("./.git/config"), "write-git-control-plane", TierHardRefuse},
+		{"write a submodule's hook", writeCall(".git/modules/sub/hooks/pre-push"), "write-git-control-plane", TierHardRefuse},
+		{"write a bare repo's config", writeCall("mirror.git/config"), "write-git-control-plane", TierHardRefuse},
+		{"delete the hooks directory", terminalCall("rm -rf .git/hooks"), "write-git-control-plane", TierHardRefuse},
+		{"chmod a hook executable", terminalCall("chmod +x .git/hooks/pre-commit"), "write-git-control-plane", TierHardRefuse},
+		{"write the apogee config", writeCall("~/.apogee/config.yaml"), "write-apogee-control-plane", TierForceApproval},
+		{"write the apogee library", writeCall("/home/alice/.apogee/library/probes.yaml"), "write-apogee-control-plane", TierForceApproval},
+		{"write the apogee config on macOS", writeCall("/Users/alice/.apogee/config.yaml"), "write-apogee-control-plane", TierForceApproval},
+		{"copy over the apogee config", terminalCall("cp evil.yaml $HOME/.apogee/config.yaml"), "write-apogee-control-plane", TierForceApproval},
 	}
 
 	for _, tc := range cases {
@@ -233,8 +239,8 @@ func TestDefaultDangerousRules_ControlPlanesAreOnTheFloor(t *testing.T) {
 
 			d := g.Inspect(tc.call, nil)
 
-			if d.Tier != TierHardRefuse {
-				t.Fatalf("Inspect(%q) tier = %d, want TierHardRefuse (rule=%q)", tc.name, d.Tier, d.RuleID)
+			if d.Tier != tc.wantTier {
+				t.Fatalf("Inspect(%q) tier = %d, want %d (rule=%q)", tc.name, d.Tier, tc.wantTier, d.RuleID)
 			}
 			if d.RuleID != tc.ruleID {
 				t.Errorf("Inspect(%q) rule = %q, want %q", tc.name, d.RuleID, tc.ruleID)
@@ -246,9 +252,11 @@ func TestDefaultDangerousRules_ControlPlanesAreOnTheFloor(t *testing.T) {
 // TestDefaultDangerousRules_ApogeeControlPlaneReadHintsTheSanctionedRoute pins the known
 // false positive the rule's Hint exists for: the terminal declares no read-source keys, so
 // a shell command that only READS from the home skill library still trips the write rule.
-// The refusal stands (WritesOnly narrows by declared class, not by parsing shell text) —
-// but the Decision must carry the Hint naming the dedicated tools, so a small model
-// reroutes instead of looping on rewrites of the write half of its command.
+// The look stands (WritesOnly narrows by declared class, not by parsing shell text) — but
+// the Decision must carry the Hint naming the dedicated tools, so a small model reroutes
+// instead of looping on rewrites of the write half of its command. At Tier 2 that Hint is
+// what the Approval prompt shows the human as its remedy and what a denied call hands back
+// to the model (internal/agent).
 func TestDefaultDangerousRules_ApogeeControlPlaneReadHintsTheSanctionedRoute(t *testing.T) {
 	t.Parallel()
 	g := DefaultDangerousActionGuard()
@@ -256,8 +264,8 @@ func TestDefaultDangerousRules_ApogeeControlPlaneReadHintsTheSanctionedRoute(t *
 	call := terminalCall("cp /home/u/.apogee/skills/x/prompts/a.md /tmp/")
 	d := g.Inspect(call, nil)
 
-	if d.Tier != TierHardRefuse {
-		t.Fatalf("Inspect tier = %d, want TierHardRefuse (rule=%q)", d.Tier, d.RuleID)
+	if d.Tier != TierForceApproval {
+		t.Fatalf("Inspect tier = %d, want TierForceApproval (rule=%q)", d.Tier, d.RuleID)
 	}
 	if d.RuleID != "write-apogee-control-plane" {
 		t.Fatalf("Inspect rule = %q, want %q", d.RuleID, "write-apogee-control-plane")
@@ -366,17 +374,20 @@ func TestDefaultDangerousRules_HomeAnchoredRulesMatchTheWindowsHome(t *testing.T
 		name     string
 		call     domain.ToolCall
 		wantRule string
+		// wantTier is the matched rule's own tier — Tier 2 for apogee's control plane (a
+		// forced look, ADR 0049 §4), Tier 1 for the rest. Ignored when wantRule is "".
+		wantTier Tier
 	}{
-		{"write an SSH key on Windows", writeCall(`C:\Users\alice\.ssh\authorized_keys`), "write-ssh-keys"},
-		{"write an npmrc under the profile variable", writeCall(`%USERPROFILE%\.npmrc`), "write-credential-persistence"},
-		{"write the apogee config on Windows", writeCall(`C:\Users\alice\.apogee\config.yaml`), "write-apogee-control-plane"},
-		{"recursively delete a Windows home", terminalCall(`rm -rf C:\Users\alice`), "rm-rf-root-home-system"},
-		{"recursively delete the profile variable", terminalCall(`rm -rf %USERPROFILE%`), "rm-rf-root-home-system"},
-		{"recursively delete a Windows home, flag order", terminalCall(`rm -fr C:\Users\alice`), "rm-fr-root-home-system"},
-		{"write a project file on a Windows drive", writeCall(`C:\code\app\main.go`), ""},
-		{"write a relative path that merely contains users", writeCall(`docs\users\guide.md`), ""},
-		{"delete a project directory relatively on Windows", terminalCall(`rm -rf build\out`), ""},
-		{"an ordinary backslash escape in a command", terminalCall(`printf 'a\tb\n' > out.txt`), ""},
+		{"write an SSH key on Windows", writeCall(`C:\Users\alice\.ssh\authorized_keys`), "write-ssh-keys", TierHardRefuse},
+		{"write an npmrc under the profile variable", writeCall(`%USERPROFILE%\.npmrc`), "write-credential-persistence", TierHardRefuse},
+		{"write the apogee config on Windows", writeCall(`C:\Users\alice\.apogee\config.yaml`), "write-apogee-control-plane", TierForceApproval},
+		{"recursively delete a Windows home", terminalCall(`rm -rf C:\Users\alice`), "rm-rf-root-home-system", TierHardRefuse},
+		{"recursively delete the profile variable", terminalCall(`rm -rf %USERPROFILE%`), "rm-rf-root-home-system", TierHardRefuse},
+		{"recursively delete a Windows home, flag order", terminalCall(`rm -fr C:\Users\alice`), "rm-fr-root-home-system", TierHardRefuse},
+		{"write a project file on a Windows drive", writeCall(`C:\code\app\main.go`), "", TierNone},
+		{"write a relative path that merely contains users", writeCall(`docs\users\guide.md`), "", TierNone},
+		{"delete a project directory relatively on Windows", terminalCall(`rm -rf build\out`), "", TierNone},
+		{"an ordinary backslash escape in a command", terminalCall(`printf 'a\tb\n' > out.txt`), "", TierNone},
 	}
 
 	for _, tc := range cases {
@@ -391,8 +402,8 @@ func TestDefaultDangerousRules_HomeAnchoredRulesMatchTheWindowsHome(t *testing.T
 				}
 				return
 			}
-			if d.Tier != TierHardRefuse {
-				t.Fatalf("Inspect(%q) tier = %d, want TierHardRefuse (rule=%q)", tc.name, d.Tier, d.RuleID)
+			if d.Tier != tc.wantTier {
+				t.Fatalf("Inspect(%q) tier = %d, want %d (rule=%q)", tc.name, d.Tier, tc.wantTier, d.RuleID)
 			}
 			if d.RuleID != tc.wantRule {
 				t.Errorf("Inspect(%q) rule = %q, want %q", tc.name, d.RuleID, tc.wantRule)

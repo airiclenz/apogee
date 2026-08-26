@@ -36,8 +36,10 @@ type ApprovalRequest struct {
 	Reason    string // why approval is required (e.g. "write", "unconfinable MCP tool")
 	// Remedy is the OPTIONAL one-line route out of the condition that forced this approval — the
 	// answer to "and what do I do about it", for the gates whose cause is something the user can
-	// actually change. Today that is the confinement-unavailable pair: the Auto ladder cell where
-	// the host cannot fence a subprocess, and the runtime demote where the box failed to establish.
+	// actually change. Today that is the confinement-unavailable pair — the Auto ladder cell where
+	// the host cannot fence a subprocess, and the runtime demote where the box failed to
+	// establish — plus a dangerous-action forced look whose rule carries a Hint, whose way out is
+	// the sanctioned route to what the call was reaching for.
 	//
 	// It is EMPTY on every gate whose cause is the autonomy rung itself — an ask-before write has
 	// nothing to fix, only a mode to be in — so most prompts read exactly as they always have. Like

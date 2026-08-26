@@ -176,7 +176,8 @@ func (m Model) sendApproval(decision domain.ApprovalDecision) (tea.Model, tea.Cm
 // verbatim (not the friendly transcript label — the approval flow is a security surface, so the
 // human sees exactly the tool that will run), the body carries the asking sub-agent's task when a
 // child raised the call, then a non-empty Reason, then the Fix: line for the few gates whose cause
-// the user can lift (ApprovalRequest.Remedy — the confinement-unavailable pair), then the arguments
+// the user can lift (ApprovalRequest.Remedy — the confinement-unavailable pair, and a
+// dangerous-action forced look whose rule names a sanctioned route), then the arguments
 // (approvalArgsBlock), and the decisions themselves are the pane's ROWS.
 //
 // The Sub-agent line leads the body because it answers a question the rest of the pane cannot: with
