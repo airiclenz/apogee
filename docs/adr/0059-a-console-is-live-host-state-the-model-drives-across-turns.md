@@ -20,10 +20,10 @@ denial does not cover it — that was parallelism (ADR 0039); this is interactiv
 ## Decision
 
 **1 — A Console is live host state, never Session state.** A Console — a persistent
-interactive program the model opens and drives — lives until an explicit close, `/new`, or
-engine exit. It is the same class as the undo journal (ADR 0022 §8, ADR 0051): per process, dies
-with it. It is **not** an exception to ADR 0008's forkability clause but an instance of its
-resume clause — "production resume reconnects fresh and makes no server-side-state promise":
+interactive program the model opens and drives — lives until an explicit close, `/new`, a
+session restore (`/sessions`), or engine exit. It is the same class as the undo journal
+(ADR 0022 §8, ADR 0051): per process, dies with it. It is **not** an exception to ADR 0008's
+forkability clause but an instance of its resume clause — "production resume reconnects fresh and makes no server-side-state promise":
 a snapshot, fork, or resume inherits **no** Console; a later send/read on a handle the process
 no longer holds returns "console gone", and the model reopens it. A bench task that needs a
 Console falls out of the frozen discriminating suite the way a live-network task does

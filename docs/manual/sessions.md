@@ -51,5 +51,6 @@ still remembers.
 
 Autonomy mode, tool approvals, confinement, and MCP connections are deliberately
 **not** part of a saved session — they are re-established or re-confirmed on
-resume, so yesterday's approvals never silently apply to today's run.
+resume, so yesterday's approvals never silently apply to today's run, and any
+Console the previous conversation left open is closed at the switch.
 

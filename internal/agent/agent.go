@@ -913,6 +913,14 @@ func (a *Agent) ClearContext() error {
 // full success. It does NOT touch the allow-for-session approval cache, the autonomy mode, or the
 // confinement flag: those are live host state re-confirmed per ADR 0008, not part of the Session.
 //
+// It DOES reset two things the outgoing conversation owned, exactly as ClearContext does at the
+// /new boundary: every Console is closed (ADR 0059 §1 — a Console is live host state the model
+// steers by id, and the ids live in the history the swap drops, so leaving the shells running
+// would be the same unnameable-process leak the cap exists to prevent), and the cumulative usage
+// tally is zeroed (the sums belong to the conversation that just left; a Driver restoring a
+// record seeds its own accounting from that record's stored totals). Both sit AFTER the swap:
+// a REFUSED restore leaves the Consoles running and the tally standing.
+//
 // A successful restore starts a new session, so the workspace context files are re-read: the
 // resolved-live posture of ADR 0023 §6 — the standing content is not serialized, so a resumed
 // session speaks from the CURRENT files, not the ones its snapshot was taken under. A REFUSED
@@ -925,6 +933,8 @@ func (a *Agent) RestoreSession(snap domain.Session) error {
 	if err := a.restoreSnapshot(snap); err != nil {
 		return err
 	}
+	a.consoles.CloseAll()
+	a.usage = usageTally{}
 	a.reloadContextFiles()
 	return nil
 }

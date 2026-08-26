@@ -589,6 +589,8 @@ type Engine interface {
 	// Like ClearContext it is called only at idle (no worker running) and refuses mid-Exchange
 	// (ErrInputPending); a corrupt or future-version snapshot returns an error and leaves the live
 	// conversation untouched. It does not touch the allow-for-session cache, mode, or confinement.
+	// A successful restore closes every Console of the outgoing conversation and resets the
+	// engine's cumulative usage reading.
 	RestoreSession(domain.Session) error
 	// InExchange reports whether a multi-Turn Exchange is currently open — a boundary-only read the
 	// host makes after a restore (or at startup) to detect a session interrupted mid-task. Called

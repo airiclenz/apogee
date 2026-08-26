@@ -624,8 +624,8 @@ A persistent interactive program — a REPL, a dev server, a shell — the model
 across [Turns](#turns-and-stepping) through `console_open` / `console_send` / `console_read` /
 `console_close`; the `terminal` tool stays one-shot. A Console is **live host state, never
 [Session](#identity-and-shape) state** (like the [Undo journal](#turns-and-stepping)): it lives
-until closed, `/new`, or engine exit; a snapshot, fork, or resume inherits **none**; a
-delegation's end closes the ones it opened. `open` and `send` carry the Subprocess marker and each
+until closed, `/new`, a session restore, or engine exit; a snapshot, fork, or resume inherits
+**none**; a delegation's end closes the ones it opened. `open` and `send` carry the Subprocess marker and each
 `send` takes its own **Resolution**; `read` and `close` sit on the read-only floor. Ships
 **default-off**, profile-enabled (ADR 0057) — the first tool to use that state. See
 [ADR 0059](docs/adr/0059-a-console-is-live-host-state-the-model-drives-across-turns.md).

@@ -51,24 +51,6 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 
 ---
 
-### Resuming a stored session leaves the outgoing conversation's Consoles running
-
-**Status:** found 2026-08-25 at the close of the Console-family plan; recorded rather than fixed
-because the session-switch case wants an owner call. **Settled + planned 2026-08-26:** close on
-restore (not adopt) — `docs/plans/2026-08-26 - 03 - surfaces-that-lie-restore-consoles-plan.md` item 1.
-
-- [P] `ClearContext` closes every Console at the `/new` boundary — the ids live in the history that
-  call drops, so leaving the shells running would be the forgotten-process leak the cap exists to
-  prevent (`internal/agent/agent.go:809`, ADR 0059 §1) — and the engine's `Close` sweeps the same
-  set at exit (`internal/agent/agent.go:377`). `RestoreSession` (`internal/agent/agent.go:834`)
-  sweeps nothing: resuming a stored session from the TUI picker
-  (`internal/tui/sessions.go:514`) swaps the conversation and leaves the previous one's Consoles
-  alive under ids the restored conversation cannot name — the same unnameable-shell leak, reached
-  by a different door. Whether a session switch should close them, or a restored session should
-  adopt them, is the call to settle before touching either path.
-
----
-
 ### Effort detection and the effort picker — residuals deferred out of the 2026-08-25 run
 
 **Status:** found 2026-08-25 at the close of the effort-detection/picker plan

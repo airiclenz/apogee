@@ -287,8 +287,8 @@ func TestClearContextClosesEveryConsole(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // TestSnapshotCarriesNoConsoleState is the live-host-state half of ADR 0059 §1: running processes
-// cannot be written into a session file, so the snapshot says nothing about them and a restore
-// neither adds nor removes one.
+// cannot be written into a session file, so the snapshot says nothing about them and taking one
+// leaves them running — while the RESTORE, a session boundary, closes them.
 func TestSnapshotCarriesNoConsoleState(t *testing.T) {
 	t.Parallel()
 
@@ -312,12 +312,16 @@ func TestSnapshotCarriesNoConsoleState(t *testing.T) {
 		}
 	}
 
+	// Taking the snapshot is a pure read: the Console it says nothing about is still running.
+	if !opener.consoles[0].Alive() {
+		t.Error("the Console died when the session was snapshotted, want it untouched by session state")
+	}
+
+	// Restoring it is a session boundary, so the Console goes: its id lives in the history the
+	// swap drops (ADR 0059 §1, amended 2026-08-26). The full contract is pinned by
+	// TestRestoreSession_ClosesEveryConsoleOfTheOutgoingSession in restoresession_test.go.
 	if err := a.RestoreSession(snap); err != nil {
 		t.Fatalf("RestoreSession: %v", err)
 	}
-
-	assertOpenIDs(t, a.consoles, opener.consoles[0].ID)
-	if !opener.consoles[0].Alive() {
-		t.Error("the Console died across a snapshot round trip, want it untouched by session state")
-	}
+	assertOpenIDs(t, a.consoles)
 }

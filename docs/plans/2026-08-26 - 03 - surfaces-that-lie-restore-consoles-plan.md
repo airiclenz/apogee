@@ -137,7 +137,9 @@ keyed on the model-supplied call id (`subagent.go:380`, F-43). `commitIsPublishe
 
 ---
 
-## 1. `RestoreSession` closes every Console and resets the usage tally
+## 1. `RestoreSession` closes every Console and resets the usage tally — ✅ DONE (2026-08-26)
+
+NOTES (2026-08-26): `internal/agent/console_test.go` is one file beyond the item's Files list. `TestSnapshotCarriesNoConsoleState` asserted the pre-amendment lifetime ("a restore neither adds nor removes one", `assertOpenIDs` after the restore), so the item's own acceptance (`go test ./internal/agent/`) could not pass without it. Its "never serialized" purpose is unchanged: the snapshot-key assertion stands and the `Alive()` check moved to just after `Snapshot()`, which is what it was really proving; the post-restore assertion now expects no open Console.
 
 **What:** the engine half of the session boundary. `internal/agent/agent.go` `RestoreSession`
 (`:921-929`) becomes a boundary for the Consoles and the tally exactly as `ClearContext` (`:892`)

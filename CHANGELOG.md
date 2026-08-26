@@ -234,6 +234,18 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **A `/sessions` restore now closes the outgoing conversation's Consoles and resets the engine's
+  usage reading.** `RestoreSession` swept nothing: resuming a stored session swapped the
+  conversation and left the previous one's Consoles running under ids the restored conversation
+  could no longer name — the same forgotten-process leak `/new` is closed against, reached by a
+  different door. It is now a boundary for both, exactly as `ClearContext` is: after the snapshot
+  swap succeeds it closes every Console (ADR 0059 §1 amended — a Console's lifetime now ends at an
+  explicit close, `/new`, a session restore, or engine exit) and zeroes the cumulative token tally,
+  so the restored session's first `UsageEvent` reads one call rather than the outgoing session's
+  count plus one. Both resets sit AFTER the swap, so a REFUSED restore — mid-Exchange, a
+  future-version snapshot, a corrupt payload — still leaves the Consoles running and the tally
+  standing.
+
 - **Security: the argument-key fold is now stdlib's own field fold, so a `ſ`-spelled key cannot slip
   a collision (F-11 follow-up).** `domain.FoldArgumentKey` was `strings.ToLower`, which is not how
   `encoding/json` matches an object key to a struct field: stdlib folds each rune against its whole
