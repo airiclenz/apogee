@@ -81,7 +81,11 @@ accepted as its final answer (only an EMPTY capped reply faults today, `loop.go:
 
 ---
 
-## 1. `delegate-max-steps` config key → `domain.Config.Delegation.MaxSteps`
+## 1. `delegate-max-steps` config key → `domain.Config.Delegation.MaxSteps` — ✅ DONE (2026-08-26)
+
+NOTES (2026-08-26): the `fileConfig` leaf is a `*int`, not the plain int the item text names — an explicit `delegate-max-steps: 0` is the ratified spelling of "off", and a plain int cannot tell that value from an absent key (which resolves to 80). `KindInt` still describes it (the bijection walk derefs pointers), and the accessor is the `auto-compact` pointer idiom.
+NOTES (2026-08-26): of the four `domain.Config` sites the item names, only `cmd/apogee/wire_boot.go` and `cmd/apogee/wire_firing.go` build one — the prescribed `grep CompactionEnabled:` finds exactly those two; `cmd/apogee/upstream.go` builds an `UpstreamSpec` and `cmd/apogee/wire_server.go` a `ServerEntry`, neither of which carries a `Delegation` field. Both real sites set it.
+NOTES (2026-08-26): two files outside the item's list changed because the repo's own guards require it — `apogee.go` gained the `DelegationConfig` type alias the composition root references (the root package re-exports every domain construction type), and `cmd/apogee/wire_settings.go` gained a `settingsTable` entry, since `TestEveryEditableSettingKeyHasAnApply` fails for an `Editable` key with no apply. That apply takes `ui.inspector`'s write-alone posture (no engine seam exists yet), so the registry `Desc` ends with the startup-only contract sentence the pane header shows.
 
 **What:** plumb the key, nothing enforces it yet.
 - `internal/domain/config.go`: add `type DelegationConfig struct { MaxSteps int }` (doc

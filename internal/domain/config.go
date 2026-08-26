@@ -282,6 +282,20 @@ type Config struct {
 	// Budget / Compaction knobs (context/) are structural and load-bearing — they
 	// run even under Bypass. Defaults are sane; overrides are advanced.
 	Context ContextConfig
+
+	// Delegation bounds what a sub-agent run may spend. Like Context it is structural — it
+	// stays on under Bypass — and it applies to CHILD agents only: the main loop is the
+	// human's to stop, a delegate's is nobody's.
+	Delegation DelegationConfig
+}
+
+// DelegationConfig bounds a sub-agent run. It is NOT a Mechanism (ADR 0006): a delegate that
+// cannot be stopped is a structural hole, so the bound stays on under Bypass.
+type DelegationConfig struct {
+	// MaxSteps is the number of Turns a child agent may take in its one Exchange before the
+	// engine ends it; 0 = unbounded. The host folds in the `delegate-max-steps:` key
+	// (default 80); an embedder sets it directly.
+	MaxSteps int
 }
 
 // ContextConfig governs the structural context reducers — Budget and Compaction —

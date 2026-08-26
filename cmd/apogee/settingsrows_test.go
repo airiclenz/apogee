@@ -41,6 +41,7 @@ func fabricatedSettings() config.Options {
 		URLDenyHosts:       nil, // the honest asymmetry: a configured allow list beside an unset deny list
 		UseProjectSkills:   false,
 		AutoCompact:        true,
+		DelegateMaxSteps:   40,
 		AutoTitle:          false,
 		RememberModel:      true,
 		ContextWindow:      32768,
@@ -218,6 +219,7 @@ func TestSettingsRowsFormatEffectiveValues(t *testing.T) {
 		"url-safety.deny-hosts":  "[]", // unset: a list row's empty spelling, and every host is still floored
 		"use-project-skills":     "false",
 		"auto-compact":           "true",
+		"delegate-max-steps":     "40",
 		"auto-title":             "false",
 		"remember-model":         "true",
 		"context-window":         "32768",

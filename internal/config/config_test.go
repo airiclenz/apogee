@@ -21,6 +21,7 @@ import (
 
 func strptr(s string) *string { return &s }
 func boolptr(b bool) *bool    { return &b }
+func intptr(n int) *int       { return &n }
 
 // wantUIDefault is the resolved `ui:` block a config that configures none must produce: the
 // default spinner style with its colour loop on, the transcript's scroll bar shown, and the stall
@@ -119,6 +120,18 @@ func TestResolvePrecedence(t *testing.T) {
 			name: "auto-compact is file-only and defaults true",
 			file: fileConfig{AutoCompact: boolptr(false)},
 			want: func(o *Options) { o.AutoCompact = false },
+		},
+		{
+			name: "delegate-max-steps is file-only and defaults 80",
+			file: fileConfig{DelegateMaxSteps: intptr(12)},
+			want: func(o *Options) { o.DelegateMaxSteps = 12 },
+		},
+		{
+			// The one value a plain int could not carry: 0 is "unbounded", not "absent", so an
+			// explicit zero has to survive resolution instead of resolving back to the default.
+			name: "an explicit delegate-max-steps: 0 stays 0 — the documented spelling of unbounded",
+			file: fileConfig{DelegateMaxSteps: intptr(0)},
+			want: func(o *Options) { o.DelegateMaxSteps = 0 },
 		},
 		{
 			name: "auto-title is file-only and defaults true",
@@ -256,7 +269,8 @@ func TestResolvePrecedence(t *testing.T) {
 func wantDefaults() Options {
 	return Options{
 		Mode: "ask-before", ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: true,
-		AutoTitle: true, ValidatedSetsEnable: true, ContextFiles: []string{"AGENTS.md"},
+		DelegateMaxSteps: defaultDelegateMaxSteps,
+		AutoTitle:        true, ValidatedSetsEnable: true, ContextFiles: []string{"AGENTS.md"},
 		Present: PresentSettings{AutoOpen: true}, UI: wantUIDefault,
 	}
 }
@@ -469,7 +483,8 @@ func TestEveryConfigKeyReachesTheOptions(t *testing.T) {
 	want := map[string]bool{
 		"Mode": true, "Bypass": true, "Servers": true, "StartupServer": true, "Editor": true,
 		"ConfineToWorkspace": true, "UnconfinedHosts": true, "WebSearchEndpoint": true,
-		"UseProjectSkills": true, "AutoCompact": true, "AutoTitle": true, "RememberModel": true,
+		"UseProjectSkills": true, "AutoCompact": true, "DelegateMaxSteps": true,
+		"AutoTitle": true, "RememberModel": true,
 		"ContextWindow": true, "ResponseReserve": true, "MCPServers": true, "ToolsDisabled": true,
 		"URLAllowHosts": true, "URLDenyHosts": true, "ModelProfiles": true, "Mechanisms": true,
 		"ValidatedSetsEnable": true, "ValidatedSetsAlias": true, "Present": true,
@@ -510,8 +525,9 @@ func everyKeyFileConfig() fileConfig {
 		UnconfinedHosts:    []UnconfinedHost{{ID: "another-host", Acknowledged: "2026-08-20"}},
 		WebSearch:          "https://search.example.com",
 		UseProjectSkills:   boolptr(false), AutoCompact: boolptr(false), AutoTitle: boolptr(false),
-		RememberModel: boolptr(true),
-		ContextWindow: 64000, ResponseReserve: 0.3,
+		DelegateMaxSteps: intptr(12),
+		RememberModel:    boolptr(true),
+		ContextWindow:    64000, ResponseReserve: 0.3,
 		MCPServers:    []mcpServerConfig{{Name: "docs", Command: "mcp-docs"}},
 		Tools:         &toolsConfig{Disabled: []string{"web_search"}},
 		URLSafety:     &urlSafetyConfig{AllowHosts: []string{"example.com"}, DenyHosts: []string{"evil.example"}},
@@ -1544,6 +1560,39 @@ func TestApplyConfigContextWindow(t *testing.T) {
 	}
 	if opts.ContextWindow != 65536 {
 		t.Errorf("opts.contextWindow = %d; want the file's explicit 65536", opts.ContextWindow)
+	}
+}
+
+// The delegate-max-steps key parses into opts.delegateMaxSteps: a file-only key (no flag/env),
+// like the context-window pin above it. Three states, because a pointer on disk is what makes the
+// third one reachable — a stated bound, an absent key resolving to the built-in default, and an
+// explicit 0 that stays 0 because "unbounded" is a value here rather than the absence of one. The
+// downstream opts → Config.Delegation.MaxSteps threading is the composition root's, pinned by
+// TestBootConfigCarriesTheDelegateStepCap in wire_test.go.
+func TestApplyConfigDelegateMaxSteps(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		name string
+		file string
+		want int
+	}{
+		{"a stated bound", "delegate-max-steps: 12\n", 12},
+		{"an absent key takes the built-in default", "", defaultDelegateMaxSteps},
+		{"an explicit 0 is unbounded, not absent", "delegate-max-steps: 0\n", 0},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			home := testConfigHome(t, "")
+			writeConfigHome(t, home, tt.file)
+			opts := Options{ConfigDir: home}
+			if err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" },
+				os.ReadFile, noNotify); err != nil {
+				t.Fatalf("ApplyConfig: %v", err)
+			}
+			if opts.DelegateMaxSteps != tt.want {
+				t.Errorf("opts.delegateMaxSteps = %d; want %d", opts.DelegateMaxSteps, tt.want)
+			}
+		})
 	}
 }
 

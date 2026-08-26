@@ -465,6 +465,18 @@ context-files:
 auto-compact: true
 
 # =============================================================================
+# How far a delegated sub-agent may run. A sub-agent works its task in one exchange of its own, and
+# nothing about that exchange is yours to watch: it reads, greps and edits until it decides it is
+# done, and a model that keeps deciding otherwise can spend an unbounded number of tokens on one
+# delegation. This is the ceiling, counted in TURNS — one request plus the tools it asked for —
+# after which apogee ends the delegation cleanly and hands your agent what the sub-agent has so far,
+# marked as partial. It bounds SUB-AGENTS only, never the session you are talking to. A sub_agent
+# call may ask for a lower ceiling of its own; it can never ask for a higher one. 0 lets a
+# delegation run unbounded, which is what it did before this key existed. Config-file only (no flag
+# or env). Default: 80.
+# delegate-max-steps: 80
+
+# =============================================================================
 # Name new sessions from their first prompt. On the first thing you say in a fresh session, apogee
 # sends one small extra completion — the prompt, your workspace name and the date — and uses the
 # reply as that session's title, so the session browser lists "fix the escape handling in the

@@ -110,6 +110,17 @@ it stays on even under `--bypass` — so it is on by default; set `auto-compact:
 (a file-only key) to manage the window yourself with `/compact` instead, which opts
 out of the recovery too.
 
+A **delegated sub-agent** runs its task in one exchange of its own, and how long that
+exchange lasts is the sub-agent's call, not yours: it reads, greps and edits until it
+decides it is finished, and a model that keeps deciding otherwise can spend an unbounded
+number of tokens on a single delegation. `delegate-max-steps:` (a file-only key) is the
+ceiling, counted in **turns** — one request plus the tools it asked for — after which
+apogee ends the delegation cleanly and hands your agent what the sub-agent produced so
+far, marked as partial. The default is **80**; `0` lets a delegation run unbounded, which
+is what it did before this key existed. It bounds sub-agents only, never the session you
+are talking to. A `sub_agent` call may ask for a lower ceiling of its own through its
+`max_steps` argument; it can never raise this one.
+
 The context **window** these budgets are measured against is discovered from the
 server — live, not once: apogee asks every ten seconds, so switching the loaded model
 under a running session re-binds the window with it. Set `context-window:` (a file-only

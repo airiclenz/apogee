@@ -340,6 +340,14 @@ var KeyRegistry = []Key{
 		Read:     func(o Options) string { return boolValue(o.AutoCompact) },
 	},
 	{
+		Path: "delegate-max-steps", Kind: KindInt, Default: strconv.Itoa(defaultDelegateMaxSteps),
+		Editable: true,
+		Validate: validateDelegateMaxSteps,
+		Desc: "Turns a delegated sub-agent may take before apogee ends it; 0 lets it run " +
+			"unbounded; takes effect at the next start.",
+		Read: func(o Options) string { return strconv.Itoa(o.DelegateMaxSteps) },
+	},
+	{
 		Path: "auto-title", Kind: KindBool, Default: "true",
 		Editable: true,
 		Desc:     "Name a new session from its first prompt with one small extra completion.",
@@ -631,6 +639,24 @@ func validateContextWindow(value string) error {
 	if err != nil || n < 0 {
 		return fmt.Errorf("apogee: invalid context-window %q: want a token count of 0 or more "+
 			"(0 — the default — follows the window the server reports)", value)
+	}
+	return nil
+}
+
+// defaultDelegateMaxSteps is the built-in bound on a CHILD agent's one Exchange, in Turns. It is
+// the value the registry row advertises and the value the loader resolves an unstated key to, so
+// the two cannot drift apart.
+const defaultDelegateMaxSteps = 80
+
+// validateDelegateMaxSteps refuses a negative Turn bound. Zero is the documented spelling of
+// "unbounded" — what a delegation cost before the cap existed — and a positive value is the number
+// of Turns a child may take before the engine ends it and hands the parent what it has; a negative
+// one would reach the loop as a cap every delegation has already exceeded before its first Turn.
+func validateDelegateMaxSteps(value string) error {
+	n, err := strconv.Atoi(value)
+	if err != nil || n < 0 {
+		return fmt.Errorf("apogee: invalid delegate-max-steps %q: want a Turn count of 0 or more "+
+			"(0 lets a delegation run unbounded; %d is the default)", value, defaultDelegateMaxSteps)
 	}
 	return nil
 }

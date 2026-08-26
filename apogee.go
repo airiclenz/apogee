@@ -92,6 +92,9 @@ type Config = domain.Config
 // ContextConfig governs the structural context reducers (Budget, Compaction).
 type ContextConfig = domain.ContextConfig
 
+// DelegationConfig bounds what a sub-agent run may spend (Config.Delegation).
+type DelegationConfig = domain.DelegationConfig
+
 // ContextFilesReport is what a session's workspace context files (Config.ContextFiles)
 // contributed and what the standing system content costs against its Budget share — the
 // read-only view Agent.ContextFilesReport returns for the host's session notice.

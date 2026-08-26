@@ -1195,6 +1195,37 @@ func assertRegistryOffers(t *testing.T, registry *apogee.ToolRegistry, name stri
 	}
 }
 
+// The delegate step cap the boot phase hands the engine: a top-level file key (no per-server
+// override), so what a session's Config carries is opts.DelegateMaxSteps verbatim — including the 0
+// that means "unbounded", which is why this asserts a stated value rather than "non-zero". The
+// Firing Driver's half of the same claim is TestFiringConfigSetsEveryUnattendedField.
+func TestBootConfigCarriesTheDelegateStepCap(t *testing.T) {
+	t.Parallel()
+	for _, want := range []int{12, 0} {
+		t.Run(strconv.Itoa(want), func(t *testing.T) {
+			t.Parallel()
+			opts := config.Options{
+				Mode:             "ask-before",
+				Workspace:        t.TempDir(),
+				ConfigDir:        t.TempDir(),
+				DelegateMaxSteps: want,
+			}
+			roots, err := resolveRoots(opts.ConfigDir, opts.Workspace)
+			if err != nil {
+				t.Fatalf("resolveRoots: %v", err)
+			}
+			w := newRootWiring(opts, apogee.ModeAskBefore, roots)
+			t.Cleanup(w.close)
+			if err := w.resolveConfig(); err != nil {
+				t.Fatalf("resolveConfig: %v", err)
+			}
+			if w.cfg.Delegation.MaxSteps != want {
+				t.Errorf("Config.Delegation.MaxSteps = %d; want the threaded %d", w.cfg.Delegation.MaxSteps, want)
+			}
+		})
+	}
+}
+
 // The global rungs ride Config rather than the assembly alone so every Driver prunes and lifts the
 // same roster from the same value (ADR 0057) — one row per Config assembly in the composition root:
 // the session's boot phase, `apogee headless`, and a daemon Firing, each fed the same two lists and
@@ -3411,17 +3442,21 @@ const startupOnlyContract = "takes effect at the next start."
 // already made. They hold the dispatcher's only exemption from the nil-member refusal, and they are
 // the only shape that can be one: the apply REQUIRES no member of the applier, so there is nothing a
 // Driver could have been composed without. `editor` is re-read off a fresh projection of the file
-// every time an external edit starts (ADR 0041 decision 1); the other two are read once, while the
-// session is being built, and say so in their Descriptions. `ui.inspector` still mirrors its flip
-// onto the live holder for the Firings a session raises, and does nothing at all where a Driver
-// composed none — which is why it is exempt rather than reaching for one.
-var settingKeysWithNoMemberToReach = []string{"editor", "ui.inspector", "response-reserve"}
+// every time an external edit starts (ADR 0041 decision 1); the other three are read once, while
+// the session is being built, and say so in their Descriptions. `ui.inspector` and
+// `delegate-max-steps` still mirror their value onto the live holder for the Firings a session
+// raises, and do nothing at all where a Driver composed none — which is why they are exempt rather
+// than reaching for one.
+var settingKeysWithNoMemberToReach = []string{
+	"editor", "ui.inspector", "response-reserve", "delegate-max-steps",
+}
 
-// The two START-UP-only keys are `editor`'s counter-case from the other side: keys with no seam that
-// must not refuse either. `ui.inspector` decides whether a wire observer is installed while the
-// provider client is constructed and `response-reserve` is read into the budget the session opens
-// with, so this session genuinely cannot move either — but the file the next one starts from HAS
-// moved, which is the whole of what the key promises. Refusing would report a failed apply over a
+// The three START-UP-only keys are `editor`'s counter-case from the other side: keys with no seam
+// that must not refuse either. `ui.inspector` decides whether a wire observer is installed while
+// the provider client is constructed, `response-reserve` is read into the budget the session opens
+// with, and `delegate-max-steps` is a field of the Config the engine was constructed with, so this
+// session genuinely cannot move any of them — but the file the next one starts from HAS moved,
+// which is the whole of what the key promises. Refusing would report a failed apply over a
 // save that did exactly that, which is the defect this pins.
 //
 // The promise itself is asserted beside the silence, because they are one design: a row with no note
@@ -3431,6 +3466,7 @@ func TestApplySettingAcceptsTheStartupOnlyKeys(t *testing.T) {
 	tests := []struct{ key, value string }{
 		{key: "ui.inspector", value: "true"},
 		{key: "response-reserve", value: "0.25"},
+		{key: "delegate-max-steps", value: "40"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.key, func(t *testing.T) {

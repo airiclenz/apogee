@@ -55,6 +55,7 @@ func TestFiringConfigSetsEveryUnattendedField(t *testing.T) {
 		UI:                 config.UISettings{Inspector: true},
 		ContextFiles:       []string{"AGENTS.md"},
 		AutoCompact:        true,
+		DelegateMaxSteps:   12,
 		ContextWindow:      16384,
 		ResponseReserve:    0.2,
 		Servers: []config.ServerEntry{
@@ -181,6 +182,12 @@ func TestFiringConfigSetsEveryUnattendedField(t *testing.T) {
 	}
 	if !cfg.Context.CompactionEnabled {
 		t.Error("Context.CompactionEnabled = false; the host's auto-compact setting did not reach the run")
+	}
+	// The delegate step cap is top-level rather than per-entry, so an unattended run takes the
+	// host's own key: a Firing is exactly the run where an unbounded delegation is nobody's to stop.
+	if cfg.Delegation.MaxSteps != opts.DelegateMaxSteps {
+		t.Errorf("Delegation.MaxSteps = %d; want the host's delegate-max-steps %d",
+			cfg.Delegation.MaxSteps, opts.DelegateMaxSteps)
 	}
 	if cfg.ParallelAgents != entry.ParallelAgents {
 		t.Errorf("Config.ParallelAgents = %d; want the entry's pin %d", cfg.ParallelAgents, entry.ParallelAgents)

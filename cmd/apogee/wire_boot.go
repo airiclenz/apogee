@@ -245,6 +245,11 @@ func (w *rootWiring) resolveConfig() error {
 			MaxOutputTokens:         w.opts.StartupMaxOutputTokens,
 			CompactionEnabled:       w.opts.AutoCompact,
 		},
+		// And how far a delegation of this session's may run before the engine ends it: the
+		// `delegate-max-steps` key (default 80; 0 ⇒ unbounded, what a delegation cost before the
+		// cap existed). It rides here for the reply cap's reason — this Config is what a scheduled
+		// Firing copies, so a delegate is bounded the same whether a human is watching or not.
+		Delegation: apogee.DelegationConfig{MaxSteps: w.opts.DelegateMaxSteps},
 	}
 	return nil
 }

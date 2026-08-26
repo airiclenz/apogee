@@ -542,6 +542,17 @@ var keyAccessors = []keyAccessor{
 		},
 	},
 	{
+		// A pointer on disk, unlike context-window below: 0 is a VALUE here ("no cap"), not the
+		// absence of one, so presence cannot stand in for the positive value the way it does there.
+		row: mustKey("delegate-max-steps"),
+		fromFile: func(o *Options, fc fileConfig) {
+			o.DelegateMaxSteps = defaultDelegateMaxSteps
+			if fc.DelegateMaxSteps != nil && *fc.DelegateMaxSteps >= 0 {
+				o.DelegateMaxSteps = *fc.DelegateMaxSteps
+			}
+		},
+	},
+	{
 		row: mustKey("auto-title"),
 		fromFile: func(o *Options, fc fileConfig) {
 			o.AutoTitle = fc.AutoTitle == nil || *fc.AutoTitle
@@ -972,6 +983,14 @@ type fileConfig struct {
 	// so an explicit `auto-compact: false` is distinguishable from an absent key (default true).
 	// Compaction is structural (it stays on under Bypass), so this is the only way to turn it off.
 	AutoCompact *bool `yaml:"auto-compact"`
+	// DelegateMaxSteps bounds a CHILD agent's one Exchange, in Turns: the engine ends the
+	// delegation when it reaches this many Turns and hands the parent what the child has.
+	// File-only (no flag/env), like auto-compact above it, and a POINTER for auto-compact's
+	// reason — an explicit `delegate-max-steps: 0` is the documented spelling of "unbounded"
+	// and a plain int could not tell it from an absent key, which resolves to the built-in 80.
+	// It feeds domain.Config.Delegation.MaxSteps; the `sub_agent` tool can lower it for one
+	// delegation but never raise it.
+	DelegateMaxSteps *int `yaml:"delegate-max-steps"`
 	// AutoTitle gates the AUTOMATIC session-naming call: on the first prompt of a new session an
 	// out-of-band completion names the Session record from that prompt, applied through the same
 	// Rename path the session browser uses. File-only (no flag/env), and a pointer so an explicit

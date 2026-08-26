@@ -192,6 +192,12 @@ type Options struct {
 	// apogee.Config.Context.CompactionEnabled.
 	AutoCompact bool
 
+	// delegateMaxSteps bounds a CHILD agent's one Exchange, in Turns (default 80; 0 = unbounded),
+	// loaded from the config file only. ApplyConfig sets it from settings; the composition root
+	// folds it into apogee.Config.Delegation.MaxSteps. It never bounds the main loop, which is the
+	// human's to stop.
+	DelegateMaxSteps int
+
 	// autoTitle gates the automatic session-naming call — the cosmetic out-of-band completion that
 	// names a new Session record from its first prompt (default true), loaded from the config file
 	// only. ApplyConfig sets it from settings; runRoot folds it into tui.Options.AutoTitle. It gates

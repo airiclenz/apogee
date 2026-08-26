@@ -237,5 +237,9 @@ func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, []string
 			MaxOutputTokens:   in.entry.MaxOutputTokens,
 			CompactionEnabled: in.opts.AutoCompact,
 		},
+		// The `delegate-max-steps` bound on a sub-agent's Exchange (default 80; 0 ⇒ unbounded).
+		// A Firing runs while nobody watches, which is exactly the case a runaway delegation
+		// must not be able to become.
+		Delegation: apogee.DelegationConfig{MaxSteps: in.opts.DelegateMaxSteps},
 	}, notices, nil
 }

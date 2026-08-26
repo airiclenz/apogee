@@ -269,6 +269,8 @@ func TestSettingKeyValidatorsRefuseWhatStartupWouldRefuse(t *testing.T) {
 	}{
 		{"web-search-endpoint", "%zz", "not a URL"},
 		{"context-window", "-1", "0 or more"},
+		{"delegate-max-steps", "-1", "0 or more"},
+		{"delegate-max-steps", "eighty", "0 or more"},
 		{"present.port", "70000", "0-65535"},
 		{"mode", "yolo", "invalid --mode"},
 		{"ui.spinner", "twirl", "invalid ui.spinner"},
@@ -315,6 +317,10 @@ func TestSettingKeyValidatorsAcceptTheirDocumentedShapes(t *testing.T) {
 		{"web-search-endpoint", "https://search.example.com/s"},
 		{"context-window", "0"},
 		{"context-window", "32768"},
+		// 0 is the documented spelling of "unbounded" here, not a refusal — and 80 is the shipped
+		// default, which the settings surface has to be able to write back.
+		{"delegate-max-steps", "0"},
+		{"delegate-max-steps", "80"},
 		{"present.port", "0"},
 		{"present.port", "8080"},
 		{"mode", string(domain.ModeAuto)},

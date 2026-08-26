@@ -171,6 +171,14 @@ type liveSettings struct {
 	bypass      bool
 	autoCompact bool
 
+	// delegateMaxSteps mirrors `delegate-max-steps:`, which is the WRITE alone for THIS session —
+	// the bound is read off the file into the Config the engine was constructed with, and there is
+	// no setter behind it. It is mirrored for the one reader that can still act on it: a Firing
+	// builds a Config of its own out of options(), so a bound tightened mid-session bounds the
+	// delegations of the runs this session raises even though the session keeps the one it opened
+	// with. Same posture as inspector below.
+	delegateMaxSteps int
+
 	// inspector mirrors `ui.inspector:`, whose live apply is the WRITE alone — the wire observer is
 	// installed while THIS session's provider client is constructed and there is no seam to arm one
 	// afterwards (applyTheWriteAlone). It is mirrored anyway, for the one reader that can still act
@@ -220,6 +228,8 @@ func newLiveSettings(opts config.Options, manualIDs []apogee.MechanismID) *liveS
 		bypass:         opts.Bypass,
 		autoCompact:    opts.AutoCompact,
 		inspector:      opts.UI.Inspector,
+
+		delegateMaxSteps: opts.DelegateMaxSteps,
 	}
 }
 
@@ -534,6 +544,16 @@ func (s *liveSettings) setAutoCompact(on bool) {
 	s.autoCompact = on
 }
 
+// setDelegateMaxSteps mirrors `delegate-max-steps:`. Like setInspector below there is no engine
+// seam this shadows — the bound is a field of the Config an Agent was constructed with — so the
+// store is the whole of what the value can reach in this process, and what it reaches is the next
+// Firing's own delegations.
+func (s *liveSettings) setDelegateMaxSteps(steps int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.delegateMaxSteps = steps
+}
+
 // setInspector mirrors `ui.inspector:`. Unlike the two above there is no engine seam this shadows —
 // the capture is armed while a provider client is CONSTRUCTED — so the store is the whole of what
 // the value can reach in this process, and what it reaches is the next Firing's own client.
@@ -583,6 +603,7 @@ func (s *liveSettings) optionsLocked() config.Options {
 	next.Bypass = s.bypass
 	next.AutoCompact = s.autoCompact
 	next.UI.Inspector = s.inspector
+	next.DelegateMaxSteps = s.delegateMaxSteps
 
 	// And the keys that are re-RESOLVED rather than pushed — the same values rebindInputs projects
 	// for a rebind, since a Firing and a rebind are two readings of one question: what would this
@@ -1000,6 +1021,13 @@ var settingsTable = []settingsEntry{
 		},
 	},
 	{
+		key: "delegate-max-steps",
+		// No member of the applier is needed: the bound reaches no engine seam and rides no
+		// re-resolution — the holder it is mirrored onto is optional in reloadServers' sense.
+		reaches: reachesWithoutAMember,
+		apply:   applyDelegateMaxSteps,
+	},
+	{
 		key: "remember-model",
 		// The holder alone, and for once that is the literal whole of the apply: the toggle reaches no
 		// engine seam and rides no rebind — the seams it gates read it back out of this holder.
@@ -1219,6 +1247,26 @@ func applyTheWriteAlone(a settingsApplier, key, value string) (string, error) {
 	// Description's own closing sentence ("takes effect at the next start"), which the pane's
 	// header carries — no row note, since ADR 0037 decision 3 gives a settings row a boundary
 	// note only when the session itself moves.
+	return "", nil
+}
+
+// applyDelegateMaxSteps is `delegate-max-steps:`, which is the write alone for THIS session and not
+// for the runs it raises. The bound is a field of the Config an Agent was CONSTRUCTED with, so
+// nothing here can tighten the session's own delegations — but a Firing builds a Config of its own
+// out of options(), and mirroring the number onto the holder is what lets a bound the human just
+// set bound the delegations of the runs this session raises.
+//
+// It answers exactly as applyTheWriteAlone does — success, no note, the Description's "takes effect
+// at the next start" carrying the promise — while parsing the value, for applyInspector's reason: a
+// value that is to be recorded has to be read.
+func applyDelegateMaxSteps(a settingsApplier, key, value string) (string, error) {
+	steps, err := settingInt(key, value)
+	if err != nil {
+		return "", err
+	}
+	if a.live != nil {
+		a.live.setDelegateMaxSteps(steps)
+	}
 	return "", nil
 }
 

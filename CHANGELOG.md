@@ -10,6 +10,18 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **A `delegate-max-steps:` key now states how far a delegated sub-agent may run (delegate token
+  runaway, plan item 1).** The top-level, file-only key (default **80**; `0` = unbounded) is a
+  count of TURNS a child agent may take in its one Exchange, carried to the engine as
+  `domain.Config.Delegation.MaxSteps` through the new `DelegationConfig` — structural like the
+  `Context` knobs beside it, so it stays in force under Bypass, and delegate-only: the main loop
+  is the human's to stop. Both Config assemblies in the composition root state it, so an
+  unattended Firing bounds its delegations exactly as an interactive session does. The key has a
+  `/settings` row of its own whose apply is the write alone (it lands at the next start, and
+  mirrors onto the live holder for the Firings a session raises). Nothing ENFORCES it yet — the
+  child Exchange loop reads it in the next item; this is the plumbing, and the byte-identical
+  anchor is `0`.
+
 - **A running delegation now reaches the session record while it runs (delegation progress-save,
   plan item 2).** The TUI re-persists the record on the depth-0 `sub_agent` tool call that issues a
   delegation, on every tool result a CHILD produces (depth ≥ 1), and on every
