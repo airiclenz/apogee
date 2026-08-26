@@ -495,7 +495,12 @@ under the workspace and first on PATH ⇒ error wraps `ErrExecFromWritablePath`,
 
 ---
 
-## 6. The process-tree teardown seam moves to `internal/platform`
+## 6. The process-tree teardown seam moves to `internal/platform` — ✅ DONE (2026-08-26)
+
+NOTES (2026-08-26): `TestTeardownDoesNotReachASetsidEscapee` moved to `internal/platform` as the item says, but it could not keep driving `runSubprocess` there (`platform` cannot import `tools`), so it now drives the seam directly — `NewProcessTeardown` + `RunWithTeardown` around one `/bin/sh -c` — and carries its own POSIX PID helpers instead of `tools`' `waitForPIDFile`/`pidAlive`/`killPID`. What it pins is unchanged: the escapee detached itself and survived both the clean-exit reap and `cmd.Cancel`.
+NOTES (2026-08-26): `ProcessWaitDelay` was declared twice before the move (an identical `5 * time.Second` in each of the two build-tagged files); the item lists it under `teardown.go`, so it is now declared once there and both backends read it.
+NOTES (2026-08-26): two files outside the item's list named what moved and are updated by it — `internal/tools/doc.go` (its file map described the three moved files; it now points at the platform facility and keeps only the `newProcessTeardown` seam) and `internal/mechanisms/autofix.go:70` (a comment naming "processWaitDelay (internal/tools)" → `platform.ProcessWaitDelay`).
+NOTES (2026-08-26): the `ISSUES.md` job-object-breakaway bullet's two line references were re-pointed to the moved files' current lines (`teardown_unix.go:62`, `teardown_windows.go:23`), not only to the new paths.
 
 **What:** call 9 — a pure move with exported names, so the next spawner (item 7) reuses the
 §2.4 teardown instead of copying it. Behaviour is byte-identical; `git mv` keeps each file's

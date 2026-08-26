@@ -229,16 +229,13 @@
 // above calls — the ceilings, the default timeout, the capped output buffer, and the
 // exit-code result shape — plus RunHookSubprocess, the one exported door onto that funnel, so
 // a HOOK that must spawn (internal/mechanisms' autofix formatter) gets the same exec fence on its
-// argv[0], scrub, teardown, cap and clamp instead of an exec.Command of its own. exec_teardown.go holds the OS-independent
-// half of the teardown contract (§2.4): planTreeKill, the treeKillAction it returns, and the processTeardown seam —
-// including the reap that runs when a command completes rather than being cancelled.
-// exec_pgroup_unix.go realises that teardown as a POSIX process group — Setpgid, a
-// negative-PID kill, a bounded WaitDelay — which holds every descendant that has not
-// deliberately left it; one that calls setsid escapes the kill and survives the call,
-// unsupervised but still inside any confinement write-fence (an accepted residual, not an
-// enforcement gap). exec_pgroup_other.go realises it on Windows with a Job Object, the only
-// facility there that holds a whole tree — and, breakaway being denied, one with no matching
-// escape.
+// argv[0], scrub, teardown, cap and clamp instead of an exec.Command of its own. The §2.4
+// teardown contract itself is no longer this package's to own: planTreeKill, the ProcessTeardown
+// seam, the POSIX process group and the Windows Job Object all live in internal/platform
+// (teardown.go and its two per-OS halves), so every spawner apogee has reuses one implementation
+// rather than copying it. What stays here is the one line binding runSubprocess to it —
+// exec_common.go's newProcessTeardown seam, which a test substitutes to observe the release
+// lifecycle on every OS.
 // exec_cmdline_unix.go is a no-op because execve takes a real argv;
 // exec_cmdline_other.go hands Windows the raw command line verbatim through
 // SysProcAttr.CmdLine, bypassing the argv joining cmd.exe cannot read.

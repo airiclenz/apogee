@@ -1,14 +1,13 @@
 //go:build !windows
 
-package tools
+package platform
 
 import (
 	"os/exec"
 	"syscall"
-	"time"
 )
 
-// setProcessGroupTeardown wires the §2.4 process-group teardown onto cmd (POSIX):
+// NewProcessTeardown wires the §2.4 process-group teardown onto cmd (POSIX):
 //
 //   - SysProcAttr.Setpgid so the child and its descendants share a process group. The
 //     Confiner backend also sets this when it wraps the command (seatbelt / landlock
@@ -31,15 +30,15 @@ import (
 // accepted rather than enforced against (no subreaper, no descendant tracking): deliberately
 // backgrounding a process is legitimate terminal use. The residual is POSIX-specific — Windows'
 // Job Object holds a descendant unless the job permits breakaway, which it does not
-// (exec_pgroup_other.go).
+// (teardown_windows.go).
 //
 // It must be called after exec.CommandContext built cmd but before cmd.Start, and before any
 // Confine (the Confiner only appends to SysProcAttr, never clearing Cancel). The returned
-// processTeardown is a pgroupTeardown: the group is a fork-time property of the cmd, so POSIX
+// ProcessTeardown is a pgroupTeardown: the group is a fork-time property of the cmd, so POSIX
 // needs no post-start step and owns no handle, and the one hook it implements is the clean-exit
-// reap. The contain/release halves of the seam exist for Windows, whose Job Object can only
-// take the process once it has been created (exec_pgroup_other.go).
-func setProcessGroupTeardown(cmd *exec.Cmd) processTeardown {
+// Reap. The Contain/Release halves of the seam exist for Windows, whose Job Object can only
+// take the process once it has been created (teardown_windows.go).
+func NewProcessTeardown(cmd *exec.Cmd) ProcessTeardown {
 	if cmd.SysProcAttr == nil {
 		cmd.SysProcAttr = &syscall.SysProcAttr{}
 	}
@@ -52,7 +51,7 @@ func setProcessGroupTeardown(cmd *exec.Cmd) processTeardown {
 		killProcessGroup(cmd)
 		return nil
 	}
-	cmd.WaitDelay = processWaitDelay
+	cmd.WaitDelay = ProcessWaitDelay
 	return pgroupTeardown{}
 }
 
@@ -63,7 +62,7 @@ func killProcessGroup(cmd *exec.Cmd) {
 	// treeHeld is unconditionally true here: Setpgid establishes the group at fork, before
 	// the child can spawn anything, so the group holds every descendant that has not
 	// deliberately left it. A descendant that called setsid/setpgid(0,0) is outside the
-	// group and outside this kill (see setProcessGroupTeardown); treeHeld describes the
+	// group and outside this kill (see NewProcessTeardown); treeHeld describes the
 	// container, not escape from it. The leader-only rung is Windows', where the job
 	// assignment can be refused.
 	switch planTreeKill(cmd.Process != nil, true) {
@@ -79,25 +78,19 @@ func killProcessGroup(cmd *exec.Cmd) {
 	}
 }
 
-// pgroupTeardown is the POSIX processTeardown. The group is a fork-time property of the cmd, so
-// contain and release stay noTeardown's no-ops; the one step this backend owns is the clean-exit
+// pgroupTeardown is the POSIX ProcessTeardown. The group is a fork-time property of the cmd, so
+// Contain and Release stay NoTeardown's no-ops; the one step this backend owns is the clean-exit
 // reap.
-type pgroupTeardown struct{ noTeardown }
+type pgroupTeardown struct{ NoTeardown }
 
-// reap kills the process group once the run is over, so a descendant the command backgrounded
-// does not outlive the one-shot call (processTeardown.reap) — unless it left the group on its
-// own, which nothing aimed at the group can reach (see setProcessGroupTeardown). By the time it
+// Reap kills the process group once the run is over, so a descendant the command backgrounded
+// does not outlive the one-shot call (ProcessTeardown.Reap) — unless it left the group on its
+// own, which nothing aimed at the group can reach (see NewProcessTeardown). By the time it
 // runs the leader has been waited on, so only its descendants can still be in the group — and
 // while the group holds a member the kernel cannot recycle its PGID, which is what keeps the
 // negative-PID kill aimed at this run's tree and nothing else. An empty group answers ESRCH and
 // the leader fallback answers "process already finished"; both are the ordinary case of a
 // command that left nothing behind.
-func (pgroupTeardown) reap(cmd *exec.Cmd) {
+func (pgroupTeardown) Reap(cmd *exec.Cmd) {
 	killProcessGroup(cmd)
 }
-
-// processWaitDelay bounds the post-exit drain so a child holding a pipe open cannot wedge
-// Wait indefinitely after the process has been signalled. It is a var rather than a const so a
-// test can shrink it and exercise the drain-wedged path in milliseconds; production never
-// reassigns it.
-var processWaitDelay = 5 * time.Second

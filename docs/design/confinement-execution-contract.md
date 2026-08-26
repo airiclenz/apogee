@@ -239,8 +239,8 @@ descendant can do to leave it (the residual below).
   (`syscall.Kill(-cmd.Process.Pid, SIGKILL)`) and set a short `cmd.WaitDelay`, so a ctx cancel / timeout
   reaps the whole group — no orphaned `sandbox-exec`, no orphaned child.
   **Amended 2026-08-12 (hostile-bytes hardening, item 18): teardown runs on EVERY exit, not only on
-  cancellation.** The same group kill also runs after a normal `Wait` (`processTeardown.reap`,
-  `internal/tools/exec_teardown.go`), so a descendant the command backgrounded does not outlive a
+  cancellation.** The same group kill also runs after a normal `Wait` (`ProcessTeardown.Reap`,
+  `internal/platform/teardown.go`), so a descendant the command backgrounded does not outlive a
   clean exit either — the one-shot contract holds on all three paths, not two. A `cmd.WaitDelay`
   that expires is now reported (`exec.ErrWaitDelay`) instead of falling through to the leader's own
   exit code, which rendered a wedged drain as a success.

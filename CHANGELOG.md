@@ -181,6 +181,20 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **The process-tree teardown is a platform facility now, exported for every spawner (plan item
+  6).** The §2.4 teardown seam moved out of `internal/tools` and into `internal/platform` with
+  exported names — `ProcessTeardown` (`Contain`/`Reap`/`Release`), `NewProcessTeardown`,
+  `RunWithTeardown`, `NoTeardown` and `ProcessWaitDelay` — as `teardown.go`, `teardown_unix.go`
+  (the POSIX process group) and `teardown_windows.go` (the Job Object). Behaviour is unchanged
+  on both platforms: the execution tools keep their own `newProcessTeardown` var as the test
+  seam and now call `platform.RunWithTeardown`. What changes is who may reuse it — the next
+  spawner (the stdio MCP transport) gets the same group/job teardown instead of a copy of it,
+  which is why the move comes before that work rather than after. `ProcessWaitDelay`, previously
+  declared identically in each build-tagged file, is declared once. The tests moved with their
+  code: `TestPlanTreeKill`, `TestNoTeardownIsInert` and the POSIX setsid-escapee residual test now
+  run in `internal/platform`, while the `runSubprocess` ownership test stays in `internal/tools`
+  and fakes the exported interface.
+
 - **The shipped default system prompt no longer spends two lines on the scratch dir and `/tmp`.**
   The orientation block carries those facts now, so `internal/config/defaults/config.yaml` keeps
   the template persona-only. The `{{scratch}}` placeholder stays fully supported for a user's own

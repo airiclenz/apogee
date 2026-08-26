@@ -1,17 +1,16 @@
 //go:build windows
 
-package tools
+package platform
 
 import (
 	"os/exec"
 	"sync"
-	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
 
-// setProcessGroupTeardown wires the §2.4 teardown onto cmd (Windows). POSIX process groups
+// NewProcessTeardown wires the §2.4 teardown onto cmd (Windows). POSIX process groups
 // (Setpgid + a negative-PID kill) have no Windows equivalent; the Windows facility that holds
 // a whole process tree is a **Job Object**, so this backend implements the same contract with
 // one:
@@ -20,14 +19,14 @@ import (
 //     JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE. That limit is the crash net: if apogee dies mid-run
 //     the handle closes with it and the kernel reaps the tree, the closest Windows has to the
 //     POSIX guarantee that a cancelled command never leaves descendants behind.
-//   - runWithTeardown assigns the started process to the job (contain). A child cannot escape
+//   - RunWithTeardown assigns the started process to the job (Contain). A child cannot escape
 //     a job it is assigned to unless the job permits breakaway, which this one does not, so
 //     every descendant it spawns from then on is held too.
 //   - cmd.Cancel terminates the JOB — not the leader — when the run's context is cancelled or
 //     times out, which is the negative-PID kill's counterpart. If the job never took the
 //     process it falls back to killing the leader alone (planTreeKill's degraded rung).
-//   - runWithTeardown reaps the job the same way once a run that was NOT cancelled has been
-//     waited on, so a one-shot call leaves no descendants on any exit path (processTeardown.reap).
+//   - RunWithTeardown reaps the job the same way once a run that was NOT cancelled has been
+//     waited on, so a one-shot call leaves no descendants on any exit path (ProcessTeardown.Reap).
 //   - cmd.WaitDelay bounds how long Wait blocks draining I/O after the kill, so a descendant
 //     holding a pipe open cannot wedge the tool forever — identical to POSIX.
 //
@@ -44,30 +43,24 @@ import (
 // closes long before it can spawn anything; the alternative — a suspended start — is
 // unreachable because os/exec closes the process's initial thread handle, leaving nothing to
 // resume.
-func setProcessGroupTeardown(cmd *exec.Cmd) processTeardown {
+func NewProcessTeardown(cmd *exec.Cmd) ProcessTeardown {
 	td := &jobTeardown{job: windows.InvalidHandle}
 	if job, err := newTreeJob(); err == nil {
 		td.job = job
 	}
 
 	cmd.Cancel = func() error { return td.cancel(cmd) }
-	cmd.WaitDelay = processWaitDelay
+	cmd.WaitDelay = ProcessWaitDelay
 	return td
 }
 
-// processWaitDelay bounds the post-exit drain so a child holding a pipe open cannot wedge
-// Wait indefinitely after the process has been signalled. It is a var rather than a const so a
-// test can shrink it and exercise the drain-wedged path in milliseconds; production never
-// reassigns it.
-var processWaitDelay = 5 * time.Second
-
-// jobTeardown is the Windows processTeardown: the Job Object holding one run's process tree.
-// cmd.Cancel runs on os/exec's watchdog goroutine while contain/release run on the goroutine
+// jobTeardown is the Windows ProcessTeardown: the Job Object holding one run's process tree.
+// cmd.Cancel runs on os/exec's watchdog goroutine while Contain/Release run on the goroutine
 // driving the command, so the handle and the assignment flag are mutex-guarded.
 type jobTeardown struct {
 	mu sync.Mutex
 	// job is the Job Object holding the tree, or windows.InvalidHandle when one could not be
-	// created (teardown then degrades to a leader-only kill) or after release closed it.
+	// created (teardown then degrades to a leader-only kill) or after Release closed it.
 	job windows.Handle
 	// assigned reports that the process actually joined the job, which is what makes a job
 	// termination reap the whole tree rather than nothing.
@@ -103,10 +96,10 @@ func setJobLimits(job windows.Handle, info *windows.JOBOBJECT_EXTENDED_LIMIT_INF
 	)
 }
 
-// contain assigns the freshly started process to the job, so a cancel reaps its whole tree.
+// Contain assigns the freshly started process to the job, so a cancel reaps its whole tree.
 // Every failure is silent by design: the run continues, and cancel degrades to killing the
 // leader (planTreeKill) rather than failing a command the user asked for.
-func (t *jobTeardown) contain(cmd *exec.Cmd) {
+func (t *jobTeardown) Contain(cmd *exec.Cmd) {
 	if cmd.Process == nil {
 		return
 	}
@@ -152,23 +145,23 @@ func (t *jobTeardown) cancel(cmd *exec.Cmd) error {
 	return nil
 }
 
-// reap terminates the job once a run that was never cancelled has been waited on, so a process
+// Reap terminates the job once a run that was never cancelled has been waited on, so a process
 // the command detached — which the job holds anyway, breakaway being denied — does not outlive
-// the one-shot call (processTeardown.reap). It is cancel's clean-exit twin and goes through the
+// the one-shot call (ProcessTeardown.Reap). It is cancel's clean-exit twin and goes through the
 // same plan: the leader is already gone by now, so the degraded rung's Kill is a no-op and only
 // the job termination can still reach anything.
-func (t *jobTeardown) reap(cmd *exec.Cmd) {
+func (t *jobTeardown) Reap(cmd *exec.Cmd) {
 	_ = t.cancel(cmd)
 }
 
-// release drops the job handle when the run is over — after Wait and the reap on the normal
+// Release drops the job handle when the run is over — after Wait and the reap on the normal
 // path, and also on the confine-refusal and Start-failure paths, which never reach Wait but own
-// the handle from the moment setProcessGroupTeardown created it. The KILL_ON_JOB_CLOSE limit is
+// the handle from the moment NewProcessTeardown created it. The KILL_ON_JOB_CLOSE limit is
 // cleared first so that closing the handle is never itself a teardown: every path that started
-// a process has already terminated the job explicitly (cancel, or reap on a clean exit), and the
+// a process has already terminated the job explicitly (cancel, or Reap on a clean exit), and the
 // paths that started none hold an empty job. The limit exists for the crash path — apogee dying
 // mid-run with nobody left to make either call.
-func (t *jobTeardown) release() {
+func (t *jobTeardown) Release() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if t.job == windows.InvalidHandle {

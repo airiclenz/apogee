@@ -1,6 +1,9 @@
-package tools
+package platform
 
-import "os/exec"
+import (
+	"os/exec"
+	"time"
+)
 
 // treeKillAction names what the §2.4 cancel path must do to a running subprocess when the
 // run's context is cancelled or its timeout fires. It exists so the one decision both
@@ -23,7 +26,7 @@ const (
 	// killed as the negative PID) or a Windows Job Object (TerminateJobObject) — so one call
 	// reaps them too. This is the contract's intent: a cancelled command orphans nothing the
 	// container still holds. On POSIX a descendant that deliberately left the group (setsid)
-	// is no longer in it and survives the kill; see setProcessGroupTeardown.
+	// is no longer in it and survives the kill; see NewProcessTeardown.
 	treeKillTree
 )
 
@@ -35,7 +38,7 @@ const (
 //
 // treeHeld is about the container, not about escape from it: a POSIX descendant that calls
 // setsid/setpgid(0,0) leaves the group and survives either rung, which is why that residual is
-// documented at setProcessGroupTeardown rather than modelled here. Windows has no counterpart —
+// documented at NewProcessTeardown rather than modelled here. Windows has no counterpart —
 // its job denies breakaway.
 func planTreeKill(started, treeHeld bool) treeKillAction {
 	switch {
@@ -48,56 +51,57 @@ func planTreeKill(started, treeHeld bool) treeKillAction {
 	}
 }
 
-// processTeardown is the per-run state the §2.4 teardown needs *after* the process exists.
-// setProcessGroupTeardown builds it while wiring cmd.Cancel and cmd.WaitDelay; runWithTeardown
+// ProcessTeardown is the per-run state the §2.4 teardown needs *after* the process exists.
+// NewProcessTeardown builds it while wiring cmd.Cancel and cmd.WaitDelay; RunWithTeardown
 // drives it around cmd.Wait. POSIX needs no state to hold the tree (the process group is a
-// fork-time property of the cmd, so contain and release stay noTeardown's no-ops) and implements
+// fork-time property of the cmd, so Contain and Release stay NoTeardown's no-ops) and implements
 // the post-Wait reap alone; Windows has no fork-time hook at all, so its implementation assigns
 // the started process to a Job Object, terminates it, and releases the handle when the run is
 // over.
-type processTeardown interface {
-	// contain places the started process (cmd.Process is non-nil) under whatever holds its
+type ProcessTeardown interface {
+	// Contain places the started process (cmd.Process is non-nil) under whatever holds its
 	// descendants. It is best-effort: a failure degrades the cancel path to a leader-only
 	// kill (planTreeKill), never an error the tool surfaces — teardown is a safety net, not
 	// the confinement fence (ADR 0020).
-	contain(cmd *exec.Cmd)
-	// reap tears the tree down once the run is over — the clean-exit counterpart of
+	Contain(cmd *exec.Cmd)
+	// Reap tears the tree down once the run is over — the clean-exit counterpart of
 	// cmd.Cancel, which only ever fires when the run's context is done. The execution tools
 	// are one-shot by contract (ADR 0008: a fresh process per call, no persistent shell), so
 	// a descendant the command backgrounded must not outlive the call that started it; before
 	// this hook existed only the cancelled and timed-out paths reaped anything, and a
 	// backgrounded grandchild survived a clean exit while the call still rendered as success.
 	// It runs after Wait has returned, so the leader is already gone and only descendants can
-	// still be held. Best-effort like contain: teardown is a safety net, never the
+	// still be held. Best-effort like Contain: teardown is a safety net, never the
 	// confinement fence (ADR 0020).
-	reap(cmd *exec.Cmd)
-	// release drops any OS resource the containment holds. The resource exists from the
-	// moment the teardown was built, which is before the process does, so release runs on
+	Reap(cmd *exec.Cmd)
+	// Release drops any OS resource the containment holds. The resource exists from the
+	// moment the teardown was built, which is before the process does, so Release runs on
 	// every exit from the run — after Wait has returned on the normal path, and equally on
 	// the confine-refusal and Start-failure paths that never reach Wait. It is deferred once
-	// by the caller that built the teardown (runSubprocess), and stays idempotent so a second
-	// call could never double-free.
-	release()
+	// by the caller that built the teardown (internal/tools' runSubprocess), and stays
+	// idempotent so a second call could never double-free.
+	Release()
 }
 
-// newProcessTeardown builds the per-run teardown for cmd. It is the package's seam onto the
-// platform constructor (setProcessGroupTeardown, one per build tag) — a package var so a test
-// can substitute a fake processTeardown and observe the release lifecycle on every OS, the
-// same idiom as shellHost. Production code never reassigns it.
-var newProcessTeardown = setProcessGroupTeardown
+// ProcessWaitDelay bounds the post-exit drain so a child holding a pipe open cannot wedge Wait
+// indefinitely after the process has been signalled. Every NewProcessTeardown sets it as
+// cmd.WaitDelay, which is why it lives here rather than once per build tag. It is a var rather
+// than a const so a test can shrink it and exercise the drain-wedged path in milliseconds;
+// production never reassigns it.
+var ProcessWaitDelay = 5 * time.Second
 
-// noTeardown is the inert processTeardown: every hook is a no-op. POSIX embeds it
-// (exec_pgroup_unix.go) because the process group is established by the kernel at fork, so that
-// backend needs neither a post-start step nor an owned handle and overrides reap alone.
-type noTeardown struct{}
+// NoTeardown is the inert ProcessTeardown: every hook is a no-op. POSIX embeds it
+// (teardown_unix.go) because the process group is established by the kernel at fork, so that
+// backend needs neither a post-start step nor an owned handle and overrides Reap alone.
+type NoTeardown struct{}
 
-func (noTeardown) contain(*exec.Cmd) {}
+func (NoTeardown) Contain(*exec.Cmd) {}
 
-func (noTeardown) reap(*exec.Cmd) {}
+func (NoTeardown) Reap(*exec.Cmd) {}
 
-func (noTeardown) release() {}
+func (NoTeardown) Release() {}
 
-// runWithTeardown starts cmd, hands the started process to the platform teardown, waits for it,
+// RunWithTeardown starts cmd, hands the started process to the platform teardown, waits for it,
 // and reaps whatever the command left behind — the Start/Wait split that cmd.Run() would
 // otherwise hide. The split is load-bearing on Windows: a process can only be assigned to a Job
 // Object once CreateProcess has returned, so the teardown needs the gap between Start and Wait.
@@ -111,14 +115,14 @@ func (noTeardown) release() {}
 //
 // It does NOT release td: the resource exists from the moment the teardown was built, which is
 // before this function is reached, so releasing it belongs to the caller that built it
-// (runSubprocess, its only caller). That is the only placement a Start failure — or a Confine
+// (internal/tools' runSubprocess). That is the only placement a Start failure — or a Confine
 // failure, which never gets here at all — also drops.
-func runWithTeardown(cmd *exec.Cmd, td processTeardown) error {
+func RunWithTeardown(cmd *exec.Cmd, td ProcessTeardown) error {
 	if err := cmd.Start(); err != nil {
 		return err
 	}
-	td.contain(cmd)
+	td.Contain(cmd)
 	err := cmd.Wait()
-	td.reap(cmd)
+	td.Reap(cmd)
 	return err
 }

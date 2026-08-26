@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/security"
 )
 
@@ -82,18 +83,18 @@ func TestRunSubprocessReapsTheProcessGroupOnACleanExit(t *testing.T) {
 
 // TestRunSubprocessReportsAWedgedDrain pins the second half of the same finding: when something
 // the command left running still holds the output pipe, exec cuts the drain off at
-// processWaitDelay and returns exec.ErrWaitDelay — which is not an *exec.ExitError, so the exit
-// code falls through to the leader's own status. The leader exited 0, so the call used to render
-// as a green tick with a silently truncated tail.
+// platform.ProcessWaitDelay and returns exec.ErrWaitDelay — which is not an *exec.ExitError, so
+// the exit code falls through to the leader's own status. The leader exited 0, so the call used
+// to render as a green tick with a silently truncated tail.
 func TestRunSubprocessReportsAWedgedDrain(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("POSIX shell; the exit-code mapping it pins is platform-independent")
 	}
-	// processWaitDelay is a package var, so this test cannot run in parallel; shrinking it is
-	// what keeps a five-second drain out of the suite.
-	prev := processWaitDelay
-	processWaitDelay = 250 * time.Millisecond
-	t.Cleanup(func() { processWaitDelay = prev })
+	// platform.ProcessWaitDelay is a package var, so this test cannot run in parallel;
+	// shrinking it is what keeps a five-second drain out of the suite.
+	prev := platform.ProcessWaitDelay
+	platform.ProcessWaitDelay = 250 * time.Millisecond
+	t.Cleanup(func() { platform.ProcessWaitDelay = prev })
 
 	// The sleep INHERITS the captured pipes and outlives the shell, so the output copy cannot
 	// finish: Wait blocks until the delay expires. The sleep is short enough that a failed

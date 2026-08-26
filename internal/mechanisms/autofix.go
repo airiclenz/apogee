@@ -67,7 +67,7 @@ type autofixMechanism struct {
 
 	// timeout bounds each external formatter subprocess: it narrows the FIRE's context, which is
 	// what stops a run. The kill path is NOT this field's — the subprocess funnel pins every
-	// child's WaitDelay to its own fixed 5s processWaitDelay (internal/tools). Seeded from
+	// child's WaitDelay to its own fixed 5s platform.ProcessWaitDelay. Seeded from
 	// defaultFormatterTimeout in newAutofix.
 	timeout time.Duration
 

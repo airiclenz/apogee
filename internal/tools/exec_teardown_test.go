@@ -10,66 +10,11 @@ import (
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/platform"
 )
 
-// TestPlanTreeKill covers the one §2.4 teardown decision both backends share, on every OS:
-// what a cancelled run must kill. The syscalls differ per platform; this table does not.
-func TestPlanTreeKill(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name     string
-		started  bool
-		treeHeld bool
-		want     treeKillAction
-	}{
-		{
-			name:    "a process that never started is not killed at all",
-			started: false, treeHeld: false,
-			want: treeKillNothing,
-		},
-		{
-			name:    "a container held before the process started is still nothing to kill",
-			started: false, treeHeld: true,
-			want: treeKillNothing,
-		},
-		{
-			name:    "a held tree is reaped whole — the contract's intent",
-			started: true, treeHeld: true,
-			want: treeKillTree,
-		},
-		{
-			name:    "an unheld tree degrades to the leader rather than nothing",
-			started: true, treeHeld: false,
-			want: treeKillLeader,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			if got := planTreeKill(tt.started, tt.treeHeld); got != tt.want {
-				t.Errorf("planTreeKill(%v, %v) = %v, want %v", tt.started, tt.treeHeld, got, tt.want)
-			}
-		})
-	}
-}
-
-// TestNoTeardownIsInert pins the inert base POSIX embeds: the process group needs no post-start
-// step and owns no handle, so every hook it keeps must be safe to call — including with a cmd
-// that never started.
-func TestNoTeardownIsInert(t *testing.T) {
-	t.Parallel()
-
-	var td processTeardown = noTeardown{}
-	td.contain(nil)
-	td.reap(nil)
-	td.release()
-	td.release()
-}
-
-// fakeTeardown is a processTeardown that records its own lifecycle and nothing else, so the
-// ownership rule — runSubprocess releases the teardown on EVERY exit path, including the two
+// fakeTeardown is a platform.ProcessTeardown that records its own lifecycle and nothing else, so
+// the ownership rule — runSubprocess releases the teardown on EVERY exit path, including the two
 // that never reach Wait, and reaps the tree on the one that completes — is provable on every OS
 // instead of only where a Job Object exists.
 type fakeTeardown struct {
@@ -79,19 +24,19 @@ type fakeTeardown struct {
 	released  int
 }
 
-func (t *fakeTeardown) contain(*exec.Cmd) {
+func (t *fakeTeardown) Contain(*exec.Cmd) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.contained++
 }
 
-func (t *fakeTeardown) reap(*exec.Cmd) {
+func (t *fakeTeardown) Reap(*exec.Cmd) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.reaped++
 }
 
-func (t *fakeTeardown) release() {
+func (t *fakeTeardown) Release() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.released++
@@ -110,7 +55,7 @@ func installFakeTeardown(t *testing.T) *fakeTeardown {
 	t.Helper()
 	td := &fakeTeardown{}
 	prev := newProcessTeardown
-	newProcessTeardown = func(*exec.Cmd) processTeardown { return td }
+	newProcessTeardown = func(*exec.Cmd) platform.ProcessTeardown { return td }
 	t.Cleanup(func() { newProcessTeardown = prev })
 	return td
 }

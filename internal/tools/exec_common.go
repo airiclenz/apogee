@@ -187,9 +187,9 @@ type subprocessResult struct {
 	// timedOut reports that the run was cut short by its own timeout (vs the model's ctx).
 	timedOut bool
 	// drainWedged reports that the process had exited but something it left running was still
-	// holding the output pipe when processWaitDelay expired, so exec cut the drain short and
-	// killed what was left. The captured output may be missing its tail, and the run is not a
-	// success however cleanly the leader itself exited.
+	// holding the output pipe when platform.ProcessWaitDelay expired, so exec cut the drain
+	// short and killed what was left. The captured output may be missing its tail, and the run
+	// is not a success however cleanly the leader itself exited.
 	drainWedged bool
 	// confined reports that the run actually executed inside the confinement fence — a
 	// Confinement handle was on ctx and its Confiner wrapped the cmd before it started.
@@ -274,6 +274,12 @@ func resolveWorkdirInRoot(workdir, root string) (string, error) {
 	return resolveInRoot(workdir, root)
 }
 
+// newProcessTeardown builds the per-run process-tree teardown for cmd. It is this package's seam
+// onto the platform constructor (platform.NewProcessTeardown, one per build tag) — a package var
+// so a test can substitute a fake platform.ProcessTeardown and observe the release lifecycle on
+// every OS, the same idiom as shellHost. Production code never reassigns it.
+var newProcessTeardown = platform.NewProcessTeardown
+
 // runSubprocess runs spec as a one-shot subprocess (ADR 0008 — fresh process per call, no
 // persistent shell/REPL) and captures its combined output and exit code. It is the single
 // place the §2.4 confinement-and-teardown contract is honoured for every execution tool:
@@ -286,7 +292,7 @@ func resolveWorkdirInRoot(workdir, root string) (string, error) {
 //     container. The one documented escape is POSIX's: a descendant that calls
 //     setsid/setpgid(0,0) is outside the group and outside the kill, so it survives the call
 //     unsupervised — still inside whatever fence the Confiner installed, an accepted residual
-//     rather than an enforcement gap (setProcessGroupTeardown states it in full). Windows'
+//     rather than an enforcement gap (platform.NewProcessTeardown states it in full). Windows'
 //     Job Object denies breakaway and has no counterpart.
 //   - If a Confinement handle is on ctx (the dispatch disposition installed it for an
 //     Auto/confine subprocess call), it asks the Confiner to wrap the cmd before running.
@@ -344,13 +350,13 @@ func runSubprocess(ctx context.Context, spec subprocessSpec) (subprocessResult, 
 	// Wire the process-tree teardown BEFORE confining: the Confiner only appends to
 	// SysProcAttr (Setpgid on POSIX, Token on Windows) and never touches cmd.Cancel, so the
 	// two compose. The returned handle is what the teardown needs once the process exists —
-	// nothing on POSIX, the Job Object assignment on Windows (exec_teardown.go).
+	// nothing on POSIX, the Job Object assignment on Windows (internal/platform/teardown.go).
 	teardown := newProcessTeardown(cmd)
 	// The teardown owns an OS resource from the moment it is built (the Windows Job Object
 	// handle), so this function owns releasing it: the confine refusal below and a cmd.Start()
 	// failure both return without ever reaching Wait, and neither may leak the handle. release
 	// is idempotent, so the normal path pays nothing for the guarantee.
-	defer teardown.release()
+	defer teardown.Release()
 	// A shell line on Windows must reach the shell verbatim; every other platform and
 	// every real argv leaves this empty and the cmd untouched.
 	setRawCommandLine(cmd, spec.cmdline)
@@ -395,7 +401,7 @@ func runSubprocess(ctx context.Context, spec subprocessSpec) (subprocessResult, 
 		}
 	}
 
-	runErr := runWithTeardown(cmd, teardown)
+	runErr := platform.RunWithTeardown(cmd, teardown)
 
 	// A ctx cancellation is the one case surfaced as a Go error (the loop rolls back).
 	if ctx.Err() != nil {

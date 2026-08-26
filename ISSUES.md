@@ -645,8 +645,8 @@ the archived plans; what remains open needs hardware this environment does not h
   consequences), verifiable only if such a host turns up.
 - **Job-object breakaway assertion on Windows** (folded here 2026-08-15 from the open-residuals
   sweep's residuals) — the Windows counterpart to the POSIX setsid escape
-  (`internal/tools/exec_pgroup_unix.go:63`) is prose-only and untested: the job object "does not
-  permit breakaway" (`internal/tools/exec_pgroup_other.go:24`), and nothing asserts that a
+  (`internal/platform/teardown_unix.go:62`) is prose-only and untested: the job object "does not
+  permit breakaway" (`internal/platform/teardown_windows.go:23`), and nothing asserts that a
   descendant cannot leave the job, so the POSIX side's pinned residual has no Windows twin.
   Needs a Windows host.
 - **The advisory single-instance lock, on Windows and on macOS** (folded here 2026-08-22 from the

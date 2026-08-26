@@ -39,9 +39,10 @@
 //
 // # The files, one line each
 //
-// Twenty-two files, in four groups: the shell/path Host every OS-touching caller reads, the
-// Confiner backends, the per-machine identity, and the single-instance lock. The Windows label
-// mechanism is a module of its own beside them (internal/platform/winlabel).
+// Twenty-five files, in five groups: the shell/path Host every OS-touching caller reads, the
+// Confiner backends, the process-tree teardown every spawner reuses, the per-machine identity,
+// and the single-instance lock. The Windows label mechanism is a module of its own beside them
+// (internal/platform/winlabel).
 //
 // The Host abstraction. platform.go is the interface set — Shell (the argv, the raw command
 // line, quoting, the scoped environment) and Path — plus the Host accessor they hang off and
@@ -81,6 +82,20 @@
 // notice, so a large tree reads as an explained wait rather than a silent hang, and
 // prewarm_other.go is the no-op it collapses to everywhere else, which is what keeps startup
 // output byte-identical off Windows.
+//
+// The process-tree teardown. It is a process-lifecycle facility and never a fence (ADR 0020):
+// it bounds what one spawned command may leave behind, while the confinement boundary stays the
+// Confiner's. teardown.go is the OS-independent half of the execution contract's §2.4 —
+// planTreeKill and the treeKillAction it returns, the ProcessTeardown seam (Contain, Reap,
+// Release) a spawner drives around Wait, NoTeardown as the inert base a backend embeds,
+// RunWithTeardown (the Start/Wait split a Job Object assignment needs, reaping on every exit and
+// not only a cancelled one), and ProcessWaitDelay, the bounded post-exit drain both backends set
+// as cmd.WaitDelay. teardown_unix.go realises the container as a POSIX process group — Setpgid, a
+// negative-PID kill on cancel, the same kill again on a clean exit — which holds every descendant
+// that has not deliberately left it; one that calls setsid escapes the kill and survives the call,
+// unsupervised but still inside any confinement write-fence (an accepted residual, not an
+// enforcement gap). teardown_windows.go realises it with a Job Object, the only facility there
+// that holds a whole tree — and, breakaway being denied, one with no matching escape.
 //
 // The per-machine fact. hostid.go computes HostID once per process from the systemd or dbus
 // machine-id file, falling back to the hostname, and reports whether the result is the
