@@ -46,8 +46,10 @@ caller owns the decision, so it owns the event: when recovery is refused or spen
 that carried message verbatim — same `Source: "loop"`, same text, same ordering, same
 `abandonTurn` — so a give-up is indistinguishable from what shipped before this ADR.
 
-**3. The emergency fold is the ONE fold allowed to run MID-EXCHANGE.** It amends S2's
-Exchange-boundary-only rule *for this path alone*: the estimate-driven trigger
+**3. On the MAIN agent, the emergency fold is the ONE fold allowed to run MID-EXCHANGE.**
+*(Amended 2026-08-26 — on a CHILD agent the estimate-driven trigger runs mid-Exchange too, at
+quiescent Turn boundaries; see the 2026-08-26 Amendment section below.)* It amends S2's
+Exchange-boundary-only rule *for this path alone*: on the main agent the estimate-driven trigger
 (`shouldAutoCompact`) and the on-demand `/compact` (which refuses mid-Exchange with
 `ErrInputPending`) both stay boundary-only. The asymmetry is the point — their caller can wait for
 the next opening, while a Turn whose request the server just rejected cannot: deferring there
@@ -91,11 +93,14 @@ maintenance rather than part of the Turn's attempt, the cancellation rollback bo
 Budget is uncalibrated.** *(Amended 2026-08-02 (second) — the working room below is the KNOWN-window
 threshold and the whole-request measure is the KNOWN-window measure; with no window the guard
 compares the transcript alone against the same conservative ceiling the fold renders against,
-instead of standing down. See the second Amendment section.)* Before a request is sent, `requestExceedsWindow` estimates it with the
-measure the whole engine shares (`domain.PromptChars` through `Budget.EstimateTokens`) against the
-FULL working room (`ContextLimit − ResponseReserve`), never a softer fraction: a fold is a lossy
-rewrite of the user's history, so it must fire only when the estimate says the request cannot fit
-at all, never as a comfort margin (the ~60%-of-working-room History allocation stays the boundary
+instead of standing down. See the second Amendment section.)* *(Amended 2026-08-26 — the Budget
+now splits the advertised `Window` from the working `ContextLimit`, and the field the threshold
+below names is `Window`; see the 2026-08-26 Amendment section.)* Before a request is sent,
+`requestExceedsWindow` estimates it with the measure the whole engine shares (`domain.PromptChars`
+through `Budget.EstimateTokens`) against the FULL HARD room — the ADVERTISED window less the reply
+reserve (`Window − ResponseReserve`) — never a softer fraction: a fold is a lossy rewrite of the
+user's history, so it must fire only when the estimate says the request cannot fit at all, never
+as a comfort margin (the ~60%-of-working-room History allocation stays the boundary
 trigger's business). While no server usage has been reported yet (`Budget.Used == 0` — Turn 1,
 every sub-agent, and the first Turn after a resume, where the estimator is deliberately not
 serialized while the restored history may already sit near the window) the threshold is
@@ -275,3 +280,42 @@ allocates nothing, so hooks, the context gauge and the window-gated Mechanisms (
 `guided_decomposition`, `tool_result_cap`) all remain inert on an unknown window and never steer on
 a guess. The assumption lives only in the engine's structural bounds, which is where a wrong guess
 costs a lossy fold rather than a wrong instruction to the model.
+
+## Amendment (2026-08-26) — §7's threshold is `Window`, and a CHILD folds mid-Exchange too
+
+Two sentences above were overtaken by the delegate token-runaway work
+(`docs/plans/2026-08-26 - 00 - delegate-token-runaway-plan.md`, items 3 and 5). Both are corrected
+in place, each carrying a dated marker on the decision itself; this section is the reasoning.
+Neither is a new decision: the recovery path, its one-fold-per-Turn budget, its user bridge and its
+`auto-compact: false` opt-out are all exactly as decided.
+
+**§7's threshold named the wrong field, now that there are two.** When this record was written the
+Budget had ONE ceiling and it WAS the advertised window, so "the FULL working room (`ContextLimit −
+ResponseReserve`)" described exactly what the guard measured. The Budget now splits them: `Window`
+is the model's advertised context window — the wall the server enforces — while `ContextLimit` is
+the working room the session chose to live in, `min(Window, working-window:)`, which is what
+`context.Allocate` divides and therefore what every reducer and window-gated Mechanism honours. The
+predictive guard deliberately keeps the ADVERTISED one: `requestExceedsWindow` reads `Window −
+ResponseReserve`, and the reason is §7's own "never as a comfort margin" — a `working-window:`
+bound is a soft line the reducers keep the session under, so folding at it would fire this lossy
+guard on every request a bounded session deliberately lets run past its working room while still
+fitting the server's window. The working bound bites through the boundary trigger instead
+(`Budget.HistoryExceedsAllocation`), which DOES follow `ContextLimit` — the ~60% History allocation
+of §7 and §8 and `tool_result_cap`'s 40% nudge in §9 all read it, while the fold's own `window -
+4608` transcript budget (§8) still keys on the advertised window. On a session that configures no
+working room the two ceilings are equal and every number above is unchanged, which is every session
+that existed before the key did.
+
+**§3's "the ONE fold allowed to run MID-EXCHANGE" is a MAIN-agent rule.** A delegation's whole life
+is one Exchange, so the boundary S2's estimate-driven trigger waits for never arrives for a child,
+however far its history outgrows its allocation — the runaway measured on 2026-08-25 as a single
+delegate reaching 910K of context over 633 steps. Every child agent therefore lifts that gate
+(`midExchangeCompaction`, set by `newChildAgent` alone) and may run the ordinary estimate-driven
+fold at any quiescent TURN boundary: the top of `step()`, where the previous Turn's tool calls are
+all answered, so the prefix → summary `Replace` strands no tool result and role alternation holds.
+It repairs the cached `exchangeStart` for the same reason §3 does, through the sibling of §3's
+`anchorAtBridge` (`reanchorAfterShrink`). The main loop keeps the gate — bench arms comparing
+Mechanisms against Bypass are unchanged — and the on-demand `/compact` still refuses mid-Exchange
+everywhere. What remains the emergency fold's alone is the OVERFLOW-driven trigger: it is still the
+only fold that runs mid-TURN, on a request the server has already rejected, and the
+one-fold-per-Turn bound of §5 still governs it.
