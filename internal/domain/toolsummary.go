@@ -38,7 +38,7 @@ package domain
 // codec's own additive contract about its rendering; it is not a wire form for this type.
 
 // ToolSummary is the sealed sum type of the structured outcomes a tool may report
-// alongside its prose Content. The variants are the seven below; the marker method is
+// alongside its prose Content. The variants are the eight below; the marker method is
 // unexported, so no package outside internal/* can add one.
 type ToolSummary interface {
 	isToolSummary() // sealing marker; carries no data
@@ -89,6 +89,15 @@ func (MatchedLines) isToolSummary() {}
 type DiffStat struct{ Added, Removed int }
 
 func (DiffStat) isToolSummary() {}
+
+// ChangedFiles is git_status' outcome: how many paths each section of the report holds —
+// staged, unstaged, untracked — as the FULL counts even where the printed list was capped, so
+// a host reading them never understates a working tree mid-refactor. A path that is both
+// staged and edited again is counted in BOTH lists, exactly as git reports it. All three are
+// zero on a clean tree, which is a summary that says so rather than no summary at all.
+type ChangedFiles struct{ Staged, Unstaged, Untracked int }
+
+func (ChangedFiles) isToolSummary() {}
 
 // EditRegion is one changed region of an applied edit: the lines the edit removed and the
 // lines it inserted, with up to three unchanged lines of context each side. The tool counts

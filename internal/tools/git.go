@@ -931,7 +931,8 @@ func (t *GitStatus) Execute(ctx context.Context, call domain.ToolCall) (domain.T
 	if res.exitCode != 0 {
 		return errorResult(call.ID, gitResultText(res, "git status failed")), nil
 	}
-	return okResult(call.ID, renderGitStatus(parseGitStatus(res.combinedOutput))), nil
+	rep := parseGitStatus(res.combinedOutput)
+	return okSummary(call.ID, renderGitStatus(rep), rep.changedFiles()), nil
 }
 
 // parseGitStatus reads the NUL-terminated porcelain v2 records into a report. A record it does
@@ -982,6 +983,19 @@ func parseGitStatus(out string) gitStatusReport {
 		}
 	}
 	return rep
+}
+
+// changedFiles reports the report's three section counts as git_status' structured outcome. Each
+// is the FULL length of its list — the same number writeStatusSection prints in its header — so a
+// section the render capped is still counted whole, and a clean tree reports three zeros rather
+// than no summary at all. It is the ONE derivation of that triple: Execute attaches what this
+// returns, so what the host reads and what the prose states cannot drift apart.
+func (r gitStatusReport) changedFiles() domain.ChangedFiles {
+	return domain.ChangedFiles{
+		Staged:    len(r.staged),
+		Unstaged:  len(r.unstaged),
+		Untracked: len(r.untracked),
+	}
 }
 
 // addChange files one ordinary or renamed entry under the lists its XY code selects: X (index

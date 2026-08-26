@@ -343,6 +343,10 @@ type MatchedLines = domain.MatchedLines
 // DiffStat is view_diff's summary: the lines the diff adds and removes.
 type DiffStat = domain.DiffStat
 
+// ChangedFiles is git_status' summary: how many paths its staged, unstaged and untracked
+// sections hold, as the full counts even where the printed list was capped.
+type ChangedFiles = domain.ChangedFiles
+
 // EditRegion is one changed region of an applied edit: its removed and inserted lines with
 // up to three unchanged context lines each side, and the line it starts on in each side.
 type EditRegion = domain.EditRegion

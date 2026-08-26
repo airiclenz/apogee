@@ -50,10 +50,17 @@ const ddgPinPage = `<!DOCTYPE html>
 // the numbers another case reads.
 const pinFileBody = "package main\n\nfunc main() {}"
 
-// TestToolSummariesRenderThroughThePresenter executes each of the nine summary-bearing tools
-// for real and pins the card line the presenter renders from its outcome. Both halves are
-// asserted: that the tool attached a summary at all, and that the view words it the way it
-// always has (the D4 oracle — this card reshaped a seam, it did not change the UI).
+// TestToolSummariesRenderThroughThePresenter executes for real each summary-bearing tool that
+// needs nothing but a temp workspace — nine of the ten — and pins the card line the presenter
+// renders from its outcome. Both halves are asserted: that the tool attached a summary at all,
+// and that the view words it the way it always has (the D4 oracle — this card reshaped a seam,
+// it did not change the UI).
+//
+// The tenth is git_status, whose outcome needs a real repository and so a git binary this
+// package's tests otherwise never reach for; its domain.ChangedFiles is pinned against a live
+// repo where the tool lives (internal/tools/git_test.go) and its rendering here by
+// TestChangedFilesStatReadsTheTypedCountsNotTheProse and
+// TestGitStatusReportSurvivesItsTypedSummary (toolpresent_test.go).
 func TestToolSummariesRenderThroughThePresenter(t *testing.T) {
 	root := t.TempDir()
 	writePinFile(t, filepath.Join(root, "main.go"), pinFileBody)
@@ -138,7 +145,7 @@ func TestToolSummariesRenderThroughThePresenter(t *testing.T) {
 	}
 
 	if len(cases) != 9 {
-		t.Fatalf("the pin covers %d tools, want all 9 summary-bearing ones", len(cases))
+		t.Fatalf("the pin covers %d tools, want the 9 summary-bearing ones that need no git binary", len(cases))
 	}
 
 	for _, tc := range cases {
@@ -165,11 +172,14 @@ func TestToolSummariesRenderThroughThePresenter(t *testing.T) {
 }
 
 // The presenter names the tool the summary came from: every case above uses the tool's own
-// registry key, so a summary can never render under the wrong label.
+// registry key, so a summary can never render under the wrong label. git_status rides this list
+// too — the one summary-bearing tool the pin above cannot execute still has to be spelled the way
+// the registry keys it.
 func TestToolSummaryPinUsesRegisteredToolNames(t *testing.T) {
 	for _, name := range []string{
 		"read_file", "write_file", "list_dir", "grep", "view_diff", "web_search",
 		"single_find_and_replace", "multi_find_and_replace", "edit_existing_file",
+		"git_status",
 	} {
 		if _, ok := toolRegistry[name]; !ok {
 			t.Errorf("%s reports a summary but has no registry entry", name)

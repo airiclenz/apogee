@@ -617,8 +617,8 @@
 // stays that block's own floor. What the registry keeps is presentation vocabulary — label,
 // verb, target, stat — plus the detail extractor that stays the FLOOR for a result carrying no summary:
 // a third-party tool, or any built-in that attaches none, still renders its first line exactly as
-// before. What did NOT fully go is the READING: six stat hooks — testVerdictStat, foundFilesStat,
-// changedFilesStat, commitCountStat, commitHashStat, diffLinesStat — still word their slot off a
+// before. What did NOT fully go is the READING: five stat hooks — testVerdictStat, foundFilesStat,
+// commitCountStat, commitHashStat, diffLinesStat — still word their slot off a
 // fixed header the tool writes into its own output, because design call 14 rules out growing the
 // engine for presentation. That residue is a documented trade rather than an oversight, and
 // toolregistry.go states it beside the hooks: each reading is anchored on a token the tool formats
@@ -628,8 +628,10 @@
 // The wording stays the view's own; that several lines read like the tool's own header is
 // what made "the rendered output does not change, byte for byte" a checkable oracle for the
 // change, not a contract, and this package may reword without touching a tool.
-// toolsummary_pin_test.go executes all nine summary-bearing tools for real and asserts the
-// rendered line — the cross-package pin the old regexes never had.
+// toolsummary_pin_test.go executes for real every summary-bearing tool that needs nothing but a
+// temp workspace — nine of the ten — and asserts the rendered line, the cross-package pin the old
+// regexes never had; the tenth, git_status, wants a real repository and is pinned against one
+// where it lives (internal/tools/git_test.go).
 //
 // The rest of the package, one line each, so this narration names every file in it: tui.go is the
 // seam boundary the binary sees ([Run], [Options], and the [Engine], [SkillCatalog] and

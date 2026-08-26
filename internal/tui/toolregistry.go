@@ -174,12 +174,16 @@ const askUserToolName = "ask_user"
 // the engine cannot supply without growing a wire (design call 14) is a hook returning false,
 // which leaves the tool's own prose floor in the slot rather than inventing a number.
 //
-// Every detail extractor here renders PROSE. The nine tools that report a typed summary
-// (read_file, write_file, list_dir, grep, view_diff, web_search, and the three edit tools
-// single_find_and_replace, multi_find_and_replace and edit_existing_file) word their slot
-// from that summary through their stat hook, and keep firstLineDetail as the floor for a result
-// that carries none — a degraded card is that tool's own first line, never a file dumped into the
-// transcript. The rest quote their fixed sentence or hand free-form output (a command run, a
+// Every detail extractor here renders PROSE. The ten tools that report a typed summary
+// (read_file, write_file, list_dir, grep, view_diff, web_search, git_status, and the three edit
+// tools single_find_and_replace, multi_find_and_replace and edit_existing_file) word their slot
+// from that summary through their stat hook, and keep their detail extractor as the floor for a
+// result that carries none — firstLineDetail for all but git_status, whose report is free-form
+// output and floors on outputDetail — so a degraded card is that tool's own words, never a file
+// dumped into the transcript. A summary-bearing tool whose floor lays out a BODY has to register a
+// body hook as well, because the typed path skips the extractor altogether
+// (toolView.absorbProse) and the body would simply go missing: read_file, view_diff and git_status
+// each set one. The rest quote their fixed sentence or hand free-form output (a command run, a
 // sub-agent report) on as a body the collapsed paint shows the gist of: the chat compresses it
 // to a first line plus a remainder count until the block is expanded, and the model gets the
 // full text either way. One tool's result is nobody's words but the human's — ask_user's, which is
@@ -363,8 +367,9 @@ var toolRegistry = map[string]toolPresenter{
 		label: "Git Status",
 		verb:  "checking",
 		// No target: the tool takes no arguments — the repository IS the target.
-		detail: outputDetail, // the branch line plus the staged/unstaged/untracked sections
+		detail: outputDetail, // floor: the branch line plus the staged/unstaged/untracked sections
 		stat:   changedFilesStat,
+		body:   gitStatusBody, // that same report, kept beneath the row on the typed path
 	},
 	"git_log": {
 		label:  "Git Log",
@@ -443,7 +448,7 @@ var toolRegistry = map[string]toolPresenter{
 //     an edit's diffstat are facts about the REQUEST, so the slot can say them without the tool
 //     reporting anything and without a byte more crossing the wire (ADR 0031);
 //   - off a fixed HEADER the tool writes into its own output (testVerdictStat, foundFilesStat,
-//     changedFilesStat, commitCountStat, commitHashStat, diffLinesStat). This is the reading the
+//     commitCountStat, commitHashStat, diffLinesStat). This is the reading the
 //     file's opening note warns about, and it is taken only because design call 14 rules out
 //     growing the engine for presentation. Every one of them is anchored on a token the tool
 //     formats deliberately and every one is TOTAL: a shape it does not recognise returns false,
@@ -746,30 +751,17 @@ func foundFilesStat(res domain.ToolResult) (statValue, bool) {
 	return pluralStat(n, "file"), true
 }
 
-// gitStatusSection matches one section header of git_status' report — "Staged (3):" — whose count
-// is the FULL one even where the list beneath it was capped.
-var gitStatusSection = regexp.MustCompile(`(?m)^(?:Staged|Unstaged|Untracked) \((\d+)\):`)
-
-// changedFilesStat words git_status' slot as how many files the working tree has changed: the sum
-// of the three section counts, or the zero its clean-tree sentence states. A report in neither
-// shape keeps its prose floor.
+// changedFilesStat words git_status' slot as how many paths the working tree has changed: the sum
+// of the three section counts the tool reports as a domain.ChangedFiles, which are the FULL counts
+// even where the printed list was capped, and three zeros on a clean tree. A result carrying no
+// summary keeps its prose floor, exactly as every other typed slot degrades — the slot never reads
+// the report's sentences, so a path NAMED like one of them cannot be mistaken for one.
 func changedFilesStat(res domain.ToolResult) (statValue, bool) {
-	if strings.Contains(res.Content, "Working tree clean") {
-		return countedStat(0, "changed"), true
-	}
-	sections := gitStatusSection.FindAllStringSubmatch(res.Content, -1)
-	if len(sections) == 0 {
+	v, ok := res.Summary.(domain.ChangedFiles)
+	if !ok {
 		return statValue{}, false
 	}
-	total := 0
-	for _, s := range sections {
-		n, err := strconv.Atoi(s[1])
-		if err != nil {
-			return statValue{}, false
-		}
-		total += n
-	}
-	return countedStat(total, "changed"), true
+	return countedStat(v.Staged+v.Unstaged+v.Untracked, "changed"), true
 }
 
 // commitCountStat words git_log's slot as how many commits it listed. The tool prints one line per
@@ -1371,4 +1363,18 @@ func readFileBody(res domain.ToolResult) []detailLine {
 		numbers[i] = strconv.Itoa(n)
 	}
 	return []detailLine{{Text: clipDetail(fmt.Sprintf("Located %q on lines: %s", v.Locate, strings.Join(numbers, ", ")))}}
+}
+
+// gitStatusBody lays git_status' REPORT out beneath the branch — the branch line and the
+// staged/unstaged/untracked sections, the same lines outputDetail lays out for a result that
+// carries no summary. It exists because a result carrying one skips the detail extractor
+// altogether (toolView.absorbProse): without a body hook, gaining a typed slot would COST this
+// tool the output it printed, leaving a count on a row with nothing under it. read_file and
+// view_diff keep their bodies across that same seam for the same reason.
+//
+// It reads the CONTENT and not the summary: the counts are the slot's and the paths are the
+// body's, so the two halves of the card say different things about one report rather than the
+// same thing twice.
+func gitStatusBody(res domain.ToolResult) []detailLine {
+	return outputBody(res.Content)
 }

@@ -696,8 +696,14 @@ func TestGitStatus_CapsEachList(t *testing.T) {
 	for i := 0; i < maxGitStatusPaths+extra; i++ {
 		records = append(records, fmt.Sprintf("? file%d.txt", i))
 	}
-	got := renderGitStatus(parseGitStatus(porcelainZ(records...)))
+	rep := parseGitStatus(porcelainZ(records...))
+	got := renderGitStatus(rep)
 
+	// The summary states what the tree HOLDS, not what the list printed: the cap trims the
+	// paths a model reads, never the count a host renders.
+	if want := (domain.ChangedFiles{Untracked: maxGitStatusPaths + extra}); rep.changedFiles() != want {
+		t.Errorf("summary = %+v, want %+v — the FULL count past the cap", rep.changedFiles(), want)
+	}
 	if want := fmt.Sprintf("Untracked (%d):", maxGitStatusPaths+extra); !strings.Contains(got, want) {
 		t.Errorf("status = %q, want the header %q with the full count", got, want)
 	}
@@ -721,6 +727,11 @@ func TestGitStatus_CleanTree(t *testing.T) {
 	}
 	if !strings.Contains(res.Content, "On branch main") || !strings.Contains(res.Content, "Working tree clean") {
 		t.Errorf("status = %q, want the branch line and a clean tree", res.Content)
+	}
+	// A clean tree reports a summary of three zeros — a host reads the fact as data instead of
+	// testing the sentence for a substring any path could carry.
+	if got, want := res.Summary, (domain.ChangedFiles{}); got != want {
+		t.Errorf("summary = %#v, want %+v", got, want)
 	}
 }
 
@@ -763,6 +774,10 @@ func TestGitStatus_ReportsStagedUnstagedAndUntracked(t *testing.T) {
 		if !strings.Contains(res.Content, want) {
 			t.Errorf("status = %q, want it to contain %q", res.Content, want)
 		}
+	}
+	// The same three counts the section headers print, carried as data beside them.
+	if got, want := res.Summary, (domain.ChangedFiles{Staged: 1, Unstaged: 1, Untracked: 1}); got != want {
+		t.Errorf("summary = %#v, want %+v", got, want)
 	}
 }
 

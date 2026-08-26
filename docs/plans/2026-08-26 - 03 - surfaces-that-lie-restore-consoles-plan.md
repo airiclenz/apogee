@@ -596,7 +596,15 @@ marker back to ` *`; `TestConfigWatchNotesAFileThatKeepsFailingToParseExactlyOnc
 
 ---
 
-## 10. `git_status` reports its counts as a typed summary; the slot stops parsing prose
+## 10. `git_status` reports its counts as a typed summary; the slot stops parsing prose — ✅ DONE (2026-08-26)
+
+NOTES (2026-08-26): the summary is built by a new `gitStatusReport.changedFiles()` method rather than composed inline in `Execute`, so the derivation has ONE home and `TestGitStatus_CapsEachList` — which drives `parseGitStatus`/`renderGitStatus` directly, not `Execute` — can assert the full count past the cap as the plan asks.
+
+NOTES (2026-08-26): the item's registry change (stat off the typed value) would have COST the card the report: `toolView.absorbProse` skips the detail extractor for any result carrying a `domain.ToolSummary`, so `detail: outputDetail` stopped running the moment `git_status` attached one. Added `body: gitStatusBody` (`outputBody(res.Content)`) beside the stat — the same seam `read_file`/`view_diff` keep their bodies across — plus `TestGitStatusReportSurvivesItsTypedSummary` (toolpresent_test.go), which asserts the branch line and both section lists are still laid out beneath a "3 changed" slot.
+
+NOTES (2026-08-26): six docs outside the item's file list stated counts this change falsifies and were corrected with it: `internal/tools/doc.go` (NINE→TEN summary-bearing built-ins, `git_status` moved out of the "deliberately do not" list), `internal/tui/doc.go` (six→five prose-header stat hooks; the pin test's "all nine" claim now says nine of ten and names where the tenth is pinned), the stat-hook list and the summary-bearing-tool list in `internal/tui/toolregistry.go` (the latter now also states the body-hook rule that trap came from), `internal/tui/toolsummary_pin_test.go` (its "all 9" prose and guard message, and `git_status` added to `TestToolSummaryPinUsesRegisteredToolNames`), and `CONTEXT.md`'s Tool-summary entry (nine→ten built-ins, `git_status` added).
+
+NOTES (2026-08-26): `TestToolSummariesRenderThroughThePresenter` deliberately does NOT execute `git_status` — it would need a real repository and a git binary this package's tests otherwise never reach for. Its summary is pinned against a live repo in `internal/tools/git_test.go` and its rendering in `toolpresent_test.go`; the pin file now says so rather than claiming to cover all ten.
 
 **What:** F-20 (ratified call 6).
 - `internal/domain/toolsummary.go`: an eighth variant, `ChangedFiles{Staged, Unstaged, Untracked

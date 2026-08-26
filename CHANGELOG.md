@@ -276,6 +276,20 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **`git_status`' outcome slot counts what the tool reported, not what its sentences say.** The
+  card's slot was worded by matching the report's prose: any result containing `Working tree clean`
+  read `0 changed`, and a path is DATA inside a section list — a file literally named
+  `Working tree clean.md` therefore worded the slot "0 changed" over a report that listed a change
+  (F-20). `git_status` now attaches its three section counts as `ChangedFiles{Staged, Unstaged,
+  Untracked}`, the eighth `ToolSummary` variant (re-exported from the root facade like every
+  other), derived once in the tool from the same lists its headers state — so the counts are the
+  FULL ones even where a long section's printed list was capped — and `changedFilesStat` sums the
+  typed value. A result carrying no summary declines and keeps that tool's prose floor, exactly as
+  every other typed slot degrades. The report itself still lays out beneath the branch: a result
+  carrying a typed summary skips the prose extractor altogether, so the tool now registers a body
+  hook the way `read_file` and `view_diff` do, and the card shows the count in its slot over the
+  staged/unstaged/untracked lists it counted.
+
 - **`/settings` reports the mode and the fence the session is RUNNING, not the ones it launched
   with.** The pane's rows are projected in the binary from the boot `config.Options`, so a
   `shift+tab` or a `/confine off` — neither of which writes the config file — left the `mode:` and

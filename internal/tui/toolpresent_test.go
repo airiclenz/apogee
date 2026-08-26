@@ -41,7 +41,7 @@ func bodyText(tv toolView) string {
 // "running <raw name>") with its arguments shown verbatim (the approval surface never hides
 // the model's request).
 //
-// The nine summary-bearing tools carry the domain.ToolSummary their tool now attaches, so
+// The ten summary-bearing tools carry the domain.ToolSummary their tool now attaches, so
 // the line comes from the typed outcome rather than from the prose beside it; the "no summary"
 // rows pin the D6 floor, where the same result with no summary degrades to its verbatim first
 // line instead of to a raw dump. Every wantDetail here is unchanged from when the view parsed
@@ -1571,8 +1571,8 @@ func TestToolStat(t *testing.T) {
 		{name: "output in no verdict shape keeps its floor", tool: "run_tests", result: domain.ToolResult{Content: "go: no test files"}, wantOK: false},
 		{name: "find files reads its own total", tool: "find_files", result: domain.ToolResult{Content: "[12 files found, showing 1-12]\na.go"}, want: "12 files", wantOK: true},
 		{name: "find files states the empty case", tool: "find_files", result: domain.ToolResult{Content: "No files found"}, want: "0 files", wantOK: true},
-		{name: "git status sums its section counts", tool: "git_status", result: domain.ToolResult{Content: "On branch main\n\nStaged (2):\n  a.go\n  b.go\n\nUntracked (1):\n  c.go"}, want: "3 changed", wantOK: true},
-		{name: "a clean tree changed nothing", tool: "git_status", result: domain.ToolResult{Content: "On branch main\n\nWorking tree clean"}, want: "0 changed", wantOK: true},
+		{name: "git status sums its typed section counts", tool: "git_status", result: domain.ToolResult{Content: "On branch main\n\nStaged (2):\n  a.go\n  b.go\n\nUntracked (1):\n  c.go", Summary: domain.ChangedFiles{Staged: 2, Untracked: 1}}, want: "3 changed", wantOK: true},
+		{name: "a clean tree changed nothing", tool: "git_status", result: domain.ToolResult{Content: "On branch main\n\nWorking tree clean", Summary: domain.ChangedFiles{}}, want: "0 changed", wantOK: true},
 		{name: "git log counts its commit lines", tool: "git_log", result: domain.ToolResult{Content: "a1b2c3d 2026-08-10 first\ne4f5a6b 2026-08-09 second"}, want: "2 commits", wantOK: true},
 		{name: "git log states the empty case", tool: "git_log", result: domain.ToolResult{Content: "No commits found"}, want: "0 commits", wantOK: true},
 		{name: "git commit words the short hash of the oneline it returns", tool: "git_commit", result: domain.ToolResult{Content: "6fd6ff7 add the thing"}, want: "6fd6ff7", wantOK: true},
@@ -1620,6 +1620,67 @@ func TestToolStatDeclinesWithoutATypedSummary(t *testing.T) {
 	for _, name := range []string{"read_file", "list_dir", "grep", "web_search", "view_diff"} {
 		if _, ok := toolRegistry[name].stat(domain.ToolResult{Content: "prose"}); ok {
 			t.Errorf("%s must decline a summary-less result", name)
+		}
+	}
+}
+
+// git_status' slot reads the counts the tool reports as a domain.ChangedFiles and NOTHING in the
+// report's prose. That is the difference between a number and a coincidence: the sections state
+// their counts in a header, but a path is DATA inside them, and a file literally named
+// "Working tree clean.md" put the old reading's clean-tree test on a tree that had changed —
+// the card said "0 changed" over a report listing a change. A result with no summary declines,
+// which leaves that tool's own first line in the slot rather than a wrong number.
+func TestChangedFilesStatReadsTheTypedCountsNotTheProse(t *testing.T) {
+	t.Parallel()
+
+	misleading := domain.ToolResult{
+		CallID:  "1",
+		Content: "On branch main\n\nUntracked (1):\n  Working tree clean.md",
+		Summary: domain.ChangedFiles{Untracked: 1},
+	}
+	got, ok := changedFilesStat(misleading)
+	if !ok {
+		t.Fatalf("changedFilesStat declined a result carrying a ChangedFiles summary")
+	}
+	if want := "1 changed"; got.spell() != want {
+		t.Errorf("stat = %q, want %q — the count is the summary's, not the sentence's", got.spell(), want)
+	}
+
+	// Every section counts, the capped ones whole: the summary states what the tree holds.
+	full := domain.ToolResult{Summary: domain.ChangedFiles{Staged: 2, Unstaged: 3, Untracked: 60}}
+	if got, ok := changedFilesStat(full); !ok || got.spell() != "65 changed" {
+		t.Errorf("stat = %q (ok %v), want %q", got.spell(), ok, "65 changed")
+	}
+
+	// The floor: no summary, no number — the same degradation every typed slot answers to.
+	if _, ok := changedFilesStat(domain.ToolResult{Content: "On branch main\n\nWorking tree clean"}); ok {
+		t.Errorf("changedFilesStat must decline a summary-less result rather than read its prose")
+	}
+}
+
+// Gaining a typed slot must not COST git_status the report it printed. A result carrying a
+// domain.ToolSummary skips the prose extractor altogether (toolView.absorbProse), so this tool
+// needs a body hook for the same reason read_file and view_diff have one — without it the card
+// would read "3 changed" over nothing, which is a different lie from the one the typed count
+// fixed. The count is the slot's and the paths are the body's: two facts, two places, one card.
+func TestGitStatusReportSurvivesItsTypedSummary(t *testing.T) {
+	t.Parallel()
+
+	call := domain.ToolCall{ID: "1", Tool: "git_status", Arguments: []byte(`{}`)}
+	tv := presentToolCall(call, "", workspaceRoot{})
+	tv.enrichWithResult(domain.ToolResult{
+		CallID:  "1",
+		Content: "On branch main\n\nStaged (2):\n  a.go\n  b.go\n\nUntracked (1):\n  c.go",
+		Summary: domain.ChangedFiles{Staged: 2, Untracked: 1},
+	}, workspaceRoot{})
+
+	if want := "3 changed"; tv.Summary.Text != want {
+		t.Errorf("slot = %q, want %q", tv.Summary.Text, want)
+	}
+	body := bodyText(tv)
+	for _, want := range []string{"On branch main", "Staged (2):", "a.go", "b.go", "Untracked (1):", "c.go"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("the report lost %q beneath its typed slot:\n%s", want, body)
 		}
 	}
 }
