@@ -774,7 +774,8 @@ catastrophic *mistakes* before execution, in **every** mode independent of Confi
 lives in `internal/security`, P3.6). Two tiers: **hard-refuse** (`rm -rf` of a root/home/system
 path, fork bombs, writes to `~/.ssh`/credential/persistence files — no per-call override) and
 **force-approval** (`curl | bash`-class — sometimes a legit installer, so a speed-bump that forces
-the Approver even in Auto). Rules match the call's **action text** — the tool, its target paths, its
+the Approver even in Auto; a forced look on a call Auto would have confined stays confined once
+allowed — approval decides *whether*, confinement *where*). Rules match the call's **action text** — the tool, its target paths, its
 command lines and code — and never the **payload** a call carries (a file body, a replacement string,
 a search pattern, a commit message), so writing or grepping a document that merely *quotes* `~/.ssh`
 is not an action. It is **tighten-only** and trivially bypassable by anything determined,

@@ -829,7 +829,28 @@ and `TestDangerousActionGuard_HardRefuseBeatsForceApproval` stay green.
 
 ---
 
-## 11. An approved Tier-2 forced gate keeps the Confine box
+## 11. An approved Tier-2 forced gate keeps the Confine box — ✅ DONE (2026-08-26)
+
+NOTES (2026-08-26): the upgraded gate's box is seeded from `in.box`, not from `leaf.box` as the
+item's text spells it — the bare ladder leaf is `resolution{kind: resolveConfine}` and its box is
+attached later by `finishConfine`, so `leaf.box` is the zero box at the overlay. `in.box` is
+byte-for-byte what `finishConfine` would have attached, and it is what the item's own test
+(`box == in.box`) requires; with `leaf.box` that test fails on an empty `WorkspaceRoot`.
+NOTES (2026-08-26): `finishGate` needed no code change — it only ADDS to the gate it is handed, so
+`box`, `confineOnAllow` and `fallback` already survive it; a sentence saying so (and naming the
+nil-Approver branch as the deliberate exception, since a refused call confines nothing) was added
+to its doc comment instead.
+NOTES (2026-08-26): the `CONTEXT.md` clause was appended inside the force-approval parenthetical
+rather than after it — the line the item quotes as "forcing the Approver even in Auto" actually
+reads "forces the Approver even in Auto)" and ends the parenthesis, so the new clause goes before
+the closing `)`.
+NOTES (2026-08-26): ADR 0012 and ADR 0049 were grepped for `unconfined` and `forced` as the item
+directs. The one near-miss is ADR 0049 §1, "an unconfinable subprocess that gates and gets Allow
+already runs unconfined" — that is the caps-insufficient GATE LEAF (there is no box to keep), not a
+forced upgrade of a Confine leaf, so it stays true and no ADR edit was made.
+NOTES (2026-08-26): negative control run — with the `confineOnAllow` branch removed from
+`executeGate`, `TestDispatch_ApprovedForcedGateRunsConfined` fails ("ran with no confinement
+handle", "Confine called 0 times") and the fallback test fails on one prompt instead of two.
 
 Depends on item 8.
 

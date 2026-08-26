@@ -514,10 +514,17 @@ func (a *Agent) executeRun(ctx context.Context, turn int, tool domain.Tool, call
 	return result, dispatchDone
 }
 
-// executeGate routes a Gate verdict through the Approver and, if allowed, runs it unconfined.
+// executeGate routes a Gate verdict through the Approver and, if allowed, runs it — confined
+// when the leaf it upgraded was a Confine.
 // The resolver guarantees an Approver is present for a Gate (a gate with none is folded to a
 // Refuse — Resolution D5), so nothing runs unapproved here. A forced gate skips the
 // allow-for-session cache; a deny (or a nil Approver defensively) refuses the call.
+//
+// The confineOnAllow branch is a Tier-2 forced look on a call Auto would have Confined: approval
+// decides WHETHER it runs, confinement decides WHERE, so the allow executes as the Confine would
+// have — box installed, and a run-time ErrConfinementUnavailable following the verdict's own D4
+// fallback. That asks the human a second time, by the demote gate, whether to run UNCONFINED; two
+// prompts in the rare failure case is the honest shape, because the two questions are different.
 func (a *Agent) executeGate(ctx context.Context, turn int, tool domain.Tool, call domain.ToolCall, verdict resolution) (domain.ToolResult, dispatchOutcome) {
 	allowed, outcome := a.approve(ctx, turn, call, verdict.force, verdict.cacheKey, verdict.reason, verdict.remedy)
 	if outcome == dispatchCancelled {
@@ -527,6 +534,9 @@ func (a *Agent) executeGate(ctx context.Context, turn int, tool domain.Tool, cal
 		result := errorToolResult(call.ID, "tool call denied by approver")
 		a.recordBlocked(turn, call, verdict.auditDecision, verdict.auditReason, result)
 		return result, dispatchDone
+	}
+	if verdict.confineOnAllow {
+		return a.executeConfine(ctx, turn, tool, call, verdict)
 	}
 	return a.executeRun(ctx, turn, tool, call, verdict)
 }

@@ -437,7 +437,9 @@ func TestGuardRefusalMessageAppendsTheHint(t *testing.T) {
 
 // TestResolve_GuardTier2ForcesGate proves a Tier-2 force-approval upgrades any non-Refuse leaf
 // to a FORCED gate (the guardrail can only tighten): a Run leaf, a Confine leaf, and a Gate
-// leaf all become a forced gate whose reason is the guard's. A Plan-mode Refuse leaf is NOT
+// leaf all become a forced gate whose reason is the guard's. The CONFINE leaf's upgrade keeps
+// its box and its D4 fallback — approval decides whether the call runs, confinement where — so
+// a forced look never loosens the fence the ladder chose. A Plan-mode Refuse leaf is NOT
 // upgraded, and a nil Approver turns the forced gate into a Refuse.
 func TestResolve_GuardTier2ForcesGate(t *testing.T) {
 	t.Parallel()
@@ -465,15 +467,30 @@ func TestResolve_GuardTier2ForcesGate(t *testing.T) {
 		t.Parallel()
 		got := resolve(base(ro, domain.ModeAuto)) // read-only would Run
 		assertForcedGate(t, got, ro.Name())
+		if got.confineOnAllow {
+			t.Error("confineOnAllow on a Run leaf's upgrade; there was no fence to keep")
+		}
+		if got.fallback != nil {
+			t.Error("a Run leaf's forced gate carries no Confine fallback (nothing is confined)")
+		}
 	})
 
-	t.Run("Confine leaf upgrades to forced gate (unconfined, no fallback)", func(t *testing.T) {
+	t.Run("Confine leaf upgrades to a forced gate that keeps its box (confined on allow, demote fallback carried)", func(t *testing.T) {
 		t.Parallel()
-		got := resolve(base(sub, domain.ModeAuto)) // subprocess/confine would Confine
+		in := base(sub, domain.ModeAuto) // subprocess/confine would Confine
+		got := resolve(in)
 		assertForcedGate(t, got, sub.Name())
-		if got.fallback != nil {
-			t.Error("a forced gate carries no Confine fallback (nothing is confined)")
+		// Approval decides WHETHER the call runs, confinement decides WHERE: the guard is
+		// tighten-only, so the forced look must not loosen the fence the ladder chose.
+		if !got.confineOnAllow {
+			t.Error("confineOnAllow = false; an approved forced look on a Confine leaf must still run confined")
 		}
+		if got.box.WorkspaceRoot != in.box.WorkspaceRoot {
+			t.Errorf("box WorkspaceRoot = %q, want the leaf's box %q", got.box.WorkspaceRoot, in.box.WorkspaceRoot)
+		}
+		// And it keeps the D4 contingency, so an unconfinable box at run time still demotes
+		// rather than silently running unconfined.
+		assertConfineFallback(t, got, true)
 	})
 
 	t.Run("Gate leaf upgrades to forced gate", func(t *testing.T) {
@@ -482,6 +499,12 @@ func TestResolve_GuardTier2ForcesGate(t *testing.T) {
 		assertForcedGate(t, got, mcp.Name())
 		if got.reason != forceApprovalReason {
 			t.Errorf("reason = %q, want the forced-approval reason (it overrides the class reason)", got.reason)
+		}
+		if got.confineOnAllow {
+			t.Error("confineOnAllow on a Gate leaf's upgrade; an MCP call was never confinable")
+		}
+		if got.fallback != nil {
+			t.Error("a Gate leaf's forced gate carries no Confine fallback (nothing is confined)")
 		}
 	})
 

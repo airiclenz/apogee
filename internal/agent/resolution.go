@@ -19,7 +19,8 @@ import (
 // fate, computed in full BEFORE anything executes: the tighten-only guardrail floor, the
 // autonomy-ladder × blast-radius table, the confinement-capability check, and the
 // precomputed contingency for what can only be discovered at run time (the Confine ⇒
-// forced-Gate demote, D4). resolve() DECIDES; dispatch EXECUTES — the executor follows the
+// forced-Gate demote, D4 — which a Tier-2 force keeps, along with a Confine leaf's box, when it
+// upgrades that leaf to a forced Gate). resolve() DECIDES; dispatch EXECUTES — the executor follows the
 // plan and never re-derives it. This supersedes the Phase-3 "per-call disposition", which
 // named only the ladder-table stage that runs after the guard clears.
 //
@@ -146,8 +147,8 @@ type resolution struct {
 	// gate the human denied, never reach a permit. Run / Gate only.
 	writeEscapeTarget string
 
-	// box is the confinement box a Confine subprocess runs inside. Confine, and a Run with
-	// confineChildren.
+	// box is the confinement box a Confine subprocess runs inside. Confine, a Run with
+	// confineChildren, and a forced Gate upgraded from a Confine (confineOnAllow).
 	box domain.ConfinementBox
 
 	// confineChildren says this Run executes with the Confinement handle installed: a Run whose
@@ -159,9 +160,17 @@ type resolution struct {
 	// Confined (applyOverlays).
 	confineChildren bool
 
+	// confineOnAllow says this Gate's allow-continuation executes as a Confine rather than as a
+	// bare Run. Gate only, and only on the forced Gate a Tier-2 dangerous action upgraded a
+	// Confine leaf into: approval decides WHETHER the call runs, confinement decides WHERE, and
+	// the guard is tighten-only (ADR 0012), so a forced look never loosens the fence the ladder
+	// chose. Such a gate carries the leaf's box and its D4 fallback too.
+	confineOnAllow bool
+
 	// fallback is the precomputed runtime-demote contingency for a Confine (D4): a forced
 	// Gate (re-run unconfined on allow) or, with no Approver, a Refuse. Structurally bounded
-	// — a fallback's own fallback is always nil. Confine only.
+	// — a fallback's own fallback is always nil. Carried by a Confine and by the forced Gate a
+	// Tier-2 force upgraded a Confine leaf into (confineOnAllow).
 	fallback *resolution
 
 	// auditDecision and auditReason are what the executor records for this verdict, so its
@@ -435,7 +444,9 @@ func resolveLadderAuto(in resolutionInput, class toolClass) resolution {
 }
 
 // applyOverlays folds the leaf-verdict overlays onto the bare ladder verdict, in order (D5):
-// a Tier-2 force-approval upgrades any non-Refuse leaf to a forced Gate; a Gate is finished
+// a Tier-2 force-approval upgrades any non-Refuse leaf to a forced Gate — and a Confine leaf
+// keeps its box and its D4 fallback through that upgrade, so an approved forced look still runs
+// confined; a Gate is finished
 // (nil-Approver ⇒ Refuse, else its class reason + cache key, plus the write-escape target its
 // allow would authorise); a Confine is finished (box + runtime-demote fallback); a Run / Refuse
 // carries the guard's audit metadata where today's trail records it, and a Run also carries the
@@ -444,8 +455,28 @@ func resolveLadderAuto(in resolutionInput, class toolClass) resolution {
 func applyOverlays(in resolutionInput, leaf resolution) resolution {
 	// A Tier-2 dangerous action forces the Approver even where the ladder would not (the
 	// guardrail can only tighten — ADR 0012). A Refuse leaf stays refused.
+	//
+	// A CONFINE leaf keeps its box and its D4 fallback across the upgrade — both taken from the
+	// input, exactly as finishConfine would have taken them (the bare ladder leaf carries neither
+	// yet): approval decides
+	// WHETHER the call runs, confinement decides WHERE, and the guard is tighten-only, so a
+	// forced look must never loosen the fence the ladder had already chosen. The allow-
+	// continuation therefore executes as the Confine would have (confineOnAllow), demote
+	// contingency included. A Run or Gate leaf had no fence to keep, so its upgrade is the
+	// bare forced gate.
 	if in.guard.Outcome == security.GuardForceApproval && leaf.kind != resolveRefuse {
-		leaf = resolution{kind: resolveGate, force: true, reason: forceApprovalReason}
+		if leaf.kind == resolveConfine {
+			leaf = resolution{
+				kind:           resolveGate,
+				force:          true,
+				reason:         forceApprovalReason,
+				box:            in.box,
+				confineOnAllow: true,
+				fallback:       confineFallback(in),
+			}
+		} else {
+			leaf = resolution{kind: resolveGate, force: true, reason: forceApprovalReason}
+		}
 	}
 
 	switch leaf.kind {
@@ -492,6 +523,10 @@ func applyOverlays(in resolutionInput, leaf resolution) resolution {
 // already set, its
 // blast-radius class reason and the remedy that goes with it (gateReason yields the pair, so a
 // gate can never end up blaming one condition and prescribing the fix for another).
+//
+// It only ADDS to the gate it is handed, so a forced Gate upgraded from a Confine keeps the box,
+// confineOnAllow and fallback applyOverlays put on it. The nil-Approver branch is the one
+// exception, and deliberately so: it builds a fresh Refuse, and a refused call confines nothing.
 func finishGate(in resolutionInput, gate resolution) resolution {
 	if !in.approverPresent {
 		return resolution{

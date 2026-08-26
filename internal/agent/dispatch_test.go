@@ -641,6 +641,126 @@ func TestDisposition_RuntimeConfineUnavailable_DemotesToApproval(t *testing.T) {
 	})
 }
 
+// ----------------------------------------------------------------------------
+// A Tier-2 forced gate on a Confine leaf — approval decides WHETHER, the box WHERE
+// ----------------------------------------------------------------------------
+
+// TestDispatch_ApprovedForcedGateRunsConfined proves the tighten-only promise end to end: a
+// Tier-2 dangerous action on a subprocess call Auto would have Confined forces the Approver,
+// and the human's yes runs the call INSIDE the box the ladder had already chosen. Approval
+// decides whether the call runs; confinement decides where. A forced look that dropped the
+// fence would be the guardrail LOOSENING a verdict, which ADR 0012 forbids.
+func TestDispatch_ApprovedForcedGateRunsConfined(t *testing.T) {
+	t.Parallel()
+	sink := &recordingSink{}
+	sub := &subprocTool{name: "terminal"}
+	conf := &fakeConfiner{caps: capsBoth()}
+	cfg := autoConfig(sink, conf, true, sub)
+	approver := &fakeApprover{decision: domain.ApprovalAllow}
+	cfg.Approver = approver
+
+	driveToolCall(t, cfg, sink, "c1", "terminal", `{"command":"sudo apt-get install ripgrep"}`)
+
+	req := requestOnApproval(t, sink.events)
+	if req.Reason != forceApprovalReason {
+		t.Fatalf("approval reason = %q, want %q — this gate was not the Tier-2 force, so the case is not exercised", req.Reason, forceApprovalReason)
+	}
+	if approver.calls != 1 {
+		t.Errorf("Approver consulted %d times, want 1", approver.calls)
+	}
+	if sub.ranCount() != 1 {
+		t.Errorf("tool ran %d times, want 1 (an allowed forced gate executes)", sub.ranCount())
+	}
+	if !sub.confinedOK() {
+		t.Error("the approved forced gate ran with no confinement handle; a forced look must not loosen the fence Auto would have applied")
+	}
+	if conf.confineCount() != 1 {
+		t.Errorf("Confine called %d times, want 1", conf.confineCount())
+	}
+	if got, want := conf.lastConfinedBox().WorkspaceRoot, cfg.ConfinementBox().WorkspaceRoot; got != want {
+		t.Errorf("confined box WorkspaceRoot = %q, want the ladder's box %q", got, want)
+	}
+}
+
+// TestDispatch_ApprovedForcedGateFallsBackOnUnconfinableBox proves the D4 contingency survives
+// the upgrade too. The forced gate carries the Confine's fallback, so a box that cannot be
+// established at RUN time demotes to the second, different question — "run this UNCONFINED?" —
+// instead of quietly running unfenced on the strength of the first yes. Two prompts in the rare
+// failure case is the honest shape. A denied first prompt never reaches the Confiner at all.
+func TestDispatch_ApprovedForcedGateFallsBackOnUnconfinableBox(t *testing.T) {
+	t.Parallel()
+
+	t.Run("allowed twice → runs once, unconfined, after the demote prompt", func(t *testing.T) {
+		t.Parallel()
+		sink := &recordingSink{}
+		ran := 0
+		sub := confinePropagatingTool{name: "terminal", ran: &ran}
+		conf := &fakeConfiner{caps: capsBoth(), unavailable: true}
+		cfg := autoConfig(sink, conf, true, sub)
+		approver := &fakeApprover{decision: domain.ApprovalAllow}
+		cfg.Approver = approver
+
+		driveToolCall(t, cfg, sink, "c1", "terminal", `{"command":"sudo apt-get install ripgrep"}`)
+
+		reqs := approvalRequests(sink.events)
+		if len(reqs) != 2 {
+			t.Fatalf("Approver consulted %d times (%d ApprovalEvents), want 2: the forced look, then the runtime demote", approver.calls, len(reqs))
+		}
+		if reqs[0].Reason != forceApprovalReason {
+			t.Errorf("first reason = %q, want the Tier-2 force %q", reqs[0].Reason, forceApprovalReason)
+		}
+		if reqs[1].Reason != confineDemoteGateReason {
+			t.Errorf("second reason = %q, want the runtime-demote reason %q", reqs[1].Reason, confineDemoteGateReason)
+		}
+		if ran != 1 {
+			t.Errorf("tool ran %d times, want 1 (the demoted re-run)", ran)
+		}
+		res, _ := lastToolResult(sink.events)
+		if res.IsError {
+			t.Errorf("result = %q, want a clean run once both prompts were allowed", res.Content)
+		}
+	})
+
+	t.Run("denied → refused, and the Confiner is never reached", func(t *testing.T) {
+		t.Parallel()
+		sink := &recordingSink{}
+		ran := 0
+		sub := confinePropagatingTool{name: "terminal", ran: &ran}
+		conf := &fakeConfiner{caps: capsBoth()}
+		cfg := autoConfig(sink, conf, true, sub)
+		approver := &fakeApprover{decision: domain.ApprovalDeny}
+		cfg.Approver = approver
+
+		driveToolCall(t, cfg, sink, "c1", "terminal", `{"command":"sudo apt-get install ripgrep"}`)
+
+		if approver.calls != 1 {
+			t.Errorf("Approver consulted %d times, want 1 (a denied forced gate asks nothing further)", approver.calls)
+		}
+		if ran != 0 {
+			t.Errorf("tool ran %d times, want 0", ran)
+		}
+		if conf.confineCount() != 0 {
+			t.Errorf("Confine called %d times, want 0: a denied call is never handed to the backend", conf.confineCount())
+		}
+		res, _ := lastToolResult(sink.events)
+		if !res.IsError {
+			t.Error("a denied forced gate must produce an error result")
+		}
+	})
+}
+
+// approvalRequests returns every ApprovalEvent's request, in order — the sequence of questions
+// dispatch actually put to the human, which is what a two-prompt path has to be checked against.
+func approvalRequests(events []domain.Event) []domain.ApprovalRequest {
+	var out []domain.ApprovalRequest
+	for _, e := range events {
+		if approval, ok := e.(domain.ApprovalEvent); ok {
+			out = append(out, approval.Request)
+		}
+	}
+	return out
+}
+
 // unconfinableClaimTool returns ErrConfinementUnavailable from Execute although nothing asked
 // it to confine anything — the third-party or host-registered tool that reports the sentinel
 // outside a Confine verdict. It is read-only, so the disposition resolves it to a plain Run and

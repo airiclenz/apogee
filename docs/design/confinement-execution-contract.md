@@ -512,7 +512,13 @@ computed in a fixed, load-bearing order:
 1. **Guard floor first (tighten-only, ADR 0012 / P3.6).** A Tier-1 dangerous action or a tripped
    circuit-breaker ⇒ **`Refuse`** in every mode. A Tier-2 dangerous action ⇒ **force** the Approver:
    it upgrades any non-`Refuse` *leaf* verdict to a forced `Gate`. Applied to **leaf verdicts only**
-   — never to a `Delegate`.
+   — never to a `Delegate`. A `Confine` leaf upgraded this way KEEPS its box and its D4 fallback:
+   the allow executes as the `Confine` would have (amendment 2026-08-26) — approval decides
+   *whether* the call runs, confinement decides *where*, and the guard being tighten-only, a forced
+   look must never loosen the fence the ladder had already chosen. A run-time
+   `ErrConfinementUnavailable` then follows that fallback exactly as a plain `Confine`'s does, so the
+   rare failure case asks the human the second, different question rather than assuming the first
+   yes covered it.
    **What the floor never sees (amendment 2026-08-13).** A value under an argument key the tool
    itself declares a delegation prompt (`domain.PromptArgKeys` / `domain.PromptTool` — `sub_agent`
    declares `task` and `name`) is dropped from the inspectable text of **every** rule, not only the

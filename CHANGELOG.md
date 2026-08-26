@@ -234,6 +234,17 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- A Tier-2 forced approval on a call Auto would have confined now KEEPS the box once the
+  human allows it (design call 4). The guard is tighten-only (ADR 0012), but the forced-gate
+  upgrade used to build a bare `Gate` and run the allow unconfined — a forced *look* silently
+  loosening the fence the ladder had already chosen. A `Confine` leaf's upgrade now carries
+  `box`, `confineOnAllow` and the leaf's D4 fallback, and `executeGate` runs an allowed
+  `confineOnAllow` verdict through `executeConfine`: approval decides *whether* the call runs,
+  confinement decides *where*. A run-time `ErrConfinementUnavailable` still follows the same
+  demote contingency a plain `Confine` carries, so the rare failure case asks the second,
+  different question — "run this UNCONFINED?" — instead of treating the first yes as covering
+  it. A `Run` or `Gate` leaf's upgrade is unchanged (neither had a fence to keep).
+
 - The dangerous-action guard now covers the everyday spellings of its two most important
   rules (code audit C-10). The recursive-delete rules share five named fragments and accept
   end-of-options `--`, long flags (`--recursive`, `--force`), the flags split apart or in
