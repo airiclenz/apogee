@@ -168,7 +168,19 @@ allocation, F-26 unbounded reference cycles).
 
 ---
 
-## 1. `security.ResolveProgram` — the one exec resolver; the terminal tool's shell goes through it
+## 1. `security.ResolveProgram` — the one exec resolver; the terminal tool's shell goes through it — ✅ DONE (2026-08-26)
+
+NOTES (2026-08-26): `internal/tools/terminal_test.go` was not in the item's Files list but had to be
+touched: `TestTerminal_ScopesTheWorkspaceOffTheChildPATH` builds a synthetic PATH with no shell on
+it, which the tool now resolves before it builds the spec — the fixture appends the host shell's own
+directory (the assertions are about which entries survive the scrub, not about a host without `sh`).
+NOTES (2026-08-26): `prependPATH` in `exec_fence_test.go` fires `platform.FailFastPreamble()` before
+planting a shell: the probe memoizes for the life of the process, and a planted `sh` that exits 0 for
+anything would teach it the host accepts `set -o pipefail` and break every later terminal test. Item
+2 deletes that probe outright.
+NOTES (2026-08-26): `console_open`'s lookup-failure wording moves from `shell not available: …` to
+the resolver's `sh not available: …` — the fence refusal the existing test pins (`resolves inside`,
+naming the resolved path) is byte-identical, and both consumers now surface one sentence.
 
 **What:** the fence gains its complete form (resolve + fence), the platform names its shell, and
 the two shell consumers use both.

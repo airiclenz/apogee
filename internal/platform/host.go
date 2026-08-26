@@ -82,6 +82,15 @@ func windowsRules() hostRules {
 	}
 }
 
+// Shell returns the bare program name Command wraps a line in, read out of the same rule
+// table Command builds its argv from, so the two cannot name different shells.
+func (r hostRules) Shell() string {
+	if len(r.shell) == 0 {
+		return ""
+	}
+	return r.shell[0]
+}
+
 // Command returns the argv that runs line through the platform shell.
 func (r hostRules) Command(line string) []string {
 	argv := make([]string, 0, len(r.shell)+1)

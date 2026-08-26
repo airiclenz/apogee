@@ -15,9 +15,17 @@ import (
 // The terminal tool is the first real caller (Phase 3, Command only); Phase 5
 // widened the surface to what the Windows backend and the git tools consume.
 type Shell interface {
+	// Shell returns the bare program Command wraps a line in: `sh` on POSIX,
+	// `cmd` on Windows. It is a NAME, resolved by the caller, never a path —
+	// this rung says which shell the platform speaks, and deliberately not
+	// where that shell lives: resolving a name on PATH is a judgement about
+	// what may be executed (security.ResolveProgram), which belongs above.
+	Shell() string
+
 	// Command returns the argv that runs line through the platform shell:
 	// {"sh", "-c", line} on POSIX, {"cmd", "/c", line} on Windows. The caller
-	// wires the result into os/exec.
+	// wires the result into os/exec, having first resolved argv[0] — the bare
+	// name Shell returns — through the exec fence.
 	Command(line string) []string
 
 	// CommandLine returns the exact process command line Command's argv must be

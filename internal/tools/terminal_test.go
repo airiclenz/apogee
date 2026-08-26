@@ -165,7 +165,14 @@ func TestTerminal_ScopesTheWorkspaceOffTheChildPATH(t *testing.T) {
 	// Not parallel: t.Setenv, plus the package-level runner swap.
 	root := t.TempDir()
 	path, inside, outside := workspacePATH(t, root)
-	t.Setenv("PATH", path)
+	// The tool RESOLVES its shell on this PATH before it builds the spec (shellArgv), so the
+	// fixture carries the host's own shell directory: the assertions below are about which
+	// entries survive the scrub, not about a host with no `sh`.
+	shell, err := exec.LookPath(shellHost.Shell())
+	if err != nil {
+		t.Skipf("no platform shell on this host: %v", err)
+	}
+	t.Setenv("PATH", path+string(os.PathListSeparator)+filepath.Dir(shell))
 	t.Setenv("APOGEE_TERMINAL_ENV_PROBE", "kept")
 
 	captured := withCapturedTerminalRun(t)

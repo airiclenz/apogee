@@ -3,6 +3,7 @@ package security
 import (
 	"errors"
 	"fmt"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -83,4 +84,41 @@ func execFences(root string, box *domain.ConfinementBox) []string {
 		}
 	}
 	return fences
+}
+
+// ResolveProgram resolves name to the absolute program apogee will execute and fences it. It is
+// RefuseExecFromWritablePath's complete form — the lookup and the refusal as one step — and the
+// entry every new exec site takes, so a site cannot acquire a program without also acquiring the
+// fence that judges it.
+//
+// look is the PATH resolver, nil ⇒ exec.LookPath; a test injects its own. The three outcomes are
+// deliberately distinguishable, because they send an operator to three different places:
+//
+//   - ABSENT — look failed — is returned wrapped (%w), so errors.Is still reaches exec.ErrNotFound
+//     and never ErrExecFromWritablePath: the program is not installed, not refused.
+//   - RELATIVE — look answered with a path that is not absolute, which is what PATH carrying a
+//     relative entry produces (Go's exec.ErrDot) — is refused with ErrExecFromWritablePath. The
+//     child would resolve it against a working directory that is usually the workspace itself,
+//     which is the very box the fence exists to keep out of argv[0].
+//   - REFUSED — the absolute program resolves inside the writable box — is
+//     RefuseExecFromWritablePath's own sentence, naming the resolved path so the operator reads
+//     which PATH entry to fix rather than hunting a missing install.
+//
+// The empty-fence rule carries over unchanged: no root and no box refuses nothing, because a
+// caller that cannot name a workspace has no policy to apply.
+func ResolveProgram(look func(string) (string, error), name, root string, box *domain.ConfinementBox) (string, error) {
+	if look == nil {
+		look = exec.LookPath
+	}
+	resolved, err := look(name)
+	if err != nil {
+		return "", fmt.Errorf("%s not available: %w", name, err)
+	}
+	if !filepath.IsAbs(resolved) {
+		return "", fmt.Errorf("%w: %s resolves to a relative program path", ErrExecFromWritablePath, resolved)
+	}
+	if err := RefuseExecFromWritablePath(resolved, root, box); err != nil {
+		return "", err
+	}
+	return resolved, nil
 }

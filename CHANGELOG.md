@@ -10,6 +10,17 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **Security — one exec resolver, and the shells go through it.** `security.ResolveProgram` is the
+  exec fence's complete form — PATH lookup, a refusal for a relative answer (Go's `exec.ErrDot`
+  shape), then `RefuseExecFromWritablePath` — with the three outcomes kept distinguishable:
+  a program that is absent wraps the lookup error, a program that is refused wraps
+  `ErrExecFromWritablePath` and names the resolved path. `platform.Shell` now names the shell it
+  wraps a line in (`Shell() string`: `sh` on POSIX, `cmd` on Windows), and `internal/tools`
+  composes the two in `shellArgv`, so `terminal` and `console_open` no longer hand a bare `sh` to
+  `os/exec`: an `sh` planted inside the workspace — an activated `.venv`, a `node_modules/.bin`
+  ahead of the system entries on PATH — is refused by name instead of executed, and the refusal
+  tells the operator which PATH entry to fix rather than reading as "not available".
+
 - **The delegate bounds now have a live-path shakeout (delegate token runaway, plan item 9).**
   `TestLiveDelegateCapAndWorkingWindow` drives one real delegation against a live large-window
   server — a child bounded to 5 steps and a 32,768-token working room, reading this repository's

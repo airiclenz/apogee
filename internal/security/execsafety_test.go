@@ -104,3 +104,71 @@ func TestRefuseExecFromWritablePathResolvesSymlinksAndRelativeNames(t *testing.T
 		t.Errorf("err = %v, want ErrExecFromWritablePath for a relative argv[0] resolving into the box", err)
 	}
 }
+
+// TestResolveProgram pins the fence's complete form: what it answers with, and — the point of
+// the three-way split — which of the three refusals a caller gets, because "absent", "relative"
+// and "inside the box" send an operator to three different places.
+func TestResolveProgram(t *testing.T) {
+	// No t.Parallel: the nil-look case sets PATH for the whole process.
+	root := t.TempDir()
+	elsewhere := plantProgram(t, t.TempDir(), "tool")
+	inRoot := plantProgram(t, filepath.Join(root, "node_modules", ".bin"), "tool")
+	absent := errors.New("executable file not found in $PATH")
+
+	t.Run("a program outside the fence resolves to itself", func(t *testing.T) {
+		got, err := ResolveProgram(func(string) (string, error) { return elsewhere, nil }, "tool", root, nil)
+		if err != nil {
+			t.Fatalf("err = %v, want nil for a program the model cannot write", err)
+		}
+		if got != elsewhere {
+			t.Errorf("ResolveProgram() = %q, want the resolved absolute path %q", got, elsewhere)
+		}
+	})
+
+	t.Run("a program inside the fence is refused by name", func(t *testing.T) {
+		_, err := ResolveProgram(func(string) (string, error) { return inRoot, nil }, "tool", root, nil)
+		if !errors.Is(err, ErrExecFromWritablePath) {
+			t.Fatalf("err = %v, want ErrExecFromWritablePath", err)
+		}
+		if !strings.Contains(err.Error(), EvalRealPath(inRoot)) {
+			t.Errorf("refusal = %q, want it to name the resolved program path %q", err, inRoot)
+		}
+	})
+
+	t.Run("a relative answer is refused", func(t *testing.T) {
+		// What exec.LookPath returns for a relative PATH entry (exec.ErrDot): the child would
+		// resolve it against a working directory that is the workspace itself.
+		_, err := ResolveProgram(func(string) (string, error) { return "node_modules/.bin/tool", nil }, "tool", root, nil)
+		if !errors.Is(err, ErrExecFromWritablePath) {
+			t.Fatalf("err = %v, want ErrExecFromWritablePath for a relative program path", err)
+		}
+		if !strings.Contains(err.Error(), "resolves to a relative program path") {
+			t.Errorf("refusal = %q, want the relative-program-path sentence", err)
+		}
+	})
+
+	t.Run("a lookup failure is absent, not refused", func(t *testing.T) {
+		_, err := ResolveProgram(func(string) (string, error) { return "", absent }, "tool", root, nil)
+		if !errors.Is(err, absent) {
+			t.Fatalf("err = %v, want the lookup error wrapped", err)
+		}
+		if errors.Is(err, ErrExecFromWritablePath) {
+			t.Errorf("err = %v, want an absent program NOT to read as a fence refusal", err)
+		}
+	})
+
+	t.Run("a nil look resolves on PATH", func(t *testing.T) {
+		self, err := os.Executable()
+		if err != nil {
+			t.Skipf("os.Executable unavailable on this host: %v", err)
+		}
+		t.Setenv("PATH", filepath.Dir(self))
+		got, err := ResolveProgram(nil, filepath.Base(self), root, nil)
+		if err != nil {
+			t.Fatalf("err = %v, want the test binary resolved off PATH", err)
+		}
+		if !filepath.IsAbs(got) {
+			t.Errorf("ResolveProgram() = %q, want an absolute path", got)
+		}
+	})
+}

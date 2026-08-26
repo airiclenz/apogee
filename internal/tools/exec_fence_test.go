@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/platform"
 )
 
 // plantExecutable writes an executable file at root/rel and returns its absolute path — the
@@ -26,12 +27,30 @@ func plantExecutable(t *testing.T, root, rel string) string {
 	return path
 }
 
+// prependPATH puts dir ahead of the inherited PATH for the duration of one test — the everyday
+// shape of the collision the fence judges: an activated .venv or a node_modules/.bin sitting
+// ahead of the system entries and winning the lookup.
+//
+// It fires platform's one-shot pipefail probe against the AMBIENT PATH first. That probe
+// memoizes its answer for the life of the process (sync.OnceValue), so a planted `sh` — which
+// exits 0 for anything — would otherwise teach it that this host's shell accepts
+// `set -o pipefail`, and every later terminal test would run a preamble the real shell rejects.
+func prependPATH(t *testing.T, dir string) {
+	t.Helper()
+	platform.FailFastPreamble()
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
 // TestEveryExecSiteRefusesAProgramInsideTheWorkspace walks the tool exec sites one by one and
 // pins the same rule at each: a program resolved on PATH that lands inside the workspace is
 // refused, and the refusal NAMES the resolved path. The table is the item's scope statement —
-// git, python_exec, run_tests and diagnostics are every exec site in this package (the fifth is
-// internal/mechanisms/autofix, pinned in its own package; the sixth is internal/present's
-// opener, which resolves its program in the presentation rung).
+// git, python_exec, run_tests, diagnostics, terminal and console_open are every exec site in
+// this package (the next is internal/mechanisms/autofix, pinned in its own package; then
+// internal/present's opener, which resolves its program in the presentation rung).
+//
+// The last two rows resolve the PLATFORM SHELL rather than a named tool, through the one
+// resolver both take (shellArgv → security.ResolveProgram), which is why a planted `sh` is
+// refused where a bare "sh" handed straight to os/exec would have been run.
 //
 // Naming the path is half the requirement, not a nicety: without it the operator reads a bare
 // "not available" and goes looking for an install, when the cause is a workspace-resident entry
@@ -103,6 +122,35 @@ func TestEveryExecSiteRefusesAProgramInsideTheWorkspace(t *testing.T) {
 			},
 			wantError: false,
 		},
+		{
+			name: "terminal",
+			run: func(t *testing.T, root string) (string, string, bool) {
+				skipWithoutPOSIXShell(t)
+				planted := plantExecutable(t, root, "node_modules/.bin/sh")
+				prependPATH(t, filepath.Dir(planted))
+				res, err := NewTerminal(root, nil).Execute(context.Background(), terminalCall("c1", "echo hi"))
+				if err != nil {
+					t.Fatalf("Execute returned a Go error (reserved for cancellation): %v", err)
+				}
+				return planted, res.Content, res.IsError
+			},
+			wantError: true,
+		},
+		{
+			name: "console_open",
+			run: func(t *testing.T, root string) (string, string, bool) {
+				skipWithoutPOSIXShell(t)
+				planted := plantExecutable(t, root, "node_modules/.bin/sh")
+				prependPATH(t, filepath.Dir(planted))
+				ctx, _ := consoleTestCtx(t)
+				res, err := NewConsoleOpen(root, nil).Execute(ctx, consoleOpenCall("c1", "echo hi", 10))
+				if err != nil {
+					t.Fatalf("Execute returned a Go error (reserved for cancellation): %v", err)
+				}
+				return planted, res.Content, res.IsError
+			},
+			wantError: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -165,5 +213,27 @@ func TestExecFenceCoversTheConfinementBoxNotOnlyTheRoot(t *testing.T) {
 	}
 	if !res.IsError || !strings.Contains(res.Content, planted) {
 		t.Errorf("result = %q, want a refusal naming the program planted in the box's writable path", res.Content)
+	}
+}
+
+// TestTerminalResolvesTheShellToAnAbsoluteProgram is the success half of the terminal row above:
+// on an ordinary PATH the tool still runs, and what it runs is the ABSOLUTE shell the fence
+// approved. A bare "sh" reaching the subprocess layer would be resolved again, by the child,
+// against a working directory that is the workspace itself — which is the resolution this item
+// took away from os/exec.
+func TestTerminalResolvesTheShellToAnAbsoluteProgram(t *testing.T) {
+	// Not parallel: withCapturedTerminalRun swaps a package-level var.
+	captured := withCapturedTerminalRun(t)
+
+	res, err := NewTerminal(tempRoot(t), nil).Execute(context.Background(), terminalCall("c1", "echo hi"))
+
+	if err != nil {
+		t.Fatalf("Execute returned a Go error (reserved for cancellation): %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("result = %q, want an ordinary PATH to resolve the platform shell", res.Content)
+	}
+	if len(captured.argv) == 0 || !filepath.IsAbs(captured.argv[0]) {
+		t.Errorf("argv = %q, want argv[0] resolved to an absolute program", captured.argv)
 	}
 }

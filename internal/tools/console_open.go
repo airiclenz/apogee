@@ -177,19 +177,15 @@ func (t *ConsoleOpen) Execute(ctx context.Context, call domain.ToolCall) (domain
 // consoleArgv resolves the argv the Console actually runs: the platform shell wrapped around the
 // model's command line, with the shell resolved to an absolute program.
 //
-// The resolution is what makes the exec fence meaningful here. The platform hands back a BARE
-// "sh", and the fence measures argv[0] against the writable box — a bare name would be measured
-// against apogee's own working directory, which is the workspace itself, and every open would be
-// refused. Resolving first also puts the fence where it belongs: on the program PATH actually
-// leads to, so an `sh` planted inside the workspace is refused by name rather than executed.
+// The resolution and the fence are the shared ones (shellArgv, exec_common.go): the platform
+// hands back a BARE "sh", and the fence measures argv[0] against the writable box — a bare name
+// would be measured against apogee's own working directory, which is the workspace itself, and
+// every open would be refused. Resolving first also puts the fence where it belongs: on the
+// program PATH actually leads to, so an `sh` planted inside the workspace is refused by name
+// rather than executed.
 func (t *ConsoleOpen) consoleArgv(ctx context.Context, callID, command string) ([]string, domain.ToolResult, bool) {
-	argv := shellHost.Command(command)
-	shell, err := exec.LookPath(argv[0])
+	argv, err := shellArgv(ctx, t.root, command)
 	if err != nil {
-		return nil, errorResult(callID, "shell not available: "+err.Error()), false
-	}
-	argv[0] = shell
-	if err := refuseExecFromWritablePath(argv[0], t.root, confinementBox(ctx)); err != nil {
 		return nil, errorResult(callID, err.Error()), false
 	}
 	return argv, domain.ToolResult{}, true

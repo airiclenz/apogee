@@ -130,8 +130,18 @@ func (t *Terminal) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 		command = platform.FailFastPreamble() + command
 	}
 
+	// The shell is resolved to an absolute program and fenced before it becomes argv[0]
+	// (shellArgv): a refusal names the resolved path, so the operator reads which PATH entry
+	// to fix and the model reads a refusal rather than "not available". The Windows raw
+	// command line is unaffected — argv[0] is now the absolute cmd.exe and the verbatim line
+	// is still what cmd reads (exec_cmdline_other.go).
+	argv, err := shellArgv(ctx, t.root, command)
+	if err != nil {
+		return errorResult(call.ID, err.Error()), nil
+	}
+
 	spec := subprocessSpec{
-		argv:     shellHost.Command(command),
+		argv:     argv,
 		cmdline:  cmdline,
 		dir:      dir,
 		timeout:  time.Duration(args.TimeoutSeconds) * time.Second,

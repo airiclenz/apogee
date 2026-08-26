@@ -34,6 +34,33 @@ func TestCommandWrapsLineInThePlatformShell(t *testing.T) {
 	}
 }
 
+// TestShellNamesTheProgramCommandWraps pins the one fact the rung above needs in order to
+// resolve and fence the shell itself: which program Command's argv[0] is. It is read out of the
+// same rule table Command builds from, so the assertion is that the two cannot disagree.
+func TestShellNamesTheProgramCommandWraps(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		rules hostRules
+		want  string
+	}{
+		{"posix", posixRules(), "sh"},
+		{"windows", windowsRules(), "cmd"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := tt.rules.Shell(); got != tt.want {
+				t.Errorf("Shell() = %q, want %q", got, tt.want)
+			}
+			if got, argv0 := tt.rules.Shell(), tt.rules.Command("")[0]; got != argv0 {
+				t.Errorf("Shell() = %q, but Command()[0] = %q — the two must name one shell", got, argv0)
+			}
+		})
+	}
+}
+
 func TestCommandDoesNotAliasTheRuleSetsShellSlice(t *testing.T) {
 	t.Parallel()
 
