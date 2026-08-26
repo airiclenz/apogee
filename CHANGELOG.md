@@ -276,6 +276,19 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **A `tool_calls` entry with no name and no id is no longer native tool-call evidence.** `probe model`
+  counted any non-empty `tool_calls` array as a passed probe, so a server answering with a placeholder
+  — `tool_calls:[{}]`, a `null` entry, a call carrying a name but no id — earned the model the
+  `native-tool-call` capability on a reply that demonstrated nothing, and the multi-step probe then
+  echoed that unusable call back as an assistant turn and keyed its tool result on an id `omitempty`
+  drops off the wire. Both tool probes now read a filtered list (`wellFormedToolCalls`): an entry
+  counts only when it carries a function name to route on AND an id to key its result on, and the
+  chain's assistant echo replays the filtered calls. A reply that carried entries but none usable gets
+  its own detail — `the reply carried 1 tool_calls entries, none with a name and an id — the reply
+  began: …` — so the report states what the server actually sent instead of claiming the reply carried
+  no `tool_calls` entry at all. The capability stays unobserved in that case, so the tier, the
+  suggested `tool-call-format` and the behavioral fingerprint all follow from it.
+
 - **`git_commit`'s amend guard now asks git which remote branches contain HEAD.** The guard read
   the tip's decoration (`git log -1 --format=%D`) and refused an amend only when some ref there
   began with `origin/`, so it missed both shapes a remote actually takes: a local branch reset

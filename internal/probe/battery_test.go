@@ -3,9 +3,11 @@ package probe
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
@@ -26,14 +28,37 @@ type script struct {
 	// fail makes the server answer every chat call with a 500, standing in for an Upstream
 	// that is reachable for discovery but cannot complete a generation.
 	fail bool
+	// malformedTools is a raw tool_calls array spliced in place of the well-formed entry, so a
+	// test can play a server that answers with a placeholder call the loop cannot dispatch.
+	malformedTools string
+}
+
+// requestLog records the body of every chat request the fake Upstream received, so a test can
+// assert on what the battery SENT and not only on what it concluded.
+type requestLog struct {
+	mu     sync.Mutex
+	bodies []string
+}
+
+func (l *requestLog) add(body string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.bodies = append(l.bodies, body)
+}
+
+func (l *requestLog) all() []string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return append([]string(nil), l.bodies...)
 }
 
 // batteryServer starts an httptest Upstream that answers the battery per s. It branches on the
 // SHAPE of each request — how many tools were offered, how many messages were sent, whether
 // logprobs were asked for — which is exactly how a real server distinguishes them, so the test
 // exercises the real provider client and the real wire encoding rather than a stub seam.
-func batteryServer(t *testing.T, s script) *httptest.Server {
+func batteryServer(t *testing.T, s script) (*httptest.Server, *requestLog) {
 	t.Helper()
+	log := &requestLog{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/v1/models" {
 			_, _ = w.Write([]byte(`{"data":[{"id":"fake-model","context_length":4096}]}`))
@@ -44,6 +69,14 @@ func batteryServer(t *testing.T, s script) *httptest.Server {
 			return
 		}
 
+		raw, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("upstream could not read the request body: %v", err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		log.add(string(raw))
+
 		var body struct {
 			Messages []struct {
 				Role    string `json:"role"`
@@ -52,7 +85,7 @@ func batteryServer(t *testing.T, s script) *httptest.Server {
 			Tools    []json.RawMessage `json:"tools"`
 			LogProbs *bool             `json:"logprobs"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		if err := json.Unmarshal(raw, &body); err != nil {
 			t.Errorf("upstream received undecodable request: %v", err)
 			w.WriteHeader(http.StatusBadRequest)
 			return
@@ -71,10 +104,13 @@ func batteryServer(t *testing.T, s script) *httptest.Server {
 		}
 	}))
 	t.Cleanup(srv.Close)
-	return srv
+	return srv, log
 }
 
 func (s script) toolReply() string {
+	if s.malformedTools != "" {
+		return chatReply("null", `,"tool_calls":`+s.malformedTools)
+	}
 	if !s.nativeTools {
 		return chatReply(`"I would call probe_echo with the text apogee."`, "")
 	}
@@ -91,6 +127,9 @@ func (s script) jsonReply() string {
 }
 
 func (s script) chainReply(messages int) string {
+	if s.malformedTools != "" {
+		return chatReply("null", `,"tool_calls":`+s.malformedTools)
+	}
 	if !s.chain {
 		return chatReply(`"I cannot use tools right now."`, "")
 	}
@@ -128,11 +167,32 @@ func jsonString(s string) string {
 // test speaks the same wire a session does.
 func runBattery(t *testing.T, s script) Battery {
 	t.Helper()
-	srv := batteryServer(t, s)
+	b, _ := runBatteryRecording(t, s)
+	return b
+}
+
+// runBatteryRecording is runBattery plus the log of what went up the wire, for the tests that
+// have to check the battery never echoed an unusable tool call back to the server.
+func runBatteryRecording(t *testing.T, s script) (Battery, *requestLog) {
+	t.Helper()
+	srv, log := batteryServer(t, s)
 	client := provider.NewClient(srv.URL, "fake-model")
-	return RunBattery(context.Background(), func(ctx context.Context, req provider.Request) (provider.RawResponse, error) {
+	b := RunBattery(context.Background(), func(ctx context.Context, req provider.Request) (provider.RawResponse, error) {
 		return client.Respond(ctx, req)
 	})
+	return b, log
+}
+
+// findingDetail returns the Detail the battery recorded for one capability.
+func findingDetail(t *testing.T, b Battery, c Capability) string {
+	t.Helper()
+	for _, f := range b.Findings {
+		if f.Capability == c {
+			return f.Detail
+		}
+	}
+	t.Fatalf("no finding for capability %s: %+v", c, b.Findings)
+	return ""
 }
 
 // The all-pass model: every capability observed, the server exposes a candidate distribution,
@@ -187,6 +247,73 @@ func TestBatteryNoNativeTools(t *testing.T) {
 	}
 	if got := SuggestProfile(b).ToolCallFormat; got != domain.FormatMarkdownFenced {
 		t.Errorf("suggested tool-call-format = %q; want the text format for a model with no native calls", got)
+	}
+}
+
+// The placeholder-tool_calls server: every tool probe comes back with tool_calls entries that
+// carry no name and no id. Those are not native tool-call evidence — a loop cannot route an
+// unnamed function, and the follow-up request cannot key a tool result on a missing id — so
+// counting them raised a model's tier on a reply that demonstrated nothing (C-18).
+func TestBatteryMalformedToolCallsAreNotEvidence(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name  string
+		calls string
+	}{
+		{name: "empty entry", calls: `[{}]`},
+		{name: "null entry", calls: `[null]`},
+		{name: "name without id", calls: `[{"function":{"name":"probe_echo","arguments":"{}"}}]`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			b, log := runBatteryRecording(t, script{structured: true, malformedTools: tc.calls})
+
+			if !b.Complete() {
+				t.Fatalf("every probe answered, so the battery is still complete: %+v", b.Findings)
+			}
+			if b.Observed(CapNativeToolCall) || b.Observed(CapMultiStepChain) {
+				t.Errorf("an unusable tool_calls entry observes neither capability: %+v", b.Findings)
+			}
+			if got := Tier(b); got == TierStructured {
+				t.Errorf("tier = %q; a placeholder entry must not buy the two-capability tier", got)
+			}
+			const wantDetail = "tool_calls entries, none with a name and an id"
+			for _, c := range []Capability{CapNativeToolCall, CapMultiStepChain} {
+				if got := findingDetail(t, b, c); !strings.Contains(got, wantDetail) {
+					t.Errorf("%s detail = %q; want it to report what the server sent, not silence", c, got)
+				}
+			}
+			assertNoUnusableEcho(t, log)
+		})
+	}
+}
+
+// assertNoUnusableEcho fails when any request the battery sent echoed a tool call the server
+// could not reconcile: the chain probe replays the model's first call as an assistant turn, and
+// a call with no name or no id would go up the wire as an assistant message about nothing.
+func assertNoUnusableEcho(t *testing.T, log *requestLog) {
+	t.Helper()
+	for _, body := range log.all() {
+		var sent struct {
+			Messages []struct {
+				Role      string              `json:"role"`
+				ToolCalls []provider.ToolCall `json:"tool_calls"`
+			} `json:"messages"`
+		}
+		if err := json.Unmarshal([]byte(body), &sent); err != nil {
+			t.Fatalf("a recorded request did not decode: %v", err)
+		}
+		for _, m := range sent.Messages {
+			if m.Role != "assistant" {
+				continue
+			}
+			for _, call := range m.ToolCalls {
+				if call.Function.Name == "" || call.ID == "" {
+					t.Errorf("a request echoed an unusable tool call back to the server: %s", body)
+				}
+			}
+		}
 	}
 }
 

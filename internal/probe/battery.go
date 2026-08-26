@@ -149,6 +149,29 @@ func RunBattery(ctx context.Context, chat Chat) Battery {
 	return b
 }
 
+// wellFormedToolCalls keeps only the entries a loop could actually dispatch: a call needs a
+// function name to route on and an id to key its result on. Servers that answer with a
+// placeholder — `tool_calls:[{}]` for a call the model never produced — otherwise read as
+// native tool-call evidence and raise a model's tier on nothing at all (C-18); echoing such an
+// entry back would also send a tool message whose omitempty tool_call_id drops off the wire.
+func wellFormedToolCalls(calls []provider.ToolCall) []provider.ToolCall {
+	out := make([]provider.ToolCall, 0, len(calls))
+	for _, c := range calls {
+		if c.Function.Name != "" && c.ID != "" {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// malformedToolCallsDetail says what the server actually sent when a reply carried tool_calls
+// entries but none the loop could use: reporting that as "no tool_calls entry" would blame the
+// model for a shape the server chose.
+func malformedToolCallsDetail(calls []provider.ToolCall, content string) string {
+	return fmt.Sprintf("the reply carried %d tool_calls entries, none with a name and an id — ",
+		len(calls)) + firstWords(content)
+}
+
 // probeNativeToolCall offers exactly one tool and asks for it by name. A model that answers in
 // prose ("I would call probe_echo...") fails the probe, which is the point: the question is
 // whether the STRUCTURED channel carries the call, because that is what the loop reads.
@@ -166,12 +189,17 @@ func probeNativeToolCall(ctx context.Context, chat Chat) (Finding, provider.RawR
 		f.Detail = "the probe never completed, so this capability is unknown"
 		return f, resp
 	}
-	if len(resp.ToolCalls) == 0 {
+	calls := wellFormedToolCalls(resp.ToolCalls)
+	if len(calls) == 0 {
+		if len(resp.ToolCalls) > 0 {
+			f.Detail = malformedToolCallsDetail(resp.ToolCalls, resp.Content)
+			return f, resp
+		}
 		f.Detail = "the reply carried no tool_calls entry — " + firstWords(resp.Content)
 		return f, resp
 	}
 	f.Observed = true
-	f.Detail = fmt.Sprintf("the reply carried a native tool_calls entry for %q", resp.ToolCalls[0].Function.Name)
+	f.Detail = fmt.Sprintf("the reply carried a native tool_calls entry for %q", calls[0].Function.Name)
 	return f, resp
 }
 
@@ -227,14 +255,19 @@ func probeMultiStepChain(ctx context.Context, chat Chat) Finding {
 		f.Detail = "the probe never completed, so this capability is unknown"
 		return f
 	}
-	if len(first.ToolCalls) == 0 {
+	firstCalls := wellFormedToolCalls(first.ToolCalls)
+	if len(firstCalls) == 0 {
+		if len(first.ToolCalls) > 0 {
+			f.Detail = malformedToolCallsDetail(first.ToolCalls, first.Content)
+			return f
+		}
 		f.Detail = "the first step produced no tool call, so there was nothing to chain from"
 		return f
 	}
 
-	call := first.ToolCalls[0]
+	call := firstCalls[0]
 	messages = append(messages,
-		provider.Message{Role: "assistant", ToolCalls: first.ToolCalls},
+		provider.Message{Role: "assistant", ToolCalls: firstCalls},
 		provider.Message{Role: "tool", ToolCallID: call.ID, Content: `{"value":"` + chainSecret + `"}`},
 	)
 
@@ -244,13 +277,18 @@ func probeMultiStepChain(ctx context.Context, chat Chat) Finding {
 		f.Detail = "the second step never completed, so this capability is unknown"
 		return f
 	}
-	if len(second.ToolCalls) == 0 {
+	secondCalls := wellFormedToolCalls(second.ToolCalls)
+	if len(secondCalls) == 0 {
+		if len(second.ToolCalls) > 0 {
+			f.Detail = malformedToolCallsDetail(second.ToolCalls, second.Content)
+			return f
+		}
 		f.Detail = "the tool result did not produce a second tool call — " + firstWords(second.Content)
 		return f
 	}
 
 	f.Observed = true
-	next := second.ToolCalls[0]
+	next := secondCalls[0]
 	if strings.Contains(next.Function.Arguments, chainSecret) {
 		f.Detail = fmt.Sprintf("the tool result was carried into a second call to %q", next.Function.Name)
 	} else {

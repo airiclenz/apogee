@@ -820,7 +820,13 @@ remote amends fine; a table test for `remoteBranchesListed` ("", "\n", "  upstre
 
 ---
 
-## 15. `probe model` counts only a well-formed native tool call as evidence
+## 15. `probe model` counts only a well-formed native tool call as evidence — ✅ DONE (2026-08-26)
+
+NOTES (2026-08-26): the malformed-entries detail is emitted by both `probeMultiStepChain` gates as well as by `probeNativeToolCall` — the item states all three gates test the filtered list and supplies one wording, and leaving the chain's "produced no tool call" wording in place would have kept the same lie on that surface.
+
+NOTES (2026-08-26): `internal/probe/model_test.go` is touched mechanically (one line) because `batteryServer` now also returns the recorded-request log the item's test asserts on; the item's Files list did not name it.
+
+NOTES (2026-08-26): CHANGELOG.md is left to the verifier per this run's protocol, so it is absent from FILES although the item lists it.
 
 **What:** C-18. `internal/probe/battery.go`: a package helper
 `wellFormedToolCalls(calls []provider.ToolCall) []provider.ToolCall` keeps an entry only when

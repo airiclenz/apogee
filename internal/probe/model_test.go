@@ -13,7 +13,7 @@ import (
 // dated claim is deterministic.
 func gatherModel(t *testing.T, s script, label string) Model {
 	t.Helper()
-	srv := batteryServer(t, s)
+	srv, _ := batteryServer(t, s)
 	client := provider.NewClient(srv.URL, label)
 	return GatherModel(context.Background(), ModelInputs{
 		Endpoint: srv.URL,
