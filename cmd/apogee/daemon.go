@@ -622,7 +622,16 @@ func (l *daemonLog) notify(ev schedule.Event) {
 		l.line("fired     %s — %s", ev.ScheduleName, oneLine(ev.Prompt))
 	case schedule.EventCompleted:
 		l.firings.landed()
-		l.line("completed %s in %s — %s", ev.ScheduleName, daemonElapsed(ev.Elapsed), daemonOutcome(ev.Outcome))
+		// A Firing whose final Turn the engine ABANDONED still returned — the library reports it
+		// completed, and this arm is where it lands — but its final text is not an answer to the
+		// prompt, so the verb says so rather than leaving that fact to be read out of the work
+		// clause. The %-9s is the verb column every other line here pads to by hand ("completed"
+		// being exactly nine characters), so a journal stays aligned across the two words.
+		verb := "completed"
+		if ev.Outcome.Faulted {
+			verb = "faulted"
+		}
+		l.line("%-9s %s in %s — %s", verb, ev.ScheduleName, daemonElapsed(ev.Elapsed), daemonOutcome(ev.Outcome))
 	case schedule.EventFailed:
 		l.firings.landed()
 		l.line("failed    %s after %s — %v", ev.ScheduleName, daemonElapsed(ev.Elapsed), ev.Err)
@@ -636,8 +645,22 @@ func (l *daemonLog) notify(ev schedule.Event) {
 // daemonOutcome is what a completed Firing left behind, in one clause: the work it did and the
 // record it can be read in. A run that saved nothing says so rather than printing an empty id —
 // that is the shape of a --no-save run and of a store that refused, and both are worth noticing.
+//
+// A faulted Firing leads with WHY its final Turn was abandoned, because that is the fact a human
+// scanning the log acts on; the counts and the record still follow, since they are as true of a
+// faulted run as of any other and the record is exactly the one worth opening. A fault that
+// surfaced no cause (run.Result.Fault empty) still says a fault happened, naming none.
 func daemonOutcome(out schedule.Outcome) string {
 	work := fmt.Sprintf("%s, %d denied", counted(out.Turns, "turn", "turns"), out.Denied)
+	if out.Faulted {
+		fault := "final turn abandoned"
+		if out.Fault != "" {
+			// Through oneLine for the same reason the prompt is: the fault is upstream text and
+			// this log is one line per Event, so a fault that arrived wrapped stays on its line.
+			fault += " (" + oneLine(out.Fault) + ")"
+		}
+		work = fault + "; " + work
+	}
 	if out.RecordID == "" {
 		return work + ", not saved"
 	}

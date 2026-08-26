@@ -286,7 +286,14 @@ errored result still exits `exitRunFailed` even with `Faulted` set.
 
 ---
 
-## 4. A faulted Firing reads `faulted` in the daemon log and the TUI's firing block
+## 4. A faulted Firing reads `faulted` in the daemon log and the TUI's firing block — ✅ DONE (2026-08-26)
+
+NOTES (2026-08-26): also updated `layout.md`'s firing-block paragraph (the stats-line and body-line
+enumeration it pins) — the item's Files list omitted it, but it is the TUI rendering spec this
+change alters.
+NOTES (2026-08-26): the daemon's fault clause runs through `oneLine` and the TUI's through
+`flattenField` — the fault is raw upstream text and both surfaces are one-row-per-fact, so a
+wrapped fault cannot forge a second log line or an unauthored body row.
 
 Depends on item 3.
 

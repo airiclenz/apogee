@@ -240,6 +240,8 @@ func (w *daemonWiring) fire(ctx context.Context, f schedule.Firing) (schedule.Ou
 		FinalText: res.FinalText,
 		Turns:     res.Turns,
 		Denied:    res.Denied,
+		Faulted:   res.Faulted,
+		Fault:     res.Fault,
 	}
 	if err != nil {
 		// A failed Firing still reports what it salvaged: run.Once saves whatever completed before

@@ -152,6 +152,8 @@ func (w scheduleWiring) fire(ctx context.Context, f schedule.Firing) (schedule.O
 		FinalText: res.FinalText,
 		Turns:     res.Turns,
 		Denied:    res.Denied,
+		Faulted:   res.Faulted,
+		Fault:     res.Fault,
 	}
 	if err != nil {
 		// A failed Firing still reports what it salvaged: run.Once fills its Result with whatever

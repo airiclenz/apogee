@@ -734,6 +734,70 @@ func TestScheduleFiringFailsInItsBlock(t *testing.T) {
 	}
 }
 
+// A Firing whose final Turn the engine abandoned RETURNED, so it enriches its block like any other
+// completed one — the answer still rides the branch. What says the answer is not one is the stats
+// line's last cell, which a collapsed block can show, and the body line naming the cause beneath it.
+func TestScheduleFiringMarksAnAbandonedFinalTurn(t *testing.T) {
+	m := scheduleModel(t, &fakeScheduler{}, "")
+	m = fireSchedule(t, m, "sch-1", "nightly tidy", "check the log")
+
+	m = step(t, m, scheduleEventMsg{Event: schedule.Event{
+		Kind: schedule.EventCompleted, ScheduleID: "sch-1", ScheduleName: "nightly tidy",
+		Elapsed: 4 * time.Second,
+		Outcome: schedule.Outcome{
+			RecordID: "s1", Title: "nightly tidy — 14:05", FinalText: "half a thought", Turns: 2,
+			Faulted: true, Fault: "upstream returned an empty reply",
+		},
+	}})
+
+	e := lastEntry(t, m)
+	want := []string{
+		"prompt: check the log",
+		"2 turns · 4s · faulted",
+		"final turn abandoned — upstream returned an empty reply",
+		`saved as "nightly tidy — 14:05" — find it in /sessions`,
+	}
+	if got := firingBody(e); !slices.Equal(got, want) {
+		t.Errorf("body = %q, want the faulted cell and the reason %q", got, want)
+	}
+}
+
+// A fault that surfaced no cause still gets its line: that the Turn was abandoned is the fact, and
+// the cause is the detail — a line naming none is not the same as no fault at all.
+func TestScheduleFiringMarksAFaultWithNoCause(t *testing.T) {
+	m := scheduleModel(t, &fakeScheduler{}, "")
+	m = fireSchedule(t, m, "sch-1", "nightly tidy", "check the log")
+
+	m = step(t, m, scheduleEventMsg{Event: schedule.Event{
+		Kind: schedule.EventCompleted, ScheduleID: "sch-1", ScheduleName: "nightly tidy",
+		Outcome: schedule.Outcome{FinalText: "half a thought", Turns: 1, Faulted: true},
+	}})
+
+	want := []string{"prompt: check the log", "1 turn · 0s · faulted", "final turn abandoned"}
+	if got := firingBody(lastEntry(t, m)); !slices.Equal(got, want) {
+		t.Errorf("body = %q, want %q", got, want)
+	}
+}
+
+// A clean Firing carries neither mark — the cell and the line are alarms, and an alarm that rings on
+// every run is not one. (TestScheduleFiringCompletesInPlace pins the whole clean body; this is the
+// negative half of the faulted pair above, stated where the pair is read.)
+func TestScheduleFiringLeavesACleanRunUnmarked(t *testing.T) {
+	m := scheduleModel(t, &fakeScheduler{}, "")
+	m = fireSchedule(t, m, "sch-1", "nightly tidy", "check the log")
+
+	m = step(t, m, scheduleEventMsg{Event: schedule.Event{
+		Kind: schedule.EventCompleted, ScheduleID: "sch-1", ScheduleName: "nightly tidy",
+		Outcome: schedule.Outcome{FinalText: "the log is clean", Turns: 1},
+	}})
+
+	for _, line := range firingBody(lastEntry(t, m)) {
+		if strings.Contains(line, scheduleFaultedCell) || strings.Contains(line, scheduleFaultLead) {
+			t.Errorf("body line %q marks a fault on a run that had none", line)
+		}
+	}
+}
+
 // A failure with no open block is a Firing that never started — the Gate refused it — so it lands as
 // the note it always was rather than inventing a block for a run that did not happen.
 func TestScheduleFailureWithoutABlockStaysANote(t *testing.T) {

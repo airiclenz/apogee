@@ -317,6 +317,42 @@ func TestDaemonFireReportsWhatTheRunDid(t *testing.T) {
 	}
 }
 
+// A faulted final Turn crosses onto the Outcome as DATA beside the answer. The Firing RETURNED —
+// the Exchange reached its boundary — so fire raises no error and the library will report it
+// completed; these two fields are then the only thing that tells the daemon's log that the text it
+// is carrying is the run's LAST WORDS rather than its answer to the prompt.
+func TestDaemonFireReportsAnAbandonedFinalTurn(t *testing.T) {
+	harness := newDaemonFireHarness(t, config.Options{
+		HostAlias: "startup",
+		Endpoint:  "http://startup.invalid",
+		Servers:   []config.ServerEntry{{Name: "startup", Endpoint: "http://startup.invalid"}},
+	})
+	harness.runner.res = run.Result{
+		SessionID: "rec-42",
+		FinalText: "half a thought",
+		Turns:     3,
+		Faulted:   true,
+		Fault:     "upstream returned an empty reply",
+	}
+
+	entry := entryFor(t, "audit", daemon.Action{})
+	harness.wiring.adopt([]daemon.Entry{entry})
+	out, err := harness.wiring.fire(context.Background(), schedule.Firing{
+		ScheduleID:   "sched-1",
+		ScheduleName: entry.Name,
+		Prompt:       entry.Run.Prompt,
+		Mode:         entry.Run.Mode,
+	})
+
+	if err != nil {
+		t.Fatalf("fire: %v — a faulted run reached its boundary, so the Firing itself did not fail", err)
+	}
+	if !out.Faulted || out.Fault != "upstream returned an empty reply" {
+		t.Errorf("the firing reports Faulted=%v, Fault=%q; want the run's own true, %q",
+			out.Faulted, out.Fault, "upstream returned an empty reply")
+	}
+}
+
 // The Schedule identity is stamped onto the record so a schedule's runs read chronologically under
 // its name in /sessions (ADR 0034), and the entry's own workspace — not the daemon's working
 // directory — is where the run happens.

@@ -86,6 +86,15 @@ type Outcome struct {
 	Turns int
 	// Denied is how many gated actions the Firing's fail-safe denier refused.
 	Denied int
+	// Faulted reports that the Firing's final Turn was ABANDONED (run.Result.Faulted). The
+	// Firing still RETURNED — the Exchange reached its boundary and this is an EventCompleted
+	// carrying a faulted Outcome, not an EventFailed — but FinalText is then the run's last
+	// words rather than its answer to the prompt.
+	Faulted bool
+	// Fault is why that final Turn was abandoned, empty when Faulted is false. Like FinalText it
+	// is RAW upstream text — a surface escape-strips it at its own render seam, this library
+	// does not.
+	Fault string
 }
 
 // Status is one live Schedule as a surface displays it.

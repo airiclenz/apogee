@@ -1001,7 +1001,9 @@ longer one leads the body with that slot holding the `+N more lines` alone, so t
 is the Schedule's name and a count of the answer with everything else behind it, and a
 click is what shows the answer itself. Beneath the branch the body carries the
 prompt (its first line led by `prompt: `, the one word that tells the two quoted voices apart), one
-stats line (`2 turns · 4s`, and a `· N denied` cell only when a gated action was actually refused),
+stats line (`2 turns · 4s`, a `· N denied` cell only when a gated action was actually refused, and a
+`· faulted` cell only when the engine ABANDONED the run's final Turn), the line naming why it was
+abandoned when one was (`final turn abandoned — …`, the lead alone when the fault named no cause),
 and the record pointer (`saved as "…" — find it in /sessions`), dropped when nothing was persisted.
 A failed Firing words its branch `error: …` and shows no answer — a partial answer under an error
 reads as a result — while keeping the stats and any salvaged pointer. The `⟳` is **static**: the

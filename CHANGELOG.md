@@ -10,6 +10,17 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **A Firing whose final Turn was abandoned now says so where a Firing is read.** `schedule.Outcome`
+  gained `Faulted` and `Fault` beside `Denied` — pass-through fields the scheduler library reads no
+  more than it reads the others (ADR 0033) — and both runners copy them off `run.Result`, so the
+  fact crosses the seam as data. The daemon log words it in the verb column: a faulted Firing logs
+  `faulted   nightly-audit in 7m41s — final turn abandoned (upstream returned an empty reply);
+  9 turns, 0 denied, saved as …` in place of `completed`, keeping the nine-character verb column a
+  journal is scanned by, and it is still an `EventCompleted` — the Firing returned, so nothing
+  reports it as a failure. In the TUI the firing block's stats line gains a `· faulted` cell (what a
+  collapsed block can still show) and its body a `final turn abandoned — <reason>` line beneath;
+  a fault that surfaced no cause still says a fault happened, naming none.
+
 - **An abandoned final Turn now reaches the caller as data, and `apogee headless` exits 3 on it.**
   `run.Result` gained `Faulted` and `Fault` beside `Denied`: `Faulted` says the Firing's final Turn
   was ABANDONED (`domain.StepResult.Faulted`) and `Fault` carries the reason — the Agent's new

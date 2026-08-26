@@ -974,6 +974,30 @@ func TestDaemonNotifyLinesArePinned(t *testing.T) {
 			want: "2026-08-22T03:04:05Z completed nightly-audit in 1s — 1 turn, 0 denied, not saved",
 		},
 		{
+			// The Firing returned, so the library called it completed — but its final Turn was
+			// abandoned, and the verb column is where a supervisor's journal is scanned.
+			name: "completed with an abandoned final turn",
+			event: schedule.Event{
+				Kind: schedule.EventCompleted, ScheduleName: "nightly-audit", Elapsed: 7*time.Minute + 41*time.Second,
+				Outcome: schedule.Outcome{
+					RecordID: "20260823-210000-3b7d", Turns: 9,
+					Faulted: true, Fault: "upstream returned an empty reply",
+				},
+			},
+			want: "2026-08-22T03:04:05Z faulted   nightly-audit in 7m41s — final turn abandoned " +
+				"(upstream returned an empty reply); 9 turns, 0 denied, saved as 20260823-210000-3b7d",
+		},
+		{
+			// A fault that surfaced no cause (run.Result.Fault empty) still reads as a fault
+			// naming none, rather than as an empty pair of brackets or as no fault at all.
+			name: "faulted with no cause",
+			event: schedule.Event{
+				Kind: schedule.EventCompleted, ScheduleName: "nightly-audit", Elapsed: time.Second,
+				Outcome: schedule.Outcome{Turns: 1, Faulted: true},
+			},
+			want: "2026-08-22T03:04:05Z faulted   nightly-audit in 1s — final turn abandoned; 1 turn, 0 denied, not saved",
+		},
+		{
 			name: "failed",
 			event: schedule.Event{
 				Kind: schedule.EventFailed, ScheduleName: "nightly-audit", Elapsed: 2 * time.Second,

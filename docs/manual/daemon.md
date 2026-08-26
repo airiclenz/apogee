@@ -103,6 +103,13 @@ $ apogee daemon
 2026-08-23T21:07:41+02:00 completed nightly-audit in 7m41s — 9 turns, 0 denied, saved as 20260823-210000-3b7d
 ```
 
+A firing whose final turn the engine **abandoned** logs `faulted` in place of `completed` and
+names the reason ahead of the counts — `faulted   nightly-audit in 7m41s — final turn abandoned
+(upstream returned an empty reply); 9 turns, 0 denied, saved as 20260823-210000-3b7d`. It is
+saved like any other firing, and the record holds what the run last said rather than an answer to
+its prompt. The daemon keeps running and still exits `0`; only `apogee headless` turns that into
+an exit code (`3`).
+
 ## The unit that runs it — `apogee daemon install`
 
 `apogee daemon install` writes the unit that makes this host run `apogee daemon` for

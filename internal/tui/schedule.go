@@ -419,6 +419,16 @@ const scheduleInterruptedSummary = "never finished — schedules die with the TU
 // "+N more lines" to count, spending the count on a word that says nothing about the run.
 const schedulePromptLead = "prompt: "
 
+// scheduleFaultedCell is the stats cell a Firing whose final Turn the engine abandoned earns
+// (schedule.Outcome.Faulted). It is the one word that tells a run's last words from its answer, and
+// it rides the stats line because that line is what a Firing always costs — the summary slot above
+// it belongs to whatever the run did say.
+const scheduleFaultedCell = "faulted"
+
+// scheduleFaultLead opens the body line naming WHY that final Turn was abandoned. It reads as a
+// sentence on its own so a fault that surfaced no cause still says what happened.
+const scheduleFaultLead = "final turn abandoned"
+
 // addFiring appends the block one starting Firing gets, carrying the ScheduleID as its pairing key
 // (entry.callID) and the prompt as its body. It is left `!done`: the block is open until the
 // Firing's completed or failed Event enriches it, which is what enrichFiring scans for.
@@ -489,15 +499,15 @@ func presentFiring(ev schedule.Event) toolView {
 // (firingAnswer). Which half it lands in is what a collapsed block can show of it: a one-line answer
 // fills the branch row's outcome slot and is read without a click, while a longer one sits
 // wholly behind the "+N more lines" marker until the block is opened. Everything the block already
-// held — the prompt — keeps its place beneath, and the two facts a human judges a Firing by close
-// it: what it cost, and where the record is.
+// held — the prompt — keeps its place beneath, and the facts a human judges a Firing by close it:
+// what it cost, why its final Turn was abandoned when one was, and where the record is.
 //
 // A failure words the summary itself and shows no answer: the error is what happened, and a partial
 // answer under an "error:" line would read as a result. The stats and any salvaged record pointer
 // still land, because a failed Firing that got half way is exactly the one worth opening.
 func (tv *toolView) enrichWithFiring(ev schedule.Event) {
 	defer tv.finishDisplay(workspaceRoot{})
-	lines := make([]detailLine, 0, tv.Details.len()+3)
+	lines := make([]detailLine, 0, tv.Details.len()+4)
 	if ev.Kind == schedule.EventFailed {
 		tv.Summary = namedSummary(detailLine{Text: "error: " + scheduleErrText(ev.Err)})
 	} else {
@@ -507,6 +517,9 @@ func (tv *toolView) enrichWithFiring(ev schedule.Event) {
 	}
 	lines = append(lines, tv.Details.all()...)
 	lines = append(lines, detailLine{Text: firingStats(ev)})
+	if ev.Outcome.Faulted {
+		lines = append(lines, detailLine{Text: firingFaultLine(ev.Outcome.Fault)})
+	}
 	if ev.Outcome.RecordID != "" {
 		lines = append(lines, detailLine{Text: firingRecordLine(ev.Outcome.Title)})
 	}
@@ -553,12 +566,35 @@ func promptDetails(prompt string) []detailLine {
 // a denial in an unattended run is an alarm rather than a statistic. The elapsed time is the
 // SCHEDULER's measurement (schedule.Event.Elapsed), spelled the way every other duration on this
 // surface is (formatCycle).
+//
+// A faulted Firing gets a last cell for the same reason a denial gets one: the run RETURNED, so
+// nothing else on the branch says its final Turn was abandoned and its answer is not one. Why it
+// was abandoned is a body line of its own (firingFaultLine) — the cell is what a collapsed block
+// can still show.
 func firingStats(ev schedule.Event) string {
 	cells := []string{plural(ev.Outcome.Turns, "turn"), formatCycle(ev.Elapsed)}
 	if ev.Outcome.Denied > 0 {
 		cells = append(cells, fmt.Sprintf("%d denied", ev.Outcome.Denied))
 	}
+	if ev.Outcome.Faulted {
+		cells = append(cells, scheduleFaultedCell)
+	}
 	return strings.Join(cells, " · ")
+}
+
+// firingFaultLine says why the engine abandoned the Firing's final Turn. The reason is RAW upstream
+// text (schedule.Outcome.Fault), so it lands as a body line like the prompt and the answer do and is
+// escape-stripped with them at the block's own sanitize seam — nothing here respells it. A fault that
+// surfaced no cause still gets the line: that the Turn was abandoned is the fact, the cause is the
+// detail, and a line naming none is not the same as no fault at all.
+func firingFaultLine(fault string) string {
+	if strings.TrimSpace(fault) == "" {
+		return scheduleFaultLead
+	}
+	// Flattened for the approval pane's reason (flattenField): this line is the block's OWN row —
+	// a lead the block wrote and the cause quoted after it — so a line break inside the cause is a
+	// body row the block did not author. Clipped after, so the clip counts the runes the row holds.
+	return scheduleFaultLead + " — " + clipDetail(flattenField(fault))
 }
 
 // firingRecordLine points at the session record the Firing left behind, by the title /sessions lists
