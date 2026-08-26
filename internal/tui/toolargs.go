@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"strings"
+
+	"github.com/airiclenz/apogee/internal/domain"
 )
 
 // ----------------------------------------------------------------------------
@@ -121,9 +123,13 @@ const argumentValueIndent = "  "
 //
 // That decode folds key CASE as well — it matches an object key to a struct field
 // case-insensitively (domain.FoldArgumentKey) — so `command` and `Command` are ONE parameter to
-// the tool that runs, and a call spelling one name two ways has no rendering the pane and the
-// executor could both be right about. Dispatch refuses such a call before the Approver is ever
-// consulted (agent.resolveAndExecute), so it does not reach this surface.
+// the tool that runs. Dispatch refuses a call spelling one name two ways before the Approver is
+// ever consulted (agent.resolveAndExecute), and the collapse here folds the same way regardless
+// (lastWins keys its survivors by domain.FoldArgumentKey): the pane reads the call the executor
+// would run by CONSTRUCTION, not because something upstream happened to reject it first. What that
+// buys is every path the upstream check does not stand on — a second Driver, a replayed record, a
+// future dispatch that skips resolveAndExecute — where a pane keyed on the spelling would go back
+// to painting `command: npm test` above the `Command:` value that runs.
 //
 // The NAME is flattened (flattenField) and the value is not, which is the same line drawn twice. A
 // name is a label: nothing in it is layout, so a newline in one is not a longer label but a SECOND
@@ -241,21 +247,30 @@ func orderedArgs(raw json.RawMessage) ([]argumentPair, bool) {
 }
 
 // lastWins collapses repeated keys the way every consumer of the same bytes does: one pair per
-// name, holding the value of its LAST occurrence and standing at that occurrence's place among the
-// survivors, with the occurrence count carried through so the label can say the key was repeated.
+// PARAMETER, holding the value of its LAST occurrence and standing at that occurrence's place among
+// the survivors, with the occurrence count carried through so the label can say the key was
+// repeated.
+//
+// A parameter is the FOLDED name (domain.FoldArgumentKey), not the spelling, because that is what
+// the executor's decode collapses to: `command` and `Command` are one parameter to the tool that
+// runs, so keying on the spelling would leave the pane painting two rows for a call that has one.
+// The survivor keeps its own occurrence's spelling as its label — the key the model wrote for the
+// value that actually runs.
 func lastWins(pairs []argumentPair) []argumentPair {
 	occurrences := make(map[string]int, len(pairs))
 	last := make(map[string]int, len(pairs))
 	for i, p := range pairs {
-		occurrences[p.name]++
-		last[p.name] = i
+		fold := domain.FoldArgumentKey(p.name)
+		occurrences[fold]++
+		last[fold] = i
 	}
 	out := make([]argumentPair, 0, len(occurrences))
 	for i, p := range pairs {
-		if last[p.name] != i {
+		fold := domain.FoldArgumentKey(p.name)
+		if last[fold] != i {
 			continue
 		}
-		p.occurrences = occurrences[p.name]
+		p.occurrences = occurrences[fold]
 		out = append(out, p)
 	}
 	return out

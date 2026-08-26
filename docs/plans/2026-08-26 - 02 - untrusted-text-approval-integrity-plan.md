@@ -660,7 +660,13 @@ in two key cases is one decision"` and `"colliding keys can never be remembered"
 
 ---
 
-## 10. The approval pane collapses case-variant keys by the executor's fold (F-17)
+## 10. The approval pane collapses case-variant keys by the executor's fold (F-17) — ✅ DONE (2026-08-26)
+
+NOTES (2026-08-26): the cross-check loop's `map[string]string` decode is case-SENSITIVE, so it
+reads a case-variant call as two parameters; the two new cases decode into a struct
+(`Command`/`Path`/`Workdir` with json tags) selected by a `caseVariant` flag on the table row,
+which is the "decode into a struct with a Command string field" the item asks for, generalised
+to the second case's names.
 
 Depends on item 9.
 

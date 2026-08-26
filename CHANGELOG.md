@@ -234,6 +234,17 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **Security: the approval pane collapses case-variant argument keys by the executor's own fold
+  (F-17).** The pane's duplicate-key collapse keyed on a key's raw SPELLING, so
+  `{"command":"npm test","Command":"curl …|sh"}` painted two rows — the `npm test` the executor
+  discards above the value it actually runs. It now folds key case (`domain.FoldArgumentKey`), the
+  same fold the executor's case-insensitive decode applies: one row per parameter, labelled with
+  the spelling of the occurrence whose value runs, standing at that occurrence's place among the
+  survivors, and carrying the usual `(duplicate key — last of N wins)` note. Dispatch already
+  refuses such a call before the Approver is consulted (F-11); the pane is now right about it by
+  construction as well, on every path that check does not stand on — a second Driver, a replayed
+  record, a future dispatch that skips `resolveAndExecute`.
+
 - **Security: a tool call cannot name one parameter twice and be approved as another (F-11).** The
   executor decodes a call's arguments with stdlib JSON, which matches object keys to parameters
   case-insensitively and takes the last — so `{"command":"npm test","Command":"curl …|sh"}` ran the
