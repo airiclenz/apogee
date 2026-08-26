@@ -234,6 +234,26 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **PDF extraction is bounded on every axis a document can inflate (security audit §3.8, code audit
+  C-07/F-25/F-26, design call 12).** The parser is driven entirely by numbers the document asserts
+  about itself, and none of them was checked against the bytes actually present: a 594-byte file
+  declaring `/Count 10000000` cost 51 s and ~142 GiB of churn — and under a memory ceiling died in
+  a runtime OOM no `recover` can catch — while a `/Size` of four billion sizes the cross-reference
+  table before a single object is read, and a `/Pages` node whose `/Kids` names itself walks
+  forever without ever returning a page. `doctext.ExtractPDF` now takes a context and an output
+  ceiling, and holds four bounds the document cannot raise: a declared object count larger than the
+  file's own byte length is refused before the parser allocates for it; the walk covers at most
+  2 000 pages; it abandons a document after 25 consecutive pages that yield neither text nor an
+  error, which is the signature of a `/Count` that outran its page tree; and every read the parser
+  makes is charged against a 200 000-read budget and the caller's context — which is what makes a
+  reference cycle finite, because the parser keeps no value cache and each turn of the loop is a
+  fresh read. A walk that stopped short of the last page ends with one
+  `[Pages N+1–M not extracted: <reason>]` block, so the model reads how much document it is NOT
+  holding, and the page count its header quotes is the part actually extracted. Both seams pass
+  their own ceiling: `read_file` the same 10 MiB the raw read is bounded by, and the `@file`
+  resolver twice the structural clamp's char budget — extracting a thousand pages for a block that
+  is about to be elided spends the Turn's time and memory on bytes dropped on arrival.
+
 - The `~/.apogee` write rule is the Tier-2 forced LOOK ADR 0049 §4 always described, and its way
   out now reaches both readers (security audit §3.5, design calls 3 and 11). The code shipped
   `write-apogee-control-plane` as `TierHardRefuse` — a hard refusal with no per-call override —

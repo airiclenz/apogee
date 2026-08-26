@@ -101,7 +101,7 @@ func (t *ReadFile) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 		return errorResult(call.ID, failMessage), nil
 	}
 
-	body, displayPath, extractFailure := readableText(content, args.Path)
+	body, displayPath, extractFailure := readableText(ctx, content, args.Path)
 	if extractFailure != "" {
 		return errorResult(call.ID, extractFailure), nil
 	}
@@ -131,12 +131,17 @@ func (t *ReadFile) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 // A non-empty failMessage is the extractor's own model-facing sentence, meant to go straight to
 // errorResult: read_file never falls back to raw PDF bytes, because a wall of binary teaches the
 // model nothing and costs it a context window to learn it.
-func readableText(content []byte, path string) (body, displayPath, failMessage string) {
+//
+// Extraction is bounded by the SAME ceiling the raw read is (maxFileReadBytes, path_read.go) and
+// by the call's context: a document is a file this tool refuses above ten mebibytes, so the text
+// walked out of one has no business exceeding what the file itself was allowed to be, and a
+// cancelled call stops a long walk instead of finishing it for nobody.
+func readableText(ctx context.Context, content []byte, path string) (body, displayPath, failMessage string) {
 	if !doctext.IsPDF(content) {
 		return string(content), path, ""
 	}
 
-	extracted, pages, extractFailure := doctext.ExtractPDF(content)
+	extracted, pages, extractFailure := doctext.ExtractPDF(ctx, content, maxFileReadBytes)
 	if extractFailure != "" {
 		return "", "", extractFailure
 	}

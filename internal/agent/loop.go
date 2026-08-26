@@ -95,7 +95,7 @@ func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 		// per-turn instructions, so prepending them scopes them to this one message (the right
 		// semantics; it avoids a skill leaking into every later turn as a system-prompt edit).
 		skillBlocks := a.resolveSkillRefs(turn, a.pendingInput.SkillIDs)
-		refs := a.resolveFileRefs(turn, a.pendingInput.FileRefs)
+		refs := a.resolveFileRefs(ctx, turn, a.pendingInput.FileRefs)
 		a.conv.Append(domain.Message{Role: domain.RoleUser, Content: skillBlocks + refs + a.pendingInput.Text})
 		a.pendingInput = nil
 	}
@@ -996,7 +996,13 @@ const maxRefFileBytes = 10 * 1024 * 1024
 // longer be defeated by one reference: the block the fold cannot shed is now bounded by
 // construction. The marker's "re-read with start_line/end_line" hint is actionable here, because
 // read_file reaches the very same file.
-func (a *Agent) resolveFileRefs(turn int, refs []string) string {
+//
+// Document EXTRACTION is bounded by that same clamp budget rather than by the raw-read ceiling
+// (maxRefFileBytes, 10 MiB): text past the clamp cannot survive the next line, so walking a
+// thousand-page document to produce it costs the Turn its time and memory for bytes that are
+// dropped on arrival. The walk also stops on the step's ctx, so a cancelled Turn does not finish
+// extracting a document nobody will read.
+func (a *Agent) resolveFileRefs(ctx context.Context, turn int, refs []string) string {
 	if len(refs) == 0 {
 		return ""
 	}
@@ -1006,6 +1012,9 @@ func (a *Agent) resolveFileRefs(turn int, refs []string) string {
 	// not the ones that resolve: a ref that fails leaves the survivors a stricter bound, never a
 	// looser one, and a lone reference keeps the whole floor — the number a tool result gets.
 	bound := max(a.structuralFloor()/len(refs), 1)
+	// TWICE the clamp's char budget, so a document elided to the head/tail shape has real content
+	// at both ends rather than a head the extractor stopped in the middle of.
+	extractBytes := 2 * int(float64(bound)*a.budget().CharsPerToken)
 	for _, ref := range refs {
 		data, err := a.readFileRef(ref)
 		if err != nil {
@@ -1014,7 +1023,7 @@ func (a *Agent) resolveFileRefs(turn int, refs []string) string {
 		}
 		content, annotation := string(data), ""
 		if doctext.IsPDF(data) {
-			extracted, pages, failMessage := doctext.ExtractPDF(data)
+			extracted, pages, failMessage := doctext.ExtractPDF(ctx, data, extractBytes)
 			if failMessage != "" {
 				a.refIgnored(turn, ref, failMessage)
 				continue

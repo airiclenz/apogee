@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"errors"
 
 	"github.com/airiclenz/apogee/internal/domain"
@@ -60,7 +61,11 @@ func (a *Agent) Interject(in domain.UserInput) error {
 	// interjection reads identically to an opening message: skills → @file refs → the text.
 	turn := a.turns.index
 	skillBlocks := a.resolveSkillRefs(turn, in.SkillIDs)
-	refs := a.resolveFileRefs(turn, in.FileRefs)
+	// context.Background, not the running Turn's: an interjection is delivered on the HOST's
+	// goroutine (a human typed it), it commits before the Turn it steers is cancellable from
+	// here, and the Turn's own context is not in scope at this seam. Document extraction is still
+	// bounded — the page, read and output bounds are the extractor's own and need no context.
+	refs := a.resolveFileRefs(context.Background(), turn, in.FileRefs)
 	a.conv.Append(domain.Message{
 		Role:        domain.RoleUser,
 		Content:     skillBlocks + refs + in.Text,

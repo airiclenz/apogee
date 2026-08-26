@@ -197,10 +197,20 @@ const refFiller = "referenced text that repeats until the file is large enough t
 func clampingRefAgent(t *testing.T, dir string) (*Agent, int) {
 	t.Helper()
 
+	return refAgentWithWindow(t, dir, floorWindow)
+}
+
+// refAgentWithWindow is clampingRefAgent for a window the caller picks, and returns the same
+// single-reference bound in characters. A test that has to overshoot the bound with a FIXTURE
+// rather than with generated filler needs the smaller window: a committed document is only so
+// many pages long.
+func refAgentWithWindow(t *testing.T, dir string, window int) (*Agent, int) {
+	t.Helper()
+
 	sink := &recordingSink{}
 	cfg := baseConfig(sink)
 	cfg.WorkspaceDir = dir
-	cfg.Context.MaxContextTokens = floorWindow
+	cfg.Context.MaxContextTokens = window
 	a, err := newAgent(cfg, echoResponder{reply: "ok"})
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
@@ -208,7 +218,7 @@ func clampingRefAgent(t *testing.T, dir string) (*Agent, int) {
 
 	b := a.budget()
 	if b.History <= 0 {
-		t.Fatalf("History allocation = %d, want a positive allocation from window %d", b.History, floorWindow)
+		t.Fatalf("History allocation = %d, want a positive allocation from window %d", b.History, window)
 	}
 	return a, int(float64(b.History) * b.CharsPerToken)
 }
@@ -364,6 +374,43 @@ func TestResolveFileRefs_SplitsTheFloorAcrossReferences(t *testing.T) {
 	b := together.budget()
 	if estimated := b.EstimateTokens(len(got)); estimated > b.History {
 		t.Errorf("the assembled message estimates %d tokens, past the History allocation of %d", estimated, b.History)
+	}
+}
+
+// TestResolveFileRefs_BoundsExtractionByTheClampBudget pins where document EXTRACTION stops: at
+// the clamp's own budget, not at the 10 MiB raw-read ceiling. The block is clamped to the
+// allocation either way, so the fact this test is for is what the extractor did BEFORE the clamp
+// — it walked as far as twice the char budget and stopped, instead of walking a whole document to
+// produce text the next line drops. The stop is observable twice over: the header's page count is
+// short of the document's own, and the block ends with the extractor's own not-extracted marker,
+// which an unbounded extraction would never emit.
+func TestResolveFileRefs_BoundsExtractionByTheClampBudget(t *testing.T) {
+	// The committed fixture is twenty pages of ~315 characters each. The window is small enough
+	// that twice its History allocation lands inside the document rather than past it.
+	const (
+		window        = 1024
+		documentPages = 20
+	)
+
+	dir := t.TempDir()
+	copyPDFFixture(t, dir, "manypages.pdf", "manypages.pdf")
+
+	a, floorChars := refAgentWithWindow(t, dir, window)
+	got := submitOneRef(t, a, "read it", "manypages.pdf")
+
+	pages := 0
+	if _, err := fmt.Sscanf(got, "Referenced file `manypages.pdf` (PDF, %d pages", &pages); err != nil {
+		t.Fatalf("annotated header missing from the block (%v):\n%.200s", err, got)
+	}
+	if pages <= 0 || pages >= documentPages {
+		t.Errorf("header names %d of the document's %d pages, want the walk to have stopped short",
+			pages, documentPages)
+	}
+	if !strings.Contains(got, "not extracted: content budget") {
+		t.Errorf("the extractor's not-extracted marker is missing; the walk was not bounded:\n%.300s", got)
+	}
+	if limit := 2*floorChars + 200; len(got) > limit {
+		t.Errorf("block is %d chars, past the %d the extraction budget and its marker allow", len(got), limit)
 	}
 }
 

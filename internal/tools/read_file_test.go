@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
 )
@@ -780,6 +781,34 @@ func TestReadFile_Execute_RefusesAPDFWithNoText(t *testing.T) {
 	}
 	if result.Summary != nil {
 		t.Errorf("Summary = %#v, want nil on a failed call", result.Summary)
+	}
+}
+
+// TestReadFile_Execute_BoundsAPhantomPageCount pins the extractor's bounds AT THE TOOL boundary.
+// A 240-byte document declaring ten million pages behind an empty page tree cost 51 s and ~142
+// GiB of churn before the walk was bounded (audit 2026-08-25, C-07); it now answers promptly with
+// the same sentence any document that yields no text gets, because that is what it is.
+func TestReadFile_Execute_BoundsAPhantomPageCount(t *testing.T) {
+	t.Parallel()
+
+	start := time.Now()
+	result, err := NewReadFile(pdfWorkspace(t, "phantompages.pdf"), nil).Execute(context.Background(),
+		callWith(t, "c1", map[string]any{"path": "phantompages.pdf"}))
+	elapsed := time.Since(start)
+
+	if err != nil {
+		t.Fatalf("Execute returned a Go error: %v", err)
+	}
+	if !result.IsError {
+		t.Fatalf("IsError = false on a document with no extractable text (content: %q)", result.Content)
+	}
+	if !strings.Contains(result.Content, "no extractable text") {
+		t.Errorf("Content = %q, want the extractor's no-extractable-text sentence", result.Content)
+	}
+	// Generous on purpose — the assertion is that the read is bounded at all, not how fast this
+	// machine is. An unbounded walk of ten million declared pages does not finish in minutes.
+	if elapsed > 5*time.Second {
+		t.Errorf("reading a 240-byte document took %s; the walk sized itself off its /Count", elapsed)
 	}
 }
 

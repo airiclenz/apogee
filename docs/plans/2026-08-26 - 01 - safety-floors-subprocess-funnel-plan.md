@@ -959,7 +959,16 @@ returns the appended sentence; without one, today's sentence.
 
 ---
 
-## 13. PDF extraction is bounded: `/Count` is a hint, `/Size` is checked, cycles and output have budgets
+## 13. PDF extraction is bounded: `/Count` is a hint, `/Size` is checked, cycles and output have budgets — ✅ DONE (2026-08-26)
+
+NOTES (2026-08-26): the item says both `resolveFileRefs` callers thread the step's ctx; only `loop.go:98` has one. `Interject` takes no context (it is a Driver-facing method delivering on the host's goroutine), so `interject.go:63` passes `context.Background()` with a comment saying why — the page, read and output bounds are the extractor's own and do not depend on it.
+NOTES (2026-08-26): the item's Tests section names an "existing three-page fixture" and an "existing multi-page fixture"; testdata held only `minimal.pdf`, `nopages.pdf`, `notext.pdf`. Added the prescribed `hostilePDF` builder plus `textPagesPDF`/`treePagesPDF` on top of it, and two committed fixtures — `testdata/phantompages.pdf` (240 bytes, the `/Count 10000000` shape, so `read_file`'s test, which has no builder, is fed the same bytes the extractor's own test is) and `testdata/manypages.pdf` (20 text pages, for the agent's clamp-budget test).
+NOTES (2026-08-26): `TestExtractPDF_CapsThePageWalk`'s fixture uses a NESTED page tree (branching 8), not a flat one: a flat `/Kids` array of 2 001 entries costs the parser a linear scan per page lookup, so the read budget would trip long before the page cap and the test would pin the wrong bound.
+NOTES (2026-08-26): the alloc ceiling in `TestExtractPDF_CapsAPhantomPageCount` is 5 000, not the item's 1 000 — a bounded walk of that document measures ~1 350 allocations (~1 370 under `-race`), nearly all of them the parse itself, so 1 000 does not hold. The test also cannot use `t.Parallel()`, because `testing.AllocsPerRun` measures the whole process.
+NOTES (2026-08-26): `TestExtractPDF_BoundsAReferenceCycle`'s wall bound is 10 s, not the item's 2 s: the budget bounds READS, and the wall time that buys measured 0.75 s plain but 1.85 s under the race detector `make check` runs, so a 2 s assertion would be flaky. What the assertion is for is that the walk terminates at all.
+NOTES (2026-08-26): a blank run that ends because the DOCUMENT ended is committed rather than dropped. The item spells dropping only for a run that REACHES `pdfPhantomRun`; dropping an unfinished trailing run would silently lose a real document's trailing blank pages and shorten the reported page count, changing behaviour the item does not ask to change.
+NOTES (2026-08-26): `internal/agent/filerefs_test.go`'s `clampingRefAgent` was factored onto a new `refAgentWithWindow(t, dir, window)` (identical body, window parameterised) rather than copied — the new test needs a smaller allocation than `floorWindow` gives. Its four existing call sites are untouched.
+NOTES (2026-08-26): `TestResolveFileRefs_BoundsExtractionByTheClampBudget` was verified by a negative control — with `extractBytes` set to 0 (unbounded) it fails on both its observables (the header names all 20 pages; the not-extracted marker is absent).
 
 **What:** C-07, F-25, F-26, per call 12. The parser cannot be trusted with the document's own
 numbers; every allocation and every walk it drives is bounded from outside it.
