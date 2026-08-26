@@ -536,7 +536,16 @@ verbatim. `TestOrientation_SubAgentInheritsTheBlock` (`:163`) passes with the ne
 
 ---
 
-## 8. Popup body wrap keeps a hanging indent (F-16)
+## 8. Popup body wrap keeps a hanging indent (F-16) — ✅ DONE (2026-08-26)
+
+NOTES (2026-08-26): the narrow-pane fallback reuses `hangingPrefixes` (wrap.go) for the hang itself
+rather than re-implementing the prefixing, and keeps the plan's literal `indent >= inner-1` collapse
+threshold — one column more conservative than `hangCollapses`, so a continuation never falls to a
+single column.
+NOTES (2026-08-26): the plan's three popup tests are written against `popupBodyWrapped` (the wrap both
+accounting halves go through, where "inner width 40" is literally the argument) rather than through
+`renderPopup`, whose every line is padded to the pane's total width; the end-to-end paint is pinned by
+the `model_test.go` approval test the plan also asks for.
 
 **What:** `internal/tui/popup.go:1218-1227` `popupBodyWrapped` word-wraps each `\n` segment
 flat, so the continuation of an indented argument value (`toolargs.go:86`

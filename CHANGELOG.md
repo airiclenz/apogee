@@ -234,6 +234,12 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- Popup body wrap now hangs continuation lines under their own leading indent, so a long
+  model-authored argument value on the approval pane can no longer wrap into column zero and paint
+  as pane furniture beside the pane's own `Reason:` and labels (F-16). A pane too narrow to hold the
+  indent plus text beside it sheds the hang and wraps flat, as every hanging surface does; prose
+  bodies with no leading spaces wrap exactly as before.
+
 - **Security: a workspace context file can no longer forge the harness's own orientation.** The
   engine-composed orientation block now rides directly after your system prompt and **ahead of**
   any workspace context files, so nothing a repository ships can precede — and thereby reframe —

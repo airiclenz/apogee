@@ -415,6 +415,70 @@ func TestRenderPopupBodyWraps(t *testing.T) {
 	}
 }
 
+// A body segment that arrives indented keeps that indent on every row it wraps onto. The approval
+// pane tells its own rows from the model's by the column they start in, so a value's continuation
+// landing in column zero would paint model-authored text where only the pane's own `Reason:` lives.
+func TestRenderPopupBodyIndentedLinesHangUnderTheirIndent(t *testing.T) {
+	th := newTheme(scheme.Default())
+	const inner = 40
+
+	lines := popupBodyWrapped(th, "command:\n  "+strings.Repeat("x", 120), inner)
+
+	if len(lines) < 3 {
+		t.Fatalf("a 120-column value at inner %d wrapped to %d lines, want the label plus several: %q", inner, len(lines), lines)
+	}
+	if lines[0] != "command:" {
+		t.Errorf("label row = %q, want \"command:\"", lines[0])
+	}
+	for i, ln := range lines[1:] {
+		if !strings.HasPrefix(ln, argumentValueIndent) {
+			t.Errorf("value row %d = %q, want it to hang under %q", i+1, ln, argumentValueIndent)
+		}
+		if w := lipgloss.Width(ln); w > inner {
+			t.Errorf("value row %d is %d cells, want at most %d: %q", i+1, w, inner, ln)
+		}
+	}
+}
+
+// The hang is only for segments the caller already indented: an unindented paragraph — which is
+// every line of every prose body — wraps byte for byte the way it did before the hang existed.
+func TestRenderPopupBodyFlatLinesUnchanged(t *testing.T) {
+	th := newTheme(scheme.Default())
+	body := "the quick brown fox jumps over the lazy dog and keeps on running until the paragraph is long enough to wrap several times"
+	want := []string{
+		"the quick brown fox jumps over the lazy",
+		"dog and keeps on running until the",
+		"paragraph is long enough to wrap several",
+		"times",
+	}
+
+	got := popupBodyWrapped(th, body, 40)
+
+	if !slices.Equal(got, want) {
+		t.Errorf("a flat paragraph re-wrapped:\ngot  %q\nwant %q", got, want)
+	}
+}
+
+// Too narrow to hold the indent and text beside it, the hang is shed whole and the segment wraps
+// flat at the full width — the alternative being a value spelled one rune per row, or none at all.
+func TestRenderPopupBodyNarrowIndentCollapses(t *testing.T) {
+	th := newTheme(scheme.Default())
+	const inner = 6
+
+	lines := popupBodyWrapped(th, strings.Repeat(" ", 6)+strings.Repeat("y", 20), inner)
+
+	text := 0
+	for _, ln := range lines {
+		if w := lipgloss.Width(ln); w > inner {
+			t.Errorf("row %q is %d cells, want at most %d", ln, w, inner)
+		}
+		text += strings.Count(ln, "y")
+	}
+	if text != 20 {
+		t.Errorf("a collapsed hang lost text: %d of 20 value runes survived in %q", text, lines)
+	}
+}
+
 // Embedded newlines in the body are layout, not text to reflow: a body "a\n\nb" renders three body
 // rows with a blank middle row — the approval reason/args separator case.
 func TestRenderPopupBodyPreservesNewlines(t *testing.T) {

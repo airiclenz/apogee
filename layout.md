@@ -325,7 +325,11 @@ the bytes do not support. Those unlabelled lines hang at the same two spaces a v
 this pane tells its own rows from the model's by the column they start in: a line of argument bytes
 at column zero is indistinguishable from the `Reason:` the pane wrote, so no argument-derived line
 is ever painted there — the bytes are all on the screen, two columns to the right of where a label
-can live. A single value with no flat shape (a nested object, an array) is indented
+can live. **The wrap holds that column too:** a body line too long for the pane continues under its
+own leading indent rather than flush left, so a value only long enough to wrap cannot walk into the
+column the pane's own rows start in; a pane too narrow to hold the indent and text beside it sheds
+the hang whole and wraps flat, as every hanging surface here does. A single value with no flat shape
+(a nested object, an array) is indented
 JSON under its own label, which is the one place a brace still reaches this pane. All of it is
 display: the arguments the tool receives are the ones the model sent, whatever shape they were read
 in.

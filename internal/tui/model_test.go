@@ -1045,6 +1045,45 @@ func TestModelApprovalArgsKeepIndentation(t *testing.T) {
 	}
 }
 
+// A value too long for the pane keeps its hanging indent on every row it wraps onto. Before the body
+// wrap hung its continuations, a single 300-character argument painted every row after the first in
+// column zero — the column the pane's own `Reason:` and labels live in — so model-authored bytes read
+// as pane furniture on the surface the decision is taken off (popupBodySegmentWrapped).
+func TestModelApprovalLongArgumentNeverPaintsFlushLeft(t *testing.T) {
+	m := step(t, newTestModel(t), tea.WindowSizeMsg{Width: 50, Height: 30})
+	reply := make(chan domain.ApprovalDecision, 1)
+	args, err := json.Marshal(map[string]string{"command": strings.Repeat("a", 300)})
+	if err != nil {
+		t.Fatalf("marshalling the argument: %v", err)
+	}
+	m = step(t, m, approvalReqMsg{
+		Request: domain.ApprovalRequest{Tool: "terminal", Arguments: json.RawMessage(args)},
+		Reply:   reply,
+	})
+
+	view := plain(m.View())
+
+	// Between the label and the menu is the value and nothing else, so every row there must open in
+	// the value's own column — two spaces in from where a label could live.
+	inBody := false
+	for _, ln := range strings.Split(view, "\n") {
+		row := strings.TrimSuffix(strings.TrimPrefix(ln, "│"), "│")
+		switch {
+		case strings.HasPrefix(strings.TrimSpace(row), "command:"):
+			inBody = true
+			continue
+		case strings.Contains(row, "❯"):
+			inBody = false
+		}
+		if !inBody || strings.TrimSpace(row) == "" {
+			continue
+		}
+		if !strings.HasPrefix(row, " "+argumentValueIndent) {
+			t.Errorf("a wrapped value row paints in the pane's own column: %q\n%s", ln, view)
+		}
+	}
+}
+
 // A model-authored FIELD paints no row of its own, whatever it carries. The approval body is drawn
 // one row per line (popupBodyWrapped) and every body row wears the same th.popupBody style —
 // approvalPrompt sets no bodyLead — so a newline inside an argument NAME, a sub-agent TASK or a

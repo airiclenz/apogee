@@ -1215,15 +1215,43 @@ func popupBodyLeadLine(th theme, line, lead string) string {
 // accounting go through — the painter's (popupBodyLines) and the CALLER's (popupBodyLineCount) — for
 // the reason popupWrappedRowHeights exists on the row side: a pane that has to state its prose's cost
 // before the block is composed must state the cost the painter will actually pay.
+//
+// A segment that arrives INDENTED keeps that indent on every row it wraps onto (popupBodySegmentWrapped).
+// The approval pane tells its own rows from the model's by the column they start in (layout.md, the
+// approval body): a label lives at column zero and an argument's value hangs two spaces under it
+// (argumentValueIndent), so a value line that wrapped flush left would be painted exactly where the
+// pane's own `Reason:` lives — model-authored text reading as pane furniture on the one surface whose
+// whole job is that the fact is read correctly.
 func popupBodyWrapped(th theme, body string, inner int) []string {
 	if body == "" {
 		return nil
 	}
 	var wrapped []string
 	for _, seg := range strings.Split(body, "\n") {
-		wrapped = append(wrapped, wrapText(th, seg, inner)...)
+		wrapped = append(wrapped, popupBodySegmentWrapped(th, seg, inner)...)
 	}
 	return wrapped
+}
+
+// popupBodySegmentWrapped wraps ONE newline-free body segment at inner, hanging its continuation rows
+// under the segment's own leading spaces. An unindented segment — every line of every prose body —
+// takes the flat wrap it always took and comes back byte for byte unchanged; only a segment the
+// caller already indented gains the hang, which is the composition it was written in.
+//
+// The indent is the run of ' ' before the first other rune: a tab-led segment is left flat, since
+// wrapText expands tabs downstream and a hang measured before that expansion would not be the hang
+// painted after it. A segment that is nothing but spaces has no continuation to hang and wraps flat.
+//
+// Too narrow to hold the indent and two columns of text beside it, the hang is SHED WHOLE and the
+// segment wraps flat at the full inner width — hangCollapses' order (wrap.go) applied one column
+// earlier, because a continuation floored at a single column is a value spelled down the screen one
+// rune per row: still readable in principle, unreadable in fact, on a pane a decision is taken off.
+func popupBodySegmentWrapped(th theme, seg string, inner int) []string {
+	indent := len(seg) - len(strings.TrimLeft(seg, " "))
+	if indent == 0 || indent == len(seg) || indent >= inner-1 {
+		return wrapText(th, seg, inner)
+	}
+	return hangingPrefixes(th, seg[:indent], seg[indent:], inner)
 }
 
 // popupBodyLineCount is what body will cost in painted LINES on a pane drawn at the given TOTAL
