@@ -46,6 +46,18 @@ tools execute on the server side, outside any OS fence. Two consequences shape t
   Amendment 2026-07-26). A **stdio** server is a local launched subprocess — the host chose the
   command, a different trust model — so no URL check applies; its tool calls still gate through
   Approval in Auto exactly the same.
+- **A stdio server is a fenced absolute program held as a process tree** (2026-08-26). Its
+  `Command` is resolved on PATH through the exec fence (`security.ResolveProgram`), so what is
+  launched is an absolute path and a program resolving **inside the workspace** — bytes a confined
+  call is allowed to write — is refused at connect time rather than executed; `Connect` being
+  all-or-nothing, the operator meets that refusal at startup. It still **starts in the workspace**
+  (apogee's own working directory, which filesystem-style servers expect): with argv[0] absolute
+  and fenced there is no relative lookup left for the working directory to decide. Its environment
+  is unchanged — the full process environment plus `cfg.Env`, the deliberate trust decision above
+  (`ISSUES.md` L4). The launched process is held in a **process group** (POSIX) / **Job Object**
+  (Windows) via `platform.NewProcessTeardown`, and `Close` reaps that container after the session's
+  own shutdown, so a descendant the server spawned cannot outlive the session — the SDK's
+  spec-shaped shutdown signals the leader alone.
 
 Every tool **description, schema, and result** the client surfaces is untrusted input: it is passed
 to the model and rendered, **never executed or interpreted** as a command by Apogee.
@@ -53,14 +65,15 @@ to the model and rendered, **never executed or interpreted** as a command by Apo
 ## 3. The lifecycle (the design surface §3 D3)
 
 ```
-Connect(ctx, []ServerConfig, URLGuard) → *Client     // dial every server, list its tools
-  Client.Tools() []domain.Tool                        // the surfaced tools, for registration
-  Client.Close() error                                // tear every session down — no orphan
+Connect(ctx, []ServerConfig, URLGuard, workspaceRoot) → *Client  // dial every server, list its tools
+  Client.Tools() []domain.Tool                                   // the surfaced tools, for registration
+  Client.Close() error                                           // tear every session down — no orphan
 ```
 
 - **Connect** is **all-or-nothing**: a later server's failure tears down every already-opened
   session and returns the error, so a half-wired MCP set never reaches the registry and no orphaned
-  stdio process leaks. Zero configs returns a **dormant** Client (no sessions, no tools, a no-op
+  stdio process — or process tree — leaks. `workspaceRoot` is the exec fence a stdio server's
+  command is measured against (§2). Zero configs returns a **dormant** Client (no sessions, no tools, a no-op
   Close) — a host without MCP pays nothing. Server names must be non-empty and unique (the name
   prefixes each surfaced tool's registry key as `mcp__…` — actually `<name>__<tool>`, see §4).
 - **Tool naming** qualifies each server tool as `<server-name>__<tool>` so two servers advertising

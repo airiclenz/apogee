@@ -549,7 +549,47 @@ compile the Windows half.
 
 ---
 
-## 7. Stdio MCP servers: fenced absolute program, process-group teardown
+## 7. Stdio MCP servers: fenced absolute program, process-group teardown — ✅ DONE (2026-08-26)
+
+NOTES (2026-08-26): the item spells `cmd := exec.Command(program, cfg.Args...)`, which does not work:
+`platform.NewProcessTeardown` wires `cmd.Cancel`, and `exec.Cmd.Start` refuses a non-nil `Cancel` on a
+Cmd built without a context (`os/exec/exec.go:710`) — every stdio server would have failed to start.
+The Cmd is therefore built with `exec.CommandContext(context.Background(), …)`. `Background` and not
+the connect ctx deliberately: a stdio server's lifetime is the SESSION, and binding it to the sweep
+that dialled it would kill every server the moment `Connect` returned. `Background.Done()` is nil, so
+os/exec starts no watchdog and the wired `Cancel`/`WaitDelay` stay inert; teardown is driven
+explicitly by `Close`.
+NOTES (2026-08-26): the fence refusal wraps with `%w` where the item's text spelled `%v` — the item's
+own test asks for an error that wraps `security.ErrExecFromWritablePath`, which `%v` would not
+preserve (the same correction item 5 recorded).
+NOTES (2026-08-26): the fence root passed at `wire_live.go:41,51` is `w.roots.workspace`, not
+`w.opts.Workspace` as the item's text spelled it — the option may be empty (meaning the cwd) or
+relative, and neither is a root an absolute resolved program path can be compared against. This is
+the same input `registryWithMCP` is already given two lines below, so the tool registry and the MCP
+launch cannot disagree about which bytes the model can write (item 5 recorded the identical
+correction for the editor and the keystore probe).
+NOTES (2026-08-26): the item's `TestClose_ReapsTheStdioServersDescendants` says the fixture starts
+`sleep 60` "in its own group". Implemented as a plain child inheriting the SERVER'S group: a
+descendant that made a group of its own (setsid) is precisely the documented ESCAPE from
+`platform.NewProcessTeardown`, so the literal reading would have pinned the residual instead of the
+reap. Verified as a real test by a negative control — with `td.Reap` removed it fails
+("the descendant outlived Close") and passes with it.
+NOTES (2026-08-26): `connectOne` reaps `(cmd, td)` when `client.Connect` FAILS. The item spells the
+teardown order for `Close` and says "rollback in Connect runs the same path", but a handshake that
+failed never yields a session to record, so `Close`'s rollback cannot reach that process or the
+teardown's own Job Object handle; the shared `reapProcess` helper is called on that path too.
+NOTES (2026-08-26): `internal/mcp/doc.go` is not in the item's Files list but had to be touched — its
+trust-boundary bullet states the stdio trust model ("the host chose the command, so no URL check
+applies"), which is now only half the story; one sentence names the exec fence and the reaped process
+tree, matching the design-doc wording the item does prescribe.
+NOTES (2026-08-26): `docs/design/mcp-client.md` §3's lifecycle signature line and its "no orphaned
+stdio process leaks" bullet were updated alongside the §2 stdio bullet the item names — `Connect`
+gained a parameter, so leaving §3 spelling the old three-argument form would have made the doc wrong
+in the same edit that made §2 right.
+NOTES (2026-08-26): `cmd/apogee/wire_test.go` is in the item's Files list but needed no change —
+`wireSession`'s own signature is unchanged and the workspace is threaded from `w.roots.workspace`
+inside it, so both tests that drive it (`wire_test.go:184`, `title_test.go:596`) compile and pass
+untouched.
 
 Depends on items 1 and 6.
 

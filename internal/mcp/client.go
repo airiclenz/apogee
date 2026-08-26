@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os/exec"
 	"strings"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/security"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -35,8 +37,19 @@ const (
 // that owns the Agent (the SDK sessions themselves are concurrency-safe, but the Client's own
 // connection bookkeeping is not).
 type Client struct {
-	sessions []*mcpsdk.ClientSession // one per connected server, in config order
-	tools    []domain.Tool           // surfaced server tools, in (server, tool) order
+	sessions []liveSession // one per connected server, in config order
+	tools    []domain.Tool // surfaced server tools, in (server, tool) order
+}
+
+// liveSession is one connected server: the SDK session, plus — for a stdio server — the process
+// this client launched and the teardown holding that process's whole tree. cmd and td are nil for
+// the two HTTP transports, which launch nothing. The pair is kept beside the session because the
+// SDK's spec-shaped shutdown reaches the LEADER alone (stdin close, wait, SIGTERM, SIGKILL of
+// cmd.Process); anything the server spawned is only reachable through the group / Job Object.
+type liveSession struct {
+	session *mcpsdk.ClientSession
+	cmd     *exec.Cmd
+	td      platform.ProcessTeardown
 }
 
 // Connect dials every configured server in order, lists each server's tools, and returns a
@@ -52,10 +65,14 @@ type Client struct {
 // so a half-wired MCP set never reaches the registry. The host decides whether an MCP failure is
 // fatal or a logged degradation; this package does not silently swallow it.
 //
-// ctx bounds the whole connect sweep (every server's handshake and tools/list). A duplicate or
-// empty server name is rejected before any connection is made (the alias must uniquely qualify a
-// surfaced tool's registry name).
-func Connect(ctx context.Context, servers []ServerConfig, guard security.URLGuard) (*Client, error) {
+// ctx bounds the whole connect sweep (every server's handshake and tools/list) — never the life of
+// a launched stdio server, which is the session's. A duplicate or empty server name is rejected
+// before any connection is made (the alias must uniquely qualify a surfaced tool's registry name).
+//
+// workspaceRoot is the exec fence a stdio server's command is measured against: the command is
+// resolved on PATH to an absolute program, and one resolving inside the workspace is refused here
+// rather than launched (see buildStdioTransport).
+func Connect(ctx context.Context, servers []ServerConfig, guard security.URLGuard, workspaceRoot string) (*Client, error) {
 	if len(servers) == 0 {
 		return &Client{}, nil
 	}
@@ -65,7 +82,7 @@ func Connect(ctx context.Context, servers []ServerConfig, guard security.URLGuar
 
 	c := &Client{}
 	for _, cfg := range servers {
-		if err := c.connectOne(ctx, cfg, guard); err != nil {
+		if err := c.connectOne(ctx, cfg, guard, workspaceRoot); err != nil {
 			// Roll back every session opened so far so a partial connect leaves no orphan, then
 			// surface the failure — Connect is all-or-nothing.
 			_ = c.Close()
@@ -79,8 +96,14 @@ func Connect(ctx context.Context, servers []ServerConfig, guard security.URLGuar
 // tools to the Client. A connect or list failure is returned (the caller rolls the whole set
 // back). The session is recorded BEFORE listing tools so a list failure still tears the
 // just-opened session down on rollback.
-func (c *Client) connectOne(ctx context.Context, cfg ServerConfig, guard security.URLGuard) error {
-	transport, err := buildTransport(ctx, cfg, guard)
+//
+// A stdio server's process exists from the moment the SDK's transport started it, so the teardown
+// takes it as soon as Connect returns — the same sub-millisecond Windows window the tools funnel
+// documents (platform.NewProcessTeardown), since no OS lets a process be created directly into a
+// job. A handshake that FAILED never yields a session to record, so its process and the teardown's
+// own handle are reaped here: the rollback below can only reach what was recorded.
+func (c *Client) connectOne(ctx context.Context, cfg ServerConfig, guard security.URLGuard, workspaceRoot string) error {
+	transport, cmd, td, err := buildTransport(ctx, cfg, guard, workspaceRoot)
 	if err != nil {
 		return err
 	}
@@ -88,9 +111,13 @@ func (c *Client) connectOne(ctx context.Context, cfg ServerConfig, guard securit
 	client := mcpsdk.NewClient(&mcpsdk.Implementation{Name: clientName, Version: clientVersion}, nil)
 	session, err := client.Connect(ctx, transport, nil)
 	if err != nil {
+		reapProcess(cmd, td)
 		return fmt.Errorf("mcp: connect to server %q: %w", cfg.Name, err)
 	}
-	c.sessions = append(c.sessions, session)
+	if td != nil {
+		td.Contain(cmd)
+	}
+	c.sessions = append(c.sessions, liveSession{session: session, cmd: cmd, td: td})
 
 	tools, err := listServerTools(ctx, cfg.Name, session)
 	if err != nil {
@@ -146,15 +173,24 @@ func (c *Client) Tools() []domain.Tool {
 // dormant Client (no sessions ⇒ nil) and idempotent in effect — after Close the sessions are
 // cleared, so a second Close is a no-op. The host calls it at Agent.Close (no orphaned process
 // or connection survives).
+//
+// The order per session is the session FIRST, the process tree second, and it is load-bearing.
+// ClientSession.Close is the spec-shaped stdio shutdown — close stdin, wait, SIGTERM, SIGKILL —
+// which gives a well-behaved server the chance to exit cleanly and flush, but reaches the LEADER
+// alone: anything it spawned outlives it. The teardown's Reap then kills the group (POSIX) or
+// terminates the Job Object (Windows), which is the only thing that reaches those descendants, and
+// Release drops the handle the teardown has owned since before the process existed. Reaping first
+// would turn every clean shutdown into a kill.
 func (c *Client) Close() error {
 	if c == nil {
 		return nil
 	}
 	var errs []error
 	for _, s := range c.sessions {
-		if err := s.Close(); err != nil {
+		if err := s.session.Close(); err != nil {
 			errs = append(errs, err)
 		}
+		reapProcess(s.cmd, s.td)
 	}
 	c.sessions = nil
 	c.tools = nil
@@ -162,6 +198,19 @@ func (c *Client) Close() error {
 		return fmt.Errorf("mcp: closing sessions: %w", errors.Join(errs...))
 	}
 	return nil
+}
+
+// reapProcess tears one launched server's process tree down and drops the teardown's own handle.
+// It is a no-op for an HTTP transport, which launched nothing (nil td), so every caller can hand
+// it a session's pair without asking which transport built it. Both hooks are best-effort by
+// contract — teardown is a safety net, never the confinement fence (ADR 0020) — so neither can
+// fail a shutdown.
+func reapProcess(cmd *exec.Cmd, td platform.ProcessTeardown) {
+	if td == nil {
+		return
+	}
+	td.Reap(cmd)
+	td.Release()
 }
 
 // validateServers rejects an empty or duplicate server name before any connection is made: the

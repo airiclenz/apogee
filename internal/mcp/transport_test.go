@@ -34,7 +34,7 @@ func TestBuildTransportHTTPKinds(t *testing.T) {
 	t.Parallel()
 	guard := security.URLGuard{}.WithResolver(publicResolver)
 
-	sse, err := buildTransport(context.Background(), ServerConfig{Name: "s", Transport: TransportSSE, Endpoint: "https://mcp.example.com/"}, guard)
+	sse, _, _, err := buildTransport(context.Background(), ServerConfig{Name: "s", Transport: TransportSSE, Endpoint: "https://mcp.example.com/"}, guard, t.TempDir())
 	if err != nil {
 		t.Fatalf("sse buildTransport: %v", err)
 	}
@@ -42,7 +42,7 @@ func TestBuildTransportHTTPKinds(t *testing.T) {
 		t.Errorf("sse transport = %T; want *mcpsdk.SSEClientTransport", sse)
 	}
 
-	sh, err := buildTransport(context.Background(), ServerConfig{Name: "s", Transport: TransportStreamableHTTP, Endpoint: "https://mcp.example.com/"}, guard)
+	sh, _, _, err := buildTransport(context.Background(), ServerConfig{Name: "s", Transport: TransportStreamableHTTP, Endpoint: "https://mcp.example.com/"}, guard, t.TempDir())
 	if err != nil {
 		t.Fatalf("streamable-http buildTransport: %v", err)
 	}
@@ -62,7 +62,7 @@ func TestBuildTransport_HandsTheSDKTheNormalisedEndpoint(t *testing.T) {
 	// Whitespace, an upper-case host and a trailing DNS root dot — three spellings that reach
 	// the same server and that Go's transport normalises away before dialling.
 	cfg := ServerConfig{Name: "s", Transport: TransportSSE, Endpoint: "  http://MCP.Example.COM./sse  "}
-	tr, err := buildTransport(context.Background(), cfg, guard)
+	tr, _, _, err := buildTransport(context.Background(), cfg, guard, t.TempDir())
 	if err != nil {
 		t.Fatalf("buildTransport: %v", err)
 	}
@@ -84,10 +84,11 @@ func TestBuildTransport_EndpointRidesHostPolicyNotTheFloor(t *testing.T) {
 
 	// A loopback / LAN endpoint that the floor used to refuse now builds. It is resolved for
 	// PINNING (an IP literal needs no lookup), not for a floor verdict.
+	workspace := t.TempDir()
 	for _, endpoint := range []string{"http://127.0.0.1:7331/mcp", "http://192.168.64.1:7331/mcp", "http://[::1]:7331/mcp"} {
 		for _, transport := range []Transport{TransportSSE, TransportStreamableHTTP} {
 			cfg := ServerConfig{Name: "local", Transport: transport, Endpoint: endpoint}
-			if _, err := buildTransport(context.Background(), cfg, security.URLGuard{}); err != nil {
+			if _, _, _, err := buildTransport(context.Background(), cfg, security.URLGuard{}, workspace); err != nil {
 				t.Errorf("%s endpoint %s: %v; want it to build (config-file endpoints are floor-exempt)", transport, endpoint, err)
 			}
 		}
@@ -108,7 +109,7 @@ func TestBuildTransport_EndpointRidesHostPolicyNotTheFloor(t *testing.T) {
 	}
 	for _, tc := range blocked {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := buildTransport(context.Background(), tc.cfg, tc.guard)
+			_, _, _, err := buildTransport(context.Background(), tc.cfg, tc.guard, t.TempDir())
 			if err == nil {
 				t.Fatalf("endpoint %q built without error; want a refusal", tc.cfg.Endpoint)
 			}
@@ -129,7 +130,7 @@ func TestBuildTransport_UnresolvableEndpointFailsClosed(t *testing.T) {
 		return nil, errors.New("no such host")
 	})
 	cfg := ServerConfig{Name: "s", Transport: TransportStreamableHTTP, Endpoint: "https://mcp.example.com/"}
-	_, err := buildTransport(context.Background(), cfg, unresolvable)
+	_, _, _, err := buildTransport(context.Background(), cfg, unresolvable, t.TempDir())
 	if err == nil {
 		t.Fatal("unresolvable endpoint built a transport; want a connect-time error")
 	}
@@ -287,7 +288,7 @@ func TestGuardedClient_DoesNotFollowRedirects(t *testing.T) {
 // policy and all — rather than a rebuild of it.
 func endpointClient(t *testing.T, cfg ServerConfig, guard security.URLGuard) *http.Client {
 	t.Helper()
-	tr, err := buildTransport(context.Background(), cfg, guard)
+	tr, _, _, err := buildTransport(context.Background(), cfg, guard, t.TempDir())
 	if err != nil {
 		t.Fatalf("buildTransport(%s): %v", cfg.Endpoint, err)
 	}

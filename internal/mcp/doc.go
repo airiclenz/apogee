@@ -32,7 +32,11 @@
 //     server that redirects must be configured at its final URL. A stdio server is a
 //     LOCAL launched subprocess — a different trust model (the host chose the
 //     command), so no URL check applies, but the launched tool calls still gate
-//     through Approval exactly the same way.
+//     through Approval exactly the same way. What it launches meets the EXEC FENCE
+//     instead: the command is resolved on PATH to an absolute program and one
+//     resolving inside the workspace is refused at connect time, and the process is
+//     held in a process group / Job Object that Close reaps, so no descendant of a
+//     configured server outlives the session.
 //
 // # Lifecycle
 //

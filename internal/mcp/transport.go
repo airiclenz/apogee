@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/security"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -25,7 +26,9 @@ import (
 // PINS the configured endpoint's own resolved addresses — permitting them, and keeping the SSRF
 // floor over every other address the transport is later pointed at. A stdio server is a LOCAL
 // launched subprocess — the host chose the command, a different trust model — so no URL floor
-// applies.
+// applies; it meets the exec fence instead (an absolute program resolved on PATH, refused if it
+// resolves inside the workspace) and is held in a process group / Job Object the Client reaps at
+// Close.
 //
 // Why the endpoint is exempt from the resolved-IP floor while the native network tools are not
 // (ADR 0012, Amendment (2026-07-26)): the floor is the anti-MODEL control — it stops a
@@ -83,24 +86,48 @@ type ServerConfig struct {
 // lookup that pins it) and the connection dials under PinnedDialControl. An unknown transport, a
 // missing or unparseable endpoint, an endpoint url-safety denies, and an endpoint that cannot be
 // resolved are all connect-time errors (the Client surfaces them per server).
-func buildTransport(ctx context.Context, cfg ServerConfig, guard security.URLGuard) (mcpsdk.Transport, error) {
+//
+// workspaceRoot is the exec fence a stdio server's command is measured against; it is unused by
+// the two HTTP transports, which launch nothing. The returned cmd and ProcessTeardown are the
+// launched process and the container holding its tree — both nil for an HTTP transport, and both
+// the caller's to reap (Client.Close).
+func buildTransport(ctx context.Context, cfg ServerConfig, guard security.URLGuard, workspaceRoot string) (mcpsdk.Transport, *exec.Cmd, platform.ProcessTeardown, error) {
 	switch cfg.Transport {
 	case TransportStdio:
-		return buildStdioTransport(cfg)
+		return buildStdioTransport(cfg, workspaceRoot)
 	case TransportSSE:
-		return buildSSETransport(ctx, cfg, guard)
+		transport, err := buildSSETransport(ctx, cfg, guard)
+		return transport, nil, nil, err
 	case TransportStreamableHTTP:
-		return buildStreamableTransport(ctx, cfg, guard)
+		transport, err := buildStreamableTransport(ctx, cfg, guard)
+		return transport, nil, nil, err
 	case "":
-		return nil, fmt.Errorf("mcp: server %q has no transport configured", cfg.Name)
+		return nil, nil, nil, fmt.Errorf("mcp: server %q has no transport configured", cfg.Name)
 	default:
-		return nil, fmt.Errorf("mcp: server %q has unknown transport %q (want stdio, sse, or streamable-http)", cfg.Name, cfg.Transport)
+		return nil, nil, nil, fmt.Errorf("mcp: server %q has unknown transport %q (want stdio, sse, or streamable-http)", cfg.Name, cfg.Transport)
 	}
 }
 
 // buildStdioTransport launches the configured local command and speaks over its stdin/stdout
 // (CommandTransport). The command is the host's choice (a trusted launch — no URL floor); an
 // empty command is refused so a misconfigured server fails loudly rather than launching nothing.
+//
+// The command is resolved on PATH through the exec fence (security.ResolveProgram), so what is
+// launched is an ABSOLUTE program that does not live inside the workspace: a server binary the
+// model could have authored — or a PATH entry pointing into the box — is refused at connect time
+// rather than executed. Connect being all-or-nothing, the operator meets that refusal at startup,
+// where every other misconfigured server is met. cmd.Dir is deliberately NOT set: the server keeps
+// starting in apogee's own working directory, the workspace, which is what filesystem-style MCP
+// servers expect, and with argv[0] an absolute fenced path there is no relative lookup left for
+// the working directory to decide.
+//
+// The returned ProcessTeardown holds the launched process's whole tree — a POSIX process group, a
+// Windows Job Object — so Client.Close reaps every descendant the server spawned rather than only
+// the leader the SDK's own shutdown signals. The Cmd carries a context for one reason:
+// platform.NewProcessTeardown wires cmd.Cancel, and exec.Cmd.Start refuses a non-nil Cancel on a
+// Cmd built without one. It is context.Background, never the connect ctx — a stdio server's
+// lifetime is the SESSION, and binding it to the sweep that dialled it would kill every server the
+// moment Connect returned.
 //
 // TRUST NOTE (security-review L4): a configured stdio MCP server is launched with Apogee's FULL
 // process environment (cmd.Environ()) plus the per-server cfg.Env, so it sees every secret the
@@ -111,15 +138,23 @@ func buildTransport(ctx context.Context, cfg ServerConfig, guard security.URLGua
 // optional env-allowlist scrub for stdio MCP launches is parked in ISSUES.md (L4) for a host that
 // wants to run a less-trusted stdio server; v1 treats a configured stdio MCP command as fully
 // trusted with the process environment.
-func buildStdioTransport(cfg ServerConfig) (mcpsdk.Transport, error) {
+func buildStdioTransport(cfg ServerConfig, workspaceRoot string) (mcpsdk.Transport, *exec.Cmd, platform.ProcessTeardown, error) {
 	if strings.TrimSpace(cfg.Command) == "" {
-		return nil, fmt.Errorf("mcp: stdio server %q has no command configured", cfg.Name)
+		return nil, nil, nil, fmt.Errorf("mcp: stdio server %q has no command configured", cfg.Name)
 	}
-	cmd := exec.Command(cfg.Command, cfg.Args...)
+	program, err := security.ResolveProgram(nil, cfg.Command, workspaceRoot, nil)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("mcp: stdio server %q: %w", cfg.Name, err)
+	}
+	cmd := exec.CommandContext(context.Background(), program, cfg.Args...)
 	if len(cfg.Env) > 0 {
 		cmd.Env = append(cmd.Environ(), cfg.Env...)
 	}
-	return &mcpsdk.CommandTransport{Command: cmd}, nil
+	// Built before the SDK starts the command, as the facility requires: on POSIX the process
+	// group is a fork-time property of the Cmd, and on Windows the Job Object has to exist before
+	// there is a process to assign to it.
+	td := platform.NewProcessTeardown(cmd)
+	return &mcpsdk.CommandTransport{Command: cmd}, cmd, td, nil
 }
 
 // buildSSETransport builds an SSE client transport after vetting the endpoint, over an

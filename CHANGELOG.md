@@ -234,6 +234,16 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **Security — a stdio MCP server is a fenced absolute program, reaped as a process tree**
+  (F-36 / F-42). A configured `mcp-servers:` stdio command is now resolved on PATH through the exec
+  fence (`security.ResolveProgram`): what is launched is an absolute program, and one resolving
+  inside the workspace — bytes a confined call is allowed to write — is refused at connect time
+  instead of executed. The launched process is held in a POSIX process group / Windows Job Object
+  (`platform.NewProcessTeardown`), and `Client.Close` reaps that container after the SDK's
+  spec-shaped shutdown, so a descendant the server spawned no longer outlives the session (the SDK's
+  shutdown signals the leader alone). The server still starts in the workspace and its environment
+  is unchanged.
+
 - **The settings editor and the keystore probe launch a fenced absolute path (F-07, F-35).** Two
   programs apogee starts on its OWN behalf — outside tool confinement, with no box of their own —
   resolved their program on PATH and then threw the answer away. The settings editor handed the pane

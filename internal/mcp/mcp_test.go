@@ -3,8 +3,14 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -75,6 +81,23 @@ func runFixtureServer() {
 		},
 	)
 
+	server.AddTool(
+		&mcpsdk.Tool{Name: "spawn", Description: "Start a long-lived descendant and report its pid.", InputSchema: map[string]any{"type": "object"}},
+		func(_ context.Context, _ *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
+			// A descendant in the SERVER'S OWN process group — not detached — which is what the
+			// group teardown is supposed to reach. Nothing waits on it: the whole point is a
+			// process that outlives its parent unless the group is reaped. Only the POSIX
+			// descendant test calls this.
+			child := exec.Command("sleep", "60")
+			if err := child.Start(); err != nil {
+				return nil, err
+			}
+			return &mcpsdk.CallToolResult{
+				Content: []mcpsdk.Content{&mcpsdk.TextContent{Text: strconv.Itoa(child.Process.Pid)}},
+			}, nil
+		},
+	)
+
 	if err := server.Run(context.Background(), &mcpsdk.StdioTransport{}); err != nil {
 		os.Exit(1)
 	}
@@ -103,7 +126,7 @@ func connectFixture(t *testing.T) *Client {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	t.Cleanup(cancel)
 
-	c, err := Connect(ctx, []ServerConfig{stdioServerConfig(t)}, security.URLGuard{})
+	c, err := Connect(ctx, []ServerConfig{stdioServerConfig(t)}, security.URLGuard{}, t.TempDir())
 	if err != nil {
 		t.Fatalf("Connect to stdio fixture: %v", err)
 	}
@@ -206,7 +229,7 @@ func TestExecute_CancelledContextIsGoError(t *testing.T) {
 // orphaned process) and is safe to call again (idempotent in effect).
 func TestClose_TearsDownSessions(t *testing.T) {
 	ctx := context.Background()
-	c, err := Connect(ctx, []ServerConfig{stdioServerConfig(t)}, security.URLGuard{})
+	c, err := Connect(ctx, []ServerConfig{stdioServerConfig(t)}, security.URLGuard{}, t.TempDir())
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
@@ -218,6 +241,105 @@ func TestClose_TearsDownSessions(t *testing.T) {
 	}
 }
 
+// TestConnect_RefusesAStdioServerInsideTheWorkspace proves the exec fence reaches the MCP launch
+// (F-36): a server program sitting inside the workspace — bytes a confined call is allowed to
+// write, and could have written — is refused at connect time rather than executed. What is planted
+// is the REAL fixture server, so a missing fence would not merely produce a different error: the
+// connection would SUCCEED, which is exactly what this test would then report.
+func TestConnect_RefusesAStdioServerInsideTheWorkspace(t *testing.T) {
+	workspace := t.TempDir()
+	cfg := stdioServerConfig(t)
+	cfg.Command = copyExecutable(t, cfg.Command, filepath.Join(workspace, "planted-mcp-server"))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	c, err := Connect(ctx, []ServerConfig{cfg}, security.URLGuard{}, workspace)
+	if err == nil {
+		_ = c.Close()
+		t.Fatal("a stdio server planted inside the workspace connected; want the exec fence to refuse it")
+	}
+	if !errors.Is(err, security.ErrExecFromWritablePath) {
+		t.Errorf("error = %v; want it to wrap ErrExecFromWritablePath", err)
+	}
+	if !strings.Contains(err.Error(), "planted-mcp-server") {
+		t.Errorf("error = %v; want it to name the planted program", err)
+	}
+	if !strings.Contains(err.Error(), cfg.Name) {
+		t.Errorf("error = %v; want it to name the server", err)
+	}
+}
+
+// TestClose_ReapsTheStdioServersDescendants proves F-42's fix: Close reaps the launched server's
+// whole process TREE, not the leader alone. The SDK's spec-shaped shutdown (close stdin, wait,
+// SIGTERM, SIGKILL) signals cmd.Process only, so before the process group a server that
+// backgrounded anything left it running past the session — an unsupervised process a session
+// teardown reported as clean.
+func TestClose_ReapsTheStdioServersDescendants(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX process groups; the Windows Job Object half of the same seam is verified on the owner's box")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	c, err := Connect(ctx, []ServerConfig{stdioServerConfig(t)}, security.URLGuard{}, t.TempDir())
+	if err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	res, err := findTool(t, c.Tools(), "fixture__spawn").Execute(ctx, domain.ToolCall{ID: "s", Tool: "fixture__spawn"})
+	if err != nil {
+		t.Fatalf("spawn: %v", err)
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(res.Content))
+	if err != nil {
+		t.Fatalf("spawn returned %q, want the descendant's pid: %v", res.Content, err)
+	}
+	t.Cleanup(func() {
+		if proc, err := os.FindProcess(pid); err == nil {
+			_ = proc.Kill()
+		}
+	})
+	if !pidAlive(pid) {
+		t.Fatalf("the descendant (pid %d) was not running before Close", pid)
+	}
+
+	if err := c.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for pidAlive(pid) {
+		if time.Now().After(deadline) {
+			t.Fatalf("the descendant (pid %d) outlived Close; want the server's process group reaped", pid)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// pidAlive reports whether pid still names a live process, the signal-0 probe. A process the reap
+// killed lingers as a zombie until its reparented init collects it, which is why the caller polls
+// rather than asserting once.
+func pidAlive(pid int) bool {
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return false
+	}
+	return proc.Signal(syscall.Signal(0)) == nil
+}
+
+// copyExecutable copies src to dst with the executable bit set and returns dst — a real, runnable
+// program planted where a test wants one.
+func copyExecutable(t *testing.T, src, dst string) string {
+	t.Helper()
+	data, err := os.ReadFile(src)
+	if err != nil {
+		t.Fatalf("read %s: %v", src, err)
+	}
+	if err := os.WriteFile(dst, data, 0o755); err != nil {
+		t.Fatalf("write %s: %v", dst, err)
+	}
+	return dst
+}
+
 // TestResume_ReconnectsFresh proves the ADR 0008 contract: resume reconnects FRESH — a new
 // Connect after Close re-establishes the connection from scratch (no server-side state is
 // restored), discovering the tools again. It models a resumed Session re-building its MCP
@@ -226,7 +348,9 @@ func TestResume_ReconnectsFresh(t *testing.T) {
 	ctx := context.Background()
 	configs := []ServerConfig{stdioServerConfig(t)}
 
-	first, err := Connect(ctx, configs, security.URLGuard{})
+	workspace := t.TempDir()
+
+	first, err := Connect(ctx, configs, security.URLGuard{}, workspace)
 	if err != nil {
 		t.Fatalf("first Connect: %v", err)
 	}
@@ -238,7 +362,7 @@ func TestResume_ReconnectsFresh(t *testing.T) {
 	}
 
 	// Resume: a brand-new client from the same config, no state carried over.
-	second, err := Connect(ctx, configs, security.URLGuard{})
+	second, err := Connect(ctx, configs, security.URLGuard{}, workspace)
 	if err != nil {
 		t.Fatalf("resume Connect: %v", err)
 	}
@@ -256,7 +380,7 @@ func TestResume_ReconnectsFresh(t *testing.T) {
 // TestConnect_NoServersIsDormant proves a host with no MCP configured pays nothing: Connect
 // returns a Client surfacing no tools whose Close is a no-op.
 func TestConnect_NoServersIsDormant(t *testing.T) {
-	c, err := Connect(context.Background(), nil, security.URLGuard{})
+	c, err := Connect(context.Background(), nil, security.URLGuard{}, t.TempDir())
 	if err != nil {
 		t.Fatalf("Connect(nil): %v", err)
 	}
@@ -273,14 +397,14 @@ func TestConnect_NoServersIsDormant(t *testing.T) {
 func TestConnect_RejectsBadServerNames(t *testing.T) {
 	t.Run("empty", func(t *testing.T) {
 		_, err := Connect(context.Background(),
-			[]ServerConfig{{Name: "", Transport: TransportStdio, Command: "x"}}, security.URLGuard{})
+			[]ServerConfig{{Name: "", Transport: TransportStdio, Command: "x"}}, security.URLGuard{}, t.TempDir())
 		if err == nil {
 			t.Fatal("Connect with an empty server name returned nil error")
 		}
 	})
 	t.Run("duplicate", func(t *testing.T) {
 		cfg := ServerConfig{Name: "dup", Transport: TransportStdio, Command: "x"}
-		_, err := Connect(context.Background(), []ServerConfig{cfg, cfg}, security.URLGuard{})
+		_, err := Connect(context.Background(), []ServerConfig{cfg, cfg}, security.URLGuard{}, t.TempDir())
 		if err == nil || !strings.Contains(err.Error(), "duplicate") {
 			t.Fatalf("Connect with a duplicate name: err = %v, want a duplicate-name error", err)
 		}
@@ -294,7 +418,7 @@ func TestConnect_RejectsBadServerNames(t *testing.T) {
 // TestBuildTransport_StdioRequiresCommand proves a stdio server with no command is refused at
 // build time rather than launching nothing.
 func TestBuildTransport_StdioRequiresCommand(t *testing.T) {
-	_, err := buildTransport(context.Background(), ServerConfig{Name: "s", Transport: TransportStdio}, security.URLGuard{})
+	_, _, _, err := buildTransport(context.Background(), ServerConfig{Name: "s", Transport: TransportStdio}, security.URLGuard{}, t.TempDir())
 	if err == nil {
 		t.Fatal("stdio transport with no command built without error")
 	}
@@ -311,7 +435,7 @@ func TestBuildTransport_HTTPEndpointBlockedByURLSafety(t *testing.T) {
 	for _, transport := range []Transport{TransportSSE, TransportStreamableHTTP} {
 		t.Run(string(transport), func(t *testing.T) {
 			cfg := ServerConfig{Name: "local", Transport: transport, Endpoint: "https://blocked.example/mcp"}
-			_, err := buildTransport(context.Background(), cfg, guard)
+			_, _, _, err := buildTransport(context.Background(), cfg, guard, t.TempDir())
 			if err == nil {
 				t.Fatalf("%s endpoint to a denied host built without error, want a url-safety block", transport)
 			}
@@ -325,13 +449,13 @@ func TestBuildTransport_HTTPEndpointBlockedByURLSafety(t *testing.T) {
 // TestBuildTransport_UnknownAndMissing proves an unknown transport and a missing HTTP endpoint
 // are connect-time errors, never silently defaulted.
 func TestBuildTransport_UnknownAndMissing(t *testing.T) {
-	if _, err := buildTransport(context.Background(), ServerConfig{Name: "s", Transport: "carrier-pigeon"}, security.URLGuard{}); err == nil {
+	if _, _, _, err := buildTransport(context.Background(), ServerConfig{Name: "s", Transport: "carrier-pigeon"}, security.URLGuard{}, t.TempDir()); err == nil {
 		t.Error("unknown transport built without error")
 	}
-	if _, err := buildTransport(context.Background(), ServerConfig{Name: "s", Transport: ""}, security.URLGuard{}); err == nil {
+	if _, _, _, err := buildTransport(context.Background(), ServerConfig{Name: "s", Transport: ""}, security.URLGuard{}, t.TempDir()); err == nil {
 		t.Error("empty transport built without error")
 	}
-	if _, err := buildTransport(context.Background(), ServerConfig{Name: "s", Transport: TransportSSE}, security.URLGuard{}); err == nil {
+	if _, _, _, err := buildTransport(context.Background(), ServerConfig{Name: "s", Transport: TransportSSE}, security.URLGuard{}, t.TempDir()); err == nil {
 		t.Error("SSE transport with no endpoint built without error")
 	}
 }
@@ -352,7 +476,7 @@ func TestConnect_RollsBackOnLaterFailure(t *testing.T) {
 		stdioServerConfig(t), // healthy
 		{Name: "broken", Transport: TransportStdio, Command: "this-command-does-not-exist-apogee"},
 	}
-	c, err := Connect(ctx, configs, security.URLGuard{})
+	c, err := Connect(ctx, configs, security.URLGuard{}, t.TempDir())
 	if err == nil {
 		_ = c.Close()
 		t.Fatal("Connect with a broken second server returned nil error, want the connect failure")

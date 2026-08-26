@@ -38,7 +38,7 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	// On resume the connection is established FRESH here — no server-side state is restored
 	// (ADR 0008). An MCP connect failure is fatal: a configured server that cannot be reached is
 	// a misconfiguration the user should see, not a silently-dropped capability.
-	mcpClient, err := mcp.Connect(ctx, w.opts.MCPServers, security.URLGuard{})
+	mcpClient, err := mcp.Connect(ctx, w.opts.MCPServers, security.URLGuard{}, w.roots.workspace)
 	if err != nil {
 		return fmt.Errorf("apogee: connect MCP servers: %w", err)
 	}
@@ -48,7 +48,7 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	// client this line connected would leave the live sessions orphaned and tear down a set that was
 	// already closed hours ago.
 	w.mcpSet = newLiveMCP(mcpClient, func(servers []mcp.ServerConfig) (mcpSession, error) {
-		return mcp.Connect(ctx, servers, security.URLGuard{})
+		return mcp.Connect(ctx, servers, security.URLGuard{}, w.roots.workspace)
 	})
 	// The registry is assembled HERE unconditionally rather than left to the engine's own
 	// resolveTools — which would build the identical set from this same Config — because the
