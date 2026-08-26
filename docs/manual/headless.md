@@ -47,6 +47,9 @@ A server that reports how much of a prompt it answered from its own prefix cache
 `· cached 12k` column to that agent's line — a subset of the prompt count, never a
 replacement for it; a server that says nothing about caching leaves the column off rather
 than printing a zero that would read as a cache miss.
+A run whose final turn was **abandoned** says so on that same summary line — the stats
+segment ends `· faulted` — so the one line a script greps reports it even where the exit
+status is not read.
 The exit status says which kind of
 thing happened:
 
@@ -55,4 +58,5 @@ thing happened:
 | `0` | the run completed |
 | `1` | the run started and failed — model or tool error, cancellation, a record that would not save |
 | `2` | the run never started — usage, configuration, a refused mode |
+| `3` | the run started and reached its boundary, but its final turn was abandoned (a model or upstream fault the loop could not recover) — stdout holds the run's last text, not an answer; the record is saved |
 

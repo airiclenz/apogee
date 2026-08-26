@@ -10,6 +10,17 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **An abandoned final Turn now reaches the caller as data, and `apogee headless` exits 3 on it.**
+  `run.Result` gained `Faulted` and `Fault` beside `Denied`: `Faulted` says the Firing's final Turn
+  was ABANDONED (`domain.StepResult.Faulted`) and `Fault` carries the reason — the Agent's new
+  boundary-only `LastFault()`, which is the same sentence the loop already surfaced as an
+  `ErrorEvent`. `Err` stays nil (the Exchange did reach its boundary) and `FinalText` is still
+  delivered, so the fault is the one field that tells a run's last words from its answer, and a
+  Driver learns it without tapping the event stream. `apogee headless` reads it: a faulted run now
+  exits `3` — a third outcome beside "started and failed" (1) and "never started" (2) — its stderr
+  summary line ends `· faulted`, and its error names the fault and the saved partial record. A run
+  that also errored still exits 1.
+
 - **Security — one exec resolver, and the shells go through it.** `security.ResolveProgram` is the
   exec fence's complete form — PATH lookup, a refusal for a relative answer (Go's `exec.ErrDot`
   shape), then `RefuseExecFromWritablePath` — with the three outcomes kept distinguishable:

@@ -946,5 +946,18 @@ func (a *Agent) RestoreSession(snap domain.Session) error {
 // like Snapshot, is meant for use only at a quiescent boundary with no worker driving the Agent.
 func (a *Agent) InExchange() bool { return a.turns.inExchange }
 
+// LastFault reports the text of the most recent loop-level fault this Agent surfaced as an
+// ErrorEvent — the very sentence the human already read (emitLoopFault) — and "" when no
+// loop-level fault has been surfaced at all. A fault ends the Exchange, so after Run returns
+// with domain.StepResult.Faulted set this is the reason that Turn was ABANDONED; an Exchange
+// abandoned with no ErrorEvent behind it (a recovered hook panic) leaves it empty, and a caller
+// must render whatever it says without one rather than assert a cause.
+//
+// It exists so a Driver learns the reason as DATA rather than by tapping the event stream (ADR
+// 0031): internal/run copies it onto run.Result so an unattended caller — `apogee headless`, the
+// daemon — can say WHY its answer is not an answer. Like InExchange it is a boundary-only read,
+// meant for use after Run has returned with no worker driving the Agent.
+func (a *Agent) LastFault() string { return a.lastFault }
+
 // Compact (the /compact command's engine half) lives in compact.go alongside its provider
 // adapter and the generative reducer it drives (internal/context.Compact).

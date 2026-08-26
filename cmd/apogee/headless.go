@@ -42,6 +42,11 @@ const (
 	// exitNotStarted is a run that never began: a usage mistake, a configuration this host
 	// cannot honour, or a mode a headless run may not use. Nothing was sent and nothing saved.
 	exitNotStarted = 2
+	// exitRunFaulted is a run that started and reached its boundary, but whose final Turn the
+	// engine ABANDONED: whatever is on stdout is the run's last words, not its answer. It is a
+	// third thing a script must tell apart — the run did not fail (its record saved, its Turns
+	// did their work) and it did not answer either, so neither 0 nor 1 says what happened.
+	exitRunFaulted = 3
 )
 
 // exitError carries the process exit code an error asks the binary to end with. RunE returns it
@@ -431,6 +436,18 @@ func runHeadless(cmd *cobra.Command, args []string, opts *config.Options, noSave
 		}
 		return runFailed(runErr)
 	}
+	// An abandoned final Turn is exit 3, and it is decided AFTER the failure branch above on
+	// purpose: a run that errored is exit 1 whether or not it also faulted, because the error is
+	// the more actionable of the two. What reaches here is a run that returned no error and still
+	// has no answer — the answer text above is the run's last words, so the error names the fault
+	// the engine reported (run.Result.Fault) and, like a failure, the record it can be read in.
+	if res.Faulted {
+		err := fmt.Errorf("apogee headless: the run's final turn was abandoned — %s", res.Fault)
+		if res.SessionID != "" {
+			err = fmt.Errorf("%w (partial run saved as %s)", err, res.SessionID)
+		}
+		return exitError{code: exitRunFaulted, err: err}
+	}
 	return nil
 }
 
@@ -462,6 +479,12 @@ func resolveHeadlessPrompt(args []string, stdin io.Reader) (string, error) {
 // is no record, which is both --no-save and a save that failed.
 func headlessSummary(res run.Result) string {
 	stats := fmt.Sprintf("turns: %d · denied: %d", res.Turns, res.Denied)
+	if res.Faulted {
+		// The one line a script greps has to say the run has no answer, not only the exit code:
+		// a pipeline that keeps the summary and drops the status would otherwise read a faulted
+		// run as a completed one.
+		stats += " · faulted"
+	}
 	if res.SessionID == "" {
 		return stats
 	}

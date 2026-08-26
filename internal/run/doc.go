@@ -46,7 +46,11 @@
 // A caller that wants to observe the run supplies Config.Events; a nil sink is a discard.
 // A Turn the loop abandoned reports domain.StepResult.Faulted and surfaces its own
 // ErrorEvent through that sink — Once does not translate it into a returned error, since
-// the Exchange did reach its boundary. A CANCELLED run does become Result.Err: it never
+// the Exchange did reach its boundary. It travels on the Result instead, as data no
+// observer is needed to catch: Result.Faulted says the final Turn was abandoned and
+// Result.Fault carries the reason, the same sentence that ErrorEvent said. So Err stays
+// nil, FinalText still carries whatever the run last said, and a caller reads Faulted to
+// know that text is not the answer. A CANCELLED run does become Result.Err: it never
 // reached an answer, and an unattended caller has no other way to tell.
 //
 // Context fill IS reported, at two grains, because neither survives the run otherwise. The

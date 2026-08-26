@@ -234,7 +234,7 @@ event's alone.
 
 ---
 
-## 3. `run.Result` carries the abandoned-Turn fault; `apogee headless` exits 3 on it
+## 3. `run.Result` carries the abandoned-Turn fault; `apogee headless` exits 3 on it — ✅ DONE (2026-08-26)
 
 **What:**
 - `internal/agent/agent.go`: add `func (a *Agent) LastFault() string` — the text `emitLoopFault`

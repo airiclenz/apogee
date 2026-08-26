@@ -82,6 +82,16 @@ type Result struct {
 	// Plan Firing means the model kept reaching past its read-only floor; on an Auto Firing
 	// it means the run needed a human it did not have.
 	Denied int
+	// Faulted reports that the Firing's final Turn was ABANDONED (domain.StepResult.Faulted):
+	// the Exchange reached its boundary, so Err is nil and FinalText is whatever the run last
+	// said, but that text is NOT the answer to the prompt. A caller that treats FinalText as the
+	// product must read this first — it is the one field that tells the two apart.
+	Faulted bool
+	// Fault is why that final Turn was abandoned — the Agent's LastFault(), which is the very
+	// ErrorEvent text an attached event sink already saw. Empty when Faulted is false, and empty
+	// on the rare fault that surfaced no ErrorEvent at all, which a caller renders as a fault
+	// naming no cause rather than as no fault.
+	Fault string
 	// SubAgents reports how full each delegated run's context got and what it spent, one entry
 	// per sub-agent run, in FINISH order (so a nested run precedes the run that spawned it). It
 	// is flat: the entries carry no nesting, because a reading belongs to exactly one run and
@@ -239,6 +249,8 @@ func Once(ctx context.Context, spec Spec) (Result, error) {
 		FinalText: tap.finalText(),
 		Turns:     step.TurnIndex + 1,
 		Denied:    den.count(),
+		Faulted:   step.Faulted,
+		Fault:     a.LastFault(),
 		SubAgents: tap.subAgentRuns(),
 		Usage:     tap.totals(),
 		Err:       runErr,

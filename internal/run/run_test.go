@@ -416,6 +416,57 @@ func TestOnceReportsTheLastMessageNotTheFirst(t *testing.T) {
 	}
 }
 
+// TestOnceReportsAnAbandonedFinalTurn pins the fault half of the contract: a Firing whose
+// final Turn the loop ABANDONED reports it as data on the Result, so an unattended caller
+// with no event sink still learns its text is not an answer. The Exchange reached its
+// boundary, so Err stays nil and the record still saves; only Faulted says otherwise.
+//
+// The empty reply is the fault the engine has always raised for this (the guard
+// internal/agent/emptyreply_test.go pins): a stop-finished reply with no visible text and no
+// tool call, which no Mechanism is registered here to recover.
+func TestOnceReportsAnAbandonedFinalTurn(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		reply       func(http.ResponseWriter, request)
+		wantFaulted bool
+	}{
+		{"an abandoned turn", func(w http.ResponseWriter, _ request) { writeFinal(w, "") }, true},
+		{"a clean run", alwaysFinal("the build is green"), false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			up := newUpstream(t, tt.reply)
+			spec := planSpec(up.url, "check the build")
+			spec.Store = session.NewStore(t.TempDir())
+
+			res, err := Once(context.Background(), spec)
+
+			if err != nil {
+				t.Fatalf("Once: %v", err)
+			}
+			if res.Faulted != tt.wantFaulted {
+				t.Fatalf("Result.Faulted = %v, want %v", res.Faulted, tt.wantFaulted)
+			}
+			if res.Err != nil {
+				t.Errorf("Result.Err = %v, want nil — a fault is not a loop error", res.Err)
+			}
+			if tt.wantFaulted && res.Fault == "" {
+				t.Error("Result.Fault is empty; an abandoned turn must name why")
+			}
+			if !tt.wantFaulted && res.Fault != "" {
+				t.Errorf("Result.Fault = %q, want empty on a run that faulted nothing", res.Fault)
+			}
+			if res.SessionID == "" {
+				t.Error("Result.SessionID is empty; a firing that reached its boundary saves its record")
+			}
+		})
+	}
+}
+
 // TestOnceReportsNoAnswerWhenCancelled covers the empty half of the contract: a Firing
 // stopped before any assistant message has no answer to report, and reports none rather
 // than something older.

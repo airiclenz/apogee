@@ -1170,7 +1170,8 @@ func TestHeadlessAnswerLandsOnTheProcessStdout(t *testing.T) {
 }
 
 // The exit-code convention this command introduces, end to end through the error type: 0 for a
-// completed run, 1 for a run that started and failed, 2 for one that never started.
+// completed run, 1 for a run that started and failed, 2 for one that never started, 3 for one that
+// reached its boundary with its final Turn abandoned.
 func TestHeadlessExitCodes(t *testing.T) {
 	t.Run("a completed run exits 0", func(t *testing.T) {
 		stub := &stubRunner{res: run.Result{SessionID: "s-1", FinalText: "done", Turns: 2, Denied: 4}}
@@ -1197,6 +1198,54 @@ func TestHeadlessExitCodes(t *testing.T) {
 		}
 		if !strings.Contains(out, "half an answer") {
 			t.Errorf("a failed run withheld what it salvaged: %q", out)
+		}
+	})
+
+	t.Run("a faulted run exits 3 and says so on stdout, stderr and the error", func(t *testing.T) {
+		// run.Once's shape for an abandoned final Turn: no error at all, a saved record, and
+		// whatever the run last said on FinalText — which is exactly why the exit code and the
+		// summary have to carry the fault, since nothing else about the Result looks unusual.
+		stub := &stubRunner{res: run.Result{
+			SessionID: "s-3",
+			FinalText: "the run's last words",
+			Turns:     2,
+			Faulted:   true,
+			Fault:     "the model returned an empty reply",
+		}}
+		out, errOut, err := headlessRun(t, stub, "a prompt")
+		if err == nil {
+			t.Fatal("a faulted run was reported as a success")
+		}
+		if code := exitCodeFor(err); code != exitRunFaulted {
+			t.Errorf("exit code = %d; want %d", code, exitRunFaulted)
+		}
+		if !strings.Contains(err.Error(), "the model returned an empty reply") {
+			t.Errorf("the fault does not name the reason: %q", err.Error())
+		}
+		if !strings.Contains(err.Error(), "partial run saved as s-3") {
+			t.Errorf("the fault does not name the partial record: %q", err.Error())
+		}
+		if strings.TrimRight(out, "\n") != "the run's last words" {
+			t.Errorf("stdout = %q; a faulted run still hands over what it said", out)
+		}
+		if !strings.Contains(errOut, "faulted") {
+			t.Errorf("the summary does not say the run faulted: %q", errOut)
+		}
+	})
+
+	t.Run("a run that both errored and faulted exits 1", func(t *testing.T) {
+		// The failure is the more actionable of the two, so it keeps the exit code it has always
+		// had: the fault branch sits behind the failure branch and never overrides it.
+		stub := &stubRunner{
+			res: run.Result{SessionID: "s-4", FinalText: "half an answer", Turns: 1, Faulted: true, Fault: "an empty reply"},
+			err: errors.New("apogee: the firing was cancelled"),
+		}
+		_, _, err := headlessRun(t, stub, "a prompt")
+		if err == nil {
+			t.Fatal("a failed run returned no error")
+		}
+		if code := exitCodeFor(err); code != exitRunFailed {
+			t.Errorf("exit code = %d; want %d", code, exitRunFailed)
 		}
 	})
 
