@@ -276,6 +276,19 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **`git_commit`'s amend guard now asks git which remote branches contain HEAD.** The guard read
+  the tip's decoration (`git log -1 --format=%D`) and refused an amend only when some ref there
+  began with `origin/`, so it missed both shapes a remote actually takes: a local branch reset
+  BEHIND its remote (nothing points AT the commit, yet `origin/main` still contains it) and a
+  remote registered under any other name (`upstream/main` is a remote-tracking ref that no
+  `origin/` prefix matches) — in either case the tool amended a commit the remote had already
+  served (C-05). It now runs `git branch -r --contains HEAD` and refuses when git lists at least
+  one remote-tracking branch, which answers both shapes and asks nothing about a remote's name. A
+  non-zero exit — no remotes configured, or a state git cannot answer — still reads as unpublished,
+  the guard's existing degrade, now explicit at the call site: it lets the amend through rather
+  than blocking work on an answer it does not have. The tool spec's "blocked on published commits"
+  sentence is true as written for the first time; the refusal wording is unchanged.
+
 - **A delegation that never ran now shows the prompt it carried.** A delegation that is over with
   nothing behind it — refused at the depth bound, failed by a hook before its first event, lost to a
   construct error — is drawn as an ordinary tool block rather than as a run, and rightly so: a frame

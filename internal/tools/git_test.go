@@ -507,6 +507,137 @@ func TestGitCommit_PathEscapeRejected(t *testing.T) {
 	}
 }
 
+// gitRepoWithBareRemote builds a gitRepo(t) whose main branch is pushed to a bare repository
+// registered under remoteName, and returns the work tree's root beside a runner for further
+// host-git commands in it. It is the fixture the amend guard's remote tests share: the guard
+// asks git whether any remote-tracking branch contains HEAD, which is only answerable against
+// a real remote.
+func gitRepoWithBareRemote(t *testing.T, remoteName string) (string, func(args ...string)) {
+	t.Helper()
+	root := gitRepo(t)
+	gitPath, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("no git on PATH; skipping the live git-tool run")
+	}
+	runIn := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command(gitPath, args...)
+		cmd.Dir = root
+		cmd.Env = append(safeGitEnv(""),
+			"GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=test@example.com",
+			"GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=test@example.com",
+		)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	remote := filepath.Join(t.TempDir(), "remote.git")
+	runIn("init", "--bare", remote)
+	runIn("remote", "add", remoteName, remote)
+	runIn("push", "-u", remoteName, "main")
+	return root, runIn
+}
+
+// TestGitCommit_AmendRefusedWhenHEADIsBehindItsRemote pins the first shape the decoration read
+// could not see: the branch has been reset back below its remote, so nothing points AT HEAD but
+// origin/main still CONTAINS it. Amending here rewrites history the remote has served.
+func TestGitCommit_AmendRefusedWhenHEADIsBehindItsRemote(t *testing.T) {
+	root, runIn := gitRepoWithBareRemote(t, "origin")
+	if err := writeFileForTest(root, "second.txt", "second\n"); err != nil {
+		t.Fatalf("write second file: %v", err)
+	}
+	runIn("add", "second.txt")
+	runIn("commit", "-m", "second")
+	runIn("push", "origin", "main")
+	// HEAD is now the first commit: no ref points at it, origin/main is one ahead of it.
+	runIn("reset", "--hard", "HEAD~1")
+
+	res, err := NewGitCommit(root).Execute(context.Background(),
+		commitCall("c1", `{"message":"reworded","amend":true}`))
+	if err != nil {
+		t.Fatalf("Execute err = %v", err)
+	}
+	if !res.IsError || !strings.Contains(res.Content, "cannot amend a commit that has been pushed") {
+		t.Errorf("amend of a commit origin/main contains = %q (isError=%v), want the published refusal", res.Content, res.IsError)
+	}
+}
+
+// TestGitCommit_AmendRefusedOnANonOriginRemote pins the second shape: the remote is not called
+// "origin", so a prefix match on "origin/" saw an unpublished commit where git sees a published one.
+func TestGitCommit_AmendRefusedOnANonOriginRemote(t *testing.T) {
+	root, _ := gitRepoWithBareRemote(t, "upstream")
+
+	res, err := NewGitCommit(root).Execute(context.Background(),
+		commitCall("c1", `{"message":"reworded","amend":true}`))
+	if err != nil {
+		t.Fatalf("Execute err = %v", err)
+	}
+	if !res.IsError || !strings.Contains(res.Content, "cannot amend a commit that has been pushed") {
+		t.Errorf("amend of a commit upstream/main contains = %q (isError=%v), want the published refusal", res.Content, res.IsError)
+	}
+}
+
+// TestGitCommit_AmendAllowedOnAnUnpushedCommit keeps the guard from over-refusing: a commit made
+// past the pushed tip is the model's own work and amends fine.
+func TestGitCommit_AmendAllowedOnAnUnpushedCommit(t *testing.T) {
+	root, runIn := gitRepoWithBareRemote(t, "origin")
+	if err := writeFileForTest(root, "local.txt", "local only\n"); err != nil {
+		t.Fatalf("write local file: %v", err)
+	}
+	runIn("add", "local.txt")
+	runIn("commit", "-m", "local work")
+
+	res, err := NewGitCommit(root).Execute(context.Background(),
+		commitCall("c1", `{"message":"local work, reworded","amend":true}`))
+	if err != nil {
+		t.Fatalf("Execute err = %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("amend of an unpushed commit = %q, want it to succeed", res.Content)
+	}
+	if !strings.Contains(res.Content, "local work, reworded") {
+		t.Errorf("amend summary = %q, want the new message", res.Content)
+	}
+}
+
+// TestGitCommit_AmendAllowedWithNoRemote covers the degrade: a repository with no remote at all
+// has nothing that could have seen the commit, so the guard stays out of the way.
+func TestGitCommit_AmendAllowedWithNoRemote(t *testing.T) {
+	root := gitRepo(t)
+
+	res, err := NewGitCommit(root).Execute(context.Background(),
+		commitCall("c1", `{"message":"initial, reworded","amend":true}`))
+	if err != nil {
+		t.Fatalf("Execute err = %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("amend in a remote-less repo = %q, want it to succeed", res.Content)
+	}
+	if !strings.Contains(res.Content, "initial, reworded") {
+		t.Errorf("amend summary = %q, want the new message", res.Content)
+	}
+}
+
+func TestRemoteBranchesListed(t *testing.T) {
+	cases := []struct {
+		name   string
+		output string
+		want   bool
+	}{
+		{name: "nothing printed", output: "", want: false},
+		{name: "a bare newline", output: "\n", want: false},
+		{name: "one remote branch", output: "  upstream/main\n", want: true},
+		{name: "several remote branches", output: "  origin/HEAD -> origin/main\n  origin/main\n", want: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := remoteBranchesListed(tc.output); got != tc.want {
+				t.Errorf("remoteBranchesListed(%q) = %v, want %v", tc.output, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestGitDiffRange_ShowsDiff(t *testing.T) {
 	root := gitRepo(t)
 	gitPath, _ := exec.LookPath("git")

@@ -788,7 +788,10 @@ delegation WITH a span is unchanged (the existing sketch tests at `:58` stay byt
 
 ---
 
-## 14. The amend guard asks git which remote branches contain HEAD
+## 14. The amend guard asks git which remote branches contain HEAD — ✅ DONE (2026-08-26)
+
+NOTES (2026-08-26): the item's `remoteBranchesListed` is fed `runGit`'s combined output (stdout+stderr),
+the only output shape the git funnel returns — the item's "its output" read against the existing seam.
 
 **What:** C-05. `internal/tools/git.go:551-560`: replace the `log -1 --format=%D` read and
 `commitIsPublished` (`:617-627`) with `runGit(ctx, gitPath, t.root, gitTimeout, "branch", "-r",

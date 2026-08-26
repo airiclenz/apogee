@@ -641,14 +641,19 @@ func (t *GitCommit) Execute(ctx context.Context, call domain.ToolCall) (domain.T
 		return errorResult(call.ID, refusal), nil
 	}
 
-	// Amend is refused on a commit already published to a remote (origin/…), so the
-	// tool never rewrites history a remote has seen.
+	// Amend is refused on a commit some remote already holds, so the tool never rewrites
+	// history a remote has seen. The question is put to git rather than inferred from the
+	// tip's decoration: `branch -r --contains HEAD` answers it for a remote under any name
+	// and for a local branch that has fallen BEHIND its remote, where the decoration names
+	// only the refs pointing AT the commit. A non-zero exit — no remotes configured, or a
+	// state git cannot answer — reads as unpublished, the guard's existing degrade: it lets
+	// the amend through rather than blocking work on an answer it does not have.
 	if args.Amend {
-		refs, err := runGit(ctx, gitPath, t.root, gitTimeout, "log", "-1", "--format=%D", "HEAD")
+		remotes, err := runGit(ctx, gitPath, t.root, gitTimeout, "branch", "-r", "--contains", "HEAD")
 		if err != nil {
 			return domain.ToolResult{}, err
 		}
-		if refs.exitCode == 0 && commitIsPublished(refs.combinedOutput) {
+		if remotes.exitCode == 0 && remoteBranchesListed(remotes.combinedOutput) {
 			return errorResult(call.ID, "cannot amend a commit that has been pushed to a remote; create a new commit instead"), nil
 		}
 	}
@@ -714,12 +719,13 @@ func (t *GitCommit) Execute(ctx context.Context, call domain.ToolCall) (domain.T
 	return okResult(call.ID, gitResultText(res, "commit created")), nil
 }
 
-// commitIsPublished reports whether the decoration refs of a commit (the output of
-// `git log -1 --format=%D`) include a remote-tracking ref (origin/…), i.e. the
-// commit has been pushed.
-func commitIsPublished(refDecoration string) bool {
-	for _, ref := range strings.Split(refDecoration, ",") {
-		if strings.HasPrefix(strings.TrimSpace(ref), "origin/") {
+// remoteBranchesListed reports whether `git branch -r --contains <commit>` listed at least
+// one remote-tracking branch, i.e. some remote holds the commit. git lists one branch per
+// line and prints nothing at all when none contains it, so any non-blank line is a hit —
+// the remote's name is irrelevant, only that a remote has seen the commit.
+func remoteBranchesListed(output string) bool {
+	for _, line := range strings.Split(output, "\n") {
+		if strings.TrimSpace(line) != "" {
 			return true
 		}
 	}
