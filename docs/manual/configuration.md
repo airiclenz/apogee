@@ -141,8 +141,10 @@ point it decides to compact — so a model advertising a very large one makes al
 expensive at once, and a single delegated task can re-send hundreds of thousands of tokens
 on every step. `working-window:` (a file-only key, in tokens) bounds the room those guards
 work in without changing what the model can hold: apogee budgets, caps and compacts inside
-your number, while the advertised window still says when a request genuinely will not fit
-and still sets the reply ceiling. On a 1M-window model, `working-window: 200000` is a sane
+your number, while the advertised window still says when a request genuinely will not fit.
+The reply ceiling follows your number too — it is derived from the share of the working room
+held back for the reply — so bounding the room also stops a big-window model deriving the
+same maximum reply every time. On a 1M-window model, `working-window: 200000` is a sane
 place to start. Leave it unset (`0`) and the working room is the whole advertised window,
 which is what apogee always did. The same key on a `servers:` entry bounds that one server's
 room and outranks the top-level one while the session is on it — following a `/server`

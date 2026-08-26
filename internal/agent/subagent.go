@@ -302,6 +302,12 @@ func (a *Agent) newChildAgent(spawnCallID, task, name string) (*Agent, error) {
 		if target.ContextWindow > 0 {
 			childCfg.Context.MaxContextTokens = target.ContextWindow
 		}
+		// The room INSIDE that window the child works in — the target's `working-window:`, carried
+		// unconditionally like the reply ceiling below and for the same reason: a bound in tokens is
+		// a number sized for ONE server's window, so an unbounded target must not leave the parent's
+		// standing over the window just settled above. 0 is the honest absent value, and it puts the
+		// child back in the whole of the routed server's window.
+		childCfg.Context.WorkingWindow = target.WorkingWindow
 		// The reply ceiling, unconditionally — the one routed field whose zero IS the answer (ADR
 		// 0046). An unpinned target leaves the child deriving its cap from the window just settled
 		// above, which is the routed server's; keeping the parent's pin would bound a reply from

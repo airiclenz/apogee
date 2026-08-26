@@ -4,7 +4,8 @@ package agent
 // request cannot fit the model's context window, step() folds the history BEFORE the request
 // reaches the wire — saving the round-trip the server would reject, and covering the one case the
 // reactive path cannot (a server whose 400 body the provider cannot classify as an overflow).
-// These tests pin the threshold (the full working room, exactly — not a comfort margin), the one
+// These tests pin the threshold (the full HARD room — the advertised window less the reply
+// reserve, exactly, never a comfort margin and never the softer `working-window:` ceiling), the one
 // fold the predictive and reactive paths share, the conservative ceiling an unknown window falls
 // back to, and the way the guard stays out of the way: a refused fold still sends the request.
 
@@ -27,10 +28,12 @@ func calibrate(a *Agent) {
 }
 
 // workingRoom is the threshold the predictive guard compares against: everything the prompt may
-// occupy once the reply's reserve is held back.
+// occupy inside the ADVERTISED window once the reply's reserve is held back. It reads Window
+// rather than the working ceiling ContextLimit because the guard does — the two are the same
+// number on every Agent here, none of which bounds its working room.
 func workingRoom(a *Agent) int {
 	b := a.budget()
-	return b.ContextLimit - b.ResponseReserve
+	return b.Window - b.ResponseReserve
 }
 
 // seedSizedOpenTurn seeds an Exchange in flight whose history ends in a tool result — a tool
@@ -368,5 +371,41 @@ func TestPredictiveGuardSpendsTheTurnsOneFold(t *testing.T) {
 	}
 	if hasEvent[domain.MessageEvent](sink.events) {
 		t.Error("a MessageEvent was emitted for a Turn that produced no assistant message")
+	}
+}
+
+// TestPredictiveGuardMeasuresTheAdvertisedWindow pins which of the Budget's two ceilings this
+// guard reads. A `working-window:` bound is a SOFT line the reducers keep the session under, so a
+// request that runs past it while still fitting the server's window must not be folded — folding
+// there would make the bound a fold trigger rather than a budget, on every Turn of a bounded
+// session. The hard wall still folds, which is what the guard is for.
+func TestPredictiveGuardMeasuresTheAdvertisedWindow(t *testing.T) {
+	t.Parallel()
+
+	cfg := baseConfig(&recordingSink{})
+	cfg.Context.MaxContextTokens = 1310720
+	cfg.Context.WorkingWindow = 200000
+	a, err := newAgent(cfg, echoResponder{reply: "unused"})
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	calibrate(a) // CALIBRATED: the ratio margin is out of the way and the room is the bare one
+
+	b := a.budget()
+	const past = 400000 // tokens: far past the 200K working room, far inside the 1.3M window
+	if working := b.ContextLimit - b.ResponseReserve; working >= past {
+		t.Fatalf("test setup: the working room is %d tokens, not under the %d-token request", working, past)
+	}
+	exceeds := func(tokens int) bool {
+		msgs := []domain.Message{{Role: domain.RoleUser, Content: strings.Repeat("x", tokens*4)}}
+		return a.requestExceedsWindow(domain.NewRequest(a.cfg.Model, msgs, nil, a.budget(), 0, nil))
+	}
+
+	if exceeds(past) {
+		t.Errorf("a %d-token request folded under a %d working / %d advertised pair; the guard is reading the soft ceiling",
+			past, b.ContextLimit, b.Window)
+	}
+	if !exceeds(b.Window) {
+		t.Errorf("a request the size of the whole %d-token advertised window did not fold; the hard wall is unguarded", b.Window)
 	}
 }

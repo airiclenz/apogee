@@ -193,3 +193,113 @@ func TestPreRequestHookBeatsTheOutputCap(t *testing.T) {
 		t.Fatalf("MaxTokens = %v, want the hook's 77 rather than the loop's derived cap", got)
 	}
 }
+
+// TestBudgetSplitsTheAdvertisedWindowFromTheWorkingRoom pins the split the `working-window:` key
+// introduced: Window keeps naming the wall the server enforces while ContextLimit — the number the
+// Allocation is computed from and every reducer reads — names the room the session works in. The
+// four rows are the whole precedence: a bound inside the window, no bound at all, a bound the
+// window already beats, and a bound with no window to sit inside.
+func TestBudgetSplitsTheAdvertisedWindowFromTheWorkingRoom(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name      string
+		window    int
+		working   int
+		wantWin   int
+		wantLimit int
+	}{
+		{
+			name:   "a working window bounds the room inside the advertised window",
+			window: 1310720, working: 200000, wantWin: 1310720, wantLimit: 200000,
+		},
+		{
+			name:   "no working window leaves the advertised window whole",
+			window: 1310720, working: 0, wantWin: 1310720, wantLimit: 1310720,
+		},
+		{
+			name:   "a working window above the advertised window is ignored",
+			window: 32768, working: 200000, wantWin: 32768, wantLimit: 32768,
+		},
+		{
+			name:   "a working window with no advertised window is the only room named",
+			window: 0, working: 200000, wantWin: 0, wantLimit: 200000,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			cfg := baseConfig(&recordingSink{})
+			cfg.Context.MaxContextTokens = tc.window
+			cfg.Context.WorkingWindow = tc.working
+			a, err := newAgent(cfg, echoResponder{reply: "unused"})
+			if err != nil {
+				t.Fatalf("newAgent: %v", err)
+			}
+
+			b := a.budget()
+
+			if b.Window != tc.wantWin {
+				t.Errorf("Window = %d, want the advertised %d", b.Window, tc.wantWin)
+			}
+			if b.ContextLimit != tc.wantLimit {
+				t.Errorf("ContextLimit = %d, want the working room %d", b.ContextLimit, tc.wantLimit)
+			}
+			want := apogeectx.Allocate(tc.wantLimit, 0, 0)
+			if b.ResponseReserve != want.ResponseReserve || b.SystemPrompt != want.SystemPrompt ||
+				b.FileContext != want.FileContext || b.History != want.History {
+				t.Errorf("allocation = {reserve %d sys %d file %d hist %d}, want the working room's %+v",
+					b.ResponseReserve, b.SystemPrompt, b.FileContext, b.History, want)
+			}
+			if sum := b.SystemPrompt + b.FileContext + b.History; sum != tc.wantLimit-b.ResponseReserve {
+				t.Errorf("allocation sums to %d, want ContextLimit - ResponseReserve = %d",
+					sum, tc.wantLimit-b.ResponseReserve)
+			}
+		})
+	}
+}
+
+// TestMaxOutputTokensDerivesFromTheWorkingRoom is the payoff the split buys on a very large window:
+// the reply cap comes out of the reserve of the room the session WORKS in, so an operator's
+// `working-window:` bound produces a cap their own number implies instead of maxOutputTokenCap
+// every single time. The 200,000 row is the honest boundary: a fifth of it is still 40,000, past
+// the ceiling, so the bound has to be under ~163,840 before the derivation is what bites.
+func TestMaxOutputTokensDerivesFromTheWorkingRoom(t *testing.T) {
+	t.Parallel()
+
+	const advertised = 1310720
+
+	cases := []struct {
+		name    string
+		working int
+		want    int
+	}{
+		{name: "the advertised window alone derives the ceiling", working: 0, want: maxOutputTokenCap},
+		{name: "a bounded working room derives its own reserve", working: 120000, want: 24000},
+		{name: "a working room whose reserve still clears the ceiling is clamped", working: 200000, want: maxOutputTokenCap},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			cfg := baseConfig(&recordingSink{})
+			cfg.Context.MaxContextTokens = advertised
+			cfg.Context.WorkingWindow = tc.working
+			a, err := newAgent(cfg, echoResponder{reply: "unused"})
+			if err != nil {
+				t.Fatalf("newAgent: %v", err)
+			}
+
+			got := a.maxOutputTokens()
+
+			if got != tc.want {
+				t.Errorf("maxOutputTokens() = %d, want %d (advertised %d, working %d)",
+					got, tc.want, advertised, tc.working)
+			}
+			if got < minOutputTokenCap || got > maxOutputTokenCap {
+				t.Errorf("maxOutputTokens() = %d, outside [%d, %d]", got, minOutputTokenCap, maxOutputTokenCap)
+			}
+		})
+	}
+}

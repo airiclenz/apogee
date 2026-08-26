@@ -478,3 +478,50 @@ func TestRoutedSpawnClosesItsOwnClient(t *testing.T) {
 		t.Errorf("routed child Close closed its client %d times, want exactly 1", dialled.closes)
 	}
 }
+
+// TestRoutedSpawnTakesTheTargetsWorkingWindow pins the routed half of the `working-window:` bound:
+// a room measured in tokens is sized for ONE server's window, so the target's number replaces the
+// parent's unconditionally — including the 0 that says the Sub-agent server bounds nothing, which
+// puts the child back in the whole of the routed window rather than inside the orchestrator's bound.
+func TestRoutedSpawnTakesTheTargetsWorkingWindow(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name          string
+		targetWorking int
+		want          int
+	}{
+		{name: "the target's bound replaces the parent's", targetWorking: 8192, want: 8192},
+		{name: "an unbounded target frees the child of the parent's bound", targetWorking: 0, want: 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			parent := routingParent(t)
+			parent.cfg.Context.WorkingWindow = 65536 // the ORCHESTRATOR's room, sized for its 131072 window
+			target := routedTarget()
+			target.WorkingWindow = tc.targetWorking
+			parent.SetDelegationTarget(target)
+
+			child := spawn(t, parent)
+
+			if got := child.cfg.Context.WorkingWindow; got != tc.want {
+				t.Errorf("routed child working window = %d, want the target's %d", got, tc.want)
+			}
+			if got := child.budget().ContextLimit; got != expectedChildLimit(tc.want, target.ContextWindow) {
+				t.Errorf("routed child ContextLimit = %d, want %d",
+					got, expectedChildLimit(tc.want, target.ContextWindow))
+			}
+		})
+	}
+}
+
+// expectedChildLimit is the working ceiling a Budget reports for a child on window with bound
+// working room — the smaller of the two, the whole window when nothing bounds it.
+func expectedChildLimit(working, window int) int {
+	if working > 0 && working < window {
+		return working
+	}
+	return window
+}

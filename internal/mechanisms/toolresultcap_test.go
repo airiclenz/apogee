@@ -195,3 +195,31 @@ func TestToolResultCapMarkerIsActionable(t *testing.T) {
 		t.Errorf("marker not actionable:\n%s", capped)
 	}
 }
+
+// TestCapMaxCharsFollowsTheWorkingCeiling pins which of the Budget's two ceilings the cap is scaled
+// against. On a model advertising a very large window a cap sized to the ADVERTISEMENT is no cap at
+// all — the runaway the `working-window:` key exists for — so the ceiling has to be ContextLimit,
+// the room the session actually works in, and a bound one must shrink the cap while the advertised
+// window beside it stays exactly as large.
+func TestCapMaxCharsFollowsTheWorkingCeiling(t *testing.T) {
+	t.Parallel()
+
+	const advertised = 1310720
+
+	unbounded := domain.Budget{
+		Window: advertised, ContextLimit: advertised, ResponseReserve: 262144, CharsPerToken: 4,
+	}
+	bounded := domain.Budget{
+		Window: advertised, ContextLimit: 200000, ResponseReserve: 40000, CharsPerToken: 4,
+	}
+
+	loose, tight := capMaxChars(unbounded), capMaxChars(bounded)
+
+	if want := int(float64(200000-40000) * 4 * toolResultBudgetFraction); tight != want {
+		t.Errorf("capMaxChars under a 200k working ceiling = %d, want %d", tight, want)
+	}
+	if tight >= loose {
+		t.Errorf("capMaxChars = %d bounded vs %d unbounded; the working ceiling did not shrink the cap",
+			tight, loose)
+	}
+}

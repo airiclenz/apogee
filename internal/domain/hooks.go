@@ -273,7 +273,18 @@ type ToolDef struct {
 // usage (internal/context.TokenEstimator), so Used and CharsPerToken are honest measures rather
 // than a fixed guess.
 type Budget struct {
-	ContextLimit  int     // the model's full context window (n_ctx tokens); 0 when unknown
+	// Window is the model's ADVERTISED context window (n_ctx tokens) — the hard wall the server
+	// itself enforces; 0 when unknown. Overflow detection measures against it, because whether a
+	// request WILL NOT FIT is the server's question rather than a question about how much room the
+	// session chose to use. Nothing else reads it: every reducer, guard and derived ceiling reads
+	// the working ContextLimit below.
+	Window int
+	// ContextLimit is the WORKING ceiling: how much of Window this session actually works in. It is
+	// min(Window, ContextConfig.WorkingWindow) when a working window is configured and Window itself
+	// otherwise, so it equals Window on every session that configures none. It is what the
+	// allocation below is computed from and what every reducer and guard reads — 0 only when
+	// neither a window nor a working window is known, which leaves nothing to allocate.
+	ContextLimit  int
 	Used          int     // tokens the last server usage reported the prompt occupied; 0 until the first UsageEvent
 	CharsPerToken float64 // the chars→token ratio, calibrated against reported usage
 

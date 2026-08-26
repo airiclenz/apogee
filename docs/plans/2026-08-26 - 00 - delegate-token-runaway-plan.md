@@ -286,7 +286,32 @@ config load refuses `working-window: 300000` beside `context-window: 200000` on 
 
 ---
 
-## 5. Budget split: `ContextLimit` = working room, new `Budget.Window` = advertised window
+## 5. Budget split: `ContextLimit` = working room, new `Budget.Window` = advertised window — ✅ DONE (2026-08-26)
+
+NOTES (2026-08-26): the plan's ratified decision 3 says the advertised window "drives … the
+output-cap derivation", while item 5's own What and Tests say the reply cap derives from the reserve
+of the WORKING room ("the reserve already comes from `Allocate(limit)`", "below 32768"). They cannot
+both hold — one `Allocate` call produces the reserve. Implemented per item 5's What/Tests (working
+room); decision 3's summary line reads as the loose one.
+NOTES (2026-08-26): the item's test expectation "the derived output cap under [200K working / 1.3M
+advertised] … is below 32768" is arithmetically false at the default 20% reply share — a fifth of
+200,000 is 40,000, still over `maxOutputTokenCap`. `TestMaxOutputTokensDerivesFromTheWorkingRoom`
+therefore pins three rows instead: unbounded → the ceiling, 120,000 → its own 24,000 reserve (the
+below-the-ceiling case the item wanted), 200,000 → still clamped. A bound has to sit under ~163,840
+before the derivation rather than the clamp is what bites.
+NOTES (2026-08-26): two tests were written in their topical homes rather than the files the item
+named. `requestExceedsWindow`'s new coverage went to `internal/agent/predictiveguard_test.go` (the
+file that owns that guard) instead of `loop_test.go`, and the routed-child assertion went to
+`internal/agent/routedspawn_test.go` (the file that owns what a routed spawn BUILDS) instead of
+`delegationtarget_test.go`, which covers the latch alone. Added `cmd/apogee/delegation_test.go`
+coverage, not in the item's Files list, because the item added a production line to
+`resolveDelegationTarget`.
+NOTES (2026-08-26): `docs/manual/configuration.md` was edited though the item's Files list omits it.
+Item 4's landed prose says the advertised window "still sets the reply ceiling"; item 5 makes that
+false, so the sentence was corrected rather than left standing as a false user-facing claim.
+NOTES (2026-08-26): `internal/agent/predictiveguard_test.go`'s `workingRoom` helper and file-top
+comment now read `Budget.Window`, following the guard they describe. No existing test changes
+behaviour — none of them bounds its working room, where the two ceilings are the same number.
 
 Depends on item 4.
 

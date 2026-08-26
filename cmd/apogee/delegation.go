@@ -439,6 +439,12 @@ func resolveDelegationTarget(
 		APIKey:        apiKey,
 		Model:         model,
 		ContextWindow: window,
+		// The entry's `working-window:` bound, carried as written and NOT resolved over the top-level
+		// key: that key describes the session's own server, and this one is another box whose room a
+		// number sized for the orchestrator's window has no business fencing. There is no observed
+		// half either — a server reports no working room — so an absent key stays 0 and a delegation
+		// there works in the whole window resolved above (subagent.go).
+		WorkingWindow: entry.WorkingWindow,
 		// The entry's `max-output-tokens:` pin, carried as written (ADR 0046). There is no observed
 		// half to fall back to — a server advertises no reply ceiling — so an absent key stays 0 and
 		// the child derives its cap from the window resolved above.

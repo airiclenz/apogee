@@ -95,9 +95,14 @@ func (toolResultCapMechanism) PreRequest(_ context.Context, req *domain.Request)
 // `proxy.go:597` @pin) converted to characters through the calibrated chars→token ratio, times the
 // budget fraction (apogee-sim capToolResults `compress.go:438` @pin: budget * charsPerToken * pct).
 // It is 0 when the window is unknown (ContextLimit 0 ⇒ a zero Allocation), so capping is inert until
-// a window is discovered. This is the tokens→chars INVERSE of Budget.EstimateTokens — chars =
-// tokens × ratio where the estimate is ceil(chars ÷ ratio), computed from the same CharsPerToken —
-// kept as its own expression rather than forced through a shared shape (D4).
+// a window is discovered. ContextLimit is the WORKING ceiling rather than the advertised window
+// (domain.Budget), so a session bounded by `working-window:` caps its results against the room it
+// actually works in — which is the point of the key on a model advertising a very large window,
+// where a cap scaled to the advertisement is no cap at all.
+//
+// This is the tokens→chars INVERSE of Budget.EstimateTokens — chars = tokens × ratio where the
+// estimate is ceil(chars ÷ ratio), computed from the same CharsPerToken — kept as its own
+// expression rather than forced through a shared shape (D4).
 func capMaxChars(b domain.Budget) int {
 	budgetTokens := b.ContextLimit - b.ResponseReserve
 	if budgetTokens <= 0 || b.CharsPerToken <= 0 {

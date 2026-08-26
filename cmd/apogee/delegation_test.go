@@ -905,3 +905,40 @@ func TestDelegationKeySourceFailureStopsRoutingAndSaysWhy(t *testing.T) {
 		t.Errorf("pushes = %+v; want the second beat's clearing push too", spy.pushes)
 	}
 }
+
+// TestResolveDelegationTargetCarriesTheWorkingWindow pins the one bound with no observed half and
+// no top-level rank: `working-window:` is a token count sized for THIS server's window, so the
+// flagged entry's value travels as written and an entry that names none resolves to 0 — the child
+// then works in the whole of the window resolved beside it, never in a room sized for the
+// orchestrator's server.
+func TestResolveDelegationTargetCarriesTheWorkingWindow(t *testing.T) {
+	t.Parallel()
+
+	entry := config.ServerEntry{
+		Name:          "grunt",
+		Endpoint:      "http://127.0.0.1:2222",
+		SubAgents:     true,
+		Model:         "pinned-model",
+		ContextWindow: 131072,
+		WorkingWindow: 32768,
+	}
+	observed := heartbeat.Beat{Reachable: true, ActiveModel: "pinned-model", ContextWindow: 131072}
+
+	bounded := resolveDelegationTarget(entry, "", observed, nil, nil)
+	if bounded == nil {
+		t.Fatal("a reachable server resolved to no target; want the bounded one")
+	}
+	if bounded.WorkingWindow != 32768 {
+		t.Errorf("WorkingWindow = %d; want the entry's 32768 carried as written", bounded.WorkingWindow)
+	}
+
+	entry.WorkingWindow = 0
+
+	unbounded := resolveDelegationTarget(entry, "", observed, nil, nil)
+	if unbounded == nil {
+		t.Fatal("a reachable server resolved to no target; want the unbounded one")
+	}
+	if unbounded.WorkingWindow != 0 {
+		t.Errorf("WorkingWindow = %d with no key on the entry; want the honest 0", unbounded.WorkingWindow)
+	}
+}

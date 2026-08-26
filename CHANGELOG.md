@@ -10,6 +10,25 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **The Budget now distinguishes the advertised window from the working room, so
+  `working-window:` actually bites (delegate token runaway, plan item 5).** `domain.Budget` gains
+  `Window` — the model's ADVERTISED context window, the wall the server itself enforces — while
+  `ContextLimit` keeps its name and every one of its readers and becomes the WORKING ceiling:
+  `min(Window, working-window)` when a working window is configured, and `Window` itself when none
+  is, which is every session that existed before the key did. The allocation is computed from that
+  working ceiling, so the tool-result cap, the Library's fill back-off, guided decomposition's
+  window gate and the automatic-Compaction trigger all fence themselves inside the operator's
+  number without reading a new field. Overflow detection is the one thing that keeps measuring the
+  advertised window: a `working-window:` bound is a soft line the reducers hold the session under,
+  and folding the user's history at it would turn a budget into a fold-every-Turn trigger while the
+  request still fits the server. The derived reply ceiling now comes out of the working room's own
+  reply reserve, so a bounded session on a model advertising a very large window derives a ceiling
+  its own number implies instead of the engine's 32,768 maximum every single time. A routed
+  delegation carries the bound too — `DelegationTarget` gains `WorkingWindow`, sourced from the
+  Sub-agent server entry's own `working-window:` and applied unconditionally, since a room measured
+  in tokens is sized for one server's window and an unbounded target must not leave the
+  orchestrator's bound fencing a run somewhere else.
+
 - **`working-window:` config key.** A new file-only key, top-level and per `servers:` entry,
   bounding the room a session actually works in — the ceiling every Budget reducer and cost
   guard will read — without changing the window the model advertises. `0` (the default) keeps

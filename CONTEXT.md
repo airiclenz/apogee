@@ -943,7 +943,17 @@ must **not** be used interchangeably.
 The allocation of the model's context window across the parts of a request — system
 prompt, conversation history, file context, and response reserve. The single authority
 on how much room each part gets; other reducers consume it. Lives in `context/`.
-_Avoid_: "context limit" (that is the raw window; the Budget is the *allocation* within it).
+It reads TWO ceilings: the **advertised window** (`Budget.Window`, the wall the server
+enforces — read by overflow detection alone, since whether a request *will not fit* is the
+server's question) and the **working ceiling** (`Budget.ContextLimit`, the room the session
+chose to live in — what the allocation, the reply ceiling, the tool-result cap and the
+compaction triggers all read).
+They are the same number unless the **`working-window:`** key (top-level or per server
+entry) names a smaller room, which is how a model advertising a very large window is made
+affordable: bound the room rather than lie about the window.
+_Avoid_: "context limit" for the advertised window (the Budget is the *allocation* within a
+ceiling, and since the split its `ContextLimit` field names the **working** ceiling — the
+advertised window is `Window`).
 
 **System prompt**:
 The standing instructions apogee sends ahead of the user's own messages — the **first system

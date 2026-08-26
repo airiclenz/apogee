@@ -863,12 +863,16 @@ const uncalibratedRoomMargin = 2
 // The measure is the one the whole engine shares: domain.PromptChars over the request's projected
 // messages and tool menu, through the Budget's calibrated chars→token ratio
 // (domain.Budget.EstimateTokens), so this guard can never disagree with the compaction trigger or
-// a hook reading the same Budget. The threshold is the FULL working room (ContextLimit −
-// ResponseReserve) — uncalibratedRoomMargin times it while the ratio is still the uncalibrated
-// seed — deliberately not a softer fraction: a fold is a lossy rewrite of the user's history, so
-// it must fire only when the estimate says the request cannot fit at all, never as a comfort
-// margin. The ~60%-of-working-room History allocation stays the boundary trigger's business
-// (Budget.HistoryExceedsAllocation), not this one's.
+// a hook reading the same Budget. The threshold is the HARD room — the ADVERTISED window less the
+// reply reserve (Window − ResponseReserve) — uncalibratedRoomMargin times it while the ratio is
+// still the uncalibrated seed — deliberately not a softer fraction: a fold is a lossy rewrite of
+// the user's history, so it must fire only when the estimate says the request cannot fit at all,
+// never as a comfort margin. That is also why it reads Window rather than the working ceiling
+// ContextLimit: a `working-window:` bound is a soft line the reducers keep the session under, and
+// folding at it would fire this guard on every request a bounded session deliberately lets run
+// past its working room while still fitting the server's window. The ~60%-of-working-room History
+// allocation stays the boundary trigger's business (Budget.HistoryExceedsAllocation), not this
+// one's — and that one DOES follow the working ceiling, which is how the bound actually bites.
 //
 // With an UNKNOWN window (no discovery, no config: Allocate returns the zero Allocation, leaving
 // no working room) BOTH sides of the compare change. The room becomes
@@ -900,7 +904,7 @@ const uncalibratedRoomMargin = 2
 // the margin applies to the assumed room as well.
 func (a *Agent) requestExceedsWindow(req *domain.Request) bool {
 	b := a.budget()
-	room, chars := b.ContextLimit-b.ResponseReserve, 0
+	room, chars := b.Window-b.ResponseReserve, 0
 	if room > 0 {
 		st := req.State()
 		chars = domain.PromptChars(st.Messages, st.Tools)
@@ -1112,11 +1116,27 @@ func (a *Agent) resolveSkillRefs(turn int, ids []string) string {
 // and the window Allocation the context reducers consume (internal/context.Allocate). It is
 // structural — read even under Bypass (D5/D6) — and advisory here: no request is reshaped by it
 // until the reducers land (plan item 9).
+//
+// The two ceilings are deliberately separate. Window is the ADVERTISED window, the wall the server
+// enforces; ContextLimit is the WORKING room the session chose to live in — the smaller of the
+// advertised window and the `working-window:` key (ContextConfig.WorkingWindow), which is what the
+// Allocation is computed from and therefore what every reducer and Mechanism reading the Budget
+// honours. They are the same number on a session that configures no working room, which is every
+// session that existed before the key did. A working window LARGER than the advertised one is
+// ignored rather than refused: the top-level key describes no particular server, so a session that
+// binds a small one simply keeps the small one (config refuses the per-entry contradiction, where
+// both numbers do describe one server). A working window with NO advertised window is honoured as
+// written — the operator named the only room anyone named.
 func (a *Agent) budget() domain.Budget {
 	window := a.cfg.Context.MaxContextTokens
-	alloc := apogeectx.Allocate(window, a.cfg.Context.ResponseReserve, a.cfg.Context.ResponseReserveFraction)
+	limit := window
+	if working := a.cfg.Context.WorkingWindow; working > 0 && (window <= 0 || working < window) {
+		limit = working
+	}
+	alloc := apogeectx.Allocate(limit, a.cfg.Context.ResponseReserve, a.cfg.Context.ResponseReserveFraction)
 	return domain.Budget{
-		ContextLimit:    window,
+		Window:          window,
+		ContextLimit:    limit,
 		Used:            a.tokens.Used(),
 		CharsPerToken:   a.tokens.CharsPerToken(),
 		ResponseReserve: alloc.ResponseReserve,
@@ -1150,6 +1170,12 @@ const (
 // the reply when it sizes the prompt (internal/context.Allocate) — clamped to [minOutputTokenCap,
 // maxOutputTokenCap]. Deriving it there is what stops the request and the budget disagreeing: the
 // engine stops reserving room it never told the server about.
+//
+// That reserve is the reserve of the WORKING room, because the Allocation is: a session bounded by
+// `working-window:` derives its reply cap from the room it actually works in rather than from a
+// window it has no intention of filling. On a model advertising a very large window that is the
+// difference between deriving maxOutputTokenCap every single time — the ceiling swallows any share
+// of a million tokens — and deriving a number the operator's own bound implies.
 //
 // An unknown window (a zero Allocation, so a zero reserve) takes the floor rather than going
 // uncapped, because Allocation's contract forbids reading unknown as "unbounded" — the defect that

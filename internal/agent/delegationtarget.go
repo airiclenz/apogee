@@ -51,6 +51,14 @@ type DelegationTarget struct {
 	// built windowless — with a dead Budget, no automatic Compaction and readings stamped 0 — over a
 	// number nobody supplied (subagent.go).
 	ContextWindow int
+	// WorkingWindow is the room INSIDE ContextWindow a routed child actually works in, in tokens —
+	// the flagged entry's `working-window:` pin. There is no observed half to fall back to: a server
+	// reports no working room, it is an operator's bound on what a delegation there may spend. 0
+	// means the target names none, and — unlike the window above — the zero IS carried to the child
+	// as written, for MaxOutputTokens' reason: an absent bound is not a broken child, it is a child
+	// working in the whole of the TARGET's window. Inheriting the parent's bound instead would fence
+	// a run on this server by a number sized for another one's window.
+	WorkingWindow int
 	// MaxOutputTokens is the ceiling on ONE reply from this server, in tokens — the flagged entry's
 	// `max-output-tokens:` pin (ADR 0046). 0 means the target pins NO cap, and — unlike the window
 	// above — the zero is carried to the child as written rather than left to the parent's: a cap of
