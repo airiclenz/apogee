@@ -14,6 +14,10 @@ package security
 // near-misses are RELATIVE targets: the recursive-delete rules below refuse every
 // absolute one on purpose, project paths included.
 //
+// Everyday idiom is covered — end-of-options `--`, long flags, a quoted absolute target, an
+// absolute shell path after the pipe; deliberate obfuscation (`eval`, variable expansion,
+// `$'…'`, base64) is not, and that is the boundary `doc.go` states.
+//
 // Tiers (ADR 0012): TierHardRefuse has no per-call override; TierForceApproval forces
 // the Approver even in Auto (a legitimate-but-risky idiom — a speed-bump, not a block).
 
@@ -36,6 +40,29 @@ const homeAnchor = `(?:~|/home/[^/\s]+|/users/[^/\s]+|/root|\$home|%userprofile%
 const deleteTargetAnchor = `(?:/|[a-z]:/|~|\$home|%userprofile%|/\*|` +
 	`/(?:etc|usr|bin|sbin|lib|boot|dev|var|sys|proc|root|home|users|opt)\b)`
 
+// The recursive-delete rules' shared flag vocabulary. `rm`'s everyday spellings put the
+// two flags in either order, split them apart, mix unrelated flags between them, end the
+// options with `--` and quote the target — all of which a single fused `-rf` pattern misses
+// (code audit C-10, 2026-08-26). Spelling the fragments once, here, keeps the two mirror
+// rules below readable and keeps them in step with each other.
+const (
+	// rmFlag is ONE flag token, short (`-v`, `-rf`) or long (`--verbose`, `--one-file-system`).
+	// It deliberately does not match a bare `--`: end-of-options is rmEndOfOptions' job, and
+	// letting a flag token swallow it would make the two indistinguishable.
+	rmFlag = `(?:--?[a-z][a-z-]*)`
+	// rmRecursive and rmForce are the two flags that make a delete catastrophic, each in its
+	// short-cluster and long spelling. The short forms match any cluster CONTAINING the
+	// letter (`-rv`, `-vrf`), which is how the flags actually arrive.
+	rmRecursive = `(?:-[a-z]*r[a-z]*|--recursive)`
+	rmForce     = `(?:-[a-z]*f[a-z]*|--force)`
+	// rmEndOfOptions is the optional `--` separator that ends the flags; the target follows it.
+	rmEndOfOptions = `(?:--\s+)?`
+	// quoteOpen is the optional opening quote of a quoted target (`rm -rf "/etc"`). Only the
+	// OPENING quote is matched: deleteTargetAnchor's branches end wherever the path ends, and
+	// requiring a matching close would buy nothing a footgun-guard needs.
+	quoteOpen = `["']?`
+)
+
 func DefaultDangerousRules() []Rule {
 	return []Rule{
 		// --- Tier 1: hard-refuse ------------------------------------------------
@@ -51,17 +78,22 @@ func DefaultDangerousRules() []Rule {
 		// often enough, and cheap enough to re-issue relatively, that the hard refuse is
 		// the right answer.
 		{
-			ID:      "rm-rf-root-home-system",
-			Tier:    TierHardRefuse,
-			Reason:  "recursive force-delete of a root, home, or system path",
-			Pattern: `\brm\s+(?:-[a-z]*\s+)*-?[a-z]*r[a-z]*f[a-z]*\s+` + deleteTargetAnchor,
+			ID:     "rm-rf-root-home-system",
+			Tier:   TierHardRefuse,
+			Reason: "recursive force-delete of a root, home, or system path",
+			Pattern: `\brm\s+(?:` + rmFlag + `\s+)*(?:-[a-z]*r[a-z]*f[a-z]*|` +
+				rmRecursive + `\s+(?:` + rmFlag + `\s+)*` + rmForce + `)\s+(?:` +
+				rmFlag + `\s+)*` + rmEndOfOptions + quoteOpen + deleteTargetAnchor,
 		},
-		// `rm -fr` flag-order variant of the above (force then recurse).
+		// `rm -fr` flag-order variant of the above (force then recurse) — and its split
+		// spellings, `rm -f -r` and `rm --force --recursive`.
 		{
-			ID:      "rm-fr-root-home-system",
-			Tier:    TierHardRefuse,
-			Reason:  "recursive force-delete of a root, home, or system path",
-			Pattern: `\brm\s+(?:-[a-z]*\s+)*-?[a-z]*f[a-z]*r[a-z]*\s+` + deleteTargetAnchor,
+			ID:     "rm-fr-root-home-system",
+			Tier:   TierHardRefuse,
+			Reason: "recursive force-delete of a root, home, or system path",
+			Pattern: `\brm\s+(?:` + rmFlag + `\s+)*(?:-[a-z]*f[a-z]*r[a-z]*|` +
+				rmForce + `\s+(?:` + rmFlag + `\s+)*` + rmRecursive + `)\s+(?:` +
+				rmFlag + `\s+)*` + rmEndOfOptions + quoteOpen + deleteTargetAnchor,
 		},
 		// Classic shell fork bomb `:(){ :|:& };:` (whitespace-normalized).
 		{
@@ -148,14 +180,16 @@ func DefaultDangerousRules() []Rule {
 
 		// --- Tier 2: force-approval --------------------------------------------
 
-		// `curl … | bash`, `wget … | sh`, `curl … | sudo bash` — the install-script
-		// idiom. Legitimate often enough to be a speed-bump (force the Approver even in
-		// Auto), not a hard block.
+		// `curl … | bash`, `wget … | sh`, `curl … | sudo bash`, `curl … | /bin/bash` — the
+		// install-script idiom. Legitimate often enough to be a speed-bump (force the
+		// Approver even in Auto), not a hard block. The optional absolute directory before
+		// the shell name is there because the idiom is written with a path as often as
+		// without one; the trailing `\b` is what keeps `shellcheck` out.
 		{
 			ID:      "remote-pipe-to-shell",
 			Tier:    TierForceApproval,
 			Reason:  "download piped directly into a shell (curl|bash-class)",
-			Pattern: `\b(?:curl|wget|fetch)\b[^|]*\|\s*(?:sudo\s+)?(?:ba|z|d|fi)?sh\b`,
+			Pattern: `\b(?:curl|wget|fetch)\b[^|]*\|\s*(?:sudo\s+)?(?:/[a-z0-9_./-]*/)?(?:ba|z|d|fi|k|a)?sh\b`,
 		},
 		// `sudo` of an arbitrary command — a privilege escalation the human should see.
 		{

@@ -770,7 +770,19 @@ mutually exclusive by construction). The battery drivers (landlock, seatbelt, wi
 
 ---
 
-## 10. Dangerous-action guard: everyday `rm -rf` and pipe-to-shell spellings are covered
+## 10. Dangerous-action guard: everyday `rm -rf` and pipe-to-shell spellings are covered — ✅ DONE (2026-08-26)
+
+NOTES (2026-08-26): the `rm-fr` rule's `// flag-order variant` comment and the
+`remote-pipe-to-shell` comment were reworded alongside their patterns; the item's text names only
+the `:1-40` block, but leaving a two-line comment that spells one spelling next to a pattern that
+now accepts four is exactly the rot the comment exists to prevent.
+NOTES (2026-08-26): the five fragments are declared in one `const (…)` group with per-fragment doc
+comments rather than as five bare consts — same names, same values, same use sites as the item
+spells them.
+NOTES (2026-08-26): negative control run — with `rules.go` stashed and the new test rows in place,
+13 of the 14 new hard-refuse / force-approval rows fail. The fourteenth, `curl x | sudo /bin/dash`,
+passes without the change because `sudo-escalation` independently forces approval on it; it is kept
+because it pins the pipe rule's own absolute-path branch beside `sudo`.
 
 **What:** C-10, per call 2. The rules are data (`internal/security/rules.go`); the shape change is
 three shared fragments plus one alternation, and the stance stays: a footgun-guard, not a boundary.

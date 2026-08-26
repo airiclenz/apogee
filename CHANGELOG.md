@@ -234,6 +234,17 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- The dangerous-action guard now covers the everyday spellings of its two most important
+  rules (code audit C-10). The recursive-delete rules share five named fragments and accept
+  end-of-options `--`, long flags (`--recursive`, `--force`), the flags split apart or in
+  either order, unrelated flags mixed between them, and a quoted absolute target — so
+  `rm -rf -- /`, `rm --recursive --force /`, `rm -r -f /var` and `rm -rf "/etc"` are refused
+  like `rm -rf /` always was. `remote-pipe-to-shell` accepts an absolute shell path after the
+  pipe (`curl … | /bin/bash`, `curl … | sudo /bin/dash`) and the `ksh`/`ash` names. The
+  precision boundary is unchanged — every relative target still clears the guard, quoted or
+  not — and so is the stance: the guard is a footgun-guard, not a security boundary, and
+  deliberate obfuscation stays out of scope.
+
 - **Landlock ABI 1–2 now DISCLOSES the `truncate(2)` it cannot fence, instead of reporting a
   complete fence (C-06).** On a kernel between 5.13 and 6.1 — Ubuntu 22.04, Debian 12, RHEL 9 —
   landlock has no `LANDLOCK_ACCESS_FS_TRUNCATE` bit, so a confined command cannot create or write

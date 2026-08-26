@@ -503,9 +503,12 @@ acceptance or a future-task re-verification, NOT a live hole.
   The cost is that anyone who was relying on `terminal` to leave a dev server up now finds it gone,
   with no opt-out: a long-running process belongs outside the one-shot tool.
 
-(L2 — the dangerous-action guard normalising only whitespace+case, trivially evadable — needs no
-entry: it is ADR-0012 by-design, and `internal/security/doc.go` already states the guard is "NOT
-a security boundary." No doc/UI describes it as one, which is exactly what L2 asks for.)
+(L2 — the dangerous-action guard normalises only whitespace, case and `\`→`/` and is evaded by
+deliberate OBFUSCATION — `eval`, variable expansion, `$'…'` quoting, encoded payloads — needs no
+entry: it is ADR-0012 by-design, and `internal/security/doc.go` states the guard is "NOT a
+security boundary." Everyday idiom — `--`, long flags, a quoted absolute target, an absolute
+shell path after a pipe — IS covered (2026-08-26, code audit C-10); what stays out of scope is
+the obfuscation chase, not the ordinary spelling.)
 
 **Triage and closeout narration — relocated 2026-08-19** to
 `docs/reviews/archived/2026-08-11 - 01 - external-audit-triage.md` (§ Addendum). The 2026-08-11
