@@ -54,8 +54,12 @@ func usageEvents(events []domain.Event) []domain.UsageEvent {
 func TestUsageEventsCarryCumulativeTotals(t *testing.T) {
 	sink := &recordingSink{}
 	responder := &scriptedResponder{scripts: [][]provider.Delta{
-		usageScript("first", provider.Usage{PromptTokens: 12, CompletionTokens: 7, TotalTokens: 19}),
-		usageScript("second", provider.Usage{PromptTokens: 30, CompletionTokens: 5, TotalTokens: 35}),
+		usageScript("first", provider.Usage{
+			PromptTokens: 12, CompletionTokens: 7, TotalTokens: 19, CachedPromptTokens: 4,
+		}),
+		usageScript("second", provider.Usage{
+			PromptTokens: 30, CompletionTokens: 5, TotalTokens: 35, CachedPromptTokens: 11,
+		}),
 	}}
 	a, err := newAgent(baseConfig(sink), responder)
 	if err != nil {
@@ -77,14 +81,16 @@ func TestUsageEventsCarryCumulativeTotals(t *testing.T) {
 	}
 	want := []domain.UsageEvent{
 		{
-			PromptTokens: 12, CompletionTokens: 7, TotalTokens: 19,
+			PromptTokens: 12, CompletionTokens: 7, TotalTokens: 19, CachedPromptTokens: 4,
 			CumulativePromptTokens: 12, CumulativeCompletionTokens: 7, CumulativeTotalTokens: 19,
-			CumulativeCalls: 1,
+			CumulativeCachedPromptTokens: 4,
+			CumulativeCalls:              1,
 		},
 		{
-			PromptTokens: 30, CompletionTokens: 5, TotalTokens: 35,
+			PromptTokens: 30, CompletionTokens: 5, TotalTokens: 35, CachedPromptTokens: 11,
 			CumulativePromptTokens: 42, CumulativeCompletionTokens: 12, CumulativeTotalTokens: 54,
-			CumulativeCalls: 2,
+			CumulativeCachedPromptTokens: 15,
+			CumulativeCalls:              2,
 		},
 	}
 	for i, w := range want {
@@ -95,6 +101,14 @@ func TestUsageEventsCarryCumulativeTotals(t *testing.T) {
 		}
 		if g.CumulativeCalls != w.CumulativeCalls {
 			t.Errorf("event %d CumulativeCalls = %d, want %d", i, g.CumulativeCalls, w.CumulativeCalls)
+		}
+		// The cached share is a subset of the prompt count, folded on the same terms: the call's
+		// own reading in the fill field, the running sum in the cumulative one.
+		if g.CachedPromptTokens != w.CachedPromptTokens ||
+			g.CumulativeCachedPromptTokens != w.CumulativeCachedPromptTokens {
+			t.Errorf("event %d cached = {%d, cumulative %d}, want {%d, cumulative %d}",
+				i, g.CachedPromptTokens, g.CumulativeCachedPromptTokens,
+				w.CachedPromptTokens, w.CumulativeCachedPromptTokens)
 		}
 		if g.CumulativePromptTokens != w.CumulativePromptTokens ||
 			g.CumulativeCompletionTokens != w.CumulativeCompletionTokens ||
@@ -119,9 +133,13 @@ func TestSubAgentUsageIsChildLocal(t *testing.T) {
 
 	responder := &scriptedResponder{scripts: [][]provider.Delta{
 		usageToolCallScript("c1", tools.SubAgentToolName, subAgentArgs("summarise the repo"),
-			provider.Usage{PromptTokens: 100, CompletionTokens: 10, TotalTokens: 110}),
-		usageScript("child reply", provider.Usage{PromptTokens: 40, CompletionTokens: 4, TotalTokens: 44}),
-		usageScript("parent done", provider.Usage{PromptTokens: 200, CompletionTokens: 20, TotalTokens: 220}),
+			provider.Usage{PromptTokens: 100, CompletionTokens: 10, TotalTokens: 110, CachedPromptTokens: 50}),
+		usageScript("child reply", provider.Usage{
+			PromptTokens: 40, CompletionTokens: 4, TotalTokens: 44, CachedPromptTokens: 9,
+		}),
+		usageScript("parent done", provider.Usage{
+			PromptTokens: 200, CompletionTokens: 20, TotalTokens: 220, CachedPromptTokens: 90,
+		}),
 	}}
 	a, err := newAgent(cfg, responder)
 	if err != nil {
@@ -154,6 +172,11 @@ func TestSubAgentUsageIsChildLocal(t *testing.T) {
 		t.Errorf("child cumulative = {calls %d, %d %d %d}, want {calls 1, 40 4 44} — its own call only",
 			c.CumulativeCalls, c.CumulativePromptTokens, c.CumulativeCompletionTokens, c.CumulativeTotalTokens)
 	}
+	// The cached share is per-agent on the same terms as the counters it qualifies: the child
+	// starts at zero rather than inheriting the 50 the parent's spawning call had cached.
+	if c := child[0]; c.CumulativeCachedPromptTokens != 9 {
+		t.Errorf("child cumulative cached = %d, want 9 — its own call only", c.CumulativeCachedPromptTokens)
+	}
 	if c := child[0]; c.CallID != "c1" {
 		t.Errorf("child event CallID = %q, want the spawning call %q (the grouping key)", c.CallID, "c1")
 	}
@@ -161,6 +184,10 @@ func TestSubAgentUsageIsChildLocal(t *testing.T) {
 		p.CumulativeCompletionTokens != 30 || p.CumulativeTotalTokens != 330 {
 		t.Errorf("parent cumulative after the delegation = {calls %d, %d %d %d}, want {calls 2, 300 30 330} — the child's tokens must not fold in",
 			p.CumulativeCalls, p.CumulativePromptTokens, p.CumulativeCompletionTokens, p.CumulativeTotalTokens)
+	}
+	if p := parent[1]; p.CumulativeCachedPromptTokens != 140 {
+		t.Errorf("parent cumulative cached after the delegation = %d, want 140 — the child's 9 must not fold in",
+			p.CumulativeCachedPromptTokens)
 	}
 }
 

@@ -410,7 +410,34 @@ a capped child reply WITH tool calls continues the run.
 
 ---
 
-## 7. Cached prompt tokens: provider parse → `UsageEvent` → tally
+## 7. Cached prompt tokens: provider parse → `UsageEvent` → tally — ✅ DONE (2026-08-26)
+
+NOTES (2026-08-26): the item says the headless line appends `cached=<n>`; it is spelled `· cached
+12k` instead. The line's own grammar is `·`-separated `label value` pairs, its counts go through
+`format.Tokens`, and `headless_test.go`'s existing comment pins that invariant ("a spend and a fill
+never read in two dialects on one report") — `total 19k cached=1200` would break both on one line.
+The self-hiding rule the item asks for (`> 0` only) is implemented exactly as written.
+
+NOTES (2026-08-26): `internal/provider/client.go` is on the item's Files list but needed no change —
+the non-streaming path assembles usage in `wirejson.go`'s `toRawResponse`, not in the client. Its
+coverage went to `internal/provider/client_test.go` (not on the list) so the "the non-streaming path
+carries it through" half of the item is actually pinned.
+
+NOTES (2026-08-26): the plain conversions `Usage(*chunk.Usage)` / `Usage(*r.Usage)` stopped
+compiling the moment `usageJSON` gained a nested member — a converted struct pair must be
+field-identical. Both call sites now go through a new `usageJSON.usage()` method, which is also the
+one place the absent-breakdown-is-zero rule lives.
+
+NOTES (2026-08-26): `internal/run/run.go` is not on the item's Files list but had to change for the
+item's own headless surface to work: `headlessUsageLine` renders a `run.Usage`, so `run.Usage`
+gained `CachedPromptTokens` (populated in `eventTap.noteUsage` from
+`CumulativeCachedPromptTokens`) and `run.SubAgentUsage` gained the matching flat field. Without the
+second, the one function that renders both the Firing's line and its delegates' would have shown a
+cache share for the Firing alone.
+
+NOTES (2026-08-26): `internal/agent/routedspawn_test.go`'s `reading` helper calls `usage.record`
+directly and needed the new argument; `docs/manual/headless.md` spells the usage line verbatim at
+:42 and gained one sentence on the cached column, since the item changes user-visible output.
 
 **What:**
 - `internal/provider/wirejson.go` `usageJSON` (:116): add

@@ -943,6 +943,36 @@ func TestHeadlessOutputRouting(t *testing.T) {
 		}
 	})
 
+	// The cached share is a SUBSET of the prompt count that most Upstreams never report, so its
+	// zero means "no breakdown was sent" rather than a spend of zero — it hides itself, unlike the
+	// counters the line always carries. It rides both grains: the Firing's own line and a
+	// delegate's, since a child's cache hits are its own spend to account for.
+	t.Run("the cached share appears only when the server reported one", func(t *testing.T) {
+		stub := &stubRunner{res: run.Result{
+			SessionID: "s-8", FinalText: "the answer", Turns: 2,
+			Usage: run.Usage{
+				Calls: 2, PromptTokens: 18000, CompletionTokens: 1200, TotalTokens: 19200,
+				CachedPromptTokens: 12000,
+			},
+			SubAgents: []run.SubAgentUsage{
+				{
+					Used: 12000, Limit: 32768, Task: "audit the issues", Name: "repo-scout",
+					Calls: 2, PromptTokens: 11800, CompletionTokens: 200, TotalTokens: 12000,
+				},
+			},
+		}}
+		_, errOut, err := headlessRun(t, stub, "a prompt")
+		if err != nil {
+			t.Fatalf("headless: %v", err)
+		}
+		if !strings.Contains(errOut, "usage: calls 2 · prompt 18k · completion 1k · total 19k · cached 12k\n") {
+			t.Errorf("the cached column is missing or misspelled: %q", errOut)
+		}
+		if !strings.Contains(errOut, "usage: calls 2 · prompt 12k · completion 200 · total 12k · repo-scout\n") {
+			t.Errorf("a delegate that reported no cached share grew a cached column anyway: %q", errOut)
+		}
+	})
+
 	// A server that reports the two parts and omits the sum leaves the total at zero, and the
 	// shared token formatter spells a zero as nothing at all — which would leave the column
 	// hanging. The line has already earned its place by counting a call, so the zero is spelled.

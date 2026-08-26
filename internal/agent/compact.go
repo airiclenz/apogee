@@ -394,7 +394,7 @@ func (c compactCompleter) Complete(ctx context.Context, msgs []domain.Message) (
 	if usage != nil {
 		event := c.a.usage.record(
 			c.a.base(c.a.turns.index), c.a.cfg.Model, c.a.cfg.Context.MaxContextTokens,
-			usage.PromptTokens, usage.CompletionTokens, usage.TotalTokens,
+			usage.PromptTokens, usage.CompletionTokens, usage.TotalTokens, usage.CachedPromptTokens,
 		)
 		event.Maintenance = true
 		c.a.cfg.Events.Emit(event)

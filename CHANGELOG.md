@@ -10,6 +10,20 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **The engine now reads how much of a prompt the server answered from its own cache, and says so
+  (delegate token runaway, plan item 7).** The OpenAI-shaped `prompt_tokens_details.cached_tokens`
+  member is parsed off both the streamed and the non-streamed reply into
+  `provider.Usage.CachedPromptTokens`, carried onto every `domain.UsageEvent` as
+  `CachedPromptTokens` beside the call's own counters and `CumulativeCachedPromptTokens` beside the
+  running totals, and summed per Agent by the same tally the other three counters use — so a
+  delegate's cache hits stay the delegate's, exactly as its tokens already do. The reading is
+  INFORMATIONAL throughout: no Budget, reducer, guard or cap reads it, because a cached prompt
+  token is still context the model has to read — only the bill differs. A server that omits the
+  breakdown reports zero rather than failing to parse, which is nearly all of them today. The
+  headless per-agent spend line grows a self-hiding `· cached 12k` column: present when the server
+  reported a cache share, absent when it said nothing, since a printed zero there would claim a
+  cache miss the server never claimed.
+
 - **The Budget now distinguishes the advertised window from the working room, so
   `working-window:` actually bites (delegate token runaway, plan item 5).** `domain.Budget` gains
   `Window` — the model's ADVERTISED context window, the wall the server itself enforces — while

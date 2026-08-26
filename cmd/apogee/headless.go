@@ -503,10 +503,11 @@ func headlessUsageLines(res run.Result) []string {
 	}
 	for _, r := range res.SubAgents {
 		usage := run.Usage{
-			Calls:            r.Calls,
-			PromptTokens:     r.PromptTokens,
-			CompletionTokens: r.CompletionTokens,
-			TotalTokens:      r.TotalTokens,
+			Calls:              r.Calls,
+			PromptTokens:       r.PromptTokens,
+			CompletionTokens:   r.CompletionTokens,
+			TotalTokens:        r.TotalTokens,
+			CachedPromptTokens: r.CachedPromptTokens,
 		}
 		if line := headlessUsageLine(usage, headlessSubAgentTarget(r)); line != "" {
 			lines = append(lines, line)
@@ -519,12 +520,20 @@ func headlessUsageLines(res run.Result) []string {
 // call at all. The counts go through format.Tokens like every other reading the binary prints, so
 // a spend reads in the same units as the fill beside it; who is the delegation label the line ends
 // with, empty for the Firing's own totals, which need no label because they are the run's.
+//
+// The cached column is the one counter that hides itself: it is a SUBSET of the prompt count that
+// most Upstreams never report, so a zero there means "this server said nothing about caching"
+// rather than a spend of zero — the same self-hiding rule the fill lines apply, and the reason it
+// is appended after the counters the line always carries rather than wedged between them.
 func headlessUsageLine(u run.Usage, who string) string {
 	if u.Calls <= 0 {
 		return ""
 	}
 	line := fmt.Sprintf("usage: calls %d · prompt %s · completion %s · total %s",
 		u.Calls, headlessTokens(u.PromptTokens), headlessTokens(u.CompletionTokens), headlessTokens(u.TotalTokens))
+	if u.CachedPromptTokens > 0 {
+		line += " · cached " + headlessTokens(u.CachedPromptTokens)
+	}
 	if who != "" {
 		line += " · " + who
 	}

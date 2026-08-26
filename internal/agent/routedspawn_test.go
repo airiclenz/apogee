@@ -165,7 +165,7 @@ func TestSpawnStampsItsOwnModelOnItsReadings(t *testing.T) {
 // reading is one usage event as the agent under test would emit it — the same two bindings the loop
 // stamps (agent.go), so a test asks what a Driver would receive rather than what a call site typed.
 func reading(a *Agent) domain.UsageEvent {
-	return a.usage.record(a.base(1), a.cfg.Model, a.cfg.Context.MaxContextTokens, 10, 5, 15)
+	return a.usage.record(a.base(1), a.cfg.Model, a.cfg.Context.MaxContextTokens, 10, 5, 15, 0)
 }
 
 // TestSpawnStampsItsOwnWindowOnItsReadings is the model stamp's twin, and the reason a Driver can

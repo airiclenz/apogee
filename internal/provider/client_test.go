@@ -70,7 +70,10 @@ func TestRespond_ParsesWholeResponse(t *testing.T) {
 				},
 				"finish_reason": "tool_calls"
 			}],
-			"usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}
+			"usage": {
+				"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15,
+				"prompt_tokens_details": {"cached_tokens": 6}
+			}
 		}`)
 	}))
 	defer srv.Close()
@@ -93,8 +96,10 @@ func TestRespond_ParsesWholeResponse(t *testing.T) {
 	if len(got.ToolCalls) != 1 || got.ToolCalls[0].ID != "tc_1" || got.ToolCalls[0].Function.Name != "read_file" {
 		t.Errorf("ToolCalls = %+v, want one read_file call tc_1", got.ToolCalls)
 	}
-	if got.Usage != (Usage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15}) {
-		t.Errorf("Usage = %+v, want {10 5 15}", got.Usage)
+	// The cached share rides the same reply the counters do, so the non-streaming path reports a
+	// server's prefix-cache hit without a second round trip to ask for it.
+	if got.Usage != (Usage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15, CachedPromptTokens: 6}) {
+		t.Errorf("Usage = %+v, want {10 5 15 cached 6}", got.Usage)
 	}
 }
 

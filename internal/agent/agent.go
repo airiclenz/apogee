@@ -316,6 +316,7 @@ type usageTally struct {
 	prompt     int
 	completion int
 	total      int
+	cached     int
 	calls      int
 }
 
@@ -323,7 +324,10 @@ type usageTally struct {
 // returns the UsageEvent to emit for it: the call's OWN counts in the fill fields, the UPDATED
 // totals in the cumulative ones. TotalTokens is folded as the server reported it rather than
 // recomputed from the two parts, so the totals stay consistent with the server's own arithmetic
-// (a server may count cached or reasoning tokens the split does not show). A caller accounting
+// (a server may count cached or reasoning tokens the split does not show). cached — the share of
+// the prompt the server answered from its prefix cache, 0 where it reports none — folds in the
+// same way but is INFORMATIONAL throughout: no Budget, reducer or guard reads it, because a cached
+// prompt token is still context the model reads; only the bill differs. A caller accounting
 // for something other than a Turn's completion — Compaction — sets Maintenance on the returned
 // event before emitting it.
 //
@@ -332,22 +336,25 @@ type usageTally struct {
 // own arithmetic, and they are passed at all because a routed sub-agent runs on a model — and in a
 // window — of its own (ADR 0045): without the stamp a Driver painting the child's fill has no way
 // to say which model filled it, nor what it was full OF.
-func (t *usageTally) record(base domain.EventBase, model string, window, prompt, completion, total int) domain.UsageEvent {
+func (t *usageTally) record(base domain.EventBase, model string, window, prompt, completion, total, cached int) domain.UsageEvent {
 	t.prompt += prompt
 	t.completion += completion
 	t.total += total
+	t.cached += cached
 	t.calls++
 	return domain.UsageEvent{
-		EventBase:                  base,
-		PromptTokens:               prompt,
-		CompletionTokens:           completion,
-		TotalTokens:                total,
-		Model:                      model,
-		ContextWindow:              window,
-		CumulativePromptTokens:     t.prompt,
-		CumulativeCompletionTokens: t.completion,
-		CumulativeTotalTokens:      t.total,
-		CumulativeCalls:            t.calls,
+		EventBase:                    base,
+		PromptTokens:                 prompt,
+		CompletionTokens:             completion,
+		TotalTokens:                  total,
+		CachedPromptTokens:           cached,
+		Model:                        model,
+		ContextWindow:                window,
+		CumulativePromptTokens:       t.prompt,
+		CumulativeCompletionTokens:   t.completion,
+		CumulativeTotalTokens:        t.total,
+		CumulativeCachedPromptTokens: t.cached,
+		CumulativeCalls:              t.calls,
 	}
 }
 

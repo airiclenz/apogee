@@ -43,6 +43,10 @@ comes what the run **spent**: `usage: calls 3 · prompt 18k · completion 1k · 
 for the run itself and one such line per delegated run (labelled the same way), counting
 every model call the agent made — the compaction folds included, which no context reading
 shows. They are the addends and never a sum: an agent that made no call prints no line.
+A server that reports how much of a prompt it answered from its own prefix cache adds a
+`· cached 12k` column to that agent's line — a subset of the prompt count, never a
+replacement for it; a server that says nothing about caching leaves the column off rather
+than printing a zero that would read as a cache miss.
 The exit status says which kind of
 thing happened:
 

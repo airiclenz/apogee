@@ -155,6 +155,11 @@ type Usage struct {
 	PromptTokens     int
 	CompletionTokens int
 	TotalTokens      int
+	// CachedPromptTokens is how many of PromptTokens the server answered from its prefix cache
+	// (OpenAI's `prompt_tokens_details.cached_tokens`). It is INFORMATIONAL only: a cached token
+	// is still context the model reads, so it moves no budget — only the bill differs. 0 on every
+	// server that omits the breakdown, which is most of them.
+	CachedPromptTokens int
 }
 
 // RawResponse is the assembled non-streaming reply: the assistant text, an optional

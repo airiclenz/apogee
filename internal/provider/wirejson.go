@@ -117,6 +117,30 @@ type usageJSON struct {
 	PromptTokens     int `json:"prompt_tokens"`
 	CompletionTokens int `json:"completion_tokens"`
 	TotalTokens      int `json:"total_tokens"`
+	// PromptTokensDetails is OpenAI's breakdown of the prompt count, of which only the cached
+	// half is read: how many of those prompt tokens the server answered from its prefix cache.
+	// It is a pointer because most servers omit the member entirely, and an absent breakdown
+	// means "this server does not report caching" rather than "nothing was cached" — both
+	// resolve to 0, but only the pointer keeps the two distinguishable at the wire seam.
+	PromptTokensDetails *struct {
+		CachedTokens int `json:"cached_tokens"`
+	} `json:"prompt_tokens_details,omitempty"`
+}
+
+// usage flattens the wire accounting into the seam's Usage. It replaces the plain type
+// conversion both call sites used before the prompt-token breakdown existed — a nested member
+// makes the two structs non-identical, so the conversion no longer compiles — and it is the one
+// place the absent-breakdown-is-zero rule lives.
+func (u usageJSON) usage() Usage {
+	out := Usage{
+		PromptTokens:     u.PromptTokens,
+		CompletionTokens: u.CompletionTokens,
+		TotalTokens:      u.TotalTokens,
+	}
+	if u.PromptTokensDetails != nil {
+		out.CachedPromptTokens = u.PromptTokensDetails.CachedTokens
+	}
+	return out
 }
 
 // wireError is the in-band error member OpenAI-compatible aggregators deliver on an HTTP
@@ -171,7 +195,7 @@ func (r chatCompletionResponse) toRawResponse() RawResponse {
 		out.TopCandidates = topCandidates(choice.LogProbs)
 	}
 	if r.Usage != nil {
-		out.Usage = Usage(*r.Usage)
+		out.Usage = r.Usage.usage()
 	}
 	return out
 }

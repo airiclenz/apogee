@@ -108,7 +108,7 @@ type Result struct {
 //
 // It is per-agent and never rolls up: a sub-agent starts from zero and its totals stay its own
 // (Result.SubAgents), so a session-wide figure is a sum the caller takes, not one this package
-// takes for it. All four counters are zero when nothing accounted for the agent at all — an
+// takes for it. Every counter is zero when nothing accounted for the agent at all — an
 // Upstream that reports no usage, or a run that never completed a call.
 type Usage struct {
 	// Calls is how many completed upstream calls the agent accounted for, Compaction folds
@@ -123,6 +123,11 @@ type Usage struct {
 	// own arithmetic (which may count cached or reasoning tokens the split does not show). A
 	// server that reports the parts and omits the sum therefore leaves this at zero.
 	TotalTokens int
+	// CachedPromptTokens is the share of PromptTokens the Upstream answered from its prefix
+	// cache, where it reports one (0 on every server that omits the breakdown). It is
+	// INFORMATIONAL: it is already counted inside PromptTokens and no bound reads it — a cached
+	// prompt token is still context the model reads, only the bill differs.
+	CachedPromptTokens int
 }
 
 // SubAgentUsage is one finished sub-agent run's context fill and cumulative spend. It exists
@@ -161,15 +166,16 @@ type SubAgentUsage struct {
 	// and makes it line-safe at its own render seam exactly as it does Task and Name.
 	Model string
 
-	// The four below are this run's CUMULATIVE accounting, on Usage's terms exactly (its doc
+	// The five below are this run's CUMULATIVE accounting, on Usage's terms exactly (its doc
 	// carries the semantics): the child's own totals, latest-wins from its own events, counting
 	// only the calls IT made. They are spelled flat here rather than reached through a member
 	// so a caller reads a run's spend beside the fill it produced. Zero throughout when the
 	// child's Upstream reported no usage.
-	Calls            int
-	PromptTokens     int
-	CompletionTokens int
-	TotalTokens      int
+	Calls              int
+	PromptTokens       int
+	CompletionTokens   int
+	TotalTokens        int
+	CachedPromptTokens int
 }
 
 // Once performs one Firing and returns its Result: it validates the mode, constructs a
@@ -489,10 +495,11 @@ func (t *eventTap) noteUsage(ev domain.UsageEvent) {
 	}
 	countsFill := fill > 0 && !ev.Maintenance
 	cumulative := Usage{
-		Calls:            ev.CumulativeCalls,
-		PromptTokens:     ev.CumulativePromptTokens,
-		CompletionTokens: ev.CumulativeCompletionTokens,
-		TotalTokens:      ev.CumulativeTotalTokens,
+		Calls:              ev.CumulativeCalls,
+		PromptTokens:       ev.CumulativePromptTokens,
+		CompletionTokens:   ev.CumulativeCompletionTokens,
+		TotalTokens:        ev.CumulativeTotalTokens,
+		CachedPromptTokens: ev.CumulativeCachedPromptTokens,
 	}
 
 	t.mu.Lock()
@@ -563,15 +570,16 @@ func (t *eventTap) closeSubAgentRun(callID string) {
 		return
 	}
 	t.runs = append(t.runs, SubAgentUsage{
-		Used:             run.used,
-		Limit:            runWindow(run.window, t.window),
-		Task:             run.task,
-		Name:             run.name,
-		Model:            differingModel(run.model, t.model),
-		Calls:            run.usage.Calls,
-		PromptTokens:     run.usage.PromptTokens,
-		CompletionTokens: run.usage.CompletionTokens,
-		TotalTokens:      run.usage.TotalTokens,
+		Used:               run.used,
+		Limit:              runWindow(run.window, t.window),
+		Task:               run.task,
+		Name:               run.name,
+		Model:              differingModel(run.model, t.model),
+		Calls:              run.usage.Calls,
+		PromptTokens:       run.usage.PromptTokens,
+		CompletionTokens:   run.usage.CompletionTokens,
+		TotalTokens:        run.usage.TotalTokens,
+		CachedPromptTokens: run.usage.CachedPromptTokens,
 	})
 }
 

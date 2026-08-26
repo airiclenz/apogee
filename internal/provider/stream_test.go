@@ -91,8 +91,45 @@ func TestStream_RoundTrip(t *testing.T) {
 	if done.FinishReason != "tool_calls" {
 		t.Errorf("finish reason = %q, want tool_calls", done.FinishReason)
 	}
+	// No prompt_tokens_details member on this stream — the shape most Upstreams send — so the
+	// cached share reads 0 rather than the parse failing or inventing a hit.
 	if done.Usage == nil || *done.Usage != (Usage{PromptTokens: 3, CompletionTokens: 4, TotalTokens: 7}) {
-		t.Errorf("usage = %+v, want {3 4 7}", done.Usage)
+		t.Errorf("usage = %+v, want {3 4 7} with no cached share", done.Usage)
+	}
+}
+
+// TestStream_UsageCarriesCachedPromptTokens pins the OpenAI-shaped prompt-token breakdown: when
+// the terminal usage chunk reports how much of the prompt came from the server's prefix cache,
+// that number reaches the seam beside the counters it qualifies. It is a subset of PromptTokens,
+// never a replacement for it, which is why the prompt count is asserted unchanged alongside.
+func TestStream_UsageCarriesCachedPromptTokens(t *testing.T) {
+	t.Parallel()
+
+	const body = `data: {"choices":[{"delta":{"content":"hi"},"finish_reason":"stop"}]}
+
+data: {"usage":{"prompt_tokens":5000,"completion_tokens":40,"total_tokens":5040,"prompt_tokens_details":{"cached_tokens":1200}}}
+
+data: [DONE]
+
+`
+
+	srv := sseServer(body)
+	defer srv.Close()
+
+	deltas := collectStream(NewClient(srv.URL, "m"), Request{Messages: []Message{{Role: "user", Content: "hi"}}})
+
+	var done *Delta
+	for i := range deltas {
+		if deltas[i].Kind == DeltaDone {
+			done = &deltas[i]
+		}
+	}
+	if done == nil {
+		t.Fatal("no terminal Done delta")
+	}
+	want := Usage{PromptTokens: 5000, CompletionTokens: 40, TotalTokens: 5040, CachedPromptTokens: 1200}
+	if done.Usage == nil || *done.Usage != want {
+		t.Errorf("usage = %+v, want %+v", done.Usage, want)
 	}
 }
 

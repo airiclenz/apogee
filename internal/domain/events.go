@@ -250,13 +250,21 @@ type UsageEvent struct {
 	PromptTokens     int
 	CompletionTokens int
 	TotalTokens      int
-	Model            string
-	ContextWindow    int
+	// CachedPromptTokens is the share of PromptTokens the server answered from its prefix cache,
+	// where it reports one at all (0 everywhere else). It is INFORMATIONAL: the Budget never
+	// reads it, because a cached prompt token is still context the model must read — only the
+	// bill differs. A surface shows it beside the prompt count, never instead of it.
+	CachedPromptTokens int
+	Model              string
+	ContextWindow      int
 
 	CumulativePromptTokens     int
 	CumulativeCompletionTokens int
 	CumulativeTotalTokens      int
-	CumulativeCalls            int
+	// CumulativeCachedPromptTokens is the running sum of CachedPromptTokens over this Agent's
+	// calls, on the cumulative fields' terms exactly — and informational on CachedPromptTokens'.
+	CumulativeCachedPromptTokens int
+	CumulativeCalls              int
 
 	Maintenance bool
 }

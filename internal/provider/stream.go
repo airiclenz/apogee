@@ -189,7 +189,7 @@ func (c *Client) parseSSE(body io.Reader, hasTemplateKwargs bool, yield func(Del
 			return
 		}
 		if chunk.Usage != nil {
-			usage := Usage(*chunk.Usage)
+			usage := chunk.Usage.usage()
 			pendingUsage = &usage
 		}
 		if len(chunk.Choices) == 0 {

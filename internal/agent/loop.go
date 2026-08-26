@@ -678,7 +678,7 @@ func (a *Agent) streamResponse(ctx context.Context, turn int, req *domain.Reques
 				// Agent with its own tally — reports child-local totals at its own Depth.
 				a.cfg.Events.Emit(a.usage.record(
 					a.base(turn), a.cfg.Model, a.cfg.Context.MaxContextTokens,
-					u.PromptTokens, u.CompletionTokens, u.TotalTokens,
+					u.PromptTokens, u.CompletionTokens, u.TotalTokens, u.CachedPromptTokens,
 				))
 			}
 		case provider.DeltaError, provider.DeltaContextOverflow:
