@@ -209,6 +209,27 @@ func (r *Registry) OpenIDs() []int {
 	return r.openIDs()
 }
 
+// OpenIDsOwnedBy returns the ids of the open Consoles this owner opened, in ascending order like
+// [Registry.OpenIDs] — what a caller shows the model when the id it asked for is not one it may
+// address. A run learns only about its own Consoles, so the refusal it reads cannot tell it that
+// another delegation's id exists (ADR 0059 §6).
+//
+// It is a query, not a policy: [Registry.Get] stays owner-blind, and the sweeps that match on the
+// key ([Registry.CloseOwnedBy]) are unaffected.
+func (r *Registry) OpenIDsOwnedBy(owner string) []int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	ids := make([]int, 0, len(r.consoles))
+	for id, console := range r.consoles {
+		if console.Owner == owner {
+			ids = append(ids, id)
+		}
+	}
+	slices.Sort(ids)
+	return ids
+}
+
 // Close stops the Console with this id and drops it from the registry, returning once the
 // process has been reaped so its exit code is final. It reports [ErrUnknown] for an id the
 // registry does not hold, which is what makes a second close of the same id an error rather than

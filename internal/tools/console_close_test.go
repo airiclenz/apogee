@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"context"
 	"fmt"
 	"slices"
 	"strings"
@@ -139,5 +140,22 @@ func TestConsoleClose_NoRegistryIsAnErrorResult(t *testing.T) {
 	}
 	if console.FromContext(t.Context()) != nil {
 		t.Fatal("this test only means anything on a context with no registry")
+	}
+}
+
+// TestConsoleClose_AnswersOnlyToTheRunThatOpenedIt is F-37 at the close end, where addressing
+// somebody else's Console would not just read it but END it: a run that did not open one is
+// refused as though the id had never been issued (ADR 0059 §6).
+func TestConsoleClose_AnswersOnlyToTheRunThatOpenedIt(t *testing.T) {
+	skipWithoutPOSIXShell(t)
+	t.Parallel()
+
+	for _, testCase := range consoleOwnerCases() {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+			checkConsoleOwnership(t, testCase, func(ctx context.Context, id int) (domain.ToolResult, error) {
+				return NewConsoleClose().Execute(ctx, consoleCloseCall("c1", id))
+			})
+		})
 	}
 }

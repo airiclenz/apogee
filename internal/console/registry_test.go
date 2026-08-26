@@ -3,6 +3,7 @@ package console
 import (
 	"errors"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -208,6 +209,29 @@ func TestRegistryMintOwnerOnANilRegistryIsTheTopLevelKey(t *testing.T) {
 
 	if key := absent.MintOwner(); key != "" {
 		t.Fatalf("MintOwner() on a nil registry = %q, want the top-level key", key)
+	}
+}
+
+// TestRegistryOpenIDsOwnedByListsOnlyThatOwnersConsoles pins the query a refusal is worded from:
+// a run that names an id it may not address is told what IT holds open, so the message can never
+// tell it that another delegation's Console exists (ADR 0059 §6).
+func TestRegistryOpenIDsOwnedByListsOnlyThatOwnersConsoles(t *testing.T) {
+	t.Parallel()
+	requireConsoleBackend(t)
+
+	registry := newTestRegistry(t)
+	first := openTestShell(t, registry, "run-1")
+	topLevel := openTestShell(t, registry, "")
+	second := openTestShell(t, registry, "run-1")
+
+	if ids := registry.OpenIDsOwnedBy("run-1"); !slices.Equal(ids, []int{first.ID, second.ID}) {
+		t.Errorf("OpenIDsOwnedBy(run-1) = %v, want %v ascending", ids, []int{first.ID, second.ID})
+	}
+	if ids := registry.OpenIDsOwnedBy(""); !slices.Equal(ids, []int{topLevel.ID}) {
+		t.Errorf("OpenIDsOwnedBy(top level) = %v, want [%d]", ids, topLevel.ID)
+	}
+	if ids := registry.OpenIDsOwnedBy("run-2"); len(ids) != 0 {
+		t.Errorf("OpenIDsOwnedBy(run-2) = %v, want none for an owner holding nothing", ids)
 	}
 }
 

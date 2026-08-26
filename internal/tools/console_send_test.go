@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -28,6 +29,73 @@ func openTestConsole(t *testing.T, ctx context.Context, command string) int {
 		t.Fatalf("console_open(%q) registered nothing", command)
 	}
 	return ids[len(ids)-1]
+}
+
+// consoleOwnerCase is one cell of the ownership table console_send, console_read and
+// console_close are each driven through: who opened the target Console, who names its id, and
+// whether that caller may reach it (F-37, ADR 0059 §6).
+type consoleOwnerCase struct {
+	name string
+	// opener is the engine-minted owner key the target Console is opened under.
+	opener string
+	// caller is the owner key of the run that names the target's id.
+	caller string
+	// reachable says whether that caller may drive it: only the run that opened it may.
+	reachable bool
+	// callerHasOwn opens one Console under the caller's own key first, so the refusal's open
+	// list is checked to name what the caller holds — and not the id it may not address.
+	callerHasOwn bool
+}
+
+// consoleOwnerCases is the shared table: a run reaches what it opened, and every other pairing —
+// a sibling delegation, the top level naming a delegation's Console, a delegation naming the top
+// level's — is refused as though the id had never been issued.
+//
+// Shared with console_read_test.go and console_close_test.go, whose subject is the same one: all
+// three tools address a Console through the one lookup in console_common.go.
+func consoleOwnerCases() []consoleOwnerCase {
+	return []consoleOwnerCase{
+		{name: "the run that opened it", opener: "run-1", caller: "run-1", reachable: true},
+		{name: "a sibling delegation", opener: "run-1", caller: "run-2"},
+		{name: "a sibling holding one of its own", opener: "run-1", caller: "run-2", callerHasOwn: true},
+		{name: "the top level naming a delegation's", opener: "run-1", caller: ""},
+		{name: "a delegation naming the top level's", opener: "", caller: "run-1"},
+	}
+}
+
+// checkConsoleOwnership drives one cell of consoleOwnerCases through the tool call the test
+// supplies: the run that opened the Console gets an ordinary result, and any other caller gets
+// the SAME refusal an id that was never issued produces, listing only its own Consoles — the
+// target's existence and its owner's shells are both none of that caller's business.
+func checkConsoleOwnership(
+	t *testing.T,
+	testCase consoleOwnerCase,
+	call func(ctx context.Context, id int) (domain.ToolResult, error),
+) {
+	t.Helper()
+	base, _ := consoleTestCtx(t)
+	callerCtx := domain.WithConsoleOwner(base, testCase.caller)
+	callerOpen := "none"
+	if testCase.callerHasOwn {
+		callerOpen = strconv.Itoa(openTestConsole(t, callerCtx, "cat"))
+	}
+	target := openTestConsole(t, domain.WithConsoleOwner(base, testCase.opener), "cat")
+
+	res, err := call(callerCtx, target)
+
+	if err != nil {
+		t.Fatalf("Execute err = %v, want nil (ownership is a result, not a Go error)", err)
+	}
+	if testCase.reachable {
+		if res.IsError {
+			t.Fatalf("result = %q, want the run that opened console %d to reach it", res.Content, target)
+		}
+		return
+	}
+	want := fmt.Sprintf("no console %d (open consoles: %s)", target, callerOpen)
+	if !res.IsError || res.Content != want {
+		t.Errorf("result = %q (isError=%v), want the unknown-id refusal %q", res.Content, res.IsError, want)
+	}
 }
 
 func TestConsoleSend_Markers(t *testing.T) {
@@ -225,5 +293,22 @@ func TestConsoleSend_DenialStopLabelNamesTheWritableRoots(t *testing.T) {
 	}
 	if !strings.Contains(res.Content, confinementDenialStopLabel(box)) {
 		t.Errorf("send result = %q, want the stop label naming %s and %s", res.Content, box.WorkspaceRoot, scratch)
+	}
+}
+
+// TestConsoleSend_AnswersOnlyToTheRunThatOpenedIt is the sharpest end of F-37: driving a shell is
+// the privilege the owner key exists to hold, so a run that names a Console it did not open is
+// refused in the words an id that never existed gets.
+func TestConsoleSend_AnswersOnlyToTheRunThatOpenedIt(t *testing.T) {
+	skipWithoutPOSIXShell(t)
+	t.Parallel()
+
+	for _, testCase := range consoleOwnerCases() {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+			checkConsoleOwnership(t, testCase, func(ctx context.Context, id int) (domain.ToolResult, error) {
+				return NewConsoleSend().Execute(ctx, consoleSendCall("c1", id, "echo hi", false, 500))
+			})
+		})
 	}
 }

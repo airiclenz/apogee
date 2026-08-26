@@ -387,7 +387,7 @@ id is still in `OpenIDs()`); a depth-2 grandchild gets a key distinct from its p
 
 ---
 
-## 6. A Console is addressable only by the run that opened it
+## 6. A Console is addressable only by the run that opened it — ✅ DONE (2026-08-26)
 
 Depends on item 5.
 

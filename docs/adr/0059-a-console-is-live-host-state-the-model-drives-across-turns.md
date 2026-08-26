@@ -71,7 +71,9 @@ divergent rule for one funnel was rejected; a miss still leaves the fence intact
 
 **6 — Delegation-scoped ownership, a fixed cap, no idle TTL.** A delegation's end closes the
 Consoles it opened: its result is text, and a live orphan is not a result (the one-shot spirit of
-contract §2.4's teardown-on-every-path). Top-level Consoles live per decision 1. The engine holds
+contract §2.4's teardown-on-every-path). Top-level Consoles live per decision 1. A Console is
+addressable by the run that opened it and by no other: a sibling or a parent delegation naming its
+id is refused as if the id did not exist. The engine holds
 at most a fixed number of open Consoles (a constant, not a config knob); there is no idle
 timeout — a dev server idles by nature. *Rejected: engine-wide handles with an idle TTL* — an
 orphaned child process and a dead server mid-Exchange are both worse failure modes.

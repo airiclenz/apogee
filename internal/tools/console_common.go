@@ -63,27 +63,33 @@ func (id *consoleID) UnmarshalJSON(data []byte) error {
 // refusal names the ids that ARE open, because "no console 7" on its own tells a model that has
 // lost track of its consoles nothing it can act on.
 //
+// A Console is addressable by the run that opened it and by no other (ADR 0059 §6): a Console
+// whose Owner is not the caller's engine-minted owner key is refused in exactly the words an id
+// that was never issued gets, so a delegation learns nothing about a sibling's shells — not even
+// that the id exists — and the ids the refusal lists are the caller's own.
+//
 // A context carrying no registry — missing engine wiring rather than a model mistake — reads as
 // an engine holding no consoles: the model is told the id is unknown instead of being handed a
 // Go error that would roll its whole Turn back.
 func lookupConsole(ctx context.Context, callID string, id int) (*console.Console, domain.ToolResult, bool) {
+	owner := domain.ConsoleOwnerFromContext(ctx)
 	registry := console.FromContext(ctx)
 	if registry != nil {
-		if found, ok := registry.Get(id); ok {
+		if found, ok := registry.Get(id); ok && found.Owner == owner {
 			return found, domain.ToolResult{}, true
 		}
 	}
-	refusal := fmt.Sprintf("no console %d (open consoles: %s)", id, openConsoleIDs(registry))
+	refusal := fmt.Sprintf("no console %d (open consoles: %s)", id, openConsoleIDs(registry, owner))
 	return nil, errorResult(callID, refusal), false
 }
 
-// openConsoleIDs renders the ids a registry holds open the way a refusal names them, or "none"
+// openConsoleIDs renders the ids this owner holds open the way a refusal names them, or "none"
 // when it holds nothing (including the no-registry case, which holds nothing by definition).
-func openConsoleIDs(registry *console.Registry) string {
+func openConsoleIDs(registry *console.Registry, owner string) string {
 	if registry == nil {
 		return "none"
 	}
-	ids := registry.OpenIDs()
+	ids := registry.OpenIDsOwnedBy(owner)
 	if len(ids) == 0 {
 		return "none"
 	}

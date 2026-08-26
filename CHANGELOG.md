@@ -256,6 +256,20 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **A Console now answers only to the run that opened it.** `lookupConsole` — the one lookup
+  `console_send`, `console_read` and `console_close` share — found a Console by id alone, so any
+  delegation naming an id it had not opened could drive, read or CLOSE another run's live shell,
+  and a sibling's ids leaked into every unknown-id refusal besides. The lookup now reads the
+  caller's engine-minted owner key off the context (`domain.ConsoleOwnerFromContext`) and refuses a
+  Console whose `Owner` differs in exactly the words an id that was never issued gets, so a run
+  learns nothing about a sibling's shells — not even that the id exists. The refusal's open list is
+  worded from the new `console.Registry.OpenIDsOwnedBy(owner)` and names only the caller's own
+  Consoles. `console_open`'s cap refusal still names every open id: the cap is engine-wide, and a
+  delegation that cannot open one needs to know the engine is full rather than that it owns
+  nothing. The registry gained a query, not a policy — `Get` stays owner-blind, so `CloseOwnedBy`
+  and `CloseAll` are unaffected. ADR 0059 §6 gained the contract sentence this was missing: a
+  Console is addressable by the run that opened it and by no other.
+
 - **Console ownership no longer rides the model-supplied call id.** Which Consoles a delegation's
   end reaps was keyed on the id of the `sub_agent` call that spawned it — a value the MODEL writes,
   and one a text-format parser numbering calls per Turn can hand to two siblings of the same

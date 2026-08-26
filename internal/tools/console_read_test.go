@@ -169,6 +169,24 @@ func TestConsoleRead_UnknownIDIsAnErrorResult(t *testing.T) {
 	}
 }
 
+// TestConsoleRead_AnswersOnlyToTheRunThatOpenedIt is F-37 at the read end: a run that did not
+// open a Console cannot watch what it prints, and the refusal it gets tells it nothing about the
+// id it named (ADR 0059 §6). The table is shared with console_send and console_close, whose
+// lookup this is.
+func TestConsoleRead_AnswersOnlyToTheRunThatOpenedIt(t *testing.T) {
+	skipWithoutPOSIXShell(t)
+	t.Parallel()
+
+	for _, testCase := range consoleOwnerCases() {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+			checkConsoleOwnership(t, testCase, func(ctx context.Context, id int) (domain.ToolResult, error) {
+				return NewConsoleRead().Execute(ctx, consoleReadCall("c1", id, 0))
+			})
+		})
+	}
+}
+
 // lastLine is the tail of a result, for failure messages that would otherwise print a megabyte.
 func lastLine(content string) string {
 	if idx := strings.LastIndex(content, "\n"); idx >= 0 {
