@@ -234,6 +234,22 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **`filehint` sanitises every listed name and reads only listing-tool results (code audit C-08).**
+  The workspace-file-hint Mechanism injects into the SYSTEM message, and it took the names it
+  suggests verbatim out of tool results — so a repo-controlled filename carrying a line break could
+  open a fresh system-prompt line, and a `grep` result sharing the batch that opened the hint
+  opportunity could put a matched line's file CONTENT into the prompt as a "file to read". Two rules
+  now bound what reaches the hint. Every parsed name — from the JSON-array branch and the
+  line branch alike — goes through `library.SanitizeContent`, the ingestion-seam strip the Library
+  already uses on the observation text it re-injects into a system prompt (control, format,
+  private-use and surrogate runes dropped; every break and whitespace run folded to one space), and
+  is then dropped when it is empty after the fold, longer than 512 bytes, or is a listing tool's own
+  `[N entries total]` / `[N files found…]` bracket line rather than an entry. And only a tool result
+  whose `ToolCallID` answers a listing call in the turn that opened the opportunity — the list-tool
+  spelling family plus `find_files`, both line-per-path — is parsed at all; a `grep` result, an MCP
+  result or an orphan result matching no call contributes no names. The Mechanism only ever injects
+  less than before, so the Bypass floor is untouched.
+
 - **A skipped skill can no longer paint rows in the `/skills` report (code audit C-12).** The two
   skip sections emitted their repo-authored fields raw — the folder name a skip is named by, the
   reason it carries, the path to go and fix, and the winning copy's path a shadow points at —

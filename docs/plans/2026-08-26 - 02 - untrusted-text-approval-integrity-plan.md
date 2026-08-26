@@ -340,7 +340,29 @@ to themselves).
 
 ---
 
-## 5. `filehint` sanitises every name and parses only listing-tool results (C-08)
+## 5. `filehint` sanitises every name and parses only listing-tool results (C-08) — ✅ DONE (2026-08-26)
+
+NOTES (2026-08-26): the item's fixture name for the escape/bidi case, `"a\x1bb‮c.go"`, cannot be
+asserted the way the item implies. `fileHintTokenizePath` splits only on `/._-`, so the UNSANITISED
+spelling tokenises to `a<ESC>b<RLO>c`, which matches no prompt keyword and therefore never becomes a
+bullet — an "no ESC in the bullets" assertion on it would pass vacuously before the fix. The test
+keeps the item's exact fixture string and asserts the load-bearing direction instead: the SANITISED
+name `abc.go` IS a bullet (verified: the test fails without the fix, where no such bullet exists).
+NOTES (2026-08-26): the item's "600-byte name" is spelled `strings.Repeat("abc/", 149) + "a.go"` —
+600 bytes, but a path with many segments — so that it tokenises to the prompt's keyword and would be
+the top-scoring bullet if the length cap were removed. A 600-byte flat name tokenises to one
+unmatchable token and would be absent from the hint with or without the cap, leaving the assertion
+vacuous.
+NOTES (2026-08-26): `TestFileHintSkipsListingHeaders` asserts the bracket rule through the
+`fileHintMinFiles` gate (header + two names is two names, so no hint) as well as through the emitted
+bullets. A bracket line can never score — `fileHintTokenizePath` makes `[12 entries total]` one
+unmatchable token — so "never appears as a suggestion" alone would not fail before the fix; being
+miscounted as a listed file is the observable half.
+NOTES (2026-08-26): the ID→tool map skips a `ToolCall` with an empty `ID`, so an unidentified call
+cannot claim an unidentified result. Every existing fixture carries an ID; the guard fails closed.
+NOTES (2026-08-26): the catalogue sentence pair landed in the `filehint` Table A row's last cell,
+which is the de-facto row-notes column (the `autofix` and `truncate_history` rows already carry
+behaviour prose there) — the catalogue has no per-mechanism prose section.
 
 **What:** `internal/mechanisms/filehint.go` injects into the SYSTEM message (`:111`
 `InjectContext` → `hooks.go:525` `appendOrCreateSystem`, pinned by `filehint_test.go:76-78`)

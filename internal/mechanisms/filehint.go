@@ -11,6 +11,7 @@ import (
 	"unicode"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/library"
 )
 
 // filehint registers the workspace-file-hint pre-request Mechanism's catalogue row (Phase-4 item
@@ -19,6 +20,15 @@ import (
 // internal/filehint/filehint.go + internal/proxy/file_hint_detector.go @pin: after the model lists
 // a directory but before it reads anything, it scores the listed files against the user's prompt
 // and injects a role-safe hint suggesting the most relevant files to read first.
+//
+// The hint lands in the SYSTEM message (Request.InjectContext), so the names it carries are
+// repo-controlled text on a prompt channel, and two rules bound what may reach it. (1) Every name is
+// sanitised at parse (library.SanitizeContent — the ingestion-seam strip: format and control runes
+// dropped, every break folded to a space), then dropped when it is empty after the fold, longer than
+// fileHintMaxNameBytes, or is a listing tool's own bracket header/trailer rather than a name — so a
+// bullet can never open a fresh system-prompt line or run past the budget. (2) Only a tool result
+// whose ToolCallID answers a call to a listing tool (fileHintListingResultTools) is parsed, so a
+// grep hit, an MCP result or a web fetch sharing the window contributes no names.
 func init() {
 	register(row{
 		descriptor: fileHintDescriptor,
@@ -53,6 +63,14 @@ var (
 	fileHintListTools = toolSet(listSpellings)
 	fileHintReadTools = toolSet(readSpellings)
 )
+
+// fileHintListingResultTools names the tools whose RESULT grammar is one workspace path per line —
+// the only results fileHintDetectOpportunity parses names out of. It is the list family plus
+// find_files (internal/tools/find_files.go, line-per-path like list_dir). grep is deliberately absent:
+// its rows are `file:line:text` and the text half is file CONTENT, which must never become a
+// suggestion in the system message. A result answering any other call in the same batch — an MCP
+// tool, web_fetch — is skipped for the same reason.
+var fileHintListingResultTools = toolSet(listSpellings, []string{"find_files"})
 
 // fileHintMechanism is the pre-request Mechanism that injects workspace file hints (catalogue
 // Table A `filehint`; ported from apogee-sim injectFileHintIfNeeded @pin). It carries no
@@ -139,9 +157,19 @@ func fileHintDetectOpportunity(conv domain.ConversationView) (filenames []string
 		return nil, "", false
 	}
 
+	// Only results that answer a LISTING call in the opening turn are parsed. The batch that opened
+	// the opportunity may also hold a grep, an MCP call or a web_fetch, whose result grammars carry
+	// file content rather than names; a bullet derived from those would put repo-authored prose in the
+	// system message. A result whose ToolCallID matches no listing call in that turn is skipped.
+	listingCalls := make(map[string]bool)
+	for _, tc := range conv.At(lastListIdx).ToolCalls {
+		if tc.ID != "" && fileHintListingResultTools[tc.Tool] {
+			listingCalls[tc.ID] = true
+		}
+	}
 	for j := lastListIdx + 1; j < conv.Len(); j++ {
 		m := conv.At(j)
-		if m.Role == domain.RoleTool {
+		if m.Role == domain.RoleTool && listingCalls[m.ToolCallID] {
 			filenames = append(filenames, fileHintParseList(m.Content)...)
 		}
 		if m.Role == domain.RoleAssistant || m.Role == domain.RoleUser {
@@ -185,15 +213,28 @@ func fileHintIsCreationFocused(prompt string) bool {
 	return creationCount >= 2 && len(fileHintBacktickFileRe.FindAllString(prompt, 3)) >= 2
 }
 
+// fileHintMaxNameBytes caps a single parsed name. A listing is repo-controlled, and the hint it feeds
+// lands in the system message, so a pathologically long name would spend the prompt budget on one
+// bullet. Anything longer is dropped rather than truncated: a truncated path is not a path, and a
+// suggestion the model cannot act on is worse than no suggestion.
+const fileHintMaxNameBytes = 512
+
 // fileHintParseList extracts filenames from a directory-listing tool result: a JSON string array
 // when the content parses as one, else one filename per non-empty line with list bullets and the
-// `ls`/"Contents of" preambles stripped (apogee-sim parseFileList @pin).
+// `ls`/"Contents of" preambles stripped (apogee-sim parseFileList @pin). Every name from either
+// branch passes fileHintCleanName, which is the ONE sanitising seam on this path — parsed names flow
+// straight into the system message, so nothing downstream sanitises again.
 func fileHintParseList(content string) []string {
+	var files []string
 	var parsed []string
 	if json.Unmarshal([]byte(content), &parsed) == nil {
-		return parsed
+		for _, name := range parsed {
+			if clean, ok := fileHintCleanName(name); ok {
+				files = append(files, clean)
+			}
+		}
+		return files
 	}
-	var files []string
 	for _, line := range strings.Split(content, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
@@ -201,11 +242,37 @@ func fileHintParseList(content string) []string {
 		}
 		line = strings.TrimPrefix(line, "- ")
 		line = strings.TrimPrefix(line, "* ")
-		if line != "" && !strings.HasPrefix(line, "total ") && !strings.HasPrefix(line, "Contents of") {
-			files = append(files, line)
+		if strings.HasPrefix(line, "total ") || strings.HasPrefix(line, "Contents of") {
+			continue
+		}
+		if clean, ok := fileHintCleanName(line); ok {
+			files = append(files, clean)
 		}
 	}
 	return files
+}
+
+// fileHintCleanName folds one parsed name into the single-line, directive-inert form the system
+// message can carry, and reports whether it is a name at all. library.SanitizeContent is the
+// ingestion-seam strip (control/format/private-use/surrogate runes dropped, every break and
+// whitespace run folded to one space, trimmed) — the same one the Library uses on the observation
+// text it re-injects into a system prompt, and the right contract here for the same reason: this is a
+// prompt payload channel, not a terminal. It is NOT the TUI's display strip, which keeps newlines.
+//
+// Three things are not names and are dropped: a value empty after the fold (a name made only of
+// format characters), a value longer than fileHintMaxNameBytes, and a listing tool's own bracket
+// line — list_dir's "[N entries total]" header and truncation trailer, find_files' "[N files found…]"
+// header and "[…N more, continue with offset N]" trailer. A trimmed value that opens with '[' and
+// closes with ']' is the grammar's furniture, never an entry the tool listed.
+func fileHintCleanName(raw string) (string, bool) {
+	name := library.SanitizeContent(raw)
+	if name == "" || len(name) > fileHintMaxNameBytes {
+		return "", false
+	}
+	if strings.HasPrefix(name, "[") && strings.HasSuffix(name, "]") {
+		return "", false
+	}
+	return name, true
 }
 
 // fileHintScoredFile is a filename with its relevance score and the tokens that matched.
@@ -284,6 +351,9 @@ func fileHintBuild(files []fileHintScoredFile, limit int) string {
 	var b strings.Builder
 	b.WriteString(fileHintMarker)
 	b.WriteString(" to your task:\n")
+	// Each bullet is exactly one line: fileHintCleanName folded every break out of the name at parse
+	// time (fileHintParseList), so no second sanitise is needed or wanted here — one seam, and the
+	// matched tokens are path tokens derived from those same folded names.
 	for _, f := range files {
 		if len(f.matches) > 0 {
 			fmt.Fprintf(&b, "- %s (matches: %s)\n", f.name, strings.Join(f.matches, ", "))
