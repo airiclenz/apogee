@@ -164,6 +164,64 @@ restore (not adopt) — `docs/plans/2026-08-26 - 03 - surfaces-that-lie-restore-
   refuses the extra field without its own decision (`internal/tui/transcriptcodec_test.go:1150`), so
   widening the wire is the call to settle first.
 
+### Safety-floor / subprocess-funnel residuals — deferred out of the 2026-08-26 run
+
+**Status:** found 2026-08-26 at the close of the safety-floors / subprocess-funnel plan
+(`docs/plans/archived/2026-08-26 - 01 - safety-floors-subprocess-funnel-plan.md`), deferred out of
+that run.
+
+- [ ] **The si-34 exec-site inventory does not name the hook door.** The package doc's inventory
+  sentence — `ResolveProgram` is "the one entry a new exec site takes, so no site can acquire a
+  program without also acquiring the judgement on it" (`internal/security/doc.go:113-115`) — never
+  names `RunHookSubprocess` (`internal/tools/exec_common.go:468`) among the exec sites it covers,
+  so the hook door reads as outside the inventory it now goes through.
+
+- [ ] **The bare-name hook-resolution test never observes argv[0].**
+  `TestRunHookSubprocessResolvesABareProgramNameToAnAbsolutePath`
+  (`internal/tools/exec_common_test.go:490`) asserts only that a bare `sh` still resolves, runs and
+  prints `ok`; nothing checks that argv[0] became the absolute program, so the test would pass green
+  against the pre-fix code that started the child from the bare name.
+
+- [ ] **Two docs still describe the git funnel's guarantee as the filter-driver refusal.** The
+  funnel now refuses every command-valued repo-local key, but
+  `docs/adr/0056-terminal-fail-fast-and-session-scratch.md:92-94` and
+  `internal/agent/treesnapshot.go:105-107` both still enumerate "the repo-local filter-driver
+  refusal" — the narrower pre-widening wording, in the two places the floor's hardening is spelled
+  out in prose.
+
+- [ ] **No test pins the settings editor's production fence root.**
+  `newExternalEdit(w.opts, w.roots.workspace, os.Getenv)` (`cmd/apogee/wire_live.go:232`) is the one
+  place the real fence root is seeded and no test reads it: seeding `""` there would still pass the
+  whole suite green.
+
+- [ ] **`WaitDelay` wired by `NewProcessTeardown` is inert on the MCP `Cmd`.** The teardown seam
+  sets `cmd.WaitDelay` on every child (`internal/platform/teardown_unix.go:54`,
+  `internal/platform/teardown_windows.go:53`) and advertises it as the post-exit drain bound
+  (`internal/platform/teardown.go:85-90`), but the MCP `Cmd` is deliberately built on
+  `context.Background()` (`internal/mcp/transport.go:149`), where that delay never fires — a stdio
+  server holding a pipe open can still block `session.Close`'s `Wait`, so the seam's advertised
+  drain bound does not apply to MCP.
+
+- [ ] **The `ResidualNotice` prints have no test.** `probe.ResidualNotice` reaches a stream at
+  `cmd/apogee/headless.go:315` and `cmd/apogee/daemon.go:230`; on an ABI ≥ 3 host the notice is
+  empty, so only the negative branch is exercised and nothing proves the disclosure ever reaches
+  the stream.
+
+- [ ] **The `rmFlag` token loses two spellings the old patterns caught.** `rmFlag` requires a letter
+  after the dash (`internal/security/rules.go:54`), so the `rm -rf` rules built from it
+  (`internal/security/rules.go:86-98`) no longer match `rm - -rf /etc` — really destructive, since
+  getopt permutes the `-rf` — nor the harmless `rm rf /etc`. Restoring a bare `- ` as a flag token
+  is the design call to settle first.
+
+- [ ] **The `~/.apogee` rule's Hint still opens with a refusal.** "a terminal command is refused
+  whenever its text names ~/.apogee" (`internal/security/rules.go:180`) was written when the rule
+  refused; at Tier 2 such a command is now put to the human, so the first clause reads stale both on
+  the approval prompt and in the deny result's tail.
+
+- [ ] **`refuseAbsurdObjectCount` scans raw bytes.** The check searches the whole file for `/Size`
+  (`internal/doctext/pdf.go:378`, called at `:168`), so a compressed stream that happens to contain
+  `/Size <huge>` would refuse a valid document; no fixture reproduces it.
+
 ## Parked / deferred work
 
 Live, deliberately deferred work only. Each entry records *enough* design that we don't re-derive
