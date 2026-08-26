@@ -24,7 +24,7 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 
 ## Improvements / Ideas
 
-- [ ] display somewhere id apogee is confined or not
+- [P] display somewhere if apogee is confined or not — planned 2026-08-26: `docs/plans/2026-08-26 - 03 - surfaces-that-lie-restore-consoles-plan.md` item 8 (footer word `confined` / `unconfined` / `gated` in Auto)
 - [ ] sub agent names are often not descriptive. the model seems to not set it at all (sub-agent name just showing input proompt) -> separate auto-name call for sub agents if enabled and name was not set? (grill)
 - [ ] when many sub agents are running - the activity status often flickers back and forth between the different sub agents. the stati of the sub-agents need to be unified / merged (grill)
 - [ ] all content print-out of any tool need to display line numbers. The write tool does not do that currently. Verify all tools that print file diffs.
@@ -36,8 +36,9 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 
 **Status:** found 2026-08-25 at the close of the Console-family plan
 (`docs/plans/archived/2026-08-25 - 02 - console-family-plan.md`), deferred out of that run.
+**Planned 2026-08-26:** `docs/plans/2026-08-26 - 03 - surfaces-that-lie-restore-consoles-plan.md` item 16.
 
-- [ ] `consoleStatusMarker` (`internal/tui/toolregistry.go:615`) is
+- [P] `consoleStatusMarker` (`internal/tui/toolregistry.go:615`) is
   `\n?(alive|exited with code (-?\d+)|killed)\s*$` — the leading `\n?` is OPTIONAL and nothing
   anchors the alternation to the start of a line, so the marker is word-anchored where it means to
   be line-anchored. A live `console_open` whose last output line ENDS in one of those words ("the
@@ -52,9 +53,10 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 ### Resuming a stored session leaves the outgoing conversation's Consoles running
 
 **Status:** found 2026-08-25 at the close of the Console-family plan; recorded rather than fixed
-because the session-switch case wants an owner call.
+because the session-switch case wants an owner call. **Settled + planned 2026-08-26:** close on
+restore (not adopt) — `docs/plans/2026-08-26 - 03 - surfaces-that-lie-restore-consoles-plan.md` item 1.
 
-- [ ] `ClearContext` closes every Console at the `/new` boundary — the ids live in the history that
+- [P] `ClearContext` closes every Console at the `/new` boundary — the ids live in the history that
   call drops, so leaving the shells running would be the forgotten-process leak the cap exists to
   prevent (`internal/agent/agent.go:809`, ADR 0059 §1) — and the engine's `Close` sweeps the same
   set at exit (`internal/agent/agent.go:377`). `RestoreSession` (`internal/agent/agent.go:834`)
@@ -87,7 +89,10 @@ because the session-switch case wants an owner call.
   Driver that builds an engine and never rebinds always sends the zero dialect, i.e. the historical
   `chat_template_kwargs` shape, whatever the bound server actually reads. The firing-block path is
   that Driver: `cmd/apogee/wire_firing.go:134` resolves a spec through `rebindSpecFor` and hands
-  back an `apogee.Config`, which carries no dialect field for the construction path to state.
+  back an `apogee.Config`, which carries no dialect field for the construction path to state. The 2026-08-25 code audit (C-03,
+  `docs/reviews/code-audit-2026-08-25.md`) rates this High as an ADR 0031 Driver-parity break and
+  names the fix shape — carry the forced/observed dialect on `domain.Config` or the Spec, applied at
+  construction; `run.Once` never rebinds. Deferred to its own design grill (see "Audit residue").
 
 - [ ] **ADR 0060 D6's "the segment drops whole" is not what the footer does.** The ADR
   (`docs/adr/0060-effort-is-detected-passively-dialected-per-server-and-picked.md:101`) says the
@@ -128,35 +133,10 @@ because the session-switch case wants an owner call.
 
 ---
 
-### The `cmd/apogee` suite's temporary home is never removed when the key-command fixture re-execs
-
-**Status:** found 2026-08-25 at the close of the engine-owned orientation-block plan
-(`docs/plans/archived/2026-08-25 - 00 - engine-owned-orientation-block-plan.md`), deferred out of
-that run.
-
-- [ ] `TestMain` creates the suite's throwaway home with `os.MkdirTemp`
-  (`cmd/apogee/main_test.go:26`) and removes it after `m.Run` returns
-  (`cmd/apogee/main_test.go:36`). The key-command fixture re-execs the test binary and exits from
-  inside the test — `os.Exit(0)`, `cmd/apogee/keysource_test.go:47` — so in every child process
-  `m.Run` never returns, the `os.RemoveAll` never runs, and the child's own temp home survives the
-  run: an ordinary `go test ./cmd/apogee` leaves six empty `/tmp/apogee-cmd-test-home-*` dirs
-  behind, one per re-exec through `keyCommandFor` (`cmd/apogee/keysource_test.go:53`). The fix is
-  one line — remove the temp home in the fixture before it exits.
-
----
-
 ### Delegate token-runaway residuals — deferred out of the 2026-08-26 run
 
 **Status:** found 2026-08-26 at the close of the delegate token-runaway plan
 (`docs/plans/archived/2026-08-26 - 00 - delegate-token-runaway-plan.md`), deferred out of that run.
-
-- [ ] **The step cap advances the Turn index twice.** `endAtStepCap`
-  (`internal/agent/agent.go:535`) reaches the exit table's `endStepCapped` row only right after
-  `endTurnDone` closed a Turn normally — and that row has already run `l.index++`
-  (`internal/agent/turn.go:98`). `endStepCapped` advances again (`internal/agent/turn.go:156`), so a
-  capped child's next-Turn index skips one (observed: index 4 after 3 Turns). Harmless today, since
-  no capped delegate runs a further Turn, but the counter a snapshot stores and a resume reads is
-  off by one.
 
 - [ ] **A child's post-fold request ends on the assistant summary and no test pins it.** The
   mid-Exchange exception a child agent takes (`shouldAutoCompact`, `internal/agent/compact.go:190`)
@@ -847,6 +827,8 @@ decision.
 (`docs/plans/archived/2026-08-11 - 04 - tool-printout-fixes-plan.md`, item 7's NOTES) and deferred by owner
 call the same day. **Pre-existing** — that plan neither introduced it nor changed it. Not a defect to
 fix on sight: what a never-run delegation should show is an open design call.
+**Settled + planned 2026-08-26:** the owner chose to show the prompt — expanding a never-ran delegation
+paints the prompt rows beneath the header on the unframed block — `docs/plans/2026-08-26 - 03 - surfaces-that-lie-restore-consoles-plan.md` item 13.
 
 A delegation that is over and left nothing behind it — a child refused at the depth bound, one that
 failed a hook before its first event — is drawn as an ordinary tool block rather than as a run.
@@ -883,3 +865,66 @@ knob value, and the run had a frame-verified keeper in hand.
   (`graphics/demo/tapes/hero.tape:49-94`) and into `graphics/demo/README.md:116` ("Knob 3 is a coin
   toss, not a setting"). A clock cannot track a window that slides with run length: what this needs
   is a trigger keyed to screen state — the card having painted — rather than to elapsed time.
+
+---
+
+### Audit residue (2026-08-25 refocus / security / code audits) — deliberately outside the five first-wave plans
+
+**Status:** recorded 2026-08-26 when the merged findings handoff (`docs/handoffs/2026-08-26 - 00 -
+merged-audit-findings.md`, untracked by design) was cut into plans `docs/plans/2026-08-26 - 01` … `05`.
+Everything the three audits found that is NOT an item in one of those plans lives here with the reason
+it waits. Sources: `docs/reviews/code-audit-2026-08-25.md` (C-nn), `docs/skill-runs/security-audit/
+2026-08-25/report.md` (F-nn), `docs/skill-runs/refocus/2026-08-25/briefing.md` (R-n).
+
+**Design discussion before code** — each wants its own grill; none is a one-item fix:
+
+- [ ] **C-13 — the library store persists under its lock.** `internal/library/store.go` `Record` /
+  `RecordSuccess` call `persist()` (MarshalIndent + temp file + rename) inside `s.mu.Lock()` with no
+  `ctx`, so ADR 0039 fan-out serialises every completion behind a disk rewrite and a hung filesystem
+  hangs the loop. Shape to settle (write model): mutate under the lock, encode and write outside it;
+  optionally a coalescing async writer. Not independently verified.
+- [ ] **C-04 — the decompose scoring cap saturates.** `internal/mechanisms/decompose.go`
+  `decomposeCountPhraseMatches` returns at `cap` and every caller passes `perMatch` = cap/2, so the
+  second match saturates and the classifier degenerates to category count + length bonus (two
+  delegation + two conditional phrases = 14 ≥ 10 → "complex" → history collapse on a simple task). The
+  fix — sum per-match points, cap the category total afterwards — shifts classification thresholds
+  and any calibrated bench arm, so it lands with apogee-sim evidence, not on sight. Not independently
+  verified.
+- [ ] **C-03 — unattended runs send the empty effort dialect.** The "no construction seed" residual
+  under *Effort detection and the effort picker* above; the code audit supplies the seam
+  (`cmd/apogee/wire_firing.go` `firingConfig`, `run.Once` never `Rebind`s) and the fix shape (a
+  dialect field on `domain.Config` or the Spec). Home of the field is the call.
+- [ ] **C-20 + F-08 — the Windows pair.** `internal/platform/confiner_windows.go` keeps no mutex by
+  stated design, so `Close` zeroes `token`/`caps` while `Confine` reads across a label walk; ordered
+  exits are joined but bubbletea's abnormal exit (SIGINT, closed console) does not wait on Cmd
+  goroutines → token 0 → `CreateProcess` unconfined, marked `confined=true`; the console spawn from
+  `context.Background()` (`internal/console/process.go`) has no fail-closed. `internal/platform/
+  winlabel/journal.go` replays a planted journal's label writes and `IsLowLabel` vouches the write
+  side only. Both need a Windows box to verify; the "backend keeps no lock" contract is what to revise.
+
+**Test debt:**
+
+- [ ] **C-15 — `GatherTerminal`'s measurement engine is untested past its two abort paths**
+  (`internal/probe/terminal.go`; `internal/probe` at 49.4% coverage, the repo's outlier). Wants a
+  scripted `TerminalInputs.Read` that answers each query, asserting Rows/Summary/Mismatch for an
+  agreeing and a diverging terminal.
+
+**Architecture pass, not fixes** — candidates for the next architecture-review plan
+(`docs/plans/archived/2026-08-24 - 03 - architecture-review-deepening-plan.md` is already archived):
+
+- **S-1** `cmd/apogee/wire_test.go` — a 5,844-line single test drawer for a composition root that
+  ADR 0043 split by seam on the production side.
+- **S-2** `internal/mechanisms/grammar.go` — grammar-constraint plumbing reachable only through
+  `Deps.GrammarConstraint`, which nothing populates, over a provider wire that cannot carry it.
+
+**Signal the audits could not produce:** `golangci-lint` and `govulncheck` were not installed on the
+audit host — no lint and no dependency-vulnerability signal from any of the three audits, and the
+dependency half of the security audit's `dependency-surface` family is unaudited (no network for a
+CVE lookup). Every verdict was a code reading; the external-behaviour claims the security report
+flagged (git `core.fsmonitor`/hooks/filters, `net/http` nil `CheckRedirect`, `os.OpenRoot` symlink
+semantics, ODF/EPUB handler execution, terminal column-0/bidi rendering) are exercised by the
+reproduction tests the corresponding plan items carry, not here.
+
+**Worth watching:** the stock `gemma-4-e4b-it-qat` Validated set (`shipped.json`) arms
+`cached_content_intercept`, `autofix` and `filehint` — `filehint` is C-08's stock-install
+reachability (plan 02 item 5).

@@ -44,6 +44,10 @@ func TestAPIKeyCommandFixture(t *testing.T) {
 		t.Skip("not the key-command fixture invocation")
 	}
 	fmt.Println(strings.TrimPrefix(last, keyFixtureMarker))
+	// Exiting here skips TestMain's own removal (os.Exit runs no deferred functions and never
+	// returns through m.Run), so this child's throwaway home is removed here or not at all —
+	// otherwise every re-exec through keyCommandFor leaves one behind for the run.
+	os.RemoveAll(suiteTempHome)
 	os.Exit(0)
 }
 

@@ -209,6 +209,23 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **The step cap no longer advances the Turn counter twice.** `endStepCapped` is reached only from
+  `Run`, and only right after `endTurnDone` closed a Turn normally — a row that has already
+  advanced the counter — so its own `l.index++` advanced a second time for a Turn that never ran:
+  a child capped after 3 Turns left the index at 4. Nothing reads it before the capped delegation
+  ends, so no output was ever wrong; what was wrong is the number `encodeState` stores and a resume
+  reads back, which named a Turn the Exchange never took. The row now closes the Exchange and
+  leaves the counter alone, and both the exit-table case and the `Run`-level cap test assert the
+  index that results.
+
+- **`go test ./cmd/apogee` no longer leaves a temp directory behind per re-exec.** `TestMain` gives
+  the suite a throwaway home and removes it after `m.Run` returns, but the `api-key-cmd:` fixture
+  re-execs the test binary and exits from inside the test (`os.Exit(0)`, which runs no deferred
+  functions and never returns through `m.Run`), so in every child the removal never ran and the
+  child's own home survived — six empty `/tmp/apogee-cmd-test-home-*` directories per ordinary run
+  of the package. `TestMain` now keeps the path it created and the fixture removes it on its way
+  out.
+
 - **A delegate's output-capped reply no longer poses as the delegation's answer (plan item 6).**
   Decision 4 of ADR 0046 faulted a reply cut off at the engine's own ceiling only when it carried
   no visible text — a rule written for a HUMAN reader, who can see a cut answer and ask for the

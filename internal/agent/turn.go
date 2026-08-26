@@ -148,12 +148,14 @@ func (l *turnLifecycle) end(t *turnRun, how turnEnd) domain.StepResult {
 		// from Run, and only right after endTurnDone closed a Turn that completed normally — so
 		// the Turn is already judged and this row deliberately does NOT judge it again (a second
 		// tracker.endTurn would rotate the pending set against an empty scratch and lose a
-		// judgment, R3). What is left is the Exchange half: close it (F6 — the deferred queue dies
-		// with it), advance past the Turn, and report the same StatusExchangeComplete a real final
+		// judgment, R3). The counter is left alone for the same reason: endTurnDone ALREADY
+		// advanced past that Turn, and no new Turn ran here, so advancing again would leave the
+		// index one ahead of the Turns actually taken — an off-by-one a Snapshot stores and a
+		// resume reads back (state.go). What is left is the Exchange half: close it (F6 — the
+		// deferred queue dies with it) and report the same StatusExchangeComplete a real final
 		// answer does. NOT Faulted: nothing failed — the work up to the cap stands and the parent
 		// receives it — so StepCapped is the flag that tells a capped Exchange from a finished one.
 		l.closeExchange()
-		l.index++
 		status = domain.StatusExchangeComplete
 		stepCapped = true
 	}

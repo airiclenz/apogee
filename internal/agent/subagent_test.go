@@ -1004,6 +1004,12 @@ func TestRunEndsTheExchangeAtTheStepCap(t *testing.T) {
 	if responder.calls != 3 {
 		t.Errorf("upstream calls = %d, want 3 — Run must stop AT the cap, not past it", responder.calls)
 	}
+	// The counter must name the next Turn, not one past it: endTurnDone advances for the Turn that
+	// completed and the endStepCapped row must not advance a second time, or the index encodeState
+	// stores (state.go) and a resume reads back is one ahead of the Turns actually taken.
+	if a.turns.index != 3 {
+		t.Errorf("turn index = %d, want 3 — the cap must not advance the counter a second time", a.turns.index)
+	}
 	if got := countCapErrors(sink.events, 0); got != 1 {
 		t.Errorf("step-cap ErrorEvents = %d, want exactly 1", got)
 	}

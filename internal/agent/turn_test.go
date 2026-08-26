@@ -117,7 +117,7 @@ func TestTurnEnd_Table(t *testing.T) {
 		assertJudged(t, tracker)
 	})
 
-	t.Run("endStepCapped advances, closes the Exchange and marks the boundary partial", func(t *testing.T) {
+	t.Run("endStepCapped closes the Exchange, marks the boundary partial and leaves the counter alone", func(t *testing.T) {
 		conv := domain.NewConversation(nil)
 		conv.Append(domain.Message{Role: domain.RoleUser, Content: "u"})
 		conv.Defer("pending-correction")
@@ -135,8 +135,10 @@ func TestTurnEnd_Table(t *testing.T) {
 		if res.Faulted {
 			t.Error("Faulted set on a step-capped Exchange; nothing failed — the work up to the cap stands")
 		}
-		if l.index != 6 {
-			t.Errorf("index = %d, want 6 (advanced)", l.index)
+		// Run reaches this row only after endTurnDone advanced past the completed Turn, and no new
+		// Turn runs here — so advancing again would put the counter one ahead of the Turns taken.
+		if l.index != 5 {
+			t.Errorf("index = %d, want 5 (unchanged — endTurnDone already advanced)", l.index)
 		}
 		if l.inExchange {
 			t.Error("inExchange still set; the step cap ends the Exchange")

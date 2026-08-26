@@ -17,9 +17,15 @@ import (
 // guard test asserts nothing resolves to any more. Empty when the OS could not name one.
 var realUserHome string
 
+// suiteTempHome is the throwaway home TestMain created for THIS process, kept so a test that
+// exits without returning through m.Run can still remove it (keysource_test.go's re-exec
+// fixture). Empty before TestMain runs.
+var suiteTempHome string
+
 // TestMain gives the whole suite a throwaway home directory. `t.TempDir` belongs to a running
 // test, so the dir is an `os.MkdirTemp` removed after `m.Run` — and the exit code is taken
-// before the removal, because `os.Exit` runs no deferred functions.
+// before the removal, because `os.Exit` runs no deferred functions. A test that calls os.Exit
+// itself never reaches that removal, so it must remove suiteTempHome on its own way out.
 func TestMain(m *testing.M) {
 	realUserHome, _ = os.UserHomeDir()
 
@@ -28,6 +34,7 @@ func TestMain(m *testing.M) {
 		fmt.Fprintf(os.Stderr, "cmd/apogee suite: create temp home: %v\n", err)
 		os.Exit(1)
 	}
+	suiteTempHome = home
 	// HOME is what os.UserHomeDir reads on POSIX, USERPROFILE what it reads on Windows.
 	os.Setenv("HOME", home)
 	os.Setenv("USERPROFILE", home)
