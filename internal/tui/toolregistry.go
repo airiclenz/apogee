@@ -621,10 +621,12 @@ func exitCodeStat(domain.ToolResult) (statValue, bool) { return plainStat("exit 
 var exitCodeMarker = regexp.MustCompile(`\n?(\[exit code (-?\d+)[^\]]*\])\s*$`)
 
 // consoleStatusMarker matches the status line every Console result ends with — "alive", "exited
-// with code 2", "killed" (consoleStatus, internal/tools/console_common.go). It is anchored the way
-// exitCodeMarker is, so a program that printed "alive" mid-stream cannot be read as the verdict on
-// it; and it captures the status first and the code inside it second, exitMarkerPhrase's shape.
-var consoleStatusMarker = regexp.MustCompile(`\n?(alive|exited with code (-?\d+)|killed)\s*$`)
+// with code 2", "killed" (consoleStatus, internal/tools/console_common.go). Unlike exitCodeMarker's
+// bracketed phrase, those words are ordinary prose, so end-anchoring alone would read the last word
+// of a program's own last line ("the dev server is alive") as the verdict on it: the status must
+// BEGIN a line as well as end the output, which is what `(?:^|\n)` says and an optional `\n?` did
+// not. It captures the status first and the code inside it second, exitMarkerPhrase's shape.
+var consoleStatusMarker = regexp.MustCompile(`(?:^|\n)(alive|exited with code (-?\d+)|killed)\s*$`)
 
 // exitMarkerPhrase words one anchored process-status marker for the outcome slot and hands back
 // the output left once the marker has been taken off it — the body that then lays out beneath the

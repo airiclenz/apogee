@@ -276,6 +276,20 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **A Console status word now has to BEGIN a line to be read as the verdict.** `consoleStatusMarker`
+  was `\n?(alive|exited with code (-?\d+)|killed)\s*$` — the leading newline was OPTIONAL, so
+  nothing anchored the alternation to the start of a line and the marker was word-anchored where its
+  own doc comment said it was line-anchored. A live `console_open`, `console_send` or `console_read`
+  whose program ended its last output line with one of those words ("the dev server is alive") had
+  that word read as the tool's status line: the outcome slot was worded from the program's own prose,
+  and `exitMarkerPhrase` handed the body back with those characters cut off its end, so the card
+  stated a verdict nothing had reported and truncated the line it came from. The marker is now
+  `(?:^|\n)(alive|…)\s*$` — the status must both begin a line and end the output — and its two
+  capture groups keep their positions, so the "exit N" wording is unchanged. A result whose status IS
+  its first line still matches through the `^` alternative, and trailing whitespace after it is still
+  tolerated. The neighbouring `exitCodeMarker` needed no change: its `[exit code N]` brackets already
+  keep it off prose.
+
 - **A `tool_calls` entry with no name and no id is no longer native tool-call evidence.** `probe model`
   counted any non-empty `tool_calls` array as a passed probe, so a server answering with a placeholder
   — `tool_calls:[{}]`, a `null` entry, a call carrying a name but no id — earned the model the

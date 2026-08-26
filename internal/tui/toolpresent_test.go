@@ -1728,6 +1728,82 @@ func TestConsoleCardStatesEachFactOnce(t *testing.T) {
 	}
 }
 
+// A Console's status word is the tool's own line, not the last word of the program's. "alive",
+// "killed" and "exited with code N" are ordinary prose a dev server prints about itself all day,
+// so the marker anchors the word to the START of a line as well as to the end of the output: a
+// result whose last line merely ENDS in one of them has no status the slot may word, and its body
+// reaches the card whole rather than with those characters cut off it.
+func TestConsoleStatusWordMustBeginItsOwnLine(t *testing.T) {
+	t.Parallel()
+
+	// body is what consoleDetail laid out: its detail lines, or — for output short enough to be
+	// promoted onto the branch, and for the empty output a status-only result leaves behind — the
+	// one line the outcome carries instead.
+	body := func(out toolOutcome) string {
+		if len(out.Details) == 0 {
+			return out.Summary.Text
+		}
+		texts := make([]string, 0, len(out.Details))
+		for _, d := range out.Details {
+			texts = append(texts, d.Text)
+		}
+		return strings.Join(texts, "\n")
+	}
+
+	for _, tc := range []struct {
+		name    string
+		content string
+		stat    string // "" — no status line, so the stat hook declines and the slot keeps its floor
+		body    string
+	}{
+		{
+			name:    "the status line follows a line that ends in the same word",
+			content: "the dev server is alive\nalive",
+			stat:    "alive",
+			body:    "the dev server is alive",
+		},
+		{
+			name:    "a program's last line merely ends in the word",
+			content: "the dev server is alive",
+			stat:    "",
+			body:    "the dev server is alive",
+		},
+		{
+			name:    "the word ends a line of a multi-line body",
+			content: "listening on :3000\nthe dev server is alive",
+			stat:    "",
+			body:    "listening on :3000\nthe dev server is alive",
+		},
+		{
+			name:    "the status IS the first line",
+			content: "exited with code 3",
+			stat:    "exit 3",
+			body:    "(no output)",
+		},
+		{
+			name:    "the status line carries trailing whitespace",
+			content: "npm run dev\nkilled  ",
+			stat:    "killed",
+			body:    "npm run dev",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			stat, ok := consoleStatusStat(domain.ToolResult{CallID: "1", Content: tc.content})
+			if ok != (tc.stat != "") {
+				t.Fatalf("consoleStatusStat ok = %v, want %v", ok, tc.stat != "")
+			}
+			if ok && stat.spell() != tc.stat {
+				t.Errorf("slot = %q, want %q", stat.spell(), tc.stat)
+			}
+			if got := body(consoleDetail(tc.content)); got != tc.body {
+				t.Errorf("body = %q, want %q", got, tc.body)
+			}
+		})
+	}
+}
+
 // read_file's locate report lays out beneath the branch: the term is in the target, the slot holds
 // the span's line count, and the lines the term was found on are here — three facts, three places.
 // A read that asked for no term has no report at all, which is the case only the typed summary can

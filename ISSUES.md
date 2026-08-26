@@ -32,24 +32,6 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 
 ## Open defects
 
-### A Console status word inside the program's own output mis-reads as the verdict
-
-**Status:** found 2026-08-25 at the close of the Console-family plan
-(`docs/plans/archived/2026-08-25 - 02 - console-family-plan.md`), deferred out of that run.
-**Planned 2026-08-26:** `docs/plans/2026-08-26 - 03 - surfaces-that-lie-restore-consoles-plan.md` item 16.
-
-- [P] `consoleStatusMarker` (`internal/tui/toolregistry.go:615`) is
-  `\n?(alive|exited with code (-?\d+)|killed)\s*$` — the leading `\n?` is OPTIONAL and nothing
-  anchors the alternation to the start of a line, so the marker is word-anchored where it means to
-  be line-anchored. A live `console_open` whose last output line ENDS in one of those words ("the
-  dev server is alive") has that word read as the status line: the outcome slot is worded from the
-  program's own prose, and `exitMarkerPhrase` (`internal/tui/toolregistry.go:627`) hands back the
-  body with those characters cut off its end. The fix is one token — `(?:^|\n)` in place of `\n?`.
-  The neighbouring `exitCodeMarker` needs no such change: its `[exit code N]` brackets already keep
-  it off prose.
-
----
-
 ### Effort detection and the effort picker — residuals deferred out of the 2026-08-25 run
 
 **Status:** found 2026-08-25 at the close of the effort-detection/picker plan

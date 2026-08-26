@@ -857,7 +857,11 @@ assistant turn carries an empty-name call (assert on the recorded request bodies
 
 ---
 
-## 16. A Console status word ends a LINE, not a word
+## 16. A Console status word ends a LINE, not a word — ✅ DONE (2026-08-26)
+
+NOTES (2026-08-26): the item said the doc comment already claims line anchoring and needed no change; it in fact said only "anchored the way exitCodeMarker is", which is end-anchoring and is precisely what was NOT enough here, so the comment was rewritten to state the line-start requirement and why the bracketed `exitCodeMarker` does not share it. Behavior unchanged.
+
+NOTES (2026-08-26): CHANGELOG.md is left to the verifier per this run's protocol, so it is absent from FILES although the item lists it.
 
 **What:** `ISSUES.md:35-48`. `internal/tui/toolregistry.go:617`: `consoleStatusMarker` becomes
 `(?:^|\n)(alive|exited with code (-?\d+)|killed)\s*$` — the leading `\n?` was optional, so a
