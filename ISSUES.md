@@ -222,6 +222,38 @@ that run.
   (`internal/doctext/pdf.go:378`, called at `:168`), so a compressed stream that happens to contain
   `/Size <huge>` would refuse a valid document; no fixture reproduces it.
 
+### Untrusted-text / approval-integrity residuals — deferred out of the 2026-08-26 run
+
+**Status:** found 2026-08-26 at the close of the untrusted-text / approval-integrity plan
+(`docs/plans/archived/2026-08-26 - 02 - untrusted-text-approval-integrity-plan.md`), deferred out
+of that run.
+
+- [ ] **`filehint`'s ID→tool gate needs a non-empty native tool-call ID.** The mechanism now parses
+  a result only when its call ID maps to a listing tool, but nothing synthesises an ID for a NATIVE
+  call: `internal/processing/toolcall.go` carries through whatever the backend sent, and the one
+  synthesis site is the text-parser path (`internal/agent/loop.go:591`). A backend that emits empty
+  `id`s therefore silently stops firing `filehint` — the safe direction, and the Bypass floor is
+  intact, but the Mechanism is off with no signal. A fallback that would restore it without
+  reopening C-08: parse ID-less results only when every call in the opening turn is a listing tool.
+
+- [ ] **The fan-out path resolves without the colliding-key check.** `prepareDelegation`
+  (`internal/agent/dispatch.go:237`) does not run the case-collision refusal the serial path gained,
+  so a `sub_agent` call spelling both `task` and `Task` is refused when dispatched serially and runs
+  when the group fans out. F-11's security property holds — a delegation reaches only Delegate or
+  Refuse, never a Gate, so no approval surface is exposed — but the two dispatch paths disagree on
+  the same call.
+
+- [ ] **`renderFileGroup`'s context-row form is unexercised.** The `%s:%d-%s` context row is not
+  covered by the escaping tests item 6 added: the 1-line fixture yields no surrounding lines, so
+  only the match-row form is proven. It shares the one proven `display` binding, so the escape is
+  believed correct — but a fixture with surrounding context lines is what would pin it.
+
+- [ ] **The auto blast-radius row truncates at 80 columns.** The mode row's `auto` sub-list cell
+  ellipsizes ("…fenced to the worksp…") at 80 columns and, when `auto` is the held value, the
+  appended "(current)" marker is cut away entirely; the post-⏎ note clips too. The landed change
+  fixed the ordering (sentence, then marker); a narrow-width treatment — marker first, or a wrapped
+  row — was out of its scope and is the design call to settle.
+
 ## Parked / deferred work
 
 Live, deliberately deferred work only. Each entry records *enough* design that we don't re-derive
