@@ -322,7 +322,19 @@ with the new skip predicate. `exec_common_test.go` —
 
 ---
 
-## 3. The tracked-file mutation floor runs its git through the tools funnel
+## 3. The tracked-file mutation floor runs its git through the tools funnel — ✅ DONE (2026-08-26)
+
+NOTES (2026-08-26): the item's text has `RunGitQuery` call `gitProgram`, whose refusal is a
+STRING; returning `errors.New(refusal)` would have dropped the `ErrExecFromWritablePath` sentinel
+the item's own `TestRunGitQuery_RefusesAPlantedGit` asserts. `gitProgram`'s body was therefore
+extracted into `resolveGit` — the identical resolve-and-fence, returning the error instead of its
+rendering — and `gitProgram` is now that function plus the render, byte-identical for every
+existing caller.
+NOTES (2026-08-26): `internal/tools/doc.go` is not in the item's Files list but had to be touched:
+the package map's `git.go` line enumerates what the file holds, and the file now also holds
+`RunGitQuery`, the package's one exported non-tool entry — the repo's own convention is that the
+map covers every file's role, so a new exported facility that the map does not mention is exactly
+the rot the map exists to prevent.
 
 **What:** F-05. `treesnapshot.go`'s three raw `exec.CommandContext(ctx, "git", …)` runs become
 calls into `internal/tools`' git funnel — fence, `-c` hardening, `GIT_CONFIG_NOSYSTEM`,

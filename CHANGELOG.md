@@ -220,6 +220,23 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **The tracked-file mutation floor no longer spawns a bare `git` (F-05).** The floor
+  (`internal/agent/treesnapshot.go`) fires twice around every subprocess tool call in every mode,
+  Bypass included, which made its `git` the most frequently spawned program apogee runs — and it
+  was the one spawn outside the tools funnel: unfenced, unhardened, teardown-less, and inheriting
+  the whole environment including `APOGEE_API_KEY`. Its three runs now go through
+  `tools.RunGitQuery`, the git funnel's new exported entry for the engine's own read-side git, so
+  they carry exactly what a git TOOL's git carries: the exec fence on the resolved binary (a `git`
+  resolving inside the workspace is refused rather than executed), `-c core.hooksPath=`,
+  `GIT_CONFIG_NOSYSTEM`, the allowlisted workspace-scoped environment, the repo-local
+  filter-driver refusal, and the §2.4 process-tree teardown. ADR 0056 decision 4's contract is
+  unchanged to the letter — 2 s per run, workspace root as cwd, any failure skips the check
+  silently — a fenced or refused git being simply one more failure that skips it. The floor's git
+  also runs OUTSIDE the call's confinement box: apogee's own bookkeeping is not the model's
+  command, so it never pays the re-exec wrapper twice a call (nor two extra Windows token label
+  walks, ADR 0020) and an unconfinable backend can never turn the floor's silent skip into the D4
+  demote signal.
+
 - **The fail-fast preamble no longer probes the host shell, and a hook's subprocess resolves its
   own `argv[0]` through the exec fence.** `platform.FailFastPreamble` was a `sync.OnceValue` that
   spawned `sh -c "set -o pipefail"` once per process to decide whether the option was available —

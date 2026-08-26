@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -140,14 +141,26 @@ var lookGit = func() (string, bool) {
 // workspace-resident PATH entry). The two are deliberately different sentences: a refusal that
 // read "git not available" would send the operator installing a git they already have.
 func gitProgram(ctx context.Context, root string) (gitPath, refusal string, ok bool) {
-	path, found := lookGit()
-	if !found {
-		return "", gitUnavailableMessage, false
-	}
-	if err := refuseExecFromWritablePath(path, root, confinementBox(ctx)); err != nil {
+	path, err := resolveGit(ctx, root)
+	if err != nil {
 		return "", err.Error(), false
 	}
 	return path, "", true
+}
+
+// resolveGit is gitProgram's error-returning form, for the callers that pass the failure ON as
+// an error rather than rendering it into a tool result: it keeps the fence's sentinel
+// (ErrExecFromWritablePath) intact through errors.Is, which a message string cannot. Both forms
+// resolve and fence identically — gitProgram is this function plus the render.
+func resolveGit(ctx context.Context, root string) (string, error) {
+	path, found := lookGit()
+	if !found {
+		return "", errors.New(gitUnavailableMessage)
+	}
+	if err := refuseExecFromWritablePath(path, root, confinementBox(ctx)); err != nil {
+		return "", err
+	}
+	return path, nil
 }
 
 // runGit runs git with gitArgs in root under the per-call timeout and the scrubbed
@@ -182,6 +195,15 @@ func runGit(ctx context.Context, gitPath, root string, timeout time.Duration, gi
 // itself, and the probe — which must reach git to ASK about the config, and whose own invocation
 // (`git config --get-regexp`) executes no driver. Everything else goes through runGit.
 func runGitUnchecked(ctx context.Context, gitPath, root string, timeout time.Duration, gitArgs ...string) (subprocessResult, error) {
+	return runSubprocess(ctx, gitRunSpec(gitPath, root, timeout, gitArgs...))
+}
+
+// gitRunSpec builds the subprocess spec for one git invocation in root: gitHardeningOptions
+// ahead of the subcommand, and the PATH-scoped allowlist environment with gitHardeningEnv
+// appended. It is the one place the hardening is composed, so every entry point into the funnel
+// — runGitUnchecked for the git TOOLS, RunGitQuery for the engine's own read-side git — carries
+// the identical argv and environment and neither can drift from the other.
+func gitRunSpec(gitPath, root string, timeout time.Duration, gitArgs ...string) subprocessSpec {
 	argv := make([]string, 0, 1+len(gitHardeningOptions)+len(gitArgs))
 	argv = append(argv, gitPath)
 	argv = append(argv, gitHardeningOptions...)
@@ -190,13 +212,61 @@ func runGitUnchecked(ctx context.Context, gitPath, root string, timeout time.Dur
 	env := safeGitEnv(root)
 	env = append(env[:len(env):len(env)], gitHardeningEnv...)
 
-	spec := subprocessSpec{
+	return subprocessSpec{
 		argv:    argv,
 		dir:     root,
 		timeout: timeout,
 		env:     env,
 	}
-	return runSubprocess(ctx, spec)
+}
+
+// RunGitQuery runs one read-side git command in root for the ENGINE itself and returns its
+// standard output alone. It is the funnel entry for apogee's own bookkeeping git — today the
+// tracked-file mutation floor (internal/agent/treesnapshot.go), which snapshots the tree around
+// every subprocess tool call — so that git gets everything a git TOOL's git gets: the exec fence
+// on the resolved binary, gitHardeningOptions, GIT_CONFIG_NOSYSTEM, the allowlisted
+// workspace-scoped environment (no APOGEE_API_KEY, no inherited config redirection), the
+// repo-local filter-driver refusal, and the §2.4 process-tree teardown.
+//
+// Every failure is ONE error and they are deliberately not distinguished: git absent, a fenced
+// binary, a refused repository, a non-zero exit, a timeout, a wedged drain and a cancelled ctx
+// all mean "no trustworthy answer", which is precisely what the caller acts on — the floor's
+// contract is that any failure skips the check silently for that call (ADR 0056 decision 4).
+//
+// It is NOT for tool results. A tool shows the model what git printed, exit code and stderr
+// included, so the git tools keep runGit's captured outcome; this returns stdout as DATA, with
+// the diagnostics left out of the payload (splitStdout).
+func RunGitQuery(ctx context.Context, root string, timeout time.Duration, args ...string) (string, error) {
+	if len(args) == 0 {
+		return "", errors.New("apogee: RunGitQuery: no git subcommand")
+	}
+	gitPath, err := resolveGit(ctx, root)
+	if err != nil {
+		return "", err
+	}
+	drivers, err := probeFilterDrivers(ctx, gitPath, root)
+	if err != nil {
+		return "", err
+	}
+	if len(drivers) > 0 {
+		return "", errors.New(gitFilterRefusal(drivers))
+	}
+
+	spec := gitRunSpec(gitPath, root, timeout, args...)
+	spec.splitStdout = true
+	res, err := runSubprocess(ctx, spec)
+	if err != nil {
+		return "", err
+	}
+	switch {
+	case res.timedOut:
+		return "", fmt.Errorf("git %s: timed out after %s", args[0], timeout)
+	case res.drainWedged:
+		return "", fmt.Errorf("git %s: output drain wedged", args[0])
+	case res.exitCode != 0:
+		return "", fmt.Errorf("git %s: exit %d: %s", args[0], res.exitCode, strings.TrimSpace(res.combinedOutput))
+	}
+	return res.stdout, nil
 }
 
 // gitFilterConfigName matches the config names that give a filter driver its COMMAND:

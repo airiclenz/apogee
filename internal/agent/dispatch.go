@@ -801,6 +801,15 @@ func (a *Agent) executeTool(ctx context.Context, turn int, tool domain.Tool, cal
 	// console tool stamps on the Consoles it opens — so a delegation's end can close its own.
 	ctx = console.WithRegistry(ctx, a.consoles)
 
+	// The floor's own context, taken BEFORE the Confinement handle goes on: apogee's
+	// bookkeeping git is not the model's command and must never run inside the call's box. A
+	// confined snapshot would pay the re-exec wrapper twice per call — and two extra token
+	// label walks per call on Windows (ADR 0020) — for a read that changes nothing, and a
+	// backend that could not establish the box would turn the floor's silent skip into the D4
+	// demote signal, gating a call on apogee's own bookkeeping. Cancellation still reaches it:
+	// floorCtx is the same ctx chain, so a cancelled Turn skips the check, per contract.
+	floorCtx := ctx
+
 	if box != nil {
 		// Install the Confinement handle so the subprocess tool confines the command it
 		// launches. resolve() chose Confine only after confirming caps (§4), so the Confiner is
@@ -818,7 +827,7 @@ func (a *Agent) executeTool(ctx context.Context, turn int, tool domain.Tool, cal
 	// silently, and the floor never turns a clean result into an error.
 	preTree, watchTree := "", false
 	if domain.IsSubprocessTool(tool) {
-		preTree, watchTree = a.tree.beforeCall()
+		preTree, watchTree = a.tree.beforeCall(floorCtx)
 	}
 
 	res, err := a.runTool(ctx, tool, call)
@@ -842,12 +851,12 @@ func (a *Agent) executeTool(ctx context.Context, turn int, tool domain.Tool, cal
 		if watchTree {
 			// The error result carries the warning too: a command that failed may
 			// still have written before it failed — the incident's exact shape.
-			appendTreeMutationWarning(&errResult, a.tree.mutationWarning(preTree))
+			appendTreeMutationWarning(&errResult, a.tree.mutationWarning(floorCtx, preTree))
 		}
 		return errResult, dispatchDone
 	}
 	if watchTree {
-		appendTreeMutationWarning(&res, a.tree.mutationWarning(preTree))
+		appendTreeMutationWarning(&res, a.tree.mutationWarning(floorCtx, preTree))
 	}
 	return res, dispatchDone
 }

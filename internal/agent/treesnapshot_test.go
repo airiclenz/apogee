@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -195,7 +196,7 @@ func TestTreeSnapshot_NonGitWorkspaceRunsWithoutSnapshotOrWarning(t *testing.T) 
 	if strings.Contains(result.Content, "[warning:") {
 		t.Fatalf("non-git workspace gained a warning: %q", result.Content)
 	}
-	if a.tree.active() {
+	if a.tree.active(context.Background()) {
 		t.Fatal("snapshotter reports active in a non-git workspace")
 	}
 }
@@ -277,4 +278,130 @@ func TestTreeSnapshot_DiffHelpers(t *testing.T) {
 			t.Fatalf("paths = %v, want empty", paths)
 		}
 	})
+}
+
+// ---------------------------------------------------------------------------
+// The floor's git goes through the tools funnel (F-05)
+// ---------------------------------------------------------------------------
+
+// writeFakeGit installs an executable POSIX fake git at dir/git that appends its argv and the
+// two environment answers the funnel is judged on to record, then answers rev-parse so the floor
+// treats the workspace as a repository. It returns the fake's path.
+func writeFakeGit(t *testing.T, dir, record string) string {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("the fake-git fixture is a POSIX shell script; the funnel it pins is platform-independent")
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", dir, err)
+	}
+	path := filepath.Join(dir, "git")
+	script := "#!/bin/sh\n" +
+		"{ echo \"argv: $*\"; echo \"nosystem: ${GIT_CONFIG_NOSYSTEM-unset}\"; echo \"apikey: ${APOGEE_API_KEY-unset}\"; } >> \"" + record + "\"\n" +
+		"case \"$*\" in *rev-parse*) echo true ;; esac\n" +
+		"exit 0\n"
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake git: %v", err)
+	}
+	return path
+}
+
+// TestTreeSnapshot_GitRunsThroughTheFunnel pins F-05's fix at the floor's own seam: the git the
+// floor spawns around every subprocess call carries the tools funnel's hardening (the
+// core.hooksPath= option, GIT_CONFIG_NOSYSTEM) and the allowlisted environment, so apogee's own
+// API key never reaches the most frequently spawned program the agent runs.
+func TestTreeSnapshot_GitRunsThroughTheFunnel(t *testing.T) {
+	// No t.Parallel: PATH and APOGEE_API_KEY are process-wide.
+	root := t.TempDir()
+	fakeDir := t.TempDir()
+	record := filepath.Join(fakeDir, "record")
+	writeFakeGit(t, fakeDir, record)
+	t.Setenv("PATH", fakeDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("APOGEE_API_KEY", "shhh-secret")
+	a := newWorkspaceAgent(t, root)
+
+	executeFake(t, a, mutatingSubprocessTool{
+		subprocess: true,
+		result:     domain.ToolResult{Content: "ok"},
+	})
+
+	logged, err := os.ReadFile(record)
+	if err != nil {
+		t.Fatalf("the floor spawned no git at all: %v", err)
+	}
+	got := string(logged)
+	if !strings.Contains(got, "argv: -c core.hooksPath= rev-parse --is-inside-work-tree") {
+		t.Errorf("record = %q, want the probe hardened", got)
+	}
+	if !strings.Contains(got, "argv: -c core.hooksPath= status --porcelain") {
+		t.Errorf("record = %q, want the snapshots hardened", got)
+	}
+	if !strings.Contains(got, "nosystem: 1") {
+		t.Errorf("record = %q, want GIT_CONFIG_NOSYSTEM=1", got)
+	}
+	if strings.Contains(got, "shhh-secret") || !strings.Contains(got, "apikey: unset") {
+		t.Errorf("record = %q, want the allowlist to have dropped APOGEE_API_KEY", got)
+	}
+}
+
+// TestTreeSnapshot_PlantedGitTurnsTheFloorOff pins the fence half: a git resolving INSIDE the
+// workspace is bytes the model may have written, so the funnel refuses it — and the floor's
+// contract turns that refusal into a silent skip rather than a failed tool call.
+func TestTreeSnapshot_PlantedGitTurnsTheFloorOff(t *testing.T) {
+	// No t.Parallel: PATH is process-wide.
+	requireGit(t)
+	root, tracked := newGitWorkspace(t)
+	record := filepath.Join(t.TempDir(), "record")
+	plantedDir := filepath.Join(root, "node_modules", ".bin")
+	writeFakeGit(t, plantedDir, record)
+	t.Setenv("PATH", plantedDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	a := newWorkspaceAgent(t, root)
+
+	result := executeFake(t, a, mutatingSubprocessTool{
+		subprocess: true,
+		run:        func() error { return os.WriteFile(tracked, []byte("changed\n"), 0o644) },
+		result:     domain.ToolResult{Content: "ok"},
+	})
+
+	if result.IsError || !strings.Contains(result.Content, "ok") {
+		t.Errorf("a refused git broke the tool call: %+v", result)
+	}
+	if strings.Contains(result.Content, "[warning:") {
+		t.Errorf("a refused git still produced a warning: %q", result.Content)
+	}
+	if _, err := os.Stat(record); err == nil {
+		t.Error("the planted git ran; the exec fence must refuse it before the spawn")
+	}
+}
+
+// TestTreeSnapshot_ConfinedCallSnapshotsOutsideTheBox pins where the floor's git runs: apogee's
+// own bookkeeping is not the model's command, so a Confine call installs the box for the TOOL
+// and never for the snapshots around it. A confined snapshot would pay the re-exec wrapper on
+// every call and turn a backend failure into the D4 demote signal.
+func TestTreeSnapshot_ConfinedCallSnapshotsOutsideTheBox(t *testing.T) {
+	t.Parallel()
+	requireGit(t)
+	root, _ := newGitWorkspace(t)
+	conf := &fakeConfiner{caps: capsBoth()}
+	cfg := baseConfig(&recordingSink{})
+	cfg.WorkspaceDir = root
+	cfg.Confiner = conf
+	a, err := newAgent(cfg, echoResponder{reply: "unused"})
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	tool := &subprocTool{name: "fake_subprocess"}
+
+	call := domain.ToolCall{ID: "call-1", Tool: tool.Name()}
+	box := domain.ConfinementBox{WorkspaceRoot: root}
+	if _, outcome := a.executeTool(context.Background(), 0, tool, call, &box); outcome != dispatchDone {
+		t.Fatalf("outcome = %v, want dispatchDone", outcome)
+	}
+
+	if !tool.confinedOK() {
+		t.Error("the tool never saw the Confinement handle; the box must reach the model's command")
+	}
+	if got := conf.confineCount(); got != 1 {
+		t.Errorf("Confine called %d times, want 1 (the tool alone) — the floor's git must run outside the box", got)
+	}
 }

@@ -87,7 +87,14 @@ success **and** error results, every mode **including Bypass** (the ADR 0006 exe
 like the tool-result clamp). Not a Mechanism; no gating, no config key. Each snapshot runs
 with a 2s timeout in the workspace root and any git error skips the check silently — the
 floor must never break or slow a call. This converts a silent clobber into something the
-model reacts to within one call.
+model reacts to within one call. **Amended 2026-08-26:** the snapshot no longer spawns a bare
+`git` of its own — it runs through the same hardened git funnel as the git tools
+(`tools.RunGitQuery`: the exec fence on the resolved binary, `-c core.hooksPath=`,
+`GIT_CONFIG_NOSYSTEM`, the allowlisted workspace-scoped environment, the repo-local
+filter-driver refusal and the §2.4 process-tree teardown), and it runs OUTSIDE the call's
+confinement box — apogee's own bookkeeping is not the model's command. The 2 s timeout,
+workspace-root cwd and silent-skip-on-any-failure contract above are unchanged; a fenced or
+refused git is simply one more failure that skips the check.
 
 **5. Relation to ADR 0012 — extended, not superseded.** The posture stands: a subprocess
 escape is OS-blocked with no Approval prompt. Two refinements land back into its documents:

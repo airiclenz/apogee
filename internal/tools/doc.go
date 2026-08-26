@@ -209,7 +209,10 @@
 // and the 8 KiB condensed verdict. diagnostics.go is diagnostics — go/parser in process, an
 // optional go vet, and the graceful "no provider" for every other language. git.go is the
 // whole git family: git_branch, git_commit, git_diff_range, git_status and git_log, with the
-// ref guards and porcelain-v2 parsing they share.
+// ref guards and porcelain-v2 parsing they share — plus RunGitQuery, the package's one exported
+// non-tool entry, which lends the same hardened funnel to the ENGINE's own read-side git (the
+// tracked-file mutation floor, internal/agent/treesnapshot.go) so no bookkeeping git of
+// apogee's has to spawn outside it.
 //
 // The Console family (ADR 0059) — a persistent interactive program the model drives across
 // Turns, held as live host state on the engine rather than as one process per call.

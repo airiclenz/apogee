@@ -3,13 +3,13 @@ package agent
 import (
 	"context"
 	"fmt"
-	"os/exec"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/tools"
 )
 
 // The tracked-file mutation floor: git-status snapshots taken around every subprocess
@@ -23,7 +23,9 @@ import (
 // Robustness contract (binding): each git run carries a 2-second timeout and executes
 // in the workspace root; on ANY git error or timeout the check is skipped silently for
 // that call. The floor must never break or slow a tool call's success path beyond the
-// two porcelain runs.
+// two porcelain runs. Since 2026-08-26 those runs go through the tools package's git funnel
+// (tools.RunGitQuery) rather than a bare exec, so the floor's own git is fenced, hardened,
+// environment-scrubbed and torn down exactly as a git TOOL's git is.
 
 // treeSnapshotTimeout bounds each git invocation the floor makes, so a wedged or
 // enormous repository can never stall a tool call behind its own bookkeeping.
@@ -53,12 +55,12 @@ func newTreeSnapshotter(workspaceRoot string) *treeSnapshotter {
 // git work tree. The git probe runs once per Agent and its answer is cached — a repo
 // created or deleted mid-session is picked up at the next Agent, not the next call.
 // Nil-safe: a nil snapshotter is an inactive floor, never an error.
-func (t *treeSnapshotter) active() bool {
+func (t *treeSnapshotter) active(ctx context.Context) bool {
 	if t == nil || t.root == "" {
 		return false
 	}
 	t.probeOnce.Do(func() {
-		out, err := t.git("rev-parse", "--is-inside-work-tree")
+		out, err := t.git(ctx, "rev-parse", "--is-inside-work-tree")
 		t.isRepo = err == nil && strings.TrimSpace(out) == "true"
 	})
 	return t.isRepo
@@ -67,11 +69,11 @@ func (t *treeSnapshotter) active() bool {
 // beforeCall takes the pre-call porcelain snapshot. ok=false means the floor is off
 // for this call — not a repo, or git failed or timed out — and the caller must skip
 // the post-call half too: without a trustworthy "before" there is nothing to diff.
-func (t *treeSnapshotter) beforeCall() (snapshot string, ok bool) {
-	if !t.active() {
+func (t *treeSnapshotter) beforeCall(ctx context.Context) (snapshot string, ok bool) {
+	if !t.active(ctx) {
 		return "", false
 	}
-	out, err := t.git("status", "--porcelain")
+	out, err := t.git(ctx, "status", "--porcelain")
 	if err != nil {
 		return "", false
 	}
@@ -81,8 +83,8 @@ func (t *treeSnapshotter) beforeCall() (snapshot string, ok bool) {
 // mutationWarning takes the post-call snapshot and renders the warning line, or ""
 // when the tree is unchanged — or when the post-call git run failed, the silent-skip
 // half of the robustness contract.
-func (t *treeSnapshotter) mutationWarning(before string) string {
-	after, err := t.git("status", "--porcelain")
+func (t *treeSnapshotter) mutationWarning(ctx context.Context, before string) string {
+	after, err := t.git(ctx, "status", "--porcelain")
 	if err != nil || after == before {
 		return ""
 	}
@@ -94,15 +96,23 @@ func (t *treeSnapshotter) mutationWarning(before string) string {
 }
 
 // git runs one git command in the workspace root under the floor's timeout, returning
-// stdout. Every error — git absent, not a repo, timeout — is the caller's signal to
-// skip, never to fail the tool call.
-func (t *treeSnapshotter) git(args ...string) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), treeSnapshotTimeout)
+// stdout. Every error — git absent, a fenced or refused git, not a repo, timeout — is the
+// caller's signal to skip, never to fail the tool call.
+//
+// It runs through the tools package's git funnel (tools.RunGitQuery), not a bare exec: the
+// floor fires around EVERY subprocess tool call in EVERY mode, so its own git is the most
+// frequently spawned program apogee runs and must carry the same hardening as a git tool's —
+// the exec fence on the resolved binary, core.hooksPath=, GIT_CONFIG_NOSYSTEM, the allowlisted
+// workspace-scoped environment (apogee's API key never reaches it), the repo-local
+// filter-driver refusal and the §2.4 process-tree teardown.
+//
+// ctx is the call's, so a cancelled Turn skips the check as the contract allows; the per-run
+// timeout stays the outer bound as well as the funnel's, since a ctx that is never cancelled
+// must still not let one wedged git hold a tool result.
+func (t *treeSnapshotter) git(ctx context.Context, args ...string) (string, error) {
+	runCtx, cancel := context.WithTimeout(ctx, treeSnapshotTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "git", args...)
-	cmd.Dir = t.root
-	out, err := cmd.Output()
-	return string(out), err
+	return tools.RunGitQuery(runCtx, t.root, treeSnapshotTimeout, args...)
 }
 
 // porcelainDiffPaths extracts the changed paths from two porcelain snapshots: every
