@@ -36,11 +36,13 @@ import (
 // git's behaviour.
 //
 // The environment is only half of that: git also runs programs the REPOSITORY names — hooks,
-// filter and diff drivers — which on an attacker-authored checkout are attacker-authored
-// scripts. gitHardeningOptions, gitHardeningEnv and gitDiffHardeningArgs below refuse those,
-// and runGit applies the first two to every invocation. Filter drivers are the one class git
-// has no switch for, so runGit refuses the CALL instead when the repository's own config
-// defines one (repoLocalFilterDrivers).
+// filesystem monitors, filter, diff, merge and credential drivers, editors, pagers — which on an
+// attacker-authored checkout are attacker-authored scripts. One principle covers all of them:
+// where git offers a per-invocation switch that neutralises the key, the switch is applied
+// (gitHardeningOptions, gitHardeningEnv and gitDiffHardeningArgs below, the first two on EVERY
+// invocation); every remaining repo-local key whose VALUE is a program git executes is refused by
+// name, so runGit gives the CALL no git at all when the repository's own config defines one
+// (gitCommandConfigName, repoLocalCommandConfig).
 
 // gitTimeout bounds a single git invocation. git operations are local (no network
 // op is exposed by these tools), so a short ceiling is ample and a hung git never
@@ -100,7 +102,14 @@ var safeGitEnv = func(root string) []string {
 // hooks, so the write is the realistic variant. A hook is a shell script git executes on the
 // operator's behalf with no gate of ours in front of it, which is exactly the unbounded blast
 // radius ADR 0012 requires a gate for.
-var gitHardeningOptions = []string{"-c", "core.hooksPath="}
+//
+// core.fsmonitor=false covers the other key git runs on nearly every command. The setting takes
+// a COMMAND — the repository names a program and git executes it to ask which files changed — so
+// an attacker-authored config turns a plain `git status` into a launcher. false disables both the
+// hook form and git's own builtin daemon, which is why it is a neutralisation rather than a
+// refusal: a repository that legitimately set core.fsmonitor=true (the everyday builtin case)
+// keeps working, just without the index-refresh shortcut, instead of losing every git tool.
+var gitHardeningOptions = []string{"-c", "core.hooksPath=", "-c", "core.fsmonitor=false"}
 
 // gitHardeningEnv is appended to the allowlisted environment of every git subprocess.
 // GIT_CONFIG_NOSYSTEM drops the system config (/etc/gitconfig, and the Git-for-Windows
@@ -109,11 +118,13 @@ var gitHardeningOptions = []string{"-c", "core.hooksPath="}
 //
 // One residual is deliberate, not an oversight: HOME stays on safeEnvKeys, so the OPERATOR's
 // own ~/.gitconfig still applies — that config is theirs, and the threat model here trusts the
-// operator and distrusts the bytes in the workspace. A .gitattributes filter driver
-// (clean/smudge/process) names a driver whose COMMAND lives in config, and git offers no global
-// switch to refuse configured filters; since 2026-08-14 that half is closed one level up
-// instead — runGit REFUSES the call outright when the repository's own config defines a filter
-// driver (repoLocalFilterDrivers), which is exactly why the operator's global drivers keep
+// operator and distrusts the bytes in the workspace. Command-valued config keys are the class
+// git has no global switch for: a filter driver (clean/smudge/process), an sshCommand, a
+// credential helper, a merge driver, a textconv, a pager, a gpg.program — each names a COMMAND
+// that lives in config, and there is no --no-configured-programs to pass. Since 2026-08-14 that
+// half is closed one level up instead, and since 2026-08-26 for the whole class rather than
+// filters alone — runGit REFUSES the call outright when the REPOSITORY's own config defines any
+// such key (repoLocalCommandConfig), which is exactly why the operator's global ones keep
 // working. gitDiffHardeningArgs closes the read-path diff drivers, which are the ones a mere
 // inspection would otherwise execute.
 var gitHardeningEnv = []string{"GIT_CONFIG_NOSYSTEM=1"}
@@ -171,29 +182,29 @@ func resolveGit(ctx context.Context, root string) (string, error) {
 // ok=false on the caller's lookGit, not here. The Go error is non-nil only for ctx
 // cancellation or a confinement-unavailable demotion (the runSubprocess contract).
 //
-// It is also the choke point for the repo-local filter-driver refusal: a repository whose own
-// config defines a filter command gets no git call at all, on the read paths as much as the
-// write ones (a clean filter runs on a plain diff or status). The refusal is returned as an
+// It is also the choke point for the repo-local command-config refusal: a repository whose own
+// config names a program git would execute gets no git call at all, on the read paths as much as
+// the write ones (a clean filter runs on a plain diff or status, a pager on a plain log). The refusal is returned as an
 // ordinary failed outcome — non-zero exit, the model-facing sentence as its output — so every
 // caller's existing "git ... failed" branch surfaces it verbatim, with no signature for a
 // future git tool to forget to handle.
 //
-// The probe behind that refusal is memoised per repository root (filterDriverProbes), so it costs
+// The probe behind that refusal is memoised per repository root (commandConfigProbes), so it costs
 // its two subprocesses once per root rather than on every git call.
 func runGit(ctx context.Context, gitPath, root string, timeout time.Duration, gitArgs ...string) (subprocessResult, error) {
-	drivers, err := probeFilterDrivers(ctx, gitPath, root)
+	drivers, err := probeCommandConfig(ctx, gitPath, root)
 	if err != nil {
 		return subprocessResult{}, err
 	}
 	if len(drivers) > 0 {
-		return subprocessResult{combinedOutput: gitFilterRefusal(drivers), exitCode: 1}, nil
+		return subprocessResult{combinedOutput: gitCommandConfigRefusal(drivers), exitCode: 1}, nil
 	}
 	return runGitUnchecked(ctx, gitPath, root, timeout, gitArgs...)
 }
 
-// runGitUnchecked is runGit without the filter-driver probe. Only two callers may use it: runGit
+// runGitUnchecked is runGit without the command-config probe. Only two callers may use it: runGit
 // itself, and the probe — which must reach git to ASK about the config, and whose own invocation
-// (`git config --get-regexp`) executes no driver. Everything else goes through runGit.
+// (`git config --get-regexp`) executes no configured program. Everything else goes through runGit.
 func runGitUnchecked(ctx context.Context, gitPath, root string, timeout time.Duration, gitArgs ...string) (subprocessResult, error) {
 	return runSubprocess(ctx, gitRunSpec(gitPath, root, timeout, gitArgs...))
 }
@@ -226,7 +237,7 @@ func gitRunSpec(gitPath, root string, timeout time.Duration, gitArgs ...string) 
 // every subprocess tool call — so that git gets everything a git TOOL's git gets: the exec fence
 // on the resolved binary, gitHardeningOptions, GIT_CONFIG_NOSYSTEM, the allowlisted
 // workspace-scoped environment (no APOGEE_API_KEY, no inherited config redirection), the
-// repo-local filter-driver refusal, and the §2.4 process-tree teardown.
+// repo-local command-config refusal, and the §2.4 process-tree teardown.
 //
 // Every failure is ONE error and they are deliberately not distinguished: git absent, a fenced
 // binary, a refused repository, a non-zero exit, a timeout, a wedged drain and a cancelled ctx
@@ -244,12 +255,12 @@ func RunGitQuery(ctx context.Context, root string, timeout time.Duration, args .
 	if err != nil {
 		return "", err
 	}
-	drivers, err := probeFilterDrivers(ctx, gitPath, root)
+	drivers, err := probeCommandConfig(ctx, gitPath, root)
 	if err != nil {
 		return "", err
 	}
 	if len(drivers) > 0 {
-		return "", errors.New(gitFilterRefusal(drivers))
+		return "", errors.New(gitCommandConfigRefusal(drivers))
 	}
 
 	spec := gitRunSpec(gitPath, root, timeout, args...)
@@ -269,14 +280,25 @@ func RunGitQuery(ctx context.Context, root string, timeout time.Duration, args .
 	return res.stdout, nil
 }
 
-// gitFilterConfigName matches the config names that give a filter driver its COMMAND:
-// filter.<driver>.clean, .smudge and .process (a .required or a .gitattributes selection names
-// no program and runs nothing on its own). The same source string is handed to git, whose own
-// matcher does the selecting, and kept here to re-check what came back — git's combined output
-// can carry a warning line the listing never intended as a name.
-var gitFilterConfigName = regexp.MustCompile(`^filter\..*\.(clean|smudge|process)$`)
+// gitCommandConfigName matches every config name whose VALUE is a program git executes — an
+// sshCommand, an editor, a pager, an askpass, a filter or merge or diff driver, a credential
+// helper, a gpg.program, a proxy command. A key that merely SELECTS one of those (a
+// filter.<driver>.required, a .gitattributes attribute) names no program and runs nothing on its
+// own, so it is deliberately absent.
+//
+// Two classes are deliberately absent for their own reasons. core.hooksPath and core.fsmonitor
+// are neutralised by gitHardeningOptions above, so refusing them as well would cost a repository
+// its git tools for a key that can no longer reach a program. alias.* cannot shadow a builtin
+// subcommand, and every subcommand these tools invoke is a builtin, so a repo-local alias never
+// changes what apogee's own argv runs.
+//
+// The source string must stay POSIX-ERE-compatible — plain ( ) groups, no (?: — because it is
+// handed to git verbatim and git's --get-regexp compiles it with regcomp; the same string is
+// kept here to re-check what came back, since git's combined output can carry a warning line the
+// listing never intended as a name.
+var gitCommandConfigName = regexp.MustCompile(`^(core\.(sshcommand|editor|pager|askpass|gitproxy|alternaterefscommand)|sequence\.editor|diff\.external|diff\..*\.(command|textconv)|merge\..*\.driver|mergetool\..*\.cmd|difftool\..*\.cmd|filter\..*\.(clean|smudge|process)|credential\.helper|credential\..*\.helper|gpg\.program|gpg\..*\.program|uploadpack\.packobjectshook|remote\..*\.proxy|pager\..*)$`)
 
-// gitFilterConfigScopes are the config scopes a filter driver is refused from — the
+// gitFilterConfigScopes are the config scopes a command-valued key is refused from — the
 // REPOSITORY's own files, which is what the workspace bytes can carry. --local is .git/config
 // (with whatever it include.path-s, since git resolves the includes for us); --worktree is the
 // per-worktree file, read only where the worktreeConfig extension is on and otherwise either a
@@ -285,11 +307,11 @@ var gitFilterConfigName = regexp.MustCompile(`^filter\..*\.(clean|smudge|process
 // comment draws.
 var gitFilterConfigScopes = []string{"--local", "--worktree"}
 
-// maxNamedFilterDrivers caps how many config keys a refusal names, so a repository that defines
-// a thousand drivers cannot turn the refusal sentence into the whole result.
-const maxNamedFilterDrivers = 5
+// maxNamedCommandKeys caps how many config keys a refusal names, so a repository that defines
+// a thousand of them cannot turn the refusal sentence into the whole result.
+const maxNamedCommandKeys = 5
 
-// filterDriverProbes memoises the repo-local filter-driver probe for the process lifetime, keyed
+// commandConfigProbes memoises the repo-local command-config probe for the process lifetime, keyed
 // by the git binary and the repository root together — the same root probed with a different git
 // is a different question, and a Driver may hold several roots at once. Each value is the probed
 // name slice, which every reader treats as read-only.
@@ -299,38 +321,39 @@ const maxNamedFilterDrivers = 5
 // tool (one git_commit ran its four real git commands behind twelve git processes).
 //
 // The accepted staleness, deliberate: a repository's config is probed once per root and never
-// re-read. A filter driver added to that config after the first probe is not refused until apogee
-// restarts, and one removed keeps refusing just as long. The threat this refusal answers is an
+// re-read. A command-valued key added to that config after the first probe is not refused until
+// apogee restarts, and one removed keeps refusing just as long. The threat this refusal answers is an
 // attacker-AUTHORED checkout — hostile in its config before apogee ever opens it — not a config
 // edited underneath a running session, so a per-session answer is the right granularity.
 //
 // Two goroutines probing the same not-yet-probed root both run the probe and store the same
 // answer; the duplicated work is wasted, never the outcome.
-var filterDriverProbes sync.Map
+var commandConfigProbes sync.Map
 
-// probeFilterDrivers returns repoLocalFilterDrivers' answer for the repository at root, reaching
+// probeCommandConfig returns repoLocalCommandConfig's answer for the repository at root, reaching
 // git only the first time it is asked about a given (gitPath, root) pair.
 //
 // A FAILED probe is never cached. Its error is the runSubprocess contract's — ctx cancellation or
 // a confinement-unavailable demotion — which says nothing about the repository, so caching it
 // would let one cancelled Turn refuse every later git call on that root.
-func probeFilterDrivers(ctx context.Context, gitPath, root string) ([]string, error) {
+func probeCommandConfig(ctx context.Context, gitPath, root string) ([]string, error) {
 	key := gitPath + "\x00" + root
-	if cached, ok := filterDriverProbes.Load(key); ok {
+	if cached, ok := commandConfigProbes.Load(key); ok {
 		return cached.([]string), nil
 	}
-	names, err := repoLocalFilterDrivers(ctx, gitPath, root)
+	names, err := repoLocalCommandConfig(ctx, gitPath, root)
 	if err != nil {
 		return nil, err
 	}
-	filterDriverProbes.Store(key, names)
+	commandConfigProbes.Store(key, names)
 	return names, nil
 }
 
-// repoLocalFilterDrivers lists the repo-local config names defining a filter-driver command for
-// the repository at root, by asking git itself rather than parsing .git/config — git is the only
-// thing that agrees with git about includes, casing and quoting. Listing config runs no driver:
-// a filter fires on add/checkout/diff, never on `git config`, and --name-only keeps an
+// repoLocalCommandConfig lists the repo-local config names whose VALUE is a program git would
+// execute (gitCommandConfigName) for the repository at root, by asking git itself rather than
+// parsing .git/config — git is the only thing that agrees with git about includes, casing and
+// quoting. Listing config executes none of them: a filter fires on add/checkout/diff and a
+// credential helper on a network call, never on `git config`, and --name-only keeps an
 // attacker-chosen VALUE out of the output entirely.
 //
 // A non-zero exit is the pass case, not an error: git exits 1 when nothing matched and 128 when
@@ -338,12 +361,12 @@ func probeFilterDrivers(ctx context.Context, gitPath, root string) ([]string, er
 // option). The error return is the runSubprocess contract's — ctx cancellation or a
 // confinement-unavailable demotion — and it stops the caller, so a probe that could not run
 // never lets the real command run un-probed.
-func repoLocalFilterDrivers(ctx context.Context, gitPath, root string) ([]string, error) {
+func repoLocalCommandConfig(ctx context.Context, gitPath, root string) ([]string, error) {
 	var names []string
 	seen := make(map[string]struct{})
 	for _, scope := range gitFilterConfigScopes {
 		res, err := runGitUnchecked(ctx, gitPath, root, gitTimeout,
-			"config", scope, "--name-only", "--get-regexp", gitFilterConfigName.String())
+			"config", scope, "--name-only", "--get-regexp", gitCommandConfigName.String())
 		if err != nil {
 			return nil, err
 		}
@@ -352,7 +375,7 @@ func repoLocalFilterDrivers(ctx context.Context, gitPath, root string) ([]string
 		}
 		for _, line := range strings.Split(res.combinedOutput, "\n") {
 			name := strings.TrimSpace(line)
-			if !gitFilterConfigName.MatchString(name) {
+			if !gitCommandConfigName.MatchString(name) {
 				continue
 			}
 			if _, dup := seen[name]; dup {
@@ -365,18 +388,18 @@ func repoLocalFilterDrivers(ctx context.Context, gitPath, root string) ([]string
 	return names, nil
 }
 
-// gitFilterRefusal is the model-facing sentence for a repository whose own config defines a
-// filter driver. Like the exec fence's refusal it NAMES what it refused — a message that only
-// said "refused" would send the model retrying the same call — and states the rule, including
-// the half that still works, so the operator's own global drivers are not read as broken.
-func gitFilterRefusal(names []string) string {
+// gitCommandConfigRefusal is the model-facing sentence for a repository whose own config names a
+// program git would execute. Like the exec fence's refusal it NAMES what it refused — a message
+// that only said "refused" would send the model retrying the same call — and states the rule,
+// including the half that still works, so the operator's own global config is not read as broken.
+func gitCommandConfigRefusal(names []string) string {
 	shown, extra := names, ""
-	if len(names) > maxNamedFilterDrivers {
-		shown = names[:maxNamedFilterDrivers]
-		extra = fmt.Sprintf(" (+%d more)", len(names)-maxNamedFilterDrivers)
+	if len(names) > maxNamedCommandKeys {
+		shown = names[:maxNamedCommandKeys]
+		extra = fmt.Sprintf(" (+%d more)", len(names)-maxNamedCommandKeys)
 	}
-	return fmt.Sprintf("git refused: this repository's own config defines a filter driver git would execute as a command (%s%s). "+
-		"Repo-local filter drivers are refused for every git tool; a filter driver in the operator's global git config is untouched and still applies.",
+	return fmt.Sprintf("git refused: this repository's own config names a program git would execute (%s%s). "+
+		"Repo-local command-valued keys are refused for every git tool; the operator's global git config is untouched and still applies.",
 		strings.Join(shown, ", "), extra)
 }
 
@@ -655,7 +678,14 @@ func (t *GitCommit) Execute(ctx context.Context, call domain.ToolCall) (domain.T
 	// emptied core.hooksPath every invocation already carries (gitHardeningOptions). The
 	// belt-and-braces is deliberate: this is the one path where a hook both runs an
 	// attacker-authored script AND can rewrite or veto the message the operator approved.
-	commitArgs := []string{"commit", "--no-verify", "-m", message}
+	//
+	// --no-gpg-sign is the same treatment for the other program a commit can launch: a repo-local
+	// commit.gpgsign=true plus a gpg.program pointing at an attacker-authored script would run it
+	// on every commit. gpg.program is refused outright (gitCommandConfigName), so this covers the
+	// residual — the operator's OWN global gpg.program, which the refusal deliberately leaves
+	// alone — by not asking for a signature at all. apogee's commits are unsigned by design; a
+	// commit the operator wants signed is one they make themselves.
+	commitArgs := []string{"commit", "--no-verify", "--no-gpg-sign", "-m", message}
 	if args.Amend {
 		commitArgs = append(commitArgs, "--amend")
 	}

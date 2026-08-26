@@ -220,6 +220,28 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **git neutralises `core.fsmonitor` and gpg signing, and refuses EVERY command-valued repo-local
+  key (F-10).** The git tools already emptied `core.hooksPath` and refused repo-local filter
+  drivers, but `core.fsmonitor` — a key whose value is a program git executes, on nearly every
+  command — went straight through, and a repo-local `commit.gpgsign=true` beside a `gpg.program`
+  ran that program on every commit. One principle now covers the class: where git offers a
+  per-invocation switch that neutralises a key, the switch is applied, and every remaining
+  repo-local key whose VALUE is a program git executes is refused by name. `gitHardeningOptions`
+  gained `-c core.fsmonitor=false` (which disables the hook form AND git's builtin daemon, so the
+  everyday `core.fsmonitor=true` repository is neutralised rather than refused), `git_commit`
+  passes `--no-gpg-sign` beside `--no-verify`, and the refusal probe widened from filter drivers
+  alone to `core.sshCommand`, `core.editor`, `core.pager`, `core.askpass`, `core.gitProxy`,
+  `core.alternateRefsCommand`, `sequence.editor`, `diff.external`, `diff.*.command`,
+  `diff.*.textconv`, `merge.*.driver`, `mergetool.*.cmd`, `difftool.*.cmd`,
+  `filter.*.clean|smudge|process`, `credential.helper`, `credential.*.helper`, `gpg.program`,
+  `gpg.*.program`, `uploadpack.packObjectsHook`, `remote.*.proxy` and `pager.*`. Two absences are
+  deliberate and documented at the regexp: `core.hooksPath`/`core.fsmonitor`, already neutralised
+  by a switch, and `alias.*`, which cannot shadow the builtin subcommands the tools invoke. The
+  scope rule is unchanged — only the REPOSITORY's own `--local`/`--worktree` config refuses; the
+  operator's global config is theirs and still applies, with the read-path
+  `--no-textconv`/`--no-ext-diff` refusals keeping an inspection from executing a global diff
+  driver.
+
 - **The tracked-file mutation floor no longer spawns a bare `git` (F-05).** The floor
   (`internal/agent/treesnapshot.go`) fires twice around every subprocess tool call in every mode,
   Bypass included, which made its `git` the most frequently spawned program apogee runs — and it

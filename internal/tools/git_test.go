@@ -1164,33 +1164,53 @@ func TestGitBranch_DoesNotRunRepoSuppliedHook(t *testing.T) {
 }
 
 // TestGitDiffRange_DoesNotRunRepoSuppliedDiffDriver pins the read path against the two driver
-// kinds a repository can select in .gitattributes and configure in its own config: a textconv
-// filter and an external diff command. Both are programs git would run during what the operator
-// approved as an inspection, and both must be refused — while the diff still reports the real
-// stored bytes rather than the driver's rendering.
+// kinds a repository can select in .gitattributes and configure in config: a textconv filter and
+// an external diff command. Both are programs git would run during what the operator approved as
+// an inspection, and the defence differs by SCOPE. A driver the REPOSITORY configures is a
+// command-valued repo-local key, so the widened refusal gives the call no git at all; a driver in
+// the OPERATOR's own global config is theirs and still applies, so the call runs and
+// gitDiffHardeningArgs (--no-textconv, --no-ext-diff) is what keeps the inspection from executing
+// it, reporting the real stored bytes instead. Either way the driver never runs.
 func TestGitDiffRange_DoesNotRunRepoSuppliedDiffDriver(t *testing.T) {
 	posixScriptHost(t)
 
 	for _, tc := range []struct {
 		name      string
 		configKey string
+		global    bool
 	}{
-		{name: "textconv filter", configKey: "diff.hostile.textconv"},
-		{name: "external diff command", configKey: "diff.hostile.command"},
+		{name: "repo-local textconv filter", configKey: "diff.hostile.textconv"},
+		{name: "repo-local external diff command", configKey: "diff.hostile.command"},
+		{name: "the operator's own global textconv filter", configKey: "diff.hostile.textconv", global: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			root := gitRepo(t)
+			gitPath, err := exec.LookPath("git")
+			if err != nil {
+				t.Skip("no git on PATH; skipping the live git-tool run")
+			}
 			marker := filepath.Join(t.TempDir(), "driver.ran")
 			driver := filepath.Join(t.TempDir(), "driver.sh")
 			writeMarkerScript(t, driver, marker, `echo "rendered by the repository"`)
 
+			if tc.global {
+				home := t.TempDir()
+				t.Setenv("HOME", home)
+				global := "[diff \"hostile\"]\n\ttextconv = " + driver + "\n"
+				if err := os.WriteFile(filepath.Join(home, ".gitconfig"), []byte(global), 0o644); err != nil {
+					t.Fatalf("write global config: %v", err)
+				}
+			}
+
+			root := gitRepo(t)
 			if err := writeFileForTest(root, ".gitattributes", "*.data diff=hostile\n"); err != nil {
 				t.Fatalf("write .gitattributes: %v", err)
 			}
 			if err := writeFileForTest(root, "a.data", "before\n"); err != nil {
 				t.Fatalf("write data file: %v", err)
 			}
-			runInRepo(t, root, "config", tc.configKey, driver)
+			if !tc.global {
+				runInRepo(t, root, "config", tc.configKey, driver)
+			}
 			runInRepo(t, root, "add", ".gitattributes", "a.data")
 			runInRepo(t, root, "commit", "-m", "seed the driver")
 			runInRepo(t, root, "checkout", "-b", "feature")
@@ -1200,18 +1220,40 @@ func TestGitDiffRange_DoesNotRunRepoSuppliedDiffDriver(t *testing.T) {
 			runInRepo(t, root, "add", "a.data")
 			runInRepo(t, root, "commit", "-m", "change the data file")
 
+			if tc.global {
+				// Guard against a vacuous pass: without git reading the injected HOME there is
+				// no global driver to leave alone.
+				seen, err := runGitUnchecked(context.Background(), gitPath, root, gitTimeout,
+					"config", "--global", "--name-only", "--get-regexp", gitCommandConfigName.String())
+				if err != nil || seen.exitCode != 0 {
+					t.Skip("this git did not read the injected HOME config; nothing to assert")
+				}
+			}
+
 			res, err := NewGitDiffRange(root).Execute(context.Background(),
 				diffCall("c1", `{"base":"main","head":"feature"}`))
 			if err != nil {
 				t.Fatalf("diff err = %v", err)
 			}
-			if res.IsError {
-				t.Fatalf("diff errored: %q", res.Content)
+			if tc.global {
+				// The operator's own driver is theirs and still applies, so the call RUNS; the
+				// diff-level refusals are what keep an inspection from executing it.
+				if res.IsError {
+					t.Fatalf("diff errored: %q", res.Content)
+				}
+				if !strings.Contains(res.Content, "after") {
+					t.Errorf("diff = %q, want the stored bytes rather than a driver's rendering", res.Content)
+				}
+			} else {
+				// A driver the REPOSITORY names is a command-valued repo-local key: no git call.
+				if !res.IsError {
+					t.Fatalf("diff ran on a repo configuring %s: %q", tc.configKey, res.Content)
+				}
+				if !strings.Contains(res.Content, tc.configKey) {
+					t.Errorf("refusal = %q, want it to name %s", res.Content, tc.configKey)
+				}
 			}
 			requireNotRan(t, marker, "the repository's "+tc.name)
-			if !strings.Contains(res.Content, "after") {
-				t.Errorf("diff = %q, want the stored bytes rather than a driver's rendering", res.Content)
-			}
 		})
 	}
 }
@@ -1321,7 +1363,7 @@ func TestGit_FilterRefusalStaysRepoLocal(t *testing.T) {
 				// Guard against a vacuous pass: without git reading the injected HOME there is
 				// no global driver to leave alone.
 				seen, err := runGitUnchecked(context.Background(), gitPath, root, gitTimeout,
-					"config", "--global", "--name-only", "--get-regexp", gitFilterConfigName.String())
+					"config", "--global", "--name-only", "--get-regexp", gitCommandConfigName.String())
 				if err != nil || seen.exitCode != 0 {
 					t.Skip("this git did not read the injected HOME config; nothing to assert")
 				}
@@ -1338,7 +1380,132 @@ func TestGit_FilterRefusalStaysRepoLocal(t *testing.T) {
 	}
 }
 
-// TestRunGit_AppliesHardeningToEveryInvocation pins the two hardening measures runGit applies
+// TestGit_RefusesRepoLocalCommandConfig pins the widened rule: EVERY repo-local config key whose
+// value is a program git would execute — not filter drivers alone — refuses the call, and the
+// refusal names the key. Each case is a real repository with the key set through git itself, so
+// what is asserted is git's own canonical name (section and variable lowercased, subsection kept)
+// rather than the spelling the test typed.
+func TestGit_RefusesRepoLocalCommandConfig(t *testing.T) {
+	for _, tc := range []struct {
+		key       string // as an attacker-authored config would spell it
+		value     string
+		canonical string // as git reports it back, and as the refusal must name it
+	}{
+		{key: "core.sshCommand", value: "ssh -oProxyCommand=payload", canonical: "core.sshcommand"},
+		{key: "core.editor", value: "payload", canonical: "core.editor"},
+		{key: "credential.helper", value: "!payload", canonical: "credential.helper"},
+		{key: "gpg.program", value: "payload", canonical: "gpg.program"},
+		{key: "diff.foo.textconv", value: "payload", canonical: "diff.foo.textconv"},
+		{key: "merge.foo.driver", value: "payload %O %A %B", canonical: "merge.foo.driver"},
+		{key: "pager.status", value: "payload", canonical: "pager.status"},
+		{key: "remote.origin.proxy", value: "payload", canonical: "remote.origin.proxy"},
+	} {
+		t.Run(tc.key, func(t *testing.T) {
+			root := gitRepo(t)
+			runInRepo(t, root, "config", "--local", tc.key, tc.value)
+
+			res, err := NewGitStatus(root).Execute(context.Background(), statusCall("c1"))
+			if err != nil {
+				t.Fatalf("status err = %v", err)
+			}
+			if !res.IsError {
+				t.Fatalf("git_status succeeded on a repo configuring %s: %q", tc.key, res.Content)
+			}
+			if !strings.Contains(res.Content, tc.canonical) {
+				t.Errorf("refusal = %q, want it to name %s", res.Content, tc.canonical)
+			}
+		})
+	}
+}
+
+// TestGit_RepoLocalFsmonitorHookNeverRuns pins the neutralisation half for the key git consults on
+// nearly every command: core.fsmonitor names a program git runs to ask which files changed, and
+// `-c core.fsmonitor=false` must stop it dead. The hook writes a marker if it ever executes.
+func TestGit_RepoLocalFsmonitorHookNeverRuns(t *testing.T) {
+	posixScriptHost(t)
+	root := gitRepo(t)
+	marker := filepath.Join(t.TempDir(), "fsmonitor.ran")
+	hook := filepath.Join(t.TempDir(), "fsmonitor.sh")
+	// A v2 fsmonitor answers with a token line; the script is well-formed so a run would
+	// succeed rather than fail for an unrelated reason.
+	writeMarkerScript(t, hook, marker, "echo /")
+	runInRepo(t, root, "config", "--local", "core.fsmonitor", hook)
+
+	res, err := NewGitStatus(root).Execute(context.Background(), statusCall("c1"))
+	if err != nil {
+		t.Fatalf("status err = %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("git_status refused a repo that only set core.fsmonitor: %q", res.Content)
+	}
+	requireNotRan(t, marker, "the repository's fsmonitor hook")
+}
+
+// TestGit_RepoLocalFsmonitorTrueIsNotRefused pins the reason core.fsmonitor is neutralised rather
+// than refused: the everyday builtin-daemon setting keeps every git tool working.
+func TestGit_RepoLocalFsmonitorTrueIsNotRefused(t *testing.T) {
+	root := gitRepo(t)
+	runInRepo(t, root, "config", "--local", "core.fsmonitor", "true")
+
+	res, err := NewGitStatus(root).Execute(context.Background(), statusCall("c1"))
+	if err != nil {
+		t.Fatalf("status err = %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("git_status refused a repo with the builtin fsmonitor enabled: %q", res.Content)
+	}
+}
+
+// TestGit_RepoLocalAliasIsNotRefused pins the other deliberate absence: an alias cannot shadow a
+// builtin subcommand, and every subcommand these tools invoke is a builtin, so a repo-local alias
+// changes nothing about what apogee's own argv runs and must not cost the repository its tools.
+func TestGit_RepoLocalAliasIsNotRefused(t *testing.T) {
+	root := gitRepo(t)
+	runInRepo(t, root, "config", "--local", "alias.status", "!payload")
+
+	res, err := NewGitStatus(root).Execute(context.Background(), statusCall("c1"))
+	if err != nil {
+		t.Fatalf("status err = %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("git_status refused a repo defining an alias: %q", res.Content)
+	}
+}
+
+// TestGitCommit_PassesNoGpgSign pins the second switch on the committing path: a repo-local
+// commit.gpgsign=true would otherwise launch the configured gpg program on every commit. A fake
+// git records the argv it was launched with, so the assertion is about the real command line.
+func TestGitCommit_PassesNoGpgSign(t *testing.T) {
+	posixScriptHost(t)
+
+	dir := t.TempDir()
+	record := filepath.Join(dir, "record")
+	fakeGit := filepath.Join(dir, "fake-git")
+	script := "#!/bin/sh\necho \"$*\" >> \"" + record + "\"\n"
+	if err := os.WriteFile(fakeGit, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake git: %v", err)
+	}
+	withFakeGit(t, true, fakeGit)
+
+	res, err := NewGitCommit(t.TempDir()).Execute(context.Background(),
+		commitCall("c1", `{"message":"a commit"}`))
+	if err != nil {
+		t.Fatalf("commit err = %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("commit = %q, want the fake git's success", res.Content)
+	}
+
+	logged, err := os.ReadFile(record)
+	if err != nil {
+		t.Fatalf("read record: %v", err)
+	}
+	if !strings.Contains(string(logged), "commit --no-verify --no-gpg-sign -m a commit") {
+		t.Errorf("argv = %q, want --no-gpg-sign beside --no-verify", string(logged))
+	}
+}
+
+// TestRunGit_AppliesHardeningToEveryInvocation pins the hardening measures runGit applies
 // to ALL git calls, without depending on the host's git: a fake program records the argv it was
 // launched with and whether GIT_CONFIG_NOSYSTEM reached its environment.
 func TestRunGit_AppliesHardeningToEveryInvocation(t *testing.T) {
@@ -1361,7 +1528,7 @@ func TestRunGit_AppliesHardeningToEveryInvocation(t *testing.T) {
 	}
 	got := string(out)
 	// The global options must precede the subcommand — git only accepts -c there.
-	if !strings.Contains(got, "argv: -c core.hooksPath= status") {
+	if !strings.Contains(got, "argv: -c core.hooksPath= -c core.fsmonitor=false status") {
 		t.Errorf("argv = %q, want the hooks-path option ahead of the subcommand", got)
 	}
 	if !strings.Contains(got, "nosystem: 1") {
@@ -1456,7 +1623,7 @@ func TestRunGitQuery_ReturnsStdoutAloneAndAppliesHardening(t *testing.T) {
 		t.Fatalf("read record: %v", err)
 	}
 	got := string(logged)
-	if !strings.Contains(got, "argv: -c core.hooksPath= status --porcelain") {
+	if !strings.Contains(got, "argv: -c core.hooksPath= -c core.fsmonitor=false status --porcelain") {
 		t.Errorf("argv = %q, want the hardening option ahead of the subcommand", got)
 	}
 	if !strings.Contains(got, "nosystem: 1") {

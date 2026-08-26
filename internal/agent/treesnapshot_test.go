@@ -308,7 +308,7 @@ func writeFakeGit(t *testing.T, dir, record string) string {
 
 // TestTreeSnapshot_GitRunsThroughTheFunnel pins F-05's fix at the floor's own seam: the git the
 // floor spawns around every subprocess call carries the tools funnel's hardening (the
-// core.hooksPath= option, GIT_CONFIG_NOSYSTEM) and the allowlisted environment, so apogee's own
+// core.hooksPath=/core.fsmonitor=false options, GIT_CONFIG_NOSYSTEM) and the allowlisted environment, so apogee's own
 // API key never reaches the most frequently spawned program the agent runs.
 func TestTreeSnapshot_GitRunsThroughTheFunnel(t *testing.T) {
 	// No t.Parallel: PATH and APOGEE_API_KEY are process-wide.
@@ -330,10 +330,10 @@ func TestTreeSnapshot_GitRunsThroughTheFunnel(t *testing.T) {
 		t.Fatalf("the floor spawned no git at all: %v", err)
 	}
 	got := string(logged)
-	if !strings.Contains(got, "argv: -c core.hooksPath= rev-parse --is-inside-work-tree") {
+	if !strings.Contains(got, "argv: -c core.hooksPath= -c core.fsmonitor=false rev-parse --is-inside-work-tree") {
 		t.Errorf("record = %q, want the probe hardened", got)
 	}
-	if !strings.Contains(got, "argv: -c core.hooksPath= status --porcelain") {
+	if !strings.Contains(got, "argv: -c core.hooksPath= -c core.fsmonitor=false status --porcelain") {
 		t.Errorf("record = %q, want the snapshots hardened", got)
 	}
 	if !strings.Contains(got, "nosystem: 1") {

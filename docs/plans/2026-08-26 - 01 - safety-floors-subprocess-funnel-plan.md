@@ -386,7 +386,19 @@ a dispatch with a fake Confiner and a Confine verdict — the Confiner's `Confin
 
 ---
 
-## 4. git hardening: neutralise `core.fsmonitor`, sign nothing, refuse every command-valued repo-local key
+## 4. git hardening: neutralise `core.fsmonitor`, sign nothing, refuse every command-valued repo-local key — ✅ DONE (2026-08-26)
+
+NOTES (2026-08-26): the item's Files list names `internal/tools/git.go` and `git_test.go` only;
+`internal/agent/treesnapshot_test.go` also changed — its two argv assertions pin the hardening
+options verbatim and had to gain `-c core.fsmonitor=false` (test-only, no production change).
+NOTES (2026-08-26): `TestGitDiffRange_DoesNotRunRepoSuppliedDiffDriver` was restructured rather
+than left as-is: the widened refusal now refuses its repo-local `diff.hostile.textconv` /
+`diff.hostile.command` cases before git runs, so those subtests assert the refusal, and a third
+subtest puts the same driver in the OPERATOR's global config to keep `gitDiffHardeningArgs`
+(`--no-textconv`/`--no-ext-diff`) pinned — it was the only test covering them.
+NOTES (2026-08-26): `gitFilterConfigScopes` keeps its name per the item's "the memo, scopes and
+maxNamedFilterDrivers (renamed maxNamedCommandKeys) are unchanged"; only its doc comment was
+reworded to the widened rule.
 
 **What:** F-10. Two switches and a widened refusal, by one stated principle: where git offers a
 per-invocation switch that neutralises a key, apply the switch; every remaining repo-local key
