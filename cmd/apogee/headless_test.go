@@ -21,6 +21,7 @@ import (
 	"github.com/airiclenz/apogee/internal/format"
 	"github.com/airiclenz/apogee/internal/probe"
 	"github.com/airiclenz/apogee/internal/run"
+	"github.com/airiclenz/apogee/internal/sanitize"
 )
 
 // stubRunner stands in for internal/run.Once: it records the Spec the command composed and
@@ -1008,12 +1009,13 @@ func TestHeadlessOutputRouting(t *testing.T) {
 	})
 }
 
-// The sanitizer's whole job, pinned character by character. A C0 control character is an
-// instruction to the terminal rather than a character in the text — ESC opens an ANSI sequence, BEL
-// rings the bell and closes an OSC 52 clipboard payload, CR rewinds the line so what follows
-// overwrites what the reader already saw — and stripping ESC alone left the other two to arrive
-// intact. Both forms drop the class; they differ only over the two controls prose is written with,
-// which the answer keeps and a one-line label folds to a space.
+// The sanitizer's whole job as THIS Driver spends it, pinned character by character. The set and
+// its reasons belong to internal/sanitize, which tests them exhaustively; what this table guards is
+// that the two CLI-visible forms keep coming from that one helper — a C0 control character is an
+// instruction to the terminal rather than a character in the text, and a bidi one reorders the
+// glyphs of a line printed beside a reading without touching a byte. Both forms drop the class;
+// they differ only over the two controls prose is written with, which the answer keeps and a
+// one-line label folds to a space.
 func TestHeadlessStripEscapesDropsControlCharacters(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
@@ -1036,24 +1038,25 @@ func TestHeadlessStripEscapesDropsControlCharacters(t *testing.T) {
 		{"DEL goes with them", "a\x7fb", "ab", "ab"},
 		{"newline and tab are the answer's own", "para\n\nnext\tcolumn", "para\n\nnext\tcolumn", "para  next column"},
 		{"non-ASCII text is not control text", "héllo — 世界 ✓", "héllo — 世界 ✓", "héllo — 世界 ✓"},
+		{"the bidi set goes too: it reorders a line the CLI prints", "a\u202eb\u2066c\u200e", "abc", "abc"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got := stripEscapes(tc.in)
+			got := sanitize.StripEscapes(tc.in)
 			if got != tc.want {
-				t.Errorf("stripEscapes(%q) = %q; want %q", tc.in, got, tc.want)
+				t.Errorf("StripEscapes(%q) = %q; want %q", tc.in, got, tc.want)
 			}
 			for _, r := range got {
-				if (r < 0x20 && r != '\n' && r != '\t') || r == 0x7f {
-					t.Errorf("stripEscapes(%q) left %#U behind: %q", tc.in, r, got)
+				if (r < 0x20 && r != '\n' && r != '\t') || r == 0x7f || sanitize.BidiControl(r) {
+					t.Errorf("StripEscapes(%q) left %#U behind: %q", tc.in, r, got)
 				}
 			}
-			line := stripEscapesToLine(tc.in)
+			line := sanitize.StripEscapesToLine(tc.in)
 			if line != tc.wantLine {
-				t.Errorf("stripEscapesToLine(%q) = %q; want %q", tc.in, line, tc.wantLine)
+				t.Errorf("StripEscapesToLine(%q) = %q; want %q", tc.in, line, tc.wantLine)
 			}
 			for _, r := range line {
-				if r < 0x20 || r == 0x7f {
-					t.Errorf("stripEscapesToLine(%q) left %#U behind: %q", tc.in, r, line)
+				if r < 0x20 || r == 0x7f || sanitize.BidiControl(r) {
+					t.Errorf("StripEscapesToLine(%q) left %#U behind: %q", tc.in, r, line)
 				}
 			}
 		})

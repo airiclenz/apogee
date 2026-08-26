@@ -22,6 +22,7 @@ import (
 	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/probe"
 	"github.com/airiclenz/apogee/internal/run"
+	"github.com/airiclenz/apogee/internal/sanitize"
 	"github.com/airiclenz/apogee/internal/session"
 )
 
@@ -393,12 +394,17 @@ func runHeadless(cmd *cobra.Command, args []string, opts *config.Options, noSave
 	// pipeline reads the model's text and nothing else, and so a run whose RECORD failed to save
 	// still hands over the answer it produced.
 	//
+	// Escape-stripped on the way out (internal/sanitize, which owns the set and the reasons):
+	// Result.FinalText is RAW model output by contract (internal/run: the answer crosses as plain
+	// data, ADR 0010), and stdout is a terminal often enough that the strip belongs at this render
+	// seam, exactly as the TUI strips at its own.
+	//
 	// Written through OutOrStdout rather than cmd.Println: Cobra's whole Print/Printf/Println
 	// family resolves to OutOrStderr, so it would put the answer on STDERR in every real
 	// invocation (the fallback only differs when a caller has wired an out writer, which is
 	// tests and nothing else). The product goes to real stdout; notices and the summary below
 	// travel by PrintErrln, which does target the err stream.
-	if text := stripEscapes(res.FinalText); text != "" {
+	if text := sanitize.StripEscapes(res.FinalText); text != "" {
 		fmt.Fprintln(cmd.OutOrStdout(), text)
 	}
 	// Each delegated run's own context fill, one line apiece and ahead of the summary: the summary
@@ -487,7 +493,7 @@ func headlessSubAgentLines(runs []run.SubAgentUsage) []string {
 		if who := headlessSubAgentTarget(r); who != "" {
 			line += " · " + who
 		}
-		if model := clipSubAgentTask(stripEscapesToLine(r.Model)); model != "" {
+		if model := clipSubAgentTask(sanitize.StripEscapesToLine(r.Model)); model != "" {
 			line += " · " + model
 		}
 		lines = append(lines, line)
@@ -575,10 +581,10 @@ func headlessTokens(n int) string {
 // terminal over with one line. The fallback is decided on the RENDERED form, so a name that is
 // nothing but control characters leaves the task showing rather than blanking the slot.
 func headlessSubAgentTarget(r run.SubAgentUsage) string {
-	if name := clipSubAgentTask(stripEscapesToLine(r.Name)); name != "" {
+	if name := clipSubAgentTask(sanitize.StripEscapesToLine(r.Name)); name != "" {
 		return name
 	}
-	return clipSubAgentTask(stripEscapesToLine(r.Task))
+	return clipSubAgentTask(sanitize.StripEscapesToLine(r.Task))
 }
 
 // headlessTaskMax is how wide a delegated task prints on a sub-agent line, in runes: enough for a
@@ -596,51 +602,4 @@ func clipSubAgentTask(task string) string {
 		return task
 	}
 	return string(runes[:headlessTaskMax-1]) + "…"
-}
-
-// stripEscapes drops the C0 control characters from the model's answer before it is printed,
-// keeping the two that ordinary prose is written with: the newline and the tab. Result.FinalText is
-// RAW model output by contract (internal/run: the answer crosses as plain data, ADR 0010), and a
-// control character there is an instruction to the terminal rather than a character in the answer —
-// ESC opens an ANSI sequence, BEL rings the bell and closes an OSC 52 clipboard payload, CR rewinds
-// the line so what follows overwrites what the reader already saw. Dropping the whole class
-// neutralises all three, where dropping ESC alone left the other two to arrive intact. stdout is a
-// terminal often enough that the strip belongs at this render seam, exactly as the transcript
-// strips at its own.
-//
-// It began as a copy of internal/tui's identically named helper and widened ahead of it for a
-// while; that twin has since caught up, and the two drop the same class and keep the same two
-// characters again. The duplication stands for the reason it always did — that one is unexported
-// in a package the binary's CLI half must not depend on, and this is a few lines of pure function
-// against a one-way dependency.
-func stripEscapes(s string) string {
-	return strings.Map(func(r rune) rune {
-		if r == '\n' || r == '\t' {
-			return r // the answer's own line and column structure, which it is printed for
-		}
-		return dropControl(r)
-	}, s)
-}
-
-// stripEscapesToLine is stripEscapes for text that must stay on ONE line — a sub-agent's task
-// label, printed beside the reading it belongs to — where the two controls the answer keeps would
-// forge a second line or a false column. They fold to a space rather than surviving; every other
-// control character goes exactly where stripEscapes sends it.
-func stripEscapesToLine(s string) string {
-	return strings.Map(func(r rune) rune {
-		if r == '\n' || r == '\t' {
-			return ' '
-		}
-		return dropControl(r)
-	}, s)
-}
-
-// dropControl maps a C0 control character — and DEL, its ASCII sibling — to strings.Map's "drop
-// this rune", and passes every other rune through untouched. Text carrying none of them maps to
-// itself, which strings.Map returns without allocating: the overwhelmingly common case.
-func dropControl(r rune) rune {
-	if r < 0x20 || r == 0x7f {
-		return -1
-	}
-	return r
 }

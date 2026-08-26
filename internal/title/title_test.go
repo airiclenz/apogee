@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/airiclenz/apogee/internal/provider"
+	"github.com/airiclenz/apogee/internal/sanitize"
 )
 
 // promptDate is the fixed date every Prompt test builds against, so the rendered context line is
@@ -740,7 +741,7 @@ func TestStripEscapesDropsBidiControls(t *testing.T) {
 			if !ok {
 				t.Fatalf("Sanitize(%q) reported failure", tc.raw)
 			}
-			if strings.ContainsFunc(got, bidiControl) {
+			if strings.ContainsFunc(got, sanitize.BidiControl) {
 				t.Errorf("Sanitize(%q) = %q, which still carries a bidi control", tc.raw, got)
 			}
 		})

@@ -849,8 +849,9 @@
 // sanitize.go the escape-stripping security seam every one of those surfaces passes untrusted text
 // through before a cell of it is painted (ADR 0043) — [stripEscapes], the batch form
 // [stripEscapesAll] a request's choices are sanitized in one call by, and [bidiControl], the
-// reordering characters that go with the control ones; it is the invariant stated at the end of
-// this file, given the file of its own that a seam referenced from two dozen call sites earns;
+// reordering characters that go with the control ones, all three now one-line delegates onto
+// internal/sanitize, which owns the set for the whole module; it is the invariant stated at the end
+// of this file, given the file of its own that a seam referenced from two dozen call sites earns;
 // the renderer itself is ten files rather than one, split along the seams the painters already
 // had once the tool-display overhaul grew render.go past the house ~400-line guideline — a pure
 // file move, nothing renamed and nothing reworded: render.go keeps the transcript walk
@@ -907,10 +908,14 @@
 // [toolView.finishDisplay], which presentToolCall and enrichWithResult both leave through) for the
 // tool card and everything derived from it (toolActivityVerb, the gist), and each popupRow
 // builder for the overlays, since the popup module strips
-// nothing and truncates ANSI-preservingly. The strip itself lives in sanitize.go — [stripEscapes],
-// its batch form [stripEscapesAll] and the [bidiControl] set they drop beside the control
-// characters — which is where a seam that needs one goes to read the rule. stripEscapes is
-// idempotent and allocation-free on text
+// nothing and truncates ANSI-preservingly. The package's spelling of the strip lives in sanitize.go
+// — [stripEscapes], its batch form [stripEscapesAll] and the [bidiControl] set they drop beside the
+// control characters — but the strip ITSELF lives in internal/sanitize, a stdlib-only package the
+// TUI, internal/title, internal/session and the headless CLI all call: the set was written out four
+// times and the fourth copy had drifted, so it is now spelled once and a copy of it anywhere,
+// this package included, is a bug. That package is where a seam that needs one goes to read the
+// rule — which characters go, which two stay, and why. stripEscapes is idempotent and
+// allocation-free on text
 // with nothing to rewrite — no control character, no DEL, no bidi formatting character, no invalid
 // UTF-8 byte — so a producer that also strips costs nothing. TestTranscriptStripsTerminalEscapes and its siblings pin every
 // one of those paths.

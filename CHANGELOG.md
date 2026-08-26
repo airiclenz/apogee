@@ -234,6 +234,14 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **Headless output now drops bidi-formatting characters too.** The control-character strip on
+  `apogee headless`'s answer and its sub-agent lines had drifted behind the TUI's: it removed the
+  C0 controls and DEL but kept the bidirectional overrides, so a model could print a line that
+  reorders on stdout while the same text reads correctly in the pane. Both surfaces now call one
+  stdlib-only `internal/sanitize` package, which the TUI, the session-title cleanup and the session
+  id validator share — four copies of the set become one, and parity is by construction rather than
+  by hand.
+
 - **PDF extraction is bounded on every axis a document can inflate (security audit §3.8, code audit
   C-07/F-25/F-26, design call 12).** The parser is driven entirely by numbers the document asserts
   about itself, and none of them was checked against the bytes actually present: a 594-byte file

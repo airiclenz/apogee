@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/sanitize"
 )
 
 // dirPerm and filePerm scope session state to the owner: records are a private history of
@@ -60,6 +61,15 @@ const maxIDLen = 200
 // or absolute path), not dot-prefixed, and free of control and bidi-formatting characters. Minted
 // ids (NewID) and legacy filename stems both satisfy it; a planted "../../.claude/settings" does
 // not.
+//
+// The bidi-formatting characters (sanitize.BidiControl) are refused rather than stripped, because
+// an id is an identity, not prose — the same posture as the newline and the NUL beside them. Every
+// one of them reorders the glyphs around it while leaving the bytes alone, so an id carrying one
+// names a file whose displayed stem is not the stem on disk: the history browser's row, the
+// deletion confirmation and the resumed path would read in an order the record does not have. The
+// set is internal/sanitize's, spelled once for the whole module — why it is the bidi characters
+// and deliberately not the whole of unicode.Cf included — and a copy of it here is what that
+// package replaced.
 func validateID(id string) error {
 	switch {
 	case id == "":
@@ -70,29 +80,10 @@ func validateID(id string) error {
 		return fmt.Errorf("%w %q: must not start with a dot", ErrInvalidID, id)
 	case id != filepath.Base(id) || strings.ContainsAny(id, `/\`):
 		return fmt.Errorf("%w %q: must be a single filename component", ErrInvalidID, id)
-	case strings.ContainsFunc(id, func(r rune) bool { return r < 0x20 || r == 0x7f || bidiControl(r) }):
+	case strings.ContainsFunc(id, func(r rune) bool { return r < 0x20 || r == 0x7f || sanitize.BidiControl(r) }):
 		return fmt.Errorf("%w %q: contains a control or bidi-formatting character", ErrInvalidID, id)
 	}
 	return nil
-}
-
-// bidiControl reports whether r is one of the Unicode bidirectional formatting characters — the
-// embeddings and overrides U+202A-U+202E, the isolates U+2066-U+2069, and the two marks U+200E and
-// U+200F. They reorder the glyphs around them while leaving the bytes alone, so an id carrying one
-// names a file whose displayed stem is not the stem on disk: the history browser's row, the
-// deletion confirmation and the resumed path would read in an order the record does not have.
-// Refused here rather than stripped, because an id is an identity, not prose — the same posture as
-// the newline and the NUL beside it.
-//
-// Deliberately the bidi set and NOT the whole of unicode.Cf, matching the display seam this backs
-// onto (internal/tui.stripEscapes) and internal/title.strippableControl; Cf also holds U+200D ZWJ
-// and U+00AD soft hyphen, which are legitimate in text a person wrote. The seams where untrusted
-// bytes ARRIVE or are STORED as prose (internal/tools' neuterInert, internal/library's sanitize)
-// drop all of Cf on purpose — that asymmetry is intended, not an inconsistency to repair.
-func bidiControl(r rune) bool {
-	return r == '\u200e' || r == '\u200f' || // LRM, RLM
-		(r >= '\u202a' && r <= '\u202e') || // LRE, RLE, PDF, LRO, RLO
-		(r >= '\u2066' && r <= '\u2069') // LRI, RLI, FSI, PDI
 }
 
 // Meta is the browsable summary of one stored session — everything the history browser

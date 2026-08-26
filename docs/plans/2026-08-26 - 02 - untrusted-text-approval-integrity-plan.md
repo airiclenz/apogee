@@ -118,7 +118,17 @@ and is the one that drifted.
 
 ---
 
-## 1. One sanitiser package: `internal/sanitize` replaces the four copies (F-32)
+## 1. One sanitiser package: `internal/sanitize` replaces the four copies (F-32) — ✅ DONE (2026-08-26)
+
+NOTES (2026-08-26): the `bidiControl` doc deleted from `internal/session/store.go` was not simply
+dropped — its substance (why a bidi character is REFUSED in an id rather than stripped) moved into
+`validateID`'s own doc, since the plan's "doc :80-91 amended" had no other home once the function
+went.
+NOTES (2026-08-26): `cmd/apogee/headless.go`'s deleted `stripEscapes` doc block is replaced by two
+sentences at the `FinalText` call site naming the strip, the raw-by-contract source (ADR 0010) and
+why the seam is the right place — the rationale would otherwise have vanished with the function.
+NOTES (2026-08-26): `TestStripEscapesDoesNotAllocateWhenNothingIsRewritten` is deliberately NOT
+`t.Parallel()`; `testing.AllocsPerRun` panics when called from a parallel test.
 
 **What:** create `internal/sanitize` — stdlib-only (`strings` only), imports nothing from this
 module, exactly as `internal/format` is (its `doc.go` charter: "both halves of the binary reach
