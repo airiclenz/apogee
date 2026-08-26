@@ -414,7 +414,10 @@ array with a newline-bearing element ⇒ folded to one line; `TestFileHintSkipsL
 
 ---
 
-## 6. `find_files`, `grep` and `list_dir` escape line breaks in rendered paths (F-30)
+## 6. `find_files`, `grep` and `list_dir` escape line breaks in rendered paths (F-30) — ✅ DONE (2026-08-26)
+
+NOTES (2026-08-26): grep's two `renderFileGroup` sites (`:389`, `:393`) are covered by escaping `display` once where it is bound at `:381` rather than inside each `fmt.Sprintf` — same output, one call instead of one per rendered line; `list_dir`'s two sites likewise share one `row := escapeRowBreaks(name)` while the raw `name` still drives the `collectSubdir` filesystem join.
+NOTES (2026-08-26): the forging-filename fixture (`forgingFileName`, `forgingRowSpelling`, `seedForgingFile` with the Windows `t.Skip`) lives once in `tools_test.go` beside `TestEscapeRowBreaks` and is shared by the three tool tests, following the package's existing cross-file test-helper convention (`seedTree` in `list_dir_test.go` serves `grep_test.go`), rather than being triplicated.
 
 **What:** a filename carrying `\n` (legal on POSIX) forges rows in three tool results whose
 grammar is one row per line: `internal/tools/find_files.go:243` (rows are the raw `found` paths

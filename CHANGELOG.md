@@ -234,6 +234,19 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **`find_files`, `grep` and `list_dir` escape line breaks in the paths they render.** All three
+  results use a grammar of one row per line, where the path is DATA inside the row — so a
+  filename carrying a `\n` (legal on POSIX) forged rows the model read as the tool's own words:
+  a second `[N files found, showing …]` header, an extra match, a listing entry that never
+  existed. `internal/tools` gained one unexported helper beside the result builders,
+  `escapeRowBreaks`, which rewrites `\r` and `\n` as their two-character backslash-letter
+  spellings and changes nothing else; it is applied to the path or entry name at all six render
+  sites (`renderFoundPaths`, `plainMatchLines`, `renderFileGroup`'s match and context forms, and
+  both `list_dir` entry rows). Escaping rather than folding keeps the name recoverable — the
+  reader still sees exactly which bytes the filename holds — and grep's `m.text` is deliberately
+  left alone: a grep line was already split on the breaks the file held, so its content is the
+  row's payload, not its grammar.
+
 - **`filehint` sanitises every listed name and reads only listing-tool results (code audit C-08).**
   The workspace-file-hint Mechanism injects into the SYSTEM message, and it took the names it
   suggests verbatim out of tool results — so a repo-controlled filename carrying a line break could

@@ -342,3 +342,30 @@ func TestListDir_DangerousActionClassification(t *testing.T) {
 		})
 	}
 }
+
+// TestListDir_Execute_NewlineInAFilenameCannotForgeARow pins that an entry name carrying a
+// line break stays ONE row of the listing: the result is the header plus a single entry row,
+// and that row spells the break out rather than pasting it into the grammar.
+func TestListDir_Execute_NewlineInAFilenameCannotForgeARow(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	seedForgingFile(t, root, "x")
+
+	result, err := NewListDir(root, nil).Execute(context.Background(),
+		callWith(t, "c1", map[string]any{"path": "."}))
+
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("unexpected tool error: %q", result.Content)
+	}
+	lines := strings.Split(result.Content, "\n")
+	if len(lines) != 2 {
+		t.Fatalf("got %d lines, want header + 1 row: %q", len(lines), result.Content)
+	}
+	if !strings.Contains(lines[1], forgingRowSpelling) {
+		t.Errorf("row %q does not carry the escaped entry spelling %q", lines[1], forgingRowSpelling)
+	}
+}

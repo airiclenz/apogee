@@ -240,7 +240,14 @@ func renderFoundPaths(found []string, maxResults, offset int) string {
 	}
 	header := fmt.Sprintf("[%d files found%s, showing %d-%d]", total, capped, start+1, end)
 
-	text := header + "\n" + strings.Join(found[start:end], "\n")
+	// A path is data inside a one-row-per-line grammar: a filename carrying a line break
+	// would otherwise forge rows the model reads as this tool's own header or notes.
+	rows := make([]string, 0, end-start)
+	for _, name := range found[start:end] {
+		rows = append(rows, escapeRowBreaks(name))
+	}
+
+	text := header + "\n" + strings.Join(rows, "\n")
 	if end < total {
 		text += fmt.Sprintf("\n[...%d more, continue with offset %d]", total-end, end)
 	}

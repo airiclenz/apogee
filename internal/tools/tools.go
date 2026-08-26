@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"sort"
+	"strings"
 
 	"github.com/airiclenz/apogee/internal/domain"
 )
@@ -61,6 +62,21 @@ func okSummary(callID, content string, summary domain.ToolSummary) domain.ToolRe
 // than returned as a Go error, which is reserved for ctx cancellation (ADR 0007).
 func errorResult(callID, message string) domain.ToolResult {
 	return domain.ToolResult{CallID: callID, Content: message, IsError: true}
+}
+
+// rowBreakEscaper spells the two line-break characters as backslash-letter pairs. It is a
+// package-level value because strings.NewReplacer builds a matcher once and is safe for
+// concurrent use by every tool call.
+var rowBreakEscaper = strings.NewReplacer("\r", `\r`, "\n", `\n`)
+
+// escapeRowBreaks rewrites the line breaks in s as the two-character spellings `\r` and `\n`,
+// and changes nothing else. Several tool results use a grammar of one row per line, where a
+// path is DATA inside a row: a filename may legally carry a line break on POSIX, and pasted
+// verbatim it would forge extra rows — a header, a match, a truncation note — that the model
+// reads as the tool's own words. Escaping rather than folding or dropping the break keeps the
+// name recoverable: the reader still sees exactly which bytes the filename holds.
+func escapeRowBreaks(s string) string {
+	return rowBreakEscaper.Replace(s)
 }
 
 // decodeArgs unmarshals a tool call's raw arguments into dst, treating empty or

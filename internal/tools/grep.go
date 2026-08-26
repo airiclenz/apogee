@@ -337,7 +337,9 @@ func (t *Grep) renderMatches(root string, matches []grepMatch, maxResults, offse
 func plainMatchLines(matches []grepMatch) []string {
 	lines := make([]string, 0, len(matches))
 	for _, m := range matches {
-		lines = append(lines, fmt.Sprintf("%s:%d:%s", m.display, m.line, m.text))
+		// Only the display PATH is escaped: m.text is the row's payload, already split on
+		// the line breaks the file held, while the path is data inside the row's grammar.
+		lines = append(lines, fmt.Sprintf("%s:%d:%s", escapeRowBreaks(m.display), m.line, m.text))
 	}
 	return lines
 }
@@ -375,7 +377,8 @@ func (t *Grep) renderFileGroup(root string, group []grepMatch, contextLines int)
 		matched[m.line] = m.text
 	}
 
-	display := group[0].display
+	// The path is data inside the "path:line:text" grammar; a break in it would forge rows.
+	display := escapeRowBreaks(group[0].display)
 	lines := make([]string, 0, len(group))
 	for i, span := range spans {
 		if i > 0 {

@@ -378,3 +378,23 @@ func TestFindFiles_IsRegisteredAndReadOnly(t *testing.T) {
 		t.Errorf("description must contrast name-matching with grep's content search: %q", desc)
 	}
 }
+
+// TestFindFiles_Execute_NewlineInAFilenameCannotForgeARow pins that a filename carrying a
+// line break stays ONE row of the listing: the result is the header plus a single row, and
+// that row spells the break out rather than pasting it into the grammar.
+func TestFindFiles_Execute_NewlineInAFilenameCannotForgeARow(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	seedForgingFile(t, root, "x")
+
+	content := findFiles(t, root, map[string]any{"pattern": "*.go"})
+
+	lines := strings.Split(content, "\n")
+	if len(lines) != 2 {
+		t.Fatalf("got %d lines, want header + 1 row: %q", len(lines), content)
+	}
+	if !strings.Contains(lines[1], forgingRowSpelling) {
+		t.Errorf("row %q does not carry the escaped filename spelling %q", lines[1], forgingRowSpelling)
+	}
+}

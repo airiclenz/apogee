@@ -142,8 +142,12 @@ func (t *ListDir) collectEntries(ctx context.Context, dir *os.File, root, rel st
 			continue
 		}
 
+		// The name is data inside a one-entry-per-line grammar: a directory entry carrying a
+		// line break would otherwise forge rows the model reads as further entries.
+		row := escapeRowBreaks(name)
+
 		if item.IsDir() {
-			entries = append(entries, indent+name+"/")
+			entries = append(entries, indent+row+"/")
 			if recursive && depth+1 < maxDepth {
 				children, err := t.collectSubdir(ctx, root, filepath.Join(rel, name), recursive, maxDepth, depth+1)
 				if err != nil {
@@ -152,7 +156,7 @@ func (t *ListDir) collectEntries(ctx context.Context, dir *os.File, root, rel st
 				entries = append(entries, children...)
 			}
 		} else {
-			entries = append(entries, indent+name)
+			entries = append(entries, indent+row)
 		}
 	}
 	return entries, nil
