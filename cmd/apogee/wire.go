@@ -31,10 +31,14 @@ package main
 //     --resume/--continue start goes through.
 //   - wire_engine.go — Agent construction through the public surface, and the late-bound
 //     [tui.Engine] that stands in until a server is picked.
+//   - wire_firing.go — the one construction surface every unattended run is composed through, so
+//     that `apogee headless`, the daemon's schedules and the `/schedule` picker raise a Firing from
+//     one shape rather than three that drift, plus the per-model rebind notices it hands back.
 //   - wire_server.go — the entry a startup selection collapses to, the one step that binds any entry
 //     to a session, and the config-change wait the reload chain parks on.
 //
-// wire_test.go covers this file and all eleven.
+// wire_test.go covers wire.go and the twelve files above; two composers are pinned at their own
+// construction site instead, in wire_firing_test.go and wire_options_test.go.
 
 import (
 	"context"
