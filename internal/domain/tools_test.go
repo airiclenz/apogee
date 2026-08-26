@@ -198,9 +198,20 @@ func TestIsDefaultOff_ReadsTheMarkerAndDefaultsToOnTheMenu(t *testing.T) {
 // The argument-key fold (FoldArgumentKey, CollidingArgumentKeys)
 // ----------------------------------------------------------------------------
 
-// TestFoldArgumentKey pins the one fold every reader of an argument object agrees on: the
-// executor's decode matches object keys to struct fields case-insensitively, so key case is not
-// a second parameter.
+// longS and kelvinSign are the two runes stdlib's field fold reaches that lower-casing does not:
+// encoding/json matches "\u017F" to "s" and "\u212A" to "k" when it resolves an object key to a
+// struct field. They are how one parameter gets named twice in a call a fold of plain lower case
+// would wave through.
+const (
+	longS      = "\u017F" // LATIN SMALL LETTER LONG S
+	kelvinSign = "\u212A" // KELVIN SIGN
+)
+
+// TestFoldArgumentKey pins the one fold every reader of an argument object agrees on: the fold
+// stdlib encoding/json itself uses to match object keys to struct fields, so neither key case nor
+// a rune that folds to an ASCII letter without lower-casing touching it is a second parameter.
+// The decode at the end is what keeps the table honest — the wanted spellings are checked against
+// what the executor's own decoder does with the same two keys, not against a second guess at it.
 func TestFoldArgumentKey(t *testing.T) {
 	t.Parallel()
 
@@ -208,6 +219,10 @@ func TestFoldArgumentKey(t *testing.T) {
 		{"Command", "command"},
 		{"command", "command"},
 		{"COMMAND", "command"},
+		{"start_line", "start_line"},
+		{longS + "tart_line", "start_line"},
+		{"kind", "kind"},
+		{kelvinSign + "ind", "kind"},
 		{"", ""},
 	}
 	for _, tc := range cases {
@@ -215,10 +230,27 @@ func TestFoldArgumentKey(t *testing.T) {
 			t.Errorf("FoldArgumentKey(%q) = %q, want %q", tc.name, got, tc.want)
 		}
 	}
+
+	var executed struct {
+		StartLine int `json:"start_line"`
+		Kind      string
+	}
+	raw := `{"start_line":1,"` + longS + `tart_line":2,"kind":"a","` + kelvinSign + `ind":"b"}`
+	if err := json.Unmarshal([]byte(raw), &executed); err != nil {
+		t.Fatalf("decoding %s: %v", raw, err)
+	}
+	if executed.StartLine != 2 || executed.Kind != "b" {
+		t.Errorf(
+			"stdlib decoded %s to StartLine=%d Kind=%q, want one parameter each with the last spelling winning (2, %q)",
+			raw, executed.StartLine, executed.Kind, "b",
+		)
+	}
 }
 
 // TestCollidingArgumentKeys pins what counts as one parameter named twice. Two DISTINCT
-// spellings folding together are a collision wherever they sit in the object — the tool decodes
+// spellings folding together are a collision wherever they sit in the object — key case is only
+// the commonest way to spell one twice, and `ſtart_line` beside `start_line` is the same
+// collision written in the corner of the fold lower-casing never reached — the tool decodes
 // nested values through the same case-insensitive matcher — while the same spelling repeated is
 // not: last-wins for an exact duplicate is a contract every reader of the raw bytes already
 // shares. Arguments that are not an object are an error, so a caller can tell "nothing collides"
@@ -240,6 +272,16 @@ func TestCollidingArgumentKeys(t *testing.T) {
 		{"a nested object collides too", `{"o":{"Path":1,"path":2}}`, []string{`"Path"/"path"`}},
 		{"an object inside an array collides too", `{"edits":[{"Path":1,"path":2}]}`, []string{`"Path"/"path"`}},
 		{"three spellings are one group", `{"a":1,"A":2,"À":3,"a":4}`, []string{`"A"/"a"`}},
+		{
+			"a long-s spelling is the same parameter",
+			`{"start_line":1,"` + longS + `tart_line":2}`,
+			[]string{`"start_line"/"` + longS + `tart_line"`},
+		},
+		{
+			"a kelvin-sign spelling is the same parameter",
+			`{"kind":"a","` + kelvinSign + `ind":"b"}`,
+			[]string{`"kind"/"` + kelvinSign + `ind"`},
+		},
 		{
 			"two groups are reported in a stable order",
 			`{"b":1,"B":2,"a":3,"A":4}`,

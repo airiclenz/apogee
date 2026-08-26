@@ -234,6 +234,21 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **Security: the argument-key fold is now stdlib's own field fold, so a `ſ`-spelled key cannot slip
+  a collision (F-11 follow-up).** `domain.FoldArgumentKey` was `strings.ToLower`, which is not how
+  `encoding/json` matches an object key to a struct field: stdlib folds each rune against its whole
+  Unicode simple-fold orbit, so `ſ` (U+017F LATIN SMALL LETTER LONG S) matches `s` — lower-casing
+  never touches it, since it already IS lower case. A call naming one key `ſtart_line` and another
+  `start_line` therefore passed `domain.CollidingArgumentKeys` unflagged, was canonicalised into a
+  digest for an object the executor reads as ONE parameter, and was painted by the approval pane's
+  `lastWins` as two rows — the operator approving the value the tool discards. The fold now folds
+  each rune to its orbit and lower-cases only where lower-casing stays inside that orbit, which is
+  an exact relabelling of stdlib's own fold classes (verified rune by rune over the whole code
+  space: no two of the decoder's classes merge, and none splits) while keeping the folded spelling
+  readable — `Command` → `command`, `ſ` → `s`, `K` → `k`. Every reader inherits it unchanged: the
+  collision check refuses the pair, `CanonicalArgs` refuses to hand out a canonical form for it, and
+  the pane collapses it to the single row whose value runs.
+
 - **The `/settings` mode row names auto's blast radius, before and after the escalation (security
   audit F-22).** One `⏎` on the mode row could move the session to the rung where every
   model-chosen call runs without a human gate, and the row said nothing at all about it: the

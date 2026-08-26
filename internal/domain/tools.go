@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode"
 )
 
 // ----------------------------------------------------------------------------
@@ -218,13 +219,50 @@ type ToolCall struct {
 }
 
 // FoldArgumentKey reduces an argument name to the spelling every reader of an argument object
-// must agree on. The executor decodes a call's arguments with stdlib encoding/json, which
-// matches object keys to struct fields CASE-INSENSITIVELY and takes the last match — so
-// "Command" and "command" are one parameter to the tool that runs, and any surface, guard,
-// digest or gate reading the same bytes has to fold them the same way or it is describing a
-// different call from the one that executes.
+// must agree on: the fold stdlib encoding/json uses to match an object key to a struct field
+// (its foldName — the Unicode simple fold behind bytes.EqualFold). The executor decodes a
+// call's arguments with that decoder, which matches CASE-INSENSITIVELY and takes the last match
+// — so "Command" and "command" are one parameter to the tool that runs, and any surface,
+// guard, digest or gate reading the same bytes has to fold them the same way or it is describing
+// a different call from the one that executes.
+//
+// That fold is NOT plain lower-casing, and the gap is exactly where a substitution hides: stdlib
+// matches each rune against its whole simple-fold orbit, so "ſ" (U+017F LATIN SMALL LETTER
+// LONG S) matches "s" and "K" (U+212A KELVIN SIGN) matches "k". A call naming one key
+// `ſtart_line` and another `start_line` is ONE parameter to the executor, and a fold that
+// missed the pair would report no collision and let a surface show the value the tool never
+// receives. Each rune is folded to its orbit and then lower-cased where lower-casing stays inside
+// that orbit, so the folded spelling stays readable ("Command" → "command", "ſ" → "s",
+// "K" → "k") without ever merging two names stdlib keeps apart.
 func FoldArgumentKey(name string) string {
-	return strings.ToLower(name)
+	return strings.Map(foldArgumentRune, name)
+}
+
+// foldArgumentRune folds one rune the way encoding/json's foldRune does — to the smallest rune
+// in its Unicode simple-fold orbit, the representative every member of that orbit shares — and
+// then lower-cases the representative when the lower-case rune folds back to it. The second step
+// is cosmetic and can never merge two orbits: it is skipped precisely where lower-casing would
+// leave the orbit, as it does for "İ" (U+0130 LATIN CAPITAL LETTER I WITH DOT ABOVE), which
+// stdlib does not match to "i".
+func foldArgumentRune(r rune) rune {
+	folded := simpleFoldMinimum(r)
+	if lower := unicode.ToLower(folded); lower != folded && simpleFoldMinimum(lower) == folded {
+		return lower
+	}
+	return folded
+}
+
+// simpleFoldMinimum returns the smallest rune in r's Unicode simple-fold orbit — the same
+// representative encoding/json picks, so two runes share it exactly when the decoder reads them
+// as one letter.
+func simpleFoldMinimum(r rune) rune {
+	for {
+		next := unicode.SimpleFold(r)
+		if next <= r {
+			return next
+		}
+		r = next
+	}
 }
 
 // CollidingArgumentKeys reports the groups of DISTINCT argument names that fold to one parameter
