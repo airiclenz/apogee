@@ -1018,13 +1018,9 @@ func TestSettingsServerRowTellsSiblingEntriesApartByName(t *testing.T) {
 // MIRRORS, because the footer renders the mode from opts.Mode — so the row shows the new value with no
 // caveat, because there is nothing left to wait for.
 func TestSettingsPaneModeEditAppliesLiveAndMarksNothing(t *testing.T) {
-	rows := []SettingRow{{
-		Path: "mode", Section: "Autonomy", Kind: SettingEnum, Value: "ask-before", Default: "ask-before",
-		EnumValues: []string{"plan", "ask-before", "allow-edits", "auto"}, Editable: true,
-		Desc: "Autonomy mode: how tool calls are gated.",
-	}}
 	log := &settingsWriteLog{}
-	m, _ := settingsEditModel(t, rows, log)
+	m, _ := settingsModeModel(t, log, domain.ModeAskBefore)
+	m = openSettingsPane(t, m)
 
 	m = step(t, m, keyEnter()) // the sub-list, highlighted on ask-before
 	m = step(t, m, keyDown())  // allow-edits
@@ -1039,10 +1035,11 @@ func TestSettingsPaneModeEditAppliesLiveAndMarksNothing(t *testing.T) {
 	if m.opts.Mode != domain.ModeAllowEdits {
 		t.Errorf("opts.Mode = %q, want allow-edits (the footer renders the mode from it)", m.opts.Mode)
 	}
-	if got := m.settingsNote(rows[0]); got != "" {
+	row := settingsModeRowOf(t, m)
+	if got := m.settingsNote(row); got != "" {
 		t.Errorf("marker = %q, want none: a live-applied edit has nothing to wait for", got)
 	}
-	if got, want := m.settingsValueCell(rows[0]), "allow-edits"+settingsEditMarker; got != want {
+	if got, want := m.settingsValueCell(row), "allow-edits"+settingsEditMarker; got != want {
 		t.Errorf("value cell = %q, want %q — the value the session is now running", got, want)
 	}
 }
@@ -1054,6 +1051,135 @@ func settingsModeRow() SettingRow {
 		Path: settingKeyMode, Section: "Autonomy", Kind: SettingEnum, Value: "ask-before",
 		Default: "ask-before", EnumValues: []string{"plan", "ask-before", "allow-edits", "auto"},
 		Editable: true, Desc: "Autonomy mode: how tool calls are gated.",
+	}
+}
+
+// settingsLiveRows is the binary's live overlay, faked: the `mode` row answers from the ENGINE once
+// something has moved it, exactly as the real settings host's Rows() does (overlayLiveSettings,
+// cmd/apogee/settingsrows.go). Until something has, the row's own value stands — which is what the
+// real overlay reports too, the engine having been constructed on the value the file resolved.
+//
+// Every test that asserts what the mode row SAYS has to model this, because a row built once and
+// held reports the boot rung forever — which is the defect the overlay closes.
+func settingsLiveRows(rows []SettingRow, eng *fakeEngine) []SettingRow {
+	live := eng.liveMode()
+	overlaid := append([]SettingRow(nil), rows...)
+	for i := range overlaid {
+		if overlaid[i].Path == settingKeyMode && live != "" {
+			overlaid[i].Value = string(live)
+		}
+	}
+	return overlaid
+}
+
+// settingsModeModel is the pane over that one row wired the way the BINARY wires it: the rows are
+// overlaid from the engine, and a landed apply moves that engine exactly as the binary's dispatcher
+// does (cmd/apogee/wire_settings.go) — which is what makes the next paint's rows say something new.
+// boot is the rung the file resolved, on the row and in the Options the footer renders from.
+//
+// It hands back the model with the pane CLOSED, because Shift+Tab is one of the keys an open pane
+// swallows: a test that moves the rung from outside the pane has to move it before opening.
+func settingsModeModel(t *testing.T, log *settingsWriteLog, boot domain.Mode) (Model, *fakeEngine) {
+	t.Helper()
+	eng := &fakeEngine{}
+	row := settingsModeRow()
+	row.Value = string(boot)
+	rows := []SettingRow{row}
+	opts := testOpts
+	opts.Mode = boot
+	opts.Settings = fakeSettingsHost{
+		rows:  func() []SettingRow { return settingsLiveRows(rows, eng) },
+		write: log.write, reset: log.reset,
+		apply: func(path, value string) (string, error) {
+			note, err := log.apply(path, value)
+			if err == nil && path == settingKeyMode {
+				eng.SetMode(domain.Mode(value))
+			}
+			return note, err
+		},
+	}
+	return newTestModelEng(t, eng, opts), eng
+}
+
+// settingsModeRowOf is the mode row as the host answers it NOW — the read every assertion below
+// makes, because the pane re-derives its rows on every paint and the overlay is what is being
+// asserted. Reading a row the test built earlier would assert the fake instead.
+func settingsModeRowOf(t *testing.T, m Model) SettingRow {
+	t.Helper()
+	rows := m.opts.Settings.Rows()
+	if len(rows) != 1 || rows[0].Path != settingKeyMode {
+		t.Fatalf("host rows = %+v, want the one mode row", rows)
+	}
+	return rows[0]
+}
+
+// Shift+Tab moves the SESSION and writes nothing: no file, no journal entry. The row still has to
+// report it, because the pane's promise is "what this session is running" and the boot resolution
+// stopped being that the moment the chord was pressed (F-14). No marker either — the marker says
+// this session wrote the key through this surface, and nothing was written.
+func TestSettingsModeRowReadsTheLiveRungAfterShiftTab(t *testing.T) {
+	m, eng := settingsModeModel(t, &settingsWriteLog{}, domain.ModeAskBefore)
+
+	m = openSettingsPane(t, step(t, m, keyShiftTab()))
+
+	if got := eng.liveMode(); got != domain.ModeAllowEdits {
+		t.Fatalf("engine mode = %q, want allow-edits — Shift+Tab drives the engine", got)
+	}
+	if len(m.settingEdits) != 0 {
+		t.Fatalf("journal = %+v, want empty: Shift+Tab writes nothing", m.settingEdits)
+	}
+	row := settingsModeRowOf(t, m)
+	if got, want := m.settingsValueCell(row), "allow-edits"; got != want {
+		t.Errorf("value cell = %q, want %q — the rung the session is running, unmarked", got, want)
+	}
+	if got, want := m.settingsCurrentValue(row), "allow-edits"; got != want {
+		t.Errorf("current value = %q, want %q — the sub-list marks the rung it is ON", got, want)
+	}
+}
+
+// The journal and the chord both move the same key, so the LAST mover wins the cell and the journal
+// decides only the marker: a session that wrote `mode` here once and then cycled the chord reads the
+// chord's rung, still marked as a key this session wrote.
+func TestSettingsModeRowFollowsAShiftTabAfterAnInPaneWrite(t *testing.T) {
+	log := &settingsWriteLog{}
+	m, eng := settingsModeModel(t, log, domain.ModeAskBefore)
+
+	m = openSettingsPane(t, m)
+	m = step(t, m, keyEnter()) // the sub-list, on ask-before
+	m = step(t, m, keyDown())  // allow-edits
+	m = step(t, m, keyEnter()) // commit: written, applied, engine moved
+	m = step(t, m, keyEsc())   // the pane closes; the chord is not swallowed
+	m = openSettingsPane(t, step(t, m, keyShiftTab()))
+
+	if got := eng.liveMode(); got != domain.ModeAuto {
+		t.Fatalf("engine mode = %q, want auto — the chord moved on from the written rung", got)
+	}
+	if len(m.settingEdits) != 1 {
+		t.Fatalf("journal = %+v, want the one in-pane write", m.settingEdits)
+	}
+	row := settingsModeRowOf(t, m)
+	if got, want := m.settingsValueCell(row), "auto"+settingsEditMarker; got != want {
+		t.Errorf("value cell = %q, want %q — the live rung, marked as a key this session wrote", got, want)
+	}
+}
+
+// And ⏎ on the row marked "(current)" is the no-op it looks like: the sub-list opens on the LIVE
+// rung, so confirming it re-applies what the session is already running rather than the rung the
+// boot resolution left in the journal (F-31 — the stale re-apply).
+func TestSettingsModeSubListAppliesTheLiveRung(t *testing.T) {
+	log := &settingsWriteLog{}
+	m, _ := settingsModeModel(t, log, domain.ModeAskBefore)
+
+	m = openSettingsPane(t, step(t, m, keyShiftTab())) // the engine is on allow-edits; the file says ask-before
+	m = step(t, m, keyEnter())                         // the sub-list opens on the live rung
+	m = step(t, m, keyEnter())                         // confirm the row marked "(current)"
+
+	want := []settingEdit{{path: settingKeyMode, value: "allow-edits"}}
+	if !reflect.DeepEqual(log.applies, want) {
+		t.Errorf("applies = %+v, want %+v — ⏎ on \"(current)\" re-applies the LIVE rung", log.applies, want)
+	}
+	if !reflect.DeepEqual(log.writes, want) {
+		t.Errorf("writes = %+v, want %+v — and persists the rung it confirmed", log.writes, want)
 	}
 }
 
@@ -2142,13 +2268,9 @@ func TestSettingsPaneResetIsANoOpOnADefaultValuedRow(t *testing.T) {
 // A RESET applies exactly as a write does, through the same dispatcher: the session drops back to the
 // ladder's default now, and the row shows it with no caveat.
 func TestSettingsPaneResetOfModeAppliesTheDefaultLive(t *testing.T) {
-	rows := []SettingRow{{
-		Path: "mode", Section: "Autonomy", Kind: SettingEnum, Value: "auto", Default: "ask-before",
-		EnumValues: []string{"plan", "ask-before", "allow-edits", "auto"}, Editable: true,
-		Desc: "Autonomy mode: how tool calls are gated.",
-	}}
 	log := &settingsWriteLog{}
-	m, _ := settingsEditModel(t, rows, log)
+	m, _ := settingsModeModel(t, log, domain.ModeAuto)
+	m = openSettingsPane(t, m)
 
 	m = step(t, step(t, m, keyBackspace()), keyEnter())
 
@@ -2161,10 +2283,11 @@ func TestSettingsPaneResetOfModeAppliesTheDefaultLive(t *testing.T) {
 	if m.opts.Mode != domain.ModeAskBefore {
 		t.Errorf("opts.Mode = %q, want ask-before (the footer renders the mode from it)", m.opts.Mode)
 	}
-	if got := m.settingsNote(rows[0]); got != "" {
+	row := settingsModeRowOf(t, m)
+	if got := m.settingsNote(row); got != "" {
 		t.Errorf("marker = %q, want none: a live-applied reset has nothing to wait for", got)
 	}
-	if got, want := m.settingsValueCell(rows[0]), "ask-before"+settingsEditMarker; got != want {
+	if got, want := m.settingsValueCell(row), "ask-before"+settingsEditMarker; got != want {
 		t.Errorf("value cell = %q, want %q — the default the session is now running", got, want)
 	}
 }

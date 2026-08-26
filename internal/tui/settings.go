@@ -285,6 +285,9 @@ const settingsUnsetValue = "unset"
 // is left worth saying is which rows this session touched. It is cleared only by a relaunch, because
 // the journal behind it is the SESSION's memory rather than the overlay's ([Model.settingEdits]): it
 // survives every close and reopen of the pane, as the edit it stands for survives them.
+//
+// On the `mode` row the value beside it is always the LIVE rung — Shift+Tab moves the session
+// without ever writing a journal entry — and the marker only says the session wrote the key once.
 const settingsEditMarker = " *"
 
 // The value cells of a bool row, spelled as the config file spells them — the two strings ⏎ toggles
@@ -1078,13 +1081,19 @@ func (m Model) settingsMechanisms(rows []SettingRow) []MechanismToggle {
 }
 
 // settingsCurrentValue is the value a sub-list opens on and marks "(current)": what the pane believes
-// the file holds (settingsPersistedValue) for every key but one.
+// the file holds (settingsPersistedValue) for every key but two.
 //
-// The `server` row is that one, and its honest answer is the entry the session is ON — identified by
+// The `server` row is the first, and its honest answer is the entry the session is ON — identified by
 // name, the picker's own comparison ([Model.currentServerRow]) — rather than the entry the key names:
 // `/server` moves a session and rewrites the key without this pane ever hearing about it, so a value
 // read off the launch resolution would mark the server the session has left. Name and not endpoint,
 // so that a sibling entry sharing the bound one's URL is not marked as the one you are on.
+//
+// The `mode` row is the second, and for the same reason with a different mover: Shift+Tab cycles the
+// rung without writing anything at all, so the journal and the file both go on describing a session
+// that has moved. Its answer is the row's own value, which the host overlays from the live engine —
+// so the sub-list opens on the rung the session is RUNNING, and ⏎ on the row marked "(current)"
+// re-applies that rung rather than a stale one.
 func (m Model) settingsCurrentValue(row SettingRow) string {
 	if row.Kind == SettingServer {
 		for _, choice := range m.servers() {
@@ -1092,6 +1101,9 @@ func (m Model) settingsCurrentValue(row SettingRow) string {
 				return choice.Name
 			}
 		}
+	}
+	if row.Path == settingKeyMode {
+		return row.Value
 	}
 	return m.settingsPersistedValue(row)
 }
@@ -1385,10 +1397,18 @@ func (m Model) settingRowCells(row SettingRow) popupRow {
 // that persists it (ADR 0037 decision 1), so what this pane wrote IS what the session runs, while the
 // provider still answers with the resolution this run started from. Such a row carries the ` *` that
 // says this session changed it (settingsEditMarker).
+//
+// `mode` is the row where that reasoning inverts: the rung moves from OUTSIDE this pane too
+// (Shift+Tab), so the journal is not the last word on it and the provider is — the host overlays the
+// row from the live engine. The cell therefore shows the row's value whatever the journal holds, and
+// the journal decides only whether the marker is on it.
 func (m Model) settingsValueCell(row SettingRow) string {
 	edit, ok := m.settingEditOf(row.Path)
 	if !ok {
 		return row.Value
+	}
+	if row.Path == settingKeyMode {
+		return row.Value + settingsEditMarker
 	}
 	return settingsEditedValue(row, edit) + settingsEditMarker
 }

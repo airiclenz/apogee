@@ -16,6 +16,9 @@ package main
 // the mask over a secret, the word an empty block shows, the default a row falls back to.
 
 import (
+	"strconv"
+
+	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/tui"
 )
@@ -58,6 +61,14 @@ const (
 // settingKeyMechanisms is the registry path of that row. It is spelled here because the pointer and
 // the affordance below both have to recognise the one key whose read-only-ness means something else.
 const settingKeyMechanisms = "mechanisms"
+
+// The two registry paths whose value the ENGINE holds rather than the resolution — the pair
+// overlayLiveSettings below replaces. They are spelled here for settingKeyMechanisms' reason: a row
+// that has to be recognised at all is recognised by its path.
+const (
+	settingKeyMode               = "mode"
+	settingKeyConfineToWorkspace = "confine-to-workspace"
+)
 
 // settingSection is one header the pane groups rows under: a NAME and the registry path that opens
 // it. Sections are runs over the registry's own order rather than a per-key label, because that
@@ -143,6 +154,46 @@ func settingsRows(opts config.Options) []tui.SettingRow {
 		})
 	}
 	return rows
+}
+
+// runningSettings is the running session's answer for the two keys a projection of config.Options
+// cannot answer honestly: the autonomy mode and Auto's blast radius are both moved DURING a session
+// — Shift+Tab and the mode row move the first, /confine the second — and neither writes the config
+// file, so rows built from the boot resolution go on reporting the values this run launched with.
+// The pane would then mark a rung the session has left as "(current)" and re-apply it on ⏎.
+//
+// It is an interface rather than the holder itself for settingsEngine's reason (wire.go): the
+// overlay is then exercisable against a fake with no Agent behind it, and this file goes on knowing
+// nothing about the engine but the two questions it asks.
+type runningSettings interface {
+	Mode() apogee.Mode
+	ConfineToWorkspace() bool
+}
+
+// overlayLiveSettings answers those two rows from the engine and leaves every other row exactly as
+// the projection built it. It is the BINARY's overlay, beside the projection it corrects, because
+// the value a row shows is composed on this side of the seam and the renderer holds neither the
+// schema nor an engine mutator (ADR 0037 decision 2).
+//
+// A nil live overlays nothing: a Driver that composed the settings host without an engine (ADR
+// 0031) still gets the file's own answers, which is what "no engine to ask" honestly reads as. The
+// rows are copied rather than written through, so the projection a caller kept is never moved under
+// it — the two lists are the FILE's answer and the SESSION's, and a test comparing them needs both.
+func overlayLiveSettings(rows []tui.SettingRow, live runningSettings) []tui.SettingRow {
+	if live == nil {
+		return rows
+	}
+	overlaid := make([]tui.SettingRow, len(rows))
+	copy(overlaid, rows)
+	for i := range overlaid {
+		switch overlaid[i].Path {
+		case settingKeyMode:
+			overlaid[i].Value = string(live.Mode())
+		case settingKeyConfineToWorkspace:
+			overlaid[i].Value = strconv.FormatBool(live.ConfineToWorkspace())
+		}
+	}
+	return overlaid
 }
 
 // settingKind projects a registry kind onto the renderer's vocabulary. The two vocabularies are

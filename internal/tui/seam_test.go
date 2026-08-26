@@ -117,6 +117,7 @@ type fakeEngine struct {
 	submitted  []domain.UserInput
 	stepCalls  int
 	modeSet    []domain.Mode // records SetMode calls (Shift+Tab drove the engine)
+	mode       domain.Mode   // the live rung SetMode moved this engine to ("" ⇒ never moved)
 	confineSet []bool        // records SetConfineToWorkspace calls (the /confine command)
 	confine    bool          // the live blast radius ConfineToWorkspace reports; SetConfineToWorkspace swaps it
 
@@ -280,7 +281,18 @@ func (f *fakeEngine) Close() error { return nil }
 func (f *fakeEngine) SetMode(m domain.Mode) {
 	f.mu.Lock()
 	f.modeSet = append(f.modeSet, m)
+	f.mode = m
 	f.mu.Unlock()
+}
+
+// liveMode reports the rung this engine was last moved to — "" while nothing has moved it, which is
+// the state a freshly built fake is in. It is the counterpart of the confine field above: the real
+// holder answers Mode() the same way (cmd/apogee/wire_engine.go), and it is what the settings host's
+// live overlay reads.
+func (f *fakeEngine) liveMode() domain.Mode {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.mode
 }
 
 // modesSet reports the modes SetMode was called with, in order.

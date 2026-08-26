@@ -92,6 +92,76 @@ func TestSettingsRowsMatchTheRegistryOrder(t *testing.T) {
 	}
 }
 
+// fakeRunningSettings is the engine's half of the live overlay: the two facts a running session
+// holds and the config file does not. A struct rather than the holder itself, which is the whole
+// point of the narrow interface — the overlay is provable with no Agent, no endpoint and no wiring.
+type fakeRunningSettings struct {
+	mode    apogee.Mode
+	confine bool
+}
+
+func (f fakeRunningSettings) Mode() apogee.Mode        { return f.mode }
+func (f fakeRunningSettings) ConfineToWorkspace() bool { return f.confine }
+
+// The two rows the ENGINE holds report what the session is running, not what it launched with:
+// Shift+Tab and the mode row move the first, /confine moves the second, and neither writes the
+// config file — so rows projected from the boot resolution alone told the user about a session that
+// had moved on, and marked a rung it had left as the one to re-apply (F-14, F-31).
+//
+// Every OTHER row is left byte-identical, which is what makes this an overlay rather than a second
+// projection: a key that started reading the engine by accident would be a row nobody wrote.
+func TestSettingsRowsOverlayTheLiveModeAndConfinement(t *testing.T) {
+	t.Parallel()
+
+	opts := fabricatedSettings()
+	opts.Mode = string(apogee.ModePlan)
+	opts.ConfineToWorkspace = true
+	boot := settingsRows(opts)
+	if got := rowsByPath(t, boot)[settingKeyMode].Value; got != string(apogee.ModePlan) {
+		t.Fatalf("boot mode row = %q, want plan — the overlay has nothing to prove otherwise", got)
+	}
+	if got := rowsByPath(t, boot)[settingKeyConfineToWorkspace].Value; got != "true" {
+		t.Fatalf("boot confinement row = %q, want true", got)
+	}
+
+	live := overlayLiveSettings(settingsRows(opts),
+		fakeRunningSettings{mode: apogee.ModeAuto, confine: false})
+
+	if len(live) != len(boot) {
+		t.Fatalf("overlaid rows = %d, want the projection's %d", len(live), len(boot))
+	}
+	for i := range boot {
+		want := boot[i].Value
+		switch boot[i].Path {
+		case settingKeyMode:
+			want = string(apogee.ModeAuto)
+		case settingKeyConfineToWorkspace:
+			want = "false"
+		}
+		if live[i].Value != want {
+			t.Errorf("%s row = %q, want %q", boot[i].Path, live[i].Value, want)
+		}
+		// Only the VALUE may move: the section, the source marker, the pointer and the prose are
+		// the file's answers whatever the engine is running.
+		restored := live[i]
+		restored.Value = boot[i].Value
+		if !reflect.DeepEqual(restored, boot[i]) {
+			t.Errorf("%s row = %+v, want %+v apart from its value", boot[i].Path, live[i], boot[i])
+		}
+	}
+}
+
+// A settings host with no engine behind it (a Driver that composed one, ADR 0031) overlays nothing
+// and shows the file's own answers, which is what "there is nothing to ask" honestly reads as.
+func TestSettingsRowsWithoutALiveEngineOverlayNothing(t *testing.T) {
+	t.Parallel()
+
+	opts := fabricatedSettings()
+	if got := overlayLiveSettings(settingsRows(opts), nil); !reflect.DeepEqual(got, settingsRows(opts)) {
+		t.Errorf("overlaid rows differ from the projection with no engine to ask")
+	}
+}
+
 // The text row carries BOTH halves: the summary a row has space for, and the prose the editor opens
 // on. They are read in different places and neither stands in for the other.
 func TestSettingsRowsCarryThePromptTextBesideItsSummary(t *testing.T) {

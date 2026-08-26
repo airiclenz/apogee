@@ -426,7 +426,13 @@ returns the owner's ids ascending and nothing for an owner with none.
 
 ---
 
-## 7. `/settings` mode and confinement rows read the live engine
+## 7. `/settings` mode and confinement rows read the live engine — ✅ DONE (2026-08-26)
+
+NOTES (2026-08-26): the plan names the new interface `liveSettings`; `cmd/apogee` already has a `liveSettings` struct (wire.go:171, the live session-state holder), so it is spelled `runningSettings` — same shape, same file, same two methods.
+
+NOTES (2026-08-26): `internal/tui/seam_test.go` is edited beyond the plan's Files list — `fakeEngine` gained a `mode` field its `SetMode` sets plus a `liveMode()` reader (the counterpart of its existing `confine` field), which is what lets the TUI tests' fake host model the binary's live overlay.
+
+NOTES (2026-08-26): two existing tests (`TestSettingsPaneModeEditAppliesLiveAndMarksNothing`, `TestSettingsPaneResetOfModeAppliesTheDefaultLive`) held a static mode row and asserted the journalled value in its cell; they now run on the live-overlay host helper and assert the same strings off the host's own rows.
 
 **What:** F-14 + F-31. The rows are projected in the BINARY (`settingsRows`, `settingsrows.go:100`)
 from the boot `config.Options`; the two keys whose live value the engine holds are overlaid there,

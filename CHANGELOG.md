@@ -256,6 +256,19 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **`/settings` reports the mode and the fence the session is RUNNING, not the ones it launched
+  with.** The pane's rows are projected in the binary from the boot `config.Options`, so a
+  `shift+tab` or a `/confine off` — neither of which writes the config file — left the `mode:` and
+  `confine-to-workspace:` rows describing a session that had moved on, and ⏎ on the rung the mode
+  sub-list marked "(current)" re-applied the STALE rung (F-14, F-31). The settings host now overlays
+  those two rows from the engine (`overlayLiveSettings`, off the new `lateEngine.Mode()` beside its
+  `ConfineToWorkspace()`), leaving every other row byte-identical to the projection; a host with no
+  engine behind it (ADR 0031) overlays nothing. In the renderer the `mode` row joins `server` in
+  answering `settingsCurrentValue` from the row rather than from the pane's journal, so the sub-list
+  opens on and marks the live rung, and its value cell shows that rung with the ` *` marker saying
+  only that this session wrote the key once. The renderer still holds no schema and no engine
+  mutator: the overlay is the binary's, as the projection already was.
+
 - **A Console now answers only to the run that opened it.** `lookupConsole` — the one lookup
   `console_send`, `console_read` and `console_close` share — found a Console by id alone, so any
   delegation naming an id it had not opened could drive, read or CLOSE another run's live shell,

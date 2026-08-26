@@ -180,6 +180,7 @@ func (w *rootWiring) options() tui.Options {
 		// idiom over rows it did not compose.
 		Settings: settingsHost{
 			opts:       w.opts,
+			live:       w.engine,
 			configPath: configPath,
 			edits:      w.externalEdits,
 			apply:      applySetting,
@@ -318,6 +319,10 @@ type settingsHost struct {
 	// THIS run made: a key persisted mid-session is applied by apply below and shown from the pane's
 	// own journal, marked ` *` (ADR 0037 decision 8).
 	opts config.Options
+	// live is the running session's answer for the two keys the resolution above cannot answer: the
+	// autonomy mode and Auto's blast radius move during a session without the file hearing about it,
+	// so Rows overlays them from the engine (settingsrows.go). nil where there is no engine to ask.
+	live runningSettings
 	// configPath is the file both writes splice — the same config.yaml the host acknowledgement is
 	// recorded in and the watcher is looking at.
 	configPath string
@@ -329,9 +334,14 @@ type settingsHost struct {
 }
 
 // Rows is every key the registry describes, with the value this run resolved and the marker for a
-// key an environment variable or a flag overrode (settingsrows.go). It is re-derived per ask because
-// the pane derives its rows on every paint — the picker's convention.
-func (h settingsHost) Rows() []tui.SettingRow { return settingsRows(h.opts) }
+// key an environment variable or a flag overrode (settingsrows.go), and — for the two keys the
+// engine rather than the file holds — the value the session is RUNNING (overlayLiveSettings). It is
+// re-derived per ask because the pane derives its rows on every paint — the picker's convention —
+// which is also what makes the overlay enough: a mode cycled with the pane open shows on the next
+// paint, with nothing to invalidate.
+func (h settingsHost) Rows() []tui.SettingRow {
+	return overlayLiveSettings(settingsRows(h.opts), h.live)
+}
 
 // Write persists one key per deliberate edit, spliced into the config file (ADR 0035). The registry
 // decides what may be written and the splice writer owns the file (internal/config/configwrite.go) —

@@ -412,6 +412,17 @@ func (e *lateEngine) SetProfile(profile apogee.ModelProfile) error {
 	return agent.SetProfile(profile)
 }
 
+// Mode reports the autonomy mode the session is RUNNING — the value the footer and the /settings
+// mode row have to read, because Shift+Tab and /settings move the engine without the config file
+// ever hearing about it. It answers from the mirror rather than from the Agent for the reason the
+// mirror exists at all: SetMode writes it whether or not there is an Agent yet, so the holder can
+// answer a mode moved before a server was ever picked, and a bind installs exactly this value.
+func (e *lateEngine) Mode() apogee.Mode {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.mode
+}
+
 // ConfineToWorkspace reports the blast radius the next tool call will read: the Agent's own once
 // there is one, and until then the value a bind would install.
 func (e *lateEngine) ConfineToWorkspace() bool {

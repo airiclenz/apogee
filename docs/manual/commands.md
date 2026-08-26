@@ -122,7 +122,10 @@ finished.
 in the order the starter `config.yaml` documents them and grouped under section headings,
 each row showing the value **this run resolved** for it. Where a higher-precedence source
 beat the file, the row says which — `(env)` or `(flag)` — so a key that reads one way in the
-file and another on screen explains itself. The conversation gives way
+file and another on screen explains itself. Two rows answer from the **running session**
+instead of that resolution — `mode:` and `confine-to-workspace:` show what apogee is running
+right now, so a `shift+tab` or a `/confine off` shows up the next time you open the pane, and
+the `mode:` list opens on the rung you are actually on. The conversation gives way
 entirely while the pane is up, because thirty-odd keys are a screen to read rather
 than a choice to scan: `↑/↓` move the `❯`, a fixed two-line `Description:` header above the
 list says what the key under the cursor is for, and `esc` closes the pane and hands the
