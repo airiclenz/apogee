@@ -10,6 +10,17 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **The delegate bounds now have a live-path shakeout (delegate token runaway, plan item 9).**
+  `TestLiveDelegateCapAndWorkingWindow` drives one real delegation against a live large-window
+  server — a child bounded to 5 steps and a 32,768-token working room, reading this repository's
+  own `internal/` tree one file at a time — and asserts the four things every other test around
+  these bounds can only script: the Exchange ends at the cap with the partial-result marker rather
+  than running on, the child's readings are stamped with the window the server ADVERTISES while its
+  Budget is fenced to the working room, and the whole capped delegation costs the parent's context
+  under 4,000 tokens. It is opt-in on `APOGEE_LIVE_ENDPOINT` like every live test in this repo, so
+  `make check` never depends on a running model, and `make live-eval` now drives it beside the TUI
+  eval.
+
 - **A session record now says what its DELEGATES spent, and the browser reports the session's whole
   bill (delegate token runaway, plan item 8).** `session.Meta` gained `delegateUsage` beside `usage`
   — the sum of the latest reading of every sub-agent run head the Driver held at Save — so the two

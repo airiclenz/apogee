@@ -558,7 +558,39 @@ delegate heads sum into the session row; the cached column appears only when non
 
 ---
 
-## 9. Live-path shakeout against a large-window model (skippable without an endpoint)
+## 9. Live-path shakeout against a large-window model (skippable without an endpoint) — ✅ DONE (2026-08-26)
+
+NOTES (2026-08-26): the delegation is driven through `runSubAgent` with a synthesised
+`sub_agent` call rather than by prompting the parent model into emitting one. Every assertion
+the item names is downstream of that call — the child's construction, its cap, its Budget, the
+result the parent is handed — so a live parent would add the one failure mode the shakeout is
+not about (a model that declines to delegate) and prove nothing extra. The parent, the child,
+the endpoint, the model, the window and the file reads are all real.
+
+NOTES (2026-08-26): "the parent's context grew by less than 4K tokens" is measured as the token
+size of the ToolResult the delegation hands back, which IS what the parent's conversation gains
+from a delegation — nothing but the parent's own dispatch appends to that conversation, and the
+test does not fabricate an append. The chars→token conversion goes through the ratio the
+child's last Budget carries, calibrated by the live model against its own reported usage rather
+than the uncalibrated default.
+
+NOTES (2026-08-26): the test Fatals when the server advertises a window at or below 32,768. The
+item's assertion `ContextLimit == 32768` is only well-founded on a LARGE-window model — below
+that bound `min(Window, WorkingWindow)` is the window, and the split the item is shaking out
+does not exist. `APOGEE_LIVE_ENDPOINT` stays the only gate that SKIPS.
+
+NOTES (2026-08-26): "within 5 Turns" is counted as the distinct Turn indices of the child's
+non-maintenance `UsageEvent`s, not as a call count: an in-place retry spends a second call on
+the same Turn, and the mid-run compaction fold item 3 ships spends one flagged `Maintenance`.
+Counting calls would fail the test for either. The child runs with `CompactionEnabled: true` on
+purpose — item 3 is one of this item's dependencies, so the fold is part of what the shakeout
+exercises.
+
+NOTES (2026-08-26): `make live-eval` enumerated exactly one test, so it gained an alternation
+`-run` regex and the `./internal/agent/` package beside `./internal/tui/`; each package's
+binary keeps its own `go test` timeout, and the test's own context ceiling (8 minutes) sits
+under the default 10-minute one so a hung server yields a diagnosis rather than a panic. The
+target's one-line help text was left as written.
 
 Depends on items 2, 3, 5, 6.
 

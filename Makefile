@@ -134,7 +134,7 @@ test:
 ## live-eval: run the opt-in live-model eval against a real local model (always -count=1, never cached)
 .PHONY: live-eval
 live-eval:
-	APOGEE_LIVE_ENDPOINT=$(LIVE_ENDPOINT) go test -race -count=1 -run TestE2ELiveModel -v ./internal/tui/
+	APOGEE_LIVE_ENDPOINT=$(LIVE_ENDPOINT) go test -race -count=1 -run 'TestE2ELiveModel|TestLiveDelegateCapAndWorkingWindow' -v ./internal/tui/ ./internal/agent/
 
 ## fmt: format all Go source in place
 .PHONY: fmt
