@@ -1087,3 +1087,154 @@ func TestFailedDelegationPaintsItsSlotRed(t *testing.T) {
 		assertSlot(t, paintedRow(t, tr, slot), slot, false, true)
 	})
 }
+
+// ----------------------------------------------------------------------------
+// A delegation that never ran shows the prompt it carried (ISSUES.md, 2026-08-11)
+// ----------------------------------------------------------------------------
+
+// refusedDelegation folds a delegation that NEVER RAN: the call, then the refusal its result
+// carried, with nothing at all between them. It is the shape agent.runSubAgent returns at the depth
+// bound, on a hook failure and on a construct error — the delegation is over and left no span, so
+// subAgentFramed frames it by neither of its answers and it is drawn as an ordinary tool block.
+func refusedDelegation(tr *transcript, id, task string) {
+	subAgentCall(tr, id, task, 0)
+	subAgentReport(tr, id, refusedResult, 0)
+}
+
+const (
+	// refusedResult is the depth bound's own wording, short enough that the body row it lands on
+	// does not wrap at the goldens' width.
+	refusedResult = "error: sub-agent depth limit reached (max 2)"
+	refusedTask   = "survey the tests\\nand report back\\nwith detail"
+)
+
+// TestUnframedSubAgentShowsThePromptWhenExpanded is the item's acceptance golden, in both rendering
+// paths. A delegation that never ran is an ordinary tool block, so the prompt it carried has
+// nowhere to go but the BODY: expanded, the block opens with "task: " and the whole prompt, and the
+// refusal follows a blank line below it. Collapsed it is still exactly one row — the task's first
+// line already rides the header as the name fallback (subAgentTarget), so a second rendering of it
+// would say the same thing twice in two adjacent rows.
+//
+// The two paths are pinned against each OTHER as much as against the goldens: folding changes the
+// frame around a delegation and never what the delegation shows of itself, so the lone block and
+// the grouped member say the same rows in their own frames.
+func TestUnframedSubAgentShowsThePromptWhenExpanded(t *testing.T) {
+	const width = 80
+	prompt := []string{"task: survey the tests", "and report back", "with detail"}
+
+	t.Run("a lone block opens onto the prompt", func(t *testing.T) {
+		tr := &transcript{}
+		refusedDelegation(tr, "s1", refusedTask)
+		if !tr.setExpanded(0, true) {
+			t.Fatalf("setExpanded(0, true) = false; want the delegation open")
+		}
+
+		want := strings.Join([]string{
+			"✦ Sub-Agent",
+			// The promoted refusal leaves the slot for the body so the prompt can stand above it,
+			// and the presenter's typed phrase takes its place (toolView.demoted).
+			leaderEdgeRow("  ┕ survey the tests ⋯ done", glyphExpanded),
+			"    " + prompt[0],
+			"    " + prompt[1],
+			"    " + prompt[2],
+			"",
+			"    " + refusedResult,
+			seeLessFooterLine(t, width),
+		}, "\n")
+
+		if got := renderPlain(tr, width); got != want {
+			t.Errorf("expanded lone refusal mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+		}
+	})
+
+	t.Run("collapsed it is one row", func(t *testing.T) {
+		tr := &transcript{}
+		refusedDelegation(tr, "s1", refusedTask)
+
+		want := "✦ Sub-Agent\n  ┕ survey the tests ⋯ " + refusedResult
+		if got := renderPlain(tr, width); got != want {
+			t.Errorf("collapsed lone refusal mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+		}
+	})
+
+	t.Run("a grouped member opens onto the same rows", func(t *testing.T) {
+		tr := &transcript{}
+		refusedDelegation(tr, "s1", refusedTask)
+		refusedDelegation(tr, "s2", "build it")
+		if !tr.setExpanded(0, true) {
+			t.Fatalf("setExpanded(0, true) = false; want the first member open")
+		}
+
+		want := strings.Join([]string{
+			"✦ Sub-Agent (2)",
+			leaderEdgeRow("  ┝ survey the tests ✓ ⋯ done", glyphExpanded),
+			"  │ " + prompt[0],
+			"  │ " + prompt[1],
+			"  │ " + prompt[2],
+			"  │",
+			"  │ " + refusedResult,
+			memberEdgeRow(t, "  │", promptSeeLess, width),
+			"┊",
+			// The sibling is shut and hides nothing of its own — its refusal rides the slot and its
+			// one-line prompt already rides the header — so its row wears no indicator.
+			"  ┕ build it ✓ ⋯ " + refusedResult,
+		}, "\n")
+
+		if got := renderPlain(tr, width); got != want {
+			t.Errorf("expanded grouped refusal mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+		}
+	})
+
+	t.Run("a delegation with a span keeps its framed prompt", func(t *testing.T) {
+		tr := &transcript{}
+		subAgentCall(tr, "s1", refusedTask, 0)
+		readCall(tr, "r1", "a.go", 1, 5, 1)
+		subAgentReport(tr, "s1", "all clear", 0)
+		if !tr.setExpanded(0, true) {
+			t.Fatalf("setExpanded(0, true) = false; want the delegation open")
+		}
+
+		// The framed reading paints the prompt INSIDE the rail as markdown (subAgentPromptRows), so
+		// the unframed body's lead line must not appear anywhere in it.
+		got := renderPlain(tr, width)
+		if strings.Contains(got, unframedSubAgentPromptLead) {
+			t.Errorf("a framed delegation grew the unframed lead line:\n%s", got)
+		}
+		if !strings.Contains(got, "│ survey the tests") {
+			t.Errorf("a framed delegation lost its railed prompt:\n%s", got)
+		}
+	})
+}
+
+// TestSubAgentPromptDetailsLeadsWithTheTask pins the body lines the prompt becomes: its first line
+// under the lead, every further line plain beneath it, and nothing at all for a prompt that is blank
+// throughout — which is what leaves a record with no retained task (transcriptcodec.go) showing the
+// view it always showed.
+func TestSubAgentPromptDetailsLeadsWithTheTask(t *testing.T) {
+	long := strings.Repeat("x", detailClipRunes+20)
+
+	for _, tc := range []struct {
+		name string
+		task string
+		want []string
+	}{
+		{"a one-line prompt is one lead line", "survey the tests", []string{"task: survey the tests"}},
+		{"further lines follow it plain", "a\nb\nc", []string{"task: a", "b", "c"}},
+		{"trailing blank lines come off", "a\n\n", []string{"task: a"}},
+		{"an empty prompt has no lines", "", nil},
+		{"whitespace alone has no lines", "  \n\t\n", nil},
+		{"every line is held to the detail clip", long, []string{clipDetail(unframedSubAgentPromptLead + long)}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := subAgentPromptDetails(tc.task)
+
+			text := make([]string, 0, len(got))
+			for _, ln := range got {
+				text = append(text, ln.Text)
+			}
+			if !slices.Equal(text, tc.want) {
+				t.Errorf("subAgentPromptDetails(%q) = %q; want %q", tc.task, text, tc.want)
+			}
+		})
+	}
+}

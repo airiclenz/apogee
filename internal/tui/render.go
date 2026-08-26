@@ -539,7 +539,17 @@ func renderEntryLines(th theme, in paintInput, width int, blink bool) blockPaint
 		body := renderMarkdownBody(th, in.text, inner-th.measure.Width(marker))
 		return plainPaint(railLines(th, withMarker(th, marker, body), in.depth))
 	case entryToolCall:
-		return renderToolBlock(th, []toolView{in.tool}, inner, blockState{
+		// A delegation that is OVER with nothing behind it reaches this branch as the ordinary tool
+		// block it is, and the prompt it carried has nowhere else to go: expanded, it opens the
+		// block's body (unframedSubAgentView). The span the question turns on is 0 by construction
+		// here — resolveBlock frames every delegation that has one and steps into it, so none ever
+		// reaches this case — which is what lets the predicate still be asked through
+		// [subAgentFramed] rather than reworded into a second rule about what a run is.
+		view := in.tool
+		if in.headsRun() && in.expanded && !subAgentFramed(in, 0) {
+			view = unframedSubAgentView(in)
+		}
+		return renderToolBlock(th, []toolView{view}, inner, blockState{
 			expanded: in.expanded,
 			live:     !in.done,
 			blink:    blink,

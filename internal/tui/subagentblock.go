@@ -215,6 +215,76 @@ func subAgentPromptRows(th theme, task string, width int) []string {
 	return append([]string{railSpacer(th, 1)}, railLines(th, body, 1)...)
 }
 
+// unframedSubAgentPromptLead labels the prompt where an UNFRAMED delegation shows it. The framed
+// reading needs no label — the prompt opens a rail that visibly belongs to the delegation
+// (subAgentPromptRows) — but a body line under an ordinary tool block has nothing around it saying
+// whose words it is, and a prompt read as the delegate's output would be the block lying about who
+// spoke.
+const unframedSubAgentPromptLead = "task: "
+
+// unframedSubAgentView is what an EXPANDED delegation that NEVER RAN shows of itself: the prompt it
+// carried, over whatever its result left behind.
+//
+// A delegation refused at the depth bound, failed by a hook before its first event, or lost to a
+// construct error (agent.runSubAgent) is over with nothing behind it, so [subAgentFramed] frames it
+// by neither of its answers and it is drawn as the ordinary tool block it is. That framing is right
+// and is not what this changes — a frame opened over an empty span would enclose nothing and be
+// closed again by the very next row. What it left with nowhere to go is the PROMPT: the framed
+// reading paints it inside the frame, so an unframed delegation showed what any tool block shows and
+// never what it was asked. Here the prompt is the block's BODY instead, which is the one place an
+// unframed block has for it.
+//
+// The header's own text does not stand in for it. Target carries the task's first line clipped to
+// the branch's budget, or the delegation's NAME where one was given (subAgentTarget), so on a named
+// or a multi-line delegation the request is otherwise unrecorded on screen — which is exactly the
+// case a reader opening a refused delegation is asking about.
+//
+// The result's own lines follow after a blank one, so the refusal reads as a second voice rather
+// than as more of the request. A delegation with no prompt to show — an empty task, whitespace
+// alone, a record replayed from a session written before the text was retained (transcriptcodec.go)
+// — keeps the view it had: a lead line over nothing would be a heading for an empty body.
+//
+// The copy is a paint-time act on facts the entry keeps whole, exactly as the framed readings'
+// are (expandedSubAgentView).
+func unframedSubAgentView(head paintInput) toolView {
+	view := head.tool
+	body := subAgentPromptDetails(view.task)
+	if len(body) == 0 {
+		return view
+	}
+	// A one-line result the presenter PROMOTED into the outcome slot is folded into the body first,
+	// through the promote-guard's own rule rather than a second wording of it (toolView.demoted):
+	// the prompt has to stand above what came back, and a promotion the painter demotes only at a
+	// narrow width would otherwise put the refusal above the prompt on some terminals and below it
+	// on others. The swap is licensed exactly here — the slot still says what happened, and the
+	// block now manifestly has something to reveal.
+	view = view.demoted()
+	if carried := view.Details.all(); len(carried) > 0 {
+		body = append(body, detailLine{})
+		body = append(body, carried...)
+	}
+	view.Details = newToolBody(body)
+	return view
+}
+
+// subAgentPromptDetails is the delegated prompt as body lines: its first line under the "task: "
+// lead and every further line plain beneath it, each held to the per-line clip tool output is held
+// to (outputBody) — a prompt is text a model wrote, and one body bounds every kind of quoted text
+// the same way. A prompt that is blank throughout has no lines at all, which is what leaves the
+// caller's view untouched.
+func subAgentPromptDetails(task string) []detailLine {
+	if strings.TrimSpace(task) == "" {
+		return nil
+	}
+	lines := splitLines(strings.TrimRight(task, "\n"))
+	out := make([]detailLine, 0, len(lines))
+	out = append(out, detailLine{Text: clipDetail(unframedSubAgentPromptLead + lines[0])})
+	for _, ln := range lines[1:] {
+		out = append(out, detailLine{Text: clipDetail(ln)})
+	}
+	return out
+}
+
 // subAgentMember is one row of a folded sub-agent group as the painter needs it: the delegation's
 // own call entry, the run nested beneath it, and where that entry sits relative to the block's
 // head. It is the paint-time reading of [subAgentBlock], which names the same member by index — the
@@ -292,6 +362,13 @@ func renderSubAgentGroup(th theme, count int, members []subAgentMember, width in
 			view = expandedSubAgentView(m.head, m.span)
 		case spanned:
 			view = collapsedSubAgentView(m.head, m.span)
+		case m.head.expanded:
+			// An OPEN member that never ran is unframed exactly as a lone one is, and shows the
+			// prompt it carried for the same reason (unframedSubAgentView): folding changes the
+			// frame around a delegation and never what the delegation shows of itself. It is asked
+			// here rather than inside the member painter so the promote-guard below sees the body
+			// the row is actually about to hide.
+			view = unframedSubAgentView(m.head)
 		}
 		// An OPEN delegation's row is the top of a frame rather than a twig of the list: the corner
 		// takes the two columns the ┝/┕ hung off and the rail runs on down the span (design call 2).

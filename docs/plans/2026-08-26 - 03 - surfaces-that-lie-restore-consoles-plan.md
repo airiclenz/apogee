@@ -747,7 +747,13 @@ colour and counts 0 in `failedCalls`; a `summaryOnly("error: boom")` renders red
 
 ---
 
-## 13. A delegation that never ran shows the prompt it carried when expanded
+## 13. A delegation that never ran shows the prompt it carried when expanded — ✅ DONE (2026-08-26)
+
+NOTES (2026-08-26): `unframedSubAgentView` folds a PROMOTED one-line result into the body itself (`toolView.demoted`) before prepending the prompt. Without it the promote-guard demotes at narrow widths only and lands the refusal ABOVE the prompt there and below it on wider terminals; the item's "task: <first line> above the refusal" then held at some widths and not others.
+
+NOTES (2026-08-26): the grouped-member substitution is asked in `renderSubAgentGroup`'s view switch (a fourth case beside the three readings already there) rather than inside `renderSubAgentMemberRows`' `!spanned` branch as the item's text says — `renderSubAgentMemberRows` receives a finished `toolView` and not the `paintInput` the helper's signature takes, and the switch is ahead of `guardPromotions`, so the promote-guard sees the body the row is about to hide.
+
+NOTES (2026-08-26): body order is prompt / blank / carried lines; the blank is emitted only when the result actually left lines behind, so a refusal that stays in the outcome slot does not paint a trailing empty row.
 
 **What:** `ISSUES.md:844-862`. A delegation that is over with nothing behind it (refused at the
 depth bound, failed by a hook, a construct error — `runSubAgent :100-116`) is an ordinary tool

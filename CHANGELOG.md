@@ -276,6 +276,18 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **A delegation that never ran now shows the prompt it carried.** A delegation that is over with
+  nothing behind it — refused at the depth bound, failed by a hook before its first event, lost to a
+  construct error — is drawn as an ordinary tool block rather than as a run, and rightly so: a frame
+  opened over an empty span would enclose nothing. But the prompt was painted only INSIDE that frame,
+  so expanding such a delegation showed what any tool block shows and never what the delegate was
+  asked. An expanded unframed delegation now opens its BODY with `task: ` and the whole prompt, the
+  result's own lines following a blank one below it (`unframedSubAgentView`). One rule serves both
+  rendering paths — the lone block and the folded group's member row — so folding still changes the
+  frame around a delegation and never what it shows of itself. Collapsed it is unchanged: one row,
+  whose header already carries the task's first line. A delegation WITH a span keeps painting its
+  prompt inside the rail exactly as before.
+
 - **A delegation that failed now paints its outcome slot red.** A sub-agent row's slot is a reading
   composed at paint time — `2 tool calls · 12k/32k · <the report's gist>` — and the painter judged
   failure by re-reading that composed text for an `error: …` opening. It never found one, because
