@@ -57,7 +57,7 @@ func newWatchedConfig(t *testing.T, body string) *watchedConfig {
 	writeSettingsFixture(t, path, body)
 	return &watchedConfig{
 		path:  path,
-		edits: newExternalEdit(config.Options{ConfigDir: home}, func(string) string { return "" }),
+		edits: newExternalEdit(config.Options{ConfigDir: home}, "", func(string) string { return "" }),
 		await: awaitConfigChangeOn(startConfigWatcher(t, path)),
 	}
 }

@@ -29,6 +29,8 @@ import (
 	"unicode"
 
 	"github.com/google/shlex"
+
+	"github.com/airiclenz/apogee/internal/security"
 )
 
 // The environment the fakes are steered by: where to record what they were asked, where to keep the
@@ -444,13 +446,15 @@ func (f fakeTools) secret(t *testing.T, entry string) (string, bool) {
 	return value, found
 }
 
-// probedStore is the Store the given platform's probe finds, with the fakes in place.
+// probedStore is the Store the given platform's probe finds, with the fakes in place. The fence root
+// is a workspace of this test's own, holding nothing: the fake tools live outside it, so the probe
+// exercises the platform answer rather than the refusal.
 func probedStore(t *testing.T, goos string) Store {
 	t.Helper()
 
-	store, found := probe(goos, exec.LookPath, runTool)
-	if !found {
-		t.Fatalf("probe(%q) found no store, want the fake tool on PATH", goos)
+	store, err := probe(goos, exec.LookPath, runTool, t.TempDir())
+	if err != nil {
+		t.Fatalf("probe(%q) found no store, want the fake tool on PATH: %v", goos, err)
 	}
 	return store
 }
@@ -513,16 +517,77 @@ func TestProbeReportsWhatThePlatformCanDo(t *testing.T) {
 				useNoTools(t)
 			}
 
-			store, found := probe(tc.goos, exec.LookPath, runTool)
+			store, err := probe(tc.goos, exec.LookPath, runTool, t.TempDir())
 
-			if found != (tc.wantName != "") {
-				t.Fatalf("probe(%q) found = %v, want %v", tc.goos, found, tc.wantName != "")
+			if wantStore := tc.wantName != ""; (err == nil) != wantStore {
+				t.Fatalf("probe(%q) error = %v, want a store: %v", tc.goos, err, wantStore)
+			}
+			if err != nil && !errors.Is(err, ErrNoStore) {
+				t.Fatalf("probe(%q) failed with %v, want ErrNoStore — nothing here was refused", tc.goos, err)
 			}
 			if store.Name() != tc.wantName {
 				t.Errorf("probe(%q) named the store %q, want %q", tc.goos, store.Name(), tc.wantName)
 			}
 		})
 	}
+}
+
+// A store tool that resolves inside the workspace is refused before it is ever run. The model may
+// write those bytes, and this is the one program apogee hands a live credential to — a planted
+// `secret-tool` first on PATH would be fed the very secret the migration exists to get out of a
+// readable place. The refusal is its own error, not "no store here": the operator has a PATH entry
+// to fix, not a missing install to go looking for.
+func TestProbeRefusesAStoreProgramInsideTheWorkspace(t *testing.T) {
+	tests := []struct {
+		name    string
+		goos    string
+		program string
+	}{
+		{name: "macOS keychain", goos: "darwin", program: keychainProgram},
+		{name: "secret service", goos: "linux", program: secretServiceProgram},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			workspace := t.TempDir()
+			planted := plantStoreTool(t, filepath.Join(workspace, "bin"), tc.program)
+
+			store, err := probe(tc.goos, exec.LookPath, runTool, workspace)
+
+			if !errors.Is(err, security.ErrExecFromWritablePath) {
+				t.Fatalf("probe(%q) = %v, want the exec fence's refusal", tc.goos, err)
+			}
+			if errors.Is(err, ErrNoStore) {
+				t.Error("a REFUSED store tool was reported as a machine with no store at all")
+			}
+			if resolved := security.EvalRealPath(planted); !strings.Contains(err.Error(), resolved) {
+				t.Errorf("refusal %v does not name the resolved program %q", err, resolved)
+			}
+			if store.Name() != "" {
+				t.Errorf("probe(%q) handed back the store %q over a refused program", tc.goos, store.Name())
+			}
+		})
+	}
+}
+
+// plantStoreTool puts a store tool of the given name inside dir and makes that directory the whole
+// of PATH. The file is a stub rather than a copy of the fake tools: the fence refuses it before
+// anything runs it, and a test that needed it to RUN would be testing something else.
+func plantStoreTool(t *testing.T, dir, name string) string {
+	t.Helper()
+
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("making the planted tool directory: %v", err)
+	}
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("planting the fake %s: %v", name, err)
+	}
+	t.Setenv("PATH", dir)
+	return path
 }
 
 // The one claim this package exists to make: the secret reaches the store tool on its standard

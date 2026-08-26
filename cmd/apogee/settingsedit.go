@@ -28,6 +28,7 @@ import (
 	"sync"
 
 	"github.com/airiclenz/apogee/internal/config"
+	"github.com/airiclenz/apogee/internal/security"
 	"github.com/airiclenz/apogee/internal/tui"
 )
 
@@ -98,6 +99,17 @@ type externalEdit struct {
 	opts config.Options
 	// configPath is the file both halves work on — the one this session resolved.
 	configPath string
+	// workspace is the root the editor's own program is fenced against (resolveEditor). The editor
+	// runs on apogee's behalf, outside tool confinement and with no box of its own, so the
+	// model-writable set it can be measured against is the workspace the file tools are scoped to —
+	// the treatment internal/present gives the desktop opener, for the same reason.
+	//
+	// It is the RESOLVED root the composition root computed (stateRoots.workspace), not the raw
+	// `--workspace` option: the option may be empty (the cwd) or relative, and a fence measured
+	// against either would compare an absolute resolved program path with something that is not a
+	// root at all. Same input as the file tools' own scope, so the two cannot disagree about which
+	// bytes the model can write.
+	workspace string
 	// getenv and goos are injected for the same reason every resolution seam in this binary injects
 	// them: the editor ladder is a table test, not a machine. look is injected beside them and
 	// answers the one question the ladder cannot — whether this machine actually has the program the
@@ -125,10 +137,14 @@ type fileProjection struct {
 // be made — a config that has since become unreadable — falls back to the session's own resolution,
 // whose rows are never nil: a baseline that exists and is a little stale reports one extra key,
 // where a missing baseline would report none at all and swallow the human's edit whole.
-func newExternalEdit(opts config.Options, getenv func(string) string) *externalEdit {
+// workspace is passed separately from opts because it is the resolved root, not the option: the
+// caller has already turned `--workspace` (or its absence) into an absolute path, and that is the
+// one the editor's program is fenced against.
+func newExternalEdit(opts config.Options, workspace string, getenv func(string) string) *externalEdit {
 	e := &externalEdit{
 		opts:       opts,
 		configPath: config.FilePath(opts.ConfigDir),
+		workspace:  workspace,
 		getenv:     getenv,
 		goos:       runtime.GOOS,
 		look:       exec.LookPath,
@@ -357,20 +373,34 @@ func osOpener(goos string) []string {
 // suspends into it, or starts a detached child that dies unwatched — and the refusal names all three
 // ways to set an editor (ADR 0041 decision 4).
 //
-// It deliberately does not carry Go's own "executable file not found in $PATH" through: on a box
-// without xdg-utils the ladder ends at an opener the user never chose, and naming that program at
-// them explains nothing they can act on.
+// The program the ladder named is RESOLVED, and it is the resolved absolute path the pane suspends
+// into: a bare name would be looked up a second time, by apogee's inherited PATH, at the moment of
+// launch — so what was checked here and what runs there need not be the same bytes. The same
+// resolution applies the exec fence (security.ResolveProgram), because an editor that resolves
+// inside the workspace is a program the model can author and this run would then execute outside any
+// box.
+//
+// The two failures are told apart, because they send their reader to two different places:
+//
+//   - ABSENT — no such program on this machine — names all three ways to set an editor and
+//     deliberately does not carry Go's own "executable file not found in $PATH" through: on a box
+//     without xdg-utils the ladder ends at an opener the user never chose, and naming that program at
+//     them explains nothing they can act on.
+//   - REFUSED — the program resolves inside the workspace — carries the fence's own sentence, which
+//     names the resolved path, so the operator reads which PATH entry points into the workspace
+//     instead of going looking for a missing install.
 func (e *externalEdit) resolveEditor(configured string) (editorCommand, error) {
 	cmd := editorArgv(configured, e.getenv, e.goos)
-	look := e.look
-	if look == nil {
-		look = exec.LookPath
-	}
-	if _, err := look(cmd.argv[0]); err != nil {
+	resolved, err := security.ResolveProgram(e.look, cmd.argv[0], e.workspace, nil)
+	if err != nil {
+		if errors.Is(err, security.ErrExecFromWritablePath) {
+			return editorCommand{}, fmt.Errorf("refusing to run editor %q: %w", cmd.argv[0], err)
+		}
 		return editorCommand{}, fmt.Errorf("cannot run editor %q: name one in the `editor` key of "+
 			"config.yaml, or in $VISUAL or $EDITOR, or install this platform's default opener (%s)",
 			cmd.argv[0], osOpener(e.goos)[0])
 	}
+	cmd.argv[0] = resolved
 	return cmd, nil
 }
 

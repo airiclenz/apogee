@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/config"
+	"github.com/airiclenz/apogee/internal/security"
 	"github.com/airiclenz/apogee/internal/tui"
 )
 
@@ -93,23 +94,23 @@ func TestExternalEditPassesTheLineJumpOnlyToEditorsThatTakeOne(t *testing.T) {
 
 	// `servers:` is on the second line of that fixture, and it is the line the jump names.
 	withVim := specFor(t, home, map[string]string{"EDITOR": "vim"}, "servers")
-	if want := []string{"vim", "+2", path}; !slices.Equal(withVim.Argv, want) {
+	if want := resolvedEditorArgv([]string{"vim", "+2", path}); !slices.Equal(withVim.Argv, want) {
 		t.Errorf("argv = %v, want %v", withVim.Argv, want)
 	}
 	withCode := specFor(t, home, map[string]string{"EDITOR": "code -w"}, "servers")
-	if want := []string{"code", "-w", path}; !slices.Equal(withCode.Argv, want) {
+	if want := resolvedEditorArgv([]string{"code", "-w", path}); !slices.Equal(withCode.Argv, want) {
 		t.Errorf("argv = %v, want %v — an editor outside the allowlist is handed the file alone", withCode.Argv, want)
 	}
 	// A path-spelled editor is still recognised by its NAME, and a key the file does not set has no
 	// active line to jump to (this fixture documents no commented example either).
-	byPath := specFor(t, home, map[string]string{"EDITOR": filepath.Join("/usr", "bin", "nvim")}, "mcp-servers")
-	if want := []string{filepath.Join("/usr", "bin", "nvim"), path}; !slices.Equal(byPath.Argv, want) {
+	byPath := specFor(t, home, map[string]string{"EDITOR": filepath.Join(editorBinDir, "nvim")}, "mcp-servers")
+	if want := []string{filepath.Join(editorBinDir, "nvim"), path}; !slices.Equal(byPath.Argv, want) {
 		t.Errorf("argv = %v, want %v — no line to point at, so no jump", byPath.Argv, want)
 	}
 	// The OS opener is the rung nobody chose, and it is the one that must never see a `+<line>`: it
 	// would hand the argument to the desktop as a second FILE to open.
 	opener := specFor(t, home, nil, "servers")
-	if want := []string{"xdg-open", path}; !slices.Equal(opener.Argv, want) {
+	if want := resolvedEditorArgv([]string{"xdg-open", path}); !slices.Equal(opener.Argv, want) {
 		t.Errorf("argv = %v, want %v — an opener takes the file alone", opener.Argv, want)
 	}
 
@@ -120,7 +121,7 @@ func TestExternalEditPassesTheLineJumpOnlyToEditorsThatTakeOne(t *testing.T) {
 	writeSettingsFixture(t, keyedPath, "editor: nvim\nmode: auto\nservers:\n"+
 		"  - name: local\n    endpoint: http://127.0.0.1:1111\n")
 	withKey := specFor(t, keyed, map[string]string{"EDITOR": "code"}, "servers")
-	if want := []string{"nvim", "+3", keyedPath}; !slices.Equal(withKey.Argv, want) {
+	if want := resolvedEditorArgv([]string{"nvim", "+3", keyedPath}); !slices.Equal(withKey.Argv, want) {
 		t.Errorf("argv = %v, want %v — the config key outranks $EDITOR, jump included", withKey.Argv, want)
 	}
 }
@@ -130,7 +131,7 @@ func TestExternalEditPassesTheLineJumpOnlyToEditorsThatTakeOne(t *testing.T) {
 // which editors the machine running the test has installed.
 func specFor(t *testing.T, home string, env map[string]string, key string) tui.EditorCommand {
 	t.Helper()
-	e := newExternalEdit(config.Options{ConfigDir: home}, func(k string) string { return env[k] })
+	e := newExternalEdit(config.Options{ConfigDir: home}, "", func(k string) string { return env[k] })
 	e.goos = "linux"
 	e.look = editorAlwaysFound
 	launch, err := e.spec(key)
@@ -140,9 +141,31 @@ func specFor(t *testing.T, home string, env map[string]string, key string) tui.E
 	return launch
 }
 
+// editorBinDir is the directory the tests' PATH lookup answers with: an absolute one on every OS
+// (os.TempDir is, where a literal "/usr/bin" would not be on Windows), and outside any workspace a
+// test builds, so the rows below exercise the ladder with nothing for the exec fence to refuse. It
+// is the internal/present opener suite's idiom, for the same reason.
+var editorBinDir = filepath.Join(os.TempDir(), "apogee-editor-bin")
+
 // editorAlwaysFound is the lookup for the tests whose subject is the resolution rather than the
-// machine: every program the ladder names exists.
-func editorAlwaysFound(program string) (string, error) { return program, nil }
+// machine: every program the ladder names exists, in editorBinDir. A program the ladder already
+// spelled as a path is answered with itself, which is what exec.LookPath does with one.
+func editorAlwaysFound(program string) (string, error) {
+	if filepath.IsAbs(program) {
+		return program, nil
+	}
+	return filepath.Join(editorBinDir, program), nil
+}
+
+// resolvedEditorArgv is a wanted command line with its program NAME rewritten to the absolute path
+// editorAlwaysFound resolves it to. The tables keep naming the program — that name is the ladder's
+// contract — while the assertion pins what the pane is now handed: an absolute argv[0], because a
+// bare name would be resolved a second time, by apogee's inherited PATH, at the moment of launch.
+func resolvedEditorArgv(argv []string) []string {
+	resolved := append([]string(nil), argv...)
+	resolved[0] = filepath.Join(editorBinDir, resolved[0])
+	return resolved
+}
 
 // The return trip reports what the human CHANGED and nothing else: the baseline is taken when the
 // editor is launched, so a key they left alone is silent however this session resolved it. Two kinds
@@ -155,7 +178,7 @@ func TestExternalEditReloadReportsTheKeysTheFileChanged(t *testing.T) {
 	writeSettingsFixture(t, path, "server: local\nmode: ask-before\nservers:\n"+
 		"  - name: local\n    endpoint: http://127.0.0.1:1111\n")
 
-	e := newExternalEdit(config.Options{ConfigDir: home}, func(string) string { return "" })
+	e := newExternalEdit(config.Options{ConfigDir: home}, "", func(string) string { return "" })
 	e.look = editorAlwaysFound                   // the subject is the return trip, not this machine's editors
 	if _, err := e.spec("servers"); err != nil { // the baseline the return trip diffs against
 		t.Fatalf("spec: %v", err)
@@ -202,7 +225,7 @@ func TestExternalEditReloadCarriesProseForATextKey(t *testing.T) {
 	home := t.TempDir()
 	path := filepath.Join(home, "config.yaml")
 	writeSettingsFixture(t, path, "system-prompt-text: one\n")
-	e := newExternalEdit(config.Options{ConfigDir: home}, func(string) string { return "" })
+	e := newExternalEdit(config.Options{ConfigDir: home}, "", func(string) string { return "" })
 	writeSettingsFixture(t, path, "system-prompt-text: |\n  first line\n  second line\n")
 
 	applied, err := e.changed()
@@ -227,7 +250,7 @@ func TestExternalEditReloadReportsAnMCPServerRepointedUnderTheSameSummary(t *tes
 	path := filepath.Join(home, "config.yaml")
 	writeSettingsFixture(t, path, "mcp-servers:\n  - name: files\n    transport: streamable-http\n"+
 		"    endpoint: http://127.0.0.1:7331/mcp\n")
-	e := newExternalEdit(config.Options{ConfigDir: home}, func(string) string { return "" })
+	e := newExternalEdit(config.Options{ConfigDir: home}, "", func(string) string { return "" })
 
 	writeSettingsFixture(t, path, "mcp-servers:\n  - name: files\n    transport: streamable-http\n"+
 		"    endpoint: http://192.0.2.1:7331/mcp\n")
@@ -260,7 +283,7 @@ func TestExternalEditReloadReportsThinkingDelimitersUnderTheSameSummary(t *testi
 			"      style: delimited\n      start: \"" + start + "\"\n      end: \"" + end + "\"\n"
 	}
 	writeSettingsFixture(t, path, profile("<think>", "</think>"))
-	e := newExternalEdit(config.Options{ConfigDir: home}, func(string) string { return "" })
+	e := newExternalEdit(config.Options{ConfigDir: home}, "", func(string) string { return "" })
 
 	writeSettingsFixture(t, path, profile("<|channel|>", "<|message|>"))
 	applied, err := e.changed()
@@ -283,7 +306,7 @@ func TestExternalEditReloadRefusesAConfigItCannotResolve(t *testing.T) {
 	home := t.TempDir()
 	path := filepath.Join(home, "config.yaml")
 	writeSettingsFixture(t, path, "mode: ask-before\n")
-	e := newExternalEdit(config.Options{ConfigDir: home}, func(string) string { return "" })
+	e := newExternalEdit(config.Options{ConfigDir: home}, "", func(string) string { return "" })
 
 	writeSettingsFixture(t, path, "mode: [this is not a mode]\n")
 	applied, err := e.changed()
@@ -312,7 +335,7 @@ func TestExternalEditReloadAcceptsAConfigWithNoStartupServer(t *testing.T) {
 	home := t.TempDir()
 	path := filepath.Join(home, "config.yaml")
 	writeSettingsFixture(t, path, "mode: ask-before\n")
-	e := newExternalEdit(config.Options{ConfigDir: home}, func(string) string { return "" })
+	e := newExternalEdit(config.Options{ConfigDir: home}, "", func(string) string { return "" })
 
 	writeSettingsFixture(t, path, "mode: ask-before\nauto-compact: false\n")
 	applied, err := e.changed()
@@ -506,7 +529,7 @@ func TestExternalEditBaselineIsTheFileNotTheResolution(t *testing.T) {
 	home := t.TempDir()
 	writeSettingsFixture(t, filepath.Join(home, "config.yaml"), "mode: plan\n")
 	// The session resolved `auto` (an APOGEE_MODE override would do this); the file still says plan.
-	e := newExternalEdit(config.Options{ConfigDir: home, Mode: "auto"}, func(string) string { return "" })
+	e := newExternalEdit(config.Options{ConfigDir: home, Mode: "auto"}, "", func(string) string { return "" })
 
 	applied, err := e.changed()
 	if err != nil {
@@ -525,7 +548,7 @@ func TestExternalEditSpecReadsTheEditorTheFileNamesNow(t *testing.T) {
 	path := filepath.Join(home, "config.yaml")
 	writeSettingsFixture(t, path, "mode: auto\n")
 	// The startup snapshot names an editor the file no longer does; it must not be consulted.
-	e := newExternalEdit(config.Options{ConfigDir: home, Editor: "stale-editor"}, func(string) string { return "" })
+	e := newExternalEdit(config.Options{ConfigDir: home, Editor: "stale-editor"}, "", func(string) string { return "" })
 	e.goos = "linux"
 	e.look = editorAlwaysFound
 
@@ -533,7 +556,7 @@ func TestExternalEditSpecReadsTheEditorTheFileNamesNow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("spec: %v", err)
 	}
-	if want := []string{"xdg-open", path}; !slices.Equal(launch.Argv, want) {
+	if want := resolvedEditorArgv([]string{"xdg-open", path}); !slices.Equal(launch.Argv, want) {
 		t.Errorf("argv = %v, want %v — the file sets no editor, and the startup snapshot is not the file", launch.Argv, want)
 	}
 
@@ -542,7 +565,7 @@ func TestExternalEditSpecReadsTheEditorTheFileNamesNow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("spec after the key was set: %v", err)
 	}
-	if want := []string{"micro", "+2", path}; !slices.Equal(launch.Argv, want) {
+	if want := resolvedEditorArgv([]string{"micro", "+2", path}); !slices.Equal(launch.Argv, want) {
 		t.Errorf("argv = %v, want %v — an editor set in this session opens the next edit", launch.Argv, want)
 	}
 }
@@ -558,7 +581,7 @@ func TestExternalEditSpecCarriesTheSpawnModeAcrossTheSeam(t *testing.T) {
 
 	writeSettingsFixture(t, path, "editor: vim\nmode: auto\n")
 	foreground := specFor(t, home, nil, "mode")
-	if want := []string{"vim", "+2", path}; !slices.Equal(foreground.Argv, want) {
+	if want := resolvedEditorArgv([]string{"vim", "+2", path}); !slices.Equal(foreground.Argv, want) {
 		t.Errorf("argv = %v, want %v", foreground.Argv, want)
 	}
 	if foreground.Detached {
@@ -571,7 +594,7 @@ func TestExternalEditSpecCarriesTheSpawnModeAcrossTheSeam(t *testing.T) {
 	openerPath := filepath.Join(opener, "config.yaml")
 	writeSettingsFixture(t, openerPath, "mode: auto\n")
 	detached := specFor(t, opener, nil, "mode")
-	if want := []string{"xdg-open", openerPath}; !slices.Equal(detached.Argv, want) {
+	if want := resolvedEditorArgv([]string{"xdg-open", openerPath}); !slices.Equal(detached.Argv, want) {
 		t.Errorf("argv = %v, want %v", detached.Argv, want)
 	}
 	if !detached.Detached {
@@ -586,7 +609,7 @@ func TestExternalEditSpecRefusesAnEditorThisMachineCannotRun(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
 	writeSettingsFixture(t, filepath.Join(home, "config.yaml"), "mode: auto\n")
-	e := newExternalEdit(config.Options{ConfigDir: home}, func(string) string { return "" })
+	e := newExternalEdit(config.Options{ConfigDir: home}, "", func(string) string { return "" })
 	e.goos = "linux"
 	e.look = func(string) (string, error) { return "", errors.New("executable file not found in $PATH") }
 
@@ -598,6 +621,58 @@ func TestExternalEditSpecRefusesAnEditorThisMachineCannotRun(t *testing.T) {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("refusal %q does not name %s; all three ways to set an editor belong in it", err, want)
 		}
+	}
+}
+
+// The pane suspends into the path the lookup RESOLVED, not the name the ladder spelled: a bare
+// argv[0] would be looked up a second time — by apogee's inherited PATH, at the moment of launch —
+// and the program that ran need not be the one this resolution judged.
+func TestExternalEditSpecCarriesTheResolvedEditorPath(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	path := filepath.Join(home, "config.yaml")
+	writeSettingsFixture(t, path, "editor: vim\nmode: auto\n")
+	installed := filepath.Join(os.TempDir(), "apogee-editor-opt", "vim")
+	e := newExternalEdit(config.Options{ConfigDir: home}, "", func(string) string { return "" })
+	e.goos = "linux"
+	e.look = func(string) (string, error) { return installed, nil }
+
+	launch, err := e.spec("mode")
+	if err != nil {
+		t.Fatalf("spec: %v", err)
+	}
+
+	if want := []string{installed, "+2", path}; !slices.Equal(launch.Argv, want) {
+		t.Errorf("argv = %v, want %v — the resolved path is what the pane launches, and the jump still\n"+
+			"follows the editor's NAME out of it", launch.Argv, want)
+	}
+}
+
+// An editor that resolves inside the workspace is refused: the model may write those bytes, and the
+// pane would then execute them outside any box. The refusal is its OWN sentence — it names the
+// resolved path and wraps the exec fence — because "cannot run editor" would send the operator after
+// a missing install instead of after the PATH entry pointing into their workspace.
+func TestExternalEditSpecRefusesAnEditorInsideTheWorkspace(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	writeSettingsFixture(t, filepath.Join(home, "config.yaml"), "editor: vim\nmode: auto\n")
+	workspace := t.TempDir()
+	planted := filepath.Join(workspace, "bin", "vim")
+	e := newExternalEdit(config.Options{ConfigDir: home}, workspace, func(string) string { return "" })
+	e.goos = "linux"
+	e.look = func(string) (string, error) { return planted, nil }
+
+	launch, err := e.spec("mode")
+
+	if err == nil {
+		t.Fatalf("spec over an editor inside the workspace = %+v, want the fence's refusal", launch)
+	}
+	if !errors.Is(err, security.ErrExecFromWritablePath) {
+		t.Errorf("refusal %q does not wrap security.ErrExecFromWritablePath", err)
+	}
+	if resolved := security.EvalRealPath(planted); !strings.Contains(err.Error(), resolved) {
+		t.Errorf("refusal %q does not name the resolved program %q — the operator has a PATH entry to fix",
+			err, resolved)
 	}
 }
 

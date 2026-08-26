@@ -31,9 +31,11 @@ func TestStoreRoundTripLive(t *testing.T) {
 		t.Skip("set APOGEE_LIVE_KEYSTORE=1 to exercise this machine's real secret store")
 	}
 
-	store, found := Probe()
-	if !found {
-		t.Fatalf("Probe() found no store on %s — the gate says this machine has one", runtime.GOOS)
+	// The fence root is a directory of this test's own: the machine's real store tool lives outside
+	// it, so this exercises the real store rather than the refusal.
+	store, err := Probe(t.TempDir())
+	if err != nil {
+		t.Fatalf("Probe() found no store on %s — the gate says this machine has one: %v", runtime.GOOS, err)
 	}
 
 	const entry = "apogee-live-test"

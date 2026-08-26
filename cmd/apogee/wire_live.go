@@ -229,7 +229,7 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	// structure no row can express are edited in the file, and this is what opens it at the right line
 	// and works out what came back different. It is built here rather than at the seam block below
 	// because its baseline is the file as it stands NOW, and now is before anything has been edited.
-	w.externalEdits = newExternalEdit(w.opts, os.Getenv)
+	w.externalEdits = newExternalEdit(w.opts, w.roots.workspace, os.Getenv)
 
 	// The other trigger for that same round trip (ADR 0041 decision 3): the file itself. An editor's
 	// EXIT can only speak for the editors apogee waits on, and a desktop opener returns before the

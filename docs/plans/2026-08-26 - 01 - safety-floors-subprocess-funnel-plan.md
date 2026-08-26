@@ -441,7 +441,13 @@ filter-driver tests (`:1223-1340`) follow the renames and stay green.
 
 ---
 
-## 5. Host-side launches keep the resolved path and the fence: settings editor, keystore probe
+## 5. Host-side launches keep the resolved path and the fence: settings editor, keystore probe — ✅ DONE (2026-08-26)
+
+NOTES (2026-08-26): both fences are seeded from the RESOLVED root, `stateRoots.workspace`, not from `opts.Workspace` as the item's text spelled it — the option may be empty (meaning the cwd) or relative, and neither is a root an absolute resolved program path can be compared against. `newExternalEdit` therefore takes the root as its own parameter (`newExternalEdit(opts, workspace, getenv)`, passed `w.roots.workspace` at `wire_live.go:232`) and `prepareKeyMigration` probes with `w.roots.workspace` — the same input `internal/present`'s opener is given at `wire_boot.go:96`, so the editor, the store tool and the desktop opener cannot disagree about which bytes the model can write.
+NOTES (2026-08-26): the editor's fence refusal wraps with `%w` where the item's text spelled `%v` — the item's own test asks for an error that wraps `security.ErrExecFromWritablePath`, which `%v` would not preserve.
+NOTES (2026-08-26): the fence root reaches the probe as a parameter — `probeKeyStore(workspaceRoot string) (secretStore, error)` and `prepareKeyMigration(probe func(string) (secretStore, error), …)` — so the composition-root call site stays `w.prepareKeyMigration(probeKeyStore, os.Stderr)`. The item named only the return type.
+NOTES (2026-08-26): required test fallout in `settingsedit_test.go` — `editorAlwaysFound` now answers with an absolute path under `os.TempDir()` (the internal/present opener idiom) and the argv expectations go through a new `resolvedEditorArgv` helper, because `ResolveProgram` refuses a relative resolution and the old name-returning fake would have refused every ladder row. The path-spelled-$EDITOR row moved from `/usr/bin/nvim` to that same directory, which is absolute on Windows too.
+NOTES (2026-08-26): `cmd/apogee/configwatch_apply_test.go` and `internal/keystore/live_test.go` are not in the item's Files list but had to be touched — the first constructs an `externalEdit` through `newExternalEdit` and the second calls `keystore.Probe`, so neither package would compile against the new signatures.
 
 Depends on item 1.
 

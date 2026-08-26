@@ -18,6 +18,7 @@ import (
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/config"
+	"github.com/airiclenz/apogee/internal/keystore"
 	"github.com/airiclenz/apogee/internal/run"
 )
 
@@ -246,7 +247,7 @@ func TestPrepareKeyMigrationRaisesTheOfferWithAStore(t *testing.T) {
 	store := &fakeStore{t: t}
 	var notices bytes.Buffer
 
-	w.prepareKeyMigration(func() (secretStore, bool) { return store, true }, &notices)
+	w.prepareKeyMigration(func(string) (secretStore, error) { return store, nil }, &notices)
 
 	if w.keyOffer.StoreName != store.Name() {
 		t.Errorf("offer store = %q; want the store's own name", w.keyOffer.StoreName)
@@ -274,7 +275,7 @@ func TestPrepareKeyMigrationNoticesWithoutAStore(t *testing.T) {
 	w := wiringFor(home, []config.ServerEntry{{Name: "workstation", APIKey: "sk-plain"}})
 	var notices bytes.Buffer
 
-	w.prepareKeyMigration(func() (secretStore, bool) { return nil, false }, &notices)
+	w.prepareKeyMigration(func(string) (secretStore, error) { return nil, keystore.ErrNoStore }, &notices)
 
 	if w.keyOffer.StoreName != "" || len(w.keyOffer.Entries) != 0 {
 		t.Errorf("offer = %+v; want none where the move cannot be completed", w.keyOffer)
@@ -293,6 +294,36 @@ func TestPrepareKeyMigrationNoticesWithoutAStore(t *testing.T) {
 	}
 }
 
+// A probe that FAILED rather than finding nothing puts its own sentence in the notice — the case
+// that produces one is a store tool the exec fence refused, and telling that operator "this machine
+// has no secret store" would report a PATH entry pointing into their workspace as a fact about their
+// platform. The probe is measured against the run's RESOLVED workspace root — the fence root a
+// startup launch has, there being no confinement box yet — and not the `--workspace` option, which
+// may be empty or relative and is no root to compare an absolute program path against.
+func TestPrepareKeyMigrationCarriesAProbeRefusalIntoTheNotice(t *testing.T) {
+	t.Parallel()
+
+	home := t.TempDir()
+	w := wiringFor(home, []config.ServerEntry{{Name: "workstation", APIKey: "sk-plain"}})
+	w.roots.workspace = t.TempDir()
+	w.opts.Workspace = "." // the raw option, deliberately not what the fence is measured against
+	refusal := errors.New("keystore: refusing to run the secret store tool /ws/bin/secret-tool")
+	var fenced string
+	var notices bytes.Buffer
+
+	w.prepareKeyMigration(func(root string) (secretStore, error) { fenced = root; return nil, refusal }, &notices)
+
+	if got := notices.String(); !strings.Contains(got, refusal.Error()) {
+		t.Errorf("notice = %q; want the probe's own sentence, not the absent-store one", got)
+	}
+	if got := notices.String(); strings.Contains(got, reasonNoStore) {
+		t.Errorf("notice = %q; a refused store tool was reported as a machine with no store", got)
+	}
+	if fenced != w.roots.workspace {
+		t.Errorf("probe fenced against %q; want the run's resolved workspace root %q", fenced, w.roots.workspace)
+	}
+}
+
 // A config with no plaintext key asks nothing, says nothing, and does not even probe: the Linux
 // probe is a subprocess on the start-up path, and a run with nothing to offer has no use for it.
 func TestPrepareKeyMigrationSkipsTheProbeWithNothingToOffer(t *testing.T) {
@@ -305,7 +336,7 @@ func TestPrepareKeyMigrationSkipsTheProbeWithNothingToOffer(t *testing.T) {
 	var notices bytes.Buffer
 	probed := false
 
-	w.prepareKeyMigration(func() (secretStore, bool) { probed = true; return nil, false }, &notices)
+	w.prepareKeyMigration(func(string) (secretStore, error) { probed = true; return nil, keystore.ErrNoStore }, &notices)
 
 	if probed {
 		t.Error("the secret store was probed for a config with nothing to migrate")

@@ -31,6 +31,8 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
+
+	"github.com/airiclenz/apogee/internal/security"
 )
 
 // service is the store item's service field. Every item apogee writes is filed under this one name
@@ -66,7 +68,7 @@ const (
 // how to put one server's key into it, and the command line that reads that key back out.
 //
 // It is obtained from Probe and used by value. The zero Store is the "no store here" answer — its
-// methods stay safe to call and refuse, so a caller that ignored Probe's bool cannot silently write
+// methods stay safe to call and refuse, so a caller that ignored Probe's error cannot silently write
 // a secret nowhere.
 type Store struct {
 	kind    kind
@@ -74,38 +76,70 @@ type Store struct {
 	run     runner
 }
 
-// Probe reports the secret store this machine can actually be migrated into, and whether it found
-// one at all. It runs at startup, before any offer is made, because an offer apogee cannot complete
-// is worse than no offer: the user would consent to moving their key and be told afterwards that the
-// move was never possible.
-func Probe() (Store, bool) {
-	return probe(runtime.GOOS, exec.LookPath, runTool)
+// ErrNoStore is the sentinel for "this machine has no secret store apogee can be migrated into" —
+// the platform has none apogee can drive, the tool is not installed, or no keyring answered behind
+// it. It is the ordinary answer, not a failure: a caller matches it (errors.Is) to say so in the
+// words it has for the machine, and treats every OTHER error as something the operator has to read.
+var ErrNoStore = errors.New("keystore: no secret store this machine can be migrated into")
+
+// Probe reports the secret store this machine can actually be migrated into. It runs at startup,
+// before any offer is made, because an offer apogee cannot complete is worse than no offer: the user
+// would consent to moving their key and be told afterwards that the move was never possible.
+//
+// The absence of a store is ErrNoStore. Any other error is a store tool that was found and REFUSED:
+// the program resolved inside workspaceRoot, which is where the exec fence
+// (security.RefuseExecFromWritablePath) is measured for this seam. The workspace root is the whole
+// fence because the probe runs at startup, before any confinement box exists — it is the same
+// model-writable boundary the file tools are scoped to, and the same treatment internal/present
+// gives the desktop opener, which likewise runs on apogee's own behalf and outside any box.
+func Probe(workspaceRoot string) (Store, error) {
+	return probe(runtime.GOOS, exec.LookPath, runTool, workspaceRoot)
 }
 
-// probe is Probe with its three machine-dependent inputs — the platform, the PATH lookup and the
-// exec seam — passed in, so the suite can exercise every platform's answer from whichever machine it
-// runs on (the internal/present opener idiom).
-func probe(goos string, lookPath func(string) (string, error), run runner) (Store, bool) {
+// probe is Probe with its machine-dependent inputs — the platform, the PATH lookup, the exec seam
+// and the root the fence is measured against — passed in, so the suite can exercise every platform's
+// answer from whichever machine it runs on (the internal/present opener idiom).
+func probe(goos string, lookPath func(string) (string, error), run runner, workspaceRoot string) (Store, error) {
 	switch goos {
 	case "darwin":
 		program, err := lookPath(keychainProgram)
 		if err != nil {
-			return Store{}, false
+			return Store{}, fmt.Errorf("%w: %s is not on this machine's PATH", ErrNoStore, keychainProgram)
 		}
-		return Store{kind: kindKeychain, program: program, run: run}, true
+		if err := fenceProgram(program, workspaceRoot); err != nil {
+			return Store{}, err
+		}
+		return Store{kind: kindKeychain, program: program, run: run}, nil
 
 	case "linux":
 		program, err := lookPath(secretServiceProgram)
 		if err != nil {
-			return Store{}, false
+			return Store{}, fmt.Errorf("%w: %s is not on this machine's PATH", ErrNoStore, secretServiceProgram)
+		}
+		if err := fenceProgram(program, workspaceRoot); err != nil {
+			return Store{}, err
 		}
 		store := Store{kind: kindSecretService, program: program, run: run}
 		if !store.answers() {
-			return Store{}, false
+			return Store{}, fmt.Errorf("%w: %s is installed but no keyring answered behind it",
+				ErrNoStore, secretServiceProgram)
 		}
-		return store, true
+		return store, nil
 	}
-	return Store{}, false
+	return Store{}, fmt.Errorf("%w: %s has no store apogee can write a key into and read it back out",
+		ErrNoStore, goos)
+}
+
+// fenceProgram refuses a store tool that resolves inside the model-writable workspace. PATH is the
+// only lookup that is right on both covered platforms, and a PATH entry pointing into the workspace
+// would let a planted `secret-tool` be handed the very secret this package exists to get out of a
+// readable place — so the refusal belongs between the lookup and the first run, and it names the
+// resolved path (security.ErrExecFromWritablePath) rather than the name that was looked up.
+func fenceProgram(program, workspaceRoot string) error {
+	if err := security.RefuseExecFromWritablePath(program, workspaceRoot, nil); err != nil {
+		return fmt.Errorf("keystore: refusing to run the secret store tool %s: %w", program, err)
+	}
+	return nil
 }
 
 // answers asks the secret service one harmless question — look up an account nothing ever writes —

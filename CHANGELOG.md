@@ -220,6 +220,26 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **The settings editor and the keystore probe launch a fenced absolute path (F-07, F-35).** Two
+  programs apogee starts on its OWN behalf — outside tool confinement, with no box of their own —
+  resolved their program on PATH and then threw the answer away. The settings editor handed the pane
+  the bare NAME the ladder produced, so the program that was checked and the program that ran were
+  two different lookups (apogee's inherited PATH decides the second one), and the keystore probe ran
+  whatever `secret-tool`/`security` PATH answered with — the one program apogee hands a live
+  credential to. Both now go through the shared exec resolver: `resolveEditor` takes
+  `security.ResolveProgram` against the session's resolved workspace root and puts the resolved
+  absolute path in argv[0], and `keystore.Probe` takes that root and fences the store tool
+  (`security.RefuseExecFromWritablePath`) between the lookup and the first run. An editor or a store
+  tool resolving inside the workspace — an activated `.venv`, a `node_modules/.bin` ahead of the
+  system entries — is refused by name and never executed. The refusals stay distinguishable from an
+  absent program, because the two send their reader to different places: the editor's refusal reads
+  "refusing to run editor …" and carries the fence's own sentence naming the resolved path, while
+  "cannot run editor" still names all three ways to set one. `keystore.Probe` now answers
+  `(Store, error)` with a new `ErrNoStore` sentinel for the ordinary "no store on this machine", so a
+  REFUSED store tool no longer masquerades as a machine with no keyring: the start-up plaintext-key
+  notice renders the absent-store reason for `ErrNoStore` and the probe's own sentence for anything
+  else.
+
 - **git neutralises `core.fsmonitor` and gpg signing, and refuses EVERY command-valued repo-local
   key (F-10).** The git tools already emptied `core.hooksPath` and refused repo-local filter
   drivers, but `core.fsmonitor` — a key whose value is a program git executes, on nearly every

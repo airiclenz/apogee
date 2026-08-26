@@ -17,6 +17,7 @@ package main
 // and the move runs only on the human's own answer (ADR 0035's deliberate-edit grain).
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"path/filepath"
@@ -39,12 +40,16 @@ type secretStore interface {
 // probeKeyStore is the production probe, adapting [keystore.Probe] to the interface above. It is
 // passed to prepareKeyMigration rather than called by it so the decision — offer, or notice — can be
 // tested from a machine of any kind.
-func probeKeyStore() (secretStore, bool) {
-	store, ok := keystore.Probe()
-	if !ok {
-		return nil, false
+//
+// workspaceRoot is what the store tool's own path is fenced against: the probe launches a program on
+// apogee's behalf at startup, before any confinement box exists, so the workspace is the whole
+// model-writable set there is to measure it by.
+func probeKeyStore(workspaceRoot string) (secretStore, error) {
+	store, err := keystore.Probe(workspaceRoot)
+	if err != nil {
+		return nil, err
 	}
-	return store, true
+	return store, nil
 }
 
 // prepareKeyMigration decides what this run does about plaintext keys, before the alternate screen
@@ -58,14 +63,27 @@ func probeKeyStore() (secretStore, bool) {
 // cannot — no store on this platform, no keyring behind the tool — the notice is the whole answer:
 // the entries are named, so is what can be done about them by hand, and nothing is asked, because an
 // offer apogee cannot complete is worse than no offer at all.
-func (w *rootWiring) prepareKeyMigration(probe func() (secretStore, bool), notices io.Writer) {
+//
+// A probe that failed for any OTHER reason than an absent store (keystore.ErrNoStore) puts its own
+// sentence in the notice instead of the absent-store one. The case that produces it is a store tool
+// refused by the exec fence, and telling that operator "this machine has no secret store" would
+// report a PATH entry pointing into their workspace as a fact about their platform.
+func (w *rootWiring) prepareKeyMigration(probe func(workspaceRoot string) (secretStore, error), notices io.Writer) {
 	names := plaintextKeyEntries(w.opts.Servers)
 	if len(names) == 0 {
 		return
 	}
-	store, ok := probe()
-	if !ok {
-		fmt.Fprintln(notices, plaintextKeyNotice(w.configPath(), reasonNoStore, names))
+	// The RESOLVED workspace root, not the `--workspace` option: the option may be empty (meaning the
+	// cwd) or relative, and the fence compares an absolute resolved program path against this. It is
+	// the same root the file tools are scoped to and the same one internal/present's opener is fenced
+	// against, so the three cannot disagree about which bytes the model can write.
+	store, err := probe(w.roots.workspace)
+	if err != nil {
+		reason := reasonNoStore
+		if !errors.Is(err, keystore.ErrNoStore) {
+			reason = err.Error()
+		}
+		fmt.Fprintln(notices, plaintextKeyNotice(w.configPath(), reason, names))
 		return
 	}
 	w.secrets = store
@@ -111,6 +129,10 @@ func plaintextKeyFor(servers []config.ServerEntry, name string) (string, bool) {
 // found no store, while a headless run never probes at all and would be asserting something it
 // never checked if it said the same. Each is a lower-case clause with no trailing period, because
 // plaintextKeyNotice folds it into the middle of its first sentence.
+//
+// A third reason is deliberately not a constant here: a probe that FAILED rather than finding
+// nothing carries its own sentence into the same slot (prepareKeyMigration), because only the probe
+// knows what it hit.
 const (
 	reasonNoStore  = "this machine has no secret store apogee can move it into"
 	reasonHeadless = "headless runs never prompt, so apogee cannot offer to move it into a secret store"
