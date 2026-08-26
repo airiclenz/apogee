@@ -10,6 +10,14 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- A config file saved on disk now says so: a re-read that applied anything leaves one transcript
+  line naming the keys that landed (`config changed on disk — applied: ui.spinner, auto-title`),
+  and a re-read that found nothing changed stays silent. `/settings` rows moved by such a save wear
+  a ` ~` marker instead of the ` *` a row wears when this session edited it in the pane — the
+  journal keeps one entry per key, so whichever source wrote last is the one the row names. The
+  manual now records that `confine-to-workspace:` and `unconfined-hosts:` are left alone by a
+  re-read alongside `server:`, rather than naming `server:` as the only excluded key.
+
 - **The footer says whether Auto is confined.** On the `auto` rung — and only there, because
   confinement attaches to Auto's blast radius alone (ADR 0012) — the footer's mode marker now
   carries a second word for what the next tool call would actually run under: `confined` (fenced

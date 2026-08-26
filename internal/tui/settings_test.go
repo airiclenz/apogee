@@ -2980,8 +2980,10 @@ func configWatchModel(t *testing.T, rows []SettingRow, log *settingsWriteLog, ed
 
 // The headline of ADR 0041 decision 5: a file somebody else saved applies to the running session.
 // No keypress, no pane, no editor — the report alone re-reads the file, journals every key that came
-// back different (the ` *` marker of ADR 0037 decision 8) and pushes it through the same dispatcher
-// an in-pane commit uses.
+// back different and pushes it through the same dispatcher an in-pane commit uses. What the row then
+// wears is the WATCH marker (` ~`, not ` *`): the key moved under this session rather than through
+// it. And because the pane is very likely not open, the transcript gets one line naming every key
+// that landed.
 func TestConfigWatchAppliesASavedFileWithNoKeyPress(t *testing.T) {
 	rows := []SettingRow{
 		settingsStructuredRow(),
@@ -3010,9 +3012,80 @@ func TestConfigWatchAppliesASavedFileWithNoKeyPress(t *testing.T) {
 	if len(log.writes) != 0 {
 		t.Errorf("the watcher wrote %+v; the file it is watching already says all of it", log.writes)
 	}
-	if got, want := m.settingsValueCell(rows[1]), "[AGENTS.md, CLAUDE.md]"+settingsEditMarker; got != want {
-		t.Errorf("names cell = %q, want %q — a watcher apply is journaled like any other", got, want)
+	if got, want := m.settingsValueCell(rows[1]), "[AGENTS.md, CLAUDE.md]"+settingsWatchMarker; got != want {
+		t.Errorf("names cell = %q, want %q — a save on disk moved it, not this surface", got, want)
 	}
+	if got, want := appliedNotes(m), []string{configWatchAppliedNote + "context-files.names"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("notes = %v, want %v — a landed re-read names what it applied", got, want)
+	}
+}
+
+// The note is ONE line naming every key the re-read returned, in the order it returned them, and it
+// is composed from the seam's answer rather than from the pane's rows. A re-read that found nothing
+// changed says nothing at all: apogee's own writes come back through this watcher as no change
+// (ADR 0041 decision 8), and a line per pane commit would be the program narrating itself.
+func TestConfigWatchNamesEveryAppliedKeyOnceAndIsSilentOnNoChange(t *testing.T) {
+	rows := []SettingRow{
+		{Path: "ui.spinner", Section: "Presentation", Kind: SettingString, Value: "dots", Editable: true},
+		{Path: "auto-title", Section: "Presentation", Kind: SettingBool, Value: settingFalse, Editable: true},
+	}
+	edit := &externalEditLog{applied: []AppliedSetting{
+		{Path: "ui.spinner", Value: "line"},
+		{Path: "auto-title", Value: settingTrue},
+	}}
+	m := configWatchModel(t, rows, &settingsWriteLog{}, edit)
+
+	m = step(t, m, configChangedMsg{alive: true})
+
+	want := []string{configWatchAppliedNote + "ui.spinner, auto-title"}
+	if got := appliedNotes(m); !reflect.DeepEqual(got, want) {
+		t.Fatalf("notes = %v, want %v — one line, every key, in the order the re-read returned them", got, want)
+	}
+	for _, row := range rows {
+		if got := m.settingsValueCell(row); !strings.HasSuffix(got, settingsWatchMarker) {
+			t.Errorf("%s cell = %q, want the ` ~` of a key a save on disk moved", row.Path, got)
+		}
+	}
+
+	edit.applied = nil
+	m = step(t, m, configChangedMsg{alive: true})
+
+	if got := appliedNotes(m); !reflect.DeepEqual(got, want) {
+		t.Errorf("notes = %v, want the first report's one: a re-read that changed nothing is silent", got)
+	}
+}
+
+// The journal keeps one entry per key, so the LAST source wins the marker: a human who edits in the
+// pane a key a save on disk had moved gets the row back to ` *`. Nothing but the marker changes —
+// the value is the one that was written either way.
+func TestConfigWatchMarkerYieldsToALaterInPaneEdit(t *testing.T) {
+	rows := []SettingRow{
+		{Path: "ui.spinner", Section: "Presentation", Kind: SettingString, Value: "dots", Editable: true},
+	}
+	edit := &externalEditLog{applied: []AppliedSetting{{Path: "ui.spinner", Value: "line"}}}
+	m := configWatchModel(t, rows, &settingsWriteLog{}, edit)
+
+	m = step(t, m, configChangedMsg{alive: true})
+	if got, want := m.settingsValueCell(rows[0]), "line"+settingsWatchMarker; got != want {
+		t.Fatalf("cell after the save = %q, want %q", got, want)
+	}
+
+	m, _ = m.settingsApplied(rows[0], settingEdit{path: "ui.spinner", value: "arc"})
+
+	if got, want := m.settingsValueCell(rows[0]), "arc"+settingsEditMarker; got != want {
+		t.Errorf("cell after the in-pane edit = %q, want %q — this surface wrote it last", got, want)
+	}
+}
+
+// appliedNotes is every transcript line the landed-re-read notice left, in order.
+func appliedNotes(m Model) []string {
+	var out []string
+	for _, e := range m.transcript.entries {
+		if strings.HasPrefix(e.text, configWatchAppliedNote) {
+			out = append(out, e.text)
+		}
+	}
+	return out
 }
 
 // One wait at a time, and the chain is the fold's: every landed report opens the next wait, so a

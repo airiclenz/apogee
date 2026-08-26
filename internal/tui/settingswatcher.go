@@ -2,6 +2,7 @@ package tui
 
 import (
 	"os/exec"
+	"strings"
 
 	tea "charm.land/bubbletea/v2"
 )
@@ -188,7 +189,7 @@ func (m Model) foldSettingsEdit(msg settingsEditedMsg) (tea.Model, tea.Cmd) {
 	if err != nil {
 		return m.settingsFailed(launched, stripEscapes(err.Error()))
 	}
-	m, cmds := m.applyReloaded(rows, applied)
+	m, cmds := m.applyReloaded(rows, applied, false)
 	m.layout()
 	return m, tea.Batch(cmds...)
 }
@@ -201,14 +202,19 @@ func (m Model) foldSettingsEdit(msg settingsEditedMsg) (tea.Model, tea.Cmd) {
 // What the applies ask for is BATCHED rather than kept one at a time: an edit that changed the colour
 // scheme and the scroll bar in one session of the editor has to leave with the scheme's repaint still
 // asked for.
-func (m Model) applyReloaded(rows []SettingRow, applied []AppliedSetting) (Model, []tea.Cmd) {
+//
+// watched is which of the two triggers is calling, and the only thing that differs between them: it
+// rides onto every journal entry the loop records so the row can say whether the human moved the key
+// here or a save on disk moved it under them ([settingsWatchMarker]). It is a PARAMETER of the one
+// loop rather than a second loop, which is the whole of ADR 0041 decision 6.
+func (m Model) applyReloaded(rows []SettingRow, applied []AppliedSetting, watched bool) (Model, []tea.Cmd) {
 	var cmds []tea.Cmd
 	for _, a := range applied {
 		row, ok := settingRowOf(rows, a.Path)
 		if !ok {
 			continue // a key the pane does not list has no row to journal it on
 		}
-		next, cmd := m.settingsApplied(row, settingEdit{path: a.Path, value: a.Value})
+		next, cmd := m.settingsApplied(row, settingEdit{path: a.Path, value: a.Value, watched: watched})
 		m = next
 		if cmd != nil {
 			cmds = append(cmds, cmd)
@@ -245,6 +251,18 @@ const configWatchStallReports = 3
 const configWatchStalledNote = "the config file has not parsed for three saves, so the session is " +
 	"still running the settings it had: "
 
+// configWatchAppliedNote opens the ONE transcript line a landed re-read leaves: a save on disk moved
+// the running session, and the session says which keys moved. It names them rather than reporting
+// that "the config changed", because the news is not that a file was written — the human wrote it —
+// but that THESE keys are now different in a conversation already in flight, possibly with no pane
+// open to show a marker on.
+//
+// A re-read that found nothing changed says nothing at all: apogee's own writes come back through
+// this same watcher as no change (ADR 0041 decision 8), and a line per pane commit would be the
+// program narrating itself. A key whose apply then REFUSED still appears in the list — the note says
+// what the FILE moved, and the row carries the refusal ([settingsApplyFailedNote]).
+const configWatchAppliedNote = "config changed on disk — applied: "
+
 // awaitConfigChange opens ONE wait on the binary's config watcher (ADR 0041 decision 3). It is the
 // whole of this chain's arming: Init opens the first wait and each landed report opens the next, so
 // there is exactly one wait outstanding at any moment (doc.go's tick-chain invariant — two would
@@ -274,6 +292,11 @@ func (m Model) awaitConfigChange() tea.Cmd {
 // What it must NOT do is apply twice, which is what the baseline refresh on every pane write buys
 // (ADR 0041 decision 8, in the binary): a key apogee itself just wrote comes back as no change at all.
 //
+// A re-read that DID move something says so, once, naming the keys (configWatchAppliedNote): the
+// human is owed the news that the conversation they are in the middle of is running different
+// settings from the ones it started with, and the markers on the rows only reach them if the pane is
+// open. A re-read that found nothing changed is silent.
+//
 // The next wait is opened before anything is applied, so a re-read that ends in a refusal still leaves
 // the session watching — a broken config the human is about to fix is exactly the file the next report
 // has to be about. A watch that has ENDED arms nothing: there is no report to wait for any more.
@@ -290,9 +313,24 @@ func (m Model) foldConfigChanged(msg configChangedMsg) (tea.Model, tea.Cmd) {
 		return m.foldConfigUnreadable(err), next
 	}
 	m.cfgWatch = configWatchState{}
-	m, cmds := m.applyReloaded(m.settingRows(), applied)
+	m, cmds := m.applyReloaded(m.settingRows(), applied, true)
+	if len(applied) > 0 {
+		m.transcript.addNote(configWatchAppliedNote + strings.Join(appliedPaths(applied), ", "))
+	}
 	m.layout()
 	return m, tea.Batch(append(cmds, next)...)
+}
+
+// appliedPaths is the note's list: the registry path of every key the re-read found changed, in the
+// order [Options.ReloadConfig] returned them, which is the registry's own. It reads the APPLIED slice
+// rather than the pane's rows on purpose — the rows are one surface's view of the config and a key
+// the pane does not list still moved the session.
+func appliedPaths(applied []AppliedSetting) []string {
+	paths := make([]string, 0, len(applied))
+	for _, a := range applied {
+		paths = append(paths, a.Path)
+	}
+	return paths
 }
 
 // foldConfigUnreadable is the last-good rule's half of the fold (ADR 0041 decision 7): a file that

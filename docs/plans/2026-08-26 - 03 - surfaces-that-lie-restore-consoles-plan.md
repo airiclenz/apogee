@@ -540,7 +540,9 @@ word appears; the narrow-window branch drops the whole marker (existing assertio
 
 ---
 
-## 9. A config re-read names the keys it applied; watcher-sourced edits are marked; the manual names all three excluded keys
+## 9. A config re-read names the keys it applied; watcher-sourced edits are marked; the manual names all three excluded keys — ✅ DONE (2026-08-26)
+
+NOTES (2026-08-26): three amendments beyond the item's literal line references, each to keep a surface from lying about the change. (a) `docs/manual/configuration.md`'s earlier sentence in the same paragraph — "every key that came back different is applied exactly as an in-pane edit is, and its row repaints wearing the same ` *`" — now names the ` ~`; leaving it would have contradicted the marker this item introduces two sentences later. (b) `settingsValueCell`'s own doc comment (`settings.go`) had the same stale ` *`-only claim and was amended to name the pair. (c) The note's path list is built by a small `appliedPaths` helper beside `foldConfigChanged` rather than inline, so the "composed from the `applied` slice, never from the pane's rows" rule is visible at the seam. Not changed: ADR 0041's line 155 still says a watcher apply journals a ` *` marker; the plan's ratified call 3 supersedes it and the item's Files list names no ADR, so the record is left as written.
 
 **What:** F-23 + R-3.
 - `internal/tui/settings.go` `settingEdit` (`:167`): add `watched bool` — the edit landed from a

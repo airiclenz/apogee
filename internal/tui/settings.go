@@ -152,8 +152,8 @@ type settingsPane struct {
 	answer  settingAnswer
 }
 
-// settingEdit is one key this pane PERSISTED this session and the value the file now yields for it —
-// the fact behind a row's ` *` marker (ADR 0037 decision 8). It is not a cache of the config: the file is
+// settingEdit is one key this session PERSISTED and the value the file now yields for it — the fact
+// behind a row's ` *` or ` ~` marker (ADR 0037 decision 8). It is not a cache of the config: the file is
 // authoritative and the pane never reads it back, so this is only ever used to say "you changed this,
 // here to what".
 //
@@ -166,11 +166,19 @@ type settingsPane struct {
 // the next session boundary rather than at once ("applies at next clear"), empty for a key already
 // in force, which is almost all of them. It is carried on the edit rather than in a slot of its own
 // because it describes THIS key's landing and stays true for as long as the edit does.
+//
+// watched marks WHERE the edit came from: a save on disk this program had nothing to do with (the
+// config watcher, ADR 0041 decision 5) rather than an in-pane commit or the pane's own editor round
+// trip. It is on the edit rather than derived at paint time because the two sources land through one
+// apply loop (applyReloaded) and only the caller knows which trigger it is serving — and because the
+// journal keeps one entry per key ([Model.recordSettingEdit]), so the LAST source is what the row
+// says about the key.
 type settingEdit struct {
-	path  string
-	value string
-	note  string
-	reset bool
+	path    string
+	value   string
+	note    string
+	reset   bool
+	watched bool
 }
 
 // settingFailure is the last write this pane was REFUSED, and by what — a read-only config home, a
@@ -288,7 +296,23 @@ const settingsUnsetValue = "unset"
 //
 // On the `mode` row the value beside it is always the LIVE rung — Shift+Tab moves the session
 // without ever writing a journal entry — and the marker only says the session wrote the key once.
+//
+// It is the FIRST of a pair, and the pair divides by SOURCE: ` *` means "this session wrote it
+// through this surface", settingsWatchMarker's ` ~` means "a save on disk moved it under this
+// session". A key the journal holds carries exactly one of them, the one its last edit came in
+// through ([settingEdit.watched]).
 const settingsEditMarker = " *"
+
+// settingsWatchMarker is the suffix on the value cell of a key that moved because somebody SAVED THE
+// CONFIG FILE — the watcher's re-read applied it and journaled it, with no keypress in this program
+// at all (ADR 0041 decision 5). It is a different character from settingsEditMarker because the two
+// answer a different question about the same row: ` *` says the human changed it here, ` ~` says the
+// file changed it under them, and a row that reads `false ~` is the only warning that the value on
+// screen is not the one this session was launched with.
+//
+// The journal keeps one entry per key, so the LAST source wins the marker: an in-pane commit over a
+// watched key flips the row back to ` *`, and a save over a key edited in the pane flips it to ` ~`.
+const settingsWatchMarker = " ~"
 
 // The value cells of a bool row, spelled as the config file spells them — the two strings ⏎ toggles
 // between and hands [SettingsHost.Write], which is the whole of what "the value as the file would
@@ -1395,8 +1419,9 @@ func (m Model) settingRowCells(row SettingRow) popupRow {
 // settingsValueCell is the value column: what the SESSION is running for this key. That is the value
 // the provider resolved, until this pane changes it — every edit and every reset applies on the ⏎
 // that persists it (ADR 0037 decision 1), so what this pane wrote IS what the session runs, while the
-// provider still answers with the resolution this run started from. Such a row carries the ` *` that
-// says this session changed it (settingsEditMarker).
+// provider still answers with the resolution this run started from. Such a row carries the marker for
+// where its last edit came IN through — ` *` for this surface (settingsEditMarker), ` ~` for a save on
+// disk (settingsWatchMarker).
 //
 // `mode` is the row where that reasoning inverts: the rung moves from OUTSIDE this pane too
 // (Shift+Tab), so the journal is not the last word on it and the provider is — the host overlays the
@@ -1407,10 +1432,14 @@ func (m Model) settingsValueCell(row SettingRow) string {
 	if !ok {
 		return row.Value
 	}
-	if row.Path == settingKeyMode {
-		return row.Value + settingsEditMarker
+	marker := settingsEditMarker
+	if edit.watched {
+		marker = settingsWatchMarker
 	}
-	return settingsEditedValue(row, edit) + settingsEditMarker
+	if row.Path == settingKeyMode {
+		return row.Value + marker
+	}
+	return settingsEditedValue(row, edit) + marker
 }
 
 // settingsEditedValue is what an edited row shows in its value column: what this pane wrote, or —

@@ -150,9 +150,14 @@ else is ever written: apogee still makes no edit to that file you did not ask fo
 also puts it into effect, so no setting waits for a restart: change `mode:`, `bypass:`, a
 mechanism switch, the web-search endpoint, the presentation keys or the model profile and the
 next thing apogee does uses it. The row keeps a ` *` after its value — `false *` — which says
-*you changed this here, this session*; it is cleared only by a relaunch. One pair lands at a
-boundary the session crosses anyway rather than mid-conversation, and says so on the row: the
-`context-files:` keys are part of the prefix every request is cached against, so they take
+*you changed this here, this session*; it is cleared only by a relaunch. A ` ~` in that same
+place — `false ~` — says the other thing: *a save of the config file moved this key under this
+session*, with no keypress here at all, and whichever of the two happened last is the one the row
+wears. A save that moved anything also leaves one line in the transcript naming the keys it
+applied (`config changed on disk — applied: ui.spinner, auto-title`), because the pane is very
+likely not open when it happens; a re-read that found nothing changed says nothing. One pair
+lands at a boundary the session crosses anyway rather than mid-conversation, and says so on
+the row: the `context-files:` keys are part of the prefix every request is cached against, so they take
 effect at the next `/clear` — `· applies at next clear`. On a key an environment variable or
 a flag is overriding, the edit still applies and is still written, and the row adds that the
 override will win again the next time apogee starts — startup precedence is unchanged. If a

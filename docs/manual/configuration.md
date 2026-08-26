@@ -31,16 +31,20 @@ touched at any other time.
 applies itself to the session you are in — whoever wrote it: the `/settings` pane's `⏎` jump, a
 GUI editor you left open in another window, a `vim ~/.apogee/config.yaml` in a second terminal.
 No key waits for a restart and nothing has to be re-entered in the pane; every key that came back
-different is applied exactly as an in-pane edit is, and its row repaints wearing the same ` *`. An
+different is applied exactly as an in-pane edit is, and its row repaints wearing a ` ~` — the marker
+for *a save on disk moved this key*, beside the ` *` a row wears when you changed it in the pane. An
 edit reaches the runs this session raises, too: a `/schedule` firing composes itself from the
 settings the session is running at the moment it fires, so a tool you disabled or a host you denied
 is disabled and denied for it as well. A file that does not parse changes nothing — the session
 keeps running the settings it had, because a poll will sooner or later read a half-written save —
 and only when three saves in a row fail to parse does apogee say so in the transcript, once, until
-the file parses again. `server:` is the one key a re-read never moves: it names where the *next*
-session starts (see [The servers you run models on](#the-servers-you-run-models-on)). The watcher
-is a poll of the file's timestamp and size on a one-second ticker — no daemon, no
-filesystem-notification dependency (ADR 0041).
+the file parses again. `server:` is the one ordinary key a re-read never moves: it names where the
+*next* session starts (see [The servers you run models on](#the-servers-you-run-models-on)). The
+confinement pair — `confine-to-workspace:` and `unconfined-hosts:` — is left alone by a re-read as
+well; that interlock stays single-homed in `/confine` (ADR 0012). A re-read that applied anything
+says so in the transcript, in one line naming the keys that landed. The watcher is a poll of the
+file's timestamp and size on a one-second ticker — no daemon, no filesystem-notification
+dependency (ADR 0041).
 
 Catalogued mechanisms are opt-in by canonical ID. Every mechanism ships **off**
 until its A/B bench run proves it a win, so enabling one is a deliberate config
