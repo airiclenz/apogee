@@ -234,6 +234,18 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **A skipped skill can no longer paint rows in the `/skills` report (code audit C-12).** The two
+  skip sections emitted their repo-authored fields raw — the folder name a skip is named by, the
+  reason it carries, the path to go and fix, and the winning copy's path a shadow points at —
+  while the loaded half beside them already flattened the same class. `transcript.addNote` strips
+  ESC but deliberately keeps `\n` (it sanitizes prose, and prose has paragraphs), so a directory
+  name or a multi-line YAML error wrote whole further rows into the report: one skipped `SKILL.md`
+  could forge the loaded half's `N skills available:` heading and a row beneath it, on the very
+  surface that exists to disclose skill impersonation. All six emits now go through
+  `flattenField`, so a skip is exactly two rows whatever its fields contain. `internal/skills` is
+  unchanged: `SkipError.Name()` and `Reason()` stay raw accessors, because the flatten belongs to
+  the render seam.
+
 - **The footer and a delegation's model id pass the escape seam (code audit C-09, C-17).** The
   status footer painted three strings raw — the model id the server advertised, the effort default
   it reported, and the configured host — on a line whose black field runs the full window width;

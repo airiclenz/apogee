@@ -300,7 +300,16 @@ walk entry fail before the fix and pass after.
 
 ---
 
-## 4. `/skills` skip sections flatten every repo-authored field (C-12)
+## 4. `/skills` skip sections flatten every repo-authored field (C-12) — ✅ DONE (2026-08-26)
+
+NOTES (2026-08-26): the new test's shadowed `SkipError` was given a poisoned `Path`
+(`/ws/.apogee/skills/review\n  forged name/SKILL.md`) as well as the poisoned `ShadowedError.By`
+the item specifies. The item's parenthetical "(so `Name()` carries the LF)" does not hold for the
+failed skip's spelling — `Name()` is `filepath.Base(filepath.Dir(Path))`, and the LF there falls in
+a non-final path segment, so `Name()` comes back LF-free — leaving the sixth emit unexercised;
+poisoning the shadowed skip's final directory segment covers it. Both assertions the item names
+still hold as written. Verified the test fails without the fix (12 lines instead of 7, with the
+forged `1 skill available:` heading and a forged `  /deploy` row).
 
 **What:** `internal/tui/skills.go` `failedSkillLines` (`:344-345`) and `shadowedSkillLines`
 (`:365-367`) emit `sk.Name()`, `sk.Reason()`, `sk.Path` and the winner path `by`

@@ -330,6 +330,13 @@ func partitionSkips(skipped []skills.SkipError) (failed, shadowed []skills.SkipE
 // a bad skill softly so one malformed file cannot sink the catalog; printing the skip here is
 // what keeps soft from meaning silent — otherwise a broken skill and an absent one look
 // identical from the merged "/" menu, with nowhere to look for the difference.
+//
+// All three repo-authored fields are FLATTENED (flattenField) — the name, the reason and the path:
+// a note is painted one row per line and addNote's strip deliberately keeps "\n" (it sanitizes
+// prose, and prose has paragraphs), so a folder name or a multi-line YAML error would otherwise
+// write further lines into this report — lines it could shape as a loaded skill's row, source
+// label and all, under a heading that counted one fewer, on the very surface that exists to
+// disclose an impersonation.
 func failedSkillLines(failed []skills.SkipError) []string {
 	if len(failed) == 0 {
 		return nil
@@ -341,8 +348,8 @@ func failedSkillLines(failed []skills.SkipError) []string {
 	lines := make([]string, 0, 2*len(failed)+1)
 	lines = append(lines, head)
 	for _, sk := range failed {
-		lines = append(lines, "  "+sk.Name()+" — "+sk.Reason())
-		lines = append(lines, "    "+sk.Path)
+		lines = append(lines, "  "+flattenField(sk.Name())+" — "+flattenField(sk.Reason()))
+		lines = append(lines, "    "+flattenField(sk.Path))
 	}
 	return lines
 }
@@ -351,6 +358,11 @@ func failedSkillLines(failed []skills.SkipError) []string {
 // then the copy that is live. Both paths are named because that is the whole question a shadow
 // raises ("which of my two files is /<id> actually running?"), and the answer is a file the user
 // can open. Nothing here is broken, so the wording deliberately never says "not loaded".
+//
+// The name, the losing path and the winning one are FLATTENED (flattenField) for the reason the
+// other halves are: addNote's strip deliberately keeps "\n", so a newline in any of them would
+// paint rows this section never authored — and here a forged row answers the shadow's one
+// question with a file that is not the live copy.
 func shadowedSkillLines(shadowed []skills.SkipError) []string {
 	if len(shadowed) == 0 {
 		return nil
@@ -363,8 +375,8 @@ func shadowedSkillLines(shadowed []skills.SkipError) []string {
 	lines = append(lines, head)
 	for _, sk := range shadowed {
 		by, _ := shadowedBy(sk) // partitioned on it above, so it is there
-		lines = append(lines, "  "+sk.Name()+" — "+sk.Path)
-		lines = append(lines, "    the live copy is "+by)
+		lines = append(lines, "  "+flattenField(sk.Name())+" — "+flattenField(sk.Path))
+		lines = append(lines, "    the live copy is "+flattenField(by))
 	}
 	return lines
 }
