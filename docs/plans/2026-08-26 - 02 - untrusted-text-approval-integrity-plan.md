@@ -763,7 +763,15 @@ deliver the FIRST pane's seq ⇒ keys still dead; deliver the second ⇒ live.
 
 ---
 
-## 12. Escalating the `/settings` mode row to `auto` states the blast radius (F-22)
+## 12. Escalating the `/settings` mode row to `auto` states the blast radius (F-22) — ✅ DONE (2026-08-26)
+
+NOTES (2026-08-26): the `auto` value's cell is composed in a new one-line helper,
+`Model.settingsEnumValueCell` (settings.go), rather than inline in `renderSettingsEnum`'s loop —
+the loop already carries the "(current)" branch and a second `row.Path`/value test inside it was
+the harder read. Behaviour is exactly the item's text: the sentence, plus " (current)" appended
+when `auto` is the held value.
+NOTES (2026-08-26): `internal/tui/settings.go` gained an `internal/domain` import for the
+`domain.ModeAuto` comparison — the file had none.
 
 **What:** the `mode` apply (`cmd/apogee/wire_settings.go:921-932`) returns an empty note, so
 `settingsNote` (`settings.go:1459-1479`) paints nothing when one ⏎ moves the session to the rung

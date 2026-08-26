@@ -177,7 +177,9 @@ func (m Model) settingsApplied(row SettingRow, edit settingEdit) (Model, tea.Cmd
 //
 // `mode` is the one key with a foot in both: the seam moves the Agent, and the footer renders the
 // mode from opts.Mode — so the mirror Shift+Tab keeps in step is updated here too, but only once the
-// apply has LANDED, or the footer would report an autonomy the engine is not running.
+// apply has LANDED, or the footer would report an autonomy the engine is not running. An escalation to
+// `auto` also answers with a note the seam does not have to know about — the blast radius of the rung
+// the ⏎ just took (autoBlastRadiusLine) — because a rung that stops asking is worth a sentence.
 // A local apply may also hand back a Cmd and a note of its own, which is why the local branch no
 // longer returns an empty note: a colour-scheme switch that loaded with warnings says so on the row
 // (settingsApplyLocal) through the same slot "applies at next clear" uses, and asks for the repaint
@@ -196,6 +198,13 @@ func (m Model) settingsApplyLive(path, value string) (Model, string, tea.Cmd, er
 	}
 	if path == settingKeyMode {
 		m.opts.Mode = domain.Mode(value) // the footer renders the mode from opts.Mode (footerContent)
+		if domain.Mode(value) == domain.ModeAuto {
+			// One ⏎ just moved the session to the rung where every model-chosen call runs without a
+			// human gate, and the seam answers `mode` with an empty note — so the row says what that
+			// means, in /confine's own words. The fence state is read, not decided, here: it is engine
+			// state the renderer already renders (confine.go), which is ADR 0011's line.
+			note = autoBlastRadiusLine(m.opts.Confinement, m.eng.ConfineToWorkspace())
+		}
 	}
 	return m, note, nil, nil
 }

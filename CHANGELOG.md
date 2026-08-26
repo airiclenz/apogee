@@ -234,6 +234,19 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **The `/settings` mode row names auto's blast radius, before and after the escalation (security
+  audit F-22).** One `⏎` on the mode row could move the session to the rung where every
+  model-chosen call runs without a human gate, and the row said nothing at all about it: the
+  dispatcher answers `mode` with an empty note, so `settingsNote` painted none. The sentence that
+  states what auto means is now extracted once — `autoBlastRadiusLine`, the wording `/confine`
+  already used — and read from both places: the value sub-list carries it beside `auto` while the
+  question is still open, and the row repeats it as its note once the escalation lands. It is
+  composed from the live fence state, so it says "unfenced, with your full privileges", "without
+  asking, fenced to the workspace by the landlock backend", or "commands cannot be fenced here, so
+  auto asks approval for each one" — one claim about the rung, wherever it is read. `/confine`'s
+  own notes now render that sentence from the same helper rather than their own copy of it, and the
+  three lower rungs are unchanged: they still say nothing, because nothing about them changed.
+
 - **The approval prompt's decision keys arm one painted frame after it appears (security audit
   F-12).** `a`, `s`, `d` and the `⏎` that takes the highlighted row used to answer the gate the
   instant the pane was folded in, so a keystroke already in the terminal's input buffer — aimed at

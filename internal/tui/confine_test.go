@@ -210,6 +210,39 @@ func TestConfineArgumentErrorReportsTheUsageLine(t *testing.T) {
 // The note builders (pure)
 // ----------------------------------------------------------------------------
 
+// The one blast-radius sentence has three states and no fourth: the fence is off, the fence is on
+// and this host can keep it, or the fence is on and this host cannot. /confine's notes and the
+// /settings mode row both read it from here, so the equality is on the WHOLE string — a reworded
+// half would be two claims about one rung again.
+func TestAutoBlastRadiusLineByFenceState(t *testing.T) {
+	cases := []struct {
+		name    string
+		info    ConfinementInfo
+		confine bool
+		want    string
+	}{
+		{
+			name: "fence off", info: capableHost, confine: false,
+			want: "auto runs every command unfenced, with your full privileges",
+		},
+		{
+			name: "fence on, host can fence", info: capableHost, confine: true,
+			want: "auto runs every command without asking, fenced to the workspace by the landlock backend",
+		},
+		{
+			name: "fence on, host cannot fence", info: degradedHost, confine: true,
+			want: "commands cannot be fenced here, so auto asks approval for each one",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := autoBlastRadiusLine(c.info, c.confine); got != c.want {
+				t.Errorf("autoBlastRadiusLine = %q, want %q", got, c.want)
+			}
+		})
+	}
+}
+
 func TestConfineStatusReportWording(t *testing.T) {
 	cases := []struct {
 		name    string

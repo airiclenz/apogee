@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/airiclenz/apogee/internal/domain"
 )
 
 // ----------------------------------------------------------------------------
@@ -1726,13 +1728,30 @@ func (m Model) renderSettingsEnum(row SettingRow) string {
 	vocabulary := m.settingsVocabulary(row)
 	values := make([]popupRow, 0, len(vocabulary))
 	for _, value := range vocabulary {
-		cell := ""
-		if value == current {
+		cell := m.settingsEnumValueCell(row, value)
+		switch {
+		case value == current && cell != "":
+			cell += " (current)"
+		case value == current:
 			cell = "(current)"
 		}
 		values = append(values, popupRow{stripEscapes(value), cell})
 	}
 	return m.renderSettingsSubList(row, values, settingsEnumHint)
+}
+
+// settingsEnumValueCell is what the sub-list's right-hand column says about ONE value BEFORE the
+// "(current)" marker joins it — nothing for a plain vocabulary, where the marker is the whole of the
+// column.
+//
+// The `mode` row's `auto` is the exception: it carries the blast radius of the rung it offers
+// (autoBlastRadiusLine, the same sentence /confine paints), so what an escalation costs is on the
+// screen while the question is still open and not only in the note that follows the ⏎.
+func (m Model) settingsEnumValueCell(row SettingRow, value string) string {
+	if row.Path == settingKeyMode && domain.Mode(value) == domain.ModeAuto {
+		return autoBlastRadiusLine(m.opts.Confinement, m.eng.ConfineToWorkspace())
+	}
+	return ""
 }
 
 // settingsMechanismState is what a Mechanism's row says about itself: the whole cell, because a

@@ -1047,6 +1047,101 @@ func TestSettingsPaneModeEditAppliesLiveAndMarksNothing(t *testing.T) {
 	}
 }
 
+// settingsModeRow is the `mode` row as the registry describes it — the enum whose top rung stops
+// asking, which is what makes its escalation the one edit that answers with a sentence.
+func settingsModeRow() SettingRow {
+	return SettingRow{
+		Path: settingKeyMode, Section: "Autonomy", Kind: SettingEnum, Value: "ask-before",
+		Default: "ask-before", EnumValues: []string{"plan", "ask-before", "allow-edits", "auto"},
+		Editable: true, Desc: "Autonomy mode: how tool calls are gated.",
+	}
+}
+
+// settingsModeEditModel opens the pane over that one row, on the host situation and the live fence
+// state the test chose — the two facts the blast-radius sentence is composed from. The window is
+// wider than the suite's default because the sentence is a whole clause in a right-hand column: at 80
+// cells the pane truncates it, and a truncated string is not what these tests are about.
+func settingsModeEditModel(t *testing.T, log *settingsWriteLog, info ConfinementInfo, confine bool) Model {
+	t.Helper()
+	opts := testOpts
+	opts.Confinement = info
+	opts.Settings = fakeSettingsHost{
+		rows:  func() []SettingRow { return []SettingRow{settingsModeRow()} },
+		write: log.write, reset: log.reset, apply: log.apply,
+	}
+	m := newTestModelEng(t, &fakeEngine{confine: confine}, opts)
+	return openSettingsPane(t, step(t, m, tea.WindowSizeMsg{Width: 160, Height: 40}))
+}
+
+// settingsEnumRowLine is the value sub-list's line for ONE rung, found by its value column — the
+// marker is the first field of the row's interior and the value the second, whichever row the cursor
+// happens to be sitting on.
+func settingsEnumRowLine(t *testing.T, rendered, rung string) string {
+	t.Helper()
+	for _, line := range popupLines(rendered) {
+		interior := popupInterior(line)
+		if fields := strings.Fields(interior); len(fields) >= 2 && fields[1] == rung {
+			return interior
+		}
+	}
+	t.Fatalf("no sub-list row for %q:\n%s", rung, strip(rendered))
+	return ""
+}
+
+// An escalation to `auto` is the one ⏎ that moves the session to the rung where every model-chosen
+// call runs without a human gate, and the dispatcher answers `mode` with no note at all — so the row
+// states the blast radius itself, in /confine's own words, and the pane paints it. Both fence states,
+// because "unfenced, with your full privileges" and "fenced to the workspace" are different claims.
+func TestSettingsPaneModeEscalationToAutoStatesTheBlastRadius(t *testing.T) {
+	cases := []struct {
+		name    string
+		info    ConfinementInfo
+		confine bool
+	}{
+		{name: "fenced", info: capableHost, confine: true},
+		{name: "unfenced", info: capableHost, confine: false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			log := &settingsWriteLog{}
+			m := settingsModeEditModel(t, log, c.info, c.confine)
+
+			m = step(t, m, keyEnter()) // the sub-list, highlighted on ask-before
+			m = step(t, m, keyDown())  // allow-edits
+			m = step(t, m, keyDown())  // auto
+			m = step(t, m, keyEnter()) // commit
+
+			sentence := autoBlastRadiusLine(c.info, c.confine)
+			if got, want := m.settingsNote(settingsModeRow()), "· "+sentence; got != want {
+				t.Errorf("note = %q, want %q — the rung that stops asking says so", got, want)
+			}
+			if got := strip(m.renderSettings()); !strings.Contains(got, sentence) {
+				t.Errorf("the pane does not paint the blast radius:\n%s", got)
+			}
+		})
+	}
+}
+
+// The same sentence is on the screen BEFORE the ⏎ that takes the rung: the `auto` value carries it in
+// the sub-list's own column, and no other rung does — the three below it all still ask.
+func TestSettingsEnumAutoRowCarriesTheBlastRadiusCell(t *testing.T) {
+	log := &settingsWriteLog{}
+	m := settingsModeEditModel(t, log, capableHost, true)
+
+	m = step(t, m, keyEnter()) // the value sub-list
+
+	rendered := m.renderSettings()
+	sentence := autoBlastRadiusLine(capableHost, true)
+	if got := settingsEnumRowLine(t, rendered, "auto"); !strings.Contains(got, sentence) {
+		t.Errorf("the auto row does not carry the blast radius: %q", got)
+	}
+	for _, rung := range []string{"plan", "ask-before", "allow-edits"} {
+		if got := settingsEnumRowLine(t, rendered, rung); strings.Contains(got, sentence) {
+			t.Errorf("the %s row carries auto's blast radius: %q", rung, got)
+		}
+	}
+}
+
 // settingsLiveBoolRow is one editable bool row that applies through the dispatcher — `bypass:` as the
 // registry describes it, minus the restart gate no key keeps once its edit takes effect.
 func settingsLiveBoolRow() SettingRow {

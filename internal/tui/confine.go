@@ -77,6 +77,27 @@ func (m Model) saveHostAcknowledgement() string {
 // The rendered notes (pure)
 // ----------------------------------------------------------------------------
 
+// autoBlastRadiusLine is the ONE sentence stating what the auto rung does on THIS host, in the
+// plainest words available. /confine's notes and the /settings mode row both paint it, so a human
+// who reaches auto through either route reads the same claim rather than two wordings of it — the
+// reason the sentence lives here and is not copied into the pane.
+//
+// confine is the live blast-radius setting ([Engine.ConfineToWorkspace]), not the mode: the caller
+// decides whether the rung is the one running. info decides whether "fenced" is a promise this
+// backend can keep — a host that cannot fence gets the sentence about the approval prompt instead,
+// because that is what auto actually does there (ADR 0012, "confine if you can, gate if you can't").
+func autoBlastRadiusLine(info ConfinementInfo, confine bool) string {
+	switch {
+	case !confine:
+		return "auto runs every command unfenced, with your full privileges"
+	case info.Caps.FSWrite:
+		return "auto runs every command without asking, fenced to the workspace by the " +
+			confineBackendName(info) + " backend"
+	default:
+		return "commands cannot be fenced here, so auto asks approval for each one"
+	}
+}
+
 // confineStatusReport renders `/confine status`: the effective setting, the backend and what it
 // can actually enforce on this host, the host id an acknowledgement is recorded against, and the
 // mode — because the flag is read by the Auto rung alone, so on the three lower rungs it is a
@@ -100,7 +121,7 @@ func confineStatusReport(info ConfinementInfo, mode domain.Mode, confine bool) s
 	}
 	if confine && mode == domain.ModeAuto && !info.Caps.FSWrite {
 		lines = append(lines,
-			"  commands cannot be fenced here, so auto asks approval for each one",
+			"  "+autoBlastRadiusLine(info, confine),
 			"  /confine off runs them unconfined for this session (safe ONLY on a",
 			"  disposable machine); /confine off --save also remembers this host")
 	}
@@ -119,7 +140,7 @@ func confineOffNote(info ConfinementInfo, mode domain.Mode, was bool) string {
 	}
 	lines := []string{
 		head,
-		"  auto runs every command unfenced, with your full privileges",
+		"  " + autoBlastRadiusLine(info, false), // off is what this line just asserted
 	}
 	switch {
 	case mode != domain.ModeAuto:

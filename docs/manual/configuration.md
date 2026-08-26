@@ -680,6 +680,10 @@ host. Both keys are **global-config-file-only** — no flag, no environment vari
 no project config — because editing that file is the deliberate acknowledgement, and a
 repo you cloned must never be able to make that claim for you.
 
+`/settings` states the same blast radius where an escalation actually happens: the mode
+row's `auto` value carries that sentence beside it in the value list — before the ⏎ that
+takes the rung — and repeats it as the row's note once the escalation lands.
+
 ## The Console family
 
 Nearly every tool apogee gives a model is one shot: `terminal` runs a command, the command ends,
