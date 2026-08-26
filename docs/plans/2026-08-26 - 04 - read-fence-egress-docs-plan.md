@@ -586,7 +586,21 @@ text, re-wrapped to README's ~76-column prose width; no word changed.
 
 ---
 
-## 9. Manual sections for `url-safety:`, `web-search-endpoint:` and `use-project-skills:` (R-undoc, config keys)
+## 9. Manual sections for `url-safety:`, `web-search-endpoint:` and `use-project-skills:` (R-undoc, config keys) — ✅ DONE (2026-08-26)
+
+NOTES (2026-08-26): the item's line anchors had drifted (the `tools:` roster now runs `:70-104`,
+Compaction starts at `:106`, and the intro's "the web-search endpoint" sits at `:11-12` wrapped
+across two lines). The three sections were placed by CONTENT — after the roster paragraphs, before
+Compaction — which is what the item names; no line number was followed literally.
+NOTES (2026-08-26): the `use-project-skills:` section says the flip re-scans "there and then"
+rather than the item's "changes where the next scan looks": `wire_settings.go:1042-1050` calls
+`SetSources` AND `Reload` in the same apply, so the `/` menu changes in the running session. The
+item's own instruction — verify each stated behaviour against the code, leave out what the code
+does not support — is what produced the change of wording.
+NOTES (2026-08-26): `/settings` liveness for the two `url-safety` rows is stated with the swap's
+idle-only caveat (`liveTools.rebuildWith` → `SwapTools` can refuse mid-run, the refusal lands on
+the row and re-committing retries), which the item did not name but the code makes true of every
+commit of those rows.
 
 Depends on items 4, 5.
 

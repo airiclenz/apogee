@@ -8,7 +8,8 @@ there as a commented example, with one exception — `system-prompt-text:`, the
 default system prompt, ships active. Three keys carry all four layers —
 `server:` (`--server`, `APOGEE_SERVER`), `mode:` and `bypass:`. Every other key
 is **file-only** (no flag or env): the `servers:` list, the system prompt, the
-model profile, MCP servers, the web-search endpoint and the small-model
+model profile, MCP servers, [the web-search
+endpoint](#where-web_search-looks--web-search-endpoint) and the small-model
 mechanisms among them. Two raw overrides are not config keys at all — `--endpoint`
 / `APOGEE_ENDPOINT` runs one session against a server the file does not list,
 while `APOGEE_API_KEY` and `--model` / `APOGEE_MODEL` carry that server's token
@@ -102,6 +103,120 @@ asked for the family by name. A `tools:` axis of your own for that model replace
 whole, the way every axis here replaces the built-in's — so `disabled: [console_open]` under a
 `qwen3.8` entry of yours turns the whole family back off rather than trimming one tool out of it;
 re-list the ones you still want under `enabled:`.
+
+## What the network tools may reach — `url-safety:`
+
+`url-safety:` is the host layer over everything apogee reaches on the model's behalf. It takes two
+lists — `allow-hosts` and `deny-hosts` — and they bind `web_fetch`, `http_request`, `web_search`
+and an `sse` or `streamable-http` entry in `mcp-servers:` alike. Both are empty by default, which
+means every host. An entry matches the host it names **and its subdomains**, so `example.com`
+covers `api.example.com`; `deny-hosts` wins over `allow-hosts`, so a host written on both is
+blocked; and the moment `allow-hosts` names anything it becomes the whole permitted set, every
+host outside it refused. Only `http` and `https` are ever dialled, whatever the lists say.
+
+Write a host the way you say it. Each entry is put into the same normal form the dialled host is
+put into before the two are compared — whitespace trimmed, the surrounding brackets of an IPv6
+literal removed (you write `[::1]`, the transport dials `::1`), IDNA-mapped when it is not ASCII,
+lower-cased, trailing DNS root dot dropped — so `Example.COM.` blocks the host that arrives as
+`example.com`. That happens where the guard is built, which is why neither list has a strictness
+of its own for you to learn.
+
+```yaml
+# ~/.apogee/config.yaml
+url-safety:
+  allow-hosts: [docs.example.com, api.github.com]
+  deny-hosts: [ads.example.com]
+```
+
+Underneath the lists sits the part no configuration can move: the **always-on SSRF floor**.
+Loopback, private, link-local and cloud-metadata addresses are refused, along with CGNAT
+(`100.64/10`), the whole `0.0.0.0/8`, the TEST-NET and benchmark ranges, and the NAT64 and
+obsolete IPv6 transition ranges. The floor judges the **resolved** address, before the request
+leaves and again as the connection is dialled, so a public name that resolves inward is refused
+both times. The lists can only ever tighten what the floor already permits — there is no spelling
+here that opens an address it closes.
+
+Redirects are never followed. A 3xx comes back as itself: `web_fetch` renders the `Location`
+header for the model, which may then ask for that URL in a fresh call that is checked from
+scratch — one vetted request can never be carried somewhere unvetted. The LLM endpoint under
+`servers:` is not subject to these lists at all; it is the address you launched apogee against
+rather than one a model chose, though it too refuses to follow a redirect.
+
+A configured MCP endpoint is the one deliberate exemption. An `mcp-servers:` address is one you
+wrote in your own config, so the floor — which exists to stop a *model* pivoting to internal
+addresses — is not applied to it, and the connection is pinned to that endpoint's own resolved
+addresses instead ([ADR
+0012](../adr/0012-confinement-attaches-to-blast-radius-and-confine-to-workspace-flag.md)). Your
+two host lists still apply: a denied endpoint is refused at startup with the same url-safety
+message, and any *other* private address that connection is later pointed at stays refused.
+
+If your machine reaches out through an egress proxy, apogee uses it. `HTTP_PROXY`, `HTTPS_PROXY`
+and `NO_PROXY` from the process environment are honoured by the network tools, by the MCP
+transports and by the LLM client alike. The destination is still judged before anything leaves the
+process, so a proxy cannot launder a private address; what the connection is pinned to is the
+proxy's own addresses, because the proxy is what is actually dialled.
+
+Both lists are live. `/settings` carries them as the `url-safety.allow-hosts` and
+`url-safety.deny-hosts` rows, and committing either — or saving the file — rebuilds the session's
+tool set around the new guard; that swap waits for the session to be idle, so a commit made
+mid-turn is reported on the row and re-committing retries it. The block is file-only (no flag, no
+environment variable) and global: it applies to every model this config runs.
+
+## Where `web_search` looks — `web-search-endpoint:`
+
+One string, with three things it can be. Unset — the default — is the built-in DuckDuckGo
+provider, so web search works out of the box with no API key and nothing to run. The value `off`
+(or `none`, or `disabled`; case does not matter) turns the tool into a graceful refusal without
+taking it off the menu: the model still sees `web_search`, and a call answers "web search is
+disabled on this host (web-search-endpoint: off); web_search is unavailable." Anything else is
+your own search backend, which receives the query as the `q` URL parameter — an HTML response is
+cleaned into title/url/snippet results, a JSON or text one passes through unchanged. A
+scheme-less value heals to `https://`, and the only value refused at startup is text that no URL
+parse can make sense of even after that.
+
+```yaml
+# ~/.apogee/config.yaml
+web-search-endpoint: https://search.example.com/search
+```
+
+Disabling is not removing: `off` leaves a tool on the menu that says no, while
+`tools.disabled: [web_search]` takes the name away from the model altogether. The endpoint is a
+host reached over the network like any other, so `url-safety:` and the SSRF floor above judge it
+exactly as they judge a `web_fetch` URL — a backend on `localhost` is refused by the floor
+whatever your lists say. The key is file-only (no flag, no environment variable) and live:
+commit the `web-search-endpoint` row in `/settings`, or save the file, and the tool is re-pointed
+in place — the next call goes to the new endpoint, mid-session, with nothing rebuilt.
+
+## Skills a repository ships — `use-project-skills:`
+
+A **skill** is a folder holding a `SKILL.md` — frontmatter naming it, and a Markdown body of
+instructions. Apogee always scans two places for them: your global library at `~/.apogee/skills`,
+and the project's own `.apogee/skills`. `use-project-skills:` (default `true`) adds a third, the
+workspace's bare `skills/` folder — the convention a repository follows when its skills are meant
+for whichever agent shows up.
+
+```yaml
+# ~/.apogee/config.yaml
+use-project-skills: false
+```
+
+Know what that turns on. A skill is prompt text somebody else wrote: it appears in your `/` menu,
+and invoking it prepends the author's instructions to the message you send. Cloning a repository
+therefore means accepting that its skills are on your menu, one keystroke from your next message
+— read them the way you read its build scripts. Two things bound the trust. Your own library wins
+every id collision ([ADR 0032](../adr/0032-the-user-skill-library-outranks-the-workspace.md)), so
+a repository can contribute a **new** skill id but can never quietly replace one you invoke by
+muscle memory; the copy it displaced is recorded rather than dropped, and
+[`/skills`](commands.md) names both the live one and the shadowed one. And the skill folders the
+model may read are mounted **read-only**, by their resolved real path — a `skills/` or
+`.apogee/skills` that is a symlink pointing out of the workspace is neither loaded nor mounted,
+so a repository cannot use one to widen what the file tools can reach.
+
+The flip is live: commit the `use-project-skills` row in `/settings`, or save the file, and the
+sources are re-scanned there and then — the `/` menu changes in the session you are already in.
+[`/skills`](commands.md) lists what was discovered and where each one came from, and a skill body
+may write [`{{SKILL_DIR}}`](commands.md#skill_dir-in-skill-bodies) to name the files bundled
+beside its own `SKILL.md`.
 
 Automatic context **Compaction** keeps a long session from overflowing the model's
 window: when the conversation history outgrows its budgeted share, apogee folds the

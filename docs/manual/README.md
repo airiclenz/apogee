@@ -8,7 +8,7 @@ install it, what it can do. These pages are the full detail:
 |---|---|
 | [Commands](commands.md) | Every in-chat command, skills, `@file` references, the keys, `/undo`, and the `/settings` screen |
 | [Sessions](sessions.md) | How conversations are saved, resumed, browsed, renamed |
-| [Configuration](configuration.md) | `~/.apogee/config.yaml` end to end: servers, API keys, model profiles, tools, mechanisms, the system prompt, llama-launcher, document presentation, and Auto mode's confinement |
+| [Configuration](configuration.md) | `~/.apogee/config.yaml` end to end: servers, API keys, model profiles, tools, mechanisms, the system prompt, llama-launcher, document presentation, Auto mode's confinement, url-safety, web search, and project skills |
 | [Diagnosing a host — `apogee probe`](probe.md) | What this machine can enforce, what the model can do, what the terminal really does |
 | [Running one prompt — `apogee headless`](headless.md) | Single unattended runs for scripts and pipelines |
 | [Standing schedules — `apogee daemon`](daemon.md) | Prompts on a clock that outlive the session |
