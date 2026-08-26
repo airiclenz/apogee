@@ -586,7 +586,17 @@ popup's own frame glyph.
 
 ---
 
-## 9. Colliding argument keys are rejected before resolution; the grant digest folds keys (F-11)
+## 9. Colliding argument keys are rejected before resolution; the grant digest folds keys (F-11) — ✅ DONE (2026-08-26)
+
+NOTES (2026-08-26): `canonicalObject` (`internal/tools/tools.go`) carries its own fold-collision
+refusal in addition to the `CanonicalArgs` check the item names. Folding without it would let a
+top-level ARRAY of objects — a shape `domain.CollidingArgumentKeys` reports as unreadable rather
+than colliding, so `CanonicalArgs` skips it — emit one key twice in map-range order, making the
+digest of one call nondeterministic. The item's `CanonicalArgs` check is still the one that NAMES
+the offending spellings.
+NOTES (2026-08-26): `internal/domain/doc.go`'s file map gained the two new `tools.go` symbols — the
+package's docmap convention (`docmap_test.go`, coding-standards "package map") requires the map to
+describe what each file holds; not listed in the item's Files.
 
 **What:** `internal/tools/tools.go:132-164` `canonicalObject` keys a case-SENSITIVE map, while
 `decodeArgs` (`:69-75`) is stdlib `json.Unmarshal`, which matches struct fields

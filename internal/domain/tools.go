@@ -1,9 +1,15 @@
 package domain
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
+	"sort"
+	"strconv"
+	"strings"
 )
 
 // ----------------------------------------------------------------------------
@@ -209,6 +215,142 @@ type ToolCall struct {
 	ID        string
 	Tool      string
 	Arguments json.RawMessage
+}
+
+// FoldArgumentKey reduces an argument name to the spelling every reader of an argument object
+// must agree on. The executor decodes a call's arguments with stdlib encoding/json, which
+// matches object keys to struct fields CASE-INSENSITIVELY and takes the last match — so
+// "Command" and "command" are one parameter to the tool that runs, and any surface, guard,
+// digest or gate reading the same bytes has to fold them the same way or it is describing a
+// different call from the one that executes.
+func FoldArgumentKey(name string) string {
+	return strings.ToLower(name)
+}
+
+// CollidingArgumentKeys reports the groups of DISTINCT argument names that fold to one parameter
+// under FoldArgumentKey — the shape `{"command":"npm test","Command":"curl …|sh"}`, where the
+// executor runs one value while every last-wins reader of the raw bytes shows or digests the
+// other. Each group is rendered as its quoted spellings joined by "/" (`"Command"/"command"`),
+// sorted, with the groups themselves sorted, so one argument object always reports one way.
+// An empty result means no name is spelled two ways.
+//
+// It walks the whole value — nested objects and objects inside arrays included — because a tool's
+// arguments decode all the way down through the same case-insensitive matcher. A key repeated
+// with the SAME spelling (`{"path":1,"path":2}`) is not a collision: last-wins for an exact
+// duplicate is a pinned contract every reader already shares.
+//
+// Arguments that are not a JSON object, or that do not parse, are an error rather than an empty
+// result, so a caller can tell "nothing collides" from "nothing could be read"; a caller that
+// only refuses collisions ignores the error and leaves malformed arguments to the decode path
+// that reports them properly.
+func CollidingArgumentKeys(raw json.RawMessage) ([]string, error) {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	opening, err := decoder.Token()
+	if err != nil {
+		return nil, fmt.Errorf("argument object: %w", err)
+	}
+	delim, isDelim := opening.(json.Delim)
+	if !isDelim || delim != '{' {
+		return nil, errors.New("argument object: arguments are not a JSON object")
+	}
+
+	groups := map[string]struct{}{}
+	if err := collectCollidingKeys(decoder, groups); err != nil {
+		return nil, fmt.Errorf("argument object: %w", err)
+	}
+	if _, err := decoder.Token(); !errors.Is(err, io.EOF) {
+		return nil, errors.New("argument object: trailing content after the closing brace")
+	}
+
+	out := make([]string, 0, len(groups))
+	for group := range groups {
+		out = append(out, group)
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+// collectCollidingKeys consumes one object's members — the opening brace is already read — and
+// adds a rendered group for every fold that more than one distinct spelling reached, recursing
+// into each member's value.
+func collectCollidingKeys(decoder *json.Decoder, groups map[string]struct{}) error {
+	spellings := map[string][]string{}
+	for decoder.More() {
+		token, err := decoder.Token()
+		if err != nil {
+			return err
+		}
+		name, isString := token.(string)
+		if !isString {
+			return errors.New("object member name is not a string")
+		}
+		fold := FoldArgumentKey(name)
+		if !containsString(spellings[fold], name) {
+			spellings[fold] = append(spellings[fold], name)
+		}
+		if err := collectCollidingValue(decoder, groups); err != nil {
+			return err
+		}
+	}
+	if _, err := decoder.Token(); err != nil { // the closing brace
+		return err
+	}
+	for _, names := range spellings {
+		if len(names) < 2 {
+			continue
+		}
+		groups[renderCollisionGroup(names)] = struct{}{}
+	}
+	return nil
+}
+
+// collectCollidingValue consumes one JSON value, descending into it when it is an object or an
+// array and skipping past it when it is a scalar.
+func collectCollidingValue(decoder *json.Decoder, groups map[string]struct{}) error {
+	token, err := decoder.Token()
+	if err != nil {
+		return err
+	}
+	delim, isDelim := token.(json.Delim)
+	if !isDelim {
+		return nil
+	}
+	switch delim {
+	case '{':
+		return collectCollidingKeys(decoder, groups)
+	case '[':
+		for decoder.More() {
+			if err := collectCollidingValue(decoder, groups); err != nil {
+				return err
+			}
+		}
+		_, err := decoder.Token() // the closing bracket
+		return err
+	default:
+		return errors.New("unbalanced JSON value")
+	}
+}
+
+// renderCollisionGroup spells one group of colliding names for a human and for the model, quoting
+// each so a name carrying a control character or a line break cannot forge text around it.
+func renderCollisionGroup(names []string) string {
+	sorted := append([]string(nil), names...)
+	sort.Strings(sorted)
+	quoted := make([]string, 0, len(sorted))
+	for _, name := range sorted {
+		quoted = append(quoted, strconv.Quote(name))
+	}
+	return strings.Join(quoted, "/")
+}
+
+// containsString reports whether names already holds name.
+func containsString(names []string, name string) bool {
+	for _, existing := range names {
+		if existing == name {
+			return true
+		}
+	}
+	return false
 }
 
 // ToolResult is what a tool returns to the loop (pre tool-result-capping). Like ToolCall it

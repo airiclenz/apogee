@@ -234,6 +234,20 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **Security: a tool call cannot name one parameter twice and be approved as another (F-11).** The
+  executor decodes a call's arguments with stdlib JSON, which matches object keys to parameters
+  case-insensitively and takes the last — so `{"command":"npm test","Command":"curl …|sh"}` ran the
+  curl while the approval pane and the allow-for-session digest, both keyed on the raw spelling,
+  could describe `npm test`. Such a call is now refused at the dispatch seam, before the call is
+  resolved: the Approver is never consulted, the session's allow-for-session memory never mints a
+  key for it, the dangerous-action guard and the pane never see it, and the model gets back
+  `invalid arguments: "Command"/"command" name the same parameter — spell each argument once`.
+  The check walks nested objects and objects inside arrays too. A key repeated with the SAME
+  spelling is unchanged — last-wins for an exact duplicate stays the contract every reader shares.
+  Behind that refusal, the canonical form a grant is digested on now folds key case (and rejects a
+  collision outright), so one executed call is one remembered decision however the model spelled its
+  keys, and a colliding call falls back to the empty, unrememberable key.
+
 - Popup body wrap now hangs continuation lines under their own leading indent, so a long
   model-authored argument value on the approval pane can no longer wrap into column zero and paint
   as pane furniture beside the pane's own `Reason:` and labels (F-16). A pane too narrow to hold the

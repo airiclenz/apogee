@@ -119,6 +119,12 @@ const argumentValueIndent = "  "
 // discards — so the surviving pair sits where its winning value arrived, in wire order among the
 // other survivors, and the note says the earlier ones existed rather than hiding them.
 //
+// That decode folds key CASE as well — it matches an object key to a struct field
+// case-insensitively (domain.FoldArgumentKey) — so `command` and `Command` are ONE parameter to
+// the tool that runs, and a call spelling one name two ways has no rendering the pane and the
+// executor could both be right about. Dispatch refuses such a call before the Approver is ever
+// consulted (agent.resolveAndExecute), so it does not reach this surface.
+//
 // The NAME is flattened (flattenField) and the value is not, which is the same line drawn twice. A
 // name is a label: nothing in it is layout, so a newline in one is not a longer label but a SECOND
 // line, unindented, wearing whatever the model wrote it as — on the approval prompt that is a row

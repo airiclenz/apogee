@@ -62,7 +62,10 @@
 // ToolResult, the ToolRegistry, and the marker interfaces the dispatch disposition reads —
 // ReadOnlyTool, SubprocessTool, ExternalEffectTool, ReadSourceTool, PromptTool — plus
 // ApprovalScoper, read on the approval path rather than by the dispatch disposition, and
-// DefaultOffTool, read by the registry assembly when it composes the default menu.
+// DefaultOffTool, read by the registry assembly when it composes the default menu. It also holds
+// FoldArgumentKey and CollidingArgumentKeys — the one fold every reader of an argument object
+// agrees on (the executor's decode matches keys case-insensitively) and the check that refuses an
+// object naming one parameter under two spellings.
 // tooledit.go is the tool stage's pair of hook working values — ToolCallEdit and
 // ToolResultEdit, the revision-bearing wrappers the two tool-stage hooks reshape a pending
 // call and a returned result through. toolsummary.go is ToolSummary and its seven variants,

@@ -373,10 +373,22 @@ func (a *Agent) commitDelegation(ctx context.Context, turn int, slot *fanOutSlot
 // short-circuiting it keeps a withheld tool (e.g. sub_agent at the depth bound) resolving as an
 // unknown tool exactly as before, un-audited (Resolution D8). resolve() has a matching
 // unknown-tool row for its own test, but dispatch never reaches it.
+//
+// Its neighbour row is arguments that name one parameter twice under different key cases
+// (domain.CollidingArgumentKeys): the executor's decode folds them and runs ONE value, so every
+// other reader of the call — the pane a human decides on, the dangerous-action guard, the
+// allow-for-session digest — is at risk of describing the value the tool discards. There is no
+// spelling of such a call that all of them agree on, so it is refused here, before resolve():
+// the Approver is never asked about it, no gate key is ever minted for it, and the tool never
+// runs. Arguments that do not DECODE are left alone — the tool's own decodeToolArgs reports
+// those, with the parameter names the tool actually has.
 func (a *Agent) resolveAndExecute(ctx context.Context, turn int, call domain.ToolCall) (domain.ToolResult, dispatchOutcome) {
 	tool, ok := a.lookupTool(call.Tool)
 	if !ok {
 		return errorToolResult(call.ID, fmt.Sprintf("unknown tool %q", call.Tool)), dispatchDone
+	}
+	if groups, err := domain.CollidingArgumentKeys(call.Arguments); err == nil && len(groups) > 0 {
+		return errorToolResult(call.ID, collidingArgumentKeysMessage(groups)), dispatchDone
 	}
 
 	verdict := resolve(a.resolutionInput(tool, call, a.guards.PreExecute(call, tool)))
@@ -393,6 +405,22 @@ func (a *Agent) resolveAndExecute(ctx context.Context, turn int, call domain.Too
 	default: // resolveRun
 		return a.executeRun(ctx, turn, tool, call, verdict)
 	}
+}
+
+// collidingArgumentKeysPrefix and collidingArgumentKeysAdvice are the two halves of the ONE
+// wording a call refused for colliding argument keys carries. They are constants because the
+// refusal is the model's only signal about what to do differently: it must name the offending
+// spellings and prescribe the single fix, in the same words every time, so a retry loop can
+// recognise it rather than re-emit the same call.
+const (
+	collidingArgumentKeysPrefix = "invalid arguments: "
+	collidingArgumentKeysAdvice = " name the same parameter — spell each argument once"
+)
+
+// collidingArgumentKeysMessage is the error result text for a call whose argument keys fold
+// together, listing each colliding group as domain.CollidingArgumentKeys rendered it.
+func collidingArgumentKeysMessage(groups []string) string {
+	return collidingArgumentKeysPrefix + strings.Join(groups, ", ") + collidingArgumentKeysAdvice
 }
 
 // resolutionInput assembles the facts resolve() decides from for one call: the effective mode,

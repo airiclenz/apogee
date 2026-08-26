@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sort"
 	"strings"
 
@@ -90,10 +91,10 @@ func decodeArgs(raw json.RawMessage, dst any) error {
 }
 
 // CanonicalArgs re-encodes a tool call's raw arguments in the one spelling every reader of
-// those bytes can agree on: object keys sorted, a duplicated key collapsed to the occurrence
-// that WINS (the last — decodeArgs above is stdlib JSON, and so is every guard reading the same
-// call), insignificant whitespace dropped, and empty arguments canonicalised to the empty
-// object exactly as decodeArgs decodes them.
+// those bytes can agree on: object keys folded and sorted, a duplicated key collapsed to the
+// occurrence that WINS (the last — decodeArgs above is stdlib JSON, and so is every guard reading
+// the same call), insignificant whitespace dropped, and empty arguments canonicalised to the
+// empty object exactly as decodeArgs decodes them.
 //
 // It exists so a decision made ABOUT a call — today the allow-for-session key a Gate carries
 // (internal/agent) — can be keyed on what the executor will actually RUN rather than on the byte
@@ -102,6 +103,15 @@ func decodeArgs(raw json.RawMessage, dst any) error {
 // bytes for the sake of that second half; re-marshalling decoded values instead would round a
 // large integer and replace invalid UTF-8, quietly mapping two different executed calls onto one
 // canonical form.
+//
+// Keys are emitted in the FOLDED spelling every reader of an argument object shares
+// (domain.FoldArgumentKey), because the executor's decode matches them case-insensitively: two
+// key cases of one executed call are one canonical form, and one decision remembered about it
+// answers both. Arguments whose keys COLLIDE under that fold — two distinct spellings of one
+// parameter — have no honest canonical form at all (the object names one parameter twice while
+// the executor runs a single value), so they are an error; dispatch refuses such a call outright
+// (agent.resolveAndExecute) and this is the second line of that defence, leaving a caller keying
+// on the result with nothing to remember.
 //
 // Arguments the executor itself would reject are reported as an error rather than canonicalised,
 // so a caller keying on the result can refuse to remember anything about a call that will not
@@ -116,6 +126,9 @@ func CanonicalArgs(raw json.RawMessage) ([]byte, error) {
 	trimmed := bytes.TrimSpace(raw)
 	if len(trimmed) == 0 {
 		return []byte("{}"), nil
+	}
+	if groups, err := domain.CollidingArgumentKeys(trimmed); err == nil && len(groups) > 0 {
+		return nil, fmt.Errorf("colliding argument keys: %s", strings.Join(groups, ", "))
 	}
 	return canonicalJSON(trimmed)
 }
@@ -142,16 +155,32 @@ func canonicalJSON(raw json.RawMessage) ([]byte, error) {
 	}
 }
 
-// canonicalObject re-emits a JSON object with its keys sorted. Decoding into a map is what
-// collapses a duplicated key to its LAST occurrence — the same value stdlib JSON hands the
-// executor — so the canonical form describes the call that will actually run.
+// canonicalObject re-emits a JSON object with its keys FOLDED (domain.FoldArgumentKey) and
+// sorted on that folded form. Decoding into a map is what collapses a duplicated key to its LAST
+// occurrence — the same value stdlib JSON hands the executor — and the fold is what collapses its
+// two case spellings, which that same decode also treats as one parameter; between them the
+// canonical form describes the call that will actually run.
+//
+// Two DISTINCT spellings of one folded name are refused here rather than folded: this function
+// could only emit them as one object key twice over, in an order a map range does not fix, and a
+// digest taken on those bytes would not describe one call. CanonicalArgs above rejects the same
+// shape first and names the offending spellings; this guard is what keeps the emitter total for
+// the nested objects it recurses into.
 func canonicalObject(raw json.RawMessage) ([]byte, error) {
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &fields); err != nil {
 		return nil, err
 	}
-	keys := make([]string, 0, len(fields))
-	for key := range fields {
+	folded := make(map[string]json.RawMessage, len(fields))
+	for key, value := range fields {
+		fold := domain.FoldArgumentKey(key)
+		if _, collides := folded[fold]; collides {
+			return nil, fmt.Errorf("colliding argument keys under %q", fold)
+		}
+		folded[fold] = value
+	}
+	keys := make([]string, 0, len(folded))
+	for key := range folded {
 		keys = append(keys, key)
 	}
 	sort.Strings(keys)
@@ -168,7 +197,7 @@ func canonicalObject(raw json.RawMessage) ([]byte, error) {
 		}
 		out.Write(encoded)
 		out.WriteByte(':')
-		value, err := canonicalJSON(fields[key])
+		value, err := canonicalJSON(folded[key])
 		if err != nil {
 			return nil, err
 		}
