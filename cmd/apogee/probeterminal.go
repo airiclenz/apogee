@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/airiclenz/apogee/internal/probe"
+	"github.com/airiclenz/apogee/internal/sanitize"
 )
 
 // probeTerminalStreams is the seam onto the process's own terminal. Production never reassigns
@@ -74,7 +75,12 @@ func probeTerminalCommand() *cobra.Command {
 			// The report is this command's PRODUCT, so it goes to real stdout — the same split
 			// the host and model halves make, and for the same reason: `apogee probe terminal
 			// >term.txt` must leave the table in the file.
-			fmt.Fprintln(cmd.OutOrStdout(), report.Report())
+			//
+			// Escape-stripped on the way out (internal/sanitize owns the set and the reasons),
+			// like both siblings: every row is built from what the TERMINAL wrote back when the
+			// probe asked, so printing it raw would hand the measured terminal a second chance
+			// to act on its own answers instead of being described by them.
+			fmt.Fprintln(cmd.OutOrStdout(), sanitize.StripEscapes(report.Report()))
 			if report.Mismatch() {
 				return errProbeTerminalMismatch
 			}

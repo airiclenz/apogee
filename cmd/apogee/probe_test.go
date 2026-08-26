@@ -127,6 +127,35 @@ func TestProbeHostReportLandsOnTheProcessStdout(t *testing.T) {
 	}
 }
 
+// The host report names the endpoint's ACTIVE model, and the endpoint is exactly the thing the
+// operator ran `apogee probe` to distrust: printed raw, the id it advertises would carry an OSC 8
+// hyperlink (ADR 0019 rung 0) and a bidi override straight onto the terminal of the diagnostic
+// judging it. The sink strips (internal/sanitize); the `active:` line still names the model.
+func TestProbeCommandReportStripsTerminalEscapes(t *testing.T) {
+	t.Parallel()
+	// JSON-ENCODED rather than pasted between quotes: a literal ESC or BEL in a JSON string is a
+	// syntax error, so discovery would fail before the id could reach the report.
+	advertised, err := json.Marshal("\x1b]8;;mailto:evil\aqwen-\u202e3")
+	if err != nil {
+		t.Fatalf("encode advertised model id: %v", err)
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/models" {
+			_, _ = io.WriteString(w, `{"data":[{"id":`+string(advertised)+`,"context_length":4096}]}`)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound) // a bare OpenAI-compatible server
+	}))
+	defer srv.Close()
+
+	report := runProbe(t, newProbeCommand(), upstreamHome(t, srv.URL), t.TempDir())
+
+	if !strings.Contains(report, "active: ") || !strings.Contains(report, "qwen-") {
+		t.Errorf("the report no longer names the advertised model:\n%q", report)
+	}
+	assertNoTerminalControls(t, "probe host report", report)
+}
+
 // An interrupted Windows run leaves mandatory labels on the disk and a journal describing how
 // to undo them, and ADR 0020 §2 makes the host report the surface that says so off-session. The
 // report must therefore READ that state and leave it exactly where it found it: constructing

@@ -14,6 +14,7 @@ import (
 	"github.com/airiclenz/apogee/internal/library"
 	"github.com/airiclenz/apogee/internal/probe"
 	"github.com/airiclenz/apogee/internal/provider"
+	"github.com/airiclenz/apogee/internal/sanitize"
 )
 
 // batteryRequestTimeout bounds ONE battery call. The battery is four short exchanges against a
@@ -152,7 +153,15 @@ func probeModelCommand() *cobra.Command {
 			// battery's whole report on STDERR in every real invocation. The preamble, the
 			// save warnings and the record notices above stay on stderr by PrintErrln, so
 			// `apogee probe model >report.txt` keeps the report and still shows the rest.
-			fmt.Fprintln(cmd.OutOrStdout(), result.Report())
+			//
+			// Escape-stripped on the way out (internal/sanitize owns the set and the reasons):
+			// the report quotes the server's advertised model id, the fingerprint label and
+			// snippets of the model's own battery replies, and a server the operator is probing
+			// precisely BECAUSE they distrust it must not be able to repaint the terminal — or
+			// forge a hyperlink — on the diagnostic that judges it. The strip sits at this render
+			// seam rather than in internal/probe, exactly as the TUI strips at its own: the probe
+			// keeps producing raw text, and every sink that prints it strips on its behalf.
+			fmt.Fprintln(cmd.OutOrStdout(), sanitize.StripEscapes(result.Report()))
 			return nil
 		},
 	}

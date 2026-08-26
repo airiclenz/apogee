@@ -71,6 +71,10 @@ last-column wrap
   OK — the terminal holds a pending wrap at the last column — the semantics the renderer emits against
 ```
 
+All three reports are printed with terminal control characters and bidi overrides removed: a
+server you are probing *because* you distrust it — or a terminal that answers the measurement
+with escape sequences — must not be able to repaint the diagnostic that judges it.
+
 **When a frame comes out wrong**, two hidden flags record the evidence a rendering bug is
 argued from — `--tui-trace <file>` writes the exact bytes the renderer emitted, one quoted
 string per write, so a corrupted frame can be replayed rather than only described, and

@@ -18,6 +18,7 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/library"
 	"github.com/airiclenz/apogee/internal/probe"
+	"github.com/airiclenz/apogee/internal/sanitize"
 )
 
 // modelUpstream is a fake OpenAI-compatible server that passes the whole capability battery. It
@@ -43,10 +44,18 @@ func modelUpstreamAdvertising(t *testing.T, active string) *httptest.Server {
 // from outside.
 func modelUpstreamRecording(t *testing.T, active string, auth *authLog) *httptest.Server {
 	t.Helper()
+	// The advertised id is JSON-ENCODED rather than pasted between quotes: the escape-strip
+	// guard below advertises an id carrying ESC and BEL, and a literal control character in a
+	// JSON string is a syntax error — the client would fail discovery instead of carrying the
+	// hostile id through to the report, and the guard would prove nothing.
+	activeJSON, err := json.Marshal(active)
+	if err != nil {
+		t.Fatalf("encode advertised model id %q: %v", active, err)
+	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		auth.record(r)
 		if r.URL.Path == "/v1/models" {
-			_, _ = w.Write([]byte(`{"data":[{"id":"` + active + `","context_length":4096}]}`))
+			_, _ = w.Write([]byte(`{"data":[{"id":` + string(activeJSON) + `,"context_length":4096}]}`))
 			return
 		}
 		if r.URL.Path == "/props" {
@@ -207,6 +216,48 @@ func TestProbeModelReportLandsOnTheProcessStdout(t *testing.T) {
 	}
 	if strings.Contains(stdout, "calling the model live") {
 		t.Errorf("the preamble reached process stdout, where it would contaminate the report: %q", stdout)
+	}
+}
+
+// The report is a diagnostic ABOUT a server the operator has reason to distrust, so it may not
+// hand that server the terminal: the id it advertises reaches three places in the report (the
+// upstream block, the fingerprint label and the suggested profile YAML), and printed raw an OSC 8
+// introducer would make the whole diagnosis one forged hyperlink (ADR 0019 rung 0) while a bidi
+// override would reorder the very line naming what was probed. The sink strips
+// (internal/sanitize); the id's printable text still identifies the model.
+func TestProbeModelReportStripsTerminalEscapes(t *testing.T) {
+	t.Parallel()
+	srv := modelUpstreamAdvertising(t, "\x1b]8;;mailto:evil\aqwen-\u202e3")
+	// --no-save keeps the run to the sink under test: nothing is written, so the advertised id
+	// never reaches a filename, and the fingerprint label still carries it into the report.
+	report := runProbeModel(t, upstreamHome(t, srv.URL), "--no-save")
+
+	if !strings.Contains(report, "qwen-") {
+		t.Errorf("the report dropped the advertised id's printable text:\n%q", report)
+	}
+	assertNoTerminalControls(t, "probe model report", report)
+}
+
+// assertNoTerminalControls fails when s carries anything the render seams strip: a C0 control
+// other than newline or tab, DEL, or one of the eleven bidi overrides. ESC and BEL are named
+// separately because they are the two that carry a payload — an OSC 8 hyperlink needs both.
+func assertNoTerminalControls(t *testing.T, what, s string) {
+	t.Helper()
+	for _, c := range []struct {
+		name string
+		r    rune
+	}{{"ESC", 0x1b}, {"BEL", 0x07}} {
+		if strings.ContainsRune(s, c.r) {
+			t.Errorf("%s carries %s — an OSC 8 hyperlink needs both", what, c.name)
+		}
+	}
+	// One dump on the first survivor: every subsequent one would print the same report again.
+	for _, r := range s {
+		switch {
+		case r == '\n' || r == '\t':
+		case r < 0x20 || r == 0x7f || sanitize.BidiControl(r):
+			t.Fatalf("%s carries the terminal control %U:\n%q", what, r, s)
+		}
 	}
 }
 

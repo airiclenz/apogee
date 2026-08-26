@@ -191,7 +191,20 @@ pass unchanged (they now exercise the delegates).
 
 ---
 
-## 2. `apogee probe` / `probe model` / `probe terminal` strip at their stdout sinks (C-11)
+## 2. `apogee probe` / `probe model` / `probe terminal` strip at their stdout sinks (C-11) — ✅ DONE (2026-08-26)
+
+NOTES (2026-08-26): the item's parenthetical named only two rationale comments
+(`probemodel.go:150-154`, `probe.go:126-131`) but its sentence says "each sink's" — the third
+sink, `probeterminal.go`, gained the same one-sentence rationale (its input is the measured
+terminal's own answers), so no sink is left with an unexplained strip.
+NOTES (2026-08-26): `modelUpstreamRecording` now JSON-*encodes* the advertised model id instead of
+pasting it between quotes. The fixture concatenated it raw, and a literal ESC or BEL inside a JSON
+string is a syntax error — the item's named call `modelUpstreamAdvertising(t,
+"\x1b]8;;mailto:evil\x07qwen-‮3")` would have failed discovery instead of carrying the hostile id
+through to the report. Every existing caller passes plain ASCII and is unaffected.
+NOTES (2026-08-26): `TestProbeModelReportStripsTerminalEscapes` runs with `--no-save`, so the
+hostile id never reaches a filename; the fingerprint label still carries it into the report, which
+is the surface under test.
 
 Depends on item 1.
 

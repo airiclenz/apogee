@@ -10,6 +10,7 @@ import (
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/probe"
+	"github.com/airiclenz/apogee/internal/sanitize"
 )
 
 // newProbeCommand builds `apogee probe` — the diagnosis command, whose FREE half is the bare
@@ -129,7 +130,14 @@ func probeHostCommand(use, short, long string) *cobra.Command {
 			// empty (the fallback differs only when a caller has wired an out writer, which is
 			// tests and nothing else). Notices and warnings above keep travelling by PrintErrln,
 			// which does target the err stream — the same split runHeadless makes.
-			fmt.Fprintln(cmd.OutOrStdout(), host.Report())
+			//
+			// Escape-stripped on the way out (internal/sanitize owns the set and the reasons):
+			// the report quotes the endpoint's advertised active model and, when discovery
+			// fails, the server's own failure text — and a server the operator is probing
+			// precisely BECAUSE they distrust it must not be able to repaint the terminal on
+			// the diagnostic that judges it. The strip sits at this render seam rather than in
+			// internal/probe, exactly as the TUI strips at its own.
+			fmt.Fprintln(cmd.OutOrStdout(), sanitize.StripEscapes(host.Report()))
 			return nil
 		},
 	}

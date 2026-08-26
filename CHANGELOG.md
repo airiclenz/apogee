@@ -234,6 +234,16 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **The three `apogee probe` reports strip terminal escapes at their stdout sinks (code audit
+  C-11).** `apogee probe`, `probe model` and `probe terminal` printed server-advertised and
+  model-authored text raw: the advertised model id, the behavioral-fingerprint label, the
+  suggested `model-profiles:` YAML, the battery's reply snippets and the terminal's own answers
+  all reached stdout unfiltered — so the very server an operator runs the diagnostic against
+  could forge a hyperlink on it (ADR 0019 rung 0) or reorder the line naming what was probed.
+  All three sinks now print through `internal/sanitize.StripEscapes`, the same strip
+  `apogee headless` puts on its answer. `internal/probe` keeps producing raw text: the strip
+  belongs at the render seam, exactly as the TUI's does.
+
 - **Headless output now drops bidi-formatting characters too.** The control-character strip on
   `apogee headless`'s answer and its sub-agent lines had drifted behind the TUI's: it removed the
   C0 controls and DEL but kept the bidirectional overrides, so a model could print a line that
