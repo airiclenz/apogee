@@ -38,7 +38,15 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	// On resume the connection is established FRESH here — no server-side state is restored
 	// (ADR 0008). An MCP connect failure is fatal: a configured server that cannot be reached is
 	// a misconfiguration the user should see, not a silently-dropped capability.
-	mcpClient, err := mcp.Connect(ctx, w.opts.MCPServers, security.URLGuard{}, w.roots.workspace)
+	//
+	// The endpoint of an `sse`/`streamable-http` server is checked against the operator's OWN
+	// url-safety host lists — scheme/host allow-deny, with the resolved-IP floor disabled for it
+	// and the connection pinned to its own addresses instead (internal/mcp/transport.go, ADR 0012
+	// amendment 2026-07-26). Before, both call sites here handed the transport a ZERO guard, so a
+	// configured `deny-hosts` entry applied to every network tool and to no MCP endpoint (audit
+	// 2026-08-25 F-40); a denied host is now refused at startup with the url-safety message.
+	mcpClient, err := mcp.Connect(ctx, w.opts.MCPServers,
+		w.mcpGuard(w.cfg.URLAllowHosts, w.cfg.URLDenyHosts), w.roots.workspace)
 	if err != nil {
 		return fmt.Errorf("apogee: connect MCP servers: %w", err)
 	}
@@ -47,8 +55,15 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	// what has to be closed at the end of the run is whatever the holder is on NOW — closing the
 	// client this line connected would leave the live sessions orphaned and tear down a set that was
 	// already closed hours ago.
+	//
+	// The reconnect runs LATER, when an `mcp-servers:` edit lands (liveMCP.reconnect), by which time
+	// the host lists may have moved through `/settings` — so its guard is built from the spec the
+	// live tool set is currently on rather than from the snapshot this line closed over. That is the
+	// same read the network tools' own rebuild makes, which is what keeps the MCP endpoint check and
+	// the network tools from ever disagreeing about which hosts are closed.
 	w.mcpSet = newLiveMCP(mcpClient, func(servers []mcp.ServerConfig) (mcpSession, error) {
-		return mcp.Connect(ctx, servers, security.URLGuard{}, w.roots.workspace)
+		spec := w.toolSet.built()
+		return mcp.Connect(ctx, servers, w.mcpGuard(spec.allowHosts, spec.denyHosts), w.roots.workspace)
 	})
 	// The registry is assembled HERE unconditionally rather than left to the engine's own
 	// resolveTools — which would build the identical set from this same Config — because the
@@ -339,4 +354,13 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	w.colorScheme, w.colorSchemeWarnings = resolveColorScheme(w.opts.UI.ColorScheme, w.roots.schemes)
 
 	return nil
+}
+
+// mcpGuard builds the url-safety guard an MCP connect is made under, from the host lists whichever
+// call site holds — the startup snapshot at wireSession, the live tool set's spec at a reconnect.
+// It exists so the two cannot drift: the guard is built through the same constructor, off the same
+// two fields, that registryWithMCP hands every network tool (wire_tools.go), so a host the operator
+// closed is closed on both paths or on neither.
+func (w *rootWiring) mcpGuard(allow, deny []string) security.URLGuard {
+	return security.NewURLGuard(allow, deny)
 }

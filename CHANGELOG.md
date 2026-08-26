@@ -276,6 +276,22 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **`url-safety:` did not apply to MCP endpoints.** Both places the composition root connects an
+  `mcp-servers:` entry — the startup connect and the reconnect a live `mcp-servers:` edit drives —
+  handed the transport a ZERO `security.URLGuard`, so an `sse` or `streamable-http` endpoint was
+  checked against empty host lists: a `deny-hosts` entry that closed a host for `web_fetch`,
+  `http_request` and `web_search` left that same host reachable as an MCP server. Both connects now
+  build the guard through `security.NewURLGuard` off the operator's own `url-safety.allow-hosts` /
+  `deny-hosts`, the same constructor and the same two fields every network tool is handed, so the
+  two can never disagree about which hosts are closed. A denied endpoint is refused before anything
+  is dialled, with the url-safety message (`mcp: server "x" endpoint blocked by url-safety: …`) —
+  at startup, where an all-or-nothing connect makes it the startup error, and on a reconnect, where
+  it leaves the session on the connections it already had. The reconnect reads the lists the session
+  is on NOW rather than the ones it launched with, so a `/settings` edit of either list binds the
+  next `mcp-servers:` apply. What did not change: the endpoint is still exempt from the resolved-IP
+  SSRF floor and pinned to its own addresses instead (ADR 0012, amendment 2026-07-26), so a
+  configured localhost or LAN server keeps working unless a list closes it.
+
 - **The LLM client could be re-aimed by a redirect.** The provider client was built as a bare
   `&http.Client{}`, so a `307` or `308` from the configured endpoint was followed automatically —
   and the request it re-aimed is the per-Turn POST, which carries the WHOLE conversation: every

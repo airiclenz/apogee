@@ -300,7 +300,20 @@ pinning that the policy lives on the default, not on the option.
 
 ---
 
-## 4. MCP connects under the configured `url-safety:` guard, at boot and on reconnect (F-40)
+## 4. MCP connects under the configured `url-safety:` guard, at boot and on reconnect (F-40) — ✅ DONE (2026-08-26)
+
+NOTES (2026-08-26): the plan asks for "one paragraph" on the comment at `:41-51`; it landed as two,
+one per call site — the startup connect's says what the guard now is and what it does not disable
+(the floor exemption and the pin), the reconnect closure's says why its guard is read from
+`toolSet.built()` rather than from the snapshot the closure closed over. The two sites now sit apart
+in the file, so one shared paragraph would have had to be read at the wrong one.
+NOTES (2026-08-26): `mcpGuard` carries the receiver the plan's signature names but does not use it —
+it is a seam against drift between the two call sites, not a read of the wiring. Kept as specified
+rather than demoted to a package function, so the plan's text and the code agree.
+NOTES (2026-08-26): both halves were checked to be load-bearing by temporarily neutralising each
+(`mcpGuard` returning `security.URLGuard{}`, and the reconnect closure reading `w.cfg` instead of
+the live spec) and confirming the matching test fails with the connection-refused error the zero
+guard produces.
 
 **What:** the zero guard at `cmd/apogee/wire_live.go:41` and `:51` becomes the operator's.
 - `cmd/apogee/wire_live.go:41`: `mcp.Connect(ctx, w.opts.MCPServers,
