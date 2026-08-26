@@ -121,12 +121,11 @@ func (p *uiPresenter) Present(ctx context.Context, req domain.PresentRequest) (d
 		SpawnCallID: req.SpawnCallID,
 	})
 
-	// The outcome's Location is where the user finds the document (domain.PresentOutcome): the URL
-	// when one was served, the display path otherwise — which is what the transcript shows.
-	if location == "" {
-		location = req.DisplayPath
-	}
-	return domain.PresentOutcome{Method: method, Location: location}, nil
+	// The outcome's Location is the display path on EVERY rung (domain.PresentOutcome), including a
+	// served one: the served URL carries the doc server's capability token (ADR 0019 §3), and the
+	// outcome is model context — relayed in the tool result, POSTed upstream on the next Turn and
+	// persisted with the session. The URL's whole reach is the entry sent just above.
+	return domain.PresentOutcome{Method: method, Location: req.DisplayPath}, nil
 }
 
 // climb attempts the highest rung that applies to this session and reports what happened: the

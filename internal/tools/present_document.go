@@ -132,16 +132,20 @@ func (t *PresentDocument) Execute(ctx context.Context, call domain.ToolCall) (do
 // renderPresented turns the outcome into the sentence the model relays. Each rung gets its
 // own truthful claim — "opened on the user's machine" is a promise only the opener rung can
 // keep — and everything else falls through to the baseline wording, which is the one claim
-// that is never wrong: an unknown Method (the enum is open, ADR 0019) and a served rung with
-// no URL both mean the model may only say the path is in the transcript.
+// that is never wrong: an unknown Method (the enum is open, ADR 0019) means the model may only
+// say the path is in the transcript.
+//
+// outcome.Location is interpolated on NO rung. A served URL carries the doc server's capability
+// token (ADR 0019 §3) and this result is model context — POSTed upstream on the next Turn and
+// persisted with the session — so the link's whole reach is the transcript entry. Defence in
+// depth: the Presenter already hands back the display path, and a host that still returned a URL
+// could not leak it through here.
 func renderPresented(display string, outcome domain.PresentOutcome) string {
 	switch outcome.Method {
 	case domain.PresentOpened:
 		return "Presented " + display + ": opened on the user's machine."
 	case domain.PresentServed:
-		if strings.TrimSpace(outcome.Location) != "" {
-			return "Presented " + display + ": shown in the transcript with a link (" + outcome.Location + ")."
-		}
+		return "Presented " + display + ": shown in the transcript with a link."
 	}
 	return "Presented " + display + ": the path is shown in the transcript for the user to open."
 }

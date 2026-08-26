@@ -70,9 +70,12 @@ func TestPresentDocument_OutcomeWordingPerRung(t *testing.T) {
 			want:    "Presented report.html: opened on the user's machine.",
 		},
 		{
+			// A served rung says a link exists; it never repeats the URL. The doc-server URL carries
+			// a capability token (ADR 0019 §3) and this result is model context — the assertion
+			// below pins that neither the token nor the `/d/` path ever reaches it.
 			name:    "served",
-			outcome: domain.PresentOutcome{Method: domain.PresentServed, Location: "http://192.168.64.2:8080/d/abc/report.html"},
-			want:    "Presented report.html: shown in the transcript with a link (http://192.168.64.2:8080/d/abc/report.html).",
+			outcome: domain.PresentOutcome{Method: domain.PresentServed, Location: "http://192.168.64.2:8080/d/0123456789abcdef0123456789abcdef/report.html"},
+			want:    "Presented report.html: shown in the transcript with a link.",
 		},
 		{
 			name:    "shown",
@@ -87,10 +90,11 @@ func TestPresentDocument_OutcomeWordingPerRung(t *testing.T) {
 			want:    "Presented report.html: the path is shown in the transcript for the user to open.",
 		},
 		{
-			// A served rung with no URL cannot be relayed as a link.
-			name:    "served without a location degrades to the baseline wording",
+			// A served rung reads the same with or without a Location, because the field is not
+			// interpolated: the wording claims a link in the transcript, which rung 0 put there.
+			name:    "served without a location reads as the served rung",
 			outcome: domain.PresentOutcome{Method: domain.PresentServed},
-			want:    "Presented report.html: the path is shown in the transcript for the user to open.",
+			want:    "Presented report.html: shown in the transcript with a link.",
 		},
 		{
 			// A document rung 1 refuses to hand the OS handler (present.OpenerRenderable, the
@@ -122,6 +126,11 @@ func TestPresentDocument_OutcomeWordingPerRung(t *testing.T) {
 			}
 			if res.Content != tc.want {
 				t.Errorf("result = %q, want %q", res.Content, tc.want)
+			}
+			// Belt and braces on every row, not just the served one: no rung may relay the doc
+			// server's path or its capability token into model context (ADR 0019 §3).
+			if strings.Contains(res.Content, "/d/") || strings.Contains(res.Content, "0123456789abcdef") {
+				t.Errorf("result = %q leaks the doc-server URL or its capability token", res.Content)
 			}
 			if presenter.calls != 1 {
 				t.Errorf("presenter consulted %d times, want exactly 1 — rung 0 always runs", presenter.calls)

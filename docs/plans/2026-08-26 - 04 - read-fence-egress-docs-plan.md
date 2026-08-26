@@ -444,7 +444,17 @@ a request to a DIFFERENT private address through the same client is refused.
 
 ---
 
-## 6. The doc-server capability token stays in the transcript entry (F-21)
+## 6. The doc-server capability token stays in the transcript entry (F-21) — ✅ DONE (2026-08-26)
+
+NOTES (2026-08-26): the item names `presenter_test.go`'s `TestPresenterLadderPicksRung`;
+`TestBridgeSetPresentationSwapsTheLadderInPlace` (same file, `:426`) also asserted
+`out.Location` held the served URL and had to move that assertion onto the last `presentedMsg` —
+same proof, the only surface that still carries the URL.
+NOTES (2026-08-26): `transcriptcodec_test.go`'s `mixedEntries` fixture (`:74`) was
+served-with-a-URL, which the round-trip's DeepEqual can no longer satisfy; per the item's
+"adjust the fixture" clause it now carries the OPENED rung (the shape every non-rung-2
+presentation has), and the served case is pinned by the new
+`TestTranscriptCodecDropsTheServedURLOnEncode`.
 
 **What:** the served URL — `/d/<token>/<basename>` — is relayed by rung 0 alone; the tool
 result, the upstream POST and the session record carry only the rung and the display path.

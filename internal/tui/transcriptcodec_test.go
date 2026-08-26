@@ -71,12 +71,63 @@ func mixedEntries() []entry {
 		{kind: entryError, text: "loop: recovered fault"},
 		{kind: entryNote, text: "cancelled"},
 		{
+			// The OPENED rung, deliberately not the served one: a served entry's Location is the
+			// one field the codec does NOT round-trip (toWirePresented drops the doc-server URL),
+			// and TestTranscriptCodecDropsTheServedURLOnEncode pins that on its own. Every rung
+			// but rung 2 leaves Location empty, so this is the shape a record brings back whole.
 			kind: entryPresented,
 			presented: presentedView{
-				Title: "Report", Path: "out/report.md", Location: "http://localhost:9/report.md",
-				Method: domain.PresentServed, Reason: "",
+				Title: "Report", Path: "out/report.md",
+				Method: domain.PresentOpened, Reason: "",
 			},
 		},
+	}
+}
+
+// TestTranscriptCodecDropsTheServedURLOnEncode proves the doc server's capability token never
+// reaches the session record. Rung 2's URL — /d/<32 hex>/<basename> (ADR 0019 §3) — is a grant,
+// and the server that honours it is started lazily and closed on shutdown, so a persisted URL is
+// dead on every resume and the token is the only thing the record would keep. The entry still
+// renders its path and status after a reload; only the link is gone.
+func TestTranscriptCodecDropsTheServedURLOnEncode(t *testing.T) {
+	t.Parallel()
+
+	const token = "0123456789abcdef0123456789abcdef"
+	served := presentedView{
+		Title: "Report", Path: "out/report.html",
+		Location: "http://192.168.64.2:8080/d/" + token + "/report.html",
+		Method:   domain.PresentServed,
+	}
+	opened := presentedView{Title: "Notes", Path: "out/notes.md", Method: domain.PresentOpened}
+
+	data, err := encodeTranscript(&transcript{entries: []entry{
+		{kind: entryPresented, presented: served},
+		{kind: entryPresented, presented: opened},
+	}})
+	if err != nil {
+		t.Fatalf("encodeTranscript: %v", err)
+	}
+	if blob := string(data); strings.Contains(blob, "/d/") || strings.Contains(blob, token) {
+		t.Fatalf("the record carries the doc-server URL or its capability token:\n%s", blob)
+	}
+
+	got, err := decodeTranscript(data)
+	if err != nil {
+		t.Fatalf("decodeTranscript: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("decoded %d entries, want the two presentations", len(got))
+	}
+	// The rung and the path survive: a resumed served entry still says which rung carried the
+	// document and where it lives, it just no longer offers a link nothing would answer.
+	if pv := got[0].presented; pv.Method != domain.PresentServed || pv.Path != served.Path || pv.Title != served.Title {
+		t.Errorf("served entry = %+v; want the served rung with its path and title intact", pv)
+	}
+	if pv := got[0].presented; pv.Location != "" {
+		t.Errorf("served location = %q; want it dropped", pv.Location)
+	}
+	if pv := got[1].presented; pv != opened {
+		t.Errorf("opened entry = %+v; want %+v — only rung 2 loses a field", pv, opened)
 	}
 }
 

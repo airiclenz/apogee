@@ -282,20 +282,20 @@ func TestPresenterLadderPicksRung(t *testing.T) {
 			if !strings.HasPrefix(msg.Reason, tc.wantReason) || (tc.wantReason == "" && msg.Reason != "") {
 				t.Errorf("reason = %q; want prefix %q", msg.Reason, tc.wantReason)
 			}
+			// The served URL's whole reach is the transcript entry: the ENTRY carries it, the
+			// OUTCOME — which the tool relays into model context and the session record — never
+			// does, on any rung (ADR 0019 §3, the capability token).
+			if out.Location != req.DisplayPath {
+				t.Errorf("outcome location = %q; want the display path %q", out.Location, req.DisplayPath)
+			}
 			if tc.wantServed {
 				if !strings.HasPrefix(msg.Location, "http://192.168.64.2:") || !strings.Contains(msg.Location, "/d/") {
 					t.Errorf("location = %q; want a doc-server URL on the advertised host", msg.Location)
-				}
-				if out.Location != msg.Location {
-					t.Errorf("outcome location = %q; want the served URL %q", out.Location, msg.Location)
 				}
 				return
 			}
 			if msg.Location != "" {
 				t.Errorf("location = %q; want empty on a rung that served nothing", msg.Location)
-			}
-			if out.Location != req.DisplayPath {
-				t.Errorf("outcome location = %q; want the display path %q", out.Location, req.DisplayPath)
 			}
 		})
 	}
@@ -423,8 +423,19 @@ func TestBridgeSetPresentationSwapsTheLadderInPlace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Present after the swap: %v", err)
 	}
-	if out.Method != domain.PresentServed || !strings.Contains(out.Location, "192.168.64.2:") {
+	if out.Method != domain.PresentServed {
 		t.Errorf("outcome = %+v; want the swapped-in doc server to have carried this presentation", out)
+	}
+	// The served URL rides the transcript entry alone (ADR 0019 §3 — the outcome is model context),
+	// so the evidence that the swapped-in server really bound is the LAST entry's Location.
+	var last presentedMsg
+	for _, m := range prog.messages() {
+		if msg, ok := m.(presentedMsg); ok {
+			last = msg
+		}
+	}
+	if !strings.Contains(last.Location, "192.168.64.2:") {
+		t.Errorf("entry location = %q; want the swapped-in doc server's URL", last.Location)
 	}
 }
 

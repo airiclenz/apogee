@@ -80,8 +80,10 @@ type PresentOutcome struct {
 	// when everything above the baseline failed or did not apply.
 	Method PresentMethod
 
-	// Location is where the user finds the document: the served URL for PresentServed, the
-	// DisplayPath otherwise.
+	// Location is the DisplayPath, on every rung — never a served URL: the tool result is model
+	// context, sent upstream on the next Turn and persisted with the session, and the doc-server
+	// URL carries a capability token (ADR 0019 §3). Where the user finds a served document is the
+	// transcript entry's to say.
 	Location string
 }
 

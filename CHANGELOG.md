@@ -276,6 +276,13 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- The doc-server link — and the capability token inside it — no longer appears in
+  `present_document`'s tool result or in the saved session record: `present_document` now
+  reports a served document as "shown in the transcript with a link", the Presenter hands the
+  engine the display path on every rung, and the transcript codec drops a served entry's URL on
+  encode (a doc server dies with the process, so a persisted URL was dead on resume anyway). The
+  live transcript entry still shows the link.
+
 - **Model-driven egress ignored the operator's proxy.** Neither the network tools
   (`web_fetch`, `http_request`, `web_search`) nor the `sse` / `streamable-http` MCP transports
   set a `Transport.Proxy`, so an operator who routes the box's traffic through

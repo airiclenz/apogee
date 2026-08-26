@@ -480,11 +480,20 @@ func toWireToolView(tv toolView) *wireToolView {
 }
 
 // toWirePresented projects a presentedView onto the wire, storing Method as its domain string.
+//
+// A SERVED entry's Location is dropped on the way out. The doc server is started lazily and closed
+// on shutdown (ADR 0019 §3), so its URL is dead on every resume and the capability token inside it
+// is the only thing the record would actually keep. Decode is unchanged: the field comes back
+// empty and a restored served entry prints no Location line (startupbox.renderPresentedBlock).
 func toWirePresented(pv presentedView) *wirePresented {
+	location := pv.Location
+	if pv.Method == domain.PresentServed {
+		location = ""
+	}
 	return &wirePresented{
 		Title:    pv.Title,
 		Path:     pv.Path,
-		Location: pv.Location,
+		Location: location,
 		Method:   string(pv.Method),
 		Reason:   pv.Reason,
 	}

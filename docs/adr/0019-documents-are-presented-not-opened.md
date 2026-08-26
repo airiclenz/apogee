@@ -91,6 +91,13 @@ probe for the local address (no packets need to arrive), else `127.0.0.1`; its p
 `present.port`, default **0** (ephemeral) — the URL is printed fresh per presentation, so a
 stable port buys nothing.
 
+*Addendum (2026-08-25, audit F-21) — the token's whole reach is the live transcript entry.* The
+served URL carries a capability grant, so rung 0's entry is the only place it appears: the tool
+result names the rung and the display path but never the URL, so no capability token is POSTed
+upstream on the next Turn, and the session record drops a served entry's location on encode. The
+server is lazily started and closed on shutdown anyway, so a persisted URL would be dead on every
+resume — the token in it was the only thing a record could still keep.
+
 **4. Fail visible, degrade to rung 0 — a presentation never fails the tool call.** An opener that
 errors, a server that cannot bind, an undetectable desktop: none of these produce a tool error,
 because rung 0 already happened host-side. The transcript entry says what happened ("no opener
