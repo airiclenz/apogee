@@ -2619,8 +2619,13 @@ func (m Model) footerView() string {
 // A window too narrow to hold both ends keeps today's shape: the left info truncates with an
 // ellipsis and the mode marker drops WHOLE, because a clipped mode word would name a blast radius
 // the session is not in.
+//
+// The line is one of the view's escape-strip SEAMS (doc.go): the model id and the effort default
+// are the SERVER's text and the host is config text, and the footer strips all three on their
+// producers' behalf rather than trusting any of them — one unterminated OSC 8 opener painted into
+// the footer's black field turns the rest of the frame into a link to somebody else's URL.
 func (m Model) footerContent(w int) string {
-	segments := append([]string{hostDisplay(m.opts)}, m.upstreamSegments()...)
+	segments := append([]string{stripEscapes(hostDisplay(m.opts))}, m.upstreamSegments()...)
 	// The effort word joins the run with the upstream facts and BEFORE the workdir: how hard the
 	// model is asked to think is a property of the model answering, not of where the session is
 	// pointed, so it sits on the upstream side of the outward-in reading. A model whose dial the
@@ -2628,7 +2633,7 @@ func (m Model) footerContent(w int) string {
 	// /effort is (ADR 0060) — and, like every unnamed segment, it leaves with its separator.
 	override, profile := m.eng.ThinkingEffort()
 	support := m.effortSupport()
-	if effort, show := footerEffortLabel(override, profile, support.Default, support.Supported); show {
+	if effort, show := footerEffortLabel(override, profile, stripEscapes(support.Default), support.Supported); show {
 		segments = append(segments, effort)
 	}
 	info := strings.Join(nonEmpty(append(segments, m.workdir)...), " "+glyphAssistant+" ")
@@ -2690,7 +2695,7 @@ func (m Model) upstreamSegments() []string {
 	if m.opts.Model == "" && m.observesUpstream() {
 		return []string{connectingLabel}
 	}
-	return []string{displayModel(m.opts.Model)}
+	return []string{stripEscapes(displayModel(m.opts.Model))}
 }
 
 // newStartupView builds the one-time start-up box's facts from the resolved display Options — the

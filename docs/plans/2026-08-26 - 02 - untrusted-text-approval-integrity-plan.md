@@ -244,7 +244,20 @@ the sink change is covered by build + the two sibling tests.
 
 ---
 
-## 3. Footer model id + effort default, and `ctxModel` on both paths (C-09, C-17)
+## 3. Footer model id + effort default, and `ctxModel` on both paths (C-09, C-17) — ✅ DONE (2026-08-26)
+
+NOTES (2026-08-26): the item's `assertNoESCIn(t, "footer", m.footerContent(80), m.footerContent(30))`
+is applied to the footer with its own CSI styling removed by `ansiPattern` first — `footerContent`
+returns a lipgloss-rendered line, so a literal `assertNoESCIn` on it fails on the black field's own
+SGR escapes rather than on anything a producer smuggled in. An OSC introducer is not CSI and so
+survives that strip, which is what makes the assertion meaningful.
+NOTES (2026-08-26): the item states the `applyUsage` fixture's expected `ctxModel` as `"child"`;
+`stripEscapes` drops the ESC introducer and the BEL terminator but leaves the payload as inert text
+(TestStripEscapesDropsControlCharacters), so the test asserts the accurate `"child]52;c;cGFyaQ=="`.
+NOTES (2026-08-26): the footer test gained one assertion beyond the item's text — the host segment
+survives as the inert `"host[31m"`. The item's `assertNoESCIn` check cannot see the host at all,
+since an UNSTRIPPED CSI escape is removed by `ansiPattern` along with the styling; without this
+line the fixture's `opts.HostAlias` would prove nothing.
 
 **What:** two server-advertised model strings reach the frame unstripped.
 - Footer: `internal/tui/model.go:2693` `upstreamSegments` returns

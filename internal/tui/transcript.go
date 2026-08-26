@@ -862,9 +862,11 @@ func (t *transcript) applyUsage(e domain.Event, window int, sessionModel string)
 	// Taken from every reading this fold accepts that names a model, whether or not it moved the
 	// fill: a maintenance reading was still produced by the child's own model. An event naming none
 	// — an agent bound before its first heartbeat — leaves whatever was established standing rather
-	// than blanking it.
+	// than blanking it. Stripped here because the fold IS the seam this server-advertised id enters
+	// the view through (doc.go): the gauge paints it beside the fill, and subagentblock.go paints
+	// what the seams stored.
 	if usage.Model != "" && usage.Model != sessionModel {
-		head.ctxModel = usage.Model
+		head.ctxModel = stripEscapes(usage.Model)
 	}
 }
 

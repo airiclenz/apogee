@@ -511,7 +511,7 @@ func fromWireEntry(w *wireEntry) (entry, bool) {
 		done:        w.Done,
 		ctxUsed:     w.CtxUsed,
 		ctxLimit:    w.CtxLimit,
-		ctxModel:    w.CtxModel,
+		ctxModel:    stripEscapes(w.CtxModel),
 		usage: usageTotals{
 			Calls:            w.UsageCalls,
 			PromptTokens:     w.UsagePromptTokens,

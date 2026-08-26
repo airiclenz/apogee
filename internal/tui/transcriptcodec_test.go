@@ -842,7 +842,7 @@ func TestTranscriptCodecUnknownKindSkipped(t *testing.T) {
 // TestTranscriptCodecStripsEscapesOnDecode proves the defence-in-depth strip: ESC bytes salted
 // through every text field of a stored blob are removed on the way back in, across the entry body,
 // the tool card (label/target/summary/details/name), a firing block's stored answer
-// and prompt, and the presented view — a disk file (which could have been hand-edited) can never
+// and prompt, the presented view and a delegation head's model id — a disk file (which could have been hand-edited) can never
 // smuggle a terminal escape into the transcript.
 // The blob is built by encoding entries that carry real ESC bytes: json.Marshal writes them as the
 // valid escaped form, exactly the on-disk shape a tampered file would hold.
@@ -876,6 +876,14 @@ func TestTranscriptCodecStripsEscapesOnDecode(t *testing.T) {
 				Method: domain.PresentShown,
 			},
 		},
+		{
+			// A delegation head wearing the model its child ran on: the id is the SERVER's own
+			// text, so a hand-edited record could salt it exactly like any other field.
+			kind: entryToolCall, callID: "s1",
+			tool:     toolView{Label: "sub_agent", name: "sub_agent"},
+			ctxModel: "qwen" + escOSC52,
+			ctxUsed:  12000, ctxLimit: 32768,
+		},
 	}}
 
 	data, err := encodeTranscript(tr)
@@ -901,6 +909,7 @@ func TestTranscriptCodecStripsEscapesOnDecode(t *testing.T) {
 		assertNoESC(t, e.presented.Title)
 		assertNoESC(t, e.presented.Path)
 		assertNoESC(t, e.presented.Reason)
+		assertNoESC(t, e.ctxModel)
 	}
 	// The strip drops the C0 control characters and DEL (keeping \n and \t) and passes every
 	// printable rune through — here that is the ESC alone, with the text around it intact.

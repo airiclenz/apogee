@@ -449,6 +449,7 @@ func entryDisplayStrings(e entry) []string {
 		e.tool.Label, e.tool.Verb, e.tool.Target, e.tool.Summary.Text,
 		e.presented.Title, e.presented.Path, e.presented.Location, e.presented.Reason,
 		e.startup.Host, e.startup.Model,
+		e.ctxModel, // the delegate's server-advertised id, painted beside the gauge's fill
 	}
 	for _, d := range e.tool.Details.all() {
 		out = append(out, d.Text)
@@ -1993,6 +1994,28 @@ func TestSubAgentModelFoldsOnlyWhenItDiffers(t *testing.T) {
 			t.Errorf("head model = %q, want %q kept as history", got, "qwen3-4b")
 		}
 	})
+}
+
+// TestApplyUsageStripsTheDelegateModel pins the fold as the SEAM this id enters the view through.
+// A delegation's model comes off the wire stamped on a usage reading, and the sub-agent line paints
+// what the fold stored (subagentblock.go) — so an OSC 52 payload salted into the id by a hostile
+// Sub-agent server reaches the frame unless the fold takes it out here, at the one place the field
+// is written.
+func TestApplyUsageStripsTheDelegateModel(t *testing.T) {
+	t.Parallel()
+	const window = 32768
+
+	tr := &transcript{}
+	subAgentCall(tr, "s1", "survey the tests", 0)
+
+	subAgentUsageOn(tr, 1, 12000, window, "child"+escOSC52, "gpt-oss-20b")
+
+	// The strip drops the ESC introducer and the BEL terminator and leaves the payload behind as
+	// inert text, exactly as it does everywhere else (TestStripEscapesDropsControlCharacters): what
+	// reaches the frame is no longer a sequence the terminal will act on.
+	if got, want := tr.entries[0].ctxModel, "child]52;c;cGFyaQ=="; got != want {
+		t.Errorf("head model = %q, want %q — the fold strips the server's own text", got, want)
+	}
 }
 
 // TestSubAgentSummaryNamesADifferingModel pins the one thing routing to the Sub-agent server shows

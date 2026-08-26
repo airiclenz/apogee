@@ -21,6 +21,7 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/format"
 	"github.com/airiclenz/apogee/internal/heartbeat"
+	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/scheme"
 	"github.com/airiclenz/apogee/internal/session"
 )
@@ -5463,6 +5464,41 @@ func TestDisplayModel(t *testing.T) {
 		if got := displayModel(tc.in); got != tc.want {
 			t.Errorf("displayModel(%q) = %q, want %q", tc.in, got, tc.want)
 		}
+	}
+}
+
+// TestFooterContentStripsEscapes pins the footer as an escape-strip SEAM (doc.go). Two of the three
+// facts it paints on the left are the SERVER's own text — the model id it advertised and the effort
+// default it reported — and the third is config text; displayModel and footerEffortLabel are pure
+// formatters that pass whatever they are given straight through. The cell buffer honours OSC 8
+// across the whole frame, so one unterminated opener painted into the footer's black field would
+// make every remaining cell a link to somebody else's URL.
+//
+// Both widths are checked because the narrow branch composes its line separately (truncate + pad),
+// and a strip that only covered the roomy branch would leave the other one painting the escape.
+func TestFooterContentStripsEscapes(t *testing.T) {
+	t.Parallel()
+	opts := testOpts
+	opts.Model = "\x1b]8;;mailto:evil\x07qwen"
+	opts.HostAlias = "host\x1b[31m"
+
+	m := step(t, newModel(context.Background(), &fakeEngine{}, opts, nil), tea.WindowSizeMsg{Width: 80, Height: 24})
+	m.hb.effort = provider.EffortSupport{Supported: true, Default: "\x1b]8;;x\x07medium"}
+
+	// The line's own styling is CSI, which ansiPattern takes out; an OSC introducer is not, so what
+	// survives that strip is exactly what a producer smuggled through.
+	roomy := ansiPattern.ReplaceAllString(m.footerContent(80), "")
+	narrow := ansiPattern.ReplaceAllString(m.footerContent(30), "")
+	assertNoESCIn(t, "footer", roomy, narrow)
+
+	if !strings.Contains(roomy, "qwen") || !strings.Contains(roomy, "medium") {
+		t.Errorf("footer = %q, want the model id and the effort word still readable", roomy)
+	}
+	// The host's escape is CSI, so ansiPattern would eat an UNSTRIPPED one along with the styling
+	// and the check above could not tell the two apart. A stripped one survives as inert text —
+	// which is what makes this the assertion that the host went through the seam too.
+	if want := "host[31m"; !strings.Contains(roomy, want) {
+		t.Errorf("footer = %q, want the host segment left inert as %q", roomy, want)
 	}
 }
 

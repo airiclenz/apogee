@@ -234,6 +234,18 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **The footer and a delegation's model id pass the escape seam (code audit C-09, C-17).** The
+  status footer painted three strings raw — the model id the server advertised, the effort default
+  it reported, and the configured host — on a line whose black field runs the full window width;
+  the cell buffer honours OSC 8 across the whole frame, so one unterminated opener there turned
+  every remaining cell into a link to somebody else's URL (ADR 0019 rung 0). `footerContent` is now
+  one of the package's named strip seams and takes all three out on their producers' behalf;
+  `displayModel` and `footerEffortLabel` stay pure formatters, as the invariant requires. The model
+  a sub-agent run wears (`entry.ctxModel`) had the same gap on both of its writers — the usage fold
+  that stamps it and the transcript codec that reads it back off disk — and both now strip, so a
+  hostile Sub-agent server and a hand-edited session record are equally inert. The two
+  hand-maintained escape enumerations gained the field that slipped past them.
+
 - **The three `apogee probe` reports strip terminal escapes at their stdout sinks (code audit
   C-11).** `apogee probe`, `probe model` and `probe terminal` printed server-advertised and
   model-authored text raw: the advertised model id, the behavioral-fingerprint label, the

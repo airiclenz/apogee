@@ -906,9 +906,10 @@
 // [transcript.addEphemeralNote], [transcript.addError], [transcript.addApproval] and
 // [transcript.addToolResult]'s orphan branch for the scrollback, [toolView.sanitize] (run by
 // [toolView.finishDisplay], which presentToolCall and enrichWithResult both leave through) for the
-// tool card and everything derived from it (toolActivityVerb, the gist), and each popupRow
+// tool card and everything derived from it (toolActivityVerb, the gist), each popupRow
 // builder for the overlays, since the popup module strips
-// nothing and truncates ANSI-preservingly. The package's spelling of the strip lives in sanitize.go
+// nothing and truncates ANSI-preservingly, and [Model.footerContent] for the status footer, whose
+// model id and effort default are the server's own text. The package's spelling of the strip lives in sanitize.go
 // — [stripEscapes], its batch form [stripEscapesAll] and the [bidiControl] set they drop beside the
 // control characters — but the strip ITSELF lives in internal/sanitize, a stdlib-only package the
 // TUI, internal/title, internal/session and the headless CLI all call: the set was written out four
