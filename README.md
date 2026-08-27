@@ -82,8 +82,8 @@ release carries all six targets on the
 archive with a `SHA256SUMS` file beside it.
 
 ```bash
-# macOS / Linux — set these two to your release and platform
-VERSION=0.15.0
+# macOS / Linux — resolves the latest release; to pin one, set VERSION=0.17.1 instead
+VERSION=$(curl -fsSL https://api.github.com/repos/airiclenz/apogee/releases/latest | sed -n 's/.*"tag_name": *"v\([^"]*\)".*/\1/p')
 PLATFORM=darwin_arm64   # or darwin_amd64 · linux_amd64 · linux_arm64
 
 curl -fsSLO "https://github.com/airiclenz/apogee/releases/download/v$VERSION/apogee_${VERSION}_${PLATFORM}.tar.gz"

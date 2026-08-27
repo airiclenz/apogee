@@ -110,7 +110,9 @@ new assertion compiles. Record in the item's NOTES that a live re-run is owed at
 
 ---
 
-## 2. README archive install resolves the latest release (D-2)
+## 2. README archive install resolves the latest release (D-2) — ✅ DONE (2026-08-27)
+
+NOTES (2026-08-27): the tripwire reads `../../README.md` from disk as the plan instructs — a deliberate exception to the testing standard's no-real-filesystem rule, since the README itself is the artefact under test.
 
 **What:** `README.md:86` pins `VERSION=0.15.0`, six releases behind the latest cut release (v0.17.1)
 and every future one. Replace the hard-coded pin in the "A prebuilt archive" block with a line that
