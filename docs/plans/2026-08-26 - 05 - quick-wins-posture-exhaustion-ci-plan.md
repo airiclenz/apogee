@@ -118,7 +118,14 @@ mutable major tag and the `contents:write` tag job persists its push credential 
 
 ---
 
-## 1. `syntax` Mechanism: `/` opens a regex literal in JS/TS, never an "unclosed string"
+## 1. `syntax` Mechanism: `/` opens a regex literal in JS/TS, never an "unclosed string" — ✅ DONE (2026-08-27)
+
+NOTES (2026-08-27): the item's under-reported-unterminated-literal row (`a.js` `const r = /abc;`)
+asserts `valid`, so it landed in `TestCheckSyntaxAcceptsValidCode` rather than in
+`TestCheckSyntaxReportsEachBrokenShape`, which asserts `valid == false` for every row.
+NOTES (2026-08-27): beside `regexOpeners` and its `regexOpenerKeyword` string the change adds one
+package-level predicate, `isIdentifierRune` — the keyword clause needs to know where an identifier
+token starts; the rule itself stays data, and the scan stays inside `checkBrackets`.
 
 **What:** the bracket/string heuristic in `internal/mechanisms/syntaxengine.go` `checkBrackets`
 (`:135-253`) learns JavaScript/TypeScript regex literals, so a quote or bracket inside one can

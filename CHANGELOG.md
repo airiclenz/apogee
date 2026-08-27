@@ -276,6 +276,22 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **The `syntax` Mechanism no longer retries correct JS/TS holding a regex literal.** A quote,
+  backtick or bracket inside a JavaScript/TypeScript regex literal — `const re = /['"]/g;` — was
+  read as a string opener or a bracket, so the heuristic checker reported an unclosed string or an
+  unbalanced bracket and `PostResponse` fired `ActionRetry` against a correct `write_file`: a
+  breach of the Bypass floor, which forbids a Mechanism making any model do worse than the agent
+  with Mechanisms off. `checkBrackets` now learns the literal, gated by a package-level table
+  (`regexOpeners`): for `javascript` and `typescript` only, and only after the existing comment
+  gate has ruled out `//` and `/*`, a `/` opens a regex literal when the last significant rune on
+  the line is one of `=` `(` `,` `[` `{` `:` `!` `&` `|` `?` `;`, when there is none (line start),
+  or when the last identifier token before it is exactly `return`. After anything else — an
+  identifier, a digit, `)`, `]`, a closing quote — `/` stays the division operator it always was.
+  Inside a literal `\` escapes the next rune, a `/` inside a `[ … ]` character class does not
+  close it, and quotes, backticks, brackets and `//` are inert. A literal never spans lines: an
+  unterminated one simply ends at end of line, so the checker keeps under-reporting rather than
+  inventing breakage. Go, Python and Ruby paths are untouched.
+
 - **The shipped config template said two untrue things about `url-safety:`.** Its comment block
   claimed the two host lists "are read at STARTUP: editing this key applies from the next run" and
   that "MCP servers are not covered by it". Neither holds: `/settings` carries both lists as live

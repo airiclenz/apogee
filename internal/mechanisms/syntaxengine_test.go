@@ -9,8 +9,9 @@ import (
 // fires ActionRetry against correct code and costs a Turn, which is exactly the regression the
 // Bypass floor forbids. This is the negative table — valid code in every language the checker
 // claims to understand, with the constructs that used to trip it: `//` where it is floor division
-// or a regex literal rather than a comment, brackets hidden in strings, docstrings and block
-// comments, and quote characters that are not string delimiters.
+// or a regex literal rather than a comment, JavaScript/TypeScript regex literals holding a quote,
+// a backtick or a bracket, brackets hidden in strings, docstrings and block comments, and quote
+// characters that are not string delimiters.
 func TestCheckSyntaxAcceptsValidCode(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -74,6 +75,60 @@ func TestCheckSyntaxAcceptsValidCode(t *testing.T) {
 				"  // pick roughly the middle ( see docs\n" +
 				"  return xs[Math.floor(n / 2)];\n" +
 				"}\n",
+		},
+		{
+			// The audit's C-02 case: a quote inside a JS/TS regex literal used to open a string,
+			// so the checker reported an unclosed string against correct code.
+			name:    "javascript regex literal holding both quote characters",
+			path:    "app.js",
+			content: "const re = /['\"]/g;\n",
+		},
+		{
+			name:    "typescript regex literal holding an escaped quote",
+			path:    "esc.ts",
+			content: "const out = s.replace(/'/g, \"\\\\'\");\n",
+		},
+		{
+			name:    "javascript regex literal holding backticks",
+			path:    "tick.js",
+			content: "const t = /`[^`]*`/.test(x);\n",
+		},
+		{
+			// The keyword clause: `return` is the one identifier a regex literal may follow.
+			name: "typescript regex literal after return",
+			path: "ret.ts",
+			content: "function blank(s: string) {\n" +
+				"  return /^\\s*$/.test(s);\n" +
+				"}\n",
+		},
+		{
+			name: "javascript regex literal after a negation",
+			path: "not.js",
+			content: "if (!/^#/.test(line)) {\n" +
+				"  go();\n" +
+				"}\n",
+		},
+		{
+			// After `[` and `,`, and a `/` inside a character class does not close the literal.
+			name:    "typescript array of regex literals",
+			path:    "list.ts",
+			content: "const rules = [/a\\(/, /b[/]x/, /\"/];\n",
+		},
+		{
+			// The other side of the rule: after an identifier, a `)` or a closing quote, `/` is
+			// the division operator it has always been.
+			name: "javascript division is not a regex literal",
+			path: "div.js",
+			content: "const half = total / 2;\n" +
+				"const r = (a) / (b) / c;\n" +
+				"const s = \"x\" / 1;\n",
+		},
+		{
+			// An unterminated literal ends at end of line: the checker under-reports rather than
+			// inventing breakage, exactly as it does for an unclosed block comment.
+			name:    "javascript unterminated regex literal is under-reported",
+			path:    "a.js",
+			content: "const r = /abc;\n",
 		},
 		{
 			name: "rust lifetime annotations are not string literals",
@@ -238,6 +293,21 @@ func TestCheckSyntaxReportsEachBrokenShape(t *testing.T) {
 			path:    "a.js",
 			content: "const a = 1;\nconst b = 2,\n",
 			want:    "file appears truncated (ends with incomplete expression)",
+			line:    2,
+		},
+		{
+			// Division must not become a regex literal: the `(` is still open.
+			name:    "javascript division after an identifier leaves a paren unclosed",
+			path:    "a.js",
+			content: "const x = (a / 2;\n",
+			want:    "unclosed parenthesis '('",
+			line:    1,
+		},
+		{
+			name:    "javascript unclosed string holding a slash",
+			path:    "a.js",
+			content: "const s = \"a / b;\n",
+			want:    "unclosed string literal (opened with \")",
 			line:    2,
 		},
 		{

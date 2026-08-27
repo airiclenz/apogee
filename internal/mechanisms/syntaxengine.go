@@ -12,6 +12,7 @@ import (
 	"go/token"
 	"path/filepath"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 )
 
@@ -89,7 +90,10 @@ func detectLanguage(path string) string {
 // The gate matters because `//` is not a comment everywhere: in Python it is floor division
 // (`n // 2`) and in Ruby an empty regex literal, so breaking out of the line scan there abandons a
 // valid line before its closing bracket and invents an "unclosed bracket" — a false positive that
-// fires ActionRetry against correct code, which the Bypass floor forbids.
+// fires ActionRetry against correct code, which the Bypass floor forbids. The second false-positive
+// family the gate must not create is the JavaScript/TypeScript regex literal: where `//` really is
+// a comment, a lone `/` may still open a literal whose quotes and brackets are inert, so
+// checkBrackets applies the regexOpeners rule immediately after this gate.
 func hasCStyleComments(lang string) bool {
 	switch lang {
 	case "javascript", "typescript", "go", "rust", "java", "c", "cpp", "csharp", "swift", "kotlin", "php":
@@ -130,6 +134,38 @@ func checkGoSyntax(content string) syntaxResult {
 	}
 }
 
+// regexOpeners are the significant runes after which a `/` opens a JavaScript/TypeScript regex
+// literal rather than dividing. The rule checkBrackets applies — for `javascript` and `typescript`
+// only, and only once the comment gate has ruled out `//` and `/*`: a `/` opens a regex literal
+// when the last significant rune on the current line (the last rune consumed outside a string,
+// comment or regex, ignoring spaces and tabs; 0 at line start) is one of these runes, or there is
+// none (line start), or the last identifier token on the line, with only whitespace between it and
+// the `/`, is exactly regexOpenerKeyword. Any other predecessor — an identifier, a digit, `)`, `]`,
+// a closing quote — leaves `/` as the division operator it is.
+var regexOpeners = map[rune]bool{
+	'=': true,
+	'(': true,
+	',': true,
+	'[': true,
+	'{': true,
+	':': true,
+	'!': true,
+	'&': true,
+	'|': true,
+	'?': true,
+	';': true,
+}
+
+// regexOpenerKeyword is the one keyword predecessor in the regexOpeners rule: `return /^\s*$/`
+// opens a regex literal, while `total / 2` divides.
+const regexOpenerKeyword = "return"
+
+// isIdentifierRune reports whether r can appear inside a JavaScript/TypeScript identifier token,
+// which is what the keyword clause of the regexOpeners rule is matched against.
+func isIdentifierRune(r rune) bool {
+	return r == '_' || r == '$' || unicode.IsLetter(r) || unicode.IsDigit(r)
+}
+
 // checkBrackets validates bracket/paren/brace balance, unclosed strings, and common truncation
 // patterns for languages without a bundled parser.
 func checkBrackets(content, lang string) syntaxResult {
@@ -144,10 +180,19 @@ func checkBrackets(content, lang string) syntaxResult {
 	inString := rune(0)
 	escaped := false
 	inBlockComment := false
+	hasRegexLiterals := lang == "javascript" || lang == "typescript"
 
 	for lineNum, line := range lines {
 		lineNo := lineNum + 1
+		// A regex literal never spans lines, and neither does the preceding-token state that
+		// decides whether a `/` opens one (regexOpeners): both start every line clean. Reaching
+		// end of line inside a literal simply ends it — the checker under-reports an unterminated
+		// literal rather than inventing breakage.
+		inRegex, inCharClass, regexEscaped := false, false, false
+		lastRune := rune(0)
+		identFrom, identTo, identOpen := 0, 0, false
 		for i := 0; i < len(line); {
+			start := i
 			r, size := utf8.DecodeRuneInString(line[i:])
 			i += size
 
@@ -163,6 +208,26 @@ func checkBrackets(content, lang string) syntaxResult {
 				continue
 			}
 
+			// Inside a regex literal only the closing unescaped `/` matters: `\` escapes the next
+			// rune, and within a `[ … ]` character class a `/` is an ordinary rune. Quotes,
+			// backticks, brackets and `//` in here are inert — reading them as code is the false
+			// positive that fires ActionRetry against correct JS/TS.
+			if inRegex {
+				switch {
+				case regexEscaped:
+					regexEscaped = false
+				case r == '\\':
+					regexEscaped = true
+				case r == '[':
+					inCharClass = true
+				case r == ']':
+					inCharClass = false
+				case r == '/' && !inCharClass:
+					inRegex = false
+				}
+				continue
+			}
+
 			if escaped {
 				escaped = false
 				continue
@@ -174,6 +239,8 @@ func checkBrackets(content, lang string) syntaxResult {
 			if inString != 0 {
 				if r == inString {
 					inString = 0
+					// A closing quote is a value, so the `/` in `"x" / 1` divides (regexOpeners).
+					lastRune, identFrom, identTo, identOpen = r, 0, 0, false
 				}
 				continue
 			}
@@ -191,6 +258,26 @@ func checkBrackets(content, lang string) syntaxResult {
 					inBlockComment = true
 					continue
 				}
+			}
+			if r == '/' && hasRegexLiterals &&
+				(lastRune == 0 || regexOpeners[lastRune] || line[identFrom:identTo] == regexOpenerKeyword) {
+				inRegex = true
+				continue
+			}
+
+			// What precedes the next rune, for the rule above: spaces and tabs leave the last
+			// identifier token intact, so `return /^\s*$/` still sees `return`.
+			switch {
+			case r == ' ' || r == '\t':
+				identOpen = false
+			case isIdentifierRune(r):
+				if !identOpen {
+					identFrom, identOpen = start, true
+				}
+				identTo, lastRune = i, r
+			default:
+				identFrom, identTo, identOpen = 0, 0, false
+				lastRune = r
 			}
 
 			switch r {
