@@ -23,7 +23,7 @@ jobs:
     steps:
       # Actions are pinned by commit SHA with the release tag in the comment beside it.
       # Bump by resolving the new tag's commit — never by editing the tag comment alone.
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # The script walks before..after and reads VERSION at the bump commit's parent,
           # and `before` can be many commits back — a shallow clone leaves those objects
