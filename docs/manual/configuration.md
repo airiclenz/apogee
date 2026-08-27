@@ -273,6 +273,53 @@ sources are re-scanned there and then — the `/` menu changes in the session yo
 may write [`{{SKILL_DIR}}`](commands.md#skill_dir-in-skill-bodies) to name the files bundled
 beside its own `SKILL.md`.
 
+## Skill suggestions — `ui.skill-suggestions:`
+
+A library grows past what anyone can recall, which is exactly where a menu you have to open stops
+helping. While you type, apogee ranks the skill catalog against your draft and names the closest
+three in a one-row band above the input box; `⇥` opens the `/` menu on exactly those. It is on by
+default, and the flip is live: commit the `ui.skill-suggestions` row in `/settings`, or save the
+file, and the band goes — or comes back — in the session you are already in. The keys, the
+spent-once rule and what the row looks like are on the [commands
+page](commands.md#suggested-skills).
+
+```yaml
+# ~/.apogee/config.yaml
+ui:
+  skill-suggestions: false
+```
+
+What the matcher reads is each skill's **id, display name, summary and `triggers:`** — never its
+body. That is what keeps ranking a large library cheap, and it is also the whole of what suggestion
+touches: the catalog stays on this side of the wire, and a skill reaches the model only when you
+invoke it with `/id`
+([ADR 0061](../adr/0061-skill-suggestions-are-driver-side-over-an-engine-matcher.md)).
+
+`triggers:` is the lever a skill's author has over this. It is an optional top-level frontmatter
+key — a YAML list, or one comma-separated string — naming the phrases somebody would actually type
+when they want the skill:
+
+```yaml
+---
+name: Brew release
+description: Cut a release and publish it to a Homebrew tap.
+triggers:
+  - cut a release
+  - publish to homebrew
+  - bump the formula
+---
+```
+
+Write them the way a request is worded, not the way the skill is titled: front-load the words a user
+types, and keep each phrase to the words that carry the meaning. A phrase matches **whole words, in
+order, side by side** once the small connecting words are set aside — `cut a release` hits "can you
+cut the release for me" and does not hit "release notes" — so a phrase made only of common words
+never hits at all. A hit does two things at once: it lifts the skill above ones matched by wording
+alone, and it admits the skill on its own, with no other evidence required — the only floor left is
+the general one, that a draft carry at least three content words before anything is suggested.
+Phrases are lowercased and their whitespace normalised, capped at 64 characters each and 32 to a
+skill, and `/skills` lists them back so you can see what a skill declared.
+
 Automatic context **Compaction** keeps a long session from overflowing the model's
 window: when the conversation history outgrows its budgeted share, apogee folds the
 older turns into a summary (the same reducer as the `/compact` command) before the

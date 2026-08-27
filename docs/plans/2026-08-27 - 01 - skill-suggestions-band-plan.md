@@ -574,7 +574,15 @@ hint returns; a refused `/command` line (unknown verb) spends nothing.
 
 ---
 
-## 8. Manual pages and the changelog entry
+## 8. Manual pages and the changelog entry — ✅ DONE (2026-08-27)
+
+NOTES (2026-08-27): README.md is untouched. The item makes that edit conditional ("only if the README has a skills paragraph; otherwise skip and note it") and the README has none — skills appear only in the documentation table's `Commands` row and in the Status paragraph's feature list, neither of which is a paragraph a sentence about suggestion could join without inventing a section the item did not ask for.
+
+NOTES (2026-08-27): the `## Suggested skills` subsection sits after the intro prose and the command table, immediately before `## {{SKILL_DIR}} in skill bodies`, rather than directly under the `/skills` table row — the paragraphs following the table (unknown `/word`, `@` references, the key legend) belong to the page's opening material, and a heading wedged between the table and them would have orphaned them under it.
+
+NOTES (2026-08-27): commands.md's `/skills` table row gained ", any declared `triggers:`," although the item's What names only the new subsection and the authoring example. The row's description ("id, name, summary and where each came from") is the one sentence in the manual that item 2's landed `/skills` triggers line makes wrong, and this item's own CHANGELOG text announces that change to users — leaving the row as it stood would have contradicted the section added two screens below it.
+
+NOTES (2026-08-27): in configuration.md the new `## Skill suggestions — ui.skill-suggestions:` heading is placed at the end of the skills prose, so the unrelated paragraphs that already trailed the `use-project-skills:` section without a heading of their own (Compaction, `delegate-max-steps:`, `context-window:`, effort, `ui.stall-after`, `editor:`) now trail the new one instead. No content was moved or reworded; the pre-existing drift is unchanged in kind, only in which heading it hangs under.
 
 Depends on items 5, 6 and 7.
 

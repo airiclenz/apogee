@@ -26,7 +26,7 @@ a typo is visible before you send.
 |---|---|---|
 | `/<skill-id>` | Invoke a skill — type its id anywhere in your message | ✅ rides the queued message |
 | `@<path>` | Hand a workspace file to the model | ✅ rides the queued message |
-| `/skills` | List the discovered skills — id, name, summary and where each came from | ✅ |
+| `/skills` | List the discovered skills — id, name, summary, any declared `triggers:`, and where each came from | ✅ |
 | `/version` | Show the apogee version | ✅ |
 | `/usage` | What this session has spent — one row for the main agent, one per sub-agent, and a session total; a `cached` column joins them when the server reports how much of a prompt it answered from its own cache | ✅ |
 | `/inspect` | The raw request and response traffic of the recent model calls — armed by `ui.inspector` (off by default) | ✅ |
@@ -82,6 +82,52 @@ readline redraw: it forces a full repaint, which is the way back from a terminal
 has smeared or eaten part of the frame. It sends nothing, edits nothing and interrupts
 nothing — the only thing it takes with it is a mouse drag-selection's highlight, which
 every keypress drops.
+
+## Suggested skills
+
+A library you cannot recall is a library you do not use, so apogee ranks your skills against the
+message you are typing and names the closest few in **one row directly above the input box**:
+
+```
+  ✦ skills: /grill-me · /code-audit · /handoff   tab to pick
+```
+
+At most three, each written as the `/id` that invokes it. The row appears as soon as the draft holds
+enough words for the ranking to mean anything — one or two words get no row rather than a guess —
+and it goes again the moment the draft no longer does.
+
+The band is apogee talking to **you**, never to the model. The ranking runs here, over the catalog
+apogee already loaded; no part of your library travels with a request, and a skill becomes prompt
+text only when you put its `/id` in a message, exactly as before
+([ADR 0061](../adr/0061-skill-suggestions-are-driver-side-over-an-engine-matcher.md)). A message
+sent with the row on screen is sent unchanged — the band never takes `⏎`.
+
+**`⇥` picks one.** With the row showing and no `/` or `@` menu open, Tab opens the menu you already
+know, filtered to exactly those skills, titled `suggested skills`, top match highlighted. `⏎` (or
+`⇥` again) takes the highlighted row and **inserts** its `/id ` where the cursor stands, leaving the
+rest of the draft untouched on both sides; `esc` closes the menu, and so does typing the next
+character. With nothing suggested, Tab keeps whatever meaning it has today.
+
+**Each skill is offered once.** The skills on the row when a message goes out — a plain send, or a
+message staged while the model works — are spent for the rest of the session and are not suggested
+again; one the draft already invokes is never suggested at all. `/clear` (or `/new`) starts a new
+session and a clean slate. The band is `ui.skill-suggestions:`, on by default and switchable live
+from `/settings` — see [Skill suggestions](configuration.md#skill-suggestions--uiskill-suggestions).
+Off, the row never paints and Tab stays inert.
+
+**What a skill author can steer.** The ranking reads a skill's id, display name, summary and its
+optional `triggers:` — a top-level frontmatter list of the phrases the author expects in a prompt
+this skill fits. A body is never read:
+
+```yaml
+triggers:
+  - cut a release
+  - publish to homebrew
+```
+
+A comma-separated string does the same (`triggers: cut a release, publish to homebrew`), and
+`/skills` lists back what each skill declared under its row. Authoring advice is in
+[configuration](configuration.md#skill-suggestions--uiskill-suggestions).
 
 ## `{{SKILL_DIR}}` in skill bodies
 
