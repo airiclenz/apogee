@@ -535,13 +535,28 @@ fails both, is reported there.
 
 ## Which driver observes which claim
 
-Seeded here with the proxies ratified for the irreducible halves (ADR 0062, decision 5); **the rest
-of the rows are filled by plan item 8**, and plan item 16 re-checks every example-test name against
-`go test -list 'TestE2E.*' ./cmd/apogee/`. Names marked *(planned)* do not exist yet.
+This table is the answer to "how do I test this?" — and it is also the gate on the word *manual*.
+A claim is manual ONLY when its class sits in the **Not observable** column; everything else has a
+driver, and the test gets written. The rows below cover every claim class
+`docs/test-checklists/2026-08-27 - 00 - since-v0.17.1.md` needed a human for, including the proxies
+ratified for the irreducible halves (ADR 0062, decision 5). Plan item 16 re-checks every
+example-test name against `go test -list 'TestE2E.*' ./cmd/apogee/`; names marked *(planned)* do
+not exist yet, with the plan item that writes them.
 
 | Claim class | Driver | Example test | Not observable by any driver |
 | --- | --- | --- | --- |
+| Stream order and completeness (T-24) | in-process — the committed transcript, read from the frame and from the session record; stubllm sets the chunking (`ChunkRunes`, `TokenDelay`) | `TestE2EStreamCommitsCompleteAndInOrder` *(planned, item 9)* | — |
+| Pane and block text, and its wording (T-04, T-10, T-12, T-13) | in-process — `Frame.Find` / `Frame.Row` for the text, `Golden` for a whole surface, a judge rubric for the wording half only | `TestE2EApproval…` *(planned, item 11)* | — |
+| Colour and tone of a run (T-15) | PTY for the real terminal's SGR, or in-process `Frame.StyleRuns` — assert the run, never the raw escape | `TestE2EOutcomeTonePTY` *(planned, item 13)* | Whether the reader's own terminal theme renders that colour legibly |
 | Wide-rune and glyph alignment (T-20) | `tuitest` — the emulator's cell width is the authority; assert `Frame` cells, never rune counts | `TestE2EWidth…` *(planned, item 12)* | Font tofu — whether the reader's font has the glyph at all |
+| Resize and reflow (T-24, T-25) | in-process `Driver.Resize` (emulator resize + a `tea.WindowSizeMsg`, then a wait for the repaint it caused); PTY `PTYDriver.Resize` = `pty.Setsize` + a real `SIGWINCH` | `TestE2EStreamPTY` *(planned, item 9)* | — |
+| tty state on the way out (T-25) | PTY only — `PTYDriver.TTYState()` after `Quit()`: echo and canonical mode restored, no dangling SGR, exit code 0 | `TestE2ESmokePTY` | Whether the user's own shell prompt looks right afterwards — no shell runs inside the PTY |
+| Real process lifetime, SIGKILL, exit code (T-03, T-07, T-14) | PTY only — `PTYDriver.Pid()`, `Kill()` (a real `SIGKILL`), `Exited()`, and the same for a Console's own children; the in-process driver has no process to kill | `TestE2EDelegationRecordSurvivesSIGKILL` *(planned, item 10)*; `TestE2EConsole` *(planned, item 14)* | — |
+| Session record on disk (T-03, T-06, T-19) | either driver — read the run's own `sessions/` records under its temp home; the record, not the frame, is the authority on what was persisted | `TestE2ESmokeInProcess` | — |
+| Config file watch and live apply (T-16) | in-process — write the key into the run's temp-home `config.yaml` and wait for the transcript line; `configWatchTiming` shortens the poll | `TestE2ELiveState…` *(planned, item 13)* | — |
+| Daemon and headless output (T-07) | no driver needed — run the binary against stubllm and assert stdout, the record and the exit code | `TestHeadlessExitCodes`; `TestDaemonFaultedVerbColumn` *(planned, item 10)* | — |
+| Network egress: proxy honoured, url-safety, bounded bodies (T-18) | an in-test Go forward proxy plus stubllm as the upstream (`internal/tuitest/netfix.go`) — assert what reached the proxy | `TestE2EEgress` *(planned, item 14)* | Traffic to a real remote host — nothing in the suite leaves loopback |
+| MCP server behaviour (T-18) | an in-test `httptest` MCP server (the shape `internal/mcp/transport_test.go` already uses) | `TestE2EEgress` *(planned, item 14)* | What a third-party MCP server actually does with a call |
 | Flicker during streaming (T-24) | `--tui-trace` counters: bytes written and full-frame repaints per streamed token, pinned against a ceiling | `TestE2EStreamRepaintCeiling` *(planned, item 9)* | Felt flicker — the repaint ceiling is the accepted proxy |
 | Desktop hand-off (T-19) | a logging fake opener installed through `present.Opener.LookPath`; assert argv and wording | `TestE2EPresent…` *(planned, item 14)* | What a real desktop application does with the file |
 | Upgrade path of an installed apogee (T-21) | post-release `make release-smoke` — archives, `SHA256SUMS`, `--version`, `brew upgrade` when `brew` is present | `make release-smoke` *(planned, item 15)* | `brew upgrade` before the release it upgrades to exists |

@@ -807,7 +807,20 @@ self-check skips); `grep -n "JUDGE_ENDPOINT" Makefile` shows the live-eval wirin
 
 **Commit:** `test(judge): env-gated, binding LLM verdicts over named artifacts through the provider client`
 
-## 8. Adoption — the "which driver" table, the `test-checklist` skill gate, the coding-standards line
+## 8. Adoption — the "which driver" table, the `test-checklist` skill gate, the coding-standards line — ✅ DONE (2026-08-27)
+
+NOTES (2026-08-27): the CHANGELOG entry the item asks for is recorded here rather than written into
+`CHANGELOG.md` — the run's implementer contract reserves that shared file for the closeout. Item 8's
+acceptance `grep -q "tuitest" CHANGELOG.md` therefore only passes once the closeout applies this text.
+NOTES (2026-08-27): the coding-standards rule went into `references/testing.go.md` (the Go testing
+extension) rather than `coding-standards.go.md`, which has no testing section; the rule is prefixed
+`apogee:` because that skill is shared across projects and the packages it names are apogee's.
+NOTES (2026-08-27): `test-checklist-sequential` has no `prompts/` of its own — it copies the
+canonical prompts from `test-checklist/prompts/` at Phase 0 — so the one edit to `items.md` supplies
+the gate to both variants; only the "Hard rules" line was added to each `SKILL.md` separately.
+NOTES (2026-08-27): the table also gained a "Not observable" entry for the PTY tty-state row (no
+shell runs inside the PTY, so the user's own prompt afterwards is not observable) and for the
+colour row (the reader's terminal theme) — beyond the four the item enumerated.
 
 **What:** make the kit the default for future work.
 
