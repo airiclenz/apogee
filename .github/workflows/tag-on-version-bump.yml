@@ -29,6 +29,8 @@ jobs:
           # and `before` can be many commits back — a shallow clone leaves those objects
           # absent.
           fetch-depth: 0
+          # The script only READS history; the token goes to the API step below and nowhere else.
+          persist-credentials: false
       - id: detect
         name: Decide whether VERSION changed
         run: .github/scripts/version-bump.sh "${{ github.event.before }}" "${{ github.sha }}"
@@ -38,6 +40,8 @@ jobs:
         env:
           BUMPS: ${{ steps.detect.outputs.bumps }}
         with:
+          # The one step that writes is the one step that visibly holds the credential.
+          github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             for (const pair of process.env.BUMPS.trim().split(/\s+/)) {
               const [sha, tag] = pair.split('=')

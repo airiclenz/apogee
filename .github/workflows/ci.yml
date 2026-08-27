@@ -20,6 +20,9 @@ jobs:
       # Actions are pinned by commit SHA with the release tag in the comment beside it.
       # Bump by resolving the new tag's commit — never by editing the tag comment alone.
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # This job runs Go tooling only and needs no git credential.
+          persist-credentials: false
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version: '1.26.x'
@@ -54,6 +57,9 @@ jobs:
       CGO_ENABLED: '0'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # This job runs Go tooling only and needs no git credential.
+          persist-credentials: false
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version: '1.26.x'

@@ -617,7 +617,7 @@ one ecosystem, `github-actions`, weekly. CI/docs-only commit, no `make check`.
 
 ---
 
-## 10. The tag job persists no credential; the tag step alone receives the token
+## 10. The tag job persists no credential; the tag step alone receives the token — ✅ DONE (2026-08-27)
 
 Depends on item 9 (same file; the SHA-pinned `uses:` lines are the base this edits).
 

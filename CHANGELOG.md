@@ -223,6 +223,20 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **The tag job persists no credential, and the token reaches only the step that writes (CI supply
+  chain, plan item 10).** `tag-on-version-bump.yml`'s checkout now carries
+  `persist-credentials: false` beside its `fetch-depth: 0`, so the job's `contents: write`
+  `GITHUB_TOKEN` is no longer written into `.git/config` as an `extraheader` before the next step
+  runs a repo-authored script — `.github/scripts/version-bump.sh`, which only reads history
+  (`git log`/`git show`/`git rev-parse`) against the local clone. The tags were already created
+  through the REST API, so nothing in the job needed the git credential: the `github-script` step
+  now names the token explicitly with `github-token: ${{ secrets.GITHUB_TOKEN }}`, the same token
+  the action defaults to, stated so the one step that holds the credential is visibly the one step
+  that writes — and so the scope survives a future change of that default. Both `ci.yml` checkouts
+  drop credential persistence too: that job is `contents: read`, but a read token in `.git/config`
+  is still a token in a tree `go test` walks, and its steps run Go tooling only. Job permissions,
+  the pinned action SHAs and the bump script are unchanged.
+
 - **Every GitHub Action is now pinned to a full commit SHA, and Dependabot keeps the pins current
   (CI supply chain, plan item 9).** The six `uses:` lines across `.github/workflows/ci.yml` and
   `.github/workflows/tag-on-version-bump.yml` no longer reference the mutable major tags
