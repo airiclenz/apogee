@@ -31,6 +31,14 @@ type SkillCatalog interface {
 	List() []skills.Skill
 	Get(id string) (skills.Skill, bool)
 	Skipped() []skills.SkipError
+	// Suggest ranks the catalog against the message being typed and returns the closest skills,
+	// strongest first — the suggestion band's whole input (suggestband.go, ADR 0061). The ranking
+	// is the ENGINE's (skills.Catalog.Suggest): a Driver decides how to show a suggestion, never
+	// what a suggestion is. exclude, when non-nil, drops a skill by id before ranking — the band
+	// passes the ids the draft already invokes and the ones this session has spent — and limit
+	// caps the result (≤ 0 asks for the matcher's own default). A draft with too little evidence
+	// in it yields nothing at all rather than a weak guess.
+	Suggest(draft string, exclude func(id string) bool, limit int) []skills.Suggestion
 }
 
 // SessionHost is the session-persistence seam the TUI drives: it persists the active session

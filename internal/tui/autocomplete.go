@@ -177,7 +177,8 @@ func outsideRegion(value string, start, end int) string {
 	return value[:start] + value[end:]
 }
 
-// recomputeAutocomplete re-derives the overlay from the current input and stores it, and hands back
+// recomputeAutocomplete re-derives the overlay AND the skill-suggestion band from the current input
+// and stores both, and hands back
 // the skill-catalog reload the moment the catalog-listing region OPENS — the input entering the
 // merged "/" menu that it was not in before. The reload swaps the shared
 // skills.Provider that both those rows and the agent loop read, so a skill added since launch — or
@@ -211,6 +212,13 @@ func (m Model) recomputeAutocomplete() (Model, tea.Cmd) {
 	}
 	m.skillRegion = inMenu
 	m.autocomplete = m.computeAutocomplete(caret)
+	// The skill-suggestion band is re-derived from the same edit, here rather than at each caller,
+	// because every caller of this function IS the edit path: a typed key, a paste, a splice, an undo,
+	// a withdrawn interjection put back in the box. Folding it in is what makes "the band tracks the
+	// draft" a property of the path instead of a rule five call sites have to remember — and it has to
+	// come AFTER the overlay is stored, since an open "/" or "@" menu is one of the four reasons the
+	// band says nothing (suggestband.go).
+	m = m.recomputeSkillHints(value)
 	return m, reload
 }
 

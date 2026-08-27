@@ -333,6 +333,19 @@
 // cost is the deliberate one the plan named: single-key transcript scrolling while running, with
 // PgUp/PgDn and the wheel keeping it in every state.
 //
+// suggestband.go is the OTHER surface in that slot, and the only one nobody has to ask for: while
+// the draft is being typed it is ranked against the skill catalog by the engine's own matcher
+// ([SkillCatalog.Suggest], internal/skills) and the three closest skills are named as "/id" tokens
+// in one row directly above the input box, with Tab opening the merged "/" menu on exactly those
+// rows (ADR 0061). It is presentation and nothing else: the ranking is the engine's, and NO part of
+// the catalog reaches the model either way — a skill is prompt text only when the human invokes it
+// with a token. The row is re-derived on the edit path beside the overlay (recomputeAutocomplete
+// folds it in), it says nothing while a "/" or "@" menu is open or while the `ui.skill-suggestions`
+// key is off, and it shares the staged band's row plan (bandShape) because it shares that band's
+// block on the screen: it takes the group's lower framing row rather than adding a row of its own,
+// and it is the first thing the frame's allocation drops — a staged message is a fact, a suggestion
+// is advice.
+//
 // The caret under all that is the REAL terminal cursor. The bubbles textarea's virtual one is
 // retired (SetVirtualCursor(false)) and View attaches textarea.Cursor(), translated by
 // inputContentRect's content origin, onto tea.View.Cursor — but only where inputEditable holds, so

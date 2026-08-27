@@ -16,6 +16,7 @@ import (
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/format"
+	"github.com/airiclenz/apogee/internal/skills"
 )
 
 // ----------------------------------------------------------------------------
@@ -308,6 +309,24 @@ type Model struct {
 	box                  *interjectBox
 	pendingInterjections []queuedInterjection
 	interjectSeq         int
+
+	// The skill-suggestion band's state (suggestband.go, ADR 0061) — a Driver-side hint about the
+	// draft, never anything the model is told about.
+	//
+	// skillHints is what the band is showing RIGHT NOW: the matcher's answer for the draft as it
+	// stands, re-derived on every edit beside the autocomplete overlay ([Model.recomputeSkillHints])
+	// and nil whenever there is nothing to say — the knob is off, no catalog is wired, a "/" or "@"
+	// menu is open, or the draft holds too little evidence to name a skill honestly.
+	//
+	// spentSkills is the session's dedup set: a skill named in the band at the moment a message
+	// went out is spent and is never suggested again, so the band cannot nag about the same skill
+	// for the whole session. It is filled at send (submit and the staged-interjection path) and
+	// emptied by /clear and /new, which is the same boundary the conversation itself resets on. A
+	// nil map reads as empty, so the zero-value Model needs no construction step.
+	//
+	// Both are plain reference headers, safe in the value-copied Model (ADR 0011).
+	skillHints  []skills.Suggestion
+	spentSkills map[string]bool
 
 	// act is the live activity the status line renders while a worker runs — thinking,
 	// responding, a named tool, retrying, compacting, stopping (activity.go). It is derived
@@ -2058,6 +2077,7 @@ type frameOverlays struct {
 	inspector string // the /inspect raw-protocol pane (inspector.go)
 	dropdown  string // the command / @file / skill autocomplete
 	queued    string // the staged-interjection strip (ADR 0025)
+	hint      string // the skill-suggestion row closing the band above the box (ADR 0061)
 }
 
 // height is the number of screen rows these overlays take from the transcript. An absent overlay
@@ -2065,7 +2085,7 @@ type frameOverlays struct {
 // rather than measured.
 func (o frameOverlays) height() int {
 	rows := 0
-	for _, block := range []string{o.prompt, o.browser, o.picker, o.settings, o.usage, o.inspector, o.dropdown, o.queued} {
+	for _, block := range []string{o.prompt, o.browser, o.picker, o.settings, o.usage, o.inspector, o.dropdown, o.queued, o.hint} {
 		if block != "" {
 			rows += lipgloss.Height(block)
 		}
@@ -2102,6 +2122,7 @@ func (m Model) frameOverlays() frameOverlays {
 	o.inspector = m.renderInspector()
 	o.dropdown = m.renderAutocomplete()
 	o.queued = m.renderPendingInterjections()
+	o.hint = m.renderSkillHints()
 	return o
 }
 
@@ -2249,6 +2270,11 @@ func stackTranscriptSlot(rows []string, ov frameOverlays, y0 int) ([]string, fra
 // framePane, so nothing addresses it by rectangle. It is composed here anyway so the slot has ONE
 // walk rather than one per block. A closed block contributes nothing and keeps the zero span, the
 // same answer as a dropdown the window was too short to seat (frameRowPlan).
+//
+// The skill-suggestion row (ADR 0061) closes the slot for the same reason, one step nearer the box
+// than the staged rows: it is advice about the draft, and the draft is in the box under it. It is no
+// framePane either — Tab reaches it, never a click — so it too has no span. The two share one
+// bandPlan, which is what keeps the block they compose to one frame rather than two.
 func stackInputSlot(rows []string, ov frameOverlays, y0 int) ([]string, blockSpan) {
 	var dropdown blockSpan
 	if ov.dropdown != "" {
@@ -2257,6 +2283,9 @@ func stackInputSlot(rows []string, ov frameOverlays, y0 int) ([]string, blockSpa
 	}
 	if ov.queued != "" {
 		rows = append(rows, ov.queued)
+	}
+	if ov.hint != "" {
+		rows = append(rows, ov.hint)
 	}
 	return rows, dropdown
 }
@@ -3331,7 +3360,7 @@ func (m Model) frameRowPlan(open framePaneSet) frameRowPlan {
 		seated++
 	}
 
-	plan.band = bandShape(len(m.pendingInterjections), left)
+	plan.band = bandShape(len(m.pendingInterjections), left, m.hasSkillHints())
 	left -= plan.band.height()
 
 	// The transcript's soft reserve is the one thing the FULL-HEIGHT pane changes: while /settings is

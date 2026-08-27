@@ -788,6 +788,88 @@ func TestSuppressedBandKeepsItsCountOnTheStatusLine(t *testing.T) {
 	}
 }
 
+// TestBandShapeSeatsTheHintLast is the two surfaces' share of ONE band. The staged rows are a fact
+// the human put there and the skill-suggestion row is advice about the draft, so the queue takes
+// its rows out of the budget FIRST and the hint is offered only what is left — and beside a seated
+// queue what is left is the group's lower framing row, which the hint takes over rather than adding
+// a row of its own (bandPlan.height, layout.md). A window too short to seat the staged rows is too
+// short to spend on advice instead: the hint is refused there, not promoted into the rows the queue
+// was denied.
+func TestBandShapeSeatsTheHintLast(t *testing.T) {
+	cases := []struct {
+		name       string
+		staged     int
+		hints      bool
+		budget     int
+		wantShown  int
+		wantHidden int
+		wantHint   bool
+		wantHeight int
+	}{
+		{"hint alone", 0, true, 6, 0, 0, true, 2},
+		{"hint alone on its floor", 0, true, 2, 0, 0, true, 2},
+		{"hint alone under its floor", 0, true, 1, 0, 0, false, 0},
+		{"no hint wanted", 0, false, 6, 0, 0, false, 0},
+		{"hint rides the queue's framing row", 2, true, 4, 2, 0, true, 4},
+		{"hint beside a queue that is itself shedding rows", 5, true, 4, 1, 4, true, 4},
+		{"queue seated, hint not wanted", 2, false, 4, 2, 0, false, 4},
+		{"queue denied: the hint is denied with it", 3, true, 2, 0, 0, false, 0},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			plan := bandShape(c.staged, c.budget, c.hints)
+
+			if plan.shown != c.wantShown || plan.hidden != c.wantHidden || plan.hint != c.wantHint {
+				t.Errorf(
+					"bandShape(%d, %d, %v) = {shown %d, hidden %d, hint %v}, want {shown %d, hidden %d, hint %v}",
+					c.staged, c.budget, c.hints,
+					plan.shown, plan.hidden, plan.hint,
+					c.wantShown, c.wantHidden, c.wantHint,
+				)
+			}
+			if got := plan.height(); got != c.wantHeight {
+				t.Errorf("plan.height() = %d, want %d", got, c.wantHeight)
+			}
+			if plan.height() > c.budget {
+				t.Errorf("the band claims %d rows out of a %d-row budget", plan.height(), c.budget)
+			}
+		})
+	}
+}
+
+// TestHintRowIsNearestTheInputBox pins where the two band surfaces land relative to each other. The
+// hint is about the DRAFT and the draft is in the box, so the hint row is the last row of the group
+// — below the staged rows, directly above the box — and the group is framed by exactly one blank
+// band row above it, never by one between the two surfaces: the staged strip gives up its lower
+// framing row so the block still reads as one object.
+func TestHintRowIsNearestTheInputBox(t *testing.T) {
+	var rec suggestCall
+	m := withStagedRows(modelWithOverlayRoom(t, 24, bandOpts(gatedSuggest(&rec))), 2)
+	m = typeDraft(t, m, "audit the parser")
+	if len(m.skillHints) == 0 {
+		t.Fatal("no hints on the model; nothing to place")
+	}
+
+	ov := m.frameOverlays()
+	rows := strings.Split(ansi.Strip(ov.queued+"\n"+ov.hint), "\n")
+
+	if want := bandShape(2, m.transcriptBudget(), true).height(); len(rows) != want {
+		t.Fatalf("the band composed %d rows, want the %d its plan grants:\n%s", len(rows), want, strings.Join(rows, "\n"))
+	}
+	if strings.TrimSpace(rows[0]) != "" {
+		t.Errorf("the group does not open on its blank framing row: %q", rows[0])
+	}
+	for i, row := range rows[1 : len(rows)-1] {
+		if !strings.Contains(row, glyphInterject) {
+			t.Errorf("row %d of the group is not a staged row: %q", i+1, row)
+		}
+	}
+	if last := rows[len(rows)-1]; !strings.Contains(last, glyphSkill) {
+		t.Errorf("the row nearest the input box is not the hint: %q", last)
+	}
+}
+
 // TestQueuedStripEmptyWithoutAQueue: no queue, no band — not even the framing rows, which would
 // otherwise leak two blank black lines into every idle frame.
 func TestQueuedStripEmptyWithoutAQueue(t *testing.T) {

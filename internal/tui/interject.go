@@ -416,19 +416,32 @@ const maxQueuedRows = 3
 // the band (layout.md), so they are part of what it spends its row grant on.
 const bandFrame = 2
 
-// bandPlan is the staged band's share of the frame's rows ([Model.frameRowPlan]): the staged rows
-// it draws and the rows it is holding back, which its one "… N more queued" marker states.
+// bandPlan is the band slot's share of the frame's rows ([Model.frameRowPlan]): the staged rows it
+// draws, the rows it is holding back — which its one "… N more queued" marker states — and whether
+// the skill-suggestion row is granted the closing row of the group (suggestband.go, ADR 0061). Two
+// surfaces share one plan because they share one block on the screen: the hint is about the draft
+// and the staged rows are about what is already sent, and stacking them as separate bands would
+// frame the same two rows twice.
 type bandPlan struct {
 	shown  int
 	hidden int
+	hint   bool
 }
 
 // height is the rows the band occupies: its two framing rows, the staged rows it seats, and the
-// marker row when it is holding any back. A band with nothing to show and nothing to count is not
-// drawn at all — no rows, and no frame either.
+// marker row when it is holding any back. A band with nothing to show, nothing to count and no hint
+// is not drawn at all — no rows, and no frame either.
+//
+// The hint row costs nothing beside a staged queue: it takes the LOWER framing row's place rather
+// than adding one, so the group still closes on a full-width band row directly above the input box
+// (layout.md). On its own it is the whole band — the upper framing row and the hint row under it —
+// which is the two rows bandFrame already counts.
 func (b bandPlan) height() int {
 	if b.shown == 0 && b.hidden == 0 {
-		return 0
+		if !b.hint {
+			return 0
+		}
+		return bandFrame
 	}
 	h := bandFrame + b.shown
 	if b.hidden > 0 {
@@ -437,28 +450,47 @@ func (b bandPlan) height() int {
 	return h
 }
 
-// bandShape spends a row budget on n staged messages. The NEWEST rows are the ones kept, capped by
-// the band's own taste (maxQueuedRows) and then by the budget; whatever is left over is counted on a
-// marker row, which costs one row more than the content it describes — so the marker outranks the
-// rows it is describing, and a grant that seats one row spends it on the count rather than on one of
-// five. Under three rows there is no honest band left (its frame, one row and a marker do not fit),
-// so it is not drawn at all and the status line's "N queued" readout carries the count instead.
-func bandShape(n, budget int) bandPlan {
-	if n <= 0 || budget < bandFrame+1 {
-		return bandPlan{}
+// bandShape spends a row budget on n staged messages and, when hints is true, on the one
+// skill-suggestion row above the box. The NEWEST staged rows are the ones kept, capped by the band's
+// own taste (maxQueuedRows) and then by the budget; whatever is left over is counted on a marker
+// row, which costs one row more than the content it describes — so the marker outranks the rows it
+// is describing, and a grant that seats one row spends it on the count rather than on one of five.
+// Under three rows there is no honest band left (its frame, one row and a marker do not fit), so it
+// is not drawn at all and the status line's "N queued" readout carries the count instead.
+//
+// The hint gives way FIRST, before any staged row: a staged message is a fact the human put there
+// and a hint is advice, so the queue takes its rows out of the budget and the hint is offered only
+// what the plan can still pay for. Beside a seated queue that price is zero — the hint row takes the
+// lower framing row's place (bandPlan.height) — so a queue that is itself shedding rows loses
+// nothing by the hint being there. What it is never offered is a budget the QUEUE asked for and did
+// not get: a window too short to seat the staged rows is too short to spend on advice about the
+// draft instead.
+func bandShape(n, budget int, hints bool) bandPlan {
+	var plan bandPlan
+	if n > 0 && budget >= bandFrame+1 {
+		shown := min(n, maxQueuedRows, budget-bandFrame)
+		if shown < n {
+			shown = max(0, min(shown, budget-bandFrame-1)) // the marker takes a row of the band's own
+		}
+		plan = bandPlan{shown: shown, hidden: n - shown}
 	}
-	shown := min(n, maxQueuedRows, budget-bandFrame)
-	if shown < n {
-		shown = max(0, min(shown, budget-bandFrame-1)) // the marker takes a row of the band's own
+	if !hints || (n > 0 && plan.height() == 0) {
+		return plan
 	}
-	return bandPlan{shown: shown, hidden: n - shown}
+	if withHint := (bandPlan{shown: plan.shown, hidden: plan.hidden, hint: true}); withHint.height() <= budget {
+		return withHint
+	}
+	return plan
 }
 
 // renderPendingInterjections draws the staged rows shown directly above the input box, as one band:
 // faint ⧖ lines in delivery order (oldest first, newest nearest the box), each indented into the
 // body column and painted edge to edge on black, framed by one blank band row above and one below
 // so the group separates from the chrome it sits between. It returns "" when nothing is queued —
-// no queue, no band, no frame — so View treats it exactly like the dropdown slot.
+// no queue, no band, no frame — so View treats it exactly like the dropdown slot. The lower framing
+// row is the one thing it may not draw: the skill-suggestion row takes that row's place when the
+// frame granted it (bandPlan.hint), so the two surfaces read as one block rather than as two
+// framed strips stacked on each other.
 //
 // How many of those rows it draws is the FRAME's call, not the queue's (bandShape): the band is one
 // of the surfaces sharing the viewport with whatever pane is open, and on a window that cannot seat
@@ -484,7 +516,12 @@ func (m Model) renderPendingInterjections() string {
 	for _, it := range m.pendingInterjections[len(m.pendingInterjections)-band.shown:] {
 		rows = append(rows, m.queuedRow(bodyIndent+glyphInterject+" "+queuedRowText(it.raw)))
 	}
-	rows = append(rows, m.queuedRow(""))
+	// The closing framing row, unless the skill-suggestion row has been granted it: the two
+	// surfaces share ONE block above the box, so the group closes on the hint instead and
+	// [Model.renderSkillHints] paints that row (suggestband.go).
+	if !band.hint {
+		rows = append(rows, m.queuedRow(""))
+	}
 	return strings.Join(rows, "\n")
 }
 

@@ -111,7 +111,7 @@ are load-bearing rather than decorative and every shipped scheme is tested for t
 **Every pane above the input box takes its rows from the transcript.** The approval and ask
 prompts, the `/sessions` browser, the `/model` | `/server` picker, the `/settings` pane, the
 `/usage` report, the `/inspect` raw-protocol pane, the `/` and
-`@` dropdown, and the staged-interjection band all sit in the frame between the session area and the bottom chrome,
+`@` dropdown, the staged-interjection band and the skill-suggestion row all sit in the frame between the session area and the bottom chrome,
 and the session area is what shrinks to seat them. The frame is composed from ONE derivation of
 how many rows are left over, so the rows the transcript is drawn on, the rows a mouse click may
 address in it, and the rows an overlay paints are the same three answers to one question — a click
@@ -148,7 +148,8 @@ does on purpose — the band is up because they are typing while the agent works
 up because they are typing.
 
 **So the surfaces give way in a fixed order, and the order is a claim about what the human is
-doing.** The **session area** goes first and goes to nothing; then the **staged band**, which is a
+doing.** The **session area** goes first and goes to nothing; then the **skill-suggestion row**,
+which is advice about a message that has not been sent yet; then the **staged band**, which is a
 reminder rather than a control, and whose count the status line is carrying anyway; then the
 **`/` and `@` dropdown**, which a keystroke opened and a keystroke dismisses; then the
 **`/inspect` raw-protocol pane**, a window onto a ring that keeps its records whether or not the
@@ -1422,6 +1423,56 @@ appears in.
 **What the band is not.** Once a staged message is delivered it leaves the band and appears in the
 transcript as its own ⧖ block, which keeps the transcript's own look. The status line's `N queued`
 readout is separate too, and reads the same count from the same queue.
+
+---
+
+## The skill-suggestion band
+
+**What it shows, and when.** While a message is being typed, the draft is ranked against the skill
+catalog and the closest skills are named in **one row** directly above the input box — the same slot
+the staged strip sits in, one step nearer the box. It is advice about the draft and nothing else: no
+part of the catalog reaches the model either way, and a skill becomes prompt text only when the human
+invokes it with a `/token` (ADR 0061). The row appears as soon as the draft holds enough for the
+matcher to answer honestly and disappears again the moment it does not — a draft of one or two words
+gets no row rather than a guess.
+
+**When it says nothing.** Four silences, each its own reason: the `ui.skill-suggestions` key is off
+(the human asked for no band, and the Tab below is inert with it); no skill catalog is wired; a `/`
+or `@` dropdown is open (the menu is already answering the same question, and two answers to one
+question is noise); or the matcher found too little evidence in the draft. A skill the draft already
+invokes is never suggested, and neither is one that was on the row when a message went out — the
+band advises once per session per skill, and `/clear` and `/new` start that over.
+
+**A row.** `  ✦ skills: /grill-me · /code-audit · /handoff   tab to pick`: two spaces of indent
+(`bodyIndent`, the same body column every band row and the status line share), the ✦ skill glyph, the
+word `skills:`, then at most **three** suggested skills as the `/id` tokens that invoke them,
+separated by ` · `, and the legend `tab to pick` set off by three spaces. The ids are painted in the
+prompt box's skill violet — the colour they will have once one is written into the box below — and
+everything else in the band's faint text.
+
+**Painted like the staged band.** Same field, same rules: full window width, clipped ANSI-aware with
+a `…` tail and padded back out, so the black runs to both edges and joins the input box's own black
+interior.
+
+**One block with the staged band.** The two are siblings in one group, framed by **one** blank band
+row above it. The hint row is the group's last row, directly above the box — the hint is about the
+draft, the draft is in the box — and it takes the place of the staged band's **lower framing row**
+rather than adding a row of its own, so the group still reads as one object instead of two framed
+strips stacked on each other. With nothing staged the band is those two rows alone: the blank framing
+row, and the hint under it.
+
+**Give-way order: the hint goes first.** Of everything sharing the rows above the input box the hint
+is the first thing dropped — before the staged rows, before any pane — because a staged message is a
+fact the human put there and a suggestion is advice. The staged queue therefore takes its rows out of
+the budget first and the hint is offered only what remains; beside a seated queue that price is zero
+(it is taking a framing row that was already paid for), so a queue that is itself shedding rows loses
+nothing by the hint being there. What the hint is never given is a budget the **queue** asked for and
+did not get: a window too short to seat the staged rows is too short to spend on advice about the
+draft instead, and nothing is drawn at all.
+
+**Tab.** With the row showing and no dropdown open, Tab opens the merged `/` menu filtered to exactly
+those skills, top match highlighted. It never steals ⏎: the band is passive, and a message sent with
+the row on screen is sent unchanged.
 
 ---
 

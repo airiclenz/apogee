@@ -358,7 +358,43 @@ handled.
 
 ---
 
-## 5. The suggestion band
+## 5. The suggestion band — ✅ DONE (2026-08-27)
+
+NOTES (2026-08-27): the recompute is FOLDED into `recomputeAutocomplete` (internal/tui/autocomplete.go)
+rather than added beside each call site, which is the choice the item's own text offers ("pick the fold
+if every site is the same edit path") — all five call sites are the edit path (a typed key, a paste, a
+splice, an undo, a withdrawn interjection put back in the box). autocomplete.go is therefore edited
+although the item's Files list does not name it.
+
+NOTES (2026-08-27): internal/tui/skill_test.go is edited for the same reason: widening `SkillCatalog`
+with `Suggest` obliges its two fakes (`fakeSkillCatalog`, `reloadableCatalog`) to implement it, and
+`fakeSkillCatalog` is where the canned-suggestion hook the band's tests drive belongs — the item's
+"a fake SkillCatalog returning canned suggestions" is that fake, which lives in skill_test.go.
+
+NOTES (2026-08-27): the item states both that `bandShape` "grants the hint row only when at least one
+row remains after the queued band's own claim" AND that "the queued band's lower framing row is
+shared: the hint row replaces it". Those cannot both be literal — a row that REPLACES the framing row
+costs nothing. The sharing rule was kept (it is what "View stacks the hint row directly above the
+input box" needs: the group closes on the hint, not on a blank), and the gate is the honest
+generalisation of the sentence: the hint is offered the budget only after the queue has taken its
+rows, and is granted when the plan WITH the hint still fits (`withHint.height() <= budget`). The two
+readings differ only where the queue is seated, and there the literal gate would refuse a free row.
+The give-way order is unchanged and tested: the queue claims first, and a hint is never granted a
+budget the queue asked for and did not get.
+
+NOTES (2026-08-27): the escape-strip test is written against the suggested skill's ID rather than the
+DisplayName the item's Tests line names — the band's row shows ids (`/code-audit`), so the id is what
+becomes screen here and what the seam invariant applies to.
+
+NOTES (2026-08-27): two tests beyond the item's list, both about the surface the item adds to the
+frame: `hasSkillHints` is the one predicate the frame's allocation and the render share, so switching
+`ui.skill-suggestions` off takes the row off the very NEXT frame (ADR 0037) instead of the next
+keystroke, and `TestBandNeverOverflowsTheFrame` sweeps 8..26 rows × 0/2/5 staged to hold D2 with the
+new row on the frame.
+
+NOTES (2026-08-27): a send does not yet clear `m.skillHints` — the band keeps its row over an emptied
+box until the next edit. That is item 7's work ("mark each id spent … then clear `m.skillHints`"),
+which is not yet done; `spentSkills` is declared here as the item asks and stays empty until then.
 
 Depends on items 3 and 4.
 

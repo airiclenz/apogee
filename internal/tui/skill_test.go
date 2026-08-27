@@ -21,14 +21,31 @@ import (
 // fakeSkillCatalog is a deterministic SkillCatalog for the TUI tests. List returns its skills
 // in the given order (the real catalog sorts by DisplayName; tests pass them pre-sorted), and
 // skipped stands in for the SKILL.md files a real scan found but could not load.
+//
+// suggest stands in for the engine's matcher (skills.Catalog.Suggest): the band under test is the
+// PRESENTATION of a ranking, never the ranking itself, so a test hands it canned suggestions — and,
+// where it cares, closes over the call to inspect the draft and the exclude probe the band passed.
+// A nil hook suggests nothing, which is what every test that predates the band wants.
 type fakeSkillCatalog struct {
 	skills  []skills.Skill
 	skipped []skills.SkipError
+	suggest func(draft string, exclude func(string) bool, limit int) []skills.Suggestion
 }
 
 func (f fakeSkillCatalog) List() []skills.Skill { return f.skills }
 
 func (f fakeSkillCatalog) Skipped() []skills.SkipError { return f.skipped }
+
+func (f fakeSkillCatalog) Suggest(
+	draft string,
+	exclude func(id string) bool,
+	limit int,
+) []skills.Suggestion {
+	if f.suggest == nil {
+		return nil
+	}
+	return f.suggest(draft, exclude, limit)
+}
 
 func (f fakeSkillCatalog) Get(id string) (skills.Skill, bool) {
 	for _, s := range f.skills {
@@ -565,6 +582,8 @@ type reloadableCatalog struct {
 func (f reloadableCatalog) List() []skills.Skill { return *f.skills }
 
 func (f reloadableCatalog) Skipped() []skills.SkipError { return nil }
+
+func (f reloadableCatalog) Suggest(string, func(string) bool, int) []skills.Suggestion { return nil }
 
 func (f reloadableCatalog) Get(id string) (skills.Skill, bool) {
 	for _, s := range *f.skills {
