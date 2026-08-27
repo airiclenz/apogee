@@ -853,8 +853,8 @@ func TestSkillsCommandWithNoCatalog(t *testing.T) {
 	if strings.Contains(note, filepath.Join("~", ".apogee")) {
 		t.Errorf("note names the default home instead of the configured one:\n%s", note)
 	}
-	// The dirs are listed in the order sourceDirs walks (skills/load.go) — increasing priority,
-	// so the global library that wins an id clash (ADR 0032) is the LAST line, not the first.
+	// The dirs are listed in INCREASING precedence, so the global library that wins an id clash
+	// (ADR 0032) is the LAST line, not the first — the reverse of the order discovery walks them.
 	prev := -1
 	for _, want := range []string{
 		filepath.Join("home", "code", "proj", ".apogee", "skills"),

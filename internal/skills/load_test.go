@@ -91,7 +91,7 @@ func TestLoadBareProjectSkillsStillBeatDotApogeeOnCollision(t *testing.T) {
 
 // The same-source case: two folders in ONE dir declaring the same id. This lost one silently
 // before ADR 0032 — against the package's own "soft must not mean silent" contract — and the
-// walk's lexical order decides, so the later folder is the live copy.
+// walk's lexical order decides, so under keep-first the EARLIER folder is the live copy.
 func TestLoadRecordsCollisionWithinOneSourceDir(t *testing.T) {
 	home := t.TempDir()
 	writeSkill(t, filepath.Join(home, "skills"), "aaa", "---\nid: dup\nsummary: first\n---\nFROM AAA")
@@ -102,29 +102,121 @@ func TestLoadRecordsCollisionWithinOneSourceDir(t *testing.T) {
 		t.Fatalf("same-dir collision produced %d skills, want 1: %+v", got, cat.List())
 	}
 	dup, _ := cat.Get("dup")
-	if dup.Body != "FROM ZZZ" {
-		t.Errorf("collision winner body = %q, want the later-walked folder", dup.Body)
+	if dup.Body != "FROM AAA" {
+		t.Errorf("collision winner body = %q, want the first-walked folder", dup.Body)
 	}
 	assertShadowed(t, cat,
-		filepath.Join(home, "skills", "aaa", "SKILL.md"),
-		filepath.Join(home, "skills", "zzz", "SKILL.md"))
+		filepath.Join(home, "skills", "zzz", "SKILL.md"),
+		filepath.Join(home, "skills", "aaa", "SKILL.md"))
 }
 
-// assertShadowed checks the catalog recorded exactly one shadowing, naming loser as the file that
-// lost and winner as the copy that is live — reached through errors.As, which is how the /skills
-// report tells a shadowed skill from one that genuinely could not load.
+// The global skill cap is first-come across every source dir, so whichever source the walk reaches
+// LAST is the only one it can cut into. Walking the user's library FIRST is what stops the cap
+// undoing ADR 0032's precedence (audit 2026-08-25 F-06): a repo shipping maxSkills folders used to
+// fill the catalog before the library was read at all, and no collision rule can hand back an id
+// that was never loaded.
+func TestLoadCapNeverEvictsTheHomeLibrary(t *testing.T) {
+	home, ws := t.TempDir(), t.TempDir()
+	writeSkill(t, filepath.Join(home, "skills"), "home-a", "---\nid: home-a\nsummary: s\n---\nFROM HOME A")
+	writeSkill(t, filepath.Join(home, "skills"), "home-b", "---\nid: home-b\nsummary: s\n---\nFROM HOME B")
+	repo := filepath.Join(ws, ".apogee", "skills")
+	writeCapFillingSkills(t, repo)
+
+	cat, _ := Load(Sources{Home: home, Workspace: ws})
+
+	for _, id := range []string{"home-a", "home-b"} {
+		if _, ok := cat.Get(id); !ok {
+			t.Errorf("%s is missing: the repo's %d skills crowded the user's library out", id, maxSkills)
+		}
+	}
+	if got := cat.Len(); got != maxSkills {
+		t.Errorf("catalog holds %d skills, want the cap %d", got, maxSkills)
+	}
+	assertCappedUnder(t, cat, repo)
+}
+
+// The cap and the collision rule are one answer rather than two: a repo that BOTH fills the cap and
+// collides on an id loses the id to the library and still takes the cap, and both losses are
+// recorded instead of silent.
+func TestLoadCapAndCollisionStillFavourHome(t *testing.T) {
+	home, ws := t.TempDir(), t.TempDir()
+	writeSkill(t, filepath.Join(home, "skills"), "home-a", "---\nid: home-a\nsummary: s\n---\nFROM HOME A")
+	writeSkill(t, filepath.Join(home, "skills"), "dup", "---\nid: dup\nsummary: home version\n---\nFROM HOME")
+	repo := filepath.Join(ws, ".apogee", "skills")
+	// "dup" sorts before every "rNNNN" folder, so the walk meets the collision before the cap.
+	writeSkill(t, repo, "dup", "---\nid: dup\nsummary: repo version\n---\nFROM WORKSPACE")
+	writeCapFillingSkills(t, repo)
+
+	cat, _ := Load(Sources{Home: home, Workspace: ws})
+
+	dup, _ := cat.Get("dup")
+	if dup.Body != "FROM HOME" {
+		t.Errorf("dup body = %q, want the user's library to win even as the repo fills the cap", dup.Body)
+	}
+	assertShadowedAmong(t, cat,
+		filepath.Join(repo, "dup", "SKILL.md"),
+		filepath.Join(home, "skills", "dup", "SKILL.md"))
+	assertCappedUnder(t, cat, repo)
+}
+
+// writeCapFillingSkills plants maxSkills skill folders under dir, enough on their own to exhaust
+// the global catalog cap. Ids sort after any single-word fixture id used beside them.
+func writeCapFillingSkills(t *testing.T, dir string) {
+	t.Helper()
+	for i := range maxSkills {
+		id := fmt.Sprintf("r%04d", i)
+		writeSkill(t, dir, id, "---\nid: "+id+"\nsummary: s\n---\nb")
+	}
+}
+
+// assertCappedUnder checks the scan recorded exactly one skill-cap skip and that it landed in dir —
+// the lowest-priority source, the only one the cap may ever cut into.
+func assertCappedUnder(t *testing.T, cat *Catalog, dir string) {
+	t.Helper()
+	var capped []SkipError
+	for _, e := range cat.Skipped() {
+		if strings.Contains(e.Reason(), "skill cap") {
+			capped = append(capped, e)
+		}
+	}
+	if len(capped) != 1 {
+		t.Fatalf("Skipped() = %+v, want exactly one skill-cap record", cat.Skipped())
+	}
+	if !strings.HasPrefix(capped[0].Path, dir+string(filepath.Separator)) {
+		t.Errorf("skill cap fell at %q, want it inside the lower-priority dir %q", capped[0].Path, dir)
+	}
+}
+
+// assertShadowed checks the catalog recorded exactly one skip and that it is the shadowing of
+// loser by winner — the clean-scan form, where nothing else was passed over.
 func assertShadowed(t *testing.T, cat *Catalog, loser, winner string) {
 	t.Helper()
-	skipped := cat.Skipped()
-	if len(skipped) != 1 {
+	if skipped := cat.Skipped(); len(skipped) != 1 {
 		t.Fatalf("Skipped() = %d entries, want 1 shadow record: %+v", len(skipped), skipped)
 	}
-	if skipped[0].Path != loser {
-		t.Errorf("shadow record Path = %q, want the shadowed file %q", skipped[0].Path, loser)
-	}
+	assertShadowedAmong(t, cat, loser, winner)
+}
+
+// assertShadowedAmong finds the scan's one shadow record among whatever else was skipped, naming
+// loser as the file that lost and winner as the copy that is live — reached through errors.As,
+// which is how the /skills report tells a shadowed skill from one that genuinely could not load.
+func assertShadowedAmong(t *testing.T, cat *Catalog, loser, winner string) {
+	t.Helper()
 	var shadow ShadowedError
-	if !errors.As(skipped[0].Err, &shadow) {
-		t.Fatalf("shadow cause = %v, want a ShadowedError reachable via errors.As", skipped[0].Err)
+	var records []SkipError
+	for _, e := range cat.Skipped() {
+		if errors.As(e.Err, &shadow) {
+			records = append(records, e)
+		}
+	}
+	if len(records) != 1 {
+		t.Fatalf("Skipped() holds %d shadow records, want 1: %+v", len(records), cat.Skipped())
+	}
+	if records[0].Path != loser {
+		t.Errorf("shadow record Path = %q, want the shadowed file %q", records[0].Path, loser)
+	}
+	if !errors.As(records[0].Err, &shadow) {
+		t.Fatalf("shadow cause = %v, want a ShadowedError reachable via errors.As", records[0].Err)
 	}
 	if shadow.By != winner {
 		t.Errorf("ShadowedError.By = %q, want the winning file %q", shadow.By, winner)
@@ -576,7 +668,8 @@ func TestReadRootsRefuseARelocatedWorkspaceAnchor(t *testing.T) {
 			src.Home = home
 
 			roots := readRoots(src)
-			want := append(append([]string{}, kept...), filepath.Join(realDir(t, home), "skills"))
+			// The trusted home library heads the list — the walk's own highest-priority-first order.
+			want := append([]string{filepath.Join(realDir(t, home), "skills")}, kept...)
 			if !slices.Equal(roots, want) {
 				t.Errorf("readRoots() = %v, want %v — the relocated anchor must be dropped and nothing else with it",
 					roots, want)
@@ -632,9 +725,9 @@ func TestReadRootsListADirThatDoesNotExist(t *testing.T) {
 	ws, home := t.TempDir(), t.TempDir()
 
 	want := []string{
-		filepath.Join(realDir(t, ws), ".apogee", "skills"),
-		filepath.Join(realDir(t, ws), "skills"),
 		filepath.Join(realDir(t, home), "skills"),
+		filepath.Join(realDir(t, ws), "skills"),
+		filepath.Join(realDir(t, ws), ".apogee", "skills"),
 	}
 	got := readRoots(Sources{Workspace: ws, Home: home, UseProjectSkills: true})
 	if !slices.Equal(got, want) {

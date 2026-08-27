@@ -95,18 +95,20 @@ func TestCatalogResolveSkillsWithoutDirLeavesItEmpty(t *testing.T) {
 	}
 }
 
-// A replaced skill is recorded, not forgotten (ADR 0032). set is the single choke point every
-// source dir funnels through, so pinning it here covers the cross-source and same-source cases
-// alike: the loser's own file is named, and the cause carries the winner's path.
-func TestCatalogSetRecordsTheDisplacedSkill(t *testing.T) {
+// A displaced skill is recorded, not forgotten (ADR 0032), and the copy already in the map is the
+// one that stays: load.go walks the sources highest-priority first, so the first writer of an id
+// outranks every later one (audit 2026-08-25 F-06). set is the single choke point every source dir
+// funnels through, so pinning it here covers the cross-source and same-source cases alike: the
+// loser's own file is named, and the cause carries the winner's path.
+func TestCatalogSetKeepsTheFirstAndRecordsTheDisplacedSkill(t *testing.T) {
 	c := newCatalog()
-	loser := filepath.Join("/ws", ".apogee", "skills", "dup", "SKILL.md")
 	winner := filepath.Join("/home", "skills", "dup", "SKILL.md")
-	c.set(Skill{ID: "dup", DisplayName: "Dup", Summary: "s", Body: "LOSER"}, loser)
+	loser := filepath.Join("/ws", ".apogee", "skills", "dup", "SKILL.md")
 	c.set(Skill{ID: "dup", DisplayName: "Dup", Summary: "s", Body: "WINNER"}, winner)
+	c.set(Skill{ID: "dup", DisplayName: "Dup", Summary: "s", Body: "LOSER"}, loser)
 
 	if got, _ := c.Get("dup"); got.Body != "WINNER" {
-		t.Errorf("live skill body = %q, want the last writer to win", got.Body)
+		t.Errorf("live skill body = %q, want the first writer to win", got.Body)
 	}
 	skipped := c.Skipped()
 	if len(skipped) != 1 {

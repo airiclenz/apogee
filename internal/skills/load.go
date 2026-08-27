@@ -88,15 +88,25 @@ type skillAnchor struct {
 // Skill.Dir is stamped from, and what the /skills report lists as a source.
 func (a skillAnchor) dir() string { return filepath.Join(a.base, filepath.FromSlash(a.rel)) }
 
-// sourceAnchors lists the skill dirs in increasing priority (later overrides earlier on an id
-// collision): the project's .apogee/skills, then the project's bare skills/ (gated by
-// UseProjectSkills), and the user's global library LAST. Home going last is the ADR 0032 rule —
+// sourceAnchors lists the skill dirs in DECREASING priority (an earlier one wins an id collision
+// with a later one): the user's global library FIRST, then the project's bare skills/ (gated by
+// UseProjectSkills), then the project's .apogee/skills. Home going first is the ADR 0032 rule —
 // the user's own library wins any cross-source id collision, so a cloned repo can contribute a
 // NEW skill id but can never silently replace a skill the user invokes by muscle memory. The
-// workspace dirs keep their relative order among themselves. An empty Home/Workspace drops its
-// dirs rather than producing a bogus relative path. The home anchor is the trusted one: the apogee
-// home is the operator's control plane, so the path naming the library may be a symlink the
-// operator placed and discovery follows it (openAnchor).
+// workspace dirs keep their relative order among themselves.
+//
+// Highest-priority-first is what makes the global cap (maxSkills) agree with that precedence
+// instead of undoing it (audit 2026-08-25 F-06). The cap is first-come and the walk is shared
+// across every source, so whichever source is walked LAST is the one the cap can evict: with the
+// library walked last, a repo shipping maxSkills folders filled the catalog and the user's own
+// library never loaded — priority decided by last-write could not save a skill that was never
+// read. Walking highest-priority first inverts both halves at once: the cap can only ever cut
+// into the lowest-priority source, and a collision keeps the FIRST copy (Catalog.set), which
+// reaches the identical "home wins, bare skills/ beats .apogee/skills" outcome from the other end.
+//
+// An empty Home/Workspace drops its dirs rather than producing a bogus relative path. The home
+// anchor is the trusted one: the apogee home is the operator's control plane, so the path naming
+// the library may be a symlink the operator placed and discovery follows it (openAnchor).
 //
 // This is a deliberate, documented deviation from the apogee-code oracle's order, which this
 // function used to mirror: a SKILL.md written for either tool still loads in both — only
@@ -104,14 +114,14 @@ func (a skillAnchor) dir() string { return filepath.Join(a.base, filepath.FromSl
 // (Catalog.set), so the trade is visible in the /skills report instead of silent.
 func sourceAnchors(src Sources) []skillAnchor {
 	var anchors []skillAnchor
+	if src.Home != "" {
+		anchors = append(anchors, skillAnchor{base: src.Home, rel: "skills", trusted: true})
+	}
 	if src.Workspace != "" {
-		anchors = append(anchors, skillAnchor{base: src.Workspace, rel: ".apogee/skills"})
 		if src.UseProjectSkills {
 			anchors = append(anchors, skillAnchor{base: src.Workspace, rel: "skills"})
 		}
-	}
-	if src.Home != "" {
-		anchors = append(anchors, skillAnchor{base: src.Home, rel: "skills", trusted: true})
+		anchors = append(anchors, skillAnchor{base: src.Workspace, rel: ".apogee/skills"})
 	}
 	return anchors
 }

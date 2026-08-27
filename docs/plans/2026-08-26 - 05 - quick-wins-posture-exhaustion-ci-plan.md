@@ -459,7 +459,12 @@ in `renderable`. `presenter_test.go:448-458`'s crossing test stays green unchang
 
 ---
 
-## 7. Skill discovery walks the highest-priority source first; a collision keeps the first
+## 7. Skill discovery walks the highest-priority source first; a collision keeps the first — ✅ DONE (2026-08-27)
+
+NOTES (2026-08-26): `internal/tui/skills.go:130` and `internal/tui/skill_test.go:856` were listed as "no change"; both carried comments asserting the empty-catalog note lists dirs "in the order sourceDirs walks — increasing priority", which the inverted walk falsifies. Comment-only rewording, no logic or rendered output change (the note still ends with the global library).
+NOTES (2026-08-26): `internal/skills/doc.go`'s Layering paragraph (`:22-25`) was not in the item's file list but stated "later sources override earlier … the user's global library is walked LAST" — the exact claim the item inverts. Rewritten to the new rule; `doc.go:26` unchanged as the item says.
+NOTES (2026-08-26): `TestReadRootsRefuseARelocatedWorkspaceAnchor` and `TestReadRootsListADirThatDoesNotExist` hard-coded readRoots' output order and failed on the new anchor order. Expectations reordered only — the item's "order is immaterial to a read-root mount" holds, the same roots are mounted.
+NOTES (2026-08-26): `assertShadowed` was split so the collision assertion is reusable from a scan that also records a cap skip: `assertShadowedAmong` holds the body, `assertShadowed` adds the clean-scan "exactly one skip" check and delegates. Existing callers keep their assertions unchanged.
 
 **What:** ADR 0032 says the user's library outranks the workspace, but the cap (`load.go:192-201`)
 is first-come and `Catalog.set` (`catalog.go:47-52`) is last-write-wins, with the home library

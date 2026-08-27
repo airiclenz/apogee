@@ -93,3 +93,19 @@ the user's silently.
   rule — the source dirs are still supplied by the caller, only their precedence is fixed here.
 - **This supersedes no ADR.** The prior order was never ratified in a decision record; it lived
   in a code comment, which is the reason the trade-off went unweighed.
+
+## Amendment (2026-08-26) — the walk runs highest-priority first and a collision keeps the first copy
+
+The 2026-08-25 security audit (F-06) found the precedence above enforceable only where every
+source is actually read. The global cap (`maxSkills`) is first-come across all source dirs while
+priority was last-write, so a repo shipping `maxSkills` skill folders filled the catalog *before*
+the user's library was walked at all — and no write-order rule can hand back an id that was never
+loaded. The repo then owned both the ids and the cap.
+
+Both halves invert together: `sourceAnchors` now returns the sources in **decreasing** priority —
+the global library first, then the bare `skills/` dir, then `.apogee/skills` — and `Catalog.set`
+**keeps the first** copy of an id, recording the newcomer as shadowed. This reaches the identical
+"home wins, bare `skills/` beats `.apogee/skills`" outcome from the other end, while the cap can
+now only ever cut into the lowest-priority source. Precedence is unchanged; only the mechanism
+enforcing it moved. The Context above describes `sourceDirs` as returning *increasing* priority:
+that describes the pre-amendment code.

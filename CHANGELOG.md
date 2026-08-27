@@ -283,6 +283,12 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- A repository shipping thousands of skills can no longer crowd the user's own library out of the
+  catalog or take over its ids. Skill discovery now walks the source dirs highest-priority first —
+  the global library, then the workspace's bare `skills/`, then `.apogee/skills` — and an id
+  collision keeps the first copy loaded, so the global skill cap can only ever cut into the
+  lowest-priority source instead of evicting the library ADR 0032 put on top.
+
 - **A streamed reply and a non-streamed body are now byte-bounded.** The engine bounds every
   reply (ADR 0046), but only in tokens: nothing stopped a server that ignores `max_tokens` — or a
   hostile one — from streaming text until the agent ran out of memory, and `Respond` handed its

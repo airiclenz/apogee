@@ -34,19 +34,26 @@ func newCatalog() *Catalog {
 	return &Catalog{byID: map[string]Skill{}, pathByID: map[string]string{}}
 }
 
-// set inserts (or replaces) a skill by ID, remembering the absolute SKILL.md path it came from.
-// A replacement is the layering rule: load.go walks the source dirs in increasing priority, so
-// the last writer of an ID — the highest-priority source — wins. Under ADR 0032 that is the
-// user's global library over either workspace source.
+// set inserts a skill by ID, remembering the absolute SKILL.md path it came from. An id already
+// present is KEPT: load.go walks the source dirs in decreasing priority, so the FIRST writer of an
+// id — the highest-priority source — wins. Under ADR 0032 that is the user's global library over
+// either workspace source.
+//
+// Keep-first rather than last-write-wins is what lets the global cap (maxSkills) agree with that
+// precedence instead of undoing it (audit 2026-08-25 F-06): a skill that lost the cap was never
+// read, so no write-order rule could hand it the id back. With the highest-priority source walked
+// first, the copy already in the map is by construction the one that outranks the newcomer.
 //
 // The displaced skill is never dropped silently. Its SKILL.md is recorded through the same skip
 // channel as a malformed file, carrying a ShadowedError that names the winner, so /skills can
 // report both which copy is live and which was shadowed. This also closes the same-source case —
 // two folders in one dir with colliding ids — which used to lose one without a word, against this
-// package's own "soft must not mean silent" contract (doc.go).
+// package's own "soft must not mean silent" contract (doc.go); there the walk's lexical order
+// decides, so the folder reached first is the live copy.
 func (c *Catalog) set(s Skill, path string) {
 	if prev, ok := c.pathByID[s.ID]; ok {
-		c.addSkip(SkipError{Path: prev, Err: ShadowedError{By: path}})
+		c.addSkip(SkipError{Path: path, Err: ShadowedError{By: prev}})
+		return
 	}
 	c.byID[s.ID] = s
 	c.pathByID[s.ID] = path

@@ -127,9 +127,9 @@ func skillCatalogNote(list []skills.Skill, skipped []skills.SkipError, home, wor
 
 // emptyCatalogLines answers an empty scan. An empty catalog is not a failure — most users start
 // with none — so instead of an apologetic blank the note says where discovery looked, in the
-// layered order sourceDirs walks (skills/load.go) — increasing priority, so the LAST line is the
-// one that wins an id clash (ADR 0032, which put the global library there): the question a user
-// staring at "no skills" is about to ask. Both roots are INJECTED rather than assumed, for the
+// layered order, in INCREASING precedence — the reverse of the order discovery now walks them in
+// (skills/load.go's sourceAnchors) — so the LAST line is the one that wins an id clash (ADR 0032,
+// which put the global library there): the question a user staring at "no skills" is about to ask. Both roots are INJECTED rather than assumed, for the
 // same reason the loader's
 // Sources are (ADR 0001): home is the apogee home this run resolved — `--config` /
 // APOGEE_CONFIG move it, and naming `~/.apogee` at a run that is not using it would send the

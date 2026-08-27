@@ -19,10 +19,12 @@
 //	ADR 0010  package layout: depend only on internal/domain (downward), never the root facade
 //	ADR 0032  the user's global library outranks the workspace on an id collision
 //
-// Layering (load.go): later sources override earlier on an id collision, and the user's global
-// library is walked LAST — so a workspace skill may contribute a NEW id but can never replace one
-// the user already has (ADR 0032). The two workspace dirs keep their relative order among
-// themselves. Every collision is recorded, cross-source or inside one dir alike: the losing
+// Layering (load.go): the sources are walked in DECREASING priority with the user's global
+// library FIRST, and an id collision keeps the copy already loaded — so a workspace skill may
+// contribute a NEW id but can never replace one the user already has (ADR 0032). Walking the
+// highest-priority source first is also what keeps the global skill cap from undoing that
+// precedence: the cap is first-come, so it can only ever cut into the LOWEST-priority source.
+// The two workspace dirs keep their relative order among themselves. Every collision is recorded, cross-source or inside one dir alike: the losing
 // SKILL.md goes onto the catalog as a skip carrying a ShadowedError that names the winning file.
 // Robustness is by design — a missing source dir is skipped, and a malformed skill is skipped
 // rather than failing the whole load, so one bad file never blanks the catalog. Every skip is
