@@ -52,9 +52,11 @@
 //
 // Guards bundles the executor-facing always-on set (dangerous-action + breaker +
 // audit) the tool executor threads around every call so all tools — and a sub-agent
-// (D2) — inherit them. The package imports only internal/domain and the standard
-// library (ADR 0010): it is imported BY internal/tools and internal/agent, never the
-// other way, so there is no cycle.
+// (D2) — inherit them. The package imports internal/domain, the standard library and
+// exactly one third-party module — golang.org/x/net/idna, the IDNA mapping urlsafety.go's
+// NormalizeURL applies so the guard's verdict names the host net/http will actually
+// dial. ADR 0010's direction rule is untouched: this package is imported BY
+// internal/tools and internal/agent, never the other way, so there is no cycle.
 //
 // # The files, one line each
 //

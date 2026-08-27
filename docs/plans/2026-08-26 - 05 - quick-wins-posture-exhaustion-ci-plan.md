@@ -527,7 +527,9 @@ lexically FIRST folder being live and the later one recorded; its comment update
 
 ---
 
-## 8. `internal/security` package doc names its one third-party import
+## 8. `internal/security` package doc names its one third-party import — ✅ DONE (2026-08-27)
+
+NOTES (2026-08-27): none — the item warrants no CHANGELOG entry (a Go doc comment; nothing user-visible), so that heading is omitted.
 
 **What:** `internal/security/doc.go:55-56` says the package "imports only internal/domain and
 the standard library (ADR 0010)"; `urlsafety.go:12` imports `golang.org/x/net/idna` and uses
