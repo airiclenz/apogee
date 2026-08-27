@@ -264,6 +264,35 @@ of that run.
   `calls := nativeCalls` at `:584`) applies no such filter, so a real id-less native call still
   runs and sends back a tool result whose `tool_call_id` drops off the wire.
 
+### Read-fence / egress / docs-truth residuals — deferred out of the 2026-08-26 run
+
+**Status:** found 2026-08-26 at the close of the read-fence / egress / docs plan
+(`docs/plans/archived/2026-08-26 - 04 - read-fence-egress-docs-plan.md`), deferred out of that
+run.
+
+- [ ] **A dotfiles-symlinked `~/.apogee/skills` hands the model a path the read fence refuses.**
+  The mount is now the RESOLVED library, but `Skill.Dir` (`internal/skills/load.go:307`) stays
+  UNRESOLVED and is what the model is handed — the `files: %s` line and the `{{SKILL_DIR}}`
+  substitution both use it (`internal/agent/loop.go:1160-1165`) — so reads through it are refused
+  for an operator whose skills dir is a symlink. Fix: stamp `Skill.Dir` from the same resolved
+  anchor the mount uses.
+
+- [ ] **The Firing mount site has no test that would catch a revert to `SourceDirs`.** Reverting
+  `cmd/apogee/wire_firing.go:229` from `skillProvider.ReadRoots` to `SourceDirs` leaves
+  `go test ./cmd/apogee/ -run 'Firing|Schedule'` green — the fixture providers have no symlinked
+  source, so nothing there separates the two. A planted symlink in those fixtures would close it.
+
+- [ ] **The fail-closed proxy paths carry no committed test.** An unusable proxy value and an
+  unpinnable proxy host both refuse the call, documented on `newHTTPClient`
+  (`internal/tools/network.go:338`) and `vetEndpoint` (`internal/mcp/transport.go:201`); both were
+  verified by hand only.
+
+- [ ] **`--model`'s help still calls the startup server's `model:` a "hint".**
+  `cmd/apogee/root.go:110-111` reads "the startup server's `model:` hint, else ask the server".
+  The behaviour described is accurate, but the retired "hint" vocabulary survives in help text —
+  exposed by this run's CONTEXT.md correction, where `model:` became a **trusted** id, never
+  substituted.
+
 ## Parked / deferred work
 
 Live, deliberately deferred work only. Each entry records *enough* design that we don't re-derive
