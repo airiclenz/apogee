@@ -999,6 +999,27 @@ point is a **minor** bump, not a breaking change.
   it. The dirs already on disk are the existing 14-day sweep's to collect; this change deletes
   nothing.
 
+- Fixed: the live delegate shakeout (`TestLiveDelegateCapAndWorkingWindow`) now pins the child's
+  reply ceiling (`Context.MaxOutputTokens = 16384`) instead of inheriting the 6553-token
+  working-room derivation, so a reasoning child can no longer trip the output cap before the step
+  cap bites (release-checklist finding D-1); a hit on `cappedDelegateReplyErrFmt` at Depth 1 is now
+  a named assertion, and `TestUnroutedChildInheritsTheParentsOutputPin` proves offline that an
+  unrouted child inherits the parent's pin.
+
+- README: the prebuilt-archive install block now resolves `VERSION` from the latest GitHub release
+  at run time (curl + sed, no `jq`) instead of a stale hard-coded pin, with a comment on how to pin
+  a specific release; a tripwire test (`TestReadmeArchiveInstallDoesNotPinAVersion`) fails if a
+  `VERSION=<number>` line ever returns.
+
+- **An upstream reply with an empty body no longer errors with a bare colon.** `apogee: upstream
+  HTTP 308: ` is now `apogee: upstream HTTP 308 Permanent Redirect — redirects are not followed;
+  point endpoint: at the URL the server redirects to (Location: <target>)` — the status is named
+  whenever the body is empty, and any 3xx additionally explains that redirects are refused by
+  design (see `NewClient`) and names the `Location` header when the server sent one. One
+  unexported renderer (`upstreamStatusText`) now owns the text for both the blocking and the
+  streaming surface, `StatusError` carries the new `Location` field, and a non-empty body keeps
+  today's exact wording.
+
 ## [0.17.1] — 2026-08-25
 
 ### Changed
