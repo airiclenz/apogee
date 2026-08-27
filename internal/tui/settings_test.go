@@ -12,6 +12,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	lipgloss "charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/scheme"
@@ -3304,6 +3305,49 @@ func TestSettingsPaneAppliesAColorSchemeLive(t *testing.T) {
 	// And the Options carry the scheme now in force, so a report can name it.
 	if switched.opts.ColorSchemeName != "light" {
 		t.Errorf("ColorSchemeName = %q, want %q", switched.opts.ColorSchemeName, "light")
+	}
+}
+
+// The width authority rides on the theme (theme.go, ADR 0030), so the one live rebuild of a theme
+// is the one place it can be lost: applyColorScheme rebuilds for a new PALETTE while the painter
+// stays exactly where it was, and a fresh theme starts at the painter's own WcWidth. The switch
+// therefore carries the measure across — in both directions, since a carry-over that invented a
+// move would be the same defect mirrored.
+func TestSettingsPaneKeepsTheWidthAuthorityAcrossASchemeSwitch(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		reported bool
+		want     ansi.Method
+	}{
+		{name: "the terminal confirmed Unicode core", reported: true, want: ansi.GraphemeWidth},
+		{name: "the terminal said nothing about mode 2027", reported: false, want: ansi.WcWidth},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			m := settingsSchemeModel(t, &settingsWriteLog{}, []string{"dark", "light"},
+				func(string) (scheme.Scheme, []string) { return stubScheme("#123456"), nil })
+			if tt.reported {
+				m = step(t, m, tea.ModeReportMsg{Mode: ansi.ModeUnicodeCore, Value: ansi.ModeSet})
+			}
+			if got := m.th.measure.Method(); got != tt.want {
+				t.Fatalf("before the switch the model measures with %v, want %v", got, tt.want)
+			}
+
+			// Open the sub-list, walk to the second scheme, commit it.
+			switched := step(t, step(t, step(t, m, keyEnter()), keyDown()), keyEnter())
+
+			if got := hexOf(switched.th.errorFg); got != "#123456" {
+				t.Fatalf("the model's error tone = %s, want the switched scheme's #123456 — the theme "+
+					"was not rebuilt at all, so what the measure did across it proves nothing", got)
+			}
+			if got := switched.th.measure.Method(); got != tt.want {
+				t.Errorf("after the switch the model measures with %v, want %v — the theme rebuild "+
+					"moved the width authority, and only the terminal may move it", got, tt.want)
+			}
+		})
 	}
 }
 

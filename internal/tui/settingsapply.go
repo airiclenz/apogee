@@ -319,7 +319,13 @@ func (m *Model) applyColorScheme(name string) (string, tea.Cmd, error) {
 	if !ok {
 		return "", nil, errNoSchemeResolver
 	}
+	// The width authority rides on the theme (theme.go), and a rebuilt theme starts at the
+	// painter's WcWidth — but the painter did not move here, only the palette did. Carry the live
+	// measure across the rebuild, the same posture foldModeReport takes when the painter DOES move
+	// (width.go): a scheme switch must not un-learn what the terminal already told the program.
+	measure := m.th.measure
 	m.th = newTheme(s)
+	m.th.measure = measure
 	fillInput(&m.input, m.th.surface)
 	m.transcript.paints.clear()
 	m.opts.ColorScheme, m.opts.ColorSchemeName = s, name

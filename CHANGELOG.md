@@ -276,6 +276,19 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **A live colour-scheme switch no longer resets the width measure.** The TUI's one width
+  authority rides on the theme (ADR 0030), and a theme built by `newTheme` starts at the painter's
+  `ansi.WcWidth` — correct at construction, wrong on a rebuild. Every `/settings`
+  `ui.color-scheme` switch rebuilt the theme for the new palette and so re-armed the measure at
+  `WcWidth`, discarding the `ansi.GraphemeWidth` a Unicode-core terminal had already reported: on
+  such a terminal, changing the colour scheme silently returned the layout to measuring emoji and
+  variation-selector runs in a method the painter no longer used, until a restart. `applyColorScheme`
+  now reads the live measure off the outgoing theme and re-arms it on the new one — the same posture
+  `foldModeReport` takes when the painter genuinely moves — because a scheme switch moves the
+  palette, not the painter. A session on a terminal that never reported mode 2027 still measures at
+  `WcWidth` across the switch: the carry-over preserves what the terminal said and never invents a
+  move.
+
 - **The `syntax` Mechanism no longer retries correct JS/TS holding a regex literal.** A quote,
   backtick or bracket inside a JavaScript/TypeScript regex literal — `const re = /['"]/g;` — was
   read as a string opener or a bracket, so the heuristic checker reported an unclosed string or an

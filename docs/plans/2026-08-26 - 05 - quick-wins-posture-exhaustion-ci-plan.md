@@ -183,7 +183,10 @@ unterminated literal is under-reported, not invented: `a.js` `const r = /abc;\n`
 
 ---
 
-## 2. A colour-scheme switch keeps the width authority the terminal chose
+## 2. A colour-scheme switch keeps the width authority the terminal chose — ✅ DONE (2026-08-27)
+
+NOTES (2026-08-27): the item's line references had drifted — `m.th = newTheme(s)` is `settingsapply.go:322` (not `:313`), the construction-time `newTheme` is `model.go:502` (not `:476`), and `TestSettingsPaneAppliesAColorSchemeLive` is `settings_test.go:3267` (not `:2976`). Same sites, no approach change.
+NOTES (2026-08-27): the new test is table-driven with `t.Run`/`t.Parallel` over the two cases the item names (mode report / no mode report) rather than two separate functions — the house Go testing standard, and the pattern `settings_test.go:1424` already uses. Verified it fails without the fix (`want 1, got 0` on the reported case) and passes with it.
 
 **What:** `internal/tui/settingsapply.go` `applyColorScheme` (`:305-322`) carries the live
 measure across the theme rebuild. The theme is the home of `measure` by design (`theme.go:125-130`,

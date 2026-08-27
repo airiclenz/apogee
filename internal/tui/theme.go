@@ -317,7 +317,11 @@ func newTheme(s scheme.Scheme) theme {
 
 	return theme{
 		// The painter's own starting measure. It moves only when the terminal tells the program
-		// the painter moved (Update's tea.ModeReportMsg case).
+		// the painter moved (Update's tea.ModeReportMsg case) — which makes every rebuild of a
+		// theme on a LIVE screen the second mover, in the opposite direction: applyColorScheme
+		// (settingsapply.go) rebuilds the theme for a new palette while the painter stayed where
+		// it was, so it reads the measure off the outgoing theme and re-arms it on this one.
+		// Any future live rebuild owes the same carry-over.
 		measure:   newWidthAuthority(),
 		userBlock: lipgloss.NewStyle().Foreground(userText).Background(chrome),
 		// The collapse marker keeps the block's background and changes everything else: a light
