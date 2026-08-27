@@ -1,0 +1,24 @@
+❯ Echo the long string please                              │
+✦ Terminal                                                 │
+  ┕ echo … ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯   ┃
+
+╭─────────────────── Approve terminal? ────────────────────╮
+│ Reason: subprocess execution                             │
+│ command:                                                 │
+│   echo                                                   │
+│   aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa     │
+│ … (+4 more lines)                                        │
+│   fffffffffffffffffffffffffffffffffffffffffffff          │
+│                                                          │
+│ ❯ Allow                      [a]                         │
+│ · Always allow this session  [s]                         │
+│ · Deny                       [d]                         │
+│ · Cancel                     [esc]                       │
+╰──────────────────────────────────────────────────────────╯
+▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔ Hostile file names ▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔
+  approval needed
+╭──────────────────────────────────────────────────────────╮
+│ queue a message…  ⏎ queue · ↑ recall · esc stop          │
+╰──────────────────────────────────────────────────────────╯
+  probe-target ✦ hostile-model ✦ <workdir>
+▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁

@@ -1,0 +1,57 @@
+# The upstream the T-20 test talks to: one multi-select question, and one reply whose last block is
+# a markdown table carrying a wide rune and an emoji.
+#
+# The emoji is deliberately ⚠️ (U+26A0 U+FE0F) rather than a plain pictograph. It is the one shape
+# the two width measures DISAGREE about: the grapheme measure promotes a cluster carrying
+# VARIATION SELECTOR-16 to two cells, wcwidth takes the first non-zero-width rune and calls it one
+# (internal/tui/width.go). A table built around a glyph both measures agree on could not tell a
+# width authority that survived the theme rebuild from one that was reset by it.
+#
+# And the VS16 cell is the WIDEST of its column, three of them over, which is the other half of the
+# same point: a column is as wide as its widest cell, so a table whose widest cell measures the same
+# either way lands in the same columns under both measures and cannot regress. Three clusters make
+# the difference three columns wide, which no rounding can absorb.
+#
+# The preamble before the table is there for the scroll bar: the transcript has to overflow for a
+# bar to be drawn at all, and the bar's column is half of what the test compares across the switch.
+model: widths-model
+turns:
+    # The session title. apogee asks for one off the first prompt, so this has to be matched BEFORE
+    # the prompt's own turn or it would take it (see smoke.yaml).
+    - when:
+        last_message: The user's first request
+      repeat: true
+      text: Widths and ticks
+    - when:
+        last_message: ^Ask me which fruit
+      repeat: true
+      tool_calls:
+        - name: ask_user
+          arguments: '{"question":"Which of these do you want?","choices":["apples","pears","plums, and specifically the small dark ones that only turn up for about three weeks in late summer"],"multi_select":true}'
+    - when:
+        tool_result: ask_user
+      repeat: true
+      text: Noted.
+    - when:
+        last_message: ^Print a small markdown table
+      repeat: true
+      token_delay: 1ms
+      chunk_runes: 24
+      text: |
+        Here is the table you asked for.
+
+        The rows below are the three samples, and the paragraphs above them are here only so the
+        transcript is taller than the window it is drawn in — a scroll bar is drawn when there is
+        something to scroll, and the column it lands in is what this exchange is really about.
+
+        The first column is plain ASCII, the second carries wide runes, and the third is a short
+        note so the table has three columns to rule between.
+
+        | Sample | Text | Note |
+        | --- | --- | --- |
+        | one | 日本語 | plain wide runes |
+        | two | ⚠️⚠️⚠️ warning signs | a cluster with VS16 |
+        | three | 日本語⚠️ | both at once |
+    # Anything apogee asks on its own account.
+    - repeat: true
+      text: Nothing else to add.

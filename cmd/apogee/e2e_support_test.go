@@ -66,6 +66,16 @@ func launchTUI(t *testing.T, drv *tuitest.Driver, stub *stubllm.Server, args ...
 func launchTUIConfigured(t *testing.T, drv *tuitest.Driver, stub *stubllm.Server, extraConfig string,
 	args ...string) *e2eSession {
 	t.Helper()
+	return launchTUIIn(t, drv, stub, "", extraConfig, args...)
+}
+
+// launchTUIIn is [launchTUIConfigured] in a workspace the CALLER built, rather than the seeded
+// scratch one. It exists for the fixtures a test cannot ask for after the fact: T-12's hostile tree
+// puts an escape sequence in the workspace ROOT's own name, and a root is named when it is created.
+// An empty ws takes the seeded scratch workspace, which is what every other launch wants.
+func launchTUIIn(t *testing.T, drv *tuitest.Driver, stub *stubllm.Server, ws, extraConfig string,
+	args ...string) *e2eSession {
+	t.Helper()
 
 	// Registered before anything else this helper creates, so it is the LAST cleanup to run and
 	// sees a tree that has already been torn down. Whatever is still running then is a leak.
@@ -74,7 +84,10 @@ func launchTUIConfigured(t *testing.T, drv *tuitest.Driver, stub *stubllm.Server
 
 	home := e2eHome(t, stub)
 	appendHomeConfig(t, home, extraConfig)
-	s := &e2eSession{t: t, home: home, ws: e2eWorkspace(t), stub: stub, args: args}
+	if ws == "" {
+		ws = e2eWorkspace(t)
+	}
+	s := &e2eSession{t: t, home: home, ws: ws, stub: stub, args: args}
 	s.start(drv)
 	return s
 }

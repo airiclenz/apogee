@@ -1,0 +1,67 @@
+# The upstream the T-12 test talks to: a model that does nothing but reach for the three read tools
+# whose results are file NAMES, plus one terminal command whose argument is long enough to wrap a
+# pane at sixty columns.
+#
+# The fixture workspace those tools read is built by the test (hostileWorkspace), verbatim from the
+# checklist's own paste block: a root directory with an ESC in its name, a file with an ESC in its
+# name, one with a newline, one with a carriage return, and one carrying a bidi override. Nothing
+# here spells any of them — the point of the item is that apogee decides how they are rendered, so
+# the script asks for the listing and the assertions are made against what came back.
+#
+# Every turn repeats. The tools are asked for in several tests over the same script, and a consumed
+# turn would leave a later one unscripted.
+model: hostile-model
+turns:
+    # The session title. apogee asks for one off the first prompt, so this has to be matched BEFORE
+    # the prompt's own turn or it would take it (see smoke.yaml).
+    - when:
+        last_message: The user's first request
+      repeat: true
+      text: Hostile file names
+    # The wrap-ups, one per tool: matched before the prompt turns below so a RESULT can never be
+    # answered as a fresh request.
+    - when:
+        tool_result: list_dir
+      repeat: true
+      text: That is the whole directory.
+    - when:
+        tool_result: find_files
+      repeat: true
+      text: Those are the text files.
+    - when:
+        tool_result: grep
+      repeat: true
+      text: That is where the word appears.
+    - when:
+        tool_result: terminal
+      repeat: true
+      text: The command has answered.
+    - when:
+        last_message: ^List the workspace root
+      repeat: true
+      tool_calls:
+        - name: list_dir
+          arguments: '{"path":"."}'
+    - when:
+        last_message: ^Find the text files
+      repeat: true
+      tool_calls:
+        - name: find_files
+          arguments: '{"pattern":"*.txt"}'
+    - when:
+        last_message: ^Search the workspace for hello
+      repeat: true
+      tool_calls:
+        - name: grep
+          arguments: '{"pattern":"hello"}'
+    # One argument, three hundred characters of it: the pane has to put `command:` on a row of its
+    # own and hang every wrapped row of the value under the value's own indent.
+    - when:
+        last_message: ^Echo the long string
+      repeat: true
+      tool_calls:
+        - name: terminal
+          arguments: '{"command":"echo aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb cccccccccccccccccccccccccccccccccccccccccccccccccc dddddddddddddddddddddddddddddddddddddddddddddddddd eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee fffffffffffffffffffffffffffffffffffffffffffff"}'
+    # Anything apogee asks on its own account.
+    - repeat: true
+      text: Nothing else to add.

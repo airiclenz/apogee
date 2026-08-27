@@ -1,0 +1,30 @@
+│ ▗▄▄▌▌  ▌▌  ▌▌  ▌▙▄▄▌▙▄▄▌                                              model    gpt[31m-oss-20b │ │
+│ ▚▄▄▌▙▄▄▘▚▄▄▘▚▄▄▌▚▄▄ ▚▄▄                                               version  <version>         │ │
+│     ▌        ▄▄▘                                                                               │ ┃
+╰────────────────────────────────────────────────────────────────────────────────────────────────╯ ┃
+                                                                                                   ┃
+· model 'gpt[31m-oss-20b' is not advertised by the server; using it as configured (context window  ┃
+  unknown — Budget and auto-compaction inactive)                                                   ┃
+                                                                                                   ┃
+· context window unknown — automatic compaction and the Budget are inactive; set context-window:   ┃
+  in config.yaml                                                                                   ┃
+                                                                                                   ┃
+· 1 skill available:                                                                               ┃
+    /dupe · workspace  Dupe — a duplicate id                                                       ┃
+                                                                                                   ┃
+  1 skill found but not loaded:                                                                    ┃
+    ev[31mil row — skill is missing a required field (id="ev\x1b[31mil\nrow"                       ┃
+  displayName="ev\x1b[31mil\nrow" summary="ev\x1b[31mil\nrow" body-empty=true)                     ┃
+      <root>/ws[31mRED/.apogee/skills/ev[31mil row/SKILL.md ┃
+                                                                                                   ┃
+  1 skill shadowed by another of the same id:                                                      ┃
+    dupe — <root>/ws[31mRED/.apogee/skills/dupe/SKILL.md ┃
+      the live copy is <root>/ws[31mRED/skills/dupe/SKILL.md ┃
+
+▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔
+
+╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ Send a message…  ⏎ send · ⌥⏎ newline · ↑ recall · ⌃c quit                                        │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+  probe-target ✦ gpt[31m-oss-20b ✦ <workdir>
+▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁

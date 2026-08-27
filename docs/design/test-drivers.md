@@ -243,6 +243,26 @@ emulator answers them, which a driver pumps back into the program's input. That 
 optional — an undrained answer blocks the emulator mid-write and with it the program painting into
 it — so `Screen` drains it always and `Close()` is what stops the drain.
 
+**A terminal that measures in graphemes.** By default the emulator answers the mode-2027 (Unicode
+core) query with "not recognized", which is the honest answer for a terminal that has not been told
+otherwise — and it leaves apogee's width authority on `ansi.WcWidth` for the whole run
+(`internal/tui/width.go`). A test about wide-rune layout has to move it, and the way to move it is
+the way any program moves it: write `\x1b[?2027h` into the `Screen` before the launch.
+
+```go
+drv := tuitest.NewDriver(t, size)
+_, _ = drv.Screen().Write([]byte("\x1b[?2027h")) // a Ghostty, not an Apple Terminal
+```
+
+Two things follow, and a width test needs both: the emulator measures graphemes the way it measures
+them, and it answers bubbletea's start-up DECRQM with "set", which moves the *painter* — and with it
+apogee's authority — onto `ansi.GraphemeWidth`. Pass `--tui-diag` and the run says so in its own log
+(`mode 2027: 1 (set)`, `width-method: grapheme`); `TestE2EWidthSurvivesAColourSchemeSwitch` asserts
+those two lines before it asserts anything about columns, because on a terminal that never answered
+the query the layout cannot move and a green test would mean nothing. The checklist says the same
+thing to a human (T-20's preconditions: on such a terminal, record step 5 as *not covered* rather
+than as a pass).
+
 ### Waiting
 
 A driver test never sleeps. `WaitFor(t, cond, opts...)` polls at 20 ms against a 5 s deadline and,
@@ -577,11 +597,12 @@ not exist yet, with the plan item that writes them.
 | Stream order and completeness (T-24) | in-process — the committed transcript, read from the frame and from the session record; stubllm sets the chunking (`ChunkRunes`, `TokenDelay`) | `TestE2EStreamCommitsCompleteAndInOrder` | Every line of a long answer by ⇞ paging alone: the sticky prompt header covers the top row of each window (layout.md), so a page-at-a-time walk leaves one line per window unseen. The record is the completeness authority; the walk's own claim is that no *run* of lines is missing |
 | Streamed text belongs to one block (T-24) | in-process — the session record's own `depth` and `spawnCallID` per entry, with the frame as the second reading; each child streams a marker word the other never uses | `TestE2EDelegationsStreamIntoTheirOwnBlocks` | — |
 | A cancelled reply (T-24) | in-process — the frame at the moment of the cancel, and the record afterwards for "the next prompt starts a new entry" | `TestE2EStreamCancelKeepsWhatArrived` | — |
-| Pane and block text, and its wording (T-04, T-10, T-12, T-13) | in-process — `Frame.Find` / `Frame.Row` for the text, `Golden` for a whole surface, a judge rubric for the wording half only | `TestE2EDelegationStepCap`; `TestE2EApprovalForcesALookAtTheControlPlane`; `TestJudgeForcedApprovalPaneReadsAsHelp` | — |
+| Pane and block text, and its wording (T-04, T-10, T-12, T-13) | in-process — `Frame.Find` / `Frame.Row` for the text, `Golden` for a whole surface, a judge rubric for the wording half only | `TestE2EDelegationStepCap`; `TestE2EApprovalForcesALookAtTheControlPlane`; `TestE2EHostileWrapsUnderItsOwnIndent`; `TestJudgeForcedApprovalPaneReadsAsHelp` | — |
+| Untrusted text on a rendering surface (T-12) | in-process — the fixture is hostile file and skill names on a REAL filesystem, and the claim is made on CELLS: `StyleRuns` for the colour a leaked sequence would have painted, row indents for the rows a section authored, `Golden` for the block. `apogee probe`'s report is asserted on its bytes | `TestE2EHostileSurfacesKeepTheirOwnRows`; `TestE2EHostileProbeKeepsItsOwnRows`; `TestJudgeHostileRowsReadAsOneRow` | A listing's own rows: the transcript paints a `list_dir`/`grep`/`find_files` block's target and outcome slot and never its result body, so the rows are the ones the MODEL is handed and are asserted out of the stub's request log (`TestE2EHostileToolResultsKeepOneRowPerEntry`) |
 | Token accounting across surfaces (T-06) | in-process — the `/usage` pane's rows and the `/sessions` spend cell, split back into cells and asserted against the counts the FIXTURE told the server to report; stubllm's `usage:` carries the `cached` share that no live server can be relied on to produce | `TestE2EUsageReportsCachedTokensAndDelegateSpend`; `TestE2EUsageHidesTheCachedColumnWithoutABreakdown` | — |
 | A decision key that arrives too early (T-13) | PTY only — the key is written into the terminal from the moment the prompt is sent until the pane is on screen, and the `--tui-trace` file is the evidence that the pane was PAINTED before anything removed it; an in-process run has no trace (item 4) | `TestE2EApprovalKeysAreArmedAfterPaint` | Whether the latency of a deliberate press is *felt* — the test pins a ceiling in milliseconds instead |
 | Colour and tone of a run (T-15) | PTY for the real terminal's SGR, or in-process `Frame.StyleRuns` — assert the run, never the raw escape | `TestE2EOutcomeTonePTY` *(planned, item 13)* | Whether the reader's own terminal theme renders that colour legibly |
-| Wide-rune and glyph alignment (T-20) | `tuitest` — the emulator's cell width is the authority; assert `Frame` cells, never rune counts | `TestE2EWidth…` *(planned, item 12)* | Font tofu — whether the reader's font has the glyph at all |
+| Wide-rune and glyph alignment (T-20) | `tuitest` — the emulator's cell width is the authority; assert `Frame` cells, never rune counts. A layout claim needs a terminal in Unicode-core mode (see *Frame*) or the two measures cannot disagree | `TestE2EWidthTicksMultiSelectChoices`; `TestE2EWidthSurvivesAColourSchemeSwitch` | Font tofu — whether the reader's font has the glyph at all |
 | Resize and reflow (T-24, T-25) | in-process `Driver.Resize` (emulator resize + a `tea.WindowSizeMsg`, then a wait for the repaint it caused); PTY `PTYDriver.Resize` = `pty.Setsize` + a real `SIGWINCH` | `TestE2EStreamPTY` | — |
 | tty state on the way out (T-25) | PTY only — `PTYDriver.TTYState()` after `Quit()`: echo and canonical mode restored, no dangling SGR, exit code 0 | `TestE2ESmokePTY` | Whether the user's own shell prompt looks right afterwards — no shell runs inside the PTY |
 | Real process lifetime, SIGKILL, exit code (T-03, T-07, T-14) | PTY only — `PTYDriver.Pid()`, `Kill()` (a real `SIGKILL`), `Exited()`, and the same for a Console's own children; the in-process driver has no process to kill | `TestE2EDelegationRecordSurvivesSIGKILL`; `TestE2EConsole` *(planned, item 14)* | — |
@@ -701,5 +722,14 @@ command. Where a test needs the same prompt more than once — T-13 sends one li
 exchange is told from the next by waiting for the prompt box's idle placeholder, never by waiting
 for reply TEXT, which the exchange before it already put on the screen.
 
+The T-12/T-20 set (`e2e_hostile_test.go`, `e2e_width_test.go`) measures **≈ 12 s** under `-race`
+across six launches, and the settings pane is most of it: a value two-thirds of the way down the key
+registry is reached one arrow at a time, each press waiting for the selection to move, and the width
+item opens that pane twice (there and back, T-20 step 7).
+
 Two rules keep it there. Every wait is a bounded `WaitFor` (5 s default) on a condition, never a
-sleep; and a settle is 150 ms of no bytes, taken only when a frame is about to be READ.
+sleep; and a settle is 150 ms of no bytes, taken only when a frame is about to be READ. The second
+rule has a corollary worth stating, because it is the quiet way a driver test lies: **`WaitQuiet` is
+not a wait for a keypress to land**. The screen has been quiet since before the key was sent, so the
+check passes at once, on a frame the program has not answered yet. Wait for the paint the key caused
+(`awaitRepaint`, or a `WaitText` on what the key was supposed to produce) and settle after that.
