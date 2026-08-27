@@ -143,6 +143,11 @@ func (m Model) startNewSession() (tea.Model, tea.Cmd) {
 	if rotate := m.scheduleWrite(recordWrite{kind: writeRotate}); rotate != nil {
 		cmd = rotate
 	}
+	// The suggestion band's spent set falls with the conversation it was advising (suggestband.go):
+	// the skills it named in the closed session are advice the human has not been given in this one.
+	// A refused clear returns above and never reaches this line, so the set survives exactly as long
+	// as the session it belongs to does.
+	m.spentSkills = nil
 	m.transcript.reset()
 	m.transcript.addStartup(newStartupView(m.opts))
 	// The clear above was a session boundary, so the engine re-read the workspace context files:

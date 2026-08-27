@@ -198,6 +198,9 @@ func (m Model) stageInterjection() (tea.Model, tea.Cmd) {
 	// reconcilable: the row exists for the human the moment it exists for the worker.
 	m.pendingInterjections = append(m.pendingInterjections, row)
 	m.box.push(row)
+	// A staged row is a send from the human's side — the line has left their hands and the worker
+	// delivers it — so the suggestion band is spent exactly as it is at idle (spendSkillHints).
+	m.spendSkillHints()
 	m.promptEditor.reset()
 	m, record = m.recordSend(sent) // the row is queued: the human sent this line, so ↑ hands it back
 	m.layout()                     // the emptied box shrinks back; the strip above it gains a row

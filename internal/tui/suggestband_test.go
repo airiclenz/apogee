@@ -276,3 +276,171 @@ func TestBandNeverOverflowsTheFrame(t *testing.T) {
 		}
 	}
 }
+
+// ----------------------------------------------------------------------------
+// Spent at send — the band's session dedup
+// ----------------------------------------------------------------------------
+//
+// The dedup rule has one boundary and it is the SEND: while the draft is being written the row may
+// change as often as the sentence does, and none of it costs the human anything; the moment a
+// message goes out, every skill the row was naming has had its chance and is never suggested again
+// this session. What follows pins both halves of that — what spends, and what does not.
+
+// TestSuggestedSkillIsSpentOnSend is the rule itself: the band names three skills, the human sends
+// the message under them, and a later draft that would rank exactly the same way gets no row. The
+// exclusion is asserted at the SEAM as well as on the model — the exclude probe the band hands the
+// matcher must answer for the spent ids — because that closure is what a real matcher would consult,
+// and a spent set nothing reads would dedup nothing.
+func TestSuggestedSkillIsSpentOnSend(t *testing.T) {
+	var rec suggestCall
+	m := modelWithOverlayRoom(t, 24, bandOpts(gatedSuggest(&rec)))
+
+	m = typeDraft(t, m, "audit the parser")
+	if got := len(m.skillHints); got != 3 {
+		t.Fatalf("precondition: band shows %d hints, want 3", got)
+	}
+
+	m = step(t, m, keyEnter()) // the message goes out with the row standing above it
+
+	if m.state != stateRunning {
+		t.Fatalf("precondition: state = %v after ⏎, want running (the message did not send)", m.state)
+	}
+	if got := len(m.skillHints); got != 0 {
+		t.Errorf("the band still holds %d hints after the send", got)
+	}
+
+	m = typeDraft(t, m, "audit the parser once more")
+
+	for _, s := range bandSuggestions {
+		if rec.exclude == nil {
+			t.Fatal("the band ranked without an exclude probe")
+		}
+		if !rec.exclude(s.ID) {
+			t.Errorf("the exclude probe admits %q, spent on the previous send", s.ID)
+		}
+	}
+	if got := len(m.skillHints); got != 0 {
+		t.Errorf("the band suggests %d already-spent skills on the next draft", got)
+	}
+	if m.renderSkillHints() != "" {
+		t.Error("the band paints a row of spent skills")
+	}
+}
+
+// TestSuggestionsSurviveASendWithNoBand is the other side of "spent at send": what is spent is what was
+// SHOWN, never the catalog. A draft under the matcher's evidence gate has no row, so sending it
+// retires nothing — and the very same skills must still be offered on the next draft that earns
+// them. Without this the first two-word message of a session would silently spend the top matches
+// for a draft the human never saw a band for.
+func TestSuggestionsSurviveASendWithNoBand(t *testing.T) {
+	var rec suggestCall
+	m := modelWithOverlayRoom(t, 24, bandOpts(gatedSuggest(&rec)))
+
+	m = typeDraft(t, m, "go on") // two words: under the gate, so no row
+	if got := len(m.skillHints); got != 0 {
+		t.Fatalf("precondition: band shows %d hints on a draft under the gate", got)
+	}
+
+	m = step(t, m, keyEnter())
+
+	if got := len(m.spentSkills); got != 0 {
+		t.Errorf("a send with an empty band spent %d skills: %v", got, m.spentSkills)
+	}
+
+	m = typeDraft(t, m, "audit the parser")
+
+	if got := len(m.skillHints); got != 3 {
+		t.Errorf("band shows %d hints after a send that spent nothing, want 3", got)
+	}
+}
+
+// TestStagedInterjectionSpendsTheBand: ⏎ while a worker runs stages the line rather than launching
+// it, but from the human's side it is the same act — the message has left their hands and the worker
+// delivers it — so the row above it is spent exactly as a plain send spends it.
+func TestStagedInterjectionSpendsTheBand(t *testing.T) {
+	var rec suggestCall
+	m := modelWithOverlayRoom(t, 24, bandOpts(gatedSuggest(&rec)))
+
+	m = step(t, typeDraft(t, m, "go on"), keyEnter()) // open the Exchange with nothing on the row
+	if m.state != stateRunning || m.box == nil {
+		t.Fatalf("precondition: state = %v, mailbox %v — want a running Exchange", m.state, m.box != nil)
+	}
+
+	m = typeDraft(t, m, "audit the parser")
+	if got := len(m.skillHints); got != 3 {
+		t.Fatalf("precondition: band shows %d hints while the worker runs, want 3", got)
+	}
+
+	m = step(t, m, keyEnter()) // stages the row
+
+	if got := len(m.pendingInterjections); got != 1 {
+		t.Fatalf("precondition: %d rows staged, want 1", got)
+	}
+	if got := len(m.spentSkills); got != 3 {
+		t.Errorf("a staged interjection spent %d skills, want 3", got)
+	}
+
+	m = typeDraft(t, m, "audit the parser once more")
+
+	if got := len(m.skillHints); got != 0 {
+		t.Errorf("the band suggests %d skills already spent by a staged row", got)
+	}
+}
+
+// TestClearResetsTheSpentSkills pins the boundary the set lives inside. /clear (and /new) open a new
+// conversation, and a new conversation has heard none of the old one's advice — so the skills spent
+// before it are offered again afterwards. It is the same boundary the transcript resets on, which is
+// what makes the rule "once per session" rather than "once per catalog scan".
+func TestClearResetsTheSpentSkills(t *testing.T) {
+	var rec suggestCall
+	m := modelWithOverlayRoom(t, 24, bandOpts(gatedSuggest(&rec)))
+
+	m = step(t, typeDraft(t, m, "audit the parser"), keyEnter())
+	if got := len(m.spentSkills); got != 3 {
+		t.Fatalf("precondition: the send spent %d skills, want 3", got)
+	}
+	m = step(t, m, cancelledMsg{}) // back to idle, where an idle-only /command can run
+	if m.state != stateIdle {
+		t.Fatalf("precondition: state = %v after the cancel, want idle", m.state)
+	}
+
+	// Set the line rather than type it: a typed "/clear" opens the "/" menu, whose own ⏎ accepts a
+	// row instead of submitting the line, and this test is about the command not the dropdown.
+	m.input.SetValue("/clear")
+	m = step(t, m, keyEnter())
+
+	if m.spentSkills != nil {
+		t.Errorf("/clear left %d spent skills behind: %v", len(m.spentSkills), m.spentSkills)
+	}
+
+	m = typeDraft(t, m, "audit the parser")
+
+	if got := len(m.skillHints); got != 3 {
+		t.Errorf("band shows %d hints in the fresh session, want the 3 /clear made available again", got)
+	}
+}
+
+// TestSuggestionsSurviveARefusedLine: only a SEND spends the row. A lone "/word" that names neither a
+// command nor a skill is refused with the typo guard's note and the line is left standing in the box
+// — nothing went out — so the advice above it must still be there to act on afterwards.
+func TestSuggestionsSurviveARefusedLine(t *testing.T) {
+	var rec suggestCall
+	m := modelWithOverlayRoom(t, 24, bandOpts(gatedSuggest(&rec)))
+
+	m = typeDraft(t, m, "audit the parser")
+	if got := len(m.skillHints); got != 3 {
+		t.Fatalf("precondition: band shows %d hints, want 3", got)
+	}
+	// Set the mistyped verb rather than type it, so the row the refusal must not spend is still
+	// standing when ⏎ lands (a typed "/" would open the menu, which stands the band down by itself).
+	m.input.SetValue("/comapct")
+
+	m = step(t, m, keyEnter())
+
+	if got := len(m.spentSkills); got != 0 {
+		t.Errorf("a refused /word spent %d skills: %v", got, m.spentSkills)
+	}
+	if got := len(m.skillHints); got != 3 {
+		t.Errorf("the refusal cleared the band: %d hints left, want 3", got)
+	}
+}

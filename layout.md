@@ -1441,8 +1441,9 @@ gets no row rather than a guess.
 dropdown is open — the `/` or `@` menu, or the suggestion menu Tab itself opens (the pane is already
 answering the same question, and two answers to one question is noise); or the matcher found too
 little evidence in the draft. A skill the draft already invokes is never suggested, and neither is
-one that was on the row when a message went out — the band advises once per session per skill, and
-`/clear` and `/new` start that over.
+one that was on the row when a message went out — a plain send or a row staged while the agent works,
+both being the human letting the line go, while a refusal or a `/command` line spends nothing. The
+band therefore advises once per session per skill, and `/clear` and `/new` start that over.
 
 **A row.** `  ✦ skills: /grill-me · /code-audit · /handoff   tab to pick`: two spaces of indent
 (`bodyIndent`, the same body column every band row and the status line share), the ✦ skill glyph, the

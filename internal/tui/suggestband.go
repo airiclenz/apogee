@@ -15,6 +15,12 @@ import (
 // prompt text only when the human invokes it with a "/token" (CONTEXT.md "Skill", ADR 0027) — so the
 // band changes what the SCREEN says and never what is sent. It is the reason the matcher lives in
 // internal/skills rather than here: ranking is engine work, presentation is the Driver's.
+//
+// The advice is made ONCE. Every skill the row is naming at the moment a message goes out — a plain
+// send or a staged interjection — is SPENT for the session and is never suggested again
+// ([Model.spendSkillHints]), and only a new conversation (/clear, /new) starts that over. Until a
+// message goes out the row is free to change with every keystroke: what the human never sent on has
+// cost them nothing.
 
 // maxSkillHints is how many skills the band names at once. It is the ROW's taste, the way
 // maxQueuedRows is the staged strip's: the band is one line, and three "/id" tokens plus the legend
@@ -96,6 +102,33 @@ func hintDraft(value string, known func(id string) bool) string {
 	}
 	b.WriteString(value[cut:])
 	return b.String()
+}
+
+// spendSkillHints retires what the band is showing right now: every id on the row is marked spent
+// for the session ([Model.spentSkills]) and the row is emptied. Its callers are the two places a
+// message leaves the human's hands — the send at idle ([Model.submit]) and the ⏎ that stages a row
+// while a worker runs ([Model.stageInterjection]) — and nowhere else: a refusal, a mistyped "/word"
+// and a "/command" line are not sends, and advice the human was given no chance to act on must still
+// be given the next time it fits.
+//
+// Spending at SEND rather than at first sight is what makes the rule honest in both directions. The
+// draft is a moving thing and so is the row above it, so a suggestion that came and went while the
+// sentence was being written was never really made; but the moment the message goes out, whatever
+// the row was advising has had its chance, and repeating it on the next draft is no longer advice —
+// it is nagging, and a row that nags is a row the human stops reading.
+//
+// The map is allocated on first use, so the zero-value Model needs no construction step and a
+// session that never sees a suggestion never allocates one. It is emptied at the conversation
+// boundary /clear and /new draw ([Model.startNewSession]) — the same boundary the transcript resets
+// on, and the same reading: a fresh conversation has heard none of the old one's advice.
+func (m *Model) spendSkillHints() {
+	for _, h := range m.skillHints {
+		if m.spentSkills == nil {
+			m.spentSkills = map[string]bool{}
+		}
+		m.spentSkills[h.ID] = true
+	}
+	m.skillHints = nil
 }
 
 // hasSkillHints is the ONE answer to "is there a suggestion row on this frame", and both readers of

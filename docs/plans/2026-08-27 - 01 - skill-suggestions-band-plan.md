@@ -532,7 +532,16 @@ no longer in the catalog is skipped. Key-claim test names `tab` at idle with hin
 
 ---
 
-## 7. Spent-at-send dedup
+## 7. Spent-at-send dedup — ✅ DONE (2026-08-27)
+
+NOTES (2026-08-27): the marking is factored into one method, `spendSkillHints` (suggestband.go),
+rather than open-coded at each of the two send sites the item names. Both sites do the identical two
+things (mark every id, then clear the row), and the rule's whole reason for existing — advice is made
+once, at the send — belongs stated in the band's own file next to the set it retires.
+
+NOTES (2026-08-27): layout.md's band section already carried the rule (item 5 wrote it) so this item
+only sharpened it: the sentence now names WHICH acts spend (a send or a staged row) and which do not
+(a refusal, a `/command` line), which is the part item 7 actually settles.
 
 Depends on item 5.
 

@@ -1593,6 +1593,11 @@ func (m Model) submit() (tea.Model, tea.Cmd) {
 		in, spans = m.joinedInterjections(parsed)
 		m.pendingInterjections = nil
 	}
+	// The band's advice has been given: every skill it was naming is spent for the session
+	// (spendSkillHints, ADR 0061). It happens HERE — past every refusal above, before the box is
+	// emptied — because this is the first line submit reaches that is committed to sending, and it
+	// is the line both send shapes reach: the plain message and the ⏎ that flushes the held queue.
+	m.spendSkillHints()
 	m.promptEditor.reset()         // empties the textarea, closes the overlay, clears the skill region
 	m, record = m.recordSend(sent) // the send is committed: this line is recallable from here on
 	m.detached = false             // a fresh prompt re-arms follow-the-tail: sending means "done reading history"
