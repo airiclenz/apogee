@@ -189,10 +189,115 @@ server they were recorded from and the run they pin, e.g. `qwen3-smoke.yaml`. Th
 
 ## tuitest
 
-*Filled by plan items 4, 5 and 6.* The `Frame` type over `github.com/charmbracelet/x/vt` (text,
-cell styles, cursor, cell width), the in-process `Driver` over `runRoot`'s launcher seam, the
-black-box `PTYDriver`, and the golden-frame convention under `cmd/apogee/testdata/frames/`
-(`go test ./cmd/apogee -update`).
+`internal/tuitest` is the driver kit: it launches the terminal UI, types into it, and answers the
+question every "manual" checklist step was really asking — *what did the terminal show?*
+
+### Frame
+
+The answer is a `Frame`: one immutable snapshot of a terminal, reconstructed by a real VT emulator
+(`github.com/charmbracelet/x/vt`, pinned at pseudo-version
+`v0.0.0-20260823001701-96af6d2cb5f6` because it holds this repo's exact `x/ansi v0.11.7`). Both
+drivers — in-process and PTY — feed their bytes to the same emulator and get the same `Frame` type
+back, so an assertion means the same thing whichever one produced it (ADR 0062).
+
+```go
+scr := tuitest.NewScreen(100, 30)   // the terminal the renderer paints into
+defer scr.Close()                   // stops the answer pump; CheckLeaks counts it
+_, _ = scr.Write(rendererBytes)
+
+f := scr.Snapshot()
+f.String()          // the whole picture, plain, trailing spaces trimmed
+f.Row(3)            // one row
+f.Find("Deny")      // the COLUMN and row of some text, or ok=false
+f.Cell(12, 3).Width // how many columns that grapheme occupies — the emulator's answer
+f.StyleRuns(3)      // the row split into maximal spans sharing one Style
+f.Cursor()          // where the caret is
+```
+
+**Cells, not strings.** A `Frame` is a grid of `Cell{Style, Rune, Width}`, and every accessor above
+is derived from it. That is the whole reason the emulator is in the loop: a claim about the screen
+is a claim about *columns*, and a Go string does not have columns. `len("世界")` is 6, its rune count
+is 2, and the terminal gives it 4 — only the last number can settle whether a box drawn beside it
+lines up (T-20). The same goes for colour: `View()` returns a string with SGR sequences in it, and
+asking whether the error tone is red by searching for `\x1b[31m` proves only that the renderer
+*emitted* something. `StyleRuns` reports what the terminal *ended up showing*, in spans with real
+bounds, after every reset, overwrite and re-paint in between.
+
+`Style` carries the two colours and the three attributes apogee's scheme actually uses (bold,
+faint, reverse). Colours compare by resolved RGBA (`tuitest.SameColor`), so an indexed colour and
+the literal it resolves to are one style — a renderer may spell a colour either way and no test
+should care. A nil colour is "the terminal's own default", which is a real value: leaving the
+foreground alone and painting it grey are different decisions.
+
+`Screen` also counts what it was told to do: `BytesWritten()` and `FullRepaints()` (writes carrying
+a full-screen erase or a cursor-home) are the T-24 flicker proxy, and `Quiet(d)` is the settle rule
+— no bytes for `d` — that a test waits on before pinning a frame. `Answers()` is the other
+direction: a renderer asks the terminal questions (DA1, DECRQM for mode 2027, DSR/CPR) and the
+emulator answers them, which a driver pumps back into the program's input. That pump is not
+optional — an undrained answer blocks the emulator mid-write and with it the program painting into
+it — so `Screen` drains it always and `Close()` is what stops the drain.
+
+### Waiting
+
+A driver test never sleeps. `WaitFor(t, cond, opts...)` polls at 20 ms against a 5 s deadline and,
+when it gives up, prints the last frame *plain and styled*, so a colour bug is visible in the
+failure output rather than only in a rerun. `WaitText`, `WaitGone` and `WaitQuiet` are the
+shorthands almost every test uses. Options: `On(screen)` (which screen to print — pass it),
+`Within(d)`, `Awaiting("the approval pane")`. Set `TUITEST_ARTIFACTS=<dir>` and a failure also
+writes `<dir>/<test name>.{txt,ansi}`, for a CI run nobody is watching live.
+
+`CheckLeaks(t)` is the other guard: called FIRST in a driver test, it fails the test if a goroutine
+from `internal/tui`, bubbletea, `internal/tuitest`, `internal/filewatch` or `internal/heartbeat` is
+still running 2 s after it ends. A driver test starts real workers; the interesting failure is not
+one that crashes but one that never stops and makes some *later* test flaky.
+
+### Goldens
+
+`Golden(t, name, frame, redactions...)` compares `frame.String()` against
+`testdata/frames/<name>.txt` in the calling package and prints a line diff on mismatch;
+`go test ./cmd/apogee -update` records them. Goldens are for **rendering surfaces only** (ratified
+call 13): the transcript pane, hostile rows, the fold, outcome slots, settings rows — surfaces
+whose whole point is how they look. Everything else is asserted semantically with `WaitFor`,
+because a golden that pins behaviour fails on every unrelated wording change and is then updated
+without being read, which is worse than no test.
+
+Redactions are not optional for a frame that carries a `t.TempDir()` path, the build version, a
+session title with today's date in it, or a relative age: without them the golden churns on every
+run. `Redact(pattern, with)` builds one; `-update` records the **redacted** text, so what is on
+disk is what a later comparison sees. The in-process driver supplies the default set (plan item 5).
+
+### The composition seam: `tui.Build`
+
+Drivers are Drivers in the ADR 0031 sense — they enter through the composition, not beside it.
+`tui.Run` is split for exactly that:
+
+```go
+func Build(ctx context.Context, eng Engine, br *Bridge, opts Options,
+	out io.Writer, extra ...tea.ProgramOption) (*tea.Program, func(), error)
+```
+
+`Build` is everything `Run` did between `newModel` and `tea.NewProgram` — the event flush, the
+`--tui-diag` log, the program options, `br.Bind` — and it stops one step short of running the
+program. `Run` is now the terminal half: claim the alternate screen, `Build(…, nil)`, run, clean up.
+
+`out` is the whole of the difference between the two callers. `nil` is the binary's path and is
+byte-for-byte what it was before the split: `--tui-trace` and the Windows sync-query stripper wrap
+`os.Stdout` exactly as they always have. A non-nil `out` is a driver's: the output half is skipped
+entirely and `tea.WithOutput(out)` installed instead. A `--tui-trace` path alongside a driver output
+is **refused**, not honoured — the trace wraps `os.Stdout`, which the driver's own output wins over,
+so honouring it would hand back an empty file that looks exactly like a run that painted nothing.
+The PTY driver, which does drive a real stdout, is where the trace seam is exercised (plan item 6).
+
+`extra` options are appended last, so a caller's `WithInput` / `WithWindowSize` /
+`WithColorProfile` / `WithEnvironment` beats anything built inside.
+
+### In-process Driver
+
+*Filled by plan item 5.*
+
+### PTYDriver
+
+*Filled by plan item 6.*
 
 ## judge
 

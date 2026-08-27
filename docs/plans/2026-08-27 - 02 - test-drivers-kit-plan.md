@@ -363,7 +363,44 @@ prints a `listening` line (the example fixture is checked in by this item).
 
 **Commit:** `test(stubllm): cmd/stubllm serve and record — fixtures come from real servers`
 
-## 4. `internal/tuitest` Frame over x/vt, and the `tui.Run` split
+## 4. `internal/tuitest` Frame over x/vt, and the `tui.Run` split — ✅ DONE (2026-08-27)
+
+NOTES (2026-08-27): `Screen` gained `Close()` and a permanent answer-drain goroutine, neither
+named on the item's API list. `vt.Emulator`'s reply pipe is an unbuffered `io.Pipe`: an
+undrained DA1/DECRQM/CPR answer blocks the emulator mid-write and with it the program painting
+into it, so the drain cannot be the caller's job. `vt.Emulator.Close()` is deliberately NOT
+used to stop it — it writes a `closed` flag the blocked `Read` reads with no happens-before,
+which `-race` reports — so a NUL-framed sentinel written through `Emulator.InputPipe()` ends
+the pump instead.
+NOTES (2026-08-27): `Frame` gained `Styled()` (the SGR render captured inside the same
+snapshot) so a `WaitFor` failure prints a plain frame and a styled one that are the same
+instant; `Style`, `SameColor`, `Redact` and `ApplyRedactions` are the supporting exports the
+item's field lists imply but do not name.
+NOTES (2026-08-27): `CheckLeaks` ignores `go test`'s own harness goroutines
+(`testing.tRunner(`, `testing.(*M).Run(`, `testing.runTests(`) as well as its own inspection
+frame. A test function that LIVES in a marked package — every test in `internal/tuitest`, every
+driver test in `cmd/apogee` — names that package in its own stack, so without this exemption
+the check reports the goroutine that called it. This is the concrete form of the item's
+"standard library and `testing` goroutines are ignored".
+NOTES (2026-08-27): the failure paths (`WaitFor`'s timeout message, `Golden`'s mismatch diff,
+`CheckLeaks`' report) are asserted against the pure functions that build them —
+`waiter.failure`, `compareGolden`, `unifiedDiff`, `leakedGoroutines` — rather than against a
+fake `testing.TB`. `testing.TB` carries an unexported method and cannot be implemented outside
+the `testing` package, so a stub TB is not available to any test in this repo.
+NOTES (2026-08-27): the `Build` option assembly is an unexported `buildProgramOptions` over a
+shared `baseProgramOptions`, so `programOptions` keeps its exact signature and its four
+existing pins (diagnostics_test.go, environ_test.go, syncoutput_test.go,
+conpty_windows_test.go) are untouched, as the item requires.
+NOTES (2026-08-27): two of the four `Build` tests run a real `tea.Program` (input disabled,
+window size fixed, stopped by cancelling the program context). `tea.Program`'s output field is
+unexported, so "the caller's option lands last" and "the driver's writer is where frames
+actually land" can only be proven behaviourally; both finish in ~25 ms.
+NOTES (2026-08-27): no `docmap_test.go` for `internal/tuitest` — `doc.go` carries a complete
+file map, but the package is at 6 non-test files, under the ~10 the house rule triggers at.
+Plan items 5 (driver.go, keys.go) and 6 (pty.go, pty_windows.go) take it to 10; item 6 should
+add the one-line `docmap.Check(t)` guard.
+NOTES (2026-08-27): no CHANGELOG entry from this item — plan item 8 owns the single
+`[Unreleased]` entry covering the whole kit (items 2–7), as recorded under items 2 and 3.
 
 **What:** the shared frame type and the composition seam both drivers use.
 

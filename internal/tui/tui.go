@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -1521,11 +1522,13 @@ type AppliedSetting struct {
 
 // Run launches the interactive terminal UI over eng. It is the single entry point the
 // binary calls: cmd/apogee hands it the constructed Agent, the Bridge whose Sink/Approver
-// were installed in the Agent's Config, and the resolved Options. Run builds the Model and
-// the Bubble Tea program, then binds the program to br (br.Bind) *before* program.Run()
-// starts the loop — so the late-bound event and approval delegates reach the live program
-// the moment the first worker emits (phase-2 detail plan §3 C2/C3; ADR 0011). The program
-// context is ctx, so a program-wide shutdown also cancels an in-flight Exchange (C4).
+// were installed in the Agent's Config, and the resolved Options. The construction itself is
+// [Build]'s — which builds the Model and the Bubble Tea program and binds the program to br
+// (br.Bind) *before* program.Run() starts the loop, so the late-bound event and approval
+// delegates reach the live program the moment the first worker emits (phase-2 detail plan §3
+// C2/C3; ADR 0011). What Run adds is the terminal: the alternate screen it claims for the whole
+// of the run, and os.Stdout as the thing painted into. The program context is ctx, so a
+// program-wide shutdown also cancels an in-flight Exchange (C4).
 func Run(ctx context.Context, eng Engine, br *Bridge, opts Options) error {
 	// The alternate screen is claimed HERE, before the program starts, rather than being left to
 	// the first frame's AltScreen field — see claimAltScreen for why the order cannot be left to
@@ -1538,6 +1541,52 @@ func Run(ctx context.Context, eng Engine, br *Bridge, opts Options) error {
 		}
 		defer release()
 	}
+	program, cleanup, err := Build(ctx, eng, br, opts, nil)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+	_, err = program.Run()
+	return err
+}
+
+// errTraceWithDriverOutput refuses --tui-trace on a caller-supplied output. The trace wraps
+// os.Stdout ([programOutput]); a driver's own tea.WithOutput wins over it, so honouring the flag
+// here would hand the human an empty file and no way to tell that from a run that painted nothing.
+// A Driver traces the bytes it is handed — it already has them.
+var errTraceWithDriverOutput = errors.New(
+	"tui: --tui-trace wraps the real terminal; a driver output is traced by the driver")
+
+// Build constructs the Bubble Tea program [Run] runs and stops one step short of running it: it
+// returns the program — already bound to br — beside the cleanup that closes whatever files the
+// options opened, and an error if the two arguments contradict each other.
+//
+// It exists so a Driver (ADR 0031: the TUI test drivers, a bench harness, anything that has to
+// feed the loop its own input and read its own output) enters through the SAME construction the
+// binary uses, rather than through a Model assembled beside it. Everything between [newModel] and
+// tea.NewProgram lives here, so there is one wiring and both callers get it.
+//
+// out is the writer the renderer paints into, and it is the whole of the difference between the
+// two callers. nil is the production path: [programOptions] runs unchanged, so --tui-trace and the
+// Windows sync-query stripper wrap os.Stdout exactly as they always have. A non-nil out is the
+// driver path: the output half of [programOptions] is skipped entirely — it wraps os.Stdout, which
+// the caller's output would win over — and tea.WithOutput(out) is installed in its place; a trace
+// path alongside it is [errTraceWithDriverOutput] rather than a silently blank file.
+//
+// extra options are appended LAST, so a caller's WithInput / WithWindowSize / WithColorProfile /
+// WithEnvironment beats anything built here. On an error nothing is left open and the returned
+// cleanup is nil.
+func Build(
+	ctx context.Context,
+	eng Engine,
+	br *Bridge,
+	opts Options,
+	out io.Writer,
+	extra ...tea.ProgramOption,
+) (*tea.Program, func(), error) {
+	if out != nil && opts.TracePath != "" {
+		return nil, nil, errTraceWithDriverOutput
+	}
 	// The per-Turn snapshot notify: the worker sends turnSnapshotMsg through the Bridge's
 	// late-bound program sender (the same programRef the Sink pushes Events through), so the
 	// Model persists between Steps without any exported API. Bind (below) resolves it to the
@@ -1546,7 +1595,7 @@ func Run(ctx context.Context, eng Engine, br *Bridge, opts Options) error {
 	// The Step-boundary flush: the Sink coalesces adjacent tokens behind a short window, and the
 	// worker empties that buffer the instant a Step returns, so no token is ever delivered after
 	// the Step that emitted it (worker.go, sink.go). It is wired HERE rather than through newModel
-	// because the sink is the Bridge's, and Run is where the two meet.
+	// because the sink is the Bridge's, and Build is where the two meet.
 	m.flushEvents = br.sink.flush
 	// The environment the painter will read: bubbletea's own default (the process's) everywhere
 	// but Windows, and on Windows the terminal-naming rule's slice (environ_windows.go). It is
@@ -1554,6 +1603,15 @@ func Run(ctx context.Context, eng Engine, br *Bridge, opts Options) error {
 	// log has to report the environment the PAINTER sees — on Windows that is not the process's,
 	// and a diagnostic that read the process would misreport the one variable it exists to measure.
 	environ := programEnviron()
+	// What the caller has to close when the program is done, closed in reverse order. It is a
+	// slice rather than a deferred pair because Build RETURNS before the program runs: the files
+	// have to outlive this function and still be closed exactly once.
+	var closers []func()
+	cleanup := func() {
+		for i := len(closers) - 1; i >= 0; i-- {
+			closers[i]()
+		}
+	}
 	// The --tui-diag half of the diagnostic seam (diagnostics.go). It is opened HERE, between
 	// newModel and the program, because that is the only window in which both halves of its
 	// contract can be met: the Model exists, so the log can be put on it before any message
@@ -1564,9 +1622,9 @@ func Run(ctx context.Context, eng Engine, br *Bridge, opts Options) error {
 		if err != nil {
 			// Named so the human knows which of the two paths they got wrong; the wrapped error
 			// already carries the path and what was refused about it.
-			return fmt.Errorf("--tui-diag: %w", err)
+			return nil, nil, fmt.Errorf("--tui-diag: %w", err)
 		}
-		defer func() { _ = diag.Close() }()
+		closers = append(closers, func() { _ = diag.Close() })
 		m.diag = diag
 		diag.start(os.Getenv, environ, m.th.measure.Method())
 	}
@@ -1575,24 +1633,55 @@ func Run(ctx context.Context, eng Engine, br *Bridge, opts Options) error {
 	// Two platform rules can also add an option here, both no-ops off Windows: environ is the
 	// terminal apogee names itself to the painter as (environ_windows.go), and
 	// programDeclinesSyncOutput is the mode-2026 question it keeps to itself (syncoutput.go).
-	teaOpts, traced, err := programOptions(ctx, opts, environ, programDeclinesSyncOutput())
+	teaOpts, traced, err := buildProgramOptions(ctx, opts, environ, programDeclinesSyncOutput(), out)
 	if err != nil {
-		return err
+		cleanup()
+		return nil, nil, err
 	}
 	if traced != nil {
-		defer func() { _ = traced.Close() }()
+		closers = append(closers, func() { _ = traced.Close() })
 	}
-	program := tea.NewProgram(m, teaOpts...)
+	program := tea.NewProgram(m, append(teaOpts, extra...)...)
 	// Bind before Run: the program exists now, and the first Send cannot occur until a
 	// worker is launched, which only happens after the user submits into the running loop.
 	br.Bind(program)
-	_, err = program.Run()
-	return err
+	return program, cleanup, nil
 }
 
-// programOptions builds the Bubble Tea options [Run] starts the program with, and opens the
-// traced output when [Options.TracePath] named one — the two are one decision, since the traced
-// output IS an option and is also a file the caller has to close.
+// buildProgramOptions picks between [Build]'s two paths. A nil out is the binary's, and is
+// [programOptions] verbatim — the pin that says "with nothing switched on the program is built
+// with exactly the option it has always had" covers the production path through this call too. A
+// non-nil out is a Driver's: the same base options, then the caller's writer, and no output
+// wrapper of ours anywhere near it.
+func buildProgramOptions(
+	ctx context.Context,
+	opts Options,
+	environ []string,
+	declineSyncOutput bool,
+	out io.Writer,
+) ([]tea.ProgramOption, *tracedOutput, error) {
+	if out == nil {
+		return programOptions(ctx, opts, environ, declineSyncOutput)
+	}
+	if opts.TracePath != "" {
+		return nil, nil, errTraceWithDriverOutput
+	}
+	return append(baseProgramOptions(ctx, environ), tea.WithOutput(out)), nil, nil
+}
+
+// baseProgramOptions are the options both of [Build]'s paths start from: the program context, and
+// the painter's environment when a platform rule built one (nil ⇒ bubbletea keeps os.Environ()).
+func baseProgramOptions(ctx context.Context, environ []string) []tea.ProgramOption {
+	teaOpts := []tea.ProgramOption{tea.WithContext(ctx)}
+	if environ != nil {
+		teaOpts = append(teaOpts, tea.WithEnvironment(environ))
+	}
+	return teaOpts
+}
+
+// programOptions builds the Bubble Tea options [Build] starts the program with on the production
+// path, and opens the traced output when [Options.TracePath] named one — the two are one decision,
+// since the traced output IS an option and is also a file the caller has to close.
 //
 // environ is the environment the painter should read, or nil to leave bubbletea on os.Environ()
 // — the Windows terminal-naming rule, and nothing at all anywhere else (environ_windows.go).
@@ -1605,10 +1694,7 @@ func Run(ctx context.Context, eng Engine, br *Bridge, opts Options) error {
 // wrapper at all. An always-on wrapper would be invisible in every other test while quietly
 // changing what the renderer believes about its terminal on every run — see tracedOutput.
 func programOptions(ctx context.Context, opts Options, environ []string, declineSyncOutput bool) ([]tea.ProgramOption, *tracedOutput, error) {
-	teaOpts := []tea.ProgramOption{tea.WithContext(ctx)}
-	if environ != nil {
-		teaOpts = append(teaOpts, tea.WithEnvironment(environ))
-	}
+	teaOpts := baseProgramOptions(ctx, environ)
 	out, traced, err := programOutput(opts.TracePath, declineSyncOutput)
 	if err != nil {
 		return nil, nil, err
