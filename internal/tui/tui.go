@@ -742,6 +742,16 @@ type Options struct {
 	// both the key's own default and what the hand-built Options of the layout tests want.
 	Inspector bool
 
+	// SkillSuggestions paints the skill-suggestion band above the input box — what the
+	// `ui.skill-suggestions` config key selected (ADR 0061). With it on, the draft is ranked against
+	// [Options.Skills] as it is typed and the closest skills are named in the band; with it off the
+	// band never paints and the Tab that opens the menu on it stays inert. It gates a hint on THIS
+	// screen and nothing else: no part of the catalog reaches the model either way — a skill is sent
+	// only when the human invokes it with a `/token`. A `/settings` edit moves it mid-session
+	// (ADR 0037, settingsApplyLocal). The zero value is off, which is what the hand-built Options of
+	// the layout tests want: it is the screen apogee rendered before the band existed.
+	SkillSuggestions bool
+
 	// CursorShape is the shape the prompt's caret is drawn with — what the `cursor-shape` config
 	// key selected. apogee draws the REAL terminal cursor (the textarea's simulated one is retired
 	// in newPromptEditor) and it never blinks, so the shape is the only axis there is: a Bubble Tea

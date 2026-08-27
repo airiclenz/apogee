@@ -24,12 +24,12 @@ func boolptr(b bool) *bool    { return &b }
 func intptr(n int) *int       { return &n }
 
 // wantUIDefault is the resolved `ui:` block a config that configures none must produce: the
-// default spinner style with its colour loop on, the transcript's scroll bar shown, and the stall
-// guard waiting 90 seconds of engine silence out. It is spelled out rather than taken from
+// default spinner style with its colour loop on, the transcript's scroll bar shown, the stall
+// guard waiting 90 seconds of engine silence out, and the skill-suggestion band painting. It is spelled out rather than taken from
 // defaultUISettings, so a change to any shipped default shows up here as a failure instead of
 // silently agreeing with itself.
 var wantUIDefault = UISettings{Spinner: domain.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true,
-	ColorScheme: "dark", StallAfter: 90 * time.Second}
+	ColorScheme: "dark", StallAfter: 90 * time.Second, SkillSuggestions: true}
 
 // testHostID is the machine identity injected into resolution so the Host acknowledgement
 // ladder is pinned off whatever host the tests happen to run on.
@@ -204,7 +204,7 @@ func TestResolvePrecedence(t *testing.T) {
 			file: fileConfig{UI: &uiConfig{Spinner: "glitter", SpinnerColor: boolptr(false), ShowScrollbar: boolptr(false)}},
 			want: func(o *Options) {
 				o.UI = UISettings{Spinner: domain.SpinnerGlitter, SpinnerColor: false, ShowScrollbar: false,
-					ColorScheme: "dark", StallAfter: 90 * time.Second}
+					ColorScheme: "dark", StallAfter: 90 * time.Second, SkillSuggestions: true}
 			},
 		},
 		{
@@ -225,6 +225,19 @@ func TestResolvePrecedence(t *testing.T) {
 			name: "ui with only show-scrollbar: false → the spinner keys stay at their defaults",
 			file: fileConfig{UI: &uiConfig{ShowScrollbar: boolptr(false)}},
 			want: func(o *Options) { o.UI.ShowScrollbar = false },
+		},
+		{
+			// The band's key is independent in the same way, and its pointer runs the other way round:
+			// the default is TRUE, so an absent key is the band shown and only an explicit false takes
+			// it away.
+			name: "ui with no skill-suggestions: → the band is shown",
+			file: fileConfig{UI: &uiConfig{Spinner: "classic"}},
+			want: func(o *Options) { o.UI.Spinner = domain.SpinnerClassic },
+		},
+		{
+			name: "ui with skill-suggestions: false → the band goes and nothing else moves",
+			file: fileConfig{UI: &uiConfig{SkillSuggestions: boolptr(false)}},
+			want: func(o *Options) { o.UI.SkillSuggestions = false },
 		},
 		{
 			name: "a context-files block replaces the default name list whole",
@@ -3414,7 +3427,7 @@ func TestApplyConfigUI(t *testing.T) {
 	}
 
 	want := UISettings{Spinner: domain.SpinnerGlitter, SpinnerColor: false, ShowScrollbar: false, ColorScheme: "light",
-		StallAfter: 2 * time.Minute}
+		StallAfter: 2 * time.Minute, SkillSuggestions: true}
 	if opts.UI != want {
 		t.Errorf("opts.ui = %+v; want %+v", opts.UI, want)
 	}
@@ -3561,19 +3574,19 @@ func TestApplyConfigUIPartialKeepsTheOtherDefault(t *testing.T) {
 			name: "only spinner: → the colour loop stays on and the bar stays shown",
 			yaml: "ui:\n  spinner: classic\n",
 			want: UISettings{Spinner: domain.SpinnerClassic, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "dark",
-				StallAfter: 90 * time.Second},
+				StallAfter: 90 * time.Second, SkillSuggestions: true},
 		},
 		{
 			name: "only spinner-color: false → the style stays the default and the bar stays shown",
 			yaml: "ui:\n  spinner-color: false\n",
 			want: UISettings{Spinner: domain.SpinnerSnake, SpinnerColor: false, ShowScrollbar: true, ColorScheme: "dark",
-				StallAfter: 90 * time.Second},
+				StallAfter: 90 * time.Second, SkillSuggestions: true},
 		},
 		{
 			name: "only show-scrollbar: false → the bar goes, the spinner keys stay put",
 			yaml: "ui:\n  show-scrollbar: false\n",
 			want: UISettings{Spinner: domain.SpinnerSnake, SpinnerColor: true, ShowScrollbar: false, ColorScheme: "dark",
-				StallAfter: 90 * time.Second},
+				StallAfter: 90 * time.Second, SkillSuggestions: true},
 		},
 		{
 			// The explicit `true` and the absent key resolve alike — pinned so the pointer's
@@ -3581,13 +3594,21 @@ func TestApplyConfigUIPartialKeepsTheOtherDefault(t *testing.T) {
 			name: "only show-scrollbar: true → the shipped default, said out loud",
 			yaml: "ui:\n  show-scrollbar: true\n",
 			want: UISettings{Spinner: domain.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "dark",
-				StallAfter: 90 * time.Second},
+				StallAfter: 90 * time.Second, SkillSuggestions: true},
 		},
 		{
 			name: "only color-scheme: → the spinner keys and the bar stay put",
 			yaml: "ui:\n  color-scheme: light\n",
 			want: UISettings{Spinner: domain.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "light",
-				StallAfter: 90 * time.Second},
+				StallAfter: 90 * time.Second, SkillSuggestions: true},
+		},
+		{
+			// The band's key, the one whose default is TRUE: an explicit false takes the band away and
+			// leaves every other key of the block where it was.
+			name: "only skill-suggestions: false → the band goes and the look is untouched",
+			yaml: "ui:\n  skill-suggestions: false\n",
+			want: UISettings{Spinner: domain.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "dark",
+				StallAfter: 90 * time.Second, SkillSuggestions: false},
 		},
 		{
 			// And the newest key is independent in both directions: turning the stall guard off says
@@ -3595,7 +3616,7 @@ func TestApplyConfigUIPartialKeepsTheOtherDefault(t *testing.T) {
 			name: "only stall-after: 0 → the look is untouched and only the guard goes",
 			yaml: "ui:\n  stall-after: 0\n",
 			want: UISettings{Spinner: domain.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "dark",
-				StallAfter: 0},
+				StallAfter: 0, SkillSuggestions: true},
 		},
 	}
 	for _, tt := range tests {

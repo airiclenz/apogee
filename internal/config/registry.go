@@ -473,6 +473,16 @@ var KeyRegistry = []Key{
 		Read: func(o Options) string { return boolValue(o.UI.Inspector) },
 	},
 	{
+		// A bool like ui.spinner-color beside it, and applied the same way: its whole effect is on
+		// THIS screen, so the renderer applies it to itself and the binary's dispatcher never sees it
+		// (internal/tui's settingsApplyLocal).
+		Path: "ui.skill-suggestions", Kind: KindBool, Default: "true",
+		Editable: true,
+		Desc: "Show the skills that fit the message you are typing in a band above the input box; " +
+			"Tab opens the / menu on them.",
+		Read: func(o Options) string { return boolValue(o.UI.SkillSuggestions) },
+	},
+	{
 		Path: "cursor-shape", Kind: KindEnum, Default: "block", EnumValues: cursorShapeValues,
 		Editable: true,
 		Validate: validateCursorShapeName,

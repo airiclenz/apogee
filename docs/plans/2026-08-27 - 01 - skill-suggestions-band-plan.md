@@ -285,7 +285,41 @@ ties (id asc); tokeniser table (stemming, stopwords, hyphen splitting, digits). 
 
 ---
 
-## 4. The `ui.skill-suggestions` knob
+## 4. The `ui.skill-suggestions` knob — ✅ DONE (2026-08-27)
+
+NOTES (2026-08-27): the key resolves onto `UISettings.SkillSuggestions` (internal/config/config.go)
+rather than a flat `Options.SkillSuggestions` in options.go as the item's text spells it. Every
+`ui:` key of the block travels in that one struct through the shared `fileUI` projection
+(`o.UI = fc.ui()`, "every key of a block writes the whole block"), and the registry/schema bijection
+test walks `uiConfig` for the `ui.` paths — so the item's own headline, "register the bool exactly as
+`ui.spinner-color` is", is what was followed. internal/config/options.go is therefore untouched and
+the registry row reads `o.UI.SkillSuggestions`; the UISettings literals in the config tests gained
+the new default.
+
+NOTES (2026-08-27): cmd/apogee/wire_settings.go is untouched. `ui.spinner` has NO entry in
+`settingsTable` — a renderer-owned key never reaches the binary's dispatcher at all (it is
+intercepted by `settingsApplyLocal`) — so mirroring it exactly means naming the key in
+`settingKeysAppliedByTheRenderer` (cmd/apogee/wire_test.go), the list
+TestEveryEditableSettingKeyHasAnApply reads. Adding a `settingsTable` entry would have been dead
+code.
+
+NOTES (2026-08-27): the pass-through is cmd/apogee/wire_options.go, not wire_boot.go/wire_firing.go
+— `tui.Options{...}` is composed in exactly one place in the binary.
+
+NOTES (2026-08-27): internal/tui has no settingsapply_test.go; the renderer-owned-key table
+(TestSettingsPaneRendererOwnedKeysApplyWithoutTheSeam) lives in settings_test.go, so the case was
+added there. The table gained an optional `seed` hook because testOpts leaves the field at its zero
+value — without it the case would have passed over an apply that did nothing (mutation-checked: the
+case fails when the `settingKeySkillSuggestions` branch is removed).
+
+NOTES (2026-08-27): the registry assertions (row present, editable, default "true", Read projects
+the session's value) went into internal/config/registry_test.go as a focused test rather than into
+a round-trip test — TestSpliceScalarSettingRoundTripsEveryEditableKey already walks every editable
+key automatically, so the new row's write/reset round trip is covered without an edit.
+
+NOTES (2026-08-27): the template ships the key as a COMMENTED example (`# skill-suggestions: true`)
+as the item asks, which keeps the seeded config behaviour-neutral
+(TestEmbeddedDefaultConfigSetsOnlyTheSystemPrompt).
 
 **What:** register the bool exactly as `ui.spinner-color` is, then apply it locally in the TUI.
 

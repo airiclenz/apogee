@@ -255,6 +255,37 @@ func TestRegistryRowsProjectEveryValue(t *testing.T) {
 	}
 }
 
+// The suggestion band's row is a bool that defaults ON and is editable, which is the whole of what
+// the key promises a surface: /settings offers it, an untouched config paints the band, and the row
+// reads back what THIS session resolved rather than the declared default (ADR 0061). The row's
+// live apply is the renderer's own (internal/tui's settingsApplyLocal), so what is asserted here is
+// only the description a surface renders it from.
+func TestSkillSuggestionsRowIsAnEditableBoolDefaultingOn(t *testing.T) {
+	t.Parallel()
+
+	row, ok := LookupKey("ui.skill-suggestions")
+	if !ok {
+		t.Fatal("no registry row for ui.skill-suggestions; /settings could not show the key at all")
+	}
+	if row.Kind != KindBool {
+		t.Errorf("kind = %q, want %q", row.Kind, KindBool)
+	}
+	if row.Default != "true" {
+		t.Errorf("default = %q, want \"true\" — a config that names nothing paints the band", row.Default)
+	}
+	if !row.Editable {
+		t.Error("the row is not editable; the knob is live from /settings (ADR 0037)")
+	}
+
+	off := Options{UI: UISettings{SkillSuggestions: false}}
+	if got := row.Read(off); got != "false" {
+		t.Errorf("read of a session with the band off = %q, want \"false\"", got)
+	}
+	if got := row.Read(Options{UI: defaultUISettings()}); got != "true" {
+		t.Errorf("read of an unconfigured session = %q, want \"true\"", got)
+	}
+}
+
 // TestSettingKeyValidatorsRefuseWhatStartupWouldRefuse pins each row's validate hook (Key.Validate
 // — the write path's guard) to one value it must refuse. It calls the hooks directly rather than through
 // SaveConfigSetting because three of them cannot be reached from there: an enum's vocabulary is checked

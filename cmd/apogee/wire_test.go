@@ -3599,6 +3599,7 @@ var settingKeysAppliedByTheRenderer = []string{
 	"ui.spinner-color",
 	"ui.stall-after",
 	"ui.color-scheme",
+	"ui.skill-suggestions",
 	"cursor-shape",
 }
 

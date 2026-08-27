@@ -245,6 +245,11 @@ func (m Model) settingsApplyLocal(path, value string) (Model, string, tea.Cmd, b
 	case settingKeySpinnerColor:
 		on := value == settingTrue
 		m.opts.SpinnerColor, m.spin.color = on, on
+	case settingKeySkillSuggestions:
+		// Nothing is laid out again and nothing is recomputed here: the band is derived from the
+		// draft where the frame is built, so the very next render already answers the new value —
+		// and an edit made from the /settings pane happens with no draft on screen anyway.
+		m.opts.SkillSuggestions = value == settingTrue
 	case settingKeyStallAfter:
 		after, err := parseStallAfter(value)
 		if err != nil {
@@ -364,15 +369,16 @@ func colorSchemeWarningNote(n int) string {
 // is the row whose ⏎ opens a list of its own instead of an editor, and a row can only be recognised
 // by its path (settingsEnter, the settingKeyColorScheme precedent in settingsVocabulary).
 const (
-	settingKeyMode          = "mode"
-	settingKeyAutoTitle     = "auto-title"
-	settingKeyShowScrollbar = "ui.show-scrollbar"
-	settingKeySpinner       = "ui.spinner"
-	settingKeySpinnerColor  = "ui.spinner-color"
-	settingKeyColorScheme   = "ui.color-scheme"
-	settingKeyStallAfter    = "ui.stall-after"
-	settingKeyCursorShape   = "cursor-shape"
-	settingKeyMechanisms    = "mechanisms"
+	settingKeyMode             = "mode"
+	settingKeyAutoTitle        = "auto-title"
+	settingKeyShowScrollbar    = "ui.show-scrollbar"
+	settingKeySpinner          = "ui.spinner"
+	settingKeySpinnerColor     = "ui.spinner-color"
+	settingKeyColorScheme      = "ui.color-scheme"
+	settingKeyStallAfter       = "ui.stall-after"
+	settingKeySkillSuggestions = "ui.skill-suggestions"
+	settingKeyCursorShape      = "cursor-shape"
+	settingKeyMechanisms       = "mechanisms"
 )
 
 // settingsApplyFailedNote opens the row's failure when the WRITE landed and the apply did not: the

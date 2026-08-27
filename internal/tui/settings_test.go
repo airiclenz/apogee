@@ -1373,8 +1373,12 @@ func TestSettingsPaneApplyFailureKeepsTheWriteAndSaysSo(t *testing.T) {
 // would only be a longer way to reach the Model's own fields.
 func TestSettingsPaneRendererOwnedKeysApplyWithoutTheSeam(t *testing.T) {
 	tests := []struct {
-		name  string
-		row   SettingRow
+		name string
+		row  SettingRow
+		// seed puts the Model in the state the apply has to move it OUT of, for a key whose "on" is
+		// not the hand-built testOpts' zero value — without it the check would pass over an apply
+		// that did nothing at all.
+		seed  func(m Model) Model
 		check func(t *testing.T, m Model)
 	}{
 		{
@@ -1421,6 +1425,23 @@ func TestSettingsPaneRendererOwnedKeysApplyWithoutTheSeam(t *testing.T) {
 				}
 			},
 		},
+		{
+			name: "ui.skill-suggestions",
+			row: SettingRow{
+				Path: "ui.skill-suggestions", Section: "Interface", Kind: SettingBool, Value: "true",
+				Default: "true", Editable: true, Desc: "Show the skills that fit what you are typing.",
+			},
+			seed: func(m Model) Model {
+				m.opts.SkillSuggestions = true // the knob's own default, which testOpts does not carry
+				return m
+			},
+			check: func(t *testing.T, m Model) {
+				t.Helper()
+				if m.opts.SkillSuggestions {
+					t.Error("opts.SkillSuggestions is still on; the band would go on being painted")
+				}
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1428,6 +1449,9 @@ func TestSettingsPaneRendererOwnedKeysApplyWithoutTheSeam(t *testing.T) {
 			rows := []SettingRow{tt.row}
 			log := &settingsWriteLog{}
 			m, _ := settingsEditModel(t, rows, log)
+			if tt.seed != nil {
+				m = tt.seed(m)
+			}
 
 			m = step(t, m, keyEnter())
 

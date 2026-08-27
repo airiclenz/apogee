@@ -271,6 +271,12 @@ type UISettings struct {
 	// observer is installed while the engine is constructed), so a mid-session edit takes effect at
 	// the next start; the template's key doc says so.
 	Inspector bool
+	// skillSuggestions paints the suggestion band above the input box: while the user types, the
+	// catalog's skills are ranked against the draft and the closest are named there (ADR 0061).
+	// Default TRUE, and the whole of what it gates is on the screen — nothing about the catalog
+	// reaches the model either way, so this key changes what the human is offered and never what the
+	// session sends. false leaves the band unpainted and the Tab that opens it inert.
+	SkillSuggestions bool
 	// unparsedStallAfter is a `stall-after:` value time.ParseDuration could make nothing of, kept as
 	// it was written so Validate can name the text the human typed rather than the value it failed
 	// to become. Empty on every config that resolves — including one that never named the key —
@@ -286,8 +292,9 @@ const defaultStallAfter = 90 * time.Second
 
 // defaultUISettings is the resolved `ui:` block with nothing configured: the renderer's own default
 // style, with the colour loop on, the scroll bar shown, the default colour scheme, the shipped
-// quiet threshold the stall guard waits out, and the Inspector disarmed (a false left at the zero
-// value: an off-state that captures nothing is the absence of the feature). The style is
+// quiet threshold the stall guard waits out, the Inspector disarmed (a false left at the zero
+// value: an off-state that captures nothing is the absence of the feature), and the skill-suggestion
+// band on. The style is
 // ASKED of internal/domain (ParseSpinnerStyle's documented "" ⇒ the default) rather than restated here,
 // so the vocabulary and its default stay in the one package that owns them — the same reason
 // validate does not list the valid names, and the same reason the scheme name comes from
@@ -297,11 +304,12 @@ func defaultUISettings() UISettings {
 	// so this cannot fail.
 	style, _ := domain.ParseSpinnerStyle("")
 	return UISettings{
-		Spinner:       style,
-		SpinnerColor:  true,
-		ShowScrollbar: true,
-		ColorScheme:   scheme.DefaultName,
-		StallAfter:    defaultStallAfter,
+		Spinner:          style,
+		SpinnerColor:     true,
+		ShowScrollbar:    true,
+		ColorScheme:      scheme.DefaultName,
+		StallAfter:       defaultStallAfter,
+		SkillSuggestions: true,
 	}
 }
 
@@ -358,7 +366,7 @@ func (u UISettings) Validate() error {
 //     that fence: the pass skips the row, so there is no path for those sources to reach the key.
 //
 // Two shapes need a word. The keys that SHARE a carrier — the three system-prompt keys, the two
-// context-files keys, the four present keys, the six ui keys — each write the whole block their key
+// context-files keys, the four present keys, the seven ui keys — each write the whole block their key
 // sits in, because the Options field IS that block and the block's own mapper (toUISettings and its
 // siblings) applies the defaults for whatever the file left out. The rows of one block therefore
 // write the same value, which is why they share one named projection. And confine-to-workspace's
@@ -618,7 +626,7 @@ var keyAccessors = []keyAccessor{
 		fromFile: filePresent,
 	},
 	{
-		// The six `ui:` keys are one carrier, the `present:` block's shape — and independent axes
+		// The seven `ui:` keys are one carrier, the `present:` block's shape — and independent axes
 		// within it: naming a style does not turn the colour loop off (toUISettings).
 		row:      mustKey("ui.spinner"),
 		fromFile: fileUI,
@@ -641,6 +649,10 @@ var keyAccessors = []keyAccessor{
 	},
 	{
 		row:      mustKey("ui.inspector"),
+		fromFile: fileUI,
+	},
+	{
+		row:      mustKey("ui.skill-suggestions"),
 		fromFile: fileUI,
 	},
 	{
@@ -714,7 +726,7 @@ var keyAccessors = []keyAccessor{
 }
 
 // The file projections shared by the key groups that resolve into ONE carrier: three system-prompt
-// keys, two context-files keys, four present keys and six ui keys. Every key of a block writes the
+// keys, two context-files keys, four present keys and seven ui keys. Every key of a block writes the
 // whole block — the Options field IS the block, and the block's mapper defaults whatever the file
 // left out — so the rows of one block differ in nothing but the key they are described by, and a
 // named function is the honest way to say that. context-files is the one that is not a plain copy:
@@ -1831,6 +1843,10 @@ type uiConfig struct {
 	// though both spell the same off-state today, so the schema stays honest if the default ever
 	// moves.
 	Inspector *bool `yaml:"inspector"`
+	// SkillSuggestions gates the skill-suggestion band above the input box (ADR 0061). A pointer for
+	// SpinnerColor's reason turned around: the default is TRUE, so it is the explicit `false` that
+	// must be distinguishable from an absent key.
+	SkillSuggestions *bool `yaml:"skill-suggestions"`
 }
 
 // toUISettings maps the on-disk ui block onto the resolved value, applying the defaults for the keys
@@ -1867,6 +1883,9 @@ func (u uiConfig) toUISettings() UISettings {
 	}
 	if u.Inspector != nil {
 		s.Inspector = *u.Inspector
+	}
+	if u.SkillSuggestions != nil {
+		s.SkillSuggestions = *u.SkillSuggestions
 	}
 	return s
 }

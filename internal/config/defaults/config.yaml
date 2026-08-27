@@ -701,6 +701,15 @@ remember-model: true
 # nothing at all. It is read once, at startup — changing it here (or from /settings) arms or disarms
 # the capture at your NEXT start, not in the running session.
 #
+# `skill-suggestions` shows you which of your skills fit the message you are typing: while you type,
+# apogee ranks its skill catalogue against the draft — over each skill's id, name, summary and the
+# `triggers:` its author declared, never its body — and names the closest few in a one-row band just
+# above the input box. Tab opens the `/` menu on exactly those, ⏎ picks one, Esc closes; with nothing
+# suggested Tab does what it always did. A skill shown when you send a message is not suggested again
+# for the rest of the session (/clear starts over). This is a hint for YOU and nothing else: no part
+# of your skill library is ever sent to the model — a skill reaches it only when you invoke one with
+# `/id`, exactly as before (ADR 0061). Default on; `false` leaves the band unpainted.
+#
 ui:
   spinner: snake         # snake | glitter | classic
   spinner-color: true    # the 10s colour loop; false = your terminal's own text colour
@@ -708,6 +717,7 @@ ui:
   color-scheme: dark     # dark | light | any *.yaml in ~/.apogee/schemes/
   stall-after: 120s      # engine silence before "· quiet" qualifies the status line; 0 = off
   inspector: false       # true = capture the raw wire traffic /inspect shows; takes effect next start
+  # skill-suggestions: true   # false = never paint the skill-suggestion band above the input box
 
 # =============================================================================
 # The prompt cursor — apogee draws the real terminal cursor, always steady, in the shape named here:
