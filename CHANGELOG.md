@@ -8,6 +8,94 @@ point is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+### Added
+
+- Ratified ADR 0061 — skill suggestion is a Driver concern painted over an engine-level matcher
+  (`skills.Catalog.Suggest`: BM25 over id + display name + summary + `triggers:`, an evidence gate,
+  top 3), and nothing about the catalog reaches the model: a suggestion becomes model-visible only
+  when the user accepts it into a `/id` token, so suggestion is not a Mechanism and has no Bypass
+  gate. Records the spent-at-send dedup rule and defers model-facing discovery (auto-attach, a
+  `load_skill` tool) — either is a Mechanism that must be benched against Bypass, and the tool form
+  reopens CONTEXT.md's "a skill is not a tool", so a later ADR must supersede 0061 explicitly to
+  build them. `CONTEXT.md`'s *Skill* entry gains the **Suggestion** definition and names
+  `triggers:` in the frontmatter list; `ISSUES.md` carries the deferral with what must precede it.
+
+- A `SKILL.md` may now declare an optional top-level **`triggers:`** list — the phrases its author
+  expects to see in a prompt the skill fits — written either as a YAML sequence or as one
+  comma-separated line. The loader lowercases them, collapses their whitespace, drops blanks and
+  duplicates, and caps a phrase at 64 runes and the list at 32 entries. A `triggers:` value in any
+  other shape (a mapping, an alias) is a soft field error: the skill loads with the rest of its
+  frontmatter intact and no triggers, because one optional field must never cost a block its YAML
+  meaning. `/skills` now prints a skill's declared triggers on an indented line under its row,
+  escape-stripped, flattened onto that one row and clipped at 120 runes. Nothing about them reaches
+  the model — they feed the host-side suggestion matcher and nothing else (ADR 0061).
+
+- **The skills catalog can now rank itself against a draft message.** `skills.Catalog.Suggest`
+  (and `skills.Provider.Suggest`) scores every discovered skill with BM25 over its id, display
+  name, summary and the author's optional `triggers:` phrases — bodies are never indexed — and
+  returns the best matches strongest first. A skill is admitted only on real evidence: either one
+  of its trigger phrases appears verbatim in the draft, or at least two distinct non-stopword
+  draft terms appear in its document; a draft holding fewer than three content words gets nothing
+  at all. A trigger hit adds a corpus-scaled boost on top of the lexical score, so an authored
+  phrase outranks a coincidental word overlap while two lexical matches still order among
+  themselves by BM25. The index is built once per scan and is immutable, so ranking runs lock-free
+  on the same snapshot the "/" menu lists and the loop resolves against. This is a host-side
+  matcher only: nothing about it reaches the model, which still learns a skill exists only when
+  the user attaches it as a `/id` (ADR 0061).
+
+- **`ui.skill-suggestions:` — the switch for the skill-suggestion band.** A bool in the `ui:` block,
+  default true, editable live from `/settings` (ADR 0037): with it on, the band above the input box
+  names the skills that fit what you are typing and Tab opens the `/` menu on them; with it off the
+  band never paints and Tab keeps its old meaning. Like the other `ui:` keys it is a presentation
+  key the renderer applies to itself, so a flip is in force on the next frame. It gates a hint for
+  the human and nothing else — no part of the skill catalog reaches the model in either state
+  (ADR 0061).
+
+- The skills that fit the message you are typing now show in a one-row band directly above the input
+  box: `  ✦ skills: /grill-me · /code-audit · /handoff   tab to pick`. The draft is ranked by the
+  engine's own matcher and the three closest skills are named as the `/id` tokens that invoke them.
+  It is a hint on your screen and nothing more — no part of the skill catalog reaches the model, and
+  a skill becomes prompt text only when you invoke it with a token. The band says nothing while a
+  `/` or `@` menu is open, while `ui.skill-suggestions` is off, or when the draft holds too little
+  to name a skill honestly; it shares one block with the staged-interjection band and is the first
+  surface a short window drops.
+
+- Tab now opens the `/` menu over exactly the skills the suggestion band is naming — titled
+  "suggested skills", top match highlighted, the rows identical to the typed `/` menu's. Accepting
+  one inserts its `/id ` token at the caret and leaves the rest of the draft untouched; ⏎ accepts,
+  Esc and the next character typed close it. Tab keeps every other meaning it had, and the band row
+  stands down while the menu it opened is up.
+
+- The suggestion band advises once per skill per session: every skill it is naming when a message
+  goes out — a plain send, or a row staged while the agent works — is spent and never suggested
+  again, while a refusal or a `/command` line spends nothing. `/clear` and `/new` start it over.
+
+- **apogee names the skills that fit the message you are typing.** While a draft is being written
+  the skill catalog is ranked against it — BM25 over each skill's id, display name, summary and the
+  optional `triggers:` its author declared, never its body (`skills.Catalog.Suggest`) — and the
+  closest three are named in a one-row band directly above the input box:
+  `✦ skills: /grill-me · /code-audit · /handoff   tab to pick`. `⇥` opens the `/` menu filtered to
+  exactly those, titled `suggested skills`; accepting one **inserts** its `/id ` where the caret
+  stands and leaves the rest of the draft untouched, and with nothing suggested Tab keeps the
+  meaning it always had. A skill on the row when a message goes out — a plain send, or a message
+  staged while the model works — is spent for the session and is not suggested again (`/clear` and
+  `/new` start over); one the draft already invokes is never suggested at all. The band gives way
+  before the staged-interjection rows, because a staged message is a fact and a suggestion is
+  advice. None of it reaches the model: the catalog stays host-side, and a skill becomes prompt text
+  only when the user writes its `/id`
+  ([ADR 0061](docs/adr/0061-skill-suggestions-are-driver-side-over-an-engine-matcher.md)).
+  `triggers:` is the new optional SKILL.md frontmatter key — a YAML list or one comma-separated
+  string of the phrases an author expects in a prompt this skill fits; a hit both lifts the skill
+  above purely lexical matches and admits it on its own, the draft's three-content-word floor still
+  applying. `ui.skill-suggestions:` (default `true`, live via `/settings`) switches the band off,
+  and Tab with it.
+
+### Changed
+
+- `/skills` now lists a skill's declared `triggers:` on an indented line under its row, so the
+  reason a skill will or will not be suggested can be read off the listing; a skill that declares
+  none is listed exactly as before.
+
 ## [0.18.0] — 2026-08-27
 
 ### Added

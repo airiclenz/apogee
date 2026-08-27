@@ -323,6 +323,28 @@ of that run.
   regression that stopped the switch path from reaching `move` would leave
   `go test ./cmd/apogee/` green.
 
+### Skill-suggestion band residuals — deferred out of the 2026-08-27 run
+
+**Status:** found 2026-08-27 at the close of the skill-suggestions band plan
+(`docs/plans/archived/2026-08-27 - 01 - skill-suggestions-band-plan.md`), deferred out of that run.
+
+- [ ] **The lenient frontmatter scan comma-splits a `triggers:` YAML sequence into one phrase.**
+  The lenient path applies `splitTriggers` (`internal/skills/parse.go:120`, wired at
+  `internal/skills/parse.go:265`) to the folded value, exactly as plan item 2 specifies, so a
+  `triggers:` written as a *sequence* inside a block that is broken elsewhere folds to a single
+  dash-prefixed phrase. Harmless — it simply never matches — but worth revisiting.
+
+- [ ] **An in-TUI `/sessions` restore inherits the outgoing session's spent skills.** The restore
+  path (`internal/tui/sessions.go:573`, beside `m.liveStats.reset()`) never clears `spentSkills`;
+  the set is cleared only at `internal/tui/commandrun.go:150`. The plan's Out-of-scope line asserts
+  "a restored session starts with an empty spent set", which holds only for a `--resume` process
+  start. One line fixes it.
+
+- [ ] **Two docs say the suggestion row "returns on the next edit"; it returns on the next frame.**
+  `layout.md:1445-1446` and `hasSkillHints`'s comment (`internal/tui/suggestband.go:154`) both word
+  the live-state stand-down as returning on the next edit, but the hints are never cleared, so the
+  row comes back on the first frame after the state goes live again — no edit required.
+
 ## Parked / deferred work
 
 Live, deliberately deferred work only. Each entry records *enough* design that we don't re-derive
@@ -1078,6 +1100,6 @@ catalog-derived prompt text into the request, making it a **Mechanism** — cata
 by the Bypass never-worse floor — and B2 also contradicts CONTEXT.md's *Skill* entry outright
 (*"_Avoid_: 'tool'"*), a domain-language change before it is a feature. **Before it is built:** its
 own grill, an ADR **explicitly superseding ADR 0061**, and a bench arm against Bypass. **The
-reusable half exists:** `skills.Catalog.Suggest` (plan `docs/plans/2026-08-27 - 01 -
+reusable half exists:** `skills.Catalog.Suggest` (plan `docs/plans/archived/2026-08-27 - 01 -
 skill-suggestions-band-plan.md`) is engine-level and model-free, so B1 would consume the matcher
 rather than grow a second one.
