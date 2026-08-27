@@ -1,0 +1,57 @@
+# The upstream the T-10 and T-13 tests talk to: a model that does nothing but ask for terminal
+# commands, one of them naming apogee's own control plane.
+#
+# The three commands are chosen for what the GUARD makes of them rather than for what they do.
+# `ls -d /tmp` is the control — an ordinary subprocess gate, `Reason: subprocess execution`, no
+# `Fix:` line — and it is also T-13's whole conversation, asked over and over so that every pane in
+# that test is the same pane and any difference between them is the latch rather than the command.
+# `-d` is there for cost: the same command listing /tmp itself hands the model a few hundred lines
+# of whatever this machine keeps there, five times over, and the pane is what is under test.
+# `ls ~/.apogee` and `touch ~/.apogee/guard-probe.txt` both name the control plane in their TEXT,
+# which is what the Tier-2 rule matches (a read is not exempt), so both raise the forced-approval
+# pane that carries the sanctioned-route hint.
+#
+# Every turn repeats: T-13 asks for the same command six times over, and a consumed turn would
+# leave the later panes unscripted.
+model: guard-model
+turns:
+    # The session title. apogee asks for one off the first prompt, so this has to be matched BEFORE
+    # the prompt's own turn or it would take it (see smoke.yaml).
+    - when:
+        last_message: The user's first request
+      repeat: true
+      text: Guarded commands
+    # The wrap-up once a terminal call has come back — allowed, denied or refused alike. Matched
+    # BEFORE the prompt turns below so a result can never be answered as a fresh request.
+    - when:
+        tool_result: terminal
+      repeat: true
+      text: That is what the command had to say.
+      token_delay: 1ms
+      chunk_runes: 6
+    # The control: an ordinary subprocess gate, and T-13's repeated conversation.
+    - when:
+        last_message: ^Run ls in /tmp
+      repeat: true
+      tool_calls:
+        - name: terminal
+          arguments: '{"command":"ls -d /tmp"}'
+    # A READ under the control plane. WritesOnly does not exempt it — the terminal declares no
+    # read-source key — so the rule fires and the pane carries the hint.
+    - when:
+        last_message: ^List the apogee home
+      repeat: true
+      tool_calls:
+        - name: terminal
+          arguments: '{"command":"ls ~/.apogee"}'
+    # A WRITE under the control plane: a look, not a refusal. Allowed, it runs, which is the whole
+    # behaviour change from the hard refusal this rule used to be.
+    - when:
+        last_message: ^Touch a probe file
+      repeat: true
+      tool_calls:
+        - name: terminal
+          arguments: '{"command":"touch ~/.apogee/guard-probe.txt"}'
+    # Anything apogee asks on its own account.
+    - repeat: true
+      text: Nothing else to add.

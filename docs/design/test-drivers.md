@@ -176,6 +176,12 @@ The medians are the point: they make one recording reproduce the server's *behav
 one run's jitter. A recorded delay is rounded to 10 µs, because `token_delay: 10.37ms` reads as a
 decision and `token_delay: 10.372413ms` reads as a mistake.
 
+Two fixtures in `cmd/apogee/testdata/stubllm/` are hand-written anyway, and say so at the top of the
+file: one documents the format (`example.yaml`), and `cached-usage.yaml` reports a prefix-cache
+share the recorder can only capture from a server that has prefix caching switched on. Re-record it
+with `stubllm record` the day such a server is at hand — the numbers in it are what the T-06 test's
+expectations are computed from, so a re-recording is a fixture change and a test change together.
+
 Recording is always an explicit human act at a command line, never something a `go test` run does
 (ADR 0062): a test that silently re-records its own fixture cannot fail. A recording a real server
 answered in a shape the format refuses — content alongside tool calls, say — is still written and
@@ -340,6 +346,9 @@ returns an `e2eSession` — `Relaunch()` (same home, fresh driver), `Quit()`, `W
 the home's `config.yaml` first, which is the only way to reach a **file-only** key: `delegate-max-steps`
 (T-04) has no flag and no environment variable and the Agent reads it when it is CONSTRUCTED, so a
 test that needs one cannot set it once the run is up.
+`e2eSession.RelaunchWith(extra...)` is `Relaunch()` with arguments added for this launch and every
+one after it — the shape a REOPEN takes, since `--continue` names the record the first run wrote and
+so cannot be passed at the launch that creates it (T-06 step 8).
 
 The worked example is `TestE2ESmokeInProcess` (`cmd/apogee/e2e_smoke_test.go`), which is checklist
 item T-25 — "the one pass a human makes over the most-used path end to end" — step for step: the
@@ -568,7 +577,9 @@ not exist yet, with the plan item that writes them.
 | Stream order and completeness (T-24) | in-process — the committed transcript, read from the frame and from the session record; stubllm sets the chunking (`ChunkRunes`, `TokenDelay`) | `TestE2EStreamCommitsCompleteAndInOrder` | Every line of a long answer by ⇞ paging alone: the sticky prompt header covers the top row of each window (layout.md), so a page-at-a-time walk leaves one line per window unseen. The record is the completeness authority; the walk's own claim is that no *run* of lines is missing |
 | Streamed text belongs to one block (T-24) | in-process — the session record's own `depth` and `spawnCallID` per entry, with the frame as the second reading; each child streams a marker word the other never uses | `TestE2EDelegationsStreamIntoTheirOwnBlocks` | — |
 | A cancelled reply (T-24) | in-process — the frame at the moment of the cancel, and the record afterwards for "the next prompt starts a new entry" | `TestE2EStreamCancelKeepsWhatArrived` | — |
-| Pane and block text, and its wording (T-04, T-10, T-12, T-13) | in-process — `Frame.Find` / `Frame.Row` for the text, `Golden` for a whole surface, a judge rubric for the wording half only | `TestE2EDelegationStepCap`; `TestE2EApproval…` *(planned, item 11)* | — |
+| Pane and block text, and its wording (T-04, T-10, T-12, T-13) | in-process — `Frame.Find` / `Frame.Row` for the text, `Golden` for a whole surface, a judge rubric for the wording half only | `TestE2EDelegationStepCap`; `TestE2EApprovalForcesALookAtTheControlPlane`; `TestJudgeForcedApprovalPaneReadsAsHelp` | — |
+| Token accounting across surfaces (T-06) | in-process — the `/usage` pane's rows and the `/sessions` spend cell, split back into cells and asserted against the counts the FIXTURE told the server to report; stubllm's `usage:` carries the `cached` share that no live server can be relied on to produce | `TestE2EUsageReportsCachedTokensAndDelegateSpend`; `TestE2EUsageHidesTheCachedColumnWithoutABreakdown` | — |
+| A decision key that arrives too early (T-13) | PTY only — the key is written into the terminal from the moment the prompt is sent until the pane is on screen, and the `--tui-trace` file is the evidence that the pane was PAINTED before anything removed it; an in-process run has no trace (item 4) | `TestE2EApprovalKeysAreArmedAfterPaint` | Whether the latency of a deliberate press is *felt* — the test pins a ceiling in milliseconds instead |
 | Colour and tone of a run (T-15) | PTY for the real terminal's SGR, or in-process `Frame.StyleRuns` — assert the run, never the raw escape | `TestE2EOutcomeTonePTY` *(planned, item 13)* | Whether the reader's own terminal theme renders that colour legibly |
 | Wide-rune and glyph alignment (T-20) | `tuitest` — the emulator's cell width is the authority; assert `Frame` cells, never rune counts | `TestE2EWidth…` *(planned, item 12)* | Font tofu — whether the reader's font has the glyph at all |
 | Resize and reflow (T-24, T-25) | in-process `Driver.Resize` (emulator resize + a `tea.WindowSizeMsg`, then a wait for the repaint it caused); PTY `PTYDriver.Resize` = `pty.Setsize` + a real `SIGWINCH` | `TestE2EStreamPTY` | — |
@@ -681,6 +692,14 @@ test inherits them. Reading a line near the END of an expanded block means walki
 page costs a settle; and the walk only learns it has reached the bottom by pressing once more and
 finding nothing painted, which is a bounded half-second per walk. A `hang` turn costs nothing — the
 stub sleeps until the request's context ends, and killing the program ends it.
+
+The T-06/T-10/T-13 set (`e2e_usage_test.go`, `e2e_approval_test.go`) measures **≈ 9.5 s** under
+`-race` across six launches, and its one avoidable cost is worth naming: a subprocess that actually
+RUNS under Auto's confinement box costs about five seconds under the race detector, so the Auto half
+of T-10 asserts the rung from the footer's mode marker and cancels its pane rather than running the
+command. Where a test needs the same prompt more than once — T-13 sends one line five times — one
+exchange is told from the next by waiting for the prompt box's idle placeholder, never by waiting
+for reply TEXT, which the exchange before it already put on the screen.
 
 Two rules keep it there. Every wait is a bounded `WaitFor` (5 s default) on a condition, never a
 sleep; and a settle is 150 ms of no bytes, taken only when a frame is about to be READ.

@@ -1,0 +1,103 @@
+# The upstream the T-06 tests talk to: a conversation whose second call is answered largely out of
+# the server's prefix cache, a delegation that spends tokens of its own, and — in the same file — a
+# prompt whose reply reports no cache breakdown at all.
+#
+# The numbers are the whole fixture. A cached share only exists because a SERVER said so, and no
+# unit test can conjure one honestly; a script can, and these are the shapes that matter: a cold
+# call (prompt, completion, no `cached` member on the wire at all), a warm one (a cached share
+# strictly inside its own prompt count), a child's spend the parent's row must not absorb, and a
+# server that never mentions caching, whose pane must therefore draw NO cached column.
+#
+# Hand-written for now. `stubllm record --upstream <a prefix-caching server>` re-records it the day
+# one is at hand, and the recorded file replaces this one without a test changing
+# (docs/design/test-drivers.md).
+model: cached-model
+turns:
+    # The session title. apogee asks for one off the first prompt, so this has to be matched BEFORE
+    # the prompt's own turn or it would take it (see smoke.yaml). It reports no usage: a title call
+    # is apogee's own housekeeping and the pane's numbers should be the conversation's.
+    - when:
+        last_message: The user's first request
+      repeat: true
+      text: Cached prompt accounting
+    # The parent's wrap-up once a delegation has reported. Matched BEFORE the child's turn below so
+    # a parent request can never be answered as a child's.
+    - when:
+        tool_result: sub_agent
+      repeat: true
+      text: The delegate reported back.
+      token_delay: 1ms
+      chunk_runes: 6
+      usage:
+        prompt: 1100
+        completion: 25
+        cached: 900
+    # Turn 1 — the cold call. No `cached` member reaches the wire at all, which is what most
+    # servers do and what the negative half of this item is about.
+    - when:
+        last_message: ^Summarise the workspace
+      repeat: true
+      text: The workspace holds one file, a.txt.
+      token_delay: 1ms
+      chunk_runes: 6
+      usage:
+        prompt: 900
+        completion: 40
+    # Turn 2 — the same conversation re-sent as a prefix, so the server answers nearly all of it
+    # from its cache. 880 of 950 prompt tokens: a share strictly INSIDE the count it qualifies.
+    - when:
+        last_message: ^And what is in it
+      repeat: true
+      text: One line, and it says hello.
+      token_delay: 1ms
+      chunk_runes: 6
+      usage:
+        prompt: 950
+        completion: 30
+        cached: 880
+    # The delegation. Its child spends a window of its own, which is the spend the `session` row
+    # sums and the `/sessions` row must carry.
+    - when:
+        last_message: ^Delegate a one-line description
+      repeat: true
+      tool_calls:
+        - name: sub_agent
+          arguments: '{"task":"Describe every file in the workspace in one line","name":"survey"}'
+    - when:
+        last_message: Describe every file in the workspace
+      repeat: true
+      text: a.txt holds one line of text.
+      token_delay: 1ms
+      chunk_runes: 6
+      usage:
+        prompt: 640
+        completion: 12
+        cached: 320
+    # The one message a RESUMED session sends, whose cost has to be added to what the record
+    # restored rather than replacing it.
+    - when:
+        last_message: ^One more question
+      repeat: true
+      text: Nothing has changed since.
+      token_delay: 1ms
+      chunk_runes: 6
+      usage:
+        prompt: 1200
+        completion: 15
+        cached: 1000
+    # The negative half, in this file rather than one of its own because it is the same claim read
+    # the other way: a server that reports counts and says NOTHING about caching. A session that
+    # only ever asks this must draw a pane with no cached column — a column of zeros would read as
+    # a cache miss and is the failure the item names.
+    - when:
+        last_message: ^Answer with no cache breakdown
+      repeat: true
+      text: Nothing here was answered from a cache.
+      token_delay: 1ms
+      chunk_runes: 6
+      usage:
+        prompt: 500
+        completion: 20
+    # Anything apogee asks on its own account.
+    - repeat: true
+      text: OK.

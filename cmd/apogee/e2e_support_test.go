@@ -286,6 +286,17 @@ func (s *e2eSession) Relaunch() *tuitest.Driver {
 	return drv
 }
 
+// RelaunchWith is [e2eSession.Relaunch] with extra arguments added to the command line, for this
+// launch and every one after it. It exists because the arguments a REOPEN takes are not the ones the
+// first run could have carried: --continue names the record the first run wrote, and --resume names
+// its id, so neither can be passed at the launch that creates it.
+func (s *e2eSession) RelaunchWith(extra ...string) *tuitest.Driver {
+	s.t.Helper()
+
+	s.args = append(s.args, extra...)
+	return s.Relaunch()
+}
+
 // Wait blocks until the run returns and hands back its error — what the command tree returned,
 // which for a clean quit is nil.
 func (s *e2eSession) Wait() error {
