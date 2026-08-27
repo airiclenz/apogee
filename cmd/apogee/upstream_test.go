@@ -887,6 +887,37 @@ func TestParallelAgentsCapCurrentReadsWithoutInstalling(t *testing.T) {
 	}
 }
 
+// A move is an arrival too (ADR 0039), and the shared fold is where every arrival that is not a bind
+// makes the cap follow: the entry the session lands on supplies the pin, and that written pin outranks
+// whatever the new server's beats go on to observe.
+func TestMoveReFollowsTheParallelAgentsCap(t *testing.T) {
+	t.Parallel()
+
+	spy := &parallelAgentsSpy{}
+	caps := newParallelAgentsCap(spy)
+	holder := newUpstreamHolder()
+	holder.Bind("http://old.invalid:1111", "old-key", "old-model",
+		heartbeat.NewMonitor("http://old.invalid:1111", "old-model", "old-key"))
+	mover := sessionMover{
+		agent: &fakeSwitcher{}, holder: holder, host: &fakeStamper{},
+		live: newLiveSettings(config.Options{}, nil), keys: config.NewKeyResolver(), caps: caps,
+	}
+
+	pinned := config.ServerEntry{
+		Name: "workstation", Endpoint: "http://192.168.64.1:1111", ParallelAgents: 2,
+	}
+	if _, err := mover.move(pinned); err != nil {
+		t.Fatalf("move onto the pinned entry: %v", err)
+	}
+
+	if got := spy.last(); got != 2 {
+		t.Errorf("the width the move pushed = %d, want the arrived-on entry's pin 2", got)
+	}
+	if got := caps.observe(8); got != 2 {
+		t.Errorf("cap after a beat naming 8 slots = %d, want 2 — a written pin outranks observation", got)
+	}
+}
+
 // The startup half of the same fact: the entry a session was launched on carries its own pin, so a
 // session that starts on a pinned server is capped from its first Turn rather than from its first
 // beat.

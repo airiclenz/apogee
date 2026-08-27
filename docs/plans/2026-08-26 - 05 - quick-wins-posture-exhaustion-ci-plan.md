@@ -225,7 +225,11 @@ across the same switch (the carry-over does not invent a move).
 
 ---
 
-## 3. `sessionMover.move` re-follows the Parallel agents cap on every arrival
+## 3. `sessionMover.move` re-follows the Parallel agents cap on every arrival — ✅ DONE (2026-08-27)
+
+NOTES (2026-08-27): the item's test-fixture line references had drifted by the two landed items — the six `sessionMover{…}` literals are `wire_test.go:2443`, `:4885`, `:4971`, `keysource_test.go:77`, `:113` and `launcher_test.go:563` (not `:2432`, `:4874`, `:4960`, `:73`, `:109`). Same six sites, no approach change.
+NOTES (2026-08-27): `launcherWiringFixture` returning the spy widens its tuple to five, so all 14 of its call sites in `wire_test.go` gained a `_` — mechanical, and the only edit outside the sites the item names.
+NOTES (2026-08-27): `move`'s doc comment said "the three follow-ups"; it now reads "the follow-ups" and names the cap as the fourth, since the count was part of the sentence the change invalidates.
 
 **What:** the fan-out cap follows the server on EVERY arrival (ADR 0039), and the shared move
 is the one fold every arrival that is not a bind goes through — so the follow moves INTO it.

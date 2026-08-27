@@ -276,6 +276,15 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **A launch-profile load no longer keeps the departed server's fan-out pin.** How many sub-agents
+  may run at once follows the SERVER (ADR 0039), and every arrival re-states it — but only the
+  `/server` switch did. A `/load` onto a profile serving another address moved the whole session and
+  left the cap where it was, so the retired entry's `parallel-agents:` pin, and the slot count the
+  retired server had advertised, both silently governed fan-out on a machine that never claimed
+  either. The follow now lives in the shared move every arrival that is not a bind goes through, so
+  a load and a switch answer alike: a profile's server pins nothing, starts at the serial floor of
+  one, and widens on its own first beat.
+
 - **A live colour-scheme switch no longer resets the width measure.** The TUI's one width
   authority rides on the theme (ADR 0030), and a theme built by `newTheme` starts at the painter's
   `ansi.WcWidth` — correct at construction, wrong on a rebuild. Every `/settings`

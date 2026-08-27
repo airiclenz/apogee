@@ -212,6 +212,10 @@ type sessionMover struct {
 	// with the entry's own `context-window:` pin (followEntry), which is what keeps the new server's
 	// window standing past the first beat's rebind instead of for the seconds until it.
 	live *liveSettings
+	// caps is the session's Parallel agents cap; a move is an arrival, so it re-follows here, after
+	// the engine switch succeeded. It is REQUIRED: every construction of a sessionMover supplies one,
+	// so the fold carries no nil guard and no arrival can quietly skip the follow.
+	caps *parallelAgentsCap
 }
 
 // move re-points the whole session at entry and reports what the display should adopt.
@@ -229,12 +233,13 @@ type sessionMover struct {
 // Order matters, and it is the order the `/server` closure established. The engine's own
 // validate-then-commit switch goes FIRST, so a refusal — an Exchange still open, an endpoint the
 // provider will not take — leaves the session exactly where it was. Past that call nothing can fail,
-// and the three follow-ups all describe the world the switch just made true: the Monitor is replaced
+// and the follow-ups all describe the world the switch just made true: the Monitor is replaced
 // whole (a Monitor is per-server, endpoint and key alike), the session's stored model is cleared,
 // because the switch UNBOUND it and a Save landing in the gap before the new server's first beat must
-// not claim the model of a server this session no longer talks to, and the entry's window pin is
+// not claim the model of a server this session no longer talks to, the entry's window pin is
 // latched, so the first beat's rebind re-resolves against the server the session is on now instead of
-// binding that server's observation over the number its entry pinned.
+// binding that server's observation over the number its entry pinned, and the fan-out cap follows
+// the entry the way every other arrival makes it follow (ADR 0039).
 func (m sessionMover) move(entry config.ServerEntry) (tui.ServerSwitchResult, error) {
 	// What this server bounds the session to, resolved BEFORE anything is mutated so the engine and
 	// the display adopt one number: the entry's own window pin outranks the top-level key, which
@@ -276,6 +281,14 @@ func (m sessionMover) move(entry config.ServerEntry) (tui.ServerSwitchResult, er
 		provider.WithEffortDialect(provider.EffortDialectFor(entry.EffortDialect))))
 	m.host.SetModel("")
 	m.live.followEntry(entry)
+	// And how wide the session may fan out on the server it has just arrived on (ADR 0039): the new
+	// entry's `parallel-agents:` pin becomes the pin and the retired server's observed slot count is
+	// forgotten, because a slot count is a fact about one server. It lives HERE, in the shared fold,
+	// rather than at either caller, because every arrival that is not a bind goes through this move —
+	// a `/server` switch and a profile load alike — and one follow per arrival is the whole rule. An
+	// entry that pins nothing (a profile load's does not) resolves to the serial floor 1 until the new
+	// server's own first beat widens it, which is the honest width for a server no entry describes.
+	m.caps.follow(entry)
 	// What the display adopts: the endpoint now on the wire, the alias the footer calls it, and the
 	// very window the engine was just handed, so the gauge and the Budget cannot describe different
 	// servers. Unpinned at both scopes it is 0, the honest "unknown until the first beat binds one"

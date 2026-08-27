@@ -260,7 +260,8 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	// The one fold that re-points a session at another Upstream, shared by `/server`'s switch and
 	// a profile load's follow-the-profile: engine switch, Monitor swap, stored model cleared, in order
 	// (see sessionMover.move, which carries the reasoning).
-	w.mover = sessionMover{agent: w.engine, holder: w.holder, host: w.host, live: w.live, keys: w.keys}
+	w.mover = sessionMover{agent: w.engine, holder: w.holder, host: w.host, live: w.live, keys: w.keys,
+		caps: w.caps}
 
 	// Where "is the llama-launcher integration on, and against which config" lives for this session
 	// (ADR 0029 D4, per-entry since 2026-08-07). It is declared HERE, above the two verbs that

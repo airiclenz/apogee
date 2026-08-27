@@ -563,6 +563,7 @@ func restoreWiring(ops launcherOps, entry config.ServerEntry, remember bool, pat
 		sessionMover: sessionMover{
 			live: newLiveSettings(config.Options{
 				Servers: []config.ServerEntry{entry}, HostAlias: entry.Name}, nil),
+			caps: newParallelAgentsCap(&parallelAgentsSpy{}),
 		},
 		ops:      ops,
 		path:     newLauncherPath(path, entry.Name),

@@ -145,12 +145,6 @@ func (w *rootWiring) switchServer(name string) (tui.ServerSwitchResult, error) {
 	// installed only after the move SUCCEEDED, so a refused switch leaves the session's launcher
 	// where the session still is.
 	w.launcherPath.follow(entry)
-	// And so does the fan-out width, for the same reason and on the same terms (ADR 0039): how
-	// many sub-agents may run at once is the new server's answer, not the old one's, and the
-	// entry's pin is in hand right here. A move is the one moment the previously observed slot
-	// count must be forgotten — parallelAgentsCap.follow does that — so an unpinned server starts
-	// serial and widens the moment its own first beat reports its slots.
-	w.caps.follow(entry)
 	return result, nil
 }
 

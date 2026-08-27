@@ -80,6 +80,7 @@ func TestMoveResolvesACommandKeySource(t *testing.T) {
 		host:   &fakeStamper{},
 		live:   newLiveSettings(config.Options{}, nil),
 		keys:   config.NewKeyResolver(),
+		caps:   newParallelAgentsCap(&parallelAgentsSpy{}),
 	}
 
 	entry := config.ServerEntry{
@@ -116,6 +117,7 @@ func TestMoveRefusesWhenTheKeySourceFails(t *testing.T) {
 		host:   &fakeStamper{},
 		live:   newLiveSettings(config.Options{}, nil),
 		keys:   config.NewKeyResolver(),
+		caps:   newParallelAgentsCap(&parallelAgentsSpy{}),
 	}
 
 	entry := config.ServerEntry{

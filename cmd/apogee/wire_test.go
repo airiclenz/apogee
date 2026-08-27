@@ -2431,24 +2431,28 @@ type fakeStamper struct{ models []string }
 func (f *fakeStamper) SetModel(model string) { f.models = append(f.models, model) }
 
 // launcherWiringFixture builds the wiring under test over a scripted launcher and a session sitting
-// on endpoint, and hands back the collaborators the assertions read.
+// on endpoint, and hands back the collaborators the assertions read. The last of them is the engine
+// spy behind the wiring's Parallel agents cap: a load's move re-follows the cap (ADR 0039), so a test
+// can read every width that arrival pushed as well as the one the cap now resolves to.
 func launcherWiringFixture(t *testing.T, ops launcherOps, endpoint string) (
-	launcherWiring, *fakeSwitcher, *fakeStamper, *upstreamHolder) {
+	launcherWiring, *fakeSwitcher, *fakeStamper, *upstreamHolder, *parallelAgentsSpy) {
 	t.Helper()
 	agent := &fakeSwitcher{}
 	host := &fakeStamper{}
 	holder := newUpstreamHolder()
 	holder.Bind(endpoint, "", "", heartbeat.NewMonitor(endpoint, "", ""))
+	widths := &parallelAgentsSpy{}
 	wiring := launcherWiring{
 		sessionMover: sessionMover{
 			agent: agent, holder: holder, host: host,
 			live: newLiveSettings(config.Options{ContextWindow: 16384}, nil),
 			keys: config.NewKeyResolver(),
+			caps: newParallelAgentsCap(widths),
 		},
 		ops:  ops,
 		path: newLauncherPath("/etc/llama-launcher/config.yaml", "rig"),
 	}
-	return wiring, agent, host, holder
+	return wiring, agent, host, holder, widths
 }
 
 // twoServerConfig is a launcher config with one profile per backend on two different addresses —
@@ -2487,7 +2491,7 @@ func TestLoadProfileSameAddressMovesNothing(t *testing.T) {
 		notices:      []string{"servers.llamacpp: api_key has leading/trailing whitespace"},
 		loadResult:   &llamalauncher.RunningInstance{Backend: "llamacpp", Host: "127.0.0.1", Port: 8080},
 	}
-	wiring, agent, host, holder := launcherWiringFixture(t, ops, "http://127.0.0.1:8080")
+	wiring, agent, host, holder, _ := launcherWiringFixture(t, ops, "http://127.0.0.1:8080")
 
 	var steps []string
 	result, err := wiring.load("here", func(step string) { steps = append(steps, step) })
@@ -2537,7 +2541,7 @@ func TestLoadProfileCrossAddressFollowsTheProfile(t *testing.T) {
 		cfg:        twoServerConfig(t),
 		loadResult: &llamalauncher.RunningInstance{Backend: "llamacpp", Host: "127.0.0.1", Port: 9090},
 	}
-	wiring, agent, host, holder := launcherWiringFixture(t, ops, "http://127.0.0.1:8080")
+	wiring, agent, host, holder, _ := launcherWiringFixture(t, ops, "http://127.0.0.1:8080")
 
 	result, err := wiring.load("there", nil)
 	if err != nil {
@@ -2582,6 +2586,47 @@ func TestLoadProfileCrossAddressFollowsTheProfile(t *testing.T) {
 	}
 }
 
+// The fan-out cap follows the profile's server like every other arrival (ADR 0039), because the load
+// commits the same shared move a `/server` switch does. A Launch profile's entry pins no
+// `parallel-agents:` and its server has not beaten yet, so the honest width on the other side is the
+// serial floor: neither the departed entry's pin nor the retired server's slot count travels, and the
+// new server's own first beat is what widens it.
+func TestLoadProfileMoveReFollowsTheParallelAgentsCap(t *testing.T) {
+	t.Parallel()
+
+	ops := &fakeLauncher{
+		cfg:        twoServerConfig(t),
+		loadResult: &llamalauncher.RunningInstance{Backend: "llamacpp", Host: "127.0.0.1", Port: 9090},
+	}
+	wiring, _, _, _, widths := launcherWiringFixture(t, ops, "http://127.0.0.1:8080")
+	wiring.caps.follow(config.ServerEntry{Name: "rig", ParallelAgents: 3})
+	wiring.caps.observe(6)
+
+	result, err := wiring.load("there", nil)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if result.Move == nil {
+		t.Fatalf("result = %+v; want a resolved Move — the profile serves another address", result)
+	}
+	if _, err := result.Move(); err != nil {
+		t.Fatalf("committing the resolved move: %v", err)
+	}
+
+	if got := widths.last(); got != 1 {
+		t.Errorf("the width the committed move pushed = %d; want the serial floor 1 — the departed "+
+			"entry's pin was dropped and its observed slot count forgotten", got)
+	}
+	if got := wiring.caps.current(); got != 1 {
+		t.Errorf("caps.current() = %d; want 1 — a server no `servers:` entry describes runs serial "+
+			"until it reports its own slots", got)
+	}
+	if got := wiring.caps.observe(4); got != 4 {
+		t.Errorf("cap after the new server's first beat named 4 slots = %d; want 4 — the profile's "+
+			"own server is what widens it", got)
+	}
+}
+
 // wildcardBoundConfig is twoServerConfig under the posture anyone who wants their server reachable
 // off-box runs: `defaults.host: "0.0.0.0"`. The profiles resolve to the address the server BINDS,
 // while the session dials one of the addresses that bind answers on — one server, two legitimate
@@ -2623,7 +2668,7 @@ func TestUnloadAndStopActOnAWildcardBoundServer(t *testing.T) {
 		},
 		actuateResult: &llamalauncher.StopResult{ServerStopped: true},
 	}
-	wiring, _, _, _ := launcherWiringFixture(t, ops, "http://127.0.0.1:8080")
+	wiring, _, _, _, _ := launcherWiringFixture(t, ops, "http://127.0.0.1:8080")
 
 	result, err := wiring.unload("http://127.0.0.1:8080")
 	if err != nil {
@@ -2667,7 +2712,7 @@ func TestLoadProfileWildcardBindMovesNothing(t *testing.T) {
 		cfg:        wildcardBoundConfig(t),
 		loadResult: &llamalauncher.RunningInstance{Backend: "llamacpp", Host: "0.0.0.0", Port: 8080},
 	}
-	wiring, agent, host, holder := launcherWiringFixture(t, ops, "http://127.0.0.1:8080")
+	wiring, agent, host, holder, _ := launcherWiringFixture(t, ops, "http://127.0.0.1:8080")
 
 	result, err := wiring.load("here", nil)
 	if err != nil {
@@ -2711,7 +2756,7 @@ func TestLoadProfileCrossAddressDialsTheLoopback(t *testing.T) {
 		cfg:        wildcardBoundConfig(t),
 		loadResult: &llamalauncher.RunningInstance{Backend: "llamacpp", Host: "0.0.0.0", Port: 9090},
 	}
-	wiring, agent, host, holder := launcherWiringFixture(t, ops, "http://127.0.0.1:8080")
+	wiring, agent, host, holder, _ := launcherWiringFixture(t, ops, "http://127.0.0.1:8080")
 
 	result, err := wiring.load("there", nil)
 	if err != nil {
@@ -2791,7 +2836,7 @@ func TestUnloadAndStopActOnTheServerASessionMovedTo(t *testing.T) {
 		},
 		actuateResult: &llamalauncher.StopResult{ServerStopped: true},
 	}
-	wiring, _, _, holder := launcherWiringFixture(t, ops, "http://127.0.0.1:8080")
+	wiring, _, _, holder, _ := launcherWiringFixture(t, ops, "http://127.0.0.1:8080")
 
 	loaded, err := wiring.load("there", nil)
 	if err != nil {
@@ -2836,7 +2881,7 @@ func TestLoadProfileUnknownNameNeverActuates(t *testing.T) {
 	t.Parallel()
 
 	ops := &fakeLauncher{cfg: twoServerConfig(t)}
-	wiring, agent, _, _ := launcherWiringFixture(t, ops, "http://127.0.0.1:8080")
+	wiring, agent, _, _, _ := launcherWiringFixture(t, ops, "http://127.0.0.1:8080")
 
 	if _, err := wiring.load("typo", nil); err == nil {
 		t.Fatal("load with an unresolvable profile returned no error")
@@ -2859,7 +2904,7 @@ func TestLoadProfileProjectsTheStartupTimeout(t *testing.T) {
 	timeout := fmt.Errorf("llama-server did not become healthy (pid 4711, log /tmp/a.log): %w",
 		llamalauncher.ErrStartupTimeout)
 	ops := &fakeLauncher{cfg: twoServerConfig(t), loadErr: timeout}
-	wiring, agent, _, _ := launcherWiringFixture(t, ops, "http://127.0.0.1:8080")
+	wiring, agent, _, _, _ := launcherWiringFixture(t, ops, "http://127.0.0.1:8080")
 
 	_, err := wiring.load("there", nil)
 
@@ -2878,7 +2923,7 @@ func TestLoadProfileProjectsTheStartupTimeout(t *testing.T) {
 
 	// Every other failure crosses untouched — only the timeout may claim the coda.
 	other := &fakeLauncher{cfg: twoServerConfig(t), loadErr: errors.New("model file not found")}
-	wiring, _, _, _ = launcherWiringFixture(t, other, "http://127.0.0.1:8080")
+	wiring, _, _, _, _ = launcherWiringFixture(t, other, "http://127.0.0.1:8080")
 	if _, err := wiring.load("there", nil); errors.Is(err, tui.ErrStartupTimeout) {
 		t.Errorf("load error = %v; want an ordinary failure NOT marked as a startup timeout", err)
 	}
@@ -2892,7 +2937,7 @@ func TestLaunchProfilesSeamProjectsRows(t *testing.T) {
 		cfg:       twoServerConfig(t),
 		instances: []*llamalauncher.RunningInstance{{Backend: "llamacpp", Host: "127.0.0.1", Port: 9090, ActiveProfile: "there"}},
 	}
-	wiring, _, _, _ := launcherWiringFixture(t, ops, "http://127.0.0.1:8080")
+	wiring, _, _, _, _ := launcherWiringFixture(t, ops, "http://127.0.0.1:8080")
 
 	rows, err := wiring.profiles()
 	if err != nil {
@@ -2908,7 +2953,7 @@ func TestLaunchProfilesSeamProjectsRows(t *testing.T) {
 
 	// The one failure that sinks the list travels out as the error the renderer notes.
 	broken := &fakeLauncher{cfgErr: errors.New("no config file at /nope/config.yaml")}
-	wiring, _, _, _ = launcherWiringFixture(t, broken, "http://127.0.0.1:8080")
+	wiring, _, _, _, _ = launcherWiringFixture(t, broken, "http://127.0.0.1:8080")
 	if rows, err := wiring.profiles(); err == nil || rows != nil {
 		t.Errorf("profiles over an unreadable config = %+v, %v; want no rows and the loader's error", rows, err)
 	}
@@ -2930,7 +2975,7 @@ func TestUnloadAndStopActOnTheSessionsEndpoint(t *testing.T) {
 		instances:     instances,
 		actuateResult: &llamalauncher.StopResult{ServerStopped: true, Steps: steps},
 	}
-	wiring, _, _, _ := launcherWiringFixture(t, ops, "http://127.0.0.1:8080")
+	wiring, _, _, _, _ := launcherWiringFixture(t, ops, "http://127.0.0.1:8080")
 
 	result, err := wiring.unload("http://127.0.0.1:8080")
 	if err != nil {
@@ -2977,7 +3022,7 @@ func TestUnloadAndStopRefuseAnUnmanagedEndpoint(t *testing.T) {
 				cfg:       twoServerConfig(t),
 				instances: []*llamalauncher.RunningInstance{{Backend: "llamacpp", Host: "127.0.0.1", Port: 8080}},
 			}
-			wiring, _, _, _ := launcherWiringFixture(t, ops, "http://remote.invalid:9999")
+			wiring, _, _, _, _ := launcherWiringFixture(t, ops, "http://remote.invalid:9999")
 
 			result, err := verb.call(wiring, "http://remote.invalid:9999")
 			if err == nil {
@@ -3206,7 +3251,7 @@ func TestLoadProfileMovePreservesTheLauncher(t *testing.T) {
 		cfg:        twoServerConfig(t),
 		loadResult: &llamalauncher.RunningInstance{Backend: "llamacpp", Host: "127.0.0.1", Port: 9090},
 	}
-	wiring, _, _, _ := launcherWiringFixture(t, ops, "http://127.0.0.1:8080")
+	wiring, _, _, _, _ := launcherWiringFixture(t, ops, "http://127.0.0.1:8080")
 
 	result, err := wiring.load("there", nil)
 	if err != nil {
@@ -4882,7 +4927,8 @@ func TestMoveCarriesTheEntrysWindowAndReplyCap(t *testing.T) {
 	holder.Bind("http://old.invalid:1111", "old-key", "old-model",
 		heartbeat.NewMonitor("http://old.invalid:1111", "old-model", "old-key"))
 	live := newLiveSettings(config.Options{ContextWindow: 16384}, nil)
-	mover := sessionMover{agent: agent, holder: holder, host: host, live: live, keys: config.NewKeyResolver()}
+	mover := sessionMover{agent: agent, holder: holder, host: host, live: live,
+		keys: config.NewKeyResolver(), caps: newParallelAgentsCap(&parallelAgentsSpy{})}
 
 	pinned := config.ServerEntry{
 		Name: "workstation", Endpoint: "http://192.168.64.1:1111", APIKey: "new-key",
@@ -4970,6 +5016,7 @@ func TestMoveCarriesTheEntrysResponseReserveShare(t *testing.T) {
 	live := newLiveSettings(config.Options{ContextWindow: 16384, ResponseReserve: 0.2}, nil)
 	mover := sessionMover{
 		agent: agent, holder: holder, host: &fakeStamper{}, live: live, keys: config.NewKeyResolver(),
+		caps: newParallelAgentsCap(&parallelAgentsSpy{}),
 	}
 
 	stated := config.ServerEntry{
