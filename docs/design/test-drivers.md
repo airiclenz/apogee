@@ -423,9 +423,115 @@ is a reset, and echo and canonical mode are back.
 
 ## judge
 
-*Filled by plan item 7.* The `APOGEE_JUDGE_ENDPOINT` / `APOGEE_JUDGE_MODEL` gate, how a rubric is
-written beside its test, the named text artifacts a verdict is rendered on, `judge.Pairwise`, and
-what a binding `fail` looks like in `go test` output.
+`internal/judge` is the oracle for the halves a cell cannot settle: whether a pane READS right,
+whether a tone carries, whether a sentence a human will act on says what it meant to. Everything
+else is settled by a cell — a rubric asking "is `Fix:` on row 4" is a rubric written in the wrong
+package (ADR 0062, decision 4).
+
+### The gate
+
+Judge calls need a model, so they are opt-in exactly as the live tests are:
+
+| Variable | Meaning |
+| --- | --- |
+| `APOGEE_JUDGE_ENDPOINT` | the OpenAI-compatible server the judge talks to; **this is the gate** |
+| `APOGEE_LIVE_ENDPOINT` | used as the endpoint when the judge one is unset, so one variable turns both on |
+| `APOGEE_JUDGE_MODEL` | the judging model; falls back to `APOGEE_LIVE_MODEL`, then to the endpoint's first advertised model |
+| `APOGEE_API_KEY` | the bearer token, when the server is keyed |
+
+`judge.Enabled()` reports the gate and `judge.Skip(t)` skips with the line that says how to turn it
+on. A plain `go test` never sets it, so an ungated run **skips** and never passes silently.
+`make live-eval` sets it from `JUDGE_ENDPOINT` (default: the same `LIVE_ENDPOINT` the live tests
+use) and runs `./internal/judge/` **first**, so a broken judge is reported as a broken judge rather
+than as twenty rubric failures further down the run.
+
+### A rubric, beside its test
+
+```go
+func TestE2EOutcomeSlotReadsAsOneRow(t *testing.T) {
+	drv := tuitest.NewDriver(t, e2eSize)
+	launchTUI(t, drv, stub)
+	// … drive the TUI, then take the frame the claim is about.
+	frame := drv.Frame()
+
+	judge.Require(t, t.Context(), judge.Rubric{
+		Item:     "T-15",
+		Claim:    "the outcome slot reads as one row, in the tone the result deserves",
+		PassWhen: "each finished step shows one outcome line whose wording matches what happened",
+		FailsIf:  "an outcome line contradicts the step above it, or a failure reads as a success",
+		Extra:    []string{"row 0 is the header; the run had no network"},
+	}, judge.FrameArtifact("the transcript", frame, true, judge.Tone{Name: "red", Color: scheme.Error}))
+}
+```
+
+`Rubric` has four fields for one reason: `PassWhen` and `FailsIf` are copied **verbatim** from the
+checklist step the test replaces. A rubric paraphrased in the test drifts from the thing the
+release actually promises, and the drift is invisible — both texts still read fine. `Extra` carries
+what the artifacts do not: which row is the header, that the run was offline, that the model was a
+stub.
+
+**One claim per call.** Two claims in one rubric produce a verdict that cannot say which of them
+failed and a reason list nobody can act on. Two claims are two `Require` calls.
+
+### Artifacts
+
+A verdict is rendered on named texts, never on a screenshot and never on the raw bytes:
+
+```go
+judge.Artifact{Name: "the approval pane", Kind: judge.KindFrame, Text: frame.String()}
+```
+
+`Kind` is one of `KindFrame`, `KindStdout`, `KindFile`, `KindTranscript`, `KindTrace`; the `Name` is
+what a reason will point at, so `"the outcome slot"` beats `"frame2"`.
+`judge.FrameArtifact(name, frame, withStyles, tones…)` serialises a `tuitest.Frame`: plain text
+without styles, and with them, every style run wrapped in named tags — `⟨red⟩failed⟨/red⟩`,
+`⟨bold⟩Fix:⟨/bold⟩`. The tone names come from the CALLER, because only the caller knows which
+scheme is loaded; a colour no `Tone` matches is left unnamed rather than given an invented name the
+rubric could then assert against.
+
+### The API
+
+| Call | What it does |
+| --- | --- |
+| `judge.Enabled() bool` | is a judge endpoint configured |
+| `judge.Skip(t)` | skip with the line that says how to enable it |
+| `judge.Require(t, ctx, rubric, artifacts…)` | the assertion: skips when ungated, `t.Fatal` when the judge could not answer, `t.Errorf` with the reasons when the verdict is fail |
+| `judge.Ask(ctx, rubric, artifacts…) (Verdict, error)` | the verdict without the assertion, for a test that wants both directions |
+| `judge.Pairwise(ctx, rubric, before, after) (Verdict, error)` | "is `after` no worse than `before` under this rubric" |
+
+One round-trip, temperature 0, one vote. A majority of local votes costs N× the wall clock and buys
+agreement rather than accuracy.
+
+Use `Pairwise` where no absolute oracle exists but a comparison does — "nothing regressed since
+v0.17.1", "the reworded pane is no worse than the shipped one". Give it the two artifacts and let
+the rubric describe the property; a difference that is not *worse* is a pass.
+
+### The verdict is binding
+
+With the gate set, a `fail` **fails the Go test** and prints the model's reasons. An advisory judge
+is a judge nobody reads. Two consequences follow, and both are deliberate.
+
+**A weak local judge is a reason to sharpen the rubric, not to soften the verdict.** If a small
+model cannot settle a claim, the claim is usually under-specified — say which row, say what "reads
+right" means here, move the mechanical half into a cell assertion and leave the judgment half to
+the judge. Every one of those edits makes the test better; making the verdict advisory makes it
+disappear.
+
+**A single fail is not yet a fail.** Temperature 0 on a local server is *not* bit-reproducible —
+the sampler seed and the batch the request lands in both move the sampled token — so a judge
+failure is re-run ONCE by hand before it is believed:
+
+```
+go test -run TestE2EOutcomeSlotReadsAsOneRow -count=1 -v ./cmd/apogee/
+```
+
+Two fails in a row are a real fail. The failure message says so itself, because the person reading
+it is mid-release. `-count=1` is load-bearing: the model behind the endpoint is not a Go-visible
+input, so a cached PASS would survive a model swap.
+
+`TestJudgeSelfCheck` is the kit's own probe of the configured judge — the rubric "the text says
+hello" put to the real model against `hello` and against `goodbye`. A judge that passes both, or
+fails both, is reported there.
 
 ## Which driver observes which claim
 
@@ -473,7 +579,13 @@ A new end-to-end test is `cmd/apogee/e2e_<topic>_test.go`, and it follows this c
 
 ## Gates and budgets
 
-*The judge and final-measurement rows are filled by plan items 7 and 16.*
+*The final-measurement row is filled by plan item 16.*
+
+| Set | Runs in a plain `go test` | Ways it does not run |
+| --- | --- | --- |
+| in-process e2e | yes, every platform | — |
+| PTY e2e | yes | Windows; a failed `TestMain` build (both say so in the skip) |
+| judge | no | always, unless `APOGEE_JUDGE_ENDPOINT` / `APOGEE_LIVE_ENDPOINT` is set — it joins `make live-eval` |
 
 No build tags and no `-short`: a test that only runs when someone remembers a flag is a test nobody
 runs. The in-process e2e set runs in **every plain `go test`**, on every platform, with no gate at

@@ -46,6 +46,12 @@ ARGS ?=
 # unset APOGEE_LIVE_ENDPOINT would have skipped.
 LIVE_ENDPOINT ?= http://127.0.0.1:1111
 
+# The endpoint `make live-eval` points the LLM judge at (internal/judge), defaulting to the same
+# server the live tests use — override to judge with a bigger model than the one under test:
+# `make live-eval JUDGE_ENDPOINT=http://host.internal:1111`. Set APOGEE_JUDGE_MODEL in the
+# environment to pin the judging model. Judge verdicts are BINDING: a fail fails the Go test.
+JUDGE_ENDPOINT ?= $(LIVE_ENDPOINT)
+
 # Where `install` drops the binary. Leave empty to let `install` auto-pick the
 # first candidate dir that is already on $PATH *and* writable without sudo,
 # trying, in order: /usr/local/bin (most Linux, and macOS if you own it), the Go
@@ -140,10 +146,10 @@ install: build
 test:
 	go test -race -count=1 ./...
 
-## live-eval: run the opt-in live-model eval against a real local model (always -count=1, never cached)
+## live-eval: run the opt-in live-model eval and the gated judge tests against a real local model (always -count=1, never cached)
 .PHONY: live-eval
 live-eval:
-	APOGEE_LIVE_ENDPOINT=$(LIVE_ENDPOINT) go test -race -count=1 -run 'TestE2ELiveModel|TestLiveDelegateCapAndWorkingWindow' -v ./internal/tui/ ./internal/agent/
+	APOGEE_LIVE_ENDPOINT=$(LIVE_ENDPOINT) APOGEE_JUDGE_ENDPOINT=$(JUDGE_ENDPOINT) go test -race -count=1 -run 'TestE2ELiveModel|TestLiveDelegateCapAndWorkingWindow|TestJudge' -v ./internal/judge/ ./internal/tui/ ./internal/agent/ ./cmd/apogee/
 
 ## fmt: format all Go source in place
 .PHONY: fmt

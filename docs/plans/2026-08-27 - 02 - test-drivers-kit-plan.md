@@ -725,7 +725,39 @@ child's `stty size`, `Kill` reaps. `TestE2ESmokePTY` as described, ≤ 8 s.
 
 **Commit:** `test(tuitest): PTYDriver over creack/pty + x/vt; the binary is built once per test run; T-25 black-box smoke`
 
-## 7. `internal/judge` — gated, binding LLM verdicts; `make live-eval` gains the gate
+## 7. `internal/judge` — gated, binding LLM verdicts; `make live-eval` gains the gate — ✅ DONE (2026-08-27)
+
+NOTES (2026-08-27): the item names both `type Verdict struct` and `func Verdict(ctx, r, a...)
+(Verdict, error)`; Go cannot hold both names in one package. The TYPE keeps the name — it is what
+`Pairwise(…) (Verdict, error)` returns in the item's own signature and what a caller writes down —
+and the function is `judge.Ask(ctx, rubric, artifacts…)`. Nothing downstream in the plan calls it:
+items 9–15 reference `judge.Require`, `judge.Pairwise` and `judge.Enabled` only, all of which have
+the names the item gives them.
+NOTES (2026-08-27): `FrameArtifact(name, frame, withStyles bool, tones ...Tone)` — the item's
+literal signature has three parameters but its prose requires the tone resolution to compare
+"against the model's theme colours passed by the caller", which no three-parameter form can receive.
+The variadic keeps the three named parameters and the documented call shape (`FrameArtifact("the
+pane", f, false)`), and `Tone{Name, Color}` is the caller's own vocabulary: a colour matching no
+Tone is left UNNAMED rather than given an invented name, so a rubric can only assert a tone somebody
+declared.
+NOTES (2026-08-27): `make live-eval` runs `./internal/judge/` FIRST, ahead of the item's three
+listed packages. `TestJudgeSelfCheck` lives in `internal/judge`, so the item's own requirement that
+it "runs first in `make live-eval`" is unsatisfiable with the package list as literally written —
+the test would not run at all. `-run` is widened exactly as the item states, and `go test` prints
+package results in the order they are listed, so a broken judge is the first thing the run reports.
+NOTES (2026-08-27): the parse forgives case and surrounding whitespace on the verdict value
+(`"PASS"` is the pass verdict, pinned by a subtest); everything else is strict as the item states —
+the first balanced `{…}` object, `verdict` ∈ {pass, fail}, `reasons` an array, and any other shape
+an `error` rather than a fail. A local model spelling the value with a capital meant the verdict,
+not a third value, and treating it as a judge malfunction would turn a green run red for a
+formatting habit.
+NOTES (2026-08-27): no CHANGELOG entry from this item — plan item 8 owns the single `[Unreleased]`
+entry covering the whole kit (items 2–7), as recorded under items 2–6.
+NOTES (2026-08-27): the GATED half is unexercised in this environment — no LLM endpoint is reachable
+from the sandbox (`127.0.0.1:1111` and `host.internal:1111` both refuse), so `TestJudgeSelfCheck`
+skipped and the live request path (discovery fallback against a real server, a real model's JSON)
+has only been proven against `internal/stubllm`. `make live-eval` on the owner's host is what closes
+that.
 
 **What:** the judgment oracle.
 
