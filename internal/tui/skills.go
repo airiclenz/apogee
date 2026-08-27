@@ -264,7 +264,8 @@ func skillIDCell(id string) string {
 }
 
 // loadedSkillLines renders the working half: one line per skill — the /id that names it and the
-// source it was loaded from (skillTokenLabel), then its display name and its summary. Nothing
+// source it was loaded from (skillTokenLabel), then its display name and its summary, plus one
+// indented triggers line under it when the skill declares any (skillTriggerLine). Nothing
 // loaded renders nothing, so the caller's section joiner never emits a "0 skills available:"
 // header over an empty list.
 //
@@ -292,8 +293,43 @@ func loadedSkillLines(list []skills.Skill, home, workspace string) []string {
 			line += " — " + summary
 		}
 		lines = append(lines, line)
+		if triggers := skillTriggerLine(sk.Triggers); triggers != "" {
+			lines = append(lines, triggers)
+		}
 	}
 	return lines
+}
+
+// maxTriggerCells bounds how many runes of a skill's joined trigger list the /skills row spends.
+// The loader already caps a phrase at 64 runes and the list at 32 (skills.maxTriggerLen,
+// maxTriggers), which is a bound on the DATA and far too wide for a row: 120 is roughly the width
+// the report's other lines already run to, so the disclosure fits the pane and says "…" when the
+// declaration is longer than the pane can show.
+const maxTriggerCells = 120
+
+// skillTriggerLine renders a skill's declared triggers as one indented line under its listing row —
+// "    triggers: review a diff, code review" — or "" when the skill declares none, so a row without
+// them is exactly the row it was before.
+//
+// The list exists to be READ: the triggers are why a skill will or will not be suggested for a
+// draft, and until they are visible somewhere an author debugging "why did this never come up?"
+// has only the file to go on. /skills is where the catalog already answers questions about itself.
+//
+// It is sanitized here rather than trusted: a trigger is repo-authored text, addNote's strip
+// deliberately keeps "\n" (it sanitizes prose, and prose has paragraphs), and a note is painted one
+// row per line — so a newline in a trigger would write further rows into this report, rows it could
+// shape as another skill's entry, source label and all, under a heading that counted one fewer.
+// Stripped, flattened and clipped, the declaration is one row or it ends in the "…" that says it
+// was cut.
+func skillTriggerLine(triggers []string) string {
+	if len(triggers) == 0 {
+		return ""
+	}
+	joined := strings.TrimSpace(flattenField(stripEscapes(strings.Join(triggers, ", "))))
+	if joined == "" {
+		return ""
+	}
+	return "    triggers: " + clipRunes(joined, maxTriggerCells)
 }
 
 // shadowedBy reports the winning SKILL.md's path when this skip is a lost id collision rather

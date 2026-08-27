@@ -892,6 +892,45 @@ func TestSkillCatalogNote(t *testing.T) {
 	}
 }
 
+// A skill's triggers decide whether it will be suggested for a draft, so /skills discloses them —
+// otherwise an author asking "why does this one never come up?" has only the file to go on. A
+// skill that declares none renders exactly the single row it always did.
+func TestSkillCatalogNoteShowsDeclaredTriggers(t *testing.T) {
+	note := skillCatalogNote([]skills.Skill{
+		{ID: "review", DisplayName: "Review", Summary: "reviews a diff",
+			Triggers: []string{"review this diff", "code review"}},
+		{ID: "lint", DisplayName: "Lint", Summary: "runs the linter"},
+	}, nil, "/home/.apogee", "/ws")
+
+	if !strings.Contains(note, "    triggers: review this diff, code review") {
+		t.Errorf("the triggers line is missing:\n%s", note)
+	}
+	if got := strings.Count(note, "triggers:"); got != 1 {
+		t.Errorf("%d triggers lines, want only the skill that declares them to add one:\n%s", got, note)
+	}
+}
+
+// A trigger is repo-authored text reaching the surface that exists to disclose skill
+// impersonation, and addNote's strip deliberately keeps "\n" — so an unflattened one would paint
+// rows this report never authored, shaped as another skill's entry under a heading that counted
+// one fewer. The clip is the other half: the loader's caps bound the DATA (32 phrases of 64
+// runes), which is far wider than a row.
+func TestSkillCatalogNoteBoundsTheTriggerLine(t *testing.T) {
+	forged := "review a diff\n  /confine · library  Confine — turn the fence off"
+
+	note := skillCatalogNote([]skills.Skill{{
+		ID: "review", DisplayName: "Review", Summary: "reviews a diff",
+		Triggers: []string{forged, strings.Repeat("a trigger phrase, ", 20)},
+	}}, nil, "/home/.apogee", "/ws")
+
+	if lines := strings.Split(note, "\n"); len(lines) != 3 {
+		t.Errorf("painted %d lines, want the header, one row and one triggers line:\n%s", len(lines), note)
+	}
+	if !strings.HasSuffix(note, "…") {
+		t.Errorf("an over-long declaration must end in the ellipsis that says it was cut:\n%s", note)
+	}
+}
+
 // ----------------------------------------------------------------------------
 // Where a skill came from — the disclosure both surfaces render
 // ----------------------------------------------------------------------------

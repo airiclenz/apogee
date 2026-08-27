@@ -151,7 +151,17 @@ link, since the See line two lines above already links the ADR.
 
 ---
 
-## 2. `triggers:` frontmatter field on `skills.Skill`
+## 2. `triggers:` frontmatter field on `skills.Skill` — ✅ DONE (2026-08-27)
+
+NOTES (2026-08-27): the item names `internal/tui/skills_test.go`; the package's test file is
+`internal/tui/skill_test.go` (singular) and the existing `skillCatalogNote` tests live there, so the
+two new tests were added beside them rather than in a second file.
+
+NOTES (2026-08-27): `frontmatter` stopped being comparable once it gained the `triggersField` slice,
+so `scanFrontmatterFields`' `fm != (frontmatter{})` ok-check became `frontmatter.hasNamingField()`.
+It deliberately EXCLUDES `Triggers`: triggers alone can never make a skill loadable, so a block that
+recovered nothing else still reports the strict parser's YAML error (which names the offending line)
+rather than the vaguer "missing a required field" — the pre-existing diagnosis is unchanged.
 
 **What:** teach the loader an optional author-declared trigger list.
 

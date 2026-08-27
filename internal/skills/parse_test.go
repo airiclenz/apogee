@@ -1,6 +1,8 @@
 package skills
 
 import (
+	"fmt"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -324,5 +326,109 @@ func TestTitleCase(t *testing.T) {
 		if got := titleCase(in); got != want {
 			t.Errorf("titleCase(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+// triggers: is optional metadata for the suggestion matcher, so the loader must read the two
+// shapes an author actually writes — a YAML sequence and one comma-separated line — must fold
+// them to one normal form, and must never let a malformed one cost the skill the rest of its
+// frontmatter.
+func TestParseSkillTriggers(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		want    []string
+	}{
+		{
+			name:    "block sequence",
+			content: "---\nid: review\nsummary: s\ntriggers:\n  - review this diff\n  - code review\n---\nbody",
+			want:    []string{"review this diff", "code review"},
+		},
+		{
+			name:    "flow sequence",
+			content: "---\nid: review\nsummary: s\ntriggers: [review this diff, code review]\n---\nbody",
+			want:    []string{"review this diff", "code review"},
+		},
+		{
+			name:    "one comma-separated scalar",
+			content: "---\nid: review\nsummary: s\ntriggers: review this diff, code review\n---\nbody",
+			want:    []string{"review this diff", "code review"},
+		},
+		{
+			name:    "casing, ragged whitespace, blanks and duplicates folded away",
+			content: "---\nid: review\nsummary: s\ntriggers:\n  - Review   This Diff\n  - \"  CODE  Review \"\n  - review this diff\n  - \"\"\n---\nbody",
+			want:    []string{"review this diff", "code review"},
+		},
+		{
+			name:    "absent",
+			content: "---\nid: review\nsummary: s\n---\nbody",
+			want:    nil,
+		},
+		{
+			name:    "a mapping is a soft error: the skill loads with none",
+			content: "---\nid: review\nsummary: s\ntriggers:\n  first: review this diff\n---\nbody",
+			want:    nil,
+		},
+		{
+			name:    "lenient path: an unbalanced quote elsewhere still yields triggers",
+			content: "---\nid: review\nsummary: \"a summary\ntriggers: review this diff, code review\n---\nbody",
+			want:    []string{"review this diff", "code review"},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			sk, err := parseSkill(tc.content, "dir")
+			if err != nil {
+				t.Fatalf("parseSkill: %v", err)
+			}
+
+			if !slices.Equal(sk.Triggers, tc.want) {
+				t.Errorf("Triggers = %q, want %q", sk.Triggers, tc.want)
+			}
+			if sk.ID != "review" || sk.Summary == "" {
+				t.Errorf("the rest of the frontmatter was lost: ID=%q Summary=%q", sk.ID, sk.Summary)
+			}
+		})
+	}
+}
+
+// The caps bound what ONE SKILL.md can spend of the matcher's corpus and of the /skills row it
+// prints on, so a declaration past either is trimmed rather than honoured.
+func TestParseSkillTriggersCapped(t *testing.T) {
+	raw := []string{strings.Repeat("x", 70)}
+	for i := range maxTriggers {
+		raw = append(raw, fmt.Sprintf("trigger %d", i))
+	}
+
+	sk, err := parseSkill("---\nid: review\nsummary: s\ntriggers: "+strings.Join(raw, ", ")+"\n---\nbody", "dir")
+
+	if err != nil {
+		t.Fatalf("parseSkill: %v", err)
+	}
+	if len(sk.Triggers) != maxTriggers {
+		t.Errorf("kept %d of %d phrases, want the list capped at %d", len(sk.Triggers), len(raw), maxTriggers)
+	}
+	if want := strings.Repeat("x", maxTriggerLen); sk.Triggers[0] != want {
+		t.Errorf("Triggers[0] = %q, want it clipped to %d runes", sk.Triggers[0], maxTriggerLen)
+	}
+	if slices.Contains(sk.Triggers, fmt.Sprintf("trigger %d", maxTriggers-1)) {
+		t.Errorf("the phrase past the cap survived: %q", sk.Triggers)
+	}
+}
+
+// A triggers: value the loader cannot read is a SOFT FIELD error, not a block error: it must not
+// fail the strict unmarshal, because falling through to the lenient scan would cost the rest of
+// the block its YAML meaning — quoting, escapes, block scalars, comments — over one optional field
+// nothing but the suggestion matcher reads.
+func TestParseSkillMalformedTriggersKeepsYAMLSemantics(t *testing.T) {
+	content := "---\nid: review\nsummary: \"a\\tsummary\"\ntriggers:\n  first: review this diff\n---\nbody"
+
+	sk, err := parseSkill(content, "dir")
+
+	if err != nil {
+		t.Fatalf("parseSkill: %v", err)
+	}
+	if sk.Summary != "a\tsummary" {
+		t.Errorf("Summary = %q, want the strict parser's decoding of the escape", sk.Summary)
 	}
 }

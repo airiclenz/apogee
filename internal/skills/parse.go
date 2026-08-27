@@ -14,6 +14,16 @@ import (
 // crowds the merged "/" menu.
 const maxSummaryLen = 200
 
+// maxTriggerLen caps ONE trigger phrase at 64 runes: a trigger is a fragment a prompt might
+// contain ("review this diff"), not a sentence, and a phrase longer than a draft line can never be
+// the thing that fits it — it would only widen the /skills row it prints on.
+const maxTriggerLen = 64
+
+// maxTriggers caps the LIST at 32 phrases: past that a skill has stopped declaring where it fits
+// and started claiming every draft, which is exactly what a suggestion band must not let one
+// SKILL.md do to the rest of the catalog.
+const maxTriggers = 32
+
 // frontmatterRe splits a SKILL.md into its YAML frontmatter (group 1) and body (group 2): an
 // optional BOM, leading blank space, a "---" fence line, the frontmatter, a closing "---" fence
 // line, then the rest. (?s) makes "." span newlines and the non-greedy first group stops at the
@@ -51,17 +61,102 @@ var recognisedKeys = map[string]bool{
 	"displayname": true,
 	"summary":     true,
 	"description": true,
+	"triggers":    true,
 }
 
 // frontmatter is the recognised YAML frontmatter keys, including the apogee-code/agent-skills
 // aliases: id|name for the identifier, displayName for the menu label, summary|description
-// for the menu hint. An unknown key is ignored (yaml.v3 does not error on extras).
+// for the menu hint, and apogee's own optional triggers for the suggestion matcher. An unknown key
+// is ignored (yaml.v3 does not error on extras).
 type frontmatter struct {
-	ID          string `yaml:"id"`
-	Name        string `yaml:"name"`
-	DisplayName string `yaml:"displayName"`
-	Summary     string `yaml:"summary"`
-	Description string `yaml:"description"`
+	ID          string        `yaml:"id"`
+	Name        string        `yaml:"name"`
+	DisplayName string        `yaml:"displayName"`
+	Summary     string        `yaml:"summary"`
+	Description string        `yaml:"description"`
+	Triggers    triggersField `yaml:"triggers"`
+}
+
+// hasNamingField reports whether a scanned block yielded any field a skill could actually be built
+// from. Triggers are deliberately NOT among them: they are optional garnish on the suggestion
+// matcher and can never make a skill loadable on their own, so a block that recovered nothing else
+// is still better reported through the strict parser's error, which names the offending line.
+func (f frontmatter) hasNamingField() bool {
+	return firstNonEmpty(f.ID, f.Name, f.DisplayName, f.Summary, f.Description) != ""
+}
+
+// triggersField is the frontmatter's optional "triggers:" value. It exists because authors write
+// one intent in two shapes — a YAML sequence of phrases, or a single comma-separated scalar — and
+// a plain []string accepts only the first, turning the second into a type error that costs the
+// whole strict parse.
+type triggersField []string
+
+// UnmarshalYAML decodes either accepted shape: a sequence contributes each of its scalar entries,
+// a scalar is split on commas. Normalisation (casing, whitespace, the caps) is deliberately left
+// to normalizeTriggers, so this path and the lenient scan land on the same list.
+//
+// Any OTHER node kind — a mapping, an alias — yields no error and an empty list. triggers: is the
+// one field nothing depends on: it feeds the suggestion matcher and nothing else, never the model
+// and never the skill's identity. Returning an error here would fail the strict unmarshal and drop
+// the whole block onto the lenient scan, so one mistyped optional field would cost the skill its
+// quoting, its block scalars and its comments — a skill is never sunk, nor degraded, over its
+// triggers.
+func (t *triggersField) UnmarshalYAML(node *yaml.Node) error {
+	switch node.Kind {
+	case yaml.SequenceNode:
+		phrases := make([]string, 0, len(node.Content))
+		for _, item := range node.Content {
+			if item.Kind == yaml.ScalarNode {
+				phrases = append(phrases, item.Value)
+			}
+		}
+		*t = phrases
+	case yaml.ScalarNode:
+		*t = splitTriggers(node.Value)
+	}
+	return nil
+}
+
+// splitTriggers cuts one scalar triggers: value into phrases on commas — the shape an author who
+// wrote the field on a single line intends. An empty value yields no phrases rather than one
+// blank.
+func splitTriggers(value string) []string {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	return strings.Split(value, ",")
+}
+
+// normalizeTriggers turns the raw phrases either path recovered into the list a Skill carries:
+// trimmed, lowercased, internal whitespace collapsed, empties dropped, duplicates removed (first
+// declaration wins, as the lenient scan has it), each phrase clipped to maxTriggerLen runes and
+// the list to maxTriggers entries.
+//
+// Casing and spacing are settled HERE rather than at match time because a trigger is compared
+// against a draft on every keystroke: folding an authored phrase once at load is the difference
+// between a matcher that reads a normalised corpus and one that re-normalises it per frame. The
+// clip runs before the dedupe so two phrases that survive it identically collapse to one.
+func normalizeTriggers(raw []string) []string {
+	if len(raw) == 0 {
+		return nil
+	}
+	phrases := make([]string, 0, min(len(raw), maxTriggers))
+	seen := make(map[string]bool, len(raw))
+	for _, phrase := range raw {
+		phrase = strings.ToLower(strings.Join(strings.Fields(phrase), " "))
+		if r := []rune(phrase); len(r) > maxTriggerLen {
+			phrase = string(r[:maxTriggerLen])
+		}
+		if phrase == "" || seen[phrase] {
+			continue
+		}
+		seen[phrase] = true
+		phrases = append(phrases, phrase)
+		if len(phrases) == maxTriggers {
+			break
+		}
+	}
+	return phrases
 }
 
 // parseSkill turns one SKILL.md's content into a Skill, deriving the ID from dirName when the
@@ -91,6 +186,7 @@ func parseWithFrontmatter(fmText, body, dirName string) (Skill, error) {
 		DisplayName: strings.TrimSpace(firstNonEmpty(fm.DisplayName, titleCase(id))),
 		Summary:     clampSummary(firstNonEmpty(fm.Summary, fm.Description)),
 		Body:        strings.TrimSpace(body),
+		Triggers:    normalizeTriggers(fm.Triggers),
 	})
 }
 
@@ -135,8 +231,8 @@ func parseFrontmatterFields(text string) (frontmatter, error) {
 // open field rather than extending it, which is what stops a nested block ("metadata:" and its
 // indented children) from being folded into the description above it.
 //
-// ok reports whether any recognised key came back with a value; false means there is nothing here
-// worth preferring over the strict parser's error.
+// ok reports whether any NAMING key came back with a value (hasNamingField); false means there is
+// nothing here worth preferring over the strict parser's error.
 func scanFrontmatterFields(text string) (frontmatter, bool) {
 	values := map[string]string{}
 	openKey := ""
@@ -166,8 +262,9 @@ func scanFrontmatterFields(text string) (frontmatter, bool) {
 		DisplayName: values["displayname"],
 		Summary:     values["summary"],
 		Description: values["description"],
+		Triggers:    splitTriggers(values["triggers"]),
 	}
-	return fm, fm != (frontmatter{})
+	return fm, fm.hasNamingField()
 }
 
 // stripBlockScalar drops a value that is only a block-scalar indicator, so the lines folded in

@@ -21,6 +21,14 @@ type Skill struct {
 	Summary     string
 	Body        string
 	Dir         string
+
+	// Triggers is the optional list of phrases the SKILL.md's author declared under "triggers:":
+	// lowercase, whitespace-normalised fragments they expect to appear in a prompt this skill
+	// fits ("review this diff", "cut a release"). It is read ONLY by the suggestion matcher
+	// (Suggest), which uses a hit as a boost on top of its scoring — never as the sole reason to
+	// offer a skill. It is never shown to the model: the catalog stays host-side, and a skill
+	// reaches a prompt only when the user attaches it as a "/id" (ADR 0061).
+	Triggers []string
 }
 
 // SkipError is discovery's other outcome: one SKILL.md the walk FOUND but could not turn into
