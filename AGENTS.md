@@ -8,6 +8,7 @@
 - `docs/manual/` — the user-facing reference manual (commands, sessions, configuration, probe, headless, daemon, building). `README.md` is the plain-language front door; detail lives here, not there.
 - `docs/adr/` — architectural decision records. Settled questions live here; check for an ADR before re-opening one.
 - `docs/design/` — design contracts (confinement execution contract, MCP client, mechanism catalogue) plus the `tool-surface-findings.md` record.
+- `docs/design/test-drivers.md` — how to drive the TUI, script an upstream and judge a frame in `go test`; a test step is manual only where its table says so.
 - `docs/plans/` — implementation plans in the house format: numbered `## N.` H2 items with What/Tests/Acceptance/commit. Plans are saved repo docs, executed item-by-item; completed plans get archived.
 - `docs/handoffs/` — multi-session work-in-flight handoffs (superseded ones move to `docs/handoffs/archived/`).
 - `docs/reviews/` — saved review reports.

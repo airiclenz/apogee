@@ -191,7 +191,15 @@ below, so the items are authoritative):**
 
 ---
 
-## 1. ADR 0062, design-doc skeleton, AGENTS.md pointer
+## 1. ADR 0062, design-doc skeleton, AGENTS.md pointer — ✅ DONE (2026-08-27)
+
+NOTES (2026-08-27): the ADR's cross-links to ADR 0010/0011 use their real filenames
+(`0010-package-layout-domain-core-and-thin-root-facade.md`,
+`0011-tui-is-a-thin-renderer-over-a-worker-goroutine-engine.md`), not the descriptive slugs the
+plan's prose implies; all links verified to resolve.
+NOTES (2026-08-27): the claim table's example-test names for tests that do not exist yet are
+marked "(planned, item N)" rather than stated bare, so the skeleton makes no false claim before
+plan item 16 re-checks them against `go test -list`.
 
 **What:** docs only.
 
