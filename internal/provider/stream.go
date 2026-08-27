@@ -100,7 +100,7 @@ func (c *Client) statusDelta(resp *http.Response, hasTemplateKwargs bool) Delta 
 	if resp.StatusCode == http.StatusBadRequest && isContextOverflow(string(raw)) {
 		return Delta{Kind: DeltaContextOverflow, Err: "apogee: context window exceeded: " + text}
 	}
-	message := fmt.Sprintf("apogee: upstream HTTP %d: %s", resp.StatusCode, text)
+	message := upstreamStatusText(resp.StatusCode, text, resp.Header.Get("Location"))
 	if hasTemplateKwargs {
 		message += " " + thinkingEffortHint
 	}

@@ -151,7 +151,7 @@ pass — the point is a non-empty `MAJOR.MINOR.PATCH`).
 
 ---
 
-## 3. Upstream HTTP error names the status and the redirect (D-3)
+## 3. Upstream HTTP error names the status and the redirect (D-3) — ✅ DONE (2026-08-27)
 
 **What:** an upstream reply with an empty body renders as `apogee: upstream HTTP 308: ` — a trailing
 colon with nothing after it (`internal/provider/client.go:83` `StatusError.Error`,

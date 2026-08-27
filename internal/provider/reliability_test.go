@@ -341,6 +341,68 @@ func TestRespond_StatusErrorCarriesCode(t *testing.T) {
 	}
 }
 
+// An empty non-2xx body names the status instead of ending in a bare colon, and a 3xx —
+// which the client refuses to follow by design (see NewClient) — additionally names the
+// redirect target so the user can re-point endpoint: without guessing. Both surfaces
+// (Respond and Stream) must render the identical text, since one function owns it.
+func TestStatusError_EmptyBodyNamesTheStatus(t *testing.T) {
+	t.Parallel()
+
+	t.Run("redirect names the Location", func(t *testing.T) {
+		t.Parallel()
+
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Location", "http://elsewhere.invalid/v1")
+			w.WriteHeader(http.StatusPermanentRedirect)
+		}))
+		defer srv.Close()
+
+		const want = "apogee: upstream HTTP 308 Permanent Redirect — redirects are not followed; point endpoint: at the URL the server redirects to (Location: http://elsewhere.invalid/v1)"
+		client := NewClient(srv.URL, "m", WithMaxRetries(0))
+
+		_, err := client.Respond(context.Background(), Request{})
+		var statusErr *StatusError
+		if !errors.As(err, &statusErr) {
+			t.Fatalf("error = %v (%T), want *StatusError", err, err)
+		}
+		if statusErr.Code != http.StatusPermanentRedirect {
+			t.Errorf("Code = %d, want %d", statusErr.Code, http.StatusPermanentRedirect)
+		}
+		if statusErr.Location != "http://elsewhere.invalid/v1" {
+			t.Errorf("Location = %q, want the server's Location header", statusErr.Location)
+		}
+		if err.Error() != want {
+			t.Errorf("Error() = %q, want %q", err.Error(), want)
+		}
+
+		deltas := collectStream(client, Request{})
+		if len(deltas) != 1 || deltas[0].Kind != DeltaError {
+			t.Fatalf("deltas = %+v, want exactly one DeltaError", deltas)
+		}
+		if deltas[0].Err != want {
+			t.Errorf("stream Err = %q, want %q (identical to Respond)", deltas[0].Err, want)
+		}
+	})
+
+	t.Run("no Location names the status alone", func(t *testing.T) {
+		t.Parallel()
+
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusServiceUnavailable)
+		}))
+		defer srv.Close()
+
+		_, err := NewClient(srv.URL, "m", WithMaxRetries(0)).Respond(context.Background(), Request{})
+		var statusErr *StatusError
+		if !errors.As(err, &statusErr) {
+			t.Fatalf("error = %v (%T), want *StatusError", err, err)
+		}
+		if want := "apogee: upstream HTTP 503 Service Unavailable"; err.Error() != want {
+			t.Errorf("Error() = %q, want %q", err.Error(), want)
+		}
+	})
+}
+
 func TestRespond_GenericBadRequestNotRetried(t *testing.T) {
 	t.Parallel()
 

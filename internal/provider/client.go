@@ -73,14 +73,47 @@ var ErrContextOverflow = errors.New("apogee: context window exceeded")
 // rejected my request outright" (a 4xx, worth one retry without the offending field) from
 // a transport or 5xx fault.
 type StatusError struct {
-	Code int    // the HTTP status the Upstream answered with
-	Body string // the response body, API key redacted and length-capped
+	Code     int    // the HTTP status the Upstream answered with
+	Body     string // the response body, API key redacted and length-capped
+	Location string // the response's Location header, "" when absent (in-band errors carry none)
 }
 
-// Error renders exactly the text this branch produced before the type existed, so logs and
-// any message-matching caller are unaffected by the change.
+// Error renders the reply through upstreamStatusText: byte-identical to the text this branch
+// produced before the type existed whenever the body is non-empty, so logs and any
+// message-matching caller are unaffected; an empty body names the status instead.
 func (e *StatusError) Error() string {
-	return fmt.Sprintf("apogee: upstream HTTP %d: %s", e.Code, e.Body)
+	return upstreamStatusText(e.Code, e.Body, e.Location)
+}
+
+// redirectHint is appended to any 3xx upstream reply. The client never follows a redirect
+// (see NewClient), so the bare status would leave the user guessing why a reachable server
+// answers nothing — the hint names the fix and, when the server said so, the address.
+const redirectHint = " — redirects are not followed; point endpoint: at the URL the server redirects to"
+
+// upstreamStatusText is the ONE renderer for a non-2xx upstream reply, shared by the
+// blocking (StatusError) and streaming (statusDelta) surfaces so both show the same text.
+// A non-empty body keeps the historical "apogee: upstream HTTP <code>: <body>" form; an empty
+// one names the status ("apogee: upstream HTTP 308 Permanent Redirect") rather than ending
+// in a bare colon, and an unknown code renders with no trailing space. A 3xx additionally
+// carries redirectHint plus the Location header when the server sent one.
+func upstreamStatusText(code int, body, location string) string {
+	var text string
+	switch {
+	case body != "":
+		text = fmt.Sprintf("apogee: upstream HTTP %d: %s", code, body)
+	case http.StatusText(code) != "":
+		text = fmt.Sprintf("apogee: upstream HTTP %d %s", code, http.StatusText(code))
+	default:
+		text = fmt.Sprintf("apogee: upstream HTTP %d", code)
+	}
+	if code < 300 || code > 399 {
+		return text
+	}
+	text += redirectHint
+	if location != "" {
+		text += " (Location: " + location + ")"
+	}
+	return text
 }
 
 // Client is the OpenAI-compatible chat-completions Responder: it turns a provider.Request
@@ -467,7 +500,7 @@ func (c *Client) statusError(resp *http.Response, hasTemplateKwargs bool) error 
 	if resp.StatusCode == http.StatusBadRequest && isContextOverflow(string(raw)) {
 		return fmt.Errorf("%w: %s", ErrContextOverflow, text)
 	}
-	err := &StatusError{Code: resp.StatusCode, Body: text}
+	err := &StatusError{Code: resp.StatusCode, Body: text, Location: resp.Header.Get("Location")}
 	if !hasTemplateKwargs {
 		return err
 	}
