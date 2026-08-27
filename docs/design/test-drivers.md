@@ -26,9 +26,116 @@ test step may be **manual** only where the table below says no driver observes i
 
 ## stubllm
 
-*Filled by plan items 2 and 3.* Script format (`turns:`, `when:`, `repeat:`), matching and strict
-behaviour, the turn kinds (text, reasoning, tool calls, usage, http, hang), the request log, and
-the `cmd/stubllm serve` / `cmd/stubllm record` binary.
+`internal/stubllm` is the ONE scripted upstream apogee's tests talk to (ADR 0062). A test names
+the replies it wants as a `Script` and gets an OpenAI-compatible HTTP server that plays them back
+through the wire shapes a real llama.cpp or OpenRouter endpoint uses — SSE content deltas, a
+reasoning channel, two-fragment tool calls, a terminal usage object with the cached-prompt
+breakdown, plain HTTP failures, and a stall. The package imports nothing of apogee's: the code
+under test reaches it through `internal/provider` exactly as it reaches a real server.
+
+```go
+server := stubllm.New(t, stubllm.Script{
+	Model: "stub-model",
+	Turns: []stubllm.Turn{
+		{ToolCalls: []stubllm.ToolCall{{Name: "list_dir", Arguments: `{"path":"."}`}}},
+		{When: &stubllm.Match{ToolResult: "list_dir"}, Text: "There are three files."},
+	},
+})
+// server.URL is what provider.NewClient — or apogee's own `servers:` config — is pointed at.
+```
+
+`stubllm.New(t, script, opts...)` starts the server on a loopback port and closes it on
+`t.Cleanup`; `stubllm.Serve(ctx, addr, script, opts...)` is the same server for a binary (see
+`cmd/stubllm`, added by plan item 3). Options: `WithRequestLog(bool)` (on by default), `WithAPIKey(key)` (401s a
+request without `Authorization: Bearer key`), `WithLatency(d)` (time-to-first-token for every
+reply).
+
+### The script format
+
+A `Script` is a model id and an ordered list of `Turn`s. The Go structs carry `yaml:"…"` tags, so
+a fixture on disk and a `Script` built in a test are one format; `stubllm.Load(path)` /
+`stubllm.Parse(data)` read it and `stubllm.Marshal` writes it. Parsing is strict — an unknown key
+is an error, because a misspelled `chunk_rune:` would otherwise stream with the default chunking
+and the test would pass for the wrong reason.
+
+```yaml
+model: stub-model
+turns:
+  - reasoning: "The user wants the file list."
+    tool_calls:
+      - name: list_dir
+        arguments: '{"path":"."}'
+  - when:
+      tool_result: list_dir
+    text: "There are three files: a.txt, b.txt and c.txt."
+    chunk_runes: 3
+    token_delay: 1ms
+    usage: {prompt: 812, completion: 14, cached: 640}
+  - repeat: true
+    http: {status: 503, body: "upstream busy"}
+```
+
+That script is loaded and parsed by `internal/stubllm/script_test.go`, so it cannot rot away from
+the format it documents.
+
+### Turn kinds
+
+A Turn is **exactly one** kind. Setting two is a validation error; setting none is the
+**empty-reply** turn — the thing a real model produces when it abandons a reply mid-flight, and
+the only way to script it.
+
+| Key | What it plays |
+| --- | --- |
+| `text` | assistant content, streamed in `chunk_runes` (default 4) rune deltas with `token_delay` between them |
+| `tool_calls` | one or more calls, each split into the id-bearing head and an argument tail real servers send |
+| `http` | a raw HTTP reply — `status` (required), `body`, `location`, `content_type` — and not one SSE event |
+| `hang` | stalls for the duration, then answers as the empty-reply turn does; a cancelled request context releases it at once |
+| *(none of the above)* | the empty-reply turn |
+
+`reasoning` (the `reasoning_content` channel, streamed before the content) and `usage` accompany a
+text or tool-call turn; they are refused on an `http` or `hang` turn, which never reach the
+completion shape at all. `usage.cached` reaches the wire as `prompt_tokens_details.cached_tokens`
+**only above zero** — an absent breakdown means "this server does not report caching" while a
+present zero means "nothing was cached", and both shapes have to be scriptable.
+`finish_reason` defaults to `stop`, or to `tool_calls` when the turn emits any.
+
+### Matching
+
+A request takes **the first unconsumed turn whose `when:` matches it**, and failing that **the
+next unconsumed turn with no `when:` at all**. Ordered turns are therefore the script's spine —
+request 1 takes turn 0, request 2 takes turn 1 — while a `when:` turn is an interrupt that jumps
+the queue for the requests it recognises, which is what lets a fixture answer a sub-agent without
+knowing where in the run its question lands. `repeat: true` keeps a turn available forever: it is
+never consumed.
+
+A `when:` block sets `last_message` (a regexp over the text of the request's last message,
+whatever its role), `tool_result` (a tool NAME — resolved by following the last message's
+`tool_call_id` back to the assistant turn that issued the call, because the wire shape of a tool
+result carries no name), or both, in which case both must match. A `when:` that sets neither is
+refused: an always-true matcher is an ordered turn written the confusing way.
+
+**The stub is strict.** A request no turn answers is an HTTP 500 (`stubllm: no turn for request
+N`) and a logged entry with `Unmatched` set — never a plausible improvised reply. A silent
+fallback would turn the most interesting failure a driver test can surface, "the agent asked
+something the test did not anticipate", into a green run.
+
+### The request log
+
+Every served request lands in the log, which is the stub's half of an assertion: what the agent
+actually sent, in order, and which turn answered it.
+
+- `server.Requests() []Request` — `N`, `Model`, `Messages`, `Tools`, `Stream`, `Unmatched`,
+  `TurnIndex`, `At`.
+- `server.LastMessage(n)` — the text of request *n*'s last message; the shortest way to assert
+  what was asked.
+- `server.Unmatched()` — the requests the script did not anticipate.
+- `server.AssertConsumed(t)` — fails when a non-repeat turn never played, which is how a run that
+  stopped early is caught by a test that would otherwise only look at the final frame.
+
+### Recording a fixture
+
+*Filled by plan item 3.* `cmd/stubllm record --upstream … --out fixture.yaml` in front of a real
+server, and where recorded fixtures live.
 
 ## tuitest
 

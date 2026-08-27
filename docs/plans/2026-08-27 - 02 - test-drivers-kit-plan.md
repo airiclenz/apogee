@@ -240,7 +240,22 @@ AGENTS.md && grep -q "Which driver observes which claim" docs/design/test-driver
 
 **Commit:** `docs(adr): 0062 — test drivers are Drivers; design-doc skeleton and AGENTS pointer`
 
-## 2. `internal/stubllm` — Script, matching, SSE server, request log
+## 2. `internal/stubllm` — Script, matching, SSE server, request log — ✅ DONE (2026-08-27)
+
+NOTES (2026-08-27): the item's Files line names five source files; the literal OpenAI
+request/reply JSON structs live in a sixth, `internal/stubllm/wire.go`, so server.go stays about
+transport and framing — the same split `internal/provider` makes between wirejson.go and
+client.go. The file is named in doc.go's file map.
+NOTES (2026-08-27): tests (h) YAML round-trip and (i) validation live in `script_test.go`, beside
+the code they exercise, rather than in `server_test.go` as the item's Tests paragraph lists them;
+`server_test.go` carries (a)–(g) plus the options, Serve and request-log cases.
+NOTES (2026-08-27): no CHANGELOG entry from this item — plan item 8 owns the single
+`[Unreleased]` entry covering the whole kit (items 2–7).
+NOTES (2026-08-27): `go.mod`/`go.sum` are untouched; `gopkg.in/yaml.v3` is already a direct
+dependency, and it decodes/encodes `time.Duration` as a Go duration string ("1ms") natively, so
+`TokenDelay`/`Hang` keep the field types the item specifies with no custom marshaller.
+NOTES (2026-08-27): the design doc's `### Recording a fixture` subsection is left as a
+"filled by plan item 3" marker, matching the skeleton's convention — the recorder is item 3's.
 
 **What:** the scripted OpenAI-compatible upstream as a library.
 
