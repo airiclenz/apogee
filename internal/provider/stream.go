@@ -26,8 +26,8 @@ const (
 	// DeltaDone is the terminal event: the finish reason and (when the server sent it)
 	// token usage. Exactly one Done ends a successful stream.
 	DeltaDone DeltaKind = "done"
-	// DeltaError is a terminal fault (transport, bad status, oversized tool args). No
-	// Done follows it.
+	// DeltaError is a terminal fault (transport, bad status, oversized tool args, a reply
+	// past the text cap). No Done follows it.
 	DeltaError DeltaKind = "error"
 	// DeltaContextOverflow is the terminal "prompt too long" signal (a 400 the server
 	// flagged as a context-window rejection).
@@ -57,7 +57,10 @@ type Delta struct {
 // DeltaError / DeltaContextOverflow rather than a Go error, so the consumer drives a
 // single range loop (matching the TS AsyncIterable). The HTTP request is issued lazily on
 // first iteration; the body and the request context are released when the range ends
-// (whether drained or broken early).
+// (whether drained or broken early). The caller's ctx is the stream's only deadline — there
+// is no inter-chunk idle timeout — and a cancelled or expired ctx ends the body read and
+// surfaces as a terminal DeltaError. Content plus reasoning is capped at maxReplyTextBytes;
+// crossing it ends the stream with a non-retryable terminal DeltaError.
 func (c *Client) Stream(ctx context.Context, req Request) iter.Seq[Delta] {
 	return func(yield func(Delta) bool) {
 		req.Stream = true
@@ -132,9 +135,10 @@ func (c *Client) inBandErrorDelta(werr wireError, raw string, hasTemplateKwargs 
 
 // parseSSE reads the SSE body line by line and yields Deltas. It accumulates a tool call
 // across argument fragments (flushing on the next call's id or at end), drops a malformed
-// event rather than failing the stream, caps accumulated tool-call arguments, and emits a
-// terminal Done with the last finish reason and any usage chunk — a faithful port of the
-// oracle's parseSSEStream. Returning false from yield (consumer broke) stops cleanly.
+// event rather than failing the stream, caps accumulated tool-call arguments, caps the total
+// content plus reasoning text at maxReplyTextBytes, and emits a terminal Done with the last
+// finish reason and any usage chunk — a faithful port of the oracle's parseSSEStream.
+// Returning false from yield (consumer broke) stops cleanly.
 // hasTemplateKwargs is carried through from the request Stream built — the in-band error
 // delta needs it, and this is the only seam between that request and the error it explains.
 func (c *Client) parseSSE(body io.Reader, hasTemplateKwargs bool, yield func(Delta) bool) {
@@ -153,6 +157,10 @@ func (c *Client) parseSSE(body io.Reader, hasTemplateKwargs bool, yield func(Del
 	var current *ToolCall
 	var pendingFinish string
 	var pendingUsage *Usage
+
+	// Running total of the content and reasoning bytes yielded so far. Tool-call bytes are
+	// not summed here — they carry their own maxToolCallBytes cap in accumulateToolCalls.
+	textBytes := 0
 
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
@@ -197,6 +205,21 @@ func (c *Client) parseSSE(body io.Reader, hasTemplateKwargs bool, yield func(Del
 		}
 
 		choice := chunk.Choices[0]
+		textBytes += len(choice.Delta.Content) + len(choice.Delta.ReasoningContent)
+		if textBytes > maxReplyTextBytes {
+			// Terminal and NOT Retryable: the same request re-streamed would overflow again.
+			// Returning here runs the deferred body close and wire-capture flush, as on every
+			// other terminal path; the crossing chunk is never yielded, so what the consumer
+			// received stays at or under the cap.
+			yield(Delta{
+				Kind: DeltaError,
+				Err: fmt.Sprintf(
+					"apogee: streamed reply exceeded the %d MiB text limit",
+					maxReplyTextBytes>>20,
+				),
+			})
+			return
+		}
 		if choice.Delta.ReasoningContent != "" && !yield(Delta{Kind: DeltaThinking, Thinking: choice.Delta.ReasoningContent}) {
 			return
 		}

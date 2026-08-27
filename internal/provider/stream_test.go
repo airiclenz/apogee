@@ -3,12 +3,14 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 // sseServer returns a server that writes body verbatim as an event-stream, flushing so a
@@ -492,6 +494,169 @@ func TestStream_EarlyBreakIsClean(t *testing.T) {
 	// Break after the first delta — the iterator must release the body without hanging.
 	for range NewClient(srv.URL, "m").Stream(context.Background(), Request{}) {
 		break
+	}
+}
+
+// chunkedTextServer returns a server that writes 64 KiB SSE text deltas into the named delta
+// field ("content" or "reasoning_content") and keeps writing until the client disconnects, so
+// nothing but the client's own byte cap can end the stream. The chunk count is bounded well
+// past maxReplyTextBytes so a missed disconnect fails the assertion instead of hanging.
+func chunkedTextServer(field string) *httptest.Server {
+	const chunkBytes = 64 << 10
+	maxChunks := maxReplyTextBytes/chunkBytes + 32
+	payload := `data: {"choices":[{"delta":{"` + field + `":"` + strings.Repeat("a", chunkBytes) + `"}}]}` + "\n\n"
+
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher, _ := w.(http.Flusher)
+		for range maxChunks {
+			select {
+			case <-r.Context().Done():
+				return
+			default:
+			}
+			if _, err := io.WriteString(w, payload); err != nil {
+				return
+			}
+			if flusher != nil {
+				flusher.Flush()
+			}
+		}
+	}))
+}
+
+// assertReplyTextCapFires drains a stream from srv and asserts the reply-text cap is what
+// ended it: exactly one terminal DeltaError naming the limit, not retryable, no Done at all,
+// and no more text handed to the consumer than the cap allows.
+func assertReplyTextCapFires(t *testing.T, srv *httptest.Server) {
+	t.Helper()
+
+	deltas := collectStream(NewClient(srv.URL, "m"), Request{})
+
+	var errorCount, doneCount, delivered int
+	var terminal Delta
+	for _, delta := range deltas {
+		switch delta.Kind {
+		case DeltaError:
+			errorCount++
+			terminal = delta
+		case DeltaDone:
+			doneCount++
+		}
+		delivered += len(delta.Content) + len(delta.Thinking)
+	}
+
+	if errorCount != 1 {
+		t.Fatalf("terminal DeltaError count = %d, want exactly 1 (deltas = %d)", errorCount, len(deltas))
+	}
+	if want := fmt.Sprintf("%d MiB", maxReplyTextBytes>>20); !strings.Contains(terminal.Err, want) {
+		t.Errorf("error %q does not name the %s limit", terminal.Err, want)
+	}
+	if terminal.Retryable {
+		t.Error("the cap error is Retryable; a re-stream would overflow again")
+	}
+	if doneCount != 0 {
+		t.Errorf("DeltaDone count = %d, want 0 — the reply was faulted, not finished", doneCount)
+	}
+	if delivered > maxReplyTextBytes {
+		t.Errorf("delivered %d text bytes, want at most maxReplyTextBytes (%d)", delivered, maxReplyTextBytes)
+	}
+}
+
+// TestStream_ReplyTextIsCapped proves an endless content stream ends at the byte cap rather
+// than exhausting the agent.
+func TestStream_ReplyTextIsCapped(t *testing.T) {
+	t.Parallel()
+
+	srv := chunkedTextServer("content")
+	defer srv.Close()
+
+	assertReplyTextCapFires(t, srv)
+}
+
+// TestStream_ThinkingCountsTowardTheCap proves the reasoning channel is summed into the same
+// budget — a model that never leaves its thinking channel cannot stream without bound either.
+func TestStream_ThinkingCountsTowardTheCap(t *testing.T) {
+	t.Parallel()
+
+	srv := chunkedTextServer("reasoning_content")
+	defer srv.Close()
+
+	assertReplyTextCapFires(t, srv)
+}
+
+// TestStream_CtxCancelEndsTheBody pins the contract Stream documents: the caller's ctx is the
+// stream's only deadline. There is no idle timeout, so a server that goes silent mid-reply
+// hangs until the caller cancels — and that cancel must end the body read, surface as a
+// terminal DeltaError, and close the connection the handler is sitting on.
+func TestStream_CtxCancelEndsTheBody(t *testing.T) {
+	t.Parallel()
+
+	release := make(chan struct{})
+	observed := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, `data: {"choices":[{"delta":{"content":"hi"}}]}`+"\n\n")
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+		select {
+		case <-r.Context().Done():
+			close(observed)
+		case <-release:
+		}
+	}))
+	// LIFO: release the handler before Close waits on it, so a failed assertion cannot deadlock.
+	defer srv.Close()
+	defer close(release)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	streamed := make(chan Delta, 16)
+	go func() {
+		defer close(streamed)
+		for delta := range NewClient(srv.URL, "m").Stream(ctx, Request{}) {
+			streamed <- delta
+		}
+	}()
+
+	var got []Delta
+	select {
+	case delta := <-streamed:
+		if delta.Kind != DeltaContent {
+			t.Fatalf("first delta = %+v, want DeltaContent", delta)
+		}
+		got = append(got, delta)
+	case <-time.After(2 * time.Second):
+		t.Fatal("no content delta within 2s of the handler's flush")
+	}
+
+	cancel()
+
+	deadline := time.After(2 * time.Second)
+	for drained := false; !drained; {
+		select {
+		case delta, open := <-streamed:
+			if !open {
+				drained = true
+				break
+			}
+			got = append(got, delta)
+		case <-deadline:
+			t.Fatal("the stream did not end within 2s of the ctx cancel")
+		}
+	}
+
+	terminal := got[len(got)-1]
+	if terminal.Kind != DeltaError {
+		t.Errorf("terminal delta = %+v, want DeltaError from the cancelled body read", terminal)
+	}
+
+	select {
+	case <-observed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the handler never saw its request context end — the body was not closed")
 	}
 }
 

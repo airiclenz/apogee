@@ -276,6 +276,26 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **A streamed reply and a non-streamed body are now byte-bounded.** The engine bounds every
+  reply (ADR 0046), but only in tokens: nothing stopped a server that ignores `max_tokens` — or a
+  hostile one — from streaming text until the agent ran out of memory, and `Respond` handed its
+  whole 200 body to `json.Decode` unread-ahead. `internal/provider` now caps the content plus
+  reasoning bytes of one streamed completion at 8 MiB (`maxReplyTextBytes`) and a non-streamed
+  200 body at 16 MiB (`maxResponseBodyBytes`), alongside the tool-call and error-body caps the
+  same const block already kept. The stream's cap is checked at the one seam that yields text, so
+  the consumer never sees the chunk that crossed the line; it ends the stream with a terminal,
+  non-retryable `DeltaError` naming the limit (a re-stream would overflow again). A body cut at
+  the non-streamed limit fails the decode and surfaces as the existing decode error — no new
+  error kind. 8 MiB is sixty-fold the ~128 KiB a server honouring the engine's 32,768-token
+  ceiling can produce, so no honest reply is affected.
+
+- **The caller's context is documented and pinned as the stream's only deadline.** `Stream` adds
+  no inter-chunk idle timeout — a local model's first token can take minutes on a large prompt,
+  and a default would break that persona — so a cancelled or expired ctx is what ends the body
+  read, surfacing as a terminal `DeltaError`. That contract now stands in `Stream`'s doc comment
+  and is held by a test that cancels mid-stream and asserts the server sees its request context
+  end.
+
 - **A launch-profile load no longer keeps the departed server's fan-out pin.** How many sub-agents
   may run at once follows the SERVER (ADR 0039), and every arrival re-states it — but only the
   `/server` switch did. A `/load` onto a profile serving another address moved the whole session and

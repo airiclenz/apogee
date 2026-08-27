@@ -29,6 +29,18 @@ const (
 	// its own.
 	maxErrorBodyBytes = 64 << 10
 
+	// maxReplyTextBytes caps the content plus reasoning bytes one streamed completion may
+	// yield. The engine's own reply ceiling is maxOutputTokenCap — 32,768 tokens (ADR 0046) —
+	// and a UTF-8 rune is at most 4 bytes, so a server that honours max_tokens fits in ~128
+	// KiB. 8 MiB is sixty-fold that: past any honest reply, yet small enough that a server
+	// ignoring the cap cannot exhaust the agent.
+	maxReplyTextBytes = 8 << 20
+
+	// maxResponseBodyBytes caps a NON-streamed 200 body, which must hold the same reply text
+	// as a stream plus one maxToolCallBytes tool call plus metadata. A body cut at the limit
+	// fails the JSON decode and surfaces as the existing decode error — no error kind of its own.
+	maxResponseBodyBytes = 16 << 20
+
 	// topLogProbsCount is how many alternatives a Request that asks for LogProbs requests per
 	// token position. Five is enough for the candidate set to identify a model's distribution
 	// while staying inside every server's top_logprobs cap.
@@ -269,7 +281,9 @@ func (c *Client) Close() error {
 // status becomes an error (ErrContextOverflow for a 400 overflow, otherwise an
 // HTTP-status error with the body sanitised); transient faults are retried per the
 // Client's policy before the final error escapes. An HTTP 200 whose body carries an
-// in-band error member becomes the same kind of error, never an empty reply.
+// in-band error member becomes the same kind of error, never an empty reply. The 200
+// body is read through a maxResponseBodyBytes limit, so an unbounded reply fails the
+// decode rather than exhausting memory.
 func (c *Client) Respond(ctx context.Context, req Request) (RawResponse, error) {
 	req.Stream = false
 	wire := c.buildBody(req)
@@ -290,7 +304,7 @@ func (c *Client) Respond(ctx context.Context, req Request) (RawResponse, error) 
 	}
 
 	var decoded chatCompletionResponse
-	if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxResponseBodyBytes)).Decode(&decoded); err != nil {
 		return RawResponse{}, fmt.Errorf("apogee: decode response: %w", err)
 	}
 	if decoded.Error != nil {

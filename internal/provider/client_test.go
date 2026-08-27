@@ -268,6 +268,33 @@ func TestRespond_ErrorBodyIsCapped(t *testing.T) {
 	}
 }
 
+// TestRespond_BodyIsCapped proves a non-streamed 200 is read through maxResponseBodyBytes: a
+// body past the limit is cut mid-JSON, which fails the decode instead of buffering an
+// unbounded reply into memory.
+func TestRespond_BodyIsCapped(t *testing.T) {
+	t.Parallel()
+
+	const prefix = `{"choices":[{"message":{"role":"assistant","content":"`
+	const suffix = `"}}]}`
+	padding := strings.Repeat("a", maxResponseBodyBytes+1-len(prefix)-len(suffix))
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, prefix+padding+suffix)
+	}))
+	defer srv.Close()
+
+	reply, err := NewClient(srv.URL, "m").Respond(context.Background(), Request{})
+
+	if err == nil {
+		t.Fatalf("Respond returned no error for a %d-byte body, want the capped decode to fail (reply = %+v)",
+			maxResponseBodyBytes+1, reply)
+	}
+	if !strings.Contains(err.Error(), "decode response") {
+		t.Errorf("error = %q, want the existing decode error — the cap adds no error kind", err)
+	}
+}
+
 // TestRespond_InBandErrorRedactsAPIKey proves the surfaced body goes through the same
 // sanitiser as the non-2xx path — a server that echoes the key must not leak it into an error.
 func TestRespond_InBandErrorRedactsAPIKey(t *testing.T) {

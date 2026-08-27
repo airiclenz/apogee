@@ -281,7 +281,17 @@ entry pinning `parallel-agents: 2` installs `2` and a subsequent `observe(8)` st
 
 ---
 
-## 4. Provider: a streamed reply and a non-streamed body are byte-bounded; ctx is the deadline
+## 4. Provider: a streamed reply and a non-streamed body are byte-bounded; ctx is the deadline — ✅ DONE (2026-08-27)
+
+NOTES (2026-08-27): the stream cap's error text is built with `fmt.Sprintf` from
+`maxReplyTextBytes >> 20` rather than hard-coding "8 MiB"; the emitted string is byte-identical to
+the item's literal text but cannot drift if the constant changes.
+NOTES (2026-08-27): two doc comments beyond the item's named `Stream` one were updated to match
+the new behaviour — `Respond`'s (the body limit) and the `DeltaError` kind's (a reply past the
+text cap is now a terminal fault). No behaviour outside the item.
+NOTES (2026-08-27): `chunkedTextServer` writes its 64 KiB chunks in a loop bounded at
+`maxReplyTextBytes/64KiB + 32` alongside the item's `r.Context().Done()` check, so a missed
+disconnect fails the assertion instead of hanging the suite.
 
 **What:** `internal/provider` bounds what one completion may hand the agent, in the constant
 family `client.go:17-29` already keeps (`maxToolCallBytes`, `maxErrorBodyBytes`).
