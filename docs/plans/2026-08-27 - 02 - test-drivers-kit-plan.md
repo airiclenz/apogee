@@ -311,7 +311,21 @@ clean; `grep -c "^### \|^## stubllm" docs/design/test-drivers.md` shows the sect
 
 **Commit:** `test(stubllm): a scripted OpenAI-compatible upstream — ordered turns, matchers, SSE, request log`
 
-## 3. `cmd/stubllm` — serve and record
+## 3. `cmd/stubllm` — serve and record — ✅ DONE (2026-08-27)
+
+NOTES (2026-08-27): `internal/stubllm/doc.go` gains one line for `record.go` in its file map — not
+named on the item's Files line, but the map is the package's navigation aid and a file missing
+from it is a rotted map.
+NOTES (2026-08-27): the item's Tests paragraph names two `cmd/stubllm/main_test.go` cases; the
+serve case plays the checked-in `cmd/apogee/testdata/stubllm/example.yaml` rather than a temp
+script, so the fixture the acceptance line runs by hand is also exercised by `go test`, and a
+third case pins the other half of the exit-code split (a missing script is a run failure, exit 1,
+no usage dump). The exit statuses are asserted through `exitCodeFor` — the function `main` exits
+with — rather than by spawning the binary.
+NOTES (2026-08-27): no CHANGELOG entry from this item — plan item 8 owns the single `[Unreleased]`
+entry covering the whole kit (items 2–7), as recorded under item 2.
+NOTES (2026-08-27): `make clean` is left untouched (it removes `./apogee` only); the item asked
+for the `stubllm` target and the `.gitignore` entry, and `clean`'s scope was not part of it.
 
 **What:** the thin binary around item 2, plus the recorder.
 

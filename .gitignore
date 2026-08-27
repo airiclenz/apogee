@@ -2,9 +2,11 @@
 *.afdesign
 *.afdesign~lock~
 
-# Go build artifacts (the cmd/apogee binary if built at the repo root, test bins)
+# Go build artifacts (the cmd/apogee and cmd/stubllm binaries if built at the repo root, test bins)
 /apogee
 /apogee.exe
+/stubllm
+/stubllm.exe
 *.test
 *.out
 IDEAS.md

@@ -1,0 +1,26 @@
+# The worked example of the script format — the same one docs/design/test-drivers.md shows.
+# It is what `stubllm serve` is pointed at by hand to see the stub answer a real client:
+#
+#   go run ./cmd/stubllm serve --script cmd/apogee/testdata/stubllm/example.yaml
+#
+# Fixtures that a test actually drives are RECORDED (`stubllm record`) and named
+# <server>-<what>.yaml; this one is written by hand because it documents the format.
+model: stub-model
+turns:
+    - reasoning: The user wants the file list.
+      tool_calls:
+        - name: list_dir
+          arguments: '{"path":"."}'
+    - when:
+        tool_result: list_dir
+      text: "There are three files: a.txt, b.txt and c.txt."
+      token_delay: 1ms
+      chunk_runes: 3
+      usage:
+        prompt: 812
+        completion: 14
+        cached: 640
+    - repeat: true
+      http:
+        status: 503
+        body: upstream busy

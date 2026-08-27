@@ -46,7 +46,7 @@ server := stubllm.New(t, stubllm.Script{
 
 `stubllm.New(t, script, opts...)` starts the server on a loopback port and closes it on
 `t.Cleanup`; `stubllm.Serve(ctx, addr, script, opts...)` is the same server for a binary (see
-`cmd/stubllm`, added by plan item 3). Options: `WithRequestLog(bool)` (on by default), `WithAPIKey(key)` (401s a
+[`cmd/stubllm`](#the-binary-cmdstubllm)). Options: `WithRequestLog(bool)` (on by default), `WithAPIKey(key)` (401s a
 request without `Authorization: Bearer key`), `WithLatency(d)` (time-to-first-token for every
 reply).
 
@@ -132,10 +132,60 @@ actually sent, in order, and which turn answered it.
 - `server.AssertConsumed(t)` — fails when a non-repeat turn never played, which is how a run that
   stopped early is caught by a test that would otherwise only look at the final frame.
 
+### The binary: `cmd/stubllm`
+
+`internal/stubllm` is a library; `cmd/stubllm` is the thin binary around it, for the two things a
+human does at a command line. `make stubllm` builds it to `./stubllm` — it is a dev tool, so
+`make dist` never ships it and `make build` never mentions it.
+
+```console
+$ stubllm serve --script cmd/apogee/testdata/stubllm/example.yaml --listen 127.0.0.1:8080
+listening http://127.0.0.1:8080
+```
+
+`serve` plays a fixture at a real address until it is interrupted (Ctrl-C exits 0), so a fixture
+can be driven by hand — `apogee --endpoint http://127.0.0.1:8080` — or by a shell test. The
+`listening <url>` line is the contract: it is printed once the listener is up, which is what makes
+`--listen 127.0.0.1:0` usable, because an ephemeral port has no other way of being found. A bad
+command line exits **2** with the usage text; a run that started and failed — an unreadable
+script, a taken port — exits **1** with just the error.
+
 ### Recording a fixture
 
-*Filled by plan item 3.* `cmd/stubllm record --upstream … --out fixture.yaml` in front of a real
-server, and where recorded fixtures live.
+A fixture is something you **capture**, not something you write. `record` stands between a client
+and a real server, forwards `/v1/*` verbatim, and writes everything it saw as a Script:
+
+```console
+$ stubllm record --upstream http://127.0.0.1:1111 --out smoke.yaml
+listening http://127.0.0.1:41234
+recording http://127.0.0.1:1111 -> smoke.yaml
+$ apogee --endpoint http://127.0.0.1:41234        # in another terminal: drive the run you want
+^C                                                 # back here: the fixture is written on the way out
+```
+
+Each completed `/v1/chat/completions` request becomes one turn, carrying what the reply actually
+did: the content and reasoning deltas re-joined, the tool-call fragments reassembled into whole
+calls, the `usage` object including `cached_tokens`, the measured pacing (the **median** gap
+between deltas as `token_delay`, the median delta size as `chunk_runes`), and a non-2xx reply as
+an `http` turn. A non-streamed reply is recorded as a text turn with no `token_delay` — there were
+no chunks to space out. `model` is taken from the first request. Every turn gets a `when:`
+matcher over that request's last message, regexp-quoted, so the fixture answers the same question
+in the same way even when a replayed run reorders its requests.
+
+The medians are the point: they make one recording reproduce the server's *behaviour* rather than
+one run's jitter. A recorded delay is rounded to 10 µs, because `token_delay: 10.37ms` reads as a
+decision and `token_delay: 10.372413ms` reads as a mistake.
+
+Recording is always an explicit human act at a command line, never something a `go test` run does
+(ADR 0062): a test that silently re-records its own fixture cannot fail. A recording a real server
+answered in a shape the format refuses — content alongside tool calls, say — is still written and
+then reported as an error naming the turn, because a fixture a human can fix by hand beats a
+deleted one.
+
+**Where fixtures live.** Under `cmd/apogee/testdata/stubllm/`, named `<server>-<what>.yaml` — the
+server they were recorded from and the run they pin, e.g. `qwen3-smoke.yaml`. The one exception is
+`example.yaml`, the hand-written worked example of the format that this document shows and that
+`cmd/stubllm`'s own test serves.
 
 ## tuitest
 

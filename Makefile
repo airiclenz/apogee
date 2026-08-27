@@ -76,6 +76,11 @@ help:
 build:
 	go build -ldflags "$(GO_LDFLAGS)" -o $(BINARY) $(PKG)
 
+## stubllm: build the scripted test upstream to ./stubllm (a dev tool, never a release asset)
+.PHONY: stubllm
+stubllm:
+	go build -o stubllm ./cmd/stubllm
+
 ## run: build-and-run the binary (pass flags via ARGS="...")
 .PHONY: run
 run:
