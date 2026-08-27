@@ -862,7 +862,73 @@ staged).
 
 **Commit:** `docs(design): which driver observes which claim; changelog entry for the test-drivers kit` (skill edits stay uncommitted by rule)
 
-## 9. T-24 + T-25 residue — streaming, resize mid-stream, cancel, interleaved delegations, flicker ceiling
+## 9. T-24 + T-25 residue — streaming, resize mid-stream, cancel, interleaved delegations, flicker ceiling — ✅ DONE (2026-08-27)
+
+NOTES (2026-08-27): the mid-stream resize changes the WIDTH only (100×30 → 60×30 → 100×30), not
+the item's implied 60×20. Shrinking the height while the program is still painting a frame sized
+for the old terminal panics the emulator both drivers share: bubbletea sets a scroll region
+(DECSTBM) for the layout it believes it has, `x/vt`'s `Screen.DeleteLine` passes that region to
+`ultraviolet.Buffer.DeleteLineArea`, and the loop there indexes `b.Lines[src]` with no clamp
+against a buffer that has already shrunk — `index out of range [20] with length 20`, reproduced in
+`TestE2EStreamPTY` under `-race`. Reflow is a claim about width, so the width-only resize keeps the
+claim whole; T-25 step 9's own 60×20 resize stays asserted in `TestE2ESmokeInProcess`, where the
+session is idle and nothing is in flight. Recorded in the design doc's budget section.
+NOTES (2026-08-27): a live mid-stream frame is asserted by WAITING, not by snapping. A repaint is
+incremental and takes more than one write, so a single snapshot of a streaming terminal can catch a
+row half-written (the spinner glyph over the number of a list line was the observed shape, ~1 run
+in 3). What a reflow must not do is LEAVE a row torn, so `waitWholeStreamRows` bounds the claim as
+"the picture converges" and `waitStreamGrows` pins that the answer keeps arriving into it.
+NOTES (2026-08-27): the frame-side half of "1 to 400 with no gaps" cannot be "every line was
+painted", and the test does not claim it. The transcript pins the owning prompt as a sticky header
+over the viewport's top rows (`Model.stickyHeaderSpan`, layout.md), so a ⇞ that scrolls a whole
+window leaves the line under that header unseen — exactly one per window, measured: 383 of 400
+lines, the missing set being 27, 49, 71, … at a stride of 22. `assertScrollbackIsWhole` therefore
+asserts the walk reaches line 1 and line 400 and that no TWO ADJACENT lines are missing, which is
+the claim that separates the documented overlay from a stretch the terminal never painted. The
+session record carries the exact 400-line equality.
+NOTES (2026-08-27): what arrived before a cancel reaches the SCREEN but never the session record.
+`Model.foldCancelled` (internal/tui/model.go) writes the "cancelled" note and returns to idle,
+leaving the in-flight buffer as a live preview that the next prompt clears — so a resumed session
+shows the prompt and the note with nothing between them, and T-24 step 9's "the cancelled text
+stays in the transcript as what actually arrived" holds only for the run it happened in.
+`TestE2EStreamCancelKeepsWhatArrived` asserts the frame for "keeps what arrived" and the record for
+"the next prompt starts a new entry", states the behaviour in a comment rather than blessing it,
+and it is on the DEFER line for the owner.
+NOTES (2026-08-27): the acceptance's "≤ 6 s" is not reachable with the item's own parameters and
+was not met. The measured set is **20.9 s of tests under `-race`** (22.7 s including `TestMain`'s
+one-off build; 17.6 s without `-race`), and `cmd/apogee` goes 14.4 s → 35.3 s under `-race`. The
+arithmetic is the item's: a 400-line answer at `chunk_runes: 3` / `token_delay: 1ms` is ~1 930
+scripted delays ≈ 2 s before the composition or the renderer are paid for at all, ≈ 5 s of wall
+clock under `-race`, and the item asks for three near-complete passes over that answer (in process,
+through the pty, once more for the ceiling) plus two shorter runs, each with its own launch.
+Per-test: CommitsCompleteAndInOrder 7.3 s, StreamPTY 6.1 s, RepaintCeiling 3.9 s, Delegations
+1.8 s, Cancel 1.8 s. Two knobs trade fidelity for time and are named in the design doc — the
+fixture's `chunk_runes` and how far into the answer the ceiling's last mark sits — but both are
+fixed by the item text, so neither was taken. Plan item 16 already carries the remedy ("if the set
+exceeds 15 s, the slowest test is moved behind `APOGEE_E2E_SLOW=1`").
+NOTES (2026-08-27): the flicker ceilings are measured, not guessed, and pinned at 3× the
+measurement with the run named in the comment: in process 8.0 bytes per streamed rune early and 6.9
+late → ceiling 24; through the pty 9.1 over the whole run → ceiling 27. Whole-screen repaints are
+counted BETWEEN two mid-reply marks rather than from the launch: the frame is erased once when the
+answer starts and the input box gives up its rows, which is a layout change and not flicker.
+NOTES (2026-08-27): the item's Files line names only the test and the two fixtures;
+`docs/design/test-drivers.md` is edited too, because the item's own What text asks for the T-25
+coverage note and the claim table's rows for this item's tests. Three `*(planned, item 9)*` markers
+are cleared, two rows are added (block ownership across concurrent delegations; a cancelled reply),
+the stream row gains its "not observable" entry for the sticky-header walk, and the budget section
+gains the streamed-set measurement and the two mechanics above.
+NOTES (2026-08-27): `TestE2EStreamFixtureIsTheListItClaims` is one test more than the item's five.
+The 400 lines are compared to the fixture in exactly one place, so a fixture edited out from under
+the tests fails there with a readable message instead of failing four driver tests with an
+unreadable one; it also pins `chunk_runes: 3` / `token_delay: 1ms` and that the prompt the tests
+send is one the fixture's own matcher answers.
+NOTES (2026-08-27): `stream400.yaml` and `delegate2.yaml` each carry the two `repeat: true` turns
+smoke.yaml established — the session title apogee asks for off the first prompt (matched first, or
+it takes the prompt's own turn) and a trailing catch-all. `delegate2.yaml` orders the parent's
+`tool_result: sub_agent` wrap-up BEFORE the two child turns, so a parent request can never be
+answered as a child's.
+NOTES (2026-08-27): no CHANGELOG entry from this item — plan item 16 owns the single `[Unreleased]`
+entry covering the application items (9–15); item 8's kit entry stays.
 
 **What:** the streaming buffer rewrite's visible behaviour.
 

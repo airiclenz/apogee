@@ -344,6 +344,12 @@ takes it, the file on disk, `/settings` walked a whole lap, `/usage`, `/skills`,
 resize narrower and wider, Ctrl+C twice, a relaunch, `/sessions`, the restored transcript, and one
 more prompt that makes the record on disk grow.
 
+Between it and `TestE2ESmokePTY` below, **checklist item T-25 is covered end to end and has no
+manual step left**: steps 1–9 and 11–13 are asserted in process, step 10's "the terminal is not
+left in a broken state" is the black-box test's — a property of the terminal rather than of any
+frame — and the streamed-reply half that T-25 shares with T-24 (a long answer arriving, a resize
+landing mid-stream, a cancel) is `cmd/apogee/e2e_stream_test.go`.
+
 ### PTYDriver
 
 `tuitest.PTYDriver` runs the **shipped binary** under a real pseudo-terminal
@@ -414,7 +420,12 @@ deliberately unix-only — a ConPTY stand-in would be a different mechanism asse
 things under the same test's name — and the in-process driver, which has no platform gate, keeps
 Windows covered for frames, keys, waits and goldens.
 
-The worked example is `TestE2ESmokePTY` (`cmd/apogee/e2e_smoke_test.go`): T-25 again, through the
+The second worked example is `TestE2EStreamPTY` (`cmd/apogee/e2e_stream_test.go`): the 400-line
+reply of T-24 through the binary, with a genuine `TIOCSWINSZ` and `SIGWINCH` landing while it is
+still arriving, and the flicker measure read back out of the `--tui-trace` file that only this
+driver can write.
+
+The first worked example is `TestE2ESmokePTY` (`cmd/apogee/e2e_smoke_test.go`): T-25 again, through the
 binary, deliberately shorter than the in-process walk — the first frame and its footer, a prompt
 answered with a tool call, the approval pane and the `a` that takes it, the file on disk,
 `/version`, a real SIGWINCH resize, and then step 10 as a property of the terminal: exit code 0,
@@ -545,11 +556,13 @@ not exist yet, with the plan item that writes them.
 
 | Claim class | Driver | Example test | Not observable by any driver |
 | --- | --- | --- | --- |
-| Stream order and completeness (T-24) | in-process — the committed transcript, read from the frame and from the session record; stubllm sets the chunking (`ChunkRunes`, `TokenDelay`) | `TestE2EStreamCommitsCompleteAndInOrder` *(planned, item 9)* | — |
+| Stream order and completeness (T-24) | in-process — the committed transcript, read from the frame and from the session record; stubllm sets the chunking (`ChunkRunes`, `TokenDelay`) | `TestE2EStreamCommitsCompleteAndInOrder` | Every line of a long answer by ⇞ paging alone: the sticky prompt header covers the top row of each window (layout.md), so a page-at-a-time walk leaves one line per window unseen. The record is the completeness authority; the walk's own claim is that no *run* of lines is missing |
+| Streamed text belongs to one block (T-24) | in-process — the session record's own `depth` and `spawnCallID` per entry, with the frame as the second reading; each child streams a marker word the other never uses | `TestE2EDelegationsStreamIntoTheirOwnBlocks` | — |
+| A cancelled reply (T-24) | in-process — the frame at the moment of the cancel, and the record afterwards for "the next prompt starts a new entry" | `TestE2EStreamCancelKeepsWhatArrived` | — |
 | Pane and block text, and its wording (T-04, T-10, T-12, T-13) | in-process — `Frame.Find` / `Frame.Row` for the text, `Golden` for a whole surface, a judge rubric for the wording half only | `TestE2EApproval…` *(planned, item 11)* | — |
 | Colour and tone of a run (T-15) | PTY for the real terminal's SGR, or in-process `Frame.StyleRuns` — assert the run, never the raw escape | `TestE2EOutcomeTonePTY` *(planned, item 13)* | Whether the reader's own terminal theme renders that colour legibly |
 | Wide-rune and glyph alignment (T-20) | `tuitest` — the emulator's cell width is the authority; assert `Frame` cells, never rune counts | `TestE2EWidth…` *(planned, item 12)* | Font tofu — whether the reader's font has the glyph at all |
-| Resize and reflow (T-24, T-25) | in-process `Driver.Resize` (emulator resize + a `tea.WindowSizeMsg`, then a wait for the repaint it caused); PTY `PTYDriver.Resize` = `pty.Setsize` + a real `SIGWINCH` | `TestE2EStreamPTY` *(planned, item 9)* | — |
+| Resize and reflow (T-24, T-25) | in-process `Driver.Resize` (emulator resize + a `tea.WindowSizeMsg`, then a wait for the repaint it caused); PTY `PTYDriver.Resize` = `pty.Setsize` + a real `SIGWINCH` | `TestE2EStreamPTY` | — |
 | tty state on the way out (T-25) | PTY only — `PTYDriver.TTYState()` after `Quit()`: echo and canonical mode restored, no dangling SGR, exit code 0 | `TestE2ESmokePTY` | Whether the user's own shell prompt looks right afterwards — no shell runs inside the PTY |
 | Real process lifetime, SIGKILL, exit code (T-03, T-07, T-14) | PTY only — `PTYDriver.Pid()`, `Kill()` (a real `SIGKILL`), `Exited()`, and the same for a Console's own children; the in-process driver has no process to kill | `TestE2EDelegationRecordSurvivesSIGKILL` *(planned, item 10)*; `TestE2EConsole` *(planned, item 14)* | — |
 | Session record on disk (T-03, T-06, T-19) | either driver — read the run's own `sessions/` records under its temp home; the record, not the frame, is the authority on what was persisted | `TestE2ESmokeInProcess` | — |
@@ -557,7 +570,7 @@ not exist yet, with the plan item that writes them.
 | Daemon and headless output (T-07) | no driver needed — run the binary against stubllm and assert stdout, the record and the exit code | `TestHeadlessExitCodes`; `TestDaemonFaultedVerbColumn` *(planned, item 10)* | — |
 | Network egress: proxy honoured, url-safety, bounded bodies (T-18) | an in-test Go forward proxy plus stubllm as the upstream (`internal/tuitest/netfix.go`) — assert what reached the proxy | `TestE2EEgress` *(planned, item 14)* | Traffic to a real remote host — nothing in the suite leaves loopback |
 | MCP server behaviour (T-18) | an in-test `httptest` MCP server (the shape `internal/mcp/transport_test.go` already uses) | `TestE2EEgress` *(planned, item 14)* | What a third-party MCP server actually does with a call |
-| Flicker during streaming (T-24) | `--tui-trace` counters: bytes written and full-frame repaints per streamed token, pinned against a ceiling | `TestE2EStreamRepaintCeiling` *(planned, item 9)* | Felt flicker — the repaint ceiling is the accepted proxy |
+| Flicker during streaming (T-24) | `--tui-trace` counters: bytes written and full-frame repaints per streamed token, pinned against a ceiling | `TestE2EStreamRepaintCeiling` | Felt flicker — the repaint ceiling is the accepted proxy |
 | Desktop hand-off (T-19) | a logging fake opener installed through `present.Opener.LookPath`; assert argv and wording | `TestE2EPresent…` *(planned, item 14)* | What a real desktop application does with the file |
 | Upgrade path of an installed apogee (T-21) | post-release `make release-smoke` — archives, `SHA256SUMS`, `--version`, `brew upgrade` when `brew` is present | `make release-smoke` *(planned, item 15)* | `brew upgrade` before the release it upgrades to exists |
 | Tag job and action pins (T-21) | `actionlint` plus `scripts/check-pins.sh`, both run from `make check` | `make check` *(planned, item 15)* | — |
@@ -617,6 +630,27 @@ serial wall clock. The whole set added by this plan has ~15 s under `go test -ra
 on top of the 5.5 s the package cost before it. `TestE2ESmokeInProcess` — thirteen checklist steps,
 two launches and a restore — measures **≈ 7.5 s** of that under `-race`, and `TestE2ESmokePTY`
 **≈ 1 s** on top of the one-off `go build` (**≈ 1.5 s**) every run of the package now pays.
+
+A **streamed** e2e test is the expensive kind, and the reason is arithmetic rather than waste: a
+fixture that streams the checklist's 400-line answer three runes at a time with a millisecond
+between deltas spends ~2 s of scripted delay before the composition and the renderer are paid for
+at all, and ~5 s of wall clock under `-race`. The T-24 set (`cmd/apogee/e2e_stream_test.go`) runs
+three near-complete passes over that answer — in process, through the pty, and once more for the
+repaint ceiling — and measures **≈ 20 s** under `-race`, ≈ 16 s without it. Two knobs trade
+fidelity for time if that becomes the package's problem: the fixture's `chunk_runes` (3 is what cuts
+most lines mid-word, which is the point of the fixture) and how far into the answer the ceiling
+test's last mark sits.
+
+Two mechanics belong with those tests. **Resize mid-stream changes the WIDTH only.** Reflow is a
+claim about width, and shrinking the height while the program is still painting a frame sized for
+the old terminal walks into a fragility of the emulator underneath both drivers: a scroll region
+the program sets straight after (DECSTBM, which bubbletea uses for its scrolling area) can name a
+row past the end of a buffer that has already shrunk, and `x/vt` indexes it without clamping.
+T-25's own 60×20 resize is asserted where the session is idle and nothing is in flight. And **a
+live frame is asserted by waiting, not by snapping**: a repaint takes more than one write, so any
+single snapshot of a streaming terminal may catch a row half-written. What a reflow must not do is
+LEAVE one, so the assertion is that the picture converges within a bounded wait
+(`waitWholeStreamRows`) rather than that it was never briefly torn.
 
 Two rules keep it there. Every wait is a bounded `WaitFor` (5 s default) on a condition, never a
 sleep; and a settle is 150 ms of no bytes, taken only when a frame is about to be READ.

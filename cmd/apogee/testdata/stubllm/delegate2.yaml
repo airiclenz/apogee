@@ -1,0 +1,45 @@
+# The upstream TestE2EDelegationsStreamIntoTheirOwnBlocks talks to: one reply that issues two
+# delegations, and two children that stream a marker word of their own.
+#
+# The marker words are the whole design. Each child repeats ONE word fifty times and the other
+# child's word never; so does the parent. Ownership is then a claim about text rather than about
+# timing: a marker that lands in the wrong block, or in the main reply, is a leak whatever order
+# the two children ran in.
+model: delegate-model
+turns:
+    # The session title, matched before the prompt's own turn (see stream400.yaml).
+    - when:
+        last_message: The user's first request
+      repeat: true
+      text: Two delegations
+    # The main turn: two sub_agent calls in ONE reply, which is what makes them siblings.
+    - when:
+        last_message: ^Delegate two summaries
+      tool_calls:
+        - name: sub_agent
+          arguments: '{"task":"Summarise the alpha half of the workspace","name":"alpha"}'
+        - name: sub_agent
+          arguments: '{"task":"Summarise the beta half of the workspace","name":"beta"}'
+    # The parent's wrap-up, once a delegation has reported. It is matched BEFORE the two child
+    # turns below so a parent request can never be answered as a child's.
+    - when:
+        tool_result: sub_agent
+      repeat: true
+      text: Both summaries are in.
+    # The children. Each is asked its own task in a fresh conversation, so its task text is what
+    # picks its turn out. Both repeat, because a child may be re-asked after its own reply.
+    - when:
+        last_message: alpha half of the workspace
+      repeat: true
+      token_delay: 1ms
+      chunk_runes: 3
+      text: ALPHAMARK ALPHAMARK ALPHAMARK ALPHAMARK ALPHAMARK ALPHAMARK ALPHAMARK ALPHAMARK ALPHAMARK ALPHAMARK ALPHAMARK ALPHAMARK ALPHAMARK ALPHAMARK ALPHAMARK ALPHAMARK ALPHAMARK ALPHAMARK ALPHAMARK ALPHAMARK ALPHAMARK ALPHAMARK ALPHAMARK ALPHAMARK ALPHAMARK ALPHAMARK ALPHAMARK ALPHAMARK ALPHAMARK ALPHAMARK ALPHAMARK ALPHAMARK ALPHAMARK ALPHAMARK ALPHAMARK ALPHAMARK ALPHAMARK ALPHAMARK ALPHAMARK ALPHAMARK ALPHAMARK ALPHAMARK ALPHAMARK ALPHAMARK ALPHAMARK ALPHAMARK ALPHAMARK ALPHAMARK ALPHAMARK ALPHAMARK
+    - when:
+        last_message: beta half of the workspace
+      repeat: true
+      token_delay: 1ms
+      chunk_runes: 3
+      text: BETAMARK BETAMARK BETAMARK BETAMARK BETAMARK BETAMARK BETAMARK BETAMARK BETAMARK BETAMARK BETAMARK BETAMARK BETAMARK BETAMARK BETAMARK BETAMARK BETAMARK BETAMARK BETAMARK BETAMARK BETAMARK BETAMARK BETAMARK BETAMARK BETAMARK BETAMARK BETAMARK BETAMARK BETAMARK BETAMARK BETAMARK BETAMARK BETAMARK BETAMARK BETAMARK BETAMARK BETAMARK BETAMARK BETAMARK BETAMARK BETAMARK BETAMARK BETAMARK BETAMARK BETAMARK BETAMARK BETAMARK BETAMARK BETAMARK BETAMARK
+    # Anything neither the parent nor a child claims.
+    - repeat: true
+      text: Nothing else to add.
