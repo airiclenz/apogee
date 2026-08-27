@@ -223,6 +223,20 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- **Every GitHub Action is now pinned to a full commit SHA, and Dependabot keeps the pins current
+  (CI supply chain, plan item 9).** The six `uses:` lines across `.github/workflows/ci.yml` and
+  `.github/workflows/tag-on-version-bump.yml` no longer reference the mutable major tags
+  `actions/checkout@v4`, `actions/setup-go@v5` and `actions/github-script@v7`: each now names the
+  40-character commit of its major's latest patch release with the tag in a trailing comment
+  (`actions/checkout@11d5960… # v4.4.0`, `actions/setup-go@40f1582… # v5.6.0`,
+  `actions/github-script@f28e40c… # v7.1.0`), so a compromised or retargeted tag can no longer
+  change what CI runs. A comment at the top of each workflow's steps states the rule — bump by
+  resolving the new tag's commit, never by editing the tag comment alone. The new
+  `.github/dependabot.yml` carries exactly one ecosystem, `github-actions`, on a weekly schedule:
+  its PRs move the SHA and the trailing version comment together, which is what keeps a SHA pin
+  from rotting into a stale one, and it stays on the pinned major unless a human accepts a major
+  bump. No Go-modules entry, and no workflow logic, `with:` block or permission changed.
+
 - `present_document` on a local desktop no longer launches the OS handler for `.odt`, `.ods`,
   `.odp` or `.epub`: the OpenDocument container carries Basic macros with no macro-free variant
   (the class ADR 0019's third amendment removed `.doc`/`.xls`/`.ppt` for) and an `.epub` is a zip

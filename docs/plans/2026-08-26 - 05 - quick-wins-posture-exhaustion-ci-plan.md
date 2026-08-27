@@ -557,7 +557,16 @@ it belongs beside the dial-time check).
 
 ---
 
-## 9. Every GitHub Action is pinned to a full commit SHA
+## 9. Every GitHub Action is pinned to a full commit SHA — ✅ DONE (2026-08-27)
+
+NOTES (2026-08-27): the two-line pin-rule comment is written once per WORKFLOW FILE (at the top of
+the first job's `steps:` in `ci.yml`, and at the top of the tag job's `steps:`), not once per
+`steps:` block — `ci.yml`'s `cross` job repeats the same two `uses:` lines four lines below, and a
+second copy of the rule would be duplication inside one file.
+NOTES (2026-08-27): SHAs resolved live with the item's binding `gh api` procedure on 2026-08-27 —
+checkout v4.4.0 = 11d5960a326750d5838078e36cf38b85af677262, setup-go v5.6.0 =
+40f1582b2485089dde7abd97c1529aa768e1baff, github-script v7.1.0 =
+f28e40c7f34bde8b3046d885e986cb6290c5673b; all three verified 40 hex characters.
 
 **What:** the six `uses:` lines across `.github/workflows/ci.yml` (`:20-21`, `:54-55`) and
 `.github/workflows/tag-on-version-bump.yml` (`:24`, `:35`) reference mutable major tags

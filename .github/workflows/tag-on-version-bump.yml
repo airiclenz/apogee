@@ -21,7 +21,9 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      # Actions are pinned by commit SHA with the release tag in the comment beside it.
+      # Bump by resolving the new tag's commit — never by editing the tag comment alone.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           # The script walks before..after and reads VERSION at the bump commit's parent,
           # and `before` can be many commits back — a shallow clone leaves those objects
@@ -32,7 +34,7 @@ jobs:
         run: .github/scripts/version-bump.sh "${{ github.event.before }}" "${{ github.sha }}"
       - name: Create the annotated tags
         if: steps.detect.outputs.bumps != ''
-        uses: actions/github-script@v7
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
         env:
           BUMPS: ${{ steps.detect.outputs.bumps }}
         with:

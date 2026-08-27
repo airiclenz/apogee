@@ -1,0 +1,9 @@
+# Dependabot keeps the SHA pins in .github/workflows/ current: it bumps the commit SHA and the
+# trailing version comment together, so a pin cannot rot into a stale one. It stays on the major
+# each workflow pins — a major upgrade is a human decision, never an automatic one.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
