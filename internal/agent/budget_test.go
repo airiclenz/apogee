@@ -303,3 +303,28 @@ func TestMaxOutputTokensDerivesFromTheWorkingRoom(t *testing.T) {
 		})
 	}
 }
+
+// TestUnroutedChildInheritsTheParentsOutputPin is the offline proof behind the live delegate
+// shakeout's pin: an UNROUTED child inherits the parent's Config wholesale (newChildAgent), the
+// pinned Context.MaxOutputTokens included, and the pin beats the working-room derivation outright
+// (maxOutputTokens) — so the ceiling the shakeout states in its cfg is the ceiling its child
+// actually runs under.
+func TestUnroutedChildInheritsTheParentsOutputPin(t *testing.T) {
+	t.Parallel()
+
+	cfg := baseConfig(&recordingSink{})
+	cfg.Context.MaxOutputTokens = 16384
+	cfg.Context.MaxContextTokens = 98304
+	cfg.Context.WorkingWindow = 32768
+	parent, err := newAgent(cfg, echoResponder{reply: "unused"})
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+
+	child := spawn(t, parent)
+
+	if got := child.maxOutputTokens(); got != 16384 {
+		t.Errorf("unrouted child maxOutputTokens() = %d, want the parent's pin 16384 "+
+			"(without it the 32768-token working room would derive 6553)", got)
+	}
+}

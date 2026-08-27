@@ -26,6 +26,15 @@ const (
 	// liveDelegateWorkingWindow is the working-window the child's Budget must be bounded to,
 	// whatever window the server advertises.
 	liveDelegateWorkingWindow = 32768
+	// liveDelegateOutputCap is the reply ceiling the child runs under. Without a pin the engine
+	// derives the ceiling from the WORKING room (loop.go maxOutputTokens, ADR 0046): 20% of the
+	// 32768-token window above is 6553 tokens whatever the server advertises, which is less than
+	// a reasoning child needs to think and then ask for its next read — on 2026-08-27 one run
+	// tripped cappedDelegateReplyErrFmt before the step cap bit. The shakeout is about the step
+	// cap, the working window and the parent-growth marker, not the reply cap, so it states the
+	// ceiling it wants: the pin is the operator's statement and wins outright. It must stay at or
+	// under liveDelegateWorkingWindow / 2 so the child keeps prompt room inside the working window.
+	liveDelegateOutputCap = 16384
 	// liveParentGrowthCeiling is the most, in tokens, a capped delegation may cost the parent's
 	// context. A child that ran to its cap may have read hundreds of thousands of tokens; what
 	// reaches the parent is one marker line plus the child's last visible text, and this is the
@@ -209,6 +218,9 @@ func TestLiveDelegateCapAndWorkingWindow(t *testing.T) {
 		Context: domain.ContextConfig{
 			MaxContextTokens: info.ContextWindow,
 			WorkingWindow:    liveDelegateWorkingWindow,
+			// The parent is UNROUTED (no delegation target), so the child inherits this Config
+			// wholesale (runSubAgent) — the pin reaches the child exactly as written.
+			MaxOutputTokens: liveDelegateOutputCap,
 			// The shipped default, and the posture the child's mid-Exchange fold needs to exist
 			// at all: a delegation that folds under pressure is half of what bounds it.
 			CompactionEnabled: true,
@@ -275,6 +287,17 @@ func TestLiveDelegateCapAndWorkingWindow(t *testing.T) {
 	budgets := probe.at(1)
 	if len(budgets) == 0 {
 		t.Fatal("the budget probe saw no request at Depth 1; the child never built one")
+	}
+	// The failure mode D-1 recorded, as a named assertion: a child that hit the reply ceiling
+	// faults with cappedDelegateReplyErrFmt (loop.replyFault) instead of reaching the step cap,
+	// and the fault names the pin, so the expected text is the format filled with it.
+	cappedReply := fmt.Sprintf(cappedDelegateReplyErrFmt, liveDelegateOutputCap)
+	for _, e := range events {
+		if ev, ok := e.(domain.ErrorEvent); ok && ev.Depth == 1 && strings.HasPrefix(ev.Err, cappedReply) {
+			t.Errorf("child ErrorEvent (Turn %d) = %q — the child hit the %d-token reply ceiling before "+
+				"the step cap bit; the shakeout is about the step cap, so raise liveDelegateOutputCap",
+				ev.Turn, ev.Err, liveDelegateOutputCap)
+		}
 	}
 	for i, b := range budgets {
 		if b.Window != info.ContextWindow {
