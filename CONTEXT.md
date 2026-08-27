@@ -1041,7 +1041,7 @@ _Avoid_: "attachment", "upload" (a reference is read live from the workspace, no
 
 **Skill**:
 A reusable block of instructions the user *invokes* from a message — a folder holding a `SKILL.md`
-(YAML frontmatter — id, display name, summary — plus a Markdown body).
+(YAML frontmatter — id, display name, summary, optional triggers — plus a Markdown body).
 Skills are discovered from layered dirs (the project's `.apogee/skills`, — when
 `use-project-skills` is on — the project's `skills/`, and the global `<apogee home>/skills`), the
 **user's global library winning any cross-source id clash** while the two project dirs keep their
@@ -1060,8 +1060,14 @@ folder name an id can come from. Like an `@file`, a skill is
 and prepends each body to *that one* user message, so a skill never persists as a system-prompt
 edit. The TUI parses and offers (one merged `/` menu, and `/skills` to browse the catalog); the
 agent resolves. See
-[ADR 0027](docs/adr/0027-one-slash-namespace-with-inline-skill-tokens.md) and
-[ADR 0032](docs/adr/0032-the-user-skill-library-outranks-the-workspace.md).
+[ADR 0027](docs/adr/0027-one-slash-namespace-with-inline-skill-tokens.md),
+[ADR 0032](docs/adr/0032-the-user-skill-library-outranks-the-workspace.md) and
+[ADR 0061](docs/adr/0061-skill-suggestions-are-driver-side-over-an-engine-matcher.md).
+A **Suggestion** is a Driver-side hint naming the catalog skills whose id, name, summary or
+`triggers:` best match the draft (`skills.Catalog.Suggest`, BM25 + evidence gate); painted by the
+TUI in the suggestion band above the input box, accepted via Tab into a `/token`, and spent for the
+session once a message is sent with it showing. A suggestion never reaches the model — see
+ADR 0061 above.
 _Avoid_: "plugin", "tool" (a skill is prompt text, not executable; it adds no capability — it
 steers the model), "attachment"/"chip" (a skill is text *in* the message, not state beside it —
 chips are retired from every surface: the strip above the box went with ADR 0027 and the sent

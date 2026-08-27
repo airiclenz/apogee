@@ -1065,3 +1065,19 @@ reproduction tests the corresponding plan items carry, not here.
 **Worth watching:** the stock `gemma-4-e4b-it-qat` Validated set (`shipped.json`) arms
 `cached_content_intercept`, `autofix` and `filehint` — `filehint` is C-08's stock-install
 reachability (plan 02 item 5).
+
+---
+
+### Model-facing skill discovery (B1 auto-attach / B2 `load_skill` tool) — deferred by ADR 0061
+
+**Status:** deferred 2026-08-27 by
+[ADR 0061](docs/adr/0061-skill-suggestions-are-driver-side-over-an-engine-matcher.md) decision 4.
+**B1** attaches a matched skill's body to a message carrying no `/id`; **B2** registers a
+model-callable `load_skill` tool that pulls a body mid-Turn. **Deferred because** either one puts
+catalog-derived prompt text into the request, making it a **Mechanism** — catalogued, gated, bound
+by the Bypass never-worse floor — and B2 also contradicts CONTEXT.md's *Skill* entry outright
+(*"_Avoid_: 'tool'"*), a domain-language change before it is a feature. **Before it is built:** its
+own grill, an ADR **explicitly superseding ADR 0061**, and a bench arm against Bypass. **The
+reusable half exists:** `skills.Catalog.Suggest` (plan `docs/plans/2026-08-27 - 01 -
+skill-suggestions-band-plan.md`) is engine-level and model-free, so B1 would consume the matcher
+rather than grow a second one.
