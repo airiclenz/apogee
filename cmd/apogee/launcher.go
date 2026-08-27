@@ -72,6 +72,18 @@ type launcherOps interface {
 	unload(backend, addr string) (*llamalauncher.StopResult, error)
 }
 
+// liveLauncherOps is the seam onto the launcher facade the running session drives (ADR 0062: a
+// driver test enters through the composition, and what it cannot reach through the composition it
+// reaches through a package var that defaults to production). Its production value is the
+// delegating adapter below; a driven test swaps in the same in-memory fake the bridge's own unit
+// tests use, so `/model` lists profiles and a profile load moves the session without a launcher
+// config, a server process or a socket. Production never reassigns it.
+//
+// It is the seam rather than a stub tui.LauncherHost because the rebind a profile load ends in runs
+// through sessionMover inside launcherWiring, and a stub host would bypass the very move the claim
+// is about.
+var liveLauncherOps launcherOps = realLauncher{}
+
 // realLauncher is the production launcherOps adapter: every method delegates straight to the
 // facade and holds no state, so nothing here can drift from what the library does.
 type realLauncher struct{}

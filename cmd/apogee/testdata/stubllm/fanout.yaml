@@ -1,0 +1,26 @@
+model: fanout-model
+turns:
+    - when:
+        last_message: The user's first request
+      repeat: true
+      text: Moved session
+    - when:
+        tool_result: sub_agent
+      repeat: true
+      text: All three reported.
+    - when:
+        last_message: ^Fan out
+      repeat: true
+      tool_calls:
+        - name: sub_agent
+          arguments: '{"task":"Count the alpha files","name":"alpha"}'
+        - name: sub_agent
+          arguments: '{"task":"Count the beta files","name":"beta"}'
+        - name: sub_agent
+          arguments: '{"task":"Count the gamma files","name":"gamma"}'
+    - when:
+        last_message: ^Count the
+      repeat: true
+      text: One file.
+    - repeat: true
+      text: Nothing else to add.

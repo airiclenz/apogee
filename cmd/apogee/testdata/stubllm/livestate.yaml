@@ -1,0 +1,15 @@
+# The upstream the T-16 tests talk to. Almost nothing is asked of it: the item is about state that
+# moves WITHOUT the model — a rung reached at the keyboard, a `/confine` line, a file saved in
+# another window — so the script exists to give the session a server to be bound to rather than a
+# conversation to have.
+#
+# The one turn that matters is the catch-all: apogee asks for a session title off the first prompt,
+# and the launcher half sends one prompt after the move to prove which server received it.
+model: livestate-model
+turns:
+    - when:
+        last_message: The user's first request
+      repeat: true
+      text: Live state
+    - repeat: true
+      text: Nothing else to add.

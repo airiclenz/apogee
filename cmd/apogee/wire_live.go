@@ -17,6 +17,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
@@ -27,6 +28,38 @@ import (
 	"github.com/airiclenz/apogee/internal/security"
 	"github.com/airiclenz/apogee/internal/session"
 )
+
+// configWatchTiming is the seam onto how fast the session's `config.yaml` watcher runs (ADR 0041
+// decision 3). Its zero value — the production one — leaves internal/filewatch's own constants in
+// place: a poll every second, a quarter of a second of quiet before a save is reported, which is
+// what a feature that ends with a human saving a document should cost. A driver test replaces it so
+// a watcher step costs a tenth of a second instead of a second and a half of a test suite's budget.
+// Production never reassigns it.
+//
+// It is a pair of durations rather than a filewatch value because the watcher's own knobs are
+// exported fields settable before Start, and the seam's job is only to carry the two numbers to
+// them: a zero field means "leave the watcher's default alone", so a test may move one and not the
+// other.
+var configWatchTiming watchTiming
+
+// watchTiming is the poll cadence and settle window [configWatchTiming] carries.
+type watchTiming struct {
+	Interval time.Duration
+	Settle   time.Duration
+}
+
+// applyTo moves whichever of the two durations is set onto a watcher that has not been started yet.
+func (t watchTiming) applyTo(w *filewatch.Watcher) {
+	if w == nil {
+		return
+	}
+	if t.Interval > 0 {
+		w.Interval = t.Interval
+	}
+	if t.Settle > 0 {
+		w.Settle = t.Settle
+	}
+}
 
 // wireSession assembles the running session on top of the boot phase's Config. Every step that can
 // fail returns the error untouched, and every step that opens something records it on the wiring
@@ -255,6 +288,7 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	// The path is the one this session resolved, which is the same file every seam in the block below
 	// writes; the watcher reads no YAML and holds no projection of its own (internal/filewatch).
 	w.configWatch = filewatch.New(config.FilePath(w.opts.ConfigDir))
+	configWatchTiming.applyTo(w.configWatch)
 	w.configWatch.Start()
 
 	// The one fold that re-points a session at another Upstream, shared by `/server`'s switch and
@@ -295,7 +329,7 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	// and the boot restore is the one seam of the three that is answered off the Update loop. Reading
 	// through the closure is what keeps its question ("is remembering on?") the same question the two
 	// record seams ask, asked of the same holder the pane's flip writes to.
-	w.launcherSeams = launcherWiring{sessionMover: w.mover, ops: realLauncher{}, path: w.launcherPath,
+	w.launcherSeams = launcherWiring{sessionMover: w.mover, ops: liveLauncherOps, path: w.launcherPath,
 		remember: func() bool { return w.live.remember() }}
 
 	// The session-naming seam (ADR 0022 addendum): one out-of-band completion, built per call from

@@ -1,0 +1,90 @@
+# The upstream the T-15 tests talk to: a delegation that never gets anywhere, a terminal command
+# whose OUTPUT quotes an error while its exit code is zero, and two edits whose changed regions sit
+# at two distances from each other.
+#
+# Each turn exists for one claim about an outcome slot. The delegate hangs on its very first request
+# — before it has read a file, streamed a word or produced any nested entry — so the run a cancel
+# closes is one that produced NOTHING, which is the delegation the checklist asks to be shown its own
+# prompt back. The terminal command exits 0 and prints the word "error", which is the whole of step
+# 7: a slot carries the tool's verdict and never the quoted text's tone. The two edits change lines
+# ten apart and lines one apart, which is what puts an elision rule between one pair of regions and
+# not between the other.
+model: outcome-model
+turns:
+    # The session title. apogee asks for one off the first prompt, so this has to be matched BEFORE
+    # the prompt's own turn or it would take it (see smoke.yaml).
+    - when:
+        last_message: The user's first request
+      repeat: true
+      text: Outcome tones
+    # The parent's wrap-up once a delegation has reported. Matched BEFORE the child turn below so a
+    # parent request can never be answered as a child's — this run is cancelled and never reaches it,
+    # which is exactly why it must not be able to steal the child's.
+    - when:
+        tool_result: sub_agent
+      repeat: true
+      text: The delegate handed back what it had.
+    # Step 2 — the delegation.
+    - when:
+        last_message: ^Delegate the outcome survey
+      repeat: true
+      tool_calls:
+        - name: sub_agent
+          arguments: '{"task":"Survey every file in the workspace and say what is in it","name":"survey"}'
+    # The child, which never answers. A run cancelled here has no nested entry behind it, so the
+    # expanded block has nothing to show but the prompt it carried.
+    - when:
+        last_message: Survey every file in the workspace
+      repeat: true
+      hang: 1h
+    # Step 5's other delegation: one that never RAN. Its child's first request is refused by the
+    # server, so the run is over before it produced a single nested entry and the block that is left
+    # is an ordinary tool block with a failure in it — the one shape that shows the prompt it carried
+    # as its own body, under a `task:` lead.
+    - when:
+        last_message: ^Delegate the doomed survey
+      repeat: true
+      tool_calls:
+        - name: sub_agent
+          arguments: '{"task":"Count the files and report the number","name":"doomed"}'
+    - when:
+        last_message: Count the files and report the number
+      repeat: true
+      http:
+        status: 500
+        body: 'the server has nothing to say'
+    # Steps 6 and 7 — a command that exits 0 and says the word "error" on its way out.
+    - when:
+        last_message: ^Run the terminal command
+      repeat: true
+      tool_calls:
+        - name: terminal
+          arguments: '{"command":"echo \"error: 3 errors found\""}'
+    - when:
+        tool_result: terminal
+      repeat: true
+      text: That is what the command had to say.
+    # Step 9's near pair — line 5 and line 7 of a twelve-line file, ONE unchanged line apart, so the
+    # two regions tile end to end and nothing at all is elided between them. It is asked FIRST so the
+    # claim it settles is made against a transcript that holds no elision rule anywhere.
+    - when:
+        last_message: ^Edit the near lines
+      repeat: true
+      tool_calls:
+        - name: edit_existing_file
+          arguments: '{"path": "lines.txt", "content": "line one\nline two\nline three\nline four\nline five CHANGED\nline six\nline seven CHANGED\nline eight\nline nine\nline ten\nline eleven\nline twelve\n"}'
+    # And the far pair — line 1 and line 12 of the file the near edit left, ten unchanged lines
+    # apart, which is more than the two regions' context can tile: a rule stands between them.
+    - when:
+        last_message: ^Edit the far lines
+      repeat: true
+      tool_calls:
+        - name: edit_existing_file
+          arguments: '{"path": "lines.txt", "content": "line one CHANGED\nline two\nline three\nline four\nline five CHANGED\nline six\nline seven CHANGED\nline eight\nline nine\nline ten\nline eleven\nline twelve CHANGED\n"}'
+    - when:
+        tool_result: edit_existing_file
+      repeat: true
+      text: The edit is in.
+    # Anything neither the conversation nor apogee's own account claims.
+    - repeat: true
+      text: Nothing else to add.

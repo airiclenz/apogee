@@ -369,6 +369,11 @@ test that needs one cannot set it once the run is up.
 `e2eSession.RelaunchWith(extra...)` is `Relaunch()` with arguments added for this launch and every
 one after it — the shape a REOPEN takes, since `--continue` names the record the first run wrote and
 so cannot be passed at the launch that creates it (T-06 step 8).
+`launchTUIIn(t, drv, stub, ws, extraConfig, args...)` takes a WORKSPACE the caller built (T-12's
+hostile tree names its escape in the root's own name, and a root is named when it is created), and
+`launchTUIOn(t, drv, stub, home, ws, args...)` takes a HOME the caller wrote — the only way to reach
+a key that sits INSIDE the `servers:` entry, since nothing appended to the file afterwards can get
+in there. `llama-launcher:` is that key (T-16 step 11).
 
 The worked example is `TestE2ESmokeInProcess` (`cmd/apogee/e2e_smoke_test.go`), which is checklist
 item T-25 — "the one pass a human makes over the most-used path end to end" — step for step: the
@@ -601,7 +606,10 @@ not exist yet, with the plan item that writes them.
 | Untrusted text on a rendering surface (T-12) | in-process — the fixture is hostile file and skill names on a REAL filesystem, and the claim is made on CELLS: `StyleRuns` for the colour a leaked sequence would have painted, row indents for the rows a section authored, `Golden` for the block. `apogee probe`'s report is asserted on its bytes | `TestE2EHostileSurfacesKeepTheirOwnRows`; `TestE2EHostileProbeKeepsItsOwnRows`; `TestJudgeHostileRowsReadAsOneRow` | A listing's own rows: the transcript paints a `list_dir`/`grep`/`find_files` block's target and outcome slot and never its result body, so the rows are the ones the MODEL is handed and are asserted out of the stub's request log (`TestE2EHostileToolResultsKeepOneRowPerEntry`) |
 | Token accounting across surfaces (T-06) | in-process — the `/usage` pane's rows and the `/sessions` spend cell, split back into cells and asserted against the counts the FIXTURE told the server to report; stubllm's `usage:` carries the `cached` share that no live server can be relied on to produce | `TestE2EUsageReportsCachedTokensAndDelegateSpend`; `TestE2EUsageHidesTheCachedColumnWithoutABreakdown` | — |
 | A decision key that arrives too early (T-13) | PTY only — the key is written into the terminal from the moment the prompt is sent until the pane is on screen, and the `--tui-trace` file is the evidence that the pane was PAINTED before anything removed it; an in-process run has no trace (item 4) | `TestE2EApprovalKeysAreArmedAfterPaint` | Whether the latency of a deliberate press is *felt* — the test pins a ceiling in milliseconds instead |
-| Colour and tone of a run (T-15) | PTY for the real terminal's SGR, or in-process `Frame.StyleRuns` — assert the run, never the raw escape | `TestE2EOutcomeTonePTY` *(planned, item 13)* | Whether the reader's own terminal theme renders that colour legibly |
+| Colour and tone of a run (T-15) | PTY for the real terminal's SGR, or in-process `Frame.StyleRuns` — assert the run, never the raw escape. The scheme's own role is the comparand (`scheme.Default().Error`), so "painted red" means the failure role and not any red | `TestE2EOutcomeTonePTY`; `TestE2EOutcomeSlotsCarryTheToolsVerdict`; `TestE2EOutcomeCancelledDelegationCarriesTheFailureTone` | Whether the reader's own terminal theme renders that colour legibly |
+| A diff body's elision rule (T-15) | in-process — the rule is a ROW that is nothing but `⋯`, counted across a paged walk of the expanded block, since a twelve-line file's diff is taller than the terminal. The leader every tool row runs to its outcome slot is the same glyph and is not a rule: it has text either side of it | `TestE2EOutcomeSlotsCarryTheToolsVerdict` | — |
+| The rung, the blast radius and the rows that read them (T-16) | in-process — the footer's mode marker (`footerRow` + `StyleRuns` for the `unconfined` tone), the `/confine` notes, and the `/settings` `mode` and `confine-to-workspace` rows walked to by registry path. The word the host earns is read from `apogee probe`, never assumed | `TestE2ELiveStateFollowsTheRunningSession` | — |
+| A launcher profile move (T-16) | in-process — the package var `liveLauncherOps` takes the bridge's own `fakeLauncher` behind the REAL wiring, so the picker's rows, the load and the rebind through `sessionMover` all run; a second stubllm server IS the profile's address, and its request log is what says the session moved | `TestE2ELiveStateLauncherMoveKeepsTheSessionWorking` | More than one delegation live at once after the move: the fan-out width resolves from the entry's pin and the server's `total_slots`, and stubllm answers no `/props`, so a moved session's cap is 1. The re-follow itself is unit-covered (`upstream_test.go`) |
 | Wide-rune and glyph alignment (T-20) | `tuitest` — the emulator's cell width is the authority; assert `Frame` cells, never rune counts. A layout claim needs a terminal in Unicode-core mode (see *Frame*) or the two measures cannot disagree | `TestE2EWidthTicksMultiSelectChoices`; `TestE2EWidthSurvivesAColourSchemeSwitch` | Font tofu — whether the reader's font has the glyph at all |
 | Resize and reflow (T-24, T-25) | in-process `Driver.Resize` (emulator resize + a `tea.WindowSizeMsg`, then a wait for the repaint it caused); PTY `PTYDriver.Resize` = `pty.Setsize` + a real `SIGWINCH` | `TestE2EStreamPTY` | — |
 | tty state on the way out (T-25) | PTY only — `PTYDriver.TTYState()` after `Quit()`: echo and canonical mode restored, no dangling SGR, exit code 0 | `TestE2ESmokePTY` | Whether the user's own shell prompt looks right afterwards — no shell runs inside the PTY |
@@ -609,7 +617,7 @@ not exist yet, with the plan item that writes them.
 | Session record on disk (T-03, T-06, T-19) | either driver — read the run's own `sessions/` records under its temp home; the record, not the frame, is the authority on what was persisted | `TestE2ESmokeInProcess` | — |
 | What a killed run left behind (T-03) | either driver — a stubllm turn that `hang`s holds the run mid-delegation for as long as the test needs, then `Kill()` and a relaunch on the SAME home; the reopened frame is where "closed as interrupted" is read | `TestE2EDelegationRecordSurvivesAKill`; `TestE2EDelegationRecordSurvivesSIGKILL` | — |
 | A scheduled Firing and its block (T-07) | in-process — the package var `tuiScheduleClock` (the daemon's `daemonClock`, one Driver over) puts the Scheduler on a clock the test ticks, so the thirty-second `MinCycle` floor costs a microsecond | `TestE2EFiringMarksAnAbandonedFinalTurn` | — |
-| Config file watch and live apply (T-16) | in-process — write the key into the run's temp-home `config.yaml` and wait for the transcript line; `configWatchTiming` shortens the poll | `TestE2ELiveState…` *(planned, item 13)* | — |
+| Config file watch and live apply (T-16) | in-process — write the key into the run's temp-home `config.yaml` and wait for the transcript line; the package var `configWatchTiming` shortens the poll to 50 ms for every driven launch, so a watcher step costs a tenth of a second rather than the production second-and-a-quarter | `TestE2ELiveStateFollowsTheRunningSession` | — |
 | Daemon and headless output (T-07) | no driver needed — run the binary against stubllm and assert stdout, the record and the exit code | `TestHeadlessExitCodes`; `TestDaemonFaultedVerbColumn` | — |
 | Network egress: proxy honoured, url-safety, bounded bodies (T-18) | an in-test Go forward proxy plus stubllm as the upstream (`internal/tuitest/netfix.go`) — assert what reached the proxy | `TestE2EEgress` *(planned, item 14)* | Traffic to a real remote host — nothing in the suite leaves loopback |
 | MCP server behaviour (T-18) | an in-test `httptest` MCP server (the shape `internal/mcp/transport_test.go` already uses) | `TestE2EEgress` *(planned, item 14)* | What a third-party MCP server actually does with a call |
@@ -726,6 +734,13 @@ The T-12/T-20 set (`e2e_hostile_test.go`, `e2e_width_test.go`) measures **≈ 12
 across six launches, and the settings pane is most of it: a value two-thirds of the way down the key
 registry is reached one arrow at a time, each press waiting for the selection to move, and the width
 item opens that pane twice (there and back, T-20 step 7).
+
+The T-15/T-16 set (`e2e_outcome_test.go`, `e2e_livestate_test.go`) measures **≈ 25 s** under
+`-race` across seven launches, and the settings pane is again most of it — which is why this set
+walks the key list DOWNWARDS (`settingsGoDown`): the rows it wants sit near the top, and the shared
+`settingsGoTo` walks up for rows that sit near the bottom. One cost here is not avoidable: the
+verdict a CANCELLED delegation's outcome slot carries is written by the replay that closes it, so the
+claim costs a relaunch and a `/sessions` restore.
 
 Two rules keep it there. Every wait is a bounded `WaitFor` (5 s default) on a condition, never a
 sleep; and a settle is 150 ms of no bytes, taken only when a frame is about to be READ. The second

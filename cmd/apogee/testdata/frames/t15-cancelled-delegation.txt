@@ -1,0 +1,30 @@
+╭────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ ▗▄▄ ▄▄▄ ▗▄▄ ▗▄▄▖▗▄▄ ▗▄▄                                                 host     probe-target  │
+│ ▗▄▄▌▌  ▌▌  ▌▌  ▌▙▄▄▌▙▄▄▌                                                model    outcome-model │
+│ ▚▄▄▌▙▄▄▘▚▄▄▘▚▄▄▌▚▄▄ ▚▄▄                                                 version  <version>       │
+│     ▌        ▄▄▘                                                                               │
+╰────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+· context window unknown — automatic compaction and the Budget are inactive; set context-window:
+  in config.yaml
+
+❯ Delegate the outcome survey to a sub-agent.
+
+✦ Sub-Agent
+  ┕ survey ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ interrupted — the run did not finish
+
+· cancelled
+
+· resumed: Outcome tones
+
+· this record was saved while a delegation was still running — that unfinished work was not kept;
+  /continue re-runs the step that started it, a new message discards it
+
+
+▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔ Outcome tones ▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔
+
+╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ Send a message…  ⏎ send · ⌥⏎ newline · ↑ recall · ⌃c quit                                        │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+  probe-target ✦ outcome-model ✦ <workdir>
+▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
