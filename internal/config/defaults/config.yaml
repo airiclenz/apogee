@@ -437,9 +437,14 @@ context-files:
 # is built.
 #
 # The lists can only ever TIGHTEN what the network tools reach — there is no spelling here that opens
-# an address the floor closes. They are read at STARTUP: editing this key applies from the next run.
-# MCP servers are not covered by it — an mcp-servers: endpoint is an address you configured yourself
-# (see above), not one the model chose.
+# an address the floor closes. Both lists are LIVE: /settings carries them as the
+# url-safety.allow-hosts and url-safety.deny-hosts rows, and committing either row — or saving this
+# file — rebuilds the session's tool set around the new guard.
+#
+# An mcp-servers: endpoint is checked against these two lists as well: a denied host is refused with
+# the same url-safety message, at startup and when a reconnect lands. What it is exempt from is the
+# resolved-IP floor — that address is one you configured yourself (see above), not one the model
+# chose — and the connection is pinned to that endpoint's own resolved addresses instead.
 #
 # url-safety:
 #   allow-hosts: [docs.example.com, api.github.com]

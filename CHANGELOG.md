@@ -276,6 +276,17 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **The shipped config template said two untrue things about `url-safety:`.** Its comment block
+  claimed the two host lists "are read at STARTUP: editing this key applies from the next run" and
+  that "MCP servers are not covered by it". Neither holds: `/settings` carries both lists as live
+  rows, so committing either — or saving the file — rebuilds the session's tool set around the new
+  guard, and since the MCP connect and reconnect were put under the configured guard an
+  `mcp-servers:` endpoint IS checked against those same lists, at startup and when a reconnect
+  lands. The comment now says both, and records what an MCP endpoint is still exempt from — the
+  resolved-IP floor, with the connection pinned to that endpoint's own resolved addresses instead —
+  in the wording `docs/manual/configuration.md` already carries. Comment text only: no config value
+  moved.
+
 - The doc-server link — and the capability token inside it — no longer appears in
   `present_document`'s tool result or in the saved session record: `present_document` now
   reports a served document as "shown in the transcript with a link", the Presenter hands the
