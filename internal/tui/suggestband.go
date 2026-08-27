@@ -144,8 +144,16 @@ func (m *Model) spendSkillHints() {
 // overlay rule cannot answer for that menu — and a band still advising "tab to pick" underneath the
 // pane tab just opened would repeat the popup's rows and name a key that no longer means what it
 // says.
+//
+// The live states are the third re-read, and the one the recompute cannot make at all: hints are
+// derived on the EDIT path, so a run that goes from idle to an approval, an ask or an error never
+// passes through it and leaves m.skillHints holding whatever the last keystroke ranked. Advice about
+// a draft the human is no longer composing is stale by then, and it would be advising "tab to pick"
+// against a key the decision surface has taken (the same set keyClaimOrder gives the overlays, and
+// the same gate the tab case in handleKey answers with) — so the row stands down for the whole time
+// the prompt is not the human's own, and comes back on the next edit once it is.
 func (m Model) hasSkillHints() bool {
-	return m.opts.SkillSuggestions && !m.autocomplete.active && len(m.skillHints) > 0
+	return m.opts.SkillSuggestions && m.state.live() && !m.autocomplete.active && len(m.skillHints) > 0
 }
 
 // renderSkillHints draws the band's one row, or "" when there is nothing to draw — no hints, or a

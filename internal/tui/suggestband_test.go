@@ -206,6 +206,35 @@ func TestSkillHintsRespectTheKnobAndTheOverlay(t *testing.T) {
 	})
 }
 
+// TestSkillHintsStandDownOffTheLiveStates is the band's fifth silence, and the only one the
+// recompute cannot speak for: hints are derived on the EDIT path, so a run that leaves idle for an
+// approval, an ask or an error never passes through it and m.skillHints keeps whatever the last
+// keystroke ranked. The row must not paint there anyway — it would be advice about a draft nobody
+// is composing, over a surface that has taken the very key its legend names — and the frame must
+// not reserve it either, or the staged band loses its closing row to a row nobody draws.
+func TestSkillHintsStandDownOffTheLiveStates(t *testing.T) {
+	for _, state := range []uiState{stateAwaitingApproval, stateAwaitingAsk, stateErrored} {
+		var rec suggestCall
+		m := modelWithOverlayRoom(t, 24, bandOpts(gatedSuggest(&rec)))
+		m = typeDraft(t, m, "audit the parser")
+		if m.renderSkillHints() == "" {
+			t.Fatal("no band at idle to be stood down")
+		}
+
+		m.state = state
+
+		if len(m.skillHints) == 0 {
+			t.Fatalf("state %d cleared the hints by itself; the stale row is no longer the case under test", state)
+		}
+		if row := m.renderSkillHints(); row != "" {
+			t.Errorf("the band paints a stale row at state %d:\n%q", state, ansi.Strip(row))
+		}
+		if m.frameRowPlan(m.openPanes()).band.hint {
+			t.Errorf("the frame reserves a hint row at state %d that nobody paints", state)
+		}
+	}
+}
+
 // TestSkillHintRowIsPaintedLikeTheBand pins the row as CHROME: it names the suggested ids as the
 // "/id" tokens that invoke them, carries the legend for the key that opens the menu on them, and is
 // clipped and padded to the window exactly as a staged row is — so the black field runs edge to

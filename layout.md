@@ -1436,11 +1436,14 @@ invokes it with a `/token` (ADR 0061). The row appears as soon as the draft hold
 matcher to answer honestly and disappears again the moment it does not — a draft of one or two words
 gets no row rather than a guess.
 
-**When it says nothing.** Four silences, each its own reason: the `ui.skill-suggestions` key is off
+**When it says nothing.** Five silences, each its own reason: the `ui.skill-suggestions` key is off
 (the human asked for no band, and the Tab below is inert with it); no skill catalog is wired; a
 dropdown is open — the `/` or `@` menu, or the suggestion menu Tab itself opens (the pane is already
-answering the same question, and two answers to one question is noise); or the matcher found too
-little evidence in the draft. A skill the draft already invokes is never suggested, and neither is
+answering the same question, and two answers to one question is noise); the matcher found too
+little evidence in the draft; or the prompt is not the human's own to compose in — at an approval,
+an ask or an error the row stands down whatever it last held, because it is advice about a draft
+nobody is writing and it would name a key the decision surface has taken. It returns on the next
+edit once the run is live again. A skill the draft already invokes is never suggested, and neither is
 one that was on the row when a message went out — a plain send or a row staged while the agent works,
 both being the human letting the line go, while a refusal or a `/command` line spends nothing. The
 band therefore advises once per session per skill, and `/clear` and `/new` start that over.
