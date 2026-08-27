@@ -24,6 +24,17 @@ import (
 // WHERE its narration goes (the running Bubble Tea program). The library owns everything else — the
 // cycle, the overlap skip, the lifetime — and knows nothing about any of the above.
 
+// tuiScheduleClock is the seam onto the interactive Scheduler's sense of time — the twin of
+// [daemonClock] (daemon.go), one Driver over. nil, its production value, is the wall clock and real
+// tickers (schedule.Config.Clock), which is what a surface whose shortest legal cycle is thirty
+// seconds must run on. A test replaces it so a due tick happens now rather than in half a minute,
+// which is the only way a driven run can watch a Firing land in the transcript inside a test's
+// wall-clock budget. Production never reassigns it.
+//
+// It lives at this level rather than on [tui.Options] for the reason the scheduler itself does: the
+// cycle is a Driver's concern (ADR 0033), and the engine gains no test-only hook from it (ADR 0062).
+var tuiScheduleClock schedule.Clock
+
 // scheduleWiring turns one Firing into one unattended run. It is the titleWiring split, made for the
 // same reason: the endpoint, the key, the model and the roots are wiring the binary resolves and a
 // `/server` switch moves, so the Config is composed PER FIRING from the session as it stands at that

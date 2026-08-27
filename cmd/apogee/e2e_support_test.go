@@ -56,15 +56,45 @@ type e2eSession struct {
 // output (item 4). The in-process repaint measure is the driver's own screen counters instead.
 func launchTUI(t *testing.T, drv *tuitest.Driver, stub *stubllm.Server, args ...string) *e2eSession {
 	t.Helper()
+	return launchTUIConfigured(t, drv, stub, "", args...)
+}
+
+// launchTUIConfigured is launchTUI with extraConfig appended to the home's config.yaml before the
+// launch. It is the only way a driven run reaches a FILE-ONLY key: delegate-max-steps (T-04) has no
+// flag and no environment variable, and the Agent reads it when it is CONSTRUCTED, so a test that
+// needs one cannot set it once the run is up.
+func launchTUIConfigured(t *testing.T, drv *tuitest.Driver, stub *stubllm.Server, extraConfig string,
+	args ...string) *e2eSession {
+	t.Helper()
 
 	// Registered before anything else this helper creates, so it is the LAST cleanup to run and
 	// sees a tree that has already been torn down. Whatever is still running then is a leak.
 	tuitest.CheckLeaks(t)
 	assertNoAmbientApogeeConfig(t)
 
-	s := &e2eSession{t: t, home: e2eHome(t, stub), ws: e2eWorkspace(t), stub: stub, args: args}
+	home := e2eHome(t, stub)
+	appendHomeConfig(t, home, extraConfig)
+	s := &e2eSession{t: t, home: home, ws: e2eWorkspace(t), stub: stub, args: args}
 	s.start(drv)
 	return s
+}
+
+// appendHomeConfig adds lines to a home's config.yaml. It appends rather than rewrites so the
+// `servers:` block e2eHome wrote — the whole reason the run has anything to talk to — survives.
+func appendHomeConfig(t *testing.T, home, extra string) {
+	t.Helper()
+
+	if extra == "" {
+		return
+	}
+	path := filepath.Join(home, "config.yaml")
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read the e2e home's config: %v", err)
+	}
+	if err := os.WriteFile(path, append(body, extra...), 0o600); err != nil {
+		t.Fatalf("write the e2e home's config: %v", err)
+	}
 }
 
 // start runs one launch under drv. The launcher seam is where the driver enters: it hands
@@ -137,6 +167,7 @@ type ptySession struct {
 	home  string
 	ws    string
 	trace string
+	args  []string
 
 	drv *tuitest.PTYDriver
 }
@@ -163,12 +194,37 @@ func launchPTY(t *testing.T, stub *stubllm.Server, args ...string) *ptySession {
 		home:  e2eHome(t, stub),
 		ws:    e2eWorkspace(t),
 		trace: filepath.Join(t.TempDir(), "tui-trace.txt"),
+		args:  args,
 	}
-	argv := append([]string{"--config", s.home, "--workspace", s.ws, "--tui-trace", s.trace}, args...)
-	s.drv = tuitest.NewPTYDriver(t, e2eBinary, argv, ptyEnv(), e2eSize)
+	s.spawn()
+	return s
+}
+
+// Relaunch starts the BINARY again on the same home and workspace, under a fresh pty — the black-box
+// twin of [e2eSession.Relaunch], and the reopen half of every "what did the killed run leave
+// behind?" claim (T-03). The previous child is killed first if it is somehow still up; after a
+// [tuitest.PTYDriver.Kill] it is already gone and this is a no-op.
+//
+// The new run gets a trace file of its own. Reusing the first one would append two runs' paint into
+// a single stream, and [ptySession.TraceBytes] would then answer about neither.
+func (s *ptySession) Relaunch() *tuitest.PTYDriver {
+	s.t.Helper()
+
+	s.drv.Kill()
+	s.trace = filepath.Join(s.t.TempDir(), "tui-trace.txt")
+	s.spawn()
+	return s.drv
+}
+
+// spawn starts one pty run of the binary on this session's home, workspace and trace path, and
+// returns once its first frame has reached the emulator.
+func (s *ptySession) spawn() {
+	s.t.Helper()
+
+	argv := append([]string{"--config", s.home, "--workspace", s.ws, "--tui-trace", s.trace}, s.args...)
+	s.drv = tuitest.NewPTYDriver(s.t, e2eBinary, argv, ptyEnv(), e2eSize)
 	s.drv.WaitFor(func() bool { return s.drv.Screen().BytesWritten() > 0 },
 		tuitest.Awaiting("apogee's first frame"))
-	return s
 }
 
 // ptyEnv is the WHOLE environment the launched binary gets: nothing is inherited, so what a driven
@@ -372,3 +428,97 @@ var _ launcher = func(context.Context, tui.Engine, *tui.Bridge, tui.Options) err
 
 // and that the program options a driver supplies are the options tui.Build appends.
 var _ = func(d *tuitest.Driver) []tea.ProgramOption { return d.ProgramOptions() }
+
+// ----------------------------------------------------------------------------
+// Reading a driven frame
+// ----------------------------------------------------------------------------
+//
+// The three ways a claim is made against a terminal that is wider and taller than any one
+// assertion: one row of it, its whole text with the wrap taken back out, and — for a surface that
+// does not fit at all — the pages of it walked in order.
+
+// expandLastBlock opens the last toggleable block in the transcript — the keyboard route to the
+// click the checklist describes. ⌥↑ enters the block cursor on the LAST stop and ⏎ toggles what it
+// is standing on (blockcursor.go).
+//
+// It leaves the block cursor afterwards, which is not tidiness: while the cursor is active every
+// repaint re-anchors the view on the line it stands on (followBlockCursor), so a ⇟ scrolls and is
+// yanked straight back. A test that then walked a tall block would read the same page forever.
+func expandLastBlock(drv *tuitest.Driver) {
+	painted := drv.Screen().BytesWritten()
+	drv.Press(tuitest.AltUp)
+	drv.WaitFor(func() bool { return drv.Screen().BytesWritten() > painted },
+		tuitest.Awaiting("the block cursor to highlight a block"))
+	drv.Press(tuitest.Enter)
+	drv.WaitQuiet(settled)
+	drv.Press(tuitest.Esc)
+	drv.WaitQuiet(settled)
+}
+
+// rowContaining is the frame's first row holding want, failing the test with the whole frame when
+// no row does. It is how a claim about ONE line — a stats line, a footer — is made against a frame
+// rather than against the frame's flattened text.
+func rowContaining(t *testing.T, f tuitest.Frame, want string) string {
+	t.Helper()
+
+	for _, row := range f.Rows() {
+		if strings.Contains(row, want) {
+			return row
+		}
+	}
+	t.Fatalf("no row of the frame holds %q:\n%s", want, f)
+	return ""
+}
+
+// flatten collapses every run of whitespace in text to one space. A frame is wrapped to its width,
+// so a SENTENCE the renderer had to break over two rows is only assertable this way; a claim about
+// a single row uses rowContaining instead.
+func flatten(text string) string { return strings.Join(strings.Fields(text), " ") }
+
+// scrollTranscript walks the transcript from wherever it stands to its end, collecting every row it
+// showed on the way, and returns them as one text. An expanded delegation is taller than the
+// terminal — the child's whole run stands inside it — so a claim about a line near its end can only
+// be made across frames.
+//
+// It stops when a page repaints into the same picture, which is what the bottom of a transcript
+// looks like from outside. ⇟ scrolls the viewport in every state (model.go), block cursor included,
+// so the walk costs nothing but the frames it reads.
+func scrollTranscript(drv *tuitest.Driver) string {
+	// A ceiling on the walk rather than an expectation: how many pages a block spans is the
+	// renderer's business.
+	const maxPages = 40
+
+	var b strings.Builder
+	last := ""
+	for range maxPages {
+		page := drv.Frame().String()
+		if page == last {
+			break // the press before this one moved nothing: the walk is at the transcript's end
+		}
+		last = page
+		b.WriteString(page)
+		b.WriteByte('\n')
+
+		painted := drv.Screen().BytesWritten()
+		drv.Press(tuitest.PgDown)
+		// The byte counter, not the quiet check, is what says the press LANDED. A quiet check taken
+		// straight after a keystroke passes on a screen that has simply not been painted yet, and a
+		// walk built on one reads its first page twice and calls that the end.
+		awaitRepaint(drv, painted)
+		drv.WaitQuiet(60 * time.Millisecond)
+	}
+	return b.String()
+}
+
+// awaitRepaint blocks until the screen has been painted since it held `painted` bytes, and gives up
+// after a bounded wait. It reports nothing: a press that paints nothing is the end of a list, and
+// the caller finds that out from the page it reads next.
+func awaitRepaint(drv *tuitest.Driver, painted int64) {
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		if drv.Screen().BytesWritten() > painted {
+			return
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+}

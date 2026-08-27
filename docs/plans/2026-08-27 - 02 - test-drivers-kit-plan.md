@@ -966,7 +966,70 @@ passes in ≤ 6 s; with the judge gate set `TestJudgeStreamFrames` runs.
 
 **Commit:** `test(e2e): streamed reply commits complete and in order across resize, cancel and concurrent delegations (T-24)`
 
-## 10. T-03 + T-04 + T-07 TUI — delegation record on kill/reopen, step-cap marker, firing block `faulted`
+## 10. T-03 + T-04 + T-07 TUI — delegation record on kill/reopen, step-cap marker, firing block `faulted` — ✅ DONE (2026-08-27)
+
+NOTES (2026-08-27): the item's Files line names `schedule.go` and `wire_live.go` but not
+`e2e_support_test.go`; three things landed there because they are the cmd/apogee half of the driver
+kit and both new test files need them — `launchTUIConfigured` (the only route to a FILE-ONLY key:
+`delegate-max-steps` has no flag and no env var and the Agent reads it at construction),
+`ptySession.Relaunch`/`spawn` (the PTY reopen T-03's black-box variant asks for, which `launchPTY`
+had no form of), and the four generic frame readers `flatten`, `rowContaining`, `expandLastBlock`
+and `scrollTranscript` that both topic files use.
+NOTES (2026-08-27): everything a delegation holds is COLLAPSED by default (`entry.expanded` is
+false and `insideCollapsedRun` elides the whole span), so the item's `WaitText("read_file")` and
+"read the error line the child left" cannot be asserted off the default paint. The tests OPEN the
+block — ⌥↑ then ⏎, the keyboard route to the click the checklist describes — and then leave the
+block cursor with Esc, because while it is active every repaint re-anchors the view on the line it
+stands on (`followBlockCursor`) and a ⇟ scrolls only to be yanked straight back. That cost the first
+two attempts at the step-cap assertions.
+NOTES (2026-08-27): an expanded delegation is taller than the terminal, so the child's error line —
+which stands at the END of its run — is read by walking pages (`scrollTranscript`), and each press
+is waited for on the screen's BYTE COUNTER before the next page is read. A quiet check taken
+straight after a keystroke passes on a screen that has simply not been painted yet, and the walk
+then reads its first page twice and calls that the end (observed as a flake before the fix).
+NOTES (2026-08-27): the transcript paints rendered LABELS, never the wire tool names the item's step
+list uses — `Read` for `read_file`, `Sub-Agent` for `sub_agent`. Item 5 recorded the same finding
+for `list_dir`/`write_file`.
+NOTES (2026-08-27): "nothing paints as running" is asserted as the STATUS LINE's absence of the
+tool's present participle (`delegating`, `reading` — `toolActivityVerb`). A running tool card has no
+wording of its own (it simply has no outcome yet) and the live ✦ blinks on the spinner's phase, so
+the status line is the only deterministic "this is in flight" surface a frame can be asked about.
+NOTES (2026-08-27): T-04's child chain calls three DIFFERENT tools (`read_file` → `list_dir` →
+`grep`) rather than one repeatedly. A `tool_result:` matcher names a tool, so a chain that reused
+one would match its own previous turn forever and never reach the fourth turn the
+`delegate-max-steps: 0` edge needs. The same fixture therefore serves both edges: capped it stops
+inside turn 3, uncapped it runs four and speaks.
+NOTES (2026-08-27): the T-04 golden takes one redaction beyond `e2eSession.Redactions()`
+(`goldenRedactions`): the footer truncates the workdir cell from the LEFT to the room it has and
+drops the mode marker beside it when there is none, so how long the machine's temp root happens to
+be decides what survives on that row. The session's own redactions only match a path that appears
+whole, so the whole tail of the footer row is replaced first. Every later full-frame golden
+(items 11–15) inherits this; it is written up in the design doc's "Writing a new e2e test".
+NOTES (2026-08-27): `assertNoErrorTone` finds the head row by its OUTCOME SLOT ("tool calls ·
+done") rather than by the delegation's name — the prompt two rows above names the delegation too,
+and a search for the name settles step 7 against a line nobody was asking about.
+NOTES (2026-08-27): the step-cap test is `TestE2EDelegationStepCap` rather than
+`TestE2EDelegateStepCap`, so the item's own acceptance pattern (`-run 'TestE2EDelegation|…'`)
+actually covers it; `-run` matching is unanchored per name element and would have skipped
+"Delegate…" silently.
+NOTES (2026-08-27): the fake clock both halves of T-07 use is `fakeDaemonClock`
+(`cmd/apogee/daemon_test.go`) — `internal/schedule`'s `Clock`/`Ticker` shape, already in this
+package — rather than a second copy; `tuiScheduleClock` and `daemonClock` are swapped from it and
+restored in `t.Cleanup`. `TestDaemonFaultedVerbColumn` also restores the REAL `runOnce` over the
+daemon harness's stub, because the verb column is a fact about what `run.Once` reported and a
+stubbed runner would only prove the log formats a flag the test itself set.
+NOTES (2026-08-27): T-04 step 8 ("watch what the parent does next") is not asserted and cannot be:
+the stub scripts the parent's reply, so what a real model does with a partial result is a live-model
+claim (the design doc's T-22 row). The item's own What text does not list it. Step 2's `/settings`
+reading of `delegate-max-steps: 3` is likewise not asserted through the pane — that the capped run
+stops at three is the same fact, measured where it matters.
+NOTES (2026-08-27): measured wall clock — this item's five driver tests = **≈ 9.5 s** under `-race`
+(kill 2.7 s, SIGKILL 0.7 s, step cap 5.1 s, firing 1.3 s, daemon 0.01 s); the whole `cmd/apogee`
+package goes 35.3 s → **44.8 s** under `-race`. Item 16's remedy for the plan's 15 s budget now has
+one more candidate: the step-cap test's two page-walks, each of which ends by pressing once more and
+waiting a bounded half-second for a repaint that never comes.
+NOTES (2026-08-27): no CHANGELOG entry from this item — plan item 16 owns the single `[Unreleased]`
+entry covering the application items (9–15), as recorded under item 9.
 
 **What:** the delegation and scheduler surfaces.
 

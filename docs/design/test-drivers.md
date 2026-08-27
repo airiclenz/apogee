@@ -336,6 +336,10 @@ launcher seam is in package `main`: `launchTUI(t, drv, stub, args...)` builds a 
 workspace, runs `newRootCommand(launch)` with `--config` and `--workspace` pointing at them, and
 returns an `e2eSession` — `Relaunch()` (same home, fresh driver), `Quit()`, `Workspace()`,
 `Redactions()` (the default golden redaction set), and the screen's repaint counters.
+`launchTUIConfigured(t, drv, stub, extraConfig, args...)` is the same launch with lines appended to
+the home's `config.yaml` first, which is the only way to reach a **file-only** key: `delegate-max-steps`
+(T-04) has no flag and no environment variable and the Agent reads it when it is CONSTRUCTED, so a
+test that needs one cannot set it once the run is up.
 
 The worked example is `TestE2ESmokeInProcess` (`cmd/apogee/e2e_smoke_test.go`), which is checklist
 item T-25 — "the one pass a human makes over the most-used path end to end" — step for step: the
@@ -402,6 +406,11 @@ measured), so `TestMain` recognises the fixture's marker argument and skips it.
 **The environment is stated, not inherited.** `launchPTY` gives the child `HOME` (the suite's temp
 one), `PATH`, and nothing else, plus the `TERM`/`COLORTERM` the driver appends. An `APOGEE_*`
 variable in the developer's shell cannot reach a driven run.
+
+**`ptySession.Relaunch()`** starts the binary again on the same home and workspace under a fresh
+pty — the black-box twin of `e2eSession.Relaunch()`, and the reopen half of every "what did the
+killed run leave behind?" claim. The new run gets a trace file of its own: appending two runs'
+paint into one stream would leave `TraceBytes()` answering about neither.
 
 **The settle rule is the same** — no bytes for 150 ms means the frame is final — because it is a
 property of the picture, not of how the bytes arrived. The two drivers' **byte counters are not**:
@@ -559,15 +568,17 @@ not exist yet, with the plan item that writes them.
 | Stream order and completeness (T-24) | in-process — the committed transcript, read from the frame and from the session record; stubllm sets the chunking (`ChunkRunes`, `TokenDelay`) | `TestE2EStreamCommitsCompleteAndInOrder` | Every line of a long answer by ⇞ paging alone: the sticky prompt header covers the top row of each window (layout.md), so a page-at-a-time walk leaves one line per window unseen. The record is the completeness authority; the walk's own claim is that no *run* of lines is missing |
 | Streamed text belongs to one block (T-24) | in-process — the session record's own `depth` and `spawnCallID` per entry, with the frame as the second reading; each child streams a marker word the other never uses | `TestE2EDelegationsStreamIntoTheirOwnBlocks` | — |
 | A cancelled reply (T-24) | in-process — the frame at the moment of the cancel, and the record afterwards for "the next prompt starts a new entry" | `TestE2EStreamCancelKeepsWhatArrived` | — |
-| Pane and block text, and its wording (T-04, T-10, T-12, T-13) | in-process — `Frame.Find` / `Frame.Row` for the text, `Golden` for a whole surface, a judge rubric for the wording half only | `TestE2EApproval…` *(planned, item 11)* | — |
+| Pane and block text, and its wording (T-04, T-10, T-12, T-13) | in-process — `Frame.Find` / `Frame.Row` for the text, `Golden` for a whole surface, a judge rubric for the wording half only | `TestE2EDelegationStepCap`; `TestE2EApproval…` *(planned, item 11)* | — |
 | Colour and tone of a run (T-15) | PTY for the real terminal's SGR, or in-process `Frame.StyleRuns` — assert the run, never the raw escape | `TestE2EOutcomeTonePTY` *(planned, item 13)* | Whether the reader's own terminal theme renders that colour legibly |
 | Wide-rune and glyph alignment (T-20) | `tuitest` — the emulator's cell width is the authority; assert `Frame` cells, never rune counts | `TestE2EWidth…` *(planned, item 12)* | Font tofu — whether the reader's font has the glyph at all |
 | Resize and reflow (T-24, T-25) | in-process `Driver.Resize` (emulator resize + a `tea.WindowSizeMsg`, then a wait for the repaint it caused); PTY `PTYDriver.Resize` = `pty.Setsize` + a real `SIGWINCH` | `TestE2EStreamPTY` | — |
 | tty state on the way out (T-25) | PTY only — `PTYDriver.TTYState()` after `Quit()`: echo and canonical mode restored, no dangling SGR, exit code 0 | `TestE2ESmokePTY` | Whether the user's own shell prompt looks right afterwards — no shell runs inside the PTY |
-| Real process lifetime, SIGKILL, exit code (T-03, T-07, T-14) | PTY only — `PTYDriver.Pid()`, `Kill()` (a real `SIGKILL`), `Exited()`, and the same for a Console's own children; the in-process driver has no process to kill | `TestE2EDelegationRecordSurvivesSIGKILL` *(planned, item 10)*; `TestE2EConsole` *(planned, item 14)* | — |
+| Real process lifetime, SIGKILL, exit code (T-03, T-07, T-14) | PTY only — `PTYDriver.Pid()`, `Kill()` (a real `SIGKILL`), `Exited()`, and the same for a Console's own children; the in-process driver has no process to kill | `TestE2EDelegationRecordSurvivesSIGKILL`; `TestE2EConsole` *(planned, item 14)* | — |
 | Session record on disk (T-03, T-06, T-19) | either driver — read the run's own `sessions/` records under its temp home; the record, not the frame, is the authority on what was persisted | `TestE2ESmokeInProcess` | — |
+| What a killed run left behind (T-03) | either driver — a stubllm turn that `hang`s holds the run mid-delegation for as long as the test needs, then `Kill()` and a relaunch on the SAME home; the reopened frame is where "closed as interrupted" is read | `TestE2EDelegationRecordSurvivesAKill`; `TestE2EDelegationRecordSurvivesSIGKILL` | — |
+| A scheduled Firing and its block (T-07) | in-process — the package var `tuiScheduleClock` (the daemon's `daemonClock`, one Driver over) puts the Scheduler on a clock the test ticks, so the thirty-second `MinCycle` floor costs a microsecond | `TestE2EFiringMarksAnAbandonedFinalTurn` | — |
 | Config file watch and live apply (T-16) | in-process — write the key into the run's temp-home `config.yaml` and wait for the transcript line; `configWatchTiming` shortens the poll | `TestE2ELiveState…` *(planned, item 13)* | — |
-| Daemon and headless output (T-07) | no driver needed — run the binary against stubllm and assert stdout, the record and the exit code | `TestHeadlessExitCodes`; `TestDaemonFaultedVerbColumn` *(planned, item 10)* | — |
+| Daemon and headless output (T-07) | no driver needed — run the binary against stubllm and assert stdout, the record and the exit code | `TestHeadlessExitCodes`; `TestDaemonFaultedVerbColumn` | — |
 | Network egress: proxy honoured, url-safety, bounded bodies (T-18) | an in-test Go forward proxy plus stubllm as the upstream (`internal/tuitest/netfix.go`) — assert what reached the proxy | `TestE2EEgress` *(planned, item 14)* | Traffic to a real remote host — nothing in the suite leaves loopback |
 | MCP server behaviour (T-18) | an in-test `httptest` MCP server (the shape `internal/mcp/transport_test.go` already uses) | `TestE2EEgress` *(planned, item 14)* | What a third-party MCP server actually does with a call |
 | Flicker during streaming (T-24) | `--tui-trace` counters: bytes written and full-frame repaints per streamed token, pinned against a ceiling | `TestE2EStreamRepaintCeiling` | Felt flicker — the repaint ceiling is the accepted proxy |
@@ -597,12 +608,24 @@ A new end-to-end test is `cmd/apogee/e2e_<topic>_test.go`, and it follows this c
    ever after a content wait, because a screen that has not started painting yet is quiet too.
 5. **Assert on cells.** `Frame.Find`, `Frame.Row`, `Frame.Cell(...).Width`, `Frame.StyleRuns`. A
    `Golden` is for a rendering surface whose whole layout is the claim, and always with
-   `sess.Redactions()...` — a golden carrying a temp path or today's date churns on every run.
-6. **Close what you open.** Press Esc and then WAIT for the pane to be gone. A test that carries on
+   `sess.Redactions()...` — a golden carrying a temp path or today's date churns on every run. The
+   footer needs one redaction of its own on top: it truncates the workdir cell from the left to the
+   room it has and drops the mode marker beside it when there is none, so how long the machine's
+   temp root happens to be decides what survives on that row (`goldenRedactions`,
+   `cmd/apogee/e2e_delegation_test.go`).
+6. **Open a block before asserting inside it.** A delegation and a firing block are COLLAPSED by
+   default (layout.md): the child's cards, its error lines and the result handed back to the parent
+   are all elided until the block is opened, and a test asserting on them against the default paint
+   asserts on nothing. `⌥↑` enters the block cursor on the last stop and `⏎` toggles it
+   (`expandLastBlock`) — then LEAVE the cursor with Esc, because while it is active every repaint
+   re-anchors the view on the line it stands on and a `⇟` scrolls only to be yanked back. An
+   expanded block is usually taller than the terminal, so a line near its end is read by walking
+   pages (`scrollTranscript`), waiting for each press to actually PAINT before reading the next.
+7. **Close what you open.** Press Esc and then WAIT for the pane to be gone. A test that carries on
    after a pane that never closed types its next command into that pane and fails somewhere else.
-7. **Add a judge rubric only for a judgment half** — wording, tone, "reads as one row". Everything
+8. **Add a judge rubric only for a judgment half** — wording, tone, "reads as one row". Everything
    a cell can settle is settled by a cell.
-8. **Stay inside the budget below.** Every wait bounded, no `t.Parallel` (the e2e tests use
+9. **Stay inside the budget below.** Every wait bounded, no `t.Parallel` (the e2e tests use
    `t.Setenv` and package-var seams), and every swapped package var restored via `t.Cleanup`.
 
 ## Gates and budgets
@@ -651,6 +674,13 @@ live frame is asserted by waiting, not by snapping**: a repaint takes more than 
 single snapshot of a streaming terminal may catch a row half-written. What a reflow must not do is
 LEAVE one, so the assertion is that the picture converges within a bounded wait
 (`waitWholeStreamRows`) rather than that it was never briefly torn.
+
+The T-03/T-04/T-07 set (`e2e_delegation_test.go`, `e2e_schedule_test.go`) measures **≈ 9.5 s**
+under `-race` across five launches, and two of its costs are worth naming because every later block
+test inherits them. Reading a line near the END of an expanded block means walking pages, and each
+page costs a settle; and the walk only learns it has reached the bottom by pressing once more and
+finding nothing painted, which is a bounded half-second per walk. A `hang` turn costs nothing — the
+stub sleeps until the request's context ends, and killing the program ends it.
 
 Two rules keep it there. Every wait is a bounded `WaitFor` (5 s default) on a condition, never a
 sleep; and a settle is 150 ms of no bytes, taken only when a frame is about to be READ.

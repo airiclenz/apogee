@@ -1,0 +1,45 @@
+# The upstream the T-03 tests talk to: one delegation whose child does a little real work and then
+# never comes back.
+#
+# The hang is the whole fixture. A record has to reach disk WHILE a delegation is still running —
+# that is the progress save the item is about — and the only way a test can be sure the run is still
+# in flight when it kills the program is for the child's next request to never be answered. The
+# child reads one file first so the save has a child tool boundary to fire at, and so the reopened
+# transcript has a settled call standing beside the interrupted one.
+model: hang-model
+turns:
+    # The session title. apogee asks for one off the first prompt, so this has to be matched BEFORE
+    # the prompt's own turn or it would take it (see smoke.yaml).
+    - when:
+        last_message: The user's first request
+      repeat: true
+      text: Workspace survey
+    # Step 2 — the prompt that delegates.
+    - when:
+        last_message: ^Delegate a survey
+      tool_calls:
+        - name: sub_agent
+          arguments: '{"task":"Survey every file in the workspace and say what is in it","name":"survey"}'
+    # The child's first turn: one read, which settles and is what the reopened transcript shows
+    # beside the interrupted delegation.
+    - when:
+        last_message: Survey every file in the workspace
+      tool_calls:
+        - name: read_file
+          arguments: '{"path":"a.txt"}'
+    # The child's second turn: it is never answered. The delegation is still open from here on, and
+    # stays open until the program dies.
+    - when:
+        tool_result: read_file
+      hang: 1h
+    # Step 10's edge — the same session shape with NO delegation in it: a plain answer, nothing left
+    # unfinished. It is in this fixture rather than one of its own because it is the negative half of
+    # the same claim, and a reader comparing the two should not have to open two files.
+    - when:
+        last_message: ^Just answer this yourself
+      text: There is one file in the workspace, a.txt, and it says hello.
+      token_delay: 1ms
+      chunk_runes: 6
+    # Anything apogee asks on its own account.
+    - repeat: true
+      text: OK.

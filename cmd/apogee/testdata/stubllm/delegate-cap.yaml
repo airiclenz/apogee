@@ -1,0 +1,69 @@
+# The upstream the T-04 tests talk to: a delegation whose child would happily keep calling tools for
+# four turns, so that a cap of three is a cap the run actually MEETS — and so that the same script,
+# uncapped, walks past three and ends on its own.
+#
+# The child's chain is picked by what its last turn produced rather than by order: read_file, then
+# list_dir, then grep, then it speaks. Each step is a different tool on purpose — a `tool_result:`
+# matcher names a tool, so a chain that used one tool twice would loop forever instead of ending.
+# Every turn repeats, because the session delegates twice (step 9's max_steps edge) and a consumed
+# turn would leave the second delegation unanswered.
+model: cap-model
+turns:
+    # The session title, matched before the prompt's own turn (see smoke.yaml).
+    - when:
+        last_message: The user's first request
+      repeat: true
+      text: Delegated survey
+    # The parent's wrap-up once a delegation has reported. Matched BEFORE the child turns below so a
+    # parent request can never be answered as a child's.
+    - when:
+        tool_result: sub_agent
+      repeat: true
+      text: The delegate handed back what it had.
+      token_delay: 1ms
+      chunk_runes: 6
+    # Step 3 — the delegation.
+    - when:
+        last_message: ^Delegate the survey to a sub-agent
+      repeat: true
+      tool_calls:
+        - name: sub_agent
+          arguments: '{"task":"Read the workspace files one at a time and describe them","name":"survey"}'
+    # Step 9's edge — the same delegation, this time asking for a raised cap in the CALL itself. A
+    # call may lower the bound and never raise it, so this must still stop at three.
+    - when:
+        last_message: ^Delegate it again with a raised cap
+      repeat: true
+      tool_calls:
+        - name: sub_agent
+          arguments: '{"task":"Read the workspace files one at a time and describe them","name":"survey","max_steps":50}'
+    # The child, four turns deep. Turn 1 is picked by its task; every later turn by the tool the
+    # previous one ran. A cap of 3 stops it inside turn 3, before it ever speaks.
+    - when:
+        last_message: Read the workspace files one at a time
+      repeat: true
+      tool_calls:
+        - name: read_file
+          arguments: '{"path":"a.txt"}'
+    - when:
+        tool_result: read_file
+      repeat: true
+      tool_calls:
+        - name: list_dir
+          arguments: '{"path":"."}'
+    - when:
+        tool_result: list_dir
+      repeat: true
+      tool_calls:
+        - name: grep
+          arguments: '{"pattern":"hello"}'
+    # Turn 4 — the child's only visible text, and the only turn a capped child never reaches.
+    - when:
+        tool_result: grep
+      repeat: true
+      text: The workspace holds a.txt and it says hello.
+      token_delay: 1ms
+      chunk_runes: 6
+    # Anything neither the parent nor the child claims.
+    - repeat: true
+      text: Nothing else to add.

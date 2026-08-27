@@ -1,0 +1,13 @@
+# The upstream the T-07 faulted tests talk to: a server that always answers with NOTHING.
+#
+# One turn, repeated forever, setting none of text / tool_calls / http / hang — stubllm's
+# empty-reply turn. It streams a `finish_reason: stop` and no content at all, which is exactly what
+# the checklist's own hand-written Python stub sends, and it is what makes the engine ABANDON the
+# run's final Turn: a Turn that neither spoke nor acted has produced nothing to hand on.
+#
+# Every request gets the same nothing, the session-title call included, so the fixture holds for a
+# driven TUI, an `apogee daemon` and anything else that dials it.
+model: fault-model
+turns:
+    - repeat: true
+      finish_reason: stop

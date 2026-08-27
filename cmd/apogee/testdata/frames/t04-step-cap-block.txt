@@ -1,0 +1,30 @@
+╭────────────────────────────────────────────────────────────────────────────────────────────────╮ ┃
+│ ▗▄▄ ▄▄▄ ▗▄▄ ▗▄▄▖▗▄▄ ▗▄▄                                                  host     probe-target │ ┃
+│ ▗▄▄▌▌  ▌▌  ▌▌  ▌▙▄▄▌▙▄▄▌                                                 model    cap-model    │ ┃
+│ ▚▄▄▌▙▄▄▘▚▄▄▘▚▄▄▌▚▄▄ ▚▄▄                                                  version  <version>      │ ┃
+│     ▌        ▄▄▘                                                                               │ ┃
+╰────────────────────────────────────────────────────────────────────────────────────────────────╯ ┃
+                                                                                                   ┃
+· context window unknown — automatic compaction and the Budget are inactive; set context-window:   ┃
+  in config.yaml                                                                                   ┃
+                                                                                                   ┃
+❯ Delegate the survey to a sub-agent.                                                              ┃
+                                                                                                   ┃
+✦ Sub-Agent                                                                                        ┃
+┌─┶ survey ✓ ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ 3 tool calls · done ▼ ┃
+    [delegate stopped at its step cap (3 steps); partial result — its last visible text follows]   ┃
+    (no visible text)                                                                              ┃
+                                                                                         see less… │
+│                                                                                                  │
+│ Read the workspace files one at a time and describe them                                         │
+│                                                                                                  │
+│ ✦ Tools (3 calls)                                                                                │
+│   ┝ Read ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ 2 lines ▶ │
+
+▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔ Delegated survey ▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔
+
+╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ Send a message…  ⏎ send · ⌥⏎ newline · ↑ recall · ⌃c quit                                        │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+  probe-target ✦ cap-model ✦ <workdir>
+▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁

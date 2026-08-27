@@ -336,6 +336,7 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 		Fire:   firings.fire,
 		Gate:   w.gate.wait,
 		Notify: w.bridge.NotifySchedule,
+		Clock:  tuiScheduleClock,
 	})
 	if err != nil {
 		return fmt.Errorf("apogee: build the scheduler: %w", err)
