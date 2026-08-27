@@ -6,9 +6,10 @@ package main
 // look at is what this asserts on: the frame a terminal would have shown.
 //
 // The black-box half — the terminal left clean on exit, a real SIGWINCH, a real pid — is
-// TestE2ESmokePTY's (plan item 6). What is here is everything a driver inside the process can see.
+// TestE2ESmokePTY's, below. What is here is everything a driver inside the process can see.
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -199,6 +200,132 @@ func TestE2ESmokeInProcess(t *testing.T) {
 	stub.AssertConsumed(t)
 }
 
+// TestE2ESmokePTY walks T-25 again — the SHIPPED BINARY this time, in a real pseudo-terminal —
+// and adds the claims no driver inside the process can make: a resize that is a genuine SIGWINCH,
+// an exit status from a real pid, and the state the terminal is LEFT in once apogee is gone. Step
+// 10's "the shell prompt is intact and `stty sane` should not be necessary" is the whole reason
+// this test exists: it is a property of the terminal, not of any frame.
+//
+// It is deliberately shorter than the in-process walk. Every pane, every verb and the whole
+// save/restore path are asserted there, against the same composition this binary is built from;
+// repeating them here would buy a second copy of the same evidence at the price of the package's
+// wall-clock budget.
+func TestE2ESmokePTY(t *testing.T) {
+	script, err := stubllm.Load("testdata/stubllm/smoke.yaml")
+	if err != nil {
+		t.Fatalf("load the smoke script: %v", err)
+	}
+	stub := stubllm.New(t, script)
+	sess := launchPTY(t, stub)
+	drv := sess.drv
+
+	// Step 1 — the binary draws its frame in a terminal it negotiated for itself.
+	drv.WaitText("Send a message")
+	drv.WaitQuiet(settled)
+	footer := footerRow(t, drv.Frame())
+	for _, want := range []string{stub.Model, "probe-target"} {
+		if !strings.Contains(footer, want) {
+			t.Errorf("the footer does not name %q: %q", want, footer)
+		}
+	}
+
+	// Step 2 — a prompt, the tool call it produces, and the streamed reply after it.
+	submit(drv, "What files are in this workspace?")
+	drv.WaitText("entries")
+	drv.WaitText("The workspace holds one file")
+
+	// Steps 3 and 4 — the write asks first, "a" allows it, and the file on disk carries the line.
+	submit(drv, `Append a line saying "smoke test" to a.txt.`)
+	drv.WaitText("Always allow this session")
+	// The decision keys are dead for the first 100 ms the pane is on screen (approvalArmDelay), so
+	// that a keystroke already in flight cannot answer a question the human has not read yet. A
+	// driver types faster than a human and has to wait for the arm the same way.
+	drv.WaitQuiet(settled)
+	drv.Type("a")
+	drv.WaitText("Appended the smoke test line")
+	if got := sess.readWorkspaceFile("a.txt"); !strings.Contains(got, "smoke test") {
+		t.Errorf("a.txt = %q after the approved write; want the appended line", got)
+	}
+
+	// Step 8 — /version, from the binary's own embedded VERSION. The base version rather than the
+	// full one: build provenance depends on how the binary was built, and this one was built by
+	// TestMain rather than by make.
+	submit(drv, "/version")
+	drv.WaitText(apogee.BaseVersion())
+
+	// Step 9 — a real resize: TIOCSWINSZ on the pty and the SIGWINCH that comes with it. The frame
+	// reflows and the footer gives way from the left with an ellipsis.
+	drv.Resize(60, 20)
+	drv.WaitQuiet(settled)
+	narrow := drv.Frame()
+	if narrow.Width() != 60 {
+		t.Fatalf("the frame is %d columns after a SIGWINCH to 60", narrow.Width())
+	}
+	if got := footerRow(t, narrow); !strings.Contains(got, "…") {
+		t.Errorf("the narrow footer does not truncate with an ellipsis: %q", got)
+	}
+
+	// Step 10 — Ctrl+C twice, and then the terminal itself is the assertion.
+	if code := drv.Quit(); code != 0 {
+		t.Errorf("apogee exited %d; want 0", code)
+	}
+	raw := string(drv.Bytes())
+	if got := lastOf(raw, "\x1b[?1049h", "\x1b[?1049l"); got != "\x1b[?1049l" {
+		t.Errorf("the last alternate-screen sequence was %q; apogee did not hand the primary "+
+			"screen back", got)
+	}
+	if got := lastOf(raw, "\x1b[?25l", "\x1b[?25h"); got != "\x1b[?25h" {
+		t.Errorf("the last cursor sequence was %q; the terminal is left with an invisible cursor",
+			got)
+	}
+	if got := lastSGR(raw); got != "\x1b[0m" && got != "\x1b[m" {
+		t.Errorf("the last SGR sequence was %q; the terminal is left with stuck colours", got)
+	}
+	// And the line discipline the shell would come back to: echo on, canonical input on. This is
+	// "no `stty sane` needed", read off the pty rather than judged by eye.
+	if echo, canonical := drv.TTYState(); !echo || !canonical {
+		t.Errorf("the terminal was left with echo=%v canonical=%v; want both restored",
+			echo, canonical)
+	}
+
+	// The --tui-trace seam, which only this driver can exercise: the file holds what was painted,
+	// and replaying it gives back the same two counters the in-process driver reads off its screen.
+	if got := sess.TraceBytes(); got == 0 {
+		t.Error("the --tui-trace file recorded no bytes; the trace seam painted nothing")
+	}
+	if got := sess.TraceFullRepaints(); got == 0 {
+		t.Error("the --tui-trace file recorded no full repaint; not even the first frame")
+	}
+}
+
+// lastOf returns whichever of a and b appears later in raw, or "" when neither does. It is how a
+// paired terminal sequence — enter/leave, hide/show — is asserted on honestly: what matters is not
+// that the release was sent but that nothing re-took the screen after it.
+func lastOf(raw, a, b string) string {
+	ia, ib := strings.LastIndex(raw, a), strings.LastIndex(raw, b)
+	switch {
+	case ia < 0 && ib < 0:
+		return ""
+	case ib > ia:
+		return b
+	default:
+		return a
+	}
+}
+
+// sgrPattern matches one SGR (colour and attribute) sequence.
+var sgrPattern = regexp.MustCompile(`\x1b\[[0-9;:]*m`)
+
+// lastSGR is the final colour instruction the terminal was given — the one still in force once the
+// program is gone. Anything but a reset is a terminal left painted.
+func lastSGR(raw string) string {
+	all := sgrPattern.FindAllString(raw, -1)
+	if len(all) == 0 {
+		return ""
+	}
+	return all[len(all)-1]
+}
+
 // settingsHint is the settings pane's own footer line — what a test waits to LEAVE the screen to
 // know the pane is really closed, since the section headers scroll and cannot say.
 const settingsHint = "↑/↓ select · ⏎ edit"
@@ -301,8 +428,9 @@ func closePane(drv *tuitest.Driver, marker string) {
 	drv.WaitQuiet(settled)
 }
 
-// submit types a line into the prompt box and sends it.
-func submit(drv *tuitest.Driver, text string) {
+// submit types a line into the prompt box and sends it. It takes the driver interface rather than
+// one driver, so the same step means the same thing in process and through the pty.
+func submit(drv driven, text string) {
 	drv.Type(text)
 	drv.WaitFor(func() bool { _, _, ok := drv.Frame().Find(promptTail(text)); return ok },
 		tuitest.Awaiting("the typed prompt to appear in the prompt box"))

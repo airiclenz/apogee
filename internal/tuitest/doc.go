@@ -29,6 +29,10 @@
 //   - driver.go — [Driver]: the in-process terminal. It hands a program its input, its output and
 //     the terminal's own answers, and the test its keys, its resize and its quit.
 //   - keys.go — [Key]: the byte sequences a terminal sends for the keys apogee binds.
+//   - pty.go — [PTYDriver]: the black-box terminal. It starts the SHIPPED binary under a real
+//     pseudo-terminal and reads back what only a real terminal knows — colour, window size, a
+//     pid, and the state the terminal was left in.
+//   - pty_windows.go — the Windows stand-in for it: the type, and a skip in every method.
 //
 // Documented in docs/design/test-drivers.md; the "which driver observes which claim" table there
 // decides whether a test step may be manual at all.

@@ -107,6 +107,118 @@ func (s *e2eSession) start(drv *tuitest.Driver) {
 		tuitest.Awaiting("apogee's first frame"))
 }
 
+// driven is the half of a driver an e2e helper needs: keys in, and the frame and the waits that
+// answer them. Both drivers satisfy it — the in-process [tuitest.Driver] and the black-box
+// [tuitest.PTYDriver] — which is what lets one helper serve both smoke tests rather than two
+// copies of it drifting apart.
+type driven interface {
+	Type(text string)
+	Press(key tuitest.Key)
+	Frame() tuitest.Frame
+	Screen() *tuitest.Screen
+	WaitFor(cond func() bool, opts ...tuitest.Option)
+	WaitText(text string)
+	WaitGone(text string)
+	WaitQuiet(quiet time.Duration)
+}
+
+var (
+	_ driven = (*tuitest.Driver)(nil)
+	_ driven = (*tuitest.PTYDriver)(nil)
+)
+
+// ptySession is one driven run of the SHIPPED BINARY: the home and workspace it owns, the pty it
+// runs in, and the trace file it writes. It is the black-box counterpart of [e2eSession], and the
+// two are deliberately separate types rather than one with a mode flag — what they can observe is
+// not the same, and a helper that compiled for both while only working for one is how a black-box
+// claim quietly becomes an in-process one.
+type ptySession struct {
+	t     *testing.T
+	home  string
+	ws    string
+	trace string
+
+	drv *tuitest.PTYDriver
+}
+
+// launchPTY starts apogee's built binary under a real pseudo-terminal, in a temp home and a temp
+// workspace of its own, and returns once the first frame has reached the emulator. args are extra
+// command-line arguments; --config, --workspace and --tui-trace are always supplied and must not be
+// repeated. It skips when TestMain could not build the binary.
+//
+// Unlike [launchTUI] it DOES pass --tui-trace: this is the driver that paints into a real stdout,
+// so the trace wraps the terminal it was written for, and [ptySession.TraceBytes] reads it back.
+func launchPTY(t *testing.T, stub *stubllm.Server, args ...string) *ptySession {
+	t.Helper()
+
+	if e2eBinary == "" {
+		t.Skipf("the binary under test was not built: %v", e2eBuildErr)
+	}
+	// Registered first so it is the last cleanup to run — see launchTUI.
+	tuitest.CheckLeaks(t)
+	assertNoAmbientApogeeConfig(t)
+
+	s := &ptySession{
+		t:     t,
+		home:  e2eHome(t, stub),
+		ws:    e2eWorkspace(t),
+		trace: filepath.Join(t.TempDir(), "tui-trace.txt"),
+	}
+	argv := append([]string{"--config", s.home, "--workspace", s.ws, "--tui-trace", s.trace}, args...)
+	s.drv = tuitest.NewPTYDriver(t, e2eBinary, argv, ptyEnv(), e2eSize)
+	s.drv.WaitFor(func() bool { return s.drv.Screen().BytesWritten() > 0 },
+		tuitest.Awaiting("apogee's first frame"))
+	return s
+}
+
+// ptyEnv is the WHOLE environment the launched binary gets: nothing is inherited, so what a driven
+// run reads is exactly what this names, and an APOGEE_* variable in the developer's shell cannot
+// reach it. HOME is the suite's throwaway one (TestMain's), never the developer's; PATH is there
+// because apogee resolves the programs its tools spawn through it.
+func ptyEnv() []string {
+	return []string{
+		"HOME=" + suiteTempHome,
+		"USERPROFILE=" + suiteTempHome,
+		"PATH=" + os.Getenv("PATH"),
+	}
+}
+
+// Home is the apogee home this run owns — a temp dir, never the real one.
+func (s *ptySession) Home() string { return s.home }
+
+// Workspace is the workspace root the file tools are scoped to.
+func (s *ptySession) Workspace() string { return s.ws }
+
+// readWorkspaceFile reads a file from the run's workspace, failing the test if it is not there.
+func (s *ptySession) readWorkspaceFile(name string) string {
+	s.t.Helper()
+
+	data, err := os.ReadFile(filepath.Join(s.ws, name))
+	if err != nil {
+		s.t.Fatalf("read %s from the workspace: %v", name, err)
+	}
+	return string(data)
+}
+
+// TraceBytes and TraceFullRepaints are the black-box flicker measure (T-24), read back out of the
+// --tui-trace file: how much the renderer painted, and how much of that repainted the world. They
+// are NOT comparable with [e2eSession]'s in-process counters — a real pty is in raw mode and the
+// in-process driver's output maps LF to CR LF — so a ceiling is pinned per driver.
+//
+// The file is re-read on every call rather than cached: it grows for as long as the run does, and a
+// number taken before the run ended would answer a different question.
+func (s *ptySession) TraceBytes() int64 { return s.traceScreen().BytesWritten() }
+
+// TraceFullRepaints is how many traced writes carried a full-screen erase or a cursor-home.
+func (s *ptySession) TraceFullRepaints() int { return s.traceScreen().FullRepaints() }
+
+// traceScreen replays the trace into a closed screen — the picture the terminal ended on, and the
+// counters that came with it.
+func (s *ptySession) traceScreen() *tuitest.Screen {
+	s.t.Helper()
+	return tuitest.ReplayTrace(s.t, s.trace, e2eSize)
+}
+
 // Relaunch starts apogee again on the same home and workspace with a fresh driver — the reopen half
 // of every "what did the last run leave behind?" claim. The previous run must have ended.
 func (s *e2eSession) Relaunch() *tuitest.Driver {

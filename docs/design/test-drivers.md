@@ -286,7 +286,7 @@ byte-for-byte what it was before the split: `--tui-trace` and the Windows sync-q
 entirely and `tea.WithOutput(out)` installed instead. A `--tui-trace` path alongside a driver output
 is **refused**, not honoured — the trace wraps `os.Stdout`, which the driver's own output wins over,
 so honouring it would hand back an empty file that looks exactly like a run that painted nothing.
-The PTY driver, which does drive a real stdout, is where the trace seam is exercised (plan item 6).
+The PTY driver, which does drive a real stdout, is where the trace seam is exercised.
 
 `extra` options are appended last, so a caller's `WithInput` / `WithWindowSize` /
 `WithColorProfile` / `WithEnvironment` beats anything built inside.
@@ -346,7 +346,80 @@ more prompt that makes the record on disk grow.
 
 ### PTYDriver
 
-*Filled by plan item 6.*
+`tuitest.PTYDriver` runs the **shipped binary** under a real pseudo-terminal
+(`github.com/creack/pty`) and reads it back through the same [`Screen`](#frame). Nothing about the
+program under test is arranged for the test: no launcher seam, no injected program options, no
+in-process anything. It is the binary, in a terminal.
+
+```go
+sess := launchPTY(t, stub)          // cmd/apogee/e2e_support_test.go
+drv := sess.drv                     // *tuitest.PTYDriver
+drv.WaitText("Send a message")
+drv.Resize(60, 20)                  // TIOCSWINSZ + SIGWINCH, for real
+code := drv.Quit()                  // Ctrl+C twice, then the child's exit status
+echo, canonical := drv.TTYState()   // the line discipline the shell gets back
+```
+
+The surface mirrors the in-process driver — `Type`, `Press`, `Resize`, `Frame`, `Screen`, the four
+waits — and adds the four things only a real terminal has:
+
+- `Bytes()` — every byte the child wrote to the terminal, unconsumed. Frames are the picture; this
+  is the wire, and the teardown claims are about sequences no frame can show: the alternate-screen
+  release, the cursor-show, the final SGR reset.
+- `TTYState()` — echo and canonical mode, read off the pty. This is "no `stty sane` needed" as a
+  mechanical fact. It is read through the MASTER fd, because `pty.StartWithAttrs` closes the slave
+  once the child holds it; a pty pair has one line discipline, and a mode ioctl on the master is
+  answered for the pair.
+- `Pid()`, `Exited()`, `Kill()` — a real pid, a real exit status, and `SIGKILL` to the child's whole
+  session. `Kill` is the black-box half of "reopen after an abrupt end" (T-03); the in-process
+  driver cancels a context for the other half.
+- `Resize(w, h)` — `pty.Setsize` **and** an explicit `SIGWINCH`, then a wait for the repaint that
+  answers it. The in-process driver sends a `WindowSizeMsg`; here the kernel does it.
+
+**When to use it.** Colour and wide runes (the child negotiates `TERM=xterm-256color` itself), a
+resize that has to be a signal, the state the terminal is left in on exit, a real pid to kill, and
+anything about the binary's own argv, environment or exit code. Everything else belongs in the
+in-process driver, which is roughly seven times cheaper per step.
+
+**The binary is built once per `go test` run.** `cmd/apogee`'s existing `TestMain` — the one that
+redirects `HOME` to a suite temp dir — also runs `go build -o <suiteTempHome>/apogee .`, without
+`-race`, because what the black-box driver drives is the binary as it ships. The build uses the
+DEVELOPER's `HOME` rather than the suite's throwaway one, or it would miss the module and build
+caches and recompile the world on every run. On failure `e2eBinary` stays empty, `e2eBuildErr` says
+why, and `launchPTY` skips with it: a test that cannot build the binary has not found a bug in it.
+The build is unconditional for an ordinary run of the suite — one cached `go build` is cheaper than
+a second thing to get wrong — with exactly one exception: `keysource_test.go` re-invokes the test
+binary as an `api-key-cmd:` program several times per run, and a child that only prints a key never
+drives the binary. Building there multiplies one build by every re-exec (+10 s on the package,
+measured), so `TestMain` recognises the fixture's marker argument and skips it.
+
+**The environment is stated, not inherited.** `launchPTY` gives the child `HOME` (the suite's temp
+one), `PATH`, and nothing else, plus the `TERM`/`COLORTERM` the driver appends. An `APOGEE_*`
+variable in the developer's shell cannot reach a driven run.
+
+**The settle rule is the same** — no bytes for 150 ms means the frame is final — because it is a
+property of the picture, not of how the bytes arrived. The two drivers' **byte counters are not**:
+a real pty in raw mode does no newline translation and the in-process driver's output does, so a
+flicker ceiling is pinned per driver.
+
+**`--tui-trace` is exercised here and nowhere else.** `tui.Build` refuses a trace beside a driver
+output (it would wrap an `os.Stdout` nothing paints into), so `launchTUI` never passes the flag and
+`launchPTY` always does. `tuitest.ReplayTrace(t, path, size)` feeds the trace's quoted writes back
+through a `Screen`, which gives the picture the terminal ended on and the two counters for free;
+`ptySession.TraceBytes()` / `TraceFullRepaints()` are that, read fresh on every call.
+
+**Windows.** `pty.go` is `//go:build !windows`; `pty_windows.go` provides the same type with a
+`t.Skip` in every entry point, so a black-box test file compiles there and skips. The driver is
+deliberately unix-only — a ConPTY stand-in would be a different mechanism asserting different
+things under the same test's name — and the in-process driver, which has no platform gate, keeps
+Windows covered for frames, keys, waits and goldens.
+
+The worked example is `TestE2ESmokePTY` (`cmd/apogee/e2e_smoke_test.go`): T-25 again, through the
+binary, deliberately shorter than the in-process walk — the first frame and its footer, a prompt
+answered with a tool call, the approval pane and the `a` that takes it, the file on disk,
+`/version`, a real SIGWINCH resize, and then step 10 as a property of the terminal: exit code 0,
+the last alternate-screen sequence is the leave, the last cursor sequence is the show, the last SGR
+is a reset, and echo and canonical mode are back.
 
 ## judge
 
@@ -382,9 +455,9 @@ A new end-to-end test is `cmd/apogee/e2e_<topic>_test.go`, and it follows this c
    of its own (the session title, whatever a Mechanism needs), and an ordered script silently hands
    one of them the turn meant for the user's prompt. End the fixture with one `repeat: true` turn
    for those, and let `AssertConsumed` prove the scripted turns fired.
-3. **Own the home and the workspace.** `launchTUI` gives the run a `t.TempDir()` home and a
-   `t.TempDir()` workspace and passes both as flags; it also refuses to run with `APOGEE_CONFIG`
-   set. No test may read or write the real `~/.apogee`.
+3. **Own the home and the workspace.** `launchTUI` — and `launchPTY` for the black-box driver —
+   gives the run a `t.TempDir()` home and a `t.TempDir()` workspace and passes both as flags; both
+   refuse to run with `APOGEE_CONFIG` set. No test may read or write the real `~/.apogee`.
 4. **Wait for the thing, never for a duration.** `WaitText` / `WaitGone` / `WaitFor` are bounded and
    print the failing frame. A settle (`WaitQuiet`) is for a frame you are about to READ — and only
    ever after a content wait, because a screen that has not started painting yet is quiet too.
@@ -400,17 +473,23 @@ A new end-to-end test is `cmd/apogee/e2e_<topic>_test.go`, and it follows this c
 
 ## Gates and budgets
 
-*The PTY, judge and final-measurement rows are filled by plan items 6, 7 and 16.*
+*The judge and final-measurement rows are filled by plan items 7 and 16.*
 
 No build tags and no `-short`: a test that only runs when someone remembers a flag is a test nobody
 runs. The in-process e2e set runs in **every plain `go test`**, on every platform, with no gate at
 all — it needs no terminal, no model and no network beyond loopback.
 
+The PTY set runs in every plain `go test` too, and has exactly two ways not to run, both of which
+say so: it skips on Windows (the driver is unix-only) and it skips when `TestMain` could not build
+the binary, with the build error in the skip message. It needs no terminal of its own — it makes
+one — and no model beyond the same loopback stub.
+
 The e2e tests are **serial**: they use `t.Setenv` and package-var seams, so none of them calls
 `t.Parallel`, and every swapped package var is restored through `t.Cleanup`. The budget is therefore
 serial wall clock. The whole set added by this plan has ~15 s under `go test -race ./cmd/apogee/`,
 on top of the 5.5 s the package cost before it. `TestE2ESmokeInProcess` — thirteen checklist steps,
-two launches and a restore — measures **≈ 8.5 s** of that under `-race`.
+two launches and a restore — measures **≈ 7.5 s** of that under `-race`, and `TestE2ESmokePTY`
+**≈ 1 s** on top of the one-off `go build` (**≈ 1.5 s**) every run of the package now pays.
 
 Two rules keep it there. Every wait is a bounded `WaitFor` (5 s default) on a condition, never a
 sleep; and a settle is 150 ms of no bytes, taken only when a frame is about to be READ.

@@ -4,7 +4,11 @@ import (
 	"bytes"
 	"errors"
 	"io"
+	"os"
+	"strconv"
+	"strings"
 	"sync"
+	"testing"
 	"time"
 
 	"github.com/charmbracelet/x/vt"
@@ -155,6 +159,42 @@ func (s *Screen) Close() {
 	// must be free to finish whatever it is doing first.
 	_, _ = io.WriteString(pipe, closeSentinel)
 	<-s.pumped
+}
+
+// ReplayTrace rebuilds a --tui-trace file into a Screen of the given size. The trace is every
+// write the renderer made, one Go-quoted string per line (internal/tui's tracedOutput), so
+// replaying it in order reconstructs both the picture the terminal ended on and the two counters:
+// how many bytes were painted, and how many of those writes repainted the world.
+//
+// It is how a BLACK-BOX test measures what a driver inside the process reads off its own screen.
+// The in-process driver refuses a trace — it would wrap an os.Stdout nothing paints into — so the
+// PTY driver is the one that exercises the seam, and this is where its bytes come back.
+//
+// The returned Screen is already closed: nothing is going to paint into it again, and a live one
+// would leave a goroutine behind for [CheckLeaks] to find.
+func ReplayTrace(t testing.TB, path string, size Size) *Screen {
+	t.Helper()
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("tuitest: read the trace at %s: %v", path, err)
+	}
+	s := NewScreen(size.W, size.H)
+	for i, line := range strings.Split(string(data), "\n") {
+		if line == "" {
+			continue
+		}
+		// %q escapes every newline, so one line of the file is exactly one write.
+		write, uerr := strconv.Unquote(line)
+		if uerr != nil {
+			t.Fatalf("tuitest: %s line %d is not a quoted trace write: %v", path, i+1, uerr)
+		}
+		if _, werr := s.Write([]byte(write)); werr != nil {
+			t.Fatalf("tuitest: replay %s line %d: %v", path, i+1, werr)
+		}
+	}
+	s.Close()
+	return s
 }
 
 // pump drains the emulator's reply pipe into the answer queue. The pipe is unbuffered — an

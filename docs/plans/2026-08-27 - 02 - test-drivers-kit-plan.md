@@ -626,7 +626,64 @@ described, ≤ 5 s under `-race`.
 
 **Commit:** `test(tuitest): in-process Driver over the launcher seam; T-25 smoke runs under go test`
 
-## 6. `internal/tuitest` PTYDriver, TestMain build, and the PTY smoke (T-25 black-box)
+## 6. `internal/tuitest` PTYDriver, TestMain build, and the PTY smoke (T-25 black-box) — ✅ DONE (2026-08-27)
+
+NOTES (2026-08-27): the termios read-back is taken through the pty MASTER fd, not the slave.
+`pty.StartWithAttrs` closes the slave once the child holds it, and a pty pair has one line
+discipline — on Linux the kernel redirects a mode ioctl on the master to the slave explicitly,
+the BSD masters pass it through. Verified against a probe (`stty -echo -icanon` … `stty sane`)
+before the driver was written, and pinned by `TestPTYDriverRestoresNothingItselfMeasures`.
+NOTES (2026-08-27): `github.com/charmbracelet/x/termios` moved from the indirect to the direct
+block of go.mod. It supplies the one cross-platform `GetTermios(fd)` the tty-state claim needs;
+it was already in the module graph as an indirect dependency of the charm stack, so go.sum is
+unchanged and no new module is downloaded. The alternative was a per-GOOS ioctl constant in a
+third file.
+NOTES (2026-08-27): `TestMain` builds the binary for every ordinary run of the suite but NOT for
+`keysource_test.go`'s re-exec of the test binary as an `api-key-cmd:` program (recognised by the
+fixture's own marker argument). The item's "no `-run`-aware laziness" is about not making the
+build conditional on which tests were selected; a child process that only prints a key and exits
+never drives the driver, and building there multiplied one build by every re-exec — the package
+went 12.9 s → 26.1 s under `-race` before this, and 14.4 s after.
+NOTES (2026-08-27): `tuitest.ReplayTrace(t, path, size)` — the `--tui-trace` reader
+`session.TraceBytes()`/`TraceFullRepaints()` are built on — landed in `screen.go` rather than in
+`pty.go` or a file of its own. It is a `Screen` constructor (replaying the trace's quoted writes
+gives the counters and the final picture for free) and it must be platform-neutral, because
+`cmd/apogee/e2e_support_test.go` compiles on Windows too, where `pty.go` does not. `screen.go` is
+not in the item's file list; `pty_test.go` pins it.
+NOTES (2026-08-27): `submit` in `e2e_smoke_test.go` was widened from `*tuitest.Driver` to a new
+`driven` interface (Type/Press/Frame/Screen/the four waits, declared in `e2e_support_test.go`,
+with compile-time proofs that both drivers satisfy it), so one helper means the same thing in
+process and through the pty. The black-box run is a separate `ptySession` type rather than a mode
+flag on `e2eSession`: what the two can observe is not the same, and a helper that compiled for
+both while only working for one is how a black-box claim quietly becomes an in-process one.
+NOTES (2026-08-27): `TestE2ESmokePTY` walks a SHORTER T-25 than the in-process test — steps 1–4,
+8, 9 and 10 — rather than all thirteen. Every pane, every verb and the whole save/restore path
+are asserted in `TestE2ESmokeInProcess` against the same composition this binary is built from;
+repeating them buys a second copy of the same evidence at the price of the package's budget.
+`stub.AssertConsumed` is therefore not called there (the fixture's step-13 turn is only reached
+by the in-process walk), and the fixture is reused rather than forked.
+NOTES (2026-08-27): step 10's "terminal left clean" is asserted as three LAST-sequence claims
+over the raw master stream (`PTYDriver.Bytes()`) rather than as `strings.Contains`: the last of
+`\x1b[?1049h`/`\x1b[?1049l` must be the leave, the last of `\x1b[?25l`/`\x1b[?25h` the show, and
+the last SGR a reset. "The release was sent" is not the claim; "nothing re-took the screen after
+it" is. The termios pair (echo, canonical) is the fourth.
+NOTES (2026-08-27): the PTY smoke waits `settled` after the approval pane appears before pressing
+`a`. The decision keys are dead for `approvalArmDelay` (100 ms, `internal/tui/approval.go:50`) so
+a keystroke already in flight cannot answer an unread question; the in-process test pays that
+wait incidentally through its frame assertions, a driver typing at full speed does not.
+NOTES (2026-08-27): `internal/tuitest` passed 10 non-test files with this item, so `doc.go`'s
+file map gained `pty.go` and `pty_windows.go` and a three-line `docmap_test.go` was added (the
+coding-standards rule the plan forwards; ADR 0043's guard). `pty_test.go` also drives the shell
+with a trailing loop rather than letting it exit — a child that has already gone cannot be
+killed, and the last claim of that test is about killing one.
+NOTES (2026-08-27): measured on this box — `go test -race -count=1 -run 'TestE2ESmoke|TestPTY'
+./cmd/apogee/ ./internal/tuitest/` = 10.1 s + 1.4 s (acceptance, green); `TestE2ESmokePTY` 0.98 s
+under `-race` on top of a one-off `go build` of ~1.5 s per package run; the whole `cmd/apogee`
+package under `-race` = 14.4 s against item 5's measured 12.9 s, so the black-box half adds ~1.5
+s of the plan's ~15 s budget. `GOOS=windows go vet ./internal/tuitest/ ./cmd/apogee/` compiles.
+Ran `-count=3` on the PTY tests with no flake.
+NOTES (2026-08-27): no CHANGELOG entry from this item — plan item 8 owns the single
+`[Unreleased]` entry covering the whole kit (items 2–7), as recorded under items 2–5.
 
 **What:** the black-box driver for claims only a real terminal shows.
 
