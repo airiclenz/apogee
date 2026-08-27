@@ -115,6 +115,13 @@ func (p *Provider) Get(id string) (Skill, bool) { return p.current().Get(id) }
 // scan — never a fresh listing paired with stale failures.
 func (p *Provider) Skipped() []SkipError { return p.current().Skipped() }
 
+// Suggest ranks the current snapshot's skills against a draft (see Catalog.Suggest). It reads the
+// SAME snapshot List does, so a suggestion the band paints is always a skill the "/" menu can
+// offer and the loop can resolve — never a row pointing at a skill the last Reload dropped.
+func (p *Provider) Suggest(draft string, exclude func(id string) bool, limit int) []Suggestion {
+	return p.current().Suggest(draft, exclude, limit)
+}
+
 // ResolveSkills satisfies domain.SkillResolver against the current snapshot, so the loop resolves
 // attached IDs through whatever catalog the last Reload installed (see Catalog.ResolveSkills).
 func (p *Provider) ResolveSkills(ids []string) []domain.ResolvedSkill {

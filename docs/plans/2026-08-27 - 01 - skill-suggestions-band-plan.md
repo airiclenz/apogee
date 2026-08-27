@@ -200,7 +200,20 @@ triggers and no line for one without.
 
 ---
 
-## 3. The matcher: `skills.Catalog.Suggest` (BM25 + triggers + evidence gate)
+## 3. The matcher: `skills.Catalog.Suggest` (BM25 + triggers + evidence gate) — ✅ DONE (2026-08-27)
+
+NOTES (2026-08-27): `internal/skills/load.go` is edited although the item's Files list names only
+catalog.go/provider.go/doc.go — the item text puts the index build "in `Load` after the walk", and
+`Load` lives in load.go; the change there is the single `cat.finalize()` call, with `finalize()`
+itself in catalog.go as the item specifies.
+
+NOTES (2026-08-27): the plan's stemmer order (`ies`→`y`, `es`, `s`, `ing`, `ed`, first match wins)
+is implemented literally, so "releases" stems to "releas" while "release" stays "release". Left as
+specified rather than upgraded to a Porter-style rule; it costs a match only on that one inflection
+pair and the tokeniser table test records the behaviour.
+
+NOTES (2026-08-27): `BenchmarkSuggest` measures ~244 µs/op over 1000 synthetic skills on this host
+(informational, nothing asserted) — a real library is one to two orders of magnitude smaller.
 
 Depends on item 2.
 

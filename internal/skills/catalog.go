@@ -25,6 +25,10 @@ type Catalog struct {
 	// carries the folder for consumers, and this map exists for the shadow record alone.
 	pathByID map[string]string
 	skipped  []SkipError
+	// idx is the suggestion matcher's BM25 index over byID, built once by finalize at the end of
+	// the scan (suggest.go). It is nil until then, which is exactly what Suggest tests before it
+	// answers — an unfinalized catalog suggests nothing rather than half a corpus.
+	idx *index
 }
 
 // newCatalog returns an empty catalog ready for set. Load always returns a non-nil *Catalog —
@@ -58,6 +62,13 @@ func (c *Catalog) set(s Skill, path string) {
 	c.byID[s.ID] = s
 	c.pathByID[s.ID] = path
 }
+
+// finalize builds the suggestion index over everything the scan loaded. It is the LAST step of a
+// scan and the point the catalog becomes immutable: after it, no method mutates any field, so the
+// Provider can hand ONE snapshot to a matcher running on the UI goroutine and a resolver running
+// on the loop goroutine with no lock and no lazy build. Load calls it exactly once; a Catalog that
+// never went through it serves everything else normally and simply suggests nothing.
+func (c *Catalog) finalize() { c.idx = buildIndex(c.byID) }
 
 // addSkip records one SKILL.md discovery could not load, in walk order.
 func (c *Catalog) addSkip(e SkipError) {

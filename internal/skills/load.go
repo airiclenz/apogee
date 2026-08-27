@@ -68,6 +68,7 @@ func Load(src Sources) (*Catalog, error) {
 	for _, a := range sourceAnchors(src) {
 		loadDir(cat, a)
 	}
+	cat.finalize()
 	return cat, cat.skipError()
 }
 

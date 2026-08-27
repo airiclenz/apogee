@@ -1,0 +1,318 @@
+package skills
+
+import (
+	"fmt"
+	"path/filepath"
+	"reflect"
+	"testing"
+)
+
+// suggestFixture is the eight-skill library every ranking test in this file draws on: two
+// overlapping audit skills, one with authored triggers, one whose summary reuses the corpus's
+// common words, and four unrelated skills that must stay out of the results.
+func suggestFixture() []Skill {
+	return []Skill{
+		{
+			ID:          "code-audit",
+			DisplayName: "Code Audit",
+			Summary:     "High-signal code review of real bugs, security holes and architectural drift.",
+		},
+		{
+			ID:          "security-audit",
+			DisplayName: "Security Audit",
+			Summary:     "Find and triage latent security vulnerabilities and holes in the workspace, ranked by exploitability.",
+		},
+		{
+			ID:          "brew-release",
+			DisplayName: "Brew Release",
+			Summary:     "Publish a new version of the CLI and update the Homebrew tap formula.",
+			Triggers:    []string{"cut a release", "homebrew"},
+		},
+		{
+			ID:          "grill-me",
+			DisplayName: "Grill Me",
+			Summary:     "Interview the user relentlessly about a plan or design until reaching shared understanding.",
+		},
+		{
+			ID:          "handoff",
+			DisplayName: "Handoff",
+			Summary:     "Compact the current conversation into a handoff document for another agent to pick up.",
+		},
+		{
+			ID:          "refocus",
+			DisplayName: "Refocus",
+			Summary:     "Brief the user on the workspace state: what works, what is in flight, what is planned.",
+		},
+		{
+			ID:          "test-checklist",
+			DisplayName: "Test Checklist",
+			Summary:     "Compile a release test checklist for everything implemented since the last cut release.",
+		},
+		{
+			ID:          "note-taker",
+			DisplayName: "Note Taker",
+			Summary:     "Take notes on the parser and the audit trail of a workspace file.",
+		},
+	}
+}
+
+// newFixtureCatalog assembles a finalized catalog from the given skills, exactly as Load does —
+// the index is built once at the end, so Suggest sees the same immutable snapshot production does.
+func newFixtureCatalog(t *testing.T, list []Skill) *Catalog {
+	t.Helper()
+	c := newCatalog()
+	for _, s := range list {
+		c.set(s, fmt.Sprintf("/library/%s/SKILL.md", s.ID))
+	}
+	c.finalize()
+	return c
+}
+
+// suggestedIDs reduces a result to the ids in rank order — what every ordering assertion compares.
+func suggestedIDs(t *testing.T, got []Suggestion) []string {
+	t.Helper()
+	ids := make([]string, 0, len(got))
+	for _, s := range got {
+		ids = append(ids, s.ID)
+	}
+	return ids
+}
+
+func TestSuggestBelowTheContentWordFloorReturnsNothing(t *testing.T) {
+	t.Parallel()
+	c := newFixtureCatalog(t, suggestFixture())
+
+	for _, draft := range []string{"", "audit", "please audit the", "a b"} {
+		if got := c.Suggest(draft, nil, 0); got != nil {
+			t.Errorf("Suggest(%q) = %v, want nil below %d content words", draft, suggestedIDs(t, got), minContentWords)
+		}
+	}
+}
+
+func TestSuggestRanksTheStrongerLexicalMatchFirst(t *testing.T) {
+	t.Parallel()
+	c := newFixtureCatalog(t, suggestFixture())
+
+	got := c.Suggest("please audit the parser for security holes", nil, 0)
+
+	want := []string{"security-audit", "code-audit", "note-taker"}
+	if ids := suggestedIDs(t, got); !reflect.DeepEqual(ids, want) {
+		t.Fatalf("Suggest = %v, want %v", ids, want)
+	}
+	for _, s := range got {
+		if s.TriggerHit {
+			t.Errorf("%s reported a trigger hit; the fixture declares none for it", s.ID)
+		}
+	}
+}
+
+func TestSuggestPutsATriggerHitFirst(t *testing.T) {
+	t.Parallel()
+	c := newFixtureCatalog(t, suggestFixture())
+
+	got := c.Suggest("cut a release for homebrew", nil, 0)
+
+	if len(got) < 2 {
+		t.Fatalf("Suggest = %v, want the triggered skill and at least one lexical match", suggestedIDs(t, got))
+	}
+	if got[0].ID != "brew-release" || !got[0].TriggerHit {
+		t.Fatalf("top suggestion = %+v, want brew-release with TriggerHit", got[0])
+	}
+	// The boost must lift the trigger above a skill that shares two draft terms lexically, which
+	// is what test-checklist ("the last cut release") is in the fixture for.
+	if got[1].ID != "test-checklist" || got[1].TriggerHit {
+		t.Fatalf("second suggestion = %+v, want test-checklist without a trigger hit", got[1])
+	}
+	if got[0].Score <= got[1].Score {
+		t.Errorf("trigger score %v did not beat the lexical score %v", got[0].Score, got[1].Score)
+	}
+}
+
+func TestSuggestASingleSharedTermAdmitsNothing(t *testing.T) {
+	t.Parallel()
+	c := newFixtureCatalog(t, suggestFixture())
+
+	// "compile" appears in exactly one summary and nothing else in the draft matches anywhere, so
+	// the evidence gate must keep the band dark rather than offer a one-word coincidence.
+	if got := c.Suggest("compile the daemon binary", nil, 0); got != nil {
+		t.Fatalf("Suggest = %v, want nil below %d matched terms", suggestedIDs(t, got), minMatchedTerms)
+	}
+}
+
+func TestSuggestExcludeDropsASkillAndTheNextFillsIn(t *testing.T) {
+	t.Parallel()
+	c := newFixtureCatalog(t, suggestFixture())
+	const draft = "please audit the parser for security holes"
+
+	before := suggestedIDs(t, c.Suggest(draft, nil, 2))
+	after := suggestedIDs(t, c.Suggest(draft, func(id string) bool { return id == "security-audit" }, 2))
+
+	if want := []string{"security-audit", "code-audit"}; !reflect.DeepEqual(before, want) {
+		t.Fatalf("Suggest without exclude = %v, want %v", before, want)
+	}
+	if want := []string{"code-audit", "note-taker"}; !reflect.DeepEqual(after, want) {
+		t.Fatalf("Suggest with exclude = %v, want %v", after, want)
+	}
+}
+
+func TestSuggestLimitCapsTheResult(t *testing.T) {
+	t.Parallel()
+	c := newFixtureCatalog(t, suggestFixture())
+	const draft = "please audit the parser for security holes"
+
+	if got := c.Suggest(draft, nil, 1); len(got) != 1 {
+		t.Errorf("Suggest(limit 1) returned %d results, want 1", len(got))
+	}
+	if got := c.Suggest(draft, nil, 0); len(got) != defaultSuggestLimit {
+		t.Errorf("Suggest(limit 0) returned %d results, want the default %d", len(got), defaultSuggestLimit)
+	}
+	if got := c.Suggest(draft, nil, -5); len(got) != defaultSuggestLimit {
+		t.Errorf("Suggest(limit -5) returned %d results, want the default %d", len(got), defaultSuggestLimit)
+	}
+	if got := c.Suggest(draft, nil, 50); len(got) != 3 {
+		t.Errorf("Suggest(limit 50) returned %d results, want the 3 admitted", len(got))
+	}
+}
+
+func TestSuggestBreaksScoreTiesByIDAscending(t *testing.T) {
+	t.Parallel()
+	// Two skills with identical summaries and equal-length ids score identically on a draft that
+	// only touches the shared words, so ONLY the id tiebreak can decide the order.
+	c := newFixtureCatalog(t, []Skill{
+		{ID: "twin-beta", DisplayName: "Twin Beta", Summary: "A duplicated fixture entry for tie ordering."},
+		{ID: "twin-alpha", DisplayName: "Twin Alpha", Summary: "A duplicated fixture entry for tie ordering."},
+	})
+
+	got := c.Suggest("duplicated fixture entry ordering", nil, 0)
+
+	want := []string{"twin-alpha", "twin-beta"}
+	if ids := suggestedIDs(t, got); !reflect.DeepEqual(ids, want) {
+		t.Fatalf("Suggest = %v, want %v (id ascending on a score tie)", ids, want)
+	}
+	if got[0].Score != got[1].Score {
+		t.Fatalf("fixture no longer ties: %v vs %v", got[0].Score, got[1].Score)
+	}
+}
+
+func TestSuggestCarriesTheRowFields(t *testing.T) {
+	t.Parallel()
+	c := newFixtureCatalog(t, suggestFixture())
+
+	got := c.Suggest("cut a release for homebrew", nil, 1)
+
+	if len(got) != 1 {
+		t.Fatalf("Suggest returned %d results, want 1", len(got))
+	}
+	if got[0].DisplayName != "Brew Release" {
+		t.Errorf("DisplayName = %q, want %q", got[0].DisplayName, "Brew Release")
+	}
+	if got[0].Summary == "" {
+		t.Error("Summary is empty; the band has nothing to paint")
+	}
+}
+
+func TestSuggestOnAnUnfinalizedOrEmptyCatalogReturnsNothing(t *testing.T) {
+	t.Parallel()
+
+	if got := newCatalog().Suggest("audit the parser for security", nil, 0); got != nil {
+		t.Errorf("unfinalized catalog suggested %v, want nil", suggestedIDs(t, got))
+	}
+	if got := newFixtureCatalog(t, nil).Suggest("audit the parser for security", nil, 0); got != nil {
+		t.Errorf("empty catalog suggested %v, want nil", suggestedIDs(t, got))
+	}
+}
+
+func TestSuggestExcludesEveryAdmittedSkill(t *testing.T) {
+	t.Parallel()
+	c := newFixtureCatalog(t, suggestFixture())
+
+	got := c.Suggest("please audit the parser for security holes", func(string) bool { return true }, 0)
+
+	if got != nil {
+		t.Fatalf("Suggest = %v, want nil when everything is excluded", suggestedIDs(t, got))
+	}
+}
+
+func TestProviderSuggestServesTheCurrentSnapshot(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	writeSkill(t, filepath.Join(home, "skills"), "brew-release",
+		"---\nid: brew-release\ndisplayName: Brew Release\nsummary: Publish a new version and update the Homebrew tap.\ntriggers:\n  - cut a release\n---\nbody\n")
+
+	p := NewProvider(Sources{Home: home})
+
+	got := p.Suggest("time to cut a release now", nil, 0)
+	if len(got) != 1 || got[0].ID != "brew-release" || !got[0].TriggerHit {
+		t.Fatalf("Provider.Suggest = %+v, want the triggered brew-release", got)
+	}
+}
+
+func TestTokenize(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		in   string
+		want []string
+	}{
+		{"hyphenated id splits into words", "code-audit", []string{"code", "audit"}},
+		{"stopwords and one-rune fragments drop", "please review the a I diffs", []string{"review", "diff"}},
+		{"plural in ies stems to y", "utilities", []string{"utility"}},
+		{"plural in es stems", "holes", []string{"hol"}},
+		{"gerund and past tense stem", "running planned", []string{"runn", "plann"}},
+		{"a stem that would get too short keeps the word", "goes ties", []string{"goes", "ties"}},
+		{"digits survive as terms", "release v2 builds 1024", []string{"release", "v2", "build", "1024"}},
+		{"case and punctuation are normalised", "Security: HOLES, found!", []string{"security", "hol", "found"}},
+		{"nothing but stopwords yields nothing", "the and of to", nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := tokenize(tc.in)
+			if len(got) == 0 && len(tc.want) == 0 {
+				return
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("tokenize(%q) = %v, want %v", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestTokenizeDropsTheStopwordsBetweenTriggerWords(t *testing.T) {
+	t.Parallel()
+	// The contiguity check runs over tokenized sequences, which is why an author's "cut a release"
+	// still hits a user's "cut the release".
+	if !containsSequence(tokenize("cut the release tonight"), tokenize("cut a release")) {
+		t.Error("a trigger phrase did not survive differing stopwords between its words")
+	}
+	if containsSequence(tokenize("release the cut branch"), tokenize("cut a release")) {
+		t.Error("a trigger phrase matched out of order; the check must be contiguous")
+	}
+	if containsSequence(tokenize("anything at all"), tokenize("the and of")) {
+		t.Error("an all-stopword trigger matched; an empty phrase must never hit")
+	}
+}
+
+// BenchmarkSuggest documents the per-keystroke cost over a library far larger than any real one.
+// It asserts nothing — it exists so a future change to the matcher shows its price.
+func BenchmarkSuggest(b *testing.B) {
+	list := make([]Skill, 0, 1000)
+	for i := range 1000 {
+		list = append(list, Skill{
+			ID:          fmt.Sprintf("synthetic-skill-%d", i),
+			DisplayName: fmt.Sprintf("Synthetic Skill %d", i),
+			Summary:     fmt.Sprintf("Audit the parser and review the workspace for security holes in module %d.", i),
+			Triggers:    []string{fmt.Sprintf("audit module %d", i)},
+		})
+	}
+	c := newCatalog()
+	for _, s := range list {
+		c.set(s, fmt.Sprintf("/library/%s/SKILL.md", s.ID))
+	}
+	c.finalize()
+
+	b.ResetTimer()
+	for range b.N {
+		_ = c.Suggest("please audit the parser for security holes", nil, 0)
+	}
+}
