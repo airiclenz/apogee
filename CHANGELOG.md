@@ -8,6 +8,8 @@ point is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+## [0.18.0] — 2026-08-27
+
 ### Added
 
 - A config file saved on disk now says so: a re-read that applied anything leaves one transcript
