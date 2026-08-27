@@ -1,0 +1,60 @@
+# The upstream TestE2ESmokeInProcess talks to: checklist T-25's conversation, scripted.
+# Hand-written rather than recorded, because what it has to be is SHORT and deterministic —
+# a recorded fixture would carry a real model's wording and a real model's timings.
+#
+# The turns with a `when:` are matched before the ordered ones, first match wins, so the order
+# below is a precedence: the two `repeat: true` turns answer what apogee asks on its own account
+# (the session title, and anything a Mechanism needs), and the four in the middle are the
+# conversation. AssertConsumed is what proves all four of those actually fired.
+model: smoke-model
+turns:
+    # The session title. apogee asks for one off the first prompt, so this has to be matched
+    # BEFORE the prompt's own turn or it would take it.
+    - when:
+        last_message: The user's first request
+      repeat: true
+      text: Workspace file list
+    # Step 2 — "What files are in this workspace?" answers with a tool call.
+    - when:
+        last_message: ^What files are in this workspace
+      reasoning: The user wants the file list, so list the workspace root.
+      tool_calls:
+        - name: list_dir
+          arguments: '{"path":"."}'
+    - when:
+        tool_result: list_dir
+      text: The workspace holds one file, a.txt.
+      token_delay: 1ms
+      chunk_runes: 6
+      usage:
+        prompt: 812
+        completion: 9
+        cached: 128
+    # Steps 3-4 — the write that has to be approved.
+    - when:
+        last_message: ^Append a line saying
+      tool_calls:
+        - name: write_file
+          arguments: '{"path":"a.txt","content":"hello\nsmoke test\n"}'
+    - when:
+        tool_result: write_file
+      text: Appended the smoke test line to a.txt.
+      token_delay: 1ms
+      chunk_runes: 6
+      usage:
+        prompt: 934
+        completion: 8
+        cached: 640
+    # Step 13 — one more prompt in the RESTORED session, answered from the same script.
+    - when:
+        last_message: ^Is there anything else worth knowing
+      text: Nothing else — the workspace is still just a.txt.
+      token_delay: 1ms
+      chunk_runes: 6
+      usage:
+        prompt: 1044
+        completion: 11
+    # Anything apogee asks that none of the above claims. Never consumed, so the turns above stay
+    # the whole script.
+    - repeat: true
+      text: OK.

@@ -40,6 +40,14 @@ const checkerFrame = "tuitest.leakedGoroutines("
 // goroutine was started BY a test, and its stack says "created by", not "testing.tRunner".
 var harnessFrames = []string{"testing.tRunner(", "testing.(*M).Run(", "testing.runTests("}
 
+// timerFrames are goroutines that are ALREADY over and are only waiting for a clock to say so.
+// bubbletea's Tick starts a goroutine that parks on a timer for the whole interval and cannot be
+// cancelled by design (commands.go), so every tick a TUI has in flight when it quits outlives the
+// test by up to its own period. Reporting those would make this check unusable against any program
+// that ticks — which is every TUI — and they hold nothing: no channel a dead program reads, no file,
+// no lock. What this check is for is a goroutine that is still WORKING.
+var timerFrames = []string{"bubbletea/v2.Tick.func1("}
+
 // CheckLeaks registers a cleanup that fails the test when a goroutine from the driver's own stack
 // is still running after it. Call it FIRST in a driver test — before anything is launched — so the
 // cleanup runs last, after every other cleanup has had its chance to stop things.
@@ -77,7 +85,8 @@ func leakedGoroutines() []string {
 	}
 	var left []string
 	for _, stack := range strings.Split(string(buf), "\n\n") {
-		if strings.TrimSpace(stack) == "" || strings.Contains(stack, checkerFrame) || harness(stack) {
+		if strings.TrimSpace(stack) == "" || strings.Contains(stack, checkerFrame) ||
+			harness(stack) || parkedOnATimer(stack) {
 			continue
 		}
 		for _, marker := range leakMarkers {
@@ -88,6 +97,16 @@ func leakedGoroutines() []string {
 		}
 	}
 	return left
+}
+
+// parkedOnATimer reports whether a stack is one of [timerFrames] — over, but not yet told.
+func parkedOnATimer(stack string) bool {
+	for _, frame := range timerFrames {
+		if strings.Contains(stack, frame) {
+			return true
+		}
+	}
+	return false
 }
 
 // harness reports whether a stack belongs to the test runner rather than to the code under test.

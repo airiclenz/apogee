@@ -26,6 +26,9 @@
 //   - golden.go — [Golden]: byte-for-byte frames under testdata/frames/, with redactions so a
 //     golden does not churn, and -update to record them.
 //   - leak.go — [CheckLeaks]: the guard that a driver test's goroutines stop when it does.
+//   - driver.go — [Driver]: the in-process terminal. It hands a program its input, its output and
+//     the terminal's own answers, and the test its keys, its resize and its quit.
+//   - keys.go — [Key]: the byte sequences a terminal sends for the keys apogee binds.
 //
 // Documented in docs/design/test-drivers.md; the "which driver observes which claim" table there
 // decides whether a test step may be manual at all.

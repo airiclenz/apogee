@@ -475,7 +475,87 @@ parked in a `internal/tuitest` frame trips `CheckLeaks`, a finished one does not
 
 **Commit:** `test(tuitest): Frame over x/vt, WaitFor and goldens; tui.Build splits program construction from Run`
 
-## 5. `internal/tuitest` in-process Driver over the launcher seam, and the first e2e (T-25 in-process)
+## 5. `internal/tuitest` in-process Driver over the launcher seam, and the first e2e (T-25 in-process) — ✅ DONE (2026-08-27)
+
+NOTES (2026-08-27): the item names the cmd/apogee half's type `session`; `cmd/apogee` already
+imports `internal/session` under that name, so a `session` type in package main does not
+compile (nine existing files declare `session` as the package identifier). It is `e2eSession`
+here, and `launchTUI` returns it.
+NOTES (2026-08-27): `WithStub(stub)` is folded into `launchTUI(t, drv, stub, args...)` as a
+parameter rather than an option constructor, so `args ...string` stays the variadic tail the
+item's signature gives it. A nil stub seeds an unreachable endpoint, which startup accepts (ADR
+0024 decision 8).
+NOTES (2026-08-27): `Driver` gained `Attach(prog, cancel)` and `Finished(err)`, which the
+item's API list implies but does not name: it names `Resize` (sends through the program),
+`Kill` (cancels the program ctx) and `Done()` (the run's result) without saying how the driver
+comes by any of the three. `Quit()` returns that result rather than nothing, so T-25 step 10's
+"Quit() returns nil" is a claim the test can make.
+NOTES (2026-08-27): `Driver.Output()` is the Screen behind an ONLCR translation, not the Screen
+itself. With a non-tty input bubbletea puts the renderer in map-newline mode (tea.go:1075, a
+workaround for emulated ptys left in cooked mode): it then moves the cursor down with a bare LF
+*and assumes the column reset to 0* (ultraviolet/terminal_renderer.go:1382). A raw terminal
+holds the column, so without the translation the renderer's model of where it is drifts at the
+first full-width row and every frame after it is unreadable. The driver is therefore the
+terminal bubbletea believes it is talking to — a line discipline with ONLCR. The PTY driver
+(item 6) must NOT do this, which is a second reason the two drivers' byte counters are not
+comparable (the item already records the first).
+NOTES (2026-08-27): a lone `Esc` is followed by a 70 ms gap before the driver writes again. No
+reader can tell the Escape KEY from the start of an escape SEQUENCE without a timeout
+(ultraviolet's is 50 ms), so `Esc` then `/` typed microseconds apart is delivered as one
+`alt+/` — which is exactly what happened to `/version` in the smoke test. It is the one place a
+driver waits on a clock rather than on the screen.
+NOTES (2026-08-27): `Resize` waits for the repaint it caused, rather than leaving that to the
+caller. The emulator resizes the instant it is asked, so a frame read straight after is the OLD
+frame at the NEW size — and a settle check passes, because the screen has genuinely been quiet:
+the program was never given a chance to paint. The in-test form of the trap cost the
+wide-resize assertion of T-25 step 9.
+NOTES (2026-08-27): `Kill` ends the input BEFORE it cancels. A killed bubbletea program skips
+`waitForReadLoop` and closes its cancel reader out from under the live read loop
+(tea.go:1249-1255), which `-race` reports as a data race inside muesli/cancelreader, and which
+can also leave the read loop parked in `EpollWait` on a closed epoll fd. Ending the input first
+lets the read loop finish on EOF — which does not quit the program, so what the cancel kills is
+still a running program.
+NOTES (2026-08-27): item 4's `CheckLeaks` gained one exemption — goroutines parked in
+`bubbletea.Tick.func1`. `tea.Tick` starts a goroutine that waits out its whole interval and
+cannot be cancelled by design, so every tick a TUI has in flight when it quits outlives the
+test; reporting those makes the check unusable against any program that ticks. They hold
+nothing and are already over. `TestDriverBurstOfKeysArrivesWhole` was added alongside, pinning
+that a burst of presses reaches the model whole — the pin that says a lost keystroke in a
+driver test is the program's doing, not the driver's.
+NOTES (2026-08-27): T-25 step 5's walk is one lap of the settings list, one key at a time, and
+five rows back up rather than the full list back. Three findings forced the shape: the pane
+WRAPS (so "past the last row" never stops moving and the walk ends when the selection returns
+to where it started), the pane is taller than the terminal (so the ten section headers can only
+be collected across frames), and the pane drops rapid ↓ presses (see the DEFER line) — so each
+press waits for the selection to move. The full walk back up cost another ~2 s of the package's
+budget and proved nothing the lap had not.
+NOTES (2026-08-27): T-25 step 10's "Session saved · resume with" line is written straight to
+`os.Stdout` by `runRoot` (wire.go), not through the cobra command's out, so a driven run cannot
+capture it; the step asserts the session record on disk instead, which is the claim behind the
+sentence.
+NOTES (2026-08-27): step 12 asserts the RENDERED transcript — "Write", "entries" — rather than
+the wire tool names `list_dir`/`write_file`, which the transcript never shows. The item's step
+list names the wire spellings.
+NOTES (2026-08-27): `cmd/apogee/testdata/stubllm/smoke.yaml` carries two `repeat: true` turns
+the item's script sketch does not: apogee asks for a session title off the first prompt (that
+request's text CONTAINS the prompt, so it must be matched first or it takes the prompt's turn),
+and a trailing catch-all answers anything else asked on apogee's own account. The four
+conversation turns stay non-repeat, so `AssertConsumed` proves each of them fired.
+NOTES (2026-08-27): `## Writing a new e2e test` is filled here. The skeleton's placeholder said
+"filled by plan item 8", but item 5's own text assigns it to this item; item 8's text covers
+the claim table, the skill gate and the coding-standards line. The in-process half of `## Gates
+and budgets` (which the skeleton assigns to items 5, 6, 7 and 16) is filled too, with the
+measured 8.5 s.
+NOTES (2026-08-27): no golden is recorded for the smoke test — goldens are for the rendering
+surfaces of items 9–15 (ratified call 13). `e2eSession.Redactions()` exists, is documented, and
+is what those items pass to `tuitest.Golden`.
+NOTES (2026-08-27): measured wall clock — `go test -race -count=1 -run
+'TestE2ESmokeInProcess|TestDriver' ./cmd/apogee/ ./internal/tuitest/` = 9.0 s (acceptance:
+under 15 s); the whole `cmd/apogee` package under `-race` = 12.9 s against the plan's 5.5 s
+baseline, so the in-process e2e adds ~7.3 s of the ~15 s the plan budgets for the whole set.
+Item 6's PTY smoke has ~7.7 s of that left.
+NOTES (2026-08-27): no CHANGELOG entry from this item — plan item 8 owns the single
+`[Unreleased]` entry covering the whole kit (items 2–7), as recorded under items 2, 3 and 4.
 
 **What:** the driver that runs the real composition inside the test binary.
 

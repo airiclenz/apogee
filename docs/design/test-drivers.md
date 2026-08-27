@@ -293,7 +293,56 @@ The PTY driver, which does drive a real stdout, is where the trace seam is exerc
 
 ### In-process Driver
 
-*Filled by plan item 5.*
+`tuitest.Driver` is a terminal for a Bubble Tea program running inside the test binary. It owns the
+[`Screen`](#frame) the renderer paints into and the input the key parser reads, and nothing else —
+what program it drives is the caller's business, which is what lets the same driver serve
+`cmd/apogee`'s real composition and a three-line probe model.
+
+```go
+drv := tuitest.NewDriver(t, tuitest.Size{W: 100, H: 30})
+program, cleanup, err := tui.Build(ctx, eng, br, opts, drv.Output(), drv.ProgramOptions()...)
+drv.Attach(program, cancel)          // the Send target for Resize, the cancel for Kill
+go func() { _, err := program.Run(); drv.Finished(err) }()
+```
+
+- `ProgramOptions()` — `WithInput` (the pipe), `WithWindowSize`, `WithoutSignals`,
+  `WithoutSignalHandler`, `WithColorProfile(TrueColor)`, `WithEnvironment(TERM/COLORTERM)`. The
+  OUTPUT is deliberately not among them: it is `tui.Build`'s own `out` argument, `drv.Output()`.
+- `Type(text)`, `Press(key)` — bytes, not `tea.KeyPressMsg` values. The `Key` constants are the
+  sequences a real xterm sends, each pinned by `TestKeysDecodeAsIntended` against a live program.
+- `Resize(w, h)` — resizes the emulator, sends the `WindowSizeMsg`, and waits for the repaint.
+- `Frame()`, `Screen()`, `WaitText`, `WaitGone`, `WaitQuiet`, `WaitFor` — the assertion surface.
+- `Quit()` — Ctrl+C twice, then the run's error. `Kill()` — the context, and nothing tidied.
+- `Done()` / `Finished(err)` — how the run's result reaches whoever is waiting for it.
+
+Three things about it are decisions rather than details, and each of them was a bug first:
+
+- **The input is one `os.Pipe`.** Bubble Tea wraps its input in a cancel reader, and the
+  epoll-backed one is only available for an `*os.File`; anything else falls back to a reader it
+  cannot cancel, costing every quit 500 ms and a leaked goroutine.
+- **The output maps LF to CR LF.** With a non-tty input Bubble Tea puts the renderer in
+  map-newline mode (`tea.go:1075`, a workaround for emulated ptys left in cooked mode): it then
+  moves the cursor down with a bare LF *and assumes the column reset to 0*. A raw terminal does no
+  such thing, so the driver is the terminal Bubble Tea thinks it is talking to — a line discipline
+  with ONLCR. The PTY driver must NOT do this, which is one reason the two drivers' byte counters
+  are not comparable.
+- **A lone `Esc` is followed by a 70 ms gap.** No terminal can tell the Escape KEY from the start
+  of an escape SEQUENCE by looking; every reader resolves it on a timeout (ultraviolet's is 50 ms).
+  Press `Esc` and type `/` five milliseconds later and the program is handed one `alt+/`. This is
+  the only place a driver waits on a clock instead of on the screen.
+
+`cmd/apogee/e2e_support_test.go` is the half that cannot live in `internal/tuitest`, because the
+launcher seam is in package `main`: `launchTUI(t, drv, stub, args...)` builds a temp home and a temp
+workspace, runs `newRootCommand(launch)` with `--config` and `--workspace` pointing at them, and
+returns an `e2eSession` — `Relaunch()` (same home, fresh driver), `Quit()`, `Workspace()`,
+`Redactions()` (the default golden redaction set), and the screen's repaint counters.
+
+The worked example is `TestE2ESmokeInProcess` (`cmd/apogee/e2e_smoke_test.go`), which is checklist
+item T-25 — "the one pass a human makes over the most-used path end to end" — step for step: the
+first frame and its footer, a prompt answered with a tool call, an approval pane and the `a` that
+takes it, the file on disk, `/settings` walked a whole lap, `/usage`, `/skills`, `/version`, a
+resize narrower and wider, Ctrl+C twice, a relaunch, `/sessions`, the restored transcript, and one
+more prompt that makes the record on disk grow.
 
 ### PTYDriver
 
@@ -324,13 +373,44 @@ of the rows are filled by plan item 8**, and plan item 16 re-checks every exampl
 
 ## Writing a new e2e test
 
-*Filled by plan item 8.* The checklist a new `cmd/apogee/e2e_<topic>_test.go` follows: pick the
-driver from the table, script stubllm instead of writing a handler, assert on `Frame` cells (or a
-golden for a rendering surface), add a judge rubric only for a judgment half, and keep inside the
-budget below.
+A new end-to-end test is `cmd/apogee/e2e_<topic>_test.go`, and it follows this checklist.
+
+1. **Pick the driver from the table above.** In-process unless the claim is about a real terminal,
+   a real process, or the tty state on the way out.
+2. **Script stubllm; never write a handler.** The fixture goes in `cmd/apogee/testdata/stubllm/`.
+   Match on `when:` rather than on order wherever the conversation has a shape — apogee makes calls
+   of its own (the session title, whatever a Mechanism needs), and an ordered script silently hands
+   one of them the turn meant for the user's prompt. End the fixture with one `repeat: true` turn
+   for those, and let `AssertConsumed` prove the scripted turns fired.
+3. **Own the home and the workspace.** `launchTUI` gives the run a `t.TempDir()` home and a
+   `t.TempDir()` workspace and passes both as flags; it also refuses to run with `APOGEE_CONFIG`
+   set. No test may read or write the real `~/.apogee`.
+4. **Wait for the thing, never for a duration.** `WaitText` / `WaitGone` / `WaitFor` are bounded and
+   print the failing frame. A settle (`WaitQuiet`) is for a frame you are about to READ — and only
+   ever after a content wait, because a screen that has not started painting yet is quiet too.
+5. **Assert on cells.** `Frame.Find`, `Frame.Row`, `Frame.Cell(...).Width`, `Frame.StyleRuns`. A
+   `Golden` is for a rendering surface whose whole layout is the claim, and always with
+   `sess.Redactions()...` — a golden carrying a temp path or today's date churns on every run.
+6. **Close what you open.** Press Esc and then WAIT for the pane to be gone. A test that carries on
+   after a pane that never closed types its next command into that pane and fails somewhere else.
+7. **Add a judge rubric only for a judgment half** — wording, tone, "reads as one row". Everything
+   a cell can settle is settled by a cell.
+8. **Stay inside the budget below.** Every wait bounded, no `t.Parallel` (the e2e tests use
+   `t.Setenv` and package-var seams), and every swapped package var restored via `t.Cleanup`.
 
 ## Gates and budgets
 
-*Filled by plan items 5, 6, 7 and 16.* Which tests run in a plain `go test`, what skips where (PTY
-on Windows or without a pty; judge without its gate), which join `make live-eval`, and the measured
-wall clock of the whole e2e set under `-race` against its ~15 s ceiling. No build tags, no `-short`.
+*The PTY, judge and final-measurement rows are filled by plan items 6, 7 and 16.*
+
+No build tags and no `-short`: a test that only runs when someone remembers a flag is a test nobody
+runs. The in-process e2e set runs in **every plain `go test`**, on every platform, with no gate at
+all — it needs no terminal, no model and no network beyond loopback.
+
+The e2e tests are **serial**: they use `t.Setenv` and package-var seams, so none of them calls
+`t.Parallel`, and every swapped package var is restored through `t.Cleanup`. The budget is therefore
+serial wall clock. The whole set added by this plan has ~15 s under `go test -race ./cmd/apogee/`,
+on top of the 5.5 s the package cost before it. `TestE2ESmokeInProcess` — thirteen checklist steps,
+two launches and a restore — measures **≈ 8.5 s** of that under `-race`.
+
+Two rules keep it there. Every wait is a bounded `WaitFor` (5 s default) on a condition, never a
+sleep; and a settle is 150 ms of no bytes, taken only when a frame is about to be READ.
