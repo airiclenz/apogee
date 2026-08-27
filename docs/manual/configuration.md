@@ -760,7 +760,12 @@ text only, because anything the OS would *run* rather than show (a `.bat`, a `.c
 a `.desktop`) is left as a path for you to open deliberately. A **web page counts as
 something it would run**: `.html`, `.htm`, `.xhtml` and `.svg` are left as a path too,
 because a browser executes what a page carries — including a page that merely arrived in
-a repo you cloned — and a `file://` launch can carry no policy to stop it. Over SSH — a
+a repo you cloned — and a `file://` launch can carry no policy to stop it. **A document
+that can carry code counts too**: the OpenDocument formats (`.odt`, `.ods`, `.odp`) hold
+Basic macros with no macro-free variant to tell them apart, and an `.epub` is a zip of
+web pages its reader may run, so those are left as a path as well; `.docx`, `.xlsx`,
+`.pptx`, `.pdf` and `.rtf` still open, because there the extension itself states the file
+carries no macro. Over SSH — a
 devbox, a VM, a container — browser-renderable documents (`.html`, `.htm`, `.svg`,
 `.pdf`) are served from a small built-in server and the URL is printed beside the path,
 so one cmd+click opens the document in the browser on *your* machine; that rung keeps the

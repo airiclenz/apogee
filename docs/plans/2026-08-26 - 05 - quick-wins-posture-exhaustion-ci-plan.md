@@ -411,7 +411,9 @@ change and prove the routing is untouched. `TestModelNoBuilderByValue` stays gre
 
 ---
 
-## 6. Opener allow-list drops `.odt`, `.ods`, `.odp` and `.epub` (ADR 0019, fifth amendment)
+## 6. Opener allow-list drops `.odt`, `.ods`, `.odp` and `.epub` (ADR 0019, fifth amendment) — ✅ DONE (2026-08-27)
+
+NOTES (2026-08-27): also updated `docs/manual/configuration.md` "Showing a finished document" (not in the item's Files list) — the manual promised a local desktop opens "documents, images and text", which this item makes untrue for the four extensions; added one sentence naming them beside the existing web-page carve-out.
 
 **What:** the rung-1 rule is "formats whose default handler DISPLAYS the file rather than
 executing it", and the shipped set disagrees with it again: the ODF trio is the LibreOffice

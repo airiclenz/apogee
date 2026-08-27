@@ -338,3 +338,34 @@ abandoned: the two rungs differ here **because** their ability to bound the docu
 is the ladder working as designed and not drift. Rung 1 stays the wider set for every inert format;
 rung 3 stays unbounded (the first amendment's (c)); the Windows name bound (the second amendment)
 is untouched.
+
+## Amendment (2026-08-26) — the allow-list refuses the ODF formats and `.epub`
+
+**Why now.** Raised by the security audit of 2026-08-25 (F-04, fires on a stock install) and
+ratified by the owner on 2026-08-26. As in the third amendment, the rule stands and the **set
+moves**: the rule is "the formats whose default handler **displays** the file rather than executing
+it", and the shipped set still admitted `.odt`, `.ods` and `.odp` — the OpenDocument container is
+the LibreOffice one that carries Basic macros, with **no macro-free variant** to name in the
+extension, which is exactly the class the third amendment removed `.doc`, `.xls` and `.ppt` for —
+and `.epub`, a zip of XHTML that several readers render with script enabled, which is the class the
+fourth amendment removed `.html` for. Both were oversights of their own amendment rather than
+decisions: neither was ever argued for. The preconditions are unchanged from the fourth amendment's
+— `present_document` is `ReadOnly` so it auto-runs in every mode, `present.auto-open` defaults true,
+and the document need only have arrived in the clone — and so is the limit: `presentationRungs`
+wires the opener only on a **Local** session with `auto-open` set, and `Opener.argv` additionally
+requires `HasDesktop`, so the persona this defends is the local desktop one.
+
+**(a) `.odt`, `.ods`, `.odp` and `.epub` are out.** They degrade exactly as any refused extension
+does (the first amendment's (a)): **no argv at all**, `ErrNoOpener`, rung 0 — the path is still
+presented, the tool result still reads `shown`, never an error. The user-visible consequence is
+that a local `present_document report.odt` launches no office application.
+
+**(b) What stays.** `.docx`, `.xlsx` and `.pptx` stay: OOXML split the macro-free formats from the
+macro-carrying ones precisely so the **extension states which one it is**, which is the line the
+whole set draws. `.pdf` stays, `.rtf` stays, and the text and image sets are untouched — a CSV is
+still ruled in explicitly (the third amendment's (b)).
+
+**(c) Nothing else moves.** None of the four was ever in rung 2's `browserRenderableExts`
+(`internal/tui/presenter.go`), so the crossing the fourth amendment's (c) describes is untouched
+and its test stays green unchanged; rung 3 stays unbounded (the first amendment's (c)); the Windows
+name bound (the second amendment) is untouched.

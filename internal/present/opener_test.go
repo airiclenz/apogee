@@ -323,7 +323,8 @@ func TestOpenerBuildsThePlatformCommand(t *testing.T) {
 // not execute it" — so the whole executable family is out whatever the OS, and the document,
 // image and text formats a deliverable actually arrives in are in. The office rows pin the line
 // the rule draws — .docx vs .docm — with the pre-2007 binary formats, which have no macro-free
-// variant, on the .docm side of it (ADR 0019, third amendment 2026-07-26).
+// variant, on the .docm side of it (ADR 0019, third amendment 2026-07-26), and the OpenDocument
+// formats beside them for the same reason (fifth amendment 2026-08-26).
 //
 // The four active-content extensions moved from the first list to the second on 2026-08-12 (ADR
 // 0019, fourth amendment). That is the rule being APPLIED, not relaxed or repaired: a browser is
@@ -332,14 +333,16 @@ func TestOpenerBuildsThePlatformCommand(t *testing.T) {
 // metadata address from the browser's network position. They sit further along the same line as
 // .docm — a macro needs one Enable Content click, a <script> needs none — and they keep rung 2,
 // where a Content-Security-Policy can bound them and a file:// launch cannot. Restoring any of
-// them to the allow-list must fail here.
+// them to the allow-list must fail here. .epub joined that second list on 2026-08-26 (fifth
+// amendment) under the same active-content rule: it is a zip of XHTML, and several readers run
+// its script.
 func TestOpenerRenderableAllowsDocumentsAndRefusesPrograms(t *testing.T) {
 	t.Parallel()
 
 	renderable := []string{
 		"report.pdf",
 		"report.md", "notes.txt", "data.json", "config.yaml", "notes.log",
-		"report.docx", "report.odt", "sheet.xlsx", "deck.pptx", "book.epub",
+		"report.docx", "sheet.xlsx", "deck.pptx",
 		"data.csv", // ruled IN (ADR 0019, third amendment): plain text, no container for a macro
 		"shot.png", "photo.jpg", "photo.jpeg", "anim.gif", "shot.webp", "scan.tiff",
 	}
@@ -356,6 +359,7 @@ func TestOpenerRenderableAllowsDocumentsAndRefusesPrograms(t *testing.T) {
 		"report.desktop", "report.sh", "report.py", // Linux and friends
 		"report.docm", "sheet.xlsm", "deck.pptm", // macro-enabled office documents
 		"report.doc", "sheet.xls", "deck.ppt", // pre-2007 office: the one binary container carries macros too
+		"report.odt", "sheet.ods", "deck.odp", "book.epub", "BOOK.EPUB", // ODF carries macros; EPUB is scripted XHTML (ADR 0019, fifth amendment)
 		"report.html", "report.htm", "report.xhtml", "diagram.svg", // active content: the handler is a runtime
 		"REPORT.HTML", "DIAGRAM.SVG", // and the case fold applies to the refusal too
 		"report", "report.", ".bashrc", // no usable extension at all

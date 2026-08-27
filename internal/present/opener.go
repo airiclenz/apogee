@@ -263,11 +263,12 @@ func refuseExecFromWritablePath(argv0, root string) error {
 // Linux has .desktop — and a list of what must never run is a list somebody is always one entry
 // behind on. An extension earns a place here only when its default handler DISPLAYS the file,
 // which is what excludes scripts, installers, shortcuts and every office format whose container
-// can carry a macro: the macro-enabled OOXML formats (.docm/.xlsm/.pptm) and equally the
-// pre-2007 binary formats (.doc/.xls/.ppt), which have no macro-free variant — their handler
-// offers to run whatever the document carries on a single Enable Content click. The line the
-// set draws is .docx vs .docm, and the legacy trio sits on the .docm side of it (ADR 0019,
-// third amendment 2026-07-26). It is also why a file with NO extension is refused: an
+// can carry a macro: the macro-enabled OOXML formats (.docm/.xlsm/.pptm), the pre-2007 binary
+// formats (.doc/.xls/.ppt) and equally the OpenDocument formats (.odt/.ods/.odp) — neither of the
+// latter two has a macro-free variant, so their handler offers to run whatever the document
+// carries on a single Enable Content click. The line the set draws is .docx vs .docm, and both
+// the legacy trio (ADR 0019, third amendment 2026-07-26) and the ODF trio (fifth amendment
+// 2026-08-26) sit on the .docm side of it. It is also why a file with NO extension is refused: an
 // executable text file with a shebang is exactly what a content-sniffing xdg-open would hand
 // to a shell.
 //
@@ -313,17 +314,18 @@ var openerRenderableExts = map[string]bool{
 
 	// .html, .htm, .xhtml and .svg are deliberately absent — see the active-content rule above.
 
-	// Documents: the formats an office or reader application owns. The pre-2007 binary
-	// formats (.doc/.xls/.ppt) are deliberately absent — see the macro rule above.
+	// Documents: the formats an office or reader application owns. The pre-2007 binary formats
+	// (.doc/.xls/.ppt) and the OpenDocument formats (.odt/.ods/.odp) are deliberately absent —
+	// see the macro rule above; ODF is the LibreOffice container that carries Basic macros and
+	// has no macro-free variant, exactly the class the legacy trio was removed for. .epub is
+	// deliberately absent under the ACTIVE-CONTENT rule instead: it is a zip of XHTML that
+	// several readers render with script enabled, which puts it beside .html rather than beside
+	// .docm (ADR 0019, fifth amendment 2026-08-26).
 	".pdf":  true,
 	".rtf":  true,
-	".epub": true,
 	".docx": true,
-	".odt":  true,
 	".xlsx": true,
-	".ods":  true,
 	".pptx": true,
-	".odp":  true,
 
 	// Images: a diagram or screenshot is a deliverable too.
 	".png":  true,

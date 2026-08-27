@@ -223,6 +223,13 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- `present_document` on a local desktop no longer launches the OS handler for `.odt`, `.ods`,
+  `.odp` or `.epub`: the OpenDocument container carries Basic macros with no macro-free variant
+  (the class ADR 0019's third amendment removed `.doc`/`.xls`/`.ppt` for) and an `.epub` is a zip
+  of XHTML several readers run with script enabled (the class the fourth amendment removed
+  `.html` for). The path is still presented — the tool result reads `shown`, never an error
+  (ADR 0019, fifth amendment 2026-08-26).
+
 - **The process-tree teardown is a platform facility now, exported for every spawner (plan item
   6).** The §2.4 teardown seam moved out of `internal/tools` and into `internal/platform` with
   exported names — `ProcessTeardown` (`Contain`/`Reap`/`Release`), `NewProcessTeardown`,
