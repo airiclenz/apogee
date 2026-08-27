@@ -57,3 +57,25 @@ func TestTheFirstClaimantThatWantsAKeyAnswersIt(t *testing.T) {
 		t.Error("/inspect closed on the same esc; a claimed key must never reach the rung below it")
 	}
 }
+
+// TestTabAtIdleWithHintsReachesTheFramesOwnVerb is the other half of tab's routing. The suggestion
+// menu is opened by handleKey's own switch, BELOW the claim order, which is what leaves every
+// claimant above it the tab it already had — the dropdown's second accept key most of all. What this
+// pins is the fall-through: with no surface open, tab is claimed by nobody and reaches that verb.
+func TestTabAtIdleWithHintsReachesTheFramesOwnVerb(t *testing.T) {
+	var rec suggestCall
+	m := typeDraft(t, modelWithOverlayRoom(t, 24, bandOpts(gatedSuggest(&rec))), "audit the parser")
+
+	if _, _, claimed := m.claimKey(keyClaimOrder, keyTab()); claimed {
+		t.Fatal("a claimant took tab at idle; the suggestion menu is the frame's own verb, under them all")
+	}
+
+	next := step(t, m, keyTab())
+
+	if !next.autocomplete.active || next.autocomplete.kind != acSuggest {
+		t.Errorf(
+			"overlay = {active:%v kind:%v}, want tab to have opened the suggestion menu",
+			next.autocomplete.active, next.autocomplete.kind,
+		)
+	}
+}

@@ -6,6 +6,8 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/airiclenz/apogee/internal/skills"
 )
 
 // ----------------------------------------------------------------------------
@@ -47,33 +49,31 @@ type acKind int
 const (
 	acCommand acKind = iota // a "/command" word
 	acFile                  // an "@file" reference
+	acSuggest               // the suggestion band's skills, opened with tab (suggestband.go)
 )
 
 // acItem is one suggestion: value is the text spliced in (the command name, the skill id or the
 // file path, without the "/"/"@" sigil), cells are the row's COLUMNS in its menu's fixed schema
 // (popupRow — the popup module pads them into vertically aligned columns, so no producer here
-// concatenates its own spacing), and skill marks a row of the merged "/" menu that names a SKILL
-// rather than a command. The mark is not decoration: the two kinds of row do different things at
-// accept (a skill writes its token, a command RUNS), so the row has to carry which it is.
+// concatenates its own spacing), and skill marks a row that names a SKILL rather than a command —
+// every row of the suggestion menu, and the skill half of the merged "/" one. The mark is not
+// decoration: the two kinds of row do different things at accept (a skill writes its token, a
+// command RUNS), so the row has to carry which it is.
 //
 // Only the cells are display: prefix matching and accept-on-enter read value (and the parsed verb)
 // exclusively, so re-columning a menu can never change what a row DOES.
 //
-// rank is the row's MATCH QUALITY against the partial being typed (slashMatchRank): the "/" menu
-// sorts by it, so a row the partial prefixes outranks one it merely appears inside. It is a
-// property of the pair (partial, row), not of the row alone, which is why it is computed where the
-// row is built and not stored on the skill or the commandSpec behind it.
-//
-// source is the skill half's other row fact: WHICH source dir the skill was loaded from
-// (skillSource — "workspace", "library"), empty on every command and file row. It rides here rather
-// than being re-derived at render time because the skill it describes is in hand where the row is
-// built (skillSuggestions) and gone by the time the row is composed (slashSuggestions).
+// rank is the row's place in its menu's ordering, lowest first. In the "/" menu that is its MATCH
+// QUALITY against the partial being typed (slashMatchRank), which the menu sorts by, so a row the
+// partial prefixes outranks one it merely appears inside; in the suggestion menu it is the matcher's
+// own placement (openSuggestMenu). Either way it is a property of the pair (menu, row), not of the
+// row alone, which is why it is computed where the row is built and not stored on the skill or the
+// commandSpec behind it.
 type acItem struct {
-	value  string
-	cells  popupRow
-	skill  bool
-	rank   int
-	source string
+	value string
+	cells popupRow
+	skill bool
+	rank  int
 }
 
 // slashMatchRank scores how well name answers partial, lowest-is-best: 0 exact, 1 prefix,
@@ -487,15 +487,10 @@ func commandSuggestions(partial string, busy, effortSupported bool) []acItem {
 // the bound model's effort dial (it takes m.effortSupport().Supported, which drops /effort's row
 // when there is none).
 //
-// A skill row follows the merged menu's schema: ["✦ /id · source", what the skill is]. The
-// two kinds of row therefore share one second column, so a skill's description starts exactly where
-// the command summaries above it do rather than wherever its own token happened to end.
-//
-// The source rides in the FIRST cell, beside the id, rather than in a column of its own after the
-// description (skills.go says why: the description is the repo's own text and is long, so a source
-// placed after it is the first thing a padded summary pushes off the pane). The id it sits beside
-// is bounded and folded by skillTokenLabel, so nothing a SKILL.md chooses can move it, hide it, or
-// paint a second row beneath it.
+// A skill row follows the merged menu's schema: ["✦ /id · source", what the skill is]
+// (skillRow builds it, and builds the suggestion menu's rows too). The two kinds of row therefore
+// share one second column, so a skill's description starts exactly where the command summaries
+// above it do rather than wherever its own token happened to end.
 func (m Model) slashSuggestions(partial, outside string) []acItem {
 	items := commandSuggestions(partial, m.busy(), m.effortSupport().Supported)
 	for _, sk := range m.skillSuggestions(partial, outside) {
@@ -505,17 +500,7 @@ func (m Model) slashSuggestions(partial, outside string) []acItem {
 		if _, shadowed := commandByName(firstCommandToken(sk.value)); shadowed {
 			continue
 		}
-		items = append(items, acItem{
-			value: sk.value,
-			// The token cell is escape-stripped like every other cell this module builds
-			// (sessionRowCells, launchProfileRows) — a skill id is a directory name a repo chose —
-			// and is folded and clipped besides (skillTokenLabel → skillIDCell), so the row shows
-			// the whole id or says it did not. The description cell arrives already stripped and
-			// flattened from skillSuggestions.
-			cells: popupRow{glyphSkill + " " + skillTokenLabel(sk.value, sk.source), skillMenuCell(sk.cells)},
-			skill: true,
-			rank:  sk.rank,
-		})
+		items = append(items, sk)
 	}
 	sort.SliceStable(items, func(i, j int) bool { return items[i].rank < items[j].rank })
 	return items
@@ -538,12 +523,9 @@ func skillMenuCell(cells popupRow) string {
 }
 
 // skillSuggestions lists skills matching partial (a case-insensitive substring of id or
-// displayName), excluding those the message already invokes, as two cells —
-// ["DisplayName", "Summary"] — which the merged "/" menu flattens into the single description cell
-// a skill row gets (skillMenuCell), so what each skill DOES aligns against the command summaries
-// above it. The value is the skill ID (what the accepted row splices in as a "/id" token), and the
-// source is which dir the skill was loaded from, for the merged menu to render beside that id. A
-// nil catalog yields nothing (the menu shows no skill rows).
+// displayName), excluding those the message already invokes, as finished menu rows (skillRow — the
+// shape the suggestion menu's rows share). The value is the skill ID, which is what the accepted row
+// splices in as a "/id" token. A nil catalog yields nothing (the menu shows no skill rows).
 //
 // The list is ranked by match quality (slashMatchRank) and only THEN cut to maxAutocompleteItems,
 // which is the whole reason the cap moved out of the scan loop. Capping first meant the cut was
@@ -577,33 +559,64 @@ func (m Model) skillSuggestions(partial, outside string) []acItem {
 			!strings.Contains(strings.ToLower(sk.DisplayName), needle) {
 			continue
 		}
-		// Both cells come from a repo-supplied SKILL.md front matter, so they are escape-stripped
-		// where the row is built — the popup module strips nothing and truncates
-		// ANSI-preservingly, and an ESC byte takes string length but no display cell, so an
-		// unstripped cell would both reach the terminal live and lie to the column math. They are
-		// FLATTENED for the neighbouring reason (flattenField): stripEscapes keeps "\n" because its
-		// biggest callers are wrapped prose bodies, while a menu cell is one row — a kept newline
-		// there is a row the pane did not author, in a pane whose rows are chosen with ⏎.
-		items = append(items, acItem{
-			value: sk.ID,
-			cells: popupRow{
-				flattenField(stripEscapes(sk.DisplayName)),
-				flattenField(stripEscapes(sk.Summary)),
-			},
+		items = append(items, skillRow(
+			sk,
 			// The better of the two names the filter above accepted the skill on: matching an id
 			// by prefix is worth as much as matching a display name by one, and a skill must not
 			// be ranked down for the name it did NOT match through.
-			rank: min(slashMatchRank(partial, sk.ID), slashMatchRank(partial, sk.DisplayName)),
+			min(slashMatchRank(partial, sk.ID), slashMatchRank(partial, sk.DisplayName)),
 			// The one row fact the SKILL.md does not author, carried from the only place that holds
 			// the Dir it is read off (Options.ConfigHome/Workspace are the loader's own roots).
-			source: skillSource(sk.Dir, m.opts.ConfigHome, m.opts.Workspace),
-		})
+			skillSource(sk.Dir, m.opts.ConfigHome, m.opts.Workspace),
+		))
 	}
 	sort.SliceStable(items, func(i, j int) bool { return items[i].rank < items[j].rank })
 	if len(items) > maxAutocompleteItems {
 		items = items[:maxAutocompleteItems]
 	}
 	return items
+}
+
+// skillRow builds the ONE row a skill has in a menu, whichever menu asked for it: the merged "/"
+// list the human narrows by typing (skillSuggestions, slashSuggestions) and the suggestion menu tab
+// opens over the band's rows (openSuggestMenu). Both name the same thing, so both name it the same
+// way — a skill that reads "✦ /code-audit · library" in one list may not read anything else in the
+// other — and one builder is what keeps that true instead of a convention two call sites remember.
+//
+// The schema is the merged menu's: ["✦ /id · source", DisplayName · Summary], so a skill's
+// description starts exactly where the command summaries above it do rather than wherever its own
+// token happened to end. The source rides in the FIRST cell, beside the id, rather than in a column
+// of its own after the description (skills.go says why: the description is the repo's own text and
+// is long, so a source placed after it is the first thing a padded summary pushes off the pane).
+//
+// Every cell of it comes from a repo-supplied SKILL.md, so every cell is escape-stripped HERE, where
+// the row is built, like every other cell this module composes (sessionRowCells, launchProfileRows):
+// the popup module strips nothing and truncates ANSI-preservingly, and an ESC byte takes string
+// length but no display cell, so an unstripped cell would both reach the terminal live and lie to
+// the column math. The id is bounded and folded besides (skillTokenLabel → skillIDCell), so the row
+// shows the whole id or says it did not, and nothing a SKILL.md chooses can move the source, hide it
+// or paint a second row beneath it. The description cells are FLATTENED for the neighbouring reason
+// (flattenField): stripEscapes keeps "\n" because its biggest callers are wrapped prose bodies,
+// while a menu cell is one row — a kept newline there is a row the pane did not author, in a pane
+// whose rows are chosen with ⏎.
+//
+// rank is the row's place in its own menu's ordering, lowest first — match quality against the typed
+// partial in the "/" menu (slashMatchRank), the matcher's own placement in the suggestion menu — and
+// source is which dir the skill was loaded from. Both are the CALLER's: they are properties of the
+// pair (menu, skill) rather than of the skill, which is why neither is derived in here.
+func skillRow(sk skills.Skill, rank int, source string) acItem {
+	return acItem{
+		value: sk.ID,
+		cells: popupRow{
+			glyphSkill + " " + skillTokenLabel(sk.ID, source),
+			skillMenuCell(popupRow{
+				flattenField(stripEscapes(sk.DisplayName)),
+				flattenField(stripEscapes(sk.Summary)),
+			}),
+		},
+		skill: true,
+		rank:  rank,
+	}
 }
 
 // fileSuggestions lists workspace files matching the typed partial as "@path" rows — quoted
@@ -750,6 +763,50 @@ func (m *Model) dismissAutocomplete() {
 	m.skillRegion = false
 }
 
+// openSuggestMenu opens the "/" menu over exactly the skills the suggestion band is naming — tab's
+// answer while that band shows and no menu of its own is up (handleKey, model.go). It is the band's
+// one affordance: the row advises, and this is where the human acts on the advice without retyping
+// an id they can already read.
+//
+// The completion REGION is empty and stands at the caret (tokenStart == tokenEnd), which is what
+// makes accepting an INSERT rather than a replacement: there is no typed partial behind these rows,
+// so the accepted "/id " is written in where the caret is and everything already drafted survives on
+// both sides of it (spliceCompletion). It is also why ⏎ can never fall through to submit from this
+// menu (autocompleteExactMatch).
+//
+// The rows are rebuilt from the CATALOG rather than from the suggestions themselves, through the
+// builder the "/" menu's skill rows come from (skillRow): a suggestion carries what the matcher
+// ranked, a menu row carries what a menu row carries — the source dir among it. A hint whose skill
+// has left the catalog since the recompute (a reload landing between the keystroke and the tab) is
+// skipped rather than offered as a row that would splice a token nothing resolves, and with every
+// hint gone that way nothing opens at all — tab is inert, exactly as it is with no band up.
+func (m *Model) openSuggestMenu() {
+	if m.opts.Skills == nil {
+		return
+	}
+	caret := m.caretByteOffset()
+	items := make([]acItem, 0, len(m.skillHints))
+	for _, hint := range m.skillHints {
+		sk, ok := m.opts.Skills.Get(hint.ID)
+		if !ok {
+			continue
+		}
+		// The matcher answered strongest first, so a row's PLACE in that answer is its rank here: the
+		// same lowest-is-best scale the "/" menu sorts on, carrying the one ordering this menu has.
+		items = append(items, skillRow(sk, len(items), skillSource(sk.Dir, m.opts.ConfigHome, m.opts.Workspace)))
+	}
+	if len(items) == 0 {
+		return
+	}
+	m.autocomplete = autocompleteState{
+		active:     true,
+		kind:       acSuggest,
+		items:      items,
+		tokenStart: caret,
+		tokenEnd:   caret,
+	}
+}
+
 // autocompleteExactMatch reports whether ⏎ should fall THROUGH to submit instead of accepting the
 // highlighted row. Two things decide it: the token under completion must already equal that row
 // verbatim (sigil included), and accepting must not be the more useful answer.
@@ -763,10 +820,20 @@ func (m *Model) dismissAutocomplete() {
 // the only form that can carry arguments ("/confine off --save"). Mid-draft, an exactly typed
 // "/clear" executes through the accept path instead, which is what keeps the rest of the draft
 // alive rather than sending it.
+//
+// The suggestion menu is outside the question altogether: nothing was typed to open it, so there is
+// no token for a row to be exact against and ⏎ simply accepts.
 func (m Model) autocompleteExactMatch() bool {
 	ac := m.autocomplete
 	value := m.input.Value()
 	if !ac.active || len(ac.items) == 0 || ac.tokenEnd > len(value) || ac.tokenStart > ac.tokenEnd {
+		return false
+	}
+	if ac.kind == acSuggest {
+		// Its region is an EMPTY one at the caret (openSuggestMenu), which the comparisons below would
+		// answer false to anyway — but by accident, off a region that happens to be empty rather than
+		// off the fact that these rows never had a typed token behind them. Said here, the contract
+		// survives a region that ever stops being empty.
 		return false
 	}
 	it := ac.items[ac.selected]
@@ -879,6 +946,13 @@ func (m Model) insertSkillToken(id string) (Model, tea.Cmd) {
 // the token — before the space the draft already had, or after the one just written — which is where
 // the human goes on typing either way.
 //
+// The token's LEFT boundary is written on the same terms, and for a region that has one. A region
+// derived from the caret's word begins at a word boundary by construction (caretToken), so the text
+// before it is empty or ends in whitespace and the lead is never written. The suggestion menu's
+// region is the empty one at the caret (openSuggestMenu), which may stand at the end of a word — and
+// a token fused onto the word before it ("parser/code-audit") is not a token any parse resolves, so
+// the accepted advice would silently be plain prose.
+//
 // The Cmd it returns is whatever that recompute owes (recomputeAutocomplete): a splice that leaves
 // the caret inside a "/" token the box was not in before opens the menu, and an opening menu owes a
 // catalog re-scan. It is passed out rather than dropped, because a dropped one is a refresh that
@@ -887,12 +961,16 @@ func (m Model) spliceCompletion(token string) (Model, tea.Cmd) {
 	value := m.input.Value()
 	start, end := m.completionRegion()
 	head, tail := value[:start], value[end:]
+	lead := ""
+	if head != "" && !isInputSpace(head[len(head)-1]) {
+		lead = " " // an empty region at the end of a word: the token needs a boundary to be one
+	}
 	sep := " "
 	if tail != "" && isInputSpace(tail[0]) {
 		sep = "" // the draft already separates this token from what follows it
 	}
-	m.input.SetValue(head + token + sep + tail)
-	m.caretToOffset(len(head) + len(token) + len(sep))
+	m.input.SetValue(head + lead + token + sep + tail)
+	m.caretToOffset(len(head) + len(lead) + len(token) + len(sep))
 	var reload tea.Cmd
 	m, reload = m.recomputeAutocomplete() // the separator ends the token, so this closes the overlay
 	m.layout()
@@ -923,6 +1001,8 @@ func autocompleteTitle(kind acKind) string {
 		return "commands and skills"
 	case acFile:
 		return "files"
+	case acSuggest:
+		return "suggested skills"
 	default:
 		return ""
 	}

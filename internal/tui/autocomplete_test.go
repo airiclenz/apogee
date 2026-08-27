@@ -302,3 +302,191 @@ func TestSlashMenuBoundsAHostileSkillID(t *testing.T) {
 		t.Errorf("the dropdown hides the padded id's payload:\n%s", view)
 	}
 }
+
+// ----------------------------------------------------------------------------
+// tab opens the "/" menu over the suggestion band's own rows
+// ----------------------------------------------------------------------------
+//
+// The band names skills; this is where the human acts on one. What these tests pin is the seam
+// between the two surfaces — which rows the menu opens over, in whose order, and what accepting one
+// writes into a draft the human is still in the middle of.
+
+// bandedModel is a laid-out idle model whose suggestion band is showing all three hints — the state
+// tab answers in. The draft is TYPED through Update, so the band is derived by the same edit path a
+// human drives rather than assigned into the model by the test.
+func bandedModel(t *testing.T, opts Options) Model {
+	t.Helper()
+	m := typeDraft(t, modelWithOverlayRoom(t, 24, opts), "audit the parser")
+	if got := len(m.skillHints); got != 3 {
+		t.Fatalf("band shows %d hints, want the three the fake matcher ranks", got)
+	}
+	return m
+}
+
+// The menu opens over exactly what the band was naming, in the matcher's own order, highlighted on
+// the strongest match — and the band stands down while it is up: the popup repeats its rows and owns
+// the key its legend was advertising, so a band still painted underneath would say "tab to pick"
+// about a key that no longer means that.
+func TestTabOpensTheSuggestionMenuOverTheBandsRows(t *testing.T) {
+	var rec suggestCall
+	m := bandedModel(t, bandOpts(gatedSuggest(&rec)))
+
+	m = step(t, m, keyTab())
+
+	ac := m.autocomplete
+	if !ac.active || ac.kind != acSuggest {
+		t.Fatalf("overlay = {active:%v kind:%v}, want an open suggestion menu", ac.active, ac.kind)
+	}
+	var got []string
+	for _, it := range ac.items {
+		got = append(got, it.value)
+	}
+	if want := []string{"security-audit", "code-audit", "handoff"}; !slices.Equal(got, want) {
+		t.Errorf("menu rows = %v, want the band's hints in the matcher's order %v", got, want)
+	}
+	if ac.selected != 0 {
+		t.Errorf("selection starts on row %d, want the strongest match", ac.selected)
+	}
+	if !ac.items[0].skill {
+		t.Error("a suggestion row is not marked a skill; accepting it would be read as a command")
+	}
+	if title := autocompleteTitle(ac.kind); title != "suggested skills" {
+		t.Errorf("menu title = %q, want it named for what it holds", title)
+	}
+	view := plain(m.View())
+	if !strings.Contains(view, "suggested skills") || !strings.Contains(view, "/security-audit") {
+		t.Errorf("the frame does not paint the menu tab opened:\n%s", view)
+	}
+	if m.renderSkillHints() != "" {
+		t.Error("the band still paints its row under the menu tab just opened")
+	}
+	if strings.Contains(view, skillHintLegend) {
+		t.Errorf("the band's legend survives into the frame the menu owns:\n%s", view)
+	}
+}
+
+// With no band showing, tab is the editor's key and nothing else. The property is not what the
+// textarea does with it — that is the widget's business and this item changes none of it — but that
+// a model with the band wired answers it exactly as a model without one does.
+func TestTabWithNoBandStaysTheEditorsOwnKey(t *testing.T) {
+	var rec suggestCall
+	m := typeDraft(t, modelWithOverlayRoom(t, 24, bandOpts(gatedSuggest(&rec))), "hi") // under the gate
+	if len(m.skillHints) != 0 {
+		t.Fatalf("the draft %q raised a band; this case needs none", m.input.Value())
+	}
+	bare := typeDraft(t, modelWithOverlayRoom(t, 24, testOpts), "hi") // no catalog, no knob
+
+	m, bare = step(t, m, keyTab()), step(t, bare, keyTab())
+
+	if m.autocomplete.active {
+		t.Error("tab opened a menu with nothing for it to show")
+	}
+	if got, want := m.input.Value(), bare.input.Value(); got != want {
+		t.Errorf("editor = %q with the band wired, %q without it: tab changed meaning", got, want)
+	}
+}
+
+// Accepting a suggested row INSERTS its token at the caret rather than replacing a typed partial —
+// there was no partial — so everything the human had written survives on both sides of it, and the
+// token lands with the boundaries that make it one the parse will resolve.
+func TestSuggestionMenuInsertsTheTokenAtTheCaret(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		draft string
+		left  int // caret steps back from the end of the draft
+		want  string
+	}{
+		{
+			name:  "at the end of the draft",
+			draft: "audit the parser",
+			want:  "audit the parser /security-audit ",
+		},
+		{
+			name:  "mid-draft, at the end of a word",
+			draft: "audit the parser tomorrow",
+			left:  len(" tomorrow"),
+			want:  "audit the parser /security-audit tomorrow",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var rec suggestCall
+			m := typeDraft(t, modelWithOverlayRoom(t, 24, bandOpts(gatedSuggest(&rec))), tc.draft)
+			for range tc.left {
+				m = step(t, m, keyLeft())
+			}
+
+			m = step(t, m, keyTab())
+			m = step(t, m, keyEnter())
+
+			if got := m.input.Value(); got != tc.want {
+				t.Errorf("draft = %q, want the token written in at the caret: %q", got, tc.want)
+			}
+			if m.autocomplete.active && m.autocomplete.kind == acSuggest {
+				t.Error("the suggestion menu survived its own accept")
+			}
+		})
+	}
+}
+
+// The menu is a dropdown over a box the human is still typing in, so it closes the way that
+// dropdown closes: esc dismisses it outright, and the next character re-derives the overlay from the
+// draft, where no "/" token stands at the caret.
+func TestSuggestionMenuClosesOnEscAndOnTyping(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		key  tea.KeyPressMsg
+	}{
+		{name: "esc", key: keyEsc()},
+		{name: "a typed character", key: keyRune('!')},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var rec suggestCall
+			m := step(t, bandedModel(t, bandOpts(gatedSuggest(&rec))), keyTab())
+			if !m.autocomplete.active {
+				t.Fatal("the suggestion menu never opened")
+			}
+
+			m = step(t, m, tc.key)
+
+			if m.autocomplete.active {
+				t.Errorf("overlay kind %v survived %s", m.autocomplete.kind, tc.name)
+			}
+		})
+	}
+}
+
+// A hint is what the matcher ranked a moment ago; the row is what the catalog holds NOW. A reload
+// landing between the two — the menu's own re-scan is asynchronous (reloadSkillsCmd) — must not put
+// up a row that would splice a token nothing resolves, so the vanished hint is skipped and a menu
+// with nothing left to show does not open at all.
+func TestSuggestionMenuSkipsAHintTheCatalogNoLongerHolds(t *testing.T) {
+	var rec suggestCall
+	opts := bandOpts(gatedSuggest(&rec))
+	catalog := opts.Skills.(fakeSkillCatalog)
+
+	t.Run("one hint gone", func(t *testing.T) {
+		gone := catalog
+		gone.skills = catalog.skills[1:] // "security-audit" left the catalog after the recompute
+		opts.Skills = gone
+		m := step(t, bandedModel(t, opts), keyTab())
+
+		var got []string
+		for _, it := range m.autocomplete.items {
+			got = append(got, it.value)
+		}
+		if want := []string{"code-audit", "handoff"}; !slices.Equal(got, want) {
+			t.Errorf("menu rows = %v, want the surviving hints %v", got, want)
+		}
+	})
+
+	t.Run("every hint gone", func(t *testing.T) {
+		empty := catalog
+		empty.skills = nil
+		opts.Skills = empty
+		m := step(t, bandedModel(t, opts), keyTab())
+
+		if m.autocomplete.active {
+			t.Errorf("a menu opened over %d rows the catalog cannot back", len(m.autocomplete.items))
+		}
+	})
+}

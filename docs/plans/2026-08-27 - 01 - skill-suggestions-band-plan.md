@@ -453,7 +453,40 @@ with queued rows + hint stacks hint nearest the box.
 
 ---
 
-## 6. Tab opens the `/` menu filtered to the suggestions
+## 6. Tab opens the `/` menu filtered to the suggestions — ✅ DONE (2026-08-27)
+
+NOTES (2026-08-27): `skillRow` is extracted as the item asks, but it builds the row the MERGED menu
+actually renders (`["✦ /id · source", DisplayName · Summary]`, `skill: true`) rather than the
+intermediate two cells `skillSuggestions` used to hand `slashSuggestions`. That is what the item's own
+reason for the extraction requires — "so both menus share one row shape" — and the accept path needs
+it besides: `acceptAutocomplete` branches on `it.skill`, which only the finished row carries. The "/"
+menu's rendered rows are byte-identical to before; `slashSuggestions` now appends the row it is handed.
+
+NOTES (2026-08-27): `acItem.source` is deleted with that move. It existed only to carry the source dir
+from `skillSuggestions` to the cell `slashSuggestions` composed; the cell is now composed where the
+source is in hand, leaving the field written and never read.
+
+NOTES (2026-08-27): `spliceCompletion` gained a LEADING separator, written only when the region's text
+does not already end in whitespace. The item's acceptance ("inserts `/id ` at the caret and leaves the
+rest of the draft intact") cannot hold without it: the suggestion menu's region is the empty one at the
+caret, which typically stands at the end of a word, and `head + token` there fuses "parser/code-audit"
+into a token no parse resolves. It is a no-op for the "/" and "@" regions, whose start is 0 or preceded
+by whitespace by construction (`caretToken`).
+
+NOTES (2026-08-27): `hasSkillHints` (suggestband.go, item 5's file) gained `!m.autocomplete.active`.
+The item states item 5's overlay rule already keeps the band off the frame while the suggest menu is
+up, but that rule lives in `recomputeSkillHints`, and Tab opens the menu WITHOUT re-deriving the hints
+— so the reachable combination is one this item creates. Enforcing it in the one predicate the frame
+allocation and the render share keeps them from disagreeing.
+
+NOTES (2026-08-27): the `"tab"` case is additionally gated on `m.state.live()`. Hints are re-derived
+only at idle and while a worker runs, so at an approval or an ask they are whatever the last edit left;
+without the gate Tab would open a menu over a decision surface, which is precisely what
+`dismissAutocomplete` exists to prevent.
+
+NOTES (2026-08-27): layout.md's band section is edited although the item's Files list does not name it
+— the "when it says nothing" silences now include the suggestion menu, and the "Tab" paragraph now
+states the pane's title, the insert-at-the-caret rule and the two ways it closes.
 
 Depends on item 5.
 

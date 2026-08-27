@@ -106,9 +106,13 @@ func hintDraft(value string, known func(id string) bool) string {
 //
 // The knob is re-read HERE rather than trusted from the recompute because a `/settings` edit applies
 // live (ADR 0037): switching the band off must take the row off the very next frame, not off the
-// next keystroke.
+// next keystroke. An open dropdown is re-read for a nearer reason: tab opens the "/" menu over these
+// very hints WITHOUT re-deriving them (openSuggestMenu, autocomplete.go), so the recompute's own
+// overlay rule cannot answer for that menu — and a band still advising "tab to pick" underneath the
+// pane tab just opened would repeat the popup's rows and name a key that no longer means what it
+// says.
 func (m Model) hasSkillHints() bool {
-	return m.opts.SkillSuggestions && len(m.skillHints) > 0
+	return m.opts.SkillSuggestions && !m.autocomplete.active && len(m.skillHints) > 0
 }
 
 // renderSkillHints draws the band's one row, or "" when there is nothing to draw — no hints, or a

@@ -1437,11 +1437,12 @@ matcher to answer honestly and disappears again the moment it does not — a dra
 gets no row rather than a guess.
 
 **When it says nothing.** Four silences, each its own reason: the `ui.skill-suggestions` key is off
-(the human asked for no band, and the Tab below is inert with it); no skill catalog is wired; a `/`
-or `@` dropdown is open (the menu is already answering the same question, and two answers to one
-question is noise); or the matcher found too little evidence in the draft. A skill the draft already
-invokes is never suggested, and neither is one that was on the row when a message went out — the
-band advises once per session per skill, and `/clear` and `/new` start that over.
+(the human asked for no band, and the Tab below is inert with it); no skill catalog is wired; a
+dropdown is open — the `/` or `@` menu, or the suggestion menu Tab itself opens (the pane is already
+answering the same question, and two answers to one question is noise); or the matcher found too
+little evidence in the draft. A skill the draft already invokes is never suggested, and neither is
+one that was on the row when a message went out — the band advises once per session per skill, and
+`/clear` and `/new` start that over.
 
 **A row.** `  ✦ skills: /grill-me · /code-audit · /handoff   tab to pick`: two spaces of indent
 (`bodyIndent`, the same body column every band row and the status line share), the ✦ skill glyph, the
@@ -1471,8 +1472,13 @@ did not get: a window too short to seat the staged rows is too short to spend on
 draft instead, and nothing is drawn at all.
 
 **Tab.** With the row showing and no dropdown open, Tab opens the merged `/` menu filtered to exactly
-those skills, top match highlighted. It never steals ⏎: the band is passive, and a message sent with
-the row on screen is sent unchanged.
+those skills, top match highlighted; the rows read exactly as they do in the typed `/` menu, and the
+pane is titled `suggested skills`. Accepting one **inserts** its `/id ` token where the caret stands
+— there was no typed partial to replace — leaving the rest of the draft untouched on both sides, and
+⏎ therefore accepts rather than sending. Esc closes it and the next character typed closes it. While
+it is up the band row itself stands down (see the silences above), since the pane repeats its rows
+and owns the key the legend names. Tab never steals ⏎ from a message: the band is passive, and a
+message sent with the row on screen is sent unchanged.
 
 ---
 

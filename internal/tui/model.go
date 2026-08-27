@@ -1378,6 +1378,25 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		default:
 			return m, nil
 		}
+	case "tab":
+		// The suggestion band's one affordance: with the band showing and no menu of its own open, tab
+		// opens the "/" menu over exactly the skills that band names (openSuggestMenu, autocomplete.go),
+		// so the advice can be acted on without retyping an id already on the screen.
+		//
+		// It is answered HERE, past the claim order, which is what leaves every other tab exactly as it
+		// was: the dropdown's second accept key while a menu is up (autocompleteKey claims it above),
+		// and the textarea's own key everywhere else — the fall-through this case takes when the band
+		// is not showing, since the branch simply ends and the routing below carries on.
+		//
+		// Gated on the live states for the same reason the overlay is (keyClaimOrder): the hints are
+		// re-derived at idle and while a worker runs and nowhere else, so at an approval or an ask they
+		// are whatever the last edit left — and a menu opened over a decision surface is the one thing
+		// dismissAutocomplete exists to prevent.
+		if m.state.live() && m.hasSkillHints() {
+			m.openSuggestMenu()
+			m.layout() // the popup's rows come out of the transcript's (frameRowPlan)
+			return m, nil
+		}
 	case "shift+tab":
 		// Cycle the autonomy mode one rung up the privilege ladder (wraps Auto → Plan). Live in
 		// every state (idle, running, awaiting approval/answer): SetMode is goroutine-safe, so the
