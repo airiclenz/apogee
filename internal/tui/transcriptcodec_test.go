@@ -545,7 +545,7 @@ func TestTranscriptCodecExcludesStartupAndPending(t *testing.T) {
 	tr := &transcript{}
 	tr.addStartup(startupView{Logo: "APOGEE", Host: "host", Model: "model", Version: "0.8.0"})
 	tr.addUser("hello", nil)
-	tr.pending = "half-typed answer the user never saw committed"
+	tr.pending = bufOf("half-typed answer the user never saw committed")
 	tr.streaming = true
 
 	data, err := encodeTranscript(tr)
@@ -1493,7 +1493,7 @@ func TestTranscriptCodecGoldenV1(t *testing.T) {
 		entry{kind: entryPresented, presented: presentedView{Title: "Report", Path: "out/report.md", Method: domain.PresentShown}},
 		entry{kind: entryNote, text: "cancelled"},
 	)
-	tr.pending = "typing" // excluded from the wire
+	tr.pending = bufOf("typing") // excluded from the wire
 	tr.streaming = true
 
 	data, err := encodeTranscript(tr)

@@ -40,7 +40,7 @@ func snapshotRepaint(m Model) repaintSnapshot {
 		value:    m.input.Value(),
 		scroll:   m.viewport.YOffset(),
 		entries:  len(m.transcript.entries),
-		pending:  m.transcript.pending,
+		pending:  m.transcript.pending.String(),
 		flash:    m.flash,
 		detached: m.detached,
 		ready:    m.ready,

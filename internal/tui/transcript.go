@@ -23,10 +23,11 @@ import (
 // approvals, and recovered faults append their own entries. It renders only — no agent
 // logic lives here (C5).
 type transcript struct {
-	entries []entry // committed, in display order
-	pending string  // in-progress assistant tokens for the current Turn (a plain string,
-	// not a strings.Builder: the Model is a value type copied on every
-	// Update, and a Builder forbids the copy — it panics copyCheck)
+	entries []entry   // committed, in display order
+	pending streamBuf // in-progress assistant tokens for the current Turn (a chunk list, never a
+	// strings.Builder: the Model is a value type copied on every Update, and a
+	// Builder forbids the copy — it panics copyCheck. It is appended in bounded
+	// copies and joined once, at its commit point)
 	streaming bool // whether pending holds an un-committed assistant buffer
 	// pendingRun is WHOSE buffer pending holds: the run whose tokens filled it ([runRef] — the
 	// nesting level and the spawning call id). It is the streaming path's half of the routing every
@@ -58,6 +59,89 @@ type transcript struct {
 	paints *paintCache
 }
 
+// streamChunkBytes is how large a [streamBuf] chunk grows before the next append starts a new one.
+// It is the bound on what one append may copy: small enough that a per-flush concatenation costs
+// nothing beside the render it feeds, large enough that a whole reply is a handful of chunks rather
+// than one per 30 ms flush (sink.go, tokenCoalesceWindow).
+const streamChunkBytes = 16 << 10
+
+// streamBuf is the in-progress assistant text: the chunks it arrived in, plus the total byte count.
+// It is deliberately not one growing string — `pending += chunk` re-copied everything the model had
+// said on every sink flush (every 30 ms) and again on every park/unpark hand-over between
+// concurrent siblings (ADR 0039), so receiving a long reply cost the square of its length. Here an
+// append concatenates into the last chunk while that chunk is under streamChunkBytes and starts a
+// new one otherwise, so one append copies at most a chunk; the text is joined exactly once, at the
+// commit point that words an entry (String) or as a tail for the live preview (tail).
+//
+// It holds a slice header and an int and NO pointer to itself, so it rides the value-copied Model
+// legally — which is why it is not a strings.Builder or a bytes.Buffer (ADR 0011: a Builder panics
+// on the copy). For the same reason an append is copy-on-write over the chunk headers, as stash is
+// over parked: a Model copy that is discarded rather than returned must not leave its edit in the
+// live one. That copy is bounded by the NUMBER of chunks, never by the bytes they hold.
+type streamBuf struct {
+	chunks []string // the text in order; every chunk but the last has reached streamChunkBytes
+	n      int      // total bytes held across chunks
+}
+
+// append grows the buffer by s, concatenating into the last chunk while it is still under
+// streamChunkBytes and starting a new chunk otherwise.
+func (b *streamBuf) append(s string) {
+	if s == "" {
+		return
+	}
+	b.n += len(s)
+	if last := len(b.chunks) - 1; last >= 0 && len(b.chunks[last]) < streamChunkBytes {
+		next := append(make([]string, 0, len(b.chunks)), b.chunks...)
+		next[last] += s
+		b.chunks = next
+		return
+	}
+	b.chunks = append(append(make([]string, 0, len(b.chunks)+1), b.chunks...), s)
+}
+
+// appendBuf grows the buffer by everything other holds, chunk by chunk — the hand-over takePending
+// makes when a run's parked text is joined back onto the live buffer it was displaced from, at no
+// whole-text copy.
+func (b *streamBuf) appendBuf(other streamBuf) {
+	for _, chunk := range other.chunks {
+		b.append(chunk)
+	}
+}
+
+// Len is the number of bytes the buffer holds.
+func (b streamBuf) Len() int { return b.n }
+
+// empty reports whether the buffer holds nothing at all.
+func (b streamBuf) empty() bool { return b.n == 0 }
+
+// String joins the chunks into the whole text in one allocation. It is the COMMIT-point read — the
+// moment the buffer becomes an entry's words — and a repaint must never take it: the renderer asks
+// tail instead, which is the whole reason the buffer has this shape.
+func (b streamBuf) String() string { return strings.Join(b.chunks, "") }
+
+// tail returns the last lines+1 raw lines of the buffer, walking the chunks from the END and
+// joining only the ones the cut reaches; a buffer holding fewer lines than that is returned whole.
+// It is the live preview's input (render.go, previewTail), so a repaint costs a viewport rather
+// than a reply. The one extra line is the margin previewTail needs: it holds the trailing blank
+// lines back before taking its own last lines, so the cut here must sit above what it keeps.
+func (b streamBuf) tail(lines int) string {
+	need := lines + 1
+	for i := len(b.chunks) - 1; i >= 0; i-- {
+		chunk := b.chunks[i]
+		for end := len(chunk); end > 0; {
+			nl := strings.LastIndexByte(chunk[:end], '\n')
+			if nl < 0 {
+				break
+			}
+			if need--; need == 0 {
+				return strings.Join(append([]string{chunk[nl+1:]}, b.chunks[i+1:]...), "")
+			}
+			end = nl
+		}
+	}
+	return b.String()
+}
+
 // runRef is WHERE an event came from — the two facts on [domain.EventBase] that together name the
 // agent that emitted it: its sub-agent nesting level, and the id of the sub_agent tool call that
 // spawned it. The zero value is the human's own top-level conversation (depth 0, no spawning call),
@@ -85,7 +169,7 @@ func runOf(base domain.EventBase) runRef {
 // done so (closeRun), which is what keeps a cancelled delegate's half-sentence its own.
 type parkedText struct {
 	run  runRef
-	text string
+	text streamBuf
 }
 
 // entry is one committed line-block in the transcript. text is the body (for the text
@@ -449,22 +533,22 @@ func (t *transcript) park() {
 	if !t.streaming {
 		return
 	}
-	if t.pending != "" {
+	if !t.pending.empty() {
 		t.stash(t.pendingRun, t.pending)
 	}
 	t.streaming = false
-	t.pending = ""
+	t.pending = streamBuf{}
 	t.pendingRun = runRef{}
 }
 
 // stash grows the run's parked text, opening a slot for a run that has none. It rebuilds the slice
 // rather than writing through it: the Model is copied by value on every Update (ADR 0011), and a
 // shared backing array would carry a discarded copy's edit into the live one.
-func (t *transcript) stash(run runRef, text string) {
+func (t *transcript) stash(run runRef, text streamBuf) {
 	next := append([]parkedText(nil), t.parked...)
 	for i := range next {
 		if next[i].run == run {
-			next[i].text += text
+			next[i].text.appendBuf(text)
 			t.parked = next
 			return
 		}
@@ -472,9 +556,10 @@ func (t *transcript) stash(run runRef, text string) {
 	t.parked = append(next, parkedText{run: run, text: text})
 }
 
-// unpark removes the run's parked text and returns it ("" when the run has none) — the read every
-// commit point makes before it words its entry, so nothing this run streamed is left behind.
-func (t *transcript) unpark(run runRef) string {
+// unpark removes the run's parked text and returns it (an empty buffer when the run has none) — the
+// read every commit point makes before it words its entry, so nothing this run streamed is left
+// behind. It hands back the buffer itself, not its text: a hand-over moves a slice header.
+func (t *transcript) unpark(run runRef) streamBuf {
 	for i := range t.parked {
 		if t.parked[i].run != run {
 			continue
@@ -484,22 +569,25 @@ func (t *transcript) unpark(run runRef) string {
 		t.parked = append(next, t.parked[i+1:]...)
 		return text
 	}
-	return ""
+	return streamBuf{}
 }
 
 // takePending drains everything the run has streamed and not yet committed — its parked text plus
 // the live buffer when the run is the one holding it — leaving both empty. It is the shared first
 // half of the three commit points (commitAssistant, finalizeNarration, closeRun), so a run's text
 // can only ever be committed once and only ever into its own block.
+//
+// It is the buffer's one join point: the parked text and the live buffer are appended chunk-wise
+// and rendered to a string exactly once, here, where the words become an entry.
 func (t *transcript) takePending(run runRef) string {
 	text := t.unpark(run)
 	if t.streaming && t.pendingRun == run {
-		text += t.pending
+		text.appendBuf(t.pending)
 		t.streaming = false
-		t.pending = ""
+		t.pending = streamBuf{}
 		t.pendingRun = runRef{}
 	}
-	return text
+	return text.String()
 }
 
 // addUser appends a user message — the text the human submitted to open or continue the
@@ -645,7 +733,7 @@ func (t *transcript) refreshStartup(v startupView) {
 // memory (ClearContext) — that is the caller's separate, fallible step (model.startNewSession).
 func (t *transcript) reset() {
 	t.entries = nil
-	t.pending = ""
+	t.pending = streamBuf{}
 	t.streaming = false
 	t.pendingRun = runRef{}
 	t.parked = nil
@@ -925,7 +1013,7 @@ func (t *transcript) appendToken(text string, run runRef) {
 	}
 	t.streaming = true
 	t.pendingRun = run
-	t.pending += stripEscapes(text)
+	t.pending.append(stripEscapes(text))
 }
 
 // discardPending drops the in-progress assistant buffer when the agent at depth re-streams its
@@ -945,7 +1033,7 @@ func (t *transcript) discardPending(run runRef) {
 		return
 	}
 	t.streaming = false
-	t.pending = ""
+	t.pending = streamBuf{}
 	t.pendingRun = runRef{}
 }
 
@@ -1013,7 +1101,7 @@ func (t *transcript) closeRun(head entry) {
 	if t.streaming && t.pendingRun == run {
 		t.park()
 	}
-	text := trimBlankLines(t.unpark(run))
+	text := trimBlankLines(t.unpark(run).String())
 	if text == "" {
 		return
 	}

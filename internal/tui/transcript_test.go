@@ -418,8 +418,8 @@ func TestTranscriptStreamingPreviewTrimsTrailingBlanks(t *testing.T) {
 	if got := plainRender(tr); got != want {
 		t.Errorf("preview mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
 	}
-	if tr.pending != "thinking\n\n" {
-		t.Errorf("pending = %q; want the buffer itself untouched by the display trim", tr.pending)
+	if tr.pending.String() != "thinking\n\n" {
+		t.Errorf("pending = %q; want the buffer itself untouched by the display trim", tr.pending.String())
 	}
 
 	empty := feed(domain.TokenEvent{Text: ""})
@@ -1526,6 +1526,103 @@ func TestNestedSubAgentRunStaysCollapsedInsideAnExpandedParent(t *testing.T) {
 }
 
 // ----------------------------------------------------------------------------
+// The streaming buffer (streamBuf)
+// ----------------------------------------------------------------------------
+
+// bufOf is a streamBuf holding s — the seed every test that hands the transcript a half-streamed
+// buffer uses, so no test has to know how the chunks are cut.
+func bufOf(s string) streamBuf {
+	var b streamBuf
+	b.append(s)
+	return b
+}
+
+// TestStreamBufAppendsInBoundedChunks is the reason the buffer stopped being a string: an append
+// may copy a chunk, never the whole reply. The chunk count is the proof — one growing string would
+// be a single "chunk" re-copied 1,000 times, and one chunk per append would be 1,000 of them.
+func TestStreamBufAppendsInBoundedChunks(t *testing.T) {
+	t.Parallel()
+
+	const appends, size = 1000, 100
+	chunk := strings.Repeat("x", size)
+	var b streamBuf
+	for range appends {
+		b.append(chunk)
+	}
+
+	if got, want := b.Len(), appends*size; got != want {
+		t.Errorf("Len() = %d, want %d", got, want)
+	}
+	if got, want := b.String(), strings.Repeat(chunk, appends); got != want {
+		t.Errorf("String() length = %d, want %d — the buffer must join to the concatenation",
+			len(got), len(want))
+	}
+	if got, want := len(b.chunks), appends*size/streamChunkBytes+1; got > want {
+		t.Errorf("%d chunks for %d bytes, want at most %d — an append is not bounded by the chunk size",
+			got, b.Len(), want)
+	}
+	if b.empty() {
+		t.Error("empty() = true for a filled buffer")
+	}
+}
+
+// TestStreamBufTailReturnsOnlyTheLastLines is what makes a mid-stream repaint cost a viewport: the
+// preview asks for the lines it can paint, and the buffer walks back from its end to find them
+// instead of joining everything the model has said. The extra line is previewTail's margin — it
+// trims trailing blank lines before taking its own last previewTailLines.
+func TestStreamBufTailReturnsOnlyTheLastLines(t *testing.T) {
+	t.Parallel()
+
+	var b streamBuf
+	for i := range 5000 {
+		b.append(fmt.Sprintf("%04d %s\n", i, strings.Repeat("x", 59)))
+	}
+	if len(b.chunks) < 2 {
+		t.Fatalf("setup: %d chunk(s) — the tail must have several to walk back through", len(b.chunks))
+	}
+
+	got := b.tail(previewTailLines)
+
+	lines := strings.Split(b.String(), "\n")
+	want := strings.Join(lines[len(lines)-(previewTailLines+1):], "\n")
+	if got != want {
+		t.Errorf("tail(%d) returned %d bytes, want the last %d lines (%d bytes)",
+			previewTailLines, len(got), previewTailLines+1, len(want))
+	}
+	if strings.Contains(got, "0000 ") {
+		t.Error("the tail reached the first chunk — it must join only the chunks the cut reaches")
+	}
+	if len(got) >= b.Len() {
+		t.Errorf("tail = %d bytes of a %d-byte buffer, want a viewport rather than the reply",
+			len(got), b.Len())
+	}
+}
+
+// TestStreamBufSurvivesAValueCopy is ADR 0011 read at the buffer: the Model is copied by value on
+// every Update, so a copy that is discarded rather than returned must leave the live transcript
+// exactly as it found it. A chunk list appended in place would fail this — the copy shares the
+// backing array — which is why append is copy-on-write over the chunk headers.
+func TestStreamBufSurvivesAValueCopy(t *testing.T) {
+	t.Parallel()
+
+	var original transcript
+	original.appendToken("first", runRef{})
+
+	adopted := original
+	adopted.appendToken(" and more", runRef{})
+
+	if got, want := original.pending.String(), "first"; got != want {
+		t.Errorf("the original's buffer = %q, want %q — the copy's append leaked into it", got, want)
+	}
+	if got, want := adopted.pending.String(), "first and more"; got != want {
+		t.Errorf("the copy's buffer = %q, want %q", got, want)
+	}
+	if got, want := original.pending.Len(), len("first"); got != want {
+		t.Errorf("the original's Len() = %d, want %d", got, want)
+	}
+}
+
+// ----------------------------------------------------------------------------
 // The streamed buffer belongs to the depth that streamed it
 // ----------------------------------------------------------------------------
 
@@ -1762,8 +1859,9 @@ func TestStreamResetOnlyDiscardsItsOwnDepth(t *testing.T) {
 
 	tr.apply(domain.StreamResetEvent{EventBase: domain.EventBase{Depth: 1}})
 
-	if !tr.streaming || tr.pending != "parent words" {
-		t.Errorf("a depth-1 re-stream wiped the parent's buffer: streaming=%v pending=%q", tr.streaming, tr.pending)
+	if !tr.streaming || tr.pending.String() != "parent words" {
+		t.Errorf("a depth-1 re-stream wiped the parent's buffer: streaming=%v pending=%q",
+			tr.streaming, tr.pending.String())
 	}
 }
 
@@ -1789,9 +1887,10 @@ func TestStreamResetDropsOnlyTheParkedSiblingsOwnText(t *testing.T) {
 	tr.apply(domain.StreamResetEvent{EventBase: domain.EventBase{Depth: 1, CallID: "s2"}})
 	token("s1", "all pass")
 
-	if want := (runRef{depth: 1, spawn: "s1"}); !tr.streaming || tr.pendingRun != want || tr.pending != "the tests all pass" {
+	if want := (runRef{depth: 1, spawn: "s1"}); !tr.streaming || tr.pendingRun != want ||
+		tr.pending.String() != "the tests all pass" {
 		t.Errorf("the sibling's re-stream disturbed the live streamer: streaming=%v run=%+v pending=%q",
-			tr.streaming, tr.pendingRun, tr.pending)
+			tr.streaming, tr.pendingRun, tr.pending.String())
 	}
 	if len(tr.parked) != 0 {
 		t.Errorf("parked = %+v, want the resetting sibling's superseded text dropped", tr.parked)
@@ -2704,8 +2803,8 @@ func TestTranscriptReset(t *testing.T) {
 	if n := len(tr.entries); n != 0 {
 		t.Errorf("entries = %d after reset, want 0 (all committed entries dropped)", n)
 	}
-	if tr.pending != "" {
-		t.Errorf("pending = %q after reset, want empty", tr.pending)
+	if !tr.pending.empty() {
+		t.Errorf("pending = %q after reset, want empty", tr.pending.String())
 	}
 	if tr.streaming {
 		t.Error("streaming = true after reset, want false")

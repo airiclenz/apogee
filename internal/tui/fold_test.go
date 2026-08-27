@@ -305,7 +305,7 @@ func TestFoldEventFoldsEveryVariant(t *testing.T) {
 			if got := len(m.transcript.entries) - before; got != tc.wantEntries {
 				t.Errorf("appended %d transcript entries, want %d", got, tc.wantEntries)
 			}
-			if got := m.transcript.pending; got != tc.wantPending {
+			if got := m.transcript.pending.String(); got != tc.wantPending {
 				t.Errorf("pending buffer = %q, want %q", got, tc.wantPending)
 			}
 			if got := m.transcript.pendingRun.depth; got != tc.wantPendingDepth {

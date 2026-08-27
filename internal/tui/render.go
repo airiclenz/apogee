@@ -179,9 +179,10 @@ func (t *transcript) renderView(th theme, width int, blink bool) renderedTranscr
 		previewAt = t.runEnd(t.pendingRun.spawn)
 	}
 	// paintPreview appends the in-progress buffer as a block of its own run, at index at. What it
-	// paints is previewTail(t.pending) — the buffer's trailing blank lines held back, and only its
-	// last previewTailLines raw lines kept, so a repaint costs a viewport rather than a whole reply.
-	// Both are display-only: the buffer itself keeps every byte. An empty buffer still renders its
+	// paints is previewTail over the buffer's own tail — the buffer hands out only the lines the
+	// preview can need (streamBuf.tail), and previewTail then holds the trailing blank lines back
+	// and keeps its last previewTailLines raw lines, so a repaint costs a viewport rather than a
+	// whole reply at both seams. Both cuts are display-only: the buffer itself keeps every byte. An empty buffer still renders its
 	// lone marker line, so the human sees that streaming has begun.
 	paintPreview := func(at int) {
 		// The live buffer is painted at the depth that FILLED it (transcript.pendingRun), like every
@@ -189,7 +190,7 @@ func (t *transcript) renderView(th theme, width int, blink bool) renderedTranscr
 		// streams before producing any entry needs nothing else to announce the level.
 		preview := renderEntryLines(th, paintInput{
 			kind:  entryAssistant,
-			text:  previewTail(t.pending),
+			text:  previewTail(t.pending.tail(previewTailLines)),
 			depth: t.pendingRun.depth,
 		}, width, blink)
 		appendJoined(false, false, t.pendingRun.depth, at, preview)
@@ -471,8 +472,10 @@ func (t *transcript) renderLines(th theme, width int) []string {
 // JOIN source lines (a wrapped paragraph) are covered by the same doubling.
 const previewTailLines = 256
 
-// previewTail is the text the streaming preview paints for the in-flight buffer s: its trailing
-// blank lines held back, and then only its last previewTailLines raw lines. The trim is
+// previewTail is the text the streaming preview paints for the in-flight buffer's tail s: its
+// trailing blank lines held back, and then only its last previewTailLines raw lines. s is already a
+// tail — [streamBuf.tail] hands it the last previewTailLines+1 lines rather than the whole reply,
+// so the scan below costs a viewport, which is what this bound has always promised. The trim is
 // trimTrailingBlankLines' rule and holds for its reason — a mid-stream "\n\n" may be a paragraph
 // break the model is about to continue, so the buffer keeps it while the preview must not grow a
 // wobbling gap above the footer. Both cuts are display-only; s itself is never touched.

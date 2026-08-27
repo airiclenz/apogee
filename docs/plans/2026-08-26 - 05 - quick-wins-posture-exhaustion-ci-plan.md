@@ -348,7 +348,12 @@ padding yields an error, not a hang or a reply.
 
 ---
 
-## 5. TUI: the streaming buffer appends without re-copying the whole reply
+## 5. TUI: the streaming buffer appends without re-copying the whole reply — ✅ DONE (2026-08-27)
+
+NOTES (2026-08-27): `append` is copy-on-write over the chunk HEADER slice (a copy bounded by the number of chunks, never by their bytes) rather than a bare in-place `chunks[last] += s` — the plan's own `TestStreamBufSurvivesAValueCopy` requires it, since a value-copied Model shares the backing array (ADR 0011), exactly as `stash` already rebuilds `parked`.
+NOTES (2026-08-27): `internal/tui/paintcache_test.go` needed no edit after all — its `coldRender` copies `pending` from one `transcript` into another, which compiles unchanged with the new type — so it is not in FILES though the plan listed it.
+NOTES (2026-08-27): `internal/tui/doc.go` was added to the item's files: its ADR 0011 invariant asserted "the in-progress assistant buffer is a string, not a Builder", a claim this item's own change made stale; it now names `streamBuf` and its copy-on-write appends.
+NOTES (2026-08-27): `takePending` gained `streamBuf.appendBuf` so a run's parked buffer and the live buffer join chunk-wise and render to a string exactly once, at that commit point; `closeRun` (the third commit point) calls `String()` once on the unparked buffer.
 
 Depends on item 4 (the bound on how large the buffer can grow is the provider's; this item
 removes the quadratic cost below that bound).

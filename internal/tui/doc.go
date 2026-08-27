@@ -897,7 +897,9 @@
 // copyCheck-free but lock-like cousins) breaks under that copy: a strings.Builder held by
 // value panics "illegal use of non-zero Builder copied by value" on the first write after a
 // copy. Hold such a type by pointer, or use a plain value (the in-progress assistant buffer
-// is a string, not a Builder, for exactly this reason). TestModelNoBuilderByValue guards the
+// is a chunk list of plain strings — [streamBuf] — not a Builder, for exactly this reason;
+// its appends are copy-on-write so a discarded copy leaves nothing behind either).
+// TestModelNoBuilderByValue guards the
 // strings.Builder case structurally — the behaviour is address-dependent and a behavioural
 // test cannot reliably reproduce the panic.
 //
