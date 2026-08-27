@@ -293,6 +293,36 @@ run.
   exposed by this run's CONTEXT.md correction, where `model:` became a **trusted** id, never
   substituted.
 
+### Quick-wins / posture / exhaustion / CI residuals — deferred out of the 2026-08-27 run
+
+**Status:** found 2026-08-27 at the close of the quick-wins / posture / exhaustion / CI plan
+(`docs/plans/archived/2026-08-26 - 05 - quick-wins-posture-exhaustion-ci-plan.md`), deferred out
+of that run.
+
+- [ ] **The JS/TS regex rule still misreports an arrow body and three other predecessors.**
+  `regexOpeners` (`internal/mechanisms/syntaxengine.go:145-156`) admits `=` but not `>`, so
+  `=> /re/` reads as division and the literal's quotes reopen the very "unclosed string" the rule
+  was added to stop; a `+` predecessor and a `case` predecessor fail the same way (`return` is the
+  one keyword the rule admits, `internal/mechanisms/syntaxengine.go:161`). Same Bypass-floor class
+  as the C-02 case this run fixed: the `syntax` Mechanism retries correct code.
+
+- [ ] **A closed regex literal leaves the preceding-rune state stale.** `checkBrackets` clears
+  `inRegex` at `internal/mechanisms/syntaxengine.go:226` without refreshing `lastRune`, so in
+  `foo(/a/ / 2)` the predecessor is still the `(` that opened the first literal and the second `/`
+  opens a regex that swallows the `)`. Contrived — no realistic trigger found — but the state is
+  wrong at the same seam as the entry above.
+
+- [ ] **The manual documents the cap following a `/server` switch, never the `/load` case.**
+  `docs/manual/configuration.md:466-474` ends on "a `/server` switch carries the new server's cap
+  into the next firing". That sentence stays true; the `/load` arrival this run made re-follow the
+  cap is simply unwritten.
+
+- [ ] **No test exercises `/server`'s `switchServer` end-to-end for the cap.** With the follow
+  moved into `sessionMover.move`, `switchServer` (`cmd/apogee/wire_verbs.go:132`) no longer
+  follows the cap itself, and the switch seam's follow rests entirely on `move`'s coverage — a
+  regression that stopped the switch path from reaching `move` would leave
+  `go test ./cmd/apogee/` green.
+
 ## Parked / deferred work
 
 Live, deliberately deferred work only. Each entry records *enough* design that we don't re-derive
