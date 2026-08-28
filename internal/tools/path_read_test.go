@@ -338,6 +338,91 @@ func TestReadScopeRefusesAnExtraRootReachedThroughASymlink(t *testing.T) {
 	}
 }
 
+// TestReadScopeReadsAnExtraRootFileBySymlinkSpelling is the INPUT side of the mount rule above:
+// the root stays its own real path, and only the path the caller SPELLS runs through a symlink —
+// the shape a dotfiles-managed ~/.apogee/skills hands the model, which read_file refused while
+// list_dir read it (audit 2026-08-28 F-13). The bytes come back, and locate names the real root
+// beside the real file, which is what makes the fence's lexical half agree with its real half.
+func TestReadScopeReadsAnExtraRootFileBySymlinkSpelling(t *testing.T) {
+	t.Parallel()
+
+	workspace, extra := tempRoot(t), tempRoot(t)
+	target := filepath.Join(extra, "skill", "SKILL.md")
+	writeFixtureFile(t, target, "skill bytes")
+
+	link := filepath.Join(tempRoot(t), "lib")
+	if err := os.Symlink(extra, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	scope := readScope{root: workspace, extra: func() []string { return []string{extra} }}
+	spelled := filepath.Join(link, "skill", "SKILL.md")
+
+	data, failMessage := scope.readBounded(spelled)
+
+	if failMessage != "" {
+		t.Fatalf("readBounded(%q): %s", spelled, failMessage)
+	}
+	if string(data) != "skill bytes" {
+		t.Errorf("content = %q, want %q", data, "skill bytes")
+	}
+
+	root, located, err := scope.locate(spelled)
+
+	if err != nil {
+		t.Fatalf("locate(%q): %v", spelled, err)
+	}
+	if root != extra {
+		t.Errorf("root = %q, want the mounted extra root %q", root, extra)
+	}
+	if located != target {
+		t.Errorf("target = %q, want the resolved real path %q", located, target)
+	}
+}
+
+// TestReadScopeLocate pins the other two branches of the seam: a path the WORKSPACE accepts is
+// handed on exactly as it was given — relative stays relative, absolute stays absolute, so the
+// bounded read under the workspace is byte-for-byte what it was before locate existed — and a
+// path no root accepts carries the workspace's own ErrPathEscape, naming the input, with
+// readBounded rendering the refusal the workspace alone would have rendered.
+func TestReadScopeLocate(t *testing.T) {
+	t.Parallel()
+
+	workspace, _, scope := scopeFixture(t)
+	outside := tempRoot(t)
+	writeFixtureFile(t, filepath.Join(outside, "secret.txt"), "not yours")
+
+	for _, input := range []string{"in-workspace.txt", filepath.Join(workspace, "in-workspace.txt")} {
+		root, target, err := scope.locate(input)
+
+		if err != nil {
+			t.Fatalf("locate(%q): %v", input, err)
+		}
+		if root != workspace {
+			t.Errorf("locate(%q) root = %q, want the workspace %q", input, root, workspace)
+		}
+		if target != input {
+			t.Errorf("locate(%q) target = %q, want the input unchanged", input, target)
+		}
+	}
+
+	for _, input := range []string{"/nowhere/x", filepath.Join(outside, "secret.txt")} {
+		root, target, err := scope.locate(input)
+
+		if !errors.Is(err, ErrPathEscape) {
+			t.Fatalf("locate(%q) error = %v, want ErrPathEscape", input, err)
+		}
+		if !strings.Contains(err.Error(), input) {
+			t.Errorf("locate(%q) error %q does not name the input", input, err)
+		}
+		if root != "" || target != "" {
+			t.Errorf("locate(%q) = (%q, %q), want both empty on a refusal", input, root, target)
+		}
+		if _, failMessage := scope.readBounded(input); failMessage != err.Error() {
+			t.Errorf("readBounded(%q) message = %q, want the workspace refusal %q", input, failMessage, err)
+		}
+	}
+}
+
 // TestReadScopeOpen pins the handle half: the matched root comes back beside the file, and a
 // missing file under a root that DOES contain the path keeps its own I/O error rather than
 // being reported as an escape.

@@ -162,6 +162,33 @@ func (s readScope) resolve(input string) (root, resolved string, err error) {
 	return "", "", err
 }
 
+// locate answers, for ONE read, BOTH halves of the question a fenced read asks: the root the
+// input is accepted under, and the spelling of the path to hand a read pinned to that root.
+// The order of roots is resolve's, so there is only ever one copy of it.
+//
+// The two spellings differ because the fence's two containment judgements do. Under the
+// WORKSPACE root the input is handed on AS GIVEN, so the read is byte-for-byte what it was
+// before extra roots existed — a symlinked workspace root (macOS /tmp) included. Under an EXTRA
+// root it is the REAL path matchRoot already resolved, because resolveInRoot judged containment
+// on REAL paths while the bounded read's security.rootRelative relativises LEXICALLY: a symlink
+// SPELLING of a file under a real mounted root passes the first check and then fails the second,
+// which is how a dotfiles-symlinked ~/.apogee/skills came to be refused by read_file while
+// list_dir — which resolves — read it (audit 2026-08-28 F-13). An extra root is its own real path
+// by matchRoot's contract, so handing over the real path makes the two judgements agree.
+//
+// When no root accepts the input the error is the WORKSPACE's ErrPathEscape, so the refusal a
+// caller renders is the workspace's own whatever the extra roots happen to be.
+func (s readScope) locate(input string) (root, target string, err error) {
+	root, resolved, err := s.resolve(input)
+	if err != nil {
+		return "", "", err
+	}
+	if root == s.root {
+		return s.root, input, nil
+	}
+	return root, resolved, nil
+}
+
 // open opens input for reading through the fence of the first root that contains it and
 // returns that root beside the handle. A containment refusal falls through to the next root;
 // a genuine I/O failure under a root that DOES contain the path is returned as it is, so a
@@ -194,28 +221,33 @@ func (s readScope) open(input string) (*os.File, string, error) {
 
 // readBounded reads input through the one-handle bounded read, pinned to the root that
 // contains it. It is readWorkspaceFileBounded's contract verbatim — the same cap, the same
-// growth backstop, the same model-facing failure message — with the root chosen rather than
-// assumed.
+// growth backstop, the same model-facing failure message — with the root, and the spelling of
+// the path handed to it, chosen rather than assumed (locate).
+//
+// A path no root accepts is read at the WORKSPACE root under its own name, which is where it
+// fails: the refusal the caller renders is then the workspace's own, exactly as it is with no
+// extra roots configured.
 func (s readScope) readBounded(input string) ([]byte, string) {
-	return readWorkspaceFileBounded(input, s.readRoot(input))
+	root, target, err := s.locate(input)
+	if err != nil {
+		return readWorkspaceFileBounded(input, s.root)
+	}
+	return readWorkspaceFileBounded(target, root)
 }
 
 // readRoot answers the root a fenced read of input must be pinned to: the workspace when it
 // contains input (always, for a relative path), else the first extra root that does. When NO
 // root accepts it the answer is still the workspace root — the read then fails THERE, so the
 // refusal the caller renders is the workspace's own, exactly as it is without extra roots.
+//
+// It is locate's root half, and only that: a caller that also opens the file takes both halves
+// from locate instead, so the root and the spelling can never be chosen by two different rules.
 func (s readScope) readRoot(input string) string {
-	roots := s.extraRoots(input)
-	if len(roots) == 0 {
+	root, _, err := s.locate(input)
+	if err != nil {
 		return s.root
 	}
-	if _, err := resolveInRoot(input, s.root); err == nil {
-		return s.root
-	}
-	if extraRoot, _, ok := matchRoot(input, roots); ok {
-		return extraRoot
-	}
-	return s.root
+	return root
 }
 
 // matchRoot reports the first root in roots that is usable AND contains input, with the path
@@ -224,11 +256,15 @@ func (s readScope) readRoot(input string) string {
 // per-root refusal, never an error of its own.
 //
 // A root that is not its OWN real path — one reached through a symlink — is skipped the same way
-// (audit 2026-08-25 F-13), for two reasons that are really one. The host's contract
-// (domain.Config.ExtraReadRoots) is that every root it mounts is already symlink-resolved, so a
-// root that is not was never vouched for by anybody. And the mount and the fence would disagree
-// about it anyway: resolveInRoot judges containment on REAL paths while the bounded read's
-// rootRelative relativises LEXICALLY, so on a symlinked root the two answer different questions.
+// (audit 2026-08-25 F-13): the host's contract (domain.Config.ExtraReadRoots) is that every root
+// it mounts is already symlink-resolved, so a root that is not was never vouched for by anybody.
+//
+// That rule is also what lets the fence's two containment judgements agree. resolveInRoot judges
+// containment on REAL paths while the bounded read's rootRelative relativises LEXICALLY, so the
+// pair answers one question only when the root AND the path are both real. Which is why this
+// returns the resolved path beside the root it matched, and why readScope.locate hands a read
+// under an extra root that pair rather than the input's spelling — a symlink SPELLING of a file
+// under a real root is a path the mount accepts, and the two would otherwise part company on it.
 //
 // The trust decision itself is deliberately NOT taken here. This layer holds a bare list of paths
 // with no base to judge them against, so it cannot tell an operator's dotfiles symlink from a

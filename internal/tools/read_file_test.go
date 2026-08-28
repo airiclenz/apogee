@@ -534,6 +534,37 @@ func TestReadFile_Execute_DisclosesTheResolvedPathUnderAnExtraReadRoot(t *testin
 	}
 }
 
+// TestReadFile_Execute_ReadsAnExtraRootFileBySymlinkSpelling pins the tool's end of the same
+// fix: the root is mounted by its real path and only the ARGUMENT runs through a symlink — the
+// spelling a dotfiles-managed ~/.apogee/skills hands the model, and the spelling read_file
+// refused while list_dir served it. The read succeeds and the disclosure names the real file, so
+// the model is told which path its bytes actually came from.
+func TestReadFile_Execute_ReadsAnExtraRootFileBySymlinkSpelling(t *testing.T) {
+	t.Parallel()
+
+	root, extra := tempRoot(t), tempRoot(t)
+	target := filepath.Join(extra, "skill", "SKILL.md")
+	writeFixtureFile(t, target, "skill bytes")
+	link := filepath.Join(tempRoot(t), "lib")
+	if err := os.Symlink(extra, link); err != nil {
+		t.Skipf("symlinks unsupported: %v", err)
+	}
+
+	tool := NewReadFile(root, func() []string { return []string{extra} })
+
+	result := runFileOp(t, tool, map[string]any{"path": filepath.Join(link, "skill", "SKILL.md")})
+
+	if result.IsError {
+		t.Fatalf("read by the symlink spelling was refused: %q", result.Content)
+	}
+	if !strings.Contains(result.Content, "skill bytes") {
+		t.Errorf("content %q does not carry the file's body", result.Content)
+	}
+	if want := " → resolves to " + target; !strings.HasSuffix(result.Content, want) {
+		t.Errorf("content %q does not end with the disclosure %q", result.Content, want)
+	}
+}
+
 func TestReadFile_Execute_RejectsRangeOnLineTwo(t *testing.T) {
 	t.Parallel()
 
