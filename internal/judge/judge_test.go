@@ -18,14 +18,15 @@ const stubModel = "judge-stub"
 
 // useStub points the judge at a scripted upstream answering reply to every request, and clears
 // every other gate variable so an ambient APOGEE_LIVE_ENDPOINT on the developer's machine cannot
-// send these tests to a real model.
-func useStub(t *testing.T, reply string) *stubllm.Server {
+// send these tests to a real model. opts are passed to the stub, for the one test that gates it
+// behind an api key; the caller sets APOGEE_API_KEY itself, after this call.
+func useStub(t *testing.T, reply string, opts ...stubllm.Option) *stubllm.Server {
 	t.Helper()
 
 	server := stubllm.New(t, stubllm.Script{
 		Model: stubModel,
 		Turns: []stubllm.Turn{{Text: reply, Repeat: true}},
-	})
+	}, opts...)
 	t.Setenv(endpointEnv, server.URL)
 	t.Setenv(modelEnv, stubModel)
 	t.Setenv(liveEndpointEnv, "")
@@ -82,6 +83,21 @@ func TestAskReadsTheVerdict(t *testing.T) {
 			reply:    `{"verdict":"PASS"}`,
 			wantPass: true,
 		},
+		{
+			name:        "a stray brace object before the verdict",
+			reply:       "I {wrote 3 files} while checking.\n{\"verdict\": \"fail\", \"reasons\": [\"the footer is blank\"]}",
+			wantReasons: []string{"the footer is blank"},
+		},
+		{
+			name:     "an unbalanced brace before the verdict",
+			reply:    "Note: the frame shows { here.\n{\"verdict\": \"pass\", \"reasons\": []}",
+			wantPass: true,
+		},
+		{
+			name:     "a prose quote before the verdict",
+			reply:    "A stray { and a lone \" quote in the prose.\n{\"verdict\": \"pass\", \"reasons\": []}",
+			wantPass: true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -115,6 +131,7 @@ func TestAskRefusesAnUnreadableReply(t *testing.T) {
 		{name: "a third verdict value", reply: `{"verdict":"maybe"}`, want: `verdict "maybe"`},
 		{name: "no object at all", reply: "I think it looks fine.", want: "no JSON object"},
 		{name: "reasons of the wrong shape", reply: `{"verdict":"fail","reasons":"nope"}`, want: "decode"},
+		{name: "braces but no verdict object", reply: "I {wrote 3 files} and {stopped}.", want: "decode"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -132,6 +149,43 @@ func TestAskRefusesAnUnreadableReply(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestAskSendsTheKeyTrimmed: APOGEE_API_KEY is read the way its sibling gate variables are —
+// trimmed, because a value pasted from a shell or a secret store carries whitespace an upstream
+// rejects, and the rejection looks exactly like a wrong key. Unset stays keyless (ADR 0036): the
+// judge sends no Authorization header, and an upstream that wanted one refuses the REQUEST — that
+// refusal must surface as an error, never as a verdict about the code under test.
+func TestAskSendsTheKeyTrimmed(t *testing.T) {
+	const reply = `{"verdict":"pass","reasons":[]}`
+
+	t.Run("a padded key reaches the upstream trimmed", func(t *testing.T) {
+		useStub(t, reply, stubllm.WithAPIKey("k"))
+		t.Setenv(apiKeyEnv, "  k\t")
+
+		v, err := Ask(testContext(t), testRubric(), Artifact{Name: "footer", Kind: KindFrame, Text: "x"})
+		if err != nil {
+			t.Fatalf("Ask: %v", err)
+		}
+		if !v.Pass {
+			t.Errorf("Pass = false, want the stub's verdict (raw %q)", v.Raw)
+		}
+	})
+
+	t.Run("an unset key surfaces the upstream refusal", func(t *testing.T) {
+		useStub(t, reply, stubllm.WithAPIKey("k"))
+
+		v, err := Ask(testContext(t), testRubric(), Artifact{Name: "footer", Kind: KindFrame, Text: "x"})
+		if err == nil {
+			t.Fatalf("Ask returned verdict %+v, want the upstream's refusal", v)
+		}
+		if !strings.Contains(err.Error(), "401") {
+			t.Errorf("error = %v, want it to carry the upstream's 401", err)
+		}
+		if v.Pass {
+			t.Error("Pass = true on an error, want the zero verdict")
+		}
+	})
 }
 
 // TestAskSendsTheRubricAndTheArtifacts: every field of the rubric and every artifact — by name and

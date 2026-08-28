@@ -96,7 +96,7 @@ path) — each is stated in its item.
 
 ---
 
-## 0. Plan `2026-08-28 - 02` is archived before this plan starts
+## 0. Plan `2026-08-28 - 02` is archived before this plan starts — ✅ DONE (2026-08-28)
 
 **What.** This plan and the deferred-residuals sweep both edit `cmd/apogee/wire_test.go`
 (sweep item 22 / this plan item 9) and `internal/skills/parse.go` (sweep item 27 / this plan
@@ -113,7 +113,11 @@ sweep's remaining items; do not proceed.
 
 **Commit.** none — a gate item; the verifier marks it done without a commit when the check passes
 
-## 1. The judge reads the verdict past a stray brace and sends a trimmed key
+## 1. The judge reads the verdict past a stray brace and sends a trimmed key — ✅ DONE (2026-08-28)
+
+NOTES (2026-08-28): the "prose quote before the object" row places the quote after a stray `{`, because a quote before the first brace is never scanned — the swallow the row pins can only happen inside a candidate span.
+
+NOTES (2026-08-28): `useStub` gained a variadic `...stubllm.Option` tail so the key test can gate the stub; existing call sites are unchanged.
 
 **What.** Audit: *the live judge gate rejects valid model verdicts on a stray brace in prose*
 (High) and *the judge keys its requests through a raw env read* (Medium, recast). (1)

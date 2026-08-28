@@ -21,7 +21,10 @@ const (
 	modelEnv        = "APOGEE_JUDGE_MODEL"
 	liveEndpointEnv = "APOGEE_LIVE_ENDPOINT"
 	liveModelEnv    = "APOGEE_LIVE_MODEL"
-	apiKeyEnv       = "APOGEE_API_KEY"
+	// apiKeyEnv is the ADR 0036 startup overlay, not an ADR 0047 per-entry key source: it is one
+	// value for whatever endpoint the judge dials, and unset means keyless — the same floor every
+	// endpoint apogee dials has, so a local server that wants no key needs nothing set.
+	apiKeyEnv = "APOGEE_API_KEY"
 )
 
 // skipMessage is the one line a skipped judge test prints. It names the variable to set rather
@@ -90,7 +93,7 @@ func Client(ctx context.Context) (*provider.Client, string, error) {
 		return nil, "", fmt.Errorf("no judge endpoint: set %s or %s", endpointEnv, liveEndpointEnv)
 	}
 	client := provider.NewClient(base, "",
-		provider.WithAPIKey(os.Getenv(apiKeyEnv)),
+		provider.WithAPIKey(apiKey()),
 		provider.WithRequestTimeout(requestTimeout),
 	)
 	model, err := resolveModel(ctx, client)
@@ -175,7 +178,7 @@ func ask(ctx context.Context, r Rubric, comparison string, artifacts []Artifact)
 	}
 
 	client := provider.NewClient(base, "",
-		provider.WithAPIKey(os.Getenv(apiKeyEnv)),
+		provider.WithAPIKey(apiKey()),
 		provider.WithRequestTimeout(requestTimeout),
 	)
 	defer client.Close()
@@ -212,6 +215,11 @@ func endpoint() string {
 	}
 	return strings.TrimSpace(os.Getenv(liveEndpointEnv))
 }
+
+// apiKey is the bearer token the judge sends, trimmed like every other variable the gate reads —
+// a value pasted from a shell or a secret store carries whitespace the server would reject.
+// Unset stays unset: the client sends no Authorization header at all.
+func apiKey() string { return strings.TrimSpace(os.Getenv(apiKeyEnv)) }
 
 // resolveModel picks the judging model: the pinned judge model, else the pinned live model, else
 // whatever the endpoint advertises first. Discovery is the fallback rather than the default
@@ -305,39 +313,72 @@ func fenceFor(text string) string {
 	return strings.Repeat("`", longest+1)
 }
 
-// parseVerdict reads the reply strictly: the FIRST balanced {…} object in it, decoded, with a
-// verdict of exactly pass or fail (case and surrounding space are forgiven — a local model
-// answering "Pass" meant the verdict, not a third value). Anything else is an error rather than a
+// parseVerdict reads the reply strictly, but not blindly: it walks EVERY balanced {…} span in
+// the reply, in order, and takes the first one that decodes to a verdict of exactly pass or fail
+// (case and surrounding space are forgiven — a local model answering "Pass" meant the verdict,
+// not a third value). A span that does not balance, does not decode, or carries a third verdict
+// word moves the anchor to the next `{`, so a stray brace in the prose a chatty model wraps
+// around its answer cannot hide the object behind it. Anything else is an error rather than a
 // fail: a judge that could not be understood has not judged, and reporting that as a failed claim
 // would blame the code for the judge's malfunction.
+//
+// When no span wins, the reply is reported by what was actually wrong with it: a span that
+// decoded but named a third verdict word is the most specific complaint and wins over a span that
+// did not decode at all; a reply with no balanced object anywhere has no JSON object in it.
 func parseVerdict(reply string) (Verdict, error) {
-	raw, ok := firstJSONObject(reply)
-	if !ok {
-		return Verdict{Raw: reply}, fmt.Errorf("no JSON object in the judge's reply: %s", oneLine(reply))
+	var (
+		wordErr   error
+		wordRaw   string
+		decodeErr error
+		decodeRaw string
+	)
+	for anchor := 0; anchor < len(reply); anchor++ {
+		next := strings.IndexByte(reply[anchor:], '{')
+		if next < 0 {
+			break
+		}
+		anchor += next
+		end, ok := balancedObjectAt(reply, anchor)
+		if !ok {
+			continue
+		}
+		raw := reply[anchor:end]
+		var decoded struct {
+			Verdict string   `json:"verdict"`
+			Reasons []string `json:"reasons"`
+		}
+		if err := json.Unmarshal([]byte(raw), &decoded); err != nil {
+			decodeErr = fmt.Errorf("decode the judge's verdict %s: %w", oneLine(raw), err)
+			decodeRaw = raw
+			continue
+		}
+		switch strings.ToLower(strings.TrimSpace(decoded.Verdict)) {
+		case "pass":
+			return Verdict{Pass: true, Reasons: decoded.Reasons, Raw: raw}, nil
+		case "fail":
+			return Verdict{Reasons: decoded.Reasons, Raw: raw}, nil
+		default:
+			wordErr = fmt.Errorf("the judge answered verdict %q, want \"pass\" or \"fail\"", decoded.Verdict)
+			wordRaw = raw
+		}
 	}
-	var decoded struct {
-		Verdict string   `json:"verdict"`
-		Reasons []string `json:"reasons"`
+	if wordErr != nil {
+		return Verdict{Raw: wordRaw}, wordErr
 	}
-	if err := json.Unmarshal([]byte(raw), &decoded); err != nil {
-		return Verdict{Raw: raw}, fmt.Errorf("decode the judge's verdict %s: %w", oneLine(raw), err)
+	if decodeErr != nil {
+		return Verdict{Raw: decodeRaw}, decodeErr
 	}
-	switch strings.ToLower(strings.TrimSpace(decoded.Verdict)) {
-	case "pass":
-		return Verdict{Pass: true, Reasons: decoded.Reasons, Raw: raw}, nil
-	case "fail":
-		return Verdict{Reasons: decoded.Reasons, Raw: raw}, nil
-	default:
-		return Verdict{Raw: raw}, fmt.Errorf("the judge answered verdict %q, want \"pass\" or \"fail\"", decoded.Verdict)
-	}
+	return Verdict{Raw: reply}, fmt.Errorf("no JSON object in the judge's reply: %s", oneLine(reply))
 }
 
-// firstJSONObject returns the first balanced {…} span in text, skipping braces inside strings so
-// a reason mentioning "{" does not end the object early.
-func firstJSONObject(text string) (string, bool) {
-	start := strings.IndexByte(text, '{')
-	if start < 0 {
-		return "", false
+// balancedObjectAt returns the exclusive end of the balanced {…} span that opens at start, so
+// text[start:end] is the object, skipping braces inside strings so a reason mentioning "{" does
+// not end the object early. It reports false when the span never closes. Every bit of scan state
+// is local, so each candidate the walk tries starts clean — an unterminated quote in one
+// candidate cannot swallow the next.
+func balancedObjectAt(text string, start int) (end int, ok bool) {
+	if start < 0 || start >= len(text) || text[start] != '{' {
+		return 0, false
 	}
 	depth := 0
 	inString := false
@@ -356,11 +397,11 @@ func firstJSONObject(text string) (string, bool) {
 		case c == '}':
 			depth--
 			if depth == 0 {
-				return text[start : i+1], true
+				return i + 1, true
 			}
 		}
 	}
-	return "", false
+	return 0, false
 }
 
 // oneLine flattens text for a single-line failure message, elided so a whole frame cannot bury
