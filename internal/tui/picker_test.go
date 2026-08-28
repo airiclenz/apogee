@@ -1907,6 +1907,31 @@ func pickerKindCases() []pickerKindCase {
 				}
 			},
 		},
+		{
+			// The vocabulary is REPORTED rather than left to the canonical-four fallback, because the
+			// levels a server names are the ones the filter has to narrow: a fallback offering would
+			// test apogee's own four words instead of the model's.
+			name:   "effort levels",
+			filter: "med",
+			want:   "medium",
+			open: func(t *testing.T) (Model, func(*testing.T, Model)) {
+				t.Helper()
+				eng := &fakeEngine{}
+				m := openEffortPicker(t, eng, provider.EffortSupport{
+					Supported: true,
+					Dialect:   provider.EffortDialectReasoning,
+					Efforts:   []string{"low", "medium", "high"},
+				})
+				return m, func(t *testing.T, _ Model) {
+					t.Helper()
+					want := []domain.ThinkingEffort{domain.EffortMedium}
+					if got := eng.effortsSet(); !reflect.DeepEqual(got, want) {
+						t.Errorf("SetEffortOverride calls = %v, want %v — the level the filter left, not the first reported one",
+							got, want)
+					}
+				}
+			},
+		},
 	}
 }
 

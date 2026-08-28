@@ -184,7 +184,9 @@ with no profile level `back to auto` — assert the exact strings the footer pai
 
 **Commit.** `fix(tui): a model pick judges the effort override against the picked model and the cleared note names the fallback`
 
-## 4. `pickerKindCases` covers the effort picker
+## 4. `pickerKindCases` covers the effort picker — ✅ DONE (2026-08-28)
+
+NOTES (2026-08-28): the arm asserts with `reflect.DeepEqual` (already imported, and what every other arm in `pickerKindCases` uses) rather than `slices.Equal`; same assertion, no new import.
 
 **What.** ISSUES: *`pickerKindCases()` no longer covers every overlay kind.* Add a
 `pickerEffort` arm to `pickerKindCases` (`internal/tui/picker_test.go:1714`): `open` builds
