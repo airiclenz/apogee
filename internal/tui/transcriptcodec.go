@@ -87,17 +87,25 @@ type wireEntry struct {
 	// the run ACTUALLY used rather than the one it happens to reopen on.
 	CtxModel string `json:"ctxModel,omitempty"`
 	// the cumulative token accounting a sub-agent run's head wears (entry.usage): what the delegate
-	// spent over the whole run, as of its last report. The four members are ADDITIVE within
+	// spent over the whole run, as of its last report. The five members are ADDITIVE within
 	// transcriptVersion on the same wireEntry rule as the pair above — each takes omitempty, so a
 	// run that never reported writes none of them and a blob written before they existed decodes to
 	// zero totals, the same nothing-to-report state a pre-feature session reopens in.
-	UsageCalls            int             `json:"usageCalls,omitempty"`
-	UsagePromptTokens     int             `json:"usagePromptTokens,omitempty"`
-	UsageCompletionTokens int             `json:"usageCompletionTokens,omitempty"`
-	UsageTotalTokens      int             `json:"usageTotalTokens,omitempty"`
-	SkillSpans            []wireSkillSpan `json:"skillSpans,omitempty"`
-	Tool                  *wireToolView   `json:"tool,omitempty"`
-	Presented             *wirePresented  `json:"presented,omitempty"`
+	//
+	// UsageCachedPromptTokens travels between the prompt count and the completion count because that
+	// is where it stands on the pane too (usageRow): it is the share of THOSE prompt tokens the
+	// server answered from its own cache, not a spend beside them. Without it a resumed delegate
+	// reported a prompt count with no share under a column the main agent still filled — one pane
+	// answering the same question two ways. A blob written before it decodes to 0, which reads as
+	// the server stating no share: what every record written under such a build actually described.
+	UsageCalls              int             `json:"usageCalls,omitempty"`
+	UsagePromptTokens       int             `json:"usagePromptTokens,omitempty"`
+	UsageCachedPromptTokens int             `json:"usageCachedPromptTokens,omitempty"`
+	UsageCompletionTokens   int             `json:"usageCompletionTokens,omitempty"`
+	UsageTotalTokens        int             `json:"usageTotalTokens,omitempty"`
+	SkillSpans              []wireSkillSpan `json:"skillSpans,omitempty"`
+	Tool                    *wireToolView   `json:"tool,omitempty"`
+	Presented               *wirePresented  `json:"presented,omitempty"`
 }
 
 // wireSkillSpan is the serialized form of a [skillSpan]: the byte range one invoked "/token"
@@ -406,10 +414,11 @@ func toWireEntry(e *entry, kind string) wireEntry {
 		CtxLimit:    e.ctxLimit,
 		CtxModel:    e.ctxModel,
 
-		UsageCalls:            e.usage.Calls,
-		UsagePromptTokens:     e.usage.PromptTokens,
-		UsageCompletionTokens: e.usage.CompletionTokens,
-		UsageTotalTokens:      e.usage.TotalTokens,
+		UsageCalls:              e.usage.Calls,
+		UsagePromptTokens:       e.usage.PromptTokens,
+		UsageCachedPromptTokens: e.usage.CachedPromptTokens,
+		UsageCompletionTokens:   e.usage.CompletionTokens,
+		UsageTotalTokens:        e.usage.TotalTokens,
 
 		SkillSpans: toWireSkillSpans(e.skillSpans),
 	}
@@ -522,10 +531,11 @@ func fromWireEntry(w *wireEntry) (entry, bool) {
 		ctxLimit:    w.CtxLimit,
 		ctxModel:    stripEscapes(w.CtxModel),
 		usage: usageTotals{
-			Calls:            w.UsageCalls,
-			PromptTokens:     w.UsagePromptTokens,
-			CompletionTokens: w.UsageCompletionTokens,
-			TotalTokens:      w.UsageTotalTokens,
+			Calls:              w.UsageCalls,
+			PromptTokens:       w.UsagePromptTokens,
+			CachedPromptTokens: w.UsageCachedPromptTokens,
+			CompletionTokens:   w.UsageCompletionTokens,
+			TotalTokens:        w.UsageTotalTokens,
 		},
 	}
 	// The offsets were measured against the text as SENT, and the text above has just been

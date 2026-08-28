@@ -1150,7 +1150,9 @@ func TestTranscriptCodecRoundTripsASubAgentFill(t *testing.T) {
 // such a widening a decision someone took rather than a silent format change (both structs are
 // inside transcriptVersion 1, so every member is forever). Task is such a decision — a delegation's
 // retained prompt, which the run's expanded body is built from and which no other member could
-// carry — and it stands in the list beside the members that reached it the same way.
+// carry — and it stands in the list beside the members that reached it the same way. So is
+// UsageCachedPromptTokens, added by plan `2026-08-28 - 02` item 10 so a resumed delegate keeps the
+// cache share its row reports (usageRow); the plan document is the recorded decision behind it.
 func TestTranscriptCodecPersistsANamedDelegationAsItsTarget(t *testing.T) {
 	t.Parallel()
 
@@ -1203,7 +1205,8 @@ func TestTranscriptCodecPersistsANamedDelegationAsItsTarget(t *testing.T) {
 		wantEntry := []string{
 			"Kind", "Text", "Depth", "CallID", "SpawnCallID", "Done",
 			"CtxUsed", "CtxLimit", "CtxModel",
-			"UsageCalls", "UsagePromptTokens", "UsageCompletionTokens", "UsageTotalTokens",
+			"UsageCalls", "UsagePromptTokens", "UsageCachedPromptTokens", "UsageCompletionTokens",
+			"UsageTotalTokens",
 			"SkillSpans", "Tool", "Presented",
 		}
 		if got := fields(wireEntry{}); !slices.Equal(got, wantEntry) {
@@ -1549,9 +1552,13 @@ func TestTranscriptCodecReplaysADelegatedPresentationRailed(t *testing.T) {
 }
 
 // TestTranscriptCodecRoundTripsASubAgentsTotals proves the cumulative accounting a run head wears
-// survives the record: the four members reach the wire under their own keys and come back on the
+// survives the record: the five members reach the wire under their own keys and come back on the
 // head that delegated, so a reopened session still reports what each delegate spent — a fact the
 // fill beside them cannot give, since it only ever said how full the child's window stood.
+//
+// The cache share is one of the five for the same reason: the pane draws its column for the WHOLE
+// report (usageRows), so a delegate that came back without its share would sit under a header the
+// main agent's row still fills — the resumed session answering the same question two ways.
 //
 // The members are ADDITIVE within transcriptVersion on the wireEntry rule: a run that reported no
 // accounting writes none of them, and a blob written before they existed decodes to zero totals —
@@ -1562,7 +1569,9 @@ func TestTranscriptCodecRoundTripsASubAgentsTotals(t *testing.T) {
 
 	t.Run("a reported run carries its totals through the record", func(t *testing.T) {
 		t.Parallel()
-		totals := usageTotals{Calls: 2, PromptTokens: 11000, CompletionTokens: 1000, TotalTokens: 12000}
+		totals := usageTotals{
+			Calls: 2, PromptTokens: 11000, CachedPromptTokens: 300, CompletionTokens: 1000, TotalTokens: 12000,
+		}
 		tr := &transcript{}
 		subAgentCall(tr, "s1", "survey the tests", 0)
 		tr.applyUsage(childUsage("s1", 1, 12000, totals), window, "")
@@ -1572,8 +1581,10 @@ func TestTranscriptCodecRoundTripsASubAgentsTotals(t *testing.T) {
 		if err != nil {
 			t.Fatalf("encodeTranscript: %v", err)
 		}
-		// The members are part of the record now, so pin their names and their spelling as integers.
-		want := `"usageCalls":2,"usagePromptTokens":11000,"usageCompletionTokens":1000,"usageTotalTokens":12000`
+		// The members are part of the record now, so pin their names, their order and their spelling
+		// as integers — the share sits inside the prompt count it qualifies, as it does on the pane.
+		want := `"usageCalls":2,"usagePromptTokens":11000,"usageCachedPromptTokens":300,` +
+			`"usageCompletionTokens":1000,"usageTotalTokens":12000`
 		if !strings.Contains(string(data), want) {
 			t.Errorf("wire blob does not carry %s:\n%s", want, data)
 		}
@@ -1602,6 +1613,27 @@ func TestTranscriptCodecRoundTripsASubAgentsTotals(t *testing.T) {
 		}
 		if strings.Contains(string(data), "usage") {
 			t.Errorf("an empty accounting reached the wire: %s", data)
+		}
+	})
+
+	t.Run("a blob written before the cache share decodes with none", func(t *testing.T) {
+		t.Parallel()
+		// A record from a build that already kept the other four: the share is the only member absent,
+		// so its zero has to come from the decode rather than from an empty accounting.
+		older := []byte(`{"version":1,"entries":[{"kind":"toolCall","callID":"s1","done":true,` +
+			`"usageCalls":2,"usagePromptTokens":11000,"usageCompletionTokens":1000,"usageTotalTokens":12000,` +
+			`"tool":{"label":"Sub-Agent","name":"sub_agent","summary":{"text":"survey the tests"}}}]}`)
+		got, err := decodeTranscript(older)
+		if err != nil {
+			t.Fatalf("decodeTranscript(older): %v", err)
+		}
+		if len(got) != 1 {
+			t.Fatalf("decoded %d entries; want the one run head", len(got))
+		}
+		want := usageTotals{Calls: 2, PromptTokens: 11000, CompletionTokens: 1000, TotalTokens: 12000}
+		if got[0].usage != want {
+			t.Errorf("a blob predating the share decoded totals %+v, want %+v — no share, the rest intact",
+				got[0].usage, want)
 		}
 	})
 

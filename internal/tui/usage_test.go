@@ -340,6 +340,52 @@ func TestUsageCachedColumnIsDrawnOnlyWhereAServerReportedOne(t *testing.T) {
 	})
 }
 
+// TestUsageRestoredDelegateKeepsItsCachedShare is the transcript round trip asserted where a
+// reader meets it. The pane draws its cached column for the WHOLE report (usageRows), and a resumed
+// run head is never re-fed by a live child — the share reaches its row only through the record
+// (wireEntry.UsageCachedPromptTokens). A wire that dropped it would leave that one cell blank under
+// a column its neighbours still fill, which reads as a delegate whose server stated no share rather
+// than as a number the record lost.
+func TestUsageRestoredDelegateKeepsItsCachedShare(t *testing.T) {
+	child := childTotals
+	child.CachedPromptTokens = 300
+
+	tr := &transcript{}
+	subAgentCall(tr, "s1", "survey the tests", 0)
+	tr.applyUsage(childUsage("s1", 1, child.TotalTokens, child), 32768, "")
+	subAgentReport(tr, "s1", "tests read", 0)
+
+	data, err := encodeTranscript(tr)
+	if err != nil {
+		t.Fatalf("encodeTranscript: %v", err)
+	}
+	entries, err := decodeTranscript(data)
+	if err != nil {
+		t.Fatalf("decodeTranscript: %v", err)
+	}
+
+	m := usageModel(t, mainTotals, 8192) // the main agent itself reported no share
+	m.transcript.entries = entries
+	rows := m.usageRows()
+
+	if len(rows) != 4 {
+		t.Fatalf("rows = %q, want the header, the main agent, the restored delegate and the session", rows)
+	}
+	if got, want := rows[0], usageHeaderCells(true); !equalRow(got, want) {
+		t.Fatalf("header = %q, want the cached column %q — the restored share is what opens it", got, want)
+	}
+	subs := m.usageSubAgentRows(true)
+	if len(subs) != 1 {
+		t.Fatalf("subAgent rows = %q, want the one restored delegate", subs)
+	}
+	if got, want := subs[0][3], format.Tokens(300); got != want {
+		t.Errorf("the restored delegate's cached cell = %q, want %q — the share came back with the record", got, want)
+	}
+	if got := rows[1][3]; got != "" {
+		t.Errorf("the main agent's cached cell = %q, want it empty — it reported no share of its own", got)
+	}
+}
+
 // TestDelegateUsageTotalPrefersLiveHeadsOverTheResumedReading pins what the record's delegate sum is
 // for. A resumed session carries the sum its record stored, and that is the reading until a run head
 // reports one of its own — the heads REPLACE it rather than adding to it, or a resumed session whose

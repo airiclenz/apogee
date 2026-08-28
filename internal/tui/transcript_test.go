@@ -2961,12 +2961,13 @@ func callEntry(tr *transcript, id string) *entry {
 // spawning call (callID) identifies.
 func childUsage(callID string, depth, total int, cum usageTotals) domain.UsageEvent {
 	return domain.UsageEvent{
-		EventBase:                  domain.EventBase{Depth: depth, CallID: callID},
-		TotalTokens:                total,
-		CumulativePromptTokens:     cum.PromptTokens,
-		CumulativeCompletionTokens: cum.CompletionTokens,
-		CumulativeTotalTokens:      cum.TotalTokens,
-		CumulativeCalls:            cum.Calls,
+		EventBase:                    domain.EventBase{Depth: depth, CallID: callID},
+		TotalTokens:                  total,
+		CumulativePromptTokens:       cum.PromptTokens,
+		CumulativeCachedPromptTokens: cum.CachedPromptTokens,
+		CumulativeCompletionTokens:   cum.CompletionTokens,
+		CumulativeTotalTokens:        cum.TotalTokens,
+		CumulativeCalls:              cum.Calls,
 	}
 }
 

@@ -337,7 +337,13 @@ results carry empty IDs fires the hint; a mixed turn with empty IDs fires nothin
 
 **Commit.** `fix(mechanisms): filehint parses id-less results when the whole turn is listing tools`
 
-## 10. The transcript wire carries a delegation's cached-token share
+## 10. The transcript wire carries a delegation's cached-token share — ✅ DONE (2026-08-28)
+
+NOTES (2026-08-28): edited `internal/tui/transcript_test.go` beyond the item's Files list — the shared fold helper `childUsage` builds a `domain.UsageEvent` from a `usageTotals` and mapped only four of its five members, so no test could drive a cache share through the real `applyUsage` path. One line maps `CumulativeCachedPromptTokens`; every existing caller passes a share of zero, so nothing else moves.
+
+NOTES (2026-08-28): the new usage-pane test is named `TestUsageRestoredDelegateKeepsItsCachedShare` so the item's own Acceptance filter (`-run 'Transcript|Codec|Usage'`) selects it — a name without one of those three words would have been silently skipped by the acceptance command.
+
+NOTES (2026-08-28): the item's third test ("a pre-feature blob decodes with 0") landed as its own subtest of `TestTranscriptCodecRoundTripsASubAgentsTotals` carrying the OTHER four members and no share, rather than relying on the existing all-zero legacy subtest — a blob with zero totals cannot tell a decoded zero from an empty accounting.
 
 **What.** ISSUES: *A resumed delegate row loses its cached share.* Add
 `UsageCachedPromptTokens int \`json:"usageCachedPromptTokens,omitempty"\`` to `wireEntry`
