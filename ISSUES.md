@@ -347,6 +347,38 @@ of that run.
   the live-state stand-down as returning on the next edit, but the hints are never cleared, so the
   row comes back on the first frame after the state goes live again — no edit required.
 
+### Test-drivers-kit residuals — deferred out of the 2026-08-27 run
+
+**Status:** found 2026-08-28 at the close of the test-drivers kit plan
+(`docs/plans/archived/2026-08-27 - 02 - test-drivers-kit-plan.md`), deferred out of that run.
+
+- [ ] **The recorder's replay comparison never looks at the reasoning channel.**
+  `replayed.same` (`internal/stubllm/record_test.go:234`) compares text, finish reason, usage and
+  tool calls; reasoning is recorded into the fixture (`internal/stubllm/record_test.go:31`) but is
+  not read back, so a recorder regression that dropped reasoning would leave
+  `TestRecorderReplaysWhatItRecorded` green.
+
+- [ ] **`CheckLeaks` still scans goroutines package-globally.** `leakedGoroutines` matches
+  `leakMarkers` across the whole process (`internal/tuitest/leak.go:19`), so a goroutine leaked by
+  a `t.Parallel` driver test elsewhere is still attributed to whichever test's cleanup runs next.
+  Only the in-process driver tests are self-attributing today.
+
+- [ ] **`e2e_egress_test.go` cites the wrong source for all-or-nothing MCP connect.** The comment
+  at `cmd/apogee/e2e_egress_test.go:196` names "ADR 0037 decision 6"; the rule is written in
+  `docs/design/mcp-client.md` plus ADR 0012's 2026-07-26 amendment. The asserted behaviour is
+  correct — only the citation is wrong.
+
+- [ ] **No driven test puts more than one delegation live at once (checklist T-16 step 12).**
+  `internal/stubllm` answers no `/props` (`internal/stubllm/server.go:156`), and a launch-profile
+  move builds an entry carrying no `parallel-agents:` pin, so the fan-out cap resolves to 1 in
+  every driven run. The step's "several at once" half is unobserved by any driver, and is not one
+  of the four irreducible claims.
+
+- [ ] **The design doc's "Not observable" split is approximate, not the taxonomy it claims.**
+  `docs/design/test-drivers.md:667` says every non-irreducible cell in that column "is a pointer,
+  not a gap", but several cells state a limit rather than naming the instrument that asserts the
+  claim instead. Either the cells or the paragraph should be made to agree.
+
 ## Parked / deferred work
 
 Live, deliberately deferred work only. Each entry records *enough* design that we don't re-derive

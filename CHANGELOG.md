@@ -90,11 +90,158 @@ point is a **minor** bump, not a breaking change.
   applying. `ui.skill-suggestions:` (default `true`, live via `/settings`) switches the band off,
   and Tab with it.
 
+- ADR 0062 ("test drivers are Drivers") and the `docs/design/test-drivers.md` skeleton: test
+  drivers enter through the composition seam with no test-only engine hooks, `internal/stubllm`
+  is the one scripted upstream, `github.com/charmbracelet/x/vt` is the frame authority for both
+  the in-process and the PTY driver, and the env-gated LLM judge is binding when its gate is set.
+  A test step may be manual only where the design doc's "which driver observes which claim" table
+  says no driver observes it.
+
+- **A test-drivers kit, so "manual" stops being a test mode.** Three new packages turn claims that
+  used to need a human into assertions that run under `go test`. `internal/stubllm` is a scripted,
+  OpenAI-compatible upstream: an ordered YAML script of `turns:` with an optional `when:` matcher,
+  `repeat:`, text (with per-token chunking and delay), reasoning, tool calls, usage (including
+  `cached_tokens`), raw HTTP and hang kinds, strict by default — an unmatched request is a recorded
+  500, never a silent pass — plus a request log the test asserts on and a `cmd/stubllm` binary that
+  also records a fixture off a real endpoint. `internal/tuitest` drives the TUI two ways over one
+  frame authority (`github.com/charmbracelet/x/vt`): an in-process `Driver` that enters through
+  `cmd/apogee`'s own `launcher` seam and runs the real composition — agent, tools, session store,
+  bridge, filewatch — and a `PTYDriver` that runs the built binary in a real pseudo-terminal for the
+  claims only a real terminal can settle (tty state on the way out, real pids and `SIGKILL`,
+  `SIGWINCH`). Both reconstruct a `Frame` with cell widths, style runs and the cursor, both wait on
+  conditions rather than durations, and neither adds a test-only hook to the engine (ADR 0062,
+  ADR 0031). `internal/judge` puts the irreducible judgment halves — wording, tone, "reads as one
+  row" — to a real model through the repo's own provider client, gated by `APOGEE_JUDGE_ENDPOINT` /
+  `APOGEE_JUDGE_MODEL` (falling back to the live-eval gate): unset means skip, set means the
+  verdict is binding, and `make live-eval` reports a broken judge first. `docs/design/test-drivers.md`
+  documents the kit, and its "Which driver observes which claim" table is now the gate on the word
+  *manual*: a step may be manual only where that table says no driver observes it.
+
+- Checklist items T-06 (cached-token accounting across `/usage`, `/sessions`, a `--continue`
+  resume and headless), T-10 (the `~/.apogee` forced-approval pane, its `Fix:` line, the hint the
+  denial returns to the model, and the pane under `--mode auto`) and T-13 (approval decision keys
+  arm one latch after the pane paints, proven black-box through a pty and the `--tui-trace` file)
+  now run under `go test` instead of needing a human — `cmd/apogee/e2e_usage_test.go`,
+  `cmd/apogee/e2e_approval_test.go`, with a judge rubric for T-10's wording half.
+
+- Checklist items T-12 (hostile file and skill names cannot forge rows: the `probe` report, the
+  footer's model label, the `/skills` note, the tool results a listing hands the model, and a
+  wrapped approval pane at sixty columns) and T-20 (a multi-select question ticks with a one-cell
+  `[✔]` in an aligned column, and a live `ui.color-scheme` switch leaves wide-rune layout in exactly
+  the columns it was in) now run under `go test` instead of needing a human —
+  `cmd/apogee/e2e_hostile_test.go`, `cmd/apogee/e2e_width_test.go`, with a judge rubric for T-12's
+  "reads as one row" half.
+
+- Checklist items T-15 (a failed or interrupted delegation's outcome slot is painted in the
+  scheme's error role and wears no ✓, a successful command whose output quotes "error" is not, an
+  expanded delegation shows the prompt it carried, and a diff body draws its `⋯` elision rule only
+  between regions that do not meet) and T-16 (the footer's Auto marker names this host's blast
+  radius and moves with `/confine`, the `/settings` `mode` and `confine-to-workspace` rows read the
+  live engine rather than the boot snapshot, one transcript line names the keys a save on disk
+  applied, the ` ~`/` *` markers say which surface moved a row, and a llama-launcher profile move
+  rebinds the session and leaves it delegating) now run under `go test` instead of needing a human —
+  `cmd/apogee/e2e_outcome_test.go`, `cmd/apogee/e2e_livestate_test.go`, with the colour claim made a
+  second time against the shipped binary's own SGR through a pseudo-terminal.
+
+- Two new composition seams, both package vars defaulting to production and swapped only by tests
+  (the `daemonClock` pattern): `liveLauncherOps` (`cmd/apogee/launcher.go`) is the launcher facade
+  the running session drives, so a driven test can list Launch profiles and move the session through
+  the REAL wiring; `configWatchTiming` (`cmd/apogee/wire_live.go`) is the poll cadence and settle
+  window of the session's `config.yaml` watcher, so a driver launch costs a tenth of a second on a
+  watcher step instead of the production second and a quarter.
+
+- Consoles, and the opener allow-list, are driven tests rather than numbered human steps: a
+  black-box PTY run proves a Console answers only to the run that opened it, that a delegation's
+  Console dies with the delegation, that a `/sessions` restore closes the outgoing conversation's
+  Consoles while a refused switch closes none, and that quitting reaps everything (T-14); a driven
+  run with a logging fake opener proves `.md/.png/.pdf/.csv` reach a desktop program while
+  `.odt/.odp/.epub/.html` reach none, and that a served document's capability token never leaves the
+  transcript for a tool result or the session record (T-19).
+- `cmd/apogee` gains the `openerLookPath` package var — nil in production, `exec.LookPath` — so
+  presentation rung 1's program resolution is reachable from a driven test.
+
+- Network egress is a driven test rather than a squid log: a PTY run under a real in-test forward
+  proxy proves the operator's `HTTP_PROXY` carries a `web_fetch` and an `mcp-servers:` endpoint
+  alike, that the SSRF floor refuses a loopback destination without anything leaving the process,
+  that no loopback traffic — the model conversation included — is ever proxied, that a
+  `url-safety.deny-hosts` saved onto a running session is read live by both the network tools and a
+  reconnect (which is refused, keeping the connections it had), that a denied MCP endpoint stops the
+  launch, and that a `308` from the upstream is reported and never followed; a twenty-five-second
+  streamed reply arrives whole, which is the client-level timeout the provider deliberately does not
+  set (T-18).
+- `internal/tuitest` gains `netfix.go` — `ForwardProxy` (a real forward proxy with an access log and
+  a route table onto loopback), `PageServer` (a page with a hit counter) and `MCPEcho` (a
+  streamable-http MCP server with one `echo` tool) — and `cmd/apogee`'s PTY helper gains
+  `launchPTYWithEnv`, the only way a driven run reaches a variable the standard library reads once
+  per process.
+
+- **Test infrastructure — CI, release smoke and documentation drift (checklist T-11, T-21, T-22, T-23).**
+  CI gains a `landlock-abi-1-2` job on `ubuntu-22.04` that runs the escape battery on landlock ABI 1–2
+  and asserts the `truncate(2)` residual on all three surfaces (caps line, `probe`, the headless auto
+  startup notice); the `ubuntu-latest` check job asserts the opposite direction — no residual on a
+  modern kernel — and now also runs `actionlint` and `scripts/check-pins.sh`, which holds every
+  GitHub Action to a 40-hex SHA with its `# vX.Y.Z` comment beside it. Both workflow gates also run
+  from `make check`. New `make release-smoke VERSION=vX.Y.Z` (`scripts/release-smoke.sh`) verifies a
+  *published* release from the outside: the tag is remote and annotated, `make dist` packs six
+  verifying archives, all six published assets download and match the release `SHA256SUMS`, the host's
+  archive unpacks to a binary reporting the version, and `brew upgrade apogee` moves the machine onto
+  it where Homebrew is installed — documented in a new "Releasing" section of
+  `docs/manual/building.md`. `make live-eval` now counts the real `~/.apogee` sessions and scratch
+  entries before and after and fails on growth, so a live run that forgets `--config` is caught.
+  `apogee probe model` gained a regression test proving a nameless, idless `tool_calls` placeholder is
+  not native tool-call evidence and buys no tier. New `cmd/apogee/docs_env_test.go` pins the manual's
+  environment-override section to the variables the binary actually reads (both directions, count word
+  included), the two unparseable-value refusals, the hidden `--tui-trace`/`--tui-diag` flags, the
+  `APOGEE_CONFIG`/`APOGEE_WORKSPACE` roots, and the `url-safety:` prose in the manual and the seeded
+  config template. New `TestNewcomerFollowsTheDocs` puts the judge model in a clean
+  `debian:stable-slim` container with only `README.md`, `docs/manual/` and one release archive and
+  judges its report against T-23's oracle; it skips unless `docker` and the judge gate are both
+  present. `judge.Client` exposes the resolved judge client and model for that loop.
+
+- **Every manual item of the v0.17.1 → v0.17.7 release checklist is now a test (checklist T-03,
+  T-04, T-06, T-07, T-10 – T-16, T-18 – T-25).** Thirty-six `TestE2E…` tests in `cmd/apogee/` drive
+  the real composition through the `runRoot` launcher seam and the shipped binary through a real
+  pseudo-terminal, against scripted `internal/stubllm` fixtures: the streamed 400-line reply and its
+  cancel, resize and repaint ceiling (`e2e_stream_test.go`); the interactive smoke in process and
+  through a pty, ending on the restored tty state (`e2e_smoke_test.go`); a delegation killed with a
+  real `SIGKILL` and reopened, the delegate step cap, and a Firing whose final Turn is abandoned
+  (`e2e_delegation_test.go`, `e2e_schedule_test.go`); cached-token accounting, the forced-approval
+  pane and decision keys armed after paint (`e2e_usage_test.go`, `e2e_approval_test.go`); hostile
+  file and skill names that cannot forge a row, and the width authority across a colour-scheme
+  switch (`e2e_hostile_test.go`, `e2e_width_test.go`); outcome-slot verdict and tone, and live state
+  following the running session across a launcher move (`e2e_outcome_test.go`,
+  `e2e_livestate_test.go`); Consoles that die with their owner, egress through an in-test forward
+  proxy and MCP server, and the opener allow-list (`e2e_console_test.go`, `e2e_egress_test.go`,
+  `e2e_present_test.go`); and the manual's own environment-override claims
+  (`cmd/apogee/docs_env_test.go`). The judgment halves — pane wording, streamed-frame readability,
+  "still reads as one row", the newcomer's container walk — are `TestJudge…`/`TestNewcomer…`
+  rubrics behind the `internal/judge` gate and run under `make live-eval`. CI gains a
+  `landlock-abi-1-2` job on `ubuntu-22.04` that asserts the `truncate(2)` residual on all three
+  disclosure surfaces while the `ubuntu-latest` check job asserts its absence on a modern kernel;
+  `make check` and the check job also run `actionlint` and `scripts/check-pins.sh`, and
+  `make release-smoke VERSION=vX.Y.Z` verifies a published release from the outside. The whole
+  `TestE2E` set measures 121.7 s under `-race` (89.3 s without) and runs in every plain `go test`
+  with no env gate. Four claims stay irreducible — font tofu, felt flicker, what a real desktop
+  application does with a handed-off file, and `brew upgrade` before its own release together with
+  the newcomer walk's Homebrew and OpenRouter steps — and are recorded in `ISSUES.md` under
+  "Test drivers — residue" as accepted proxies with no open work.
+
 ### Changed
 
 - `/skills` now lists a skill's declared `triggers:` on an indented line under its row, so the
   reason a skill will or will not be suggested can be read off the listing; a skill that declares
   none is listed exactly as before.
+
+### Fixed
+
+- **`tuitest.Screen.Resize` is safe on a shrink.** A resize is the one moment the renderer is behind
+  the terminal: the frame already on the wire carries the scroll region of the size it was laid out
+  for, and `x/vt` applied that margin without clamping it to the buffer that had just shrunk — the
+  next delete-line then indexed past the end of the buffer and panicked whichever goroutine was
+  painting, taking the test binary down. `Screen` now registers its own DECSTBM/DECSLRM handlers
+  ahead of `x/vt`'s, lowers an out-of-range margin in place and lets the real handler apply it, which
+  is what a real terminal does with a margin it cannot honour. `Screen.Resize` is now safe over its
+  whole input range, a height shrink under live output included.
 
 ## [0.18.0] — 2026-08-27
 
