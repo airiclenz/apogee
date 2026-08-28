@@ -126,12 +126,6 @@ var discoverDialect = func(ctx context.Context, endpoint, model, apiKey string) 
 	return heartbeat.NewMonitor(endpoint, model, apiKey).Beat(ctx).EffortSupport.Dialect
 }
 
-// newConfiner is the seam onto the host's confinement backend, for the same reason runOnce is one:
-// what a backend can enforce is a property of the MACHINE the test happens to run on — a kernel
-// with landlock or without it — and the Auto gate below is a decision about exactly that. A test
-// dictates the capability matrix here and asserts the verdict; production never reassigns it.
-var newConfiner = platform.NewConfiner
-
 // errHeadlessNoPrompt is the usage refusal when neither the argument nor stdin carries anything.
 // A headless run cannot ask what the user meant, so an empty prompt is refused rather than sent.
 var errHeadlessNoPrompt = errors.New(

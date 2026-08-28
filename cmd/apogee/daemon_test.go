@@ -345,6 +345,59 @@ func TestDaemonRefusesWhenNoStartupServerIsResolved(t *testing.T) {
 	}
 }
 
+// The daemon's ONE confinement sentence: the residual disclosure — a backend that fences, on a
+// kernel where it knowingly leaves one write-class access open (landlock ABI 1–2 cannot fence
+// truncate(2)). It is said once at startup, on stderr, where a supervisor journals it; the degraded
+// cell has nothing to print here because it is REFUSED instead, by the verdict daemonHost hands
+// internal/daemon (TestDaemonHostRefusesAutoOnAHostThatCannotFence above).
+//
+// Both directions are driven through the confiner seam rather than read off this machine's kernel,
+// because the silent half is the half a real host almost always lands in: a suite that only ever
+// saw a residual-free backend would pass with the print deleted.
+func TestDaemonDisclosesTheFenceResidualAtStartup(t *testing.T) {
+	const disclosure = "cannot fence"
+
+	tests := []struct {
+		name string
+		caps apogee.ConfinementCaps
+		want bool
+	}{
+		{
+			name: "a fence with a known hole in it discloses the hole",
+			caps: apogee.ConfinementCaps{FSWrite: true, Residuals: []string{"truncate(2)"}},
+			want: true,
+		},
+		{
+			name: "a fence with no known hole says nothing",
+			caps: apogee.ConfinementCaps{FSWrite: true},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newDaemonHarness(t)
+			newConfiner = func() apogee.Confiner { return fakeConfiner{caps: tc.caps} }
+			h.writeSchedules(t, oneScheduleYAML(t.TempDir()))
+
+			h.stop()
+			wait := h.run(t)
+			if err := wait(); err != nil {
+				t.Fatalf("daemon: %v\n%s", err, h.errOut.String())
+			}
+
+			errOut := h.errOut.String()
+			if got := strings.Contains(errOut, disclosure); got != tc.want {
+				t.Errorf("residual disclosure on stderr = %v; want %v (stderr = %q)", got, tc.want, errOut)
+			}
+			if tc.want && !strings.Contains(errOut, "truncate(2)") {
+				t.Errorf("the disclosure does not name the access it is about: %q", errOut)
+			}
+			if strings.Contains(h.out.String(), disclosure) {
+				t.Errorf("the disclosure reached the narration a supervisor reads as the daemon's log: %q", h.out.String())
+			}
+		})
+	}
+}
+
 // ----------------------------------------------------------------------------
 // Adoption and the run
 // ----------------------------------------------------------------------------

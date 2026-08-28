@@ -391,6 +391,60 @@ func TestHeadlessAutoDegradedCellIsARefusalNotANotice(t *testing.T) {
 	}
 }
 
+// The residual cell is the degraded cell's mirror in FSWrite, and the opposite decision: a backend
+// that DOES fence — so the run is never refused — on a kernel where it knowingly leaves one
+// write-class access open (landlock ABI 1–2 cannot fence truncate(2)). Nothing is gated and nothing
+// falls back to approval, so there is nothing to refuse; the one thing the fence does not stop is
+// disclosed instead, on stderr, where it cannot contaminate the answer a pipeline reads off stdout.
+//
+// Both directions are driven through the confiner seam rather than read off this machine's kernel,
+// because the silent half is the half a real host almost always lands in: a suite that only ever
+// saw a residual-free backend would pass with the print deleted.
+func TestHeadlessAutoDisclosesTheFenceResidual(t *testing.T) {
+	const disclosure = "cannot fence"
+
+	tests := []struct {
+		name string
+		caps apogee.ConfinementCaps
+		want bool
+	}{
+		{
+			name: "a fence with a known hole in it discloses the hole",
+			caps: apogee.ConfinementCaps{FSWrite: true, Residuals: []string{"truncate(2)"}},
+			want: true,
+		},
+		{
+			name: "a fence with no known hole says nothing",
+			caps: apogee.ConfinementCaps{FSWrite: true},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			stub := &stubRunner{res: run.Result{FinalText: "the answer", Turns: 1}}
+			out, errOut, err := headlessRunOn(
+				t, stub, fakeConfiner{caps: tc.caps}, testConfigHome(t, ""), "--mode", "auto", "a prompt")
+			if err != nil {
+				t.Fatalf("headless: %v (stderr: %q)", err, errOut)
+			}
+			if !stub.called {
+				t.Fatal("the runner did not run on a backend that can fence")
+			}
+			if got := strings.Contains(errOut, disclosure); got != tc.want {
+				t.Errorf("residual disclosure on stderr = %v; want %v (stderr = %q)", got, tc.want, errOut)
+			}
+			if tc.want && !strings.Contains(errOut, "truncate(2)") {
+				t.Errorf("the disclosure does not name the access it is about: %q", errOut)
+			}
+			if strings.Contains(out, disclosure) {
+				t.Errorf("the disclosure reached stdout, where a pipeline would read it as the answer: %q", out)
+			}
+			if !strings.Contains(out, "the answer") {
+				t.Errorf("stdout = %q; want the run's answer, untouched", out)
+			}
+		})
+	}
+}
+
 // What the command hands the runner: the resolved prompt, the roots this invocation was pointed
 // at, and none of the delegates that assume a human — run.Once pins its own, and a Firing reaches
 // no MCP server (ADR 0033/0034).

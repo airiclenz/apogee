@@ -654,7 +654,15 @@ stdio server that ignores stdin-close and SIGTERM and keeps stdout open returns 
 
 **Commit.** `fix(mcp): the stdio server's post-close drain is bounded by WaitDelay`
 
-## 22. Every `ResidualNotice` print is driven in both directions
+## 22. Every `ResidualNotice` print is driven in both directions — ✅ DONE (2026-08-28)
+
+NOTES (2026-08-28): the item's first half was already landed — `wire_boot.go` has routed through `newConfiner()` since `b32e25b0` (plan `2026-08-28 - 01`, its own recorded NOTES), so this item moved the seam and built the coverage rather than doing the routing again; `wire_boot.go`'s comment about where the seam lives was updated to match the move.
+
+NOTES (2026-08-28): the item says the seam moves "beside the other process-wide test seams" in `wire.go`, but `wire.go` held none — its only package-level var was the `tui.Engine` compile-time assertion. The seam landed under a new `The process-wide seams` section header there, and `wire.go`'s package doc gained the matching phrase.
+
+NOTES (2026-08-28): `TestRunRootConfinementStartupNotices` was rewritten rather than extended. Its expectations were derived from `platform.NewConfiner().Capabilities()`, so on any one host only one cell was ever exercised; making the residual cell deterministic meant dictating the caps through the seam, which makes all five cells deterministic. The now-unused `internal/platform` import was dropped from `wire_test.go` as a consequence.
+
+NOTES (2026-08-28): each of the three prints was deleted in turn and the matching test confirmed to fail (TUI, headless, daemon), then restored.
 
 **What.** ISSUES: *Two of the three `ResidualNotice` prints still have no test.* Route
 `cmd/apogee/wire_boot.go:102` through the existing `var newConfiner = platform.NewConfiner`

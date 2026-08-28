@@ -25,7 +25,6 @@ import (
 	"github.com/airiclenz/apogee/internal/library"
 	"github.com/airiclenz/apogee/internal/mcp"
 	"github.com/airiclenz/apogee/internal/mechanisms"
-	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/profiles"
 	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/scheme"
@@ -811,35 +810,54 @@ func TestRunRootResolvesTheColorScheme(t *testing.T) {
 // confine=false is the blanket-loosen WARNING, confine=true on an unfenceable backend is the
 // degradation notice. The third is the residual disclosure — confine=true on a backend that CAN
 // fence but leaves a write-class access open (landlock ABI 1–2 and truncate(2)) — which is the
-// degradation notice's mirror in FSWrite and so can never accompany it. All three cells are
-// host-dependent (this machine's real backend decides what it can fence), so each is asserted
-// against that backend's own Capabilities rather than against an assumption about the test runner.
+// degradation notice's mirror in FSWrite and so can never accompany it.
+//
+// Every cell is dictated through the [newConfiner] seam rather than read off this machine's real
+// backend: what a kernel can fence decides which branch speaks, so a host-derived expectation only
+// ever drives the one cell that host happens to be in — and leaves the silent half of each branch,
+// which is where a deleted print hides, unasserted on every machine.
 func TestRunRootConfinementStartupNotices(t *testing.T) {
-	// Deliberately NOT parallel: captureStderr swaps the process-global os.Stderr.
+	// Deliberately NOT parallel: captureStderr swaps the process-global os.Stderr, and the confiner
+	// seam below is package state.
 	const (
 		unconfinedWarning = "running UNCONFINED"
 		degradedNotice    = "auto mode is gating terminal commands"
 		residualNotice    = "cannot fence"
 	)
-	hostCaps := platform.NewConfiner().Capabilities()
-	hostCanFence := hostCaps.FSWrite
-	hostHasResidual := hostCanFence && len(hostCaps.Residuals) > 0
+	var (
+		unfenceable = apogee.ConfinementCaps{}
+		fenced      = apogee.ConfinementCaps{FSWrite: true}
+		leakyFence  = apogee.ConfinementCaps{FSWrite: true, Residuals: []string{"truncate(2)"}}
+	)
 
 	tests := []struct {
 		name         string
 		mode         string
 		confine      bool
+		caps         apogee.ConfinementCaps
 		wantWarning  bool
 		wantDegraded bool
 		wantResidual bool
 	}{
-		{name: "auto unconfined → warning only", mode: "auto", confine: false, wantWarning: true},
-		{name: "auto confined → degraded notice iff the host cannot fence", mode: "auto", confine: true,
-			wantDegraded: !hostCanFence, wantResidual: hostHasResidual},
-		{name: "ask-before makes no confinement promise → silent", mode: "ask-before", confine: true},
+		// The posture, not the backend: an acknowledged disposable host warns and says nothing else,
+		// even where the backend it is not using has a hole in it.
+		{name: "auto unconfined → warning only", mode: "auto", confine: false, caps: leakyFence,
+			wantWarning: true},
+		{name: "auto confined, a backend that cannot fence → the degradation notice", mode: "auto",
+			confine: true, caps: unfenceable, wantDegraded: true},
+		{name: "auto confined, a fence with a known hole → the residual disclosure", mode: "auto",
+			confine: true, caps: leakyFence, wantResidual: true},
+		{name: "auto confined, a fence with no known hole → silent", mode: "auto",
+			confine: true, caps: fenced},
+		{name: "ask-before makes no confinement promise → silent", mode: "ask-before",
+			confine: true, caps: leakyFence},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			prevConfiner := newConfiner
+			newConfiner = func() apogee.Confiner { return fakeConfiner{caps: tt.caps} }
+			t.Cleanup(func() { newConfiner = prevConfiner })
+
 			rec := &recordingLauncher{}
 			opts := config.Options{
 				Endpoint:           "http://127.0.0.1:1111",
@@ -861,12 +879,15 @@ func TestRunRootConfinementStartupNotices(t *testing.T) {
 				t.Errorf("unconfined-Auto warning present = %v; want %v (stderr = %q)", got, tt.wantWarning, stderr)
 			}
 			if got := strings.Contains(stderr, degradedNotice); got != tt.wantDegraded {
-				t.Errorf("degradation notice present = %v; want %v (host FSWrite = %v, stderr = %q)",
-					got, tt.wantDegraded, hostCanFence, stderr)
+				t.Errorf("degradation notice present = %v; want %v (caps = %+v, stderr = %q)",
+					got, tt.wantDegraded, tt.caps, stderr)
 			}
 			if got := strings.Contains(stderr, residualNotice); got != tt.wantResidual {
-				t.Errorf("residual notice present = %v; want %v (host residuals = %v, stderr = %q)",
-					got, tt.wantResidual, hostCaps.Residuals, stderr)
+				t.Errorf("residual notice present = %v; want %v (caps = %+v, stderr = %q)",
+					got, tt.wantResidual, tt.caps, stderr)
+			}
+			if tt.wantResidual && !strings.Contains(stderr, "truncate(2)") {
+				t.Errorf("the disclosure does not name the access it is about: %q", stderr)
 			}
 		})
 	}

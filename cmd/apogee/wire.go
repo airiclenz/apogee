@@ -1,7 +1,8 @@
 package main
 
 // The composition proper: runRoot, the four phases it walks, the wiring those phases fill in, the
-// state-root resolution behind them and the narrow surfaces its seam files share. Everything else
+// state-root resolution behind them, the narrow surfaces its seam files share and the process-wide
+// seams onto the host that every Driver — not just this one — builds from. Everything else
 // the wiring owns lives in a wire_<seam>.go beside it (ADR 0043: a composition root splits by seam
 // once it outgrows one file).
 //
@@ -64,6 +65,23 @@ import (
 // (phase-2 detail plan §3 C5): cmd dogfoods apogee.New, and *apogee.Agent (= *agent.Agent)
 // is exactly what internal/tui drives — without internal/tui ever importing the root path.
 var _ tui.Engine = (*apogee.Agent)(nil)
+
+// ----------------------------------------------------------------------------
+// The process-wide seams
+// ----------------------------------------------------------------------------
+
+// newConfiner is the seam onto the host's confinement backend, for the same reason runOnce is one:
+// what a backend can enforce is a property of the MACHINE the test happens to run on — a kernel
+// with landlock or without it — and every posture decision read off it is a decision about exactly
+// that. A test dictates the capability matrix here and asserts the verdict; production never
+// reassigns it.
+//
+// It lives in the composition root rather than beside any one Driver because all three Drivers
+// build their backend from it — runRoot (wire_boot.go), `apogee headless` (headless.go) and the
+// daemon (daemonfire.go) — and the three confinement sentences a host says for itself
+// (probe.DegradedNotice, probe.ResidualNotice, the unattended Auto refusal) are therefore all
+// drivable from one place, on every host, in both directions.
+var newConfiner = platform.NewConfiner
 
 // ----------------------------------------------------------------------------
 // Root command body
