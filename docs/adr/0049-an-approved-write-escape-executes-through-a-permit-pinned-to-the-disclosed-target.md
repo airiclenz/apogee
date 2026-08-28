@@ -139,3 +139,33 @@ with that target's own ancestor; sending it down the lexical branch instead woul
 call the human actually read, which is the gate failing to execute its own Allow. Every OTHER call
 is untouched by the ordering: permits are minted only for disclosed escape targets, so an ordinary
 in-workspace write can never meet the match.
+
+## Amendment (2026-08-28) — the session's own scratch dir is outside the forced look
+
+Decision 4 stands unchanged: `~/.apogee` is a Tier-2 **forced look**, never a boundary, and the
+human's informed yes runs the write. This note records the one carve-out inside it — the session's
+**own** scratch dir under `~/.apogee/scratch/` (ADR 0056's extra writable path), which the
+dangerous-action guard never sees.
+
+**Why a look there answers nothing.** The same Resolution that would force the look also installs
+a confinement box whose `WritablePaths` already contains that directory: the box grants the
+confined subprocess the dir outright, so the question the prompt asks has been answered
+affirmatively one line earlier in the same verdict. What the look bought instead was pure approval
+fatigue — in the `/code-audit` session of 2026-08-28
+(`~/.apogee/sessions/20260828T052713Z-55b6dbc4.json`) every `go test` and `go vet` the model
+routed through its sanctioned scratch space (`GOCACHE`, `GOTMPDIR`, throwaway probes) stopped Auto
+for a prompt, on the one path the run was explicitly told to use.
+
+**The carve-out is exactly one dir wide, and it is per call.** `Guards.PreExecute` /
+`DangerousActionGuard.Inspect` take an `exemptPaths []string`, and `maskExempt` replaces those
+spellings — the literal path plus its `~` / `$HOME` / `/root` / `/home/<u>` / `/Users/<u>`
+home-anchored forms — with a placeholder no rule can match, before ANY rule runs. Dispatch passes
+`Agent.guardExemptions()`, which is the agent's live `ScratchDir()` and nothing else; each agent,
+root or sub-agent, passes its own, so the shared guard stays stateless. Other sessions' scratch
+dirs, `config.yaml`, `skills/`, `sessions/` and every other control-plane path keep the look, and a
+command that names the exempt dir *and* a guarded path elsewhere still stops on the other half.
+
+Masking before every rule means a Tier-1 rule sees the placeholder too. That is acceptable at
+exactly this width: the masked dir is the session's own writable box, and no hard-refuse rule
+targets it. Widening the exemption beyond the session's own scratch dir would not be — it would
+start hiding text a Tier-1 rule exists to see.

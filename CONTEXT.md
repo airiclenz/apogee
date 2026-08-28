@@ -784,7 +784,8 @@ lives in `internal/security`, P3.6). Two tiers: **hard-refuse** (`rm -rf` of a r
 path, fork bombs, writes to `~/.ssh`/credential/persistence files — no per-call override) and
 **force-approval** (`curl | bash`-class — sometimes a legit installer — and a write under
 `~/.apogee`, apogee's own control plane, which the operator legitimately curates by hand
-(ADR 0049 §4): a speed-bump that forces the Approver even in Auto, carrying the rule's way out to
+(ADR 0049 §4) — except the session's own scratch dir, which the box already declares writable
+(ADR 0049 amendment 2026-08-28): a speed-bump that forces the Approver even in Auto, carrying the rule's way out to
 the prompt and to a denied call's result; a forced look on a call Auto would have confined stays
 confined once allowed — approval decides *whether*, confinement *where*). Rules match the call's **action text** — the tool, its target paths, its
 command lines and code — and never the **payload** a call carries (a file body, a replacement string,

@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -837,6 +838,97 @@ func approvalRequests(events []domain.Event) []domain.ApprovalRequest {
 		}
 	}
 	return out
+}
+
+// ----------------------------------------------------------------------------
+// The session's own scratch dir is outside the ~/.apogee forced look
+// ----------------------------------------------------------------------------
+
+// TestDispatch_ScratchDirCommandIsConfinedNotForcedInAuto proves the ADR 0049 amendment
+// (2026-08-28) end to end. A terminal command that routes its build through the session's OWN
+// scratch dir is CONFINED in Auto and never reaches the Approver: dispatch hands the guard that
+// dir as a per-call exemption, so no rule ever sees its spelling. Every OTHER path under the
+// control plane keeps the Tier-2 forced look. Without the carve-out each `go test` / `go vet`
+// the model routed through its sanctioned scratch space prompted — the live session of
+// 2026-08-28 — which is approval fatigue bought for nothing, since the box the very same
+// verdict installs already declares that dir writable (ADR 0056).
+func TestDispatch_ScratchDirCommandIsConfinedNotForcedInAuto(t *testing.T) {
+	t.Parallel()
+
+	// A home-SHAPED fake home: the rule is anchored on ~/ , $HOME, /root and /home|/Users/<user>,
+	// so a t.TempDir() path would not trip it at all and the exemption would prove nothing. No
+	// file is ever touched — the tools and the Confiner are fakes.
+	const home = "/home/apogee-user"
+	const scratch = home + "/.apogee/scratch/20260828T052713Z-55b6dbc4"
+
+	t.Run("the session's own scratch dir → confined, the Approver never consulted", func(t *testing.T) {
+		t.Parallel()
+		sink := &recordingSink{}
+		sub := &subprocTool{name: "terminal"}
+		conf := &fakeConfiner{caps: domain.ConfinementCaps{FSWrite: true}}
+		cfg := autoConfig(sink, conf, true, sub)
+		approver := &fakeApprover{decision: domain.ApprovalAllow}
+		cfg.Approver = approver
+
+		driveScratchToolCall(t, cfg, scratch, "export GOCACHE="+scratch+"/gocache && go vet ./...")
+
+		if approver.calls != 0 || len(approvalRequests(sink.events)) != 0 {
+			t.Errorf("Approver consulted %d times (%d ApprovalEvents), want 0: a command naming only the session's own scratch dir must not force a look", approver.calls, len(approvalRequests(sink.events)))
+		}
+		if sub.ranCount() != 1 {
+			t.Errorf("tool ran %d times, want 1", sub.ranCount())
+		}
+		if !sub.confinedOK() || conf.confineCount() != 1 {
+			t.Errorf("Confine called %d times (handle seen and clean: %t), want 1 / true — the verdict must be Confine, not Run and not Gate", conf.confineCount(), sub.confinedOK())
+		}
+		if !slices.Contains(conf.lastConfinedBox().WritablePaths, scratch) {
+			t.Errorf("confined box WritablePaths = %v, want the scratch dir %q among them — the look is skipped precisely because the box already grants it", conf.lastConfinedBox().WritablePaths, scratch)
+		}
+	})
+
+	t.Run("another control-plane path → the forced look stands", func(t *testing.T) {
+		t.Parallel()
+		sink := &recordingSink{}
+		sub := &subprocTool{name: "terminal"}
+		conf := &fakeConfiner{caps: domain.ConfinementCaps{FSWrite: true}}
+		cfg := autoConfig(sink, conf, true, sub)
+		approver := &fakeApprover{decision: domain.ApprovalAllow}
+		cfg.Approver = approver
+
+		driveScratchToolCall(t, cfg, scratch, "cat "+home+"/.apogee/config.yaml")
+
+		req := requestOnApproval(t, sink.events)
+		if req.Reason != forceApprovalReason {
+			t.Fatalf("approval reason = %q, want %q — this gate was not the Tier-2 force, so the case is not exercised", req.Reason, forceApprovalReason)
+		}
+		if want := shippedRuleHint(t, "write-apogee-control-plane"); req.Remedy != want {
+			t.Errorf("prompt remedy = %q, want the control-plane rule's Hint %q — a different rule forced this gate", req.Remedy, want)
+		}
+	})
+}
+
+// driveScratchToolCall is driveToolCall for a terminal command whose verdict depends on the LIVE
+// session scratch dir. The move has to land between construction and the Step — where the host
+// performs it, at a session boundary — so the call cannot go through driveToolCall, which builds
+// and steps in one breath.
+func driveScratchToolCall(t *testing.T, cfg domain.Config, scratch, command string) *Agent {
+	t.Helper()
+	responder := &scriptedResponder{scripts: [][]provider.Delta{
+		toolCallScript("c1", "terminal", `{"command":`+strconv.Quote(command)+`}`),
+		contentScript("done"),
+	}}
+	a, err := newAgent(cfg, responder)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	a.SetScratchDir(scratch)
+	if err := a.Submit(domain.UserInput{Text: "go"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if _, err := a.Step(context.Background()); err != nil {
+		t.Fatalf("Step: %v", err)
+	}
+	return a
 }
 
 // unconfinableClaimTool returns ErrConfinementUnavailable from Execute although nothing asked

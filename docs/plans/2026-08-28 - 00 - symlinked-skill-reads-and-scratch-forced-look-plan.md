@@ -281,7 +281,15 @@ NOTES (2026-08-28): no `PreExecute`/`Inspect` signature appears in `docs/`, `CON
 
 ---
 
-## 5. Agent-level regression and the documents that state the floor
+## 5. Agent-level regression and the documents that state the floor — ✅ DONE (2026-08-28)
+
+NOTES (2026-08-28): `internal/security/doc.go` is in the item's Files list but is unchanged — its only `~/.apogee` mention is the `ReadSourceTool`/`WritesOnly` narrowing, and it never enumerates the forced look, so the item's own conditional ("if it does not mention it, change nothing") resolved to no edit.
+NOTES (2026-08-28): the test drives the call through a new `driveScratchToolCall` helper rather than `driveToolCall`, because the item's `SetScratchDir` has to land BETWEEN construction and the Step (where the host performs it, at a session boundary) and `driveToolCall` builds and steps in one breath.
+NOTES (2026-08-28): the fake home is the literal `/home/apogee-user`, not `t.TempDir()` — the rule is anchored on `homeAnchor`, so a `/tmp/...` scratch dir would never have tripped it and the exemption would have proved nothing. Nothing on disk is touched (tools and Confiner are fakes).
+NOTES (2026-08-28): the forced-gate half identifies the RULE through the prompt's Remedy compared against `shippedRuleHint(t, "write-apogee-control-plane")` (the existing helper), since the rule id is not carried on `ApprovalRequest` itself.
+NOTES (2026-08-28): the confined half also asserts the box's `WritablePaths` contains the scratch dir — the amendment's rationale ("a look there answers nothing") is only true because the same verdict grants it.
+NOTES (2026-08-28): mutation proof — passing `nil` instead of `a.guardExemptions()` at the two `dispatch.go` `PreExecute` call sites makes the new test's first subtest fail (Approver consulted 1×); `internal/agent/dispatch.go` was restored byte-for-byte afterwards (`git status` clean for it).
+NOTES (2026-08-28): the untracked `docs/plans/2026-08-28 - 01 - announced-paths-regression-floor-plan.md` in the tree is not this item's work and was left untouched.
 
 Depends on item 4.
 
