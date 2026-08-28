@@ -281,7 +281,7 @@ func (s *liveSettings) setPin(tokens int) {
 func (s *liveSettings) followEntry(entry config.ServerEntry) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.entryWindow, s.entryCap, s.entryName = entry.ContextWindow, entry.MaxOutputTokens, entry.Name
+	s.entryWindow, s.entryCap, s.entryName = int(entry.ContextWindow), entry.MaxOutputTokens, entry.Name
 	// The room inside that window this server is worked in, moving with the pin it sits under and for
 	// its reason: a bound describes ONE server, so carrying the retired server's onto the new one
 	// would work a 32K slot in the room a 1M one was bounded to.
@@ -472,7 +472,7 @@ func (s *liveSettings) setServers(servers []config.ServerEntry) bool {
 	s.servers = servers
 	for _, e := range servers {
 		if e.Name != "" && e.Name == s.entryName {
-			s.entryWindow, s.entryCap = e.ContextWindow, e.MaxOutputTokens
+			s.entryWindow, s.entryCap = int(e.ContextWindow), e.MaxOutputTokens
 			// The re-read entry's own working room travels with them so the next bind, move or Firing
 			// works in the room the file names NOW. It is deliberately absent from the moved-answer
 			// below: nothing a rebind carries reads it (apogee.RebindSpec states no working room), so
@@ -700,7 +700,7 @@ func (s *liveSettings) firingSources(bound upstreamBinding) (config.Options, con
 		Name:            s.entryName,
 		Endpoint:        bound.Endpoint,
 		Model:           bound.Model,
-		ContextWindow:   s.entryWindow,
+		ContextWindow:   config.TokenCount(s.entryWindow),
 		WorkingWindow:   s.entryWorking,
 		MaxOutputTokens: s.entryCap,
 		ResponseReserve: s.entryReserve,

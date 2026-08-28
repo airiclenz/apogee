@@ -174,7 +174,7 @@ func TestFiringConfigSetsEveryUnattendedField(t *testing.T) {
 
 	// The three bounds the BOUND entry carries outrank the top-level keys, and a pin answers the
 	// fan-out width without spending a round trip on a question already settled.
-	if cfg.Context.MaxContextTokens != entry.ContextWindow {
+	if cfg.Context.MaxContextTokens != int(entry.ContextWindow) {
 		t.Errorf("Context.MaxContextTokens = %d; want the entry's pin %d", cfg.Context.MaxContextTokens, entry.ContextWindow)
 	}
 	if cfg.Context.MaxOutputTokens != entry.MaxOutputTokens {

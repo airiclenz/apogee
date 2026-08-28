@@ -575,13 +575,15 @@ var keyAccessors = []keyAccessor{
 		},
 	},
 	{
-		// A plain int rather than a pointer on disk, so PRESENCE is the positive value: 0 and absent
-		// both mean unpinned, and the heartbeat's live observation stands (ADR 0024).
+		// A whole count rather than a pointer on disk, so PRESENCE is the positive value: 0 and
+		// absent both mean unpinned, and the heartbeat's live observation stands (ADR 0024). Only 0
+		// still reaches here as "unpinned" — a fractional or negative value never gets this far,
+		// because TokenCount refuses it at the decode rather than letting it be floored to one.
 		row: mustKey("context-window"),
 		fromFile: func(o *Options, fc fileConfig) {
 			o.ContextWindow = 0
 			if fc.ContextWindow > 0 {
-				o.ContextWindow = fc.ContextWindow
+				o.ContextWindow = int(fc.ContextWindow)
 			}
 		},
 	},
@@ -950,6 +952,65 @@ func resolveConfineToWorkspace(confine bool, hosts []UnconfinedHost, hostID stri
 // The config file (<apogee-home>/config.yaml)
 // ----------------------------------------------------------------------------
 
+// TokenCount is a `context-window:` value as the decoder is allowed to read it: a whole,
+// non-negative number of tokens, or a load error. It exists because yaml.v3 truncates silently —
+// `context-window: 3.5` decodes into a plain `int` as 3, and `applyFile` then drops the result for
+// being ≤ 0 — so a typed window nobody wrote reaches the Budget with nothing left to notice it. The
+// truncation happens INSIDE the decoder, which is why this is a type rather than a second pass over
+// the decoded struct: after the unmarshal there is no 3.5 left to refuse.
+//
+// It is exported because the composition root builds ServerEntry values from plain ints and has to
+// be able to name the type for the conversion.
+//
+// The refusal is a LOAD error, in the shape validateResponseReserveFraction set for the other key
+// whose every wrong value is silent downstream: every Driver surfaces a config-load failure loudly,
+// with the file it came from still named. Consumers convert back with `int(...)`; the resolution
+// ranks (ResolveContextWindow) and Options both keep plain ints.
+type TokenCount int
+
+// UnmarshalYAML accepts exactly a `!!int` node whose value is 0 or more, and refuses everything
+// else. The tag check is the point of the type: `!!float` covers both `3.5` and the whole numbers
+// written with a decimal point or an exponent (`65536.0`, `1e3`), and the decoder cannot tell those
+// apart from each other — a value that has to be rounded to become a window is not a window.
+//
+// The value is decoded through the node rather than parsed off node.Value, because yaml.v3 tags
+// `0x10000`, `1_000`, `0o17` and `+5` as `!!int` and every one of them loads today.
+//
+// An absent key and an explicit `null` never reach here at all — yaml.v3 short-circuits both before
+// it looks for an Unmarshaler — so the field keeps its zero value, which is the "unpinned" state it
+// already had.
+func (t *TokenCount) UnmarshalYAML(node *yaml.Node) error {
+	if node.Tag != "!!int" {
+		return tokenCountRefusal(node)
+	}
+	var tokens int
+	if err := node.Decode(&tokens); err != nil || tokens < 0 {
+		return tokenCountRefusal(node)
+	}
+	*t = TokenCount(tokens)
+	return nil
+}
+
+// tokenCountRefusal is the one refusal every unusable `context-window:` scalar gets. It carries
+// validateContextWindow's wording, so the file and the /settings row say the same thing about the
+// same key, plus the line the value sits on — which is all the locator there is: yaml.v3 hands a
+// scalar Unmarshaler the value node alone, never the key it hangs under nor the `servers:` index,
+// so an entry-level defect is located by line rather than by entry number and name.
+//
+// The key is named literally because both fields that use this type are spelled `context-window:`;
+// a second key adopting it has to make the name a parameter.
+func tokenCountRefusal(node *yaml.Node) error {
+	written := node.Value
+	if node.Kind != yaml.ScalarNode {
+		written = node.Tag
+	}
+	return fmt.Errorf("context-window: %q (line %d) is not a token count — want a token count of 0 "+
+		"or more (0 — the default — follows the window the server reports); a fractional value is "+
+		"refused rather than truncated to a window nobody wrote, and a whole number written with a "+
+		"decimal point or an exponent (65536.0, 1e3) is refused with it, so write 65536",
+		written, node.Line)
+}
+
 // fileConfig is the on-disk config schema. It mirrors the settable flags so a user can
 // fix their servers/autonomy once instead of passing them every invocation.
 // Bypass is a pointer so an explicit `bypass: false` is distinguishable from an absent
@@ -1037,7 +1098,7 @@ type fileConfig struct {
 	// beat (ADR 0024) — the escape hatch for a server that does not advertise a window, or
 	// advertises one that is wrong for how it is run. It feeds ContextConfig.MaxContextTokens,
 	// which the Budget and automatic Compaction bind against.
-	ContextWindow int `yaml:"context-window"`
+	ContextWindow TokenCount `yaml:"context-window"`
 	// WorkingWindow BOUNDS the room the Budget hands its reducers, in tokens — a soft ceiling INSIDE
 	// the window above rather than a second pin of it. File-only (no flag/env), like context-window
 	// beside it, and a plain int for that key's reason: presence IS the positive value, so absent or
@@ -1344,7 +1405,7 @@ type ServerEntry struct {
 	SubAgents       bool            `yaml:"sub-agents,omitempty"`
 	Bypass          *bool           `yaml:"bypass,omitempty"`
 	Mechanisms      map[string]bool `yaml:"mechanisms,omitempty"`
-	ContextWindow   int             `yaml:"context-window,omitempty"`
+	ContextWindow   TokenCount      `yaml:"context-window,omitempty"`
 	WorkingWindow   int             `yaml:"working-window,omitempty"`
 	MaxOutputTokens int             `yaml:"max-output-tokens,omitempty"`
 	ResponseReserve float64         `yaml:"response-reserve,omitempty"`
@@ -1518,17 +1579,12 @@ func ValidateServers(servers []ServerEntry) error {
 				"number of sub-agents this server may run at once (1 or more), or remove the key to take "+
 				"the server's own slot count", i+1, s.Name, s.ParallelAgents)
 		}
-		if s.ContextWindow < 0 {
-			return fmt.Errorf("apogee: servers: entry %d (%q): context-window: %d is negative — give the "+
-				"context window this server serves, in tokens (1 or more), or remove the key to take the "+
-				"window the server advertises", i+1, s.Name, s.ContextWindow)
-		}
 		if s.WorkingWindow < 0 {
 			return fmt.Errorf("apogee: servers: entry %d (%q): working-window: %d is negative — give the "+
 				"room a session on this server should work in, in tokens (1 or more), or remove the key to "+
 				"work in the whole window", i+1, s.Name, s.WorkingWindow)
 		}
-		if s.ContextWindow >= 1 && s.WorkingWindow > s.ContextWindow {
+		if s.ContextWindow >= 1 && s.WorkingWindow > int(s.ContextWindow) {
 			return fmt.Errorf("apogee: servers: entry %d (%q): working-window: %d is larger than this "+
 				"entry's context-window: %d — the working window is the room INSIDE the context window, so "+
 				"lower it, or raise the pin it has to fit in", i+1, s.Name, s.WorkingWindow, s.ContextWindow)
@@ -2653,7 +2709,7 @@ func ApplyConfig(opts *Options, changed func(string) bool, getenv func(string) s
 	// written for the composition root to resolve over the top-level `context-window:` key
 	// (ResolveContextWindow) at the bind. The ephemeral override entry pins nothing, which leaves an
 	// override run on that top-level key and, unpinned there too, on what the first beat observes.
-	opts.StartupContextWindow = startup.ContextWindow
+	opts.StartupContextWindow = int(startup.ContextWindow)
 	// And how much of that window a session on it actually works in. Flattened for the pin's reason
 	// and travelling the same way — the SELECTED entry's own value, carried as written for the
 	// composition root to resolve over the top-level `working-window:` key (ResolveWorkingWindow) at

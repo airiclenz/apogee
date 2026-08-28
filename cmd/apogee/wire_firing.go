@@ -136,7 +136,7 @@ func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, []string
 	specOpts := in.opts
 	specOpts.Endpoint = in.entry.Endpoint
 	specOpts.APIKey = apiKey
-	pinnedWindow := config.ResolveContextWindow(in.entry.ContextWindow, in.opts.ContextWindow)
+	pinnedWindow := config.ResolveContextWindow(int(in.entry.ContextWindow), in.opts.ContextWindow)
 	specOpts.ContextWindow = pinnedWindow
 	specOpts.ResponseReserve = config.ResolveResponseReserve(in.entry.ResponseReserve, in.opts.ResponseReserve)
 	spec, notices, err := rebindSpecFor(specOpts, in.roots, in.manualIDs, model, 0, pinnedWindow, in.entry.MaxOutputTokens)

@@ -346,7 +346,10 @@ The context **window** these budgets are measured against is discovered from the
 server — live, not once: apogee asks every ten seconds, so switching the loaded model
 under a running session re-binds the window with it. Set `context-window:` (a file-only
 key, in tokens) only when your server does not advertise a window, or when its number is
-wrong for how you run it; that key is a **pin** the heartbeat never overrides. With no
+wrong for how you run it; that key is a **pin** the heartbeat never overrides. It takes a
+whole number of tokens: a fractional or negative value — and a whole number written with a
+decimal point or an exponent, `65536.0` or `1e3` — is refused when the config loads, rather
+than rounded into a window you did not write. With no
 window known, the Budget and automatic compaction stay inactive and apogee says so in the
 transcript the moment it binds a model without one. How that window is **split** is a second
 file-only key: apogee holds a fifth of it back for the model's reply and lets the prompt fill

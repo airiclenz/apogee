@@ -227,7 +227,15 @@ these fails against the tree with only the `parseConfigFile` trim applied.
 
 **Commit.** `fix(config): a padded server name or endpoint is stored trimmed, so it selects and dials`
 
-## 3. `context-window` refuses a fractional or negative value at load
+## 3. `context-window` refuses a fractional or negative value at load — ✅ DONE (2026-08-28)
+
+NOTES (2026-08-28): the item's regression guard (a) named `cmd/apogee/wire_options.go:77` and `cmd/apogee/launcher.go:295,599` as `ServerEntry.ContextWindow` assignment sites; they are not — they assign into `tui.Options`, the local `launchProfile` row and `tui.LaunchProfileChoice` respectively — so neither file changed. `delegation.go:425` needed `int(entry.ContextWindow)` rather than a `config.TokenCount(...)` conversion. Three compile sites the item did not list did need touching: `cmd/apogee/upstream.go` and `cmd/apogee/wire_firing.go` (`int(...)` at `config.ResolveContextWindow`) and `cmd/apogee/wire_firing_test.go` (`int(...)` in a comparison).
+
+NOTES (2026-08-28): two `internal/config/configedit_test.go` fixtures used `context-window: lots` as their generic "a file that is settings-shaped but holds a value the schema's type cannot take" case and asserted on `cannot unmarshal`; the key was switched to `working-window:` (still a plain `int`) so those two tests keep pinning the DECODER's own error rather than `TokenCount`'s sentence.
+
+NOTES (2026-08-28): the new table's entry-scope YAML carries a `server: box` line — `ApplyConfig` refuses a `servers:` list that records no startup server, so the entry-level rows cannot be written without it.
+
+NOTES (2026-08-28): `docs/manual/configuration.md` gained a sentence on the refusal beside the `context-window:` pin, because the accepted `65536.0`/`1e3` change is user-facing.
 
 **What.** Audit: *`context-window` is validated only on the settings write path* (Medium).
 `validateContextWindow` (`internal/config/registry.go:659`) guards only the `/settings` row;

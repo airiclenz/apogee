@@ -5108,7 +5108,7 @@ func TestStartupBindHonoursTheEntrysContextWindow(t *testing.T) {
 				ContextWindow:        16384,
 				StartupContextWindow: tt.entryPin,
 				Servers: []config.ServerEntry{
-					{Name: "workstation", Endpoint: "http://127.0.0.1:1111", ContextWindow: tt.entryPin},
+					{Name: "workstation", Endpoint: "http://127.0.0.1:1111", ContextWindow: config.TokenCount(tt.entryPin)},
 				},
 				AutoCompact: true,
 			}

@@ -246,7 +246,7 @@ func (m sessionMover) move(entry config.ServerEntry) (tui.ServerSwitchResult, er
 	// itself survives a move (config.ResolveContextWindow), and the reply cap is the entry's as
 	// written — an unpinned entry sends 0 and the engine derives its own cap from the window (ADR
 	// 0046).
-	window := config.ResolveContextWindow(entry.ContextWindow, m.live.pin())
+	window := config.ResolveContextWindow(int(entry.ContextWindow), m.live.pin())
 	// And how the new server splits it: that entry's own `response-reserve:` over the top-level key,
 	// which survives a move the way the window pin does (config.ResolveResponseReserve). Resolved
 	// here, with the window, so the engine takes one statement about one server — 0 at both scopes

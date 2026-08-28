@@ -422,7 +422,7 @@ func resolveDelegationTarget(
 	if model == "" {
 		return nil
 	}
-	window := entry.ContextWindow
+	window := int(entry.ContextWindow)
 	if window <= 0 {
 		window = observed.ContextWindow
 	}

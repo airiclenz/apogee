@@ -41,7 +41,7 @@ func startupEntry(opts config.Options) config.ServerEntry {
 		Model:           opts.Model,
 		ParallelAgents:  opts.StartupParallelAgents,
 		MaxOutputTokens: opts.StartupMaxOutputTokens,
-		ContextWindow:   opts.StartupContextWindow,
+		ContextWindow:   config.TokenCount(opts.StartupContextWindow),
 		WorkingWindow:   opts.StartupWorkingWindow,
 		ResponseReserve: opts.StartupResponseReserve,
 		EffortDialect:   opts.StartupEffortDialect,
@@ -126,7 +126,7 @@ func (b serverBinder) bind(entry config.ServerEntry) error {
 	// reply cap's reason: a session that STARTS on a pinned entry must budget against that pin from
 	// its first Turn rather than from the first beat that rebinds. Unpinned at both scopes it stays
 	// 0, the honest "unknown until the first beat binds one".
-	cfg.Context.MaxContextTokens = config.ResolveContextWindow(entry.ContextWindow, cfg.Context.MaxContextTokens)
+	cfg.Context.MaxContextTokens = config.ResolveContextWindow(int(entry.ContextWindow), cfg.Context.MaxContextTokens)
 	// And the seventh, the room INSIDE that window a session on this server actually works in: the
 	// entry's own `working-window:` over the top-level key already in cfg (config.ResolveWorkingWindow,
 	// the ranks the pin above spells). It goes in through the Config for the pin's reason — a session

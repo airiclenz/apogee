@@ -1611,6 +1611,102 @@ func TestApplyConfigContextWindow(t *testing.T) {
 	}
 }
 
+// A `context-window:` value that is not a whole, non-negative token count is refused when the file
+// LOADS (TokenCount) instead of being floored to a window nobody wrote: yaml.v3 decodes `3.5` into
+// a plain int as 3, and applyFile then dropped it for being ≤ 0, so a typo cost the pin in silence.
+// Both scopes that carry the key decode through the type, so every case runs twice — once on the
+// top-level key, once on a `servers:` entry's own.
+//
+// The `!!float` rows are the deliberate part of this: a whole number written `65536.0` or `1e3`
+// loaded before the type existed and does not now, because the decoder cannot tell either of them
+// from `3.5` without refusing the tag. The `!!int` spellings yaml.v3 already accepts — hex here,
+// and underscores, octal and a leading `+` with it — keep loading, which is why the value is
+// decoded through the node rather than parsed off its text.
+func TestApplyConfigContextWindowRefusesAFractionOrANegative(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		value   string
+		want    int      // the pin both scopes carry when the file loads
+		wantErr []string // non-empty ⇒ the load is refused, and the error says all of these
+	}{
+		{name: "a whole count pins the window", value: "65536", want: 65536},
+		{name: "an explicit 0 leaves the window unpinned", value: "0", want: 0},
+		{name: "hex is a whole count too", value: "0x10000", want: 65536},
+		{
+			name:    "a fraction is refused rather than truncated",
+			value:   "3.5",
+			wantErr: []string{"context-window", "0 or more"},
+		},
+		{
+			name:    "a whole number written as a float is refused with it",
+			value:   "1e3",
+			wantErr: []string{"context-window", "0 or more"},
+		},
+		{
+			name:    "a negative pin is refused",
+			value:   "-1",
+			wantErr: []string{"context-window", "0 or more"},
+		},
+		{
+			name:    "a word that is no count at all is refused",
+			value:   "lots",
+			wantErr: []string{"context-window", "0 or more"},
+		},
+	}
+	scopes := []struct {
+		name string
+		file func(value string) string
+		got  func(o Options) int
+	}{
+		{
+			name: "the top-level key",
+			file: func(value string) string { return "context-window: " + value + "\n" },
+			got:  func(o Options) int { return o.ContextWindow },
+		},
+		{
+			name: "a servers: entry's own pin",
+			file: func(value string) string {
+				return "server: box\nservers:\n  - name: box\n    endpoint: http://one:1111\n" +
+					"    context-window: " + value + "\n"
+			},
+			got: func(o Options) int { return int(o.Servers[0].ContextWindow) },
+		},
+	}
+	for _, tt := range tests {
+		for _, scope := range scopes {
+			t.Run(tt.name+" — "+scope.name, func(t *testing.T) {
+				t.Parallel()
+
+				home := testConfigHome(t, "")
+				writeConfigHome(t, home, scope.file(tt.value))
+				opts := Options{ConfigDir: home}
+
+				err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" },
+					os.ReadFile, noNotify)
+
+				if len(tt.wantErr) == 0 {
+					if err != nil {
+						t.Fatalf("ApplyConfig: %v; want context-window: %s accepted", err, tt.value)
+					}
+					if got := scope.got(opts); got != tt.want {
+						t.Errorf("context-window = %d; want the file's %s read as %d", got, tt.value, tt.want)
+					}
+					return
+				}
+				if err == nil {
+					t.Fatalf("ApplyConfig = nil error; want context-window: %s refused at load", tt.value)
+				}
+				for _, want := range tt.wantErr {
+					if !strings.Contains(err.Error(), want) {
+						t.Errorf("error = %q; want it to contain %q", err, want)
+					}
+				}
+			})
+		}
+	}
+}
+
 // The delegate-max-steps key parses into opts.delegateMaxSteps: a file-only key (no flag/env),
 // like the context-window pin above it. Three states, because a pointer on disk is what makes the
 // third one reachable — a stated bound, an absent key resolving to the built-in default, and an
@@ -2739,11 +2835,17 @@ func TestApplyConfigServersInvalid(t *testing.T) {
 		},
 		{
 			// The window pin is refused on the parallel-agents reasoning: absent and 0 already mean
-			// observe, every N ≥ 1 is a pin, so a negative number has nothing left to mean.
+			// observe, every N ≥ 1 is a pin, so a negative number has nothing left to mean. It is
+			// refused one layer earlier than its neighbours, at the DECODE (TokenCount), which is what
+			// makes a fractional value impossible to floor — and the price is the locator: yaml.v3
+			// hands a scalar Unmarshaler the value node alone, never the key above it or the list
+			// index it hangs under, so the refusal names the key and the line instead of entry 1
+			// ("box"). The whole table of decode refusals is
+			// TestApplyConfigContextWindowRefusesAFractionOrANegative's.
 			name: "an entry whose context-window pin is negative",
 			configYAML: "servers:\n  - name: box\n    endpoint: http://one:1111\n" +
 				"    context-window: -8192\n",
-			wantErr: []string{"servers: entry 1", "box", "context-window: -8192 is negative", "1 or more"},
+			wantErr: []string{"context-window", "0 or more"},
 		},
 		{
 			// The working room is refused on the window pin's reasoning one key over: absent and 0
