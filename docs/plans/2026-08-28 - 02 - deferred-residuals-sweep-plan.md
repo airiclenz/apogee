@@ -683,7 +683,9 @@ the daemon prints it. With a residual-free fake, all three print nothing.
 
 **Commit.** `test(cmd): the landlock residual notice is driven on every surface without an old kernel`
 
-## 23. The settings editor's production fence root is pinned
+## 23. The settings editor's production fence root is pinned — ✅ DONE (2026-08-28)
+
+NOTES (2026-08-28): mutation-checked — seeding `""` at the `newExternalEdit` call in `wire_live.go` fails all three assertions, the behavioural one included (the spec hands back an argv).
 
 **What.** ISSUES: *No test pins the settings editor's production fence root.* In
 `cmd/apogee/wire_live_test.go`, after `urlGuardWiring(t, config.Options{})` and

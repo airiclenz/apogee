@@ -2,12 +2,16 @@ package main
 
 import (
 	"context"
+	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/mcp"
+	"github.com/airiclenz/apogee/internal/security"
 )
 
 // The `url-safety:` guard an MCP connect is made under (audit 2026-08-25 F-40).
@@ -106,5 +110,56 @@ func TestMCPReconnectUsesTheLiveURLSafetyLists(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "blocked by url-safety") {
 		t.Errorf("reconnect error = %v; want a connection error once no list closes the host", err)
+	}
+}
+
+// The root the settings editor's exec fence is measured against, asserted where it is SEEDED
+// (audit residual, 2026-08-28).
+//
+// settingsedit.go's own tests hand newExternalEdit a workspace of their own, so every one of them
+// passes whatever the composition root seeds here. And the value matters more than an ordinary
+// wiring mistake would suggest: security.RefuseExecFromWritablePath drops an EMPTY root from its
+// fence set rather than measuring against it, so a seeded "" raises no fence at all — the editor
+// ladder would resolve a program the model authored inside the workspace and the pane would
+// suspend into it, outside any box. Both halves are asserted: the root IS the session's resolved
+// workspace, and it is load-bearing.
+func TestWireSessionFencesTheSettingsEditorAgainstTheWorkspace(t *testing.T) {
+	t.Parallel()
+	w := urlGuardWiring(t, config.Options{})
+	if err := w.wireSession(context.Background()); err != nil {
+		t.Fatalf("wireSession: %v", err)
+	}
+
+	if w.externalEdits.workspace != w.roots.workspace {
+		t.Errorf("externalEdit.workspace = %q; want the session's resolved workspace %q — the editor "+
+			"fence and the file tools' scope must not disagree about which bytes the model can write",
+			w.externalEdits.workspace, w.roots.workspace)
+	}
+	if !filepath.IsAbs(w.externalEdits.workspace) {
+		t.Errorf("externalEdit.workspace = %q is not absolute; a fence measured against a relative root "+
+			"compares an absolute resolved program path with something that is not a root at all",
+			w.externalEdits.workspace)
+	}
+
+	// The behavioural half: an editor that resolves to a program under the wired workspace is
+	// refused. Seeding "" at the newExternalEdit call fails exactly here — the assertions above
+	// still hold their shape, but the fence set would be empty and the spec would hand back an argv.
+	planted := filepath.Join(w.roots.workspace, "bin", "vim")
+	if err := os.MkdirAll(filepath.Dir(planted), 0o755); err != nil {
+		t.Fatalf("plant the editor: %v", err)
+	}
+	if err := os.WriteFile(planted, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("plant the editor: %v", err)
+	}
+	w.externalEdits.look = func(string) (string, error) { return planted, nil }
+
+	launch, err := w.externalEdits.spec("mode")
+
+	if err == nil {
+		t.Fatalf("spec over an editor inside the wired workspace = %+v; want the fence's refusal", launch)
+	}
+	if !errors.Is(err, security.ErrExecFromWritablePath) {
+		t.Errorf("refusal %q does not wrap security.ErrExecFromWritablePath; the seeded fence root is not "+
+			"the workspace the model writes into", err)
 	}
 }
