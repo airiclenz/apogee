@@ -2,6 +2,7 @@ package tuitest
 
 import (
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -12,6 +13,14 @@ import (
 // stops: the test passes, the next test inherits a goroutine still sending into a dead program,
 // and the suite becomes flaky somewhere else entirely. [CheckLeaks] makes that the failure of the
 // test that caused it.
+//
+// It is the test's OWN goroutines it makes that failure of: a driver test running in parallel with
+// others sees their stacks too, and blaming a neighbour's straggler on whichever cleanup happens to
+// look next is how a leak check becomes noise nobody reads. So [CheckLeaks] snapshots the goroutines
+// already running when it is called and reports only the ids that were not in it. The caveat that
+// rests on is id reuse: the runtime hands out goroutine ids from a counter that only ever goes up,
+// so a retired id is never seen again and a snapshotted id can only ever mean the same goroutine. If
+// that ever changed, a newborn goroutine could inherit a retired id and be forgiven as inherited.
 
 // leakMarkers are the packages whose goroutines belong to a driver test and must not outlive it.
 // Everything else — the testing framework, the runtime, the standard library's own workers — is
@@ -48,16 +57,22 @@ var harnessFrames = []string{"testing.tRunner(", "testing.(*M).Run(", "testing.r
 // no lock. What this check is for is a goroutine that is still WORKING.
 var timerFrames = []string{"bubbletea/v2.Tick.func1("}
 
-// CheckLeaks registers a cleanup that fails the test when a goroutine from the driver's own stack
-// is still running after it. Call it FIRST in a driver test — before anything is launched — so the
-// cleanup runs last, after every other cleanup has had its chance to stop things.
+// goroutineID is the runtime's identifier for one goroutine, as it appears in the
+// "goroutine <id> [<state>]:" header that opens every block of a [runtime.Stack] dump.
+type goroutineID string
+
+// CheckLeaks registers a cleanup that fails the test when a goroutine the test itself started, from
+// the driver's own stack, is still running after it. Call it FIRST in a driver test — before
+// anything is launched — so that the snapshot it takes holds only what the test inherited, and so
+// that the cleanup runs last, after every other cleanup has had its chance to stop things.
 func CheckLeaks(t testing.TB) {
 	t.Helper()
 
+	inherited := leakedGoroutines()
 	t.Cleanup(func() {
 		deadline := time.Now().Add(leakGrace)
 		for {
-			left := leakedGoroutines()
+			left := startedSince(inherited)
 			if len(left) == 0 {
 				return
 			}
@@ -71,9 +86,23 @@ func CheckLeaks(t testing.TB) {
 	})
 }
 
-// leakedGoroutines returns the stacks of every goroutine naming one of [leakMarkers], excluding
-// the one doing the looking.
-func leakedGoroutines() []string {
+// startedSince returns the stacks of the leaked goroutines that were not already running when the
+// snapshot was taken, in a stable order — the map behind them has none, and a report that reads the
+// same way twice is worth the sort.
+func startedSince(snapshot map[goroutineID]string) []string {
+	var left []string
+	for id, stack := range leakedGoroutines() {
+		if _, born := snapshot[id]; !born {
+			left = append(left, stack)
+		}
+	}
+	slices.Sort(left)
+	return left
+}
+
+// leakedGoroutines returns the stack of every goroutine naming one of [leakMarkers], keyed by its
+// id and excluding the one doing the looking.
+func leakedGoroutines() map[goroutineID]string {
 	buf := make([]byte, 1<<16)
 	for {
 		n := runtime.Stack(buf, true)
@@ -83,20 +112,34 @@ func leakedGoroutines() []string {
 		}
 		buf = make([]byte, 2*len(buf))
 	}
-	var left []string
-	for _, stack := range strings.Split(string(buf), "\n\n") {
-		if strings.TrimSpace(stack) == "" || strings.Contains(stack, checkerFrame) ||
-			harness(stack) || parkedOnATimer(stack) {
+	left := make(map[goroutineID]string)
+	for _, block := range strings.Split(string(buf), "\n\n") {
+		if strings.TrimSpace(block) == "" || strings.Contains(block, checkerFrame) ||
+			harness(block) || parkedOnATimer(block) {
 			continue
 		}
 		for _, marker := range leakMarkers {
-			if strings.Contains(stack, marker) {
-				left = append(left, strings.TrimSpace(stack))
+			if strings.Contains(block, marker) {
+				stack := strings.TrimSpace(block)
+				left[idOf(stack)] = stack
 				break
 			}
 		}
 	}
 	return left
+}
+
+// idOf reads the goroutine id out of a stack block's header line — "goroutine 42 [chan receive]:".
+// A block whose header does not parse gets the empty id, which no snapshot taken from the same
+// dump format can hold: an unattributable goroutine is reported, never silently forgiven.
+func idOf(stack string) goroutineID {
+	header, _, _ := strings.Cut(stack, "\n")
+	rest, ok := strings.CutPrefix(strings.TrimSpace(header), "goroutine ")
+	if !ok {
+		return ""
+	}
+	id, _, _ := strings.Cut(rest, " ")
+	return goroutineID(id)
 }
 
 // parkedOnATimer reports whether a stack is one of [timerFrames] — over, but not yet told.

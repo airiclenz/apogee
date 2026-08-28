@@ -329,8 +329,11 @@ writes `<dir>/<test name>.{txt,ansi}`, for a CI run nobody is watching live.
 
 `CheckLeaks(t)` is the other guard: called FIRST in a driver test, it fails the test if a goroutine
 from `internal/tui`, bubbletea, `internal/tuitest`, `internal/filewatch` or `internal/heartbeat` is
-still running 2 s after it ends. A driver test starts real workers; the interesting failure is not
-one that crashes but one that never stops and makes some *later* test flaky.
+still running 2 s after it ends. Only goroutines the test itself started: the call snapshots the
+ones already running and reports the ids absent from that snapshot, so a parallel neighbour's
+straggler is never charged to whichever cleanup looks next. A driver test starts real workers; the
+interesting failure is not one that crashes but one that never stops and makes some *later* test
+flaky.
 
 ### Goldens
 
@@ -417,8 +420,9 @@ Four things about it are decisions rather than details, and each of them was a b
   Closing an epoll descriptor does not wake the `EpollWait` already parked on it, so a loop still
   parked when the reader closes is parked for the life of the process. `Close()` and `Kill()` end
   the input, wait for the loop to actually take the EOF, and only then let the cancel or the close
-  proceed. Without the wait, `CheckLeaks` — which scans goroutines package-globally — reports the
-  straggler against whichever LATER test happens to look, so the failure never names its cause.
+  proceed. Without the wait, the straggler is left running for the rest of the process, and
+  `CheckLeaks` fails the test that stranded it rather than the driver teardown that should have
+  joined it.
 
 `cmd/apogee/e2e_support_test.go` is the half that cannot live in `internal/tuitest`, because the
 launcher seam is in package `main`: `launchTUI(t, drv, stub, args...)` builds a temp home and a temp

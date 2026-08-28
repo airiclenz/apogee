@@ -816,7 +816,12 @@ compares it exactly, as it does `text`.
 
 **Commit.** `test(stubllm): the replay comparison covers reasoning`
 
-## 29. `CheckLeaks` attributes only goroutines born during its own test
+## 29. `CheckLeaks` attributes only goroutines born during its own test — ✅ DONE (2026-08-28)
+
+NOTES (2026-08-28): the item's Files list named `leak.go` and `leak_test.go`; the change falsified
+three in-repo docs that assert the package-global scan, so `doc.go`'s file-map line,
+`driver.go`'s `joinReadLoop` rationale (`:328`) and `docs/design/test-drivers.md` (`:330`, `:420`)
+were corrected with it. Item 33's test-drivers.md edit is a different paragraph (`:667-674`).
 
 **What.** ISSUES: *`CheckLeaks` still scans goroutines package-globally.* In
 `internal/tuitest/leak.go`: `leakedGoroutines` (`:76`) returns `map[goroutineID]stack`,

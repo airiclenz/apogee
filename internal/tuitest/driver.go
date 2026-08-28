@@ -324,10 +324,9 @@ func (d *Driver) Close() {
 // That loop parks in its cancel reader's EpollWait, and the reader is closed out from under it: a
 // killed program skips waitForReadLoop entirely (tea.go:1249-1255) and a graceful one gives it
 // 500 ms. Closing an epoll descriptor does NOT wake the EpollWait already parked on it, so a loop
-// still parked there when the reader closes is parked for the life of the process — and because
-// [CheckLeaks] scans goroutines package-globally, the straggler is reported against whichever LATER
-// test happens to look. Ending the input hands the loop an EOF to leave on; this waits for it to
-// leave, so nothing that follows can strand it.
+// still parked there when the reader closes is parked for the life of the process, and [CheckLeaks]
+// reports it against the test that started it. Ending the input hands the loop an EOF to leave on;
+// this waits for it to leave, so nothing that follows can strand it.
 //
 // Two cases need no waiting. A run that has already returned was joined by bubbletea itself on the
 // way out, and an input no read loop ever touched has nothing to join. The timeout is the backstop
