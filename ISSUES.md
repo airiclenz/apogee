@@ -168,9 +168,11 @@ that run.
 - [ ] **Two of the three `ResidualNotice` prints still have no test.** `probe.ResidualNotice`
   reaches a stream at `cmd/apogee/headless.go:321`, `cmd/apogee/wire_boot.go:290` (the TUI's
   startup notice) and `cmd/apogee/daemon.go:230`; on an ABI ≥ 3 host the notice is empty, so only
-  the negative branch runs on this machine. The `landlock-abi-1-2` job
-  (`.github/workflows/ci.yml`) now proves the HEADLESS disclosure reaches stderr on a kernel that
-  HAS the residual; the TUI-boot and daemon prints are still exercised in neither direction.
+  the negative branch runs on this machine — and on every GitHub runner: the `ubuntu-22.04` image
+  runs the 6.8 HWE kernel, so no CI job can reach a kernel that HAS the residual (a
+  `landlock-abi-1-2` job tried on 2026-08-28 and was removed). All three prints are exercised in
+  neither direction; automating the positive one needs the backend to take the ABI as an
+  injectable input.
 
 - [ ] **The `rmFlag` token loses two spellings the old patterns caught.** `rmFlag` requires a letter
   after the dash (`internal/security/rules.go:54`), so the `rm -rf` rules built from it

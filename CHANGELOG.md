@@ -176,10 +176,10 @@ point is a **minor** bump, not a breaking change.
   per process.
 
 - **Test infrastructure — CI, release smoke and documentation drift (checklist T-11, T-21, T-22, T-23).**
-  CI gains a `landlock-abi-1-2` job on `ubuntu-22.04` that runs the escape battery on landlock ABI 1–2
-  and asserts the `truncate(2)` residual on all three surfaces (caps line, `probe`, the headless auto
-  startup notice); the `ubuntu-latest` check job asserts the opposite direction — no residual on a
-  modern kernel — and now also runs `actionlint` and `scripts/check-pins.sh`, which holds every
+  The `ubuntu-latest` check job asserts that `probe` discloses no landlock residual on a modern kernel
+  (the positive direction — the `truncate(2)` residual on landlock ABI 1–2 — stays a manual checklist
+  step: GitHub offers no runner with a 5.13–6.1 kernel; its `ubuntu-22.04` image runs the 6.8 HWE
+  kernel too) and now also runs `actionlint` and `scripts/check-pins.sh`, which holds every
   GitHub Action to a 40-hex SHA with its `# vX.Y.Z` comment beside it. Both workflow gates also run
   from `make check`. New `make release-smoke VERSION=vX.Y.Z` (`scripts/release-smoke.sh`) verifies a
   *published* release from the outside: the tag is remote and annotated, `make dist` packs six
