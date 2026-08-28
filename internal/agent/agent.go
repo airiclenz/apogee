@@ -825,7 +825,7 @@ func (a *Agent) contextFileList() []string {
 
 // SetEffortOverride states this SESSION's Thinking effort — the level layered ABOVE the bound
 // model's profile (`model-profiles:` → `thinking.effort:`), and the engine half of /effort. The
-// four levels (domain.EffortOff … domain.EffortHigh) each stand until another call moves them;
+// eight levels (domain.EffortOff … domain.EffortMax) each stand until another call moves them;
 // the ZERO value clears the override and hands the resolution back to the profile. Nothing is
 // persisted: an override is what a user asked for NOW, so the next session starts from the
 // profile again (ADR 0050).

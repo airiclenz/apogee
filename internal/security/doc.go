@@ -113,8 +113,9 @@
 // keeps an argv[0] that resolves inside the writable box from ever being executed, so bytes a
 // confined call was allowed to WRITE cannot become the program a later unconfined call RUNS.
 // ResolveProgram beside it is that fence's complete form — resolve on PATH, refuse a relative
-// answer, then apply the refusal — and the one entry a new exec site takes, so no site can
-// acquire a program without also acquiring the judgement on it.
+// answer, then apply the refusal — and the one entry a new exec site takes, the Mechanism door
+// tools.RunHookSubprocess among them, so no site can acquire a program without also acquiring
+// the judgement on it.
 //
 // The network boundary, likewise in two layers. urlsafety.go is URLGuard, judged on the URL as
 // WRITTEN: scheme and host allow-deny with deny-first precedence, plus NormalizeURL and its

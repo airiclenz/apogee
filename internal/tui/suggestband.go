@@ -151,7 +151,7 @@ func (m *Model) spendSkillHints() {
 // a draft the human is no longer composing is stale by then, and it would be advising "tab to pick"
 // against a key the decision surface has taken (the same set keyClaimOrder gives the overlays, and
 // the same gate the tab case in handleKey answers with) — so the row stands down for the whole time
-// the prompt is not the human's own, and comes back on the next edit once it is.
+// the prompt is not the human's own, and comes back on the next frame once it is.
 func (m Model) hasSkillHints() bool {
 	return m.opts.SkillSuggestions && m.state.live() && !m.autocomplete.active && len(m.skillHints) > 0
 }

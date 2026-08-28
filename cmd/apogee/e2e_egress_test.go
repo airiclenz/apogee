@@ -193,9 +193,9 @@ func TestE2EEgress(t *testing.T) {
 
 // TestE2EEgressDeniedMCPEndpointStopsTheLaunch is the half of T-18 that happens before there is a
 // session to observe: an `mcp-servers:` endpoint on the operator's own deny list is refused at
-// STARTUP, and the refusal is fatal. Connecting the configured set is all-or-nothing (ADR 0037
-// decision 6), so a server the policy closes is not a session with one tool fewer — it is a launch
-// that does not happen, and says why.
+// STARTUP, and the refusal is fatal. Connecting the configured set is all-or-nothing
+// (docs/design/mcp-client.md §3; ADR 0012's 2026-07-26 amendment), so a server the policy closes
+// is not a session with one tool fewer — it is a launch that does not happen, and says why.
 //
 // The claim is read off the raw pty stream rather than off a frame: this failure is printed before
 // the TUI exists, so it is a line of output and not a picture, and a hundred-column emulator would

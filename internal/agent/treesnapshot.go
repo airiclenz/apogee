@@ -104,7 +104,8 @@ func (t *treeSnapshotter) mutationWarning(ctx context.Context, before string) st
 // frequently spawned program apogee runs and must carry the same hardening as a git tool's —
 // the exec fence on the resolved binary, core.hooksPath=, GIT_CONFIG_NOSYSTEM, the allowlisted
 // workspace-scoped environment (apogee's API key never reaches it), the repo-local
-// filter-driver refusal and the §2.4 process-tree teardown.
+// command-config refusal (every repo-local key whose value is a program git executes) and the
+// §2.4 process-tree teardown.
 //
 // ctx is the call's, so a cancelled Turn skips the check as the contract allows; the per-run
 // timeout stays the outer bound as well as the funnel's, since a ctx that is never cancelled

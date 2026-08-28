@@ -1443,7 +1443,7 @@ answering the same question, and two answers to one question is noise); the matc
 little evidence in the draft; or the prompt is not the human's own to compose in — at an approval,
 an ask or an error the row stands down whatever it last held, because it is advice about a draft
 nobody is writing and it would name a key the decision surface has taken. It returns on the next
-edit once the run is live again. A skill the draft already invokes is never suggested, and neither is
+frame once the run is live again — the hints are never cleared, so no edit is required. A skill the draft already invokes is never suggested, and neither is
 one that was on the row when a message went out — a plain send or a row staged while the agent works,
 both being the human letting the line go, while a refusal or a `/command` line spends nothing. The
 band therefore advises once per session per skill, and `/clear` and `/new` start that over.

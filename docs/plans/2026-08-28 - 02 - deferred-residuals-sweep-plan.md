@@ -896,7 +896,9 @@ spelling.
 
 **Commit.** `test(tools): an extra-root refusal quotes the resolved path — pinned`
 
-## 32. Stale in-code docs and help text (eight one-line fixes)
+## 32. Stale in-code docs and help text (eight one-line fixes) — ✅ DONE (2026-08-28)
+
+NOTES (2026-08-28): `layout.md`'s sentence gained a trailing clause beyond the item's literal "returns on the next FRAME" — "the hints are never cleared, so no edit is required" — because the prose immediately before it explains WHY the row stands down, and a bare "frame" swap would leave the reader without the reason the ISSUES entry gives for it. The code-side comment (`suggestband.go`) took the literal one-word swap; its surrounding paragraph already carries that reason.
 
 **What.** Doc-only, no behaviour: (a) `internal/agent/agent.go:824` "four levels" →
 the eight-name union `domain.EffortOff … domain.EffortMax` (ISSUES: *`SetEffortOverride`'s

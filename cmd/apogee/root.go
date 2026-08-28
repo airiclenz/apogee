@@ -108,7 +108,7 @@ func newRootCommand(launch launcher, subs ...*cobra.Command) *cobra.Command {
 	// may offer it as the fix. The commands that do not register it say APOGEE_SERVER instead.
 	opts.ServerFlagBound = true
 	flags.StringVar(&opts.Model, "model", "",
-		"model name to request (default: the startup server's model: hint, else ask the server)")
+		"model name to request (default: the startup server's model:, else ask the server)")
 	flags.StringVar(&opts.Mode, "mode", string(domain.ModeAskBefore),
 		"autonomy ladder: plan | ask-before | allow-edits | auto "+
 			"(auto needs filesystem confinement; tuned by confine-to-workspace in config.yaml)")
