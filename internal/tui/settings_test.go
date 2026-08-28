@@ -1184,6 +1184,37 @@ func TestSettingsModeSubListAppliesTheLiveRung(t *testing.T) {
 	}
 }
 
+// And no reading of `mode` in this pane comes off the journal — not even the one nothing reaches for
+// it. settingsPersistedValue is the base an edit starts from for every other key; for `mode` it hands
+// back the engine's rung, because a session that wrote the key here and then cycled Shift+Tab holds a
+// journal entry naming a rung it has already left (ADR 0037 — the engine is the only authority on the
+// rung a session is running). Defence in depth: settingsCurrentValue answers `mode` before this is
+// reached today, and this is what a caller that ever did reach it would get.
+func TestSettingsPersistedValueAnswersModeFromTheEngine(t *testing.T) {
+	log := &settingsWriteLog{}
+	m, eng := settingsModeModel(t, log, domain.ModeAskBefore)
+
+	m = openSettingsPane(t, m)
+	m = step(t, m, keyEnter()) // the sub-list, on ask-before
+	m = step(t, m, keyDown())  // allow-edits
+	m = step(t, m, keyEnter()) // commit: the journal records allow-edits
+	m = step(t, m, keyEsc())   // the pane closes; the chord is not swallowed
+	m = openSettingsPane(t, step(t, m, keyShiftTab()))
+
+	if got := eng.liveMode(); got != domain.ModeAuto {
+		t.Fatalf("engine mode = %q, want auto — the chord moved on from the written rung", got)
+	}
+	edit, journaled := m.settingEditOf(settingKeyMode)
+	if !journaled || edit.value != "allow-edits" {
+		t.Fatalf("journal entry = %+v (present %v), want the allow-edits write the pane made", edit, journaled)
+	}
+	row := settingsModeRowOf(t, m)
+
+	if got, want := m.settingsPersistedValue(row), "auto"; got != want {
+		t.Errorf("persisted value = %q, want %q — the live rung, never the journal's", got, want)
+	}
+}
+
 // settingsModeEditModel opens the pane over that one row, on the host situation, the live fence state
 // and the terminal WIDTH the test chose — the two facts the blast-radius sentence is composed from,
 // and the room the pane has to say it in. At 160 the sentence is a whole clause in a right-hand

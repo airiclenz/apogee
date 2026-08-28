@@ -460,7 +460,9 @@ marker); at 80 the `auto` row line starts with `(current)` when auto is held, co
 
 **Commit.** `fix(tui): the auto blast-radius row keeps its (current) marker on an 80-column terminal`
 
-## 14. `settingsPersistedValue` answers `mode` from the live engine
+## 14. `settingsPersistedValue` answers `mode` from the live engine — ✅ DONE (2026-08-28)
+
+NOTES (2026-08-28): added a reciprocal sentence to `settingsCurrentValue`'s doc comment (same file, three lines) beyond the item's literal "with a doc comment stating that `mode` has no persisted-value reading" — the two methods now call each other for `mode`, and the note names the branch that answers without consulting the journal as what keeps the deferral terminating.
 
 **What.** ISSUES: *`settingsPersistedValue` still answers `mode` from the journal.*
 Re-verification corrects the entry: its three callers (`internal/tui/settings.go:579`,

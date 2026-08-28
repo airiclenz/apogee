@@ -997,7 +997,17 @@ func indexOfSetting(values []string, value string) int {
 // itself if it wrote one, else the value this run resolved. It is the base every edit starts from, so
 // two ⏎ presses on a bool return it to where it was and a sub-list re-opened after an edit opens on
 // the value that edit set — rather than both starting again from a resolution that is now behind the file.
+//
+// `mode` is the one key with no persisted-value reading at all, so it is answered from the engine
+// before the journal is consulted: Shift+Tab moves the rung without writing anything, which leaves a
+// journal entry describing a session that has moved on, and the engine is the only authority on the
+// rung a session is running (ADR 0037). Defence in depth — no caller reaches this for `mode` today
+// ([Model.settingsCurrentValue] answers it first, and the reset path reads row.Default) — so that a
+// later caller cannot quietly reintroduce the stale read.
 func (m Model) settingsPersistedValue(row SettingRow) string {
+	if row.Path == settingKeyMode {
+		return m.settingsCurrentValue(row)
+	}
 	if edit, ok := m.settingEditOf(row.Path); ok {
 		return edit.value
 	}
@@ -1117,7 +1127,9 @@ func (m Model) settingsMechanisms(rows []SettingRow) []MechanismToggle {
 // rung without writing anything at all, so the journal and the file both go on describing a session
 // that has moved. Its answer is the row's own value, which the host overlays from the live engine —
 // so the sub-list opens on the rung the session is RUNNING, and ⏎ on the row marked "(current)"
-// re-applies that rung rather than a stale one.
+// re-applies that rung rather than a stale one. [Model.settingsPersistedValue] hands `mode` straight
+// back to this method rather than reading its own journal, and this branch — which answers without
+// consulting it — is what keeps that deferral from turning back into a call.
 func (m Model) settingsCurrentValue(row SettingRow) string {
 	if row.Kind == SettingServer {
 		for _, choice := range m.servers() {
