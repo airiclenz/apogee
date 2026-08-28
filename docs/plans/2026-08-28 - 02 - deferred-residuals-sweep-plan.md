@@ -962,7 +962,9 @@ T-11, T-22, T-23 prose) are named as accepted limits with their proxy, not as po
 
 **Commit.** `docs: ADR 0060/0041/0056, the manual's cap paragraph and the test-drivers taxonomy match the code`
 
-## 34. Strike the nine residual sections from `ISSUES.md`
+## 34. Strike the nine residual sections from `ISSUES.md` — ✅ DONE (2026-08-28)
+
+NOTES (2026-08-28): the block the item names holds TEN `###` residual sections, not nine — the 2026-08-26 run left five (*Delegate token-runaway*, *Safety-floor / subprocess-funnel*, *Untrusted-text / approval-integrity*, *Surfaces-that-lie / restore-consoles*, *Read-fence / egress / docs-truth*). The struck range is exactly the one the item's parenthetical names (the *Effort detection and the effort picker* heading through the end of *Symlinked-skill-reads*, separator rules included), so the count word is the only thing that was off; the item's title and the commit message keep their wording.
 
 **What.** Depends on items 1–33. Remove the nine "… residuals — deferred out of the … run"
 sections from `ISSUES.md` (from `### Effort detection and the effort picker — residuals…`
