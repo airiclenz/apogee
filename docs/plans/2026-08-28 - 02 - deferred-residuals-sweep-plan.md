@@ -481,7 +481,7 @@ answer for `settingKeyMode` before consulting the journal, with a doc comment st
 
 **Commit.** `fix(tui): the settings pane never answers mode from its own journal`
 
-## 15. An in-TUI `/sessions` restore starts with an empty spent-skills set
+## 15. An in-TUI `/sessions` restore starts with an empty spent-skills set — ✅ DONE (2026-08-28)
 
 **What.** ISSUES: *An in-TUI `/sessions` restore inherits the outgoing session's spent
 skills.* Add `m.spentSkills = nil` beside `m.liveStats.reset()`

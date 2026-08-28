@@ -321,8 +321,9 @@ type Model struct {
 	// spentSkills is the session's dedup set: a skill named in the band at the moment a message
 	// went out is spent and is never suggested again, so the band cannot nag about the same skill
 	// for the whole session. It is filled at send (submit and the staged-interjection path) and
-	// emptied by /clear and /new, which is the same boundary the conversation itself resets on. A
-	// nil map reads as empty, so the zero-value Model needs no construction step.
+	// emptied at every boundary the conversation itself resets on — /clear and /new (commandrun.go)
+	// and an in-TUI /sessions restore (resumeLoaded, sessions.go). A nil map reads as empty, so the
+	// zero-value Model needs no construction step.
 	//
 	// Both are plain reference headers, safe in the value-copied Model (ADR 0011).
 	skillHints  []skills.Suggestion

@@ -449,6 +449,37 @@ func TestClearResetsTheSpentSkills(t *testing.T) {
 	}
 }
 
+// TestRestoreResetsTheSpentSkills is that same boundary rule over the OTHER way a conversation is
+// replaced: an in-TUI /sessions restore drops the live session for a stored one, so the advice
+// spent against the session that just went away must be on offer again in the one reopened. The
+// set is never written to a record, so a restore that kept it could only ever inherit the outgoing
+// session's spend — which is what this pins shut.
+func TestRestoreResetsTheSpentSkills(t *testing.T) {
+	var rec suggestCall
+	m := modelWithOverlayRoom(t, 24, bandOpts(gatedSuggest(&rec)))
+
+	m = step(t, typeDraft(t, m, "audit the parser"), keyEnter())
+	if got := len(m.spentSkills); got != 3 {
+		t.Fatalf("precondition: the send spent %d skills, want 3", got)
+	}
+	m = step(t, m, cancelledMsg{}) // back to idle, the state the browser's resume runs from
+	if m.state != stateIdle {
+		t.Fatalf("precondition: state = %v after the cancel, want idle", m.state)
+	}
+
+	m = restoreSession(t, m) // the /sessions resume, folded from the loaded record (sessionLoadedMsg)
+
+	if m.spentSkills != nil {
+		t.Errorf("a restore left %d spent skills behind: %v", len(m.spentSkills), m.spentSkills)
+	}
+
+	m = typeDraft(t, m, "audit the parser")
+
+	if got := len(m.skillHints); got != 3 {
+		t.Errorf("band shows %d hints in the restored session, want the 3 the restore made available again", got)
+	}
+}
+
 // TestSuggestionsSurviveARefusedLine: only a SEND spends the row. A lone "/word" that names neither a
 // command nor a skill is refused with the typo guard's note and the line is left standing in the box
 // — nothing went out — so the advice above it must still be there to act on afterwards.

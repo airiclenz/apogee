@@ -567,6 +567,12 @@ func (m *Model) resumeLoaded(msg sessionLoadedMsg) tea.Cmd {
 	// (the resolved-live posture: a resumed session speaks from the CURRENT files, not the ones its
 	// snapshot was taken under) — the notice says what it is now carrying.
 	m.noteContextFiles()
+	// The suggestion band's spent set falls with the conversation it was advising (suggestband.go),
+	// for the same reason /clear drops it: the skills it named in the session just closed are advice
+	// the human has not been given in the one being reopened. Unconditional — a restore that got
+	// this far HAS replaced the conversation, and the set is never stored, so there is no resumed
+	// session's own spend to reopen at, only the outgoing one's to leave behind.
+	m.spentSkills = nil
 	// The live reading belongs to the conversation that just went away, so it falls whole and the
 	// gauge is relit from the record — the same one call /clear makes, differing only in having a
 	// stored fill to reopen at (liveStats.reset).
