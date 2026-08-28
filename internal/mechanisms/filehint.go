@@ -26,9 +26,10 @@ import (
 // sanitised at parse (library.SanitizeContent — the ingestion-seam strip: format and control runes
 // dropped, every break folded to a space), then dropped when it is empty after the fold, longer than
 // fileHintMaxNameBytes, or is a listing tool's own bracket header/trailer rather than a name — so a
-// bullet can never open a fresh system-prompt line or run past the budget. (2) Only a tool result
-// whose ToolCallID answers a call to a listing tool (fileHintListingResultTools) is parsed, so a
-// grep hit, an MCP result or a web fetch sharing the window contributes no names.
+// bullet can never open a fresh system-prompt line or run past the budget. (2) Only a listing tool's
+// result (fileHintListingResultTools) is parsed — matched to its call by ToolCallID, or, when every
+// call in the opening turn is a listing tool, by the batch alone — so a grep hit, an MCP result or a
+// web fetch sharing the window contributes no names.
 func init() {
 	register(row{
 		descriptor: fileHintDescriptor,
@@ -134,7 +135,10 @@ func (fileHintMechanism) PreRequest(_ context.Context, req *domain.Request) erro
 // from, gathers the listed filenames from the following tool results, and pairs them with the last
 // non-empty user prompt (apogee-sim detectFileHintOpportunity @pin). ok is false when the model has
 // already read after listing, fewer than fileHintMinFiles files were listed, or no user prompt is
-// present.
+// present. Two rules decide which results in the opening batch are parsed: a result whose ToolCallID
+// answers a listing call in that turn always is, and a result carrying no matching ID is too when
+// EVERY call in the turn is a listing tool — a turn mixing a listing tool with any other tool parses
+// ID-matched results only.
 func fileHintDetectOpportunity(conv domain.ConversationView) (filenames []string, userPrompt string, ok bool) {
 	lastListIdx := -1
 	hasReadAfterList := false
@@ -160,16 +164,24 @@ func fileHintDetectOpportunity(conv domain.ConversationView) (filenames []string
 	// Only results that answer a LISTING call in the opening turn are parsed. The batch that opened
 	// the opportunity may also hold a grep, an MCP call or a web_fetch, whose result grammars carry
 	// file content rather than names; a bullet derived from those would put repo-authored prose in the
-	// system message. A result whose ToolCallID matches no listing call in that turn is skipped.
+	// system message. A result whose ToolCallID matches no listing call in that turn is skipped —
+	// unless every call in the turn is a listing tool, in which case no result in the batch can answer
+	// anything else and the ID is not needed, so a provider that omits native call IDs still hints.
+	openingCalls := conv.At(lastListIdx).ToolCalls
+	hasOnlyListingCalls := len(openingCalls) > 0
 	listingCalls := make(map[string]bool)
-	for _, tc := range conv.At(lastListIdx).ToolCalls {
-		if tc.ID != "" && fileHintListingResultTools[tc.Tool] {
+	for _, tc := range openingCalls {
+		if !fileHintListingResultTools[tc.Tool] {
+			hasOnlyListingCalls = false
+			continue
+		}
+		if tc.ID != "" {
 			listingCalls[tc.ID] = true
 		}
 	}
 	for j := lastListIdx + 1; j < conv.Len(); j++ {
 		m := conv.At(j)
-		if m.Role == domain.RoleTool && listingCalls[m.ToolCallID] {
+		if m.Role == domain.RoleTool && (hasOnlyListingCalls || listingCalls[m.ToolCallID]) {
 			filenames = append(filenames, fileHintParseList(m.Content)...)
 		}
 		if m.Role == domain.RoleAssistant || m.Role == domain.RoleUser {

@@ -315,7 +315,9 @@ fan-out `ToolCallEvent` carries `ResolvedPath`.
 
 **Commit.** `fix(agent): a fanned-out call with colliding argument keys is refused like a serial one`
 
-## 9. `filehint` fires on ID-less listing results
+## 9. `filehint` fires on ID-less listing results — ✅ DONE (2026-08-28)
+
+NOTES (2026-08-28): amended the file's `init` doc rule (2) beyond the item's literal "update the function doc" — that rule states the ID gate as the whole story ("Only a tool result whose ToolCallID answers a call to a listing tool is parsed"), which this item's change makes false; it is reworded to name both matchings while keeping the invariant it defends (only a listing tool's result is ever parsed).
 
 **What.** ISSUES: *`filehint`'s ID→tool gate needs a non-empty native tool-call ID.* In
 `fileHintDetectOpportunity` (`internal/mechanisms/filehint.go:138`), after the map build
