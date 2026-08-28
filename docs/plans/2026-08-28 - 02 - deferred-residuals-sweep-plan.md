@@ -796,7 +796,11 @@ block-sequence `triggers:` yields the two normalised phrases; the existing lenie
 
 **Commit.** `fix(skills): a lenient frontmatter scan keeps a triggers sequence item by item`
 
-## 28. The recorder's replay comparison covers the reasoning channel
+## 28. The recorder's replay comparison covers the reasoning channel — ✅ DONE (2026-08-28)
+
+NOTES (2026-08-28): `same` compares `thinking` beside `text` in a guard of its own — folding it
+into the existing single condition would have pushed that line past 110 columns; the comparison
+is still exact and unconditional.
 
 **What.** ISSUES: *The recorder's replay comparison never looks at the reasoning channel.*
 In `internal/stubllm/record_test.go`: `replayed` (`:226`) gains `thinking string`; `observe`

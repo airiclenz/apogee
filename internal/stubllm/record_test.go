@@ -224,15 +224,19 @@ func recorderProxy(t *testing.T, upstream, out string) recording {
 // replayed is what a client saw off one streamed reply — the level a recording has to
 // reproduce. Comparing two of these is what "the same reply" means to the code under test.
 type replayed struct {
-	text   string
-	calls  []provider.ToolCall
-	usage  provider.Usage
-	finish string
+	text     string
+	thinking string
+	calls    []provider.ToolCall
+	usage    provider.Usage
+	finish   string
 }
 
 // same reports whether two observed replies are the same reply.
 func (r replayed) same(other replayed) bool {
-	if r.text != other.text || r.finish != other.finish || r.usage != other.usage {
+	if r.text != other.text || r.thinking != other.thinking {
+		return false
+	}
+	if r.finish != other.finish || r.usage != other.usage {
 		return false
 	}
 	if len(r.calls) != len(other.calls) {
@@ -261,6 +265,8 @@ func observe(t *testing.T, baseURL, model, prompt string) replayed {
 			t.Fatalf("stream error: %s", delta.Err)
 		case provider.DeltaContent:
 			seen.text += delta.Content
+		case provider.DeltaThinking:
+			seen.thinking += delta.Thinking
 		case provider.DeltaToolCall:
 			seen.calls = append(seen.calls, *delta.ToolCall)
 		case provider.DeltaDone:
