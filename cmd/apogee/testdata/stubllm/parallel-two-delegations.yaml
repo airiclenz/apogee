@@ -1,0 +1,35 @@
+# The PARENT half of the fan-out server's script (cmd/apogee/e2e_parallel_test.go): one reply that
+# asks for TWO independent delegations at once, so the width the session fans out at is the only
+# thing that decides whether both children run together or one after the other.
+#
+# The two calls are deliberately independent — neither task mentions the other, and neither child
+# reads anything the other writes — because a fan-out that had to be ordered would prove nothing
+# about the cap. Their `name:` is what the delegation rows on screen wear, and it is kept out of the
+# task text so a row can never be found by the prompt that opened it.
+#
+# The child turns live in parallel-child.yaml and are appended behind these at load: a parent
+# request must be offered the turns below FIRST, or the child's catch-all would answer it.
+model: fanout-model
+turns:
+    # The session title. apogee asks for one off the first prompt, so this has to be matched BEFORE
+    # the prompt's own turn or it would take it (see smoke.yaml).
+    - when:
+        last_message: The user's first request
+      repeat: true
+      text: Two delegations at once
+    # The parent's wrap-up once a delegation has reported. Matched before the fan-out turn so a
+    # parent request can never be answered as anything else. Nothing reaches it in these tests —
+    # both children hang — and it is here so the fixture is playable rather than a trap.
+    - when:
+        tool_result: sub_agent
+      repeat: true
+      text: Both delegates reported.
+    # The fan-out itself.
+    - when:
+        last_message: ^Fan out two delegations
+      repeat: true
+      tool_calls:
+        - name: sub_agent
+          arguments: '{"task":"Take the first half of the survey","name":"alpha"}'
+        - name: sub_agent
+          arguments: '{"task":"Take the second half of the survey","name":"beta"}'

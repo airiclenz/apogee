@@ -840,7 +840,22 @@ reported; one started after it is. The in-process driver tests still pass under
 
 **Commit.** `fix(tuitest): CheckLeaks reports only the goroutines its own test started`
 
-## 30. e2e: a `/server` switch keeps the session fanning out
+## 30. e2e: a `/server` switch keeps the session fanning out — ✅ DONE (2026-08-28)
+
+NOTES (2026-08-28): the item names `awaitPane`; no such helper existed, so the new file adds it
+(a `WaitFor` over the frame) beside `paneNeverShows` — the negative form the control run needs —
+and `frameHas`.
+
+NOTES (2026-08-28): the children BLOCK PERMANENTLY (`hang: 1h`) rather than on a merely slow turn,
+and both runs end with `drv.Kill()` (the T-03 shape) instead of a clean quit. A child that can never
+answer is what makes the control's "the second delegate is not there" a claim about the cap rather
+than a race against the clock; a slow-but-finishing child would let a serial run paint its second
+row mid-assertion.
+
+NOTES (2026-08-28): the two fixtures are the parent half and the child half of ONE upstream's
+script, joined at load (`fanOutScript`), because a delegation runs against the server its parent is
+bound to — there is no second server for the children to talk to. The server the session starts on
+plays a one-turn inline script it is never asked; both runs assert its request log stayed empty.
 
 **What.** ISSUES: *No test exercises `/server`'s `switchServer` end-to-end for the cap* and
 *No driven test puts more than one delegation live at once* (checklist T-16 step 12). New

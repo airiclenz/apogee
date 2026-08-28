@@ -1,0 +1,22 @@
+# The CHILD half of the fan-out server's script (cmd/apogee/e2e_parallel_test.go): every delegate
+# this fixture answers blocks on its very first turn and never comes back.
+#
+# The hang is the whole fixture. "Two delegations are live at once" is only a fact a test can hold
+# still if neither of them can finish — with a child that answered, a serial run would paint its
+# second row a moment later and the control run's "the second delegate is not there" would be a race
+# against the clock rather than a claim about the cap. A child that never answers makes the serial
+# case permanent: while the first delegate is stalled, a session capped at one CANNOT have announced
+# the second, however long the test watches. The runs end with the program killed where it stands
+# (the T-03 shape); a cancelled request ends the stall at once and writes nothing.
+#
+# It carries no `model:` on purpose: these turns are appended behind parallel-two-delegations.yaml's
+# and the model the fan-out server advertises is that fixture's.
+turns:
+    # Every child's first and only turn, matched by the half of the survey it was handed.
+    - when:
+        last_message: half of the survey
+      repeat: true
+      hang: 1h
+    # Anything neither the parent nor a child claims.
+    - repeat: true
+      text: Nothing else to add.
