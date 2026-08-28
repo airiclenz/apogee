@@ -151,3 +151,33 @@ func TestParseNativeToolCalls_OneMalformedInBatch_FailsAtomically(t *testing.T) 
 		t.Errorf("got = %v, want no partial batch to reach dispatch", got)
 	}
 }
+
+// TestWellFormedToolCall pins the shared dispatch bar: the probe counts a native call as
+// evidence, and the loop runs it, on exactly these two conditions. A call missing either half
+// is unusable — there is nothing to route on, or nothing to key the result to — and both
+// callers drop it rather than guessing.
+func TestWellFormedToolCall(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		tool string
+		id   string
+		want bool
+	}{
+		{"a name and an id", "read_file", "call_1", true},
+		{"no id — the result could not be keyed back", "read_file", "", false},
+		{"no name — there is nothing to route on", "", "call_1", false},
+		{"the empty placeholder a server sends for a call the model never made", "", "", false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := WellFormedToolCall(tc.tool, tc.id); got != tc.want {
+				t.Errorf("WellFormedToolCall(%q, %q) = %v, want %v", tc.tool, tc.id, got, tc.want)
+			}
+		})
+	}
+}

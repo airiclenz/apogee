@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
@@ -128,5 +129,141 @@ func TestRestreamHoldOffThatElapsesStillReStreams(t *testing.T) {
 	}
 	if errs := errorEvents(sink.events); len(errs) != 0 {
 		t.Errorf("ErrorEvents = %v, want none — a recovered re-stream stays silent", errs)
+	}
+}
+
+// idLessCall is a native tool_calls entry the server sent without an id — the `tool_calls:[{}]`
+// family the probe's battery already refuses to count as evidence (C-18). Dispatching one sends
+// its result back as a tool message whose omitempty tool_call_id drops off the wire, leaving the
+// server holding a result it cannot match to any call it issued.
+func idLessCall(name, args string) provider.Delta {
+	return provider.Delta{Kind: provider.DeltaToolCall, ToolCall: &provider.ToolCall{
+		Type:     "function",
+		Function: provider.FunctionCall{Name: name, Arguments: args},
+	}}
+}
+
+// firstToolCallEvent returns the first dispatched call the loop announced.
+func firstToolCallEvent(events []domain.Event) (domain.ToolCallEvent, bool) {
+	for _, e := range events {
+		if tce, ok := e.(domain.ToolCallEvent); ok {
+			return tce, true
+		}
+	}
+	return domain.ToolCallEvent{}, false
+}
+
+// TestIDLessNativeCallIsDroppedWhileItsSiblingDispatches closes the gap the probe had opened over
+// the loop it speaks for: the battery scored `tool_calls:[{}]` as no evidence at all, while the
+// loop dispatched the very same entry. The malformed sibling is now dropped on the shared
+// predicate and REPORTED once from source "processing", and the well-formed call runs untouched.
+func TestIDLessNativeCallIsDroppedWhileItsSiblingDispatches(t *testing.T) {
+	sink := &recordingSink{}
+	ran := 0
+	cfg := configWithTools(sink, fakeTool{name: "lookup", readOnly: true, ran: &ran, result: "the answer is 42"})
+	responder := &scriptedResponder{scripts: [][]provider.Delta{
+		{
+			{Kind: provider.DeltaToolCall, ToolCall: &provider.ToolCall{
+				ID: "c1", Type: "function",
+				Function: provider.FunctionCall{Name: "lookup", Arguments: `{"q":"meaning"}`},
+			}},
+			idLessCall("lookup", `{"q":"unusable"}`),
+			{Kind: provider.DeltaDone, FinishReason: "tool_calls"},
+		},
+		contentScript("all done"),
+	}}
+
+	a, err := newAgent(cfg, responder)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	if err := a.Submit(domain.UserInput{Text: "look it up"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+
+	res, err := a.Step(context.Background())
+	if err != nil {
+		t.Fatalf("Step: %v", err)
+	}
+
+	if res.Status != domain.StatusTurnComplete || res.Faulted {
+		t.Errorf("StepResult = {Status:%q Faulted:%v}, want {Status:%q Faulted:false} — the usable call still runs",
+			res.Status, res.Faulted, domain.StatusTurnComplete)
+	}
+	if ran != 1 {
+		t.Errorf("tool ran %d times, want 1 — the id-less entry must not reach the executor", ran)
+	}
+	if got := countEvents[domain.ToolCallEvent](sink.events); got != 1 {
+		t.Errorf("ToolCallEvents = %d, want 1", got)
+	}
+	if tce, ok := firstToolCallEvent(sink.events); !ok || tce.Call.ID != "c1" {
+		t.Errorf("dispatched call = %+v (ok=%v), want the well-formed c1", tce.Call, ok)
+	}
+
+	errs := errorEvents(sink.events)
+	if len(errs) != 1 {
+		t.Fatalf("ErrorEvents = %d (%v), want exactly 1 — one signal per reply, not one per entry", len(errs), errs)
+	}
+	if errs[0].Source != "processing" {
+		t.Errorf("ErrorEvent source = %q, want %q — the server sent the unusable shape, not the model",
+			errs[0].Source, "processing")
+	}
+	if !strings.Contains(errs[0].Err, "dropped 1 of 2") {
+		t.Errorf("ErrorEvent = %q, want it to name how many entries were dropped", errs[0].Err)
+	}
+}
+
+// TestAReplyWhoseOnlyNativeCallLacksAnIDFaults pins the other half of the control flow: with
+// nothing left after the filter the reply reads exactly like one that carried no calls at all —
+// the text parser gets its turn (a no-op on a native profile) and the empty-reply guard faults the
+// Turn. The alternative, dispatching it, is what the drop exists to prevent.
+func TestAReplyWhoseOnlyNativeCallLacksAnIDFaults(t *testing.T) {
+	sink := &recordingSink{}
+	ran := 0
+	cfg := configWithTools(sink, fakeTool{name: "lookup", readOnly: true, ran: &ran, result: "never reached"})
+	responder := &scriptedResponder{scripts: [][]provider.Delta{{
+		idLessCall("lookup", "{}"),
+		{Kind: provider.DeltaDone, FinishReason: "tool_calls"},
+	}}}
+
+	a, err := newAgent(cfg, responder)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	if err := a.Submit(domain.UserInput{Text: "look it up"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+
+	res, err := a.Step(context.Background())
+	if err != nil {
+		t.Fatalf("Step: %v", err)
+	}
+
+	if res.Status != domain.StatusExchangeComplete || !res.Faulted {
+		t.Errorf("StepResult = {Status:%q Faulted:%v}, want {Status:%q Faulted:true}",
+			res.Status, res.Faulted, domain.StatusExchangeComplete)
+	}
+	if ran != 0 {
+		t.Errorf("tool ran %d times, want 0 — no call survived the filter", ran)
+	}
+	if got := countEvents[domain.ToolCallEvent](sink.events); got != 0 {
+		t.Errorf("ToolCallEvents = %d, want 0", got)
+	}
+
+	errs := errorEvents(sink.events)
+	if len(errs) != 2 {
+		t.Fatalf("ErrorEvents = %d (%v), want 2 — the drop, then the Turn's fault", len(errs), errs)
+	}
+	if errs[0].Source != "processing" || !strings.Contains(errs[0].Err, "dropped 1 of 1") {
+		t.Errorf("first ErrorEvent = {Source:%q Err:%q}, want the processing drop signal", errs[0].Source, errs[0].Err)
+	}
+	want := "upstream returned an empty reply (finish: tool_calls)"
+	if errs[1].Source != "loop" || errs[1].Err != want {
+		t.Errorf("second ErrorEvent = {Source:%q Err:%q}, want {Source:%q Err:%q}",
+			errs[1].Source, errs[1].Err, "loop", want)
+	}
+	// Nothing was committed: the user message alone survives a faulted Turn.
+	if got := a.conv.Len(); got != 1 {
+		t.Errorf("conversation len = %d, want 1", got)
 	}
 }

@@ -256,7 +256,13 @@ text, reasoning usage present — asserts the fault text contains `tokens of rea
 
 **Commit.** `fix(agent): a delegate's empty capped reply names the reasoning it burned`
 
-## 7. The loop drops malformed native tool calls the way the probe does
+## 7. The loop drops malformed native tool calls the way the probe does — ✅ DONE (2026-08-28)
+
+NOTES (2026-08-28): the shared predicate is `processing.WellFormedToolCall(name, id string) bool` — two strings rather than a call type. Its callers hold different shapes (`provider.ToolCall` in the probe, `domain.ToolCall` in the loop) and `processing` must not import `provider` (ADR 0010, restated in the package's own `NativeToolCall` doc), so a slice-filtering signature could not have served both. Each caller keeps its own one-line filter loop over the shared rule.
+
+NOTES (2026-08-28): the loop's filter lives in a new `(*Agent).dispatchableCalls` helper beside `assembleResponse` rather than inline at `loop.go:581` — the ErrorEvent needs `turn` and `a.cfg.Events`, and inlining the emit would have put a five-line side effect in the middle of the parse seam. `assembleResponse`'s doc comment names it.
+
+NOTES (2026-08-28): `dispatchableCalls` returns the caller's own slice unchanged when nothing is dropped, so the no-malformed-call path (every real reply) is byte-identical to the pre-item pass-through, including its nil-ness.
 
 **What.** ISSUES: *`loop.go` dispatches native tool calls unfiltered — the probe is now
 stricter than the loop.* At `assembleResponse` (`internal/agent/loop.go:581`, before

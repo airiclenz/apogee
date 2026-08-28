@@ -49,6 +49,26 @@ func ParseNativeToolCalls(calls []NativeToolCall) ([]domain.ToolCall, error) {
 	return parsed, nil
 }
 
+// WellFormedToolCall reports whether a native tool call is one a loop could actually
+// dispatch: a call needs a function name to route on and an id to key its result on. Servers
+// that answer with a placeholder — `tool_calls:[{}]` for a call the model never produced —
+// otherwise read as native tool-call evidence and raise a model's tier on nothing at all
+// (probe C-18); dispatching such an entry is worse still, because echoing it back sends a
+// tool message whose omitempty tool_call_id drops off the wire and leaves the server holding
+// a result it cannot match.
+//
+// The predicate lives here so the probe's evidence filter and the loop's dispatch filter
+// cannot drift: what the probe refuses to COUNT as a call is exactly what the loop refuses to
+// RUN. It is deliberately not folded into ParseNativeToolCalls — that parse is atomic (one bad
+// call fails the whole batch, so a half-parsed batch never reaches dispatch), while both
+// callers here drop the unusable entries and keep the rest.
+//
+// It takes the two strings rather than a call type because its callers hold different ones:
+// the probe reads the provider's wire shape, which processing must not import (ADR 0010).
+func WellFormedToolCall(name, id string) bool {
+	return name != "" && id != ""
+}
+
 // parseNativeToolCall normalises a single native call, validating its name and arguments.
 func parseNativeToolCall(call NativeToolCall) (domain.ToolCall, error) {
 	name := strings.TrimSpace(call.Name)

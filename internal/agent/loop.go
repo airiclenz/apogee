@@ -574,8 +574,9 @@ func (a *Agent) emptyReplyFault(resp *domain.Response) string {
 }
 
 // assembleResponse applies the model profile at the parse seam (D5/D6). It strips the reply's
-// inline thinking/harmony channel out of the visible content and — only when the structured
-// native path produced no calls — recovers a text-format tool call from that stripped content,
+// inline thinking/harmony channel out of the visible content, drops the native calls the loop
+// could not dispatch (dispatchableCalls), and — only when the structured native path produced
+// no usable calls — recovers a text-format tool call from that stripped content,
 // removing the call's markup from the committed text and assigning it a deterministic
 // Turn-derived ID (so snapshot/resume and tests stay stable, unlike the oracle's wall-clock ID).
 // The model's reasoning (the Upstream-split reasoning_content joined with any stripped inline
@@ -585,7 +586,7 @@ func (a *Agent) emptyReplyFault(resp *domain.Response) string {
 func (a *Agent) assembleResponse(turn int, view domain.LoopView, rep reply, nativeCalls []domain.ToolCall) *domain.Response {
 	visible, reasoning := a.stripper.Strip(rep.content)
 
-	calls := nativeCalls
+	calls := a.dispatchableCalls(turn, nativeCalls)
 	if len(calls) == 0 {
 		// The native channel found nothing, so the text parser is the only tool-call source
 		// (D5). It yields at most one call; native profiles return the no-op parser, so this is
@@ -598,6 +599,42 @@ func (a *Agent) assembleResponse(turn int, view domain.LoopView, rep reply, nati
 	}
 
 	return domain.NewResponse(visible, joinThinking(rep.thinking, reasoning), calls, rep.finish, view)
+}
+
+// dispatchableCalls drops the native tool calls the loop cannot run — an entry missing the tool
+// name it routes on or the id its result is keyed to — on processing.WellFormedToolCall's rule,
+// the same one the probe's battery refuses to count such an entry as evidence under (C-18). The
+// probe had been made stricter than the loop it speaks for: a server answering `tool_calls:[{}]`
+// scored nothing in the battery yet reached dispatch here, where an id-less call's result goes
+// back as a tool message whose omitempty tool_call_id drops off the wire — a result the server
+// cannot match to any call, on a Turn the model never asked for.
+//
+// A drop is REPORTED, once per reply, as an ErrorEvent from source "processing" — the same source
+// the malformed-parse path uses, because it is the same kind of finding: the server sent a shape
+// the loop could not use, and blaming the model for the silence that follows would misdirect the
+// remedy. No ID is ever synthesised for a native call: an invented id echoed back is an id the
+// server never issued, which is the unusable echo this filter exists to prevent.
+//
+// The surviving calls are dispatched as before; a reply whose calls ALL fall here reads to the
+// caller exactly like one that carried none — the text parser gets its turn, then replyFault.
+func (a *Agent) dispatchableCalls(turn int, calls []domain.ToolCall) []domain.ToolCall {
+	var kept []domain.ToolCall
+	for _, c := range calls {
+		if processing.WellFormedToolCall(c.Tool, c.ID) {
+			kept = append(kept, c)
+		}
+	}
+	dropped := len(calls) - len(kept)
+	if dropped == 0 {
+		return calls
+	}
+	a.cfg.Events.Emit(domain.ErrorEvent{
+		EventBase: a.base(turn),
+		Source:    "processing",
+		Err: fmt.Sprintf("processing: dropped %d of %d tool_calls entries with no tool name or no id — "+
+			"a call the loop can dispatch needs both", dropped, len(calls)),
+	})
+	return kept
 }
 
 // joinThinking combines the Upstream-split reasoning (reply.thinking, the reasoning_content

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/airiclenz/apogee/internal/library"
+	"github.com/airiclenz/apogee/internal/processing"
 	"github.com/airiclenz/apogee/internal/provider"
 )
 
@@ -149,15 +150,13 @@ func RunBattery(ctx context.Context, chat Chat) Battery {
 	return b
 }
 
-// wellFormedToolCalls keeps only the entries a loop could actually dispatch: a call needs a
-// function name to route on and an id to key its result on. Servers that answer with a
-// placeholder — `tool_calls:[{}]` for a call the model never produced — otherwise read as
-// native tool-call evidence and raise a model's tier on nothing at all (C-18); echoing such an
-// entry back would also send a tool message whose omitempty tool_call_id drops off the wire.
+// wellFormedToolCalls keeps only the entries a loop could actually dispatch, on
+// processing.WellFormedToolCall's rule — the same predicate the loop filters its own native
+// calls with, so the battery's evidence bar and the loop's dispatch bar are one rule (C-18).
 func wellFormedToolCalls(calls []provider.ToolCall) []provider.ToolCall {
 	out := make([]provider.ToolCall, 0, len(calls))
 	for _, c := range calls {
-		if c.Function.Name != "" && c.ID != "" {
+		if processing.WellFormedToolCall(c.Function.Name, c.ID) {
 			out = append(out, c)
 		}
 	}
