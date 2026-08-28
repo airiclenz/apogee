@@ -332,6 +332,14 @@ func TestDefaultDangerousRules_HomeAnchoredRulesMatchTheMacOSHome(t *testing.T) 
 		{"delete an SSH key on macOS", terminalCall("rm -f /Users/alice/.ssh/id_ed25519"), "write-ssh-keys"},
 		{"recursively delete a macOS home", terminalCall("rm -rf /Users/alice"), "rm-rf-root-home-system"},
 		{"recursively delete a macOS home, flag order", terminalCall("rm -fr /Users/alice"), "rm-fr-root-home-system"},
+		// A bare `-` is a flag token of its own: getopt permutes `rm -rf /etc` into
+		// `rm - -rf /etc`, which deletes just as much. `rm rf /etc` is the harmless
+		// twin — a dashless `rf` is an operand, and reading it as a flag would fire on
+		// every `rm <name> /etc`-shaped line — and `rm -- -rf /etc` deletes files
+		// literally named `-rf` and `/etc` without recursing, so both stay unmatched.
+		{"recursively delete a system path, getopt-permuted", terminalCall("rm - -rf /etc"), "rm-rf-root-home-system"},
+		{"delete a system path with a dashless rf operand", terminalCall("rm rf /etc"), ""},
+		{"delete a system path after end-of-options", terminalCall("rm -- -rf /etc"), ""},
 		{"write a project file in a macOS home", writeCall("/Users/alice/code/app/main.go"), ""},
 		{"write the AWS config, not its credentials", writeCall("/Users/alice/.aws/config"), ""},
 		{"write a file whose name merely starts with .ssh", writeCall("/Users/alice/.sshconfig.bak"), ""},
@@ -384,6 +392,11 @@ func TestDefaultDangerousRules_HomeAnchoredRulesMatchTheWindowsHome(t *testing.T
 		{"recursively delete a Windows home", terminalCall(`rm -rf C:\Users\alice`), "rm-rf-root-home-system", TierHardRefuse},
 		{"recursively delete the profile variable", terminalCall(`rm -rf %USERPROFILE%`), "rm-rf-root-home-system", TierHardRefuse},
 		{"recursively delete a Windows home, flag order", terminalCall(`rm -fr C:\Users\alice`), "rm-fr-root-home-system", TierHardRefuse},
+		// The bare-dash flag token, pinned here too: the spelling reaches the same two
+		// rules whichever home dialect the rest of the table is about.
+		{"recursively delete a system path, getopt-permuted", terminalCall("rm - -rf /etc"), "rm-rf-root-home-system", TierHardRefuse},
+		{"delete a system path with a dashless rf operand", terminalCall("rm rf /etc"), "", TierNone},
+		{"delete a system path after end-of-options", terminalCall("rm -- -rf /etc"), "", TierNone},
 		{"write a project file on a Windows drive", writeCall(`C:\code\app\main.go`), "", TierNone},
 		{"write a relative path that merely contains users", writeCall(`docs\users\guide.md`), "", TierNone},
 		{"delete a project directory relatively on Windows", terminalCall(`rm -rf build\out`), "", TierNone},

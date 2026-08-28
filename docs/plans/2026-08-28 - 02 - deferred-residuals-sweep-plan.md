@@ -538,7 +538,9 @@ the Windows skip at `:491` stays). Against the pre-fix code the output is `sh`.
 
 **Commit.** `test(tools): the hook subprocess test proves argv[0] became the resolved program`
 
-## 18. `rmFlag` matches a bare `-` again
+## 18. `rmFlag` matches a bare `-` again — ✅ DONE (2026-08-28)
+
+NOTES (2026-08-28): the item's three cases were added verbatim (`/etc` targets) to both home-anchored tables per its text, each with a comment saying why the spelling is pinned there; `rm -- -rf /etc` was verified to be non-matching before and after the change, so "unchanged from today" means it stays untriggered.
 
 **What.** ISSUES: *The `rmFlag` token loses two spellings the old patterns caught.* Change
 `rmFlag` (`internal/security/rules.go:54`) to `(?:--?[a-z][a-z-]*|-)`; the trailing `\s+`

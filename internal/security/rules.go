@@ -48,10 +48,13 @@ const deleteTargetAnchor = `(?:/|[a-z]:/|~|\$home|%userprofile%|/\*|` +
 // (code audit C-10, 2026-08-26). Spelling the fragments once, here, keeps the two mirror
 // rules below readable and keeps them in step with each other.
 const (
-	// rmFlag is ONE flag token, short (`-v`, `-rf`) or long (`--verbose`, `--one-file-system`).
-	// It deliberately does not match a bare `--`: end-of-options is rmEndOfOptions' job, and
-	// letting a flag token swallow it would make the two indistinguishable.
-	rmFlag = `(?:--?[a-z][a-z-]*)`
+	// rmFlag is ONE flag token, short (`-v`, `-rf`) or long (`--verbose`, `--one-file-system`),
+	// or a bare `-` — getopt permutes the flags of `rm - -rf /etc`, so the lone dash is a flag
+	// token like any other and the rules must see through it. It deliberately does not match a
+	// bare `--`: end-of-options is rmEndOfOptions' job, and letting a flag token swallow it
+	// would make the two indistinguishable — the `\s+` that follows every use of rmFlag is what
+	// stops the bare-dash branch from eating a `--` one dash at a time.
+	rmFlag = `(?:--?[a-z][a-z-]*|-)`
 	// rmRecursive and rmForce are the two flags that make a delete catastrophic, each in its
 	// short-cluster and long spelling. The short forms match any cluster CONTAINING the
 	// letter (`-rv`, `-vrf`), which is how the flags actually arrive.
