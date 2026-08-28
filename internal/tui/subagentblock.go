@@ -588,11 +588,15 @@ func subAgentSummary(head paintInput, span []paintInput) branchSummary {
 		text += " · " + model
 	}
 	summary := quotedSummary(detailLine{Text: text})
-	// The verdict is the HEAD's, carried onto the composed reading rather than re-derived from it:
-	// this line opens with a count of the work, so its own words say nothing about how the run ended
-	// and a painter reading them would find no failure to paint (F-28). It is the same fact
-	// subAgentFinished withholds the done ✓ on, so the red slot and the missing ✓ are one answer.
-	summary.failed = failedSummary(head.tool.Summary.Text)
+	// The verdict is the HEAD's OWN (branchSummary.failed), carried onto the composed reading rather
+	// than re-derived from anybody's wording. This line opens with a count of the work, so its own
+	// words say nothing about how the run ended and a painter reading them would find no failure to
+	// paint (F-28) — and reading the head's TEXT instead was no better: the head's slot holds the
+	// child's REPORT, quoted, so a run that succeeded and opened its report with "error: …" was
+	// painted red while subAgentFinished — which asks the field — handed it the done ✓, the block
+	// saying both at once. One field answers both, so the red slot and the missing ✓ cannot disagree:
+	// what failed a delegation is its result's error status (enrichWithResult), never a sentence.
+	summary.failed = head.tool.Summary.failed
 	return summary
 }
 

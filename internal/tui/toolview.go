@@ -100,7 +100,8 @@ type branchSummary struct {
 	//
 	// It rides WITH the text for the reason quoted does: the wording is put to the vocabulary once,
 	// at the seam that words it (failedSummary), and every reader downstream asks the field instead
-	// of reading the same sentence back out — summaryStyle, failedCalls, subAgentFinished.
+	// of reading the same sentence back out — summaryStyle, failedCalls, subAgentFinished, and the
+	// composed delegation row that carries a head's verdict onto words of its own (subAgentSummary).
 	failed bool
 
 	// stat is the ARITHMETIC the text spells out, for the summaries a presenter worded from a fact

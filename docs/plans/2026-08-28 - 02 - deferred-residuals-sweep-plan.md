@@ -366,7 +366,13 @@ non-empty cached cell (`usageSubAgentRows`, `internal/tui/usage.go:212`); a pre-
 
 **Commit.** `fix(tui): a restored delegation keeps its cached-token share on the usage row`
 
-## 11. A delegation's verdict comes from its outcome, never from its report text
+## 11. A delegation's verdict comes from its outcome, never from its report text — ✅ DONE (2026-08-28)
+
+NOTES (2026-08-28): the item's second half ("also set `failed` on the head's `branchSummary` wherever the presenter enriches a delegation whose tool result is an error result") needed no code — the premise that a refusal is a quoted promotion with `.failed` false does not hold: `runSubAgent` returns every refusal through `errorToolResult` (`IsError: true`, `internal/agent/subagent.go:100-116`), and `enrichWithResult` short-circuits such a result into `absorbFailure`, which words it with `namedSummary` and so already sets `failed`. The invariant is pinned instead by the new "a delegation refused before it ran is red and wears no done mark" subtest, which passes with no change under `internal/tui/toolview.go`.
+
+NOTES (2026-08-28): the golden at `subagentblock_test.go:1180` KEEPS its ✓, against the item's "the ✓ goes". Its fixture `refusedDelegation` (`:1099`) reports through `subAgentReport`, which builds a NON-error `domain.ToolResult`, so under this item's own binding rule ("the verdict is the result's error status") that row is a delegation that succeeded and quoted a one-line report opening `error: …` — exactly the case the item requires to keep its ✓. Making the fixture a real error result would take the promotion away (`absorbFailure` sets no stat, so `promotable` is false), which is what `unframedSubAgentView`'s body layout and `guardRefuses` both work on — and what item 12's whole approach is written against. Left alone; the promised behaviour is asserted on a faithful error-result refusal instead.
+
+NOTES (2026-08-28): edited `internal/tui/toolleader.go` beyond the item's Files list — `failedSummary`'s doc named `subAgentSummary` as its "one other caller" and explained why it read the head's text there, which this item's change makes false. Reworded to name `namedSummary` as the only caller and to record what the removed reading got wrong.
 
 **What.** ISSUES: *A red slot and a ✓ can land on one delegation row.* Replace
 `summary.failed = failedSummary(head.tool.Summary.Text)` (`internal/tui/subagentblock.go:595`)

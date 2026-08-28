@@ -295,11 +295,13 @@ func summaryStyle(th theme, s branchSummary, expanded bool) lipgloss.Style {
 // verdicts beside it), plus the count a TYPE ROW aggregates its run's failures into ("3 errors",
 // runAggregate).
 //
-// The text is read ONCE, at the seam that words it: namedSummary puts its own sentence to this
-// vocabulary on the way in and the answer rides the summary from there ([branchSummary.failed]), so
-// no painter and no counter asks the words again. The one other caller is subAgentSummary, which
-// composes a reading of a run whose verdict lives on the HEAD's summary and carries that verdict
-// onto the composed line rather than leaving it to be re-derived from it.
+// The text is read ONCE, at the seam that words it, and namedSummary is now the only caller: it puts
+// its own sentence to this vocabulary on the way in and the answer rides the summary from there
+// ([branchSummary.failed]), so no painter and no counter asks the words again. subAgentSummary used
+// to be the second caller — it composes a reading of a run whose verdict lives on the HEAD's summary
+// — and it asked of the head's TEXT, which for a delegation is the child's REPORT, quoted: a run
+// that succeeded and opened its report with "error: …" was read here as a failure while the field
+// said otherwise. It carries the head's field across instead, so one verdict serves both marks.
 //
 // The aggregate is worded by the house plural (plural, runAggregate) and read back here by
 // countPhrase's strict split of that same "<n> <word>" shape, so the two cannot come to disagree,

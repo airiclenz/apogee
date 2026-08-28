@@ -1086,6 +1086,36 @@ func TestFailedDelegationPaintsItsSlotRed(t *testing.T) {
 
 		assertSlot(t, paintedRow(t, tr, slot), slot, false, true)
 	})
+
+	// A report that OPENS with the failure vocabulary is the case the wording test above cannot
+	// reach, and the one that made the row say two things at once: the child SUCCEEDED — its result
+	// carries no error — and quoted its answer into the slot, so a run that reported "error: none
+	// found" was painted red by a reading of that quote while subAgentFinished, asking the head's
+	// own verdict, gave it the done ✓. The verdict is the result's, so the row is neither red nor
+	// un-✓'d and the two marks agree.
+	t.Run("a report that opens with the failure vocabulary is not a failure", func(t *testing.T) {
+		const slot = "1 tool call · error: none found"
+
+		tr := &transcript{}
+		loneDelegation(tr, "s1", "search", "a.go", "error: none found")
+
+		assertSlot(t, paintedRow(t, tr, slot), slot, false, true)
+	})
+
+	// The other end of the same rule: a delegation REFUSED before it ran (the depth bound, a hook
+	// failure, a construct error — agent.runSubAgent) returns an error result and left no span, so
+	// its head wears the refusal in its own words (absorbFailure) and that error status is the whole
+	// verdict — red, and no ✓ beside a name whose run never happened.
+	t.Run("a delegation refused before it ran is red and wears no done mark", func(t *testing.T) {
+		const slot = "error: sub-agent depth limit reached (max 2)"
+
+		tr := &transcript{}
+		subAgentCall(tr, "s1", "delegate deeper", 0)
+		tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{
+			CallID: "s1", Content: "sub-agent depth limit reached (max 2)", IsError: true}})
+
+		assertSlot(t, paintedRow(t, tr, slot), slot, true, false)
+	})
 }
 
 // ----------------------------------------------------------------------------
