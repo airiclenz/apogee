@@ -396,7 +396,22 @@ seed — it must fail against the pre-item tree (bite check).
 
 **Commit.** `fix(tui): a file name with a line or tab break is one dropdown row and inserts as shown`
 
-## 7. `/clear` and `/new` in a pre-bound session reset the view without an engine call
+## 7. `/clear` and `/new` in a pre-bound session reset the view without an engine call — ✅ DONE (2026-08-28)
+
+NOTES (2026-08-28): the view-reset block was extracted into a new `resetSessionView` method so
+the pre-bound branch and the bound path run the one block rather than a copy; the item's text
+said to "run the view reset block" without naming the mechanism.
+
+NOTES (2026-08-28): three comments inside the moved block named control flow that stayed behind
+in `startNewSession` ("A refused clear returns above and never reaches this line", "The clear
+above was a session boundary", "The Rotate queued above") — each was reworded to stay true when
+read from either caller, and the pre-bound case was named in the two where it differs.
+
+NOTES (2026-08-28): the reset block holds `noteContextFiles`, which reads
+`Engine.ContextFilesReport`, so the pre-bound path is not literally engine-call-free as the
+item's title says; the **What**'s binding enumeration (skip the save, the exchange check and
+`ClearContext`) is what was followed, and the unbound holder answers that read with a zero
+report (`cmd/apogee/wire_engine.go:256-261`), so nothing is noted.
 
 **What.** Audit: *in a pre-bound session, `/clear` and `/new` report a misleading error and
 skip the reset* (Medium). `startNewSession` (`internal/tui/commandrun.go:126`) calls

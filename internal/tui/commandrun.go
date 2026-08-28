@@ -123,7 +123,24 @@ func (m Model) launchExchange(in domain.UserInput) (tea.Model, tea.Cmd) {
 // Snapshot the flush takes are safe. On a ClearContext error the view is left untouched and the failure
 // is noted — a fresh-looking view must never lie about an engine that still remembers the old
 // conversation; the save already on the queue is harmless (the session was closing anyway).
+//
+// A pre-bound session takes the view-only half instead (resetSessionView): there is no engine to
+// flush from, no Exchange to abort and no context to clear, and the unbound holder answers all three
+// with errNoServerBound — which used to surface as a "could not clear context" note over a view the
+// reset never reached. Options.Prebound is left standing, so the reason, its start-up box and the
+// picker the next send re-opens all survive the reset.
+//
+// The one pre-bound session that does NOT take it is a resumed one (--resume/--continue): the record
+// is seeded into the Agent the LATER bind builds, so a fresh-looking view there would be lying about
+// an engine that comes back remembering the whole resumed conversation — the same lie the error path
+// above refuses to tell. With a resume pending the branch is skipped and today's refusal note stands.
 func (m Model) startNewSession() (tea.Model, tea.Cmd) {
+	if m.prebound() && m.opts.Resumed == nil {
+		// Nothing to flush, abort or clear while no engine exists, so the reset is the view's alone.
+		m.resetSessionView()
+		m.layout()
+		return m, nil
+	}
 	cmd := m.saveAtIdle() // flush the outgoing session into history before it closes (queued, gated)
 	if m.eng.InExchange() {
 		// A session interrupted mid-task cannot be cleared — ClearContext refuses mid-Exchange with
@@ -143,16 +160,28 @@ func (m Model) startNewSession() (tea.Model, tea.Cmd) {
 	if rotate := m.scheduleWrite(recordWrite{kind: writeRotate}); rotate != nil {
 		cmd = rotate
 	}
+	m.resetSessionView()
+	m.layout()
+	return m, cmd
+}
+
+// resetSessionView wipes what the closed conversation owned out of the view and re-seeds the
+// one-time start-up box, so the frame is byte-identical to a fresh launch at this window size. It
+// touches no engine and queues no write — both halves of /clear end here: the bound one once the
+// engine has accepted the clear, and the pre-bound one, which has no engine to accept it and for
+// which this is the whole of the reset.
+func (m *Model) resetSessionView() {
 	// The suggestion band's spent set falls with the conversation it was advising (suggestband.go):
 	// the skills it named in the closed session are advice the human has not been given in this one.
-	// A refused clear returns above and never reaches this line, so the set survives exactly as long
-	// as the session it belongs to does.
+	// A refused clear returns before this runs, so the set survives exactly as long as the session it
+	// belongs to does.
 	m.spentSkills = nil
 	m.transcript.reset()
 	m.transcript.addStartup(newStartupView(m.opts))
-	// The clear above was a session boundary, so the engine re-read the workspace context files:
+	// A bound reset's clear was a session boundary, so the engine re-read the workspace context files:
 	// the fresh view says what the NEW session is carrying (which is why the notice is reprinted
-	// rather than assumed unchanged — the repo's AGENTS.md may have moved since launch).
+	// rather than assumed unchanged — the repo's AGENTS.md may have moved since launch). A pre-bound
+	// session has no engine to ask and the unbound holder's empty report adds nothing.
 	m.noteContextFiles()
 	// A held interjection queue deliberately SURVIVES the reset (ADR 0025): staged rows are
 	// outgoing input, not context — the human wrote them and has not unwritten them — so /clear
@@ -169,9 +198,10 @@ func (m Model) startNewSession() (tea.Model, tea.Cmd) {
 	// rather than corrected here, because correcting it is a behaviour change.
 	m.liveStats.reset()
 	m.flash = "" // drop any transient copy note; a new session shows nothing stale
-	// The Rotate queued above opens a fresh Session record, and a fresh record names itself: unlatch
-	// the naming call, forget that the CLOSED session was named by hand, and drop any title still
-	// waiting for an id — it was stashed for the session that just went into history.
+	// A bound reset queues a Rotate above, which opens a fresh Session record, and a fresh record
+	// names itself; a pre-bound one had no session to rotate. Either way: unlatch the naming call,
+	// forget that the CLOSED session was named by hand, and drop any title still waiting for an id —
+	// it was stashed for the session that just went into history.
 	m.autoTitleFired = false
 	m.titleTouched = false
 	m.pendingTitle.drop()
@@ -181,8 +211,6 @@ func (m Model) startNewSession() (tea.Model, tea.Cmd) {
 	// the next worker launch caches the boundary the new session actually starts from.
 	m.boundary = domain.Session{}
 	m.hasBoundary = false
-	m.layout()
-	return m, cmd
 }
 
 // runCommand handles a recognised local /command. /continue and /compact open a worker: /continue

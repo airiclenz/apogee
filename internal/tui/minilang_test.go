@@ -129,6 +129,78 @@ func TestClearCommandSurfacesEngineError(t *testing.T) {
 	}
 }
 
+// noServerBoundEngine is a fakeEngine that refuses ClearContext the way the composition root's
+// unbound holder does (cmd/apogee's errNoServerBound, unreachable from this package): the answer a
+// pre-bound /clear used to surface as a "could not clear context" note over an unreset view.
+func noServerBoundEngine() *fakeEngine {
+	return &fakeEngine{clearFn: func() error {
+		return errors.New("apogee: no server is bound yet — choose one with /server")
+	}}
+}
+
+// A pre-bound session has no engine to save from or clear, so /clear (and its /new alias) resets the
+// view alone: nothing is asked of the engine, no refusal note is printed, the scrollback comes back
+// down to the re-seeded start-up box, and the session is still the one waiting for a server.
+func TestPreboundClearResetsTheViewWithoutTheEngine(t *testing.T) {
+	for _, verb := range []string{"/clear", "/new"} {
+		t.Run(verb, func(t *testing.T) {
+			eng := noServerBoundEngine()
+			m := newTestModelEng(t, eng, preboundOpts(PreboundFirstBoot, ""))
+			m = step(t, m, keyEsc()) // close the unasked picker; the pre-bound state outlives it
+			seedConversation(&m)
+
+			m, cmd := typeCommand(t, m, verb)
+
+			if eng.clearCalls != 0 {
+				t.Errorf("ClearContext calls = %d, want 0 — there is no engine to clear", eng.clearCalls)
+			}
+			if cmd != nil {
+				t.Error(verb + " returned a Cmd; a view-only reset flushes nothing and rotates nothing")
+			}
+			if got := plain(m.View()); strings.Contains(got, "could not clear") {
+				t.Errorf("%s noted a clear failure on a session with nothing bound:\n%s", verb, got)
+			}
+			if n := len(m.transcript.entries); n != 1 {
+				t.Fatalf("transcript has %d entries after %s, want exactly 1 (only the re-seeded start-up box)", n, verb)
+			}
+			if k := m.transcript.entries[0].kind; k != entryStartup {
+				t.Errorf("entries[0].kind = %v after %s, want entryStartup", k, verb)
+			}
+			if !m.prebound() {
+				t.Error("the reset ended the pre-bound state; the reason and its start-up box must survive it")
+			}
+		})
+	}
+}
+
+// The one pre-bound session that keeps today's refusal is a resumed one: the record is seeded into
+// the Agent the LATER bind builds, so a view-only reset would paint a fresh view over an engine that
+// comes back remembering the whole resumed conversation.
+func TestPreboundClearWithAResumePendingKeepsTheRefusal(t *testing.T) {
+	eng := noServerBoundEngine()
+	opts := preboundOpts(PreboundFirstBoot, "")
+	opts.Resumed = &ResumedSession{Title: "an older task"}
+	m := newTestModelEng(t, eng, opts)
+	m = step(t, m, keyEsc())
+	seedConversation(&m)
+	before := len(m.transcript.entries)
+
+	m, _ = typeCommand(t, m, "/clear")
+
+	if eng.clearCalls != 1 {
+		t.Errorf("ClearContext calls = %d, want 1 — a resume pending must take the engine path", eng.clearCalls)
+	}
+	if got := plain(m.View()); !strings.Contains(got, "could not clear context") {
+		t.Errorf("transcript missing the clear-failure note:\n%s", got)
+	}
+	if got := len(m.transcript.entries); got != before+1 {
+		t.Errorf("transcript entries = %d after a failed /clear, want %d (the scrollback survives, plus the error note)", got, before+1)
+	}
+	if got := plain(m.View()); !strings.Contains(got, seededAssistantText) {
+		t.Errorf("a refused /clear wrongly wiped the prior conversation:\n%s", got)
+	}
+}
+
 // seededAssistantText is the assistant reply seedConversation folds in, so the reset tests can assert
 // on a distinctive string that must vanish (or survive) with the scrollback.
 const seededAssistantText = "the number is 7"
