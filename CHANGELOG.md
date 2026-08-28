@@ -248,6 +248,57 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- `read_file` reads a file under a configured extra read-only root when the path is spelled
+  through a symlink — the shape a dotfiles-managed `~/.apogee/skills` hands the model. The
+  bounded read was pinned to the matched root but still opened the path AS SPELLED, so the
+  fence's lexical relativisation disagreed with the real-path containment that had just
+  accepted it and the read was refused as an escape (regression from the 2026-08-26 mount
+  rule; `list_dir`, `grep` and `find_files` were never affected). A new `readScope.locate`
+  seam answers the root and the path together: unchanged under the workspace root, the
+  resolved real path under an extra root.
+
+- `copy_file` copies a source under a configured extra read-only root when the path is spelled
+  through a symlink — the same dotfiles-managed `~/.apogee/skills` shape `read_file` was fixed
+  for. The source's root and the source's PATH are now chosen together (`readScope.locate`), so
+  the copy primitive's lexical relativisation is handed the resolved real path the mount rule had
+  already accepted instead of the argument's spelling. The destination is untouched by the fix —
+  it stays workspace-fenced (ADR 0012 D1) — and a spelling that resolves outside every root is
+  still refused with the one uniform escape message. This retires the issue-register entry that
+  proposed stamping `Skill.Dir` from the resolved anchor: the ratified fix leaves the skill
+  header announcing the directory AS CONFIGURED and makes the read tools accept both spellings.
+
+- **The symlink SPELLING of a mounted read-only root is now pinned for the three walking read
+  tools.** `list_dir`, `grep` and `find_files` resolve their path argument through
+  `readScope.resolve`, so they already served the shape a dotfiles-managed `~/.apogee/skills`
+  hands the model — a real mounted root reached by a path that runs through a link — while
+  `read_file` refused it (audit 2026-08-28 F-13). One regression test per tool now holds that
+  open: each runs the tool twice, once by the symlink spelling and once by the root's own name,
+  and requires the two answers to be byte-identical and to name the file at its real location
+  (`skill/SKILL.md`), so a future change to `resolve()` cannot regress these three the way
+  `readBounded` regressed. (`internal/tools`.)
+
+- Auto mode no longer forces an approval prompt on every terminal command that names the session's
+  own scratch dir under `~/.apogee/scratch/`. The dangerous-action guard now takes a per-call list
+  of exempt paths and masks their spellings — literal, `~/…`, `$HOME/…`, `/root/…`,
+  `/home/<user>/…`, `/Users/<user>/…` — out of the inspected text before any rule runs; dispatch
+  passes the agent's live `ScratchDir()`. The confinement box already declares that dir writable
+  (ADR 0056), so the `~/.apogee` forced look (ADR 0049 §4) answered nothing there. Other sessions'
+  scratch dirs, `config.yaml`, `skills/` and `sessions/` keep the Tier-2 look, and a command that
+  names the exempt dir alongside a guarded path still fires on the guarded half.
+
+- ADR 0049 gains an **Amendment (2026-08-28)**: §4's Tier-2 forced look on `~/.apogee` stands,
+  with exactly one carve-out — the session's OWN scratch dir under `~/.apogee/scratch/`, masked
+  out of the guard's text per call, because the same Resolution that would force the look already
+  installs a box declaring that dir writable (ADR 0056), so the prompt asks a question the verdict
+  answered one line earlier. The amendment records the mechanism (`exemptPaths` on
+  `Guards.PreExecute` / `Inspect`, `maskExempt`'s home-anchored spellings, dispatch passing
+  `Agent.guardExemptions()`), the 2026-08-28 `/code-audit` session where every scratch-routed
+  `go test`/`go vet` prompted, and why the carve-out must stay one dir wide (masking runs before
+  Tier-1 rules too). `CONTEXT.md`'s *Dangerous-action guard* entry carries the same exception
+  clause, and `internal/agent`'s dispatch tests pin the wiring end to end: a terminal command
+  naming the session's own scratch dir is confined in Auto with the Approver never consulted,
+  while one naming `<home>/.apogee/config.yaml` still forces the gate on the control-plane rule.
+
 - **The README's stale-version tripwire now watches prose too.** The archive-install block resolves
   `VERSION` from the latest release, but the comment beside it still carried a worked example
   (`set VERSION=0.17.1 instead`) that went stale the moment 0.18.0 shipped, and

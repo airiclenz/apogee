@@ -374,6 +374,19 @@ of that run.
   not a gap", but several cells state a limit rather than naming the instrument that asserts the
   claim instead. Either the cells or the paragraph should be made to agree.
 
+### Symlinked-skill-reads residuals — deferred out of the 2026-08-28 run
+
+**Status:** found 2026-08-28 at the close of the symlinked skill reads / scratch forced-look plan
+(`docs/plans/archived/2026-08-28 - 00 - symlinked-skill-reads-and-scratch-forced-look-plan.md`),
+deferred out of that run.
+
+- [ ] **Under an extra root, a non-escape read refusal now names the RESOLVED path, not the
+  spelling the model used.** `readBounded` opens the located target
+  (`internal/tools/path_read.go:235`), so a refusal raised past containment — `not a file: <real>`
+  at `internal/tools/path_read.go:47`, and the other `readFileErrorMessage` paths — quotes the real
+  path instead of the symlinked spelling the model wrote. Inherent to the fix and arguably better,
+  but no test pins which spelling those refusals carry.
+
 ## Parked / deferred work
 
 Live, deliberately deferred work only. Each entry records *enough* design that we don't re-derive
