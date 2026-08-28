@@ -88,23 +88,23 @@ type ServerConfig struct {
 // resolved are all connect-time errors (the Client surfaces them per server).
 //
 // workspaceRoot is the exec fence a stdio server's command is measured against; it is unused by
-// the two HTTP transports, which launch nothing. The returned cmd and ProcessTeardown are the
-// launched process and the container holding its tree — both nil for an HTTP transport, and both
-// the caller's to reap (Client.Close).
-func buildTransport(ctx context.Context, cfg ServerConfig, guard security.URLGuard, workspaceRoot string) (mcpsdk.Transport, *exec.Cmd, platform.ProcessTeardown, error) {
+// the two HTTP transports, which launch nothing. The returned cmd, ProcessTeardown and CancelFunc
+// are the launched process, the container holding its tree, and the cancel that ends the Cmd's own
+// context — all three nil for an HTTP transport, and all three the caller's to run (Client.Close).
+func buildTransport(ctx context.Context, cfg ServerConfig, guard security.URLGuard, workspaceRoot string) (mcpsdk.Transport, *exec.Cmd, platform.ProcessTeardown, context.CancelFunc, error) {
 	switch cfg.Transport {
 	case TransportStdio:
 		return buildStdioTransport(cfg, workspaceRoot)
 	case TransportSSE:
 		transport, err := buildSSETransport(ctx, cfg, guard)
-		return transport, nil, nil, err
+		return transport, nil, nil, nil, err
 	case TransportStreamableHTTP:
 		transport, err := buildStreamableTransport(ctx, cfg, guard)
-		return transport, nil, nil, err
+		return transport, nil, nil, nil, err
 	case "":
-		return nil, nil, nil, fmt.Errorf("mcp: server %q has no transport configured", cfg.Name)
+		return nil, nil, nil, nil, fmt.Errorf("mcp: server %q has no transport configured", cfg.Name)
 	default:
-		return nil, nil, nil, fmt.Errorf("mcp: server %q has unknown transport %q (want stdio, sse, or streamable-http)", cfg.Name, cfg.Transport)
+		return nil, nil, nil, nil, fmt.Errorf("mcp: server %q has unknown transport %q (want stdio, sse, or streamable-http)", cfg.Name, cfg.Transport)
 	}
 }
 
@@ -123,9 +123,13 @@ func buildTransport(ctx context.Context, cfg ServerConfig, guard security.URLGua
 //
 // The returned ProcessTeardown holds the launched process's whole tree — a POSIX process group, a
 // Windows Job Object — so Client.Close reaps every descendant the server spawned rather than only
-// the leader the SDK's own shutdown signals. The Cmd carries a context for one reason:
-// platform.NewProcessTeardown wires cmd.Cancel, and exec.Cmd.Start refuses a non-nil Cancel on a
-// Cmd built without one. It is context.Background, never the connect ctx — a stdio server's
+// the leader the SDK's own shutdown signals. The Cmd carries a CANCELLABLE context, returned beside
+// it, because platform.NewProcessTeardown wires both cmd.Cancel (the process-group kill) and
+// cmd.WaitDelay (the post-exit drain bound) — and exec.Cmd.Start refuses a non-nil Cancel on a Cmd
+// built without a context. Neither fires while that context is live, so the cancel is what makes
+// them real: Client.Close runs it once the SDK's spec-shaped shutdown has returned, bounding a
+// server that outlived it rather than leaving the SDK's cmd.Wait blocked with nothing behind it.
+// The context is derived from context.Background, never the connect ctx — a stdio server's
 // lifetime is the SESSION, and binding it to the sweep that dialled it would kill every server the
 // moment Connect returned.
 //
@@ -138,15 +142,16 @@ func buildTransport(ctx context.Context, cfg ServerConfig, guard security.URLGua
 // optional env-allowlist scrub for stdio MCP launches is parked in ISSUES.md (L4) for a host that
 // wants to run a less-trusted stdio server; v1 treats a configured stdio MCP command as fully
 // trusted with the process environment.
-func buildStdioTransport(cfg ServerConfig, workspaceRoot string) (mcpsdk.Transport, *exec.Cmd, platform.ProcessTeardown, error) {
+func buildStdioTransport(cfg ServerConfig, workspaceRoot string) (mcpsdk.Transport, *exec.Cmd, platform.ProcessTeardown, context.CancelFunc, error) {
 	if strings.TrimSpace(cfg.Command) == "" {
-		return nil, nil, nil, fmt.Errorf("mcp: stdio server %q has no command configured", cfg.Name)
+		return nil, nil, nil, nil, fmt.Errorf("mcp: stdio server %q has no command configured", cfg.Name)
 	}
 	program, err := security.ResolveProgram(nil, cfg.Command, workspaceRoot, nil)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("mcp: stdio server %q: %w", cfg.Name, err)
+		return nil, nil, nil, nil, fmt.Errorf("mcp: stdio server %q: %w", cfg.Name, err)
 	}
-	cmd := exec.CommandContext(context.Background(), program, cfg.Args...)
+	ctx, cancel := context.WithCancel(context.Background())
+	cmd := exec.CommandContext(ctx, program, cfg.Args...)
 	if len(cfg.Env) > 0 {
 		cmd.Env = append(cmd.Environ(), cfg.Env...)
 	}
@@ -154,8 +159,14 @@ func buildStdioTransport(cfg ServerConfig, workspaceRoot string) (mcpsdk.Transpo
 	// group is a fork-time property of the Cmd, and on Windows the Job Object has to exist before
 	// there is a process to assign to it.
 	td := platform.NewProcessTeardown(cmd)
-	return &mcpsdk.CommandTransport{Command: cmd}, cmd, td, nil
+	return &mcpsdk.CommandTransport{Command: cmd, TerminateDuration: stdioTerminateDuration}, cmd, td, cancel, nil
 }
+
+// stdioTerminateDuration is how long the SDK's stdio shutdown waits at each rung of its ladder
+// (stdin close → SIGTERM → SIGKILL) before escalating. Zero means the SDK's own 5s default, which
+// is what production runs on: it is a package var only to give the drain test a seam short enough
+// to run in milliseconds (a test that shrinks it must not run in parallel).
+var stdioTerminateDuration time.Duration
 
 // buildSSETransport builds an SSE client transport after vetting the endpoint, over an
 // http.Client pinned to that endpoint's own addresses.

@@ -608,7 +608,29 @@ content stream contains the bytes `/Size 4000000000` extracts normally; the exis
 
 **Commit.** `fix(doctext): the absurd-object-count guard no longer reads /Size out of a stream body`
 
-## 21. `WaitDelay` bounds the MCP stdio child's drain
+## 21. `WaitDelay` bounds the MCP stdio child's drain — ✅ DONE (2026-08-28)
+
+NOTES (2026-08-28): `buildTransport`/`buildStdioTransport` gained a fifth return value (the
+`context.CancelFunc`), so `internal/mcp/transport_test.go` — not in the item's Files list — was
+updated at its seven call sites (one extra `_`); mechanical, no behaviour asserted there changed.
+
+NOTES (2026-08-28): added `stdioTerminateDuration`, a package var defaulting to zero (the SDK's own
+5s default, so production is unchanged) that sets `CommandTransport.TerminateDuration`. Without that
+seam the wedged-server test would spend ~10s in the SDK's stdin-close → SIGTERM → SIGKILL ladder;
+with it the test runs in 0.2s. Same var-as-test-seam precedent as `platform.ProcessWaitDelay` and
+this package's `proxyForRequest`.
+
+NOTES (2026-08-28): the item's prescribed end-to-end test does not discriminate the fix — the SDK's
+ladder ends in a `SIGKILL` of the leader, which bounds a wedged server with or without the cancel
+(verified by neutering `s.cancel()` and re-running: still green). It is kept as the behavioural pin
+(bounded `Close`, no goroutine left in `cmd.Wait`) and joined by
+`TestBuildStdioTransport_CancelArmsTheCmdsTeardown`, which starts the wedged fixture directly and
+proves the returned cancel is what makes `cmd.Wait` return — that one fails (7s timeout) when
+`buildStdioTransport` is reverted to `context.Background`.
+
+NOTES (2026-08-28): `docs/design/mcp-client.md` gained one clause on the stdio bullet (the
+session-scoped cancellable context and the bounded drain) — not in the item's Files list, but the
+doc states that bullet's teardown contract.
 
 **What.** ISSUES: *`WaitDelay` wired by `NewProcessTeardown` is inert on the MCP `Cmd`.*
 `buildStdioTransport` (`internal/mcp/transport.go:149`) builds the `Cmd` on

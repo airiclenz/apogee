@@ -42,14 +42,17 @@ type Client struct {
 }
 
 // liveSession is one connected server: the SDK session, plus — for a stdio server — the process
-// this client launched and the teardown holding that process's whole tree. cmd and td are nil for
-// the two HTTP transports, which launch nothing. The pair is kept beside the session because the
-// SDK's spec-shaped shutdown reaches the LEADER alone (stdin close, wait, SIGTERM, SIGKILL of
-// cmd.Process); anything the server spawned is only reachable through the group / Job Object.
+// this client launched, the teardown holding that process's whole tree, and the cancel ending the
+// Cmd's own context. All three are nil for the two HTTP transports, which launch nothing. They are
+// kept beside the session because the SDK's spec-shaped shutdown reaches the LEADER alone (stdin
+// close, wait, SIGTERM, SIGKILL of cmd.Process): anything the server spawned is only reachable
+// through the group / Job Object, and nothing at all bounds the wait once that ladder is spent
+// unless the Cmd's context is cancelled (buildStdioTransport).
 type liveSession struct {
 	session *mcpsdk.ClientSession
 	cmd     *exec.Cmd
 	td      platform.ProcessTeardown
+	cancel  context.CancelFunc
 }
 
 // Connect dials every configured server in order, lists each server's tools, and returns a
@@ -103,7 +106,7 @@ func Connect(ctx context.Context, servers []ServerConfig, guard security.URLGuar
 // job. A handshake that FAILED never yields a session to record, so its process and the teardown's
 // own handle are reaped here: the rollback below can only reach what was recorded.
 func (c *Client) connectOne(ctx context.Context, cfg ServerConfig, guard security.URLGuard, workspaceRoot string) error {
-	transport, cmd, td, err := buildTransport(ctx, cfg, guard, workspaceRoot)
+	transport, cmd, td, cancel, err := buildTransport(ctx, cfg, guard, workspaceRoot)
 	if err != nil {
 		return err
 	}
@@ -111,13 +114,16 @@ func (c *Client) connectOne(ctx context.Context, cfg ServerConfig, guard securit
 	client := mcpsdk.NewClient(&mcpsdk.Implementation{Name: clientName, Version: clientVersion}, nil)
 	session, err := client.Connect(ctx, transport, nil)
 	if err != nil {
+		if cancel != nil {
+			cancel()
+		}
 		reapProcess(cmd, td)
 		return fmt.Errorf("mcp: connect to server %q: %w", cfg.Name, err)
 	}
 	if td != nil {
 		td.Contain(cmd)
 	}
-	c.sessions = append(c.sessions, liveSession{session: session, cmd: cmd, td: td})
+	c.sessions = append(c.sessions, liveSession{session: session, cmd: cmd, td: td, cancel: cancel})
 
 	tools, err := listServerTools(ctx, cfg.Name, session)
 	if err != nil {
@@ -174,13 +180,16 @@ func (c *Client) Tools() []domain.Tool {
 // cleared, so a second Close is a no-op. The host calls it at Agent.Close (no orphaned process
 // or connection survives).
 //
-// The order per session is the session FIRST, the process tree second, and it is load-bearing.
-// ClientSession.Close is the spec-shaped stdio shutdown — close stdin, wait, SIGTERM, SIGKILL —
-// which gives a well-behaved server the chance to exit cleanly and flush, but reaches the LEADER
-// alone: anything it spawned outlives it. The teardown's Reap then kills the group (POSIX) or
-// terminates the Job Object (Windows), which is the only thing that reaches those descendants, and
-// Release drops the handle the teardown has owned since before the process existed. Reaping first
-// would turn every clean shutdown into a kill.
+// The order per session is the session FIRST, the Cmd's context second, the process tree third, and
+// it is load-bearing. ClientSession.Close is the spec-shaped stdio shutdown — close stdin, wait,
+// SIGTERM, SIGKILL — which gives a well-behaved server the chance to exit cleanly and flush, but
+// reaches the LEADER alone: anything it spawned outlives it. Cancelling the Cmd's context once that
+// ladder has been spent is what arms cmd.Cancel and cmd.WaitDelay (buildStdioTransport), so a
+// server that outlived the shutdown is killed as a group and the drain that follows is bounded
+// (platform.ProcessWaitDelay) rather than leaving the SDK's cmd.Wait blocked for good. The
+// teardown's Reap then kills the group (POSIX) or terminates the Job Object (Windows), which is the
+// only thing that reaches those descendants, and Release drops the handle the teardown has owned
+// since before the process existed. Reaping first would turn every clean shutdown into a kill.
 func (c *Client) Close() error {
 	if c == nil {
 		return nil
@@ -189,6 +198,9 @@ func (c *Client) Close() error {
 	for _, s := range c.sessions {
 		if err := s.session.Close(); err != nil {
 			errs = append(errs, err)
+		}
+		if s.cancel != nil {
+			s.cancel()
 		}
 		reapProcess(s.cmd, s.td)
 	}

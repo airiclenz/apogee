@@ -85,9 +85,12 @@ type ProcessTeardown interface {
 
 // ProcessWaitDelay bounds the post-exit drain so a child holding a pipe open cannot wedge Wait
 // indefinitely after the process has been signalled. Every NewProcessTeardown sets it as
-// cmd.WaitDelay, which is why it lives here rather than once per build tag. It is a var rather
-// than a const so a test can shrink it and exercise the drain-wedged path in milliseconds;
-// production never reassigns it.
+// cmd.WaitDelay, which is why it lives here rather than once per build tag. The bound is only real
+// on a Cmd whose context is eventually cancelled — the execution tools' subprocesses, cancelled
+// with the run, and an MCP stdio server, whose Cmd carries a session-scoped cancellable context
+// that mcp.Client.Close cancels once the SDK's own shutdown ladder is spent (internal/mcp's
+// buildStdioTransport). It is a var rather than a const so a test can shrink it and exercise the
+// drain-wedged path in milliseconds; production never reassigns it.
 var ProcessWaitDelay = 5 * time.Second
 
 // NoTeardown is the inert ProcessTeardown: every hook is a no-op. POSIX embeds it

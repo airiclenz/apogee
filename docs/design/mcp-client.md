@@ -59,7 +59,11 @@ tools execute on the server side, outside any OS fence. Two consequences shape t
   (`ISSUES.md` L4). The launched process is held in a **process group** (POSIX) / **Job Object**
   (Windows) via `platform.NewProcessTeardown`, and `Close` reaps that container after the session's
   own shutdown, so a descendant the server spawned cannot outlive the session — the SDK's
-  spec-shaped shutdown signals the leader alone.
+  spec-shaped shutdown signals the leader alone. That `Cmd` carries a **session-scoped cancellable
+  context** (never the connect ctx, which would kill every server the moment `Connect` returned)
+  that `Close` cancels once the SDK's shutdown ladder is spent: it is what arms `cmd.Cancel` and
+  `cmd.WaitDelay`, so a server that outlives the ladder is killed as a group and the drain after it
+  is bounded by `platform.ProcessWaitDelay` rather than left open-ended.
 
 Every tool **description, schema, and result** the client surfaces is untrusted input: it is passed
 to the model and rendered, **never executed or interpreted** as a command by Apogee.

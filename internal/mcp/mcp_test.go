@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -17,6 +18,7 @@ import (
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/security"
 )
 
@@ -31,7 +33,10 @@ import (
 // (buildTransport(stdio) → CommandTransport → ListTools → CallTool → Close) deterministically,
 // so the suite is hermetic and runs everywhere `go test` does (the SDK's own stdio-test idiom).
 
-const runAsServerEnv = "APOGEE_MCP_TEST_SERVER"
+const (
+	runAsServerEnv       = "APOGEE_MCP_TEST_SERVER"
+	runAsWedgedServerEnv = "APOGEE_MCP_TEST_WEDGED_SERVER"
+)
 
 // fixtureToolSchema is the input schema the fixture's echo tool advertises (a single string
 // argument), so a surfaced tool carries a real, non-empty schema to assert against.
@@ -48,6 +53,10 @@ var fixtureToolSchema = map[string]any{
 func TestMain(m *testing.M) {
 	if os.Getenv(runAsServerEnv) != "" {
 		runFixtureServer()
+		return
+	}
+	if os.Getenv(runAsWedgedServerEnv) != "" {
+		runWedgedFixtureServer()
 		return
 	}
 	os.Exit(m.Run())
@@ -103,6 +112,29 @@ func runFixtureServer() {
 	}
 }
 
+// runWedgedFixtureServer serves the same stdio fixture, but refuses every polite rung of the SDK's
+// shutdown ladder: it ignores SIGTERM, it does not exit when the client closes its stdin (the
+// server runs on a goroutine the process outlives), and it holds stdout open until it is killed.
+// That is what a badly behaved stdio server looks like from the client's side — the shape the
+// bounded drain exists for.
+func runWedgedFixtureServer() {
+	signal.Ignore(syscall.SIGTERM)
+	server := mcpsdk.NewServer(&mcpsdk.Implementation{Name: "apogee-test-wedged-fixture", Version: "v0.0.1"}, nil)
+	server.AddTool(
+		&mcpsdk.Tool{Name: "echo", Description: "Echo the text argument back.", InputSchema: fixtureToolSchema},
+		func(_ context.Context, _ *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
+			return &mcpsdk.CallToolResult{Content: []mcpsdk.Content{&mcpsdk.TextContent{Text: "echo"}}}, nil
+		},
+	)
+	go func() { _ = server.Run(context.Background(), &mcpsdk.StdioTransport{}) }()
+	// A sleep loop rather than a bare block: once the server goroutine returns on the stdin EOF
+	// the runtime's deadlock detector would kill a parked process outright, which is the very
+	// wedge this fixture exists to hold.
+	for {
+		time.Sleep(time.Minute)
+	}
+}
+
 // stdioServerConfig returns a ServerConfig that launches THIS test binary as the fixture MCP
 // server over stdio (the re-exec trick), under the alias "fixture".
 func stdioServerConfig(t *testing.T) ServerConfig {
@@ -117,6 +149,15 @@ func stdioServerConfig(t *testing.T) ServerConfig {
 		Command:   exe,
 		Env:       []string{runAsServerEnv + "=1"},
 	}
+}
+
+// wedgedStdioServerConfig is stdioServerConfig pointed at the WEDGED fixture instead — the same
+// re-exec, the environment switch being the only difference.
+func wedgedStdioServerConfig(t *testing.T) ServerConfig {
+	t.Helper()
+	cfg := stdioServerConfig(t)
+	cfg.Env = []string{runAsWedgedServerEnv + "=1"}
+	return cfg
 }
 
 // connectFixture connects a Client to the stdio fixture server and registers cleanup that
@@ -315,6 +356,107 @@ func TestClose_ReapsTheStdioServersDescendants(t *testing.T) {
 	}
 }
 
+// TestClose_BoundsTheDrainOfAWedgedStdioServer proves the drain bound the teardown seam advertises
+// (platform.ProcessWaitDelay) now reaches an MCP stdio server: the Cmd is built on a session-scoped
+// cancellable context that Close cancels once the SDK's shutdown ladder is spent, so cmd.Cancel and
+// cmd.WaitDelay fire instead of sitting inert on a context.Background Cmd nothing ever cancels.
+// The fixture refuses the whole polite ladder — stdin close ignored, SIGTERM ignored, stdout held
+// open — and Close must still return inside that ladder's own bound plus ProcessWaitDelay (both
+// shrunk to milliseconds here), leaving no goroutine parked in cmd.Wait behind it.
+func TestClose_BoundsTheDrainOfAWedgedStdioServer(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the fixture wedges itself by ignoring a POSIX SIGTERM; the Windows half of the seam is verified on the owner's box")
+	}
+	// Package vars, so this test must not run in parallel with another that reads them.
+	waitDelay, terminate := platform.ProcessWaitDelay, stdioTerminateDuration
+	platform.ProcessWaitDelay, stdioTerminateDuration = 200*time.Millisecond, 100*time.Millisecond
+	t.Cleanup(func() { platform.ProcessWaitDelay, stdioTerminateDuration = waitDelay, terminate })
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	c, err := Connect(ctx, []ServerConfig{wedgedStdioServerConfig(t)}, security.URLGuard{}, t.TempDir())
+	if err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	if len(c.Tools()) == 0 {
+		t.Fatal("the wedged fixture surfaced no tools; the session was never live")
+	}
+
+	// Everything the wedge can legitimately cost: the ladder's two waits (stdin close, then
+	// SIGTERM) before the SIGKILL, then the cancelled context's own bounded drain — plus slack for
+	// a loaded machine. Anything past that is the unbounded wait this wiring removes.
+	bound := 2*stdioTerminateDuration + platform.ProcessWaitDelay + 2*time.Second
+	closed := make(chan error, 1)
+	go func() { closed <- c.Close() }()
+	select {
+	case err := <-closed:
+		// A killed server does not close cleanly; the error is expected, the RETURN is the claim.
+		t.Logf("Close returned %v", err)
+	case <-time.After(bound):
+		t.Fatalf("Close did not return within %v; the wedged server's drain is unbounded", bound)
+	}
+	assertNoGoroutineIn(t, "os/exec.(*Cmd).Wait", 2*time.Second)
+}
+
+// TestBuildStdioTransport_CancelArmsTheCmdsTeardown pins the other half of the same wiring, the
+// half the end-to-end test above cannot separate (the SDK's ladder ends in a SIGKILL of its own, so
+// it bounds the wedged server either way): the CancelFunc buildStdioTransport returns is what arms
+// cmd.Cancel and cmd.WaitDelay. It starts the wedged fixture directly — no SDK, no session, a
+// process that ignores SIGTERM and never exits on its own — parks a goroutine in cmd.Wait, and
+// cancels. On a Cmd built on a context nothing can cancel (the previous context.Background one)
+// that Wait never returns.
+func TestBuildStdioTransport_CancelArmsTheCmdsTeardown(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the fixture wedges itself by ignoring a POSIX SIGTERM; the Windows half of the seam is verified on the owner's box")
+	}
+	_, cmd, td, cancel, err := buildTransport(context.Background(), wedgedStdioServerConfig(t), security.URLGuard{}, t.TempDir())
+	if err != nil {
+		t.Fatalf("buildTransport: %v", err)
+	}
+	// Started here rather than through the transport: with no stdin the fixture's server sees EOF
+	// at once and the process falls through to its sleep loop, which is precisely the server that
+	// outlives every polite shutdown.
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start the wedged fixture: %v", err)
+	}
+	td.Contain(cmd)
+	t.Cleanup(func() {
+		td.Reap(cmd)
+		td.Release()
+	})
+
+	waited := make(chan error, 1)
+	go func() { waited <- cmd.Wait() }()
+	cancel()
+
+	bound := platform.ProcessWaitDelay + 2*time.Second
+	select {
+	case <-waited:
+	case <-time.After(bound):
+		t.Fatalf("cmd.Wait did not return within %v of the cancel; the stdio Cmd's context is inert, so cmd.Cancel and cmd.WaitDelay never fire", bound)
+	}
+}
+
+// assertNoGoroutineIn fails unless every goroutine naming frame has left it before the deadline.
+// It polls rather than sampling once: the SDK parks its own goroutine in cmd.Wait for as long as
+// the shutdown ladder runs, so the claim is about what SURVIVES Close, not about one instant.
+func assertNoGoroutineIn(t *testing.T, frame string, within time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(within)
+	for {
+		buf := make([]byte, 1<<20)
+		stacks := string(buf[:runtime.Stack(buf, true)])
+		if !strings.Contains(stacks, frame) {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("a goroutine was still parked in %s %v after Close:\n%s", frame, within, stacks)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
 // pidAlive reports whether pid still names a live process, the signal-0 probe. A process the reap
 // killed lingers as a zombie until its reparented init collects it, which is why the caller polls
 // rather than asserting once.
@@ -418,7 +560,7 @@ func TestConnect_RejectsBadServerNames(t *testing.T) {
 // TestBuildTransport_StdioRequiresCommand proves a stdio server with no command is refused at
 // build time rather than launching nothing.
 func TestBuildTransport_StdioRequiresCommand(t *testing.T) {
-	_, _, _, err := buildTransport(context.Background(), ServerConfig{Name: "s", Transport: TransportStdio}, security.URLGuard{}, t.TempDir())
+	_, _, _, _, err := buildTransport(context.Background(), ServerConfig{Name: "s", Transport: TransportStdio}, security.URLGuard{}, t.TempDir())
 	if err == nil {
 		t.Fatal("stdio transport with no command built without error")
 	}
@@ -435,7 +577,7 @@ func TestBuildTransport_HTTPEndpointBlockedByURLSafety(t *testing.T) {
 	for _, transport := range []Transport{TransportSSE, TransportStreamableHTTP} {
 		t.Run(string(transport), func(t *testing.T) {
 			cfg := ServerConfig{Name: "local", Transport: transport, Endpoint: "https://blocked.example/mcp"}
-			_, _, _, err := buildTransport(context.Background(), cfg, guard, t.TempDir())
+			_, _, _, _, err := buildTransport(context.Background(), cfg, guard, t.TempDir())
 			if err == nil {
 				t.Fatalf("%s endpoint to a denied host built without error, want a url-safety block", transport)
 			}
@@ -449,13 +591,13 @@ func TestBuildTransport_HTTPEndpointBlockedByURLSafety(t *testing.T) {
 // TestBuildTransport_UnknownAndMissing proves an unknown transport and a missing HTTP endpoint
 // are connect-time errors, never silently defaulted.
 func TestBuildTransport_UnknownAndMissing(t *testing.T) {
-	if _, _, _, err := buildTransport(context.Background(), ServerConfig{Name: "s", Transport: "carrier-pigeon"}, security.URLGuard{}, t.TempDir()); err == nil {
+	if _, _, _, _, err := buildTransport(context.Background(), ServerConfig{Name: "s", Transport: "carrier-pigeon"}, security.URLGuard{}, t.TempDir()); err == nil {
 		t.Error("unknown transport built without error")
 	}
-	if _, _, _, err := buildTransport(context.Background(), ServerConfig{Name: "s", Transport: ""}, security.URLGuard{}, t.TempDir()); err == nil {
+	if _, _, _, _, err := buildTransport(context.Background(), ServerConfig{Name: "s", Transport: ""}, security.URLGuard{}, t.TempDir()); err == nil {
 		t.Error("empty transport built without error")
 	}
-	if _, _, _, err := buildTransport(context.Background(), ServerConfig{Name: "s", Transport: TransportSSE}, security.URLGuard{}, t.TempDir()); err == nil {
+	if _, _, _, _, err := buildTransport(context.Background(), ServerConfig{Name: "s", Transport: TransportSSE}, security.URLGuard{}, t.TempDir()); err == nil {
 		t.Error("SSE transport with no endpoint built without error")
 	}
 }
