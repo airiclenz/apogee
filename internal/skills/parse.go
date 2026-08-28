@@ -11,7 +11,8 @@ import (
 
 // maxSummaryLen caps a skill summary, mirroring the apogee-code oracle (summary.slice(0,200)):
 // the summary is a one-line menu hint, not a second body, so a runaway description never
-// crowds the merged "/" menu.
+// crowds the merged "/" menu. The cap is the menu's alone — Skill.Description keeps the full
+// text for the suggestion matcher, which must see a phrase wherever the author placed it.
 const maxSummaryLen = 200
 
 // maxTriggerLen caps ONE trigger phrase at 64 runes: a trigger is a fragment a prompt might
@@ -181,10 +182,12 @@ func parseWithFrontmatter(fmText, body, dirName string) (Skill, error) {
 		return Skill{}, err
 	}
 	id := firstNonEmpty(fm.ID, fm.Name, dirName)
+	summary := firstNonEmpty(fm.Summary, fm.Description)
 	return validate(Skill{
 		ID:          strings.TrimSpace(id),
 		DisplayName: strings.TrimSpace(firstNonEmpty(fm.DisplayName, titleCase(id))),
-		Summary:     clampSummary(firstNonEmpty(fm.Summary, fm.Description)),
+		Summary:     clampSummary(summary),
+		Description: strings.TrimSpace(summary),
 		Body:        strings.TrimSpace(body),
 		Triggers:    normalizeTriggers(fm.Triggers),
 	})
@@ -332,6 +335,7 @@ func parseFallback(content, dirName string) (Skill, error) {
 		ID:          strings.TrimSpace(dirName),
 		DisplayName: strings.TrimSpace(displayName),
 		Summary:     clampSummary(summary),
+		Description: summary,
 		Body:        strings.TrimSpace(content),
 	})
 }

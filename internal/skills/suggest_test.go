@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -356,6 +357,27 @@ func TestSuggestCarriesTheRowFields(t *testing.T) {
 	}
 	if got[0].Summary == "" {
 		t.Error("Summary is empty; the band has nothing to paint")
+	}
+}
+
+// TestSuggestIndexesTheDescriptionPastTheMenuClamp pins that the matcher sees a skill's whole
+// description: a phrase the author placed after the 200-rune Summary clamp still finds the skill.
+func TestSuggestIndexesTheDescriptionPastTheMenuClamp(t *testing.T) {
+	t.Parallel()
+	filler := strings.Repeat("filler ", maxSummaryLen/len("filler ")+1)
+	sk, err := parseSkill("---\nid: checklist\ndescription: "+filler+" compile the release checklist\n---\nbody", "checklist")
+	if err != nil {
+		t.Fatalf("parseSkill: %v", err)
+	}
+	if strings.Contains(sk.Summary, "compile") {
+		t.Fatalf("Summary %q still holds the phrase — the clamp must sit before it", sk.Summary)
+	}
+	c := newFixtureCatalog(t, []Skill{sk})
+
+	got := suggestedIDs(t, c.Suggest("compile the release checklist now", nil, 0))
+
+	if len(got) != 1 || got[0] != "checklist" {
+		t.Errorf("Suggest = %v, want [checklist] — the phrase past the clamp must be indexed", got)
 	}
 }
 

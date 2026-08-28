@@ -180,7 +180,11 @@ bonus, adjust the fixture's summaries, not the assertions' intent.
 
 ---
 
-## 3. Real-library fixture and regression cases
+## 3. Real-library fixture and regression cases — ✅ DONE (2026-08-28)
+
+NOTES (2026-08-28): deviation, owner-authorized (option a) — the item forbids matcher edits, but two binding rows (`get me up to speed on this project` → `refocus`, `cut a release for homebrew` → `brew-release`) failed because `parse.go` clamps `Summary` to 200 runes before the index sees it; `Skill` gained a `Description` field (the summary's unclamped source text, set by both parse paths) and `buildIndex` indexes `firstNonEmpty(s.Description, s.Summary)` — the clamp on `Summary` stays for the / menu only. All nine rows are binding and pass; `TestSuggestIndexesTheDescriptionPastTheMenuClamp` and an extra assertion in `TestParseSkillSummaryClampedTo200` pin the split.
+NOTES (2026-08-28): ADR 0061 Decision 1 (line 47) says the document is "id + display name + summary + …" — with this change it is the full description; item 4 rewrites that sentence and should say "description" there (not edited here — item 4 owns the ADR); CONTEXT.md line 1066 ("id, name, summary or `triggers:`") reads the same way and is a one-word tidy for the same pass.
+NOTES (2026-08-28): the fixture mirrors every frontmatter key the library declares (`argument-hint:`, one `disable-model-invocation:`), not only name/description — the refresh one-liner copies the whole block and the parser ignores extras.
 
 Depends on item 2.
 

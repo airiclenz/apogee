@@ -131,8 +131,8 @@ type Suggestion struct {
 // Suggest ranks the catalog against draft and returns the best matches, strongest first.
 //
 // A skill is admitted when one of its trigger phrases appears verbatim in the draft OR at least
-// minMatchedTerms distinct draft terms appear in its document (id + display name + summary +
-// triggers; bodies are never indexed). A draft term appears when the document holds it exactly or
+// minMatchedTerms distinct draft terms appear in its document (id + display name + full
+// description + triggers; bodies are never indexed). A draft term appears when the document holds it exactly or
 // holds a term it shares a prefix with either way, the shorter side at least minPrefixRunes long.
 // Admitted skills are ordered by score descending, then by ID ascending so ties are stable across
 // calls.
@@ -224,10 +224,13 @@ type document struct {
 	triggers  [][]string
 }
 
-// buildIndex indexes every skill in byID. The document is id + display name + summary + every
-// trigger phrase: triggers are ordinary document text for BM25 (an author's phrasing is evidence
-// like any other), and their contiguous-phrase boost is applied separately in Suggest. Bodies are
-// deliberately absent — indexing a whole SKILL.md would let one long skill match every draft.
+// buildIndex indexes every skill in byID. The document is id + display name + description + every
+// trigger phrase: the description is the summary's full source text (Skill.Description) rather
+// than the menu-clamped Summary, so a phrase an author placed past the 200-rune cap still finds
+// the skill; a Skill built without one falls back to its Summary. Triggers are ordinary document
+// text for BM25 (an author's phrasing is evidence like any other), and their contiguous-phrase
+// boost is applied separately in Suggest. Bodies are deliberately absent — indexing a whole
+// SKILL.md would let one long skill match every draft.
 func buildIndex(byID map[string]Skill) *index {
 	ids := make([]string, 0, len(byID))
 	for id := range byID {
@@ -243,7 +246,7 @@ func buildIndex(byID map[string]Skill) *index {
 	for _, id := range ids {
 		s := byID[id]
 		doc := document{id: id, terms: map[string]int{}, nameTerms: map[string]bool{}}
-		fields := strings.Join([]string{s.ID, s.DisplayName, s.Summary, strings.Join(s.Triggers, " ")}, " ")
+		fields := strings.Join([]string{s.ID, s.DisplayName, firstNonEmpty(s.Description, s.Summary), strings.Join(s.Triggers, " ")}, " ")
 		for _, term := range tokenize(fields) {
 			doc.terms[term]++
 			doc.length++

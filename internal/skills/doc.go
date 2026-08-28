@@ -44,7 +44,9 @@
 // against a draft message, so a Driver can offer the user the skills that fit what they are
 // typing. It is HOST-SIDE only and changes nothing about what reaches the model — the catalog is
 // never advertised to it, and a skill still enters a prompt only when the user attaches it as a
-// "/id" (ADR 0061).
+// "/id" (ADR 0061). Its ranking on the phrases people actually type is pinned against
+// testdata/library/ — a frontmatter-only copy of the owner's real skill library, loaded through
+// the ordinary Load by suggest_library_test.go.
 //
 // No builtin/embedded skills and no auto-created ~/.apogee/skills directory ship in v1 (the
 // creation-deferred convention — a writer creates what it needs); both are additive future

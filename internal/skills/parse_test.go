@@ -240,6 +240,9 @@ func TestParseSkillSummaryClampedTo200(t *testing.T) {
 	if len([]rune(sk.Summary)) != maxSummaryLen {
 		t.Errorf("summary length = %d, want clamped to %d", len([]rune(sk.Summary)), maxSummaryLen)
 	}
+	if sk.Description != long {
+		t.Errorf("Description length = %d, want the full %d — the clamp is the menu's alone", len([]rune(sk.Description)), len(long))
+	}
 }
 
 func TestParseSkillRejectsIncomplete(t *testing.T) {
