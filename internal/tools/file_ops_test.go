@@ -612,7 +612,7 @@ func TestCopyFile_GuardJudgesOnlyTheDestination(t *testing.T) {
 		"destination": "docs/skill-runs/resources/methodology.md",
 	})
 	materialize.Tool = copyFileSpec.name
-	if d := guard.Inspect(materialize, copier); d.Triggered() {
+	if d := guard.Inspect(materialize, copier, nil); d.Triggered() {
 		t.Errorf("copy FROM the skill library triggered rule %q (tier %d), want no trigger", d.RuleID, d.Tier)
 	}
 
@@ -621,7 +621,7 @@ func TestCopyFile_GuardJudgesOnlyTheDestination(t *testing.T) {
 		"destination": "/root/.apogee/skills/evil/SKILL.md",
 	})
 	poison.Tool = copyFileSpec.name
-	if d := guard.Inspect(poison, copier); d.Tier != security.TierForceApproval {
+	if d := guard.Inspect(poison, copier, nil); d.Tier != security.TierForceApproval {
 		t.Errorf("copy INTO the control plane tier = %d, want TierForceApproval", d.Tier)
 	}
 
@@ -630,7 +630,7 @@ func TestCopyFile_GuardJudgesOnlyTheDestination(t *testing.T) {
 		"destination": "docs/x.md",
 	})
 	drain.Tool = moveFileSpec.name
-	if d := guard.Inspect(drain, mover); d.Tier != security.TierForceApproval {
+	if d := guard.Inspect(drain, mover, nil); d.Tier != security.TierForceApproval {
 		t.Errorf("move OUT of the control plane tier = %d, want TierForceApproval", d.Tier)
 	}
 }

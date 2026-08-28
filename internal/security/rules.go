@@ -172,7 +172,13 @@ func DefaultDangerousRules() []Rule {
 		// small model looping on rewrites of the write half. The hint names the sanctioned
 		// route instead — and at Tier 2 it now rides the Approval prompt as its remedy line and
 		// the deny result's tail (internal/agent's resolution.go / dispatch.go), which is where
-		// a small model actually reads it.
+		// a small model actually reads it. One dir under `~/.apogee` never reaches this rule at
+		// all: the session's OWN scratch dir under `~/.apogee/scratch/`, whose spellings dispatch
+		// passes as a per-call exemption and maskExempt removes from the text before any rule runs
+		// (ADR 0049 amendment, 2026-08-28) — the confinement box already declares that dir
+		// writable (ADR 0056), so a look there answers nothing while prompting on every command
+		// the model routes through its sanctioned scratch space. Other sessions' scratch dirs, and
+		// every other control-plane path, keep the look.
 		{
 			ID:     "write-apogee-control-plane",
 			Tier:   TierForceApproval,

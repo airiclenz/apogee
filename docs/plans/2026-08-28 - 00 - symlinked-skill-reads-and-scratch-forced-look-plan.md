@@ -214,7 +214,13 @@ real (resolved) location, matching what the tools return today for the real spel
 
 ---
 
-## 4. The dangerous-action guard masks the session's own scratch dir
+## 4. The dangerous-action guard masks the session's own scratch dir — ✅ DONE (2026-08-28)
+
+NOTES (2026-08-28): the item's Files list names six files, but its own instruction to "update every other `PreExecute`/`Inspect` caller the compiler finds (tests included) with `nil`" reaches seven more test files — `internal/security/rules_test.go`, `internal/agent/setconfine_test.go`, `internal/agent/setmode_test.go`, `internal/tools/{delete_file,file_ops,list_dir}_test.go`. Those carry the mechanical `, nil` third argument and nothing else.
+NOTES (2026-08-28): `maskExempt` trims a trailing separator off the exempt path before building its patterns, so `\b` is always anchored on a word character; the item's "a trailing separator … masks with it" is covered from both sides (a trailing `/` in the TEXT masks with the dir, a trailing `/` on the exempt PATH is ignored) — both are `TestMaskExempt` rows.
+NOTES (2026-08-28): the plan's step 1 ("replace every literal occurrence") is implemented as a `regexp.QuoteMeta` pattern rather than `strings.ReplaceAll`, because the `\b` end-anchor the same bullet requires (so `<id>x` does not mask) needs a regexp either way — one code path (`maskSpelling`) now serves both the literal and the home-anchored spelling.
+NOTES (2026-08-28): mutation proof — dropping the two `maskExempt` calls from `Inspect` makes `TestInspectMasksTheSessionScratchDir` (3 subtests) and `TestGuards_PreExecute_ExemptScratchDirProceeds` fail with the `write-apogee-control-plane` force; `internal/security/dangerous.go` was restored byte-for-byte afterwards.
+NOTES (2026-08-28): no `PreExecute`/`Inspect` signature appears in `docs/`, `CONTEXT.md` or `internal/security/doc.go`, so no documentation edit fell to this item (the ADR/CONTEXT prose is item 5's).
 
 **What:**
 - `internal/security/dangerous.go`: `Inspect(call domain.ToolCall, tool domain.Tool, exemptPaths []string) Decision`.

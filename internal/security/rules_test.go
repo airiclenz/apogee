@@ -189,7 +189,7 @@ func TestMergeDangerousRules_ProjectCannotDissolveFloorByID(t *testing.T) {
 			}
 
 			// End-to-end: the guard built from the merged set still catches the call.
-			d := NewDangerousActionGuard(merged).Inspect(tc.probe, nil)
+			d := NewDangerousActionGuard(merged).Inspect(tc.probe, nil, nil)
 			if d.Tier != tc.wantTier {
 				t.Errorf("Inspect(probe) tier = %d, want %d — the project add shrank the shipped rule's coverage",
 					d.Tier, tc.wantTier)
@@ -237,7 +237,7 @@ func TestDefaultDangerousRules_ControlPlanesAreOnTheFloor(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			d := g.Inspect(tc.call, nil)
+			d := g.Inspect(tc.call, nil, nil)
 
 			if d.Tier != tc.wantTier {
 				t.Fatalf("Inspect(%q) tier = %d, want %d (rule=%q)", tc.name, d.Tier, tc.wantTier, d.RuleID)
@@ -262,7 +262,7 @@ func TestDefaultDangerousRules_ApogeeControlPlaneReadHintsTheSanctionedRoute(t *
 	g := DefaultDangerousActionGuard()
 
 	call := terminalCall("cp /home/u/.apogee/skills/x/prompts/a.md /tmp/")
-	d := g.Inspect(call, nil)
+	d := g.Inspect(call, nil, nil)
 
 	if d.Tier != TierForceApproval {
 		t.Fatalf("Inspect tier = %d, want TierForceApproval (rule=%q)", d.Tier, d.RuleID)
@@ -303,7 +303,7 @@ func TestDefaultDangerousRules_ControlPlaneNearMissesNotBlocked(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			d := g.Inspect(tc.call, nil)
+			d := g.Inspect(tc.call, nil, nil)
 
 			if d.Triggered() {
 				t.Fatalf("Inspect(%q) wrongly triggered: tier=%d rule=%q reason=%q", tc.name, d.Tier, d.RuleID, d.Reason)
@@ -341,7 +341,7 @@ func TestDefaultDangerousRules_HomeAnchoredRulesMatchTheMacOSHome(t *testing.T) 
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			d := g.Inspect(tc.call, nil)
+			d := g.Inspect(tc.call, nil, nil)
 
 			if tc.wantRule == "" {
 				if d.Triggered() {
@@ -394,7 +394,7 @@ func TestDefaultDangerousRules_HomeAnchoredRulesMatchTheWindowsHome(t *testing.T
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			d := g.Inspect(tc.call, nil)
+			d := g.Inspect(tc.call, nil, nil)
 
 			if tc.wantRule == "" {
 				if d.Triggered() {

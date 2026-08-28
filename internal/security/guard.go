@@ -99,7 +99,14 @@ type PreCheck struct {
 // conservative default; a resolved tool lets the write-shaped rules respect its declared
 // read-only class (see Rule.WritesOnly). It does not execute the call and does not
 // consult the Approver — it only reports what the executor must do.
-func (g Guards) PreExecute(call domain.ToolCall, tool domain.Tool) PreCheck {
+//
+// exemptPaths are paths whose spellings no rule may see — today the session's own scratch
+// dir, the box's extra writable path (ADR 0056), which the confinement already declares
+// writable so a forced look there would answer nothing. It is threaded straight to Inspect;
+// a nil slice is the guard as before. Passing it per call rather than holding it on Guards is
+// deliberate: the dangerous-action guard is shared read-only between an agent and its
+// sub-agents (ForSubAgent), and each of them exempts its own dir.
+func (g Guards) PreExecute(call domain.ToolCall, tool domain.Tool, exemptPaths []string) PreCheck {
 	if g.Breaker != nil && g.Breaker.Tripped(call) {
 		return PreCheck{
 			Outcome: GuardRefuse,
@@ -109,7 +116,7 @@ func (g Guards) PreExecute(call domain.ToolCall, tool domain.Tool) PreCheck {
 	}
 
 	if g.Dangerous != nil {
-		if d := g.Dangerous.Inspect(call, tool); d.Triggered() {
+		if d := g.Dangerous.Inspect(call, tool, exemptPaths); d.Triggered() {
 			switch d.Tier {
 			case TierHardRefuse:
 				return PreCheck{Outcome: GuardRefuse, Reason: d.Reason, Hint: d.Hint, Audit: AuditDangerousRefused}

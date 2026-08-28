@@ -66,7 +66,7 @@ func TestDangerousActionGuard_Tier1HardRefuse(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			d := g.Inspect(tc.call, nil)
+			d := g.Inspect(tc.call, nil, nil)
 			if d.Tier != TierHardRefuse {
 				t.Fatalf("Inspect(%q) tier = %d, want TierHardRefuse (reason=%q)", tc.name, d.Tier, d.Reason)
 			}
@@ -102,7 +102,7 @@ func TestDangerousActionGuard_Tier2ForceApproval(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			d := g.Inspect(tc.call, nil)
+			d := g.Inspect(tc.call, nil, nil)
 			if d.Tier != TierForceApproval {
 				t.Fatalf("Inspect(%q) tier = %d, want TierForceApproval (reason=%q)", tc.name, d.Tier, d.Reason)
 			}
@@ -145,7 +145,7 @@ func TestDangerousActionGuard_PrecisionNearMissesNotBlocked(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			d := g.Inspect(tc.call, nil)
+			d := g.Inspect(tc.call, nil, nil)
 			if d.Triggered() {
 				t.Fatalf("Inspect(%q) wrongly triggered: tier=%d rule=%q reason=%q", tc.name, d.Tier, d.RuleID, d.Reason)
 			}
@@ -201,7 +201,7 @@ func TestDangerousActionGuard_PayloadTextNotInspected(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			d := g.Inspect(tc.call, nil)
+			d := g.Inspect(tc.call, nil, nil)
 
 			if d.Triggered() {
 				t.Fatalf("Inspect(%q) wrongly triggered on payload text: tier=%d rule=%q reason=%q",
@@ -245,7 +245,7 @@ func TestDangerousActionGuard_ActionKeysStillInspected(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			d := g.Inspect(tc.call, nil)
+			d := g.Inspect(tc.call, nil, nil)
 
 			if d.Tier != TierHardRefuse {
 				t.Fatalf("Inspect(%q) tier = %d, want TierHardRefuse (the floor must still fire)", tc.name, d.Tier)
@@ -264,7 +264,7 @@ func TestDangerousActionGuard_PayloadKeySpellingVariants(t *testing.T) {
 		t.Run(key, func(t *testing.T) {
 			t.Parallel()
 
-			d := g.Inspect(argCall("diff", map[string]any{"path": "docs/x.md", key: "mentions ~/.ssh"}), nil)
+			d := g.Inspect(argCall("diff", map[string]any{"path": "docs/x.md", key: "mentions ~/.ssh"}), nil, nil)
 
 			if d.Triggered() {
 				t.Fatalf("key %q was inspected as an action: tier=%d rule=%q", key, d.Tier, d.RuleID)
@@ -279,7 +279,7 @@ func TestDangerousActionGuard_WhitespaceNormalized(t *testing.T) {
 
 	// Odd-but-not-obfuscated whitespace still matches (whitespace-normalization), but
 	// the guard does NOT chase obfuscation beyond that (ADR 0012).
-	d := g.Inspect(terminalCall("rm    -rf\t/"), nil)
+	d := g.Inspect(terminalCall("rm    -rf\t/"), nil, nil)
 	if d.Tier != TierHardRefuse {
 		t.Fatalf("whitespace-normalized rm -rf / tier = %d, want TierHardRefuse", d.Tier)
 	}
@@ -320,7 +320,7 @@ func TestDangerousActionGuard_HardRefuseBeatsForceApproval(t *testing.T) {
 
 	// A command that matches both a Tier-2 (sudo) and a Tier-1 (rm -rf /) rule must
 	// report the strictest tier.
-	d := g.Inspect(terminalCall("sudo rm -rf /"), nil)
+	d := g.Inspect(terminalCall("sudo rm -rf /"), nil, nil)
 	if d.Tier != TierHardRefuse {
 		t.Fatalf("sudo rm -rf / tier = %d, want TierHardRefuse (strictest wins)", d.Tier)
 	}
@@ -336,7 +336,7 @@ func TestNewDangerousActionGuard_DropsMalformedRule(t *testing.T) {
 	if got := len(g.Rules()); got != 1 {
 		t.Fatalf("compiled rules = %d, want 1 (malformed dropped)", got)
 	}
-	if d := g.Inspect(terminalCall("drop_db now"), nil); d.Tier != TierHardRefuse {
+	if d := g.Inspect(terminalCall("drop_db now"), nil, nil); d.Tier != TierHardRefuse {
 		t.Fatalf("valid rule did not fire after malformed one was dropped: %+v", d)
 	}
 }
@@ -348,7 +348,7 @@ func TestDangerousActionGuard_UnparseableArgsStillInspected(t *testing.T) {
 	// A malformed argument payload degrades to matching the raw bytes — the guard still
 	// sees the dangerous text rather than silently passing it.
 	call := domain.ToolCall{ID: "c1", Tool: "terminal", Arguments: json.RawMessage(`rm -rf / not json`)}
-	if d := g.Inspect(call, nil); d.Tier != TierHardRefuse {
+	if d := g.Inspect(call, nil, nil); d.Tier != TierHardRefuse {
 		t.Fatalf("unparseable args tier = %d, want TierHardRefuse", d.Tier)
 	}
 }
@@ -405,11 +405,11 @@ func TestWritesOnlyRulesSkipADeclaredReadOnlyTool(t *testing.T) {
 			t.Parallel()
 			call := argCall("list_dir", map[string]any{"path": tc.path})
 
-			if d := g.Inspect(call, reader); d.Triggered() {
+			if d := g.Inspect(call, reader, nil); d.Triggered() {
 				t.Errorf("read-only tool reading %q triggered rule %q (tier %d), want no trigger",
 					tc.path, d.RuleID, d.Tier)
 			}
-			if d := g.Inspect(call, nil); d.Tier != tc.wantFloor {
+			if d := g.Inspect(call, nil, nil); d.Tier != tc.wantFloor {
 				t.Errorf("nil (unknown) tool naming %q tier = %d, want %d — the exemption must not be the default",
 					tc.path, d.Tier, tc.wantFloor)
 			}
@@ -427,7 +427,7 @@ func TestCommandShapedRulesIgnoreTheToolClass(t *testing.T) {
 	reader := stubTool{name: "weird_reader", readOnly: true}
 
 	call := argCall("weird_reader", map[string]any{"path": "x; rm -rf /"})
-	if d := g.Inspect(call, reader); d.Tier != TierHardRefuse {
+	if d := g.Inspect(call, reader, nil); d.Tier != TierHardRefuse {
 		t.Fatalf("command-shaped rule through a read-only tool tier = %d, want TierHardRefuse", d.Tier)
 	}
 }
@@ -449,7 +449,7 @@ func TestWritesOnlyRulesJudgeTheWriteTargetNotADeclaredReadSource(t *testing.T) 
 		"source":      "/root/.apogee/skills/security-audit/resources/methodology.md",
 		"destination": "docs/skill-runs/security-audit/resources/methodology.md",
 	})
-	if d := g.Inspect(materialize, copier); d.Triggered() {
+	if d := g.Inspect(materialize, copier, nil); d.Triggered() {
 		t.Errorf("copy FROM the skill library triggered rule %q (tier %d), want no trigger", d.RuleID, d.Tier)
 	}
 
@@ -457,7 +457,7 @@ func TestWritesOnlyRulesJudgeTheWriteTargetNotADeclaredReadSource(t *testing.T) 
 		"source":      "docs/x.md",
 		"destination": "/root/.apogee/skills/evil/SKILL.md",
 	})
-	if d := g.Inspect(poison, copier); d.Tier != TierForceApproval {
+	if d := g.Inspect(poison, copier, nil); d.Tier != TierForceApproval {
 		t.Errorf("copy INTO the control plane tier = %d, want TierForceApproval — the write half keeps the floor", d.Tier)
 	}
 
@@ -465,7 +465,7 @@ func TestWritesOnlyRulesJudgeTheWriteTargetNotADeclaredReadSource(t *testing.T) 
 		"source":      "/root/.apogee/skills/security-audit/SKILL.md",
 		"destination": "docs/x.md",
 	})
-	if d := g.Inspect(drain, mover); d.Tier != TierForceApproval {
+	if d := g.Inspect(drain, mover, nil); d.Tier != TierForceApproval {
 		t.Errorf("move OUT of the control plane tier = %d, want TierForceApproval — an undeclared source is a delete target", d.Tier)
 	}
 }
@@ -507,11 +507,11 @@ func TestEveryRuleSkipsADeclaredPromptKey(t *testing.T) {
 				"task": tc.task,
 			})
 
-			if d := g.Inspect(call, dispatcher); d.Triggered() {
+			if d := g.Inspect(call, dispatcher, nil); d.Triggered() {
 				t.Errorf("declared prompt text triggered rule %q (tier %d), want no trigger",
 					d.RuleID, d.Tier)
 			}
-			if d := g.Inspect(call, undeclared); d.Tier != tc.wantFloor {
+			if d := g.Inspect(call, undeclared, nil); d.Tier != tc.wantFloor {
 				t.Errorf("undeclared tool carrying the same text: tier = %d, want %d — the exemption must not be the default",
 					d.Tier, tc.wantFloor)
 			}
@@ -529,7 +529,7 @@ func TestPromptKeyExemptionCoversOnlyTheDeclaredKeys(t *testing.T) {
 	g := DefaultDangerousActionGuard()
 
 	heredoc := terminalCall("cat <<'EOF' > ~/.ssh/authorized_keys\nssh-rsa AAAA attacker\nEOF")
-	if d := g.Inspect(heredoc, stubTool{name: "terminal"}); d.Tier != TierHardRefuse {
+	if d := g.Inspect(heredoc, stubTool{name: "terminal"}, nil); d.Tier != TierHardRefuse {
 		t.Errorf("terminal heredoc writing to ~/.ssh: tier = %d, want TierHardRefuse — command text stays inspected", d.Tier)
 	}
 
@@ -538,7 +538,7 @@ func TestPromptKeyExemptionCoversOnlyTheDeclaredKeys(t *testing.T) {
 		"task": "Tidy the workspace.",
 		"path": "~/.ssh/id_rsa",
 	})
-	if d := g.Inspect(sneaked, dispatcher); d.Tier != TierHardRefuse {
+	if d := g.Inspect(sneaked, dispatcher, nil); d.Tier != TierHardRefuse {
 		t.Errorf("undeclared argument on a prompt-declaring tool: tier = %d, want TierHardRefuse — only the declared keys are dropped", d.Tier)
 	}
 }
@@ -564,7 +564,7 @@ func TestWriteShapedViewDropsPromptAndSourceKeysTogether(t *testing.T) {
 		"source":      "docs/methodology.md",
 		"destination": "docs/skill-runs/security-audit/methodology.md",
 	})
-	if d := g.Inspect(inPrompt, both); d.Triggered() {
+	if d := g.Inspect(inPrompt, both, nil); d.Triggered() {
 		t.Errorf("declared prompt text triggered rule %q (tier %d), want no trigger — "+
 			"the source declaration must not cost the prompt its drop", d.RuleID, d.Tier)
 	}
@@ -574,7 +574,7 @@ func TestWriteShapedViewDropsPromptAndSourceKeysTogether(t *testing.T) {
 		"source":      "/root/.apogee/skills/security-audit/resources/methodology.md",
 		"destination": "docs/skill-runs/security-audit/methodology.md",
 	})
-	if d := g.Inspect(inSource, both); d.Triggered() {
+	if d := g.Inspect(inSource, both, nil); d.Triggered() {
 		t.Errorf("declared read source triggered rule %q (tier %d), want no trigger — "+
 			"the prompt declaration must not cost the source its drop", d.RuleID, d.Tier)
 	}
@@ -584,7 +584,7 @@ func TestWriteShapedViewDropsPromptAndSourceKeysTogether(t *testing.T) {
 		"source":      "docs/methodology.md",
 		"destination": "/root/.apogee/skills/evil/SKILL.md",
 	})
-	if d := g.Inspect(inDestination, both); d.Tier != TierForceApproval {
+	if d := g.Inspect(inDestination, both, nil); d.Tier != TierForceApproval {
 		t.Errorf("write INTO the control plane tier = %d, want TierForceApproval — "+
 			"an undeclared argument on a two-class tool is judged as any other write target", d.Tier)
 	}
@@ -606,5 +606,207 @@ func TestWriteShapedDefaultRulesCarryWritesOnly(t *testing.T) {
 		if r.WritesOnly != want[r.ID] {
 			t.Errorf("rule %q WritesOnly = %v, want %v", r.ID, r.WritesOnly, want[r.ID])
 		}
+	}
+}
+
+// scratchDirExemption is the live scratch dir of the 2026-08-28 /code-audit session, whose
+// forced look made Auto prompt on every `go test` the model routed through it.
+const scratchDirExemption = "/root/.apogee/scratch/20260828T052713Z-55b6dbc4"
+
+// TestInspectMasksTheSessionScratchDir pins the ADR 0049 amendment (2026-08-28): the session's
+// OWN scratch dir is masked out of the inspected text in every home spelling, while everything
+// else in the same command — another session's scratch dir, the control plane itself, ~/.ssh —
+// is still judged, and no exemption is the guard exactly as it was.
+func TestInspectMasksTheSessionScratchDir(t *testing.T) {
+	t.Parallel()
+	g := DefaultDangerousActionGuard()
+	exempt := []string{scratchDirExemption}
+
+	cases := []struct {
+		name     string
+		command  string
+		exempt   []string
+		wantTier Tier
+		wantRule string
+	}{
+		{
+			name:     "the live session's own build cache",
+			command:  "export GOCACHE=/root/.apogee/scratch/20260828T052713Z-55b6dbc4/gocache && go vet ./...",
+			exempt:   exempt,
+			wantTier: TierNone,
+		},
+		{
+			name:     "a tilde spelling of the same dir",
+			command:  "ls ~/.apogee/scratch/20260828T052713Z-55b6dbc4/tmp",
+			exempt:   exempt,
+			wantTier: TierNone,
+		},
+		{
+			name:     "a $HOME spelling of the same dir",
+			command:  "cd $HOME/.apogee/scratch/20260828T052713Z-55b6dbc4 && go test ./...",
+			exempt:   exempt,
+			wantTier: TierNone,
+		},
+		{
+			name:     "another session's scratch dir still forces the look",
+			command:  "cat /root/.apogee/scratch/20260701T000000Z-deadbeef/x",
+			exempt:   exempt,
+			wantTier: TierForceApproval,
+			wantRule: "write-apogee-control-plane",
+		},
+		{
+			name:     "the exempt dir alongside the global config still forces the look",
+			command:  "cp /root/.apogee/config.yaml /root/.apogee/scratch/20260828T052713Z-55b6dbc4/backup.yaml",
+			exempt:   exempt,
+			wantTier: TierForceApproval,
+			wantRule: "write-apogee-control-plane",
+		},
+		{
+			name:     "the exempt dir alongside ~/.ssh still hard-refuses",
+			command:  "rm -rf ~/.ssh && mkdir /root/.apogee/scratch/20260828T052713Z-55b6dbc4/tmp",
+			exempt:   exempt,
+			wantTier: TierHardRefuse,
+		},
+		{
+			name:     "a sibling whose name merely extends the exempt dir still fires",
+			command:  "touch /root/.apogee/scratch/20260828T052713Z-55b6dbc4x/y",
+			exempt:   exempt,
+			wantTier: TierForceApproval,
+			wantRule: "write-apogee-control-plane",
+		},
+		{
+			name:     "no exemption is the guard as before",
+			command:  "export GOCACHE=/root/.apogee/scratch/20260828T052713Z-55b6dbc4/gocache && go vet ./...",
+			exempt:   nil,
+			wantTier: TierForceApproval,
+			wantRule: "write-apogee-control-plane",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			d := g.Inspect(terminalCall(tc.command), nil, tc.exempt)
+
+			if d.Tier != tc.wantTier {
+				t.Fatalf("Inspect(%q) tier = %d, want %d (rule=%q reason=%q)",
+					tc.command, d.Tier, tc.wantTier, d.RuleID, d.Reason)
+			}
+			if tc.wantRule != "" && d.RuleID != tc.wantRule {
+				t.Errorf("Inspect(%q) rule = %q, want %q", tc.command, d.RuleID, tc.wantRule)
+			}
+		})
+	}
+}
+
+// TestMaskExempt covers the masking seam directly: which spellings of an exempt path
+// disappear, which neighbouring text survives, and that no exemption is a byte-for-byte
+// identity. Its inputs are already normalized, which is the shape Inspect hands it.
+func TestMaskExempt(t *testing.T) {
+	t.Parallel()
+	const scratch = "/root/.apogee/scratch/sess-1"
+
+	cases := []struct {
+		name   string
+		text   string
+		exempt []string
+		want   string
+	}{
+		{
+			name: "no exemption leaves the text untouched",
+			text: "go test /root/.apogee/scratch/sess-1",
+			want: "go test /root/.apogee/scratch/sess-1",
+		},
+		{
+			name:   "an empty exempt path is ignored",
+			text:   "go test /root/.apogee/scratch/sess-1",
+			exempt: []string{""},
+			want:   "go test /root/.apogee/scratch/sess-1",
+		},
+		{
+			name:   "the dir itself masks",
+			text:   "cd /root/.apogee/scratch/sess-1",
+			exempt: []string{scratch},
+			want:   "cd <exempt>",
+		},
+		{
+			name:   "a deeper path masks with the dir",
+			text:   "cat /root/.apogee/scratch/sess-1/gocache/x",
+			exempt: []string{scratch},
+			want:   "cat <exempt>/gocache/x",
+		},
+		{
+			name:   "a trailing separator in the text masks with the dir",
+			text:   "cd /root/.apogee/scratch/sess-1/",
+			exempt: []string{scratch},
+			want:   "cd <exempt>/",
+		},
+		{
+			name:   "a trailing separator on the exempt path is ignored",
+			text:   "cd /root/.apogee/scratch/sess-1/x",
+			exempt: []string{scratch + "/"},
+			want:   "cd <exempt>/x",
+		},
+		{
+			name:   "the tilde spelling masks",
+			text:   "cd ~/.apogee/scratch/sess-1",
+			exempt: []string{scratch},
+			want:   "cd <exempt>",
+		},
+		{
+			name:   "the $home spelling masks",
+			text:   "cd $home/.apogee/scratch/sess-1",
+			exempt: []string{scratch},
+			want:   "cd <exempt>",
+		},
+		{
+			name:   "a linux home spelling masks",
+			text:   "cd /home/alice/.apogee/scratch/sess-1",
+			exempt: []string{scratch},
+			want:   "cd <exempt>",
+		},
+		{
+			name:   "a macos home spelling masks",
+			text:   "cd /users/alice/.apogee/scratch/sess-1",
+			exempt: []string{scratch},
+			want:   "cd <exempt>",
+		},
+		{
+			name:   "a longer sibling name does not mask",
+			text:   "cd /root/.apogee/scratch/sess-10",
+			exempt: []string{scratch},
+			want:   "cd /root/.apogee/scratch/sess-10",
+		},
+		{
+			name:   "a neighbouring control-plane path survives",
+			text:   "cp /root/.apogee/config.yaml /root/.apogee/scratch/sess-1/b",
+			exempt: []string{scratch},
+			want:   "cp /root/.apogee/config.yaml <exempt>/b",
+		},
+		{
+			name:   "every occurrence masks",
+			text:   "cp /root/.apogee/scratch/sess-1/a ~/.apogee/scratch/sess-1/b",
+			exempt: []string{scratch},
+			want:   "cp <exempt>/a <exempt>/b",
+		},
+		{
+			name:   "a path outside the control plane masks literally only",
+			text:   "cd /srv/box && cat /srv/box/x",
+			exempt: []string{"/srv/box"},
+			want:   "cd <exempt> && cat <exempt>/x",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := maskExempt(tc.text, tc.exempt)
+
+			if got != tc.want {
+				t.Errorf("maskExempt(%q, %v) = %q, want %q", tc.text, tc.exempt, got, tc.want)
+			}
+		})
 	}
 }

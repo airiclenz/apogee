@@ -632,6 +632,21 @@ func (a *Agent) ScratchDir() string {
 	return a.scratchDir
 }
 
+// guardExemptions returns the paths whose spellings the dangerous-action guard must not see
+// for THIS agent's calls: today exactly the session's own scratch dir, read live so it follows
+// a SetScratchDir move like every other per-call read. The confinement box already declares
+// that dir writable (ADR 0056), so the `~/.apogee` forced look (ADR 0049 §4) would answer
+// nothing there while prompting on every scratch-routed command. nil when there is no scratch
+// dir — the guard as it was. Each agent, root or sub-agent, passes its OWN: the guard itself is
+// shared read-only, so the exemption travels as a per-call argument and never as guard state.
+func (a *Agent) guardExemptions() []string {
+	dir := a.ScratchDir()
+	if dir == "" {
+		return nil
+	}
+	return []string{dir}
+}
+
 // SetScratchDir moves the session scratch directory for subsequent tool calls — the extra
 // writable root ConfinementBox folds into WritablePaths (Config.ScratchDir documents the field).
 // The host calls it at a SESSION boundary so the box handed to each call follows the ACTIVE

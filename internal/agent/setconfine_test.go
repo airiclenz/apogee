@@ -25,7 +25,7 @@ func TestAgentSetConfineToWorkspaceAffectsResolution(t *testing.T) {
 	if !a.ConfineToWorkspace() {
 		t.Fatal("ConfineToWorkspace() = false at construction, want the cfg seed true")
 	}
-	if got := resolveLadder(a.resolutionInput(write, call, a.guards.PreExecute(call, write))).kind; got != resolveGate {
+	if got := resolveLadder(a.resolutionInput(write, call, a.guards.PreExecute(call, write, nil))).kind; got != resolveGate {
 		t.Fatalf("confined Auto ladder = %s, want resolveGate", got)
 	}
 
@@ -34,13 +34,13 @@ func TestAgentSetConfineToWorkspaceAffectsResolution(t *testing.T) {
 	if a.ConfineToWorkspace() {
 		t.Fatal("ConfineToWorkspace() = true after SetConfineToWorkspace(false)")
 	}
-	if got := resolveLadder(a.resolutionInput(write, call, a.guards.PreExecute(call, write))).kind; got != resolveRun {
+	if got := resolveLadder(a.resolutionInput(write, call, a.guards.PreExecute(call, write, nil))).kind; got != resolveRun {
 		t.Fatalf("after SetConfineToWorkspace(false) ladder = %s, want resolveRun", got)
 	}
 
 	a.SetConfineToWorkspace(true)
 
-	if got := resolveLadder(a.resolutionInput(write, call, a.guards.PreExecute(call, write))).kind; got != resolveGate {
+	if got := resolveLadder(a.resolutionInput(write, call, a.guards.PreExecute(call, write, nil))).kind; got != resolveGate {
 		t.Fatalf("after SetConfineToWorkspace(true) ladder = %s, want resolveGate again", got)
 	}
 }
@@ -118,7 +118,7 @@ func TestNewChildAgentInheritsLiveConfineToWorkspace(t *testing.T) {
 	if child.ConfineToWorkspace() {
 		t.Fatal("child confine-to-workspace = true, want the parent's live false at spawn")
 	}
-	if got := resolveLadder(child.resolutionInput(write, call, child.guards.PreExecute(call, write))).kind; got != resolveRun {
+	if got := resolveLadder(child.resolutionInput(write, call, child.guards.PreExecute(call, write, nil))).kind; got != resolveRun {
 		t.Fatalf("child write ladder = %s, want resolveRun (the parent's live blast radius)", got)
 	}
 	if !spawnedConfined.ConfineToWorkspace() {
@@ -152,7 +152,7 @@ func TestAgentSetConfineToWorkspaceConcurrent(t *testing.T) {
 		defer wg.Done()
 		for i := 0; i < iters; i++ {
 			_ = a.ConfineToWorkspace()
-			_ = resolveLadder(a.resolutionInput(write, call, a.guards.PreExecute(call, write)))
+			_ = resolveLadder(a.resolutionInput(write, call, a.guards.PreExecute(call, write, nil)))
 			_, _ = a.newChildAgent("call_sub", "the delegated task", "") // the spawn seam reads the live flag too
 		}
 	}()

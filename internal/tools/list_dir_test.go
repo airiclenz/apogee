@@ -406,7 +406,7 @@ func TestListDir_DangerousActionClassification(t *testing.T) {
 			call := callWith(t, "c1", map[string]any{"path": tc.path})
 			call.Tool = listDirSpec.name
 
-			if d := guard.Inspect(call, tool); d.Triggered() {
+			if d := guard.Inspect(call, tool, nil); d.Triggered() {
 				t.Errorf("guard triggered rule %q (tier %v) on a read-only listing of %q, want no trigger",
 					d.RuleID, d.Tier, tc.path)
 			}

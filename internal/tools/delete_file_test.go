@@ -151,7 +151,7 @@ func TestDeleteFile_DangerousActionClassification(t *testing.T) {
 			call := callWith(t, "c1", map[string]any{"path": tc.path})
 			call.Tool = deleteFileSpec.name
 
-			decision := guard.Inspect(call, tool)
+			decision := guard.Inspect(call, tool, nil)
 			if decision.Tier != tc.want {
 				t.Errorf("guard tier for delete_file %q = %v (rule %q), want %v",
 					tc.path, decision.Tier, decision.RuleID, tc.want)

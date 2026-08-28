@@ -22,13 +22,13 @@ func TestAgentSetModeAffectsDispatch(t *testing.T) {
 	}
 	call := domain.ToolCall{ID: "c1", Tool: "w"}
 
-	if got := resolveLadder(a.resolutionInput(write, call, a.guards.PreExecute(call, write))).kind; got != resolveRefuse {
+	if got := resolveLadder(a.resolutionInput(write, call, a.guards.PreExecute(call, write, nil))).kind; got != resolveRefuse {
 		t.Fatalf("Plan ladder = %s, want resolveRefuse", got)
 	}
 
 	a.SetMode(domain.ModeAllowEdits)
 
-	if got := resolveLadder(a.resolutionInput(write, call, a.guards.PreExecute(call, write))).kind; got != resolveGate {
+	if got := resolveLadder(a.resolutionInput(write, call, a.guards.PreExecute(call, write, nil))).kind; got != resolveGate {
 		t.Fatalf("after SetMode(allow-edits) ladder = %s, want resolveGate", got)
 	}
 	if a.Mode() != domain.ModeAllowEdits {
@@ -80,13 +80,13 @@ func TestSubAgentSeesParentTighteningMidRun(t *testing.T) {
 	call := domain.ToolCall{ID: "c1", Tool: "w"}
 
 	// Spawned in Auto, the child auto-runs the write — no refusal yet.
-	if got := resolveLadder(child.resolutionInput(write, call, child.guards.PreExecute(call, write))).kind; got == resolveRefuse {
+	if got := resolveLadder(child.resolutionInput(write, call, child.guards.PreExecute(call, write, nil))).kind; got == resolveRefuse {
 		t.Fatalf("child spawned in Auto refused a write before any tightening (got %s)", got)
 	}
 
 	// The parent tightens to Plan MID-delegation; the still-running child must now refuse.
 	parent.SetMode(domain.ModePlan)
-	if got := resolveLadder(child.resolutionInput(write, call, child.guards.PreExecute(call, write))).kind; got != resolveRefuse {
+	if got := resolveLadder(child.resolutionInput(write, call, child.guards.PreExecute(call, write, nil))).kind; got != resolveRefuse {
 		t.Fatalf("after the parent tightened to Plan, child write ladder = %s, want resolveRefuse", got)
 	}
 }
@@ -124,7 +124,7 @@ func TestSubAgentTighteningComposesToGrandchild(t *testing.T) {
 	if got := grandchild.effectiveMode(); got != domain.ModeAuto {
 		t.Fatalf("grandchild effectiveMode before tightening = %q, want auto", got)
 	}
-	if got := resolveLadder(grandchild.resolutionInput(write, call, grandchild.guards.PreExecute(call, write))).kind; got == resolveRefuse {
+	if got := resolveLadder(grandchild.resolutionInput(write, call, grandchild.guards.PreExecute(call, write, nil))).kind; got == resolveRefuse {
 		t.Fatalf("grandchild spawned in Auto refused a write before any tightening (got %s)", got)
 	}
 
@@ -137,7 +137,7 @@ func TestSubAgentTighteningComposesToGrandchild(t *testing.T) {
 	if got := grandchild.effectiveMode(); got != domain.ModePlan {
 		t.Fatalf("grandchild effectiveMode after top tightened = %q, want plan — the tightening stopped at depth 1", got)
 	}
-	if got := resolveLadder(grandchild.resolutionInput(write, call, grandchild.guards.PreExecute(call, write))).kind; got != resolveRefuse {
+	if got := resolveLadder(grandchild.resolutionInput(write, call, grandchild.guards.PreExecute(call, write, nil))).kind; got != resolveRefuse {
 		t.Fatalf("after the top-level agent tightened to Plan, grandchild write ladder = %s, want resolveRefuse", got)
 	}
 }
@@ -167,7 +167,7 @@ func TestSubAgentGrandchildLooseningStaysImpossible(t *testing.T) {
 	if got := grandchild.effectiveMode(); got != domain.ModePlan {
 		t.Fatalf("grandchild effectiveMode after top loosened = %q, want plan (its spawn mode is the ceiling)", got)
 	}
-	if got := resolveLadder(grandchild.resolutionInput(write, call, grandchild.guards.PreExecute(call, write))).kind; got != resolveRefuse {
+	if got := resolveLadder(grandchild.resolutionInput(write, call, grandchild.guards.PreExecute(call, write, nil))).kind; got != resolveRefuse {
 		t.Fatalf("after the top-level agent loosened to Auto, grandchild (spawned Plan) write ladder = %s, want resolveRefuse", got)
 	}
 }
@@ -190,13 +190,13 @@ func TestSubAgentParentLooseningCannotLoosenChild(t *testing.T) {
 	}
 	call := domain.ToolCall{ID: "c1", Tool: "w"}
 
-	if got := resolveLadder(child.resolutionInput(write, call, child.guards.PreExecute(call, write))).kind; got != resolveRefuse {
+	if got := resolveLadder(child.resolutionInput(write, call, child.guards.PreExecute(call, write, nil))).kind; got != resolveRefuse {
 		t.Fatalf("child spawned in Plan write ladder = %s, want resolveRefuse", got)
 	}
 
 	// The parent loosens all the way to Auto; the child, spawned in Plan, must NOT loosen.
 	parent.SetMode(domain.ModeAuto)
-	if got := resolveLadder(child.resolutionInput(write, call, child.guards.PreExecute(call, write))).kind; got != resolveRefuse {
+	if got := resolveLadder(child.resolutionInput(write, call, child.guards.PreExecute(call, write, nil))).kind; got != resolveRefuse {
 		t.Fatalf("after the parent loosened to Auto, child (spawned Plan) write ladder = %s, want resolveRefuse — loosening must stay impossible", got)
 	}
 }
@@ -230,7 +230,7 @@ func TestSubAgentEffectiveModeConcurrent(t *testing.T) {
 	read := func(a *Agent) {
 		for i := 0; i < iters; i++ {
 			_ = a.effectiveMode()
-			_ = resolveLadder(a.resolutionInput(write, call, a.guards.PreExecute(call, write)))
+			_ = resolveLadder(a.resolutionInput(write, call, a.guards.PreExecute(call, write, nil)))
 		}
 	}
 	var wg sync.WaitGroup
@@ -274,7 +274,7 @@ func TestAgentSetModeConcurrent(t *testing.T) {
 		defer wg.Done()
 		for i := 0; i < iters; i++ {
 			_ = a.Mode()
-			_ = resolveLadder(a.resolutionInput(write, call, a.guards.PreExecute(call, write)))
+			_ = resolveLadder(a.resolutionInput(write, call, a.guards.PreExecute(call, write, nil)))
 			_ = a.toolMenu()
 		}
 	}()

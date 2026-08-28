@@ -128,13 +128,21 @@ func DefaultDangerousActionGuard() *DangerousActionGuard {
 // class: it is skipped when the tool is read-only, and judges a text that omits the
 // tool's declared read-source values (see the Rule field's doc). It never errors and
 // never executes anything — pure inspection.
-func (g *DangerousActionGuard) Inspect(call domain.ToolCall, tool domain.Tool) Decision {
+//
+// exemptPaths are paths whose spellings NO rule may see: maskExempt removes them from both
+// views before any rule runs, hard-refuse rules included. Today the caller names the
+// session's own scratch dir, the box's extra writable path (ADR 0056) — a dir the
+// confinement already declares writable, so a look there would answer nothing. A nil or
+// empty slice is the guard as before, byte for byte. The exemption is an ARGUMENT of the
+// inspection rather than guard state: one guard is shared read-only across an agent and its
+// sub-agents (Guards.ForSubAgent), and each of them exempts its OWN scratch dir.
+func (g *DangerousActionGuard) Inspect(call domain.ToolCall, tool domain.Tool, exemptPaths []string) Decision {
 	// A value the tool only FORWARDS — prose it hands to another agent — is outside
 	// EVERY rule's sight, not just the write-shaped ones: it describes an action rather
 	// than performing one, and the delegated agent's own calls are inspected one level
 	// down, at the action site.
 	prompts := domain.PromptArgKeys(tool)
-	full := normalize(inspectableText(call, prompts))
+	full := maskExempt(normalize(inspectableText(call, prompts)), exemptPaths)
 	readOnly := domain.IsReadOnly(tool)
 
 	// The write-shaped view of the same call: identical unless the tool declares
@@ -144,7 +152,7 @@ func (g *DangerousActionGuard) Inspect(call domain.ToolCall, tool domain.Tool) D
 		dropped := make([]string, 0, len(prompts)+len(sources))
 		dropped = append(dropped, prompts...)
 		dropped = append(dropped, sources...)
-		writes = normalize(inspectableText(call, dropped))
+		writes = maskExempt(normalize(inspectableText(call, dropped)), exemptPaths)
 	}
 
 	for _, r := range g.rules {
@@ -294,4 +302,60 @@ var whitespaceRun = regexp.MustCompile(`\s+`)
 func normalize(s string) string {
 	folded := strings.ReplaceAll(strings.ToLower(s), `\`, "/")
 	return strings.TrimSpace(whitespaceRun.ReplaceAllString(folded, " "))
+}
+
+// exemptPlaceholder is what a masked path's spelling collapses to before any rule runs. It
+// carries no slash and no dot, so no path rule can match through it: masking takes the path
+// out of the guard's sight entirely rather than leaving a shape a rule might still catch.
+const exemptPlaceholder = "<exempt>"
+
+// apogeeHomeSegment is the control-plane segment whose home spellings maskExempt generalises.
+const apogeeHomeSegment = "/.apogee/"
+
+// maskExempt replaces every spelling of each exempt path in already-normalized text with
+// exemptPlaceholder, so the rules that follow cannot see it. It is the one seam the
+// dangerous-action guard's per-call exemptions run through: the caller names paths no rule may
+// judge, and the text reaches EVERY rule — hard-refuse ones included — with those spellings
+// already gone. Masking a path never masks its neighbours, so a command naming both an exempt
+// dir and a guarded one still fires on the guarded half.
+//
+// An empty or nil exempt list returns text unchanged, byte for byte: the guard without
+// exemptions is the guard as it was.
+//
+// Two spellings are masked per path. The literal one is the path itself, normalized, with any
+// trailing separator dropped. A path under `~/.apogee/` masks additionally in every home
+// spelling homeAnchor knows — `~/…`, `$HOME/…`, `/root/…`, `/home/<user>/…`, `/Users/<user>/…` —
+// so the guard need not know which home an absolute path was built from. Both patterns end at a
+// word boundary, so a deeper path or a trailing separator masks WITH the dir
+// (`<dir>/gocache` → `<exempt>/gocache`) while a sibling whose name merely extends it (`<dir>x`)
+// does not mask at all and stays fully judged.
+//
+// The patterns are compiled per call: an exemption list is a handful of paths and the guard is
+// not a hot path. Cache by path string only if a benchmark says otherwise.
+func maskExempt(text string, exempt []string) string {
+	if text == "" || len(exempt) == 0 {
+		return text
+	}
+	for _, path := range exempt {
+		dir := strings.TrimRight(normalize(path), "/")
+		if dir == "" {
+			continue
+		}
+		text = maskSpelling(text, regexp.QuoteMeta(dir))
+		if i := strings.Index(dir, apogeeHomeSegment); i >= 0 {
+			text = maskSpelling(text, homeAnchor+regexp.QuoteMeta(dir[i:]))
+		}
+	}
+	return text
+}
+
+// maskSpelling replaces every occurrence of one path pattern — word-boundary-terminated, so a
+// longer sibling name is left alone — with exemptPlaceholder. A pattern that fails to compile
+// leaves the text untouched, which is the stricter answer: the rules still see the path.
+func maskSpelling(text, pattern string) string {
+	re, err := regexp.Compile(pattern + `\b`)
+	if err != nil {
+		return text
+	}
+	return re.ReplaceAllLiteralString(text, exemptPlaceholder)
 }
