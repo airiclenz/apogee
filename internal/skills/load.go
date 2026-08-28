@@ -207,8 +207,22 @@ func loadDir(cat *Catalog, a skillAnchor) {
 
 	dirsSeen, deepBranchNoted := 0, false
 	_ = fs.WalkDir(fsys, ".", func(p string, d fs.DirEntry, walkErr error) error {
-		if walkErr != nil || p == "." {
-			return nil // skip an unreadable entry (incl. an escaping symlink) / the root itself
+		if walkErr != nil {
+			if p != "." {
+				// An entry the walk could not read — an unreadable sub-directory, a file that
+				// vanished mid-scan — is a place a skill may have sat and was not looked at, so
+				// it is recorded like every other skip: this package does not let soft mean
+				// silent (doc.go). The root's own failure is already recorded above, so "."
+				// stays silent rather than reporting the same anchor twice.
+				cat.addSkip(SkipError{
+					Path: absSkillPath(dir, p),
+					Err:  fmt.Errorf("skill dir entry %s was not scanned: %w", p, walkErr),
+				})
+			}
+			return nil
+		}
+		if p == "." {
+			return nil // the root itself is not a skill folder
 		}
 		if d.IsDir() {
 			if strings.HasPrefix(d.Name(), ".") {

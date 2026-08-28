@@ -327,7 +327,9 @@ through `Report`.
 
 **Commit.** `fix(skills): the /skills report is served from one catalog snapshot`
 
-## 5. Skill descriptions are capped for the index and an unreadable entry is recorded
+## 5. Skill descriptions are capped for the index and an unreadable entry is recorded — ✅ DONE (2026-08-28)
+
+NOTES (2026-08-28): the new unreadable-entry test skips as root (a 0-mode dir stays readable), per the item's text; verified passing under an unprivileged user and failing without the `load.go` fix.
 
 **What.** Audit: *the skills BM25 index is built from the full, uncapped description* (Medium,
 Security) and *an unreadable skills-dir entry is silently dropped* (Medium, Security). (1)

@@ -381,6 +381,27 @@ func TestSuggestIndexesTheDescriptionPastTheMenuClamp(t *testing.T) {
 	}
 }
 
+// TestSuggestDoesNotIndexPastTheDescriptionCap pins the far side of that clamp: text beyond
+// maxDescriptionLen never reaches the index, so a padded SKILL.md cannot buy matches with prose no
+// menu, model or human will ever see. The id is deliberately unrelated to the query, or the name
+// terms would match on their own and prove nothing about the description.
+func TestSuggestDoesNotIndexPastTheDescriptionCap(t *testing.T) {
+	t.Parallel()
+	filler := strings.Repeat("filler ", maxDescriptionLen/len("filler ")+1)
+	sk, err := parseSkill("---\nid: alpha\ndescription: "+filler+" gyroscope calibration\n---\nbody", "alpha")
+	if err != nil {
+		t.Fatalf("parseSkill: %v", err)
+	}
+	if strings.Contains(sk.Description, "gyroscope") {
+		t.Fatalf("Description holds the phrase at %d runes — the clamp must sit before it", len([]rune(sk.Description)))
+	}
+	c := newFixtureCatalog(t, []Skill{sk})
+
+	if got := suggestedIDs(t, c.Suggest("gyroscope calibration now", nil, 0)); len(got) != 0 {
+		t.Errorf("Suggest = %v, want none — a phrase past the %d-rune cap is not indexed", got, maxDescriptionLen)
+	}
+}
+
 func TestSuggestOnAnUnfinalizedOrEmptyCatalogReturnsNothing(t *testing.T) {
 	t.Parallel()
 

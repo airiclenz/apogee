@@ -604,6 +604,45 @@ func TestLoadWalkWidthBounded(t *testing.T) {
 	}
 }
 
+// TestLoadRecordsAnUnreadableDirEntry pins that an entry the walk cannot read is REPORTED rather
+// than dropped: it is a place a skill may have sat, and a silent skip is indistinguishable from an
+// empty folder — this package does not let soft mean silent. The readable sibling beside it must
+// still load: one unreadable entry ends that branch, not the scan.
+func TestLoadRecordsAnUnreadableDirEntry(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX directory permissions do not apply on Windows")
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: a 0-mode directory is still readable, so the entry never errors")
+	}
+	home := t.TempDir()
+	root := filepath.Join(home, "skills")
+	writeSkill(t, root, "alpha", "---\nid: alpha\nsummary: the alpha skill\n---\nbody A")
+	writeSkill(t, root, "locked", "---\nid: locked\nsummary: never read\n---\nbody L")
+
+	locked := filepath.Join(root, "locked")
+	if err := os.Chmod(locked, 0); err != nil {
+		t.Fatal(err)
+	}
+	// Restore the bits so t.TempDir's own cleanup can remove the tree.
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
+
+	cat, err := Load(Sources{Home: home})
+	if err == nil {
+		t.Error("Load() returned no error; an entry that was not scanned must reach the caller")
+	}
+	if _, ok := cat.Get("alpha"); !ok {
+		t.Error("the readable sibling was dropped; one unreadable entry must not end the walk")
+	}
+	if _, ok := cat.Get("locked"); ok {
+		t.Fatal("the skill under the unreadable directory loaded; the fixture did not take")
+	}
+	got := cat.Skipped()
+	if len(got) != 1 || !strings.Contains(got[0].Reason(), "not scanned") || filepath.Base(got[0].Path) != "locked" {
+		t.Errorf("Skipped() = %+v, want one entry naming %s as not scanned", got, locked)
+	}
+}
+
 // realDir resolves a fixture dir through symlinks — the form readRoots answers in, and the form a
 // temp dir needs on a box where /tmp or /var is itself a symlink (macOS).
 func realDir(t *testing.T, dir string) string {

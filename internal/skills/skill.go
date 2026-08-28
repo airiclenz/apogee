@@ -22,10 +22,11 @@ type Skill struct {
 	Body        string
 	Dir         string
 
-	// Description is the summary's source text in full — the frontmatter's summary/description
-	// (or the fallback's first prose line) before the maxSummaryLen clamp Summary carries for
-	// the "/" menu. It is read ONLY by the suggestion matcher (Suggest), which indexes it so a
-	// phrase an author placed past the menu cap still finds the skill; it is never shown.
+	// Description is the summary's source text past the maxSummaryLen clamp Summary carries for
+	// the "/" menu — the frontmatter's summary/description, or the fallback's first prose line,
+	// under the far wider maxDescriptionLen (4096 runes) instead of 200. It is read ONLY by the
+	// suggestion matcher (Suggest), which indexes it so a phrase an author placed past the menu
+	// cap still finds the skill; it is never shown.
 	Description string
 
 	// Triggers is the optional list of phrases the SKILL.md's author declared under "triggers:":

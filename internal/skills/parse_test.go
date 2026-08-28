@@ -241,7 +241,34 @@ func TestParseSkillSummaryClampedTo200(t *testing.T) {
 		t.Errorf("summary length = %d, want clamped to %d", len([]rune(sk.Summary)), maxSummaryLen)
 	}
 	if sk.Description != long {
-		t.Errorf("Description length = %d, want the full %d — the clamp is the menu's alone", len([]rune(sk.Description)), len(long))
+		t.Errorf("Description length = %d, want it untouched at %d — the menu clamp is not the description's", len([]rune(sk.Description)), len(long))
+	}
+}
+
+// TestParseSkillDescriptionClampedForTheIndex pins the SECOND cap the same text meets: Summary is
+// the menu's 200 runes, Description the matcher's maxDescriptionLen. Without it a SKILL.md shipping
+// a megabyte of prose hands buildIndex a document that size on every Load/Reload.
+func TestParseSkillDescriptionClampedForTheIndex(t *testing.T) {
+	long := strings.Repeat("b", 10_000)
+	for _, tc := range []struct {
+		name    string
+		content string
+	}{
+		{"frontmatter", "---\nid: x\ndescription: " + long + "\n---\nbody"},
+		{"no frontmatter", long},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sk, err := parseSkill(tc.content, "d")
+			if err != nil {
+				t.Fatalf("parseSkill: %v", err)
+			}
+			if got := len([]rune(sk.Description)); got != maxDescriptionLen {
+				t.Errorf("Description length = %d, want clamped to %d", got, maxDescriptionLen)
+			}
+			if got := len([]rune(sk.Summary)); got != maxSummaryLen {
+				t.Errorf("Summary length = %d, want clamped to %d", got, maxSummaryLen)
+			}
+		})
 	}
 }
 

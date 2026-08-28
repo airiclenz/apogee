@@ -11,9 +11,17 @@ import (
 
 // maxSummaryLen caps a skill summary, mirroring the apogee-code oracle (summary.slice(0,200)):
 // the summary is a one-line menu hint, not a second body, so a runaway description never
-// crowds the merged "/" menu. The cap is the menu's alone — Skill.Description keeps the full
-// text for the suggestion matcher, which must see a phrase wherever the author placed it.
+// crowds the merged "/" menu. It is the tighter of the two caps one description text meets —
+// 200 runes for the menu here, maxDescriptionLen for the matcher — so Skill.Description still
+// carries a phrase the author placed well past the menu hint.
 const maxSummaryLen = 200
+
+// maxDescriptionLen caps Skill.Description at 4096 runes: the text the suggestion matcher
+// indexes WHOLE on every Load/Reload (suggest.go buildIndex). The matcher must see a phrase
+// wherever the author placed it, so the cap sits far past the menu's 200 — but it is a cap,
+// because an untrusted SKILL.md must not be able to make one skill's document dominate the BM25
+// index, or the cost of rebuilding it, by shipping a megabyte of prose.
+const maxDescriptionLen = 4096
 
 // maxTriggerLen caps ONE trigger phrase at 64 runes: a trigger is a fragment a prompt might
 // contain ("review this diff"), not a sentence, and a phrase longer than a draft line can never be
@@ -191,8 +199,8 @@ func parseWithFrontmatter(fmText, body, dirName string) (Skill, error) {
 	return validate(Skill{
 		ID:          strings.TrimSpace(id),
 		DisplayName: strings.TrimSpace(firstNonEmpty(fm.DisplayName, titleCase(id))),
-		Summary:     clampSummary(summary),
-		Description: strings.TrimSpace(summary),
+		Summary:     clampRunes(summary, maxSummaryLen),
+		Description: clampRunes(summary, maxDescriptionLen),
 		Body:        strings.TrimSpace(body),
 		Triggers:    normalizeTriggers(fm.Triggers),
 	})
@@ -361,8 +369,8 @@ func parseFallback(content, dirName string) (Skill, error) {
 	return validate(Skill{
 		ID:          strings.TrimSpace(dirName),
 		DisplayName: strings.TrimSpace(displayName),
-		Summary:     clampSummary(summary),
-		Description: summary,
+		Summary:     clampRunes(summary, maxSummaryLen),
+		Description: clampRunes(summary, maxDescriptionLen),
 		Body:        strings.TrimSpace(content),
 	})
 }
@@ -433,12 +441,13 @@ func titleCase(s string) string {
 	return strings.Join(parts, " ")
 }
 
-// clampSummary trims and caps a summary at maxSummaryLen runes (rune-safe so a multibyte cut
-// never splits a character).
-func clampSummary(s string) string {
+// clampRunes trims s and caps it at max runes (rune-safe so a multibyte cut never splits a
+// character). One clamp serves both limits the same description text meets: maxSummaryLen for the
+// Summary the "/" menu paints, maxDescriptionLen for the Description the matcher indexes.
+func clampRunes(s string, max int) string {
 	s = strings.TrimSpace(s)
-	if r := []rune(s); len(r) > maxSummaryLen {
-		return string(r[:maxSummaryLen])
+	if r := []rune(s); len(r) > max {
+		return string(r[:max])
 	}
 	return s
 }
