@@ -13,8 +13,10 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
 )
@@ -29,7 +31,16 @@ func captureStderr(t *testing.T, f func()) string {
 	if err != nil {
 		t.Fatalf("os.Pipe: %v", err)
 	}
+	defer r.Close()
 	os.Stderr = w
+	// A t.Fatal or t.Skip inside f is a runtime.Goexit, which unwinds past the restore below
+	// exactly as a panic does. This cleanup runs on every exit path: it closes the write end — which
+	// ends the reader goroutine — and puts the process stderr back. It is idempotent with the
+	// happy-path restore, which stays so the captured string is still returned in order.
+	t.Cleanup(func() {
+		_ = w.Close()
+		os.Stderr = orig
+	})
 	captured := make(chan string, 1)
 	go func() {
 		var buf bytes.Buffer
@@ -42,6 +53,37 @@ func captureStderr(t *testing.T, f func()) string {
 	_ = w.Close()
 	os.Stderr = orig
 	return <-captured
+}
+
+// TestCaptureStderrRestoresOnGoexit pins the restore on the exit path the helper used to leak. A
+// t.Fatal or t.Skip inside the wrapped call is a runtime.Goexit, which unwinds past the happy-path
+// restore exactly as a panic does — t.Skip is that path with no failure to swallow. After the
+// subtest returns, the process stderr must be the real one again and the reader goroutine must have
+// ended; otherwise every later test writes its diagnostics into a pipe nobody reads.
+func TestCaptureStderrRestoresOnGoexit(t *testing.T) {
+	// Deliberately NOT parallel: captureStderr swaps the process-global os.Stderr.
+	orig := os.Stderr
+	before := runtime.NumGoroutine()
+
+	t.Run("the wrapped call bails", func(sub *testing.T) {
+		captureStderr(sub, func() { sub.Skip("bail") })
+		sub.Fatal("captureStderr returned after a Goexit inside the wrapped call")
+	})
+
+	if os.Stderr != orig {
+		t.Errorf("os.Stderr = %v after a bailed capture; want the original %v", os.Stderr, orig)
+	}
+	// The reader ends once the cleanup closes the write end. Poll for `<=`, never `==`: other tests'
+	// background goroutines (httptest idle connections) wind down asynchronously and an equality flakes.
+	deadline := time.Now().Add(2 * time.Second)
+	for runtime.NumGoroutine() > before {
+		if time.Now().After(deadline) {
+			t.Errorf("goroutines = %d after a bailed capture; want <= the %d before it",
+				runtime.NumGoroutine(), before)
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }
 
 // lineContaining returns the first line of out that contains want, trimmed. Isolating the one line

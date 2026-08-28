@@ -564,7 +564,14 @@ of the tool). `TestE2EEgressDeniedMCPEndpointStopsTheLaunch` unchanged.
 
 **Commit.** `fix(cmd): a url-safety edit reconnects MCP under the new host lists and drops denied servers`
 
-## 9. `captureStderr` restores the process stderr even when the wrapped call bails
+## 9. `captureStderr` restores the process stderr even when the wrapped call bails — ✅ DONE (2026-08-28)
+
+NOTES (2026-08-28): the new test's subtest body carries one line the item did not specify — an
+unreachable `sub.Fatal` after the `captureStderr(sub, func() { sub.Skip("bail") })` call — so a
+helper that ever stopped Goexiting would be caught rather than silently making the test vacuous.
+
+NOTES (2026-08-28): `internal/agent/library_corrupt_store_test.go` gained the `runtime` and `time`
+imports the new test needs; the other two files already had both.
 
 **What.** Audit: *`captureStderr` leaks the process stderr pipe and a reader goroutine if the
 wrapped call panics* (Medium). Three copies share the defect — `cmd/apogee/wire_test.go:76-95`
