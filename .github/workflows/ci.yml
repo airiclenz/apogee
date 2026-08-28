@@ -32,8 +32,10 @@ jobs:
         # Pinned by MODULE VERSION rather than run as a third-party action: an action would be a
         # sixth SHA to keep current and a fifth publisher trusted with this workflow's context,
         # where `go run` fetches a checksum-verified module with the toolchain already installed.
-        # `make check` runs the identical command, so the two cannot drift.
-        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12 .github/workflows/*.yml
+        # This calls the Makefile target rather than repeating the command, so the pinned version
+        # literal lives once — `ACTIONLINT_VERSION` in the Makefile — and `make check` and CI
+        # literally run one command.
+        run: make actionlint
       - name: gofmt
         run: |
           unformatted="$(gofmt -l .)"

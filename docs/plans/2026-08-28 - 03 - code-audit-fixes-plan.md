@@ -696,7 +696,11 @@ call: pin all twelve rather than drop eight).
 
 **Commit.** `test(tuitest): ReplayTrace's failure branches and every F-key are pinned on all platforms`
 
-## 13. `make check` and CI run one actionlint
+## 13. `make check` and CI run one actionlint — ✅ DONE (2026-08-28)
+
+NOTES (2026-08-28): `check` calls the new target as `@$(MAKE) --no-print-directory actionlint`, following the existing `cross` precedent in the same recipe (the item said only "`check` calls it").
+
+NOTES (2026-08-28): the dropped comment sentence claimed the PATH short-circuit served "the offline and the pre-commit-hook case"; no hook in the repo runs actionlint, so the replacement names only the offline case (module cache after the first run), per the item's wording.
 
 **What.** Audit: *`make check` can run a different actionlint than CI* (High). `Makefile:47`
 short-circuits to any `actionlint` on PATH with no version check; `ci.yml:36` always runs the

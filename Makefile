@@ -40,11 +40,12 @@ ARGS ?=
 
 # actionlint checks the workflow files `make check` and CI both run it over. It is pinned by
 # MODULE VERSION and fetched by `go run` rather than added as a third-party GitHub Action:
-# one fewer publisher trusted with the workflow's context, one fewer SHA to keep current,
-# and CI runs the identical command so the two cannot drift. An `actionlint` already on PATH
-# wins — that is the offline and the pre-commit-hook case.
+# one fewer publisher trusted with the workflow's context, one fewer SHA to keep current.
+# CI runs `make actionlint` rather than its own copy of the command, so this version literal
+# is the only one and the two cannot drift. `go run` always runs the pinned version; after the
+# first run the module cache serves it, so an offline build still lints the workflows.
 ACTIONLINT_VERSION := v1.7.12
-ACTIONLINT = $(shell command -v actionlint 2>/dev/null || echo 'go run github.com/rhysd/actionlint/cmd/actionlint@$(ACTIONLINT_VERSION)')
+ACTIONLINT = go run github.com/rhysd/actionlint/cmd/actionlint@$(ACTIONLINT_VERSION)
 
 # The default endpoint for `make live-eval` (override: make live-eval LIVE_ENDPOINT=...).
 # Set APOGEE_LIVE_MODEL in the environment to pin the model (and bust the result cache on a swap).
@@ -192,6 +193,11 @@ fmt:
 vet:
 	go vet ./...
 
+## actionlint: lint the GitHub workflow files with the pinned actionlint
+.PHONY: actionlint
+actionlint:
+	$(ACTIONLINT) .github/workflows/*.yml
+
 ## cross: build every release target (CGO off); fails on the first broken one
 .PHONY: cross
 cross:
@@ -243,7 +249,7 @@ check:
 	@echo "==> workflow action pins (SHA + version comment)"
 	@./scripts/check-pins.sh
 	@echo "==> actionlint"
-	@$(ACTIONLINT) .github/workflows/*.yml
+	@$(MAKE) --no-print-directory actionlint
 	@echo "==> ADR-0010 invariant (internal/ must not import the root module path)"
 	@if grep -rl '"$(MODULE)"' internal/; then echo "ADR-0010 violation: internal/ imports the root module path"; exit 1; fi
 	@echo "==> cross-build"
