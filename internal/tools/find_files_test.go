@@ -359,6 +359,26 @@ func TestFindFiles_Execute_SkipsSymlinkOutOfAnExtraReadRoot(t *testing.T) {
 	}
 }
 
+// TestFindFiles_SearchesAnExtraRootBySymlinkSpelling pins that a walk whose path runs through
+// a symlink to a mounted read-only root is served, and that the names it returns are measured
+// from the REAL root — the spelling a dotfiles-managed ~/.apogee/skills hands the model, which
+// read_file refused while find_files walked it (audit 2026-08-28 F-13). The pin is here so a
+// future change to readScope.resolve cannot regress find_files the way readBounded regressed.
+func TestFindFiles_SearchesAnExtraRootBySymlinkSpelling(t *testing.T) {
+	t.Parallel()
+
+	workspace, extra, link := symlinkedExtraReadRoot(t)
+	tool := NewFindFiles(workspace, func() []string { return []string{extra} })
+
+	content := spelledLikeReal(t, tool,
+		map[string]any{"pattern": "*.md", "path": link},
+		map[string]any{"pattern": "*.md", "path": extra})
+
+	if !strings.Contains(content, "skill/SKILL.md") {
+		t.Errorf("results %q do not name the file at its real location skill/SKILL.md", content)
+	}
+}
+
 func TestFindFiles_IsRegisteredAndReadOnly(t *testing.T) {
 	t.Parallel()
 

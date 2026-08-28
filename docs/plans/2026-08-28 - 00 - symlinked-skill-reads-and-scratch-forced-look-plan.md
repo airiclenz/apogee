@@ -184,7 +184,12 @@ Depends on item 1.
 
 ---
 
-## 3. Lock in the symlink spelling for `list_dir`, `grep`, `find_files`
+## 3. Lock in the symlink spelling for `list_dir`, `grep`, `find_files` — ✅ DONE (2026-08-28)
+
+NOTES (2026-08-28): the three tests share two helpers — `symlinkedExtraReadRoot` (the fixture: real mounted extra root holding `skill/SKILL.md`, plus a `lib -> extra` symlink elsewhere) and `spelledLikeReal` (runs a tool by both spellings and requires the answers to be byte-identical) — placed in `list_dir_test.go`, the same cross-file sharing `seedTree` already has with `grep_test.go`. No file outside the item's Files list was touched.
+NOTES (2026-08-28): "the returned path names the real (resolved) location, matching what the tools return today for the real spelling" is asserted as BOTH halves: the byte-identical comparison against the real-spelling run (in `spelledLikeReal`) and a per-tool substring naming the real location — `grep` `skill/SKILL.md:1:name: code-audit`, `find_files` `skill/SKILL.md`.
+NOTES (2026-08-28): `list_dir` renders one indented entry per line, never a joined path, so its assertion checks `skill/` and `SKILL.md` separately rather than the literal string `skill/SKILL.md`; the recursive listing of the link root is what carries both.
+NOTES (2026-08-28): mutation proof — returning the UNRESOLVED input from `resolve()`'s extra-root branch makes all three new tests fail, so they pin the behaviour rather than passing incidentally; `internal/tools/path_read.go` was restored byte-for-byte afterwards (`git diff --stat` shows only the three test files).
 
 Tests only — these three already resolve through `readScope.resolve()` and accept the symlink
 spelling; the tests pin that so a future change to `resolve()` cannot regress them the way

@@ -267,6 +267,77 @@ func TestListDir_Execute_ListsUnderAnExtraReadRoot(t *testing.T) {
 	}
 }
 
+// skillFixtureLine is the one line the SKILL.md in symlinkedExtraReadRoot's fixture holds:
+// grep matches it, and every tool that reports the file names the line's file.
+const skillFixtureLine = "name: code-audit"
+
+// symlinkedExtraReadRoot builds the fixture the three WALKING read tools share for the
+// symlink-SPELLING case: a workspace, a real extra root holding skill/SKILL.md — real because
+// matchRoot only mounts a root that is its own real path — and a symlink to that root from
+// somewhere else. It is the shape a dotfiles-managed ~/.apogee/skills hands the model: the
+// mount is real, and only the path the model SPELLS runs through a link (audit 2026-08-28
+// F-13). extra is the root to MOUNT, link the spelling to search by.
+func symlinkedExtraReadRoot(t *testing.T) (workspace, extra, link string) {
+	t.Helper()
+
+	workspace, extra = tempRoot(t), tempRoot(t)
+	writeFixtureFile(t, filepath.Join(extra, "skill", "SKILL.md"), skillFixtureLine)
+
+	link = filepath.Join(tempRoot(t), "lib")
+	if err := os.Symlink(extra, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	return workspace, extra, link
+}
+
+// spelledLikeReal runs tool twice — once with the path argument spelled through the symlink,
+// once with the mounted root's own name — and returns the spelled run's content, failing
+// unless that run succeeded AND answered byte-for-byte what the real spelling answers. The
+// equality is the whole point: these tools resolve their path (readScope.resolve), so the
+// names they report are measured from the REAL root, and a symlink spelling can neither be
+// refused nor leak the link's own name into the answer. Each caller then asserts the names.
+func spelledLikeReal(t *testing.T, tool domain.Tool, spelledArgs, realArgs map[string]any) string {
+	t.Helper()
+
+	spelled, err := tool.Execute(context.Background(), callWith(t, "c1", spelledArgs))
+	if err != nil {
+		t.Fatalf("Execute returned a Go error: %v", err)
+	}
+	if spelled.IsError {
+		t.Fatalf("the symlink spelling was refused: %q", spelled.Content)
+	}
+
+	resolved, err := tool.Execute(context.Background(), callWith(t, "c2", realArgs))
+	if err != nil {
+		t.Fatalf("Execute returned a Go error: %v", err)
+	}
+	if spelled.Content != resolved.Content {
+		t.Fatalf("the symlink spelling answered %q, want the real spelling's answer %q",
+			spelled.Content, resolved.Content)
+	}
+	return spelled.Content
+}
+
+// TestListDir_ListsAnExtraRootBySymlinkSpelling pins that a listing whose path runs through a
+// symlink to a mounted read-only root is served, and served under the root's REAL names.
+// read_file took the other road on the same path and refused it (audit 2026-08-28 F-13); this
+// pins the spelling so a future change to readScope.resolve cannot regress list_dir the way
+// readBounded regressed.
+func TestListDir_ListsAnExtraRootBySymlinkSpelling(t *testing.T) {
+	t.Parallel()
+
+	workspace, extra, link := symlinkedExtraReadRoot(t)
+	tool := NewListDir(workspace, func() []string { return []string{extra} })
+
+	content := spelledLikeReal(t, tool,
+		map[string]any{"path": link, "recursive": true},
+		map[string]any{"path": extra, "recursive": true})
+
+	if !strings.Contains(content, "skill/") || !strings.Contains(content, "SKILL.md") {
+		t.Errorf("listing %q does not name skill/SKILL.md at its real location", content)
+	}
+}
+
 func TestListDir_Execute_ToolErrors(t *testing.T) {
 	t.Parallel()
 

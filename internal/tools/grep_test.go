@@ -374,6 +374,26 @@ func TestGrep_Execute_RefusesSymlinkEscapingAnExtraReadRoot(t *testing.T) {
 	}
 }
 
+// TestGrep_SearchesAnExtraRootBySymlinkSpelling pins that a search whose path runs through a
+// symlink to a mounted read-only root is served, and that its matches are named from the REAL
+// root — the spelling a dotfiles-managed ~/.apogee/skills hands the model, which read_file
+// refused while grep read it (audit 2026-08-28 F-13). The pin is here so a future change to
+// readScope.resolve cannot regress grep the way readBounded regressed.
+func TestGrep_SearchesAnExtraRootBySymlinkSpelling(t *testing.T) {
+	t.Parallel()
+
+	workspace, extra, link := symlinkedExtraReadRoot(t)
+	tool := NewGrep(workspace, func() []string { return []string{extra} })
+
+	content := spelledLikeReal(t, tool,
+		map[string]any{"pattern": "^name: ", "path": link},
+		map[string]any{"pattern": "^name: ", "path": extra})
+
+	if !strings.Contains(content, "skill/SKILL.md:1:"+skillFixtureLine) {
+		t.Errorf("matches %q do not name the hit at its real location skill/SKILL.md", content)
+	}
+}
+
 // writeGrepLines writes name under root with one newline-terminated line per element.
 func writeGrepLines(t *testing.T, root, name string, lines ...string) {
 	t.Helper()
