@@ -56,6 +56,10 @@ machinery for an error the enum mostly prevents.
 *(Amended 2026-08-25 by [ADR 0060](0060-effort-is-detected-passively-dialected-per-server-and-picked.md) §4: the enum widens to the seven-name
 union `off|low|medium|high|minimal|xhigh|max`, plus `none` on the OpenRouter dialect. The
 probe stays rejected — detection is passive, from the discovery payloads already fetched.)*
+*(Amended 2026-08-28: the hint is gated on the request BODY carrying an effort in ANY dialect —
+`chat_template_kwargs`, `reasoning` or `reasoning_effort` — not on the kwargs field alone, and it
+is worded to name the intent (`thinking.effort` / the `/effort` override) rather than one
+dialect's field. The `off` dialect emits none of the three and so stays unhinted.)*
 
 **5 — `/effort` is a session override layered above the profile.** Resolution is session
 override ▸ profile effort ▸ nothing. `/effort low` sets it, bare `/effort` shows the current

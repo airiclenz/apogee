@@ -46,6 +46,16 @@ type chatRequest struct {
 	ReasoningEffort *string         `json:"reasoning_effort,omitempty"`
 }
 
+// carriesEffort reports whether this body expresses a thinking-effort intent in ANY dialect —
+// the three fields applyEffort can set. It is the gate on the enriched turn error: a server
+// that chokes on the effort answers without naming the field it choked on, so the hint is
+// appended whenever the request actually asked for one, whatever shape it asked in. Gating on
+// the BODY rather than on the Request's ThinkingEffort is what keeps the `off` dialect silent:
+// it emits none of the three, so a stated effort it deliberately dropped explains nothing.
+func (r chatRequest) carriesEffort() bool {
+	return len(r.ChatTemplateKwargs) > 0 || r.Reasoning != nil || r.ReasoningEffort != nil
+}
+
 // reasoningField is the OpenRouter `reasoning` object. Effort names a level; Enabled is a
 // pointer so `enabled: false` — the way that dialect switches reasoning off — survives
 // marshalling instead of being omitted as a zero value.

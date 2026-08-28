@@ -82,18 +82,18 @@ func (c *Client) Stream(ctx context.Context, req Request) iter.Seq[Delta] {
 		defer resp.Body.Close()
 
 		if resp.StatusCode != http.StatusOK {
-			yield(c.statusDelta(resp, len(wire.ChatTemplateKwargs) > 0))
+			yield(c.statusDelta(resp, wire.carriesEffort()))
 			return
 		}
-		c.parseSSE(resp.Body, len(wire.ChatTemplateKwargs) > 0, yield)
+		c.parseSSE(resp.Body, wire.carriesEffort(), yield)
 	}
 }
 
 // statusDelta classifies a non-2xx streamed response into a terminal Delta, mirroring
 // statusError but on the streaming surface — including its maxErrorBodyBytes read cap and its
-// thinking-effort hint: hasTemplateKwargs reports that the failed request carried
-// chat_template_kwargs, and a turn is where that failure actually lands, since the loop streams.
-func (c *Client) statusDelta(resp *http.Response, hasTemplateKwargs bool) Delta {
+// thinking-effort hint: carriedEffort reports that the failed request expressed a thinking
+// effort in some dialect, and a turn is where that failure actually lands, since the loop streams.
+func (c *Client) statusDelta(resp *http.Response, carriedEffort bool) Delta {
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodyBytes))
 	text := c.sanitize(string(raw))
 	c.observeWire(WireResponse, []byte(text))
@@ -101,7 +101,7 @@ func (c *Client) statusDelta(resp *http.Response, hasTemplateKwargs bool) Delta 
 		return Delta{Kind: DeltaContextOverflow, Err: "apogee: context window exceeded: " + text}
 	}
 	message := upstreamStatusText(resp.StatusCode, text, resp.Header.Get("Location"))
-	if hasTemplateKwargs {
+	if carriedEffort {
 		message += " " + thinkingEffortHint
 	}
 	return Delta{Kind: DeltaError, Err: message}
@@ -117,16 +117,16 @@ const providerUnavailable = "provider_unavailable"
 // reaches the user verbatim instead of being flattened away. Retryable mirrors the client's
 // own HTTP retry policy (isRetryableStatus) so an in-band 502 is treated exactly like a 502
 // status, with the error_type slug covering the shapes that carry no usable code.
-// hasTemplateKwargs appends thinkingEffortHint exactly as statusDelta does — a template
+// carriedEffort appends thinkingEffortHint exactly as statusDelta does — an effort
 // failure an aggregator wrapped in a 200 needs the same explanation as one that arrived as a
 // status — and an overflow stays unhinted, since no thinking effort caused it.
-func (c *Client) inBandErrorDelta(werr wireError, raw string, hasTemplateKwargs bool) Delta {
+func (c *Client) inBandErrorDelta(werr wireError, raw string, carriedEffort bool) Delta {
 	code := werr.intCode()
 	text := fmt.Sprintf("apogee: upstream in-band error %d: %s", code, c.sanitize(raw))
 	if code == http.StatusBadRequest && isContextOverflow(werr.Message) {
 		return Delta{Kind: DeltaContextOverflow, Err: text}
 	}
-	if hasTemplateKwargs {
+	if carriedEffort {
 		text += " " + thinkingEffortHint
 	}
 	retryable := isRetryableStatus(code) || werr.ErrorType == providerUnavailable
@@ -139,9 +139,9 @@ func (c *Client) inBandErrorDelta(werr wireError, raw string, hasTemplateKwargs 
 // content plus reasoning text at maxReplyTextBytes, and emits a terminal Done with the last
 // finish reason and any usage chunk — a faithful port of the oracle's parseSSEStream.
 // Returning false from yield (consumer broke) stops cleanly.
-// hasTemplateKwargs is carried through from the request Stream built — the in-band error
+// carriedEffort is carried through from the request Stream built — the in-band error
 // delta needs it, and this is the only seam between that request and the error it explains.
-func (c *Client) parseSSE(body io.Reader, hasTemplateKwargs bool, yield func(Delta) bool) {
+func (c *Client) parseSSE(body io.Reader, carriedEffort bool, yield func(Delta) bool) {
 	scanner := bufio.NewScanner(body)
 	scanner.Buffer(make([]byte, 0, 64*1024), maxToolCallBytes+64*1024)
 
@@ -193,7 +193,7 @@ func (c *Client) parseSSE(body io.Reader, hasTemplateKwargs bool, yield func(Del
 			// terminal, and it must not fall through to the choice-less `continue` below — that
 			// path ends at the implicit Done and commits a silent empty reply. A flushed-but-
 			// unfinished tool call is dropped with it: the reply is faulted, not partly usable.
-			yield(c.inBandErrorDelta(*chunk.Error, data, hasTemplateKwargs))
+			yield(c.inBandErrorDelta(*chunk.Error, data, carriedEffort))
 			return
 		}
 		if chunk.Usage != nil {

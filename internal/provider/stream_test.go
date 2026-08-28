@@ -217,39 +217,69 @@ func TestStream_ErrorStatus(t *testing.T) {
 }
 
 // TestStream_ThinkingEffortHint is the streaming counterpart of TestRespond_ThinkingEffortHint,
-// and the one that matters in practice: the loop streams, so a template that rejects an effort
-// value fails a turn here. Kwargs on the wire ⇒ the hint rides the terminal error delta; no
-// kwargs ⇒ today's text unchanged.
+// and the one that matters in practice: the loop streams, so a server that rejects an effort
+// value fails a turn here. An effort on the wire in ANY dialect ⇒ the hint rides the terminal
+// error delta, whether the failure arrives as a 4xx status or in-band under a 200; the `off`
+// dialect and an effortless request ⇒ today's text unchanged.
 func TestStream_ThinkingEffortHint(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
 		name     string
+		dialect  EffortDialect
 		effort   Effort
 		wantHint bool
 	}{
-		{name: "effort level puts kwargs on the wire", effort: EffortMedium, wantHint: true},
-		{name: "no effort, no kwargs, no hint", effort: ""},
+		{name: "kwargs dialect", dialect: EffortDialectKwargs, effort: EffortMedium, wantHint: true},
+		{name: "reasoning dialect", dialect: EffortDialectReasoning, effort: EffortMedium, wantHint: true},
+		{name: "reasoning dialect switching thinking off", dialect: EffortDialectReasoning, effort: EffortOff, wantHint: true},
+		{name: "openai dialect", dialect: EffortDialectOpenAI, effort: EffortMedium, wantHint: true},
+		{name: "the zero dialect still speaks kwargs", effort: EffortMedium, wantHint: true},
+		{name: "the off dialect emits nothing, so it explains nothing", dialect: EffortDialectOff, effort: EffortMedium},
+		{name: "no effort, nothing on the wire, no hint", dialect: EffortDialectOpenAI},
+	}
+
+	framings := []struct {
+		name   string
+		server func() *httptest.Server
+	}{
+		{
+			name: "4xx status",
+			server: func() *httptest.Server {
+				return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					w.WriteHeader(http.StatusBadRequest)
+					_, _ = io.WriteString(w, "jinja2.exceptions.TemplateError")
+				}))
+			},
+		},
+		{
+			name: "in-band error under a 200",
+			server: func() *httptest.Server {
+				return sseServer("data: {\"error\":{\"message\":\"jinja2.exceptions.TemplateError\",\"code\":400}}\n\n")
+			},
+		},
 	}
 
 	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
+		for _, framing := range framings {
+			t.Run(tc.name+"/"+framing.name, func(t *testing.T) {
+				t.Parallel()
 
-			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				w.WriteHeader(http.StatusInternalServerError)
-				_, _ = io.WriteString(w, "jinja2.exceptions.TemplateError")
-			}))
-			defer srv.Close()
+				srv := framing.server()
+				defer srv.Close()
 
-			deltas := collectStream(NewClient(srv.URL, "m", WithMaxRetries(0)), Request{ThinkingEffort: tc.effort})
-			if len(deltas) != 1 || deltas[0].Kind != DeltaError {
-				t.Fatalf("deltas = %+v, want a single error", deltas)
-			}
-			if got := strings.Contains(deltas[0].Err, thinkingEffortHint); got != tc.wantHint {
-				t.Errorf("error %q carries the hint = %t, want %t", deltas[0].Err, got, tc.wantHint)
-			}
-		})
+				deltas := collectStream(NewClient(srv.URL, "m", WithMaxRetries(0)), Request{
+					ThinkingEffort: tc.effort,
+					EffortDialect:  tc.dialect,
+				})
+				if len(deltas) != 1 || deltas[0].Kind != DeltaError {
+					t.Fatalf("deltas = %+v, want a single error", deltas)
+				}
+				if got := strings.Contains(deltas[0].Err, thinkingEffortHint); got != tc.wantHint {
+					t.Errorf("error %q carries the hint = %t, want %t", deltas[0].Err, got, tc.wantHint)
+				}
+			})
+		}
 	}
 }
 

@@ -317,57 +317,95 @@ func TestRespond_InBandErrorRedactsAPIKey(t *testing.T) {
 	}
 }
 
-// TestRespond_ThinkingEffortHint covers the enriched turn error (ADR 0050): a chat template that
-// rejects an effort value raises inside Jinja and the server answers 500 without ever naming the
-// offending field, so a request that carried chat_template_kwargs gets the hint appended. A
-// request that carried none keeps exactly the error it produced before, and either way the
-// *StatusError stays reachable for callers that branch on the status code.
+// TestRespond_ThinkingEffortHint covers the enriched turn error (ADR 0050, ADR 0060): a server
+// that rejects an effort value never names the field it choked on — a chat template raises inside
+// Jinja and answers a traceback, an API answers a bare 4xx — so a request that expressed a
+// thinking effort gets the hint appended whichever dialect it spoke it in. The gate is the wire
+// BODY, so the `off` dialect (which emits nothing) and a request that named no effort both keep
+// exactly the error they produced before, and either way the *StatusError stays reachable for
+// callers that branch on the status code. Both framings of the one failure are covered here: a
+// 4xx status, and the same fault an aggregator wrapped in an HTTP 200.
 func TestRespond_ThinkingEffortHint(t *testing.T) {
 	t.Parallel()
 
+	// The hint explains an intent, not a dialect: naming one dialect's field would misdescribe
+	// the request on the other two.
+	if strings.Contains(thinkingEffortHint, "chat_template_kwargs") {
+		t.Errorf("thinkingEffortHint = %q, want it to name the effort intent and no single dialect's field", thinkingEffortHint)
+	}
+
 	tests := []struct {
 		name     string
+		dialect  EffortDialect
 		effort   Effort
 		wantHint bool
 	}{
-		{name: "effort level puts kwargs on the wire", effort: EffortHigh, wantHint: true},
-		{name: "thinking off also puts kwargs on the wire", effort: EffortOff, wantHint: true},
-		{name: "no effort, no kwargs, no hint", effort: ""},
+		{name: "kwargs dialect", dialect: EffortDialectKwargs, effort: EffortHigh, wantHint: true},
+		{name: "kwargs dialect switching thinking off", dialect: EffortDialectKwargs, effort: EffortOff, wantHint: true},
+		{name: "reasoning dialect", dialect: EffortDialectReasoning, effort: EffortHigh, wantHint: true},
+		{name: "reasoning dialect switching thinking off", dialect: EffortDialectReasoning, effort: EffortOff, wantHint: true},
+		{name: "openai dialect", dialect: EffortDialectOpenAI, effort: EffortHigh, wantHint: true},
+		{name: "openai dialect at its documented floor", dialect: EffortDialectOpenAI, effort: EffortOff, wantHint: true},
+		{name: "the zero dialect still speaks kwargs", effort: EffortHigh, wantHint: true},
+		{name: "the off dialect emits nothing, so it explains nothing", dialect: EffortDialectOff, effort: EffortHigh},
+		{name: "no effort, nothing on the wire, no hint", dialect: EffortDialectReasoning},
+	}
+
+	framings := []struct {
+		name    string
+		handler http.HandlerFunc
+	}{
+		{
+			name: "4xx status",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusBadRequest)
+				_, _ = io.WriteString(w, "jinja2.exceptions.TemplateError")
+			},
+		},
+		{
+			name: "in-band error under a 200",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = io.WriteString(w, `{"error":{"message":"jinja2.exceptions.TemplateError","code":400}}`)
+			},
+		},
 	}
 
 	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
+		for _, framing := range framings {
+			t.Run(tc.name+"/"+framing.name, func(t *testing.T) {
+				t.Parallel()
 
-			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				w.WriteHeader(http.StatusInternalServerError)
-				_, _ = io.WriteString(w, "jinja2.exceptions.TemplateError")
-			}))
-			defer srv.Close()
+				srv := httptest.NewServer(framing.handler)
+				defer srv.Close()
 
-			client := NewClient(srv.URL, "m", WithMaxRetries(0))
-			_, err := client.Respond(context.Background(), Request{ThinkingEffort: tc.effort})
-			if err == nil {
-				t.Fatal("Respond returned no error, want the upstream 500 surfaced")
-			}
+				client := NewClient(srv.URL, "m", WithMaxRetries(0))
+				_, err := client.Respond(context.Background(), Request{
+					ThinkingEffort: tc.effort,
+					EffortDialect:  tc.dialect,
+				})
+				if err == nil {
+					t.Fatal("Respond returned no error, want the upstream failure surfaced")
+				}
 
-			var status *StatusError
-			if !errors.As(err, &status) {
-				t.Fatalf("error = %v (%T), want a reachable *StatusError", err, err)
-			}
-			if status.Code != http.StatusInternalServerError {
-				t.Errorf("StatusError.Code = %d, want %d", status.Code, http.StatusInternalServerError)
-			}
-			if got := strings.Contains(err.Error(), thinkingEffortHint); got != tc.wantHint {
-				t.Errorf("error %q carries the hint = %t, want %t", err, got, tc.wantHint)
-			}
-			if !tc.wantHint && err.Error() != status.Error() {
-				t.Errorf("error = %q, want the unhinted text %q", err, status.Error())
-			}
-			if strings.Contains(status.Body, thinkingEffortHint) {
-				t.Errorf("StatusError.Body = %q, want the hint kept out of the server's body", status.Body)
-			}
-		})
+				var status *StatusError
+				if !errors.As(err, &status) {
+					t.Fatalf("error = %v (%T), want a reachable *StatusError", err, err)
+				}
+				if status.Code != http.StatusBadRequest {
+					t.Errorf("StatusError.Code = %d, want %d", status.Code, http.StatusBadRequest)
+				}
+				if got := strings.Contains(err.Error(), thinkingEffortHint); got != tc.wantHint {
+					t.Errorf("error %q carries the hint = %t, want %t", err, got, tc.wantHint)
+				}
+				if !tc.wantHint && err.Error() != status.Error() {
+					t.Errorf("error = %q, want the unhinted text %q", err, status.Error())
+				}
+				if strings.Contains(status.Body, thinkingEffortHint) {
+					t.Errorf("StatusError.Body = %q, want the hint kept out of the server's body", status.Body)
+				}
+			})
+		}
 	}
 }
 
