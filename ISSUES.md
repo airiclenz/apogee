@@ -12,7 +12,8 @@ The single register of known issues and deliberately deferred work (it absorbed 
 
 This file holds OPEN work only. A resolved or executed item is REMOVED from it and recorded in
 `CHANGELOG.md` (under `[Unreleased]` until a release is cut) — the changelog is the closed trail;
-no closed-entries section, and no "done" narration, lives here. When a run leaves residuals, record
+no closed-entries section, and no "done" narration, lives here. A regression is not deferrable
+work and never belongs here — it is fixed, or it blocks. When a run leaves residuals, record
 only the still-open, ACTIONABLE findings — a defect, or a concrete missing test or doc with
 `file:line` evidence to act on. Narration of how an item's text and its landed change differ,
 costs a plan already ratified, and cosmetic observations belong in the run's closing report (the
