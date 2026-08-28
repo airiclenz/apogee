@@ -759,7 +759,13 @@ gate. `go vet ./cmd/apogee/` in every case.
 
 **Commit.** `test(e2e): the newcomer container runs on a private bridge with the stub on the gateway`
 
-## 15. The release smoke proves each published binary was built from the tagged commit
+## 15. The release smoke proves each published binary was built from the tagged commit — ✅ DONE (2026-08-28)
+
+NOTES (2026-08-28): the per-asset extraction directory is `$work/stamp/<archive name>/`, not the item's literal `$work/<name>/` — `$work/<name>` is already the downloaded archive FILE, so a directory of that name cannot exist beside it (the `stamp/` parent also keeps the host unpack at `:160` collision-free).
+
+NOTES (2026-08-28): `vcs.modified` is read by a sibling helper `binary_modified` beside the item's required `binary_revision`; both return empty and never abort under `set -euo pipefail`.
+
+NOTES (2026-08-28): `docs/manual/building.md` step 4 is edited beyond the item's `Files:` list — it is the manual's description of exactly what `make release-smoke` checks and its SKIP list, so it would otherwise state the gate's behaviour wrongly.
 
 **What.** Audit: *the release smoke gate verifies published assets against checksums fetched
 from the release itself* (Medium, Security). `scripts/release-smoke.sh:84-95` verifies

@@ -69,12 +69,16 @@ Cutting a release is four acts, in this order, and only the first two are automa
    can run *after* the release exists, and it is the one that catches a release nobody can
    install. It checks that the tag is remote and annotated rather than lightweight, that
    `make dist` still packs six verifying archives, that all six published assets download
-   and match the release's own `SHA256SUMS`, and that the archive for *this* machine unpacks
-   to a binary reporting the released version. Where Homebrew is installed and already has
-   apogee, it also runs `brew update && brew upgrade apogee` and expects the upgraded binary
+   and match the release's own `SHA256SUMS`, that each of those binaries carries the tagged
+   commit in its embedded build stamp (`go version -m`) — the checksums only prove the assets
+   match the list the release itself published, the stamp is what ties them to the tree — and
+   that the archive for *this* machine unpacks to a binary reporting the released version.
+   Where Homebrew is installed and already has apogee, it also runs
+   `brew update && brew upgrade apogee` and expects the upgraded binary
    to report the same version — the one claim only a real tap and a real release can make.
-   Every check that needs a tool this machine lacks (`gh`, `brew`) says `SKIP` and names it,
-   so a partial run is never mistaken for a pass.
+   Every check that needs a tool this machine lacks (`gh`, `brew`, `unzip` for the two
+   Windows archives' stamp) says `SKIP` and names it, so a partial run is never mistaken for
+   a pass. A binary built from a modified tree only warns — untracked files flip that flag.
 
 `make check` covers what can be proven *before* a release: alongside the Go gates it runs
 `scripts/check-pins.sh` — every GitHub Action must be pinned to a 40-character commit SHA
