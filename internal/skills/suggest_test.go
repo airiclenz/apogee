@@ -78,14 +78,43 @@ func suggestedIDs(t *testing.T, got []Suggestion) []string {
 	return ids
 }
 
-func TestSuggestBelowTheContentWordFloorReturnsNothing(t *testing.T) {
+func TestSuggestBelowTheRawWordFloorReturnsNothing(t *testing.T) {
 	t.Parallel()
 	c := newFixtureCatalog(t, suggestFixture())
 
-	for _, draft := range []string{"", "audit", "please audit the", "a b"} {
+	// "security audit" would clear the evidence gate twice over; it is the word count alone that
+	// keeps the band dark.
+	for _, draft := range []string{"", "audit", "please audit", "security audit", "a b"} {
 		if got := c.Suggest(draft, nil, 0); got != nil {
-			t.Errorf("Suggest(%q) = %v, want nil below %d content words", draft, suggestedIDs(t, got), minContentWords)
+			t.Errorf("Suggest(%q) = %v, want nil below %d words", draft, suggestedIDs(t, got), minDraftWords)
 		}
+	}
+}
+
+func TestSuggestGateCountsRawWords(t *testing.T) {
+	t.Parallel()
+	c := newFixtureCatalog(t, suggestFixture())
+
+	cases := []struct {
+		name  string
+		draft string
+		want  []string
+	}{
+		{"five words with two content terms clear the gate", "grill me on this plan", []string{"grill-me"}},
+		{"the same content terms in two words do not", "grill plan", nil},
+		{"four words of pure stopwords score nothing", "the and of to", nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := suggestedIDs(t, c.Suggest(tc.draft, nil, 0))
+			if len(got) == 0 && len(tc.want) == 0 {
+				return
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("Suggest(%q) = %v, want %v", tc.draft, got, tc.want)
+			}
+		})
 	}
 }
 
@@ -257,11 +286,14 @@ func TestTokenize(t *testing.T) {
 		{"hyphenated id splits into words", "code-audit", []string{"code", "audit"}},
 		{"stopwords and one-rune fragments drop", "please review the a I diffs", []string{"review", "diff"}},
 		{"plural in ies stems to y", "utilities", []string{"utility"}},
-		{"plural in es stems", "holes", []string{"hol"}},
-		{"gerund and past tense stem", "running planned", []string{"runn", "plann"}},
+		{"plural in es keeps its e outside a sibilant", "holes releases changes", []string{"hole", "release", "change"}},
+		{"plural in es after a sibilant drops the es", "boxes wishes classes", []string{"box", "wish", "class"}},
+		{"words ending in ss or us are not plurals", "stress process status focus", []string{"stress", "process", "status", "focus"}},
+		{"gerund and past tense stem", "running planned planning", []string{"runn", "plann", "plann"}},
+		{"words ending in eed keep their ed", "speed feed agreed", []string{"speed", "feed", "agreed"}},
 		{"a stem that would get too short keeps the word", "goes ties", []string{"goes", "ties"}},
 		{"digits survive as terms", "release v2 builds 1024", []string{"release", "v2", "build", "1024"}},
-		{"case and punctuation are normalised", "Security: HOLES, found!", []string{"security", "hol", "found"}},
+		{"case and punctuation are normalised", "Security: HOLES, found!", []string{"security", "hole", "found"}},
 		{"nothing but stopwords yields nothing", "the and of to", nil},
 	}
 	for _, tc := range cases {

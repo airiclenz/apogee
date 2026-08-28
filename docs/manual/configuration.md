@@ -316,7 +316,7 @@ order, side by side** once the small connecting words are set aside — `cut a r
 cut the release for me" and does not hit "release notes" — so a phrase made only of common words
 never hits at all. A hit does two things at once: it lifts the skill above ones matched by wording
 alone, and it admits the skill on its own, with no other evidence required — the only floor left is
-the general one, that a draft carry at least three content words before anything is suggested.
+the general one, that a draft carry at least three words before anything is suggested.
 Phrases are lowercased and their whitespace normalised, capped at 64 characters each and 32 to a
 skill, and `/skills` lists them back so you can see what a skill declared.
 

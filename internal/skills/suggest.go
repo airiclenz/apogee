@@ -23,10 +23,13 @@ const bm25B = 0.75
 // three, the width the one-row band can show without clipping the last entry to nothing.
 const defaultSuggestLimit = 3
 
-// minContentWords is how many DISTINCT non-stopword draft terms must exist before anything is
-// suggested at all. Below three the draft is still a fragment ("fix the") and every match is an
-// accident, so the band stays dark rather than flickering a guess at the user on every keystroke.
-const minContentWords = 3
+// minDraftWords is how many whitespace-separated words the draft must hold before anything is
+// suggested at all. It counts the words a person sees, stopwords included — the band must not go
+// dark because "me", "on" and "this" were dropped — and below three the draft is still a fragment
+// ("fix the") where every match is an accident, so the band stays dark rather than flickering a
+// guess at the user on every keystroke. At least one content term must survive tokenising as well:
+// a draft of pure stopwords has nothing to score.
+const minDraftWords = 3
 
 // minMatchedTerms is the evidence gate: absent a trigger hit, a skill is admitted only when at
 // least this many distinct draft terms appear in its document. One shared word is the noise floor
@@ -68,16 +71,29 @@ var stopwords = map[string]bool{
 	"which": true, "will": true, "with": true, "would": true, "you": true, "your": true,
 }
 
-// stemSuffixes is the whole stemmer: one ordered pass, first match wins. It is deliberately not a
-// Porter implementation — the corpus is a few hundred words of hand-written prose, and the only
-// job is to let "audits", "auditing" and "audit" meet. Order matters: "ies" before "es" before "s"
-// so "utilities" becomes "utility" rather than "utilitie".
-var stemSuffixes = []struct{ from, to string }{
-	{"ies", "y"},
-	{"es", ""},
-	{"s", ""},
-	{"ing", ""},
-	{"ed", ""},
+// stemSuffixes is the whole stemmer: one ordered pass, the first rule that applies wins. It is
+// deliberately not a Porter implementation — the corpus is a few hundred words of hand-written
+// prose, and the only job is to let "audits", "auditing" and "audit" meet. Order matters: "ies"
+// before "es" before "s" so "utilities" becomes "utility" rather than "utilitie". A rule's guard,
+// when set, may decline the word — and unlike the length floor, a guard's refusal lets the NEXT
+// rule try, which is how "holes" passes "es" and lands on "hole" under "s".
+var stemSuffixes = []struct {
+	from, to string
+	// applies reports whether the rule may take word, given the stem it would leave; nil means
+	// always.
+	applies func(word, stemmed string) bool
+}{
+	{"ies", "y", nil},
+	// "es" only after a sibilant — boxes, wishes, classes — where the e belongs to the suffix;
+	// elsewhere it belongs to the word (holes, releases, changes) and the "s" rule takes it.
+	{"es", "", func(_, stemmed string) bool { return hasAnySuffix(stemmed, "x", "z", "ch", "sh", "ss") }},
+	// "s" never strips from a word ending in ss or us — stress, process, status, focus — where the
+	// s is no plural at all.
+	{"s", "", func(word, _ string) bool { return !hasAnySuffix(word, "ss", "us") }},
+	{"ing", "", nil},
+	// "ed" never strips when the stem would end in e — speed, need, feed, agreed — where the ed is
+	// part of the word, not a tense.
+	{"ed", "", func(_, stemmed string) bool { return !strings.HasSuffix(stemmed, "e") }},
 }
 
 // Suggestion is one ranked match between a draft and a skill: enough to paint a row (ID,
@@ -104,8 +120,9 @@ type Suggestion struct {
 // triggers; bodies are never indexed). Admitted skills are ordered by score descending, then by ID
 // ascending so ties are stable across calls.
 //
-// It returns nil — never a partial guess — when the draft holds fewer than minContentWords
-// distinct content words, when nothing clears the gate, or when the catalog was never finalized.
+// It returns nil — never a partial guess — when the draft holds fewer than minDraftWords words
+// (stopwords included) or no content term at all, when nothing clears the gate, or when the
+// catalog was never finalized.
 // exclude, when non-nil, drops a skill by ID before ranking: the caller's set of skills already
 // invoked in the draft and already spent this session. limit caps the result; zero or negative
 // means defaultSuggestLimit.
@@ -118,7 +135,7 @@ func (c *Catalog) Suggest(draft string, exclude func(id string) bool, limit int)
 	}
 	draftTokens := tokenize(draft)
 	queryTerms := distinctTerms(draftTokens)
-	if len(queryTerms) < minContentWords {
+	if len(strings.Fields(draft)) < minDraftWords || len(queryTerms) == 0 {
 		return nil
 	}
 
@@ -326,20 +343,34 @@ func tokenize(s string) []string {
 
 // stem strips at most ONE inflectional suffix from word, in stemSuffixes order, and only when at
 // least minStemRunes remain. A suffix whose removal would leave too little keeps the whole word
-// rather than falling through to the next rule — one pass, so the result is a pure function of the
-// first rule that applies.
+// rather than falling through to the next rule; a suffix whose guard declines lets the next rule
+// try. One pass either way, so the result is a pure function of the first rule that applies.
 func stem(word string) string {
 	for _, suffix := range stemSuffixes {
 		if !strings.HasSuffix(word, suffix.from) {
 			continue
 		}
 		stemmed := word[:len(word)-len(suffix.from)] + suffix.to
-		if len([]rune(stemmed)) >= minStemRunes {
-			return stemmed
+		if len([]rune(stemmed)) < minStemRunes {
+			return word
 		}
-		return word
+		if suffix.applies != nil && !suffix.applies(word, stemmed) {
+			continue
+		}
+		return stemmed
 	}
 	return word
+}
+
+// hasAnySuffix reports whether s ends in any of the given suffixes — the stemmer's guards ask
+// "does this end in a sibilant" and "is this an ss/us word" in one breath.
+func hasAnySuffix(s string, suffixes ...string) bool {
+	for _, suffix := range suffixes {
+		if strings.HasSuffix(s, suffix) {
+			return true
+		}
+	}
+	return false
 }
 
 // distinctTerms drops repeats while keeping first-seen order — the draft's query terms. BM25 sums
