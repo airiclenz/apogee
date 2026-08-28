@@ -660,7 +660,16 @@ unchanged and green where it runs.
 
 **Commit.** `fix(tuitest): the forward proxy refuses an unmapped host and its branches are unit-tested`
 
-## 12. `ReplayTrace`'s error branches and all twelve F-keys are pinned
+## 12. `ReplayTrace`'s error branches and all twelve F-keys are pinned — ✅ DONE (2026-08-28)
+
+NOTES (2026-08-28): the item's **Files** line names only the two test files, but its text asks for
+the unreachable write branch to be stated "in a comment beside the branch" — the branch is in
+`internal/tuitest/screen.go`, so that file carries a comment-only change (no behaviour, no
+signature).
+
+NOTES (2026-08-28): the eight new F-key rows are inserted in numeric order (F2/F3 after F1, F6–F11
+after F5) rather than appended, so no existing row moves relative to another and `Esc` stays last
+for the reason its comment gives.
 
 **What.** Audit: *`ReplayTrace`'s reader error branches are unpinned by any test* (High) and
 *eight of twelve F-key constants are pinned by no test* (Medium). (1) `ReplayTrace`

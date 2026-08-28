@@ -2,6 +2,8 @@ package tuitest
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -143,5 +145,117 @@ func mustWrite(t *testing.T, s *Screen, p []byte) {
 	t.Helper()
 	if _, err := s.Write(p); err != nil {
 		t.Fatalf("write %q to the screen: %v", p, err)
+	}
+}
+
+// ReplayTrace reports through testing.TB rather than returning an error, so its reader failures —
+// the trace that is not there, and the trace a killed run left half-written — can only be pinned
+// by a TB that records instead of failing. These tests carry no build tag on purpose: the only
+// other Replay test runs behind //go:build !windows with the PTY driver, which left every error
+// branch unpinned on the platform that has none.
+
+// fatalRecorder stands in for the *testing.T a real caller hands ReplayTrace: it keeps the message
+// that was formatted and leaves the goroutine the way testing.T does, through runtime.Goexit, so
+// nothing after the Fatalf runs.
+type fatalRecorder struct {
+	// The embedded TB is nil on purpose. Every method ReplayTrace calls is overridden below; a call
+	// to any other one should panic here rather than quietly do nothing.
+	testing.TB
+
+	msg string
+	// returned records that ReplayTrace came back normally — the one thing Goexit cannot fake.
+	returned bool
+}
+
+// Helper is a no-op: there is no real test frame to attribute failures to.
+func (r *fatalRecorder) Helper() {}
+
+// Fatalf records the message and ends the goroutine, as testing.T.Fatalf does.
+func (r *fatalRecorder) Fatalf(format string, args ...any) {
+	r.msg = fmt.Sprintf(format, args...)
+	runtime.Goexit()
+}
+
+// replayFatal runs ReplayTrace over path and returns the message it failed with. The call is in a
+// goroutine because runtime.Goexit ends the goroutine it runs on — inline, it would end the test
+// itself — and the join both waits for it and orders the recorder's fields for the read.
+func replayFatal(t *testing.T, path string) string {
+	t.Helper()
+
+	rec := &fatalRecorder{}
+	done := make(chan struct{})
+	go func() {
+		// Deferred so the join happens on the Goexit path too.
+		defer close(done)
+		ReplayTrace(rec, path, Size{W: 20, H: 4})
+		rec.returned = true
+	}()
+	<-done
+
+	if rec.returned {
+		t.Fatalf("ReplayTrace(%q) returned a screen; want it to fail", path)
+	}
+	return rec.msg
+}
+
+// writeTrace writes body into a trace file of its own and returns the path.
+func writeTrace(t *testing.T, body string) string {
+	t.Helper()
+
+	path := filepath.Join(t.TempDir(), "trace.txt")
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatalf("write the trace fixture: %v", err)
+	}
+	return path
+}
+
+// TestReplayTraceFatalsOnAnUnreadableTrace: the file the caller named is not there. A trace is
+// written by a run that has already ended, so the path is the only clue to which run went missing
+// — the message has to carry it.
+func TestReplayTraceFatalsOnAnUnreadableTrace(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "absent-trace.txt")
+
+	msg := replayFatal(t, path)
+
+	if !strings.Contains(msg, path) {
+		t.Errorf("the failure message is %q; want it to name the missing path %q", msg, path)
+	}
+}
+
+// TestReplayTraceFatalsOnATruncatedWrite is the killed-run shape at its smallest: the process died
+// mid-write and the trace holds half a quoted string. Unquoting fails, and the message names the
+// line, so the reader can tell a truncated file from one that was never a trace.
+func TestReplayTraceFatalsOnATruncatedWrite(t *testing.T) {
+	t.Parallel()
+
+	path := writeTrace(t, `"\x1b[2Jhel`)
+
+	msg := replayFatal(t, path)
+
+	if !strings.Contains(msg, "not a quoted trace write") {
+		t.Errorf("the failure message is %q; want it to say %q", msg, "not a quoted trace write")
+	}
+	if !strings.Contains(msg, "line 1") {
+		t.Errorf("the failure message is %q; want it to name line 1", msg)
+	}
+}
+
+// TestReplayTraceFatalsOnATrailingPartialLine is the same truncation one line in, and the case that
+// matters: the lines before it replay cleanly, so a reader that skipped the unparsable tail would
+// hand back a screen that looks whole and is a frame short. The tail is never silently dropped.
+func TestReplayTraceFatalsOnATrailingPartialLine(t *testing.T) {
+	t.Parallel()
+
+	path := writeTrace(t, "\"\\x1b[2Jhello\"\n\"wor")
+
+	msg := replayFatal(t, path)
+
+	if !strings.Contains(msg, "line 2") {
+		t.Errorf("the failure message is %q; want it to name line 2, the partial one", msg)
+	}
+	if !strings.Contains(msg, "not a quoted trace write") {
+		t.Errorf("the failure message is %q; want it to say %q", msg, "not a quoted trace write")
 	}
 }

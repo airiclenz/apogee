@@ -238,6 +238,9 @@ func ReplayTrace(t testing.TB, path string, size Size) *Screen {
 		if uerr != nil {
 			t.Fatalf("tuitest: %s line %d is not a quoted trace write: %v", path, i+1, uerr)
 		}
+		// Unreachable on a fresh screen: Screen.Write returns an error only once the screen has
+		// been closed, and this one is closed below, after the loop. The branch is the guard for a
+		// Write that grows a failure mode, not a path a test can drive.
 		if _, werr := s.Write([]byte(write)); werr != nil {
 			t.Fatalf("tuitest: replay %s line %d: %v", path, i+1, werr)
 		}
