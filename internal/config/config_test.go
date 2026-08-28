@@ -960,6 +960,32 @@ func TestApplyConfigStartupServerOverrideSelects(t *testing.T) {
 	}
 }
 
+// A padded `name:` or `endpoint:` is canonicalised at the decode, so the trimmed form is what the
+// list stores, what `server:` selects the entry by, what the footer calls it, and what the session
+// dials. YAML strips the padding off a plain scalar by itself, so a quoted value is the only way
+// one reaches apogee at all — and it used to select nothing and dial an unparseable URL.
+func TestApplyConfigTrimsAPaddedServerNameAndEndpoint(t *testing.T) {
+	t.Parallel()
+	home := testConfigHome(t, "servers:\n"+
+		"  - name: \" box \"\n    endpoint: \"  http://x:1 \"\n"+
+		"server: box\n")
+	opts := Options{ConfigDir: home}
+	if err := ApplyConfig(&opts, func(string) bool { return false },
+		func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
+		t.Fatalf("ApplyConfig: %v", err)
+	}
+
+	if len(opts.Servers) != 1 || opts.Servers[0].Name != "box" || opts.Servers[0].Endpoint != "http://x:1" {
+		t.Fatalf("servers = %+v; want the one entry stored as {box http://x:1}", opts.Servers)
+	}
+	if opts.Endpoint != "http://x:1" {
+		t.Errorf("endpoint = %q; want the trimmed endpoint — a padded one reaches the wire", opts.Endpoint)
+	}
+	if opts.HostAlias != "box" {
+		t.Errorf("hostAlias = %q; want box — the footer calls the server by its canonical name", opts.HostAlias)
+	}
+}
+
 // The three ways selection has no answer. Each is a hard error naming the config file and showing
 // what to write — the permanent behaviour for the non-interactive drivers — and each carries the
 // REASON that lets the TUI answer it by asking instead (ADR 0036 decisions 3, 4 and 7). The resolved
@@ -2572,6 +2598,14 @@ func TestApplyConfigServersInvalid(t *testing.T) {
 			name:       "two entries sharing one name",
 			configYAML: "servers:\n  - name: box\n    endpoint: http://one:1111\n  - name: box\n    endpoint: http://two:1111\n",
 			wantErr:    []string{"servers: entry 2", "box", "already has that name"},
+		},
+		{
+			// The names are canonical by the time the dedup sees them, so padding is not a second
+			// entry nobody could ever select — it is the same name written twice.
+			name: "two entries whose names differ only in padding",
+			configYAML: "servers:\n  - name: \" box \"\n    endpoint: http://one:1111\n" +
+				"  - name: box\n    endpoint: http://two:1111\n",
+			wantErr: []string{"servers: entry 2", "box", "already has that name"},
 		},
 		{
 			// The whole list is checked, so a defect below a usable entry is still named.

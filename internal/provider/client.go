@@ -221,8 +221,10 @@ func WithWireObserver(observe func(WireRecord)) Option {
 }
 
 // NewClient builds a Client for the OpenAI-compatible server at baseURL, defaulting the
-// model when a Request leaves it empty. A trailing slash on baseURL is trimmed so path
-// joins are clean. Construction never fails — a malformed endpoint surfaces as a request
+// model when a Request leaves it empty. Whitespace around baseURL and a trailing slash on
+// it are trimmed so path joins are clean — the config loader already stores an endpoint
+// canonical, and this is the same guard for an embedder that passes one straight in.
+// Construction never fails — a malformed endpoint surfaces as a request
 // error, matching the TS oracle (a bad fetch URL throws at call time, not at construction).
 //
 // The client it builds never follows a redirect, the policy the network tools and the MCP
@@ -241,7 +243,7 @@ func WithWireObserver(observe func(WireRecord)) Option {
 // fragility rather than reach.
 func NewClient(baseURL, model string, opts ...Option) *Client {
 	c := &Client{
-		baseURL:  strings.TrimRight(baseURL, "/"),
+		baseURL:  strings.TrimRight(strings.TrimSpace(baseURL), "/"),
 		chatPath: defaultChatPath,
 		model:    model,
 		httpClient: &http.Client{

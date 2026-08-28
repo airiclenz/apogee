@@ -160,7 +160,9 @@ the variable unset the stub's 401 surfaces as an `Ask` error, never a verdict.
 
 **Commit.** `fix(judge): the verdict is read past a stray brace and the key is sent trimmed`
 
-## 2. A padded server name or endpoint is canonicalised on decode
+## 2. A padded server name or endpoint is canonicalised on decode — ✅ DONE (2026-08-28)
+
+NOTES (2026-08-28): the duplicate-name row was added beside the existing "two entries sharing one name" row in `TestApplyConfigServersInvalid` rather than replacing it — the plain-scalar case still has to hold.
 
 **What.** Audit: *config validation passes whitespace-padded server names* (High) and *a
 whitespace-padded endpoint passes validation and reaches the wire* (High). `ServerEntry`

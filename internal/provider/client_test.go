@@ -1015,3 +1015,39 @@ func TestClientNeverFollowsARedirect(t *testing.T) {
 		}
 	})
 }
+
+// recordingTransport answers every request with a canned OK reply and remembers the URL it was
+// asked for — the one place the endpoint a Client was built from actually reaches.
+type recordingTransport struct{ url string }
+
+func (r *recordingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	r.url = req.URL.String()
+	header := make(http.Header)
+	header.Set("Content-Type", "application/json")
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     header,
+		Body:       io.NopCloser(strings.NewReader(`{"choices":[{"message":{"role":"assistant","content":"ok"}}]}`)),
+		Request:    req,
+	}, nil
+}
+
+// Whitespace around the endpoint is trimmed at construction, so the request goes to the address
+// the user meant rather than to one with a space in it. The config loader stores an endpoint
+// canonical already (canonicaliseServers); this is the same guard one layer down, where an
+// embedder hands a URL straight to the Client.
+func TestNewClientTrimsWhitespaceAroundTheEndpoint(t *testing.T) {
+	t.Parallel()
+	rt := &recordingTransport{}
+	client := NewClient("  http://x/  ", "m", WithHTTPClient(&http.Client{Transport: rt}))
+
+	if _, err := client.Respond(context.Background(), Request{
+		Messages: []Message{{Role: "user", Content: "hi"}},
+	}); err != nil {
+		t.Fatalf("Respond through the recording transport: %v", err)
+	}
+
+	if want := "http://x" + defaultChatPath; rt.url != want {
+		t.Errorf("request URL = %q; want %q — a padded endpoint reached the wire", rt.url, want)
+	}
+}

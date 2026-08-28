@@ -1351,11 +1351,36 @@ type ServerEntry struct {
 	EffortDialect   string          `yaml:"effort-dialect,omitempty"`
 }
 
+// canonicaliseServers trims the whitespace around every entry's `name:` and `endpoint:`, so the
+// decoded list is the canonical one: the form that is stored is the form that is deduped, selected,
+// aliased and dialled. A padded value is never a refusal — YAML strips the padding off a plain
+// scalar by itself, so the only way one reaches the decoder is a quoted `name: " box "`, and reading
+// that as `box` is what every layer below already assumed it could.
+//
+// It runs on BOTH readers of a config file: parseConfigFile, which every Driver loads through, and
+// the edit transaction (verifiedEdit, configedit.go), which parses the same bytes for itself. They
+// have to agree, because an entry edit locates the entry by a name a caller is holding in memory —
+// already canonical — against the list the transaction just parsed.
+//
+// Nothing here rewrites the document: the file keeps the padding the user wrote, and only the
+// in-memory view is canonical.
+func canonicaliseServers(fc *fileConfig) {
+	for i := range fc.Servers {
+		fc.Servers[i].Name = strings.TrimSpace(fc.Servers[i].Name)
+		fc.Servers[i].Endpoint = strings.TrimSpace(fc.Servers[i].Endpoint)
+	}
+}
+
 // ValidateServers rejects an entry that could never be switched to, at the startup boundary where
 // the message can count the entry out for the user: one with no name (nothing to select it by, and
 // nothing for the footer to call it), one with no endpoint (nothing to talk to), and one whose
 // name an earlier entry already took — a name resolves to ONE server, so a repeat is a defect in
 // the file rather than a preference between two entries.
+//
+// The entries it sees are already canonical — canonicaliseServers trimmed every `name:` and
+// `endpoint:` at the decode, on both readers of the file — so the dedup below compares the same
+// form selection and the wire will later compare, and a padded name is a duplicate rather than a
+// second entry that can never be reached.
 //
 // It runs over the whole list rather than stopping at the first usable entry, on the
 // contextFilesSettings.validate reasoning: a defect in the file outlives the day it was written,
@@ -2281,6 +2306,7 @@ func parseConfigFile(path string, readFile func(string) ([]byte, error), notify 
 	if err := yaml.Unmarshal(data, &fc); err != nil {
 		return fileConfig{}, fmt.Errorf("apogee: parse config %q: %w", path, err)
 	}
+	canonicaliseServers(&fc)
 	if err := validateModelProfiles(fc.ModelProfiles); err != nil {
 		return fileConfig{}, err
 	}

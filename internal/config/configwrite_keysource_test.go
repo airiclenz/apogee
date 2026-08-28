@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 
@@ -300,6 +301,48 @@ func TestSaveServerPlaintextKeyOK_RefusesAnUnknownEntry(t *testing.T) {
 	if got := readTestConfig(t, path); got != config {
 		t.Errorf("a refused edit rewrote the file\n%s", got)
 	}
+}
+
+// An entry edit is the file's SECOND reader, and it locates the entry by a name its caller holds
+// from the first one — already canonical. So a padded `name:` on disk has to be matched trimmed, in
+// the parsed list and in the node tree alike, or an entry that works at every other layer would be
+// unwritable. The file keeps the padding: only the match is canonical.
+func TestSaveServerPlaintextKeyOK_MatchesAPaddedEntryNameCanonically(t *testing.T) {
+	const config = "server: box\nservers:\n  - name: \" box \"\n" +
+		"    endpoint: http://127.0.0.1:1111\n    api-key: sk-1\n"
+
+	t.Run("the padded entry is found by its canonical name", func(t *testing.T) {
+		path := writeTestConfig(t, config)
+
+		if err := SaveServerPlaintextKeyOK(path, "box"); err != nil {
+			t.Fatalf("mark the entry whose name is written padded: %v", err)
+		}
+
+		written := readTestConfig(t, path)
+		if !strings.Contains(written, "- name: \" box \"") {
+			t.Errorf("the edit rewrote the entry's own name: scalar\n%s", written)
+		}
+		fc, err := parseConfigFile(path, os.ReadFile, noNotify)
+		if err != nil {
+			t.Fatalf("the written config does not load: %v\n%s", err, written)
+		}
+		if len(fc.Servers) != 1 || fc.Servers[0].Name != "box" || !fc.Servers[0].PlaintextKeyOK {
+			t.Errorf("want the one entry loading as box and marked, got %+v\n%s", fc.Servers, written)
+		}
+	})
+
+	t.Run("a name the file does not carry is still refused", func(t *testing.T) {
+		path := writeTestConfig(t, config)
+
+		err := SaveServerPlaintextKeyOK(path, "nowhere")
+
+		if err == nil || !strings.Contains(err.Error(), "no servers: entry named") {
+			t.Fatalf("want a not-found refusal, got %v", err)
+		}
+		if got := readTestConfig(t, path); got != config {
+			t.Errorf("a refused edit rewrote the file\n%s", got)
+		}
+	})
 }
 
 // verifyEntryEdit is the gate under every entry writer, not only the two key-source ones, so its

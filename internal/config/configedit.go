@@ -101,6 +101,10 @@ func verifiedEdit(data []byte, splice editSplice, verify editVerify) ([]byte, er
 	// Held back on purpose: a splice's shape refusal names the part of the file it could not read,
 	// and that is the better message. See the ordering note at the top of this file.
 	parseErr := yaml.Unmarshal(data, &before)
+	// This is the file's SECOND reader — parseConfigFile is the first — and an entry edit locates
+	// its entry by a name the caller holds from that first read. Both views therefore canonicalise
+	// the same way, or a padded `name:` on disk would put the two readers' lists out of step.
+	canonicaliseServers(&before)
 
 	updated, err := splice(before, data)
 	switch {
@@ -120,6 +124,7 @@ func verifiedEdit(data []byte, splice editSplice, verify editVerify) ([]byte, er
 	if err := yaml.Unmarshal(updated, &after); err != nil {
 		return nil, fmt.Errorf("the edited file would not parse: %w", err)
 	}
+	canonicaliseServers(&after)
 	if err := verify(before, after, updated); err != nil {
 		return nil, err
 	}

@@ -262,6 +262,10 @@ func spliceEntryPlaintextKeyOK(data []byte, name string) ([]byte, error) {
 // than a list, and an entry written as a flow mapping ({...}), which has no line of its own for a
 // key. A name the node tree cannot find although the parsed config carries it is the same class of
 // disagreement, and refuses for the same reason.
+//
+// The name it matches on is the CANONICAL one — the caller holds the trimmed form every reader of
+// the file decodes (canonicaliseServers), so the node's own `name:` scalar is compared trimmed. The
+// splice never rewrites that scalar: a padded name stays exactly as the user wrote it.
 func serverEntryNode(data []byte, name string) ([]string, *yaml.Node, error) {
 	doc, err := Document(data)
 	if err != nil {
@@ -281,7 +285,7 @@ func serverEntryNode(data []byte, name string) ([]string, *yaml.Node, error) {
 		return nil, nil, errors.New("its servers: holds something other than a list of servers; edit the file by hand")
 	}
 	for _, item := range list.Content {
-		if _, value := mappingEntry(item, entryNameKey); value == nil || value.Value != name {
+		if _, value := mappingEntry(item, entryNameKey); value == nil || strings.TrimSpace(value.Value) != name {
 			continue
 		}
 		if item.Style&yaml.FlowStyle != 0 {
