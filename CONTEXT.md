@@ -1063,7 +1063,7 @@ agent resolves. See
 [ADR 0027](docs/adr/0027-one-slash-namespace-with-inline-skill-tokens.md),
 [ADR 0032](docs/adr/0032-the-user-skill-library-outranks-the-workspace.md) and
 [ADR 0061](docs/adr/0061-skill-suggestions-are-driver-side-over-an-engine-matcher.md).
-A **Suggestion** is a Driver-side hint naming the catalog skills whose id, name, summary or
+A **Suggestion** is a Driver-side hint naming the catalog skills whose id, name, description or
 `triggers:` best match the draft (`skills.Catalog.Suggest`, BM25 + evidence gate); painted by the
 TUI in the suggestion band above the input box, accepted via Tab into a `/token`, and spent for the
 session once a message is sent with it showing. A suggestion never reaches the model — see

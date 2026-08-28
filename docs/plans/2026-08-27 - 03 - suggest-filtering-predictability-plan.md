@@ -244,7 +244,11 @@ each row's top-3 (t.Logf) so a reviewer can see the ranking, not only the pass.
 
 ---
 
-## 4. ADR 0061 and package doc wording
+## 4. ADR 0061 and package doc wording — ✅ DONE (2026-08-28)
+
+NOTES (2026-08-28): deviation, owner-directed (DECISION, via item 3's authorized full-description indexing) — where the item's literal text keeps "summary" for the indexed document (ADR 0061 Decision 1, `internal/skills/doc.go`, CONTEXT.md's Suggestion sentence) the wording now says "description" and the ADR/doc.go note that the 200-rune clamp is the `/` menu's alone; CONTEXT.md is a one-word tidy the item's Files list did not name, and the ADR amendment names this fourth change beside the three rule changes.
+NOTES (2026-08-28): the amendment is dated `Amended 2026-08-27` — the plan's date, which the item's Acceptance greps for literally — though it landed on 2026-08-28.
+NOTES (2026-08-28): the doc.go sentence enumerates the indexed fields, not the matching rules, so per the item's own condition prefix matching and the name bonus are not added there; `Suggest`'s docstring in suggest.go (items 2–3) already states both.
 
 Depends on item 2 (the wording must describe what landed).
 

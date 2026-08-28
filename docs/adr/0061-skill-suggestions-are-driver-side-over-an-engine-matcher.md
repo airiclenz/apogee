@@ -44,13 +44,16 @@ the engine must stay sufficient for any Driver, so the matcher is engine-level a
 ## Decision
 
 **1 — Suggestion is a Driver concern painted from an engine-level matcher.** The ranking lives in
-the engine as `skills.Catalog.Suggest`: BM25 over a document of id + display name + summary + the
-skill's optional author-declared `triggers:` phrases (bodies are **not** indexed), a trigger-phrase
-hit adding a fixed boost on top of the score, an evidence gate admitting a skill only on a trigger
-hit or ≥ 2 distinct non-stopword draft terms, and the top 3 returned. It needs no model, no network
-and no embedding. The TUI paints those rows in a one-row band above the input box, sibling of the
-staged-interjection band, and opens the filtered `/` picker on Tab. Any other Driver — headless, the
-daemon, a bench harness — can call the same API and present it however it likes, or not at all.
+the engine as `skills.Catalog.Suggest`: BM25 over a document of id + display name + description +
+the skill's optional author-declared `triggers:` phrases (bodies are **not** indexed; the
+description is indexed unclamped — the 200-rune summary clamp is the `/` menu's alone), a draft
+term matching a document term exactly or by a ≥ 4-rune prefix either way, an id/display-name hit
+adding one IDF's worth of bonus, a trigger-phrase hit adding a fixed boost on top of the score, an
+evidence gate admitting a skill only on a trigger hit or ≥ 2 distinct non-stopword draft terms, and
+the top 3 returned. It needs no model, no network and no embedding. The TUI paints those rows in a
+one-row band above the input box, sibling of the staged-interjection band, and opens the filtered
+`/` picker on Tab. Any other Driver — headless, the daemon, a bench harness — can call the same API
+and present it however it likes, or not at all.
 
 **2 — Nothing about the catalog reaches the model.** A suggestion is a fact about the *draft*,
 computed and displayed on the host; it changes no request. A suggested skill becomes model-visible
@@ -76,6 +79,13 @@ change before it is a feature. Either one may well be right later; neither is de
 ADR must supersede this record **explicitly** to build them, and the deferral, with what must
 precede it, is parked in `ISSUES.md`.
 
+*Amended 2026-08-27* (plan `2026-08-27 - 03`, suggest-filtering predictability): Decision 1 now
+reads as amended — the enough-draft gate counts raw words, stopwords included, rather than content
+words; a draft term also matches a document term by ≥ 4-rune prefix either way; an id/display-name
+hit adds one IDF's worth of bonus; and the document indexes the skill's full description rather than
+the 200-rune menu summary. An amendment, not a supersession: the decision's substance — Driver-side
+painting over an engine-level matcher that never reaches the model — is unchanged.
+
 ## Consequences
 
 - **The engine gains a ranking API and stays wire-silent.** `skills.Catalog.Suggest` reads the
@@ -90,7 +100,7 @@ precede it, is parked in `ISSUES.md`.
   goes modal and never steals `⏎`.
 - **The cost is host-side and bounded.** The index is built once per catalog snapshot, the draft is
   re-ranked per keystroke over a corpus of dozens of short documents, and nothing is computed at all
-  until the draft holds three content words.
+  until the draft holds three words (stopwords included) and at least one content term.
 - **A suggestion is a new term in the domain language.** CONTEXT.md's *Skill* entry defines it and
   points here; it is a hint, never an invocation, and the distinction is what keeps "the model sees
   a skill only through a `/id`" true after this ships.
