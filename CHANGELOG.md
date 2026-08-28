@@ -226,6 +226,64 @@ point is a **minor** bump, not a breaking change.
   the newcomer walk's Homebrew and OpenRouter steps — and are recorded in `ISSUES.md` under
   "Test drivers — residue" as accepted proxies with no open work.
 
+- **A scripted stubllm turn can now echo text the request itself carried.** A `Turn` takes a
+  `captures:` list of `{name, from, pattern}`; every `{{name}}` in that turn's `text` and in each
+  of its `tool_calls[].arguments` is replaced by group 1 of the pattern's first match over the
+  request it answers — `from: system` reading the request's system messages concatenated in wire
+  order, `from: last_message` reading the same text `when.last_message` matches. This is how a
+  fixture scripts "the model uses exactly what it was told": the path in the tool call is the one
+  apogee announced on that very request (an orientation line, a skill header's `files:` path)
+  rather than one the fixture guessed and would keep passing after the announcement moved.
+  Captures are as strict as the rest of the stub: a pattern that does not compile or does not have
+  exactly one capture group, a `{{name}}` naming no capture on the turn, duplicate names, and
+  `captures` on an `http` or `hang` turn are all parse errors, so there is no way to put a literal
+  `{{x}}` on the wire; a capture that matches nothing in the request is an HTTP 500 (`stubllm:
+  capture <name> unmatched for request N`) and a logged entry with `Unmatched` set, and the turn is
+  NOT spent, so it still answers the next request. Expansion never writes back into the Script, so
+  a `repeat:` turn answers each request with that request's own path. `docs/design/test-drivers.md`
+  gains a `### Captures` section whose example is loaded by the package's tests. The recorder never
+  emits captures.
+
+- **The announced-paths floor is now an e2e test.** `TestE2EAnnouncedSkillPathsUnderASymlinkedHome`
+  builds the host shape the 2026-08-26 read-root regression actually broke — an apogee home reached
+  through a dotfiles symlink, whose `skills/` is itself a symlink into a third tree — invokes a
+  fixture skill the way a human does (an inline `/<skill-id>` token), and captures the folder apogee
+  announced on the skill header's own `files:` line straight off the wire. Every argument the scripted
+  model then sends is that captured spelling, so `read_file`, `copy_file`, `list_dir`, `grep` and
+  `find_files` are all exercised against the path apogee itself named rather than one the fixture
+  guessed. The test asserts the announced spelling is the configured home's (symlinks and all), that
+  every result comes back with the bundled file and none with a read-scope refusal, that the copy
+  landed in the workspace with its marker intact, and that the whole run in `--mode auto` raised zero
+  approval panes. A header that started announcing a path the read tools do not mount now fails here
+  instead of in a user's session.
+
+- **The announced scratch dir now has an end-to-end floor under it.**
+  `TestE2EAnnouncedScratchDirRunsUnpromptedInAuto` drives the real composition in Auto on a
+  dotfiles-symlinked home, captures the path out of the orientation block's own `Scratch dir:` line
+  on the request it rides, and hands it straight back as an `export TMPDIR=…` terminal command: the
+  command must run with no approval pane, its write must land in the real tree the home symlink
+  points at, and `touch ~/.apogee/guard-probe.txt` in the same conversation must still force the
+  look — the positive control that stops a silent approver from passing the negative half. Removing
+  the guard's scratch-dir exemption makes it fail with the pane in the failure message, which is the
+  regression that shipped in v0.18.2.
+- Two seams the fixture needed: the TUI wiring now builds its Confiner through the same
+  `newConfiner` seam the headless and daemon Drivers already use, so a fixture whose question is
+  about GATING rather than fencing can dictate the capability matrix on a host without landlock; and
+  the `cmd/apogee` suite's `TestMain` now opens with `maybeDispatchConfinedExec()` exactly as
+  `main()` does, so a confined subprocess started under the in-process driver re-invokes the test
+  binary as the landlock helper instead of falling through and running the whole suite.
+
+- **The announced workspace root now has the same floor under it.**
+  `TestE2EAnnouncedWorkspaceThroughASymlink` hands apogee a project tree through a symlink — the
+  shape macOS gives every user by default — and captures the root off the orientation block's own
+  `Workspace:` line on each request it rides, so every argument the scripted model sends is the name
+  apogee announced rather than one the fixture built. `read_file`, `write_file`,
+  `edit_existing_file`, `list_dir` and a confined `terminal` all run through that spelling in
+  `--mode auto`: each must answer with its own success receipt rather than the read-scope refusal,
+  the writes must land in the tree the link points at, and the run must raise no approval pane. A
+  tool that started measuring the announced spelling against the resolved root — in either
+  direction — now fails here instead of in a user's session.
+
 ### Changed
 
 - `/skills` now lists a skill's declared `triggers:` on an indented line under its row, so the
@@ -245,6 +303,17 @@ point is a **minor** bump, not a breaking change.
   speed` in `/refocus`) finds the skill. The real-library fixture under
   `internal/skills/testdata/library/` pins the ranking on the phrases people type; ADR 0061 is
   amended accordingly.
+
+- **The regression floor is now a written repo convention.** `AGENTS.md` ("Conventions not
+  derivable from the code") states that regressions are never deferred: a regression — behaviour
+  that worked at the previous commit or release and does not now, or a path, name or value apogee
+  itself announces to the user or model (an orientation line, a skill header, a `{{…}}` expansion)
+  that a tool, mode or guard refuses or prompts on — is fixed in the run that finds it or blocks
+  that run's closeout, never enters `ISSUES.md` as deferred work and never ships; the 2026-08-26
+  read-root residual that shipped in v0.18.2 is the case the rule closes. The `ISSUES.md` header
+  says the same from the register's side ("A regression is not deferrable work and never belongs
+  here — it is fixed, or it blocks"), and the `ISSUES.md` entry in `AGENTS.md`'s "Where knowledge
+  lives" map points at the convention.
 
 ### Fixed
 
