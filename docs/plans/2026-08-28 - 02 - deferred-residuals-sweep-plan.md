@@ -580,7 +580,16 @@ and `copy_file`.
 
 **Commit.** `fix(security): the ~/.apogee rule's hint states the approval it now asks for`
 
-## 20. `refuseAbsurdObjectCount` ignores `/Size` inside streams
+## 20. `refuseAbsurdObjectCount` ignores `/Size` inside streams — ✅ DONE (2026-08-28)
+
+NOTES (2026-08-28): the xref-`/Size` test builds the dictionary immediately before its own
+`stream … endstream` (the modern xref-stream shape) rather than a bare dictionary, which pins the
+exclusion's boundary — a dictionary introducing a stream stays scanned — more tightly than a
+`/Size` with no stream anywhere near it.
+
+NOTES (2026-08-28): a `stream` keyword with no `endstream` after it opens no skipped span, so a
+truncated stream cannot hide the trailer from the guard; recorded in `withoutStreamBodies`' doc
+comment.
 
 **What.** ISSUES: *`refuseAbsurdObjectCount` scans raw bytes.* Keep the whole-file scan
 (`internal/doctext/pdf.go:378`, regex `:372`) but skip every `stream … endstream` span

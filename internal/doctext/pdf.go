@@ -368,23 +368,49 @@ func (b *budgetedReaderAt) failureFor(reported any) string {
 // dictionary's alike, because both size the cross-reference table the parser allocates before it
 // reads a single object (read.go:233,392). The scan is over the bytes rather than the parsed
 // document for the same reason: by the time the parser could report the number, it has already
-// allocated for it.
+// allocated for it. It is applied only OUTSIDE stream bodies (see withoutStreamBodies): a
+// dictionary keying the xref table always precedes its stream keyword, so every /Size that sizes
+// an allocation stays covered, while compressed or otherwise arbitrary stream CONTENT — an image,
+// an embedded font, another PDF — cannot spell one by accident.
 var pdfDeclaredSize = regexp.MustCompile(`/Size\s+(\d+)`)
+
+// pdfStreamBody matches one stream object's body: the `stream` keyword — never the tail of
+// `endstream`, which the word boundary excludes — its mandatory end-of-line, and every byte up to
+// the nearest `endstream`.
+var pdfStreamBody = regexp.MustCompile(`(?s)\bstream\r?\n.*?endstream`)
+
+// withoutStreamBodies returns the spans of data that lie outside every stream body, in order, in
+// one pass. A `stream` keyword with no `endstream` after it terminates nothing and opens no span:
+// its bytes stay in the result, so a truncated stream cannot become a place to hide the trailer
+// from a guard that reads these spans.
+func withoutStreamBodies(data []byte) [][]byte {
+	bodies := pdfStreamBody.FindAllIndex(data, -1)
+
+	spans := make([][]byte, 0, len(bodies)+1)
+	cursor := 0
+	for _, body := range bodies {
+		spans = append(spans, data[cursor:body[0]])
+		cursor = body[1]
+	}
+	return append(spans, data[cursor:])
+}
 
 // refuseAbsurdObjectCount returns the model-facing refusal for a document declaring more objects
 // than its own bytes could hold, or "" when every declared count is possible. The bound is the
 // loosest sound one — one byte per object, where the smallest real object costs about twenty —
 // so it refuses impossible documents and nothing a real producer emits.
 func refuseAbsurdObjectCount(data []byte) string {
-	for _, match := range pdfDeclaredSize.FindAllSubmatch(data, -1) {
-		declared := string(match[1])
-		// A count too long for uint64 is refused on its digits alone: a file that cannot hold
-		// 2^64 objects cannot hold more than that either.
-		size, err := strconv.ParseUint(declared, 10, 64)
-		if err == nil && size <= uint64(len(data)) {
-			continue
+	for _, span := range withoutStreamBodies(data) {
+		for _, match := range pdfDeclaredSize.FindAllSubmatch(span, -1) {
+			declared := string(match[1])
+			// A count too long for uint64 is refused on its digits alone: a file that cannot hold
+			// 2^64 objects cannot hold more than that either.
+			size, err := strconv.ParseUint(declared, 10, 64)
+			if err == nil && size <= uint64(len(data)) {
+				continue
+			}
+			return fmt.Sprintf(pdfUnreadableFormat, fmt.Sprintf(pdfAbsurdSizeFormat, declared, len(data)))
 		}
-		return fmt.Sprintf(pdfUnreadableFormat, fmt.Sprintf(pdfAbsurdSizeFormat, declared, len(data)))
 	}
 	return ""
 }

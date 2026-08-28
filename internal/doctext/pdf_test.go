@@ -411,6 +411,55 @@ func TestExtractPDF_RefusesAnAbsurdXrefSize(t *testing.T) {
 	}
 }
 
+// TestExtractPDF_ReadsAnAbsurdSizeInsideAStreamAsContent pins the other half of the guard above:
+// a stream body is CONTENT, not a dictionary, so bytes that merely spell /Size in it size nothing
+// and must not cost the document its extraction. A compressed image, an embedded font or a nested
+// PDF can spell any byte sequence, so a whole-file scan would refuse valid documents at random.
+func TestExtractPDF_ReadsAnAbsurdSizeInsideAStreamAsContent(t *testing.T) {
+	t.Parallel()
+
+	const hostileText = "/Size 4000000000"
+
+	text, pages, failMessage := ExtractPDF(context.Background(), textPagesPDF(t, hostileText), 0)
+
+	if failMessage != "" {
+		t.Fatalf("ExtractPDF failed: %s", failMessage)
+	}
+	if pages != 1 {
+		t.Errorf("pages = %d, want the document's single page", pages)
+	}
+	if !strings.Contains(text, hostileText) {
+		t.Errorf("text = %q, want it to carry the page's own %q", text, hostileText)
+	}
+}
+
+// TestExtractPDF_RefusesAnAbsurdSizeInAnXrefStreamDictionary pins the boundary the exclusion is
+// drawn at: an xref stream's DICTIONARY always precedes its stream keyword, and that dictionary's
+// /Size is exactly the number the parser allocates the cross-reference table from. Skipping stream
+// bodies must not skip the dictionary that introduces one, or the guard would be evaded by moving
+// the count out of the trailer and into an xref stream — the modern way to write one.
+func TestExtractPDF_RefusesAnAbsurdSizeInAnXrefStreamDictionary(t *testing.T) {
+	t.Parallel()
+
+	const crossReferenceRow = "00000000"
+	xrefStream := fmt.Sprintf("<< /Type /XRef /Size 4000000000 /W [1 2 1] /Root 1 0 R /Length %d >>"+
+		"\nstream\n%s\nendstream", len(crossReferenceRow), crossReferenceRow)
+	data := hostilePDF(t,
+		"<< /Type /Catalog /Pages 2 0 R >>",
+		"<< /Type /Pages /Kids [] /Count 0 >>",
+		xrefStream,
+	)
+
+	text, pages, failMessage := ExtractPDF(context.Background(), data, 0)
+
+	if !strings.Contains(failMessage, "declares 4000000000 objects in") {
+		t.Fatalf("failMessage = %q, want the refusal naming the dictionary's declared count", failMessage)
+	}
+	if text != "" || pages != 0 {
+		t.Errorf("failure returned text %q and pages %d, want both empty", text, pages)
+	}
+}
+
 // TestExtractPDF_BoundsAReferenceCycle covers F-26: a /Pages node whose /Kids names itself. The
 // page-tree descent follows it forever and never returns a page at all, so no page-level bound
 // can catch it — only the read budget can, because the parser keeps no value cache and each turn
