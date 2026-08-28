@@ -557,7 +557,11 @@ updated to say a bare `-` IS a flag token while `--` still is not. Per the ratif
 
 **Commit.** `fix(security): rm -rf rules match the getopt-permuted "rm - -rf" spelling again`
 
-## 19. The `~/.apogee` rule's hint says "needs approval", not "is refused"
+## 19. The `~/.apogee` rule's hint says "needs approval", not "is refused" — ✅ DONE (2026-08-28)
+
+NOTES (2026-08-28): the item's Files list named only `internal/security/rules.go` and `rules_test.go`, but the hint is pinned verbatim by the e2e approval suite; leaving it would have broken a green test. Also updated `cmd/apogee/e2e_approval_test.go`'s `forcedFix` constant and regenerated the `t10-forced-pane` golden (`go test ./cmd/apogee -update`) — the shorter hint wraps to four rows instead of five, so the transcript above the pane gains one visible line.
+
+NOTES (2026-08-28): `assertFixWrapsAsOneBlock` compared the hint's last pane row for EQUALITY with the sentence's last word, which only held because the old wording happened to wrap "argument)" onto a row of its own. Relaxed to `strings.HasSuffix`, which is the check's stated claim (the sentence is not clipped); the wrap point itself is the golden's business.
 
 **What.** ISSUES: *The `~/.apogee` rule's Hint still opens with a refusal.* Reword the first
 clause of the `write-apogee-control-plane` Hint (`internal/security/rules.go:186-188`) to

@@ -36,8 +36,8 @@ const (
 	forcedReason  = "Reason: dangerous-action guard forced approval"
 	// forcedFix is the sanctioned-route hint, verbatim from internal/security's rule set. A test
 	// that paraphrased it would pass over the day somebody rewrote half of it.
-	forcedFix = "Fix: a terminal command is refused whenever its text names ~/.apogee, even for " +
-		"a read; list, read or copy from there with the dedicated tools instead (list_dir, " +
+	forcedFix = "Fix: a terminal command naming ~/.apogee needs approval, even for a read; " +
+		"list, read or copy from there with the dedicated tools instead (list_dir, " +
 		"read_file, grep, find_files, or copy_file's source argument)"
 	approvalMarker = "Always allow this session"
 )
@@ -440,8 +440,9 @@ func assertFixWrapsAsOneBlock(t *testing.T, f tuitest.Frame) {
 		t.Fatalf("the Fix: line did not wrap at %d columns, so there are no continuation rows to check:\n%s",
 			f.Width(), f)
 	}
-	// Not clipped: the sentence ends where the rule's own text ends, ellipsis-free.
-	if want := forcedFix[strings.LastIndex(forcedFix, " ")+1:]; last != want {
+	// Not clipped: the sentence ends where the rule's own text ends, ellipsis-free. The final word
+	// is the claim — whether it sits alone on the last row is the wrap's business, not the test's.
+	if want := forcedFix[strings.LastIndex(forcedFix, " ")+1:]; !strings.HasSuffix(last, want) {
 		t.Errorf("the hint's last row is %q; the rule's sentence ends with %q", last, want)
 	}
 }

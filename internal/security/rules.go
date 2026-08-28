@@ -186,8 +186,8 @@ func DefaultDangerousRules() []Rule {
 			ID:     "write-apogee-control-plane",
 			Tier:   TierForceApproval,
 			Reason: "write or delete under apogee's own control plane (~/.apogee)",
-			Hint: "a terminal command is refused whenever its text names ~/.apogee, even for a " +
-				"read; list, read or copy from there with the dedicated tools instead (list_dir, " +
+			Hint: "a terminal command naming ~/.apogee needs approval, even for a read; " +
+				"list, read or copy from there with the dedicated tools instead (list_dir, " +
 				"read_file, grep, find_files, or copy_file's source argument)",
 			Pattern:    homeAnchor + `/\.apogee\b`,
 			WritesOnly: true,

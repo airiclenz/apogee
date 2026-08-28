@@ -1,4 +1,5 @@
 ❯ Run ls in /tmp and nothing else.                         │
+                                                           │
 ✦ That is what the command had to say.                     │
                                                            │
 ❯ List the apogee home with the terminal tool.             │
@@ -8,11 +9,10 @@
 
 ╭─────────────────── Approve terminal? ────────────────────╮
 │ Reason: dangerous-action guard forced approval           │
-│ Fix: a terminal command is refused whenever its text     │
-│ names ~/.apogee, even for a read; list, read or copy     │
-│ from there with the dedicated tools instead (list_dir,   │
-│ read_file, grep, find_files, or copy_file's source       │
-│ argument)                                                │
+│ Fix: a terminal command naming ~/.apogee needs approval, │
+│ even for a read; list, read or copy from there with the  │
+│ dedicated tools instead (list_dir, read_file, grep,      │
+│ find_files, or copy_file's source argument)              │
 │ command:                                                 │
 │   ls ~/.apogee                                           │
 │                                                          │

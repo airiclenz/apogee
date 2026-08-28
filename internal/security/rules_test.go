@@ -1,6 +1,7 @@
 package security
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
@@ -271,7 +272,19 @@ func TestDefaultDangerousRules_ApogeeControlPlaneReadHintsTheSanctionedRoute(t *
 		t.Fatalf("Inspect rule = %q, want %q", d.RuleID, "write-apogee-control-plane")
 	}
 	if d.Hint == "" {
-		t.Error("Decision.Hint is empty, want the rule's hint naming the sanctioned read route")
+		t.Fatal("Decision.Hint is empty, want the rule's hint naming the sanctioned read route")
+	}
+	// The Hint's first clause has to state what the rule actually does now. At Tier 2 the call is
+	// put to the human, so a "is refused" opener reads stale on both surfaces it reaches — the
+	// approval prompt's remedy line and the deny result's tail.
+	if strings.Contains(d.Hint, "is refused") {
+		t.Errorf("Decision.Hint = %q, want no refusal wording — the rule forces approval", d.Hint)
+	}
+	if !strings.Contains(d.Hint, "needs approval") {
+		t.Errorf("Decision.Hint = %q, want it to say the command needs approval", d.Hint)
+	}
+	if !strings.Contains(d.Hint, "copy_file") {
+		t.Errorf("Decision.Hint = %q, want it to name copy_file as a sanctioned route", d.Hint)
 	}
 }
 
