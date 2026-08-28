@@ -16,6 +16,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -56,15 +57,23 @@ func TestNewcomerFollowsTheDocs(t *testing.T) {
 		t.Skip("docker is not on PATH; the newcomer container needs it (this test is local-only)")
 	}
 	if runtime.GOOS != "linux" {
-		// --network host shares the host's network namespace on Linux only; elsewhere the
-		// container cannot reach a loopback stub, and the exercise would fail on plumbing.
-		t.Skipf("the newcomer container needs --network host, which only shares loopback on linux (this is %s)", runtime.GOOS)
+		// The stub upstream binds on the docker bridge gateway, and that address is an
+		// interface of the host on Linux only; elsewhere the daemon lives in a VM the host
+		// cannot bind into, and the exercise would fail on plumbing.
+		t.Skipf("the newcomer stub binds on the docker bridge gateway, which the host can bind on linux only (this is %s)", runtime.GOOS)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), newcomerBudget)
 	defer cancel()
 
-	stub := stubllm.New(t, loadScript(t, "newcomer"))
+	gateway := newcomerBridgeGateway(t, ctx, docker)
+	stub, err := stubllm.Serve(ctx, gateway+":0", loadScript(t, "newcomer"))
+	if err != nil {
+		t.Skipf("could not bind the newcomer stub on %s:0, the docker bridge gateway "+
+			"(rootless docker, or a remote DOCKER_HOST, where it is not a host interface): %v", gateway, err)
+	}
+	t.Cleanup(stub.Close)
+
 	kit := newcomerKit(t)
 	container := startNewcomerContainer(t, ctx, docker, kit)
 
@@ -152,12 +161,15 @@ func newcomerKit(t *testing.T) string {
 }
 
 // startNewcomerContainer runs the image with the kit mounted read-only and nothing to do, and
-// returns its id. It shares the host's network namespace so the loopback stub is reachable, and it
-// is removed however the test ends.
+// returns its id. It joins docker's default bridge network rather than the host's namespace: the
+// stub upstream on the bridge gateway and the internet are reachable, nothing else on this machine
+// is. Processes and memory are capped and the container cannot gain privileges; it still runs as
+// root, because the reader's `apt` needs to. It is removed however the test ends.
 func startNewcomerContainer(t *testing.T, ctx context.Context, docker, kit string) string {
 	t.Helper()
 
-	run := exec.CommandContext(ctx, docker, "run", "--detach", "--network", "host",
+	run := exec.CommandContext(ctx, docker, "run", "--detach", "--network", "bridge",
+		"--pids-limit", "512", "--memory", "2g", "--security-opt", "no-new-privileges",
 		"--volume", kit+":/kit:ro", newcomerImage, "sleep", "3600")
 	out, err := run.CombinedOutput()
 	if err != nil {
@@ -172,6 +184,26 @@ func startNewcomerContainer(t *testing.T, ctx context.Context, docker, kit strin
 		}
 	})
 	return id
+}
+
+// newcomerBridgeGateway is the address the container reaches this machine on: the gateway of
+// docker's default bridge network, where the stub upstream binds. An answer that is empty or is not
+// an IP is a soft gate like the other three — without it there is no address to hand the reader.
+func newcomerBridgeGateway(t *testing.T, ctx context.Context, docker string) string {
+	t.Helper()
+
+	inspect := exec.CommandContext(ctx, docker, "network", "inspect", "bridge",
+		"--format", "{{(index .IPAM.Config 0).Gateway}}")
+	out, err := inspect.CombinedOutput()
+	if err != nil {
+		t.Skipf("could not inspect the docker bridge network (is the docker daemon running?): %v\n%s", err, out)
+	}
+	gateway := strings.TrimSpace(string(out))
+	if net.ParseIP(gateway) == nil {
+		t.Skipf("the docker bridge network named no usable gateway address (got %q); "+
+			"the newcomer stub has nowhere the container can reach it", gateway)
+	}
+	return gateway
 }
 
 // driveNewcomer runs the tool-use loop and returns the shell transcript beside the model's closing
@@ -190,7 +222,8 @@ func driveNewcomer(t *testing.T, ctx context.Context, docker, container, upstrea
 	runTool := provider.ToolSpec{
 		Name: "run",
 		Description: "Run one shell command inside the sandbox and get its combined output back. " +
-			"The command runs as root in a Debian container with /kit read-only.",
+			"The command runs as root in a Debian container with /kit read-only, on a private " +
+			"network: the model server and the internet are reachable, nothing else on this machine is.",
 		Parameters: json.RawMessage(`{"type":"object","properties":{"command":` +
 			`{"type":"string","description":"the shell command to run"}},"required":["command"]}`),
 	}
@@ -289,7 +322,7 @@ func newcomerTask(upstream, model string) string {
 - /kit/README.md and /kit/docs/manual/ — the only documentation that exists.
 - /kit/apogee_*.tar.gz — a release archive already downloaded for this machine's platform. Wherever the documents tell you to download an archive, use this local file instead; that substitution is expected and is not a finding.
 - An OpenAI-compatible model server already running at %s, serving the model %q. No API key is needed.
-- No Homebrew, no Go toolchain, no internet, and NO interactive terminal: this shell cannot run a full-screen program. Where the documents describe an interactive session, use the documented non-interactive way to send one prompt instead. If the documents describe no such way, that itself is a finding — report it.
+- No Homebrew, no Go toolchain, and NO interactive terminal: this shell cannot run a full-screen program. Where the documents describe an interactive session, use the documented non-interactive way to send one prompt instead. If the documents describe no such way, that itself is a finding — report it.
 
 Goal: install apogee from the archive and get one reply back from the model server, using only those two documents. Then write your report.`, upstream, model)
 }

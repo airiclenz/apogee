@@ -720,7 +720,11 @@ vets `uses:` SHAs only).
 
 **Commit.** `build: make check and CI run the one pinned actionlint`
 
-## 14. The newcomer container leaves the host network namespace
+## 14. The newcomer container leaves the host network namespace — ✅ DONE (2026-08-28)
+
+NOTES (2026-08-28): the item cites `docs/design/test-drivers.md:813` for the "why Linux" sentence; the sentence lives in the gate table's newcomer row (`:836` on this tree) and was edited there — the plan states line numbers are hints and the anchor is the symbol.
+
+NOTES (2026-08-28): both new soft gates were exercised with a fake `docker` on PATH (empty gateway, then an unbindable `172.17.0.1`) and each skipped naming the gate; the judged run itself cannot execute here — no docker, no judge endpoint.
 
 **What.** Audit: *the live judge runs as root in the host network namespace in the newcomer
 e2e container* (Medium, Security). `cmd/apogee/e2e_newcomer_test.go:160-161` runs

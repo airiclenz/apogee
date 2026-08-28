@@ -833,7 +833,7 @@ whose twenty-five seconds ARE the claim (see below).
 | in-process e2e | yes, every platform | — |
 | PTY e2e | yes | Windows; a failed `TestMain` build (both say so in the skip) |
 | judge | no | always, unless `APOGEE_JUDGE_ENDPOINT` / `APOGEE_LIVE_ENDPOINT` is set — it joins `make live-eval` |
-| newcomer container | no | needs BOTH `docker` on PATH and the judge gate, and Linux (`--network host` shares loopback there only); local-only, outside the budget |
+| newcomer container | no | needs BOTH `docker` on PATH and the judge gate, and Linux (the host can bind on the docker bridge gateway there only, which is where the stub upstream listens); local-only, outside the budget |
 | workflow gates | not a Go test | `scripts/check-pins.sh` and `actionlint` run from `make check` and from the CI check job |
 | release smoke | not a Go test | `make release-smoke VERSION=vX.Y.Z`, by hand, only once the release is published |
 
