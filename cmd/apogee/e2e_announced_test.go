@@ -16,6 +16,7 @@ package main
 // has nothing to answer with under the in-process driver.
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -326,11 +327,20 @@ func announcedScratchDir(t *testing.T, stub *stubllm.Server) string {
 // announced-workspace.yaml keys its first tool turn on.
 const announcedWorkspacePrompt = "Use every workspace tool on the project tree."
 
-// announcedWorkspaceEdit is the line the edit leaves behind in the file the write created. It is
-// what a read of the REAL tree has to come back with, which is a stronger claim than the tool's own
-// receipt: a write that landed anywhere but where the project actually lives would still report
-// success against the name it was given.
-const announcedWorkspaceEdit = "APOGEE-ANNOUNCED-EDIT-4b93"
+// announcedWorkspaceEdit is the line the edit leaves behind in the seeded file, and
+// announcedWorkspaceWrite the line the write leaves in the file it creates. Each is what a read of
+// the REAL tree has to come back with, which is a stronger claim than the tool's own receipt: a
+// write that landed anywhere but where the project actually lives would still report success
+// against the name it was given.
+const (
+	announcedWorkspaceEdit  = "APOGEE-ANNOUNCED-EDIT-4b93"
+	announcedWorkspaceWrite = "APOGEE-ANNOUNCED-WRITE-2c07"
+)
+
+// announcedWorkspaceCanary is a file this test seeds into the real tree and tells nobody about. The
+// listing's receipt has to name it: the script never mentions it, so a `list_dir` that answered
+// from anywhere but the directory the announced name resolves to could not have invented it.
+const announcedWorkspaceCanary = "canary-9d4e.txt"
 
 // TestE2EAnnouncedWorkspaceThroughASymlink is the invariant over the orientation's `Workspace:`
 // line on the host shape macOS hands every user by default: a project tree reached through a
@@ -344,11 +354,17 @@ const announcedWorkspaceEdit = "APOGEE-ANNOUNCED-EDIT-4b93"
 // below reads, writes, edits, lists and cats through the announced spelling alone — the last of
 // those from a confined subprocess, whose fence is built from the same name — and asserts that not
 // one of them was refused, and that nobody was asked.
+//
+// Every receipt is judged against the real tree rather than against its own wording: the listing has
+// to name a canary file the script never mentions, and each write is read back out of the directory
+// the link resolves to. A tool that answered from the wrong root would leave those checks with
+// nothing to find.
 func TestE2EAnnouncedWorkspaceThroughASymlink(t *testing.T) {
 	installFenceableConfiner(t)
 
 	// The tree the project really lives in, and the name apogee is given for it.
 	tree := e2eWorkspace(t)
+	writeFile(t, filepath.Join(tree, announcedWorkspaceCanary), "seeded before the run\n")
 	ws := symlinkTo(t, tree)
 
 	stub := stubllm.New(t, loadScript(t, "announced-workspace"))
@@ -370,15 +386,27 @@ func TestE2EAnnouncedWorkspaceThroughASymlink(t *testing.T) {
 		t.Fatalf("the run produced %d tool results; want the fixture's five:\n%s",
 			len(results), strings.Join(results, "\n---\n"))
 	}
+	// What the run actually left in the tree the link points at. The two write receipts are judged
+	// against these bytes rather than against their own wording: a tool that had measured the
+	// announced spelling against the resolved root and written somewhere else would still report
+	// success against the name it was handed.
+	wrote := readTreeFile(t, tree, "b.txt")
+	edited := readTreeFile(t, tree, "a.txt")
+
 	// Each result is its own tool's success receipt. A tool that had measured the announced spelling
 	// against the resolved root would answer with the read-scope refusal instead, which is the
 	// failure this whole suite exists to keep out of a user's session.
 	wants := [][]string{
-		{"hello"},             // read_file gave the seeded file back
-		{"wrote ", "b.txt"},   // write_file created a file in the project
-		{"updated ", "b.txt"}, // edit_existing_file replaced its content
-		{"a.txt", "b.txt"},    // list_dir saw both of them
-		{"hello"},             // and the confined subprocess read through the link too
+		// read_file gave the seeded file back, before the edit replaced it.
+		{"hello"},
+		// write_file created a file in the project, and counted the bytes that landed on disk.
+		{fmt.Sprintf("wrote %d bytes to ", len(wrote)), "b.txt"},
+		// edit_existing_file replaced the seeded file's content.
+		{"updated ", "a.txt"},
+		// list_dir saw all three files, the canary the script never mentions included.
+		{"a.txt", "b.txt", announcedWorkspaceCanary},
+		// And the confined subprocess read the edit back through the link.
+		{announcedWorkspaceEdit},
 	}
 	for i, want := range wants {
 		if strings.Contains(results[i], "outside the workspace root") {
@@ -393,13 +421,12 @@ func TestE2EAnnouncedWorkspaceThroughASymlink(t *testing.T) {
 		}
 	}
 
-	// And the writes reached the tree the link points at, not merely a path that spells the same.
-	edited, err := os.ReadFile(filepath.Join(tree, "b.txt"))
-	if err != nil {
-		t.Fatalf("read the written file back from the real workspace: %v", err)
+	// And each write reached the tree the link points at, not merely a path that spells the same.
+	if !strings.Contains(wrote, announcedWorkspaceWrite) {
+		t.Errorf("the real workspace holds %q as b.txt; want the written content", wrote)
 	}
-	if !strings.Contains(string(edited), announcedWorkspaceEdit) {
-		t.Errorf("the real workspace holds %q as b.txt; want the edited content", edited)
+	if !strings.Contains(edited, announcedWorkspaceEdit) {
+		t.Errorf("the real workspace holds %q as a.txt; want the edited content", edited)
 	}
 
 	if n := panes(); n != 0 {
@@ -455,6 +482,19 @@ func writeFile(t *testing.T, path, body string) {
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatalf("write %s: %v", path, err)
 	}
+}
+
+// readTreeFile reads one file back out of the tree a workspace symlink points at — the REAL
+// directory, named without going through the link, so a tool that wrote to the announced spelling
+// and a tool that wrote to the resolved one cannot both satisfy it by accident.
+func readTreeFile(t *testing.T, tree, name string) string {
+	t.Helper()
+
+	body, err := os.ReadFile(filepath.Join(tree, name))
+	if err != nil {
+		t.Fatalf("read %s back from the real workspace: %v", name, err)
+	}
+	return string(body)
 }
 
 // paneWatchInterval is how often the pane counter reads the frame. An approval pane stands until it

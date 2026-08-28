@@ -14,6 +14,13 @@
 # own workspace an escape; a write tool that did the reverse would refuse to create a file in the
 # project. Both halves are exercised here — read, write, edit, list — and the terminal call adds the
 # confined-subprocess route, which reaches the tree through a fence built from the same name.
+#
+# The write and the edit deliberately land on DIFFERENT files: b.txt is created and never touched
+# again, a.txt is read first and then replaced. Each therefore leaves its own bytes on disk at the
+# end of the run, so the test can judge both receipts against the tree the link points at rather
+# than against their own wording — a tool that reported success against a path it never reached
+# would leave nothing behind to read. The terminal `cat` of a.txt then comes back with the edited
+# content, so the confined subprocess reads the run's own write through the announced name.
 model: announced-model
 turns:
     # The session title. apogee asks for one off the first prompt, so this has to be matched BEFORE
@@ -40,7 +47,7 @@ turns:
       tool_calls:
         - id: ws-write
           name: write_file
-          arguments: '{"path":"{{workspace}}/b.txt","content":"before the edit\n"}'
+          arguments: '{"path":"{{workspace}}/b.txt","content":"APOGEE-ANNOUNCED-WRITE-2c07\n"}'
     - when:
         tool_result: write_file
       captures:
@@ -48,7 +55,7 @@ turns:
       tool_calls:
         - id: ws-edit
           name: edit_existing_file
-          arguments: '{"path":"{{workspace}}/b.txt","content":"APOGEE-ANNOUNCED-EDIT-4b93\n"}'
+          arguments: '{"path":"{{workspace}}/a.txt","content":"APOGEE-ANNOUNCED-EDIT-4b93\n"}'
     - when:
         tool_result: edit_existing_file
       captures:

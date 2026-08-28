@@ -981,7 +981,11 @@ bullet (the changelog is the trail). Nothing else in the file changes.
 
 **Commit.** `docs(issues): the nine run-residual sections are closed`
 
-## 35. The workspace e2e proves every tool touched the real tree
+## 35. The workspace e2e proves every tool touched the real tree — ✅ DONE (2026-08-28)
+
+NOTES (2026-08-28): the item asks for `a.txt` and `b.txt` to be read back after the run to judge the `write_file` and `edit_existing_file` receipts, which the landed fixture made impossible — both writes targeted `b.txt`, so the edit overwrote the write's bytes and nothing of the write survived to read. The fixture now points the edit at the seeded `a.txt` (read by `read_file` one turn earlier, so its own receipt is unaffected) and leaves `b.txt` to the write alone. Consequence: the terminal turn's `cat {{workspace}}/a.txt` — command unchanged — now returns the edit marker rather than `hello`, and its want moved with it; that receipt is no weaker, since it still proves the confined subprocess read the real tree through the announced name and now also that the edit reached it.
+
+NOTES (2026-08-28): both halves were mutation-checked — pointing the read-back at a different tree fails all three assertions (the `wrote %d bytes to ` count included), and seeding the canary outside the tree fails the listing's receipt.
 
 **What.** Residual of plan `2026-08-28 - 01` item 6, never recorded in `ISSUES.md`: in
 `TestE2EAnnouncedWorkspace` only the `read_file` and `terminal` receipts prove their content
