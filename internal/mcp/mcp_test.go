@@ -675,3 +675,65 @@ func findTool(t *testing.T, tools []domain.Tool, name string) domain.Tool {
 	t.Fatalf("tool %q not surfaced; have %v", name, names)
 	return nil
 }
+
+// Admit is the partition a host makes BEFORE it dials, so that a url-safety edit can move the
+// connected set to what the new lists still allow instead of failing it whole (Connect is
+// all-or-nothing). The three classes in one call are the whole claim: an HTTP-transported server on
+// a closed host is denied by name, one on an open host is admitted, and a stdio server — a trusted
+// local launch with no endpoint at all — is outside the URL policy and rides through untouched.
+func TestAdmitPartitionsTheSetByTheHostLists(t *testing.T) {
+	t.Parallel()
+	servers := []ServerConfig{
+		{Name: "closed", Transport: TransportSSE, Endpoint: "https://blocked.example.com/mcp"},
+		{Name: "local", Transport: TransportStdio, Command: "the-server"},
+		{Name: "open", Transport: TransportStreamableHTTP, Endpoint: "https://allowed.example.com/mcp"},
+	}
+
+	admitted, denied := Admit(servers, security.NewURLGuard(nil, []string{"blocked.example.com"}))
+
+	if names := serverNames(admitted); len(names) != 2 || names[0] != "local" || names[1] != "open" {
+		t.Errorf("admitted = %v; want the stdio server and the open endpoint, in config order", names)
+	}
+	if len(denied) != 1 || denied[0].Name != "closed" {
+		t.Fatalf("denied = %+v; want exactly the server on the closed host", denied)
+	}
+	if !errors.Is(denied[0].Err, ErrEndpointDenied) {
+		t.Errorf("denial = %v; want it to carry ErrEndpointDenied so a caller can tell the "+
+			"operator's own policy from a malformed endpoint", denied[0].Err)
+	}
+}
+
+// The other denial is not the policy's and must not be reported as if it were: an endpoint that is
+// empty or does not parse is a fault in the file, and a caller that worded it "denied" would send
+// the human hunting through their host lists for a typo that is somewhere else entirely.
+func TestAdmitSeparatesAMalformedEndpointFromADeniedOne(t *testing.T) {
+	t.Parallel()
+	servers := []ServerConfig{
+		{Name: "empty", Transport: TransportSSE},
+		{Name: "unparseable", Transport: TransportStreamableHTTP, Endpoint: "http://[::1"},
+	}
+
+	admitted, denied := Admit(servers, security.NewURLGuard(nil, nil))
+
+	if len(admitted) != 0 {
+		t.Errorf("admitted = %+v; want none — neither endpoint is dialable", admitted)
+	}
+	if len(denied) != 2 {
+		t.Fatalf("denied = %+v; want both servers reported", denied)
+	}
+	for _, d := range denied {
+		if errors.Is(d.Err, ErrEndpointDenied) {
+			t.Errorf("server %q was reported as denied by url-safety; its endpoint never reached "+
+				"the host lists: %v", d.Name, d.Err)
+		}
+	}
+}
+
+// serverNames is what a partition ADMITTED, in the order the config spelled it.
+func serverNames(servers []ServerConfig) []string {
+	names := make([]string, 0, len(servers))
+	for _, s := range servers {
+		names = append(names, s.Name)
+	}
+	return names
+}

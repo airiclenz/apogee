@@ -27,6 +27,7 @@ package main
 // request, and nothing leaves the machine.
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -156,20 +157,36 @@ func TestE2EEgress(t *testing.T) {
 			"network tools re-read the host lists live or the row is decoration")
 	}
 
-	// Step 6 — the same live list, read by the OTHER surface. Renaming the server makes the file's
-	// `mcp-servers:` differ from the session's, which is a reconnect — and the endpoint is on the
-	// deny list now, so the reconnect is refused and the connections the session already had are
-	// kept. That the OLD alias still answers is the whole claim: a reconnect that had landed would
-	// have replaced `docs__echo` with `manuals__echo`.
+	// Step 6 — the same live list, read by the OTHER surface. The deny list of step 5 names the MCP
+	// endpoint too, so that one edit did not only re-point the network tools: it re-admitted the
+	// configured servers under the new lists and dropped the one they close. `docs__echo` is gone
+	// from a session that was calling it a moment ago, and the model's ask for it comes back as an
+	// unknown tool. Before this, the two surfaces disagreed until something else happened to dial.
+	submit(drv, "Echo through the docs server once more.")
+	drv.WaitText("Nothing else to reach for.")
+	awaitRefusedCalls(t, drv, sess, 1)
+	if record := sessionRecordText(t, sess.Home()); strings.Contains(record, "echo: still here") {
+		t.Error("docs__echo answered after the operator denied its endpoint; the MCP connection and " +
+			"the network tools must not disagree about which hosts are closed")
+	}
+
+	// And the reconnect an `mcp-servers:` edit drives is refused for the reason it always was — the
+	// endpoint is still on the deny list — so renaming the server brings nothing back: no
+	// `manuals__echo`, and the same unknown tool for the ask that follows.
+	//
+	// ADR 0037 decision 7 ("a refused reconnect keeps the old connections") loses its observation
+	// here, because after step 5 the previous set is empty. It stays unit-covered, by
+	// TestMCPReconnectUsesTheLiveURLSafetyLists (the refusal is the live lists', not the network's)
+	// and TestApplySettingMCPReconnectKeepsTheOldSessionsWhenTheDialFails (the old sessions stand).
 	renameHomeConfig(t, sess.Home(), "name: docs", "name: manuals")
 	drv.WaitText("applied: mcp-servers")
 	drv.WaitQuiet(settled)
 
 	submit(drv, "Echo through the docs server once more.")
-	allowAndAwait(drv, "The docs server still answers.")
-	if record := sessionRecordText(t, sess.Home()); !strings.Contains(record, "echo: still here") {
-		t.Error("docs__echo stopped answering after a REFUSED reconnect; a reconnect that cannot " +
-			"land must leave the session on the connections it already had")
+	awaitRefusedCalls(t, drv, sess, 2)
+	if record := sessionRecordText(t, sess.Home()); strings.Contains(record, "manuals__echo") {
+		t.Error("the renamed server's tools reached the session; a reconnect whose endpoint the deny " +
+			"list still closes brings nothing back")
 	}
 
 	// Step 7 — the upstream itself moves. A 308 is reported to the human, never followed: following
@@ -260,6 +277,20 @@ func TestE2EEgressLongStreamIsNotDeadlined(t *testing.T) {
 // scoped to the URL it was granted on (the url-filter marker, internal/tools/network.go), so two
 // fetches of two different pages ask twice while two fetches of the SAME page ask once, and a step
 // that hard-coded either shape would fail on the other.
+// awaitRefusedCalls waits until the session record carries want tool calls that found no such tool.
+//
+// The count is what makes the wait honest across step 6's two asks: the model's fallback reply is
+// the same sentence both times and is already on the screen for the second one, so a frame wait
+// would return before the turn it is meant to be about had even started. The refusals are counted
+// rather than matched whole because the record is JSON and the tool name in "unknown tool %q" is
+// escaped there; the only calls in this run that can miss the registry are the two this step makes.
+func awaitRefusedCalls(t *testing.T, drv *tuitest.PTYDriver, sess *ptySession, want int) {
+	t.Helper()
+	drv.WaitFor(func() bool {
+		return strings.Count(sessionRecordText(t, sess.Home()), "unknown tool") >= want
+	}, tuitest.Awaiting(fmt.Sprintf("%d call(s) on the dropped server to be refused as unknown", want)))
+}
+
 func allowAndAwait(drv *tuitest.PTYDriver, done string) {
 	const approvalRow = "Always allow this session"
 

@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -237,6 +238,14 @@ func vetEndpoint(ctx context.Context, cfg ServerConfig, guard security.URLGuard)
 	return u.String(), newGuardedHTTPClient(control), nil
 }
 
+// ErrEndpointDenied marks the one refusal of an HTTP-transported endpoint that is the OPERATOR's
+// own policy rather than a malformed value: the url-safety host lists closed it. It is a sentinel
+// because a caller that partitions a set (Admit) has to word the two differently — a closed host is
+// news about the policy the human just edited, an unparseable endpoint is news about their typo —
+// and the wrapped guard error alone does not separate them. The sentence it contributes is unchanged
+// from the one this check has always produced.
+var ErrEndpointDenied = errors.New("endpoint blocked by url-safety")
+
 // checkEndpoint refuses an empty or unparseable endpoint, runs the pre-flight url-safety check
 // on an HTTP-transported server's endpoint, and returns the ONE normalised form the transport is
 // to be given.
@@ -264,7 +273,7 @@ func checkEndpoint(ctx context.Context, cfg ServerConfig, guard security.URLGuar
 		return nil, fmt.Errorf("mcp: server %q has an unparseable endpoint", cfg.Name)
 	}
 	if err := guard.DisableIPFloor().CheckContext(ctx, u.String()); err != nil {
-		return nil, fmt.Errorf("mcp: server %q endpoint blocked by url-safety: %w", cfg.Name, err)
+		return nil, fmt.Errorf("mcp: server %q %w: %w", cfg.Name, ErrEndpointDenied, err)
 	}
 	return u, nil
 }

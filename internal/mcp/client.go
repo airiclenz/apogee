@@ -95,6 +95,51 @@ func Connect(ctx context.Context, servers []ServerConfig, guard security.URLGuar
 	return c, nil
 }
 
+// Denied is one configured server a connect may NOT dial: the alias the host knows it by, and the
+// refusal its endpoint earned. It is a value rather than an error slice because the caller reports
+// the servers by NAME — a human who closed a host wants to be told which of their servers went with
+// it, and the error alone spells that only inside its own sentence.
+type Denied struct {
+	// Name is the server's configured alias — the same one its tools are surfaced under.
+	Name string
+	// Err is why the endpoint was refused: ErrEndpointDenied where the host lists closed it, the
+	// missing/unparseable-endpoint refusal otherwise.
+	Err error
+}
+
+// Admit partitions a configured server set into the servers guard lets a connect dial and the ones
+// its endpoint closes, WITHOUT dialling anything.
+//
+// It exists because Connect is all-or-nothing (see above): a host that wants the set to follow a
+// url-safety edit rather than fail whole has to know which servers the new lists still admit before
+// it dials. The check is exactly the one a connect makes at the door — checkEndpoint's
+// guard.DisableIPFloor().CheckContext over the normalised endpoint — so a server this admits is a
+// server whose endpoint that connect will not refuse, and a server this denies is one that would
+// have failed the whole set.
+//
+// A stdio server has no endpoint and is always admitted: it is a trusted local launch, outside the
+// URL policy altogether (see doc.go's trust boundary). So is a server whose transport this build
+// does not know — its refusal is Connect's to make, and reporting it as a url-safety denial would
+// name the wrong reason.
+//
+// The context the endpoint check takes is the caller's only through this call: the floorless check
+// resolves nothing, so there is no lookup here to bound, and threading one in would suggest a wait
+// that cannot happen.
+func Admit(servers []ServerConfig, guard security.URLGuard) (admitted []ServerConfig, denied []Denied) {
+	admitted = make([]ServerConfig, 0, len(servers))
+	for _, cfg := range servers {
+		switch cfg.Transport {
+		case TransportSSE, TransportStreamableHTTP:
+			if _, err := checkEndpoint(context.Background(), cfg, guard); err != nil {
+				denied = append(denied, Denied{Name: cfg.Name, Err: err})
+				continue
+			}
+		}
+		admitted = append(admitted, cfg)
+	}
+	return admitted, denied
+}
+
 // connectOne dials a single server, lists its tools, and appends the session and the surfaced
 // tools to the Client. A connect or list failure is returned (the caller rolls the whole set
 // back). The session is recorded BEFORE listing tools so a list failure still tears the

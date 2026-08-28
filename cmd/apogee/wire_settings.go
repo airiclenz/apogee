@@ -9,6 +9,7 @@ package main
 // is the same resolution runRoot does at startup run again with another model.
 
 import (
+	"errors"
 	"fmt"
 	"maps"
 	"os"
@@ -20,6 +21,7 @@ import (
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/mcp"
 	"github.com/airiclenz/apogee/internal/mechanisms"
 	"github.com/airiclenz/apogee/internal/profiles"
 	"github.com/airiclenz/apogee/internal/provider"
@@ -1258,6 +1260,10 @@ func applyURLSafetyHosts(a settingsApplier, key, value string) (string, error) {
 	// configuration). An entry that normalises to nothing is dropped where the guard is
 	// built, exactly as it is at startup, so there is nothing to report on the row.
 	hosts := config.ParseSettingList(value)
+	// The lists the live connections were admitted under, read BEFORE the swap door moves them:
+	// whether the MCP half below has anything to do is a question about the DIFFERENCE the edit
+	// makes, and after the rebuild there is nothing left to compare against.
+	before := a.tools.built()
 	move := a.tools.setAllowHosts
 	if key == "url-safety.deny-hosts" {
 		move = a.tools.setDenyHosts
@@ -1267,8 +1273,103 @@ func applyURLSafetyHosts(a settingsApplier, key, value string) (string, error) {
 	}
 	a.recordToolSet()
 	// The same boundary the roster reports, because it is the same boundary: the set is
-	// swapped on commit and the next request runs against the guard it carries.
-	return toolRosterNote, nil
+	// swapped on commit and the next request runs against the guard it carries. The MCP
+	// connections are the other surface these lists bind, and they follow here rather than on
+	// the next `mcp-servers:` edit — its note rides this one.
+	return toolRosterNote + a.readmitMCP(before), nil
+}
+
+// readmitMCP moves the live MCP connections onto the servers the host lists NOW admit, and answers
+// with what the url-safety row has to add about it — the empty string when there is nothing to say.
+//
+// It exists because the two surfaces the `url-safety:` lists bind are reached differently. Every
+// network tool is handed the guard at construction, so the swap door above puts the new lists in
+// force the moment it returns; the MCP guard is consumed at CONNECT time and never retained
+// (internal/mcp/transport.go), so the only way a live connection follows a list is to dial again.
+// Without this, an operator who closed a host kept talking to the MCP server on it until something
+// else happened to reconnect (audit 2026-08-28: "after a `/settings` url-safety edit, network tools
+// and the MCP connection disagree about which hosts are allowed").
+//
+// Connect is all-or-nothing, so the set is PARTITIONED first (mcp.Admit) and only the admitted
+// servers are dialled: a server the new lists close is dropped and named, rather than costing the
+// session every other server it was talking to.
+//
+// Three things it deliberately does not do.
+//
+// It does not dial when the admitted set is unchanged. A reconnect is a new process per stdio
+// server and a handshake per HTTP one, run synchronously on the Update goroutine — so dialling on
+// every host-list edit would freeze the frame, reset every server's state and break a stdio server
+// that holds a lock or a port, all for a verdict that did not move. The common edit (a web-tool host,
+// while a stdio server is connected) changes no verdict at all and must stay as instant as it is
+// today, which is what comparing the admission under the OLD lists against the NEW one buys.
+//
+// It does not return an error. The tool rebuild above has already COMMITTED — the primary effect of
+// the edit is in force — so a failed dial that came back as the row's error would report `saved —
+// live apply failed` about an edit that applied. It lands in the note instead, in the same sentence
+// liveMCP.reconnect words for the `mcp-servers:` row, so the human is told the same two things:
+// what failed, and that the connections they had are still theirs.
+//
+// And it does nothing at all for a Driver that composed no MCP holder or no config path (ADR 0031's
+// documented embedder: wire_mcp.go). The host lists still reach that Driver's tools; there is simply
+// no connection for them to reach.
+func (a settingsApplier) readmitMCP(before toolSetSpec) string {
+	if a.mcp == nil || a.configPath == "" {
+		return ""
+	}
+	// Only the FILE names an MCP server (no flag, no environment variable), so the set to partition
+	// is read exactly as reconnectMCP reads it. A file that no longer parses leaves the connections
+	// where they are and says so, for the reason above: this half cannot fail the row.
+	file, err := config.LoadFileConfig(a.configPath, os.ReadFile, func(string) {})
+	if err != nil {
+		return mcpNoteFor(mcpReconnectFailed(err))
+	}
+	now := a.tools.built()
+	was, _ := mcp.Admit(file.MCPServers, mcpGuard(before.allowHosts, before.denyHosts))
+	admitted, denied := mcp.Admit(file.MCPServers, mcpGuard(now.allowHosts, now.denyHosts))
+	if sameServerNames(was, admitted) {
+		return ""
+	}
+	if err := a.mcp.reconnect(admitted, a.tools, a.engine); err != nil {
+		return mcpNoteFor(err)
+	}
+	var note strings.Builder
+	for _, d := range denied {
+		note.WriteString("; mcp server " + d.Name + " disconnected — " + deniedReason(d))
+	}
+	return note.String()
+}
+
+// deniedReason is what the note says about ONE server the re-admission dropped. A host the operator
+// closed is reported as the policy decision it is — they have just edited that policy and the server
+// name is the whole news. Anything else (an endpoint that is empty, or that does not parse) is a
+// fault in the file the human has to see spelled out, and calling it "denied" would send them
+// looking at the host lists for a typo that is not there.
+func deniedReason(d mcp.Denied) string {
+	if errors.Is(d.Err, mcp.ErrEndpointDenied) {
+		return "its endpoint is denied"
+	}
+	return d.Err.Error()
+}
+
+// mcpNoteFor turns a failed re-admission into the clause the url-safety row carries. liveMCP's own
+// sentence is reused verbatim rather than re-worded here so the two rows that can report a failed
+// reconnect — `mcp-servers:` and this one — tell the human the same thing.
+func mcpNoteFor(err error) string { return "; mcp " + err.Error() }
+
+// sameServerNames reports whether two admitted sets name the same servers in the same order. Both
+// come from one partition of one slice, so order is the file's and equal order is equal membership;
+// the NAME is the identity because that is what the connection is keyed by and what the tools it
+// surfaces are prefixed with.
+func sameServerNames(a, b []mcp.ServerConfig) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i].Name != b[i].Name {
+			return false
+		}
+	}
+	return true
 }
 
 // applyPresentation is the one apply behind all four `present.` rows: the ladder rebuilds from the

@@ -455,7 +455,31 @@ fail before).
 
 **Commit.** `fix(tui): /clear in a pre-bound session resets the view instead of asking for a server`
 
-## 8. A url-safety edit re-applies to the live MCP connection
+## 8. A url-safety edit re-applies to the live MCP connection — ✅ DONE (2026-08-28)
+
+NOTES (2026-08-28): `mcpGuard` de-methodised from `*rootWiring` to a package-level function in
+`wire_live.go` (name and body unchanged, both call sites updated). The item's text says the apply
+partitions "under `w.mcpGuard(…)`", but `applyURLSafetyHosts` is composed from the root's members
+rather than from the root and holds no `w`; building the guard through a second call to
+`security.NewURLGuard` would have been exactly the drift `mcpGuard` exists to prevent.
+
+NOTES (2026-08-28): the e2e step-6 rewrite does not read the disconnect NOTE off the pty. An apply
+note lands on the settings row alone (`settingsapply.go` → `settingEdit.note`, rendered only in the
+`/settings` pane); it never reaches the transcript or the session record, so "the session record
+carries the disconnect note" is not observable there. The note's exact wording is pinned by
+`TestApplySettingURLSafetyHostsDropsAnMCPServerTheNewListDenies` instead, and step 6 observes the
+other announced half — the tool is gone, the ask comes back as an unknown tool, and the refused
+rename reconnect brings nothing back.
+
+NOTES (2026-08-28): `docs/manual/configuration.md` gained two sentences under "Both lists are
+live" — beyond the item's Files list, but the behaviour it documents is user-facing (a host-list
+edit can now disconnect a connected MCP server and says so on the row) and the section stated the
+old behaviour as the whole story.
+
+NOTES (2026-08-28): a config file that no longer parses at the re-admission is reported with
+`liveMCP`'s own reconnect-failure sentence rather than a new wording, and never as the row's error
+— the item states guard (b) for a failed dial and is silent on a failed re-read; the same reasoning
+(the tool rebuild has already committed) applies to both.
 
 **What.** Audit: *after a `/settings` url-safety edit, network tools and the MCP connection
 disagree about which hosts are allowed* (Medium, Security; the audit's path is wrong — the

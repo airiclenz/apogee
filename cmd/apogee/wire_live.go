@@ -79,7 +79,7 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	// configured `deny-hosts` entry applied to every network tool and to no MCP endpoint (audit
 	// 2026-08-25 F-40); a denied host is now refused at startup with the url-safety message.
 	mcpClient, err := mcp.Connect(ctx, w.opts.MCPServers,
-		w.mcpGuard(w.cfg.URLAllowHosts, w.cfg.URLDenyHosts), w.roots.workspace)
+		mcpGuard(w.cfg.URLAllowHosts, w.cfg.URLDenyHosts), w.roots.workspace)
 	if err != nil {
 		return fmt.Errorf("apogee: connect MCP servers: %w", err)
 	}
@@ -92,11 +92,17 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	// The reconnect runs LATER, when an `mcp-servers:` edit lands (liveMCP.reconnect), by which time
 	// the host lists may have moved through `/settings` — so its guard is built from the spec the
 	// live tool set is currently on rather than from the snapshot this line closed over. That is the
-	// same read the network tools' own rebuild makes, which is what keeps the MCP endpoint check and
-	// the network tools from ever disagreeing about which hosts are closed.
+	// same read the network tools' own rebuild makes.
+	//
+	// Reading the live spec is only HALF of what keeps the MCP endpoint check and the network tools
+	// agreeing about which hosts are closed, though, and on its own it would leave them disagreeing
+	// until the next `mcp-servers:` edit — which may never come. The other half is that a host-list
+	// edit RECONNECTS on its own account when the new lists change which servers are admitted
+	// (applyURLSafetyHosts), so a server the operator has just closed is dropped there and then
+	// rather than kept until something else happens to dial.
 	w.mcpSet = newLiveMCP(mcpClient, func(servers []mcp.ServerConfig) (mcpSession, error) {
 		spec := w.toolSet.built()
-		return mcp.Connect(ctx, servers, w.mcpGuard(spec.allowHosts, spec.denyHosts), w.roots.workspace)
+		return mcp.Connect(ctx, servers, mcpGuard(spec.allowHosts, spec.denyHosts), w.roots.workspace)
 	})
 	// The registry is assembled HERE unconditionally rather than left to the engine's own
 	// resolveTools — which would build the identical set from this same Config — because the
@@ -393,10 +399,15 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 }
 
 // mcpGuard builds the url-safety guard an MCP connect is made under, from the host lists whichever
-// call site holds — the startup snapshot at wireSession, the live tool set's spec at a reconnect.
-// It exists so the two cannot drift: the guard is built through the same constructor, off the same
-// two fields, that registryWithMCP hands every network tool (wire_tools.go), so a host the operator
-// closed is closed on both paths or on neither.
-func (w *rootWiring) mcpGuard(allow, deny []string) security.URLGuard {
+// call site holds — the startup snapshot at wireSession, the live tool set's spec at a reconnect,
+// and the spec a `url-safety:` edit has just installed at the re-admission that edit drives
+// (applyURLSafetyHosts). It exists so those cannot drift: the guard is built through the same
+// constructor, off the same two fields, that registryWithMCP hands every network tool
+// (wire_tools.go), so a host the operator closed is closed on every path or on none.
+//
+// It takes no receiver precisely so the settings dispatcher can reach it: the applier is composed
+// from the root's members rather than from the root (wire_options.go), and a guard the apply built
+// through some other constructor would be the very drift this function exists to prevent.
+func mcpGuard(allow, deny []string) security.URLGuard {
 	return security.NewURLGuard(allow, deny)
 }

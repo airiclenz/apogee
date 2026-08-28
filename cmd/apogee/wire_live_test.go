@@ -163,3 +163,121 @@ func TestWireSessionFencesTheSettingsEditorAgainstTheWorkspace(t *testing.T) {
 			"the workspace the model writes into", err)
 	}
 }
+
+// A `url-safety:` edit binds BOTH surfaces the lists reach, and the MCP one is only reachable by
+// dialling again: the guard is consumed at connect time and never retained (internal/mcp/
+// transport.go), so a connection made under the old lists keeps talking to a host the operator has
+// just closed until something else happens to reconnect. This is the re-admission that closes it
+// (audit 2026-08-28: "after a `/settings` url-safety edit, network tools and the MCP connection
+// disagree about which hosts are allowed") — and because Connect is all-or-nothing, the denied
+// server is DROPPED and named rather than costing the session the servers it may still talk to.
+func TestApplySettingURLSafetyHostsDropsAnMCPServerTheNewListDenies(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	writeSettingsFixture(t, path, mcpServersFixture)
+
+	old := &fakeMCPSession{tools: []apogee.Tool{mcpFixtureTool{name: "docs__echo"}}}
+	var dialled [][]mcp.ServerConfig
+	fixture := newMCPFixture(old, "", func(servers []mcp.ServerConfig) (mcpSession, error) {
+		dialled = append(dialled, servers)
+		return &fakeMCPSession{}, nil
+	})
+	spy := &applySettingSpy{}
+	apply := applySettingFor(settingsApplier{engine: spy, tools: fixture.tools, mcp: fixture.set, configPath: path})
+
+	note, err := apply("url-safety.deny-hosts", "[mcp.example.com]")
+
+	if err != nil {
+		t.Fatalf("apply url-safety.deny-hosts: %v", err)
+	}
+	if want := toolRosterNote + "; mcp server docs disconnected — its endpoint is denied"; note != want {
+		t.Errorf("note = %q, want %q — a server the edit disconnected is news the row owes the human", note, want)
+	}
+	if len(dialled) != 1 || len(dialled[0]) != 0 {
+		t.Fatalf("dialled = %+v, want exactly one reconnect, to no server at all", dialled)
+	}
+	if !old.closed {
+		t.Error("the connection to the denied host is still open; the tool set followed the new list " +
+			"and the connection did not, which is the disagreement this closes")
+	}
+	if names := toolNames(fixture.set.tools()); len(names) != 0 {
+		t.Errorf("live MCP tools = %v, want none: the only server was dropped", names)
+	}
+}
+
+// The guard on that re-admission, and the reason it is a comparison rather than an unconditional
+// dial: a reconnect launches a process per stdio server and handshakes every HTTP one, synchronously
+// on the Update goroutine. The ordinary edit — a web-tool host, while an MCP server is connected —
+// changes no endpoint verdict at all, and paying a full re-dial for it would freeze the frame, reset
+// every server's state and break a stdio server holding a lock or a port. So a deny that covers
+// nothing leaves the connection exactly where it is.
+func TestApplySettingURLSafetyHostsLeavesMCPAloneWhenNoVerdictMoved(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	writeSettingsFixture(t, path, mcpServersFixture)
+
+	serving := &fakeMCPSession{tools: []apogee.Tool{mcpFixtureTool{name: "docs__echo"}}}
+	dials := 0
+	fixture := newMCPFixture(serving, "", func([]mcp.ServerConfig) (mcpSession, error) {
+		dials++
+		return &fakeMCPSession{}, nil
+	})
+	spy := &applySettingSpy{}
+	apply := applySettingFor(settingsApplier{engine: spy, tools: fixture.tools, mcp: fixture.set, configPath: path})
+
+	note, err := apply("url-safety.deny-hosts", "[unrelated.example.com]")
+
+	if err != nil {
+		t.Fatalf("apply url-safety.deny-hosts: %v", err)
+	}
+	if note != toolRosterNote {
+		t.Errorf("note = %q, want just %q: no server moved, so there is nothing to report", note, toolRosterNote)
+	}
+	if dials != 0 {
+		t.Errorf("the edit dialled %d time(s); a list that closes no configured endpoint must leave "+
+			"the live connections untouched", dials)
+	}
+	if serving.closed {
+		t.Error("the connections that are still admitted were torn down and re-made")
+	}
+	// Identity, not equivalence: a re-dial that happened to reach the same servers would still have
+	// cost every one of them its state. swap is the holder's only reader of the session itself, and
+	// putting `serving` back is a no-op exactly when the assertion passes.
+	if got := fixture.set.swap(serving); got != mcpSession(serving) {
+		t.Errorf("the holder is on %p, want the very session it started on (%p)", got, serving)
+	}
+}
+
+// The failure posture, and it is the opposite of the `mcp-servers:` row's. The tool rebuild has
+// already COMMITTED by the time the re-admission dials, so the primary effect of the edit is in
+// force — returning the dial's failure as the row's error would make the pane say `saved — live
+// apply failed` about an edit that applied. It goes in the note instead, in liveMCP's own words, so
+// the human is still told the two things that matter: what failed, and that the connections they had
+// are still theirs.
+func TestApplySettingURLSafetyHostsReportsAFailedReconnectInTheNote(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	writeSettingsFixture(t, path, mcpServersFixture)
+
+	serving := &fakeMCPSession{tools: []apogee.Tool{mcpFixtureTool{name: "docs__echo"}}}
+	fixture := newMCPFixture(serving, "", func([]mcp.ServerConfig) (mcpSession, error) {
+		return nil, errors.New("dial: connection refused")
+	})
+	spy := &applySettingSpy{}
+	apply := applySettingFor(settingsApplier{engine: spy, tools: fixture.tools, mcp: fixture.set, configPath: path})
+
+	note, err := apply("url-safety.deny-hosts", "[mcp.example.com]")
+
+	if err != nil {
+		t.Fatalf("apply url-safety.deny-hosts = %v; the host lists ARE in force, so the row must not "+
+			"report the edit as failed over the half that could not follow", err)
+	}
+	for _, want := range []string{toolRosterNote, "mcp reconnect failed", "connection refused", "previous connections kept"} {
+		if !strings.Contains(note, want) {
+			t.Errorf("note = %q, want it to contain %q", note, want)
+		}
+	}
+	if serving.closed {
+		t.Error("the sessions that are still serving were torn down by a reconnect that never happened")
+	}
+}

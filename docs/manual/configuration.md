@@ -214,7 +214,11 @@ proxy's own addresses, because the proxy is what is actually dialled.
 Both lists are live. `/settings` carries them as the `url-safety.allow-hosts` and
 `url-safety.deny-hosts` rows, and committing either — or saving the file — rebuilds the session's
 tool set around the new guard; that swap waits for the session to be idle, so a commit made
-mid-turn is reported on the row and re-committing retries it. The block is file-only (no flag, no
+mid-turn is reported on the row and re-committing retries it. The connected MCP servers follow the
+same edit: an `sse` or `streamable-http` endpoint your new lists close is disconnected there and
+then, and the row names it (`mcp server docs disconnected — its endpoint is denied`). The rest of
+your servers keep their connections, and an edit that closes no configured endpoint leaves every
+one of them untouched. The block is file-only (no flag, no
 environment variable) and global: it applies to every model this config runs.
 
 ## Where `web_search` looks — `web-search-endpoint:`
