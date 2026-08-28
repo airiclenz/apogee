@@ -248,6 +248,14 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **The README's stale-version tripwire now watches prose too.** The archive-install block resolves
+  `VERSION` from the latest release, but the comment beside it still carried a worked example
+  (`set VERSION=0.17.1 instead`) that went stale the moment 0.18.0 shipped, and
+  `TestReadmeArchiveInstallDoesNotPinAVersion` could not see it: the pattern was anchored to the
+  start of a line, so it only ever guarded the runnable one. The example is now the placeholder
+  `VERSION=<x.y.z>` and the match is unanchored, which catches a literal version anywhere in
+  `README.md` — the resolving line itself is `VERSION=$(curl …)` and never matches.
+
 - **`tuitest.Screen.Resize` is safe on a shrink.** A resize is the one moment the renderer is behind
   the terminal: the frame already on the wire carries the scroll region of the size it was laid out
   for, and `x/vt` applied that margin without clamping it to the buffer that had just shrunk — the

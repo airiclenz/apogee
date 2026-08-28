@@ -10,7 +10,9 @@ import (
 // TestReadmeArchiveInstallDoesNotPinAVersion is a tripwire, not a README
 // parser: the "A prebuilt archive" install block must resolve VERSION from
 // the latest GitHub release at run time, so a hard-coded `VERSION=0.x.y`
-// line — which goes stale with every release cut — must never return.
+// — which goes stale with every release cut — must never return. The match
+// is deliberately unanchored: prose and comments go stale exactly as fast as
+// the runnable line, so the example beside it is a placeholder, not a number.
 func TestReadmeArchiveInstallDoesNotPinAVersion(t *testing.T) {
 	t.Parallel()
 
@@ -20,7 +22,7 @@ func TestReadmeArchiveInstallDoesNotPinAVersion(t *testing.T) {
 	}
 	defer f.Close()
 
-	pinned := regexp.MustCompile(`^VERSION=[0-9]`)
+	pinned := regexp.MustCompile(`VERSION=[0-9]`)
 	sc := bufio.NewScanner(f)
 	for line := 1; sc.Scan(); line++ {
 		if pinned.MatchString(sc.Text()) {
