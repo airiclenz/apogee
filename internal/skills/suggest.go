@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 )
 
 // bm25K1 is BM25's term-frequency saturation parameter: how fast a term's contribution stops
@@ -44,6 +45,19 @@ const minTokenRunes = 2
 // so "goes" and "ties" keep their shape instead of collapsing into two-letter noise that collides
 // with unrelated words.
 const minStemRunes = 3
+
+// minPrefixRunes is the shortest term that may match another by prefix: four runes is the shortest
+// stem that names a topic — "plan", "test", "code" — and below it "run" would claim "running" and
+// "rune" alike. Either side may be the prefix ("relea" finds "release", "plan" finds "plann"), but
+// the shorter side must reach this floor.
+const minPrefixRunes = 4
+
+// nameBonusIDFs sizes the id / display-name bonus in units of the matched term's own IDF: a word
+// the author put in the skill's NAME is the skill's topic, while a summary mention is merely a use
+// of it. One IDF's worth keeps an id hit ahead of any single summary repeat without drowning a
+// two-term summary match. It is added beside BM25, never inside its term frequency, so it neither
+// saturates with k1 nor lengthens the document.
+const nameBonusIDFs = 1.0
 
 // triggerBoostIDFs sizes the trigger boost in units of the corpus's maximum single-term IDF: an
 // author who declared "cut a release" and saw it typed verbatim has said more than any one rare
@@ -104,9 +118,10 @@ type Suggestion struct {
 	ID          string
 	DisplayName string
 	Summary     string
-	// Score is the BM25 score over the draft's distinct terms, plus the trigger boost when
-	// TriggerHit. It is comparable only within one Suggest call — it is not a probability and
-	// carries no threshold a caller should test against.
+	// Score is the BM25 score over the draft's distinct terms, plus the name bonus for every term
+	// that hit the skill's id or display name, plus the trigger boost when TriggerHit. It is
+	// comparable only within one Suggest call — it is not a probability and carries no threshold
+	// a caller should test against.
 	Score float64
 	// TriggerHit reports that one of the skill's authored trigger phrases appeared verbatim in
 	// the draft. A hit admits the skill on its own; lexical matches need minMatchedTerms.
@@ -117,8 +132,10 @@ type Suggestion struct {
 //
 // A skill is admitted when one of its trigger phrases appears verbatim in the draft OR at least
 // minMatchedTerms distinct draft terms appear in its document (id + display name + summary +
-// triggers; bodies are never indexed). Admitted skills are ordered by score descending, then by ID
-// ascending so ties are stable across calls.
+// triggers; bodies are never indexed). A draft term appears when the document holds it exactly or
+// holds a term it shares a prefix with either way, the shorter side at least minPrefixRunes long.
+// Admitted skills are ordered by score descending, then by ID ascending so ties are stable across
+// calls.
 //
 // It returns nil — never a partial guess — when the draft holds fewer than minDraftWords words
 // (stopwords included) or no content term at all, when nothing clears the gate, or when the
@@ -195,14 +212,16 @@ type index struct {
 	triggerBoost float64
 }
 
-// document is one skill as the matcher sees it: a bag of terms with its length, plus the tokenised
-// trigger phrases kept as SEQUENCES because a trigger matches contiguously and the bag cannot say
-// whether "cut" and "release" were adjacent.
+// document is one skill as the matcher sees it: a bag of terms with its length, the subset of those
+// terms that came from the id or display name (the name bonus asks for it per hit), plus the
+// tokenised trigger phrases kept as SEQUENCES because a trigger matches contiguously and the bag
+// cannot say whether "cut" and "release" were adjacent.
 type document struct {
-	id       string
-	terms    map[string]int
-	length   int
-	triggers [][]string
+	id        string
+	terms     map[string]int
+	nameTerms map[string]bool
+	length    int
+	triggers  [][]string
 }
 
 // buildIndex indexes every skill in byID. The document is id + display name + summary + every
@@ -223,11 +242,14 @@ func buildIndex(byID map[string]Skill) *index {
 	totalLen := 0
 	for _, id := range ids {
 		s := byID[id]
-		doc := document{id: id, terms: map[string]int{}}
+		doc := document{id: id, terms: map[string]int{}, nameTerms: map[string]bool{}}
 		fields := strings.Join([]string{s.ID, s.DisplayName, s.Summary, strings.Join(s.Triggers, " ")}, " ")
 		for _, term := range tokenize(fields) {
 			doc.terms[term]++
 			doc.length++
+		}
+		for _, term := range tokenize(s.ID + " " + s.DisplayName) {
+			doc.nameTerms[term] = true
 		}
 		for _, phrase := range s.Triggers {
 			if seq := tokenize(phrase); len(seq) > 0 {
@@ -271,25 +293,72 @@ func (x *index) maxIDF() float64 {
 	return best
 }
 
-// score returns doc's BM25 score over queryTerms and how many of them it matched — the two halves
-// Suggest needs, computed in one walk so the evidence gate never costs a second pass. queryTerms
-// must already be distinct; a repeated draft word must not count twice.
+// score returns doc's score over queryTerms and how many of them it matched — the two halves
+// Suggest needs, computed in one walk so the evidence gate never costs a second pass. Each query
+// term lands on at most one document term (see match); its BM25 contribution uses that term's
+// frequency and IDF — the draft's spelling has no document frequency of its own — and a term
+// found in the id or display name adds the name bonus on top. queryTerms must already be
+// distinct; a repeated draft word must not count twice.
 func (x *index) score(doc document, queryTerms []string) (float64, int) {
 	if x.avgLen == 0 {
 		return 0, 0
 	}
 	total, matched := 0.0, 0
-	for _, term := range queryTerms {
-		tf := doc.terms[term]
+	for _, q := range queryTerms {
+		term, tf := doc.match(q)
 		if tf == 0 {
 			continue
 		}
 		matched++
+		idf := x.idf(term)
 		freq := float64(tf)
 		norm := freq + bm25K1*(1-bm25B+bm25B*float64(doc.length)/x.avgLen)
-		total += x.idf(term) * (freq * (bm25K1 + 1)) / norm
+		total += idf * (freq * (bm25K1 + 1)) / norm
+		if doc.nameTerms[term] {
+			total += nameBonusIDFs * idf
+		}
 	}
 	return total, matched
+}
+
+// match finds the document term a query term lands on and that term's frequency: the exact term
+// when the document holds it, otherwise the best of the document's terms that share a prefix with
+// q either way with the shorter side at least minPrefixRunes long — highest frequency first,
+// then the lexicographically smallest, so a map walk cannot make two calls disagree. It returns
+// ("", 0) when nothing matches. The scan is O(document terms), which over a corpus of dozens of
+// ~30-term documents is a few thousand comparisons per keystroke.
+func (d document) match(q string) (term string, tf int) {
+	if exact := d.terms[q]; exact > 0 {
+		return q, exact
+	}
+	// Whichever side is shorter must reach the floor, and the query is the shorter side whenever
+	// a longer document term is to be found — so a short query can match nothing by prefix.
+	if utf8.RuneCountInString(q) < minPrefixRunes {
+		return "", 0
+	}
+	for candidate, count := range d.terms {
+		if !isPrefixEitherWay(q, candidate) {
+			continue
+		}
+		if count > tf || (count == tf && candidate < term) {
+			term, tf = candidate, count
+		}
+	}
+	return term, tf
+}
+
+// isPrefixEitherWay reports whether one of a and b is a proper prefix of the other and the shorter
+// of them is at least minPrefixRunes long. Equal strings are an exact match, not a prefix one, and
+// are the caller's business.
+func isPrefixEitherWay(a, b string) bool {
+	short, long := a, b
+	if len(short) > len(long) {
+		short, long = long, short
+	}
+	if len(short) == len(long) || utf8.RuneCountInString(short) < minPrefixRunes {
+		return false
+	}
+	return strings.HasPrefix(long, short)
 }
 
 // hasTriggerHit reports whether any of the document's trigger phrases appears as a contiguous run

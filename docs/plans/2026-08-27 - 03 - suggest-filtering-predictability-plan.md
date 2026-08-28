@@ -129,7 +129,12 @@ raw-word rule.
 
 ---
 
-## 2. Prefix matching and the id / display-name bonus
+## 2. Prefix matching and the id / display-name bonus — ✅ DONE (2026-08-28)
+
+NOTES (2026-08-28): `BenchmarkSuggest` (1000 synthetic skills, every draft term an exact hit): ~254 µs/op before, ~296 µs/op after, 8 allocs/op unchanged — the prefix scan only runs for a query term the document does not hold exactly.
+NOTES (2026-08-28): the plan's `cut a release for homebrew` case of `TestSuggestNameHitsOutrankSummaryRepeats` already ranks `brew-release` first on BM25 alone (its `homebrew` hit outweighs test-checklist's `cut`), so the test gained a second table case — two documents with an identical term bag where only the name bonus can beat the id tiebreak — verified to fail with `nameBonusIDFs = 0`.
+NOTES (2026-08-28): `TestSuggestPrefixMatchesAStemEitherWay` adds a `plan the workspace now` → `refocus` row (`plan` is a prefix of the indexed `plann`) so the document-longer direction is covered on the fixture, and the 3-rune `cut`/`cutting` case runs over a two-line catalog of its own.
+NOTES (2026-08-28): `rune` counts in the hot path use `utf8.RuneCountInString` (no allocation) rather than the `len([]rune(...))` form the tokeniser uses; no existing line was restyled.
 
 Depends on item 1.
 

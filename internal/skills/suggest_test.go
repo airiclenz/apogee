@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"testing"
 )
 
@@ -154,6 +155,124 @@ func TestSuggestPutsATriggerHitFirst(t *testing.T) {
 	}
 	if got[0].Score <= got[1].Score {
 		t.Errorf("trigger score %v did not beat the lexical score %v", got[0].Score, got[1].Score)
+	}
+}
+
+func TestSuggestPrefixMatchesAStemEitherWay(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		// skills is the catalog for the case; nil means suggestFixture.
+		skills []Skill
+		draft  string
+		// admits must appear in the result; nil means the result must be empty.
+		admits string
+	}{
+		{
+			// "releas" stems to "relea", a prefix of the indexed "release": the query side is
+			// the shorter one.
+			name:   "a truncated draft term finds the longer document term",
+			draft:  "cut a releas for the tap",
+			admits: "brew-release",
+		},
+		{
+			// refocus indexes "planned" as "plann"; the draft's "plan" is its prefix and the
+			// second matched term the evidence gate needs — "workspace" alone would not admit it.
+			name:   "a short draft term finds the longer document stem",
+			draft:  "plan the workspace now",
+			admits: "refocus",
+		},
+		{
+			// "checklists" stems to "checklist" exactly; prefix matching must not disturb a
+			// document that already matches every term outright.
+			name:   "exact matches still land as before",
+			draft:  "compile release checklists now",
+			admits: "test-checklist",
+		},
+		{
+			name: "a three-rune term never matches by prefix",
+			skills: []Skill{
+				{ID: "branch-cutter", DisplayName: "Branch Cutter", Summary: "Cutting a branch off the tap."},
+			},
+			draft:  "cut the tap now",
+			admits: "",
+		},
+		{
+			name: "the same document is admitted once the term reaches the floor",
+			skills: []Skill{
+				{ID: "branch-cutter", DisplayName: "Branch Cutter", Summary: "Cutting a branch off the tap."},
+			},
+			draft:  "cutting the tap now",
+			admits: "branch-cutter",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			list := tc.skills
+			if list == nil {
+				list = suggestFixture()
+			}
+			c := newFixtureCatalog(t, list)
+
+			got := suggestedIDs(t, c.Suggest(tc.draft, nil, 0))
+
+			if tc.admits == "" {
+				if len(got) != 0 {
+					t.Errorf("Suggest(%q) = %v, want nothing admitted", tc.draft, got)
+				}
+				return
+			}
+			if !slices.Contains(got, tc.admits) {
+				t.Errorf("Suggest(%q) = %v, want it to admit %s", tc.draft, got, tc.admits)
+			}
+		})
+	}
+}
+
+func TestSuggestNameHitsOutrankSummaryRepeats(t *testing.T) {
+	t.Parallel()
+	// untriggeredFixture is suggestFixture with brew-release's triggers gone, so nothing but the
+	// lexical score separates it from test-checklist, whose summary repeats "release" and holds
+	// "cut" outright.
+	untriggeredFixture := suggestFixture()
+	for i := range untriggeredFixture {
+		if untriggeredFixture[i].ID == "brew-release" {
+			untriggeredFixture[i].Triggers = nil
+		}
+	}
+	// equalBags holds two documents with the SAME term bag and length, differing only in which
+	// terms sit in the id and display name — so BM25 ties them, the id tiebreak would put
+	// formula-tap first, and only the name bonus can lift release-notes above it.
+	equalBags := []Skill{
+		{ID: "release-notes", DisplayName: "Release Notes", Summary: "Publish them to the tap formula, then the tap formula."},
+		{ID: "formula-tap", DisplayName: "Formula Tap", Summary: "Publish the release notes and the release notes."},
+	}
+
+	cases := []struct {
+		name   string
+		skills []Skill
+		draft  string
+		want   []string
+	}{
+		{"an id hit beats a summary repeat", untriggeredFixture, "cut a release for homebrew", []string{"brew-release", "test-checklist"}},
+		{"the bonus alone decides an otherwise exact tie", equalBags, "publish the release notes", []string{"release-notes", "formula-tap"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			c := newFixtureCatalog(t, tc.skills)
+
+			got := c.Suggest(tc.draft, nil, 0)
+
+			if ids := suggestedIDs(t, got); !reflect.DeepEqual(ids, tc.want) {
+				t.Fatalf("Suggest(%q) = %v, want %v", tc.draft, ids, tc.want)
+			}
+			if got[0].TriggerHit {
+				t.Errorf("%s reported a trigger hit; the fixture declares none for it", got[0].ID)
+			}
+		})
 	}
 }
 
