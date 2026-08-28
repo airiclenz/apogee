@@ -1181,7 +1181,10 @@ func TestUnframedSubAgentShowsThePromptWhenExpanded(t *testing.T) {
 		tr := &transcript{}
 		refusedDelegation(tr, "s1", refusedTask)
 
-		want := "✦ Sub-Agent\n  ┕ survey the tests ⋯ " + refusedResult
+		// The row wears the ▶ that says the prompt above is behind it: the block hides the
+		// delegation's whole task, which no reading of its own lines can see (subAgentHidesPrompt).
+		want := "✦ Sub-Agent\n" +
+			leaderEdgeRow("  ┕ survey the tests ⋯ "+refusedResult, glyphCollapsed)
 		if got := renderPlain(tr, width); got != want {
 			t.Errorf("collapsed lone refusal mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
 		}
@@ -1234,6 +1237,76 @@ func TestUnframedSubAgentShowsThePromptWhenExpanded(t *testing.T) {
 			t.Errorf("a framed delegation lost its railed prompt:\n%s", got)
 		}
 	})
+}
+
+// TestNeverRanDelegationRowIsExpandableAtEveryWidth is the pair of findings ISSUES.md left over the
+// unframed reading, pinned together because they are one row's two halves (2026-08-27).
+//
+// A delegation that never ran opens onto the prompt it carried (unframedSubAgentView), and that body
+// exists at every width — so the ▶ that says so cannot be the promote-guard's to grant. It used to
+// be: the row's only hidden thing the block could count was the refusal the guard DEMOTED, so the
+// affordance appeared on a narrow terminal and vanished on a wide one, taking the prompt with it
+// (subAgentHidesPrompt closes that). The other half is what the row keeps while it says it: the
+// guard's floor holds the target's promoteMinTargetCells wherever the slot's reading falls, so the
+// narrowest terminal still names what was delegated.
+//
+// The table straddles the guard on purpose. At 80 columns this refusal is too long for the slot and
+// the presenter's typed phrase takes it; at 110 and above the refusal itself stays there — the
+// binding "no unconditional demote", the wide row going on saying why the delegation never ran.
+func TestNeverRanDelegationRowIsExpandableAtEveryWidth(t *testing.T) {
+	// Long enough that the guard refuses it at the narrow end of the table and admits it at the
+	// wide end — the depth bound's own wording with the sentence it closes with.
+	const refusal = refusedResult + " — no further delegation is possible"
+	const target = "survey the tests"
+
+	// The floor is composed from the guard's own constant rather than spelled, so a change to the
+	// number moves what this test demands instead of leaving it aimed at a stale width.
+	floor := string([]rune(target)[:promoteMinTargetCells])
+
+	for _, tc := range []struct {
+		name  string
+		width int
+		slot  string // what the collapsed row's outcome slot must carry at this width
+	}{
+		{"the guard demotes the refusal at 80 columns", 80, "done"},
+		{"the refusal keeps the slot at 110 columns", 110, refusal},
+		{"and at 120 columns", 120, refusal},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tr := &transcript{}
+			subAgentCall(tr, "s1", refusedTask, 0)
+			subAgentReport(tr, "s1", refusal, 0)
+
+			rows := strings.Split(renderPlain(tr, tc.width), "\n")
+			row := rows[len(rows)-1]
+
+			if !strings.HasSuffix(row, glyphCollapsed) {
+				t.Errorf("collapsed row = %q; want the ▶ that opens onto the prompt", row)
+			}
+			if !strings.Contains(row, floor) {
+				t.Errorf("collapsed row = %q; want at least %d cells of the target %q",
+					row, promoteMinTargetCells, target)
+			}
+			if !strings.Contains(row, tc.slot) {
+				t.Errorf("collapsed row = %q; want the outcome %q in its slot", row, tc.slot)
+			}
+
+			if !tr.setExpanded(0, true) {
+				t.Fatalf("setExpanded(0, true) = false; want the delegation open")
+			}
+			// What the ▶ promised: the prompt whole — its lead line and its last — over the refusal
+			// the row had been carrying alone. The refusal is asked for by its opening phrase, the
+			// body soft-wrapping it at the narrow widths of the table.
+			opened := renderPlain(tr, tc.width)
+			for _, want := range []string{
+				unframedSubAgentPromptLead + target, "with detail", "error: sub-agent depth limit",
+			} {
+				if !strings.Contains(opened, want) {
+					t.Errorf("the opened delegation is missing %q:\n%s", want, opened)
+				}
+			}
+		})
+	}
 }
 
 // TestSubAgentPromptDetailsLeadsWithTheTask pins the body lines the prompt becomes: its first line

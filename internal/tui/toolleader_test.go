@@ -270,6 +270,20 @@ func TestPromoteGuardHoldsFifteenCellsOfTarget(t *testing.T) {
 			Summary: quotedSummary(detailLine{Text: strings.Repeat("x", 300)})},
 		width:    120,
 		wantSlot: stat, wantCount: "+1 more line",
+	}, {
+		// The guard asked of a never-ran DELEGATION, whose refusal reaches the slot as a promoted
+		// one-line report: at a width the refusal cannot share, it is demoted like any other output
+		// and the row goes on naming what was delegated (ISSUES.md, 2026-08-27 — "a long refusal
+		// clips the target off"). The row is a click target here for a reason of its own: what a
+		// delegation's block hides is the prompt it carried, whichever reading the slot got
+		// (subAgentHidesPrompt).
+		name: "a never-ran delegation's refusal is held to the same floor",
+		view: toolView{Label: "Sub-Agent", Target: "survey the tests", name: subAgentToolName,
+			task:    "survey the tests\nand report back",
+			stat:    plainStat("done"),
+			Summary: quotedSummary(detailLine{Text: refusedResult + " — no further delegation is possible"})},
+		width:    80,
+		wantSlot: "done", wantCount: "+1 more line",
 	}} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()

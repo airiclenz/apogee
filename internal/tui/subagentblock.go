@@ -222,6 +222,28 @@ func subAgentPromptRows(th theme, task string, width int) []string {
 // spoke.
 const unframedSubAgentPromptLead = "task: "
 
+// subAgentHidesPrompt reports whether a DELEGATION's collapsed row is holding back the prompt it
+// carried. It is the toggle-target rule (blockHidesWhenCollapsed) asked about the one thing a
+// delegation's block hides that is nowhere among its views: every reading a delegation opens onto
+// paints the prompt — the framed run inside its rail (subAgentPromptRows), the never-ran block as
+// its body (unframedSubAgentView) — while the collapsed row is one leader row that never does, the
+// task's first line riding the header as the target being the header's text and not the prompt
+// (subAgentTarget).
+//
+// It is asked of the VIEW rather than of the entry because the promote-guard is exactly what it must
+// not depend on: a refusal short enough to keep the outcome slot leaves the block bodiless, so the
+// body-counting rule beside it answered "nothing to reveal" at wide widths and "something" at narrow
+// ones, and the indicator, the click surface and the prompt underneath them all came and went with
+// the terminal's columns (ISSUES.md, 2026-08-27).
+//
+// A delegation with no prompt to show — an empty task, whitespace alone, a record replayed from a
+// session written before the text was retained (transcriptcodec.go) — answers false: the readings
+// above open onto nothing for it, and an indicator over an empty frame is the affordance the rule
+// exists to withhold.
+func subAgentHidesPrompt(tv toolView) bool {
+	return tv.headsRun() && strings.TrimSpace(tv.task) != ""
+}
+
 // unframedSubAgentView is what an EXPANDED delegation that NEVER RAN shows of itself: the prompt it
 // carried, over whatever its result left behind.
 //

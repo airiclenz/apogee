@@ -149,12 +149,22 @@ func memberFlags(ins []paintInput) []bool {
 // cuts. One call in a block with something to reveal makes the whole block a target — the header
 // belongs to the block, not to a branch.
 //
+// A DELEGATION is the one shape whose hidden half is not among the lines at all: what its block
+// opens onto is the prompt it carried, which the collapsed row never paints (subAgentHidesPrompt).
+// That question is asked FIRST and on its own, because the body-counting rules below answer for a
+// never-ran delegation by the promote-guard's leave — a refusal narrow enough to be demoted lands a
+// body the count can see, the same refusal promoted at a wider terminal lands none — and an
+// indicator that appears and disappears with the columns is one no reader can learn.
+//
 // It is the SINGLE block's rule: a group's header toggles nothing and asks nothing here, its members
 // each wearing an indicator of their own under this same question asked of one call
 // (renderGroupMember). The slice stays a slice because the question is about a block's views rather
 // than about one of them, and item 5's per-member state is where that distinction is spent.
 func blockHidesWhenCollapsed(th theme, views []toolView, width int) bool {
 	for _, tv := range views {
+		if subAgentHidesPrompt(tv) {
+			return true
+		}
 		shown, _, truncated := collapsedCall(tv)
 		if truncated {
 			return true

@@ -397,7 +397,13 @@ delegation is red and wears no ✓.
 
 **Commit.** `fix(tui): a delegation row's colour and tick both follow the outcome, not the report text`
 
-## 12. A never-ran delegation row always wears ▶ and keeps its target
+## 12. A never-ran delegation row always wears ▶ and keeps its target — ✅ DONE (2026-08-28)
+
+NOTES (2026-08-28): the item's half (2) needed no code. Re-verified at 80/110/120 columns: when the guard refuses the promotion the demoted slot holds only the typed phrase and `leaderRow`'s spend order leaves the target its `promoteMinTargetCells`, so the ISSUES claim that a long refusal cuts the target away entirely below ~120 columns does not reproduce at any width. It is pinned instead — by the width table's ≥15-cells assertion and by a new never-ran-delegation arm in `TestPromoteGuardHoldsFifteenCellsOfTarget` (`toolleader_test.go`, the file the item lists).
+
+NOTES (2026-08-28): edited two files beyond the item's Files list, both goldens the fix necessarily moves and neither belonging to another item. `internal/tui/transcript_test.go` — `TestSubAgentStreamStaysInsideItsCollapsedRun`'s collapsed live delegation now wears ▶ (opening it shows the prompt and the railed stream, verified); its assertion about the delegate's words not leaking is untouched. `cmd/apogee/testdata/frames/t15-cancelled-delegation.txt` — the restored interrupted delegation's row gains the same ▶, re-recorded with `go test ./cmd/apogee -update`.
+
+NOTES (2026-08-28): the fix is deliberately the SINGLE block's rule only (`blockHidesWhenCollapsed`, the predicate the item names). A grouped delegation's row answers its own predicate in `renderSubAgentGroup`/`renderGroupMember` and is unchanged, which keeps the queued member inert as `scheduledSubAgentView` documents — see the DEFER line for the gap that leaves.
 
 **What.** ISSUES: *A never-ran delegation whose refusal stays promoted wears no ▶* and *At
 80 columns a long refusal clips the target off a never-ran delegation's collapsed row.*

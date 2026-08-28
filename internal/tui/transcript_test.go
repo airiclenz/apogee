@@ -1643,9 +1643,12 @@ func TestSubAgentStreamStaysInsideItsCollapsedRun(t *testing.T) {
 
 	streamAt(tr, 1, "child words")
 
+	// The row still wears its ▶: opening this run shows the prompt it carried and the stream
+	// beneath it (subAgentHidesPrompt), and the elision rule is about the delegate's WORDS, not
+	// about whether the head can be opened at all.
 	want := strings.Join([]string{
 		"✦ Sub-Agent",
-		"  ┕ survey the tests ⋯",
+		leaderEdgeRow("  ┕ survey the tests ⋯", glyphCollapsed),
 	}, "\n")
 	got := renderPlain(tr, 80)
 	if got != want {
