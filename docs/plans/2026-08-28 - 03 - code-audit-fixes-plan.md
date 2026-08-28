@@ -598,7 +598,7 @@ equality flakes). Bite check: against the pre-item helper the `os.Stderr` assert
 
 **Commit.** `test: captureStderr restores os.Stderr and closes its pipe on every exit path`
 
-## 10. The watcher's "absent at Start, appears later" case is pinned
+## 10. The watcher's "absent at Start, appears later" case is pinned — ✅ DONE (2026-08-28)
 
 **What.** Audit: *the config watcher's zero baseline re-applies the whole config when a
 previously-absent file first appears* (Medium) — re-verification corrects the consequence:

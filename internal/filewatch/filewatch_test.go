@@ -159,6 +159,24 @@ func TestWatchSurvivesADeleteAndRecreate(t *testing.T) {
 	awaitChange(t, w, "the recreated file")
 }
 
+// A watch can be started over a path that holds no file yet — apogee watches its config file from
+// startup, and a first run may not have seeded one. Start takes the zero sample as its baseline
+// (filewatch.go's Start), which no real file matches, so the file that appears later is the change:
+// silence while it is absent, one report when it lands, and silence again after.
+func TestWatchReportsAFileThatAppearsAfterStart(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "config.yaml")
+
+	w := startWatcher(t, path)
+	expectNoChange(t, w, testQuiet, "no file had ever existed at the watched path")
+
+	writeWatchedFile(t, path, "auto-title: true\n")
+
+	awaitChange(t, w, "a file that first appeared after Start")
+	expectNoChange(t, w, testQuiet, "the appearing file had already been reported once")
+}
+
 // An idle apogee must stay idle. A poll that reported a file nobody touched would journal markers and
 // reconnect MCP servers on its own schedule (ADR 0041's rejection of an unconditional re-apply).
 func TestWatchStaysSilentOnAnUnchangedFile(t *testing.T) {
