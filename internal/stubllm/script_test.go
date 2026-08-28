@@ -38,6 +38,10 @@ func TestScriptRoundTripsThroughYAML(t *testing.T) {
 			{HTTP: &HTTPReply{Status: 503, Body: "busy", Location: "/elsewhere", ContentType: "text/plain"}},
 			{Hang: 250 * time.Millisecond},
 			{},
+			{
+				Captures:  []Capture{{Name: "scratch", From: "system", Pattern: `scratch directory: (/\S+)`}},
+				ToolCalls: []ToolCall{{Name: "terminal", Arguments: `{"command":"ls {{scratch}}"}`}},
+			},
 		},
 	}
 
@@ -105,6 +109,53 @@ func TestParseRejectsAnUnplayableScript(t *testing.T) {
 			yaml: "turns:\n  - chunk_rune: 3\n",
 			want: "field chunk_rune not found",
 		},
+		{
+			name: "a capture pattern with no group",
+			yaml: "turns:\n  - captures: [{name: p, from: system, pattern: 'scratch'}]\n    text: hi\n",
+			want: "pattern has 0 capture groups, want exactly one",
+		},
+		{
+			name: "a capture pattern with two groups",
+			yaml: "turns:\n  - captures: [{name: p, from: system, pattern: '(a)(b)'}]\n    text: hi\n",
+			want: "pattern has 2 capture groups, want exactly one",
+		},
+		{
+			name: "a capture pattern that does not compile",
+			yaml: "turns:\n  - captures: [{name: p, from: system, pattern: '(unclosed'}]\n    text: hi\n",
+			want: "pattern is not a regexp",
+		},
+		{
+			name: "a capture reading an unknown source",
+			yaml: "turns:\n  - captures: [{name: p, from: prompt, pattern: '(.)'}]\n    text: hi\n",
+			want: `from is "prompt", want system or last_message`,
+		},
+		{
+			name: "a nameless capture",
+			yaml: "turns:\n  - captures: [{name: '', from: system, pattern: '(.)'}]\n    text: hi\n",
+			want: "capture 0: needs a name",
+		},
+		{
+			name: "two captures with one name",
+			yaml: "turns:\n  - captures: [{name: p, from: system, pattern: '(a)'}, " +
+				"{name: p, from: system, pattern: '(b)'}]\n    text: hi\n",
+			want: `capture 1: duplicate name "p"`,
+		},
+		{
+			name: "a placeholder naming no capture",
+			yaml: "turns:\n  - captures: [{name: here, from: system, pattern: '(.)'}]\n" +
+				"    tool_calls:\n      - {name: terminal, arguments: 'ls {{there}}'}\n",
+			want: "turn 0: {{there}} names no capture on this turn",
+		},
+		{
+			name: "captures on an http turn",
+			yaml: "turns:\n  - captures: [{name: p, from: system, pattern: '(.)'}]\n    http: {status: 500}\n",
+			want: "an http turn carries no captures",
+		},
+		{
+			name: "captures on a hang turn",
+			yaml: "turns:\n  - captures: [{name: p, from: system, pattern: '(.)'}]\n    hang: 10ms\n",
+			want: "a hang turn carries no captures",
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -141,7 +192,7 @@ func TestEmptyReplyTurnIsLegal(t *testing.T) {
 func TestDesignDocExampleScriptParses(t *testing.T) {
 	t.Parallel()
 
-	example := designDocExample(t)
+	example := designDocExample(t, "## stubllm")
 
 	script, err := Parse([]byte(example))
 	if err != nil {
@@ -153,23 +204,45 @@ func TestDesignDocExampleScriptParses(t *testing.T) {
 	}
 }
 
-// designDocExample returns the first YAML fence in the design doc's `## stubllm` section.
-func designDocExample(t *testing.T) string {
+// TestDesignDocCapturesExampleParses pins the `### Captures` example the same way. A capture is
+// the one part of the format a fixture author copies verbatim out of the doc, so an example
+// that no longer parses would be read as the format itself.
+func TestDesignDocCapturesExampleParses(t *testing.T) {
+	t.Parallel()
+
+	example := designDocExample(t, "### Captures")
+
+	script, err := Parse([]byte(example))
+	if err != nil {
+		t.Fatalf("the design doc's captures example does not parse: %v\n%s", err, example)
+	}
+
+	if len(script.Turns) != 1 || len(script.Turns[0].Captures) != 1 {
+		t.Fatalf("captures example = %+v, want the one turn with the one capture the doc shows", script)
+	}
+	if got := script.Turns[0].Captures[0]; got.Name != "scratch" || got.From != captureFromSystem {
+		t.Errorf("capture = %+v, want the scratch capture read from the system prompt", got)
+	}
+}
+
+// designDocExample returns the first YAML fence under heading in the design doc, bounded by the
+// next top-level section so a fence further down the file cannot stand in for a missing one.
+func designDocExample(t *testing.T, heading string) string {
 	t.Helper()
 
 	raw, err := os.ReadFile(designDoc)
 	if err != nil {
 		t.Fatalf("read the design doc: %v", err)
 	}
-	_, after, found := strings.Cut(string(raw), "## stubllm")
+	_, after, found := strings.Cut(string(raw), heading)
 	if !found {
-		t.Fatalf("%s has no ## stubllm section", designDoc)
+		t.Fatalf("%s has no %s section", designDoc, heading)
 	}
-	body, _, _ := strings.Cut(after, "\n## tuitest")
+	body, _, _ := strings.Cut(after, "\n## ")
 
 	_, fenced, found := strings.Cut(body, "```yaml\n")
 	if !found {
-		t.Fatalf("the ## stubllm section carries no yaml example")
+		t.Fatalf("the %s section carries no yaml example", heading)
 	}
 	example, _, _ := strings.Cut(fenced, "```")
 	return example

@@ -22,6 +22,18 @@ const defaultChunkRunes = 4
 // arguments — a valid empty JSON object, because the loop parses what it receives.
 const defaultToolArguments = "{}"
 
+// The two sources a Capture may read. Anything else is a parse error: a misspelled `from:`
+// would otherwise capture from an empty string and match nothing, far from its cause.
+const (
+	captureFromSystem      = "system"
+	captureFromLastMessage = "last_message"
+)
+
+// placeholderPattern finds the `{{name}}` slots a Turn's captures fill. It deliberately matches
+// ANY braced word, not just the known names, so an unknown placeholder is caught at parse time
+// rather than reaching the wire as a literal `{{x}}`.
+var placeholderPattern = regexp.MustCompile(`\{\{([^{}]*)\}\}`)
+
 // Script is one scripted upstream: the model it advertises and the ordered Turns it answers
 // requests with. It is the whole configuration of a [Server]; everything else is transport.
 //
@@ -53,6 +65,10 @@ type Turn struct {
 	// Repeat keeps the Turn available forever: it is never consumed, so it answers every
 	// request that reaches it. Useful for a "whatever else is asked" fallback.
 	Repeat bool `yaml:"repeat,omitempty"`
+	// Captures lift text out of the request this Turn answers, so the reply can echo a path
+	// apogee itself announced rather than one the fixture guessed. Every `{{name}}` in Text and
+	// in the ToolCalls' Arguments is replaced by the matching capture's value.
+	Captures []Capture `yaml:"captures,omitempty"`
 	// Text is the assistant content, streamed in ChunkRunes-sized deltas.
 	Text string `yaml:"text,omitempty"`
 	// TokenDelay is the pause between two streamed deltas. Zero streams as fast as the
@@ -91,6 +107,20 @@ type Match struct {
 	// assistant turn that issued the call, because the wire shape of a tool result carries the
 	// id and not the name.
 	ToolResult string `yaml:"tool_result,omitempty"`
+}
+
+// Capture is one value a Turn lifts out of the request it answers. Name is the placeholder it
+// fills (`{{name}}`), From names the request text it reads — `system` for the system messages'
+// text concatenated in wire order, `last_message` for the same text `when.last_message` matches
+// — and Pattern is a regexp with EXACTLY one capture group, whose group 1 is the value.
+//
+// A capture is how a fixture scripts "the model uses exactly what it was told": the path in the
+// tool call is the one the orientation or a skill header announced on this very request, not a
+// path the test guessed and would silently stop testing the day the announcement changed.
+type Capture struct {
+	Name    string `yaml:"name"`
+	From    string `yaml:"from"`
+	Pattern string `yaml:"pattern"`
 }
 
 // ToolCall is one call a Turn emits. ID may be left unset, in which case the call is numbered
@@ -193,9 +223,15 @@ func (t Turn) validate() error {
 		if t.Reasoning != "" || t.Usage != nil {
 			return errors.New("an http turn carries no reasoning or usage")
 		}
+		if len(t.Captures) > 0 {
+			return errors.New("an http turn carries no captures")
+		}
 	}
 	if t.Hang > 0 && (t.Reasoning != "" || t.Usage != nil) {
 		return errors.New("a hang turn carries no reasoning or usage")
+	}
+	if t.Hang > 0 && len(t.Captures) > 0 {
+		return errors.New("a hang turn carries no captures")
 	}
 	if t.ChunkRunes < 0 {
 		return errors.New("chunk_runes cannot be negative")
@@ -206,9 +242,70 @@ func (t Turn) validate() error {
 		}
 	}
 	if t.When != nil {
-		return t.When.validate()
+		if err := t.When.validate(); err != nil {
+			return err
+		}
+	}
+	return t.validateCaptures()
+}
+
+// validateCaptures reports the first thing wrong with this Turn's captures, including a
+// placeholder that names none of them. Both halves have to hold together: a capture nothing
+// substitutes is harmless, while a placeholder with no capture would reach the model as the
+// literal text `{{x}}` and send the run somewhere nobody scripted.
+func (t Turn) validateCaptures() error {
+	names := make(map[string]bool, len(t.Captures))
+	for i := range t.Captures {
+		if err := t.Captures[i].validate(); err != nil {
+			return fmt.Errorf("capture %d: %w", i, err)
+		}
+		if names[t.Captures[i].Name] {
+			return fmt.Errorf("capture %d: duplicate name %q", i, t.Captures[i].Name)
+		}
+		names[t.Captures[i].Name] = true
+	}
+	for _, text := range t.templated() {
+		for _, match := range placeholderPattern.FindAllStringSubmatch(text, -1) {
+			if !names[match[1]] {
+				return fmt.Errorf("%s names no capture on this turn", match[0])
+			}
+		}
 	}
 	return nil
+}
+
+// templated is every string of this Turn that captures substitute into: the assistant text and
+// each tool call's arguments.
+func (t Turn) templated() []string {
+	out := make([]string, 0, 1+len(t.ToolCalls))
+	out = append(out, t.Text)
+	for i := range t.ToolCalls {
+		out = append(out, t.ToolCalls[i].Arguments)
+	}
+	return out
+}
+
+// validate reports whether a Capture can be evaluated at all.
+func (c Capture) validate() error {
+	if c.Name == "" {
+		return errors.New("needs a name")
+	}
+	if c.From != captureFromSystem && c.From != captureFromLastMessage {
+		return fmt.Errorf("from is %q, want %s or %s", c.From, captureFromSystem, captureFromLastMessage)
+	}
+	pattern, err := regexp.Compile(c.Pattern)
+	if err != nil {
+		return fmt.Errorf("pattern is not a regexp: %w", err)
+	}
+	if pattern.NumSubexp() != 1 {
+		return fmt.Errorf("pattern has %d capture groups, want exactly one", pattern.NumSubexp())
+	}
+	return nil
+}
+
+// placeholder is the slot a capture of this name fills.
+func placeholder(name string) string {
+	return "{{" + name + "}}"
 }
 
 // kindCount is how many of the four mutually exclusive reply kinds the Turn sets.

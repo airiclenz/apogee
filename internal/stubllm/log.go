@@ -2,6 +2,7 @@ package stubllm
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 )
@@ -94,6 +95,20 @@ func lastText(messages []Message) string {
 		return ""
 	}
 	return messages[len(messages)-1].Content
+}
+
+// systemText is the text of a request's system messages, concatenated in wire order with a
+// newline between them — what a `from: system` capture reads. apogee sends its orientation as
+// one system message today, but the concatenation is what makes the capture indifferent to a
+// provider that splits it.
+func systemText(messages []Message) string {
+	var parts []string
+	for _, message := range messages {
+		if message.Role == "system" {
+			parts = append(parts, message.Content)
+		}
+	}
+	return strings.Join(parts, "\n")
 }
 
 // lastToolResultName is the name of the tool whose result the request's last message carries,

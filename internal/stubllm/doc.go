@@ -26,7 +26,8 @@
 // # Files
 //
 //   - script.go — the Script/Turn/Match/Usage/HTTPReply types, their YAML form, and validation.
-//   - match.go — which Turn answers which request: ordered by default, a `when:` turn first.
+//   - match.go — which Turn answers which request: ordered by default, a `when:` turn first;
+//     and what that Turn's captures lift out of the request before it is played.
 //   - server.go — the HTTP surface: /v1/models, /v1/chat/completions, SSE and whole replies.
 //   - wire.go — the literal OpenAI request/reply JSON the server reads and writes.
 //   - log.go — the request log every served request lands in, and the assertions over it.

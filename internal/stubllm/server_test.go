@@ -392,6 +392,159 @@ func TestMatcherReportsUnservedTurns(t *testing.T) {
 	}
 }
 
+// TestServerCaptureSubstitutesTheAnnouncedPath pins the point of captures: the path in the tool
+// call is the one THIS request announced, so a fixture drives the agent to what apogee told it
+// rather than to a path the fixture guessed and would keep passing after the announcement moved.
+func TestServerCaptureSubstitutesTheAnnouncedPath(t *testing.T) {
+	t.Parallel()
+
+	server := New(t, Script{Model: "stub-model", Turns: []Turn{{
+		Captures:  []Capture{{Name: "scratch", From: captureFromSystem, Pattern: `scratch directory[^\n]*?(/\S+)`}},
+		ToolCalls: []ToolCall{{Name: "terminal", Arguments: `{"command":"mkdir -p {{scratch}}/tmp && echo ok"}`}},
+	}}})
+
+	got := scratchCall(t, server, "/tmp/x/scratch/abc")
+
+	want := `{"command":"mkdir -p /tmp/x/scratch/abc/tmp && echo ok"}`
+	if got != want {
+		t.Errorf("arguments = %q, want %q", got, want)
+	}
+}
+
+// TestServerRepeatingCaptureTurnExpandsPerRequest pins that expansion never writes back into the
+// Script: a repeating turn answers many requests, and each must be answered with its own
+// request's path.
+func TestServerRepeatingCaptureTurnExpandsPerRequest(t *testing.T) {
+	t.Parallel()
+
+	server := New(t, Script{Model: "stub-model", Turns: []Turn{{
+		Repeat:    true,
+		Captures:  []Capture{{Name: "scratch", From: captureFromSystem, Pattern: `scratch directory: (\S+)`}},
+		ToolCalls: []ToolCall{{Name: "terminal", Arguments: `{"command":"ls {{scratch}}"}`}},
+	}}})
+
+	first := scratchCall(t, server, "/tmp/one")
+	second := scratchCall(t, server, "/tmp/two")
+
+	if first != `{"command":"ls /tmp/one"}` || second != `{"command":"ls /tmp/two"}` {
+		t.Errorf("arguments = %q then %q, want each request's own scratch dir", first, second)
+	}
+}
+
+// TestServerUnmatchedCaptureFailsWithoutSpendingTheTurn pins the strict half of captures. A
+// request that never carried the announcement is a 500 naming the capture — never a reply with
+// the placeholder silently rendered as nothing — and the turn survives it, so the run that
+// arrives with the announcement still finds the script where it was.
+func TestServerUnmatchedCaptureFailsWithoutSpendingTheTurn(t *testing.T) {
+	t.Parallel()
+
+	server := New(t, Script{Model: "stub-model", Turns: []Turn{{
+		Captures: []Capture{{Name: "scratch", From: captureFromSystem, Pattern: `scratch directory: (\S+)`}},
+		Text:     "using {{scratch}}",
+	}}})
+
+	missing := post(t, server, `{"model":"stub-model","messages":[{"role":"user","content":"no orientation here"}]}`)
+
+	if missing.status != http.StatusInternalServerError {
+		t.Errorf("status = %d body = %q, want 500", missing.status, missing.body)
+	}
+	if !strings.Contains(missing.body, "stubllm: capture scratch unmatched for request 1") {
+		t.Errorf("body = %q, want it to name the capture and the request", missing.body)
+	}
+	unmatched := server.Unmatched()
+	if len(unmatched) != 1 || unmatched[0].N != 1 || unmatched[0].TurnIndex != -1 {
+		t.Errorf("unmatched log = %+v, want one entry for request 1 with no turn", unmatched)
+	}
+
+	announced := `{"model":"stub-model","messages":[{"role":"system","content":"scratch directory: /tmp/s"}]}`
+	if got := decodeWhole(t, post(t, server, announced)).Choices[0].Message.Content; got != "using /tmp/s" {
+		t.Errorf("text = %q, want the unspent turn expanded against the second request", got)
+	}
+	server.AssertConsumed(t)
+}
+
+// TestTurnExpandReadsWhatTheRequestCarried is the table over the one function captures are
+// evaluated by: which text each `from:` reads, where the values land, and how a miss reads.
+func TestTurnExpandReadsWhatTheRequestCarried(t *testing.T) {
+	t.Parallel()
+
+	orientation := Message{Role: "system", Content: "workspace: /ws\nscratch directory: /home/.apogee/scratch/s1"}
+	header := Message{Role: "user", Content: "files: /home/.apogee/skills/announced — this skill's bundled files"}
+	skilldir := Capture{Name: "skilldir", From: captureFromLastMessage, Pattern: `files: (\S+) — this skill`}
+	scratch := Capture{Name: "scratch", From: captureFromSystem, Pattern: `scratch directory: (\S+)`}
+
+	for _, tc := range []struct {
+		name          string
+		turn          Turn
+		messages      []Message
+		wantText      string
+		wantArguments string
+		wantErr       string
+	}{
+		{
+			name:     "a turn without captures is its own answer",
+			turn:     Turn{Text: "plain {reply}"},
+			messages: []Message{header},
+			wantText: "plain {reply}",
+		},
+		{
+			name:          "the system prompt reaches a tool call's arguments",
+			turn:          Turn{Captures: []Capture{scratch}, ToolCalls: []ToolCall{{Name: "terminal", Arguments: `{"command":"ls {{scratch}}/tmp"}`}}},
+			messages:      []Message{orientation, header},
+			wantArguments: `{"command":"ls /home/.apogee/scratch/s1/tmp"}`,
+		},
+		{
+			name:     "the last message reaches the text",
+			turn:     Turn{Captures: []Capture{skilldir}, Text: "reading {{skilldir}}/prompts/a.md"},
+			messages: []Message{orientation, header},
+			wantText: "reading /home/.apogee/skills/announced/prompts/a.md",
+		},
+		{
+			name:     "two captures, one of them used twice",
+			turn:     Turn{Captures: []Capture{scratch, skilldir}, Text: "{{skilldir}} -> {{scratch}}; then {{scratch}}"},
+			messages: []Message{orientation, header},
+			wantText: "/home/.apogee/skills/announced -> /home/.apogee/scratch/s1; then /home/.apogee/scratch/s1",
+		},
+		{
+			name: "a system capture does not read the user's message",
+			turn: Turn{
+				Captures: []Capture{{Name: "skilldir", From: captureFromSystem, Pattern: skilldir.Pattern}},
+				Text:     "{{skilldir}}",
+			},
+			messages: []Message{orientation, header},
+			wantErr:  "capture skilldir unmatched",
+		},
+		{
+			name:     "nothing announced at all",
+			turn:     Turn{Captures: []Capture{scratch}, Text: "{{scratch}}"},
+			messages: []Message{header},
+			wantErr:  "capture scratch unmatched",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := tc.turn.expand(Request{Messages: tc.messages})
+
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("error = %v, want it to mention %q", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("expand: %v", err)
+			}
+			if got.Text != tc.wantText {
+				t.Errorf("text = %q, want %q", got.Text, tc.wantText)
+			}
+			if tc.wantArguments != "" && got.ToolCalls[0].Arguments != tc.wantArguments {
+				t.Errorf("arguments = %q, want %q", got.ToolCalls[0].Arguments, tc.wantArguments)
+			}
+		})
+	}
+}
+
 // --- helpers ---
 
 // reply is the part of an HTTP answer the assertions here read.
@@ -568,6 +721,18 @@ func decodeWhole(t *testing.T, got reply) wholeReply {
 		t.Fatalf("reply %q carries no choices", got.body)
 	}
 	return out
+}
+
+// scratchCall sends a request whose system prompt announces scratch the way apogee's
+// orientation does, and returns the arguments of the tool call the stub answered with.
+func scratchCall(t *testing.T, server *Server, scratch string) string {
+	t.Helper()
+
+	body := fmt.Sprintf(
+		`{"model":%q,"messages":[{"role":"system","content":"scratch directory: %s"}]}`,
+		server.Model, scratch,
+	)
+	return decodeWhole(t, post(t, server, body)).Choices[0].Message.ToolCalls[0].Function.Arguments
 }
 
 // TestServerWithoutRequestLogStillNumbersRequests pins that switching the log off drops only

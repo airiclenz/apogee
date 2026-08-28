@@ -3,6 +3,7 @@ package stubllm
 import (
 	"fmt"
 	"regexp"
+	"strings"
 )
 
 // matcher decides which Turn answers a request and remembers which Turns are spent.
@@ -68,6 +69,14 @@ func (m *matcher) take(i int) {
 	}
 }
 
+// release makes a Turn available again after it was taken but could not be played — the case
+// of a turn whose captures found nothing in the request. A request the script cannot answer
+// must not spend a turn, or the failure would shift every later turn by one and bury its own
+// cause under a cascade of mismatches.
+func (m *matcher) release(i int) {
+	m.consumed[i] = false
+}
+
 // matches reports whether turn i's When selects r. Both members, when set, must match.
 func (m *matcher) matches(i int, r Request) bool {
 	when := m.turns[i].When
@@ -89,4 +98,61 @@ func (m *matcher) unserved() []int {
 		}
 	}
 	return out
+}
+
+// expand renders the Turn that answers r: every `{{name}}` in the text and in the tool calls'
+// arguments replaced by what this Turn's captures lift out of the request. A Turn without
+// captures is its own answer. Nothing is written back — the Script is immutable, because a
+// repeating turn answers many requests and each must expand against its own.
+//
+// A capture that finds nothing is an error rather than an empty substitution: a fixture that
+// quietly rendered `mkdir -p /tmp` from `mkdir -p {{scratch}}/tmp` would fail somewhere far
+// from the missing announcement that actually caused it.
+func (t Turn) expand(r Request) (Turn, error) {
+	if len(t.Captures) == 0 {
+		return t, nil
+	}
+
+	pairs := make([]string, 0, len(t.Captures)*2)
+	for i := range t.Captures {
+		value, err := t.Captures[i].value(r)
+		if err != nil {
+			return Turn{}, err
+		}
+		pairs = append(pairs, placeholder(t.Captures[i].Name), value)
+	}
+	replacer := strings.NewReplacer(pairs...)
+
+	expanded := t
+	expanded.Text = replacer.Replace(t.Text)
+	if len(t.ToolCalls) > 0 {
+		expanded.ToolCalls = make([]ToolCall, len(t.ToolCalls))
+		copy(expanded.ToolCalls, t.ToolCalls)
+		for i := range expanded.ToolCalls {
+			expanded.ToolCalls[i].Arguments = replacer.Replace(expanded.ToolCalls[i].Arguments)
+		}
+	}
+	return expanded, nil
+}
+
+// value is what this Capture lifts out of request r — group 1 of its pattern's first match over
+// the text From names.
+func (c Capture) value(r Request) (string, error) {
+	pattern, err := regexp.Compile(c.Pattern)
+	if err != nil {
+		return "", fmt.Errorf("capture %s: pattern is not a regexp: %w", c.Name, err)
+	}
+	match := pattern.FindStringSubmatch(c.source(r))
+	if match == nil {
+		return "", fmt.Errorf("capture %s unmatched", c.Name)
+	}
+	return match[1], nil
+}
+
+// source is the request text this Capture reads.
+func (c Capture) source(r Request) string {
+	if c.From == captureFromSystem {
+		return systemText(r.Messages)
+	}
+	return lastText(r.Messages)
 }

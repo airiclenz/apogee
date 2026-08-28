@@ -3,6 +3,7 @@ package stubllm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -194,9 +195,9 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	entry, turn, ok := s.take(request)
-	if !ok {
-		http.Error(w, fmt.Sprintf("stubllm: no turn for request %d", entry.N), http.StatusInternalServerError)
+	turn, err := s.take(request)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	if !sleep(r.Context(), s.set.latency) {
@@ -205,9 +206,12 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	s.reply(w, r, turn, request.Stream)
 }
 
-// take logs a request and hands back the Turn that answers it. The lock spans both so request
-// numbering and turn consumption stay in step under concurrent requests.
-func (s *Server) take(request chatRequest) (Request, Turn, bool) {
+// take logs a request and hands back the Turn that answers it, expanded against the request's
+// own text. The lock spans all of it so request numbering, turn consumption and the capture
+// evaluation stay in step under concurrent requests. Both failures — no turn at all, and a turn
+// whose captures found nothing — log the request with Unmatched set and leave the script where
+// it was, so the 500 body is the whole story of what went wrong.
+func (s *Server) take(request chatRequest) (Turn, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -224,17 +228,32 @@ func (s *Server) take(request chatRequest) (Request, Turn, bool) {
 
 	index := s.matcher.next(entry)
 	if index < 0 {
-		entry.Unmatched = true
-	} else {
-		entry.TurnIndex = index
+		return Turn{}, s.refuse(entry, errors.New("no turn"))
 	}
+	turn, err := s.matcher.turns[index].expand(entry)
+	if err != nil {
+		s.matcher.release(index)
+		return Turn{}, s.refuse(entry, err)
+	}
+
+	entry.TurnIndex = index
+	s.record(entry)
+	return turn, nil
+}
+
+// refuse logs an unanswerable request and renders the 500 body naming it. The caller holds the
+// lock.
+func (s *Server) refuse(entry Request, cause error) error {
+	entry.Unmatched = true
+	s.record(entry)
+	return fmt.Errorf("stubllm: %w for request %d", cause, entry.N)
+}
+
+// record appends an entry to the request log, unless the log is off. The caller holds the lock.
+func (s *Server) record(entry Request) {
 	if s.set.requestLog {
 		s.requests = append(s.requests, entry)
 	}
-	if index < 0 {
-		return entry, Turn{}, false
-	}
-	return entry, s.matcher.turns[index], true
 }
 
 // reply plays one Turn onto the wire in the shape the request asked for.

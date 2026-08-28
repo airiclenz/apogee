@@ -135,7 +135,23 @@ NOTES (2026-08-28): the "Where knowledge lives" append reads `… in `ISSUES.md`
 
 ---
 
-## 3. stubllm captures — a turn can echo what the request told it
+## 3. stubllm captures — a turn can echo what the request told it — ✅ DONE (2026-08-28)
+
+NOTES (2026-08-28): `expand` is a VALUE receiver (`func (t Turn) expand(r Request) (Turn, error)`),
+not the pointer receiver the item's text sketches — every other Turn method in the package takes a
+value receiver, and expansion must not be able to mutate the Script. It lives in `match.go` (the
+item's own alternative to `server.go`, since that is where the request is already resolved against
+a turn); `server.go` holds the wiring only.
+NOTES (2026-08-28): two files outside the item's Files list were touched, both to keep an existing
+doc honest rather than to add behaviour: `internal/stubllm/log.go` gains `systemText` beside its
+sibling `lastText` (the reader a `from: system` capture uses), and `internal/stubllm/doc.go`'s
+package file-map line for `match.go` now mentions the expansion the file gained.
+NOTES (2026-08-28): `Server.take` now returns `(Turn, error)` instead of `(Request, Turn, bool)` —
+the Request return had no reader left once the 500 body is built where the failure is known, and
+both failure paths (no turn, unmatched capture) now log and refuse through one seam.
+NOTES (2026-08-28): `script_test.go`'s `designDocExample` helper took a `heading` parameter so the
+existing `## stubllm` example test and the new `### Captures` example test share one loader rather
+than duplicating it.
 
 **What:**
 - `internal/stubllm/script.go`: add `Capture struct { Name string; From string; Pattern string }`

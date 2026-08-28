@@ -119,6 +119,45 @@ N`) and a logged entry with `Unmatched` set — never a plausible improvised rep
 fallback would turn the most interesting failure a driver test can surface, "the agent asked
 something the test did not anticipate", into a green run.
 
+### Captures
+
+A turn can echo text the request itself carried. `captures:` is a list of `{name, from, pattern}`,
+and every `{{name}}` in that turn's `text` and in each of its `tool_calls[].arguments` is replaced
+by what the capture lifted out of the request the turn answers.
+
+```yaml
+model: stub-model
+turns:
+  - captures:
+      - {name: scratch, from: system, pattern: 'scratch directory[^\n]*?(/\S+)'}
+    tool_calls:
+      - name: terminal
+        arguments: '{"command":"mkdir -p {{scratch}}/tmp && echo ok"}'
+```
+
+This is how a fixture scripts **"the model uses exactly what it was told"**: the path in the tool
+call is the one apogee announced on that very request — an orientation line, a skill header's
+`files:` path — rather than one the fixture guessed and would silently stop testing the day the
+announcement changed. `from: system` reads the request's system messages' text concatenated in
+wire order with a newline; `from: last_message` reads the same text `when.last_message` matches.
+The value is group 1 of the pattern's first match.
+
+Captures are strict, for the reason the rest of the stub is — a fixture that quietly substituted
+nothing would send `mkdir -p /tmp` and fail far from the missing announcement that caused it:
+
+- a `pattern` that does not compile, or that has anything other than **exactly one** capture
+  group, is a parse error;
+- a `{{name}}` naming no capture on the same turn is a parse error, so there is no way to put a
+  literal `{{x}}` on the wire;
+- two captures with one name on a turn is a parse error, and `captures` on an `http` or `hang`
+  turn is refused as `reasoning` is;
+- a capture that matches nothing in the request is an HTTP 500 (`stubllm: capture <name>
+  unmatched for request N`) and a logged entry with `Unmatched` set — and the turn is **not**
+  spent, so it still answers the next request.
+
+The recorder never writes captures: a recorded fixture is a transcript of what a real server
+said, while a capture is something a test author adds.
+
 ### The request log
 
 Every served request lands in the log, which is the stub's half of an assertion: what the agent
