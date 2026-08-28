@@ -22,6 +22,7 @@ package tuitest
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -63,7 +64,9 @@ type Proxy struct {
 //
 // routes maps a destination HOST (no port) to the `host:port` actually dialled for it, which is how
 // a public destination is served from loopback — see the file comment. A destination with no route
-// is dialled as it stands, so a mapping is an explicit act rather than a default.
+// is REFUSED rather than dialled as it stands: the header's guarantee that nothing a driven run
+// reaches leaves this process is enforced here instead of assumed, and an unmapped host arrives at
+// the caller as the proxy's own 502 naming it.
 func ForwardProxy(t testing.TB, routes map[string]string) *Proxy {
 	t.Helper()
 
@@ -73,10 +76,10 @@ func ForwardProxy(t testing.TB, routes map[string]string) *Proxy {
 		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
 			if host, _, err := net.SplitHostPort(addr); err == nil {
 				if to, ok := routes[host]; ok {
-					addr = to
+					return dialer.DialContext(ctx, network, to)
 				}
 			}
-			return dialer.DialContext(ctx, network, addr)
+			return nil, fmt.Errorf("tuitest: no route for %s — every host a driven run may reach is mapped", addr)
 		},
 		// No proxy of its own: a proxy that honoured the developer's own HTTP_PROXY would send
 		// the suite's traffic to it.

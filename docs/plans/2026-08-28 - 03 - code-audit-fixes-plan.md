@@ -622,7 +622,16 @@ production change.
 
 **Commit.** `test(filewatch): a file absent at Start is reported once when it appears`
 
-## 11. The egress test proxy refuses an unmapped host, and its branches are unit-tested
+## 11. The egress test proxy refuses an unmapped host, and its branches are unit-tested — ✅ DONE (2026-08-28)
+
+NOTES (2026-08-28): the hop-by-hop test uses a test-local header-recording httptest destination
+(`recordHeaders`, in `netfix_test.go`) rather than `PageServer` as the item's text says — `Page`
+records hits only and exposes no request headers, and growing the shipped fixture's API for one
+call site would be the speculative generality the standards forbid. The routed happy-path test does
+use `PageServer`, as the item asks.
+
+NOTES (2026-08-28): `netfix_test.go` is not named in `doc.go` — `docmap.Check` skips `_test.go`
+files, so it does not demand it (the item made that conditional).
 
 **What.** Audit: *the egress test proxy can dial real hosts* (Medium, Security) and *the
 egress-instrument half of T-18 has no unit test* (High). `DialContext`
