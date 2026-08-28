@@ -868,6 +868,76 @@ func TestAutocompleteRowsStripEscapes(t *testing.T) {
 	}
 }
 
+// A workspace filename can carry a line break or a tab, and neither may reach the dropdown: a "\n"
+// left in the row's cell paints rows the pane never counted (popupRowBlocks composes ONE line per
+// row and the frame is split on "\n" from there), and lands in the composer as a real second line
+// the "@"-ref scanner cuts at; a "\t" is expanded to spaces by the popup and again by the textarea
+// on insert, so the row would show one thing and splice another and autocompleteExactMatch could
+// never match a fully-typed token. fileSuggestions flattens the path the way skillRow flattens its
+// cells, once, before the cell and the value are both derived from it — so the hostile listing
+// renders the frame its flattened, benign twin renders, byte for byte.
+func TestFileRowsFlattenLineAndTabBreaks(t *testing.T) {
+	const draft = "read @docs/"
+
+	openOn := func(t *testing.T, path string) Model {
+		t.Helper()
+		m := newTestModel(t)
+		m.opts.Workspace = "/ws"
+		m.files = &fileCache{
+			root:    "/ws",
+			files:   []string{path},
+			expires: time.Now().Add(time.Hour),
+		}
+		m.input.SetValue(draft)
+		m.autocomplete = m.computeAutocomplete(len(draft))
+		if !m.autocomplete.active || m.autocomplete.kind != acFile || len(m.autocomplete.items) != 1 {
+			t.Fatalf("the \"@\" overlay did not open on the seeded listing %q: %+v", path, m.autocomplete)
+		}
+		return m
+	}
+
+	for _, tc := range []struct{ name, hostile, flattened string }{
+		{"a line break in the name", "docs/no\ntes.md", "docs/no tes.md"},
+		{"a tab in the name", "docs/a\tb.md", "docs/a b.md"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := openOn(t, tc.hostile)
+			row := m.autocomplete.items[0]
+			for _, cell := range row.cells {
+				if strings.ContainsAny(cell, "\n\t") {
+					t.Errorf("the file row's cell %q still carries a line or tab break", cell)
+				}
+			}
+			if strings.ContainsAny(row.value, "\n\t") {
+				t.Errorf("the file row's spliced value %q still carries a line or tab break", row.value)
+			}
+			if row.value != tc.flattened {
+				t.Errorf("the file row's value = %q, want the flattened path %q", row.value, tc.flattened)
+			}
+
+			got := m.renderAutocomplete()
+			painted := 0
+			for _, ln := range popupLines(got) {
+				if strings.Contains(strip(ln), "docs/") {
+					painted++
+				}
+			}
+			if painted != 1 {
+				t.Errorf("one seeded name painted %d dropdown rows, want exactly one:\n%s", painted, got)
+			}
+			if want := openOn(t, tc.flattened).renderAutocomplete(); got != want {
+				t.Errorf("the dropdown over %q rendered\n%s\nwant the frame its flattened twin renders\n%s", tc.hostile, got, want)
+			}
+
+			next, _ := m.acceptAutocomplete()
+			composed := next.(Model).input.Value()
+			if want := "read " + fileRefToken(row.value) + " "; composed != want {
+				t.Errorf("composer after accept = %q, want %q (the row's own value, verbatim)", composed, want)
+			}
+		})
+	}
+}
+
 // A row's VALUE is the overlay's second door, because an autocomplete row is not only SHOWN, it is
 // SPLICED: accepting an "@" row writes it into the composer, which inputView paints. That door is
 // currently held shut by the bubbles textarea, whose every insertion path (SetValue → InsertString →
@@ -879,31 +949,40 @@ func TestAutocompleteRowsStripEscapes(t *testing.T) {
 // sanitized box could never equal the row it came from, so autocompleteExactMatch failed on a
 // fully-typed token and ⏎ re-accepted instead of submitting.
 //
-// The payload here is the CSI one, whose bytes are all printable once the ESCs are gone, so the
-// composer can be compared verbatim — where escOSC52's trailing BEL would leave the two sides to be
-// compared across two sanitizers that agree on it only by coincidence.
+// The escape payload here is the CSI one, whose bytes are all printable once the ESCs are gone, so
+// the composer can be compared verbatim — where escOSC52's trailing BEL would leave the two sides to
+// be compared across two sanitizers that agree on it only by coincidence. The TAB seed is the same
+// property from the other side: nothing drops a tab, both the popup and the textarea EXPAND one, and
+// they expand it to different widths, so a row holding a raw "\t" could never equal what accepting
+// it inserts.
 func TestAcceptedFileRowMatchesItsValue(t *testing.T) {
-	m := newTestModel(t)
-	m.opts.Workspace = "/ws"
-	m.files = &fileCache{
-		root:    "/ws",
-		files:   []string{"docs/no" + escCSI + "tes.md"},
-		expires: time.Now().Add(time.Hour),
-	}
+	for _, tc := range []struct{ name, seed, draft string }{
+		{"an ESC byte in the name", "docs/no" + escCSI + "tes.md", "read @docs/no"},
+		{"a tab in the name", "docs/a\tb.md", "read @docs/a"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := newTestModel(t)
+			m.opts.Workspace = "/ws"
+			m.files = &fileCache{
+				root:    "/ws",
+				files:   []string{tc.seed},
+				expires: time.Now().Add(time.Hour),
+			}
 
-	const draft = "read @docs/no"
-	m.input.SetValue(draft)
-	m.autocomplete = m.computeAutocomplete(len(draft))
-	if !m.autocomplete.active || m.autocomplete.kind != acFile || len(m.autocomplete.items) != 1 {
-		t.Fatalf("the \"@\" overlay did not open on the seeded listing: %+v", m.autocomplete)
-	}
-	row := m.autocomplete.items[0]
+			m.input.SetValue(tc.draft)
+			m.autocomplete = m.computeAutocomplete(len(tc.draft))
+			if !m.autocomplete.active || m.autocomplete.kind != acFile || len(m.autocomplete.items) != 1 {
+				t.Fatalf("the \"@\" overlay did not open on the seeded listing: %+v", m.autocomplete)
+			}
+			row := m.autocomplete.items[0]
 
-	next, _ := m.acceptAutocomplete()
-	got := next.(Model).input.Value()
-	assertNoESCIn(t, "the composer after accepting an \"@\" row", got)
-	if want := "read " + fileRefToken(row.value) + " "; got != want {
-		t.Errorf("composer after accept = %q, want %q (the row's own value, verbatim)", got, want)
+			next, _ := m.acceptAutocomplete()
+			got := next.(Model).input.Value()
+			assertNoESCIn(t, "the composer after accepting an \"@\" row", got)
+			if want := "read " + fileRefToken(row.value) + " "; got != want {
+				t.Errorf("composer after accept = %q, want %q (the row's own value, verbatim)", got, want)
+			}
+		})
 	}
 }
 

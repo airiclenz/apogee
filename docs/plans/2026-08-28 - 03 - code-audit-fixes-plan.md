@@ -364,7 +364,13 @@ the sibling skill still loads.
 
 **Commit.** `fix(skills): descriptions are capped before indexing and an unreadable entry is reported`
 
-## 6. A file-name row in the dropdown is one line and inserts exactly what it shows
+## 6. A file-name row in the dropdown is one line and inserts exactly what it shows — ✅ DONE (2026-08-28)
+
+NOTES (2026-08-28): the item asked for one sentence added to the `fileSuggestions` doc block and to
+the `doc.go` trade record; each also had its existing claim corrected from "escape-stripped"/"strips
+the workspace path" to "escape-stripped and flattened"/"sanitizes the workspace path", because the
+old wording would have described only half of what the code now does. The surrounding lines were
+re-wrapped only where those edits changed the fill.
 
 **What.** Audit: *a workspace file name containing a newline or tab forges extra dropdown
 rows* (Medium, Security). `fileSuggestions` (`internal/tui/autocomplete.go:654-662`) strips

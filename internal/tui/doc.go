@@ -950,10 +950,15 @@
 // autocomplete row is not only shown, it is SPLICED, so an acItem carrying a stripped cell beside a
 // raw value hands the escape to the input box on accept. What stops it there today is the bubbles
 // textarea's own internal rune sanitizer rather than anything this package does — an undocumented
-// third-party internal standing in for a seam — so fileSuggestions strips the workspace path itself,
-// once, before the row's value and cell are both derived from it. Nothing is lost to a second
+// third-party internal standing in for a seam — so fileSuggestions sanitizes the workspace path
+// itself, once, before the row's value and cell are both derived from it. Nothing is lost to a second
 // channel by that: an @ref resolves from the "@token" read back out of the composed text
 // (extractFileRefs → the loop's resolveFileRefs), never from the acItem, so display and resolution
 // are one string and are sanitized once — which also keeps fileRefToken's promise that a row shows
 // exactly what accepting it inserts, the property autocompleteExactMatch's ⏎-submits rule needs.
+// A LINE or TAB break in that filename goes through the same door and is flattened at it
+// (flattenField, the idiom skillRow already uses for its cells), because a kept "\n" is a dropdown
+// row the workspace authored rather than the pane — in a pane whose rows are chosen with ⏎ — and a
+// kept "\t" is re-expanded to spaces by the popup and again by the textarea, so the row would show
+// one thing and insert another.
 package tui

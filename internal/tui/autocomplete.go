@@ -628,14 +628,15 @@ func skillRow(sk skills.Skill, rank int, source string) acItem {
 // A path is one thing, not a name and a description, so a file row stays SINGLE-CELL: one column,
 // which the popup module lays out as the plain "@path" it always was.
 //
-// The PATH is escape-stripped ONCE, before either half of the row is derived from it — a filename is
-// the WORKSPACE's, not this program's, and a clone can carry one holding an ESC byte. Stripping only
-// the cell left the row's other half unsanitized, and a row is not merely shown: accepting it
-// SPLICES its value into the composer (acceptAutocomplete → fileRefToken → spliceCompletion), a box
-// this package then paints. That the escape does not in fact reach the screen today is the bubbles
-// textarea's doing, not this package's — every insertion path runs an internal runeutil.Sanitizer
-// that drops control runes — which is a third-party internal with no compatibility promise standing
-// where doc.go's seam invariant says this package's own strip belongs.
+// The PATH is escape-stripped and flattened ONCE, before either half of the row is derived from it —
+// a filename is the WORKSPACE's, not this program's, and a clone can carry one holding an ESC byte or
+// a line break. Sanitizing only the cell left the row's other half unsanitized, and a row is not
+// merely shown: accepting it SPLICES its value into the composer (acceptAutocomplete → fileRefToken →
+// spliceCompletion), a box this package then paints. That the escape does not in fact reach the
+// screen today is the bubbles textarea's doing, not this package's — every insertion path runs an
+// internal runeutil.Sanitizer that drops control runes — which is a third-party internal with no
+// compatibility promise standing where doc.go's seam invariant says this package's own strip
+// belongs.
 //
 // Keeping the value raw "so the reference still resolves on disk" was never the trade it looked
 // like, because display and resolution are the SAME string: an @ref resolves from the token read
@@ -650,12 +651,18 @@ func skillRow(sk skills.Skill, rank int, source string) acItem {
 // dropdown: the stripped path names nothing on disk, so the token never lights up (inputaccent's
 // knownWorkspaceFile asks the same listing) and a submitted ref is reported unresolvable and skipped
 // rather than silently read. An ESC byte in a filename is hostile far more often than load-bearing,
-// and the seam invariant settles which way that trade goes.
+// and the seam invariant settles which way that trade goes. A name carrying a LINE or TAB break is
+// flattened (flattenField, the skillRow idiom) and takes that same trade for the same reason: a
+// "\n" left in the cell paints rows the pane never counted and splices into the composer as a real
+// second line the "@"-ref scanner cuts at, while a "\t" is re-expanded to spaces by the popup and
+// again by the textarea, so the row and the value it inserts would differ and autocompleteExactMatch
+// could never match a fully-typed token — one flattened string is the row cell, the value and the
+// ref token alike, and it names nothing on disk exactly as the stripped one does not.
 func (m Model) fileSuggestions(partial string) []acItem {
 	paths := m.files.suggest(m.opts.Workspace, partial, maxAutocompleteItems, time.Now())
 	items := make([]acItem, 0, len(paths))
 	for _, p := range paths {
-		p = stripEscapes(p)
+		p = flattenField(stripEscapes(p))
 		items = append(items, acItem{value: p, cells: popupRow{fileRefToken(p)}})
 	}
 	return items
