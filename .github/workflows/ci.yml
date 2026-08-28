@@ -54,8 +54,13 @@ jobs:
         # The negative half of checklist T-11: ubuntu-latest runs landlock ABI >= 3, which fences
         # truncate(2) like every other write. A residual disclosed here is as wrong as one missing
         # on the ubuntu-22.04 job below.
+        #
+        # --endpoint is a raw override that skips startup-server selection: a fresh runner has no
+        # config.yaml and probe never seeds one (ADR 0021 §1), so without it the command refuses
+        # with "no servers are configured" before any report is gathered. The dead endpoint is
+        # simply reported unreachable, which the residual check does not read.
         run: |
-          report="$(go run ./cmd/apogee probe)"
+          report="$(go run ./cmd/apogee probe --endpoint http://127.0.0.1:9)"
           echo "$report"
           if printf '%s' "$report" | grep -q 'unfenced:'; then
             echo "probe disclosed a confinement residual on a kernel that has none" >&2
@@ -87,8 +92,10 @@ jobs:
         # confined truncate to succeed, and fails loudly if the backend claimed a complete fence.
         run: go test -run 'TestLandlockProbe$|TestLandlockResidualsMatchHostABI|TestLandlockCapabilitiesHonest' ./internal/platform/
       - name: probe discloses the truncate(2) residual
+        # --endpoint for the same reason as the check job's probe step: no config.yaml on the
+        # runner, and probe refuses rather than seeds one.
         run: |
-          go run ./cmd/apogee probe | grep -q 'unfenced: truncate(2)'
+          go run ./cmd/apogee probe --endpoint http://127.0.0.1:9 | grep -q 'unfenced: truncate(2)'
       - name: auto mode discloses the residual on startup
         # Headless is the unattended shape of the same disclosure, and it prints the notice on
         # stderr before it ever dials. The endpoint is deliberately dead: the notice is emitted
