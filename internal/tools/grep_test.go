@@ -644,23 +644,37 @@ func TestGrep_Execute_ToolErrors(t *testing.T) {
 
 // TestGrep_Execute_NewlineInAFilenameCannotForgeARow pins that a matched file whose NAME
 // carries a line break stays ONE row in both render paths — the bare "path:line:text" form
-// and the context form of renderFileGroup — with the break spelled out in the path.
+// and the context form of renderFileGroup — with the break spelled out in the path. The
+// context case seeds a line on either side of the match, so the "path:line-text" branch
+// that prints surrounding lines is exercised too, not just the matched row.
 func TestGrep_Execute_NewlineInAFilenameCannotForgeARow(t *testing.T) {
 	t.Parallel()
 
-	root := t.TempDir()
-	seedForgingFile(t, root, "needle\n")
-
 	cases := []struct {
-		name string
-		args map[string]any
+		name     string
+		content  string
+		args     map[string]any
+		wantRows []string
 	}{
-		{name: "plain rows", args: map[string]any{"pattern": "needle"}},
-		{name: "context rows", args: map[string]any{"pattern": "needle", "context_lines": 1}},
+		{
+			name:     "plain rows",
+			content:  "needle\n",
+			args:     map[string]any{"pattern": "needle"},
+			wantRows: []string{":1:needle"},
+		},
+		{
+			name:     "context rows",
+			content:  "before\nneedle\nafter\n",
+			args:     map[string]any{"pattern": "needle", "context_lines": 1},
+			wantRows: []string{":1-before", ":2:needle", ":3-after"},
+		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			seedForgingFile(t, root, tc.content)
+
 			result, err := NewGrep(root, nil).Execute(context.Background(), callWith(t, "c1", tc.args))
 
 			if err != nil {
@@ -670,11 +684,17 @@ func TestGrep_Execute_NewlineInAFilenameCannotForgeARow(t *testing.T) {
 				t.Fatalf("unexpected tool error: %q", result.Content)
 			}
 			lines := strings.Split(result.Content, "\n")
-			if len(lines) != 2 {
-				t.Fatalf("got %d lines, want header + 1 row: %q", len(lines), result.Content)
+			if len(lines) != len(tc.wantRows)+1 {
+				t.Fatalf("got %d lines, want header + %d rows: %q", len(lines), len(tc.wantRows), result.Content)
 			}
-			if !strings.Contains(lines[1], forgingRowSpelling) {
-				t.Errorf("row %q does not carry the escaped path spelling %q", lines[1], forgingRowSpelling)
+			for i, want := range tc.wantRows {
+				row := lines[i+1]
+				if !strings.Contains(row, forgingRowSpelling) {
+					t.Errorf("row %q does not carry the escaped path spelling %q", row, forgingRowSpelling)
+				}
+				if !strings.HasSuffix(row, want) {
+					t.Errorf("row %q does not end in %q", row, want)
+				}
 			}
 		})
 	}

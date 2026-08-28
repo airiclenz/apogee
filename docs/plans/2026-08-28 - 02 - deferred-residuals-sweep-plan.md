@@ -500,7 +500,9 @@ restore message: a spent skill before the restore is suggested again after it.
 
 **Commit.** `fix(tui): a session restore clears the spent-skills set`
 
-## 16. `renderFileGroup`'s context row is proven escaped
+## 16. `renderFileGroup`'s context row is proven escaped — ✅ DONE (2026-08-28)
+
+NOTES (2026-08-28): the two table cases now carry their own file content and their own `t.TempDir()` (the shared `"needle\n"` seed could not serve both); each row is also asserted to END in its expected `:<n>[:-]<text>` suffix, so the header/row alignment is pinned, not just the escaping.
 
 **What.** ISSUES: *`renderFileGroup`'s context-row form is unexercised.* Extend
 `TestGrep_Execute_NewlineInAFilenameCannotForgeARow` (`internal/tools/grep_test.go:646`):
