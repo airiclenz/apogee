@@ -329,7 +329,35 @@ Depends on items 1, 3 and 4.
 
 ---
 
-## 6. e2e: a symlinked workspace (the macOS /tmp shape), every tool, zero prompts
+## 6. e2e: a symlinked workspace (the macOS /tmp shape), every tool, zero prompts — ✅ DONE (2026-08-28)
+
+NOTES (2026-08-28): the edit tool is `edit_existing_file`, the repo's actual name for it — the item's
+"`edit_file` (or the repo's replace tool)" names no tool this registry has.
+NOTES (2026-08-28): the fixture calls `installFenceableConfiner(t)` (item 5's), which the item's text
+does not mention. Auto on a backend that cannot fence the filesystem gates every terminal command
+through Approval instead (ADR 0012), so on a host without landlock the scripted `cat` would raise a
+pane for a reason that has nothing to do with an announced path and the item's own "`paneTrace` count
+0" would fail. The seam is a no-op on a host that can fence, which is where this ran.
+NOTES (2026-08-28): "plain home" is `e2eHome` plus item 5's one `system-prompt-text:` key
+(`announcedStandingPrompt`), through `launchTUIIn`. The orientation block RIDES ALONG on a standing
+system message (ADR 0023 §6 amendment), so a home with no prompt sends no system message, announces
+no workspace, and leaves a `from: system` capture nothing to read.
+NOTES (2026-08-28): "zero prompts" is item 4's in-process `watchApprovalPanes` rather than the design
+call's `paneTrace`, for that item's own recorded reason — `paneTrace` reads a pty run's `--tui-trace`
+file and this fixture is an in-process run.
+NOTES (2026-08-28): each of the five turns repeats the same capture and each call carries an explicit
+`id:`. A `{{name}}` must name a capture on its OWN turn (the stub refuses it otherwise), and a call's
+id is numbered by position within its own turn, so five turns each emitting one call would all send
+`call_1` and the id-keyed readers would collapse them into one.
+NOTES (2026-08-28): the item's "no error prefix" is asserted as each tool's own success receipt
+(`hello` back from the read, `wrote …`/`updated …` naming `b.txt`, both files in the listing, `hello`
+back from the confined command) alongside the `outside the workspace root` check. A tool result
+carries no error MARKER on the wire — `domain.ToolOutcome` is projected onto the conversation message
+but not sent upstream — so there is no prefix for a fixture to look for, and the positive receipt is
+the stronger claim anyway.
+NOTES (2026-08-28): mutation-checked — pointing `assertEveryToolCallNames` at the RESOLVED tree
+instead of the link fails all five calls, so the capture really lifted the announced spelling and the
+five calls really are five distinct calls.
 
 Depends on items 3 and 4.
 

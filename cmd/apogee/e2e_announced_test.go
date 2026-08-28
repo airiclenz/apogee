@@ -322,6 +322,99 @@ func announcedScratchDir(t *testing.T, stub *stubllm.Server) string {
 	return ""
 }
 
+// announcedWorkspacePrompt is what the workspace fixture's model is asked, and the phrase
+// announced-workspace.yaml keys its first tool turn on.
+const announcedWorkspacePrompt = "Use every workspace tool on the project tree."
+
+// announcedWorkspaceEdit is the line the edit leaves behind in the file the write created. It is
+// what a read of the REAL tree has to come back with, which is a stronger claim than the tool's own
+// receipt: a write that landed anywhere but where the project actually lives would still report
+// success against the name it was given.
+const announcedWorkspaceEdit = "APOGEE-ANNOUNCED-EDIT-4b93"
+
+// TestE2EAnnouncedWorkspaceThroughASymlink is the invariant over the orientation's `Workspace:`
+// line on the host shape macOS hands every user by default: a project tree reached through a
+// symlink, so the name apogee announces and the path the filesystem resolves it to differ in every
+// byte after the temp root.
+//
+// The workspace is the one root every tool measures against, and the two sides of that measurement
+// are spelled differently here on purpose. A read tool that resolved the announced path and then
+// compared it against the CONFIGURED root would call the workspace's own files an escape; a write
+// tool that compared the other way round would refuse to create a file in the project. The chain
+// below reads, writes, edits, lists and cats through the announced spelling alone — the last of
+// those from a confined subprocess, whose fence is built from the same name — and asserts that not
+// one of them was refused, and that nobody was asked.
+func TestE2EAnnouncedWorkspaceThroughASymlink(t *testing.T) {
+	installFenceableConfiner(t)
+
+	// The tree the project really lives in, and the name apogee is given for it.
+	tree := e2eWorkspace(t)
+	ws := symlinkTo(t, tree)
+
+	stub := stubllm.New(t, loadScript(t, "announced-workspace"))
+	drv := tuitest.NewDriver(t, e2eSize)
+	sess := launchTUIIn(t, drv, stub, ws, announcedStandingPrompt, "--mode", "auto")
+	panes := watchApprovalPanes(t, drv)
+
+	submit(drv, announcedWorkspacePrompt)
+	drv.WaitText("Every workspace tool answered.")
+	drv.WaitQuiet(settled)
+
+	// The orientation announced the configured spelling — the link — and every call the model made
+	// used it. A run whose orientation had started naming the resolved tree would fail here rather
+	// than quietly leave the symlinked shape untested.
+	assertEveryToolCallNames(t, stub, ws)
+
+	results := toolResults(stub)
+	if len(results) != 5 {
+		t.Fatalf("the run produced %d tool results; want the fixture's five:\n%s",
+			len(results), strings.Join(results, "\n---\n"))
+	}
+	// Each result is its own tool's success receipt. A tool that had measured the announced spelling
+	// against the resolved root would answer with the read-scope refusal instead, which is the
+	// failure this whole suite exists to keep out of a user's session.
+	wants := [][]string{
+		{"hello"},             // read_file gave the seeded file back
+		{"wrote ", "b.txt"},   // write_file created a file in the project
+		{"updated ", "b.txt"}, // edit_existing_file replaced its content
+		{"a.txt", "b.txt"},    // list_dir saw both of them
+		{"hello"},             // and the confined subprocess read through the link too
+	}
+	for i, want := range wants {
+		if strings.Contains(results[i], "outside the workspace root") {
+			t.Errorf("tool result %d was refused as an escape:\n%s", i+1, results[i])
+			continue
+		}
+		for _, text := range want {
+			if !strings.Contains(results[i], text) {
+				t.Errorf("tool result %d does not read as a success — no %q in it:\n%s",
+					i+1, text, results[i])
+			}
+		}
+	}
+
+	// And the writes reached the tree the link points at, not merely a path that spells the same.
+	edited, err := os.ReadFile(filepath.Join(tree, "b.txt"))
+	if err != nil {
+		t.Fatalf("read the written file back from the real workspace: %v", err)
+	}
+	if !strings.Contains(string(edited), announcedWorkspaceEdit) {
+		t.Errorf("the real workspace holds %q as b.txt; want the edited content", edited)
+	}
+
+	if n := panes(); n != 0 {
+		t.Errorf("the run raised %d approval pane(s); an announced path must cost nobody a look", n)
+	}
+	if un := stub.Unmatched(); len(un) > 0 {
+		t.Errorf("the run made %d request(s) the script did not anticipate: %v", len(un), un)
+	}
+	stub.AssertConsumed(t)
+
+	if err := sess.Quit(); err != nil {
+		t.Fatalf("the run returned %v; want a clean quit", err)
+	}
+}
+
 // ----------------------------------------------------------------------------
 // Shared fixtures for the announced-paths suite
 // ----------------------------------------------------------------------------

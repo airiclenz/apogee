@@ -1,0 +1,76 @@
+# The upstream TestE2EAnnouncedWorkspaceThroughASymlink talks to: a model that reaches the project
+# tree only by the name apogee gave it, on the host shape where that name is not the tree's own.
+#
+# Every tool turn below carries the same capture, whose pattern lifts the root out of the
+# orientation block's `- Workspace: %s — the project's own files; …` line
+# (internal/agent/prompts/orientation.txt). The orientation rides the standing system message on
+# EVERY request, so each turn can read the announcement off the request it is answering rather than
+# out of the preceding tool's output — which is why this fixture can be a chain where the skill
+# fixture (whose header rides only the first request) has to be one turn.
+#
+# The shape under test is macOS's: a workspace handed to apogee through a symlink, so the announced
+# spelling and the tree's real path differ in every byte after the temp root. A read tool that
+# resolved the announcement and then measured the result against the configured root would call its
+# own workspace an escape; a write tool that did the reverse would refuse to create a file in the
+# project. Both halves are exercised here — read, write, edit, list — and the terminal call adds the
+# confined-subprocess route, which reaches the tree through a fence built from the same name.
+model: announced-model
+turns:
+    # The session title. apogee asks for one off the first prompt, so this has to be matched BEFORE
+    # the prompt's own turn or it would take it (see smoke.yaml).
+    - when:
+        last_message: The user's first request
+      repeat: true
+      text: Announced workspace
+    # Explicit ids throughout: a call's id is numbered by position within its own turn, so six turns
+    # each emitting one call would all send `call_1` and an assertion that reads the calls or the
+    # results back would see one of them.
+    - when:
+        last_message: every workspace tool
+      captures:
+        - {name: workspace, from: system, pattern: 'Workspace: (\S+) — the project'}
+      tool_calls:
+        - id: ws-read
+          name: read_file
+          arguments: '{"path":"{{workspace}}/a.txt"}'
+    - when:
+        tool_result: read_file
+      captures:
+        - {name: workspace, from: system, pattern: 'Workspace: (\S+) — the project'}
+      tool_calls:
+        - id: ws-write
+          name: write_file
+          arguments: '{"path":"{{workspace}}/b.txt","content":"before the edit\n"}'
+    - when:
+        tool_result: write_file
+      captures:
+        - {name: workspace, from: system, pattern: 'Workspace: (\S+) — the project'}
+      tool_calls:
+        - id: ws-edit
+          name: edit_existing_file
+          arguments: '{"path":"{{workspace}}/b.txt","content":"APOGEE-ANNOUNCED-EDIT-4b93\n"}'
+    - when:
+        tool_result: edit_existing_file
+      captures:
+        - {name: workspace, from: system, pattern: 'Workspace: (\S+) — the project'}
+      tool_calls:
+        - id: ws-list
+          name: list_dir
+          arguments: '{"path":"{{workspace}}"}'
+    - when:
+        tool_result: list_dir
+      captures:
+        - {name: workspace, from: system, pattern: 'Workspace: (\S+) — the project'}
+      tool_calls:
+        - id: ws-terminal
+          name: terminal
+          arguments: '{"command":"cat {{workspace}}/a.txt"}'
+    # The wrap-up, once the confined command has come back.
+    - when:
+        tool_result: terminal
+      text: Every workspace tool answered.
+      token_delay: 1ms
+      chunk_runes: 8
+    # Anything apogee asks on its own account.
+    - repeat: true
+      text: Nothing else to add.
