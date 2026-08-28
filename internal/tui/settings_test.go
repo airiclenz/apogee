@@ -1184,20 +1184,35 @@ func TestSettingsModeSubListAppliesTheLiveRung(t *testing.T) {
 	}
 }
 
-// settingsModeEditModel opens the pane over that one row, on the host situation and the live fence
-// state the test chose — the two facts the blast-radius sentence is composed from. The window is
-// wider than the suite's default because the sentence is a whole clause in a right-hand column: at 80
-// cells the pane truncates it, and a truncated string is not what these tests are about.
-func settingsModeEditModel(t *testing.T, log *settingsWriteLog, info ConfinementInfo, confine bool) Model {
+// settingsModeEditModel opens the pane over that one row, on the host situation, the live fence state
+// and the terminal WIDTH the test chose — the two facts the blast-radius sentence is composed from,
+// and the room the pane has to say it in. At 160 the sentence is a whole clause in a right-hand
+// column and nothing has to give; 80 is the narrow reading, where the column has to choose what it
+// keeps, and the width the tests below pin that choice at.
+//
+// The rows are overlaid from the ENGINE and a landed apply moves it, the way the binary wires the
+// dispatcher (settingsModeModel says the same thing at greater length): a test that takes the auto
+// rung and then re-opens the sub-list reads it holding the rung it just took, which is the situation
+// where the sentence and the "(current)" marker land in one cell.
+func settingsModeEditModel(t *testing.T, log *settingsWriteLog, info ConfinementInfo, confine bool, width int) Model {
 	t.Helper()
+	eng := &fakeEngine{confine: confine}
+	rows := []SettingRow{settingsModeRow()}
 	opts := testOpts
 	opts.Confinement = info
 	opts.Settings = fakeSettingsHost{
-		rows:  func() []SettingRow { return []SettingRow{settingsModeRow()} },
-		write: log.write, reset: log.reset, apply: log.apply,
+		rows:  func() []SettingRow { return settingsLiveRows(rows, eng) },
+		write: log.write, reset: log.reset,
+		apply: func(path, value string) (string, error) {
+			note, err := log.apply(path, value)
+			if err == nil && path == settingKeyMode {
+				eng.SetMode(domain.Mode(value))
+			}
+			return note, err
+		},
 	}
-	m := newTestModelEng(t, &fakeEngine{confine: confine}, opts)
-	return openSettingsPane(t, step(t, m, tea.WindowSizeMsg{Width: 160, Height: 40}))
+	m := newTestModelEng(t, eng, opts)
+	return openSettingsPane(t, step(t, m, tea.WindowSizeMsg{Width: width, Height: 40}))
 }
 
 // settingsEnumRowLine is the value sub-list's line for ONE rung, found by its value column — the
@@ -1231,7 +1246,7 @@ func TestSettingsPaneModeEscalationToAutoStatesTheBlastRadius(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			log := &settingsWriteLog{}
-			m := settingsModeEditModel(t, log, c.info, c.confine)
+			m := settingsModeEditModel(t, log, c.info, c.confine, 160)
 
 			m = step(t, m, keyEnter()) // the sub-list, highlighted on ask-before
 			m = step(t, m, keyDown())  // allow-edits
@@ -1253,7 +1268,7 @@ func TestSettingsPaneModeEscalationToAutoStatesTheBlastRadius(t *testing.T) {
 // the sub-list's own column, and no other rung does — the three below it all still ask.
 func TestSettingsEnumAutoRowCarriesTheBlastRadiusCell(t *testing.T) {
 	log := &settingsWriteLog{}
-	m := settingsModeEditModel(t, log, capableHost, true)
+	m := settingsModeEditModel(t, log, capableHost, true, 160)
 
 	m = step(t, m, keyEnter()) // the value sub-list
 
@@ -1266,6 +1281,65 @@ func TestSettingsEnumAutoRowCarriesTheBlastRadiusCell(t *testing.T) {
 		if got := settingsEnumRowLine(t, rendered, rung); strings.Contains(got, sentence) {
 			t.Errorf("the %s row carries auto's blast radius: %q", rung, got)
 		}
+	}
+}
+
+// The marker and the blast-radius sentence share ONE cell on the rung the session is holding, and at
+// 80 columns they do not both fit it. The marker is the half that survives — it answers the question
+// the sub-list is asking, "which of these is the one running?" — so there it LEADS and the sentence
+// takes the ellipsis, while at 160 the reading order stands as it always was. The note the ⏎ leaves
+// on the key row makes the same trade in its own column: the sentence's first clause, which
+// finishes, rather than the whole of it cut off mid-word.
+func TestSettingsEnumCurrentMarkerSurvivesANarrowColumn(t *testing.T) {
+	sentence := autoBlastRadiusLine(capableHost, true)
+	cases := []struct {
+		name   string
+		width  int
+		cell   string // what the auto row's right-hand cell opens with once that rung is held
+		elided bool   // whether the pane had to cut the tail off that cell
+		note   string
+	}{
+		{name: "wide", width: 160, cell: sentence + " " + settingsEnumCurrentMarker, note: "· " + sentence},
+		{
+			name: "narrow", width: 80, elided: true,
+			cell: settingsEnumCurrentMarker + " auto runs",
+			note: "· " + autoBlastRadiusClause(capableHost, true),
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			log := &settingsWriteLog{}
+			m := settingsModeEditModel(t, log, capableHost, true, c.width)
+
+			m = step(t, m, keyEnter()) // the value sub-list, highlighted on the boot rung
+			m = step(t, m, keyDown())  // allow-edits
+			m = step(t, m, keyDown())  // auto
+			m = step(t, m, keyEnter()) // commit: the session runs auto, and the key row carries the note
+
+			if got := m.settingsNote(settingsModeRow()); got != c.note {
+				t.Errorf("note = %q, want %q — a column takes a clause that finishes, never an ellipsis", got, c.note)
+			}
+			if got := strip(m.renderSettings()); !strings.Contains(got, c.note) {
+				t.Errorf("the key list does not paint that note whole:\n%s", got)
+			}
+
+			m = step(t, m, keyEnter()) // re-opened, the sub-list holds the rung just taken
+			line := settingsEnumRowLine(t, m.renderSettings(), "auto")
+			_, cell, ok := strings.Cut(line, "auto")
+			if !ok {
+				t.Fatalf("no value column in the auto row: %q", line)
+			}
+			cell = strings.TrimSpace(cell)
+			if !strings.HasPrefix(cell, c.cell) {
+				t.Errorf("auto cell = %q, want it to open %q", cell, c.cell)
+			}
+			if !strings.Contains(cell, settingsEnumCurrentMarker) {
+				t.Errorf("auto cell = %q — the marker was cut to a fragment; it is the half that must survive", cell)
+			}
+			if got := strings.HasSuffix(cell, "…"); got != c.elided {
+				t.Errorf("auto cell elided = %v, want %v: %q", got, c.elided, cell)
+			}
+		})
 	}
 }
 

@@ -429,7 +429,13 @@ updated only where the ▶ appears.
 
 **Commit.** `fix(tui): a never-ran delegation row is expandable at every width and keeps its target`
 
-## 13. The settings `auto` row keeps its `(current)` marker at 80 columns
+## 13. The settings `auto` row keeps its `(current)` marker at 80 columns — ✅ DONE (2026-08-28)
+
+NOTES (2026-08-28): `settingsModeEditModel` gained the engine-overlaid rows and the mode-moving apply of its sibling `settingsModeModel` (the file's own house wiring) beyond the item's literal "parameterise by width" — the marker and the sentence share ONE cell only when `auto` is the HELD rung, and the helper's fixed `ask-before` row could never hold it, so no test at any width could reach the composition this item changes.
+
+NOTES (2026-08-28): the item says `TestSettingsEnumAutoRowCarriesTheBlastRadiusCell` holds unchanged at 160 "(sentence, then marker)"; it holds unchanged, but it never carried a marker on the `auto` row (its `(current)` sits on the boot rung). The wide reading is pinned instead by the `wide` arm of the new `TestSettingsEnumCurrentMarkerSurvivesANarrowColumn`, which takes the auto rung first and then asserts the composed cell exactly.
+
+NOTES (2026-08-28): "narrow widths" is resolved by MEASUREMENT rather than by a fixed column count — `settingsEnumCellWidth` and `settingsNoteWidth` compute what the sub-list's cell and the key list's note column actually have at this terminal width (the same `popupInnerWidth`/`popupColumnWidths` arithmetic the painter then spends), so the threshold cannot drift as the key list gains rows or the vocabulary gains a longer word.
 
 **What.** ISSUES: *The auto blast-radius row truncates at 80 columns.* In
 `renderSettingsEnum` (`internal/tui/settings.go:1775-1789`): when the composed cell

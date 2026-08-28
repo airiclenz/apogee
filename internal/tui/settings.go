@@ -1528,6 +1528,35 @@ func (m Model) settingsNote(row SettingRow) string {
 	return ""
 }
 
+// settingsNoteMarkerCells is what the lead settingsNote puts on every note it paints ("· ", "✗ ")
+// costs the sentence after it — the same two cells whichever marker the note earned.
+const settingsNoteMarkerCells = 2
+
+// settingsNoteWidth is how many cells the key list leaves a note's TEXT at this terminal width: the
+// pane's inner width, less the marker column every row is led by (popupRowIndent), less each tier
+// before the note with the gutter after it — a tier no row fills collapses away and costs nothing
+// (layoutPopupRow) — less the note's own marker.
+//
+// Its caller is an apply choosing between a sentence and its first clause (settingsApplyLive): the
+// painter elides an over-wide cell from the right, so a note the column cannot hold ends in an
+// ellipsis rather than in a full stop, and the whole point of a note that says what a rung costs is
+// that it finishes saying it.
+func (m Model) settingsNoteWidth(rows []SettingRow) int {
+	cells := make([]popupRow, 0, len(rows))
+	for _, row := range rows {
+		cells = append(cells, m.settingRowCells(row))
+	}
+	widths := popupColumnWidths(m.th, cells)
+	width := popupInnerWidth(m.th, m.width) - popupRowIndent - settingsNoteMarkerCells
+	for i := 0; i+1 < len(widths); i++ {
+		if widths[i] == 0 {
+			continue
+		}
+		width -= widths[i] + m.th.measure.Width(popupGutter)
+	}
+	return width
+}
+
 // settingsSourceLabel names the source that beat the file for a row — "APOGEE_MODE", "--mode" — for
 // the override note to point at. A row that carries a source but no name for it falls back to the kind
 // of source it was, so the sentence still says something true rather than trailing off.
@@ -1775,14 +1804,15 @@ func (m Model) renderSettingsSubList(row SettingRow, values []popupRow, hint str
 func (m Model) renderSettingsEnum(row SettingRow) string {
 	current := m.settingsCurrentValue(row)
 	vocabulary := m.settingsVocabulary(row)
+	width := m.settingsEnumCellWidth(vocabulary)
 	values := make([]popupRow, 0, len(vocabulary))
 	for _, value := range vocabulary {
 		cell := m.settingsEnumValueCell(row, value)
 		switch {
 		case value == current && cell != "":
-			cell += " (current)"
+			cell = settingsEnumCurrentCell(m.th, cell, width)
 		case value == current:
-			cell = "(current)"
+			cell = settingsEnumCurrentMarker
 		}
 		values = append(values, popupRow{stripEscapes(value), cell})
 	}
@@ -1801,6 +1831,44 @@ func (m Model) settingsEnumValueCell(row SettingRow, value string) string {
 		return autoBlastRadiusLine(m.opts.Confinement, m.eng.ConfineToWorkspace())
 	}
 	return ""
+}
+
+// settingsEnumCurrentMarker is what the sub-list says about the value the key already holds — the one
+// cell the enum content brings to the shared painter (renderSettingsEnum).
+const settingsEnumCurrentMarker = "(current)"
+
+// settingsEnumCurrentCell composes that marker with a value that ALREADY had something to say
+// (settingsEnumValueCell: `mode`'s auto rung, and nothing else today).
+//
+// THE THRESHOLD: the marker follows the sentence — the reading order a human takes, "this is what the
+// rung does, and it is the one you are on" — for as long as both fit the column
+// (settingsEnumCellWidth). Past that width it LEADS instead, because the painter elides a row from
+// the RIGHT (truncateToWidth, popup.go) and a trailing marker is the half that goes: an 80-column
+// terminal painted "…without asking, fenced to the (curren…", which is a row that no longer answers
+// which value the pane is holding. The sentence is the half that can afford the ellipsis — it is a
+// description, and the marker is the answer to the question the sub-list is asking.
+func settingsEnumCurrentCell(th theme, cell string, width int) string {
+	if composed := cell + " " + settingsEnumCurrentMarker; th.measure.Width(composed) <= width {
+		return composed
+	}
+	return settingsEnumCurrentMarker + " " + cell
+}
+
+// settingsEnumCellWidth is how many cells the sub-list leaves a value's right-hand cell at this
+// terminal width: the pane's inner width, less the marker column every row is led by
+// (popupRowIndent) and the value column with the gutter after it — the value column being as wide as
+// the widest word in the vocabulary, which is what the painter will measure it at
+// (popupColumnWidths).
+//
+// It is computed here rather than read back from the painter because the composition happens first:
+// the cell has to know its budget while it is still two strings that can be ordered either way
+// round, and by the time the painter has a line to truncate the ordering is already spent.
+func (m Model) settingsEnumCellWidth(vocabulary []string) int {
+	value := 0
+	for _, v := range vocabulary {
+		value = max(value, m.th.measure.Width(stripEscapes(v)))
+	}
+	return popupInnerWidth(m.th, m.width) - popupRowIndent - value - m.th.measure.Width(popupGutter)
 }
 
 // settingsMechanismState is what a Mechanism's row says about itself: the whole cell, because a

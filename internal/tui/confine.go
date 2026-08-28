@@ -98,6 +98,23 @@ func autoBlastRadiusLine(info ConfinementInfo, confine bool) string {
 	}
 }
 
+// autoBlastRadiusClause is that sentence's FIRST CLAUSE — what the rung does, without the qualifier
+// the comma introduces — for a surface too narrow to carry the whole of it. The one caller is the
+// /settings row's note (settingsApplyLive): a note wider than its column is elided by the painter,
+// and "auto runs every command without asking, fenced to the…" is a claim cut off mid-word where
+// the clause is a shorter claim that finishes.
+//
+// It is DERIVED from the sentence rather than written beside it, so the short reading can never say
+// something the long one does not — the reason autoBlastRadiusLine is the one wording in the first
+// place. A wording with no comma is already its own clause and comes back whole.
+func autoBlastRadiusClause(info ConfinementInfo, confine bool) string {
+	line := autoBlastRadiusLine(info, confine)
+	if comma := strings.Index(line, ","); comma > 0 {
+		return line[:comma]
+	}
+	return line
+}
+
 // confineStatusReport renders `/confine status`: the effective setting, the backend and what it
 // can actually enforce on this host, the host id an acknowledgement is recorded against, and the
 // mode — because the flag is read by the Auto rung alone, so on the three lower rungs it is a

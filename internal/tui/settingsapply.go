@@ -203,10 +203,25 @@ func (m Model) settingsApplyLive(path, value string) (Model, string, tea.Cmd, er
 			// human gate, and the seam answers `mode` with an empty note — so the row says what that
 			// means, in /confine's own words. The fence state is read, not decided, here: it is engine
 			// state the renderer already renders (confine.go), which is ADR 0011's line.
-			note = autoBlastRadiusLine(m.opts.Confinement, m.eng.ConfineToWorkspace())
+			note = m.autoBlastRadiusNote()
 		}
 	}
 	return m, note, nil, nil
+}
+
+// autoBlastRadiusNote is that sentence as the ROW can carry it: whole where the note column has the
+// cells for it, and its first clause (autoBlastRadiusClause) where it does not.
+//
+// The choice is made HERE, at the apply, because this is where the note is composed and the width is
+// known; the alternative — handing the row the long sentence and letting the painter cut it — ends
+// the note in an ellipsis, which reads as a claim that was interrupted rather than as the shorter
+// true claim the clause is. An 80-column terminal is the width that forces it.
+func (m Model) autoBlastRadiusNote() string {
+	line := autoBlastRadiusLine(m.opts.Confinement, m.eng.ConfineToWorkspace())
+	if m.th.measure.Width(line) <= m.settingsNoteWidth(m.settingRows()) {
+		return line
+	}
+	return autoBlastRadiusClause(m.opts.Confinement, m.eng.ConfineToWorkspace())
 }
 
 // settingsApplyLocal applies the keys the RENDERER itself owns — the ones whose entire effect is a
