@@ -20,6 +20,19 @@ type DiscoveredModel struct {
 	ID            string
 	DisplayName   string
 	ContextWindow int
+
+	// EffortSupport is what this ENTRY says about its own thinking-effort dial, read by the same
+	// rule ModelInfo.EffortSupport is read by (see effortSupport) and carried per model because the
+	// dial is a property of the MODEL, not of the server: a host deciding what a switch INTO a model
+	// implies — the TUI clearing a session effort override the target rules out (ADR 0060 D8) — must
+	// judge against the model it is switching to, and only this field can answer for a model that is
+	// not the active one.
+	//
+	// The zero value is both "no dial" and "no tell to read", exactly as on ModelInfo: an entry
+	// without a `reasoning` object says nothing, and a caller must treat that as unknown rather than
+	// as a refusal. The /props chat template is deliberately NOT folded in here — it describes the
+	// one model the server has LOADED, so it can only answer for the active one.
+	EffortSupport EffortSupport
 }
 
 // HintResolution records HOW discovery resolved the configured model id (the hint) against
@@ -147,8 +160,15 @@ func (c *Client) Discover(ctx context.Context) (ModelInfo, error) {
 		info.EffortSupport = templateEffort
 	}
 	// And a dialect the server's own entry FORCED outranks both tells: it is there precisely
-	// because this provider advertises none (see WithEffortDialect).
+	// because this provider advertises none (see WithEffortDialect). It is applied to every
+	// advertised entry as well as to the active model, so a host reading the dial of a model it is
+	// about to switch to can never get a different answer than it gets for the one it is on — one
+	// channel from either source (ADR 0060 decision 3).
 	info.EffortSupport = forceEffortDialect(c.effortDialect, info.EffortSupport)
+	for i := range info.AvailableModels {
+		info.AvailableModels[i].EffortSupport =
+			forceEffortDialect(c.effortDialect, info.AvailableModels[i].EffortSupport)
+	}
 	return info, nil
 }
 
@@ -351,8 +371,10 @@ type modelReasoning struct {
 const jsonNullLiteral = "null"
 
 // toModelInfo projects the payload onto ModelInfo, dropping id-less entries and resolving
-// the active model from hint (the configured model) per resolveHint, then reading that model's
-// thinking-effort tell per effortSupport.
+// the active model from hint (the configured model) per resolveHint. Every advertised entry is
+// read for its own thinking-effort tell per effortSupport, and the resolved active model once
+// more — the same rule twice, so an entry and the active model can never disagree about the
+// model they both describe.
 func (r modelsResponse) toModelInfo(hint string) ModelInfo {
 	var models []DiscoveredModel
 	for _, m := range r.Data {
@@ -367,6 +389,7 @@ func (r modelsResponse) toModelInfo(hint string) ModelInfo {
 			ID:            m.ID,
 			DisplayName:   m.Name,
 			ContextWindow: contextWindow,
+			EffortSupport: r.effortSupport(m.ID),
 		})
 	}
 

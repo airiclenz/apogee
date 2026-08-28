@@ -565,6 +565,49 @@ func TestDiscover_EffortSupport(t *testing.T) {
 	}
 }
 
+// The dial is a property of the MODEL, so EVERY advertised entry carries its own answer and not
+// just the active one: a host deciding what a switch INTO a model implies has to read the target's
+// vocabulary before it binds, and the entry is the only place that can state it (ADR 0060 D8).
+func TestDiscover_PerModelEffortSupport(t *testing.T) {
+	t.Parallel()
+
+	const models = `{"data":[` +
+		`{"id":"strict","context_length":32768,` +
+		`"reasoning":{"supported_efforts":["low","medium"],"default_effort":"low"}},` +
+		`{"id":"wide","context_length":16384,` +
+		`"reasoning":{"supported_efforts":["low","medium","high"],"default_effort":"high"}},` +
+		`{"id":"plain","context_length":8192}]}`
+
+	srv, _ := discoveryServer(models, "")
+	defer srv.Close()
+
+	info, err := NewClient(srv.URL, "strict").Discover(context.Background())
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+
+	strict := EffortSupport{
+		Supported: true, Dialect: EffortDialectReasoning,
+		Efforts: []string{"low", "medium"}, Default: "low",
+	}
+	want := []DiscoveredModel{
+		{ID: "strict", ContextWindow: 32768, EffortSupport: strict},
+		{ID: "wide", ContextWindow: 16384, EffortSupport: EffortSupport{
+			Supported: true, Dialect: EffortDialectReasoning,
+			Efforts: []string{"low", "medium", "high"}, Default: "high",
+		}},
+		{ID: "plain", ContextWindow: 8192},
+	}
+	if !reflect.DeepEqual(info.AvailableModels, want) {
+		t.Errorf("AvailableModels = %+v, want each entry carrying its own vocabulary %+v",
+			info.AvailableModels, want)
+	}
+	// The active model is read by the same rule, so the two answers about one model always agree.
+	if !reflect.DeepEqual(info.EffortSupport, strict) {
+		t.Errorf("EffortSupport = %+v, want the active entry's own answer %+v", info.EffortSupport, strict)
+	}
+}
+
 // A parse miss is never an error: discovery keeps reporting the model it resolved, and the dial
 // simply reads as undetected — the same best-effort contract the window and slot probes hold.
 func TestDiscover_MalformedEffortPayloadsStayBestEffort(t *testing.T) {

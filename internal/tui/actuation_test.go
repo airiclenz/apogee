@@ -545,7 +545,7 @@ func TestActuationDefersABindingObservedUnderTheLatch(t *testing.T) {
 		t.Fatalf("rebind calls = %v, want none while a launcher verb owns the server", rb.calls)
 	}
 	want := rebindIntent{model: "other-model", window: 16384}
-	if m.hb.pendingRebind == nil || *m.hb.pendingRebind != want {
+	if m.hb.pendingRebind == nil || !reflect.DeepEqual(*m.hb.pendingRebind, want) {
 		t.Fatalf("pendingRebind = %+v, want the observation stashed (%+v)", m.hb.pendingRebind, want)
 	}
 	if !m.hb.everOnline || m.hb.offline {

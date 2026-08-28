@@ -310,6 +310,93 @@ func TestModelCommandArgumentForm(t *testing.T) {
 }
 
 // ----------------------------------------------------------------------------
+// The effort override a pick is judged against
+// ----------------------------------------------------------------------------
+
+// reasoningSupport is one model's advertised thinking-effort answer: the reasoning dialect and the
+// level vocabulary that model named for itself (provider.EffortSupport).
+func reasoningSupport(levels ...string) provider.EffortSupport {
+	return provider.EffortSupport{
+		Supported: true, Dialect: provider.EffortDialectReasoning, Efforts: levels,
+	}
+}
+
+// A `/model` pick judges the live session effort override against the model it is picking INTO,
+// never against the one the session is leaving: the vocabulary is a property of the MODEL, both are
+// advertised on the same beat, and only the target's can say whether the next request would fail.
+// Judged against the model being left, a switch OUT of a restrictive model dropped an override the
+// target offers, and a switch INTO one kept an override the target refuses until a beat happened to
+// land — the pick has no beat of its own, so the entry it names is the whole evidence (ADR 0060 D8).
+func TestModelPickJudgesTheOverrideAgainstThePickedModel(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name         string
+		active       provider.EffortSupport // what the model the session is LEAVING advertises
+		picked       provider.EffortSupport // what the model being picked advertises
+		wantOverride domain.ThinkingEffort
+		wantCleared  bool
+	}{
+		{
+			name:        "the target rules it out — cleared at the pick, though the model left offers it",
+			active:      reasoningSupport("low", "medium", "high"),
+			picked:      reasoningSupport("low", "medium"),
+			wantCleared: true,
+		},
+		{
+			name:         "the target offers it — kept, though the model left rules it out",
+			active:       reasoningSupport("low", "medium"),
+			picked:       reasoningSupport("low", "medium", "high"),
+			wantOverride: domain.EffortHigh,
+		},
+		{
+			name:         "the target reports no set — kept, and the next beat judges it",
+			active:       reasoningSupport("low", "medium"),
+			picked:       provider.EffortSupport{Supported: true, Dialect: provider.EffortDialectKwargs},
+			wantOverride: domain.EffortHigh,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			rb := &fakeRebind{}
+			m := wireRebind(t, testOpts, &fakeHeartbeat{}, rb)
+			beat := offerBeat("test-model", 32768,
+				heartbeat.ModelSummary{ID: "test-model", ContextWindow: 32768, EffortSupport: tt.active},
+				heartbeat.ModelSummary{ID: "other-model", ContextWindow: 16384, EffortSupport: tt.picked},
+			)
+			beat.EffortSupport = tt.active // the beat's own answer is about the ACTIVE model
+			m = foldBeatMsg(t, m, beat)
+			m.eng.SetEffortOverride(domain.EffortHigh)
+
+			// One Update, no beat in between: the pick is the whole evidence the clear decides from.
+			m, _ = typeCommand(t, m, "/model other-model")
+
+			if m.opts.Model != "other-model" {
+				t.Fatalf("opts.Model = %q, want the pick bound", m.opts.Model)
+			}
+			if override, _ := m.eng.ThinkingEffort(); override != tt.wantOverride {
+				t.Errorf("override after the pick = %q, want %q", override, tt.wantOverride)
+			}
+			notes := countNotes(m, "effort override")
+			if !tt.wantCleared {
+				if notes != 0 {
+					t.Errorf("clear notes = %d, want none — a kept override is silent; notes = %q",
+						notes, noteTexts(m))
+				}
+				return
+			}
+			want := `effort override "high" is not offered by other-model — cleared; back to auto`
+			if notes != 1 || countNotes(m, want) != 1 {
+				t.Errorf("notes = %q, want exactly one reading %q", noteTexts(m), want)
+			}
+		})
+	}
+}
+
+// ----------------------------------------------------------------------------
 // Recording the pick — the `model:` key (remember-model)
 // ----------------------------------------------------------------------------
 

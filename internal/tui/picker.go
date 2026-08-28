@@ -215,7 +215,7 @@ func (m Model) pickAdvertisedModel(args []string) (tea.Model, tea.Cmd) {
 		// instead of picking one, and "already bound to it" is a truer answer than calling it unknown.
 		for _, offered := range m.hb.models {
 			if offered.ID == args[0] {
-				return m.bindPickedModel(offered.ID, offered.ContextWindow)
+				return m.bindPickedModel(offered)
 			}
 		}
 		return m.pickerNote(fmt.Sprintf(
@@ -690,7 +690,7 @@ func (m Model) acceptPicker() (tea.Model, tea.Cmd) {
 	switch m.picker.kind {
 	case pickerModel:
 		picked := m.offeredModels()[offered]
-		return m.bindPickedModel(picked.ID, picked.ContextWindow)
+		return m.bindPickedModel(picked)
 	case pickerServer:
 		// The one kind whose list is asked per draw (ServerHost.List): the rows are re-read here
 		// rather than trusted from the frame that drew them, so a `servers:` block that shrank under the
@@ -717,7 +717,11 @@ func (m Model) acceptPicker() (tea.Model, tea.Cmd) {
 }
 
 // bindPickedModel is the accept path both forms of /model share — a highlighted row and
-// "/model <id>". It closes the overlay and drives the EXISTING rebind orchestration, so every
+// "/model <id>". It takes the whole advertised entry rather than an id and a window because a pick
+// is decided from what the server said about THAT model — the window it binds and the effort
+// vocabulary it judges the session override against are both entry facts, and splitting them into
+// parameters would invite a caller to pass one without the other. It closes the overlay and drives
+// the EXISTING rebind orchestration, so every
 // consequence (the seam call, the fail-once refusal, the restated start-up box, rebindNote's
 // wording, the notices, the unknown-window honesty) is the heartbeat's own and no second set of
 // strings exists to drift from it.
@@ -738,7 +742,8 @@ func (m Model) acceptPicker() (tea.Model, tea.Cmd) {
 // ON is offered to the seam: a refused rebind leaves the file describing the model still bound, and
 // naming the bound one records at once, which is the human's only way to pin what the heartbeat (or
 // start-up) chose for them.
-func (m Model) bindPickedModel(id string, window int) (tea.Model, tea.Cmd) {
+func (m Model) bindPickedModel(picked heartbeat.ModelSummary) (tea.Model, tea.Cmd) {
+	id, window := picked.ID, picked.ContextWindow
 	m.picker = picker{}
 	if id == m.opts.Model {
 		m.transcript.addNote("already bound to " + displayModel(id))
@@ -755,10 +760,16 @@ func (m Model) bindPickedModel(id string, window int) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.hb.observedModel, m.hb.observedWindow = id, window
-	// The dialect the last beat reported for the server this pick stays on, carried through rather
-	// than re-derived: a pick has no beat of its own, and a zero here would tell the engine this
-	// server advertises no thinking-effort dial (ADR 0060). The next beat re-observes it.
-	next, _ := m.applyRebind(rebindIntent{model: id, window: window, dialect: m.hb.observedDialect})
+	// Two halves of the effort observation, from two different sources on purpose. The DIALECT is the
+	// last beat's, carried through rather than re-derived: it is a fact about the SERVER this pick
+	// stays on, a pick has no beat of its own, and a zero here would tell the engine the server
+	// advertises no thinking-effort dial at all (ADR 0060). The SET is the picked entry's own, because
+	// the vocabulary is a fact about the MODEL: judging against it clears an override the target rules
+	// out at the pick rather than a beat later, and leaves one the target still offers standing even
+	// when the model being left excluded it (applyRebind, ADR 0060 D8).
+	next, _ := m.applyRebind(rebindIntent{
+		model: id, window: window, dialect: m.hb.observedDialect, effort: picked.EffortSupport,
+	})
 	if next.opts.Model == id {
 		record := recordModelChoice(next.opts.RecordModelChoice, id)
 		if record.saved {

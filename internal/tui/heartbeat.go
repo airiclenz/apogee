@@ -99,6 +99,21 @@ type rebindIntent struct {
 	// dialect seam; it is a plain value, so the value-copied Model carries it exactly as the two
 	// fields above.
 	dialect provider.EffortDialect
+	// effort is what the observation said about the dial of the model this intent binds INTO — the
+	// beat's own EffortSupport, or the picked entry's for a `/model` pick, which has no beat of its
+	// own. It is the set [effortExcluded] judges a live session override against, carried on the
+	// intent rather than read off the Model so a pick judges against the model it is MOVING TO and
+	// a change stashed for the quiescent boundary judges against the model it actually saw.
+	//
+	// An EMPTY set is not a refusal (binding, ADR 0060 D8): a `/props`-only server and a
+	// `/v1/models` entry with no reasoning metadata both report one, and neither is evidence the
+	// override is unavailable — the override stands, and the next landed beat judges it against
+	// whatever that beat can read. Only a model that REPORTED a vocabulary can rule a level out.
+	//
+	// The dialect above is the engine's half of the same observation; this half never crosses into
+	// the engine — the clear is host policy (ADR 0060 D9). It holds plain values and one slice of
+	// them, so it copies with the Model exactly as [heartbeatState.effort] does (ADR 0011).
+	effort provider.EffortSupport
 	// quietSeed records that this change was observed at FIRST CONTACT — no beat had ever landed
 	// and none had ever failed. It is an observation FACT, captured before the fold erases the
 	// evidence, rather than presentation state; [rebindNote] is what decides the wording it buys.
@@ -310,7 +325,10 @@ func (m Model) observeBinding(beat heartbeat.Beat, firstContact bool) (Model, bo
 		// The dialect the beat reported for this server, carried whole with the rest of the
 		// observation. It is deliberately NOT part of the changed test above: the dial is a fact
 		// about the server, so it moves when the model or the window does and never on its own.
-		dialect:   beat.EffortSupport.Dialect,
+		dialect: beat.EffortSupport.Dialect,
+		// The whole tell the beat read for the model it is binding, so the clear below decides from
+		// the observation that captured the change rather than from a later beat's state.
+		effort:    beat.EffortSupport,
 		quietSeed: firstContact,
 	}
 	if m.busy() || m.actuation.inFlight {
@@ -378,12 +396,16 @@ func (m Model) applyRebind(intent rebindIntent) (Model, bool) {
 	// The session effort override the newly bound model rules out, dropped rather than left to fail
 	// the next turn (ADR 0060 D8). It is decided HERE because this is the one seam every model switch
 	// funnels through — a beat-observed change and a `/model` pick alike — and from the two facts the
-	// host already holds: the override, read back off the engine, and the level set the last landed
-	// beat reported for the model now bound. The engine never learns that set; the clear is host
-	// policy, exactly as the menu gate, the footer segment and the picker rows are (ADR 0060 D9).
-	if override, _ := m.eng.ThinkingEffort(); effortExcluded(m.effortSupport(), override) {
+	// host already holds: the override, read back off the engine, and the level set the OBSERVATION
+	// carried for the model being bound (rebindIntent.effort) — the beat's for a beat-driven change,
+	// the picked entry's for a `/model` pick. Judging against the intent rather than against the
+	// Model's own last-beat state is what keeps a pick honest: the state still describes the model
+	// being LEFT, whose vocabulary says nothing about the one being moved to. The engine never learns
+	// that set; the clear is host policy, exactly as the menu gate, the footer segment and the picker
+	// rows are (ADR 0060 D9).
+	if override, profile := m.eng.ThinkingEffort(); effortExcluded(intent.effort, override) {
 		m.eng.SetEffortOverride("")
-		m.transcript.addNote(effortClearedNote(override, m.opts.Model))
+		m.transcript.addNote(effortClearedNote(override, profile, m.opts.Model, intent.effort.Default))
 	}
 	return m, true
 }
@@ -406,18 +428,28 @@ func effortExcluded(support provider.EffortSupport, override domain.ThinkingEffo
 }
 
 // effortClearedNote words a dropped override: the level that went, the model that does not offer it,
-// and where the dial stands now — "auto" being the picker's own word for the absence of an override,
-// so the note lands the human back on a row they have seen. A plain fact in the shape of the other
-// rebind notes beside it (rebindNote), with no verdict: the human asked for the level and for the
-// switch, not for the collision between them.
+// and where the dial stands now. A plain fact in the shape of the other rebind notes beside it
+// (rebindNote), with no verdict: the human asked for the level and for the switch, not for the
+// collision between them.
+//
+// The tail names the level the next request will ACTUALLY carry, resolved through the footer's own
+// ladder (footerEffortLabel with no override, since this note is written the instant the override
+// goes): the profile's `thinking.effort:` when the bound profile states one, else the level the
+// server reported as this model's default, else "auto" for the dial nothing has named a level for.
+// It shares that one function with the footer painted a row below, so the note and the footer cannot
+// tell the human two different things about the same dial — the old wording said "back to auto"
+// unconditionally and was simply wrong wherever a profile level sat underneath.
 //
 // The model is rendered through displayModel like every id the chrome shows, so this note and the
 // footer beside it can never name the same model two different ways. The level is quoted because it
 // is a vocabulary word rather than one of apogee's own; neither half is escape-stripped here, since
 // the note's one destination is addNote, which strips at the seam for every producer.
-func effortClearedNote(override domain.ThinkingEffort, model string) string {
-	return fmt.Sprintf("effort override %q is not offered by %s — cleared; back to auto",
-		override, displayModel(model))
+func effortClearedNote(override, profile domain.ThinkingEffort, model, reportedDefault string) string {
+	// The dial is supported by construction: only a model that reported a vocabulary can rule a
+	// level out, so the label's "is there a segment at all" answer is never in doubt here.
+	fallback, _ := footerEffortLabel("", profile, reportedDefault, true)
+	return fmt.Sprintf("effort override %q is not offered by %s — cleared; back to %s",
+		override, displayModel(model), fallback)
 }
 
 // applyPendingRebind binds a change that was captured while the engine was not the Update loop's to

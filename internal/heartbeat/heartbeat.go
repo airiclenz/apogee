@@ -38,6 +38,12 @@ type ModelSummary struct {
 	DisplayName string
 	// ContextWindow is the model's window in tokens, 0 when the server does not report it.
 	ContextWindow int
+	// EffortSupport is what THIS model's advertised entry said about its own thinking-effort dial
+	// (provider.DiscoveredModel.EffortSupport), and the zero value when it said nothing. It rides
+	// the offering rather than only the beat's active model because a host acting on a `/model`
+	// pick decides against the model it is picking INTO — the session effort override a target
+	// rules out is cleared at the pick, without waiting a beat to be told (ADR 0060 D8).
+	EffortSupport provider.EffortSupport
 }
 
 // Beat is one observation of the Upstream. It is never accompanied by an error: an
@@ -156,6 +162,7 @@ func (m *Monitor) Beat(ctx context.Context) Beat {
 			ID:            model.ID,
 			DisplayName:   model.DisplayName,
 			ContextWindow: model.ContextWindow,
+			EffortSupport: model.EffortSupport,
 		})
 	}
 	return beat

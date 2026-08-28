@@ -144,7 +144,13 @@ log — the announced surface is the wire).
 
 **Commit.** `fix(agent): a Driver that never rebinds still sends the server's effort dialect`
 
-## 3. A `/model` pick judges the override against the picked model; the cleared note names the real fallback
+## 3. A `/model` pick judges the override against the picked model; the cleared note names the real fallback — ✅ DONE (2026-08-28)
+
+NOTES (2026-08-28): edited `internal/tui/actuation_test.go` beyond the item's Files list — adding `provider.EffortSupport` (which holds a slice) to `rebindIntent` makes the struct non-comparable, so the two `*m.hb.pendingRebind != want` assertions (`actuation_test.go:548`, `heartbeat_test.go:936`) had to become `reflect.DeepEqual`. Mechanical, no assertion weakened.
+
+NOTES (2026-08-28): `Discover` now applies the server entry's forced `effort-dialect:` (`forceEffortDialect`) to every advertised entry, not only to the active model. Beyond the item's literal text, which names only the `modelsResponse.effortSupport` path: without it a server that forces a dialect different from the one it advertises would hand the pick a vocabulary the active model's own resolution had already dropped, and the two answers about one server would disagree (ADR 0060 decision 3's "one channel"). It can only narrow the clear, never widen it. The /props chat-template tell is deliberately NOT spread across entries — it describes the one model the server has loaded.
+
+NOTES (2026-08-28): `bindPickedModel` now takes the whole `heartbeat.ModelSummary` instead of `(id string, window int)`. Both call sites already held the entry, and the window it binds and the vocabulary it judges against are both entry facts — splitting them into parameters would invite a caller to pass one without the other.
 
 **What.** ISSUES: *A `/model` pick judges the override against the PREVIOUS model's level
 set* and *The cleared-override note says "back to auto" even when a profile level sits

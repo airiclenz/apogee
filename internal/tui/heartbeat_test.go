@@ -656,7 +656,7 @@ func TestBeatCarriesTheEffortDialectIntoTheRebind(t *testing.T) {
 	}
 
 	// The pick: same server, no beat, so the observed dialect is re-stated rather than zeroed.
-	picked, _ := m.bindPickedModel("other-model", 16384)
+	picked, _ := m.bindPickedModel(heartbeat.ModelSummary{ID: "other-model", ContextWindow: 16384})
 	if _, ok := picked.(Model); !ok {
 		t.Fatalf("bindPickedModel returned %T, want a Model", picked)
 	}
@@ -670,12 +670,17 @@ func TestBeatCarriesTheEffortDialectIntoTheRebind(t *testing.T) {
 // the next turn would fail on it, so the switch drops it and says so once (ADR 0060 D8). A model
 // that reports no set at all says nothing of the kind and keeps it, the enriched turn error being
 // that case's backstop.
+//
+// The note's tail names where the dial ACTUALLY lands once the override goes — the profile's own
+// level, else the level the server reported as this model's default, else "auto" — resolved through
+// the same footerEffortLabel the footer paints a row below, so the two cannot disagree.
 func TestSwitchClearsAnExcludedEffortOverride(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
 		name         string
 		support      provider.EffortSupport
+		profile      domain.ThinkingEffort // the bound profile's own `thinking.effort:`, "" when it states none
 		wantOverride domain.ThinkingEffort
 		wantNote     string
 	}{
@@ -685,6 +690,22 @@ func TestSwitchClearsAnExcludedEffortOverride(t *testing.T) {
 				Supported: true, Dialect: provider.EffortDialectReasoning, Efforts: []string{"low", "medium"},
 			},
 			wantNote: `effort override "high" is not offered by new-model — cleared; back to auto`,
+		},
+		{
+			name: "a profile level under the cleared override is what the note names",
+			support: provider.EffortSupport{
+				Supported: true, Dialect: provider.EffortDialectReasoning, Efforts: []string{"low", "medium"},
+			},
+			profile:  domain.EffortMedium,
+			wantNote: `effort override "high" is not offered by new-model — cleared; back to medium`,
+		},
+		{
+			name: "with no profile level the server's own default is the fallback",
+			support: provider.EffortSupport{
+				Supported: true, Dialect: provider.EffortDialectReasoning,
+				Efforts: []string{"low", "medium"}, Default: "low",
+			},
+			wantNote: `effort override "high" is not offered by new-model — cleared; back to low`,
 		},
 		{
 			name:         "a model that reports no set keeps it",
@@ -705,6 +726,7 @@ func TestSwitchClearsAnExcludedEffortOverride(t *testing.T) {
 			t.Parallel()
 
 			m := wireRebind(t, testOpts, &fakeHeartbeat{}, &fakeRebind{})
+			m.eng.(*fakeEngine).effortProfile = tt.profile
 			m = foldBeatMsg(t, m, upBeat("test-model", 32768)) // the first beat observes what is bound
 			m.eng.SetEffortOverride(domain.EffortHigh)
 
@@ -933,7 +955,7 @@ func TestRebindDeferredWhileBusy(t *testing.T) {
 	if m.opts.Model != "test-model" {
 		t.Errorf("bound model = %q, want the mid-Exchange binding untouched", m.opts.Model)
 	}
-	if want := (rebindIntent{model: "model-b", window: 16384}); m.hb.pendingRebind == nil || *m.hb.pendingRebind != want {
+	if want := (rebindIntent{model: "model-b", window: 16384}); m.hb.pendingRebind == nil || !reflect.DeepEqual(*m.hb.pendingRebind, want) {
 		t.Fatalf("pendingRebind = %+v, want the LATEST observation stashed (%+v)", m.hb.pendingRebind, want)
 	}
 
