@@ -82,11 +82,16 @@ func (r foldBlockingResponder) Stream(ctx context.Context, req provider.Request)
 }
 
 // assertRequestTemplateLegal fails when the wire request would be rejected by a strict chat
-// template — a tool result or an assistant tool call whose partner the fold replaced, or two
-// consecutive messages in the same role once past the leading system messages.
+// template — a tool result or an assistant tool call whose partner the fold replaced, two
+// consecutive messages in the same role once past the leading system messages, or a request whose
+// last non-system message is the assistant's own turn. That last check is the one a fold can break
+// on its own: a template refuses a request ending on an assistant turn, and an instruct model
+// handed one reads it as "keep writing that" rather than as a task to resume, so every fold that
+// leaves the conversation ending in its summary owes it a user bridge.
 func assertRequestTemplateLegal(t *testing.T, req provider.Request) {
 	t.Helper()
 	prev := ""
+	last := ""
 	for i, m := range req.Messages {
 		if m.Role == string(domain.RoleTool) {
 			t.Errorf("request message %d is a dangling tool result: %+v", i, m)
@@ -99,6 +104,13 @@ func assertRequestTemplateLegal(t *testing.T, req provider.Request) {
 				i-1, i, m.Role)
 		}
 		prev = m.Role
+		if m.Role != string(domain.RoleSystem) {
+			last = m.Role
+		}
+	}
+	if last != "" && last != string(domain.RoleUser) && last != string(domain.RoleTool) {
+		t.Errorf("the request's last non-system message is %q; a strict template requires it to be %q or %q",
+			last, domain.RoleUser, domain.RoleTool)
 	}
 }
 

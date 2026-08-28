@@ -1297,6 +1297,20 @@ func TestSubAgent_ChildFoldsMidDelegationAndFinishes(t *testing.T) {
 		t.Fatal("no request carried the folded summary; the child's post-fold request was not observed")
 	}
 	assertRequestTemplateLegal(t, req)
+
+	// The shape the trailing-role half of that check stands on: a delegation has no Exchange
+	// opening for a user message to arrive at, so the fold owes the request its own bridge and the
+	// request ends assistant-summary | user(bridge) rather than on the summary.
+	if len(req.Messages) < 2 {
+		t.Fatalf("the child's post-fold request carries %d messages, want at least the summary and its bridge", len(req.Messages))
+	}
+	summary, bridge := req.Messages[len(req.Messages)-2], req.Messages[len(req.Messages)-1]
+	if summary.Role != string(domain.RoleAssistant) || !strings.Contains(summary.Content, "CHILD-SUMMARY") {
+		t.Errorf("the request's second-to-last message is %q/%q, want the assistant's fold summary", summary.Role, summary.Content)
+	}
+	if bridge.Role != string(domain.RoleUser) || bridge.Content != overflowBridge {
+		t.Errorf("the request's last message is %q/%q, want the user overflow bridge", bridge.Role, bridge.Content)
+	}
 }
 
 // TestSubAgent_ChildNeverFoldsWithAutoCompactOff holds the one gate the child's mid-Exchange fold

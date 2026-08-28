@@ -96,7 +96,8 @@ func (a *Agent) Compact(ctx context.Context) (skipped bool, err error) {
 // Exchange-boundary-only on the MAIN agent (shouldAutoCompact's inExchange guard — a mid-Exchange
 // over-budget Turn defers to the next opening; a CHILD agent lifts that guard and folds at
 // quiescent Turn boundaries too, and the sibling emergencyFold below runs mid-Exchange on any Agent
-// for its own overflow-driven trigger alone — ADR 0018), and a fold that RAN and STILL leaves the
+// for its own overflow-driven trigger alone — ADR 0018; a fold that DID run mid-Exchange appends the
+// same overflowBridge emergencyFold appends, so no request ever ends on the summary), and a fold that RAN and STILL leaves the
 // history over its allocation
 // saturates the trigger (one ErrorEvent, then it stands down until the estimate drops). A skip
 // (Result.Skipped — too few messages past the protected prefix to be worth folding) folds nothing,
@@ -123,16 +124,32 @@ func (a *Agent) autoCompact(ctx context.Context, turn int) {
 	if res.Skipped {
 		return
 	}
-	// Repair the cached Exchange boundary when this fold ran MID-Exchange (a child agent): the
-	// Replace dropped everything past the protected prefix, so the recorded exchangeStart now
-	// points past the conversation's end and AbortExchange would roll back to nothing. It is the
-	// same S2 repair step() performs after a mid-Exchange history rewrite and emergencyFold's
-	// anchorAtBridge performs after ITS fold — the boundary is a CACHED value (ADR 0017 §2)
-	// precisely because a fold can drop the Exchange's opening user message. reanchorAfterShrink
-	// clamps to just past the prefix, which after this fold is the summary's far side: the folded
-	// summary is retained history, so an abort has nothing of the Exchange left to drop. It is a
-	// no-op at an Exchange boundary, so the main agent's path is untouched.
-	a.turns.reanchorAfterShrink(res.Before - res.After)
+	// Close a fold that ran MID-Exchange (the branch only a child agent — midExchangeCompaction —
+	// reaches) exactly as emergencyFold closes its own mid-Exchange fold: append the overflow bridge
+	// and re-anchor the cached Exchange boundary to it.
+	//
+	// The bridge is required here for the same reason it is required there. Compact Replaces
+	// everything past the protected prefix with a single assistant summary, so the conversation now
+	// ENDS on an assistant turn — and the next request the child sends is built from it directly,
+	// because there is no Exchange opening left in a delegation for a user message to arrive at (the
+	// whole delegation is one Exchange). A request ending on an assistant turn is what a strict chat
+	// template refuses and what an instruct model reads as "keep writing that summary"; the bridge's
+	// ROLE closes the structure back to a legal …assistant → user and its TEXT tells the child, in
+	// band, that its visible history is a summary of a conversation that outgrew the window.
+	//
+	// The depth-0 Exchange-boundary fold needs none of this: autoCompact runs before pendingInput is
+	// consumed, so the real user message follows the summary as its own turn.
+	//
+	// anchorAtBridge is then the required repair, not an optional one: the Replace dropped
+	// everything past the protected prefix, so the recorded exchangeStart points past the
+	// conversation's end and AbortExchange would roll back into the protected prefix. The boundary
+	// is a CACHED value (ADR 0017 §2) precisely because a fold can drop the Exchange's opening user
+	// message; that owner method (turn.go) carries the full rationale and is a no-op outside an
+	// Exchange, so the main agent's path is untouched either way.
+	if a.turns.inExchange {
+		a.conv.Append(domain.Message{Role: domain.RoleUser, Content: overflowBridge})
+		a.turns.anchorAtBridge()
+	}
 	// S2 saturation: a fold that RAN and still leaves the history over its allocation cannot help —
 	// the folded shape is the protected prefix (leading system messages + the first user message) plus
 	// the single compaction summary, and together they still exceed the History allocation. Latch the
@@ -247,8 +264,9 @@ func mustPrompt(name string) string {
 	return strings.TrimSuffix(strings.ReplaceAll(string(b), "\r\n", "\n"), "\n")
 }
 
-// overflowBridge is the user-role message appended after an emergency fold
-// (prompts/overflow-bridge.txt). Its ROLE is the load-bearing half: the fold leaves the
+// overflowBridge is the user-role message appended after any fold that ran MID-EXCHANGE
+// (prompts/overflow-bridge.txt) — emergencyFold's overflow-driven one on any Agent, and a child
+// agent's estimate-driven one in autoCompact. Its ROLE is the load-bearing half: the fold leaves the
 // conversation ending in the assistant summary, and a request whose last message is an assistant
 // turn is what a strict chat template refuses (and what an instruct model reads as "keep writing
 // that summary") — the user bridge closes the turn structure back to a legal …user → assistant →

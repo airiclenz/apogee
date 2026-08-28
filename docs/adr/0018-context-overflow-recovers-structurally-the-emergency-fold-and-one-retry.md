@@ -62,8 +62,10 @@ rewrite can drop the open Exchange's opening user message, the fold re-anchors t
 [ADR 0017](0017-the-exchange-is-a-derived-domain-working-value.md) §2, mirroring the S2 repair
 `step()` performs after a mid-Exchange `truncate_history` shrink.
 
-**4. The folded conversation ends with a user-role bridge.** On success the fold appends one
-constant message (`overflowBridge`) telling the model that the conversation above was compacted
+**4. The folded conversation ends with a user-role bridge.**
+*(Amended 2026-08-28 — the bridge belongs to every fold that runs MID-EXCHANGE, so a child's
+estimate-driven fold appends the same one; see the 2026-08-26 Amendment section below.)* On success
+the fold appends one constant message (`overflowBridge`) telling the model that the conversation above was compacted
 because the previous request exceeded the window, and to continue from the summary. Its ROLE is
 the load-bearing half — the conversation would otherwise end in an assistant message, which a
 strict chat template refuses and an instruct model reads as "keep writing that summary" — leaving
@@ -313,8 +315,14 @@ delegate reaching 910K of context over 633 steps. Every child agent therefore li
 (`midExchangeCompaction`, set by `newChildAgent` alone) and may run the ordinary estimate-driven
 fold at any quiescent TURN boundary: the top of `step()`, where the previous Turn's tool calls are
 all answered, so the prefix → summary `Replace` strands no tool result and role alternation holds.
-It repairs the cached `exchangeStart` for the same reason §3 does, through the sibling of §3's
-`anchorAtBridge` (`reanchorAfterShrink`). The main loop keeps the gate — bench arms comparing
+It closes that fold exactly as §3 closes its own — the bridge of §4 appended, then
+`anchorAtBridge` — for the reason §4 gives *(corrected 2026-08-28: this paragraph first said the
+child re-anchored through `reanchorAfterShrink` and appended nothing)*. A delegation has no
+Exchange opening for a real user message to arrive at, so nothing else follows the summary and the
+child's very next request would end on an assistant turn: the same shape §4 exists to prevent, now
+reached by the estimate-driven trigger rather than the overflow-driven one. The main agent's
+boundary fold still owes no bridge — `autoCompact` runs before the loop consumes pending input, so
+the human's own message follows the summary as its own turn. The main loop keeps the gate — bench arms comparing
 Mechanisms against Bypass are unchanged — and the on-demand `/compact` still refuses mid-Exchange
 everywhere. What remains the emergency fold's alone is the OVERFLOW-driven trigger: it is still the
 only fold that runs mid-TURN, on a request the server has already rejected, and the

@@ -132,6 +132,18 @@ func TestAutoCompactSkipsMidExchangeThenFoldsAtNextOpening(t *testing.T) {
 	if up.summaryCalls != 1 {
 		t.Fatalf("deferred fold did not fire at the next Exchange opening: summarizer calls = %d, want 1", up.summaryCalls)
 	}
+	// Only a MID-Exchange fold owes the conversation an overflow bridge. This one ran at an
+	// Exchange opening, where the human's own "again" follows the summary as its own turn, so a
+	// bridge here would put an invented user message in front of theirs.
+	for i := 0; i < a.conv.Len(); i++ {
+		if a.conv.At(i).Content == overflowBridge {
+			t.Errorf("the Exchange-boundary fold appended an overflow bridge at message %d (roles: %s); only a mid-Exchange fold appends one",
+				i, convRoles(a))
+		}
+	}
+	if last := up.requests[len(up.requests)-1].Messages; last[len(last)-1].Content != "again" {
+		t.Errorf("the post-fold request ends %q, want the user's own %q", last[len(last)-1].Content, "again")
+	}
 }
 
 // TestAutoCompactSaturatesWhenPrefixExceedsAllocation drives the thrash-guard: a first user message

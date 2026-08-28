@@ -205,7 +205,13 @@ doc comment at `:1711` is true again.
 
 **Commit.** `test(tui): the filtered-accept census covers the effort picker`
 
-## 5. A child's mid-Exchange fold bridges back to a user turn
+## 5. A child's mid-Exchange fold bridges back to a user turn — ✅ DONE (2026-08-28)
+
+NOTES (2026-08-28): `reanchorAfterShrink` is dropped from `autoCompact` rather than kept on an else branch — it is a documented no-op outside an Exchange, so the `inExchange` branch the item replaces was the only one where it did anything; keeping the call would have left a line that provably cannot fire.
+
+NOTES (2026-08-28): edited `docs/adr/0018-…md` beyond the item's Files list — its 2026-08-26 amendment states that a child's estimate-driven fold re-anchors "through the sibling of §3's `anchorAtBridge` (`reanchorAfterShrink`)", which this item's change makes false, and §4 scopes the bridge to the emergency fold alone. Both carry dated amendment markers (the file's own house pattern) naming the widened rule.
+
+NOTES (2026-08-28): the item says "all seven call sites must still hold" for `assertRequestTemplateLegal`; the tree has five (`overflowrecovery_test.go:178`, `:378`, `predictiveguard_test.go:129`, `:212`, `subagent_test.go:1299`). All five hold, and the whole `internal/agent` package is green.
 
 **What.** ISSUES: *A child's post-fold request ends on the assistant summary and no test pins
 it.* In `autoCompact` (`internal/agent/compact.go:105`), when the fold ran inside an
