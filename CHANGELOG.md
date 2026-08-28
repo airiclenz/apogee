@@ -385,6 +385,253 @@ point is a **minor** bump, not a breaking change.
   is what a real terminal does with a margin it cannot honour. `Screen.Resize` is now safe over its
   whole input range, a height shrink under live output included.
 
+- **The thinking-effort turn-error hint now fires on every dialect.** A request whose effort
+  rode the `reasoning` object or the top-level `reasoning_effort` field used to fail bare: the
+  hint that names `thinking.effort` / the `/effort` override was gated on
+  `chat_template_kwargs`, so only the llama.cpp dialect ever got the explanation. The gate is
+  now one predicate on the wire body (`chatRequest.carriesEffort()`) — true when any of the
+  three fields `applyEffort` can set is present — on all four surfaces (unary status, unary
+  in-band, streamed status, streamed in-band). The `off` dialect emits none of the three and
+  stays silent, and the hint's wording names the intent instead of one dialect's field.
+  Closes ISSUES.md *The enriched turn-error hint reaches only the kwargs dialect.*
+
+- Fixed: a Driver that never rebinds now sends the bound server's thinking-effort wire dialect
+  instead of the historical `chat_template_kwargs` shape. `domain.Config` gained an
+  `EffortDialect` construction seed (a domain mirror of `provider.EffortDialect`, converted at
+  the wire seam), which `agent.New`/`Resume` apply and `Agent.Rebind` still overrides; every
+  unattended run — `apogee headless`, a daemon schedule, a `/schedule` Firing — states it from
+  the bound entry's forced `effort-dialect:` else one beat of the same discovery a session's
+  heartbeat drives. Closes *The Agent's effort dialect has no construction seed* and the
+  Audit-residue *C-03 — unattended runs send the empty effort dialect*.
+- Fixed: a startup `servers:` entry's `effort-dialect:` was dropped on the way into the session —
+  `startupEntry` flattened every other per-entry pin but that one, so a configured dialect never
+  reached the heartbeat's Monitor or any Firing. It now travels as `config.Options.StartupEffortDialect`.
+
+- **A `/model` pick now judges the session effort override against the model it picks INTO.** Closes
+  *A `/model` pick judges the override against the PREVIOUS model's level set* and *The
+  cleared-override note says "back to auto" even when a profile level sits underneath*. The
+  thinking-effort dial is a property of the model, so `provider.DiscoveredModel` and
+  `heartbeat.ModelSummary` now carry a per-entry `EffortSupport`, read by the same rule that already
+  answered for the active model (and, like it, overridden by a server entry's forced
+  `effort-dialect:`). The clear-on-switch decides from the observation that captured the change —
+  the beat's own tell for a beat-driven rebind, the picked entry's for a `/model` pick, which has no
+  beat of its own — so a switch OUT of a restrictive model no longer drops an override the target
+  offers, and a switch INTO one no longer keeps an override the target refuses until a beat happens
+  to land. A picked model that reports no level set keeps the override standing and the next beat
+  judges it, as before. The note the clear writes now names where the dial actually lands, resolved
+  through the footer's own ladder (`footerEffortLabel`): the profile's `thinking.effort:`, else the
+  level the server reported as that model's default, else `auto` — it said "back to auto"
+  unconditionally before, which was wrong wherever a profile level sat underneath.
+
+- The filtered-accept census (`TestPickerFilteredViewAgreesOnRowsCountAndAccept`) covers the `/effort` picker: an "effort levels" arm opens the pane over an explicitly reported vocabulary, narrows it to `medium` and asserts the level reaching `Engine.SetEffortOverride` is the filtered row's, not the first offered one — closing ISSUES.md *`pickerKindCases()` no longer covers every overlay kind.*
+
+- Fixed: a delegate that folds its history mid-delegation no longer sends a request ending on the fold's own summary — the child's mid-Exchange fold appends the same user bridge the emergency fold appends, so a strict chat template accepts the request and the child resumes the task instead of continuing the summary. Closes ISSUES.md *A child's post-fold request ends on the assistant summary and no test pins it.*
+
+- **A delegate's EMPTY capped reply now names the reasoning it burned.** `replyFault` judged the
+  delegate rule before emptiness, so a child whose `finish: length` reply carried no visible text
+  at all got the delegate wording — which reports no spend — instead of the capped-reply message
+  that names the cap AND "after roughly N tokens of reasoning". The visible-text check now runs
+  first at every depth, so an empty capped reply is `emptyReplyFault`'s at depth 0 and depth 1
+  alike; a delegate's capped reply WITH text keeps `cappedDelegateReplyErrFmt` unchanged (ADR 0046
+  addendum), and no third format string was added. Closes the issue-register entry *A child's
+  EMPTY capped reply lost the reasoning-spend number.*
+
+- The loop no longer dispatches a native `tool_calls` entry the server sent without a tool name or
+  an id: `assembleResponse` filters them on the same `processing.WellFormedToolCall` predicate the
+  `probe model` battery already refuses to count such an entry as evidence under, and reports the
+  drop once per reply as an `ErrorEvent` from source `processing`. A reply whose calls are all
+  dropped falls through to the text parser and the empty-reply guard exactly as one carrying no
+  calls does; no id is ever synthesised. Closes ISSUES: *`loop.go` dispatches native tool calls
+  unfiltered — the probe is now stricter than the loop.*
+
+- Fixed: a `sub_agent` call whose argument object names one parameter twice under different key
+  cases is now refused on the fan-out path too, in the same constant wording the serial path
+  uses — the Approver is never consulted, no gate key is minted, and no child starts, so a call's
+  disposition no longer depends on the bound server's Parallel agents cap. The fan-out
+  `ToolCallEvent` also carries `ResolvedPath`, the write-redirection disclosure the serial path
+  has always stamped. Closes ISSUES.md *The fan-out path resolves without the colliding-key check.*
+
+- **`filehint` now hints on a backend that emits no native tool-call IDs.** Closes ISSUES:
+  ***`filehint`'s ID→tool gate needs a non-empty native tool-call ID.*** The Mechanism parses a
+  result only when its `ToolCallID` answers a listing call in the opening turn, and nothing
+  synthesises an ID for a native call — so a backend sending empty `id`s silently stopped firing the
+  hint. `fileHintDetectOpportunity` (`internal/mechanisms/filehint.go`) now accepts every in-batch
+  tool result regardless of ID when EVERY call in the opening assistant turn is a listing tool
+  (`fileHintListingResultTools`): with nothing else in the batch a result could answer, the ID gate
+  has nothing left to decide. A turn mixing a listing tool with any other tool keeps the ID gate
+  unchanged, so a grep row still cannot reach the system message through an unmapped result (C-08
+  stays closed).
+
+- A resumed session's delegation keeps the cache share on its `/usage` row. The transcript record
+  gained `usageCachedPromptTokens` on `wireEntry`, mapped both ways beside the four accounting
+  members it already carried, so a restored run head reports the share its child's server stated
+  instead of a blank cell under a column the main agent's row still fills. The member is ADDITIVE
+  within `transcriptVersion` — it takes `omitempty`, a run that reported no share writes nothing new,
+  and a blob written before it decodes to no share, which is what such a record always described. No
+  version bump, no migration. Closes **A resumed delegate row loses its cached share.**
+
+- A delegation row's colour and its done ✓ now give one answer. The collapsed run line
+  (`subAgentSummary`) carried a verdict re-derived from the head's summary TEXT, which for a
+  delegation is the child's REPORT, quoted — so a run that SUCCEEDED and opened its report with
+  `error: …` was painted red while the ✓ beside its name said it finished cleanly. Both marks now
+  read the one field the result's error status set (`branchSummary.failed`), so a refused or faulted
+  delegation is red and wears no ✓, and a clean run that merely quotes an error line is neither.
+  Closes **A red slot and a ✓ can land on one delegation row.**
+
+- A delegation's collapsed row now always says it can be opened. The toggle-target rule
+  (`blockHidesWhenCollapsed`) could only count lines the block was hiding, and a delegation that
+  never ran has none once the promote-guard leaves its one-line refusal in the outcome slot — so at
+  roughly 110 columns and wider the row wore no ▶ and was not clickable, and the prompt
+  `unframedSubAgentView` lays out beneath it was unreachable at exactly those widths, while the same
+  row on a narrower terminal (where the guard demotes the refusal into a body) wore one. The rule now
+  asks a delegation about the prompt itself (`subAgentHidesPrompt`), which every reading of an open
+  delegation paints and no collapsed row ever does, so the affordance no longer comes and goes with
+  the terminal's columns. The wide row keeps the refusal in its slot; the narrow one keeps the
+  guard's fifteen cells of target. Closes **A never-ran delegation whose refusal stays promoted wears
+  no ▶.** and **At 80 columns a long refusal clips the target off a never-ran delegation's collapsed
+  row.**
+
+- **The `/settings` mode sub-list keeps its `(current)` marker on an 80-column terminal.** The `auto`
+  rung's cell carries the blast-radius sentence, and on the rung the session is holding the marker
+  joined it at the END — where the painter's right-hand elision cut it away, leaving a row that said
+  what auto costs but no longer which value the pane was on ("…fenced to the worksp…"). The marker
+  now LEADS the cell wherever the two do not both fit the value column, and the sentence takes the
+  ellipsis instead; the wide reading (sentence, then marker) is unchanged above that width. The
+  post-⏎ note on the key row makes the same trade in its own column: at a width that cannot hold the
+  whole sentence it carries the sentence's first clause — a claim that finishes — rather than one cut
+  off mid-word. Closes *The auto blast-radius row truncates at 80 columns.*
+
+- The settings pane never answers `mode` from its own edit journal: `settingsPersistedValue`
+  hands the key back to the live engine's rung before consulting the journal, so a session that
+  wrote `mode` in the pane and then cycled Shift+Tab cannot be read as still on the written rung.
+  Defence in depth — no caller reaches that path for `mode` today. Closes the ISSUES.md entry
+  **`settingsPersistedValue` still answers `mode` from the journal.**
+
+- Fixed: an in-TUI `/sessions` restore now clears the skill-suggestion band's spent set, so a skill
+  suggested before the restore is offered again in the reopened session (closes ISSUES.md **An
+  in-TUI `/sessions` restore inherits the outgoing session's spent skills**).
+
+- `grep`'s context rows are now pinned as escaped: `TestGrep_Execute_NewlineInAFilenameCannotForgeARow`'s `"context rows"` case seeds a match with a line on either side and asserts all three rows carry the escaped filename spelling, so `renderFileGroup`'s `%s:%d-%s` branch is under test (closes **`renderFileGroup`'s context-row form is unexercised.**).
+
+- The bare-name hook-resolution test now observes the child's argv[0]: `TestRunHookSubprocessResolvesABareProgramNameToAnAbsolutePath` runs `sh -c 'printf %s "$0"'` and asserts the output is absolute and equal to `exec.LookPath("sh")`, so the test fails against unresolved wiring instead of passing green (closes **The bare-name hook-resolution test never observes argv[0].**).
+
+- The `rm -rf` footgun rules match the getopt-permuted `rm - -rf /etc` spelling again: `rmFlag` accepts a bare `-` as a flag token, while `--` stays end-of-options and the harmless `rm rf /etc` stays unmatched (closes **The `rmFlag` token loses two spellings the old patterns caught.**).
+
+- Closes **The `~/.apogee` rule's Hint still opens with a refusal.** The
+  `write-apogee-control-plane` hint now opens "a terminal command naming ~/.apogee needs
+  approval, even for a read" instead of claiming a refusal the Tier-2 rule no longer makes —
+  the wording reads correctly on both surfaces it reaches, the approval prompt's remedy line
+  and the deny result's tail. The sanctioned-tools half is unchanged.
+
+- Fixed: the PDF absurd-object-count guard no longer reads `/Size` out of a stream body, so a
+  document whose compressed content happens to spell one is extracted instead of refused; the
+  trailer's and every xref-stream dictionary's `/Size` — the numbers that actually size the
+  cross-reference table — stay covered. Closes **`refuseAbsurdObjectCount` scans raw bytes.**
+
+- Fixed: an MCP stdio server that outlives the SDK's shutdown ladder no longer leaves the wait on
+  its process open-ended — the launched `Cmd` now carries a session-scoped cancellable context
+  (never the connect ctx) that `Client.Close` cancels once that ladder is spent, so the teardown
+  seam's `cmd.Cancel` (the process-group kill) and `cmd.WaitDelay` (`platform.ProcessWaitDelay`)
+  actually fire. Closes ISSUES: **`WaitDelay` wired by `NewProcessTeardown` is inert on the MCP
+  `Cmd`.**
+
+- All three `probe.ResidualNotice` prints — the TUI's boot notice, `apogee headless` and the
+  daemon's startup disclosure — are now driven in both directions on every host: the confiner
+  seam moved from `cmd/apogee/headless.go` to the composition root (`cmd/apogee/wire.go`), where
+  all three Drivers already build their backend from it, and each surface has a test that dictates
+  a fence-with-a-hole and a fence-without-one and asserts the notice fires exactly once and only
+  on stderr. `TestRunRootConfinementStartupNotices` no longer reads this machine's real kernel:
+  its five cells (unconfined warning, degradation notice, residual disclosure, silent fence,
+  silent non-Auto mode) are all dictated, so the silent half of each branch — where a deleted
+  print hides — is asserted everywhere. Closes ISSUES.md *Two of the three `ResidualNotice`
+  prints still have no test.* No production behaviour changes.
+
+- Test: the settings editor's exec fence root is pinned at the composition root —
+  `TestWireSessionFencesTheSettingsEditorAgainstTheWorkspace` asserts `externalEdit.workspace` is
+  the session's resolved workspace and absolute, then plants an executable under it and proves
+  `spec("mode")` wraps `security.ErrExecFromWritablePath`. Closes *No test pins the settings
+  editor's production fence root.*
+
+- Test: the Firing mount drops an escaping skill root — `TestFiringConfigMountsNoEscapingSkillRoot`
+  symlinks the workspace's `.apogee` out of the workspace and proves the relocated anchor is in
+  `Provider.SourceDirs()` but never in `Config.ExtraReadRoots()`. Closes *The Firing mount site has
+  no test that would catch a revert to `SourceDirs`.*
+
+- Test: both egress funnels' fail-closed proxy paths are pinned. `internal/tools`'
+  `TestNewHTTPClient_UnusableOrUnpinnableProxyRefusesTheCall` drives `newHTTPClient` over the 2×2 of
+  {a proxy value the resolver refuses, a proxy whose addresses cannot be learned} × {a bare value, a
+  `user:pw@` one}: every case wraps `security.ErrURLBlocked`, builds no client, carries the right
+  wording (`not a usable URL` / `could not be pinned`) and never names the proxy's password.
+  `internal/mcp`'s three `TestVetEndpoint_*` cases pin the same two refusals over `vetEndpoint` plus
+  one `HTTPS_PROXY` case proving the environment is the whole proxy surface. Closes *The fail-closed
+  proxy paths carry no committed test.*
+
+- The `syntax` Mechanism's JavaScript/TypeScript regex rule reads three more predecessors and no
+  longer carries stale state past a closed literal, so it stops firing `ActionRetry` against
+  correct code — the Bypass floor this rule exists to hold. `regexOpeners` now admits `>` (an
+  arrow body: `(s) => /['"]/.test(s)`) and `+`; `case` joins `return` as a keyword opener
+  (`regexOpenerKeyword` became the `regexOpenerKeywords` set); and the closing `/` of a literal
+  now refreshes the preceding-rune state, so the second `/` in `foo(/a/ / 2)` divides instead of
+  opening a literal that swallows the closing paren. Closes **The JS/TS regex rule still
+  misreports an arrow body and three other predecessors.** and **A closed regex literal leaves
+  the preceding-rune state stale.** `TestCheckSyntaxAcceptsValidCode` gains a row per opener —
+  the three new predecessors, the seven map runes that had no row of their own (`,` `{` `:` `&`
+  `|` `?` `;`), each literal holding both quote characters, and the division-after-a-literal case
+  with `a / b / c` beside it.
+
+- **The lenient frontmatter scan comma-splits a `triggers:` YAML sequence into one phrase.** When
+  strict YAML rejects a `SKILL.md`'s frontmatter, the recovery scan now records a `- phrase`
+  continuation line as an ITEM of the open key as well as folding it into the value, so a
+  list-shaped `triggers:` recovers the phrases the author wrote instead of the one run-on trigger
+  ("- review this diff - code review") no draft could ever match. A sequence entry is unquoted like
+  any other scanned value, and a phrase carrying a comma survives whole — only a single scalar
+  value is still cut on commas.
+
+- `internal/stubllm`'s recorder test now compares the reasoning channel across a replay, so a
+  fixture that drops `reasoning_content` fails the round-trip (closes **The recorder's replay
+  comparison never looks at the reasoning channel.**).
+
+- `tuitest.CheckLeaks` now holds a driver test answerable for its OWN goroutines only. It snapshots
+  the marked goroutines already running when it is called — keyed on the id in each block's
+  `goroutine <id> [...]` header — and its cleanup reports just the ids absent from that snapshot, so
+  a straggler leaked by a parallel neighbour is no longer charged to whichever cleanup happens to
+  look next. The marker packages, the harness/timer/checker exclusions and the 2 s grace poll are
+  unchanged. The one thing this rests on — the runtime never reusing a goroutine id — is written
+  down in `leak.go`'s narration, and `docs/design/test-drivers.md` no longer says the check "scans
+  goroutines package-globally". Closes ISSUES: ***`CheckLeaks` still scans goroutines
+  package-globally.***
+
+- Two driven e2e runs now cover the fan-out arrival path end to end, closing
+  *No test exercises `/server`'s `switchServer` end-to-end for the cap* and *No driven test puts
+  more than one delegation live at once* (checklist T-16 step 12). A session boots on one stubllm
+  server, runs `/server` onto a second whose `servers:` entry pins `parallel-agents: 2`, and the
+  reply that follows puts **two delegation rows on screen at once, neither queued** — the first
+  automated proof that more than one delegation is ever live. The control run is the same session
+  onto an entry that pins nothing: the second delegation is never announced while the first is still
+  working. Both assert the server the session LEFT answered nothing, so the whole fan-out is shown to
+  have followed the switch. Fixtures: `cmd/apogee/testdata/stubllm/parallel-two-delegations.yaml`
+  (the parent's two independent `sub_agent` calls) and `parallel-child.yaml` (a delegate that blocks
+  on its first turn and never comes back).
+
+- Pinned the path spelling an extra-root read refusal quotes — closes *Under an extra root, a non-escape read refusal now names the RESOLVED path, not the spelling the model used*: a directory reached through a symlinked extra read root is refused as `not a file: <real path>`, and `readFileErrorMessage`'s doc states that a refusal quotes the path the read was pinned to, never the caller's spelling.
+
+- Corrected eight stale doc comments and one help line, no behaviour changed — closes *`SetEffortOverride`'s doc still says "four levels"* (now the eight-name union `domain.EffortOff` … `domain.EffortMax`), *The si-34 exec-site inventory does not name the hook door* (`internal/security`'s package tour names the Mechanism door `tools.RunHookSubprocess` among the sites `ResolveProgram` covers), *Two docs still describe the git funnel's guarantee as the filter-driver refusal* (code half: `treeSnapshotter.git` now names the repo-local command-config refusal), *`--model`'s help still calls the startup server's `model:` a "hint"* (the retired vocabulary is gone from `--model`'s usage line), *`e2e_egress_test.go` cites the wrong source for all-or-nothing MCP connect* (now `docs/design/mcp-client.md` §3 plus ADR 0012's 2026-07-26 amendment), *Two docs say the suggestion row "returns on the next edit"; it returns on the next frame* (`hasSkillHints`' comment and `layout.md`), and *`internal/domain/doc.go:71` still counts seven `ToolSummary` variants* (there are eight).
+
+- Brought five prose passages back in line with the code they describe — closes *ADR 0060 D6's "the segment drops whole" is not what the footer does* (the effort word sits in the footer's left run and truncates with an ellipsis like its neighbours; only the mode marker drops whole), *ADR 0041 still says a watcher apply journals the ` *` marker* (decisions 8 and 9 now carry the watcher's own ` ~` marker and the last-source-wins rule), *Two docs still describe the git funnel's guarantee as the filter-driver refusal* (ADR 0056's 2026-08-26 amendment now names the repo-local command-config refusal), *The manual documents the cap following a `/server` switch, never the `/load` case* (a `/model` profile load arrives at the new server's cap, and its pin-less entry runs delegations serially until the first beat widens them), and *The design doc's "Not observable" split is approximate, not the taxonomy it claims* (the column's two kinds of cell — pointer and accepted limit — are now named, with the four irreducible claims a subset of the limits). No code changed.
+
+- The run-residual block is struck from `ISSUES.md` — *Effort detection and the effort picker*, *Delegate token-runaway*, *Safety-floor / subprocess-funnel*, *Untrusted-text / approval-integrity*, *Surfaces-that-lie / restore-consoles*, *Read-fence / egress / docs-truth*, *Quick-wins / posture / exhaustion / CI*, *Skill-suggestion band*, *Test-drivers-kit* and *Symlinked-skill-reads*, the 45 findings deferred out of the 2026-08-25 … 2026-08-28 runs. Every one of them is closed by this sweep and the entries above are the closed trail, so the register carries only open work again. The *Audit residue* bullet **C-03 — unattended runs send the empty effort dialect** goes with them, closed by the construction-time effort seed. `## Open defects` now stands empty; `## Parked / deferred work` is untouched.
+
+- `TestE2EAnnouncedWorkspaceThroughASymlink` now judges all five of its receipts against the real
+  project tree instead of against their own wording. The tree is seeded with a canary file the
+  stubllm script never mentions, so a `list_dir` answering from anywhere but the directory the
+  announced symlink resolves to could not name it; the write and the edit land on separate files
+  (`b.txt` is created and never touched again, `a.txt` is read first and then replaced), so each
+  leaves its own bytes behind and both are read back out of the resolved tree at the end of the
+  run — the `write_file` receipt's byte count is measured against what actually landed there, and
+  the confined `cat` now comes back with the run's own edit. Closes the residual of plan
+  `2026-08-28 - 01` item 6 (the `list_dir` and the two write receipts were asserted on their own
+  text alone). Test-only; no production behaviour changes.
+
 ## [0.18.0] — 2026-08-27
 
 ### Added

@@ -33,6 +33,45 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 
 ## Open defects
 
+### Residuals deferred out of the 2026-08-28 deferred-residuals sweep
+
+**Status:** found 2026-08-28 at the close of the deferred-residuals sweep
+(`docs/plans/archived/2026-08-28 - 02 - deferred-residuals-sweep-plan.md`), deferred out of that run.
+
+- [ ] **A GROUPED never-ran delegation still wears no ▶ and never shows its prompt.** The sweep
+  fixed the single-block reading only (`subAgentHidesPrompt`, `internal/tui/subagentblock.go:243`).
+  The grouped path is unchanged: `renderGroupMember` grants the indicator on
+  `tv.Details.len() > 0` alone (`internal/tui/toolblock.go:325`), and the group adds
+  `subAgentPromptRows` only for a SPANNED member (`internal/tui/subagentblock.go:190`, `:532`) — so
+  a folded delegation whose refusal stays promoted has no hidden lines to count, wears no ▶, and its
+  prompt is unreachable at every width. Fixing it means asking the member the same
+  prompt-shaped question the ungrouped block now asks.
+
+- [ ] **`settingsNoteWidth` measures the value column before the apply appends its ` *` marker.**
+  `settingsNoteWidth` (`internal/tui/settings.go:1556`) computes the note's cells from
+  `settingRowCells` as the rows stand, and its caller `autoBlastRadiusNote`
+  (`internal/tui/settingsapply.go:221`) then chooses the whole sentence whenever it fits that
+  measurement — but the apply that follows widens the value column by the ` *` marker, so a note
+  landing within 2 cells of the column edge can still be elided from the right, the failure the
+  clause fallback exists to prevent. Not observed at 80 or 160 columns; the fix is to measure
+  against the post-marker width.
+
+- [ ] **MCP's unusable-proxy refusal does not wrap `security.ErrURLBlocked`.**
+  `vetEndpoint` returns a bare `fmt.Errorf` when the egress proxy is not a usable URL
+  (`internal/mcp/transport.go:228`), while its unpinnable sibling three lines down wraps the
+  guard's error (`internal/mcp/transport.go:235`) and both `internal/tools` funnel paths wrap
+  `security.ErrURLBlocked` on either refusal. A caller matching on the sentinel therefore sees an
+  MCP unusable-proxy refusal as an unrelated error, and the asymmetry is unpinned: the sweep's
+  `TestVetEndpoint_*` cases assert the wording, not the sentinel.
+
+- [ ] **`idOf` collapses every unparseable stack block onto one id.** `idOf`
+  (`internal/tuitest/leak.go:135`) returns the empty id for any block whose header does not parse,
+  so two such blocks are one entry in the snapshot map and an unparseable block present when
+  `CheckLeaks` snapshots would forgive every later one — which is exactly what the function's own
+  doc comment says cannot happen ("an unattributable goroutine is reported, never silently
+  forgiven"). Defensive path only; never observed. Either the id is made unique per block or the
+  comment is corrected.
+
 ## Parked / deferred work
 
 Live, deliberately deferred work only. Each entry records *enough* design that we don't re-derive
