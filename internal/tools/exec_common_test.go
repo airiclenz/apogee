@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -486,16 +487,23 @@ func TestRunHookSubprocessRefusesAProgramInsideTheWorkspace(t *testing.T) {
 
 // TestRunHookSubprocessResolvesABareProgramNameToAnAbsolutePath pins the other half of the door's
 // resolution: a bare name on PATH is looked up and argv[0] becomes the absolute program, so the
-// child is never started from a name the OS would re-resolve against its own environment.
+// child is never started from a name the OS would re-resolve against its own environment. The
+// canary is the child's own $0 — it reports the argv[0] it was actually started with, which
+// against unresolved wiring reads back as the bare "sh".
 func TestRunHookSubprocessResolvesABareProgramNameToAnAbsolutePath(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("POSIX shell canary; the resolution it pins is platform-independent")
 	}
 	t.Parallel()
 
+	want, err := exec.LookPath("sh")
+	if err != nil {
+		t.Skipf("no sh on PATH: %v", err)
+	}
+
 	out, err := RunHookSubprocess(
 		context.Background(),
-		[]string{"sh", "-c", "printf ok"},
+		[]string{"sh", "-c", `printf %s "$0"`},
 		"",
 		t.TempDir(),
 		nil,
@@ -505,7 +513,10 @@ func TestRunHookSubprocessResolvesABareProgramNameToAnAbsolutePath(t *testing.T)
 	if err != nil {
 		t.Fatalf("RunHookSubprocess: %v", err)
 	}
-	if out != "ok" {
-		t.Errorf("stdout = %q, want %q — a bare name must still resolve and run", out, "ok")
+	if !filepath.IsAbs(out) {
+		t.Errorf("child argv[0] = %q, want an absolute program path", out)
+	}
+	if out != want {
+		t.Errorf("child argv[0] = %q, want the looked-up program %q", out, want)
 	}
 }

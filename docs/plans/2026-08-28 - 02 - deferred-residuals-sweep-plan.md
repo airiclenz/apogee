@@ -520,7 +520,9 @@ unescaped (bite check by the verifier).
 
 **Commit.** `test(tools): grep's context rows carry the escaped filename`
 
-## 17. The bare-name hook test observes argv[0]
+## 17. The bare-name hook test observes argv[0] — ✅ DONE (2026-08-28)
+
+NOTES (2026-08-28): the test skips (rather than fails) when `exec.LookPath("sh")` finds no shell, matching the existing fixture-unavailable skips in this file; the Windows skip is untouched.
 
 **What.** ISSUES: *The bare-name hook-resolution test never observes argv[0].* In
 `TestRunHookSubprocessResolvesABareProgramNameToAnAbsolutePath`
