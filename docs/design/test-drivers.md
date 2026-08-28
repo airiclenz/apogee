@@ -213,6 +213,15 @@ The answer is a `Frame`: one immutable snapshot of a terminal, reconstructed by 
 drivers — in-process and PTY — feed their bytes to the same emulator and get the same `Frame` type
 back, so an assertion means the same thing whichever one produced it (ADR 0062).
 
+One behaviour of that emulator is ours rather than its. `Screen` clamps the margins a program asks
+for — DECSTBM, DECSLRM — to the size the buffer actually has. A resize is the one moment the
+renderer is behind the terminal: the frame still on the wire carries the scroll region of the size
+it was laid out for, `x/vt` applies that bottom margin without clamping it, and the next delete-line
+then indexes past the end of a buffer that has already shrunk, panicking whichever goroutine was
+painting. `Screen` registers its own CSI handlers ahead of `x/vt`'s, lowers an out-of-range margin
+in place and lets the real handler apply it — the margin a real terminal would have given — so
+`Screen.Resize` is safe over its whole input range, a height shrink under live output included.
+
 ```go
 scr := tuitest.NewScreen(100, 30)   // the terminal the renderer paints into
 defer scr.Close()                   // stops the answer pump; CheckLeaks counts it
@@ -810,11 +819,13 @@ stream that outlives every plausible value of it. It stands as its own test rath
 name.
 
 Two mechanics belong with those tests. **Resize mid-stream changes the WIDTH only.** Reflow is a
-claim about width, and shrinking the height while the program is still painting a frame sized for
-the old terminal walks into a fragility of the emulator underneath both drivers: a scroll region
-the program sets straight after (DECSTBM, which bubbletea uses for its scrolling area) can name a
-row past the end of a buffer that has already shrunk, and `x/vt` indexes it without clamping.
-T-25's own 60×20 resize is asserted where the session is idle and nothing is in flight. And **a
+claim about width, so width is what the claim needs — but the resize started out width-only for a
+second reason, a fragility of the emulator underneath both drivers: a scroll region the program set
+straight after the resize (DECSTBM, which bubbletea uses for its scrolling area) could name a row
+past the end of a buffer that had already shrunk, and `x/vt` indexed it without clamping. `Screen`
+now clamps it at the source ([Frame](#frame)), so the height shrink is safe and the width-only
+resize rests on the claim alone. T-25's own 60×20 resize is asserted where the session is idle and
+nothing is in flight. And **a
 live frame is asserted by waiting, not by snapping**: a repaint takes more than one write, so any
 single snapshot of a streaming terminal may catch a row half-written. What a reflow must not do is
 LEAVE one, so the assertion is that the picture converges within a bounded wait

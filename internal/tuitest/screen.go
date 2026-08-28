@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/vt"
 )
 
@@ -60,14 +61,58 @@ var fullRepaintMarks = [][]byte{
 // NewScreen builds a w×h emulator and starts draining its reply pipe. Close it when the program
 // that paints into it has stopped — the drain is a goroutine, and [CheckLeaks] counts it.
 func NewScreen(w, h int) *Screen {
+	term := vt.NewEmulator(w, h)
+	clampMargins(term)
 	s := &Screen{
-		term:     vt.NewEmulator(w, h),
+		term:     term,
 		lastByte: time.Now(),
 		answers:  newAnswerQueue(),
 		pumped:   make(chan struct{}),
 	}
 	go s.pump()
 	return s
+}
+
+// clampMargins keeps the emulator's scroll region inside the buffer that region indexes, which is
+// what makes [Screen.Resize] safe on a SHRINK.
+//
+// x/vt resets the region when it resizes the buffer, so a stale region does not survive the resize
+// itself — but the renderer's bytes do. A frame laid out for the old terminal is still on the wire
+// when the resize lands, and it carries its own DECSTBM for the height it believed in. x/vt applies
+// that bottom margin without clamping it (handlers.go, CSI r), and the next delete-line then walks
+// ultraviolet's DeleteLineArea off the end of a buffer that has already shrunk: an index-out-of-
+// range inside whichever goroutine was painting, taking the test binary with it. Plan item 9 hit it
+// with a mid-stream resize and worked around it by resizing the width only; this is the root.
+//
+// The guard is a CSI handler registered AFTER x/vt's own, so it runs FIRST — handlers are called
+// last-registered-first — and returns false to let the real handler do the work, on parameters it
+// has clamped in place. Rewriting them in place is the whole trick: the ansi parser hands a handler
+// a slice over its own parameter storage, which is exactly where x/vt's handler reads them back
+// from, so a renderer asking for more rows than the terminal has now gets the answer a real
+// terminal gives it — the margin it could have had.
+func clampMargins(term *vt.Emulator) {
+	// DECSTBM: the bottom margin cannot sit below the last row.
+	term.RegisterCsiHandler('r', func(params ansi.Params) bool {
+		clampParam(params, 1, term.Height())
+		return false
+	})
+	// DECSLRM: the same hole one axis over, reachable once DECLRMM (mode ?69) is set.
+	term.RegisterCsiHandler('s', func(params ansi.Params) bool {
+		clampParam(params, 1, term.Width())
+		return false
+	})
+}
+
+// clampParam lowers the parameter at i to limit when it asks for more. A missing or already
+// in-range parameter is left exactly as it was: the default the handler behind this one computes
+// for a missing parameter IS the limit, so there is nothing to correct.
+func clampParam(params ansi.Params, i, limit int) {
+	if i < 0 || i >= len(params) {
+		return
+	}
+	if params[i].Param(limit) > limit {
+		params[i] = ansi.Param(ansi.Parameter(limit, params[i].HasMore()))
+	}
 }
 
 // Write feeds the renderer's bytes to the emulator. It is the [io.Writer] a driver hands to
@@ -107,6 +152,10 @@ func (s *Screen) Render() string {
 
 // Resize changes the emulator's dimensions. A driver pairs it with whatever tells the program the
 // size changed — a tea.WindowSizeMsg in process, a real SIGWINCH through a pty.
+//
+// It is safe over its whole input range, a height shrink under live output included: the bytes of
+// a frame laid out for the old size go on arriving after the resize, and [clampMargins] is what
+// keeps the scroll region they carry inside the buffer that shrank underneath them.
 func (s *Screen) Resize(w, h int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
