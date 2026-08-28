@@ -317,6 +317,231 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- The judge now reads the verdict past a stray brace. `parseVerdict` walks EVERY balanced `{…}`
+  span in the model's reply, in order, and takes the first one that decodes to a verdict of
+  exactly `pass` or `fail`; a span that does not balance, does not decode, or names a third
+  verdict word moves the anchor to the next `{`. A chatty reply quoting shell output
+  (`I {wrote 3 files}… {"verdict":"fail"}`), an unbalanced `{` in the prose, or a lone `"` after
+  one no longer hides the object behind it — before, the gate anchored on the first `{` anywhere
+  and rejected the valid verdict that followed. The brace walk is extracted as
+  `balancedObjectAt`, whose scan state is local, so an unterminated quote in one candidate cannot
+  swallow the next. When no span wins, the reply is still reported by what was actually wrong
+  with it: a third verdict word wins over a span that did not decode, and a reply with no
+  balanced object anywhere still says there is no JSON object in it.
+
+- The judge sends its api key trimmed. Both client constructions read `APOGEE_API_KEY` through a
+  new `apiKey()` helper that trims it, as `endpoint()` and `resolveModel` already trim their own
+  variables — a value pasted from a shell or a secret store carried whitespace the upstream
+  rejected, and that rejection looked exactly like a wrong key. The constant's doc now states
+  what the variable is: the ADR 0036 startup overlay, one value for whatever endpoint the judge
+  dials, not an ADR 0047 per-entry key source. Unset stays keyless, the floor every endpoint
+  apogee dials has.
+
+- A whitespace-padded `name:` or `endpoint:` on a `servers:` entry is now stored canonical. Every
+  reader of the config file trims both scalars at the decode (`canonicaliseServers`), so the form
+  the list stores is the form that is deduped, selected, aliased and dialled. Before, a quoted
+  `name: " box "` passed validation and then matched nothing: `server: box` refused to select it
+  ("names `box`, which no `servers:` entry carries"), the status footer called the server `" box "`,
+  and two entries whose names differed only in padding both loaded as separate servers instead of
+  being refused as the duplicate they are. A padded `endpoint:` was worse — it passed validation
+  and reached the wire, where the space made the request URL unparseable. This closes the audit's
+  *config validation passes whitespace-padded server names* and *a whitespace-padded endpoint
+  passes validation and reaches the wire*. The document itself is never rewritten: the file keeps
+  the padding the user wrote, and only apogee's in-memory view is canonical.
+
+- An entry edit still finds an entry whose `name:` is written padded. The config-edit transaction
+  is the file's second reader — it parses the bytes for itself rather than through the loader — so
+  it canonicalises the same way, and the node-tree lookup under `/model`, the launch-profile
+  record and the key migration compares the entry's `name:` scalar trimmed. The splice never
+  touches that scalar.
+
+- `provider.NewClient` trims whitespace around the base URL before its trailing-slash trim, so an
+  endpoint an embedder hands straight in gets the same guard the config loader applies.
+
+- A `context-window:` value that is not a whole, non-negative token count is now refused when the
+  config file loads, instead of being silently floored to a window nobody wrote. Both scopes that
+  carry the key — the top-level one and a `servers:` entry's own — decode through the new exported
+  `config.TokenCount` type, which accepts only a `!!int` node of 0 or more and otherwise fails the
+  load with `validateContextWindow`'s own wording (`want a token count of 0 or more`). Before,
+  yaml.v3 read `context-window: 3.5` into a plain `int` as `3` and the loader then dropped it for
+  being `<= 0`, so a mistyped pin cost the session its window in silence and left the Budget
+  following whatever the heartbeat happened to observe; the `/settings` row was the only surface
+  that ever checked the value. This closes the audit's *`context-window` is validated only on the
+  settings write path*. The entry-level `context-window: <negative>` check in the `servers:`
+  validation loop is gone with it — the decoder now refuses that value one layer earlier.
+
+- **Behaviour change:** a whole number written as a float — `context-window: 65536.0`,
+  `context-window: 1e3` — loaded before and is now a load error. The decoder cannot tell either of
+  them from `3.5` without refusing the `!!float` tag, and refusing is the point of the guard; write
+  `65536`. Every `!!int` spelling yaml.v3 already accepted still loads (`0x10000`, `1_000`, `0o17`,
+  `+5`), because the value is decoded through the node rather than parsed off its text. A quoted
+  `"65536"` was already refused and still is.
+
+- **Locator change:** a bad `context-window:` on a `servers:` entry is now located by key and file
+  line rather than by `entry 1 ("box")`. yaml.v3 hands a scalar unmarshaler the value node alone —
+  never the key above it or the list index it hangs under — so the refusal names `context-window:`,
+  the value as written, and the line it sits on.
+
+- The `/skills` report is now served from a single catalog snapshot. Its two halves — the skills
+  that loaded and the `SKILL.md` files discovery refused — used to be read through two independent
+  accessors (`List` then `Skipped`), each taking its own load of the provider's atomic catalog
+  pointer, while the `/skills` rescan swaps that pointer off the Update loop. A rescan landing
+  between the two calls made the report pair a fresh listing with the previous scan's failures (or
+  the reverse), so a skill could be listed as loaded AND named as skipped in one report, or a
+  fixed skill could keep being reported broken. A new combined accessor, `Report`, returns both
+  halves off one load — on `skills.Catalog`, on `skills.Provider` and on the TUI's `SkillCatalog`
+  seam — and the report path takes it. This closes the audit's */skills can report two catalog
+  snapshots as one*. `List` and `Skipped` stay for the single-half callers (the "/" menu's
+  autocomplete), and the seam stays behavioural: a Driver asks for the answer it needs and never
+  reaches for the engine's snapshot itself (ADR 0031).
+
+- A skill's `Description` — the full text the suggestion matcher indexes, past the 200-rune clamp
+  the "/" menu's `Summary` carries — is now capped at **4096 runes** (`maxDescriptionLen`), so a
+  `SKILL.md` shipping a megabyte of prose can no longer hand `buildIndex` a document that size on
+  every `Load`/`Reload`, nor let one skill's document dominate the BM25 scoring by sheer length.
+  The cap sits far past the menu's, so a phrase an author placed well beyond the menu hint still
+  finds the skill. `clampSummary` became `clampRunes(s, max)`: one rune-safe clamp, two limits.
+
+- An entry the skills walk cannot read — an unreadable sub-directory, a file that vanished
+  mid-scan — is now **recorded** as a `SkipError` naming it ("skill dir entry … was not scanned")
+  instead of being dropped in silence, so a folder a skill may have sat in is no longer
+  indistinguishable from an empty one and `/skills` can report it. The readable siblings beside it
+  still load, and the walk root itself stays silent because its own failure is already recorded.
+
+- A workspace file name carrying a line break or a tab is now flattened before it becomes an "@"
+  dropdown row, so the name paints exactly one row and the row inserts exactly what it shows
+  (closes the code-audit 2026-08-28 finding *a workspace file name containing a newline or tab
+  forges extra dropdown rows*). Previously a `\n` in a name painted rows the pane never counted
+  and landed in the composer as a real second line the `@`-ref scanner cut at, while a `\t` was
+  expanded to different widths by the popup and by the input box, so a fully-typed token could
+  never match its row and ⏎ re-accepted instead of submitting. As with an ESC byte, such a name
+  is no longer referenceable through the dropdown — the same trade the escape strip already took.
+
+- `/clear` (and its `/new` alias) now resets the view in a session that has no server bound yet,
+  instead of noting `could not clear context: no server is bound yet` over a scrollback it never
+  wiped. The reset is view-only — no save, no exchange check, no `ClearContext` — and the pre-bound
+  reason, its start-up box and the picker the next send re-opens all survive it. A pre-bound session
+  started with `--resume`/`--continue` keeps the old refusal: the record is seeded into the engine
+  the later bind builds, so a fresh-looking view there would lie about an engine that still
+  remembers. Closes the code-audit 2026-08-28 finding *in a pre-bound session, `/clear` and `/new`
+  report a misleading error and skip the reset*.
+
+- **A `url-safety:` host-list edit now reaches the live MCP connection (code audit 2026-08-28:
+  "after a `/settings` url-safety edit, network tools and the MCP connection disagree about which
+  hosts are allowed").** The guard an MCP server is dialled under is consumed at connect time and
+  never retained, so until now only the network tools followed an `allow-hosts` / `deny-hosts` edit
+  and the connection kept talking to a host the operator had just closed — until some later
+  `mcp-servers:` edit happened to reconnect. `applyURLSafetyHosts` now re-admits the configured
+  servers after the tool rebuild commits: `internal/mcp` gains `Admit(servers, guard) (admitted,
+  denied []Denied)`, which runs the connect's own endpoint vet over every `sse` /
+  `streamable-http` server and admits every stdio server (a trusted local launch has no endpoint),
+  and the applier reconnects to the admitted set. Because `mcp.Connect` is all-or-nothing, a server
+  the new lists close is DROPPED rather than costing the session every other server, and the row
+  names it: `applies to the next request; mcp server <name> disconnected — its endpoint is denied`.
+  Three deliberate limits. The re-admission is compared against the OLD lists first and dials only
+  when the admitted set actually changed, so the ordinary edit — a web-tool host while an MCP
+  server is connected — stays instant and leaves every connection, process and lock where it was.
+  A failed reconnect lands in the NOTE (`; mcp reconnect failed: … — previous connections kept`),
+  never as the row's error, because the tool rebuild it follows has already committed. And a Driver
+  that composed no MCP holder or no config path (ADR 0031's embedder) skips the MCP half entirely.
+  `internal/mcp` gains the `ErrEndpointDenied` sentinel so a host the operator closed is worded as
+  the policy decision it is while an empty or unparseable endpoint names its own fault; the message
+  a connect prints is unchanged. This supersedes two earlier entries: v0.17.1's "`url-safety:` did
+  not apply to MCP endpoints" (the reconnect no longer waits for an `mcp-servers:` apply to bind an
+  edit of either list) and the `[Unreleased]` T-18 egress-driver note above, whose "read live by
+  both the network tools and a reconnect (which is refused, keeping the connections it had)" is now
+  read as the tool DISAPPEARING — `TestE2EEgress` step 6 observes `docs__echo` leaving the session
+  when its endpoint is denied, and ADR 0037 decision 7's "a refused reconnect keeps the old
+  connections" moves to its unit coverage.
+
+- The three `captureStderr` test helpers (`cmd/apogee/wire_test.go`, `internal/library/store_test.go`,
+  `internal/agent/library_corrupt_store_test.go`) now restore the process `os.Stderr` and close their
+  pipe on every exit path, not just the happy one. A `t.Fatal` or `t.Skip` inside the wrapped call is
+  a `runtime.Goexit` that unwinds past the trailing restore exactly as a panic does, so a single
+  bailed capture left every later test in the binary writing its diagnostics into a pipe nobody read
+  and leaked the reader goroutine with it. Each copy registers a `t.Cleanup` closing the write end and
+  putting `os.Stderr` back immediately after the swap (idempotent with the happy-path restore, which
+  stays so the captured string is still returned in order) and defers a close of the read end, which
+  was never closed at all. A new `TestCaptureStderrRestoresOnGoexit` in each package pins it. Closes
+  the code audit's *`captureStderr` leaks the process stderr pipe and a reader goroutine if the
+  wrapped call panics* (`docs/reviews/code-audit-2026-08-28.md`).
+
+- The config watcher's "absent at `Start`, appears later" case is now pinned by a test.
+  `filewatch.Watcher.Start` documents that a file it cannot stat leaves the zero sample as the
+  baseline — which no real file matches — so a file that appears after the watch began is reported
+  as the change it is; the suite covered delete-then-recreate but never a path that held no file at
+  all. `TestWatchReportsAFileThatAppearsAfterStart` watches an empty directory's `config.yaml`,
+  asserts silence while nothing is there, writes the file, and asserts exactly one report and
+  silence after it. Test-only: re-verification of the code audit's *the config watcher's zero
+  baseline re-applies the whole config when a previously-absent file first appears*
+  (`docs/reviews/code-audit-2026-08-28.md`) corrected its consequence — `ReloadConfig` diffs the
+  appearing file against the defaults baseline `newExternalEdit` took from the same missing file, so
+  only keys that actually differ apply — leaving the missing coverage as the whole finding.
+
+- `internal/tuitest`'s forward proxy now REFUSES a destination the caller never mapped instead of
+  dialling it for real. `ForwardProxy`'s route table was consulted as an override — an unmapped host
+  fell through to a genuine `net.Dialer` call, so a driven run that reached a name the test never
+  named resolved it against the machine's resolver and put packets on the wire, against the file's
+  own guarantee that nothing an egress test touches leaves the process (verified: the pre-fix
+  helper's refusal read `lookup unmapped.example on <resolver>:53`). The dialler now answers
+  `tuitest: no route for <addr> — every host a driven run may reach is mapped`, which `serve` turns
+  into the 502 it already sends, and `ForwardProxy`'s doc says so. A new
+  `internal/tuitest/netfix_test.go` pins the instrument's four branches — the 400 on a non-absolute
+  request URI, the 502 on an unmapped host with the attempt still in the access log, hop-by-hop
+  header stripping observed at the destination, and the routed happy path through `PageServer` —
+  where the package previously had none. Closes the code audit's *the egress test proxy can dial
+  real hosts* and *the egress-instrument half of T-18 has no unit test*
+  (`docs/reviews/code-audit-2026-08-28.md`).
+
+- `internal/tuitest`'s `ReplayTrace` now has its reader failures pinned on every platform. Its only
+  test lived behind `//go:build !windows` with the PTY driver, so the three `t.Fatalf` branches — a
+  trace that cannot be read, a line that will not unquote, and a failed write — were asserted
+  nowhere. `screen_test.go` (no build tag) gains a `fatalRecorder` test double that stands in for
+  the `testing.TB` a caller hands in, records the formatted message and leaves through
+  `runtime.Goexit` the way `testing.T` does, with `ReplayTrace` run in a goroutine the test joins.
+  Three tests use it: a missing trace fails naming the path, a crash-truncated single line fails
+  naming line 1 and `not a quoted trace write`, and a valid trace with a trailing partial line fails
+  naming line 2 — the killed-run case, pinning that the unparsable tail is never silently dropped
+  for a screen that would look whole and be a frame short. The write branch is unreachable on a
+  fresh screen (`Screen.Write` fails only after `Close`) and now says so in a comment beside itself
+  rather than being faked. `TestKeysDecodeAsIntended` also gains rows for F2, F3, F6, F7, F8, F9,
+  F10 and F11, so `keys.go`'s claim that every constant is pinned by that test is true for all
+  twelve F-keys rather than four. Closes the code audit's *`ReplayTrace`'s reader error branches are
+  unpinned by any test* and *eight of twelve F-key constants are pinned by no test*
+  (`docs/reviews/code-audit-2026-08-28.md`).
+
+- `make check` and CI now run one actionlint: the Makefile always invokes the pinned
+  `go run github.com/rhysd/actionlint/cmd/actionlint@$(ACTIONLINT_VERSION)` (the
+  `command -v actionlint` PATH short-circuit is gone, so a stray local build can no longer
+  lint the workflows in place of the pinned one), a new `make actionlint` target runs it, and
+  the CI job calls that target — the version literal now lives once, in the Makefile.
+
+- The newcomer e2e container (`TestNewcomerFollowsTheDocs`) no longer shares the host's network
+  namespace. It runs on docker's default **bridge** network with `--pids-limit 512`, `--memory 2g`
+  and `--security-opt no-new-privileges`, and the scripted upstream now binds on the bridge gateway
+  (`stubllm.Serve`) instead of loopback — so the reader reaches exactly the model server and the
+  internet, and nothing else on the machine. Root stays, because the reader's `apt` needs it. Two
+  new soft gates skip rather than fail where the address cannot be had: a bridge network that names
+  no gateway, and a gateway the host cannot bind (rootless docker, a remote `DOCKER_HOST`). The
+  `run` tool's description tells the model what its network is, and the task turn drops its "no
+  internet" claim, which was never true under `--network host` either.
+
+- `make release-smoke` now proves the published binaries were built from the tagged commit.
+  Verifying the downloaded assets against the `SHA256SUMS` the release itself publishes only
+  proves the assets match that list — an asset built from any tree at all passes — so nothing
+  tied a published binary to the tag. After the remote checksum check, the gate now resolves
+  `VERSION^{}` in the local clone, extracts the binary from each of the six archives and reads
+  its embedded build stamp with `go version -m`: an asset with no `vcs.revision` fails
+  (`was it built with -buildvcs=false?`), one whose revision is not the tagged commit fails
+  naming both, and all six matching prints `6 assets carry vcs.revision <short> = the tag`.
+  `vcs.modified=true` only warns — untracked files flip that flag and a plan doc in the tree at
+  cut time is routine. Archive bytes are deliberately not the fact checked: `make dist` re-`cp`s
+  LICENSE/README with fresh mtimes into every tar/zip, so two runs of the same tree never hash
+  alike. A tag missing from the local clone skips with `git fetch --tags`, and a missing `unzip`
+  skips the two Windows archives by name; `docs/manual/building.md` records the new check and
+  both skips. Closes the code audit's *the release smoke gate verifies published assets against
+  checksums fetched from the release itself* (`docs/reviews/code-audit-2026-08-28.md`).
+
 - `read_file` reads a file under a configured extra read-only root when the path is spelled
   through a symlink — the shape a dotfiles-managed `~/.apogee/skills` hands the model. The
   bounded read was pinned to the matched root but still opened the path AS SPELLED, so the

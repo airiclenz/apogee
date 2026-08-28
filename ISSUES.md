@@ -72,6 +72,21 @@ closeout commit message), never here; the work the run completed belongs in `CHA
   forgiven"). Defensive path only; never observed. Either the id is made unique per block or the
   comment is corrected.
 
+### Residuals deferred out of the 2026-08-28 code-audit fixes run
+
+**Status:** found 2026-08-28 at the close of the code-audit fixes run
+(`docs/plans/archived/2026-08-28 - 03 - code-audit-fixes-plan.md`), deferred out of that run.
+
+- [ ] **`Provider.Suggest`'s doc still claims it reads "the SAME snapshot List does".**
+  `internal/skills/provider.go:126-128` repeats the guarantee that item 4 of the run disproved for
+  `Skipped` (`internal/skills/provider.go:113-116`): every accessor takes its OWN `p.current()`
+  load, so a `Reload` landing between a `List` and a `Suggest` pairs a band with a different
+  snapshot than the "/" menu listed — the same window `Report` was added to close for the
+  `/skills` report. The behaviour the sentence promises (a suggested skill is always one the menu
+  can offer and the loop can resolve) holds per call and is not at risk; the doc's stated reason
+  for it is wrong and should be reworded, or `Suggest` given a paired accessor if callers ever
+  need one snapshot across both.
+
 ## Parked / deferred work
 
 Live, deliberately deferred work only. Each entry records *enough* design that we don't re-derive
