@@ -289,7 +289,9 @@ only call lacks an id falls through to the text parser and, with empty text, fau
 
 **Commit.** `fix(agent): id-less native tool calls are dropped with a signal instead of dispatched`
 
-## 8. The fan-out path refuses colliding argument keys like the serial path
+## 8. The fan-out path refuses colliding argument keys like the serial path — ✅ DONE (2026-08-28)
+
+NOTES (2026-08-28): the item's second test ("the fan-out `ToolCallEvent` carries `ResolvedPath`") is driven at the `prepareDelegation` seam rather than through a whole run — the fan-out group holds `sub_agent` calls only, `sub_agent` writes nothing inspectable, so an end-to-end fan-out can only ever observe `""`, which is also what the unfixed code produced. Handing the seam a workspace-scoped writer whose target travels a symlink is the one way to see the field populated; the bite check confirms a revert drops it back to `""`.
 
 **What.** ISSUES: *The fan-out path resolves without the colliding-key check.* Extract the
 refusal at `internal/agent/dispatch.go:389-391` into

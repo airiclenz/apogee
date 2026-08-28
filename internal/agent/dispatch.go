@@ -234,8 +234,14 @@ func (a *Agent) dispatchFanOut(ctx context.Context, turn, width int, calls []dom
 // calls cannot see each other's outcomes by construction — that is what concurrent means — and
 // the shared read-only dangerous-action floor still re-fires on every call a child actually
 // makes (ADR 0013 D3).
+//
+// The two dispatch facts resolveAndExecute answers before resolve() are answered here too, and in
+// its order: the registry miss, then arguments whose keys fold together
+// (collidingArgumentKeysResult). Both produce a final, unaudited slot with no child — the Approver
+// is never consulted and nothing runs — so a call's disposition never depends on whether the
+// reply that carried it happened to fan out.
 func (a *Agent) prepareDelegation(ctx context.Context, turn int, call domain.ToolCall) fanOutSlot {
-	a.cfg.Events.Emit(domain.ToolCallEvent{EventBase: a.base(turn), Call: call})
+	a.cfg.Events.Emit(domain.ToolCallEvent{EventBase: a.base(turn), Call: call, ResolvedPath: a.resolvedPath(call)})
 
 	if err := a.runPreToolExecHooks(ctx, turn, &call); err != nil {
 		// Same disposition as the serial path: an error result, no child, and no postlude.
@@ -251,6 +257,10 @@ func (a *Agent) prepareDelegation(ctx context.Context, turn int, call domain.Too
 		// The recursion point is not in this Agent's registry (e.g. withheld): the registry miss
 		// is a dispatch fact answered before resolve(), exactly as resolveAndExecute answers it.
 		return fanOutSlot{call: call, result: errorToolResult(call.ID, fmt.Sprintf("unknown tool %q", call.Tool))}
+	}
+
+	if result, refused := collidingArgumentKeysResult(call); refused {
+		return fanOutSlot{call: call, result: result}
 	}
 
 	verdict := resolve(a.resolutionInput(tool, call, a.guards.PreExecute(call, tool, a.guardExemptions())))
@@ -381,14 +391,15 @@ func (a *Agent) commitDelegation(ctx context.Context, turn int, slot *fanOutSlot
 // spelling of such a call that all of them agree on, so it is refused here, before resolve():
 // the Approver is never asked about it, no gate key is ever minted for it, and the tool never
 // runs. Arguments that do not DECODE are left alone — the tool's own decodeToolArgs reports
-// those, with the parameter names the tool actually has.
+// those, with the parameter names the tool actually has. The refusal itself lives in
+// collidingArgumentKeysResult, because prepareDelegation owes a fanned-out call the same answer.
 func (a *Agent) resolveAndExecute(ctx context.Context, turn int, call domain.ToolCall) (domain.ToolResult, dispatchOutcome) {
 	tool, ok := a.lookupTool(call.Tool)
 	if !ok {
 		return errorToolResult(call.ID, fmt.Sprintf("unknown tool %q", call.Tool)), dispatchDone
 	}
-	if groups, err := domain.CollidingArgumentKeys(call.Arguments); err == nil && len(groups) > 0 {
-		return errorToolResult(call.ID, collidingArgumentKeysMessage(groups)), dispatchDone
+	if result, refused := collidingArgumentKeysResult(call); refused {
+		return result, dispatchDone
 	}
 
 	verdict := resolve(a.resolutionInput(tool, call, a.guards.PreExecute(call, tool, a.guardExemptions())))
@@ -421,6 +432,24 @@ const (
 // together, listing each colliding group as domain.CollidingArgumentKeys rendered it.
 func collidingArgumentKeysMessage(groups []string) string {
 	return collidingArgumentKeysPrefix + strings.Join(groups, ", ") + collidingArgumentKeysAdvice
+}
+
+// collidingArgumentKeysResult is the refusal itself, in the one shape both dispatch paths need:
+// the error result for a call whose argument object names one parameter twice under different key
+// cases, and false for every ordinary call. It exists as a function because the serial path and
+// the fan-out path must answer such a call IDENTICALLY — a delegation that reaches a pool is
+// still a call whose arguments no two readers agree on, and a check living in only one of the two
+// would make the refusal depend on the bound server's Parallel agents cap.
+//
+// Arguments that do not parse at all are NOT this rule's business: domain.CollidingArgumentKeys
+// reports that as an error, and it is left to the tool's own decodeToolArgs, which can name the
+// parameters the tool actually has.
+func collidingArgumentKeysResult(call domain.ToolCall) (domain.ToolResult, bool) {
+	groups, err := domain.CollidingArgumentKeys(call.Arguments)
+	if err != nil || len(groups) == 0 {
+		return domain.ToolResult{}, false
+	}
+	return errorToolResult(call.ID, collidingArgumentKeysMessage(groups)), true
 }
 
 // resolutionInput assembles the facts resolve() decides from for one call: the effective mode,
