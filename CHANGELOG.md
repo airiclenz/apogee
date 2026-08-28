@@ -232,6 +232,20 @@ point is a **minor** bump, not a breaking change.
   reason a skill will or will not be suggested can be read off the listing; a skill that declares
   none is listed exactly as before.
 
+- Skill suggestions: `Suggest` now indexes a skill's full description — the 200-rune summary clamp
+  is the "/" menu's alone — so a phrase an author placed past the cap (`get me up to speed` in
+  `/refocus`) finds the skill; the real-library fixture under `internal/skills/testdata/library/`
+  pins the ranking on the phrases people type.
+
+- Skill suggestions: the band now counts the words you typed (stopwords included), the stemmer no
+  longer mangles `holes`/`speed`/`stress`, a term matches by ≥ 4-rune prefix (`releas` finds
+  `release`), a hit in a skill's id or name outranks a summary repeat — `cut a release for homebrew`
+  now names `/brew-release` first — and the matcher indexes a skill's full description (the 200-rune
+  summary clamp is the `/` menu's alone), so a phrase an author placed past the cap (`get me up to
+  speed` in `/refocus`) finds the skill. The real-library fixture under
+  `internal/skills/testdata/library/` pins the ranking on the phrases people type; ADR 0061 is
+  amended accordingly.
+
 ### Fixed
 
 - **`tuitest.Screen.Resize` is safe on a shrink.** A resize is the one moment the renderer is behind
