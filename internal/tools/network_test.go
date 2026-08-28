@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/security"
@@ -963,5 +964,98 @@ func TestWebFetch_NoProxyDialsDirectUnderTheFloor(t *testing.T) {
 	}
 	if !strings.Contains(res.Content, "HTTP 302") {
 		t.Errorf("expected the raw 302 (no auto-follow, no proxy), got: %q", res.Content)
+	}
+}
+
+// credentialedProxy is the shape an operator's HTTP(S)_PROXY value can really take — userinfo
+// with a password — and credentialedProxyPassword is the half that must never reach the model.
+// Each fail-closed path below has its own way to leak one: the proxy resolver quotes the raw
+// value back inside its own error, and a resolved proxy URL carries the credentials in its
+// userinfo.
+const (
+	credentialedProxy         = "http://ops:hunter2@proxy.invalid:3128"
+	credentialedProxyPassword = "hunter2"
+)
+
+// TestNewHTTPClient_UnusableOrUnpinnableProxyRefusesTheCall pins the funnel's two fail-closed
+// proxy paths, which every network tool inherits because newHTTPClient is the only place a
+// client is built: a proxy value the resolver cannot use, and a proxy whose own addresses
+// cannot be learned. Both refuse the call before anything leaves the process rather than
+// dialling around the proxy — the direction that keeps an operator's egress policy from
+// failing OPEN — and neither names the proxy's credentials, which is why the resolver's error
+// text is not interpolated and why the pin failure names Hostname() alone.
+func TestNewHTTPClient_UnusableOrUnpinnableProxyRefusesTheCall(t *testing.T) {
+	t.Parallel()
+
+	target, err := url.Parse("http://example.test/")
+	if err != nil {
+		t.Fatalf("parse target: %v", err)
+	}
+	// proxy.invalid is the RFC 2606 name reserved for one that cannot resolve; the resolver is
+	// injected so the answer is the test's rather than the host's DNS.
+	unresolvableProxy := security.URLGuard{}.WithResolver(func(_ context.Context, host string) ([]net.IP, error) {
+		if host == "proxy.invalid" {
+			return nil, errors.New("no such host")
+		}
+		return []net.IP{net.ParseIP("93.184.216.34")}, nil
+	})
+	resolvesTo := func(raw string) func(*http.Request) (*url.URL, error) {
+		u, err := url.Parse(raw)
+		if err != nil {
+			t.Fatalf("parse proxy %q: %v", raw, err)
+		}
+		return func(*http.Request) (*url.URL, error) { return u, nil }
+	}
+
+	cases := map[string]struct {
+		guard security.URLGuard
+		proxy func(*http.Request) (*url.URL, error)
+		want  []string
+	}{
+		"an unusable proxy value": {
+			guard: publicNameGuard(),
+			proxy: func(*http.Request) (*url.URL, error) { return nil, errors.New("invalid proxy address") },
+			want:  []string{"not a usable URL"},
+		},
+		"an unusable proxy value whose error quotes it back with credentials": {
+			guard: publicNameGuard(),
+			proxy: func(*http.Request) (*url.URL, error) {
+				return nil, errors.New(`invalid proxy address "` + credentialedProxy + `"`)
+			},
+			want: []string{"not a usable URL"},
+		},
+		"a proxy whose addresses cannot be learned": {
+			guard: unresolvableProxy,
+			proxy: resolvesTo("http://proxy.invalid:3128"),
+			want:  []string{"could not be pinned", "proxy.invalid"},
+		},
+		"a credentialed proxy whose addresses cannot be learned": {
+			guard: unresolvableProxy,
+			proxy: resolvesTo(credentialedProxy),
+			want:  []string{"could not be pinned", "proxy.invalid"},
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			client, err := newHTTPClient(context.Background(), tc.guard, target, tc.proxy, time.Second)
+
+			if client != nil {
+				t.Error("a refused proxy must build no client")
+			}
+			if !errors.Is(err, security.ErrURLBlocked) {
+				t.Fatalf("err = %v; want it to wrap security.ErrURLBlocked", err)
+			}
+			for _, want := range tc.want {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("err = %q; want it to contain %q", err, want)
+				}
+			}
+			if strings.Contains(err.Error(), credentialedProxyPassword) {
+				t.Errorf("err = %q; it names the proxy's password", err)
+			}
+		})
 	}
 }

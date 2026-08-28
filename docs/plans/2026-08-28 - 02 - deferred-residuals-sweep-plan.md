@@ -723,7 +723,13 @@ symlink tests.
 
 **Commit.** `test(cmd): the firing mount drops an escaping skill root`
 
-## 25. The fail-closed proxy paths are tested
+## 25. The fail-closed proxy paths are tested — ✅ DONE (2026-08-28)
+
+NOTES (2026-08-28): the "could not be pinned" cases stage `http://proxy.invalid:3128` through each package's injected resolver seam (`WithResolver`) rather than letting the name reach real DNS — the item's own `.invalid` spelling, made hermetic the way every other resolver-dependent test in both files already is.
+
+NOTES (2026-08-28): the item attaches the credential assertion ("NOT the password of a `http://user:pw@…` value") to the resolver-error path only; both paths carry it, because a resolved proxy URL keeps the password in its userinfo and only `Hostname()` standing between it and the message. That is what makes the four tools cases a 2×2 rather than two cases plus two assertions. Mutation-checked in both packages: interpolating the resolver's error, pinning `proxyURL.String()`, dropping the proxy from the pinned set, and failing open on either path each fail a case.
+
+NOTES (2026-08-28): `TestVetEndpoint_TheEgressProxyComesFromTheEnvironment` can only observe its own `t.Setenv` while no earlier non-parallel test in `internal/mcp` has resolved a proxy through the real `http.ProxyFromEnvironment` (net/http caches the environment behind a `sync.Once`). It holds today — every other proxy test swaps the `proxyForRequest` seam — and the constraint plus its failure mode are stated in the test's doc comment so a future serial test that breaks it reads as the cause rather than as a proxy bug.
 
 **What.** ISSUES: *The fail-closed proxy paths carry no committed test.* Tools: pass a
 `proxy` func into `newHTTPClient` (`internal/tools/network.go:338`) returning an error →

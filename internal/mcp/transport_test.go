@@ -315,6 +315,127 @@ func TestGuardedClient_ProxiedEndpointPinsBothHosts(t *testing.T) {
 	})
 }
 
+// credentialedProxy is the shape an operator's HTTP(S)_PROXY value can really take — userinfo
+// with a password — and credentialedProxyPassword is the half that must never reach the user or
+// the model. Each of the two fail-closed paths below has its own way to leak one: the proxy
+// resolver quotes the raw value back inside its own error, and a resolved proxy URL carries the
+// credentials in its userinfo.
+const (
+	credentialedProxy         = "http://ops:hunter2@proxy.invalid:3128"
+	credentialedProxyPassword = "hunter2"
+)
+
+// unresolvableProxyGuard answers every host with a public address except proxy.invalid, which
+// cannot be resolved — an egress proxy whose addresses are unknowable, staged through the guard's
+// resolver seam so no test reaches real DNS. (RFC 2606 reserves .invalid for exactly this.)
+func unresolvableProxyGuard() security.URLGuard {
+	return security.URLGuard{}.WithResolver(func(ctx context.Context, host string) ([]net.IP, error) {
+		if host == "proxy.invalid" {
+			return nil, errors.New("no such host")
+		}
+		return publicResolver(ctx, host)
+	})
+}
+
+// proxiedServer is the endpoint the fail-closed proxy tests below vet: a public name, so the
+// operator's HTTP(S)_PROXY applies to it and the guard's own resolver is what answers for it.
+func proxiedServer() ServerConfig {
+	return ServerConfig{Name: "proxied", Transport: TransportStreamableHTTP, Endpoint: "https://mcp.example/mcp"}
+}
+
+// TestVetEndpoint_AnUnusableProxyRefusesTheEndpoint pins the first of the MCP funnel's two
+// fail-closed proxy paths: a proxy value the resolver cannot use refuses the connect outright
+// rather than letting the session dial around the operator's egress policy — the fail-OPEN
+// direction, which would put an MCP connection outside the proxy the operator requires. The
+// refusal names no part of the value, because the resolver quotes it back in its own error and
+// a proxy URL may carry credentials.
+//
+// It swaps the proxyForRequest seam, so it must not run in parallel.
+func TestVetEndpoint_AnUnusableProxyRefusesTheEndpoint(t *testing.T) {
+	restore := proxyForRequest
+	proxyForRequest = func(*http.Request) (*url.URL, error) {
+		return nil, errors.New(`invalid proxy address "` + credentialedProxy + `"`)
+	}
+	t.Cleanup(func() { proxyForRequest = restore })
+
+	endpoint, client, err := vetEndpoint(context.Background(), proxiedServer(), security.URLGuard{}.WithResolver(publicResolver))
+
+	if err == nil {
+		t.Fatal("an unusable egress proxy vetted the endpoint; want the connect refused")
+	}
+	if endpoint != "" || client != nil {
+		t.Errorf("endpoint = %q, client = %v; want neither on a refusal", endpoint, client)
+	}
+	if !strings.Contains(err.Error(), "not a usable URL") {
+		t.Errorf("error = %v; want it to name the unusable egress proxy", err)
+	}
+	if strings.Contains(err.Error(), credentialedProxyPassword) {
+		t.Errorf("error = %v; it names the proxy's password", err)
+	}
+}
+
+// TestVetEndpoint_AnUnpinnableProxyRefusesTheEndpoint pins the second path: a proxy whose own
+// addresses cannot be learned cannot be pinned, and an unpinnable dial target refuses the
+// connect for the same reason an unresolvable endpoint does — the addresses the connection would
+// actually go to are unknown. The refusal names the proxy's HOST, which is all of a proxy URL
+// that is ever safe to surface.
+//
+// It swaps the proxyForRequest seam, so it must not run in parallel.
+func TestVetEndpoint_AnUnpinnableProxyRefusesTheEndpoint(t *testing.T) {
+	proxyURL, err := url.Parse(credentialedProxy)
+	if err != nil {
+		t.Fatalf("parse proxy URL: %v", err)
+	}
+	restore := proxyForRequest
+	proxyForRequest = func(*http.Request) (*url.URL, error) { return proxyURL, nil }
+	t.Cleanup(func() { proxyForRequest = restore })
+
+	endpoint, client, err := vetEndpoint(context.Background(), proxiedServer(), unresolvableProxyGuard())
+
+	if err == nil {
+		t.Fatal("an unpinnable egress proxy vetted the endpoint; want the connect refused")
+	}
+	if endpoint != "" || client != nil {
+		t.Errorf("endpoint = %q, client = %v; want neither on a refusal", endpoint, client)
+	}
+	if !errors.Is(err, security.ErrURLBlocked) {
+		t.Errorf("error = %v; want a url-safety refusal", err)
+	}
+	if !strings.Contains(err.Error(), "proxy.invalid") {
+		t.Errorf("error = %v; want it to name the proxy that could not be pinned", err)
+	}
+	if strings.Contains(err.Error(), credentialedProxyPassword) {
+		t.Errorf("error = %v; it names the proxy's password", err)
+	}
+}
+
+// TestVetEndpoint_TheEgressProxyComesFromTheEnvironment pins the surface itself: there is no
+// per-server `proxy:` config key, so the process's HTTP_PROXY / HTTPS_PROXY / NO_PROXY is the
+// whole of it. It deliberately does NOT swap proxyForRequest — that the default IS
+// http.ProxyFromEnvironment is the claim under test — and drives the unpinnable path, which is
+// the observable consequence of the environment having been consulted at all.
+//
+// net/http reads the proxy environment ONCE per process (a sync.Once behind
+// http.ProxyFromEnvironment), so this test sees its own t.Setenv only while no earlier
+// non-parallel test in the package has resolved a proxy through the real function. Every other
+// proxy test here swaps the seam, which is what keeps that true; a failure here with no
+// production change is that invariant breaking, not the proxy path.
+func TestVetEndpoint_TheEgressProxyComesFromTheEnvironment(t *testing.T) {
+	t.Setenv("HTTPS_PROXY", "http://proxy.invalid:3128")
+	// Neutralise any exclusion list the developer's own environment carries rather than inherit it.
+	t.Setenv("NO_PROXY", "127.0.0.1")
+	t.Setenv("no_proxy", "127.0.0.1")
+
+	_, _, err := vetEndpoint(context.Background(), proxiedServer(), unresolvableProxyGuard())
+
+	if err == nil {
+		t.Fatal("the endpoint vetted with no proxy pinned; want HTTPS_PROXY to have been consulted")
+	}
+	if !strings.Contains(err.Error(), "proxy.invalid") {
+		t.Errorf("error = %v; want it to name the environment's proxy", err)
+	}
+}
+
 // TestGuardedClient_DoesNotFollowRedirects pins the redirect policy the MCP client builder
 // reproduced field-for-field from the native funnel except for this one line: a redirect could
 // send a vetted connection to an unvetted host, stepping around the endpoint's string-level
