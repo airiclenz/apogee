@@ -176,6 +176,13 @@ The medians are the point: they make one recording reproduce the server's *behav
 one run's jitter. A recorded delay is rounded to 10 µs, because `token_delay: 10.37ms` reads as a
 decision and `token_delay: 10.372413ms` reads as a mistake.
 
+Closing the recorder waits for the replies still in flight, and that wait is load-bearing. A
+streaming client stops at the `[DONE]` event and hands control straight back to its caller, while
+the proxy is still one `Read` short of the EOF that files the turn — so a fixture written the
+instant the last client returned would be short its last turn, with nothing in the file to say so.
+`Close` holds until every begun request has filed or given up, with a two-second backstop for a
+request whose reply is never coming.
+
 Two fixtures in `cmd/apogee/testdata/stubllm/` are hand-written anyway, and say so at the top of the
 file: one documents the format (`example.yaml`), and `cached-usage.yaml` reports a prefix-cache
 share the recorder can only capture from a server that has prefix caching switched on. Re-record it
@@ -341,7 +348,7 @@ go func() { _, err := program.Run(); drv.Finished(err) }()
 - `Quit()` — Ctrl+C twice, then the run's error. `Kill()` — the context, and nothing tidied.
 - `Done()` / `Finished(err)` — how the run's result reaches whoever is waiting for it.
 
-Three things about it are decisions rather than details, and each of them was a bug first:
+Four things about it are decisions rather than details, and each of them was a bug first:
 
 - **The input is one `os.Pipe`.** Bubble Tea wraps its input in a cancel reader, and the
   epoll-backed one is only available for an `*os.File`; anything else falls back to a reader it
@@ -356,6 +363,14 @@ Three things about it are decisions rather than details, and each of them was a 
   of an escape SEQUENCE by looking; every reader resolves it on a timeout (ultraviolet's is 50 ms).
   Press `Esc` and type `/` five milliseconds later and the program is handed one `alt+/`. This is
   the only place a driver waits on a clock instead of on the screen.
+- **Teardown joins the read loop.** Ending the input is not enough: Bubble Tea's read loop parks in
+  its cancel reader's `EpollWait`, and the reader is closed out from under it — a KILLED program
+  skips `waitForReadLoop` altogether (`tea.go:1249-1255`) and a graceful one gives it 500 ms.
+  Closing an epoll descriptor does not wake the `EpollWait` already parked on it, so a loop still
+  parked when the reader closes is parked for the life of the process. `Close()` and `Kill()` end
+  the input, wait for the loop to actually take the EOF, and only then let the cancel or the close
+  proceed. Without the wait, `CheckLeaks` — which scans goroutines package-globally — reports the
+  straggler against whichever LATER test happens to look, so the failure never names its cause.
 
 `cmd/apogee/e2e_support_test.go` is the half that cannot live in `internal/tuitest`, because the
 launcher seam is in package `main`: `launchTUI(t, drv, stub, args...)` builds a temp home and a temp
@@ -637,8 +652,17 @@ This table is the answer to "how do I test this?" — and it is also the gate on
 A claim is manual ONLY when its class sits in the **Not observable** column; everything else has a
 driver, and the test gets written. The rows below cover every claim class
 `docs/test-checklists/2026-08-27 - 00 - since-v0.17.1.md` needed a human for, including the proxies
-ratified for the irreducible halves (ADR 0062, decision 5). Plan item 16 re-checks every
-example-test name against `go test -list 'TestE2E.*' ./cmd/apogee/`.
+ratified for the irreducible halves (ADR 0062, decision 5). Every example-test name in it was
+re-checked against `go test -list` on 2026-08-28 and resolves to a real function.
+
+Read the **Not observable** column knowing it carries two kinds of cell. Most of them name the
+instrument that asserts the claim INSTEAD of the driver on that row — the session record, the
+stub's request log, a unit test — and those claims are covered, just not where the row's own
+driver could see them. Only four are irreducible, the claim leaving the machine altogether: font
+tofu (T-20), felt flicker (T-24), what a real desktop application does with the file (T-19), and
+`brew upgrade` before its release exists together with the newcomer walk's Homebrew and OpenRouter
+steps (T-21, T-23). Those four are recorded in `ISSUES.md` under "Test drivers — residue" as
+accepted proxies with no open work; every other cell in the column is a pointer, not a gap.
 
 | Claim class | Driver | Example test | Not observable by any driver |
 | --- | --- | --- | --- |
@@ -715,7 +739,23 @@ A new end-to-end test is `cmd/apogee/e2e_<topic>_test.go`, and it follows this c
 
 ## Gates and budgets
 
-*The final-measurement row is filled by plan item 16.*
+**Measured 2026-08-28, the final pass over the whole kit.**
+`go test -race -count=1 -run 'TestE2E' ./cmd/apogee/` — **36 tests, all PASS, 121.7 s** of package
+wall clock (**89.3 s** without `-race`). Roughly 120 s of that is test time; the rest is the one-off
+`go build` every run of the package now pays. Per file, under `-race`:
+
+| File | s | File | s |
+| --- | --- | --- | --- |
+| `e2e_egress_test.go` | 31.6 | `e2e_console_test.go` | 5.8 |
+| `e2e_stream_test.go` | 20.7 | `e2e_width_test.go` | 5.4 |
+| `e2e_livestate_test.go` | 11.2 | `e2e_hostile_test.go` | 5.2 |
+| `e2e_outcome_test.go` | 9.4 | `e2e_usage_test.go` | 4.9 |
+| `e2e_smoke_test.go` | 8.5 | `e2e_approval_test.go` | 4.6 |
+| `e2e_delegation_test.go` | 8.3 | `e2e_present_test.go` | 3.2 |
+|  |  | `e2e_schedule_test.go` | 1.4 |
+
+`e2e_egress_test.go` is three-quarters one test — `TestE2EEgressLongStreamIsNotDeadlined`, **25.7 s**,
+whose twenty-five seconds ARE the claim (see below).
 
 | Set | Runs in a plain `go test` | Ways it does not run |
 | --- | --- | --- |
@@ -737,8 +777,16 @@ one — and no model beyond the same loopback stub.
 
 The e2e tests are **serial**: they use `t.Setenv` and package-var seams, so none of them calls
 `t.Parallel`, and every swapped package var is restored through `t.Cleanup`. The budget is therefore
-serial wall clock. The whole set added by this plan has ~15 s under `go test -race ./cmd/apogee/`,
-on top of the 5.5 s the package cost before it. `TestE2ESmokeInProcess` — thirteen checklist steps,
+serial wall clock, and the measurement above is the whole of it: **≈ 122 s** under `-race`, on top
+of the 5.5 s the package cost before this work. That is well past the ~15 s the kit's first slice
+budgeted for itself, and the excess is not waste — it is nine later sets, each measured and narrated
+below, plus one test whose twenty-five seconds are its assertion. Nothing has been moved behind an
+env flag to buy the number down, and the rule two paragraphs up is why: a test that runs only when
+someone remembers a flag is a test nobody runs. Gating the single slowest one would delete the only
+observation that the provider client sets no response-wide timeout and still leave ~96 s. The knobs
+that genuinely trade time for fidelity are named per set below, and the first to reach for is the
+streamed fixture's `chunk_runes`. The per-set figures below were each taken when that set landed;
+the table above is the authority when they disagree. `TestE2ESmokeInProcess` — thirteen checklist steps,
 two launches and a restore — measures **≈ 7.5 s** of that under `-race`, and `TestE2ESmokePTY`
 **≈ 1 s** on top of the one-off `go build` (**≈ 1.5 s**) every run of the package now pays.
 

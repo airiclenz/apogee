@@ -165,10 +165,12 @@ that run.
   server holding a pipe open can still block `session.Close`'s `Wait`, so the seam's advertised
   drain bound does not apply to MCP.
 
-- [ ] **The `ResidualNotice` prints have no test.** `probe.ResidualNotice` reaches a stream at
-  `cmd/apogee/headless.go:315` and `cmd/apogee/daemon.go:230`; on an ABI ≥ 3 host the notice is
-  empty, so only the negative branch is exercised and nothing proves the disclosure ever reaches
-  the stream.
+- [ ] **Two of the three `ResidualNotice` prints still have no test.** `probe.ResidualNotice`
+  reaches a stream at `cmd/apogee/headless.go:321`, `cmd/apogee/wire_boot.go:290` (the TUI's
+  startup notice) and `cmd/apogee/daemon.go:230`; on an ABI ≥ 3 host the notice is empty, so only
+  the negative branch runs on this machine. The `landlock-abi-1-2` job
+  (`.github/workflows/ci.yml`) now proves the HEADLESS disclosure reaches stderr on a kernel that
+  HAS the residual; the TUI-boot and daemon prints are still exercised in neither direction.
 
 - [ ] **The `rmFlag` token loses two spellings the old patterns caught.** `rmFlag` requires a letter
   after the dash (`internal/security/rules.go:54`), so the `rm -rf` rules built from it
@@ -1103,3 +1105,35 @@ own grill, an ADR **explicitly superseding ADR 0061**, and a bench arm against B
 reusable half exists:** `skills.Catalog.Suggest` (plan `docs/plans/archived/2026-08-27 - 01 -
 skill-suggestions-band-plan.md`) is engine-level and model-free, so B1 would consume the matcher
 rather than grow a second one.
+
+---
+
+### Test drivers — residue: the claims no driver observes
+
+**Status:** recorded 2026-08-28 at the close of the test-drivers kit plan
+(`docs/plans/2026-08-27 - 02 - test-drivers-kit-plan.md`). **No open work.** These are the
+accepted proxies ratified by
+[ADR 0062](docs/adr/0062-test-drivers-are-drivers.md) decision 5, written down so a later reader
+does not re-open them as coverage gaps.
+
+The live source is the "which driver observes which claim" table in
+[`docs/design/test-drivers.md`](docs/design/test-drivers.md). Its **Not observable** column names
+two different things: most cells name the instrument that asserts the claim INSTEAD (a session
+record, a request log, a unit test), and those are covered. Only the rows below are irreducible —
+the claim leaves the machine, and the proxy beside it *is* what "that item passes" means.
+
+- **Font tofu (T-20)** — whether the reader's own font carries the glyph at all. The emulator's
+  cell width is the width authority (`TestE2EWidthTicksMultiSelectChoices`,
+  `TestE2EWidthSurvivesAColourSchemeSwitch`); what a font does with a codepoint is outside every
+  terminal apogee can drive.
+- **Felt flicker (T-24)** — proxied by the `--tui-trace` repaint ceiling
+  (`TestE2EStreamRepaintCeiling`): bytes written and full-frame repaints per streamed token,
+  pinned against a ceiling. Nothing measures perception.
+- **What a real desktop application does with the file (T-19)** — the hand-off is asserted at its
+  argv through the `openerLookPath` seam (`TestE2EPresentOpensOnlyTheAllowedFormats`), and the
+  refusals by that log's ABSENCE of a launch. The application on the other side is not apogee's.
+- **`brew upgrade` before the release it upgrades to exists (T-21), and the Homebrew and
+  OpenRouter steps of the newcomer walk (T-23)** — both need a PUBLISHED release, and the second
+  a real API key. The post-publish half runs by hand as `make release-smoke VERSION=vX.Y.Z`
+  (`scripts/release-smoke.sh`); the container walk (`TestNewcomerFollowsTheDocs`) judges
+  everything that needs neither.

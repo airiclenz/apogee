@@ -33,10 +33,11 @@ type Driver struct {
 	screen *Screen
 	size   Size
 
-	// The program's input. Reader is handed to tea.WithInput; writer is where keys and the
+	// The program's input. input is handed to tea.WithInput; writer is where keys and the
 	// emulator's answers go, both under writeMu so a pumped answer cannot land inside a keystroke.
-	reader, writer *os.File
-	writeMu        sync.Mutex
+	input   *driverInput
+	writer  *os.File
+	writeMu sync.Mutex
 	// When a lone Esc was last sent, so the next write can let the reader's escape timeout expire
 	// first. Guarded by writeMu.
 	lastEsc time.Time
@@ -47,7 +48,11 @@ type Driver struct {
 	prog   *tea.Program
 	cancel context.CancelFunc
 
-	done      chan error
+	done chan error
+	// ended mirrors done as a bare signal. A wait that only needs to know the run is over must not
+	// receive from done: done carries one buffered error, and receiving it would take the result
+	// out from under the caller who is waiting for it.
+	ended     chan struct{}
 	finishing sync.Once
 	pumped    chan struct{}
 	closing   sync.Once
@@ -72,9 +77,10 @@ func NewDriver(t testing.TB, size Size) *Driver {
 		t:      t,
 		screen: NewScreen(size.W, size.H),
 		size:   size,
-		reader: reader,
+		input:  &driverInput{File: reader, released: make(chan struct{})},
 		writer: writer,
 		done:   make(chan error, 1),
+		ended:  make(chan struct{}),
 		pumped: make(chan struct{}),
 	}
 	go d.pumpAnswers()
@@ -90,7 +96,7 @@ func NewDriver(t testing.TB, size Size) *Driver {
 // output has to replace that half rather than race it.
 func (d *Driver) ProgramOptions() []tea.ProgramOption {
 	return []tea.ProgramOption{
-		tea.WithInput(d.reader),
+		tea.WithInput(d.input),
 		tea.WithWindowSize(d.size.W, d.size.H),
 		// No signals and no signal handler: a test process's SIGWINCH and SIGINT belong to the
 		// test binary, and a program that installed handlers for them would answer for the whole
@@ -159,6 +165,7 @@ func (d *Driver) Finished(err error) {
 	d.finishing.Do(func() {
 		d.done <- err
 		close(d.done)
+		close(d.ended)
 	})
 }
 
@@ -258,11 +265,13 @@ func (d *Driver) Quit() error {
 // teardown and no farewell follow. It is the in-process half of the "reopen after an abrupt end"
 // claim (T-03) — the PTY driver SIGKILLs a real pid for the other half.
 //
-// The input is ended FIRST, and that is not politeness. A killed program skips
-// bubbletea's waitForReadLoop and closes its cancel reader out from under the read loop
-// (tea.go:1249-1255); with a live reader on the other side that is a genuine data race, reported by
-// -race in the kit's own tests. Ending the input lets the read loop finish on EOF — which does not
-// quit the program, so what the cancel below kills is still a running program.
+// The input is ended FIRST, and the read loop is joined SECOND, and neither is politeness. A killed
+// program skips bubbletea's waitForReadLoop and closes its cancel reader out from under the read
+// loop (tea.go:1249-1255); with a live reader on the other side that is a genuine data race,
+// reported by -race in the kit's own tests, and a loop still parked in that reader when it closes
+// never wakes at all ([Driver.joinReadLoop]). Ending the input hands the loop an EOF to leave on —
+// which does not quit the program, so what the cancel below kills is still a running program — and
+// the join is what makes sure it has actually left before the cancel arrives.
 func (d *Driver) Kill() {
 	d.t.Helper()
 
@@ -273,6 +282,7 @@ func (d *Driver) Kill() {
 		d.t.Fatal("tuitest: Kill needs the program's cancel; Attach was never called with one")
 	}
 	d.endInput()
+	d.joinReadLoop()
 	cancel()
 	select {
 	case <-d.done:
@@ -282,8 +292,8 @@ func (d *Driver) Kill() {
 }
 
 // Close tears the driver down: the answer pump stops, the input ends (which is what ends the
-// program's read loop), and the pipe is released. It is idempotent and registered as a cleanup, so
-// a test only calls it to end the input early.
+// program's read loop), the read loop is joined, and the pipe is released. It is idempotent and
+// registered as a cleanup, so a test only calls it to end the input early.
 func (d *Driver) Close() {
 	d.closing.Do(func() {
 		// Order matters. The screen closes first so the pump's blocking read returns; only once
@@ -292,7 +302,9 @@ func (d *Driver) Close() {
 		<-d.pumped
 		d.endInput()
 		// The read end belongs to the program while it runs — bubbletea's cancel reader reads the
-		// file's descriptor from its own goroutine — so it is released only once the run is over.
+		// file's descriptor from its own goroutine — so it is released only once the run is over
+		// AND that goroutine has let go of it.
+		d.joinReadLoop()
 		d.mu.Lock()
 		attached := d.attached
 		d.mu.Unlock()
@@ -302,8 +314,34 @@ func (d *Driver) Close() {
 			case <-time.After(DefaultTimeout):
 			}
 		}
-		_ = d.reader.Close()
+		_ = d.input.Close()
 	})
+}
+
+// joinReadLoop waits for bubbletea's input read loop to let go of the driver's input, and it is
+// what keeps a torn-down driver from leaving a goroutine behind it.
+//
+// That loop parks in its cancel reader's EpollWait, and the reader is closed out from under it: a
+// killed program skips waitForReadLoop entirely (tea.go:1249-1255) and a graceful one gives it
+// 500 ms. Closing an epoll descriptor does NOT wake the EpollWait already parked on it, so a loop
+// still parked there when the reader closes is parked for the life of the process — and because
+// [CheckLeaks] scans goroutines package-globally, the straggler is reported against whichever LATER
+// test happens to look. Ending the input hands the loop an EOF to leave on; this waits for it to
+// leave, so nothing that follows can strand it.
+//
+// Two cases need no waiting. A run that has already returned was joined by bubbletea itself on the
+// way out, and an input no read loop ever touched has nothing to join. The timeout is the backstop
+// for neither being true — a driver whose program never started — and it fails nothing on its own:
+// [CheckLeaks] is what reports a goroutine that really did outlive its test.
+func (d *Driver) joinReadLoop() {
+	if !d.input.touched() {
+		return
+	}
+	select {
+	case <-d.input.released:
+	case <-d.ended:
+	case <-time.After(DefaultTimeout):
+	}
 }
 
 // endInput closes the write end of the program's input, which the read loop sees as EOF. It is
@@ -314,6 +352,48 @@ func (d *Driver) endInput() {
 		defer d.writeMu.Unlock()
 		_ = d.writer.Close()
 	})
+}
+
+// driverInput is the read end of the driver's input pipe with one observation added: whether
+// bubbletea's read loop is still holding it. That is the whole reason [Driver.joinReadLoop] can
+// exist, and it costs nothing else.
+//
+// It stays an *os.File underneath because it must: muesli/cancelreader chooses its epoll
+// implementation by asserting the input to a cancelreader.File — an io.ReadWriteCloser that also
+// has Fd and Name — and an embedded *os.File answers every one of those but the method overridden
+// here. Anything less and bubbletea falls back to a reader it cannot cancel, which is the very
+// thing the pipe was chosen to avoid.
+type driverInput struct {
+	*os.File
+
+	mu       sync.Mutex
+	everRead bool // guarded by mu: a read loop has come through Read at least once
+	// released is closed by the read that returns an error. The read loop makes no further read
+	// after one, so that error is the moment it lets go of the file — and of the epoll descriptor
+	// its cancel reader parks on.
+	released chan struct{}
+	closing  sync.Once
+}
+
+// Read is the pipe's own read, remembering that a loop came through and closing [released] on the
+// error that ends it.
+func (in *driverInput) Read(p []byte) (int, error) {
+	in.mu.Lock()
+	in.everRead = true
+	in.mu.Unlock()
+
+	n, err := in.File.Read(p)
+	if err != nil {
+		in.closing.Do(func() { close(in.released) })
+	}
+	return n, err //nolint:wrapcheck
+}
+
+// touched reports whether any read loop has ever read this input.
+func (in *driverInput) touched() bool {
+	in.mu.Lock()
+	defer in.mu.Unlock()
+	return in.everRead
 }
 
 // escapeGap is how long the driver leaves the input alone after a lone Esc. A terminal cannot tell

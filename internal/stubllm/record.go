@@ -58,7 +58,16 @@ type Recorder struct {
 	model string
 	next  int
 	turns map[int]Turn
+	// inflight is how many begun requests have not yet filed their Turn. A client stops reading
+	// the moment it sees the last event it cares about, so it can be back in its caller's hands
+	// while this proxy is still a Read away from the EOF that files the reply — see
+	// [Recorder.settle].
+	inflight int
 }
+
+// settleWait is how long [Recorder.Close] gives replies still in flight. It is a backstop, not a
+// budget: the wait normally ends on the last reply filing, in well under a millisecond.
+const settleWait = 2 * time.Second
 
 // NewRecorder returns a Recorder that proxies to upstream and writes its fixture to out.
 // Neither is optional: a recorder with nowhere to send traffic, or nowhere to put the result,
@@ -84,7 +93,11 @@ func NewRecorder(upstream, out string) (*Recorder, error) {
 		// through at once, so what the recorder measures is the upstream's own pacing and
 		// what the client downstream sees is the stream it would have seen directly.
 		FlushInterval: -1,
-		ErrorHandler: func(w http.ResponseWriter, _ *http.Request, err error) {
+		ErrorHandler: func(w http.ResponseWriter, request *http.Request, err error) {
+			// A request that failed before its reply could be captured files no Turn, so it is
+			// settled here instead — otherwise Close would wait out its whole backstop for a
+			// reply that is never coming.
+			recorder.settle(captureOf(request))
 			http.Error(w, fmt.Sprintf("stubllm: upstream %s: %v", target, err), http.StatusBadGateway)
 		},
 	}
@@ -126,6 +139,8 @@ func (r *Recorder) Script() Script {
 // shape the format refuses (content alongside tool calls, say), and a fixture a human can fix
 // by hand is worth more than a deleted one plus an error message.
 func (r *Recorder) Close() error {
+	r.settleInflight()
+
 	script := r.Script()
 	if len(script.Turns) == 0 {
 		return fmt.Errorf("stubllm: nothing recorded — no completion request reached %s", r.upstream)
@@ -172,6 +187,7 @@ func (r *Recorder) begin(request *http.Request) *http.Request {
 	}
 	entry.n = r.next
 	r.next++
+	r.inflight++
 	r.mu.Unlock()
 
 	return request.WithContext(context.WithValue(request.Context(), captureKey{}, entry))
@@ -181,8 +197,8 @@ func (r *Recorder) begin(request *http.Request) *http.Request {
 // the proxy's ModifyResponse, which is the only place with both the status and the body still
 // unread.
 func (r *Recorder) capture(reply *http.Response) error {
-	entry, ok := reply.Request.Context().Value(captureKey{}).(*capture)
-	if !ok {
+	entry := captureOf(reply.Request)
+	if entry == nil {
 		return nil
 	}
 
@@ -203,17 +219,62 @@ func (r *Recorder) finish(entry *capture) {
 	turn := entry.turn()
 
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	r.turns[entry.n] = turn
+	r.mu.Unlock()
+	r.settle(entry)
+}
+
+// settle marks a request as no longer in flight, exactly once and whatever became of it. nil and
+// a capture already settled are both no-ops: the proxy can reach its error handler after a reply
+// was captured, and a request outside /v1/chat/completions carries no capture at all.
+func (r *Recorder) settle(entry *capture) {
+	if entry == nil {
+		return
+	}
+	entry.settled.Do(func() {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		r.inflight--
+	})
+}
+
+// settleInflight waits for every begun request to file its Turn — or to give up on one — so a
+// fixture written the instant the last client returned still holds that client's last reply.
+//
+// This is the recorder's one clock, and it is here because the alternative is a silent hole: a
+// streaming client stops at the `[DONE]` event and hands control back to its caller, while the
+// proxy is still one Read short of the EOF that files the Turn. Close a millisecond later and the
+// fixture is short a turn, with nothing to say so.
+func (r *Recorder) settleInflight() {
+	deadline := time.Now().Add(settleWait)
+	for {
+		r.mu.Lock()
+		inflight := r.inflight
+		r.mu.Unlock()
+		if inflight <= 0 || !time.Now().Before(deadline) {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
 }
 
 // captureKey is the context key the request half uses to hand its capture to the reply half.
 type captureKey struct{}
 
+// captureOf returns the capture a request carries, or nil when it is not one being recorded.
+func captureOf(request *http.Request) *capture {
+	if request == nil {
+		return nil
+	}
+	entry, _ := request.Context().Value(captureKey{}).(*capture)
+	return entry
+}
+
 // capture is one request/reply pair in flight: what was asked, and the reply bytes as they
 // arrive with the times they arrived at.
 type capture struct {
 	n           int
+	settled     sync.Once
 	lastMessage string
 	status      int
 	contentType string

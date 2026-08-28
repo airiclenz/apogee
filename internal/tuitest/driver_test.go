@@ -79,9 +79,14 @@ func (l *msgLog) count() int {
 // driveProbe starts a probe program under a fresh driver and returns both. The probe binds no quit
 // key — what is under test is the input path, not a model — so the run is ended on cleanup by
 // [Driver.Kill].
+//
+// [CheckLeaks] comes first, before anything is started, so its cleanup runs last. It is what makes
+// a driver that leaves a goroutine behind fail HERE rather than in whichever later test happens to
+// scan next: a killed program's read loop outliving its teardown was exactly that bug.
 func driveProbe(t *testing.T, view string) (*Driver, *msgLog) {
 	t.Helper()
 
+	CheckLeaks(t)
 	drv := NewDriver(t, Size{W: 40, H: 8})
 	log := &msgLog{}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -236,6 +241,7 @@ func TestDriverPumpsTerminalAnswers(t *testing.T) {
 // it. The probe quits on Ctrl+C like any tea program without a key map of its own would not, so the
 // quit is driven here by the same two presses a human makes and the model's own Quit command.
 func TestDriverQuitReturnsTheRunError(t *testing.T) {
+	CheckLeaks(t)
 	drv := NewDriver(t, Size{W: 30, H: 5})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
