@@ -749,7 +749,11 @@ non-parallel) the same two ways over `vetEndpoint` (`:201`); plus one `t.Setenv(
 
 **Commit.** `test(egress): an unusable or unpinnable proxy refuses the call on both funnels`
 
-## 26. The JS/TS regex rule admits `>`, `+`, `case`, and refreshes its state on close
+## 26. The JS/TS regex rule admits `>`, `+`, `case`, and refreshes its state on close — ✅ DONE (2026-08-28)
+
+NOTES (2026-08-28): the item's "`a / b / c` still not a regex" is asserted as a second line of the
+new `javascript division follows a closed regex literal` row rather than by editing an existing
+row; `TestCheckSyntaxReportsEachBrokenShape` is untouched, as the item requires.
 
 **What.** ISSUES: *The JS/TS regex rule still misreports an arrow body and three other
 predecessors* and *A closed regex literal leaves the preceding-rune state stale.* Add `'>'`

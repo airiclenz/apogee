@@ -115,6 +115,72 @@ func TestCheckSyntaxAcceptsValidCode(t *testing.T) {
 			content: "const rules = [/a\\(/, /b[/]x/, /\"/];\n",
 		},
 		{
+			// The arrow body: `>` closes `=>`, so without it the literal's quotes reopened the very
+			// "unclosed string" the regex rule exists to prevent.
+			name:    "javascript regex literal in an arrow body",
+			path:    "arrow.js",
+			content: "const has = (s) => /['\"]/.test(s);\n",
+		},
+		{
+			name:    "javascript regex literal after a plus",
+			path:    "plus.js",
+			content: "const label = prefix + /['\"]/.source;\n",
+		},
+		{
+			// The second keyword predecessor, beside `return`.
+			name: "typescript regex literal after case",
+			path: "kind.ts",
+			content: "switch (kind) {\n" +
+				"  case /['\"]/.source:\n" +
+				"    go();\n" +
+				"    break;\n" +
+				"}\n",
+		},
+		{
+			name:    "javascript regex literal after a comma",
+			path:    "arg.js",
+			content: "const parts = split(s, /['\"]/);\n",
+		},
+		{
+			name:    "javascript regex literal opening a block",
+			path:    "block.js",
+			content: "if (ok) { /['\"]/.test(s); }\n",
+		},
+		{
+			name:    "javascript regex literal after a property colon",
+			path:    "spec.js",
+			content: "const spec = { re: /['\"]/ };\n",
+		},
+		{
+			name:    "javascript regex literal after a logical and",
+			path:    "and.js",
+			content: "const hit = ok && /['\"]/.test(s);\n",
+		},
+		{
+			name:    "javascript regex literal after a logical or",
+			path:    "or.js",
+			content: "const hit = ok || /['\"]/.test(s);\n",
+		},
+		{
+			name:    "javascript regex literal after a ternary question mark",
+			path:    "ternary.js",
+			content: "const re = ok ? /['\"]/ : null;\n",
+		},
+		{
+			name:    "javascript regex literal after a semicolon",
+			path:    "seq.js",
+			content: "let n = 0; /['\"]/.test(s);\n",
+		},
+		{
+			// The closing `/` refreshes the predecessor state, so the next `/` on the line divides
+			// instead of opening a literal that swallows the paren — and a chain of divisions is
+			// still never a regex literal.
+			name: "javascript division follows a closed regex literal",
+			path: "ratio.js",
+			content: "const n = foo(/a/ / 2);\n" +
+				"const m = a / b / c;\n",
+		},
+		{
 			// The other side of the rule: after an identifier, a `)` or a closing quote, `/` is
 			// the division operator it has always been.
 			name: "javascript division is not a regex literal",

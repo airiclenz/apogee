@@ -140,7 +140,7 @@ func checkGoSyntax(content string) syntaxResult {
 // when the last significant rune on the current line (the last rune consumed outside a string,
 // comment or regex, ignoring spaces and tabs; 0 at line start) is one of these runes, or there is
 // none (line start), or the last identifier token on the line, with only whitespace between it and
-// the `/`, is exactly regexOpenerKeyword. Any other predecessor — an identifier, a digit, `)`, `]`,
+// the `/`, is one of regexOpenerKeywords. Any other predecessor — an identifier, a digit, `)`, `]`,
 // a closing quote — leaves `/` as the division operator it is.
 var regexOpeners = map[rune]bool{
 	'=': true,
@@ -154,11 +154,16 @@ var regexOpeners = map[rune]bool{
 	'|': true,
 	'?': true,
 	';': true,
+	'>': true,
+	'+': true,
 }
 
-// regexOpenerKeyword is the one keyword predecessor in the regexOpeners rule: `return /^\s*$/`
-// opens a regex literal, while `total / 2` divides.
-const regexOpenerKeyword = "return"
+// regexOpenerKeywords are the keyword predecessors in the regexOpeners rule: `return /^\s*$/`
+// and `case /^\s*$/:` open a regex literal, while `total / 2` divides.
+var regexOpenerKeywords = map[string]bool{
+	"return": true,
+	"case":   true,
+}
 
 // isIdentifierRune reports whether r can appear inside a JavaScript/TypeScript identifier token,
 // which is what the keyword clause of the regexOpeners rule is matched against.
@@ -224,6 +229,10 @@ func checkBrackets(content, lang string) syntaxResult {
 					inCharClass = false
 				case r == '/' && !inCharClass:
 					inRegex = false
+					// The closed literal is a value, so the next `/` on the line divides
+					// (regexOpeners): in `foo(/a/ / 2)` the stale `(` used to open a second
+					// literal that swallowed the closing paren.
+					lastRune, identFrom, identTo, identOpen = '/', 0, 0, false
 				}
 				continue
 			}
@@ -260,7 +269,7 @@ func checkBrackets(content, lang string) syntaxResult {
 				}
 			}
 			if r == '/' && hasRegexLiterals &&
-				(lastRune == 0 || regexOpeners[lastRune] || line[identFrom:identTo] == regexOpenerKeyword) {
+				(lastRune == 0 || regexOpeners[lastRune] || regexOpenerKeywords[line[identFrom:identTo]]) {
 				inRegex = true
 				continue
 			}
