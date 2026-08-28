@@ -209,7 +209,35 @@ turns:
 
 ---
 
-## 4. e2e: announced skill paths under a dotfiles-symlinked home, zero prompts
+## 4. e2e: announced skill paths under a dotfiles-symlinked home, zero prompts — ✅ DONE (2026-08-28)
+
+NOTES (2026-08-28): the five read tools ride ONE scripted turn (five `tool_calls` on the turn that
+carries the capture) rather than the item's chain of `when: tool_result` turns. A capture is evaluated
+against the request its own turn answers, and only the FIRST request carries the skill block — a
+chained turn would have to re-capture the folder out of the PRECEDING TOOL'S OUTPUT, which pins each
+tool's result format instead of the announcement under test. Issuing the five calls from the one turn
+that can read the header keeps every argument the header's own spelling, which is the item's point.
+NOTES (2026-08-28): "zero prompts" is asserted with a new in-process pane counter
+(`watchApprovalPanes`) rather than the design call's `paneTrace`. `paneTrace` reads the `--tui-trace`
+file, and `launchTUI`/`startSession` deliberately never pass `--tui-trace` (the trace wraps
+`os.Stdout` and `tui.Build` refuses it beside a driver output), so it takes a `*ptySession` and has
+nothing to answer with here — while the item's own step 1 pins this fixture to the in-process
+`startSession`, and the plan puts PTY coverage out of scope. The counter polls the frame for
+`approvalMarker` and counts rising edges, so it answers the same question and also serves item 5's
+"count 0 before turn 2, exactly 1 at the end". Both halves were mutation-checked: pointing it at a
+string that IS on screen makes it report 2, and pointing the path assertion at the resolved spelling
+makes all five calls fail.
+NOTES (2026-08-28): the run is launched through `launchTUIOn` — which is `startSession` on a home the
+caller wrote, plus the `e2eGuards` every driven launch owes (leak check, ambient-config refusal, fast
+config watcher) — rather than calling `startSession` bare and skipping those guards.
+NOTES (2026-08-28): the workspace seeds an `out/` folder before the launch: `copy_file` writes into an
+existing directory and does not create its destination's parents, so the item's `out/a.md` destination
+needs it there.
+NOTES (2026-08-28): the marker line is asserted on the `read_file` and `grep` results only, not on all
+five as the item's step 5 reads — `copy_file`, `list_dir` and `find_files` answer with a receipt, a
+listing and a match list, so no file CONTENT comes back through them for a marker to be in; all five
+results ARE asserted to name `a.md` and none to carry the `outside the workspace root` read-scope
+refusal, which is the invariant step 5 is after.
 
 Depends on items 1 and 3.
 

@@ -1,0 +1,47 @@
+# The upstream TestE2EAnnouncedSkillPathsUnderASymlinkedHome talks to: a model that does nothing
+# but use the path apogee ANNOUNCED to it, verbatim.
+#
+# The one turn that matters carries a capture. Its pattern lifts the folder out of the skill
+# header's own `files: <dir> — this skill's bundled files; …` line (internal/agent/loop.go), so
+# every argument below is the spelling the shipped code rendered on that very request rather than
+# one this fixture guessed — the day the header starts announcing something else, the capture goes
+# unmatched and the test says so instead of quietly testing a path nobody is told about.
+#
+# All five read tools ride that ONE turn rather than a chain of turns, because a capture is
+# evaluated against the request its turn answers and only the FIRST request carries the header: a
+# chain would have to re-capture the path out of each preceding tool's OUTPUT, which pins the tools'
+# result formats instead of the announcement under test.
+model: announced-model
+turns:
+    # The session title. apogee asks for one off the first prompt, so this has to be matched BEFORE
+    # the prompt's own turn or it would take it (see smoke.yaml).
+    - when:
+        last_message: The user's first request
+      repeat: true
+      text: Announced skill paths
+    # The prompt that invokes the skill. Its request is the only one carrying the skill block, and
+    # so the only one a `files:` capture can read.
+    - when:
+        last_message: exercise every read tool
+      captures:
+        - {name: skilldir, from: last_message, pattern: 'files: (\S+) — this skill'}
+      tool_calls:
+        - name: read_file
+          arguments: '{"path":"{{skilldir}}/prompts/a.md"}'
+        - name: copy_file
+          arguments: '{"source":"{{skilldir}}/prompts/a.md","destination":"out/a.md"}'
+        - name: list_dir
+          arguments: '{"path":"{{skilldir}}","recursive":true}'
+        - name: grep
+          arguments: '{"pattern":"APOGEE-ANNOUNCED-MARKER-8f21","path":"{{skilldir}}"}'
+        - name: find_files
+          arguments: '{"pattern":"a.md","path":"{{skilldir}}"}'
+    # The wrap-up, once the last of the five calls has come back.
+    - when:
+        tool_result: find_files
+      text: All bundled files answered.
+      token_delay: 1ms
+      chunk_runes: 8
+    # Anything apogee asks on its own account.
+    - repeat: true
+      text: Nothing else to add.
