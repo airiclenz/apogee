@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"testing"
 
@@ -208,6 +209,59 @@ func TestFiringConfigSetsEveryUnattendedField(t *testing.T) {
 	}
 	if dialects.called {
 		t.Error("the dialect source was consulted behind a forced effort-dialect:; the round trip could only re-ask a settled question")
+	}
+}
+
+// A workspace skill anchor that is a symlink OUT of the workspace is discovered as a source and
+// mounted nowhere (audit 2026-08-25 F-13; residual 2026-08-28). The provider answers two lists on
+// purpose and they are not interchangeable: SourceDirs is the DISPLAY view — where skills come
+// from, the path a /skills report and a skip record name, spelled as configured — while ReadRoots
+// is the MOUNT view, symlink-resolved, with an untrusted workspace anchor that leaves its base
+// dropped altogether. A Firing composed on SourceDirs would hand read_file, grep, list_dir and
+// find_files the very tree discovery refuses to scan, in the one run shape with no human watching.
+// Nothing but this test stands between the two spellings at the mount site.
+func TestFiringConfigMountsNoEscapingSkillRoot(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("the escape is a POSIX symlink; internal/skills asserts the mount rule on its own tests there")
+	}
+
+	roots := firingRoots(t)
+	outside := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(roots.workspace, ".apogee")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	provider := skills.NewProvider(skills.Sources{Home: roots.config, Workspace: roots.workspace})
+	escaping := filepath.Join(roots.workspace, ".apogee", "skills")
+
+	cfg, _, err := firingConfig(context.Background(), firingInputs{
+		opts: config.Options{Bypass: true},
+		// Both bounds pinned so the composition settles with no discovery round trip: this test is
+		// about the mount, not about what a server would answer.
+		entry:    config.ServerEntry{Endpoint: "http://box.example/v1", ParallelAgents: 1, EffortDialect: "reasoning"},
+		apiKey:   "sk-test",
+		roots:    roots,
+		confiner: fenceableHost,
+		mode:     domain.ModePlan,
+		skills:   provider,
+		recordID: "2026-08-24T13-00-00-firing",
+	})
+	if err != nil {
+		t.Fatalf("firingConfig: %v", err)
+	}
+
+	// The fixture's own precondition: the relocated anchor really is one of this provider's sources,
+	// so the absence below is a decision the mount made and not an anchor that was never there.
+	if !slices.Contains(provider.SourceDirs(), escaping) {
+		t.Fatalf("SourceDirs() = %v; want the relocated anchor %q among them — the fixture no longer sets up the case",
+			provider.SourceDirs(), escaping)
+	}
+	if cfg.ExtraReadRoots == nil {
+		t.Fatal("Config.ExtraReadRoots is nil; the model could not read the files of a skill it was given")
+	}
+	if got := cfg.ExtraReadRoots(); slices.Contains(got, escaping) {
+		t.Errorf("Config.ExtraReadRoots() = %v mounts the relocated anchor %q; the composer took the display "+
+			"view (SourceDirs) where only the resolved mount view (ReadRoots) may be mounted", got, escaping)
 	}
 }
 

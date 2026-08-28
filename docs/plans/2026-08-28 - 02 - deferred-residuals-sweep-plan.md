@@ -703,7 +703,9 @@ root is load-bearing.
 
 **Commit.** `test(cmd): the settings editor's fence root is the wired workspace`
 
-## 24. The firing mount refuses an escaping skill root
+## 24. The firing mount refuses an escaping skill root — ✅ DONE (2026-08-28)
+
+NOTES (2026-08-28): mutation-checked — reverting the `ExtraReadRoots` mount in `wire_firing.go` to `skillProvider.SourceDirs` fails the test. The entry pins `parallel-agents:` and `effort-dialect:` so the composition settles with no discovery round trip.
 
 **What.** ISSUES: *The Firing mount site has no test that would catch a revert to
 `SourceDirs`.* In `cmd/apogee/wire_firing_test.go`, plant `outside := t.TempDir()` and
