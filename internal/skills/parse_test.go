@@ -377,6 +377,11 @@ func TestParseSkillTriggers(t *testing.T) {
 			content: "---\nid: review\nsummary: \"a summary\ntriggers: review this diff, code review\n---\nbody",
 			want:    []string{"review this diff", "code review"},
 		},
+		{
+			name:    "lenient path: a block sequence stays one phrase per item",
+			content: "---\nid: review\nsummary: \"a summary\ntriggers:\n  - Review This Diff\n  - code review\n---\nbody",
+			want:    []string{"review this diff", "code review"},
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

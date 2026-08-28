@@ -773,7 +773,11 @@ still not a regex (`TestCheckSyntaxReportsEachBrokenShape` `:299` stays).
 
 **Commit.** `fix(mechanisms): the JS regex rule reads an arrow body, + and case as openers and resets after a literal`
 
-## 27. The lenient frontmatter scan keeps a `triggers:` sequence as items
+## 27. The lenient frontmatter scan keeps a `triggers:` sequence as items — ✅ DONE (2026-08-28)
+
+NOTES (2026-08-28): a `- phrase` continuation line is recorded as an item AND still folded into
+the open key's value exactly as before, so only `triggers:` — the sole reader of the items —
+changes; leniency for every other key is untouched.
 
 **What.** ISSUES: *The lenient frontmatter scan comma-splits a `triggers:` YAML sequence into
 one phrase.* In `scanFrontmatterFields` (`internal/skills/parse.go:239-270`), a continuation

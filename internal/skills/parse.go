@@ -113,15 +113,20 @@ func (t *triggersField) UnmarshalYAML(node *yaml.Node) error {
 		}
 		*t = phrases
 	case yaml.ScalarNode:
-		*t = splitTriggers(node.Value)
+		*t = splitTriggers(nil, node.Value)
 	}
 	return nil
 }
 
-// splitTriggers cuts one scalar triggers: value into phrases on commas — the shape an author who
-// wrote the field on a single line intends. An empty value yields no phrases rather than one
-// blank.
-func splitTriggers(value string) []string {
+// splitTriggers resolves a recovered triggers: field into phrases. Items the author already
+// separated — the entries of a YAML block sequence, which the lenient scan hands over one per
+// line — are taken as they stand, so a phrase carrying a comma survives whole. Only a single
+// scalar value is cut on commas, the shape an author who wrote the field on one line intends. An
+// empty value yields no phrases rather than one blank.
+func splitTriggers(items []string, value string) []string {
+	if len(items) > 0 {
+		return items
+	}
 	if strings.TrimSpace(value) == "" {
 		return nil
 	}
@@ -224,10 +229,12 @@ func parseFrontmatterFields(text string) (frontmatter, error) {
 
 // scanFrontmatterFields is the lenient reader: it walks the block line by line, taking each
 // recognised "key: value" as a field and folding every following unkeyed line into it (the shape
-// a wrapped value takes). A line that is wholly a comment is dropped, but a "#" INSIDE a value
-// stays literal here — the strict parser already had its say, and on this path the author's text
-// is more trustworthy than YAML's comment rule. Keys are lowercased, so displayName and
-// displayname both land.
+// a wrapped value takes). A folded line that is a block-sequence entry ("- phrase") is recorded as
+// an ITEM of the open key as well, so a list-shaped triggers: yields the phrases the author wrote
+// rather than the one run-on value folding them together makes. A line that is wholly a comment is
+// dropped, but a "#" INSIDE a value stays literal here — the strict parser already had its say,
+// and on this path the author's text is more trustworthy than YAML's comment rule. Keys are
+// lowercased, so displayName and displayname both land.
 //
 // Two rules keep a recovery from inventing meaning. FIRST DECLARATION WINS, so a repeated key
 // cannot overwrite the one the author led with. And any key outside recognisedKeys CLOSES the
@@ -238,6 +245,7 @@ func parseFrontmatterFields(text string) (frontmatter, error) {
 // nothing here worth preferring over the strict parser's error.
 func scanFrontmatterFields(text string) (frontmatter, bool) {
 	values := map[string]string{}
+	items := map[string][]string{}
 	openKey := ""
 	for _, raw := range strings.Split(text, "\n") {
 		line := strings.TrimSpace(raw)
@@ -246,9 +254,13 @@ func scanFrontmatterFields(text string) (frontmatter, bool) {
 		}
 		m := keyLineRe.FindStringSubmatch(line)
 		if m == nil { // not a key line — continuation text for whatever field is open
-			if openKey != "" {
-				values[openKey] = strings.TrimSpace(values[openKey] + " " + line)
+			if openKey == "" {
+				continue
 			}
+			if item, isItem := sequenceItem(line); isItem {
+				items[openKey] = append(items[openKey], item)
+			}
+			values[openKey] = strings.TrimSpace(values[openKey] + " " + line)
 			continue
 		}
 		key := strings.ToLower(m[1])
@@ -265,9 +277,24 @@ func scanFrontmatterFields(text string) (frontmatter, bool) {
 		DisplayName: values["displayname"],
 		Summary:     values["summary"],
 		Description: values["description"],
-		Triggers:    splitTriggers(values["triggers"]),
+		Triggers:    splitTriggers(items["triggers"], values["triggers"]),
 	}
 	return fm, fm.hasNamingField()
+}
+
+// sequenceItem reports whether a continuation line is a YAML block-sequence entry ("- phrase"),
+// returning the entry's own text. The scan needs the items apart from the folded value because a
+// list is the ordinary shape of triggers:, and folding one glues every phrase of it into a single
+// run-on trigger no draft can ever match. The entry is unquoted like any other scanned value, so a
+// phrase the author quoted for YAML's benefit keeps its text and loses its quotes; an entry with
+// nothing after the dash is no phrase at all and is left to the fold.
+func sequenceItem(line string) (string, bool) {
+	rest, isEntry := strings.CutPrefix(line, "-")
+	if !isEntry || (rest != "" && rest[0] != ' ' && rest[0] != '\t') {
+		return "", false
+	}
+	item := unquoteValue(strings.TrimSpace(rest))
+	return item, item != ""
 }
 
 // stripBlockScalar drops a value that is only a block-scalar indicator, so the lines folded in
