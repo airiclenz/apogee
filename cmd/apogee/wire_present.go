@@ -16,6 +16,19 @@ import (
 	"github.com/airiclenz/apogee/internal/tui"
 )
 
+// openerLookPath is how rung 1 resolves the program it launches — nil in production, which is
+// present.Opener's own default of exec.LookPath (internal/present/opener.go). It exists because the
+// Opener is built HERE, inside presentationRungs, and installed into the tool layer through
+// livePresentation.install, so the launcher closure a driver enters through never sees it: there is
+// no argument a test could pass and no field it could reach afterwards.
+//
+// A driven test swaps it for a resolver that answers with a script of its own — the ratified proxy
+// for "the document opened on the desktop" (design call 9): what an OS opener does with a file is
+// not observable from a test process, but WHICH program apogee handed WHICH path to is, and that is
+// the whole of the allow-list claim (T-19). It is a package var of the same family as daemonClock
+// and tuiScheduleClock: production default, restored by t.Cleanup, never read by the engine.
+var openerLookPath func(name string) (string, error)
+
 // presentationRungs builds the host-side presentation ladder (ADR 0019) from the resolved
 // `present:` block and this session's environment: the mechanisms that exist on THIS machine, for
 // the TUI's presenter to walk. goos and env are injected — every seam in internal/present is, for
@@ -48,6 +61,7 @@ func presentationRungs(p config.PresentSettings, workspace, goos string, env fun
 			Env:             env,
 			CommandOverride: p.Command,
 			WorkspaceRoot:   workspace,
+			LookPath:        openerLookPath,
 		}
 	}
 	if !rungs.Local {

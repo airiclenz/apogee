@@ -227,6 +227,7 @@ type ptySession struct {
 	ws    string
 	trace string
 	args  []string
+	env   []string
 
 	drv *tuitest.PTYDriver
 }
@@ -240,6 +241,30 @@ type ptySession struct {
 // so the trace wraps the terminal it was written for, and [ptySession.TraceBytes] reads it back.
 func launchPTY(t *testing.T, stub *stubllm.Server, args ...string) *ptySession {
 	t.Helper()
+	return launchPTYConfigured(t, stub, "", args...)
+}
+
+// launchPTYConfigured is [launchPTY] with extraConfig appended to the home's config.yaml before the
+// binary is spawned — the black-box twin of [launchTUIConfigured], and the only way a PTY run
+// reaches a file-only key. The Console family is the reason it exists: it ships OFF (ADR 0057), it
+// is lifted by a `tools.enabled:` list with no flag behind it, and the tool registry is built once
+// at startup, so a run that has Consoles is a run whose config said so before it launched.
+func launchPTYConfigured(t *testing.T, stub *stubllm.Server, extraConfig string, args ...string) *ptySession {
+	t.Helper()
+	return launchPTYWithEnv(t, stub, extraConfig, nil, args...)
+}
+
+// launchPTYWithEnv is [launchPTYConfigured] with env appended to the child's WHOLE environment
+// ([ptyEnv]) — entries of the `KEY=VALUE` form, applied to every spawn of this session, relaunches
+// included.
+//
+// It exists for the one class of setting a driven run cannot reach any other way: a variable the
+// standard library reads ONCE per process. HTTP_PROXY / HTTPS_PROXY / NO_PROXY are that class —
+// net/http.ProxyFromEnvironment memoises the environment on first use (envProxyOnce) — so t.Setenv
+// inside the test binary reaches nothing that has already made a request, and the only honest way
+// to run apogee under an operator's egress proxy is to hand a CHILD the variables before it starts.
+func launchPTYWithEnv(t *testing.T, stub *stubllm.Server, extraConfig string, env []string, args ...string) *ptySession {
+	t.Helper()
 
 	if e2eBinary == "" {
 		t.Skipf("the binary under test was not built: %v", e2eBuildErr)
@@ -248,12 +273,15 @@ func launchPTY(t *testing.T, stub *stubllm.Server, args ...string) *ptySession {
 	tuitest.CheckLeaks(t)
 	assertNoAmbientApogeeConfig(t)
 
+	home := e2eHome(t, stub)
+	appendHomeConfig(t, home, extraConfig)
 	s := &ptySession{
 		t:     t,
-		home:  e2eHome(t, stub),
+		home:  home,
 		ws:    e2eWorkspace(t),
 		trace: filepath.Join(t.TempDir(), "tui-trace.txt"),
 		args:  args,
+		env:   env,
 	}
 	s.spawn()
 	return s
@@ -281,7 +309,7 @@ func (s *ptySession) spawn() {
 	s.t.Helper()
 
 	argv := append([]string{"--config", s.home, "--workspace", s.ws, "--tui-trace", s.trace}, s.args...)
-	s.drv = tuitest.NewPTYDriver(s.t, e2eBinary, argv, ptyEnv(), e2eSize)
+	s.drv = tuitest.NewPTYDriver(s.t, e2eBinary, argv, ptyEnv(s.env...), e2eSize)
 	s.drv.WaitFor(func() bool { return s.drv.Screen().BytesWritten() > 0 },
 		tuitest.Awaiting("apogee's first frame"))
 }
@@ -290,12 +318,15 @@ func (s *ptySession) spawn() {
 // run reads is exactly what this names, and an APOGEE_* variable in the developer's shell cannot
 // reach it. HOME is the suite's throwaway one (TestMain's), never the developer's; PATH is there
 // because apogee resolves the programs its tools spawn through it.
-func ptyEnv() []string {
-	return []string{
+//
+// extra is appended verbatim, so a caller can hand the child a variable this base set has no opinion
+// about (the egress run's HTTP_PROXY, T-18) without widening what every other run inherits.
+func ptyEnv(extra ...string) []string {
+	return append([]string{
 		"HOME=" + suiteTempHome,
 		"USERPROFILE=" + suiteTempHome,
 		"PATH=" + os.Getenv("PATH"),
-	}
+	}, extra...)
 }
 
 // Home is the apogee home this run owns — a temp dir, never the real one.

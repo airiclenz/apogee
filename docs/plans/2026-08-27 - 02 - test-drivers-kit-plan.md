@@ -1246,7 +1246,31 @@ passes.
 
 **Commit:** `test(e2e): outcome slots carry the tool's verdict and tone; footer, settings and watcher follow the live session (T-15, T-16)`
 
-## 14. T-14 + T-18 + T-19 — real Consoles across restore, egress through an in-test proxy and MCP, the opener allow-list
+## 14. T-14 + T-18 + T-19 — real Consoles across restore, egress through an in-test proxy and MCP, the opener allow-list — ✅ DONE (2026-08-28)
+
+NOTES (2026-08-28): T-18 must NOT use `t.Setenv` for `HTTP(S)_PROXY`/`NO_PROXY` as the item text says. `net/http.ProxyFromEnvironment` reads the environment exactly once per process (`envProxyOnce`), and earlier tests in the `cmd/apogee` binary already reach the network through it, so an in-process launch would silently ignore the variables and the test would pass for the wrong reason. The egress test therefore has to be PTY-driven with an explicit child environment, which needs `ptySession`/`ptyEnv` to carry extra variables (a small addition beside the `launchPTYConfigured` already added here).
+
+NOTES (2026-08-28): T-18's destinations also cannot be loopback — the SSRF floor refuses a private destination before anything is dialled, and the floor has no seam in the composition. The shape that works is a public-but-unroutable IP literal (e.g. `240.0.0.1`, outside every range `floorDeniedV4Nets` and the stdlib predicates deny) as the destination, with the in-test forward proxy holding a route table that resolves that literal to the loopback page/MCP server. Nothing ever leaves loopback. The checklist's step 5 (`NO_PROXY` covering the PAGE host) has no hermetic form for the same reason — a direct dial would go to a stranger's address — so the `NO_PROXY` claim is best made two-sidedly on the LLM host instead (excluded → no proxy entry for the stub; not excluded → the stub's own traffic appears in the proxy log).
+
+NOTES (2026-08-28): T-14 step 10 lands one layer earlier than the checklist's hand-run. `/sessions` is an idle-only command (`internal/tui/command.go`, `refuseIdleOnlyCommand`), so mid-Exchange the TUI refuses the COMMAND and `RestoreSession` is never reached: the test asserts the refusal note and that the Console still stands, which is the "Fails if" the checklist names. The engine-level `ErrInputPending` path stays covered by `internal/agent/restoresession_test.go`.
+
+NOTES (2026-08-28): the plan's file list for this item does not name `cmd/apogee/e2e_support_test.go`, but `launchPTY` had no way to reach a file-only key and the Console family is default-off; the change is the additive `launchPTYConfigured` (with `launchPTY` delegating to it), documented in `docs/design/test-drivers.md`.
+
+NOTES (2026-08-28): T-19's served rung is forced by SSH_CONNECTION (a REMOTE session), not by making `LookPath` fail as the item text suggests — `uiPresenter.climb`'s two branches are exclusive, so a LOCAL session degrades to the baseline rung and never reaches the doc server however its opener resolves.
+
+NOTES (2026-08-28): T-18 landed as three tests rather than one: `TestE2EEgress` (PTY, the proxy and url-safety steps), `TestE2EEgressDeniedMCPEndpointStopsTheLaunch` (PTY, the startup refusal read off the raw pty stream because it is printed before any frame exists) and `TestE2EEgressLongStreamIsNotDeadlined` (in-process, ≈ 26 s, split out so its cost is attributable and skippable by name — recorded in the design doc's budget section).
+
+NOTES (2026-08-28): `ForwardProxy` takes a `routes map[string]string` the plan's `ForwardProxy(t)` shorthand does not name. It is what makes the whole item hermetic: the destinations have to be public (the SSRF floor refuses a private one before the proxy question is asked, with no seam in the composition), and a public destination resolved honestly would put a packet on the wire, so the proxy dials a loopback server for each `240.0.0.0/4` literal instead.
+
+NOTES (2026-08-28): the checklist's `NO_PROXY` step has no hermetic form and was replaced rather than dropped. An excluded host dialling DIRECT would leave loopback, which the design doc's own limit column forbids for this suite; Go's `httpproxy` also bypasses every loopback destination on its own, so an excluded loopback host proves nothing about the variable. What the test asserts instead is the two-sided observable that remains: the page host's traffic goes through the proxy and NO loopback traffic ever does — the model conversation with the stub upstream included. Recorded in the T-18 row's limit column.
+
+NOTES (2026-08-28): the live-re-read step saves the key into the run's `config.yaml` instead of typing it into `/settings`. It is the same live path (the watcher re-reads, `applyReloaded` applies, the session names the moved keys), and the existing `/settings` walk helpers take `*tuitest.Driver` only — a PTY drive of the pane would have meant reshaping helpers this item does not own. The refused MCP reconnect is likewise read off the tool that STILL answers under its old alias rather than off the settings row's failure marker: "previous connections kept" is what the claim is about, and the alias is where it is visible without a pane.
+
+NOTES (2026-08-28): the design doc's T-18 egress row dropped "bounded bodies" from its title. The plan's step list does not call for it and a driven form would have to carry two megabytes through the conversation and the session record; the row now names `internal/tools/network_funnel_test.go` as where that claim is settled, so nothing was quietly lost.
+
+NOTES (2026-08-28): `internal/tuitest/doc.go` had to gain a `netfix.go` line — the package's docmap test fails on a non-test file the map does not name — and `cmd/apogee/e2e_support_test.go` gained `launchPTYWithEnv` plus a variadic `ptyEnv`, neither of which the plan's file list names.
+
+NOTES (2026-08-28): `internal/tuitest`'s own leak-check tests (`TestCheckLeaksPassesWhenTheScreenIsClosed`, `TestPTYDriverIsATerminal`, `TestPTYDriverResizeReachesTheChild`) failed once under heavy CPU load on a bubbletea `readLoop` that outlived the 2 s `leakGrace`, and passed on every rerun. Pre-existing — the goroutine is bubbletea's and no netfix code appears in the stack — and noted only because a loaded CI runner could see it too.
 
 **What:** the host-state, network and desktop items.
 

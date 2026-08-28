@@ -33,6 +33,8 @@
 //     pseudo-terminal and reads back what only a real terminal knows — colour, window size, a
 //     pid, and the state the terminal was left in.
 //   - pty_windows.go — the Windows stand-in for it: the type, and a skip in every method.
+//   - netfix.go — [ForwardProxy], [PageServer] and [MCPEcho]: the loopback network a driven run is
+//     allowed to have, and the access log that says which of it apogee actually used.
 //
 // Documented in docs/design/test-drivers.md; the "which driver observes which claim" table there
 // decides whether a test step may be manual at all.

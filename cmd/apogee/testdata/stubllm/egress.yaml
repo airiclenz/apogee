@@ -1,0 +1,109 @@
+# The upstream TestE2EEgress and TestE2EEgressLongStreamIsNotDeadlined talk to: replies that do
+# nothing but reach the network — a page through the operator's proxy, a loopback address the SSRF
+# floor refuses, an MCP tool on a configured server — plus the two turns that are about the upstream
+# ITSELF rather than about a tool (a 308 apogee must not follow, and a reply slow enough to prove
+# nothing times a stream out).
+#
+# Every turn repeats. The fixture is driven by two tests and one of them prompts the same tool twice
+# with different expectations either side of a config edit, so a consumed turn would silently hand
+# the second ask to the catch-all and the test would pass on the wrong reply.
+model: egress-model
+turns:
+    # The session title, matched before any prompt's own turn (see stream400.yaml).
+    - when:
+        last_message: The user's first request
+      repeat: true
+      text: Reaching the network
+    # ------------------------------------------------------------------------
+    # The wrap-ups, matched BEFORE the prompt turns below so a tool result is never answered as if
+    # it were a new request. Each names the RESULT it is looking at, which is what lets one fixture
+    # answer the same tool twice and mean two different things.
+    # ------------------------------------------------------------------------
+    # The page came back — through the proxy, though the model has no way of knowing that.
+    - when:
+        tool_result: web_fetch
+        last_message: APOGEE-EGRESS-PAGE
+      repeat: true
+      text: The notes are fetched.
+    # The SSRF floor's refusal of a loopback destination.
+    - when:
+        tool_result: web_fetch
+        last_message: 'url blocked by url-safety \(host 127\.0\.0\.1\)'
+      repeat: true
+      text: The discard port was refused.
+    # The host allow/deny layer's refusal, after a `url-safety:` block landed on the running session.
+    - when:
+        tool_result: web_fetch
+        last_message: 'url blocked by url-safety \(host 240\.0\.0\.1\)'
+      repeat: true
+      text: The page host is refused now.
+    # The MCP server's own tool, before and after the refused reconnect.
+    - when:
+        tool_result: docs__echo
+        last_message: 'echo: ping'
+      repeat: true
+      text: The docs server answered.
+    - when:
+        tool_result: docs__echo
+        last_message: 'echo: still here'
+      repeat: true
+      text: The docs server still answers.
+    # ------------------------------------------------------------------------
+    # The prompts.
+    # ------------------------------------------------------------------------
+    - when:
+        last_message: ^Fetch the release notes\.
+      repeat: true
+      tool_calls:
+        - name: web_fetch
+          arguments: '{"url":"http://240.0.0.1/notes.txt"}'
+    - when:
+        last_message: ^Fetch the discard port
+      repeat: true
+      tool_calls:
+        - name: web_fetch
+          arguments: '{"url":"http://127.0.0.1:9/"}'
+    - when:
+        last_message: ^Fetch the release notes once more
+      repeat: true
+      tool_calls:
+        - name: web_fetch
+          arguments: '{"url":"http://240.0.0.1/notes.txt"}'
+    - when:
+        last_message: ^Echo through the docs server\.
+      repeat: true
+      tool_calls:
+        - name: docs__echo
+          arguments: '{"text":"ping"}'
+    - when:
+        last_message: ^Echo through the docs server once more
+      repeat: true
+      tool_calls:
+        - name: docs__echo
+          arguments: '{"text":"still here"}'
+    # ------------------------------------------------------------------------
+    # The two turns about the upstream itself.
+    # ------------------------------------------------------------------------
+    # A permanent redirect the provider client must NOT follow: following one would carry a vetted
+    # connection to an unvetted host. The target is a public-but-unroutable literal the in-test proxy
+    # holds a route for, so a follow would be visible twice over — a line in the proxy's access log
+    # and a hit on the server standing in for it — and neither may appear.
+    - when:
+        last_message: ^Ask the upstream that moved
+      repeat: true
+      http:
+        status: 308
+        location: http://240.0.0.3/moved
+    # A reply that takes twenty-five seconds to arrive, one rune at a time. The provider client sets
+    # no client-level Timeout precisely because one would also kill a stream (internal/provider/
+    # client.go), and this is that claim as a stream: twenty-six deltas a second apart, all of which
+    # have to land.
+    - when:
+        last_message: ^Answer slowly
+      repeat: true
+      token_delay: 1s
+      chunk_runes: 1
+      text: The long answer completes.
+    # Anything else — including whatever a Mechanism asks on its own account.
+    - repeat: true
+      text: Nothing else to reach for.

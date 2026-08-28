@@ -1,0 +1,84 @@
+# The upstream TestE2EConsolesDieWithTheirOwner talks to: a run that opens a Console of its own, a
+# delegation that opens a second one and tries to read the first, and a Turn that hangs long enough
+# for a restore to be attempted mid-Exchange.
+#
+# The matchers lean on the Console tools' own result text. A parent and its child both call
+# console_open, so "the last message is a console_open result" cannot tell them apart — the COMMAND
+# in that result can, and does: `sleep 987` is the parent's Console and `sleep 654` is the child's.
+# The same trick separates the two refusals: the child's names the console it does own
+# (`open consoles: 2`) and the parent's, after the restore, names none.
+model: console-model
+turns:
+    # The session title, matched before any prompt's own turn (see stream400.yaml).
+    - when:
+        last_message: The user's first request
+      repeat: true
+      text: Consoles
+    # The CHILD, one Step in: its own Console is open, so now it reaches for the parent's.
+    - when:
+        tool_result: console_open
+        last_message: sleep 654
+      repeat: true
+      tool_calls:
+        - name: console_read
+          arguments: '{"id":1}'
+    # The PARENT, one Step in: its Console is open and there is nothing more to do this Turn.
+    - when:
+        tool_result: console_open
+        last_message: sleep 987
+      repeat: true
+      text: The console is open.
+    # The CHILD's report: it was refused, and it says so. The text is scripted and proves nothing on
+    # its own — the refusal itself is read off the tool result in the session record — but the child
+    # has to end its run with something, and ending it here is what makes the delegation finish.
+    - when:
+        tool_result: console_read
+        last_message: 'open consoles: 2'
+      repeat: true
+      text: Console 1 is not mine to read.
+    # The PARENT's own console_read, after the restore.
+    - when:
+        tool_result: console_read
+      repeat: true
+      text: That console is not open here.
+    # The parent, once the delegation has reported.
+    - when:
+        tool_result: sub_agent
+      repeat: true
+      text: The delegation is done.
+    # The prompts. The parent's own Console is opened twice in the run — once before the delegation
+    # and once for the refused-restore edge — so its turn repeats.
+    - when:
+        last_message: ^Open a console running sleep 987
+      repeat: true
+      tool_calls:
+        - name: console_open
+          arguments: '{"command":"sleep 987"}'
+    - when:
+        last_message: ^Delegate the console check
+      repeat: true
+      tool_calls:
+        - name: sub_agent
+          arguments: '{"task":"Open a console running sleep 654 and then read console 1 and report what you get","name":"console-check"}'
+    # The CHILD's first Step: its task is its own last message, which is what picks this turn out.
+    - when:
+        last_message: ^Open a console running sleep 654
+      repeat: true
+      tool_calls:
+        - name: console_open
+          arguments: '{"command":"sleep 654"}'
+    - when:
+        last_message: ^Read console 1
+      repeat: true
+      tool_calls:
+        - name: console_read
+          arguments: '{"id":1}'
+    # The Turn that stays open: long enough for a /sessions restore to be attempted while the
+    # Exchange is still in flight, and bounded so a failing test still ends.
+    - when:
+        last_message: ^Think about this for a while
+      repeat: true
+      hang: 8s
+    # Anything else — including the very first "say hello" that makes the OTHER saved session.
+    - repeat: true
+      text: Hello from the console run.

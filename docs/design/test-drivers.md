@@ -375,6 +375,15 @@ hostile tree names its escape in the root's own name, and a root is named when i
 a key that sits INSIDE the `servers:` entry, since nothing appended to the file afterwards can get
 in there. `llama-launcher:` is that key (T-16 step 11).
 
+`openerLookPath` (`cmd/apogee/wire_present.go`) is the same family of seam as `tuiScheduleClock`,
+`liveLauncherOps` and `configWatchTiming`: a package var that is nil in production, where
+`present.Opener` falls back to `exec.LookPath`. It exists because the Opener is built inside
+`presentationRungs` and installed into the TOOL layer through `livePresentation.install`, so the
+launcher closure a driver enters through never sees it. A test points it at a script that appends
+its argv to a log — the ratified proxy for the desktop hand-off (T-19): what an OS handler does with
+a file is not observable from a test process, but WHICH program apogee handed WHICH path to is, and
+that is the whole of rung 1's allow-list claim.
+
 The worked example is `TestE2ESmokeInProcess` (`cmd/apogee/e2e_smoke_test.go`), which is checklist
 item T-25 — "the one pass a human makes over the most-used path end to end" — step for step: the
 first frame and its footer, a prompt answered with a tool call, an approval pane and the `a` that
@@ -456,6 +465,33 @@ output (it would wrap an `os.Stdout` nothing paints into), so `launchTUI` never 
 `launchPTY` always does. `tuitest.ReplayTrace(t, path, size)` feeds the trace's quoted writes back
 through a `Screen`, which gives the picture the terminal ended on and the two counters for free;
 `ptySession.TraceBytes()` / `TraceFullRepaints()` are that, read fresh on every call.
+
+`launchPTYConfigured(t, stub, extraConfig, args...)` is `launchPTY` with lines appended to the
+home's `config.yaml` before the binary is spawned — the black-box twin of `launchTUIConfigured`, and
+the only way a PTY run reaches a file-only key. The Console family is why it exists: it ships OFF
+(ADR 0057), a `tools.enabled:` list is what lifts it, and the tool registry is built once at
+startup, so a run that has Consoles is a run whose config said so before it launched (T-14).
+
+`launchPTYWithEnv(t, stub, extraConfig, env, args...)` is the same helper with entries appended to
+the child's whole environment (`ptyEnv`). It exists for the one class of setting no in-process
+driver can reach: a variable the standard library reads ONCE per process. `HTTP_PROXY` /
+`HTTPS_PROXY` / `NO_PROXY` are that class — `net/http.ProxyFromEnvironment` memoises the environment
+on first use — and other tests in the `cmd/apogee` binary have already made requests through it, so
+a `t.Setenv` there would be silently ignored and an egress test would pass without apogee ever
+proxying anything. A variable of that class reaches a program only by being in its environment
+before it starts, which is a child, which is this driver (T-18).
+
+**The network a driven run is allowed to have** is `internal/tuitest/netfix.go`:
+`ForwardProxy(t, routes)` is a real forward proxy on loopback with an access log, `PageServer(t,
+body)` a page with a hit counter, and `MCPEcho(t)` a streamable-http MCP server exposing one `echo`
+tool. Two mechanics make them enough for T-18. The proxy is a REAL one — addressed by absolute
+request URI, and refusing anything else — because a fake that only counted calls would pass whether
+or not apogee ever set `http.Transport.Proxy`. And its `routes` table is what lets a driven run
+reach a PUBLIC destination without a packet leaving the machine: the SSRF floor refuses a private
+destination in the pre-flight, before the proxy question is asked at all and with no seam in the
+composition to relax it, so the destinations are public-but-unroutable literals (`240.0.0.0/4`,
+reserved and in none of `floorDeniedV4Nets`) that the proxy dials loopback for. A hit counter on the
+stand-in server is what makes "the redirect target got no request" a claim rather than a hope.
 
 **Windows.** `pty.go` is `//go:build !windows`; `pty_windows.go` provides the same type with a
 `t.Skip` in every entry point, so a black-box test file compiles there and skips. The driver is
@@ -613,16 +649,16 @@ not exist yet, with the plan item that writes them.
 | Wide-rune and glyph alignment (T-20) | `tuitest` — the emulator's cell width is the authority; assert `Frame` cells, never rune counts. A layout claim needs a terminal in Unicode-core mode (see *Frame*) or the two measures cannot disagree | `TestE2EWidthTicksMultiSelectChoices`; `TestE2EWidthSurvivesAColourSchemeSwitch` | Font tofu — whether the reader's font has the glyph at all |
 | Resize and reflow (T-24, T-25) | in-process `Driver.Resize` (emulator resize + a `tea.WindowSizeMsg`, then a wait for the repaint it caused); PTY `PTYDriver.Resize` = `pty.Setsize` + a real `SIGWINCH` | `TestE2EStreamPTY` | — |
 | tty state on the way out (T-25) | PTY only — `PTYDriver.TTYState()` after `Quit()`: echo and canonical mode restored, no dangling SGR, exit code 0 | `TestE2ESmokePTY` | Whether the user's own shell prompt looks right afterwards — no shell runs inside the PTY |
-| Real process lifetime, SIGKILL, exit code (T-03, T-07, T-14) | PTY only — `PTYDriver.Pid()`, `Kill()` (a real `SIGKILL`), `Exited()`, and the same for a Console's own children; the in-process driver has no process to kill | `TestE2EDelegationRecordSurvivesSIGKILL`; `TestE2EConsole` *(planned, item 14)* | — |
+| Real process lifetime, SIGKILL, exit code (T-03, T-07, T-14) | PTY only — `PTYDriver.Pid()`, `Kill()` (a real `SIGKILL`), `Exited()`, and the same for a Console's own children; the in-process driver has no process to kill | `TestE2EDelegationRecordSurvivesSIGKILL`; `TestE2EConsolesDieWithTheirOwner` | — |
 | Session record on disk (T-03, T-06, T-19) | either driver — read the run's own `sessions/` records under its temp home; the record, not the frame, is the authority on what was persisted | `TestE2ESmokeInProcess` | — |
 | What a killed run left behind (T-03) | either driver — a stubllm turn that `hang`s holds the run mid-delegation for as long as the test needs, then `Kill()` and a relaunch on the SAME home; the reopened frame is where "closed as interrupted" is read | `TestE2EDelegationRecordSurvivesAKill`; `TestE2EDelegationRecordSurvivesSIGKILL` | — |
 | A scheduled Firing and its block (T-07) | in-process — the package var `tuiScheduleClock` (the daemon's `daemonClock`, one Driver over) puts the Scheduler on a clock the test ticks, so the thirty-second `MinCycle` floor costs a microsecond | `TestE2EFiringMarksAnAbandonedFinalTurn` | — |
 | Config file watch and live apply (T-16) | in-process — write the key into the run's temp-home `config.yaml` and wait for the transcript line; the package var `configWatchTiming` shortens the poll to 50 ms for every driven launch, so a watcher step costs a tenth of a second rather than the production second-and-a-quarter | `TestE2ELiveStateFollowsTheRunningSession` | — |
 | Daemon and headless output (T-07) | no driver needed — run the binary against stubllm and assert stdout, the record and the exit code | `TestHeadlessExitCodes`; `TestDaemonFaultedVerbColumn` | — |
-| Network egress: proxy honoured, url-safety, bounded bodies (T-18) | an in-test Go forward proxy plus stubllm as the upstream (`internal/tuitest/netfix.go`) — assert what reached the proxy | `TestE2EEgress` *(planned, item 14)* | Traffic to a real remote host — nothing in the suite leaves loopback |
-| MCP server behaviour (T-18) | an in-test `httptest` MCP server (the shape `internal/mcp/transport_test.go` already uses) | `TestE2EEgress` *(planned, item 14)* | What a third-party MCP server actually does with a call |
+| Network egress: proxy honoured, url-safety live, a stream nothing deadlines (T-18) | PTY only — the proxy variables reach a program only in the environment it STARTS with (`launchPTYWithEnv`); an in-test forward proxy with a route table onto loopback servers (`internal/tuitest/netfix.go`) is the instrument, and its access log is the evidence. The 2 MiB body cap is the one claim of this row that stays unit-covered (`internal/tools/network_funnel_test.go`): a driven run would have to carry two megabytes through the conversation to say the same thing | `TestE2EEgress`; `TestE2EEgressLongStreamIsNotDeadlined` | Traffic to a real remote host — nothing in the suite leaves loopback, so a `NO_PROXY` host dialling DIRECT has no hermetic form; what is asserted instead is that no loopback traffic, the model conversation included, ever went through the proxy |
+| MCP server behaviour (T-18) | an in-test streamable-http MCP server with one `echo` tool (`tuitest.MCPEcho`, the shape `internal/mcp`'s own fixture uses) reached at a proxied endpoint; the refused reconnect is read off the tool that STILL answers under its old alias, and the denied ENDPOINT off the raw pty stream of a launch that never reached a frame | `TestE2EEgress`; `TestE2EEgressDeniedMCPEndpointStopsTheLaunch` | What a third-party MCP server actually does with a call |
 | Flicker during streaming (T-24) | `--tui-trace` counters: bytes written and full-frame repaints per streamed token, pinned against a ceiling | `TestE2EStreamRepaintCeiling` | Felt flicker — the repaint ceiling is the accepted proxy |
-| Desktop hand-off (T-19) | a logging fake opener installed through `present.Opener.LookPath`; assert argv and wording | `TestE2EPresent…` *(planned, item 14)* | What a real desktop application does with the file |
+| Desktop hand-off (T-19) | a logging fake opener installed through the `openerLookPath` package var, which is what `present.Opener.LookPath` resolves to; assert argv and wording. The refused half is the log's ABSENCE of a launch | `TestE2EPresentOpensOnlyTheAllowedFormats`; `TestE2EPresentServesWithoutLeakingTheToken` | What a real desktop application does with the file |
 | Upgrade path of an installed apogee (T-21) | post-release `make release-smoke` — archives, `SHA256SUMS`, `--version`, `brew upgrade` when `brew` is present | `make release-smoke` *(planned, item 15)* | `brew upgrade` before the release it upgrades to exists |
 | Tag job and action pins (T-21) | `actionlint` plus `scripts/check-pins.sh`, both run from `make check` | `make check` *(planned, item 15)* | — |
 | Landlock residual honesty on an older ABI (T-11) | a dedicated `ubuntu-22.04` CI job running the probe assertions | CI job `landlock-abi-1-2` *(planned, item 15)* | — |
@@ -703,6 +739,15 @@ repaint ceiling — and measures **≈ 20 s** under `-race`, ≈ 16 s without it
 fidelity for time if that becomes the package's problem: the fixture's `chunk_runes` (3 is what cuts
 most lines mid-word, which is the point of the fixture) and how far into the answer the ceiling
 test's last mark sits.
+
+`TestE2EEgressLongStreamIsNotDeadlined` is the one test in the package that is deliberately allowed
+past that norm: it measures **≈ 26 s**, and the twenty-five of them are the claim. The provider
+client sets no client-level `Timeout` because `http.Client.Timeout` bounds the whole response
+INCLUDING the body and so would cut a healthy stream at its own duration — a bound that is only
+absent in a comment is a bound somebody re-adds — and the only way to observe its absence is a
+stream that outlives every plausible value of it. It stands as its own test rather than inside
+`TestE2EEgress` (**≈ 5 s** on top of the shared build) so that cost is attributable and skippable by
+name.
 
 Two mechanics belong with those tests. **Resize mid-stream changes the WIDTH only.** Reflow is a
 claim about width, and shrinking the height while the program is still painting a frame sized for

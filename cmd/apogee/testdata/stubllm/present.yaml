@@ -1,0 +1,73 @@
+# The upstream TestE2EPresentOpensOnlyTheAllowedFormats and TestE2EPresentServesWithoutLeakingTheToken
+# talk to: replies that do nothing but call present_document on the workspace's fixture documents.
+#
+# The two groups are one reply each rather than one prompt per file. present_document is read-only
+# and needs no approval, so a whole group costs a single round trip, and the allow-list claim is
+# about which of the eight files reached the opener — not about the order they were asked in.
+model: present-model
+turns:
+    # The session title, matched before any prompt's own turn (see stream400.yaml).
+    - when:
+        last_message: The user's first request
+      repeat: true
+      text: Presenting documents
+    # The wrap-ups, once a presentation has come back. Matched BEFORE the prompt turns below so a
+    # tool result can never be answered as a new request.
+    #
+    # Each names the LAST document of its group as well as the tool: the results of one reply arrive
+    # together, so the last one is what the model is looking at when it speaks, and a wrap-up worded
+    # per group is how a driver knows which reply has finished rather than that some reply has.
+    - when:
+        tool_result: present_document
+        last_message: sheet\.csv
+      repeat: true
+      text: The deliverables are presented.
+    - when:
+        tool_result: present_document
+        last_message: page\.html
+      repeat: true
+      text: The office documents are presented.
+    - when:
+        tool_result: present_document
+        last_message: notes\.pdf
+      repeat: true
+      text: The report is presented.
+    - when:
+        tool_result: present_document
+      repeat: true
+      text: Those are the documents.
+    # Group one — the four formats rung 1's allow-list keeps (ADR 0019 fourth amendment).
+    - when:
+        last_message: ^Present the finished deliverables
+      tool_calls:
+        - name: present_document
+          arguments: '{"path":"report.md"}'
+        - name: present_document
+          arguments: '{"path":"chart.png"}'
+        - name: present_document
+          arguments: '{"path":"notes.pdf"}'
+        - name: present_document
+          arguments: '{"path":"sheet.csv"}'
+    # Group two — the ODF family, the e-book and the active-content page, none of which rung 1 may
+    # hand to a desktop handler.
+    - when:
+        last_message: ^Present the office documents
+      tool_calls:
+        - name: present_document
+          arguments: '{"path":"text.odt"}'
+        - name: present_document
+          arguments: '{"path":"deck.odp"}'
+        - name: present_document
+          arguments: '{"path":"book.epub"}'
+        - name: present_document
+          arguments: '{"path":"page.html"}'
+    # The served rung's own prompt: one document a browser renders (ADR 0019 §2 keeps .pdf on both
+    # sets), so a REMOTE session climbs to the doc server rather than to an opener.
+    - when:
+        last_message: ^Present the report for review
+      tool_calls:
+        - name: present_document
+          arguments: '{"path":"notes.pdf","title":"Notes for review"}'
+    # Anything else.
+    - repeat: true
+      text: Nothing else to present.
