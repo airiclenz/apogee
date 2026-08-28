@@ -17,7 +17,9 @@ import (
 //
 // The failures ride along WITH the loaded skills rather than beside them so a reader can never
 // pair a fresh listing with a stale set of failures: Provider swaps the whole *Catalog under one
-// atomic pointer, which makes "19 loaded, 1 skipped" always one scan's answer.
+// atomic pointer, which makes "19 loaded, 1 skipped" always one scan's answer. Report is the
+// accessor that keeps that promise across the seam — a reader wanting BOTH halves takes it in one
+// call rather than pairing a List with a Skipped a Reload may land between.
 type Catalog struct {
 	byID map[string]Skill
 	// pathByID is the SKILL.md each live skill was loaded from, kept only so a later collision
@@ -80,6 +82,15 @@ func (c *Catalog) addSkip(e SkipError) {
 // catalog read-only after Load exactly as List does.
 func (c *Catalog) Skipped() []SkipError {
 	return slices.Clone(c.skipped)
+}
+
+// Report returns both halves of the /skills report — the sorted skills List returns and a copy of
+// the failures Skipped returns — read off THIS catalog in one call. A *Catalog is immutable after
+// Load, so the pairing is trivially consistent here; the method exists for the seam above it
+// (Provider.Report, SkillCatalog.Report), where taking List and Skipped separately would let a
+// Reload land between the two and report half of one scan beside half of another.
+func (c *Catalog) Report() (list []Skill, skipped []SkipError) {
+	return c.List(), c.Skipped()
 }
 
 // skipError joins the recorded skips into the single soft error Load returns, so a caller that

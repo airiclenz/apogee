@@ -24,7 +24,8 @@ import (
 // SkillCatalog is the read-only view of the discovered skills the TUI needs: the full sorted
 // list for the merged "/" menu (List), a by-id lookup that resolves an inline "/token" (Get), and the
 // files discovery could not load (Skipped) so /skills can say why a skill is missing instead of
-// silently omitting it. It is satisfied by *skills.Catalog; the TUI depends only on this
+// silently omitting it — with Report pairing those last two off one snapshot for the /skills
+// report itself. It is satisfied by *skills.Catalog; the TUI depends only on this
 // interface so it stays unit-testable with a fake, and — being an interface — it is a reference
 // header safe to hold in the value-copied Model (ADR 0011). A nil catalog means no skills are
 // wired; every reader guards for it.
@@ -32,6 +33,13 @@ type SkillCatalog interface {
 	List() []skills.Skill
 	Get(id string) (skills.Skill, bool)
 	Skipped() []skills.SkipError
+	// Report returns List's skills and Skipped's failures read off ONE catalog snapshot — what the
+	// /skills report takes, so its two halves always describe a single scan. Behind a reloadable
+	// catalog (skills.Provider) the single-accessor pair is racy for this use: a rescan can swap
+	// the snapshot between the List call and the Skipped call, and the report would then pair a
+	// fresh listing with stale failures. The seam stays behavioural — the Driver asks for the
+	// answer it needs, it never reaches for the engine's snapshot itself (ADR 0031).
+	Report() (list []skills.Skill, skipped []skills.SkipError)
 	// Suggest ranks the catalog against the message being typed and returns the closest skills,
 	// strongest first — the suggestion band's whole input (suggestband.go, ADR 0061). The ranking
 	// is the ENGINE's (skills.Catalog.Suggest): a Driver decides how to show a suggestion, never

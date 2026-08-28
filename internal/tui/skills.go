@@ -83,8 +83,10 @@ func (m *Model) noteSkillCatalog() {
 	var list []skills.Skill
 	var skipped []skills.SkipError
 	if m.opts.Skills != nil { // nil ⇒ no catalog is wired; the empty note answers that too
-		list = m.opts.Skills.List()
-		skipped = m.opts.Skills.Skipped()
+		// One accessor, one snapshot: the /skills rescan runs off the Update loop and can swap the
+		// catalog under us, so taking List and Skipped separately could report half of one scan
+		// beside half of another.
+		list, skipped = m.opts.Skills.Report()
 	}
 	m.transcript.addNote(skillCatalogNote(list, skipped, m.opts.ConfigHome, m.opts.Workspace))
 	m.layout()

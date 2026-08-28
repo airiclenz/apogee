@@ -110,10 +110,18 @@ func (p *Provider) List() []Skill { return p.current().List() }
 // Get looks up a skill by exact ID in the current snapshot (see Catalog.Get).
 func (p *Provider) Get(id string) (Skill, bool) { return p.current().Get(id) }
 
-// Skipped returns the SKILL.md files the last scan could not load (see Catalog.Skipped). It
-// reads the SAME snapshot List does, so the /skills report's two halves always describe one
-// scan — never a fresh listing paired with stale failures.
+// Skipped returns the SKILL.md files the last scan could not load (see Catalog.Skipped). It reads
+// the snapshot in force at the moment it is called — which is NOT necessarily the one a preceding
+// List read, because a Reload can swap the pointer between two accessor calls. A reader that wants
+// both halves of one scan takes Report instead.
 func (p *Provider) Skipped() []SkipError { return p.current().Skipped() }
+
+// Report returns the current snapshot's skills and the SKILL.md files that scan could not load,
+// off ONE p.current() load (see Catalog.Report) — the /skills report's two halves, guaranteed to
+// describe a single scan. List and Skipped each take their own load, so calling them in sequence
+// lets a Reload land in between and pair a fresh listing with stale failures (or the reverse);
+// this is the accessor that closes that window, and the one the report path uses.
+func (p *Provider) Report() (list []Skill, skipped []SkipError) { return p.current().Report() }
 
 // Suggest ranks the current snapshot's skills against a draft (see Catalog.Suggest). It reads the
 // SAME snapshot List does, so a suggestion the band paints is always a skill the "/" menu can

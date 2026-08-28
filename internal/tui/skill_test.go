@@ -36,6 +36,10 @@ func (f fakeSkillCatalog) List() []skills.Skill { return f.skills }
 
 func (f fakeSkillCatalog) Skipped() []skills.SkipError { return f.skipped }
 
+func (f fakeSkillCatalog) Report() ([]skills.Skill, []skills.SkipError) {
+	return f.skills, f.skipped
+}
+
 func (f fakeSkillCatalog) Suggest(
 	draft string,
 	exclude func(id string) bool,
@@ -582,6 +586,8 @@ type reloadableCatalog struct {
 func (f reloadableCatalog) List() []skills.Skill { return *f.skills }
 
 func (f reloadableCatalog) Skipped() []skills.SkipError { return nil }
+
+func (f reloadableCatalog) Report() ([]skills.Skill, []skills.SkipError) { return *f.skills, nil }
 
 func (f reloadableCatalog) Suggest(string, func(string) bool, int) []skills.Suggestion { return nil }
 

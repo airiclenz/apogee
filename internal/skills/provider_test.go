@@ -1,6 +1,7 @@
 package skills
 
 import (
+	"errors"
 	"path/filepath"
 	"slices"
 	"testing"
@@ -192,5 +193,78 @@ func TestProviderReadRootsFollowSetSources(t *testing.T) {
 	}
 	if !slices.Contains(p.ReadRoots(), filepath.Join(realDir(t, home), "skills")) {
 		t.Errorf("ReadRoots() = %v dropped the global library; only the gated dir moves", p.ReadRoots())
+	}
+}
+
+// TestProviderReportIsOneSnapshot pins the whole point of the combined accessor: a reader that
+// takes Report always gets both halves of ONE scan, even while a Reload swaps the catalog under
+// it. The two seeded catalogs disagree about every skill — an id that LOADED in one is a SKIPPED
+// entry in the other — and their shapes differ (2 loaded/1 skipped against 1 loaded/2 skipped),
+// so a torn pair is directly observable: it names a skill in both halves at once, or it has a
+// shape neither catalog ever had. Serving the pair as List-then-Skipped fails this test; serving
+// it off one p.current() load cannot.
+func TestProviderReportIsOneSnapshot(t *testing.T) {
+	a := newCatalog()
+	a.set(Skill{ID: "alpha", DisplayName: "Alpha"}, filepath.Join("lib", "alpha", "SKILL.md"))
+	a.set(Skill{ID: "gamma", DisplayName: "Gamma"}, filepath.Join("lib", "gamma", "SKILL.md"))
+	a.addSkip(SkipError{
+		Path: filepath.Join("lib", "beta", "SKILL.md"),
+		Err:  errors.New("malformed YAML frontmatter"),
+	})
+	a.finalize()
+
+	b := newCatalog()
+	b.set(Skill{ID: "beta", DisplayName: "Beta"}, filepath.Join("lib", "beta", "SKILL.md"))
+	for _, name := range []string{"alpha", "delta"} {
+		b.addSkip(SkipError{
+			Path: filepath.Join("lib", name, "SKILL.md"),
+			Err:  errors.New("malformed YAML frontmatter"),
+		})
+	}
+	b.finalize()
+
+	shape := func(list []Skill, skipped []SkipError) [2]int {
+		return [2]int{len(list), len(skipped)}
+	}
+	shapeA, shapeB := shape(a.Report()), shape(b.Report())
+
+	p := &Provider{}
+	p.cur.Store(a)
+
+	// The swapper stands in for a /skills rescan landing mid-report: it flips the snapshot as fast
+	// as it can, so any window between two loads is hit rather than hoped about.
+	stop, done := make(chan struct{}), make(chan struct{})
+	t.Cleanup(func() {
+		close(stop)
+		<-done
+	})
+	go func() {
+		defer close(done)
+		for next := b; ; next = map[*Catalog]*Catalog{a: b, b: a}[next] {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			p.cur.Store(next)
+		}
+	}()
+
+	for range 2000 {
+		list, skipped := p.Report()
+		loaded := make(map[string]bool, len(list))
+		for _, s := range list {
+			loaded[s.ID] = true
+		}
+		for _, e := range skipped {
+			if loaded[e.Name()] {
+				t.Fatalf("Report() paired two snapshots: %q is both loaded and skipped (%d loaded, %d skipped)",
+					e.Name(), len(list), len(skipped))
+			}
+		}
+		if got := shape(list, skipped); got != shapeA && got != shapeB {
+			t.Fatalf("Report() returned %v skills/skips, which is neither seeded catalog (%v or %v) — the halves came from different snapshots",
+				got, shapeA, shapeB)
+		}
 	}
 }

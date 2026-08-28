@@ -289,7 +289,11 @@ decoder reports; state that in the sidecar entry).
 
 **Commit.** `fix(config): a fractional or negative context-window is refused at load instead of floored`
 
-## 4. The `/skills` report reads one catalog snapshot
+## 4. The `/skills` report reads one catalog snapshot — ✅ DONE (2026-08-28)
+
+NOTES (2026-08-28): `Provider.Skipped`'s doc comment claimed it "reads the SAME snapshot List does" — the claim this finding disproves — so the correction the item asks for at `provider.go:113-116` rewrites it to say the opposite (it reads the snapshot in force when it is called) and points a both-halves reader at `Report`, rather than merely adding a mention of `Report`.
+
+NOTES (2026-08-28): the `SkillCatalog` doc block (`tui.go:24-31`, inside the item's cited `24-43` range) enumerates the interface's members and attributed the `/skills` report to `Skipped`; one clause was added naming `Report` as the pair the report takes. The item's doc-correction list named only `provider.go` and `catalog.go`.
 
 **What.** Audit: *`/skills` can report two catalog snapshots as one* (Medium). Every
 `Provider` accessor loads `p.cur` independently (`internal/skills/provider.go:105-129`), and
