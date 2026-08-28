@@ -169,6 +169,17 @@ type Options struct {
 	// that STARTS on an entry stating its own share budgets by it from its first Turn.
 	StartupResponseReserve float64
 
+	// StartupEffortDialect is the SELECTED startup entry's own `effort-dialect:` value, exactly as
+	// the user wrote it: "" (the key absent, or the explicit `auto`) ⇒ that entry forces nothing, so
+	// passive detection answers for the shape (ADR 0060 decision 3). It is a fact about the entry
+	// this session starts ON for the reason the four fields above are — the dialect is a property of
+	// the SERVER, not of the run — and the ephemeral `--endpoint`/`APOGEE_ENDPOINT` override entry
+	// forces none, which leaves an override run on what discovery sees. Resolved-not-flag-bound;
+	// ApplyConfig sets it from the startup entry, and the composition root hands it to the beat that
+	// answers the dial (provider.WithEffortDialect) and to every unattended run's construction seed,
+	// so a session that STARTS on a dialled entry speaks that dialect from its first request.
+	StartupEffortDialect string
+
 	// prebound says this session starts with NO upstream bound, and why — the zero value being the
 	// ordinary start, on the server selection determined. It is the one resolution outcome that
 	// does not come out of ApplyConfig's write-back but out of its refusal: the root command

@@ -18,8 +18,10 @@ import (
 
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
+	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/format"
 	"github.com/airiclenz/apogee/internal/probe"
+	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/run"
 	"github.com/airiclenz/apogee/internal/sanitize"
 )
@@ -435,6 +437,20 @@ func (s *stubSlots) discover(context.Context, string, string, string) int {
 	return s.slots
 }
 
+// stubDialect is the effort half of stubSlots: the discovery seam a test dictates the server's
+// answer through (ADR 0060), plus the record of whether it was consulted at all — a bound entry
+// that FORCES an `effort-dialect:` must skip the round trip, exactly as a `parallel-agents:` pin
+// skips the width probe.
+type stubDialect struct {
+	called  bool
+	dialect provider.EffortDialect
+}
+
+func (s *stubDialect) discover(context.Context, string, string, string) provider.EffortDialect {
+	s.called = true
+	return s.dialect
+}
+
 // The Parallel agents cap reaches this Driver too, resolved exactly as a session resolves it (ADR
 // 0039 decision 2, ADR 0031's benchable-all-the-way-up): the bound entry's pin, else what the server
 // advertises, else one delegation at a time.
@@ -470,6 +486,66 @@ func TestHeadlessInstallsTheParallelAgentsCap(t *testing.T) {
 			}
 			if slots.called != tc.wantProbe {
 				t.Errorf("the discovery probe ran = %v; want %v", slots.called, tc.wantProbe)
+			}
+		})
+	}
+}
+
+// The effort wire dialect reaches this Driver too, on the same terms (ADR 0060, ADR 0031's
+// benchable-all-the-way-up): the bound entry's forced `effort-dialect:`, else what discovery saw,
+// else the zero — the historical `chat_template_kwargs` shape a request has always carried.
+//
+// It is asserted on the Config the CLI hands the runner because that IS this Driver's seam: an
+// unattended run never rebinds, so the construction surface is the only place the dialect can be
+// stated, and internal/agent's TestNewSeedsTheEffortDialectFromTheConfig carries the same value the
+// rest of the way onto the wire. Before the seed existed every Firing sent the zero whatever the
+// server read (2026-08-25 audit C-03).
+func TestHeadlessSendsTheServersEffortDialect(t *testing.T) {
+	const forcedServer = "servers:\n  - name: testbox\n    endpoint: " + testServerEndpoint +
+		"\n    effort-dialect: off\nserver: testbox\n"
+
+	tests := []struct {
+		name       string
+		configYAML string
+		observed   provider.EffortDialect
+		want       domain.EffortDialect
+		wantProbe  bool
+	}{
+		{
+			name:       "a forced effort-dialect: decides, and nothing is probed",
+			configYAML: forcedServer,
+			observed:   provider.EffortDialectReasoning,
+			want:       domain.EffortDialectOff,
+		},
+		{
+			name:      "nothing forced takes the shape discovery saw",
+			observed:  provider.EffortDialectReasoning,
+			want:      domain.EffortDialectReasoning,
+			wantProbe: true,
+		},
+		{
+			name:      "nothing forced and a server with no tell keeps the historical shape",
+			want:      domain.EffortDialectNone,
+			wantProbe: true,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			dialects := &stubDialect{dialect: tc.observed}
+			prev := discoverDialect
+			discoverDialect = dialects.discover
+			t.Cleanup(func() { discoverDialect = prev })
+
+			stub := &stubRunner{}
+			home := testConfigHome(t, tc.configYAML)
+			if _, _, err := headlessRunOn(t, stub, fenceableHost, home, "a prompt"); err != nil {
+				t.Fatalf("headless: %v", err)
+			}
+			if got := stub.spec.Config.EffortDialect; got != tc.want {
+				t.Errorf("Config.EffortDialect = %q; want %q", got, tc.want)
+			}
+			if dialects.called != tc.wantProbe {
+				t.Errorf("the dialect probe ran = %v; want %v", dialects.called, tc.wantProbe)
 			}
 		})
 	}

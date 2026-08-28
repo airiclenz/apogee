@@ -32,6 +32,18 @@ type Config struct {
 	// server is a different invocation.
 	APIKey string
 
+	// EffortDialect is the wire shape THIS server reads a thinking-effort intent in (CONTEXT:
+	// Thinking effort; ADR 0060). It is a property of the SERVER rather than of the call — the
+	// forced `effort-dialect:` a host configured, else what discovery saw — so it is stated once
+	// here, at construction, and rides every request unchanged until Agent.Rebind states another.
+	//
+	// It is the CONSTRUCTION SEED, the mode/confine/scratch pattern: a Driver that never rebinds —
+	// an unattended Firing, a bench arm, any embedder driving run.Once — reaches the same wire a
+	// session reaches, which is what ADR 0031's Driver parity means here. The zero value
+	// (EffortDialectNone) is the wire anchor: it keeps the historical chat_template_kwargs shape,
+	// so a caller that names no dialect sends exactly the bytes it sent before this field existed.
+	EffortDialect EffortDialect
+
 	// Autonomy.
 	Mode   Mode // Plan / Ask-Before / Allow-Edits / Auto (the privilege ladder)
 	Bypass bool // ADR 0006: Mechanisms off, structure on (the hard-constraint floor)
@@ -515,6 +527,47 @@ func (e ThinkingEffort) Valid() bool {
 	switch e {
 	case "", EffortOff, EffortNone, EffortMinimal,
 		EffortLow, EffortMedium, EffortHigh, EffortXHigh, EffortMax:
+		return true
+	default:
+		return false
+	}
+}
+
+// EffortDialect names the wire shape a server reads a thinking-effort intent in (CONTEXT: Thinking
+// effort). It mirrors provider.EffortDialect's vocabulary on this side of the boundary, exactly as
+// ThinkingEffort mirrors provider.Effort: the provider package holds no domain import (ADR 0010),
+// so the two vocabularies are the same words spelled twice and converted at the wire seam.
+//
+// The dialect is a fact about the SERVER, not about the model or the call — it is detected once
+// per binding (or forced by a server entry's `effort-dialect:`) and rides every request unchanged
+// (ADR 0060). Growth is per-sighting, never a per-model-family table.
+type EffortDialect string
+
+const (
+	// EffortDialectNone is the zero value: nobody named a dialect, so the request keeps the
+	// historical chat_template_kwargs mapping.
+	EffortDialectNone EffortDialect = ""
+	// EffortDialectKwargs is llama.cpp's: the intent rides inside `chat_template_kwargs`.
+	EffortDialectKwargs EffortDialect = "kwargs"
+	// EffortDialectReasoning is OpenRouter's: a top-level `reasoning` object.
+	EffortDialectReasoning EffortDialect = "reasoning"
+	// EffortDialectOpenAI is OpenAI's and Groq's: a top-level `reasoning_effort` string.
+	EffortDialectOpenAI EffortDialect = "openai"
+	// EffortDialectOff is the absence of a dialect stated deliberately: this server takes no effort
+	// key at all, in any shape, however loudly the caller asks. Distinct from the zero value, which
+	// says only that nobody named one.
+	EffortDialectOff EffortDialect = "off"
+)
+
+// Valid reports whether d is a dialect this build understands, the zero value included — absence
+// is a legitimate configuration, not a defect, because it is how a caller leaves the historical
+// wire shape alone. It gates the SPELLING only, exactly as ThinkingEffort.Valid does: whether the
+// bound server actually reads that shape is the server's answer, and the enriched turn error is
+// the backstop when it does not.
+func (d EffortDialect) Valid() bool {
+	switch d {
+	case EffortDialectNone, EffortDialectKwargs, EffortDialectReasoning,
+		EffortDialectOpenAI, EffortDialectOff:
 		return true
 	default:
 		return false

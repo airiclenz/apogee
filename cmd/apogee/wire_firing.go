@@ -6,6 +6,7 @@ import (
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/skills"
 )
 
@@ -63,6 +64,12 @@ type firingInputs struct {
 	// its own width source instead, because it already knows what the server advertises and must
 	// not spend a Firing's latency re-asking (design call 4).
 	width func(ctx context.Context, endpoint, model, apiKey string) int
+	// dialect is the discovery half of the effort wire shape (ADR 0060), asked ONLY when the bound
+	// entry forces no `effort-dialect:` of its own; nil takes discoverDialect, the one-shot beat
+	// standing in for the heartbeat an unattended run has none of. A session passes its own
+	// observation for width's reason: it is already holding the answer, and a Firing must not spend
+	// a round trip re-asking the server the session is talking to.
+	dialect func(ctx context.Context, endpoint, model, apiKey string) provider.EffortDialect
 	// recordID is the id this run's record is filed under, minted by the Driver because the Driver
 	// is what hands it to the runner. The run's scratch dir is created under it, so a saved run and
 	// the working files its model left behind are one thing to find and one thing to sweep.
@@ -175,6 +182,25 @@ func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, []string
 		slots = width(ctx, in.entry.Endpoint, spec.Model, apiKey)
 	}
 
+	// The wire shape this run expresses a thinking-effort intent in (ADR 0060). A session takes it
+	// off the beat that lands every Interval and commits it through Rebind; an unattended run never
+	// rebinds, so the value has to be STATED on the construction surface or the engine sends the
+	// zero dialect — the historical `chat_template_kwargs` shape — whatever the bound server
+	// actually reads. That was the Driver-parity break ADR 0031 rules out (2026-08-25 audit C-03).
+	//
+	// The bound entry's forced `effort-dialect:` ranks first and skips the round trip, exactly as a
+	// `parallel-agents:` pin skips discovery above: a forced dialect is already the answer. With
+	// nothing forced, one beat of the same discovery a session's heartbeat drives stands in, and a
+	// server with no tell answers the zero, which is what an unattended run has always sent.
+	effortDialect := provider.EffortDialectFor(in.entry.EffortDialect)
+	if effortDialect == provider.EffortDialectNone {
+		observe := in.dialect
+		if observe == nil {
+			observe = discoverDialect
+		}
+		effortDialect = observe(ctx, in.entry.Endpoint, spec.Model, apiKey)
+	}
+
 	return apogee.Config{
 		Endpoint:     in.entry.Endpoint,
 		Model:        spec.Model,
@@ -200,7 +226,11 @@ func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, []string
 		// the Firings a LATER session raises.
 		Confiner:           in.confiner,
 		ConfineToWorkspace: in.opts.ConfineToWorkspace,
-		WebSearchEndpoint:  in.opts.WebSearchEndpoint,
+		// The dialect resolved above, spelled in the domain's mirror of the provider vocabulary —
+		// the same five words on this side of the boundary (internal/agent's toProviderDialect
+		// converts them back at the wire seam, where the provider package holds no domain import).
+		EffortDialect:     domain.EffortDialect(effortDialect),
+		WebSearchEndpoint: in.opts.WebSearchEndpoint,
 		// Every file-only key from here down is honoured for one reason: it is one configuration,
 		// and an unattended run must offer the model the same tools, obey the same host allow/deny
 		// lists, scrub the same variables out of a subprocess it chose the contents of, mount the

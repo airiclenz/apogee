@@ -44,6 +44,7 @@ func startupEntry(opts config.Options) config.ServerEntry {
 		ContextWindow:   opts.StartupContextWindow,
 		WorkingWindow:   opts.StartupWorkingWindow,
 		ResponseReserve: opts.StartupResponseReserve,
+		EffortDialect:   opts.StartupEffortDialect,
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
+	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/run"
 	"github.com/airiclenz/apogee/internal/schedule"
 	"github.com/airiclenz/apogee/internal/session"
@@ -135,7 +136,13 @@ func (w scheduleWiring) fire(ctx context.Context, f schedule.Firing) (schedule.O
 		// composer probes through, so no Firing spends a round trip on a number this session is
 		// holding (design call 4). The endpoint, model and key it is offered are this Firing's own
 		// and go unread: the answer is about the server the SESSION is on, which is the same one.
-		width:    func(context.Context, string, string, string) int { return w.width() },
+		width: func(context.Context, string, string, string) int { return w.width() },
+		// And the effort wire shape it already observes on its own beat, handed over for the same
+		// reason and read the same way: the session and its Firing are on one server, so the
+		// dialect it saw is the dialect this run must speak (ADR 0060).
+		dialect: func(context.Context, string, string, string) provider.EffortDialect {
+			return w.live.observedDialect()
+		},
 		recordID: recordID,
 	})
 	if err != nil {

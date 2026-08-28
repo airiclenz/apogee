@@ -100,7 +100,17 @@ no longer contains `chat_template_kwargs`.
 
 **Commit.** `fix(provider): the effort turn-error hint fires on the reasoning and openai dialects too`
 
-## 2. The engine's effort dialect has a construction seed (C-03)
+## 2. The engine's effort dialect has a construction seed (C-03) — ✅ DONE (2026-08-28)
+
+NOTES (2026-08-28): the seed lands in `newAgent` (`internal/agent/construct.go`) rather than literally in `agent.New` — `New`, `Resume` and the white-box test path all funnel through it, and the item's own test ("drives the request through the fake provider") constructs by that path; seeding only in `New` would leave `Resume` and every fake-provider Driver unseeded.
+
+NOTES (2026-08-28): the item names `rebindSpecFor` as what puts the dialect on the Firing's Spec; it does not — the interactive path sets `spec.EffortDialect` at the caller (`cmd/apogee/wire_verbs.go:52`) and `firingConfig` never did. `firingConfig` therefore resolves the value itself (forced entry key, else one beat) and states it on the Config; the Spec is unchanged.
+
+NOTES (2026-08-28): the beat "already taken at headless.go:109" returns only `TotalSlots` and is skipped behind a `parallel-agents:` pin, so widening it would rename `discoverSlots` and move six call sites. The dialect took its own package seam, `discoverDialect`, beside it, plus an optional `firingInputs.dialect` — a session passes its own `observedDialect()` (`cmd/apogee/schedule.go`) so a Firing spends no round trip re-asking, the same design call `width` follows.
+
+NOTES (2026-08-28): the item's headless test ("a stubllm whose `/v1/models` reports a reasoning dialect … read the stub's request log") is not implementable — `internal/stubllm` serves `{id, object}` only on `/v1/models` and its request log records no effort field, and teaching it either is out of this plan's scope. Substituted: `TestHeadlessSendsTheServersEffortDialect` drives the real CLI over the runner seam and asserts the composed `run.Spec.Config.EffortDialect` across forced/observed/silent servers, with `internal/agent`'s `TestNewSeedsTheEffortDialectFromTheConfig` carrying the same value onto the wire body the fake provider was handed.
+
+NOTES (2026-08-28): edited `internal/config/options.go`, `internal/config/config.go` and `cmd/apogee/wire_server.go` beyond the item's Files list — `startupEntry` dropped the entry's `effort-dialect:`, so the seed's stated first rank ("the entry's forced `effort-dialect:`") was dead on every Driver, the interactive session's Monitor included. Fixed with the established `Startup*` flattening pattern.
 
 **What.** ISSUES: *The Agent's effort dialect has no construction seed* (code audit C-03,
 ADR 0031 Driver parity). Add `EffortDialect` to `domain.Config` (`internal/domain/config.go:17`)

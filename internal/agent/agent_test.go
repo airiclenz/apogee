@@ -6,6 +6,7 @@ package agent
 // DIALECT the same switch carries in from the server (ADR 0060).
 
 import (
+	"context"
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
@@ -122,6 +123,59 @@ func TestEffortOverrideSurvivesARebind(t *testing.T) {
 	a.SetEffortOverride("")
 	if got := a.resolvedEffort(); got != domain.EffortMedium {
 		t.Errorf("resolved effort after clearing = %q, want the new profile's %q", got, domain.EffortMedium)
+	}
+}
+
+// TestNewSeedsTheEffortDialectFromTheConfig is the construction half of the same server fact: an
+// engine built with a dialect on its Config sends that dialect on its FIRST request, with nobody
+// having rebound anything. That is what makes a Driver that never rebinds — an unattended Firing, a
+// bench arm, any embedder over run.Once — reach the same wire a session reaches (ADR 0031 parity;
+// the 2026-08-25 audit's C-03). It reads the body the fake provider was actually handed, not the
+// projection, so nothing between the seed and the Upstream can quietly drop it.
+func TestNewSeedsTheEffortDialectFromTheConfig(t *testing.T) {
+	t.Parallel()
+
+	cfg := baseConfig(&recordingSink{})
+	cfg.EffortDialect = domain.EffortDialectReasoning
+	cfg.Profile.Thinking.Effort = domain.EffortMedium
+
+	up := &recordingResponder{reply: "done"}
+	a, err := newAgent(cfg, up)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	if err := a.Submit(domain.UserInput{Text: "hi"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if _, err := a.Step(context.Background()); err != nil {
+		t.Fatalf("Step: %v", err)
+	}
+
+	if got := up.last.EffortDialect; got != provider.EffortDialectReasoning {
+		t.Errorf("first request's dialect = %q, want the Config's %q — an unrebound Driver must still speak the server's shape",
+			got, provider.EffortDialectReasoning)
+	}
+	if got := up.last.ThinkingEffort; got != provider.EffortMedium {
+		t.Errorf("first request's effort = %q, want the profile's %q", got, provider.EffortMedium)
+	}
+
+	// And the seed is TOTAL: a dialect no build understands degrades to the zero — the historical
+	// chat_template_kwargs shape — rather than putting an unknown word on the wire mid-Turn.
+	bogus := baseConfig(&recordingSink{})
+	bogus.EffortDialect = domain.EffortDialect("no-such-dialect")
+	strange := &recordingResponder{reply: "done"}
+	b, err := newAgent(bogus, strange)
+	if err != nil {
+		t.Fatalf("newAgent with an unknown dialect: %v", err)
+	}
+	if err := b.Submit(domain.UserInput{Text: "hi"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if _, err := b.Step(context.Background()); err != nil {
+		t.Fatalf("Step: %v", err)
+	}
+	if got := strange.last.EffortDialect; got != provider.EffortDialectNone {
+		t.Errorf("first request's dialect for an unknown seed = %q, want the zero anchor", got)
 	}
 }
 

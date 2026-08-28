@@ -82,6 +82,25 @@ func toProviderEffort(e domain.ThinkingEffort) provider.Effort {
 	}
 }
 
+// toProviderDialect maps the domain effort dialect onto the provider's own vocabulary at this
+// translation boundary, the mirror of toProviderEffort above and for the same reason: the provider
+// package holds no domain import (ADR 0010), so the two vocabularies are the same five words
+// spelled twice, one per side.
+//
+// It is TOTAL: anything outside the named dialects maps to the zero provider.EffortDialectNone,
+// which is the historical chat_template_kwargs shape — so a value that somehow slipped past the
+// config loader's enum degrades to the wire apogee spoke before the dialect seam existed rather
+// than to an unknown shape mid-Turn.
+func toProviderDialect(d domain.EffortDialect) provider.EffortDialect {
+	switch d {
+	case domain.EffortDialectKwargs, domain.EffortDialectReasoning,
+		domain.EffortDialectOpenAI, domain.EffortDialectOff:
+		return provider.EffortDialect(d)
+	default:
+		return provider.EffortDialectNone
+	}
+}
+
 // toolInstructions renders the non-native profile's wire-only tool menu + emission instructions
 // for menu (this request's mode-filtered tool menu) — the emit-side mirror of the parse seam's
 // ParserFor (processing.InstructionsFor). A native/zero profile or an empty menu renders "". The

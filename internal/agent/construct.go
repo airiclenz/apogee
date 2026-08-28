@@ -114,8 +114,9 @@ func newAgent(cfg domain.Config, up provider.Responder) (*Agent, error) {
 		bypass:             cfg.Bypass,             // and the three the settings surface swaps: Bypass …
 		compaction:         cfg.Context.CompactionEnabled,
 		contextFileNames:   cfg.ContextFiles,
-		parallelAgents:     cfg.ParallelAgents, // and the fan-out width the host resolved per bound server
-		delegation:         &delegationLatch{}, // an empty Delegation-target latch: no routing until the host pushes one (ADR 0045); newChildAgent replaces it with the parent's
+		parallelAgents:     cfg.ParallelAgents,                   // and the fan-out width the host resolved per bound server
+		effortDialect:      toProviderDialect(cfg.EffortDialect), // and the wire shape this server reads an effort intent in, so a Driver that never rebinds still speaks it (ADR 0060, ADR 0031)
+		delegation:         &delegationLatch{},                   // an empty Delegation-target latch: no routing until the host pushes one (ADR 0045); newChildAgent replaces it with the parent's
 		textParser:         textParser,
 		stripper:           stripper,
 		tracker:            newSelfRegulator(),

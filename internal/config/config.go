@@ -2640,6 +2640,12 @@ func ApplyConfig(opts *Options, changed func(string) bool, getenv func(string) s
 	// (ResolveResponseReserve) at the bind. The ephemeral override entry states no share, which
 	// leaves an override run on that top-level key and, unset there too, on apogee's own.
 	opts.StartupResponseReserve = startup.ResponseReserve
+	// And which wire shape that entry's server reads a thinking-effort intent in, when the user
+	// stated one rather than leaving detection to answer (ADR 0060 decision 3). Flattened for the
+	// share's reason and travelling the same way — the SELECTED entry's own value, carried as written
+	// for the composition root to hand the beat and every unattended run's construction seed. The
+	// ephemeral override entry forces nothing, which leaves an override run on what discovery sees.
+	opts.StartupEffortDialect = startup.EffortDialect
 	// A roster name that matches no tool — in either half of the global `tools:` block or of any
 	// `model-profiles:` entry's axis — is a NOTICE, never a refusal, and so is a name written under
 	// both halves of one block: the lists are how a roster is tuned on evidence, and a typo in one

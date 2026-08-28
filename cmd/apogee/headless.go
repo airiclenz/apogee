@@ -21,6 +21,7 @@ import (
 	"github.com/airiclenz/apogee/internal/mechanisms"
 	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/probe"
+	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/run"
 	"github.com/airiclenz/apogee/internal/sanitize"
 	"github.com/airiclenz/apogee/internal/session"
@@ -107,6 +108,22 @@ var runOnce = run.Once
 // worse answer than running it one delegation at a time.
 var discoverSlots = func(ctx context.Context, endpoint, model, apiKey string) int {
 	return heartbeat.NewMonitor(endpoint, model, apiKey).Beat(ctx).TotalSlots
+}
+
+// discoverDialect is the seam onto the effort half of the same discovery (ADR 0060): which wire
+// shape the bound server reads a thinking-effort intent in, and the zero EffortDialectNone when it
+// advertises no tell — which keeps the historical `chat_template_kwargs` shape a request has always
+// carried. Like discoverSlots it stands in for the beat an unattended run has no heartbeat to take,
+// it is one beat with no retry, and it exists as a variable so the composition is provable without
+// a live server; production never reassigns it.
+//
+// It never reports an error, for discoverSlots' reason: an unreachable server, a server without the
+// tell, a cancelled context are all "nothing observed", which is the zero, which is the wire every
+// unattended run spoke before this seam existed. It is asked ONLY when the bound entry forces no
+// `effort-dialect:` of its own — a forced dialect is an answer, and a round trip to re-ask a
+// settled question would spend a run's latency on nothing.
+var discoverDialect = func(ctx context.Context, endpoint, model, apiKey string) provider.EffortDialect {
+	return heartbeat.NewMonitor(endpoint, model, apiKey).Beat(ctx).EffortSupport.Dialect
 }
 
 // newConfiner is the seam onto the host's confinement backend, for the same reason runOnce is one:

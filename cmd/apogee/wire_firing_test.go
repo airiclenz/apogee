@@ -70,7 +70,9 @@ func TestFiringConfigSetsEveryUnattendedField(t *testing.T) {
 		MaxOutputTokens: 4096,
 		ContextWindow:   65536,
 		ResponseReserve: 0.35,
+		EffortDialect:   "reasoning",
 	}
+	dialects := &stubDialect{dialect: "openai"}
 	provider := skills.NewProvider(skills.Sources{Home: roots.config, Workspace: roots.workspace})
 	probed := false
 	manual := mechanisms.KnownIDs()[:1]
@@ -89,6 +91,7 @@ func TestFiringConfigSetsEveryUnattendedField(t *testing.T) {
 			probed = true
 			return 9
 		},
+		dialect:  dialects.discover,
 		recordID: "2026-08-24T09-00-00-firing",
 	})
 	if err != nil {
@@ -195,19 +198,32 @@ func TestFiringConfigSetsEveryUnattendedField(t *testing.T) {
 	if probed {
 		t.Error("the width source was consulted behind a pin; ResolveParallelAgents could never have used the answer")
 	}
+
+	// And the effort wire shape, which reaches the run the same way the bounds do: a Driver that
+	// never rebinds would otherwise send the zero dialect — the historical chat_template_kwargs
+	// shape — whatever the bound server actually reads (2026-08-25 audit C-03, ADR 0031 parity).
+	// The entry FORCES one here, so it is the answer and the beat is never taken.
+	if cfg.EffortDialect != domain.EffortDialectReasoning {
+		t.Errorf("Config.EffortDialect = %q; want the entry's forced %q", cfg.EffortDialect, domain.EffortDialectReasoning)
+	}
+	if dialects.called {
+		t.Error("the dialect source was consulted behind a forced effort-dialect:; the round trip could only re-ask a settled question")
+	}
 }
 
-// The three optional seams, each nil, each taking the documented default: a fresh key resolver asks
-// the entry's own source, a fresh catalog is built from the roots, and the width comes from the
-// one-shot discovery probe. Those defaults are what headless and the daemon rely on — they have no
-// longer-lived facility to share — so a change of default is a change to two Drivers at once.
+// The four optional seams, each nil, each taking the documented default: a fresh key resolver asks
+// the entry's own source, a fresh catalog is built from the roots, and the width and the effort
+// dialect both come from the one-shot discovery probe. Those defaults are what headless and the
+// daemon rely on — they have no longer-lived facility to share — so a change of default is a change
+// to two Drivers at once.
 func TestFiringConfigDefaultsItsSeams(t *testing.T) {
 	roots := firingRoots(t)
 
 	slots := &stubSlots{slots: 4}
-	prev := discoverSlots
-	discoverSlots = slots.discover
-	t.Cleanup(func() { discoverSlots = prev })
+	dialects := &stubDialect{dialect: "openai"}
+	prevSlots, prevDialect := discoverSlots, discoverDialect
+	discoverSlots, discoverDialect = slots.discover, dialects.discover
+	t.Cleanup(func() { discoverSlots, discoverDialect = prevSlots, prevDialect })
 
 	entry := config.ServerEntry{Name: "box", Endpoint: "http://box.example/v1", APIKey: "sk-from-the-entry", Model: "entry-model"}
 	cfg, _, err := firingConfig(context.Background(), firingInputs{
@@ -242,6 +258,13 @@ func TestFiringConfigDefaultsItsSeams(t *testing.T) {
 	}
 	if cfg.ParallelAgents != 4 {
 		t.Errorf("Config.ParallelAgents = %d; want the 4 the probe reported", cfg.ParallelAgents)
+	}
+	if !dialects.called {
+		t.Error("the dialect probe never ran; an entry that forces no effort-dialect: has no other way to learn the server's shape")
+	}
+	if cfg.EffortDialect != domain.EffortDialectOpenAI {
+		t.Errorf("Config.EffortDialect = %q; want the %q the probe observed — an unattended run must reach the wire a session reaches",
+			cfg.EffortDialect, domain.EffortDialectOpenAI)
 	}
 }
 
