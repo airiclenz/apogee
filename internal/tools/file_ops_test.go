@@ -290,6 +290,48 @@ func TestCopyFile_CopiesFromAnExtraReadRoot(t *testing.T) {
 	}
 }
 
+// TestCopyFile_CopiesFromAnExtraRootBySymlinkSpelling is copy_file's half of the F-13 fix (audit
+// 2026-08-28): the mounted root stays its own real path and only the SPELLING the model was handed
+// runs through a symlink — the shape a dotfiles-managed ~/.apogee/skills gives every path in a
+// skill's `files:` line. The copy lands the mounted source's bytes and mode because the source
+// PATH is now chosen with its root (readScope.locate) rather than handed on as the argument
+// spelled it, which is what made the fence's lexical half refuse what its real half had accepted.
+func TestCopyFile_CopiesFromAnExtraRootBySymlinkSpelling(t *testing.T) {
+	t.Parallel()
+
+	root, extra, _, mounted := extraRootFixture(t)
+	link := filepath.Join(tempRoot(t), "lib")
+	if err := os.Symlink(extra, link); err != nil {
+		t.Skipf("symlinks unsupported: %v", err)
+	}
+
+	result := runFileOp(t, NewCopyFile(root, func() []string { return []string{extra} }), map[string]any{
+		"source": filepath.Join(link, "skill", "run.sh"), "destination": "prompts/x.md",
+	})
+	if result.IsError {
+		t.Fatalf("copying an extra-root file by its symlink spelling was refused: %q", result.Content)
+	}
+
+	copied := filepath.Join(root, "prompts", "x.md")
+	got, err := os.ReadFile(copied)
+	if err != nil {
+		t.Fatalf("destination was not created: %v", err)
+	}
+	if string(got) != "#!/bin/sh\necho skill\n" {
+		t.Errorf("destination content = %q, want the mounted source's", string(got))
+	}
+	info, err := os.Stat(copied)
+	if err != nil {
+		t.Fatalf("stat destination: %v", err)
+	}
+	if perm := info.Mode().Perm(); perm != 0o755 {
+		t.Errorf("destination mode = %v, want the source's 0755", perm)
+	}
+	if _, err := os.Stat(mounted); err != nil {
+		t.Errorf("the copy must leave the mounted source in place: %v", err)
+	}
+}
+
 // TestCopyFile_ExtraReadRootRefusals pins the three edges the widening must NOT move: a RELATIVE
 // name still resolves against the workspace alone (no one name may mean two files), the read-only
 // root takes no writes as a destination, and a path under no root at all is refused exactly as it
@@ -301,11 +343,12 @@ func TestCopyFile_ExtraReadRootRefusals(t *testing.T) {
 	writeFixture(t, filepath.Join(root, "inside.txt"), "ours", 0o644)
 	tool := NewCopyFile(root, func() []string { return []string{extra} })
 
-	for _, tc := range []struct {
+	type refusalCase struct {
 		name string
 		args map[string]any
 		want string
-	}{
+	}
+	cases := []refusalCase{
 		{
 			name: "relative name of an extra-root file",
 			args: map[string]any{"source": filepath.Join("skill", "run.sh"), "destination": "copied.sh"},
@@ -321,7 +364,21 @@ func TestCopyFile_ExtraReadRootRefusals(t *testing.T) {
 			args: map[string]any{"source": filepath.Join(outside, "id_rsa"), "destination": "stolen.txt"},
 			want: ErrPathEscape.Error(),
 		},
-	} {
+	}
+	// Accepting a symlink SPELLING widens nothing: a spelling that RESOLVES outside every root is
+	// refused with the same uniform escape message its real spelling gets, one case up.
+	elsewhere := filepath.Join(tempRoot(t), "elsewhere")
+	if err := os.Symlink(outside, elsewhere); err != nil {
+		t.Logf("symlinks unsupported, leaving the symlink-spelling case out: %v", err)
+	} else {
+		cases = append(cases, refusalCase{
+			name: "symlink spelling of a source under no root",
+			args: map[string]any{"source": filepath.Join(elsewhere, "id_rsa"), "destination": "linked.txt"},
+			want: ErrPathEscape.Error(),
+		})
+	}
+
+	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 

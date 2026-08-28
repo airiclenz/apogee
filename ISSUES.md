@@ -274,13 +274,6 @@ of that run.
 (`docs/plans/archived/2026-08-26 - 04 - read-fence-egress-docs-plan.md`), deferred out of that
 run.
 
-- [ ] **A dotfiles-symlinked `~/.apogee/skills` hands the model a path the read fence refuses.**
-  The mount is now the RESOLVED library, but `Skill.Dir` (`internal/skills/load.go:307`) stays
-  UNRESOLVED and is what the model is handed — the `files: %s` line and the `{{SKILL_DIR}}`
-  substitution both use it (`internal/agent/loop.go:1160-1165`) — so reads through it are refused
-  for an operator whose skills dir is a symlink. Fix: stamp `Skill.Dir` from the same resolved
-  anchor the mount uses.
-
 - [ ] **The Firing mount site has no test that would catch a revert to `SourceDirs`.** Reverting
   `cmd/apogee/wire_firing.go:229` from `skillProvider.ReadRoots` to `SourceDirs` leaves
   `go test ./cmd/apogee/ -run 'Firing|Schedule'` green — the fixture providers have no symlinked

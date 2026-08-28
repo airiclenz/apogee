@@ -137,7 +137,13 @@ NOTES (2026-08-28): confirmed `resolvedTargetNote(args.Path, t.scope.readRoot(ar
 
 ---
 
-## 2. `copy_file` sources through the same seam; retire the ISSUES entry
+## 2. `copy_file` sources through the same seam; retire the ISSUES entry — ✅ DONE (2026-08-28)
+
+NOTES (2026-08-28): `checkFileOpsPathsFrom` takes the source spelling as a new `sourcePath` parameter (the signature option the item offers, not the `args`-copy one), so its refusals keep naming `args.Source` — the spelling the model wrote — and every existing refusal string is byte-identical. `checkFileOpsPaths` passes `args.Source`, so move_file is unchanged.
+NOTES (2026-08-28): `err := journaledMutation(...)` became `err =` because `locate` now declares `err` earlier in `CopyFile.Execute`; no other change to that block.
+NOTES (2026-08-28): `TestCopyFile_ExtraReadRootRefusals`' inline table literal is now a named `refusalCase` slice so the new symlink-spelling case can be appended only when `os.Symlink` succeeds — a `t.Skipf` would have cost the three existing cases on a symlink-less platform.
+NOTES (2026-08-28): the item text says "the other two bullets ... stay" in that ISSUES.md section; there are in fact three other bullets (Firing-mount revert test, fail-closed proxy tests, and the `--model` "hint" help text). Only the first bullet was removed; all three others and the section heading stay.
+NOTES (2026-08-28): regression proof — reverting only the `SafeCopyFileFrom` argument to `args.Source` makes `TestCopyFile_CopiesFromAnExtraRootBySymlinkSpelling` fail with the escape refusal, so the new test pins the fix rather than passing incidentally.
 
 Depends on item 1.
 

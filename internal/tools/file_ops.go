@@ -114,9 +114,12 @@ func (t *CopyFile) workspaceWriteTarget(call domain.ToolCall) (writeTarget, bool
 // overwrite, and a path escaping ITS OWN root are all reported as IsError results. The copy is
 // atomic at the destination name: it either fully lands or the destination is untouched.
 //
-// The source's root is chosen ONCE per call — the readScope's workspace-first, absolute-only order
-// — and pins both the pre-flight stat and the copy itself, so the two never disagree about which
-// file is being described. A source under no root at all resolves to the workspace, which then
+// The source's root AND the spelling of the source path are chosen ONCE per call, together
+// (readScope.locate, the workspace-first absolute-only order): the argument AS GIVEN under the
+// workspace, the RESOLVED real path under an extra root — so a symlink spelling of a mounted skill
+// file copies exactly as list_dir lists it (audit 2026-08-28 F-13). That one answer pins both the
+// pre-flight stat and the copy itself, so the two never disagree about which file is being
+// described. A source under no root at all is read at the workspace under its own name, which then
 // refuses it with the one uniform escape message. The destination is pinned to the workspace root,
 // the only end this call writes.
 func (t *CopyFile) Execute(ctx context.Context, call domain.ToolCall) (domain.ToolResult, error) {
@@ -128,8 +131,11 @@ func (t *CopyFile) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 	if !ok {
 		return fail, nil
 	}
-	sourceRoot := t.scope.readRoot(args.Source)
-	if refusal := checkFileOpsPathsFrom(ctx, args, sourceRoot, t.root); refusal != "" {
+	sourceRoot, source, err := t.scope.locate(args.Source)
+	if err != nil {
+		sourceRoot, source = t.root, args.Source
+	}
+	if refusal := checkFileOpsPathsFrom(ctx, args, source, sourceRoot, t.root); refusal != "" {
 		return errorResult(call.ID, refusal), nil
 	}
 	// Where this copy REALLY lands, read BEFORE it lands (resolvedTargetNote): the destination
@@ -142,11 +148,11 @@ func (t *CopyFile) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 	// (journaledMutation, ADR 0051): pre-image bytes when overwrite:true clobbers a file,
 	// pre-absent when the copy creates one — which is what makes an undo restore the first and
 	// remove the second. The source is a read and records nothing.
-	err := journaledMutation(
+	err = journaledMutation(
 		ctx,
 		[]mutationPath{{input: args.Destination, root: t.root, post: postReadBack}},
 		func(escape string) ([]bool, error) {
-			if err := security.SafeCopyFileFrom(sourceRoot, args.Source, t.root, args.Destination, escape); err != nil {
+			if err := security.SafeCopyFileFrom(sourceRoot, source, t.root, args.Destination, escape); err != nil {
 				return nil, err
 			}
 			return []bool{true}, nil
@@ -293,7 +299,7 @@ func (t *MoveFile) move(ctx context.Context, args fileOpsArgs) string {
 // is what move_file needs — its removal of the source is itself a write, so the source may never
 // come from anywhere the destination fence does not already cover.
 func checkFileOpsPaths(ctx context.Context, args fileOpsArgs, root string) string {
-	return checkFileOpsPathsFrom(ctx, args, root, root)
+	return checkFileOpsPathsFrom(ctx, args, args.Source, root, root)
 }
 
 // checkFileOpsPathsFrom validates the pair the file-operation tools need before either touches the
@@ -304,8 +310,11 @@ func checkFileOpsPaths(ctx context.Context, args fileOpsArgs, root string) strin
 //
 // The two roots differ for copy_file alone, whose source may have matched a configured read-only
 // root (a copy's source is a read) while its destination stays workspace-fenced; move_file passes
-// the workspace root for both. Everything else is identical for the two tools, refusal wording
-// included, so they can never drift into different answers for the same mistake.
+// the workspace root for both. sourcePath travels with sourceRoot for the same reason and from the
+// same one answer (readScope.locate): under an extra root it is the RESOLVED source, not the
+// argument's spelling. The REFUSALS still name args.Source — the spelling the model wrote is the
+// one it can act on. Everything else is identical for the two tools, refusal wording included, so
+// they can never drift into different answers for the same mistake.
 //
 // Every stat goes through the fence of ITS OWN root, so a path that escapes is refused here with
 // the uniform escape message rather than being reported as an ordinary absence. These checks are
@@ -318,7 +327,11 @@ func checkFileOpsPaths(ctx context.Context, args fileOpsArgs, root string) strin
 // copy or move will actually land, while the SOURCE keeps the plain workspace-rooted stat and no
 // permit ever reaches it — copy_file's source is already fenced by its read scope, and move_file's
 // source is the one path the Gate never disclosed.
-func checkFileOpsPathsFrom(ctx context.Context, args fileOpsArgs, sourceRoot, destinationRoot string) string {
+func checkFileOpsPathsFrom(
+	ctx context.Context,
+	args fileOpsArgs,
+	sourcePath, sourceRoot, destinationRoot string,
+) string {
 	if args.Source == "" {
 		return "source is required"
 	}
@@ -326,7 +339,7 @@ func checkFileOpsPathsFrom(ctx context.Context, args fileOpsArgs, sourceRoot, de
 		return "destination is required"
 	}
 
-	source, err := statInRoot(args.Source, sourceRoot)
+	source, err := statInRoot(sourcePath, sourceRoot)
 	if err != nil {
 		return escapeOrMessage(err, "file not found: "+args.Source)
 	}
