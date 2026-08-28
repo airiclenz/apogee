@@ -84,6 +84,14 @@ func readAllBounded(r io.Reader, max int64) (data []byte, within bool, err error
 // the workspace surfaces the uniform escape message (not "file not found", which would
 // hide the refusal), while any other read error (a genuinely missing file) keeps the
 // "file not found" phrasing the write tools used before the H1 fix.
+//
+// The path it quotes — like the sibling "not a file" refusal above — is the one the read was
+// PINNED to, never the spelling the model happened to use. Under an extra root those differ:
+// readScope.locate hands the read the REAL path so the fence's two containment judgements
+// agree, so a directory named through a symlinked extra root is refused as "not a file:
+// <real path>". That is deliberate and is the contract: the announced-path invariant governs
+// which spellings a tool ACCEPTS, not how a refusal quotes what it examined, and quoting the
+// resolved path tells the model which file the host actually looked at.
 func readFileErrorMessage(err error, path string) string {
 	return escapeOrMessage(err, "file not found: "+path)
 }

@@ -877,7 +877,7 @@ on screen), not internal state.
 
 **Commit.** `test(e2e): a /server switch re-follows the fan-out cap — two delegations run at once`
 
-## 31. Under an extra root, a refusal's path spelling is pinned
+## 31. Under an extra root, a refusal's path spelling is pinned — ✅ DONE (2026-08-28)
 
 **What.** ISSUES: *Under an extra root, a non-escape read refusal now names the RESOLVED
 path, not the spelling the model used.* Plan-author call: the resolved spelling is the

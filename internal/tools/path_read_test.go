@@ -343,6 +343,10 @@ func TestReadScopeRefusesAnExtraRootReachedThroughASymlink(t *testing.T) {
 // the shape a dotfiles-managed ~/.apogee/skills hands the model, which read_file refused while
 // list_dir read it (audit 2026-08-28 F-13). The bytes come back, and locate names the real root
 // beside the real file, which is what makes the fence's lexical half agree with its real half.
+//
+// The directory half pins what that resolution does to a REFUSAL's wording: the same spelling
+// aimed at a directory is refused in the RESOLVED path's words, never the symlink's, because the
+// read was pinned to the real path (readFileErrorMessage's doc states the rule).
 func TestReadScopeReadsAnExtraRootFileBySymlinkSpelling(t *testing.T) {
 	t.Parallel()
 
@@ -376,6 +380,20 @@ func TestReadScopeReadsAnExtraRootFileBySymlinkSpelling(t *testing.T) {
 	}
 	if located != target {
 		t.Errorf("target = %q, want the resolved real path %q", located, target)
+	}
+
+	spelledDir := filepath.Join(link, "skill")
+
+	data, failMessage = scope.readBounded(spelledDir)
+
+	if len(data) != 0 {
+		t.Errorf("readBounded(%q) returned %d bytes, want none", spelledDir, len(data))
+	}
+	if want := "not a file: " + filepath.Join(extra, "skill"); failMessage != want {
+		t.Errorf("refusal = %q, want %q", failMessage, want)
+	}
+	if strings.Contains(failMessage, link) {
+		t.Errorf("refusal %q quotes the symlink spelling %q, want the resolved path", failMessage, link)
 	}
 }
 
