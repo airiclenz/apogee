@@ -38,6 +38,14 @@ SHA256 := $(shell command -v sha256sum >/dev/null 2>&1 && echo 'sha256sum' || ec
 # Run user-supplied args through `make run ARGS="--help"`.
 ARGS ?=
 
+# actionlint checks the workflow files `make check` and CI both run it over. It is pinned by
+# MODULE VERSION and fetched by `go run` rather than added as a third-party GitHub Action:
+# one fewer publisher trusted with the workflow's context, one fewer SHA to keep current,
+# and CI runs the identical command so the two cannot drift. An `actionlint` already on PATH
+# wins — that is the offline and the pre-commit-hook case.
+ACTIONLINT_VERSION := v1.7.12
+ACTIONLINT = $(shell command -v actionlint 2>/dev/null || echo 'go run github.com/rhysd/actionlint/cmd/actionlint@$(ACTIONLINT_VERSION)')
+
 # The default endpoint for `make live-eval` (override: make live-eval LIVE_ENDPOINT=...).
 # Set APOGEE_LIVE_MODEL in the environment to pin the model (and bust the result cache on a swap).
 # The default is a local server, matching the addresses the live tests document themselves. A
@@ -147,9 +155,32 @@ test:
 	go test -race -count=1 ./...
 
 ## live-eval: run the opt-in live-model eval and the gated judge tests against a real local model (always -count=1, never cached)
+#
+# The recipe counts the REAL apogee home before and after the run and fails on growth
+# (checklist T-22 step 9). No test may write there — every one of them takes a temp home —
+# and a live run is exactly where a missing --config goes unnoticed, because the run that
+# leaks is also the run that passes. The count is entries, not bytes: a new session record
+# or a new scratch dir is what a leak looks like.
 .PHONY: live-eval
 live-eval:
-	APOGEE_LIVE_ENDPOINT=$(LIVE_ENDPOINT) APOGEE_JUDGE_ENDPOINT=$(JUDGE_ENDPOINT) go test -race -count=1 -run 'TestE2ELiveModel|TestLiveDelegateCapAndWorkingWindow|TestJudge' -v ./internal/judge/ ./internal/tui/ ./internal/agent/ ./cmd/apogee/
+	@before="$$($(MAKE) --no-print-directory home-census)"; 	APOGEE_LIVE_ENDPOINT=$(LIVE_ENDPOINT) APOGEE_JUDGE_ENDPOINT=$(JUDGE_ENDPOINT) go test -race -count=1 -run 'TestE2ELiveModel|TestLiveDelegateCapAndWorkingWindow|TestJudge' -v ./internal/judge/ ./internal/tui/ ./internal/agent/ ./cmd/apogee/; 	rc=$$?; 	after="$$($(MAKE) --no-print-directory home-census)"; 	if [ "$$before" != "$$after" ]; then 		echo "" >&2; 		echo "live-eval: the real apogee home GREW during this run — a test reached ~/.apogee" >&2; 		echo "  before: $$before" >&2; 		echo "  after:  $$after" >&2; 		echo "Keep the new files as evidence and find the run that omitted --config/APOGEE_CONFIG." >&2; 		exit 1; 	fi; 	exit $$rc
+
+## home-census: print the entry counts of the real ~/.apogee sessions and scratch dirs (used by live-eval)
+.PHONY: home-census
+home-census:
+	@h="$${APOGEE_CONFIG:-$$HOME/.apogee}"; 	printf 'sessions=%s scratch=%s\n' 		"$$(ls -1 "$$h/sessions" 2>/dev/null | wc -l | tr -d ' ')" 		"$$(ls -1 "$$h/scratch" 2>/dev/null | wc -l | tr -d ' ')"
+
+## release-smoke: verify a PUBLISHED release end to end (make release-smoke VERSION=v0.18.0)
+#
+# The post-publish half of checklist T-21: the six archives exist and their SHA256SUMS
+# verify, the host's own archive unpacks to a binary reporting that version, and — when
+# Homebrew is installed — `brew upgrade apogee` moves this machine onto it. It is never
+# part of `make check`: there is nothing to smoke until a release is cut, and the target
+# reaches the network on purpose. VERSION= names the released tag, defaulting to the tag
+# the VERSION file currently claims.
+.PHONY: release-smoke
+release-smoke:
+	@VERSION="$(VERSION)" ./scripts/release-smoke.sh
 
 ## fmt: format all Go source in place
 .PHONY: fmt
@@ -209,6 +240,10 @@ check:
 	@go build ./...
 	@echo "==> go test -race ./..."
 	@go test -race -count=1 ./...
+	@echo "==> workflow action pins (SHA + version comment)"
+	@./scripts/check-pins.sh
+	@echo "==> actionlint"
+	@$(ACTIONLINT) .github/workflows/*.yml
 	@echo "==> ADR-0010 invariant (internal/ must not import the root module path)"
 	@if grep -rl '"$(MODULE)"' internal/; then echo "ADR-0010 violation: internal/ imports the root module path"; exit 1; fi
 	@echo "==> cross-build"

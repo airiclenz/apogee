@@ -1,0 +1,26 @@
+# The upstream the documentation-drift e2e tests talk to (checklist T-23 steps 9 and 10).
+#
+# Two conversations, both tiny: a bare "hello" for the run that only has to paint and quit while
+# --tui-trace and --tui-diag write their files, and a read the workspace fence must refuse for the
+# run rooted by APOGEE_CONFIG / APOGEE_WORKSPACE. The refused path is RELATIVE (`../outside.txt`)
+# on purpose: a fixture is a static file and cannot know the temp root the test minted, while `..`
+# from the workspace root is outside it wherever that root happens to be.
+model: docs-env-model
+turns:
+    # The session title. apogee asks for one off the first prompt, so this is matched before the
+    # prompt's own turn or it would take it.
+    - when:
+        last_message: The user's first request
+      repeat: true
+      text: Documentation checks
+    - when:
+        last_message: ^Read the file just outside
+      tool_calls:
+        - name: read_file
+          arguments: '{"path":"../outside.txt"}'
+    - when:
+        tool_result: read_file
+      text: That path is outside the workspace, so the read was refused.
+    # Anything else.
+    - repeat: true
+      text: Ready.

@@ -26,6 +26,14 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: '1.26.x'
+      - name: action pins (scripts/check-pins.sh)
+        run: ./scripts/check-pins.sh
+      - name: actionlint
+        # Pinned by MODULE VERSION rather than run as a third-party action: an action would be a
+        # sixth SHA to keep current and a fifth publisher trusted with this workflow's context,
+        # where `go run` fetches a checksum-verified module with the toolchain already installed.
+        # `make check` runs the identical command, so the two cannot drift.
+        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12 .github/workflows/*.yml
       - name: gofmt
         run: |
           unformatted="$(gofmt -l .)"
@@ -42,6 +50,58 @@ jobs:
         # Passes trivially until P0.6 adds the harness test; -race is on from day one
         # so the loop goroutine + EventSink observer are checked the moment they exist.
         run: go test -race ./...
+      - name: probe discloses no residual on a modern kernel
+        # The negative half of checklist T-11: ubuntu-latest runs landlock ABI >= 3, which fences
+        # truncate(2) like every other write. A residual disclosed here is as wrong as one missing
+        # on the ubuntu-22.04 job below.
+        run: |
+          report="$(go run ./cmd/apogee probe)"
+          echo "$report"
+          if printf '%s' "$report" | grep -q 'unfenced:'; then
+            echo "probe disclosed a confinement residual on a kernel that has none" >&2
+            exit 1
+          fi
+
+  landlock-abi-1-2:
+    name: landlock ABI 1-2 (ubuntu-22.04)
+    # Checklist T-11 steps 2, 3 and 5: the truncate(2) residual only exists on landlock ABI 1-2,
+    # which is kernel 5.13 <= v < 6.2 -- ubuntu-22.04 ships 5.15, and it is the only runner image
+    # GitHub offers in that window. The check job above proves the opposite direction on a modern
+    # kernel. Steps 1, 4 and 6-8 of that item stay with a human or with the unit suite.
+    runs-on: ubuntu-22.04
+    steps:
+      # Same pins as the check job -- scripts/check-pins.sh holds every one of them to a SHA.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # This job runs Go tooling only and needs no git credential.
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.26.x'
+      - name: kernel and landlock ABI
+        # Recorded, not asserted: when the runner image moves past 6.2 this line is what says why
+        # the steps below started failing, and the job needs re-homing rather than deleting.
+        run: uname -r
+      - name: escape battery on this ABI
+        # The battery branches on the backend's own disclosure: on this kernel it REQUIRES the
+        # confined truncate to succeed, and fails loudly if the backend claimed a complete fence.
+        run: go test -run 'TestLandlockProbe$|TestLandlockResidualsMatchHostABI|TestLandlockCapabilitiesHonest' ./internal/platform/
+      - name: probe discloses the truncate(2) residual
+        run: |
+          go run ./cmd/apogee probe | grep -q 'unfenced: truncate(2)'
+      - name: auto mode discloses the residual on startup
+        # Headless is the unattended shape of the same disclosure, and it prints the notice on
+        # stderr before it ever dials. The endpoint is deliberately dead: the notice is emitted
+        # during composition, so the run's failure to reach a model is expected and ignored.
+        run: |
+          home="$(mktemp -d)"
+          ws="$(mktemp -d)"
+          set +e
+          go run ./cmd/apogee headless --mode auto --config "$home" --workspace "$ws" \
+            --endpoint http://127.0.0.1:9 'hello' >/dev/null 2>stderr.txt
+          set -e
+          cat stderr.txt
+          grep -q 'cannot fence truncate(2)' stderr.txt
 
   cross:
     name: cross-compile

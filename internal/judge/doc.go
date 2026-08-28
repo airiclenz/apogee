@@ -28,7 +28,9 @@
 //
 //   - doc.go — this narration.
 //   - judge.go — [Rubric], [Verdict], the gate ([Enabled], [Skip]), the one provider round-trip
-//     ([Ask], [Pairwise]), the strict reply parse, and the binding assertion ([Require]).
+//     ([Ask], [Pairwise]), the strict reply parse, the binding assertion ([Require]), and
+//     [Client], which hands the resolved client and model to the one test that needs the judge
+//     model as an agent rather than as an assessor (the T-23 newcomer container).
 //   - artifact.go — [Artifact] and its [Kind]s: the named texts a verdict is rendered on, plus
 //     [FrameArtifact], which serialises a tuitest frame with its colours named.
 //

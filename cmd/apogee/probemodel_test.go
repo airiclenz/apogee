@@ -1040,3 +1040,92 @@ func mustTime(t *testing.T, s string) time.Time {
 	}
 	return parsed
 }
+
+// placeholderToolCallReply is what a server sends when it answers a tool question with an EMPTY
+// `tool_calls` entry — no function name, no id — for a call the model never produced. Several
+// OpenAI-compatible servers do it, and the entry is unusable: there is no name to route on and no
+// id to key the result to, so echoing it back would send a tool message whose `tool_call_id` drops
+// off the wire entirely.
+func placeholderToolCallReply() string {
+	return `{"choices":[{"message":{"content":"I would call probe_echo with the text apogee.",` +
+		`"tool_calls":[{}]},"finish_reason":"tool_calls"}]}`
+}
+
+// modelUpstreamPlaceholderToolCalls is [modelUpstream] with every tool-offering branch answering
+// the placeholder above instead of a real call. Everything else — /v1/models, /props, the logprobs
+// branch, the JSON branch — is unchanged, so the battery still COMPLETES and the report is a report
+// about a model, not about a broken server.
+//
+// It is a fixture of its own rather than a stubllm script (checklist T-11 step 8) because
+// `probe model` branches on request SHAPE: the battery asks five differently-shaped questions —
+// one tool, two tools twice, logprobs, no tools — and stubllm matches on the last message's text
+// and cannot emit a logprobs reply at all. A scripted upstream cannot drive this battery.
+func modelUpstreamPlaceholderToolCalls(t *testing.T) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/models" {
+			_, _ = w.Write([]byte(`{"data":[{"id":"placeholder-model","context_length":4096}]}`))
+			return
+		}
+		if r.URL.Path == "/props" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+
+		var body struct {
+			Tools    []json.RawMessage `json:"tools"`
+			LogProbs *bool             `json:"logprobs"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case body.LogProbs != nil && *body.LogProbs:
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":" Paris"},"logprobs":{"content":` +
+				`[{"token":" Paris","top_logprobs":[{"token":" Paris"},{"token":" the"}]}]},"finish_reason":"length"}]}`))
+		case len(body.Tools) > 0:
+			_, _ = w.Write([]byte(placeholderToolCallReply()))
+		default:
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"ok\":true,\"name\":\"apogee\"}"},"finish_reason":"stop"}]}`))
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// A nameless, idless `tool_calls` entry is NOT native tool-call evidence, and the tier it would
+// have bought is not awarded (checklist T-11 step 8). The report says what the server actually
+// sent rather than blaming the model for a reply it never made, and the recorded tier stays at
+// what the model really showed — structured JSON alone.
+func TestProbeModelPlaceholderToolCallsAreNotEvidence(t *testing.T) {
+	t.Parallel()
+	srv := modelUpstreamPlaceholderToolCalls(t)
+	configHome := upstreamHome(t, srv.URL)
+
+	report := runProbeModel(t, configHome)
+
+	for _, want := range []string{
+		"the reply carried 1 tool_calls entries, none with a name and an id",
+		"basic — a reported signal only",
+	} {
+		if !strings.Contains(report, want) {
+			t.Errorf("report does not state %q:\n%s", want, report)
+		}
+	}
+	// The positive wording of the observed case must be absent: this is the whole claim.
+	if strings.Contains(report, "carried a native tool_calls entry") {
+		t.Errorf("a placeholder entry was reported as a native tool call:\n%s", report)
+	}
+
+	rec, warning, ok := library.LoadProbeRecord(library.ProbeDir(configHome), srv.URL, "placeholder-model")
+	if !ok {
+		t.Fatalf("no probe record was written (warning=%q)", warning)
+	}
+	if rec.CapabilityTier != string(probe.TierBasic) {
+		t.Errorf("recorded tier = %q; want %q — a placeholder entry raised the tier",
+			rec.CapabilityTier, probe.TierBasic)
+	}
+}

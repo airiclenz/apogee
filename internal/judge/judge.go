@@ -76,6 +76,32 @@ func Skip(t testing.TB) {
 	t.Skip(skipMessage)
 }
 
+// Client builds a provider client aimed at the configured judge endpoint and returns it beside
+// the model it resolved. It is the same client, key and model resolution [Ask] uses, exported for
+// the one test that needs the judge model as an AGENT rather than as an assessor: the newcomer
+// container (checklist T-23) drives a tool-use loop of its own and then hands the transcript back
+// to [Require] for the verdict.
+//
+// The caller owns the returned client and must Close it. An empty gate is an error, never a nil
+// client: a caller that forgot [Enabled] gets told so rather than panicking.
+func Client(ctx context.Context) (*provider.Client, string, error) {
+	base := endpoint()
+	if base == "" {
+		return nil, "", fmt.Errorf("no judge endpoint: set %s or %s", endpointEnv, liveEndpointEnv)
+	}
+	client := provider.NewClient(base, "",
+		provider.WithAPIKey(os.Getenv(apiKeyEnv)),
+		provider.WithRequestTimeout(requestTimeout),
+	)
+	model, err := resolveModel(ctx, client)
+	if err != nil {
+		client.Close()
+		return nil, "", err
+	}
+	client.SetModel(model)
+	return client, model, nil
+}
+
 // Ask puts one Rubric and its artifacts to the configured judge and returns the verdict. It is
 // one non-streaming round-trip at temperature 0, with one vote: a majority of local votes costs
 // N× the time and buys agreement rather than accuracy.

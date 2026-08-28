@@ -588,9 +588,17 @@ rubric could then assert against.
 | `judge.Require(t, ctx, rubric, artifacts…)` | the assertion: skips when ungated, `t.Fatal` when the judge could not answer, `t.Errorf` with the reasons when the verdict is fail |
 | `judge.Ask(ctx, rubric, artifacts…) (Verdict, error)` | the verdict without the assertion, for a test that wants both directions |
 | `judge.Pairwise(ctx, rubric, before, after) (Verdict, error)` | "is `after` no worse than `before` under this rubric" |
+| `judge.Client(ctx) (*provider.Client, string, error)` | the same client, key and model the gate resolves, for a test that needs the judge model as an AGENT rather than as an assessor; the caller owns it and must `Close` it |
 
 One round-trip, temperature 0, one vote. A majority of local votes costs N× the wall clock and buys
 agreement rather than accuracy.
+
+`Client` is the one exception to "the judge assesses, it does not act". `TestNewcomerFollowsTheDocs`
+(checklist T-23) has to put the model in the reader's chair: it drives a `run` tool over
+`docker exec` inside a clean `debian:stable-slim` container that holds ONLY `README.md`,
+`docs/manual/` and one release archive, for at most twenty steps, and the model's report of what did
+not work as written is then handed back to `Require` for the actual verdict. Both gates must be
+open — `docker` on PATH and a judge endpoint — and the test is outside the suite's wall-clock budget.
 
 Use `Pairwise` where no absolute oracle exists but a comparison does — "nothing regressed since
 v0.17.1", "the reworded pane is no worse than the shipped one". Give it the two artifacts and let
@@ -630,8 +638,7 @@ A claim is manual ONLY when its class sits in the **Not observable** column; eve
 driver, and the test gets written. The rows below cover every claim class
 `docs/test-checklists/2026-08-27 - 00 - since-v0.17.1.md` needed a human for, including the proxies
 ratified for the irreducible halves (ADR 0062, decision 5). Plan item 16 re-checks every
-example-test name against `go test -list 'TestE2E.*' ./cmd/apogee/`; names marked *(planned)* do
-not exist yet, with the plan item that writes them.
+example-test name against `go test -list 'TestE2E.*' ./cmd/apogee/`.
 
 | Claim class | Driver | Example test | Not observable by any driver |
 | --- | --- | --- | --- |
@@ -659,11 +666,13 @@ not exist yet, with the plan item that writes them.
 | MCP server behaviour (T-18) | an in-test streamable-http MCP server with one `echo` tool (`tuitest.MCPEcho`, the shape `internal/mcp`'s own fixture uses) reached at a proxied endpoint; the refused reconnect is read off the tool that STILL answers under its old alias, and the denied ENDPOINT off the raw pty stream of a launch that never reached a frame | `TestE2EEgress`; `TestE2EEgressDeniedMCPEndpointStopsTheLaunch` | What a third-party MCP server actually does with a call |
 | Flicker during streaming (T-24) | `--tui-trace` counters: bytes written and full-frame repaints per streamed token, pinned against a ceiling | `TestE2EStreamRepaintCeiling` | Felt flicker — the repaint ceiling is the accepted proxy |
 | Desktop hand-off (T-19) | a logging fake opener installed through the `openerLookPath` package var, which is what `present.Opener.LookPath` resolves to; assert argv and wording. The refused half is the log's ABSENCE of a launch | `TestE2EPresentOpensOnlyTheAllowedFormats`; `TestE2EPresentServesWithoutLeakingTheToken` | What a real desktop application does with the file |
-| Upgrade path of an installed apogee (T-21) | post-release `make release-smoke` — archives, `SHA256SUMS`, `--version`, `brew upgrade` when `brew` is present | `make release-smoke` *(planned, item 15)* | `brew upgrade` before the release it upgrades to exists |
-| Tag job and action pins (T-21) | `actionlint` plus `scripts/check-pins.sh`, both run from `make check` | `make check` *(planned, item 15)* | — |
-| Landlock residual honesty on an older ABI (T-11) | a dedicated `ubuntu-22.04` CI job running the probe assertions | CI job `landlock-abi-1-2` *(planned, item 15)* | — |
+| Upgrade path of an installed apogee (T-21) | post-release `make release-smoke` — archives, `SHA256SUMS`, `--version`, `brew upgrade` when `brew` is present | `make release-smoke` | `brew upgrade` before the release it upgrades to exists |
+| Tag job and action pins (T-21) | `actionlint` plus `scripts/check-pins.sh`, both run from `make check` | `make check` | — |
+| Landlock residual honesty on an older ABI (T-11) | a dedicated `ubuntu-22.04` CI job running the probe assertions | CI job `landlock-abi-1-2` | — |
 | Behaviour against a real model (T-22) | stays env-gated under `make live-eval`; unset means skip, never a silent pass | `TestE2ELiveModel` | — (needs a live tool-capable endpoint) |
-| The docs work for a newcomer (T-23) | judge-driven agent in a clean container with only `README.md` + `docs/manual/`, driving apogee against stubllm | `TestNewcomerFollowsTheDocs` *(planned, item 15)* | The Homebrew and OpenRouter steps — they need a published release and a real API key |
+| A claim the manual makes about the environment (T-23) | no driver needed — read the manual's own section and the source that ANSWERS it. The read set is `internal/config`'s `Env… = "APOGEE_…"` constants widened by whatever `cmd/apogee` spells out; the drift is asserted in BOTH directions, and the section's own count word with it | `TestManualListsEveryEnvironmentOverride` | — |
+| A documented flag, root or refusal (T-23) | the shape that owns the claim: headless for a value that cannot parse, PTY for the hidden `--tui-trace`/`--tui-diag` files (an in-process launch supplies its own output and `tui.Build` refuses a trace beside it), in-process for `APOGEE_CONFIG`/`APOGEE_WORKSPACE` — launched by hand, since every helper passes both as FLAGS and refuses the variables | `TestDocsEnvBadValuesNameTheVariableAndTheValue`; `TestDocsEnvTraceFlagsWriteFilesAndStayOutOfHelp`; `TestDocsEnvRootsMoveTheHomeAndTheFence`; `TestDocsEnvURLSafetyProseIsLiveAndCoversMCP` | Whether the prose READS well — a grep pins the claim, not the sentence around it |
+| The docs work for a newcomer (T-23) | judge-driven agent in a clean container with only `README.md` + `docs/manual/`, driving apogee against stubllm | `TestNewcomerFollowsTheDocs` | The Homebrew and OpenRouter steps — they need a published release and a real API key |
 
 ## Writing a new e2e test
 
@@ -713,6 +722,9 @@ A new end-to-end test is `cmd/apogee/e2e_<topic>_test.go`, and it follows this c
 | in-process e2e | yes, every platform | — |
 | PTY e2e | yes | Windows; a failed `TestMain` build (both say so in the skip) |
 | judge | no | always, unless `APOGEE_JUDGE_ENDPOINT` / `APOGEE_LIVE_ENDPOINT` is set — it joins `make live-eval` |
+| newcomer container | no | needs BOTH `docker` on PATH and the judge gate, and Linux (`--network host` shares loopback there only); local-only, outside the budget |
+| workflow gates | not a Go test | `scripts/check-pins.sh` and `actionlint` run from `make check` and from the CI check job |
+| release smoke | not a Go test | `make release-smoke VERSION=vX.Y.Z`, by hand, only once the release is published |
 
 No build tags and no `-short`: a test that only runs when someone remembers a flag is a test nobody
 runs. The in-process e2e set runs in **every plain `go test`**, on every platform, with no gate at

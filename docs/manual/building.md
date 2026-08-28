@@ -22,7 +22,8 @@ A `Makefile` wraps the common Go invocations:
 | `make test` | Run the test suite with the race detector |
 | `make cross` | Cross-build all six release targets (Linux/macOS/Windows × amd64/arm64) |
 | `make dist` | Build the publishable release archives into `dist/`, plus `SHA256SUMS` |
-| `make check` | The full acceptance gate — gofmt, vet, build, race tests, the ADR-0010 import invariant, cross-build, and an `apogee --help` smoke run |
+| `make check` | The full acceptance gate — gofmt, vet, build, race tests, the workflow pin check and `actionlint`, the ADR-0010 import invariant, cross-build, and an `apogee --help` smoke run |
+| `make release-smoke VERSION=v0.18.0` | Verify a **published** release from the outside (see [Releasing](#releasing)) |
 | `make help` | List every target |
 
 To run `apogee` from anywhere, `make install` copies the built binary to the first
@@ -50,6 +51,35 @@ always a commit of its own and, at a release cut, the *last* one — the `CHANGE
 rollup lands first, so the tree the tag pins already contains it. Publishing a GitHub
 Release on top of that tag, with the archives `make dist` packs, stays a separate manual
 act; CI creates the tag and nothing more.
+
+## Releasing
+
+Cutting a release is four acts, in this order, and only the first two are automated.
+
+1. **Roll the changelog up.** `CHANGELOG.md`'s `[Unreleased]` section gains its release
+   heading, on a commit of its own. It lands *first*, so the tree the tag pins already
+   carries it.
+2. **Bump `VERSION`, alone, last.** One line, leading `v`. Pushing that commit to `main`
+   is what creates the annotated tag — `tag-on-version-bump.yml` puts `vX.Y.Z` on that exact
+   commit and does nothing else. Never move or delete a tag afterwards.
+3. **Publish.** `make dist` packs the six archives plus `SHA256SUMS` into `dist/`; attach
+   all seven files to a GitHub Release on that tag, then point the Homebrew tap's formula
+   (`airiclenz/tap`) at the new assets and their checksums.
+4. **Smoke it from the outside.** `make release-smoke VERSION=vX.Y.Z` is the only step that
+   can run *after* the release exists, and it is the one that catches a release nobody can
+   install. It checks that the tag is remote and annotated rather than lightweight, that
+   `make dist` still packs six verifying archives, that all six published assets download
+   and match the release's own `SHA256SUMS`, and that the archive for *this* machine unpacks
+   to a binary reporting the released version. Where Homebrew is installed and already has
+   apogee, it also runs `brew update && brew upgrade apogee` and expects the upgraded binary
+   to report the same version — the one claim only a real tap and a real release can make.
+   Every check that needs a tool this machine lacks (`gh`, `brew`) says `SKIP` and names it,
+   so a partial run is never mistaken for a pass.
+
+`make check` covers what can be proven *before* a release: alongside the Go gates it runs
+`scripts/check-pins.sh` — every GitHub Action must be pinned to a 40-character commit SHA
+with its `# vX.Y.Z` tag in the comment beside it — and `actionlint` over the workflow files.
+Both also run in CI, so a workflow cannot regress between one push and the next.
 
 Prefer the raw toolchain? `go build -o apogee ./cmd/apogee` does the same thing — the
 Makefile just gives the common commands one-word names. Releases are cross-compiled to

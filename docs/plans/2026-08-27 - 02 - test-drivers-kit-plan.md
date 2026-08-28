@@ -1326,7 +1326,17 @@ NOTES (2026-08-28): `internal/tuitest`'s own leak-check tests (`TestCheckLeaksPa
 
 **Commit:** `test(e2e): consoles die with their owner, egress obeys proxy and url-safety live, the opener allow-list (T-14, T-18, T-19)`
 
-## 15. T-11 + T-21 + T-22 + T-23 — CI matrix, release smoke, docs drift, the newcomer container
+## 15. T-11 + T-21 + T-22 + T-23 — CI matrix, release smoke, docs drift, the newcomer container — ✅ DONE (2026-08-28)
+
+NOTES (2026-08-28): actionlint runs as a version-PINNED `go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12` in both the CI check job and `make check`, not as a pinned third-party Action — an Action would be a fifth publisher trusted with the workflow's context and a sixth SHA to keep current, while `go run` fetches a checksum-verified module with the toolchain already installed and lets CI and `make check` run the identical command. An `actionlint` already on PATH wins in `make check` (the offline case).
+
+NOTES (2026-08-28): the `tool_calls:[{}]` placeholder fixture is `probemodel_test.go`'s own httptest upstream, not a stubllm script, so `cmd/apogee/testdata/stubllm/placeholder-toolcall.yaml` was not written. `probe model` branches on request SHAPE — five differently shaped battery questions, one of them a logprobs reply stubllm cannot emit at all — and stubllm matches only on the last message's text, so a scripted upstream cannot drive this battery. `stubllm.Script.Validate` also refuses a nameless tool call by design; widening it for one fixture would have weakened the stub for every other.
+
+NOTES (2026-08-28): `TestNewcomerFollowsTheDocs` packs ONE archive for the host platform with `go build` + `tar` in the exact shape `make dist` produces, rather than invoking `make dist` (which has no per-target switch and would cross-build five archives nobody installs). It also serves the stub in-process through `stubllm.New` rather than spawning `cmd/stubllm serve`; the container reaches it over `--network host`, which is why the test additionally skips off Linux.
+
+NOTES (2026-08-28): `judge.Client` was added to `internal/judge` — the item's file list did not name that package, but its text calls for the newcomer loop to reach the judge model "via internal/judge's client", and the package exposed no client. It reuses the existing gate, key and model resolution, is documented in `docs/design/test-drivers.md` and narrated in `internal/judge/doc.go`.
+
+NOTES (2026-08-28): `APOGEE_MODE=fast` refuses with `apogee: invalid --mode "fast"` — it names the flag, not the variable that supplied the value, while `APOGEE_BYPASS=maybe` does name `APOGEE_BYPASS`. `docs/manual/configuration.md` promises the variable for both. The message comes from `domain.ParseMode`, shared by the flag, the variable and the config file's `mode:` key, so naming the source needs the source threaded through — outside this item's scope. The test asserts what holds today (the setting and the offending value, and that the run stops before any work) and says so in its own comment; the gap is on the DEFER line.
 
 **What:** the infra proxies of ratified call 9.
 

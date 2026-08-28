@@ -1,0 +1,9 @@
+# The upstream the newcomer container talks to (checklist T-23 steps 1-4, the read-it-fresh half).
+#
+# One repeating turn, on purpose: the claim under test is that the DOCS get a reader from nothing to
+# a reply, so the upstream has to answer whatever a reader ends up sending — the session title, the
+# first prompt, a second attempt after a typo — without the fixture deciding what that is.
+model: newcomer-model
+turns:
+    - repeat: true
+      text: Hello — apogee reached the upstream and this reply came back through it.
