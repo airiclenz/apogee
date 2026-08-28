@@ -40,6 +40,14 @@ var (
 // before the removal, because `os.Exit` runs no deferred functions. A test that calls os.Exit
 // itself never reaches that removal, so it must remove suiteTempHome on its own way out.
 func TestMain(m *testing.M) {
+	// The same interception main() opens with, and for the same reason: on Linux a confined
+	// subprocess is run by re-invoking THIS executable in the landlock helper mode
+	// (confinement-execution-contract §2.3 / §2.6), and under the in-process driver this
+	// executable is the test binary. Without it the helper child falls through to m.Run and a
+	// driven Auto run gets the whole suite's output back as its command's, instead of the
+	// command's. It MUST stay the first thing TestMain does, ahead of the binary build below.
+	maybeDispatchConfinedExec()
+
 	realUserHome, _ = os.UserHomeDir()
 
 	home, err := os.MkdirTemp("", "apogee-cmd-test-home-")

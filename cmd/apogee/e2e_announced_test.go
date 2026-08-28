@@ -18,11 +18,14 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/airiclenz/apogee"
+	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/stubllm"
 	"github.com/airiclenz/apogee/internal/tuitest"
 )
@@ -111,10 +114,18 @@ func TestE2EAnnouncedSkillPathsUnderASymlinkedHome(t *testing.T) {
 	}
 }
 
+// announcedUser is the account name the fixture's home hangs under, so the shape it builds is a
+// `/home/<user>/.apogee` and not merely an `.apogee` somewhere under a temp root. The difference is
+// load-bearing for the scratch fixture: the dangerous-action guard's control-plane rule is anchored
+// on a HOME spelling (internal/security's homeAnchor), so under a home the guard cannot recognise
+// the rule never fires, the forced look never happens, and a test claiming the announced scratch dir
+// escapes it would pass with the escape removed.
+const announcedUser = "operator"
+
 // announcedSkillFixture builds the dotfiles-symlinked host shape and returns its parts.
 //
 // It is the owner's real layout rather than an abstraction of it, because the two symlinks are the
-// bug: `<tmp>/home/.apogee` is a link into a dotfiles checkout, and that checkout's `skills/` is
+// bug: `<tmp>/home/<user>/.apogee` is a link into a dotfiles checkout, and that checkout's `skills/` is
 // itself a link into a third tree. A path announced out of the first is resolved through both
 // before any tool can read it, and the run is handed the LINK spelling throughout.
 func announcedSkillFixture(t *testing.T, stub *stubllm.Server) symlinkedHome {
@@ -128,8 +139,8 @@ func announcedSkillFixture(t *testing.T, stub *stubllm.Server) symlinkedHome {
 	if err := os.Rename(e2eHome(t, stub), real); err != nil {
 		t.Fatalf("move the e2e home into the dotfiles checkout: %v", err)
 	}
-	mkdirAll(t, filepath.Join(tmp, "home"))
-	home := filepath.Join(tmp, "home", ".apogee")
+	mkdirAll(t, filepath.Join(tmp, "home", announcedUser))
+	home := filepath.Join(tmp, "home", announcedUser, ".apogee")
 	linkAt(t, home, real)
 
 	// The skill library, in a third tree, reached from the home through a second link.
@@ -165,6 +176,151 @@ Your bundled files live in the folder the ` + "`files:`" + ` line above names.
 2. ` + "`copy_file`" + ` that same file into the workspace as out/a.md.
 3. ` + "`list_dir`" + ` the folder, ` + "`grep`" + ` it for ` + announcedMarker +
 	", and `find_files` a.md under it.\n\nUse the dedicated read tools for all of it, never a terminal command.\n"
+
+// announcedScratchPrompt is what the scratch fixture's model is asked, and the phrase
+// announced-scratch.yaml keys its one capturing turn on.
+const announcedScratchPrompt = "Set up the scratch dir and then the control plane probe."
+
+// announcedScratchEcho is what the scratch command prints when it has done all of its work: the
+// last link of an `&&` chain, so a result carrying it is a result where the mkdir and the write
+// under the announced path both succeeded.
+const announcedScratchEcho = "scratch-ok"
+
+// announcedStandingPrompt is the one config key this fixture's home needs beyond the e2e default.
+// The orientation block RIDES ALONG on a standing system message rather than seeding one of its own
+// (ADR 0023 §6 amendment), so a home with neither a prompt nor a workspace context file sends no
+// system message at all and states no host facts — there would be nothing announced to test. A real
+// install's seeded config.yaml carries `system-prompt-text:` as its one active key, so this fixture
+// carries one too.
+const announcedStandingPrompt = "system-prompt-text: |\n  You are apogee, a terminal coding agent.\n"
+
+// TestE2EAnnouncedScratchDirRunsUnpromptedInAuto is the invariant over the orientation block: the
+// dir apogee names on its `Scratch dir:` line is writable, in Auto, with nobody asked — while the
+// control plane the same guard rule protects still forces a look.
+//
+// The two halves are one conversation on purpose. The scratch dir lives UNDER `~/.apogee`, which is
+// exactly what the dangerous-action guard's Tier-2 rule matches, so for one release a model doing
+// precisely what the orientation told it was stopped to ask permission on every scratch-routed
+// command. Asserting only that nobody was asked would be passed by an approver that had stopped
+// asking altogether; the `touch ~/.apogee/guard-probe.txt` in the same run is the positive control
+// that makes the silence mean something.
+func TestE2EAnnouncedScratchDirRunsUnpromptedInAuto(t *testing.T) {
+	// The control command names `~`, and a run that somehow let it through would touch the
+	// developer's own apogee home. It is denied below, but the home it would reach is a temp one
+	// either way.
+	guardHome(t)
+	installFenceableConfiner(t)
+
+	stub := stubllm.New(t, loadScript(t, "announced-scratch"))
+	fx := announcedSkillFixture(t, stub)
+	appendHomeConfig(t, fx.home, announcedStandingPrompt)
+	drv := tuitest.NewDriver(t, e2eSize)
+	sess := launchTUIOn(t, drv, stub, fx.home, fx.ws, "--mode", "auto")
+	panes := watchApprovalPanes(t, drv)
+
+	submit(drv, announcedScratchPrompt)
+
+	// The FIRST pane the run raises carries the whole negative claim. Nothing but the line below
+	// answers a pane in this fixture, so the scratch command has to have run — unasked — for the
+	// conversation to have reached the control at all; and a guard that forced a look at the
+	// announced scratch dir would raise ITS pane first, which is what the command assertions here
+	// tell apart.
+	pane := paneText(awaitApprovalPane(drv))
+	if !strings.Contains(pane, forcedReason) {
+		t.Errorf("the pane does not read %q; the control plane no longer forces a look:\n%s", forcedReason, pane)
+	}
+	if !strings.Contains(pane, "guard-probe.txt") {
+		t.Errorf("the first pane of the run is not the control plane's:\n%s", pane)
+	}
+	if strings.Contains(pane, "TMPDIR") {
+		t.Errorf("the announced scratch dir raised an approval pane; a path apogee itself named "+
+			"must cost nobody a look:\n%s", pane)
+	}
+	decide(drv, "d")
+	drv.WaitText("Both commands answered.")
+	drv.WaitQuiet(settled)
+
+	// The orientation announced the configured home's spelling — the symlink — and the model wrote
+	// through it. Reading the path back off the command the model SENT is reading the announcement
+	// itself: the script captured it out of that request's own system prompt.
+	scratch := announcedScratchDir(t, stub)
+	if got, want := filepath.Dir(scratch), filepath.Join(fx.home, "scratch"); got != want {
+		t.Errorf("the orientation announced the scratch dir as %s; want this session's dir under "+
+			"the configured home %s", scratch, want)
+	}
+
+	results := toolResults(stub)
+	if len(results) != 2 {
+		t.Fatalf("the run produced %d tool results; want the fixture's two:\n%s",
+			len(results), strings.Join(results, "\n---\n"))
+	}
+	if !strings.Contains(results[0], announcedScratchEcho) {
+		t.Errorf("the scratch command did not run to its end:\n%s", results[0])
+	}
+	if !strings.Contains(results[1], "denied by approver") {
+		t.Errorf("the denied control call did not come back as a denial:\n%s", results[1])
+	}
+
+	// And the write landed in the REAL tree the home symlink points at, not merely somewhere that
+	// spells the same.
+	probe := filepath.Join(fx.real, "scratch", filepath.Base(scratch), "tmp", "probe")
+	if _, err := os.Stat(probe); err != nil {
+		t.Errorf("the scratch write did not reach %s: %v", probe, err)
+	}
+
+	if n := panes(); n != 1 {
+		t.Errorf("the run raised %d approval pane(s); want exactly the control plane's one", n)
+	}
+	if un := stub.Unmatched(); len(un) > 0 {
+		t.Errorf("the run made %d request(s) the script did not anticipate: %v", len(un), un)
+	}
+	stub.AssertConsumed(t)
+
+	if err := sess.Quit(); err != nil {
+		t.Fatalf("the run returned %v; want a clean quit", err)
+	}
+}
+
+// installFenceableConfiner keeps this suite's question about who was ASKED rather than about the
+// machine it runs on. Auto on a backend that cannot fence the filesystem gates every terminal
+// command through Approval instead (ADR 0012, "confine if you can, gate if you can't"), so a
+// container without landlock would raise panes for a reason that has nothing to do with an
+// announced path.
+//
+// A host that CAN fence takes its own real backend, so the command below is really confined. One
+// that cannot takes the caps-only stand-in the headless tests already use: it reports FSWrite and
+// confines nothing, which is the right trade for a fixture asserting PROMPTING. The fence itself
+// has its own suite (confinement_e2e_test.go).
+func installFenceableConfiner(t *testing.T) {
+	t.Helper()
+
+	if platform.NewConfiner().Capabilities().FSWrite {
+		return
+	}
+	previous := newConfiner
+	newConfiner = func() apogee.Confiner { return fenceableHost }
+	t.Cleanup(func() { newConfiner = previous })
+}
+
+// announcedScratchExport lifts the scratch dir back out of the command the model sent. The `\S+` is
+// greedy and the path has no spaces in it, so it ends at the LAST `/tmp ` in the export — the one
+// the fixture appended — rather than at the temp root the path itself starts under.
+var announcedScratchExport = regexp.MustCompile(`export TMPDIR=(\S+)/tmp `)
+
+// announcedScratchDir is the scratch path the run's terminal command carried: what the script
+// captured out of the orientation on that request and handed straight back, so reading it here
+// reads what apogee ANNOUNCED rather than what this test could have built for itself.
+func announcedScratchDir(t *testing.T, stub *stubllm.Server) string {
+	t.Helper()
+
+	for _, call := range toolCalls(stub) {
+		if match := announcedScratchExport.FindStringSubmatch(call.Arguments); match != nil {
+			return match[1]
+		}
+	}
+	t.Fatalf("no terminal call exported TMPDIR; the run never used the announced scratch dir")
+	return ""
+}
 
 // ----------------------------------------------------------------------------
 // Shared fixtures for the announced-paths suite
@@ -280,13 +436,12 @@ func toolResults(stub *stubllm.Server) []string {
 	return out
 }
 
-// assertEveryToolCallNames fails unless the run issued tool calls at all and every one of them
-// carries want in its arguments — the assertion that the model used the announced path verbatim
-// rather than a path the fixture could have supplied itself.
-func assertEveryToolCallNames(t *testing.T, stub *stubllm.Server, want string) {
-	t.Helper()
-
-	calls := 0
+// toolCalls is every tool call the run issued, in the order it issued them and each seen once —
+// what a claim about the ARGUMENTS the model sent is made against. A request carries the whole
+// conversation so far, so the same call arrives again on every later request; the id tells them
+// apart.
+func toolCalls(stub *stubllm.Server) []stubllm.ToolCall {
+	var out []stubllm.ToolCall
 	seen := make(map[string]bool)
 	for _, req := range stub.Requests() {
 		for _, msg := range req.Messages {
@@ -295,15 +450,27 @@ func assertEveryToolCallNames(t *testing.T, stub *stubllm.Server, want string) {
 					continue
 				}
 				seen[call.ID] = true
-				calls++
-				if !strings.Contains(call.Arguments, want) {
-					t.Errorf("the %s call reads %s; want the announced path %s",
-						call.Name, call.Arguments, want)
-				}
+				out = append(out, call)
 			}
 		}
 	}
-	if calls == 0 {
+	return out
+}
+
+// assertEveryToolCallNames fails unless the run issued tool calls at all and every one of them
+// carries want in its arguments — the assertion that the model used the announced path verbatim
+// rather than a path the fixture could have supplied itself.
+func assertEveryToolCallNames(t *testing.T, stub *stubllm.Server, want string) {
+	t.Helper()
+
+	calls := toolCalls(stub)
+	if len(calls) == 0 {
 		t.Fatalf("the run issued no tool calls at all; the announced path was never exercised")
+	}
+	for _, call := range calls {
+		if !strings.Contains(call.Arguments, want) {
+			t.Errorf("the %s call reads %s; want the announced path %s",
+				call.Name, call.Arguments, want)
+		}
 	}
 }

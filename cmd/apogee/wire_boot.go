@@ -99,7 +99,12 @@ func newRootWiring(opts config.Options, mode apogee.Mode, roots stateRoots) *roo
 	// degradation notice below and by the /confine surface the renderer is handed — the backend
 	// probes once at construction, so this is the same value the engine's dispatch disposition will
 	// consult.
-	w.confiner = platform.NewConfiner()
+	//
+	// It comes through the [newConfiner] seam the headless and daemon Drivers already build theirs
+	// from, for that seam's own reason: what a backend can enforce is a property of the MACHINE, so
+	// a fixture whose question is about GATING rather than fencing dictates the capability matrix
+	// and asks its question on every host. Production never reassigns it.
+	w.confiner = newConfiner()
 
 	return w
 }

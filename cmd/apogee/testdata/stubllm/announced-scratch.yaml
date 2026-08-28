@@ -1,0 +1,57 @@
+# The upstream TestE2EAnnouncedScratchDirRunsUnpromptedInAuto talks to: a model that takes apogee
+# at its word about where it may write, and then reaches for the one place it may not.
+#
+# The first tool turn carries a capture whose pattern lifts the path out of the orientation block's
+# own `- Scratch dir: %s — writable and outside the workspace; …` line
+# (internal/agent/prompts/orientation.txt), so the command below names the dir apogee ANNOUNCED on
+# that very request rather than one this fixture guessed. That is the whole point of the fixture:
+# the dangerous-action guard used to force a look at every command naming `~/.apogee`, and the
+# session's own scratch dir lives under it — so a model doing exactly what it was told was stopped
+# to ask permission on every scratch-routed command. A capture that went unmatched, or a path the
+# guard prompted on, fails here rather than in a user's session.
+#
+# The command is the live-session shape rather than a bare `mkdir`: an env export naming the scratch
+# dir, which is how a real run reaches for it (`export TMPDIR=…`), and which puts the announced path
+# in the command's text three times over.
+#
+# The SECOND terminal call is the positive control, and it lives in this same conversation on
+# purpose: `touch ~/.apogee/guard-probe.txt` (guard.yaml's own write) must still raise the forced
+# look, so an approver that had quietly stopped asking could never make the negative assertion above
+# pass. It is denied, so nothing is written anywhere.
+model: announced-model
+turns:
+    # The session title. apogee asks for one off the first prompt, so this has to be matched BEFORE
+    # the prompt's own turn or it would take it (see smoke.yaml).
+    - when:
+        last_message: The user's first request
+      repeat: true
+      text: Announced scratch dir
+    # The prompt, and the one turn that reads the orientation.
+    - when:
+        last_message: scratch dir and then the control plane
+      captures:
+        - {name: scratch, from: system, pattern: 'Scratch dir: (\S+) — writable'}
+      tool_calls:
+        # Explicit ids: a call's id is numbered by position within its own turn, so two turns each
+        # emitting one call would both send `call_1` and an assertion that reads the calls back
+        # would see one of them.
+        - id: scratch-probe
+          name: terminal
+          arguments: '{"command":"export TMPDIR={{scratch}}/tmp && mkdir -p \"$TMPDIR\" && echo probe > \"$TMPDIR/probe\" && echo scratch-ok"}'
+    # The control, once the scratch command has come back: apogee's own control plane, named in the
+    # command's text, which the Tier-2 rule matches whatever the mode.
+    - when:
+        tool_result: terminal
+      tool_calls:
+        - id: control-plane-probe
+          name: terminal
+          arguments: '{"command":"touch ~/.apogee/guard-probe.txt"}'
+    # The wrap-up, once the denied control call has come back.
+    - when:
+        tool_result: terminal
+      text: Both commands answered.
+      token_delay: 1ms
+      chunk_runes: 8
+    # Anything apogee asks on its own account.
+    - repeat: true
+      text: Nothing else to add.
