@@ -471,8 +471,9 @@ const cappedReplyErrFmt = "reply hit the output cap apogee set (%d tokens) with 
 	"show for it%s — raise max-output-tokens: for this server or narrow the task; a retry meets the same ceiling"
 
 // cappedDelegateReplyErrFmt is the fault text for a CHILD's reply that ran into the same ceiling
-// while carrying no tool call — with or without visible text, which is the whole difference from
-// cappedReplyErrFmt above. A truncated answer is not a result: it reads as one to the parent MODEL,
+// while carrying no tool call but visible text — the one case cappedReplyErrFmt above does not
+// cover, an EMPTY capped reply being empty at every depth and keeping that message's reasoning-spend
+// number. A truncated answer is not a result: it reads as one to the parent MODEL,
 // which sees a tool result and no cut, so on 2026-08-25 a capped delegate reply was accepted as a
 // delegation's final answer and flowed back to a coordinator as a 223K-character "finding" that
 // stopped mid-sentence. A human reading the main agent's transcript can see the cut and ask for the
@@ -516,22 +517,25 @@ func (a *Agent) reviewedOutcome(turn int, resp *domain.Response) (*domain.Respon
 // A reply carrying tool calls is never one: the loop has work to do, so a cut-off reply that still
 // asked for a tool runs it and continues, at every depth.
 //
-// With no tool calls, two rules apply in this order. A DELEGATE's reply (a.depth > 0) that hit the
-// output cap faults whatever visible text it carries — see cappedDelegateReplyErrFmt for why a
-// truncated delegate answer cannot be allowed to pose as the delegation's result. Otherwise the
-// historical rule stands unchanged for every depth: only a reply with no visible text either is
-// empty, and emptyReplyFault picks between the empty and the capped wording for it.
+// With no tool calls, two rules apply in this order. The historical rule goes first and stands
+// unchanged for every depth: only a reply with no visible text either is empty, and emptyReplyFault
+// picks between the empty and the capped wording for it. Its placement is load-bearing — a child's
+// EMPTY capped reply is the reply whose reasoning spend is worth the most and the delegate wording
+// below carries no such number, so emptiness is judged before depth is. Only a reply that did carry
+// visible text reaches the DELEGATE rule: a child's (a.depth > 0) that hit the output cap faults
+// for that text — see cappedDelegateReplyErrFmt for why a truncated delegate answer cannot be
+// allowed to pose as the delegation's result.
 func (a *Agent) replyFault(resp *domain.Response) (string, bool) {
 	if len(resp.ToolCalls()) > 0 {
 		return "", false
 	}
+	if strings.TrimSpace(resp.Text()) == "" {
+		return a.emptyReplyFault(resp), true
+	}
 	if a.depth > 0 && resp.FinishReason() == domain.FinishLength {
 		return fmt.Sprintf(cappedDelegateReplyErrFmt, a.maxOutputTokens()), true
 	}
-	if strings.TrimSpace(resp.Text()) != "" {
-		return "", false
-	}
-	return a.emptyReplyFault(resp), true
+	return "", false
 }
 
 // emitLoopFault surfaces a loop-level fault as the ErrorEvent it has always been AND records its

@@ -237,7 +237,7 @@ stray bridge.
 
 **Commit.** `fix(agent): a child's mid-exchange fold appends the user bridge so no request ends on the summary`
 
-## 6. A delegate's empty capped reply reports the reasoning spend
+## 6. A delegate's empty capped reply reports the reasoning spend — ✅ DONE (2026-08-28)
 
 **What.** ISSUES: *A child's EMPTY capped reply lost the reasoning-spend number.* In
 `replyFault` (`internal/agent/loop.go:524`) move the visible-text check ahead of the

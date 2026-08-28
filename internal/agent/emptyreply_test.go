@@ -8,10 +8,10 @@ package agent
 // that retried and recovered real content keeps first claim, so the off-ramp still owns the Turn.
 // A third set pins what the guard SAYS: a reply cut off at the engine's own output cap (ADR 0046)
 // is told apart from an upstream that answered with nothing, because calling a 20k-token reasoning
-// run "empty" names neither the cap nor what was burned reaching it. A fourth pins the one place
-// the guard judges MORE than emptiness: on a delegate, a capped reply with no tool call faults
-// even when it carries text, because a truncated answer reaches a parent MODEL that cannot see the
-// cut.
+// run "empty" names neither the cap nor what was burned reaching it — at every depth, so a child's
+// empty capped reply reports its reasoning spend too. A fourth pins the one place the guard judges
+// MORE than emptiness: on a delegate, a capped reply that carries visible text but no tool call
+// faults, because a truncated answer reaches a parent MODEL that cannot see the cut.
 
 import (
 	"context"
@@ -144,9 +144,13 @@ func cutOffScript() []provider.Delta {
 // (ADR 0046): a reply that reasoned itself into the engine's OWN ceiling is not "an empty reply"
 // — the model answered at length and apogee stopped it — so the fault names the cap, the remedy
 // key, and what the reasoning cost, while failing the Turn exactly as every other empty reply does.
+// The depth arm pins that this reading is not the main agent's alone: a CHILD that reasons itself
+// silent is the run whose spend a parent most needs named, and the delegate wording (which reports
+// no number) must not claim it just because the reply came from depth 1.
 func TestCutOffReplyNamesTheOutputCap(t *testing.T) {
 	tests := []struct {
 		name          string
+		depth         int
 		script        []provider.Delta
 		wantReasoning bool
 	}{
@@ -160,6 +164,12 @@ func TestCutOffReplyNamesTheOutputCap(t *testing.T) {
 			script:        []provider.Delta{{Kind: provider.DeltaDone, FinishReason: "length"}},
 			wantReasoning: false,
 		},
+		{
+			name:          "a delegate cut off mid-reasoning reports what it spent too",
+			depth:         1,
+			script:        cutOffScript(),
+			wantReasoning: true,
+		},
 	}
 
 	for _, tc := range tests {
@@ -172,6 +182,7 @@ func TestCutOffReplyNamesTheOutputCap(t *testing.T) {
 			if err != nil {
 				t.Fatalf("newAgent: %v", err)
 			}
+			a.depth = tc.depth
 			if err := a.Submit(domain.UserInput{Text: "audit the repository"}); err != nil {
 				t.Fatalf("Submit: %v", err)
 			}
@@ -195,6 +206,10 @@ func TestCutOffReplyNamesTheOutputCap(t *testing.T) {
 			got := errs[0].Err
 			if strings.Contains(got, "empty reply") {
 				t.Errorf("ErrorEvent.Err = %q, want the cut-off message, not the empty-reply one", got)
+			}
+			if strings.Contains(got, "a truncated answer is not a result") {
+				t.Errorf("ErrorEvent.Err = %q, want the cut-off message, not the delegate one — "+
+					"there is no truncated answer here and the delegate wording reports no spend", got)
 			}
 			if !strings.Contains(got, "19660") {
 				t.Errorf("ErrorEvent.Err = %q, want it to name the cap the engine sent (19660)", got)
