@@ -151,9 +151,16 @@ while somebody is still typing.
 
 **8. Self-writes must not double-apply, and a watcher apply is an ordinary apply.** The pane's own
 write already applies the key live; **every** apply, from either path, refreshes the baseline, so the
-watcher sees no change for a write apogee itself just made. A key the watcher applies journals its
-` *` marker exactly as a pane edit does (ADR 0037 decision 8), lands on the same boundary its class
-dictates, and refuses on its own row with the error verbatim when it cannot be applied.
+watcher sees no change for a write apogee itself just made. A key the watcher applies is journaled
+exactly as a pane edit is (ADR 0037 decision 8), lands on the same boundary its class dictates, and
+refuses on its own row with the error verbatim when it cannot be applied — but it wears a marker of
+its own, ` ~` rather than ` *`, because the two answer a different question about one row: ` *` says
+the human changed it here, ` ~` says the file changed it under them. The journal holds one entry per
+key, so the LAST source wins the marker — an in-pane commit over a watched key flips the row back to
+` *`, and a save over a key edited in the pane flips it to ` ~`. *(Amended 2026-08-28 — this
+decision originally gave a watcher apply the pane edit's ` *`; the distinct ` ~` and the
+last-source-wins rule are what shipped, `settingsWatchMarker` and `settingsEditMarker`,
+`internal/tui/settings.go`. No code changed.)*
 
 **9. Everything else in ADR 0037 stands.** Superseded here are exactly two things: **binding B** —
 the `$VISUAL`→`$EDITOR`→`vi` ladder of its decision 6, now a four-rung ladder starting at the config
@@ -162,9 +169,10 @@ and read when the child exits, which survives only for the foreground path of de
 and still governing: the `ApplySetting` seam and its per-key dispatcher (whose signature this record
 does not change), the two mutator classes of decision 2 and the boundaries they land on, the
 boundary/override/failure row notes of decisions 1, 3 and 4, the idle-only `/settings` policy and the
-idle-only editor jump, the ` *` marker of decision 8, the picker-driven `server` row of decision 5,
+idle-only editor jump, the ` *` / ` ~` marker pair of decision 8, the picker-driven `server` row of decision 5,
 the MCP validate-then-commit reconnect of decision 7, and the write fence and persistence contract of
-decision 9. ADR 0035's contract is likewise untouched.
+decision 9. ADR 0035's contract is likewise untouched. *(Amended 2026-08-28 — decision 8's marker
+is the ` *` / ` ~` pair, not ` *` alone; see the amendment there.)*
 
 ## Considered options
 

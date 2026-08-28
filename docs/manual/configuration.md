@@ -518,7 +518,10 @@ own delegations stay one at a time. `apogee headless` resolves the cap the same 
 session does: the pin if the entry carries one, and otherwise a single look at what the
 server advertises, taken once as the run is composed. A scheduled firing runs at the
 width the session it fires beneath is running at, read when it fires — so a `/server`
-switch carries the new server's cap into the next firing.
+switch carries the new server's cap into the next firing. A `/model` profile load that
+moves the session arrives at the new server's cap the same way; because the entry a
+profile load builds pins nothing, delegations run one at a time there until that
+server's own first heartbeat says how many slots it has.
 
 **Delegations can run on a server of their own.** `sub-agents: true` on one
 entry (a file-only key) sends every delegation there: your conversation stays on

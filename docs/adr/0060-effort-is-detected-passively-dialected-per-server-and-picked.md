@@ -97,8 +97,15 @@ greyed-out disabled-row machinery is introduced; absence is the whole signal.
 The footer run reads `host ✦ model ✦ <effort> ✦ ~/repo` — the effort sitting with the upstream
 facts it belongs to, before the local workdir. The word shown is what the **next request will
 actually carry**: session override ▸ profile `thinking.effort:` ▸ the server-reported
-`default_effort` ▸ the word `auto` (a `/props` hit, where the default is unknowable). The
-segment drops whole when the footer is too narrow, like the other optional segments.
+`default_effort` ▸ the word `auto` (a `/props` hit, where the default is unknowable). The word
+sits in the footer's LEFT run with the upstream facts it belongs to, so a window too narrow to hold
+both ends truncates that run with an ellipsis exactly as its neighbouring segments do; only the mode
+marker on the right drops WHOLE, because a clipped mode word would name a blast radius the session
+is not in. *(Amended 2026-08-28 — this decision previously said the segment dropped whole at a
+narrow footer, like the other optional segments. It never did: `footerContent`
+(`internal/tui/model.go`) has always ellipsized the left run and dropped only the marker. Leaving
+with its separator stays what an UNNAMED segment does — decision 5's absence, not narrowness. No
+footer code changed.)*
 
 **7 — `/effort` is a popup picker; the text grammar is removed.** Bare `/effort` opens a
 fixed-choice popup ([ADR 0053](0053-popup-surfaces-embed-one-list-surface.md), the

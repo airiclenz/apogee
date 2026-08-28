@@ -707,14 +707,33 @@ driver, and the test gets written. The rows below cover every claim class
 ratified for the irreducible halves (ADR 0062, decision 5). Every example-test name in it was
 re-checked against `go test -list` on 2026-08-28 and resolves to a real function.
 
-Read the **Not observable** column knowing it carries two kinds of cell. Most of them name the
-instrument that asserts the claim INSTEAD of the driver on that row — the session record, the
-stub's request log, a unit test — and those claims are covered, just not where the row's own
-driver could see them. Only four are irreducible, the claim leaving the machine altogether: font
-tofu (T-20), felt flicker (T-24), what a real desktop application does with the file (T-19), and
+Read the **Not observable** column knowing it carries two kinds of cell, and that neither kind is
+an open gap.
+
+A **pointer** cell names the instrument that asserts the claim INSTEAD of the driver on that row —
+the session record, the stub's request log, a unit test. The claim is covered, just not where the
+row's own driver could see it: a hostile listing's rows read out of the stub's request log (T-12),
+the record standing as the completeness authority behind a paged walk (T-24), the 2 MiB body cap
+held in `internal/tools/network_funnel_test.go` (T-18), the moved session's re-follow covered in
+`upstream_test.go` (T-16).
+
+A **limit** cell names something the suite has decided not to chase, together with the proxy it
+pins instead. Whether a deliberate press is *felt* (T-13 — a millisecond ceiling on the paint is
+the proxy); whether the reader's own terminal theme renders a role legibly (T-15 — the assertion is
+on the scheme's role, never on a colour); traffic to a real remote host, and what a third-party MCP
+server does with a call (T-18 — nothing in the suite leaves loopback, so the proxies are "no
+loopback traffic went through the proxy" and an in-test server of the shape `internal/mcp`'s own
+fixture uses); whether the user's shell prompt looks right after exit (T-25 — the tty state read
+back through `PTYDriver.TTYState()`); the Landlock residual itself (T-11 — the negative direction
+on a modern kernel); a live tool-capable endpoint (T-22 — the env-gated `make live-eval` run); and
+whether the prose READS well (T-23 — a grep pins the claim, not the sentence around it). Each of
+those is an accepted limit, and its cell says so.
+
+Four of the limit cells are irreducible, the claim leaving the machine altogether: font tofu
+(T-20), felt flicker (T-24), what a real desktop application does with the file (T-19), and
 `brew upgrade` before its release exists together with the newcomer walk's Homebrew and OpenRouter
 steps (T-21, T-23). Those four are recorded in `ISSUES.md` under "Test drivers — residue" as
-accepted proxies with no open work; every other cell in the column is a pointer, not a gap.
+accepted proxies with no open work.
 
 | Claim class | Driver | Example test | Not observable by any driver |
 | --- | --- | --- | --- |

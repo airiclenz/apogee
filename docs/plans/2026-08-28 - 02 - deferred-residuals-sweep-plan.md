@@ -926,7 +926,13 @@ still counts seven*).
 
 **Commit.** `docs(code): eight stale doc comments and one help line corrected`
 
-## 33. ADR and manual amendments (five prose fixes)
+## 33. ADR and manual amendments (five prose fixes) — ✅ DONE (2026-08-28)
+
+NOTES (2026-08-28): ADR 0060's amendment adds one clause beyond the item's literal text — that leaving with its separator stays what an UNNAMED segment does (decision 5's absence, not narrowness). Without it the corrected sentence would read as though the effort segment can never leave the footer, which is the opposite of decision 5.
+
+NOTES (2026-08-28): ADR 0041 decision 9 took both halves the item names: its inline clause now reads "the ` *` / ` ~` marker pair of decision 8", and the dated amendment sits at the end of that paragraph pointing at decision 8's own amendment, rather than being spliced into the middle of the untouched-and-still-governing list.
+
+NOTES (2026-08-28): the test-drivers.md rewrite names the MCP row's cell ("what a third-party MCP server does with a call") as a limit alongside the egress row's — both rows are tagged T-18, which the item's list covers, and leaving it unclassified would have reproduced the approximate split the item exists to close.
 
 **What.** Doc-only: (a) ADR 0060 D6 (`docs/adr/0060-…:101`) amended, dated, to say the
 effort word sits in the left run and truncates with an ellipsis like its neighbours; only

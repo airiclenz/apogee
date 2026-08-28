@@ -91,7 +91,8 @@ model reacts to within one call. **Amended 2026-08-26:** the snapshot no longer 
 `git` of its own — it runs through the same hardened git funnel as the git tools
 (`tools.RunGitQuery`: the exec fence on the resolved binary, `-c core.hooksPath=`,
 `GIT_CONFIG_NOSYSTEM`, the allowlisted workspace-scoped environment, the repo-local
-filter-driver refusal and the §2.4 process-tree teardown), and it runs OUTSIDE the call's
+command-config refusal — every repo-local key whose value is a program git executes — and the
+§2.4 process-tree teardown), and it runs OUTSIDE the call's
 confinement box — apogee's own bookkeeping is not the model's command. The 2 s timeout,
 workspace-root cwd and silent-skip-on-any-failure contract above are unchanged; a fenced or
 refused git is simply one more failure that skips the check.
