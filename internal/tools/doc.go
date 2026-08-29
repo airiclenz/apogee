@@ -258,7 +258,7 @@
 //
 // # The package spine, one line each
 //
-// Seven files register no tool. tools.go is the shared toolSpec (name, description, JSON
+// Eight files register no tool. tools.go is the shared toolSpec (name, description, JSON
 // schema) every built-in embeds, the size ceilings they all read, and the result helpers —
 // including okSummary, which attaches the structured half. registry.go is HostTools, the
 // two assemblers, NewDefaultRegistry and NewDefaultRegistryWithHost, that turn the built-ins
@@ -279,6 +279,10 @@
 // the model-facing wording a fenced failure is rendered as, and readScope — the READ-only
 // multi-root resolver that tries the workspace first and then any extra read-only roots the
 // host mounts, returning the matched root so a caller pins every later fenced operation to it.
+// path_suggest.go is the "did you mean" half of a refusal: suggestSiblings, which reads the
+// missing path's parent THROUGH the fence and answers the prefix-matching entries spelled the way
+// the model spelled the path, and notFoundMessage, which appends them to a tool's own not-found
+// wording — one helper rather than a near-miss search copied into every read tool.
 // workspace_scoped.go is the
 // unexported workspaceScopedWriter marker and the write-target resolvers that say WHICH
 // argument a given writer lands on. regions.go is the one Edit-region builder the three edit

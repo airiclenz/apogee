@@ -129,7 +129,15 @@ rendered branch line contains `KeyMsg · internal/tui/model.go`.
 
 **Commit:** `feat(tui): grep and find_files rows show the path they were scoped to`
 
-## 3. A fenced "did you mean" helper for missing paths
+## 3. A fenced "did you mean" helper for missing paths — ✅ DONE (2026-08-29)
+
+NOTES (2026-08-29): the item's Files list omits `internal/tools/doc.go`, but the package carries the docmap guard (`TestDocMapNamesEveryFile`), which fails the moment a non-test file is not named in the file map; added the half-line for `path_suggest.go` beside `path_read.go`'s and corrected the paragraph's count ("Seven files register no tool" → "Eight"). No other doc.go line changed.
+
+NOTES (2026-08-29): `notFoundMessage`'s `prefix` parameter is the refusal's leading text INCLUDING its separator ("path not found: "), i.e. the literal each call site concatenates today — chosen so item 4's four sites keep their messages byte-identical by construction; documented on the func.
+
+NOTES (2026-08-29): the entry name is joined onto the given parent FIRST and `escapeRowBreaks` applied to the whole rendered suggestion, not to the bare name — escaping first would hand `filepath.Join`'s Clean a backslash-bearing string, which is a separator on Windows (a shipped GOOS).
+
+NOTES (2026-08-29): no CHANGELOG entry — the helper has no call site yet (item 4 wires it), so nothing user- or model-facing changed with this commit.
 
 **What:** new `internal/tools/path_suggest.go`: `suggestSiblings(root, rel string) []string` —
 given the root a path was ACCEPTED under (`readScope.resolve` already answered that) and the
