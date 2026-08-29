@@ -3,6 +3,7 @@ package probe
 import (
 	"bytes"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -399,6 +400,212 @@ func TestGatherTerminalMeasuresAnAgreeingTerminal(t *testing.T) {
 	}
 }
 
+// A terminal that moves the cursor a row down the moment the last column is written is the
+// divergence the 2026-08 ghosting investigation ended on, and the wrap section is the only reason
+// the probe writes into that column at all. It has to catch it — and catch it alone, or the report
+// would hand the user a second finding to chase that no terminal actually has.
+func TestGatherTerminalFlagsAnImmediateWrap(t *testing.T) {
+	t.Parallel()
+	fake := newAgreeingTerminal()
+	fake.wrap = wrapImmediate
+
+	report := GatherTerminal(fake.inputs("xterm-256color"))
+
+	wrap := onlyMismatch(t, report, wrapSection)
+	if !strings.Contains(wrap.Summary, "WRAPPED IMMEDIATELY") {
+		t.Errorf("an immediate wrap summarised as %q", wrap.Summary)
+	}
+	if got, want := flaggedLabels(wrap, 0), []string{"wrote the final column"}; !slices.Equal(got, want) {
+		t.Errorf("the wrap section flagged %v; want %v — the step that wrote the last column", got, want)
+	}
+}
+
+// The mode section's finding is a terminal that ANSWERS the DECRQM query and then does not honour
+// the set: bubbletea switches the painter to grapheme measurement on the strength of the answer, so
+// the two sides part company. The glyph sweep that follows must then measure against the table the
+// mode ACTUALLY in force implies, or the probe would report a width finding it caused itself.
+func TestGatherTerminalFlagsAModeThatDoesNotTake(t *testing.T) {
+	t.Parallel()
+	fake := newAgreeingTerminal()
+	// Found reset and answered as reset — but CSI ?2027h never moves it.
+	fake.honours2027 = false
+
+	report := GatherTerminal(fake.inputs("xterm-256color"))
+
+	modes := onlyMismatch(t, report, modesSection)
+	const wantPrefix = "the terminal answers DECRQM for mode 2027 but CSI ?2027h does not take"
+	if !strings.HasPrefix(modes.Summary, wantPrefix) {
+		t.Errorf("the mode section summarised as\n  %q\nwant a summary beginning\n  %q", modes.Summary, wantPrefix)
+	}
+	if got, want := flaggedLabels(modes, 0), []string{"2027"}; !slices.Equal(got, want) {
+		t.Errorf("the mode section flagged %v; want %v — mode 2026 was never asked to move", got, want)
+	}
+	glyphs := report.Sections[glyphsOnSection]
+	if want := "glyph advance (mode 2027 on, terminal reports reset (2))"; glyphs.Title != want {
+		t.Errorf("the mode-on glyph section is titled\n  %q\nwant\n  %q", glyphs.Title, want)
+	}
+	if want := "every glyph advances by the width the painter's wcwidth table predicts"; glyphs.Summary != want {
+		t.Errorf("the mode-on glyph section summarised as\n  %q\nwant\n  %q", glyphs.Summary, want)
+	}
+}
+
+// bubbletea asserts the every-8 tab-stop model on every Windows session by writing DECST8C before
+// the first frame, and ultraviolet then moves the cursor against it. A terminal that ignores the
+// request keeps its own stops, and the renderer's cursor lands in a column nothing put it in.
+func TestGatherTerminalFlagsStopsDECST8CDoesNotMove(t *testing.T) {
+	t.Parallel()
+	fake := newAgreeingTerminal()
+	fake.stops = stopsEvery(4, fake.width)
+	fake.resetsStops = false
+
+	report := GatherTerminal(fake.inputs("xterm-256color"))
+
+	tabs := onlyMismatch(t, report, tabsSection)
+	if want := "the terminal's tab stops are not the every-8 model the renderer moves against"; tabs.Summary != want {
+		t.Errorf("every-4 tab stops summarised as\n  %q\nwant\n  %q", tabs.Summary, want)
+	}
+	if got, want := flaggedLabels(tabs, 0), []string{"tab stops (after DECST8C)"}; !slices.Equal(got, want) {
+		t.Errorf("the tab section flagged %v; want %v — the before row is the terminal's own state, not a finding", got, want)
+	}
+	if got := observedFor(t, tabs, "DECST8C (CSI ?5W)"); got != "no change" {
+		t.Errorf("the DECST8C row reads %q; want %q", got, "no change")
+	}
+}
+
+// The other half of the same measurement: stops that are NOT every 8 until DECST8C is sent are no
+// finding at all, because the renderer sends it. Separating the two is the whole reason the stops
+// are read twice, so the pair has to be legible in the report.
+func TestGatherTerminalReportsStopsDECST8CMoved(t *testing.T) {
+	t.Parallel()
+	fake := newAgreeingTerminal()
+	fake.stops = stopsEvery(4, fake.width)
+
+	report := GatherTerminal(fake.inputs("xterm-256color"))
+
+	if report.Aborted != "" {
+		t.Fatalf("the run aborted: %s", report.Aborted)
+	}
+	if report.Mismatch() {
+		t.Fatalf("a terminal whose stops DECST8C moved back reported a mismatch:\n%s", report.Report())
+	}
+	tabs := report.Sections[tabsSection]
+	if got := observedFor(t, tabs, "DECST8C (CSI ?5W)"); got != "moved the stops" {
+		t.Errorf("the DECST8C row reads %q; want %q", got, "moved the stops")
+	}
+	if got, want := observedFor(t, tabs, "tab stops (after DECST8C)"), stopList(everyEightStops(fake.width, 8), true); got != want {
+		t.Errorf("the stops after DECST8C read %q; want %q", got, want)
+	}
+}
+
+// This is the Windows divergence the section exists to make visible from outside the program: with
+// TERM unset the painter is granted NOTHING, so it navigates a row with relative moves counted off
+// its own model while the terminal would have answered an absolute one. The inverse — a painter
+// granted what the terminal lacks — is deliberately not a finding, and proving that is what keeps
+// the section from crying wolf on every stripped-down TERM.
+func TestGatherTerminalFlagsACapabilityThePainterDoesNotKnow(t *testing.T) {
+	t.Parallel()
+	fake := newAgreeingTerminal()
+
+	report := GatherTerminal(fake.inputs(""))
+
+	caps := onlyMismatch(t, report, capsSection)
+	if !strings.Contains(caps.Summary, "xtermCaps(TERM=(unset))") {
+		t.Errorf("the capability summary does not name the empty TERM the way the header does: %q", caps.Summary)
+	}
+	if got, want := flaggedLabels(caps, 0), []string{"CHA", "VPA"}; !slices.Equal(got, want) {
+		t.Errorf("the capability section flagged %v; want %v — every sequence this terminal answers and TERM does not grant", got, want)
+	}
+
+	// The inverse: a capability the painter believes in and the terminal does not have costs the
+	// renderer nothing it was going to use, so it is not a mismatch.
+	lacking := newAgreeingTerminal()
+	lacking.caps = fakeCaps{}
+
+	quiet := GatherTerminal(lacking.inputs("xterm-256color"))
+
+	if quiet.Mismatch() {
+		t.Errorf("a terminal that lacks what TERM grants reported a mismatch:\n%s", quiet.Report())
+	}
+	if want := "the painter's capability set matches what the terminal actually does"; quiet.Sections[capsSection].Summary != want {
+		t.Errorf("the capability section summarised as\n  %q\nwant\n  %q", quiet.Sections[capsSection].Summary, want)
+	}
+}
+
+// The glyph sweep runs twice so that a width disagreement can be pinned on the mode rather than
+// merely correlated with it. A terminal that reports mode 2027 set and still measures the VS16
+// glyphs by wcwidth is that disagreement, and only the second sweep may see it: under wcwidth the
+// same terminal is right.
+func TestGatherTerminalFlagsAGlyphTheTableMisses(t *testing.T) {
+	t.Parallel()
+	fake := newAgreeingTerminal()
+	// wcwidth counts the base character alone (1); grapheme measurement counts the emoji
+	// presentation the variation selector asks for (2). This terminal never made the switch.
+	narrow := map[string]bool{"⚠️": true, "ℹ️": true}
+	fake.widthOf = func(text string) int {
+		if narrow[text] && fake.modes[2027] == modeSet {
+			return 1
+		}
+		return fake.painterWidth(text)
+	}
+
+	report := GatherTerminal(fake.inputs("xterm-256color"))
+
+	glyphs := onlyMismatch(t, report, glyphsOnSection)
+	if want := "the terminal advances at least one glyph by a width the painter's grapheme table does not predict"; glyphs.Summary != want {
+		t.Errorf("the mode-on glyph section summarised as\n  %q\nwant\n  %q", glyphs.Summary, want)
+	}
+	if got, want := flaggedLabels(glyphs, 1), []string{"warning (VS16)", "info (VS16)"}; !slices.Equal(got, want) {
+		t.Errorf("the mode-on glyph section flagged %v; want %v", got, want)
+	}
+}
+
+// A busy pty delivers a reply in pieces, and every measurement in the probe is a reply. await holds
+// a half-arrived one until the rest lands, so a terminal that answers one byte per read must be
+// measured identically to one that answers in whole replies — anything else and the probe's
+// findings would depend on the load of the machine it ran on.
+func TestGatherTerminalSurvivesRepliesSplitAcrossReads(t *testing.T) {
+	t.Parallel()
+	whole := GatherTerminal(newAgreeingTerminal().inputs("xterm-256color"))
+
+	split := newAgreeingTerminal()
+	split.chunk = 1
+
+	report := GatherTerminal(split.inputs("xterm-256color"))
+
+	if report.Mismatch() {
+		t.Errorf("a terminal that answers a byte at a time reported a mismatch:\n%s", report.Report())
+	}
+	if report.Report() != whole.Report() {
+		t.Errorf("a byte-at-a-time terminal measured differently:\n%s\nwant the whole-reply run's report:\n%s",
+			report.Report(), whole.Report())
+	}
+}
+
+// The probe restores the mode it FOUND, not the mode it prefers. A terminal already running with
+// mode 2027 set has to be handed back set — and the sweep still has to run the off pass first, or
+// the pair of glyph sections would be measuring a mode the probe never moved.
+func TestGatherTerminalRestoresAModeItFoundSet(t *testing.T) {
+	t.Parallel()
+	fake := newAgreeingTerminal()
+	fake.modes[2027] = modeSet
+
+	report := GatherTerminal(fake.inputs("xterm-256color"))
+
+	if report.Aborted != "" {
+		t.Fatalf("the run aborted: %s", report.Aborted)
+	}
+	if report.Mismatch() {
+		t.Fatalf("a terminal found with mode 2027 set did not measure clean:\n%s", report.Report())
+	}
+	if want := "glyph advance (mode 2027 off, terminal reports reset (2))"; report.Sections[glyphsOffSection].Title != want {
+		t.Errorf("the first glyph sweep is titled\n  %q\nwant\n  %q", report.Sections[glyphsOffSection].Title, want)
+	}
+	if last, ok := lastMode2027Request(string(fake.written)); !ok || last != setMode2027 {
+		t.Errorf("the last mode-2027 request was %q, %v; want %q — the setting the terminal was found in",
+			last, ok, setMode2027)
+	}
+}
+
 // observedFor returns the "observed" cell of the row a section labels label, so a test names the
 // row it means rather than counting to it.
 func observedFor(t *testing.T, section TerminalSection, label string) string {
@@ -410,4 +617,52 @@ func observedFor(t *testing.T, section TerminalSection, label string) string {
 	}
 	t.Fatalf("section %q has no %q row", section.Title, label)
 	return ""
+}
+
+// The sections GatherTerminal measures, in the order it appends them, so a test names the section
+// it means rather than counting through the report.
+const (
+	modesSection = iota
+	glyphsOffSection
+	glyphsOnSection
+	tabsSection
+	wrapSection
+	capsSection
+)
+
+// onlyMismatch asserts that the run completed and that exactly the section at index reported a
+// divergence, and returns that section. Each diverging terminal above is scripted with ONE
+// divergence, so a second flagged section would mean the fake diverged where the test did not
+// intend it to — and the finding being asserted would be reading the wrong cause.
+func onlyMismatch(t *testing.T, report Terminal, index int) TerminalSection {
+	t.Helper()
+	if report.Aborted != "" {
+		t.Fatalf("the run aborted: %s", report.Aborted)
+	}
+	if len(report.Sections) != capsSection+1 {
+		t.Fatalf("%d sections were measured; want %d:\n%s", len(report.Sections), capsSection+1, report.Report())
+	}
+	if !report.Mismatch() {
+		t.Fatalf("a diverging terminal reported no mismatch at all:\n%s", report.Report())
+	}
+	for i, section := range report.Sections {
+		if section.Mismatch != (i == index) {
+			t.Errorf("section %q reports Mismatch = %v; want %v:\n%s",
+				section.Title, section.Mismatch, i == index, report.Report())
+		}
+	}
+	return report.Sections[index]
+}
+
+// flaggedLabels names every flagged row of a section by the cell in column col, so a test asserts
+// WHICH rows carry the finding rather than only that the section carries one — a section that
+// flagged the right number of wrong rows would otherwise pass.
+func flaggedLabels(section TerminalSection, col int) []string {
+	var labels []string
+	for i, flagged := range section.Flagged {
+		if flagged && i < len(section.Rows) && col < len(section.Rows[i]) {
+			labels = append(labels, section.Rows[i][col])
+		}
+	}
+	return labels
 }

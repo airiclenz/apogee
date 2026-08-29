@@ -782,13 +782,6 @@ it waits. Sources: `docs/reviews/code-audit-2026-08-25.md` (C-nn), `docs/skill-r
   winlabel/journal.go` replays a planted journal's label writes and `IsLowLabel` vouches the write
   side only. Both need a Windows box to verify; the "backend keeps no lock" contract is what to revise.
 
-**Test debt:**
-
-- [ ] **C-15 — `GatherTerminal`'s measurement engine is untested past its two abort paths**
-  (`internal/probe/terminal.go`; `internal/probe` at 49.4% coverage, the repo's outlier). Wants a
-  scripted `TerminalInputs.Read` that answers each query, asserting Rows/Summary/Mismatch for an
-  agreeing and a diverging terminal.
-
 **Architecture pass, not fixes** — candidates for the next architecture-review plan
 (`docs/plans/archived/2026-08-24 - 03 - architecture-review-deepening-plan.md` is already archived):
 

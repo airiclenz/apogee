@@ -269,7 +269,13 @@ specifies).
 
 **Commit.** `test(probe): a scripted terminal answers the probe and an agreeing one measures clean (C-15)`
 
-## 4. A diverging terminal is caught, section by section; a split reply is waited for (C-15, half 2)
+## 4. A diverging terminal is caught, section by section; a split reply is waited for (C-15, half 2) — ✅ DONE (2026-08-29)
+
+NOTES (2026-08-29): `internal/probe/terminal_fake_test.go` is on the item's Files list but needed no change — item 3 already gave the fake every knob this item names (`chunk`, `resetsStops`, and `widthOf` as an overridable func field), which the item's Tests line anticipates ("if item 3 did not already add them"). The per-glyph width override is therefore installed by the glyph test as a closure over the fake rather than as a new field.
+
+NOTES (2026-08-29): the capabilities inverse ("TERM grants what the terminal lacks → no mismatch") is a second block inside `TestGatherTerminalFlagsACapabilityThePainterDoesNotKnow` rather than a ninth function, which is what makes the item's "the eight above" count hold; the DECST8C-moved complementary is its own function, as the item lists it.
+
+NOTES (2026-08-29): three shared test seams were added beside `observedFor` because the "only this section is flagged" assertion the item requires appears in five tests: a `modesSection…capsSection` index const block naming GatherTerminal's six sections in append order, `onlyMismatch(t, report, index)` (asserts the run completed, six sections came back, and exactly the section at index diverged, returning it), and `flaggedLabels(section, col)` (names the flagged rows by one column, so a test asserts WHICH rows carry the finding).
 
 **What.** Depends on item 3. Each section's MISMATCH branch is what the probe exists for, and none
 is exercised. Add to `internal/probe/terminal_test.go`, each on its own fake so one divergence
