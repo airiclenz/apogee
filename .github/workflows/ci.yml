@@ -94,3 +94,31 @@ jobs:
         run: go build ./...
       - name: build the binary
         run: go build ./cmd/apogee
+
+  test-windows:
+    name: windows tests
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # This job runs Go tooling only and needs no git credential.
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.26.x'
+      - name: go test (race)
+        # These two trees rather than `./...`: the rest of the suite is Linux-shaped (the
+        # landlock battery, the PTY drivers), while the Windows half of the product is the
+        # confinement backend — `internal/platform` carries `winlabel`'s walk — whose tests
+        # label the runner's own disk, throwaway by construction. Until this job existed no
+        # `//go:build windows` test had ever run: `make check` on a Linux or macOS box can
+        # only compile them (`GOOS=windows go vet`).
+        #
+        # `internal/probe` has no Windows-tagged test today and this job claims no coverage
+        # of one; the leg is here so the package's untagged tests also prove themselves on
+        # the Windows toolchain, and so a future tagged test has a home.
+        #
+        # -race needs cgo, which the runner's MinGW gcc satisfies. Should it ever fail to
+        # link here, drop -race from this one job and say so in this comment — the C-20
+        # race test then rests on its own iteration count alone.
+        run: go test -race -count=1 ./internal/platform/... ./internal/probe/...

@@ -84,6 +84,8 @@ Cutting a release is four acts, in this order, and only the first two are automa
 `scripts/check-pins.sh` — every GitHub Action must be pinned to a 40-character commit SHA
 with its `# vX.Y.Z` tag in the comment beside it — and `actionlint` over the workflow files.
 Both also run in CI, so a workflow cannot regress between one push and the next.
+Windows-tagged tests run on a `windows-latest` job; `make check` on a Linux or macOS box
+compiles them (`GOOS=windows go vet`) but cannot run them.
 
 Prefer the raw toolchain? `go build -o apogee ./cmd/apogee` does the same thing — the
 Makefile just gives the common commands one-word names. Releases are cross-compiled to

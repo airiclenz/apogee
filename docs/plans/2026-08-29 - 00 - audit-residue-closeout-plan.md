@@ -678,7 +678,12 @@ and `Recover` on the next pass restores it although the path reads unlabelled.
 
 **Commit.** `fix(winlabel): a prior label is restored only where apogee's Low label stood before the clear (F-08)`
 
-## 9. CI runs the Windows-tagged platform and probe tests on `windows-latest`
+## 9. CI runs the Windows-tagged platform and probe tests on `windows-latest` — ✅ DONE (2026-08-29)
+
+NOTES (2026-08-29): the new job is appended after `cross` rather than inserted between the
+existing jobs, so no existing workflow content moved. The `make check` echo line beside the
+new vet deliberately avoids the literal `GOOS=windows` so the item's
+`make -n check | grep -c 'GOOS=windows'` acceptance stays at 1.
 
 **What.** Depends on items 7 and 8. `.github/workflows/ci.yml` has one `check` job on
 `ubuntu-latest` and a `cross` job that only compiles the six targets (`:74-97`); every
