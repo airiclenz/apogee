@@ -5,11 +5,13 @@ package platform
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 
@@ -1454,6 +1456,243 @@ func TestWindowsRelabellingNeverJournalsApogeesOwnLabel(t *testing.T) {
 		if label != "" {
 			t.Errorf("%q still carries a mandatory label after teardown: %q", path, label)
 		}
+	}
+}
+
+// The lifecycle battery (audit C-20). Everything above tests what the backend DOES; these four
+// test what it must not do while it is being torn down — the window bubbletea's abnormal exit
+// (SIGINT, a closed console) opens by running the composition root's deferred Close while a
+// tool goroutine is still driving a Confine.
+
+func TestWindowsConfineRacesCloseAndNeverStartsUnconfined(t *testing.T) {
+	// The C-20 race, run for real under -race. Before the lifecycle lock, Confine read c.token
+	// TWICE with no lock while Close zeroed it: the guard read passed, Close zeroed the handle,
+	// and the second read stored a Token of 0 into SysProcAttr while Confine returned nil — so
+	// CreateProcess started the child UNCONFINED and the caller recorded it as confined. The
+	// per-iteration invariant is exactly that failure's negation: a nil error implies a token.
+	c := newTokenConfiner(t.TempDir())
+	if !c.Capabilities().FSWrite {
+		t.Skip("no restricted token on this host; nothing to confine")
+	}
+	closed := false
+	t.Cleanup(func() {
+		if !closed {
+			_ = c.Close()
+		}
+	})
+	box := domain.ConfinementBox{WorkspaceRoot: t.TempDir()}
+
+	// One confinement up front: it pays the label pass, so the racing loop below exercises the
+	// lifecycle read rather than a repeated disk walk, and a box this host cannot label fails
+	// HERE rather than turning every loop iteration into a refusal that asserts nothing.
+	if err := c.Confine(context.Background(), box, exec.Command("cmd", "/c", "echo hi")); err != nil {
+		t.Fatalf("Confine (warm-up): %v", err)
+	}
+
+	const iterations = 200
+	midway := make(chan struct{})
+	var unconfined, wrongError string
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < iterations; i++ {
+			if i == iterations/10 {
+				close(midway)
+			}
+			cmd := exec.Command("cmd", "/c", "echo hi")
+			err := c.Confine(context.Background(), box, cmd)
+			token := syscall.Token(0)
+			if cmd.SysProcAttr != nil {
+				token = cmd.SysProcAttr.Token
+			}
+			if err == nil && token == 0 && unconfined == "" {
+				unconfined = fmt.Sprintf("iteration %d returned nil with SysProcAttr.Token = 0", i)
+			}
+			if err != nil && !errors.Is(err, domain.ErrConfinementUnavailable) && wrongError == "" {
+				wrongError = fmt.Sprintf("iteration %d refused with %v", i, err)
+			}
+		}
+	}()
+
+	<-midway
+	if err := c.Close(); err != nil {
+		t.Errorf("Close while a Confine loop is in flight: %v", err)
+	}
+	closed = true
+	wg.Wait()
+
+	if unconfined != "" {
+		t.Fatalf("%s — the child would have started UNCONFINED while the caller marked it confined", unconfined)
+	}
+	if wrongError != "" {
+		t.Errorf("%s, want every refusal to wrap domain.ErrConfinementUnavailable so contract §4 demotes it to a forced Gate", wrongError)
+	}
+
+	// And after the teardown the refusal is permanent and NAMED: contract §4 turns it into a
+	// forced Gate, so a command may fail to START during shutdown and can never start outside
+	// the box.
+	for i := 0; i < 3; i++ {
+		cmd := exec.Command("cmd", "/c", "echo hi")
+		err := c.Confine(context.Background(), box, cmd)
+		if !errors.Is(err, domain.ErrConfinementUnavailable) {
+			t.Fatalf("Confine after Close = %v, want a refusal wrapping domain.ErrConfinementUnavailable", err)
+		}
+		if !strings.Contains(err.Error(), "has been closed") {
+			t.Errorf("refusal after Close = %q, want it to name the closed backend", err)
+		}
+		if cmd.SysProcAttr != nil && cmd.SysProcAttr.Token != 0 {
+			t.Error("a refused Confine still set SysProcAttr.Token; a refusal must leave the cmd untouched")
+		}
+	}
+}
+
+func TestWindowsCloseIsRepeatable(t *testing.T) {
+	// Close latches the token and the capabilities, but NOT the journal: winlabel's Retire is
+	// designed to CONVERGE, so a second Close must still drive it. Both halves of that are
+	// asserted — the ordinary repeat is a no-op, and a repeat over a handed-off prior discharges
+	// the handoff instead of silently keeping it forever.
+	t.Run("a fully retired session's second Close is a no-op", func(t *testing.T) {
+		home, ws := t.TempDir(), t.TempDir()
+		c := newTokenConfiner(home)
+		if !c.Capabilities().FSWrite {
+			t.Skip("no restricted token on this host; nothing to revert")
+		}
+		if err := c.labelBox(domain.ConfinementBox{WorkspaceRoot: ws}); err != nil {
+			t.Fatalf("labelBox: %v", err)
+		}
+		own := winlabel.JournalPath(home, os.Getpid())
+		if _, err := os.Stat(own); err != nil {
+			t.Fatalf("the label pass wrote no journal at %q: %v", own, err)
+		}
+
+		if err := c.Close(); err != nil {
+			t.Fatalf("first Close: %v", err)
+		}
+		if _, err := os.Stat(own); !os.IsNotExist(err) {
+			t.Errorf("the journal %q survived a clean first Close (stat error %v)", own, err)
+		}
+		if err := c.Close(); err != nil {
+			t.Errorf("second Close = %v, want nil — the teardown is repeatable and the token close latches", err)
+		}
+		if label, _ := winlabel.ReadSDDL(ws); label != "" {
+			t.Errorf("%q carries %q after the repeated teardown, want it unlabelled", ws, label)
+		}
+	})
+
+	t.Run("a handed-off prior is discharged by the repeat", func(t *testing.T) {
+		home, ws := t.TempDir(), t.TempDir()
+		if err := winlabel.SetSDDL(ws, "S:(ML;OICI;NW;;;ME)"); err != nil {
+			t.Fatalf("apply the foreign Medium label to %q: %v", ws, err)
+		}
+		foreignPrior, err := winlabel.ReadSDDL(ws)
+		if err != nil {
+			t.Fatalf("read the planted label of %q: %v", ws, err)
+		}
+		if foreignPrior == "" || winlabel.IsLowLabel(foreignPrior) {
+			t.Fatalf("planted label reads back as %q; the test needs a non-empty, non-Low prior", foreignPrior)
+		}
+
+		c := newTokenConfiner(home)
+		if !c.Capabilities().FSWrite {
+			t.Skip("no restricted token on this host; nothing to label")
+		}
+		t.Cleanup(func() { _ = c.Close() })
+		if err := c.labelBox(domain.ConfinementBox{WorkspaceRoot: ws}); err != nil {
+			t.Fatalf("labelBox: %v", err)
+		}
+
+		// A live sibling claims the same root, so the first Close hands the prior off rather
+		// than restoring it into the sibling's live box (restorablePriors).
+		pid, kill := liveChildPID(t)
+		siblingPath := winlabel.JournalPath(home, pid)
+		if err := winlabel.WriteJournal(siblingPath, winlabel.Record{PID: pid, Entries: []winlabel.Entry{{Path: ws, Root: true}}}); err != nil {
+			t.Fatalf("plant the sibling journal: %v", err)
+		}
+		if err := c.Close(); err != nil {
+			t.Fatalf("first Close = %v, want nil; a handed-off prior is not a failure", err)
+		}
+		own := winlabel.JournalPath(home, os.Getpid())
+		kept, err := winlabel.ReadJournal(own)
+		if err != nil {
+			t.Fatalf("the handed-off journal did not survive the first Close: %v", err)
+		}
+		if len(kept.Entries) != 1 || kept.Entries[0].PriorSDDL != foreignPrior {
+			t.Fatalf("journal after the handoff = %+v, want exactly the foreign-prior entry for %q", kept.Entries, ws)
+		}
+
+		// The sibling's claim ends. The SECOND Close on the very same backend is what discharges
+		// the handoff — the convergence winlabel's Retire promises, and the reason a latched
+		// closed flag must never short-circuit it.
+		kill()
+		if err := os.Remove(siblingPath); err != nil {
+			t.Fatalf("remove the retired sibling's journal: %v", err)
+		}
+		if err := c.Close(); err != nil {
+			t.Fatalf("second Close = %v, want nil", err)
+		}
+		restored, err := winlabel.ReadSDDL(ws)
+		if err != nil {
+			t.Fatalf("read label of %q after the repeat: %v", ws, err)
+		}
+		if restored != foreignPrior {
+			t.Errorf("label after the repeated Close = %q, want the prior %q back verbatim", restored, foreignPrior)
+		}
+		if left := winlabel.ListJournals(home); len(left) != 0 {
+			t.Errorf("journals = %v after the handoff was discharged, want none left", left)
+		}
+		if got := winlabel.ResidueIn(home); got != "" {
+			t.Errorf("winlabel.ResidueIn = %q, want nothing outstanding once the repeat converged", got)
+		}
+	})
+}
+
+func TestWindowsCapabilitiesAfterCloseAreEmpty(t *testing.T) {
+	// Capability honesty across the lifecycle (contract §5): the facility is gone once the
+	// handle is, so the backend must stop claiming it — and with FSWrite false it stops being
+	// Auto-eligible, which is what keeps a torn-down backend from gating Auto in.
+	c := newTokenConfiner(t.TempDir())
+	if !c.Capabilities().FSWrite {
+		t.Skip("no restricted token on this host; capabilities are already empty")
+	}
+	if err := c.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	caps := c.Capabilities()
+	if caps.FSWrite || caps.NetworkEgress || len(caps.Residuals) != 0 {
+		t.Errorf("Capabilities() = %+v after Close, want the empty set — the token has been handed back", caps)
+	}
+	if caps.AutoEligible() {
+		t.Error("AutoEligible() = true after Close; a backend with no token must not answer for the Auto gate")
+	}
+}
+
+func TestWindowsPrewarmAfterCloseLabelsNothing(t *testing.T) {
+	// The startup prewarm is the backend's SECOND reader of the lifecycle state, and startup can
+	// overlap a shutdown. A prewarm that walked on after Close would put a mandatory label on
+	// the disk with the journal already retired — a label with no record of how to undo it,
+	// which ADR 0020 §2 forbids outright.
+	home, ws := t.TempDir(), t.TempDir()
+	c := newTokenConfiner(home)
+	if !c.Capabilities().FSWrite {
+		t.Skip("no restricted token on this host; the prewarm is a no-op anyway")
+	}
+	if err := c.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	var notice strings.Builder
+	PrewarmLabelWalk(c, ws, &notice)
+
+	if notice.String() != "" {
+		t.Errorf("PrewarmLabelWalk printed %q after Close, want silence — there is no walk to explain", notice.String())
+	}
+	if label, _ := winlabel.ReadSDDL(ws); label != "" {
+		t.Errorf("the post-Close prewarm labelled %q as %q; the journal that would undo it is already retired", ws, label)
+	}
+	if left := winlabel.ListJournals(home); len(left) != 0 {
+		t.Errorf("journals = %v after a post-Close prewarm, want none — nothing may be journalled after teardown", left)
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"os/exec"
+	"sync"
 	"syscall"
 
 	"golang.org/x/sys/windows"
@@ -66,8 +67,32 @@ import (
 // so it is box-independent, which also settles who owns the handle given that Confine
 // returns before Start. The label pass IS per box and is memoised, so the first confined
 // command of a session pays it and the rest are free.
+//
+// The backend keeps ONE lock and it guards the LIFECYCLE — the token handle, the capabilities
+// derived from it, and the closed flag — because Close and Confine run on different goroutines
+// at shutdown: bubbletea's abnormal exit (SIGINT, a closed console) runs the composition root's
+// deferred Close while a tool goroutine is still inside Confine, and an unsynchronised backend
+// would let that Confine read a token of 0 AFTER its guard passed and hand CreateProcess an
+// UNCONFINED child while the caller recorded it as confined (audit C-20). Confine holds the
+// READ lock for its whole body — the label walk included — so the handle can never be closed
+// under a CreateProcess that is about to use it; Close holds the WRITE lock, and once it has run
+// every later Confine refuses with ErrConfinementUnavailable, which contract §4 demotes to a
+// forced Gate: a command can fail to START during shutdown and can never start unconfined
+// (ADR 0020's 2026-08-29 amendment).
+//
+// LOCK ORDER: tokenConfiner.mu OUTSIDE, Journal.mu inside, never the reverse. labelBox and
+// resolveBoxRoots run under the read lock and take no lock of their own; the journal takes its
+// own beneath them.
 type tokenConfiner struct {
-	caps domain.ConfinementCaps
+	// mu guards the lifecycle fields — caps, token and closed — against a shutdown racing a
+	// tool goroutine (see the lock discipline above). It is an RWMutex because Confine,
+	// Capabilities and the startup label prewarm are all readers: concurrent confinements stay
+	// as parallel as they were, and only Close excludes them.
+	mu sync.RWMutex
+	// closed latches at Close: the token handle is gone by then, so Confine must REFUSE rather
+	// than prepare a cmd with a zero token. Guarded by mu.
+	closed bool
+	caps   domain.ConfinementCaps
 	// token is the restricted Low-integrity primary token, or 0 when minting failed (in
 	// which case caps is {false, false} and Confine refuses).
 	token windows.Token
@@ -77,9 +102,10 @@ type tokenConfiner struct {
 	// protected are the locations the backend refuses to label (ADR 0020 §2).
 	protected []string
 	// journal is this session's label journal: the record of what has been labelled, the file
-	// it is written to, and the roots already walked. It carries its own lock, so the backend
-	// keeps none — Confine records through it from whichever goroutine is driving a tool call,
-	// and Close retires it at shutdown.
+	// it is written to, and the roots already walked. It carries its own lock for the label
+	// record, which nests INSIDE the backend's lifecycle lock (see the lock order above) —
+	// Confine records through it from whichever goroutine is driving a tool call, and Close
+	// retires it at shutdown.
 	journal *winlabel.Journal
 }
 
@@ -174,7 +200,14 @@ func newTokenConfinerWithoutRecovery(home string) *tokenConfiner {
 // machine-scoped and admin-requiring. The backend is Auto-eligible anyway, because
 // AutoEligible() is FSWrite-only (ADR 0012) — the same position a 5.13–6.6 Linux kernel
 // occupies.
-func (c *tokenConfiner) Capabilities() domain.ConfinementCaps { return c.caps }
+//
+// It reads under the lifecycle lock, so it answers the empty {false, false} once Close has run
+// rather than a torn value — the same honest incapacity a mint failure reports.
+func (c *tokenConfiner) Capabilities() domain.ConfinementCaps {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.caps
+}
 
 // Confine prepares cmd to execute confined to box, then returns — it does not run cmd
 // (contract §2.2). It sets cmd.SysProcAttr.Token and NOTHING ELSE on the cmd: cmd.Path and
@@ -193,10 +226,22 @@ func (c *tokenConfiner) Capabilities() domain.ConfinementCaps { return c.caps }
 // One failure lands in neither Capabilities nor here, by construction: a CreateProcessAsUser
 // refusal happens at cmd.Start(), after Confine has returned, so it surfaces as the tool's
 // own run error. The command FAILS; it does not run unconfined.
+//
+// The whole body runs under the lifecycle read lock and reads the token ONCE, into a local: a
+// Close racing this call either waits for it to finish or precedes it entirely, and a Confine
+// that starts after one refuses outright. There is no interleaving in which a zero token
+// reaches SysProcAttr while this returns nil (audit C-20).
 func (c *tokenConfiner) Confine(_ context.Context, box domain.ConfinementBox, cmd *exec.Cmd) error {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	if c.closed {
+		return fmt.Errorf("%w: the Windows token backend has been closed — the session is shutting down", domain.ErrConfinementUnavailable)
+	}
 	if !c.caps.FSWrite || c.token == 0 {
 		return fmt.Errorf("%w: the Windows token backend could not mint a restricted token on this host", domain.ErrConfinementUnavailable)
 	}
+	token := c.token
 	if err := windowsNetworkDenyDecision(box); err != nil {
 		return err
 	}
@@ -206,7 +251,7 @@ func (c *tokenConfiner) Confine(_ context.Context, box domain.ConfinementBox, cm
 	if cmd.SysProcAttr == nil {
 		cmd.SysProcAttr = &syscall.SysProcAttr{}
 	}
-	cmd.SysProcAttr.Token = syscall.Token(c.token)
+	cmd.SysProcAttr.Token = syscall.Token(token)
 	return nil
 }
 
@@ -214,7 +259,20 @@ func (c *tokenConfiner) Confine(_ context.Context, box domain.ConfinementBox, cm
 // io.Closer rather than a Confiner method on purpose: domain.Confiner is a public interface
 // (ADR 0010) and must not sprout a lifecycle hook for one OS, so the composition root
 // asserts the optional interface and defers it beside its other Close calls (ADR 0020 §2).
+//
+// It takes the lifecycle WRITE lock, so it cannot land between a Confine's guard and its store,
+// and it latches closed: every later Confine refuses with ErrConfinementUnavailable rather than
+// preparing a cmd with a token that has been handed back to the kernel.
+//
+// It is safe to call repeatedly, and journal.Retire() runs on EVERY call — a repeated Retire is
+// designed to CONVERGE (winlabel/session.go: a handed-off entry is discharged by a later call),
+// so the closed latch must never short-circuit it. Only the token close and the capability
+// zeroing latch, because a handle may be closed once.
 func (c *tokenConfiner) Close() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.closed = true
 	err := c.journal.Retire()
 	if c.token != 0 {
 		_ = c.token.Close()
@@ -242,6 +300,10 @@ func (c *tokenConfiner) Close() error {
 // winlabel returns its failures PLAIN, so the confinement sentinel is wrapped here, once
 // (D4): the rendered message is what it always was, and every caller's errors.Is still holds,
 // which is what lets the label mechanism stay a leaf package that knows nothing about apogee.
+//
+// Both callers (Confine, PrewarmLabelWalk) hold the lifecycle READ lock for the whole call and
+// this method takes none of its own; the journal's lock nests inside it (the lock order on the
+// type).
 func (c *tokenConfiner) labelBox(box domain.ConfinementBox) error {
 	if !c.journal.Writable() {
 		return fmt.Errorf("%w: no user profile could be resolved, so there is nowhere to write the label journal; refusing to label %q rather than leave a mandatory label with no record of how to undo it",

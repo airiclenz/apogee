@@ -27,9 +27,21 @@ import (
 // ONLY the workspace root; an extra writable root added mid-session still walks lazily and
 // silently, which is acceptable since the workspace is the bulk (the plan's approach A). labelBox
 // and winlabel.LabelTree are untouched — this is purely an emission seam.
+//
+// It is the backend's SECOND reader of the lifecycle state, so it takes the same read lock
+// Confine does and makes the same closed check: startup and shutdown overlap on an abnormal
+// exit, and a prewarm that walked on after Close would label the disk with a journal already
+// retired — a mandatory label with no record of how to undo it, the one outcome ADR 0020 §2
+// forbids (audit C-20).
 func PrewarmLabelWalk(c domain.Confiner, workspaceRoot string, out io.Writer) {
 	tc, ok := c.(*tokenConfiner)
-	if !ok || !tc.caps.FSWrite || tc.token == 0 {
+	if !ok {
+		return
+	}
+	tc.mu.RLock()
+	defer tc.mu.RUnlock()
+
+	if tc.closed || !tc.caps.FSWrite || tc.token == 0 {
 		return
 	}
 	fmt.Fprintln(out, WindowsLabelProgressNotice(workspaceRoot))

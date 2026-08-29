@@ -512,7 +512,13 @@ against the 200ms default).
 
 **Commit.** `fix(agent): one library store per directory, flushed by the Agent's Close (C-13)`
 
-## 7. `tokenConfiner`: one snapshot per Confine, fail-closed after Close (C-20)
+## 7. `tokenConfiner`: one snapshot per Confine, fail-closed after Close (C-20) — ✅ DONE (2026-08-29)
+
+NOTES (2026-08-29): `TestWindowsCloseIsRepeatable` implements the item's convergence claim as two subtests, and the handed-off entry is created by the FIRST `Close` rather than "planted between them": `Journal.Retire` reverts the IN-MEMORY record (`session.go:206-224`), so a journal file written to disk between the two `Close`es is unreachable by that same journal — only `Recover` / a fresh construction reads files. Subtest one asserts the item's plain repeat (the journal file is removed by the first `Close`, the second returns nil, the tree stays unlabelled); subtest two plants a live sibling journal claiming the root so the first `Close` hands the foreign prior off, then ends the sibling and asserts the SECOND `Close` on the same backend restores the prior verbatim and retires the journal — the convergence `session.go:189-191` promises, which a latched `closed` must not short-circuit.
+
+NOTES (2026-08-29): `TestWindowsPrewarmAfterCloseLabelsNothing` pins the OUTCOME, not the new `closed` branch on its own — `Close` also zeroes `caps` and the token, so the pre-existing guard already refuses a post-`Close` prewarm. The `closed` check and the `RLock` are what close the window where a prewarm overlaps a shutdown IN FLIGHT, which the race test covers; this one keeps the settled state honest (no notice, no label, no journal).
+
+NOTES (2026-08-29): the four new tests are `//go:build windows` and cannot run on the Linux executor. Proven here by `GOOS=windows go vet ./internal/platform/...` (they compile and vet clean) and `go test ./internal/platform/... -count=1 -race` (the cross-platform suite still passes); their execution is item 9's `windows-latest` CI job.
 
 **What.** Closes audit finding C-20 — a regression class, not a regression: at
 `internal/platform/confiner_windows.go` `Confine` (`:196-211`) reads `c.token` twice (`:197` and

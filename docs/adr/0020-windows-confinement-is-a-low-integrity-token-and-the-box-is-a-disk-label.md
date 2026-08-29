@@ -289,3 +289,33 @@ no special case: a below-floor Windows host is exactly today's Windows host.
   job objects are untouched by this ADR and remain teardown, never a fence.
 - **ADR 0021's `probe host` gains its first Windows-specific line** — the outstanding-label
   journal — which is the surface that makes an interrupted cleanup diagnosable off-session.
+
+## Amendment (2026-08-29) — one lifecycle lock, and a backend that refuses once it is closed
+
+Audit finding C-20. `Confine` read the token handle TWICE with no lock — once in its guard, once
+into `SysProcAttr` — while `Close` zeroed it, and the struct's doc said the backend "keeps no
+lock" because the journal has its own. That was true of the LABEL record and false of the
+LIFECYCLE. On bubbletea's abnormal exit — SIGINT, a closed console — the composition root's
+deferred `Close` runs while a tool goroutine is mid-`Confine`: the guard passed, `Close` zeroed
+the handle, the second read stored `Token = 0`, and `CreateProcess` started the child
+**unconfined** while the caller recorded it as confined. It needed no attacker, only a Ctrl-C at
+the wrong microsecond, and it is the one outcome this ADR's whole design exists to prevent.
+
+- **The backend keeps ONE lock, over its lifecycle state** — the token handle, the capabilities
+  derived from it, and a `closed` flag. `Confine` holds the READ lock for its whole body (the
+  label walk included), reads the token ONCE into a local and hands that local to
+  `SysProcAttr.Token`; `Capabilities` and the startup label prewarm (`PrewarmLabelWalk`, this
+  file's second reader) read under the same lock. `Close` holds the WRITE lock, so it can no
+  longer land between a `Confine`'s guard and its store, and the handle is never closed under a
+  `CreateProcess` that is about to use it. The journal keeps its own lock for the label record;
+  the ORDER is `tokenConfiner.mu` OUTSIDE, `Journal.mu` inside, never the reverse.
+- **After `Close`, `Confine` refuses** with `ErrConfinementUnavailable` — "the Windows token
+  backend has been closed — the session is shutting down" — which contract §4 demotes to a
+  forced Gate. A command can fail to START during shutdown; it can never start unconfined. The
+  console spawn needs no change for this: `consolePrepare` calls `Confine` inside `Prepare`, and
+  `console_open.go` already fails closed on that sentinel, so a console opened into a tearing-down
+  session is refused rather than started outside the box.
+- **`Close` stays repeatable and still drives `journal.Retire()` on EVERY call**, because §2's
+  teardown is designed to CONVERGE — a handed-off entry is discharged by a later `Retire` — so the
+  `closed` latch must never short-circuit it. Only the token close and the capability zeroing
+  latch, a handle being closable once.
