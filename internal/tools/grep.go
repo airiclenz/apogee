@@ -138,7 +138,10 @@ func (t *Grep) Execute(ctx context.Context, call domain.ToolCall) (domain.ToolRe
 
 	info, err := os.Stat(resolved)
 	if err != nil {
-		return errorResult(call.ID, "path not found: "+args.Path), nil
+		// The path was already accepted by the fence, so an absent one is a mis-spelling the
+		// model can fix: offer its near misses in the parent it named.
+		siblings := suggestSiblings(root, workspaceRelative(resolved, root), args.Path)
+		return errorResult(call.ID, notFoundMessage("path not found: ", args.Path, siblings)), nil
 	}
 
 	globs := parseIncludeGlobs(args.Include)

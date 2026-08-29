@@ -172,7 +172,15 @@ pins the three renderings (none / one / several).
 
 **Commit:** `feat(tools): a fenced sibling-suggestion helper for path-not-found refusals`
 
-## 4. read_file, list_dir, grep and find_files suggest siblings on a missing path
+## 4. read_file, list_dir, grep and find_files suggest siblings on a missing path — ✅ DONE (2026-08-29)
+
+NOTES (2026-08-29): the read_file site is wired as a new `withSiblingSuggestions(failure, root, target)` in `path_read.go`, called from `readScope.readBounded`. `readWorkspaceFileBounded` returns only a message (its signature is untouched per the item's guard), so the absent case is recognised by comparing that message to the one `readFileErrorMessage` renders for it (`"file not found: "+target`); every other failure — escape, root-inaccessible, "not a file", over-cap — is handed back untouched.
+
+NOTES (2026-08-29): list_dir's two sites share a new file-local `directoryNotFoundMessage(err, root, rel, given)` rather than two inline copies (the stat-after-open site passes `err == nil`, having no fence branch). It asks `escapeOrMessage(err, "")` whether the failure is a fence refusal instead of keeping a second copy of its sentinel checks; an empty `absent` is answered only on the non-refusal branch.
+
+NOTES (2026-08-29): the new tests build the suggestion half of the pinned message with `filepath.Join` instead of the item's literal `docs/adr/0025-interjections.md` — the helper joins entries onto `filepath.Dir(given)`, which spells the parent with backslashes on Windows (a shipped GOOS), so a hard-coded forward-slash literal would fail there. The `given` half stays the literal the call passed.
+
+NOTES (2026-08-29): the list_dir and read_file tables each add an explicit escape case pinning that a fence refusal gains no `did you mean` clause (the item only required the existing escape tests to keep passing, which they do, unchanged).
 
 **What:** Depends on item 3. Wire `suggestSiblings` + `notFoundMessage` into the four not-found
 sites: `internal/tools/grep.go` (`path not found:` after `os.Stat`), `internal/tools/find_files.go`

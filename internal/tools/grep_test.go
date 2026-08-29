@@ -812,3 +812,48 @@ func spelledLikeRealBelowTheHeader(t *testing.T, tool domain.Tool, spelledArgs, 
 	}
 	return spelled.Content
 }
+
+// TestGrep_Execute_MissingPathSuggestsSiblings pins the recovery half of a path-not-found
+// refusal: a name the model spelled by its prefix comes back with the sibling it meant, spelled
+// onto the parent the model itself named, while a path whose parent does not exist keeps the
+// bare message it always had.
+func TestGrep_Execute_MissingPathSuggestsSiblings(t *testing.T) {
+	t.Parallel()
+
+	root := tempRoot(t)
+	writeFixtureFile(t, filepath.Join(root, "docs", "adr", "0025-interjections.md"), "adr body")
+	tool := NewGrep(root, nil)
+
+	cases := []struct {
+		name string
+		path string
+		want string
+	}{
+		{
+			name: "a prefix names its sibling",
+			path: "docs/adr/0025",
+			want: "path not found: docs/adr/0025 — did you mean: " +
+				filepath.Join("docs", "adr", "0025-interjections.md"),
+		},
+		{
+			name: "a missing parent offers nothing",
+			path: "docs/absent/0025",
+			want: "path not found: docs/absent/0025",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			result := runFileOp(t, tool, map[string]any{"pattern": "x", "path": tc.path})
+
+			if !result.IsError {
+				t.Fatalf("IsError = false, want true (content: %q)", result.Content)
+			}
+			if result.Content != tc.want {
+				t.Errorf("content = %q, want %q", result.Content, tc.want)
+			}
+		})
+	}
+}

@@ -899,3 +899,81 @@ func TestPDFDisplayPath(t *testing.T) {
 		})
 	}
 }
+
+// TestReadFile_Execute_MissingFileSuggestsSiblings pins read_file's half of the shared
+// path-not-found recovery: a prefix comes back as the sibling it meant, a missing parent keeps
+// the bare refusal, and an escape stays the uniform refusal with nothing appended.
+func TestReadFile_Execute_MissingFileSuggestsSiblings(t *testing.T) {
+	t.Parallel()
+
+	root := tempRoot(t)
+	writeFixtureFile(t, filepath.Join(root, "docs", "adr", "0025-interjections.md"), "adr body")
+	tool := NewReadFile(root, nil)
+
+	cases := []struct {
+		name string
+		path string
+		want string
+	}{
+		{
+			name: "a prefix names its sibling",
+			path: "docs/adr/0025",
+			want: "file not found: docs/adr/0025 — did you mean: " +
+				filepath.Join("docs", "adr", "0025-interjections.md"),
+		},
+		{
+			name: "a missing parent offers nothing",
+			path: "docs/absent/0025",
+			want: "file not found: docs/absent/0025",
+		},
+		{
+			name: "an escape carries no suggestions",
+			path: "../escape.txt",
+			want: `security: path resolves outside the workspace root: "../escape.txt"`,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			result := runFileOp(t, tool, map[string]any{"path": tc.path})
+
+			if !result.IsError {
+				t.Fatalf("IsError = false, want true (content: %q)", result.Content)
+			}
+			if result.Content != tc.want {
+				t.Errorf("content = %q, want %q", result.Content, tc.want)
+			}
+		})
+	}
+}
+
+// TestReadFile_Execute_MissingFileSuggestionsQuoteThePinnedPath pins which spelling the refusal
+// speaks in when the two differ: a file named through a SYMLINK spelling of an extra read root
+// is read under the root's real path (readScope.locate), and the refusal — like every other
+// "not found" read_file renders — quotes that pinned path, so the suggestions hang off the
+// parent the host actually looked in rather than the link the model typed.
+func TestReadFile_Execute_MissingFileSuggestionsQuoteThePinnedPath(t *testing.T) {
+	t.Parallel()
+
+	root, extra := tempRoot(t), tempRoot(t)
+	writeFixtureFile(t, filepath.Join(extra, "skill", "0025-interjections.md"), "adr body")
+	link := filepath.Join(tempRoot(t), "lib")
+	if err := os.Symlink(extra, link); err != nil {
+		t.Skipf("symlinks unsupported: %v", err)
+	}
+
+	tool := NewReadFile(root, func() []string { return []string{extra} })
+
+	result := runFileOp(t, tool, map[string]any{"path": filepath.Join(link, "skill", "0025")})
+
+	want := "file not found: " + filepath.Join(extra, "skill", "0025") +
+		" — did you mean: " + filepath.Join(extra, "skill", "0025-interjections.md")
+	if !result.IsError {
+		t.Fatalf("IsError = false, want true (content: %q)", result.Content)
+	}
+	if result.Content != want {
+		t.Errorf("content = %q, want %q", result.Content, want)
+	}
+}

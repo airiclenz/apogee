@@ -240,7 +240,25 @@ func (s readScope) readBounded(input string) ([]byte, string) {
 	if err != nil {
 		return readWorkspaceFileBounded(input, s.root)
 	}
-	return readWorkspaceFileBounded(target, root)
+	data, failure := readWorkspaceFileBounded(target, root)
+	return data, withSiblingSuggestions(failure, root, target)
+}
+
+// withSiblingSuggestions appends the near misses of an ABSENT file to a bounded read's failure
+// message — the one refusal a mis-spelled name can recover from — and hands every other failure
+// back untouched. A fence refusal, a directory, an over-cap file: each keeps its own wording,
+// because only absence is a spelling the model can fix.
+//
+// The absent case is recognised by the message readFileErrorMessage renders for it, which is
+// also the path this quotes: target is the PINNED spelling the read was performed under, not
+// necessarily the model's, so the suggestions are joined onto the parent of the path the host
+// actually looked in (path_read.go's "not found quotes what was examined" contract).
+func withSiblingSuggestions(failure, root, target string) string {
+	const prefix = "file not found: "
+	if failure != prefix+target {
+		return failure
+	}
+	return notFoundMessage(prefix, target, suggestSiblings(root, workspaceRelative(target, root), target))
 }
 
 // readRoot answers the root a fenced read of input must be pinned to: the workspace when it

@@ -440,3 +440,53 @@ func TestListDir_Execute_NewlineInAFilenameCannotForgeARow(t *testing.T) {
 		t.Errorf("row %q does not carry the escaped entry spelling %q", lines[1], forgingRowSpelling)
 	}
 }
+
+// TestListDir_Execute_MissingDirectorySuggestsSiblings pins list_dir's half of the shared
+// path-not-found recovery — the prefix comes back as the sibling directory it meant, a missing
+// parent keeps the bare refusal — and that a fence refusal is NEVER dressed up as a near miss:
+// the escape message stays the one uniform sentence, with nothing appended.
+func TestListDir_Execute_MissingDirectorySuggestsSiblings(t *testing.T) {
+	t.Parallel()
+
+	root := tempRoot(t)
+	writeFixtureFile(t, filepath.Join(root, "docs", "adr", "0025-interjections", "note.md"), "note")
+	tool := NewListDir(root, nil)
+
+	cases := []struct {
+		name string
+		path string
+		want string
+	}{
+		{
+			name: "a prefix names its sibling",
+			path: "docs/adr/0025",
+			want: "directory not found: docs/adr/0025 — did you mean: " +
+				filepath.Join("docs", "adr", "0025-interjections") + "/",
+		},
+		{
+			name: "a missing parent offers nothing",
+			path: "docs/absent/0025",
+			want: "directory not found: docs/absent/0025",
+		},
+		{
+			name: "an escape carries no suggestions",
+			path: "../",
+			want: `security: path resolves outside the workspace root: "../"`,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			result := runFileOp(t, tool, map[string]any{"path": tc.path})
+
+			if !result.IsError {
+				t.Fatalf("IsError = false, want true (content: %q)", result.Content)
+			}
+			if result.Content != tc.want {
+				t.Errorf("content = %q, want %q", result.Content, tc.want)
+			}
+		})
+	}
+}

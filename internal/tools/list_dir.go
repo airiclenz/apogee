@@ -83,13 +83,15 @@ func (t *ListDir) Execute(ctx context.Context, call domain.ToolCall) (domain.Too
 
 	handle, err := safeOpen(rel, root)
 	if err != nil {
-		return errorResult(call.ID, escapeOrMessage(err, "directory not found: "+args.Path)), nil
+		return errorResult(call.ID, directoryNotFoundMessage(err, root, rel, args.Path)), nil
 	}
 	defer handle.Close()
 
 	info, err := handle.Stat()
 	if err != nil {
-		return errorResult(call.ID, "directory not found: "+args.Path), nil
+		// The directory opened and then would not describe itself; the fence has already had
+		// its say, so this refusal is the absent one and carries near misses like the other.
+		return errorResult(call.ID, directoryNotFoundMessage(nil, root, rel, args.Path)), nil
 	}
 	if !info.IsDir() {
 		return errorResult(call.ID, "not a directory: "+args.Path), nil
@@ -110,6 +112,25 @@ func (t *ListDir) Execute(ctx context.Context, call domain.ToolCall) (domain.Too
 
 	text, listed := renderEntries(entries, args.Offset)
 	return okSummary(call.ID, text, listed), nil
+}
+
+// directoryNotFoundMessage renders list_dir's absent-directory refusal for the model: the
+// unchanged "directory not found: <path as the model spelled it>" wording, plus the near
+// misses that name has among its parent's entries. root is the root the path was accepted
+// under, rel its root-relative name, and given the model's own spelling.
+//
+// err is the failure being rendered, or nil where the site cannot produce a fenced one (the
+// stat of an already-opened handle). A fence refusal keeps its own uniform wording and NEVER
+// gains suggestions — a "did you mean" would read as absence and hide the refusal — which is
+// escapeOrMessage's rule; passing it an EMPTY absent string asks exactly that question without
+// keeping a second copy of the sentinel checks here.
+func directoryNotFoundMessage(err error, root, rel, given string) string {
+	if err != nil {
+		if refusal := escapeOrMessage(err, ""); refusal != "" {
+			return refusal
+		}
+	}
+	return notFoundMessage("directory not found: ", given, suggestSiblings(root, rel, given))
 }
 
 // collectEntries walks the already-opened directory dir to the given depth, returning
