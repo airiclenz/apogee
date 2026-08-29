@@ -110,7 +110,7 @@ zero-match scoped search — asserting the exact header line.
 
 **Commit:** `feat(tools): grep and find_files name the scope they searched`
 
-## 2. The transcript row for grep and find_files shows the path scope
+## 2. The transcript row for grep and find_files shows the path scope — ✅ DONE (2026-08-29)
 
 **What:** `internal/tui/toolregistry.go`: `grepTarget` renders `pattern · <path> · <include>`
 (each qualifier only when present and `path` not `.`), via `qualifiedTarget` chained; add a

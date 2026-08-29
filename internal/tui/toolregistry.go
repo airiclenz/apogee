@@ -223,14 +223,14 @@ var toolRegistry = map[string]toolPresenter{
 	"grep": {
 		label:  "Grep",
 		verb:   "searching",
-		target: grepTarget, // pattern, plus "· <glob>" when the call scoped it
+		target: grepTarget, // pattern, plus "· <path>" and "· <glob>" when the call scoped it
 		detail: firstLineDetail,
 		stat:   matchedLinesStat, // "N hits"; the table's "· M files" is not on the result
 	},
 	"find_files": {
 		label:  "Find Files",
 		verb:   "finding",
-		target: stringArg("pattern"),
+		target: findFilesTarget, // name pattern, plus "· <path>" when the call scoped it
 		detail: firstLineDetail, // the tool's own header: "[N files found, showing …]"
 		stat:   foundFilesStat,
 	},
@@ -987,10 +987,31 @@ func listDirTarget(args map[string]any) string {
 	return qualifiedTarget(stringArg("path")(args), recursive)
 }
 
-// grepTarget leads grep's branch with the pattern and the include glob that scoped it — a search
-// of one file type is a different search, and the hit count in the slot is only readable beside it.
+// searchScopeArg reads the path a search was SCOPED to as a target should spell it — the empty
+// string when the call named none, or named the workspace itself ("."), because a whole-workspace
+// search is the search every search is until it says otherwise and a row gains nothing by saying
+// so. Both search tools word the scope the same way, so they read it through one function.
+func searchScopeArg(args map[string]any) string {
+	if path := stringArg("path")(args); path != "." {
+		return path
+	}
+	return ""
+}
+
+// grepTarget leads grep's branch with the pattern, then the path the call scoped the search to and
+// the include glob that narrowed it — a search of one subtree, or of one file type, is a different
+// search, and the hit count in the slot is only readable beside what was actually searched. The
+// qualifiers chain in that order (qualifiedTarget), and each is dropped when the call omitted it.
 func grepTarget(args map[string]any) string {
-	return qualifiedTarget(stringArg("pattern")(args), stringArg("include")(args))
+	head := qualifiedTarget(stringArg("pattern")(args), searchScopeArg(args))
+	return qualifiedTarget(head, stringArg("include")(args))
+}
+
+// findFilesTarget leads find_files' branch with the name pattern and the path the call scoped the
+// walk to — the same shape grepTarget builds, for the same reason: the file count in the slot
+// means one thing under the workspace root and another under one subdirectory.
+func findFilesTarget(args map[string]any) string {
+	return qualifiedTarget(stringArg("pattern")(args), searchScopeArg(args))
 }
 
 // runTestsTarget leads run_tests' branch with the package path and the filter that narrowed the
