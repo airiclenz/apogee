@@ -722,7 +722,15 @@ compiles — the executor-side floor the plan's standing requirement names.
 
 **Commit.** `ci: the Windows-tagged platform and probe tests run on a windows-latest job`
 
-## 10. `wire_test.go` split, part 1: the settings-apply tests move to `wire_settings_test.go` (S-1)
+## 10. `wire_test.go` split, part 1: the settings-apply tests move to `wire_settings_test.go` (S-1) — ✅ DONE (2026-08-29)
+
+NOTES (2026-08-29): the item's binding shared-use rule (a helper with users in two or more `cmd/apogee/*_test.go` files goes to `wire_helpers_test.go`) sent eight more declarations to the helpers file than the item's two "known cross-file cases" — `applySettingSpy` and its seven methods (users in `configwatch_apply_test.go`, `modelprofile_test.go`, `wire_live_test.go`, `schedule_test.go`, `settingsedit_test.go`), `writeSettingsFixture` (five other files), `rebindProbe`/`rebindCall`/`rebind` (`settingsedit_test.go`), `fakeMCPSession`, `mcpFixtureTool`, `mcpServersFixture`, `newMCPFixture` + the `mcpFixture` type, and `toolNames` (`configwatch_apply_test.go`, `wire_live_test.go`). The item's remaining named helpers (`fullyComposedApplier`, `clobberOptions`, `freePort`, `writeSkillFixture`, `startupOnlyContract`, `settingKeysWithNoMemberToReach`, `settingKeysAppliedByTheRenderer`) have no users outside `wire_test.go` and went to `wire_settings_test.go` as the item lists.
+
+NOTES (2026-08-29): the `// The live-apply dispatcher (ADR 0037)` banner comment (`wire_test.go:3336-3338`) is not a declaration and so is on no list, but every declaration of the section it heads (3343–4968) left `wire_test.go` in this item; it moved with them into `wire_settings_test.go` at its original ordered position rather than being left dangling over the unrelated section that now follows it.
+
+NOTES (2026-08-29): `TestCaptureStderrRestoresOnGoexit` stays in `wire_test.go` although its subject `captureStderr` moved to `wire_helpers_test.go` — the item does not name it and item 13 takes the remainder; it still compiles and passes, the package being one.
+
+NOTES (2026-08-29): the move was verified to be exactly mechanical rather than only compiling — the multiset of non-blank lines below the import block is identical across the three files before and after (0 lost, 0 added), the blank-line count is identical (433), and adjacent single-line methods kept their gofmt brace alignment because each run of consecutive declarations was emitted as one verbatim line range.
 
 **What.** `cmd/apogee/wire_test.go` is 6,090 lines and 108 tests for a composition root ADR 0043
 split by seam into `wire_boot.go`, `wire_engine.go`, `wire_server.go`, `wire_session.go`,
