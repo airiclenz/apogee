@@ -431,3 +431,83 @@ func TestUnwindLabelEntryUsesTheInjectedFold(t *testing.T) {
 		t.Error("the injected fold was ignored; the helper is not honouring its seam")
 	}
 }
+
+func TestJournalRoundTripsJudged(t *testing.T) {
+	t.Parallel()
+
+	// Entry.Judged is the verdict the revert takes BEFORE it clears anything — apogee's own
+	// Low label was still on the path, so the prior beneath it is apogee's to put back
+	// (priorRestorable). It is only worth taking if it SURVIVES to the pass that acts on it: a
+	// prior handed off to a later run, or one retried after a failed restore, is read once the
+	// clear has unlabelled its path, where a fresh judgement would drop it. So the flag is part
+	// of the journal's on-disk compatibility surface, in both directions.
+	home := t.TempDir()
+	path := JournalPath(home, 7788)
+	written := Record{
+		PID: 7788,
+		Entries: []Entry{
+			{Path: `C:\work`, Root: true},
+			{Path: `C:\work\vendor\lib.dll`, PriorSDDL: "S:AI(ML;;NW;;;ME)", Judged: true},
+			{Path: `C:\work\pending.txt`, PriorSDDL: "S:(ML;;NW;;;HI)"},
+		},
+	}
+
+	if err := WriteJournal(path, written); err != nil {
+		t.Fatalf("write journal: %v", err)
+	}
+	read, err := ReadJournal(path)
+	if err != nil {
+		t.Fatalf("read journal: %v", err)
+	}
+
+	if len(read.Entries) != len(written.Entries) {
+		t.Fatalf("entries = %+v, want %+v", read.Entries, written.Entries)
+	}
+	for i, want := range written.Entries {
+		if read.Entries[i] != want {
+			t.Errorf("entries[%d] = %+v, want %+v", i, read.Entries[i], want)
+		}
+	}
+
+	// An unjudged entry carries no `judged` key at all, so a journal this apogee writes stays
+	// decodable by the one the user may roll back to — the rule Record's doc states about
+	// every tag here.
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read journal file: %v", err)
+	}
+	if got := strings.Count(string(raw), `"judged"`); got != 1 {
+		t.Errorf("the journal spells \"judged\" %d time(s) in %s, want exactly the one judged entry", got, raw)
+	}
+}
+
+func TestJournalWrittenByAnOlderApogeeIsUnjudged(t *testing.T) {
+	t.Parallel()
+
+	// The other direction: a journal left by an apogee that predates the judgement — the one a
+	// user upgrades over, and the one a crash left behind — has no flag to read, and false is
+	// the honest decode. It means "nothing has judged this yet", so the first pass judges it
+	// while the path still carries the label that vouches for it, rather than skipping the
+	// check over a prior nobody vetted.
+	home := t.TempDir()
+	path := JournalPath(home, 9911)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatalf("create the journal dir: %v", err)
+	}
+	legacy := `{"pid":9911,"entries":[{"path":"C:\\work","root":true},` +
+		`{"path":"C:\\work\\vendor\\lib.dll","prior_sddl":"S:AI(ML;;NW;;;ME)"}]}`
+	if err := os.WriteFile(path, []byte(legacy), 0o600); err != nil {
+		t.Fatalf("plant the older journal: %v", err)
+	}
+
+	read, err := ReadJournal(path)
+	if err != nil {
+		t.Fatalf("read journal: %v", err)
+	}
+
+	for _, entry := range read.Entries {
+		if entry.Judged {
+			t.Errorf("entry %+v decoded as already judged; an older journal has been vetted by nothing", entry)
+		}
+	}
+}

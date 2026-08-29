@@ -260,6 +260,9 @@ func osRevert() revertFunc { return revertSparingLiveSiblings }
 // revert time, when liveness and the claim set are current, not at construction.
 func revertSparingLiveSiblings(home, own string) func(Record) ([]Entry, error) {
 	return func(r Record) ([]Entry, error) {
+		if err := judgePriors(r, own); err != nil {
+			return nil, err
+		}
 		siblings := siblingJournals(home, own)
 		restore, handoff := restorablePriors(r, siblings)
 		if err := revertJournal(revertibleRoots(r, siblings, ProcessAlive), restore); err != nil {
@@ -267,6 +270,73 @@ func revertSparingLiveSiblings(home, own string) func(Record) ([]Entry, error) {
 		}
 		return handoff, nil
 	}
+}
+
+// judgePriors settles which of one journal's recorded priors are still apogee's to put back,
+// and settles it BEFORE the caller clears anything (F-08). A journal is an instruction to WRITE
+// mandatory labels onto named paths, and until this check existed the revert obeyed it
+// unconditionally — so a journal planted or corrupted under the apogee home relabelled
+// arbitrary paths at the next construction. The rule (priorRestorable) is that apogee's own Low
+// label must still be on the path: nothing else marks the path as this run's, or a dead run's,
+// to revert.
+//
+// The ORDER is the whole point. ClearTree is what turns a path apogee labelled into an
+// unlabelled one, so a verdict taken after it cannot tell apogee's own work from a stranger's
+// entry — every prior would read foreign and be dropped, and the foreign labels the journal
+// exists to preserve would be lost. The judgement therefore runs here, above
+// revertSparingLiveSiblings' clear, and covers the restore set and the HAND-OFF set alike:
+// which of the two an entry lands in is decided after this, and a handed-off entry is exactly
+// the one a later pass reads once some other session's clear has unlabelled its path.
+//
+// The verdict is recorded on the entry (Entry.Judged) and PERSISTED before the clear, because
+// the two paths that re-visit a path later — a hand-off waiting for a live sibling to retire,
+// and a retry after a restore that failed (session.go's kept journal, ADR 0020 §2) — both read
+// it after the clear. A journal written by an older apogee carries no flags and is judged on
+// its first pass, while it still reads Low. It is written back through own, this journal's own
+// file: a write failure aborts the revert with NOTHING cleared, which is the same posture the
+// label pass takes on the way in — no record on the disk, no mutation of the disk.
+//
+// A read failure other than "gone" aborts the revert too, and equally before the clear: the
+// entry stays unjudged, the journal is kept whole by retire, and the next run judges it against
+// a path that still carries every label this one would have removed. Clearing first and
+// retrying later would hand that retry an unlabelled path and the verdict "not apogee's".
+//
+// The flags are written onto r.Entries IN PLACE, which is deliberate: Record.Entries is the
+// slice the session's in-memory journal holds, so a verdict taken here survives a failed pass
+// in memory as well as on disk and a repeated Close never re-judges a path the first one
+// cleared. The persisted copy additionally drops the entries left describing no mutation at
+// all — recordEntry's rule applied on the way out, so a dropped prior does not linger as an
+// instruction to do nothing — while an entry that still names a ROOT keeps its clear
+// obligation and only loses its prior.
+func judgePriors(r Record, own string) error {
+	judged := false
+	for i := range r.Entries {
+		entry := &r.Entries[i]
+		if entry.PriorSDDL == "" || entry.Judged {
+			continue
+		}
+		current, readErr := ReadSDDL(entry.Path)
+		switch restore, drop := priorRestorable(current, readErr); {
+		case restore:
+			entry.Judged = true
+		case drop:
+			entry.PriorSDDL = ""
+		default:
+			return fmt.Errorf("apogee: confine: cannot read the mandatory label of %q to judge the prior the journal records for it: %v",
+				entry.Path, readErr)
+		}
+		judged = true
+	}
+	if !judged || own == "" {
+		return nil
+	}
+	surviving := make([]Entry, 0, len(r.Entries))
+	for _, entry := range r.Entries {
+		if entry.Root || entry.PriorSDDL != "" {
+			surviving = append(surviving, entry)
+		}
+	}
+	return WriteJournal(own, Record{PID: r.PID, Entries: surviving})
 }
 
 // revertJournal undoes one journal's disk mutation: clear the label from every object under
@@ -278,6 +348,12 @@ func revertSparingLiveSiblings(home, own string) func(Record) ([]Entry, error) {
 // here, because the sibling's pending clear would wipe it. Clearing first and restoring second
 // is the order that matters — a prior label inside a root would otherwise be wiped by the walk
 // that follows it.
+//
+// A prior is restored only onto a path that still carried the Low label this session — or a
+// dead one — wrote, judged BEFORE the clear (judgePriors, priorRestorable): apogee's own mark
+// is what makes the path apogee's to revert, and a journal a stranger planted names paths that
+// never carried it. By the time this function runs, priors holds exactly the survivors of that
+// judgement, so the loop below writes back only labels apogee is answerable for.
 //
 // A prior-labelled path that no longer exists is a completed revert, not a failure: the agent
 // deleting or renaming a workspace file is routine activity, and an object that is gone
@@ -312,6 +388,13 @@ func revertJournal(roots []string, priors map[string]string) error {
 // A journal whose revert fails survives this pass (retire): recovery is best-effort — there is
 // no user to tell at construction time — but it must never destroy the record of labels it did
 // not manage to remove, so a later run gets another attempt.
+//
+// A journal is not taken as an instruction to WRITE labels, either. Anything that can create a
+// file under the apogee home could otherwise name arbitrary paths and have the next
+// construction label them, so every prior a journal records is judged against the path's
+// CURRENT label before anything is cleared, and one that does not still carry the Low label
+// apogee wrote is dropped rather than applied (judgePriors, priorRestorable) — a prior is
+// restored only onto a path that still carried apogee's own mark.
 //
 // A journal that cannot be DECODED is likewise left where it is: it names no roots to revert
 // and no owner to check, so acting on it is impossible and deleting it would throw away the

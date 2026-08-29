@@ -579,7 +579,21 @@ cross-platform suite still passes); `grep -n 'Amendment (2026-08-29)' docs/adr/0
 
 **Commit.** `fix(platform): the Windows token backend refuses after Close instead of starting an unconfined child (C-20)`
 
-## 8. A journal's prior label is restored only where apogee's Low label still stands (F-08)
+## 8. A journal's prior label is restored only where apogee's Low label still stands (F-08) — ✅ DONE (2026-08-29)
+
+NOTES (2026-08-29): the judgement lives in `revertSparingLiveSiblings` (a new `judgePriors` beside it), not inside `revertJournal` as the third bullet's parenthetical says. The second bullet requires the HAND-OFF set to be judged too, and the restore/hand-off split is made by `restorablePriors` after the judging — `revertJournal` only ever receives the restore map, so a hand-off judged there would be judged never. `revertJournal` is where the rule is documented, as the item's last bullet asks.
+
+NOTES (2026-08-29): a non-Low verdict drops the PRIOR, and the entry itself only when it then names nothing (`recordEntry`'s own rule applied on the way out). Dropping the whole entry, as the item's first bullet words it, would discard a Root entry's clear obligation whenever the root itself carried a foreign prior — the shape `TestWindowsForeignPriorOnASharedRootSurvivesSiblingTeardown` exercises — stranding the tree's Low labels with nothing left to describe them.
+
+NOTES (2026-08-29): a read failure other than not-exist aborts the revert with NOTHING cleared, rather than only "keeping its entry". Keeping the entry and clearing anyway hands the retry a path that reads unlabelled and the verdict "not apogee's", which is the loss the whole item exists to prevent; aborting before the clear leaves every label in place for the next run to judge, and `retire` keeps the journal whole — which is what "as today's failure path does" means for a prior the revert could not discharge.
+
+NOTES (2026-08-29): the verdicts are written onto `r.Entries` IN PLACE as well as to disk. `Record.Entries` is the slice the session's in-memory journal holds, so a pass that fails after judging leaves memory and disk agreeing; without it a repeated `Close` after a failed revert (item 7 made `Close` repeatable) would re-judge from the unjudged in-memory record, against paths the first pass had already cleared.
+
+NOTES (2026-08-29): the item's one journal test is two functions — `TestJournalRoundTripsJudged` (the flag survives `WriteJournal` → `ReadJournal`, and is absent from the encoding when false, which is what keeps the file readable by an older apogee) and `TestJournalWrittenByAnOlderApogeeIsUnjudged` (a hand-planted legacy journal decodes `Judged == false`). The second needs a raw JSON fixture rather than a round trip, so it is its own arrangement.
+
+NOTES (2026-08-29): `TestWindowsHandedOffPriorIsJudgedOnce` discharges the live sibling's obligation by hand — kill the child, remove its journal, `winlabel.ClearTree` its root — instead of letting `Recover` do it in one sweep. The claim under test is that the later pass restores a prior although the path reads UNLABELLED by then, and only the by-hand sequence makes that intermediate state observable and the pass order deterministic; `TestWindowsForeignPriorOnASharedRootSurvivesSiblingTeardown` already covers the end-to-end sweep.
+
+NOTES (2026-08-29): the four new tests in `confiner_windows_test.go` are `//go:build windows` and cannot run on the Linux executor. Proven here by `GOOS=windows go vet ./internal/platform/...` (they compile and vet clean) and `go test ./internal/platform/... -count=1 -race`; their execution is item 9's `windows-latest` CI job.
 
 **What.** Closes security-audit finding F-08 (paired with C-20 in `ISSUES.md`). Recast at the
 regression check (2026-08-29) — the draft judged the label AFTER the clear loop, where every prior

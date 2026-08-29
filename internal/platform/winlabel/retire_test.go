@@ -2,6 +2,7 @@ package winlabel
 
 import (
 	"errors"
+	"io/fs"
 	"os"
 	"strings"
 	"testing"
@@ -367,6 +368,58 @@ func TestRevertibleRootsSparesOnlyALiveSiblingsRoots(t *testing.T) {
 				if got[i] != tt.want[i] {
 					t.Errorf("revertibleRoots[%d] = %q, want %q", i, got[i], tt.want[i])
 				}
+			}
+		})
+	}
+}
+
+func TestPriorRestorableTable(t *testing.T) {
+	t.Parallel()
+
+	// The read-side check that closes F-08: a journal is an instruction to WRITE mandatory
+	// labels, and until this decision existed the revert obeyed it unconditionally — so a
+	// journal planted under the apogee home relabelled whatever paths it named. Apogee's own
+	// Low label still sitting on the path is the whole warrant, and it is read BEFORE the
+	// clear that would remove it (judgePriors). The read itself is Windows-only (ReadSDDL
+	// needs a real SACL), so the verdict is proven here on every OS — the retire seam pattern.
+	const (
+		ownLabel      = "S:AI(ML;OICIID;NW;;;LW)" // the inherited spelling a labelled root propagates
+		canonicalLow  = "S:AI(ML;;NW;;;S-1-16-4096)"
+		foreignMedium = "S:AI(ML;;NW;;;ME)"
+		foreignHigh   = "S:(ML;OICI;NW;;;HI)"
+	)
+	denied := errors.New("access is denied")
+
+	tests := []struct {
+		name        string
+		current     string
+		readErr     error
+		wantRestore bool
+		wantDrop    bool
+	}{
+		{name: "apogees_own_low_label_is_restorable", current: ownLabel, wantRestore: true},
+		{name: "the_canonical_low_sid_is_the_same_mark", current: canonicalLow, wantRestore: true},
+		{name: "a_foreign_medium_label_drops_the_instruction", current: foreignMedium, wantDrop: true},
+		{name: "a_foreign_high_label_drops_the_instruction", current: foreignHigh, wantDrop: true},
+		{name: "an_unlabelled_path_drops_the_instruction", current: "", wantDrop: true},
+		{name: "a_vanished_path_drops_the_instruction", readErr: os.ErrNotExist, wantDrop: true},
+		{
+			name:     "a_vanished_path_reported_as_a_path_error_drops_too",
+			readErr:  &fs.PathError{Op: "read", Path: `C:\work\gone.txt`, Err: fs.ErrNotExist},
+			wantDrop: true,
+		},
+		{name: "an_unreadable_path_is_neither_restored_nor_dropped", readErr: denied},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			restore, drop := priorRestorable(tt.current, tt.readErr)
+
+			if restore != tt.wantRestore || drop != tt.wantDrop {
+				t.Errorf("priorRestorable(%q, %v) = restore %v, drop %v; want restore %v, drop %v",
+					tt.current, tt.readErr, restore, drop, tt.wantRestore, tt.wantDrop)
 			}
 		})
 	}

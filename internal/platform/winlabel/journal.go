@@ -53,6 +53,15 @@ type Entry struct {
 	// no label (the overwhelmingly common case) or carried a Low one apogee must never put
 	// back (recordEntry); teardown then clears the path instead.
 	PriorSDDL string `json:"prior_sddl,omitempty"`
+	// Judged records that a revert has already found this prior restorable: the path still
+	// carried the Low label this run (or a dead one) wrote when the verdict was taken, BEFORE
+	// any tree was cleared (priorRestorable). The verdict is persisted because two paths
+	// re-visit a path once the clear has unlabelled it — a prior handed off to a later run
+	// while a live sibling still claims the tree (restorablePriors), and a retry after a
+	// restore that failed — and a fresh judgement there would see nothing of apogee's on the
+	// path and drop a foreign prior for good. An older journal has no such field and decodes
+	// false, which is the honest answer: nothing has judged it yet, so its first pass does.
+	Judged bool `json:"judged,omitempty"`
 }
 
 // Roots returns the journalled box roots, the trees teardown walks.

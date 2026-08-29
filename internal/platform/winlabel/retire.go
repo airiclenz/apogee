@@ -63,6 +63,44 @@ func clearTreeOutcome(root string, failures int, first error) error {
 		failures, root, first)
 }
 
+// priorRestorable is the READ-side check on one journalled prior: from the path's current
+// mandatory label and the error that read may have failed with, it reports whether the prior
+// may be written back and whether the instruction to write it back must be dropped.
+//
+// Only the record side was ever vouched for — recordEntry refuses to journal a Low prior, so
+// an honest journal never asks for apogee's own label to be put back. Nothing vouched for the
+// read side: the revert applied every PriorSDDL a journal named, so a journal planted or
+// corrupted under the apogee home made the next construction WRITE labels onto arbitrary paths
+// (security finding F-08). The check is that apogee's own Low label must still be sitting on
+// the path — that mark is what makes the path this run's, or a dead run's, to revert — and it
+// is taken BEFORE anything is cleared, because the clear is what turns a path apogee labelled
+// into an unlabelled one (judgePriors):
+//
+//   - A Low label, read cleanly, is restorable: apogee's mark is on the path, so the prior
+//     recorded beneath it is apogee's to put back.
+//   - Any other label, read cleanly, DROPS the instruction. Either the path was never
+//     apogee's or someone has changed it since; nothing of apogee's is on it, so there is
+//     nothing left to revert, and keeping the entry would re-attempt the write forever.
+//   - A path that is GONE drops too — the verdict the restore loop already reaches for a
+//     vanished path: an object that no longer exists carries no label to put back.
+//   - Any OTHER read failure is neither. The verdict is unknown and both answers destroy
+//     something: restoring writes a label onto a path that may not be apogee's, dropping
+//     destroys the only record of a foreign one. The caller keeps the entry unjudged and
+//     leaves it to a later run.
+//
+// It is pure so the decision is table-testable on any OS — the retire seam pattern — which
+// matters most here: ReadSDDL errors off Windows, and this is the one decision a planted
+// journal attacks.
+func priorRestorable(current string, readErr error) (restore, drop bool) {
+	if readErr != nil {
+		return false, os.IsNotExist(readErr)
+	}
+	if IsLowLabel(current) {
+		return true, false
+	}
+	return false, true
+}
+
 // revertibleRoots returns the journalled roots a revert may clear: r's roots minus every
 // root also named (Root == true) by a sibling journal whose owning process is still ALIVE.
 // Two sessions confining one workspace journal the same root, and the first to tear down

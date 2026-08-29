@@ -764,16 +764,6 @@ Everything the three audits found that is NOT an item in one of those plans live
 it waits. Sources: `docs/reviews/code-audit-2026-08-25.md` (C-nn), `docs/skill-runs/security-audit/
 2026-08-25/report.md` (F-nn), `docs/skill-runs/refocus/2026-08-25/briefing.md` (R-n).
 
-**Design discussion before code** — each wants its own grill; none is a one-item fix:
-
-- [ ] **C-20 + F-08 — the Windows pair.** `internal/platform/confiner_windows.go` keeps no mutex by
-  stated design, so `Close` zeroes `token`/`caps` while `Confine` reads across a label walk; ordered
-  exits are joined but bubbletea's abnormal exit (SIGINT, closed console) does not wait on Cmd
-  goroutines → token 0 → `CreateProcess` unconfined, marked `confined=true`; the console spawn from
-  `context.Background()` (`internal/console/process.go`) has no fail-closed. `internal/platform/
-  winlabel/journal.go` replays a planted journal's label writes and `IsLowLabel` vouches the write
-  side only. Both need a Windows box to verify; the "backend keeps no lock" contract is what to revise.
-
 **Architecture pass, not fixes** — candidates for the next architecture-review plan
 (`docs/plans/archived/2026-08-24 - 03 - architecture-review-deepening-plan.md` is already archived):
 

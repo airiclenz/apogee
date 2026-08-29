@@ -1696,6 +1696,286 @@ func TestWindowsPrewarmAfterCloseLabelsNothing(t *testing.T) {
 	}
 }
 
+// The read-side battery (security finding F-08). A journal is an instruction to WRITE
+// mandatory labels onto the paths it names, and anything that can create a file under the
+// apogee home can write one. These four pin the warrant the revert now demands: apogee's own
+// Low label must still be on the path, judged before the clear that would remove it.
+
+func TestWindowsPlantedJournalDoesNotRelabelAForeignPath(t *testing.T) {
+	// The attack itself. A journal nobody here wrote names a path apogee never touched and
+	// claims a prior for it; before the read-side check, the next construction obeyed that
+	// instruction and wrote the label. Nothing in this test needs a restricted token — the
+	// harm is done by the recovery pass alone, which is exactly what makes it reachable on any
+	// Windows host that can be made to drop a file under ~/.apogee.
+	home := t.TempDir()
+	victim := filepath.Join(t.TempDir(), "victim.txt")
+	if err := os.WriteFile(victim, []byte("not apogee's"), 0o600); err != nil {
+		t.Fatalf("seed %q: %v", victim, err)
+	}
+	before, err := winlabel.ReadSDDL(victim)
+	if err != nil {
+		t.Fatalf("read the label of %q: %v", victim, err)
+	}
+	if before != "" {
+		t.Fatalf("the victim already carries the label %q; the test needs an untouched path", before)
+	}
+
+	// A High label is the interesting fabrication: it is not one apogee ever writes, and
+	// writing it would RAISE the path's integrity rather than lower it.
+	planted := winlabel.Record{PID: deadPID(t), Entries: []winlabel.Entry{
+		{Path: victim, PriorSDDL: "S:(ML;;NW;;;HI)"},
+	}}
+	if err := winlabel.WriteJournal(winlabel.JournalPath(home, planted.PID), planted); err != nil {
+		t.Fatalf("plant the journal: %v", err)
+	}
+
+	winlabel.Recover(home)
+
+	after, err := winlabel.ReadSDDL(victim)
+	if err != nil {
+		t.Fatalf("read the label of %q after recovery: %v", victim, err)
+	}
+	if after != before {
+		t.Errorf("label of %q = %q after recovery, want %q untouched; a planted journal made apogee label a path it never labelled",
+			victim, after, before)
+	}
+	if left := winlabel.ListJournals(home); len(left) != 0 {
+		t.Errorf("journals = %v after recovery, want the planted journal retired — a dropped instruction must not be re-attempted every run", left)
+	}
+}
+
+func TestWindowsRecoverStillRestoresOurOwnPrior(t *testing.T) {
+	// The other half of the same check: the warrant is real, so recovery must still finish the
+	// job it exists for. Identical shape to the planted journal above — a dead owner, a
+	// foreign prior, one recovery pass — except that the label on the path IS apogee's,
+	// because this journal describes a run that really labelled it. A check that dropped
+	// everything would pass the test above and silently strip the package's whole purpose.
+	home := t.TempDir()
+	ws := t.TempDir()
+	child := filepath.Join(ws, "foreign.txt")
+	if err := os.WriteFile(child, []byte("old"), 0o600); err != nil {
+		t.Fatalf("seed %q: %v", child, err)
+	}
+	if err := winlabel.SetSDDL(child, "S:(ML;;NW;;;ME)"); err != nil {
+		t.Fatalf("apply the foreign Medium label to %q: %v", child, err)
+	}
+	foreignPrior, err := winlabel.ReadSDDL(child)
+	if err != nil {
+		t.Fatalf("read the planted label of %q: %v", child, err)
+	}
+	if foreignPrior == "" || winlabel.IsLowLabel(foreignPrior) {
+		t.Fatalf("planted label reads back as %q; the test needs a non-empty, non-Low prior", foreignPrior)
+	}
+
+	// The interrupted run: label the box, then drop the backend on the floor and hand its
+	// journal to a dead owner, the TestWindowsInterruptedRunIsRecoveredFromTheJournal idiom.
+	crashed := newTokenConfiner(home)
+	if !crashed.Capabilities().FSWrite {
+		t.Skip("no restricted token on this host; nothing to label or restore")
+	}
+	if err := crashed.labelBox(domain.ConfinementBox{WorkspaceRoot: ws}); err != nil {
+		t.Fatalf("labelBox: %v", err)
+	}
+	journals := winlabel.ListJournals(home)
+	if len(journals) != 1 {
+		t.Fatalf("journals = %v, want exactly one", journals)
+	}
+	rewriteJournalPID(t, home, journals[0])
+
+	winlabel.Recover(home)
+
+	restored, err := winlabel.ReadSDDL(child)
+	if err != nil {
+		t.Fatalf("read the label of %q after recovery: %v", child, err)
+	}
+	if restored != foreignPrior {
+		t.Errorf("label of %q = %q after recovery, want the prior %q back verbatim; the read-side check must not drop a prior apogee really labelled over",
+			child, restored, foreignPrior)
+	}
+	if label, _ := winlabel.ReadSDDL(ws); label != "" {
+		t.Errorf("%q still carries the label %q after recovery, want the box root unlabelled", ws, label)
+	}
+	if left := winlabel.ListJournals(home); len(left) != 0 {
+		t.Errorf("journals = %v after recovery, want the fully reverted journal retired", left)
+	}
+}
+
+func TestWindowsHandedOffPriorIsJudgedOnce(t *testing.T) {
+	// Why the verdict is written to the journal rather than re-taken. A prior under a root a
+	// live sibling still claims is handed off (winlabel.restorablePriors) and restored by a
+	// LATER pass — by which time the sibling's own clear has stripped the Low label that
+	// vouches for it. Judging once, before this session's clear, and persisting the verdict is
+	// what keeps that later pass able to restore it; a check that re-read the path would find
+	// nothing of apogee's and drop the foreign label for good.
+	home := t.TempDir()
+	ws := t.TempDir()
+	if err := winlabel.SetSDDL(ws, "S:(ML;OICI;NW;;;ME)"); err != nil {
+		t.Fatalf("apply the foreign Medium label to %q: %v", ws, err)
+	}
+	foreignPrior, err := winlabel.ReadSDDL(ws)
+	if err != nil {
+		t.Fatalf("read the planted label of %q: %v", ws, err)
+	}
+	if foreignPrior == "" || winlabel.IsLowLabel(foreignPrior) {
+		t.Fatalf("planted label reads back as %q; the test needs a non-empty, non-Low prior", foreignPrior)
+	}
+
+	first := newTokenConfiner(home)
+	if !first.Capabilities().FSWrite {
+		t.Skip("no restricted token on this host; nothing to label")
+	}
+	closed := false
+	t.Cleanup(func() {
+		if !closed {
+			_ = first.Close()
+		}
+	})
+	if err := first.labelBox(domain.ConfinementBox{WorkspaceRoot: ws}); err != nil {
+		t.Fatalf("labelBox: %v", err)
+	}
+
+	pid, kill := liveChildPID(t)
+	siblingPath := winlabel.JournalPath(home, pid)
+	if err := winlabel.WriteJournal(siblingPath, winlabel.Record{PID: pid, Entries: []winlabel.Entry{{Path: ws, Root: true}}}); err != nil {
+		t.Fatalf("plant the sibling journal: %v", err)
+	}
+
+	if err := first.Close(); err != nil {
+		t.Fatalf("Close = %v, want nil; a handed-off prior must not fail the revert", err)
+	}
+	closed = true
+
+	kept, err := winlabel.ReadJournal(winlabel.JournalPath(home, os.Getpid()))
+	if err != nil {
+		t.Fatalf("the session's journal did not survive the handoff: %v", err)
+	}
+	if len(kept.Entries) != 1 || kept.Entries[0].PriorSDDL != foreignPrior {
+		t.Fatalf("handed-off entries = %+v, want exactly the foreign-prior entry for %q", kept.Entries, ws)
+	}
+	if !kept.Entries[0].Judged {
+		t.Fatal("the handed-off entry is not marked judged; the later pass would re-read a path this session's siblings will have unlabelled")
+	}
+
+	// The sibling ends and its obligation is discharged — performed by hand rather than
+	// through its own recovery, so the state that defeats a fresh judgement is observable: the
+	// path now reads unlabelled, carrying nothing that says it was ever apogee's.
+	kill()
+	if err := os.Remove(siblingPath); err != nil {
+		t.Fatalf("remove the sibling journal: %v", err)
+	}
+	if err := winlabel.ClearTree(ws); err != nil {
+		t.Fatalf("clear the sibling's root: %v", err)
+	}
+	if label, err := winlabel.ReadSDDL(ws); err != nil || label != "" {
+		t.Fatalf("label of %q = %q (err %v) before the later pass, want it unlabelled", ws, label, err)
+	}
+
+	winlabel.Recover(home)
+
+	restored, err := winlabel.ReadSDDL(ws)
+	if err != nil {
+		t.Fatalf("read the label of %q after the later pass: %v", ws, err)
+	}
+	if restored != foreignPrior {
+		t.Errorf("label of %q = %q, want the prior %q back verbatim; a verdict re-taken after the clear drops a handed-off prior",
+			ws, restored, foreignPrior)
+	}
+	if left := winlabel.ListJournals(home); len(left) != 0 {
+		t.Errorf("journals = %v, want the discharged handoff retired", left)
+	}
+}
+
+func TestWindowsFailedRestoreIsRetriedNotDropped(t *testing.T) {
+	// The retry path, the other place a later pass reads a path the clear already unlabelled.
+	// A restore that fails keeps the journal so the next run tries again (ADR 0020 §2) — and
+	// the next run reads a path whose Low label the failed pass nonetheless removed, because
+	// the clear runs before the restore. The persisted verdict is what still entitles that
+	// retry to write the prior back.
+	home := t.TempDir()
+	ws := t.TempDir()
+	child := filepath.Join(ws, "foreign.txt")
+	if err := os.WriteFile(child, []byte("old"), 0o600); err != nil {
+		t.Fatalf("seed %q: %v", child, err)
+	}
+
+	crashed := newTokenConfiner(home)
+	if !crashed.Capabilities().FSWrite {
+		t.Skip("no restricted token on this host; nothing to label")
+	}
+	if err := crashed.labelBox(domain.ConfinementBox{WorkspaceRoot: ws}); err != nil {
+		t.Fatalf("labelBox: %v", err)
+	}
+	if label, _ := winlabel.ReadSDDL(child); !winlabel.IsLowLabel(label) {
+		t.Fatalf("child label = %q, want apogee's Low label before the revert is obstructed", label)
+	}
+
+	// The obstruction: an unrestorable PriorSDDL. It fails inside SetSDDL's parse, so the
+	// CLEAR still succeeds and only the restore fails — the one shape that leaves the path
+	// unlabelled with the instruction undischarged. It is planted on the journal of a dead
+	// owner, the interrupted-run idiom, so this process's backend is out of the way.
+	journals := winlabel.ListJournals(home)
+	if len(journals) != 1 {
+		t.Fatalf("journals = %v, want exactly one", journals)
+	}
+	record, err := winlabel.ReadJournal(journals[0])
+	if err != nil {
+		t.Fatalf("read journal %q: %v", journals[0], err)
+	}
+	if err := os.Remove(journals[0]); err != nil {
+		t.Fatalf("remove journal %q: %v", journals[0], err)
+	}
+	record.PID = deadPID(t)
+	record.Entries = append(record.Entries, winlabel.Entry{Path: child, PriorSDDL: "not an sddl string"})
+	journalPath := winlabel.JournalPath(home, record.PID)
+	if err := winlabel.WriteJournal(journalPath, record); err != nil {
+		t.Fatalf("plant the obstructed journal: %v", err)
+	}
+
+	winlabel.Recover(home)
+
+	// The failed restore kept the journal, and the entry carries the verdict taken while the
+	// child still read Low — which it no longer does, because the clear ran first.
+	if label, err := winlabel.ReadSDDL(child); err != nil || label != "" {
+		t.Fatalf("child label = %q (err %v) after the failed pass, want the clear to have unlabelled it", label, err)
+	}
+	kept, err := winlabel.ReadJournal(journalPath)
+	if err != nil {
+		t.Fatalf("the journal did not survive the failed restore: %v", err)
+	}
+	var childEntry *winlabel.Entry
+	for i := range kept.Entries {
+		if strings.EqualFold(kept.Entries[i].Path, child) {
+			childEntry = &kept.Entries[i]
+		}
+	}
+	if childEntry == nil {
+		t.Fatalf("kept entries = %+v; the unrestored prior of %q was dropped instead of retried", kept.Entries, child)
+	}
+	if !childEntry.Judged {
+		t.Fatal("the kept entry is not marked judged; the retry below would re-read an already-cleared path and drop the prior")
+	}
+
+	// The obstacle is removed the way a real one would be — the descriptor is fixed up — and
+	// the next pass finishes the restore over a path that reads unlabelled.
+	childEntry.PriorSDDL = "S:(ML;;NW;;;ME)"
+	if err := winlabel.WriteJournal(journalPath, kept); err != nil {
+		t.Fatalf("rewrite the journal with a restorable prior: %v", err)
+	}
+
+	winlabel.Recover(home)
+
+	restored, err := winlabel.ReadSDDL(child)
+	if err != nil {
+		t.Fatalf("read the label of %q after the retry: %v", child, err)
+	}
+	if !strings.Contains(restored, ";ME)") {
+		t.Errorf("label of %q = %q after the retry, want the Medium prior put back", child, restored)
+	}
+	if left := winlabel.ListJournals(home); len(left) != 0 {
+		t.Errorf("journals = %v after the retry, want the discharged journal retired", left)
+	}
+}
+
 // runConfinedLine runs a confined `cmd /c echo x> "<target>"` and returns the run error.
 func runConfinedLine(t *testing.T, c domain.Confiner, box domain.ConfinementBox, target string) error {
 	t.Helper()
