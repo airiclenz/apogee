@@ -2846,18 +2846,39 @@ const maxWriteDrainSteps = 32
 // save is in flight is waiting, not lost.
 func runWrites(t *testing.T, m Model, cmd tea.Cmd) Model {
 	t.Helper()
+	pending := expandBatch(cmd)
 	for range maxWriteDrainSteps {
-		if cmd == nil {
+		if len(pending) == 0 {
 			return m
 		}
-		msg := cmdMsg(cmd)
-		if msg == nil {
-			return m
-		}
-		m, cmd = stepCmd(t, m, msg)
+		var next tea.Cmd
+		m, next = stepCmd(t, m, pending[0])
+		pending = append(pending[1:], expandBatch(next)...)
 	}
 	t.Fatal("the record-write queue never settled")
 	return m
+}
+
+// expandBatch runs cmd and returns the Msgs the RUNTIME would deliver from it: a tea.BatchMsg is
+// flattened into its members' Msgs, recursively, and a nil Cmd or a Cmd that answers nil yields
+// none. Update has no tea.BatchMsg case (foldWidgetMsg is the end of the switch), because the
+// batch never reaches a model in the real program — the runtime runs each member itself. A driver
+// that stepped the BatchMsg would therefore silently drop everything inside it, which is exactly
+// what a record write batched with anything else looks like when it goes missing.
+func expandBatch(cmd tea.Cmd) []tea.Msg {
+	msg := cmdMsg(cmd)
+	batch, batched := msg.(tea.BatchMsg)
+	if !batched {
+		if msg == nil {
+			return nil
+		}
+		return []tea.Msg{msg}
+	}
+	var msgs []tea.Msg
+	for _, member := range batch {
+		msgs = append(msgs, expandBatch(member)...)
+	}
+	return msgs
 }
 
 // isQuit reports whether cmd is tea.Quit (running it is safe — it only yields its Msg).
@@ -2872,15 +2893,18 @@ func isQuit(cmd tea.Cmd) bool {
 // empty, not from the keypress.
 func drainToQuit(t *testing.T, m Model, cmd tea.Cmd) Model {
 	t.Helper()
+	pending := expandBatch(cmd)
 	for range maxWriteDrainSteps {
-		if cmd == nil {
+		if len(pending) == 0 {
 			t.Fatal("the record-write queue settled without firing the deferred quit")
 		}
-		msg := cmdMsg(cmd)
+		msg := pending[0]
 		if _, quit := msg.(tea.QuitMsg); quit {
 			return m
 		}
-		m, cmd = stepCmd(t, m, msg)
+		var next tea.Cmd
+		m, next = stepCmd(t, m, msg)
+		pending = append(pending[1:], expandBatch(next)...)
 	}
 	t.Fatal("the deferred quit never fired")
 	return m

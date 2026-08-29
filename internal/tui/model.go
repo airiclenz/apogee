@@ -395,6 +395,10 @@ type Model struct {
 	// flash is a transient status-line note (e.g. "copied 12 chars") shown after a mouse copy and
 	// cleared by flashClearMsg after flashDuration.
 	flash string
+	// mouseReasserts counts the mouse-tracking re-asserts sent so far (mousereassert.go), which is
+	// the only thing --tui-diag can say about them. A plain int, riding the value-copied Model
+	// (ADR 0011).
+	mouseReasserts int
 
 	// Content & layout.
 	transcript transcript
@@ -825,7 +829,10 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		m.sel = promptSel{} // the box moved/reflowed: its stored visual coords are stale
 		m.dropRecall()      // and the box the human recalled into is no longer the box in front of them
 		m.layout()
-		return m, nil
+		// A resize is also the cheapest moment to say the mouse mode again: the renderer only
+		// writes it on a MouseMode DIFF, so a terminal that lost tracking while a tool child held
+		// it would otherwise never hear it again (mousereassert.go).
+		return m.reassertMouse()
 
 	case tea.ModeReportMsg:
 		// The terminal answered one of the mode queries bubbletea sends at start-up: the width
@@ -862,15 +869,23 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		// it just wrote. The widget's height IS the transcript's drawn row count (layout()), so a
 		// report pane that grew under a stale one strands the tail below the scroll clamp.
 		m.layout()
+		// A tool result is a child that just finished with the terminal — at any depth, a
+		// sub-agent's included — so it is the moment mouse tracking may have been reset behind
+		// apogee's back. Say it again (mousereassert.go); the sequence is idempotent, so the
+		// overwhelming majority of these cost two escapes nobody sees.
+		var reassert tea.Cmd
+		if _, isToolResult := msg.Event.(domain.ToolResultEvent); isToolResult {
+			m, reassert = m.reassertMouse()
+		}
 		// A delegation was just issued, or a child of one crossed a tool boundary: re-persist the
 		// record so anyone reading it while the Turn runs sees the delegation and its progress
 		// (progressSaveTrigger, fold.go). Scheduled AFTER the fold, so the transcript it encodes
 		// already holds the event that asked for it; every other Event leaves the record where the
 		// last save put it.
 		if progressSaveTrigger(msg.Event) {
-			return m, m.progressSave()
+			return m, tea.Batch(m.progressSave(), reassert)
 		}
-		return m, nil
+		return m, reassert
 
 	case approvalReqMsg:
 		// The worker's Approver hands the gate to the Update loop: record the request and switch

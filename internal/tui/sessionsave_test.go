@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/session"
 )
@@ -329,8 +330,16 @@ func TestProgressSaveTriggersCoalesceBehindAnInFlightSave(t *testing.T) {
 	m, issued := stepCmd(t, m, delegationIssued()) // both fold while that save is still running
 	m, progressed := stepCmd(t, m, delegateChildResult())
 
-	if issued != nil || progressed != nil {
+	if issued != nil {
 		t.Error("a progress save dispatched a second write while one was in flight")
+	}
+	// The child's RESULT still answers with a Cmd, because every tool result re-asserts mouse
+	// tracking (mousereassert.go). What must not be there is a write: the re-assert is the whole
+	// Cmd, not a batch with a save in it.
+	if raw, isRaw := cmdMsg(progressed).(tea.RawMsg); !isRaw {
+		t.Errorf("the child's result answered %T, want only the mouse re-assert: a progress save dispatched a second write while one was in flight", cmdMsg(progressed))
+	} else if raw.Msg != mouseTrackingSeq {
+		t.Errorf("the child's result re-asserted %q, want %q", raw.Msg, mouseTrackingSeq)
 	}
 	if n := len(m.pendingWrites); n != 1 {
 		t.Fatalf("pending writes = %d, want 1 — the two triggers must coalesce into one", n)

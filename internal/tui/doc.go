@@ -259,7 +259,11 @@
 // equal sight by construction rather than by care. clipboard.go holds the second half of the copy
 // itself: OSC52 stays the primary and SSH-safe channel, and beside it a best-effort write to the
 // host's own clipboard program covers the terminals that ignore the escape, behind one injectable
-// package-level seam so a test can watch what a copy actually hands over.
+// package-level seam so a test can watch what a copy actually hands over. mousereassert.go keeps
+// that whole reach ALIVE across a tool run: bubbletea writes the mouse-tracking escapes only when
+// the frame's MouseMode changes, so a tool child that reset tracking on its way out would leave
+// clicks, drags and the wheel dead for the rest of the session — the model re-asserts the
+// sequence itself after every tool result and on every resize.
 //
 // blockcursor.go is that same reach from the KEYBOARD: a modal block cursor over the transcript
 // (docs/layout/tool-layout.md, design call 7). ⌥↑/⌥↓ enter the walk and move it, plain ↑/↓ move
