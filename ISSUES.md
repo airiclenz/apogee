@@ -774,13 +774,6 @@ it waits. Sources: `docs/reviews/code-audit-2026-08-25.md` (C-nn), `docs/skill-r
   `ctx`, so ADR 0039 fan-out serialises every completion behind a disk rewrite and a hung filesystem
   hangs the loop. Shape to settle (write model): mutate under the lock, encode and write outside it;
   optionally a coalescing async writer. Not independently verified.
-- [ ] **C-04 — the decompose scoring cap saturates.** `internal/mechanisms/decompose.go`
-  `decomposeCountPhraseMatches` returns at `cap` and every caller passes `perMatch` = cap/2, so the
-  second match saturates and the classifier degenerates to category count + length bonus (two
-  delegation + two conditional phrases = 14 ≥ 10 → "complex" → history collapse on a simple task). The
-  fix — sum per-match points, cap the category total afterwards — shifts classification thresholds
-  and any calibrated bench arm, so it lands with apogee-sim evidence, not on sight. Not independently
-  verified.
 - [ ] **C-20 + F-08 — the Windows pair.** `internal/platform/confiner_windows.go` keeps no mutex by
   stated design, so `Close` zeroes `token`/`caps` while `Confine` reads across a label walk; ordered
   exits are joined but bubbletea's abnormal exit (SIGINT, closed console) does not wait on Cmd

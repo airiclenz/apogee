@@ -383,6 +383,20 @@ func decomposeAssessComplexity(text string) decomposeComplexityResult {
 
 // decomposeCountPhraseMatches sums perMatch points for each phrase present in text, capped
 // (apogee-sim countPhraseMatches @pin).
+//
+// The cap saturates early, by design. The delegation (4, 8), conditional (3, 6) and review (2, 4)
+// sites pass perMatch = cap/2, so the SECOND matching phrase saturates the category; the phase
+// site (2, 6) saturates on the THIRD. A category therefore contributes "absent / one or two
+// signals / saturated" and never an open count — which is the intent: a category is evidence that
+// a KIND of structure is present, not a tally of how often it is spelled. Three spellings of
+// "delegate" in one prompt are one delegation signal, not three, and a prompt that says "sub-agent"
+// six times is not six times more complex than one that says it twice.
+//
+// Summing every match and capping the category total afterwards is the same function: the running
+// total only grows, so returning cap the moment it is reached equals min(matches*perMatch, cap).
+// The only lever that changes any classification is the calibration itself (the perMatch and cap
+// each call site passes), which is an apogee-sim bench question and not a code fix — see
+// TestDecomposePhraseCategorySaturatesOnTheSecondMatch, which pins these numbers.
 func decomposeCountPhraseMatches(text string, phrases []string, perMatch, cap int) int {
 	total := 0
 	for _, phrase := range phrases {

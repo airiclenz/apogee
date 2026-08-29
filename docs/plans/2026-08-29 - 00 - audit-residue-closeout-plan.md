@@ -156,7 +156,11 @@ accessor is added (no caller needs one; the ISSUES entry says so). Remove the `I
 
 **Commit.** `docs(skills): Provider.Suggest's doc states the per-call snapshot guarantee it keeps`
 
-## 2. The decompose phrase cap's saturation is pinned as the calibration it is (C-04)
+## 2. The decompose phrase cap's saturation is pinned as the calibration it is (C-04) — ✅ DONE (2026-08-29)
+
+NOTES (2026-08-29): the audit-example assertion (score 14, `decomposeComplex`) is a subtest of `TestDecomposePhraseCategorySaturatesOnTheSecondMatch` rather than a second test function, since the item's Tests line names that one test; its own doc comment carries the "this is the pinned calibration, changing it is an apogee-sim recalibration" statement alongside the function-level one.
+
+NOTES (2026-08-29): the C-04 bullet was ISSUES.md lines 777-783 at the working tree (the plan's 787-793 counted from the base commit, before item 1 removed the `Provider.Suggest` residual); the preceding C-13 bullet and the following C-20+F-08 bullet both survive intact.
 
 **What.** Closes audit finding C-04 as by-design (ratified call). `internal/mechanisms/decompose.go`
 `decomposeCountPhraseMatches` (`:384-396`) and its four call sites (`:351-366`): delegation

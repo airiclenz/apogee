@@ -448,3 +448,64 @@ func TestDecomposeExtractStepProseFallback(t *testing.T) {
 		})
 	}
 }
+
+// TestDecomposePhraseCategorySaturatesOnTheSecondMatch pins the phrase-cap calibration
+// decomposeAssessComplexity is built on. With perMatch = cap/2 the delegation, conditional and
+// review categories saturate on the second matching phrase; the phase category (perMatch 2, cap 6)
+// saturates on the third. That IS the pinned behaviour, not a defect: a category signals that a
+// KIND of structure is present, not how often it is spelled. Summing every match and capping the
+// category total afterwards is the same arithmetic. If this test goes red, the calibration moved —
+// and moving it is a recalibration that belongs in an apogee-sim bench arm, not a fix made here.
+func TestDecomposePhraseCategorySaturatesOnTheSecondMatch(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		text     string
+		phrases  []string
+		perMatch int
+		cap      int
+		want     int
+	}{
+		{"delegation/no phrase", "rename the field and run the tests", decomposeDelegationPhrases, 4, 8, 0},
+		{"delegation/one phrase", "spawn a worker", decomposeDelegationPhrases, 4, 8, 4},
+		{"delegation/two phrases saturate", "spawn a worker and delegate the parse", decomposeDelegationPhrases, 4, 8, 8},
+		{"delegation/three phrases", "spawn a worker, delegate the parse, then handoff", decomposeDelegationPhrases, 4, 8, 8},
+		{"delegation/four phrases", "spawn a worker, delegate the parse, then handoff and orchestrate", decomposeDelegationPhrases, 4, 8, 8},
+
+		{"phase/no phrase", "rename the field and run the tests", decomposePhasePhrases, 2, 6, 0},
+		{"phase/one phrase", "phase 1 is the parser", decomposePhasePhrases, 2, 6, 2},
+		{"phase/two phrases", "phase 1 is the parser, phase 2 the printer", decomposePhasePhrases, 2, 6, 4},
+		{"phase/three phrases saturate", "phase 1 is the parser, phase 2 the printer; after that the tests", decomposePhasePhrases, 2, 6, 6},
+		{"phase/four phrases", "phase 1 is the parser, phase 2 the printer; after that the tests, once done ship it", decomposePhasePhrases, 2, 6, 6},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := decomposeCountPhraseMatches(tc.text, tc.phrases, tc.perMatch, tc.cap); got != tc.want {
+				t.Errorf("decomposeCountPhraseMatches(%q, perMatch %d, cap %d) = %d, want %d",
+					tc.text, tc.perMatch, tc.cap, got, tc.want)
+			}
+		})
+	}
+
+	// The 2026-08-25 audit's own C-04 example: two delegation phrases (saturated at 8) plus two
+	// conditional phrases (saturated at 6) score 14 and classify "complex" with no numbered steps,
+	// no review or phase language and no length bonus. Pinned deliberately — this is the calibration
+	// the classifier ships with.
+	t.Run("audit example scores 14 and classifies complex", func(t *testing.T) {
+		t.Parallel()
+
+		const prompt = "Spawn a worker and delegate the parse; if it fails, use the fallback."
+
+		got := decomposeAssessComplexity(prompt)
+		if got.score != 14 {
+			t.Errorf("score = %d, want 14 (signals %v)", got.score, got.signals)
+		}
+		if got.level != decomposeComplex {
+			t.Errorf("level = %v, want %v (score %d)", got.level, decomposeComplex, got.score)
+		}
+	})
+}
