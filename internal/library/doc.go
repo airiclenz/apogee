@@ -14,4 +14,11 @@
 // Library (decision 11). The Store is process-local: it guards its in-memory map with a
 // mutex for intra-process safety but makes no cross-process locking claims in v1 — two
 // apogee processes sharing one LibraryDir may last-writer-win.
+//
+// The write model is asynchronous: recording an observation only marks the store dirty, and a
+// single writer goroutine debounces those marks into one whole-file snapshot, so no caller — and
+// under ADR 0039 fan-out, no sub-agent's post-response hook — ever waits on the filesystem. An
+// observation therefore reaches disk within the debounce window or at Close; a process that exits
+// within 200ms of its last observation without closing the store loses that observation, which is
+// the accepted cost of a best-effort learning substrate.
 package library

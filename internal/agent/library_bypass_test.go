@@ -35,6 +35,11 @@ func TestLibrary_BypassLeavesPreSeededStoreUntouched(t *testing.T) {
 	seed := library.NewStore(dir)
 	seed.Record(fp, library.CategoryBehavioral, []string{"behavioral", "text_instead_of_tool"}, "Always prefer tool calls.")
 	seed.Record(fp, library.CategoryBehavioral, []string{"behavioral", "text_instead_of_tool"}, "Always prefer tool calls.")
+	// The store writes off the caller's path, so the seed only reaches disk when it is closed —
+	// and the read below is this test's first look at the file.
+	if err := seed.Close(); err != nil {
+		t.Fatalf("close the seed store: %v", err)
+	}
 
 	storePath := filepath.Join(dir, "library.json")
 	before, err := os.ReadFile(storePath)

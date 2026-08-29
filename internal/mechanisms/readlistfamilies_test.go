@@ -45,7 +45,7 @@ func TestLibraryObserveShallowExplorationOnCamelCaseList(t *testing.T) {
 	for _, tool := range []string{"listFiles", "listDir"} {
 		t.Run(tool, func(t *testing.T) {
 			t.Parallel()
-			st := library.NewStore(t.TempDir())
+			st := closeOnCleanup(t, library.NewStore(t.TempDir()))
 			m := newLibraryMech(st, libFP("sha256:m", domain.ConfidenceHigh))
 
 			tools := []domain.ToolDef{{Name: tool}}

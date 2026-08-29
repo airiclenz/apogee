@@ -326,7 +326,17 @@ override) if item 3 did not already add them.
 
 **Commit.** `test(probe): every terminal-probe section is proven to catch its divergence (C-15)`
 
-## 5. The library store writes off the caller's path: an async coalescing writer (C-13, store half)
+## 5. The library store writes off the caller's path: an async coalescing writer (C-13, store half) — ✅ DONE (2026-08-29)
+
+NOTES (2026-08-29): the snapshot is taken under the full write lock (`mu.Lock`), not the `RLock` the item names — clearing `dirty` is a write, and the item requires the snapshot and the flag to move in the same critical section.
+
+NOTES (2026-08-29): `TestStorePersistFailureNoticeCarriesOnePrefix` also became `t.Parallel()`: it no longer swaps the process-global `os.Stderr` (the reason it was sequential), and it sinks the writer's notice through the new `notify` seam so the async path prints nothing into the test's stderr.
+
+NOTES (2026-08-29): `TestStoreCloseBoundsAHungWriter` joins the abandoned writer in its cleanup (the write seam signals a `resumed` channel after it is released). Without that join the abandoned goroutine's read of the package-level `persistDebounce` is unordered against the next sequential test's move of the seam, and `-race` flags the global.
+
+NOTES (2026-08-29): the seams are unexported package vars, exactly as the item names them (`persistDebounce`, `closeFlushTimeout`), so item 6's `internal/agent` child-close test cannot set them from another package — item 6 will need its own hook (or an exported one added there).
+
+NOTES (2026-08-29): production shutdown does not flush the store yet — no Driver calls `Store.Close`; item 6 (the engine half) is what holds the store on the Agent and flushes it at `Agent.Close`, and it also removes the C-13 `ISSUES.md` entry, which this item deliberately leaves in place.
 
 **What.** Closes audit finding C-13 (ratified: async coalescing writer). `internal/library/store.go`
 `Record` (`:138-176`) and `RecordSuccess` (`:181-192`) call `persist()` (`:273-297`: sort +

@@ -20,6 +20,15 @@ func libFP(label string, c domain.FingerprintConfidence) domain.ModelFingerprint
 	return domain.ModelFingerprint{Label: label, Confidence: c}
 }
 
+// closeOnCleanup parks a store's writer when the test ends. The library store publishes
+// asynchronously, so a writer left running past a test could recreate the t.TempDir its cleanup
+// just removed.
+func closeOnCleanup(t *testing.T, st *library.Store) *library.Store {
+	t.Helper()
+	t.Cleanup(func() { _ = st.Close() })
+	return st
+}
+
 // newLibraryMech builds the library Mechanism directly over a store + fingerprint, bypassing the
 // catalogue so a test controls both injected collaborators (D3).
 func newLibraryMech(st *library.Store, fp domain.ModelFingerprint) *libraryMechanism {
@@ -45,7 +54,7 @@ func observeResponse(history []domain.Message, tools []domain.ToolDef, calls ...
 // Capability is the lever item 2's Bypass gate skips on, so the Library is inert under Bypass.
 func TestLibraryDescriptorAndHooks(t *testing.T) {
 	t.Parallel()
-	m, err := Build(libraryID, Deps{Library: library.NewStore(t.TempDir()), Fingerprint: libFP("sha256:m", domain.ConfidenceHigh)})
+	m, err := Build(libraryID, Deps{Library: closeOnCleanup(t, library.NewStore(t.TempDir())), Fingerprint: libFP("sha256:m", domain.ConfidenceHigh)})
 	if err != nil {
 		t.Fatalf("Build(%q): %v", libraryID, err)
 	}
@@ -77,7 +86,7 @@ func TestLibraryBuildRequiresStore(t *testing.T) {
 	if _, err := Build(libraryID, Deps{}); !errors.Is(err, errLibraryStoreRequired) {
 		t.Errorf("Build(library, no store): err = %v; want errLibraryStoreRequired", err)
 	}
-	m, err := Build(libraryID, Deps{Library: library.NewStore(t.TempDir()), Fingerprint: libFP("sha256:m", domain.ConfidenceHigh)})
+	m, err := Build(libraryID, Deps{Library: closeOnCleanup(t, library.NewStore(t.TempDir())), Fingerprint: libFP("sha256:m", domain.ConfidenceHigh)})
 	if err != nil {
 		t.Fatalf("Build(library, store): %v", err)
 	}
@@ -90,7 +99,7 @@ func TestLibraryBuildRequiresStore(t *testing.T) {
 // a no-op (the marker makes the inject idempotent).
 func TestLibraryInjectsAboveConfidenceGateMarkerDeduped(t *testing.T) {
 	t.Parallel()
-	st := library.NewStore(t.TempDir())
+	st := closeOnCleanup(t, library.NewStore(t.TempDir()))
 	fp := libFP("sha256:m", domain.ConfidenceHigh)
 	seedQualifying(st, fp, library.CategoryBehavioral, []string{"behavioral", "text_instead_of_tool"}, "Always prefer tool calls.")
 	m := newLibraryMech(st, fp)
@@ -129,7 +138,7 @@ func TestLibraryInjectsAboveConfidenceGateMarkerDeduped(t *testing.T) {
 // gate ("prefer not to inject under uncertainty"). A zero fingerprint is likewise inert.
 func TestLibraryConfidenceGateBlocksLowAndZero(t *testing.T) {
 	t.Parallel()
-	st := library.NewStore(t.TempDir())
+	st := closeOnCleanup(t, library.NewStore(t.TempDir()))
 	// Seed under the same label so entries exist; the gate, not an empty query, is what blocks inject.
 	seedQualifying(st, libFP("sha256:m", domain.ConfidenceHigh), library.CategoryBehavioral, []string{"behavioral", "text_instead_of_tool"}, "Always prefer tool calls.")
 
@@ -155,7 +164,7 @@ func TestLibraryConfidenceGateBlocksLowAndZero(t *testing.T) {
 // them when it has it (apogee-sim WithRequestIntent / analysisOnlyTags).
 func TestLibraryInjectIntentFilter(t *testing.T) {
 	t.Parallel()
-	st := library.NewStore(t.TempDir())
+	st := closeOnCleanup(t, library.NewStore(t.TempDir()))
 	fp := libFP("sha256:m", domain.ConfidenceHigh)
 	seedQualifying(st, fp, library.CategoryBehavioral, []string{"behavioral", "shallow_exploration"}, "Read files before summarizing.")
 	m := newLibraryMech(st, fp)
@@ -189,7 +198,7 @@ func TestLibraryInjectIntentFilter(t *testing.T) {
 // notes present.
 func TestLibraryInjectContextFullBackoff(t *testing.T) {
 	t.Parallel()
-	st := library.NewStore(t.TempDir())
+	st := closeOnCleanup(t, library.NewStore(t.TempDir()))
 	fp := libFP("sha256:m", domain.ConfidenceHigh)
 	seedQualifying(st, fp, library.CategoryBehavioral, []string{"behavioral", "text_instead_of_tool"}, "Always prefer tool calls.")
 
@@ -211,7 +220,7 @@ func TestLibraryInjectContextFullBackoff(t *testing.T) {
 // token cap, deferred to this Mechanism by item 13).
 func TestLibraryInjectBudgetCap(t *testing.T) {
 	t.Parallel()
-	st := library.NewStore(t.TempDir())
+	st := closeOnCleanup(t, library.NewStore(t.TempDir()))
 	fp := libFP("sha256:m", domain.ConfidenceHigh)
 	// ~700 chars at the default 3 chars/token ≈ 233 tokens, over the 200-token budget.
 	huge := strings.Repeat("prefer tools. ", 50)
@@ -233,7 +242,7 @@ func TestLibraryInjectBudgetCap(t *testing.T) {
 // tool.
 func TestLibraryObserveRecordsCorrectionKeyedOnFingerprint(t *testing.T) {
 	t.Parallel()
-	st := library.NewStore(t.TempDir())
+	st := closeOnCleanup(t, library.NewStore(t.TempDir()))
 	fp := libFP("sha256:m", domain.ConfidenceHigh)
 	m := newLibraryMech(st, fp)
 
@@ -264,7 +273,7 @@ func TestLibraryObserveRecordsCorrectionKeyedOnFingerprint(t *testing.T) {
 // an analysis-intent request.
 func TestLibraryObserveRecordsShallowExploration(t *testing.T) {
 	t.Parallel()
-	st := library.NewStore(t.TempDir())
+	st := closeOnCleanup(t, library.NewStore(t.TempDir()))
 	fp := libFP("sha256:m", domain.ConfidenceHigh)
 	m := newLibraryMech(st, fp)
 
@@ -285,7 +294,7 @@ func TestLibraryObserveRecordsShallowExploration(t *testing.T) {
 // is written.
 func TestLibraryObserveZeroFingerprintInert(t *testing.T) {
 	t.Parallel()
-	st := library.NewStore(t.TempDir())
+	st := closeOnCleanup(t, library.NewStore(t.TempDir()))
 	m := newLibraryMech(st, domain.ModelFingerprint{})
 
 	resp := observeResponse(nil, toolMenu(), domain.ToolCall{ID: "c1", Tool: "frobnicate", Arguments: json.RawMessage(`{}`)})
@@ -302,7 +311,7 @@ func TestLibraryObserveZeroFingerprintInert(t *testing.T) {
 // arguments cannot become a stored (and later injected) payload (item S4).
 func TestLibraryObserveComplexCallRecordsParamNamesNotValues(t *testing.T) {
 	t.Parallel()
-	st := library.NewStore(t.TempDir())
+	st := closeOnCleanup(t, library.NewStore(t.TempDir()))
 	fp := libFP("sha256:m", domain.ConfidenceHigh)
 	m := newLibraryMech(st, fp)
 
@@ -341,7 +350,7 @@ func TestLibraryObserveComplexCallRecordsParamNamesNotValues(t *testing.T) {
 // prompt (item S4 / third-review F4).
 func TestLibraryObserveComplexCallDropsNonSchemaKeys(t *testing.T) {
 	t.Parallel()
-	st := library.NewStore(t.TempDir())
+	st := closeOnCleanup(t, library.NewStore(t.TempDir()))
 	fp := libFP("sha256:m", domain.ConfidenceHigh)
 	m := newLibraryMech(st, fp)
 
@@ -411,7 +420,7 @@ func TestLibraryObserveComplexCallNoDerivableSchemaRecordsNoExample(t *testing.T
 		c := c
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
-			st := library.NewStore(t.TempDir())
+			st := closeOnCleanup(t, library.NewStore(t.TempDir()))
 			fp := libFP("sha256:m", domain.ConfidenceHigh)
 			m := newLibraryMech(st, fp)
 			tools := []domain.ToolDef{{Name: "mystery", Schema: c.schema}}
@@ -462,7 +471,7 @@ func TestLibraryInjectSanitizesPreSeededPoisonedStore(t *testing.T) {
 		t.Fatalf("seed store: %v", err)
 	}
 
-	st := library.NewStore(dir)
+	st := closeOnCleanup(t, library.NewStore(dir))
 	if err := st.Load(); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -530,7 +539,7 @@ func TestLibraryInjectStripsFormatCharsFromPreSeededStore(t *testing.T) {
 		t.Fatalf("seed store: %v", err)
 	}
 
-	st := library.NewStore(dir)
+	st := closeOnCleanup(t, library.NewStore(dir))
 	if err := st.Load(); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -557,8 +566,8 @@ func TestLibraryInjectStripsFormatCharsFromPreSeededStore(t *testing.T) {
 // fingerprint's observations (decision 11 — isolation falls out of the injected root).
 func TestLibraryIsolatedRootsDoNotCrossContaminate(t *testing.T) {
 	t.Parallel()
-	stA := library.NewStore(t.TempDir())
-	stB := library.NewStore(t.TempDir())
+	stA := closeOnCleanup(t, library.NewStore(t.TempDir()))
+	stB := closeOnCleanup(t, library.NewStore(t.TempDir()))
 	fpA := libFP("sha256:a", domain.ConfidenceHigh)
 	fpB := libFP("sha256:b", domain.ConfidenceHigh)
 

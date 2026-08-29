@@ -29,6 +29,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/session"
@@ -443,8 +444,10 @@ func TestBenchReadinessContract(t *testing.T) {
 
 	// === Assertion 5: agent-driven writes stay inside the injected roots ===
 	// The library observe half wrote its store under the mechanisms-on arm's LibraryDir; under
-	// Bypass the Library is fully inert, so its LibraryDir stays empty.
-	if _, err := os.Stat(filepath.Join(mechRoots.library, "library.json")); err != nil {
+	// Bypass the Library is fully inert, so its LibraryDir stays empty. The store publishes off the
+	// caller's path (it debounces its observations into one write), so the file is polled for
+	// rather than assumed: this file must not import internal/library, so its Flush is out of reach.
+	if err := pollForFile(filepath.Join(mechRoots.library, "library.json")); err != nil {
 		t.Errorf("mechanisms-on arm did not persist its Library into the injected root: %v", err)
 	}
 	if entries, err := os.ReadDir(bypassRoots.library); err != nil || len(entries) != 0 {
@@ -690,4 +693,21 @@ func descriptorFor(id apogee.MechanismID) apogee.MechanismDescriptor {
 		}
 	}
 	return apogee.MechanismDescriptor{}
+}
+
+// pollForFile waits for path to appear, up to a bounded deadline. The Library store writes
+// asynchronously, so "the arm persisted its store" is a claim that settles shortly after the
+// observation, not at the instant it was recorded.
+func pollForFile(path string) error {
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		_, err := os.Stat(path)
+		if err == nil {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return err
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }
