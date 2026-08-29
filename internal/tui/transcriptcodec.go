@@ -156,12 +156,12 @@ type wireSkillSpan struct {
 //
 // Task travels because it is BODY, not lookup: a sub-agent run's expanded span opens with the
 // delegated prompt (toolView.task), and unlike every other body on this struct that text never came
-// from a result — it is the call's own argument, and the arguments are not on the wire. A record
-// that dropped it would replay as a run whose opening prompt block vanished: the scrollback changing
-// shape across a restart, the same thing Solo and Stat are here to prevent. It is ADDITIVE on the
-// same rule and carries omitempty — only a sub_agent head ever fills it, so no other record's blob
-// grows a byte, and a blob written before it decodes with no prompt, which is the shape every such
-// record was written under.
+// from a result — it is the call's own argument, and the arguments ride the record as a stored
+// value nothing paints (Args, below). A record that dropped it would replay as a run whose opening
+// prompt block vanished: the scrollback changing shape across a restart, the same thing Solo and
+// Stat are here to prevent. It is ADDITIVE on the same rule and carries omitempty — only a
+// sub_agent head ever fills it, so no other record's blob grows a byte, and a blob written before
+// it decodes with no prompt, which is the shape every such record was written under.
 //
 // Regions travel because they are the CHANGE ITSELF rather than a rendering of it (toolView.Regions,
 // domain.EditRegion — ADR 0052 §5). Details keeps carrying the stacked rows, so a diff block replays
