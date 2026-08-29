@@ -2,6 +2,7 @@ package probe
 
 import (
 	"bytes"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -292,4 +293,121 @@ func TestGatherTerminalAbortsOnASilentTerminal(t *testing.T) {
 	if !strings.HasSuffix(written, showCursor+leaveAltScreen) {
 		t.Errorf("the probe did not leave the screen as it found it: %q", written)
 	}
+}
+
+// The scripted terminal is the instrument every measurement below is taken with, so it is proved
+// first: the two replies the whole probe rests on, in the exact bytes a real terminal sends them
+// in. A fake that answered a DECRPM in the wrong shape would make the probe's parser look broken
+// from the outside while proving nothing about the terminal.
+func TestFakeTerminalAnswersCPRAndDECRQM(t *testing.T) {
+	t.Parallel()
+	fake := newAgreeingTerminal()
+
+	_, _ = fmt.Fprintf(fake, cursorPosition, 3, 7)
+	_, _ = fake.Write([]byte(dsrCPR))
+
+	if got, want := string(fake.Read(time.Millisecond)), csi+"3;7R"; got != want {
+		t.Errorf("CSI 6n after CUP 3;7 answered %q; want %q", got, want)
+	}
+
+	_, _ = fmt.Fprintf(fake, queryMode, 2027)
+
+	if got, want := string(fake.Read(time.Millisecond)), csi+"?2027;2$y"; got != want {
+		t.Errorf("DECRQM for mode 2027 answered %q; want %q", got, want)
+	}
+
+	// A write cut mid-sequence is held until the rest arrives, never discarded — the same rule the
+	// probe's own reply parser keeps, on the other side of the wire.
+	_, _ = fake.Write([]byte(dsrCPR[:len(dsrCPR)-1]))
+
+	if answer := fake.Read(time.Millisecond); answer != nil {
+		t.Errorf("a half-written CSI 6n was answered with %q before it finished", answer)
+	}
+
+	_, _ = fake.Write([]byte(dsrCPR[len(dsrCPR)-1:]))
+
+	if got, want := string(fake.Read(time.Millisecond)), csi+"3;7R"; got != want {
+		t.Errorf("the completed CSI 6n answered %q; want %q", got, want)
+	}
+}
+
+// The five measuring sections have never been exercised — only the two paths that abort before
+// measuring anything were. A terminal scripted to do exactly what the painter assumes is the
+// baseline every divergence test is read against: all six sections must come back clean, in order,
+// with the wording the report prints, and the screen must be handed back the way it was borrowed.
+func TestGatherTerminalMeasuresAnAgreeingTerminal(t *testing.T) {
+	t.Parallel()
+	fake := newAgreeingTerminal()
+
+	report := GatherTerminal(fake.inputs("xterm-256color"))
+
+	if report.Aborted != "" {
+		t.Fatalf("an agreeing terminal was refused: %s", report.Aborted)
+	}
+	want := []struct{ title, summary string }{
+		{"mode negotiation", "mode 2027 reads back as set after CSI ?2027h"},
+		{
+			"glyph advance (mode 2027 off, terminal reports reset (2))",
+			"every glyph advances by the width the painter's wcwidth table predicts",
+		},
+		{
+			"glyph advance (mode 2027 on, terminal reports set (1))",
+			"every glyph advances by the width the painter's grapheme table predicts",
+		},
+		{"hard tabs", "tab stops are every 8 columns and a tab moves without erasing"},
+		{
+			"last-column wrap",
+			"the terminal holds a pending wrap at the last column — the semantics the renderer emits against",
+		},
+		{"capabilities actually present", "the painter's capability set matches what the terminal actually does"},
+	}
+	if len(report.Sections) != len(want) {
+		t.Fatalf("%d sections were measured; want %d:\n%s", len(report.Sections), len(want), report.Report())
+	}
+
+	for i, w := range want {
+		section := report.Sections[i]
+		if section.Title != w.title {
+			t.Errorf("section %d is %q; want %q", i+1, section.Title, w.title)
+		}
+		if section.Mismatch {
+			t.Errorf("section %q flagged an agreeing terminal: %s", section.Title, section.Summary)
+		}
+		if section.Summary != w.summary {
+			t.Errorf("section %q summarised as\n  %q\nwant\n  %q", section.Title, section.Summary, w.summary)
+		}
+	}
+	if report.Mismatch() {
+		t.Errorf("an agreeing terminal reported a mismatch:\n%s", report.Report())
+	}
+	// Whether a tab ERASED what it passed over cannot be answered from a cursor position, and this
+	// terminal has no console to read cells out of — so the row has to say so rather than guess.
+	const noReadBack = "unverified — no screen read-back on this OS"
+	if got := observedFor(t, report.Sections[3], "tab over written cells"); got != noReadBack {
+		t.Errorf("the tab-erasure row reads %q; want %q", got, noReadBack)
+	}
+
+	written := string(fake.written)
+	if !strings.HasSuffix(written, showCursor+leaveAltScreen) {
+		t.Errorf("the probe did not leave the screen as it found it: %q", written)
+	}
+	// The mode was found reset, so it has to be left reset: a probe that reconfigured the terminal
+	// it measured would be the one thing a measurement may not do.
+	if last, ok := lastMode2027Request(written); !ok || last != resetMode2027 {
+		t.Errorf("the last mode-2027 request was %q, %v; want %q — the setting it was found in",
+			last, ok, resetMode2027)
+	}
+}
+
+// observedFor returns the "observed" cell of the row a section labels label, so a test names the
+// row it means rather than counting to it.
+func observedFor(t *testing.T, section TerminalSection, label string) string {
+	t.Helper()
+	for _, row := range section.Rows {
+		if len(row) > 1 && row[0] == label {
+			return row[1]
+		}
+	}
+	t.Fatalf("section %q has no %q row", section.Title, label)
+	return ""
 }

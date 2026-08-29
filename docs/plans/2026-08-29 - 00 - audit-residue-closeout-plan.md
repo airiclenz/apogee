@@ -192,7 +192,13 @@ commit; the preceding C-13 bullet ends at 786 and must survive).
 
 **Commit.** `test(mechanisms): pin the decompose phrase-cap saturation as the sim calibration (C-04)`
 
-## 3. A scripted terminal answers the probe; an agreeing terminal measures clean (C-15, half 1)
+## 3. A scripted terminal answers the probe; an agreeing terminal measures clean (C-15, half 1) — ✅ DONE (2026-08-29)
+
+NOTES (2026-08-29): the "unverified — no screen read-back on this OS" cell the item calls the tabs section's third row is `Rows[3]` — the fourth listed, after the two tab-stop rows and the DECST8C row; the test asserts it through a small `observedFor` helper that finds the row by its "tab over written cells" label, so a row inserted ahead of it cannot silently move the assertion.
+
+NOTES (2026-08-29): `terminal_fake_test.go` is 337 lines, of which 230 are code — the item's "~250 lines" budget is met on code lines, with the balance the doc prose every file in this package carries.
+
+NOTES (2026-08-29): `TestFakeTerminalAnswersCPRAndDECRQM` gained a third case beyond the item's two — a CSI written in two halves is answered only once it completes — because the "handles a trailing partial sequence by holding it until the next write" rule the item requires of the fake is otherwise unexercised: the probe formats every sequence in one write.
 
 **What.** `internal/probe/terminal.go` `GatherTerminal` (`:290-331`) is tested only on its two
 abort paths (`terminal_test.go:244-300`); every section — `measureModes`, `measureGlyphs` ×2,
