@@ -969,7 +969,11 @@ references the symbol — `grep -rn 'GrammarConstraint\|"grammar"' --include=*.g
 
 **Commit.** `refactor(mechanisms): retire the grammar Mechanism and its never-populated seam; a config naming it is tolerated (S-2)`
 
-## 15. `ISSUES.md`: the emptied audit-residue sections are removed
+## 15. `ISSUES.md`: the emptied audit-residue sections are removed — ✅ DONE (2026-08-29)
+
+NOTES (2026-08-29): the re-homed "Signal the audits could not produce" paragraph keeps the missing-signal statement and its provenance but drops its trailing clause — the list of external-behaviour claims the security report flagged (git `core.fsmonitor`/hooks/filters, `net/http` nil `CheckRedirect`, `os.OpenRoot` symlink semantics, ODF/EPUB handler execution, terminal column-0/bidi rendering) and the note that the corresponding plan items' reproduction tests carry them. Those plans (`2026-08-26 - 01`…`05`) ran and are archived, so the pointer tracks nothing open; the bullet instead gains a closing sentence stating the gap is standing, not historical — verified by `grep -rn 'golangci-lint\|govulncheck' Makefile .github/` returning nothing. The bullet title carries a trailing period inside the bold, matching the register's other bold bullet titles.
+
+NOTES (2026-08-29): "§Residuals deferred out of the 2026-08-28 code-audit fixes run" has no `---` rule below it — it is followed directly by `## Parked / deferred work` — so "heading through the `---` rule" removed the heading, its Status paragraph and the surrounding blank line, leaving the two-blank-line gap this file keeps before a `##` heading. The "Audit residue" section did have its rule, and heading through `---` went with it.
 
 **What.** Depends on items 1–14. `ISSUES.md` §"Audit residue (2026-08-25 refocus / security /
 code audits)" now holds only its preamble, the "Signal the audits could not produce" paragraph and

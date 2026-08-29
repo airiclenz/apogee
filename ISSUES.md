@@ -27,6 +27,13 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 
 - [ ] fold the five hand-rolled `LookPath` + fence pairs (`internal/tools/git.go:142`, `python_exec.go:239`, `run_tests.go:249`, `diagnostics.go:200`, `internal/present/opener.go:228`) onto `security.ResolveProgram`, so the resolver is the only exec entry rather than the newest of six — an architecture pass, deliberately out of scope of `docs/plans/2026-08-26 - 01`
 
+- [ ] **Run `golangci-lint` and `govulncheck` in `make check` and CI.**
+  Neither `golangci-lint` nor `govulncheck` was installed on the 2026-08-25 audit host, so none of
+  the three audits produced lint or dependency-vulnerability signal, and the dependency half of the
+  security audit's `dependency-surface` family went unaudited (no network for a CVE lookup) — every
+  verdict there was a code reading. Neither tool runs in `make check` or CI today, so the gap is
+  standing, not historical.
+
 
 ## Open defects
 
@@ -72,10 +79,6 @@ closeout commit message), never here; the work the run completed belongs in `CHA
   forgiven"). Defensive path only; never observed. Either the id is made unique per block or the
   comment is corrected.
 
-### Residuals deferred out of the 2026-08-28 code-audit fixes run
-
-**Status:** found 2026-08-28 at the close of the code-audit fixes run
-(`docs/plans/archived/2026-08-28 - 03 - code-audit-fixes-plan.md`), deferred out of that run.
 
 ## Parked / deferred work
 
@@ -756,28 +759,6 @@ knob value, and the run had a frame-verified keeper in hand.
   (`graphics/demo/tapes/hero.tape:49-94`) and into `graphics/demo/README.md:116` ("Knob 3 is a coin
   toss, not a setting"). A clock cannot track a window that slides with run length: what this needs
   is a trigger keyed to screen state — the card having painted — rather than to elapsed time.
-
----
-
-### Audit residue (2026-08-25 refocus / security / code audits) — deliberately outside the five first-wave plans
-
-**Status:** recorded 2026-08-26 when the merged findings handoff (`docs/handoffs/2026-08-26 - 00 -
-merged-audit-findings.md`, untracked by design) was cut into plans `docs/plans/2026-08-26 - 01` … `05`.
-Everything the three audits found that is NOT an item in one of those plans lives here with the reason
-it waits. Sources: `docs/reviews/code-audit-2026-08-25.md` (C-nn), `docs/skill-runs/security-audit/
-2026-08-25/report.md` (F-nn), `docs/skill-runs/refocus/2026-08-25/briefing.md` (R-n).
-
-**Signal the audits could not produce:** `golangci-lint` and `govulncheck` were not installed on the
-audit host — no lint and no dependency-vulnerability signal from any of the three audits, and the
-dependency half of the security audit's `dependency-surface` family is unaudited (no network for a
-CVE lookup). Every verdict was a code reading; the external-behaviour claims the security report
-flagged (git `core.fsmonitor`/hooks/filters, `net/http` nil `CheckRedirect`, `os.OpenRoot` symlink
-semantics, ODF/EPUB handler execution, terminal column-0/bidi rendering) are exercised by the
-reproduction tests the corresponding plan items carry, not here.
-
-**Worth watching:** the stock `gemma-4-e4b-it-qat` Validated set (`shipped.json`) arms
-`cached_content_intercept`, `autofix` and `filehint` — `filehint` is C-08's stock-install
-reachability (plan 02 item 5).
 
 ---
 
