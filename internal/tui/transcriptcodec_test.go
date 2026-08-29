@@ -1214,7 +1214,7 @@ func TestTranscriptCodecPersistsANamedDelegationAsItsTarget(t *testing.T) {
 		}
 		wantTool := []string{
 			"Label", "Verb", "Target", "Name", "Solo", "Stat", "StatValue", "Task", "Summary",
-			"Details", "Regions", "RegionFiles",
+			"Details", "Regions", "RegionFiles", "Args",
 		}
 		if got := fields(wireToolView{}); !slices.Equal(got, wantTool) {
 			t.Errorf("wireToolView members = %v, want %v — widening the wire needs its own decision", got, wantTool)
@@ -1224,9 +1224,10 @@ func TestTranscriptCodecPersistsANamedDelegationAsItsTarget(t *testing.T) {
 
 // TestTranscriptCodecRoundTripsTheDelegatedPrompt pins the half of a delegation the record cannot
 // re-derive. A run's expanded span opens with the prompt the model wrote (toolView.task), and that
-// text lives nowhere else on the record: the header keeps one clipped line of it and the arguments
-// it came from are never persisted, so a blob that dropped it would replay the run without its
-// opening block — the scrollback changing shape across a restart.
+// text lives nowhere else the block can paint FROM: the header keeps one clipped line of it, and
+// the arguments it came from ride the record as a stored value nothing paints (wireToolView.Args),
+// so a blob that dropped this member would replay the run without its opening block — the
+// scrollback changing shape across a restart.
 //
 // The prompt travels VERBATIM, newlines and all, because the block renders it as markdown at paint
 // time against a width the codec cannot see. A blob written before the member decodes to no prompt,
@@ -1722,6 +1723,139 @@ func TestTranscriptCodecRoundTripsARoutedSubAgentsModel(t *testing.T) {
 		}
 		if got[0].ctxModel != "" {
 			t.Errorf("a blob predating the member decoded model %q; want none", got[0].ctxModel)
+		}
+	})
+}
+
+// TestTranscriptCodecGoldenToolArgumentsV1 is the golden half of the arguments member: the exact
+// bytes a card with stored arguments writes, beside TestTranscriptCodecGoldenV1's proof that a card
+// without them writes what it always did. Two facts are pinned here and nowhere else — the member's
+// NAME and its place in the tool object (after every field the card SHOWS, which is what lets an
+// older build skip it), and the SHAPE of the value: the model wrote its keys unsorted, and what the
+// record keeps is the key-sorted, compact form wireArgs settled on, so the bytes on disk do not
+// shift with the order a model happened to spell its call in.
+func TestTranscriptCodecGoldenToolArgumentsV1(t *testing.T) {
+	t.Parallel()
+	tr := &transcript{entries: []entry{{
+		kind: entryToolCall, callID: "c1", done: true,
+		tool: toolView{
+			Label: "Grep", Verb: "searching", Target: "KeyMsg", name: "grep",
+			Summary:  namedSummary(detailLine{Text: "3 matches"}),
+			argsWire: wireArgs("grep", json.RawMessage(`{"pattern":"KeyMsg","path":"internal/tui/model.go"}`)),
+		},
+	}}}
+
+	data, err := encodeTranscript(tr)
+	if err != nil {
+		t.Fatalf("encodeTranscript: %v", err)
+	}
+	const golden = `{"version":1,"entries":[` +
+		`{"kind":"toolCall","callID":"c1","done":true,"tool":{"label":"Grep","verb":"searching",` +
+		`"target":"KeyMsg","name":"grep","summary":{"text":"3 matches"},` +
+		`"args":{"path":"internal/tui/model.go","pattern":"KeyMsg"}}}` +
+		`]}`
+	if string(data) != golden {
+		t.Errorf("golden wire shape mismatch:\n got = %s\nwant = %s", data, golden)
+	}
+}
+
+// TestTranscriptCodecRoundTripsToolArguments proves the record keeps what each call ASKED, for every
+// card the presenter builds rather than for the ones a presenter happened to retain a parsed map
+// for. The three cases are the three that could each be the hole: a registered call at the top
+// level, a DELEGATE's call one depth down (the run nobody watched go by — the whole reason the
+// member exists), and a tool no registry knows, which reaches the wire through presentToolCall's
+// other exit. The fourth case is the additive rule: a blob written before the member decodes with
+// none rather than failing.
+func TestTranscriptCodecRoundTripsToolArguments(t *testing.T) {
+	t.Parallel()
+
+	roundTrip := func(t *testing.T, tr *transcript) []entry {
+		t.Helper()
+		data, err := encodeTranscript(tr)
+		if err != nil {
+			t.Fatalf("encodeTranscript: %v", err)
+		}
+		got, err := decodeTranscript(data)
+		if err != nil {
+			t.Fatalf("decodeTranscript: %v", err)
+		}
+		return got
+	}
+
+	t.Run("a registered call keeps its bounded arguments", func(t *testing.T) {
+		t.Parallel()
+		call := domain.ToolCall{ID: "c1", Tool: "grep",
+			Arguments: json.RawMessage(`{"pattern":"KeyMsg","path":"internal/tui/model.go"}`)}
+		tr := &transcript{entries: []entry{{
+			kind: entryToolCall, callID: "c1", done: true,
+			tool: presentToolCall(call, "", workspaceRoot{}),
+		}}}
+
+		got := roundTrip(t, tr)
+		if len(got) != 1 {
+			t.Fatalf("decoded %d entries, want the one call", len(got))
+		}
+		const want = `{"path":"internal/tui/model.go","pattern":"KeyMsg"}`
+		if string(got[0].tool.argsWire) != want {
+			t.Errorf("replayed arguments %s, want %s", got[0].tool.argsWire, want)
+		}
+	})
+
+	t.Run("a delegate's call carries them one depth down", func(t *testing.T) {
+		t.Parallel()
+		child := domain.ToolCall{ID: "k1", Tool: "read_file",
+			Arguments: json.RawMessage(`{"path":"internal/tui/model.go"}`)}
+		tr := &transcript{entries: []entry{
+			{kind: entryToolCall, callID: "s1", done: true,
+				tool: presentToolCall(domain.ToolCall{ID: "s1", Tool: "sub_agent",
+					Arguments: json.RawMessage(`{"task":"survey the tests"}`)}, "", workspaceRoot{})},
+			{kind: entryToolCall, callID: "k1", done: true, depth: 1, spawnCallID: "s1",
+				tool: presentToolCall(child, "", workspaceRoot{})},
+		}}
+
+		got := roundTrip(t, tr)
+		if len(got) != 2 {
+			t.Fatalf("decoded %d entries, want the head and its child", len(got))
+		}
+		if want := `{"task":"survey the tests"}`; string(got[0].tool.argsWire) != want {
+			t.Errorf("the run head replayed arguments %s, want %s", got[0].tool.argsWire, want)
+		}
+		if want := `{"path":"internal/tui/model.go"}`; string(got[1].tool.argsWire) != want {
+			t.Errorf("the delegate's call replayed arguments %s, want %s", got[1].tool.argsWire, want)
+		}
+	})
+
+	t.Run("an unregistered tool keeps its arguments too", func(t *testing.T) {
+		t.Parallel()
+		call := domain.ToolCall{ID: "c1", Tool: "tail_log", Arguments: json.RawMessage(`{"a":"b"}`)}
+		tr := &transcript{entries: []entry{{
+			kind: entryToolCall, callID: "c1", done: true,
+			tool: presentToolCall(call, "", workspaceRoot{}),
+		}}}
+
+		got := roundTrip(t, tr)
+		if len(got) != 1 {
+			t.Fatalf("decoded %d entries, want the one call", len(got))
+		}
+		if want := `{"a":"b"}`; string(got[0].tool.argsWire) != want {
+			t.Errorf("replayed arguments %s, want %s", got[0].tool.argsWire, want)
+		}
+	})
+
+	t.Run("a blob written before the member decodes with none", func(t *testing.T) {
+		t.Parallel()
+		legacy := []byte(`{"version":1,"entries":[{"kind":"toolCall","callID":"c1","done":true,` +
+			`"tool":{"label":"Read","verb":"reading","target":"main.go","name":"read_file",` +
+			`"summary":{"text":"1 - 10"}}}]}`)
+		got, err := decodeTranscript(legacy)
+		if err != nil {
+			t.Fatalf("decodeTranscript(legacy): %v", err)
+		}
+		if len(got) != 1 {
+			t.Fatalf("decoded %d entries, want the one call", len(got))
+		}
+		if got[0].tool.argsWire != nil {
+			t.Errorf("a blob predating the member decoded arguments %s, want none", got[0].tool.argsWire)
 		}
 	})
 }

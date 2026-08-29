@@ -29,6 +29,11 @@ still remembers.
   the browser tags it `⟳ <schedule>` beside its title, so a run reads as one of a
   series rather than as a session nobody remembers starting. Ordering, resume,
   rename and delete treat it exactly like a session you held yourself.
+- Every tool card in a record keeps a bounded copy of the arguments the model sent
+  with that call — the main agent's and every sub-agent's alike — so a finished
+  run's tool use can still be read back off the file. It stays a summary and not a
+  transport: a write or edit's file content is left out (the card's own diff already
+  carries it), and any other oversize value is stored as its size instead of its bytes.
 - A record stores what the session spent in two halves — the main agent's tokens
   and the sum its sub-agents reported — and the browser row shows their **sum**,
   the whole session's spend. A run that hands most of its work to delegates costs

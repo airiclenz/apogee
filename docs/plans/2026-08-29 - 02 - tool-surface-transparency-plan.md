@@ -275,7 +275,15 @@ payload over 4 KB collapses to `{"elided":"N bytes"}`; invalid JSON → nil; `do
 
 **Commit:** `feat(tui): a bounded compact wire form of tool-call arguments`
 
-## 7. Every tool card keeps its arguments on the wire
+## 7. Every tool card keeps its arguments on the wire — ✅ DONE (2026-08-29)
+
+NOTES (2026-08-29): the `ISSUES.md` amendment cites plan `2026-08-29 - 02` — the item's text says "since plan 2026-08-29 - 01", which is a different, unexecuted plan (double-esc abort); the reference the sentence needs is this one.
+
+NOTES (2026-08-29): `internal/tui/transcript.go` is listed under Files but needed no change — every card is built in `presentToolCall` (toolview.go), which is where the field is set, and nothing in transcript.go states or contradicts what a record keeps of a call's arguments.
+
+NOTES (2026-08-29): two edits in the listed test file beyond the new cases, both forced by the new member: the wire-member pin in `TestTranscriptCodecPersistsANamedDelegationAsItsTarget` gains `"Args"` (the deliberate-widening gate this member has to pass), and the doc sentence on `TestTranscriptCodecRoundTripsTheDelegatedPrompt` — "the arguments it came from are never persisted" — is reworded, since this item makes it false.
+
+NOTES (2026-08-29): the plan's golden case is a test of its own (`TestTranscriptCodecGoldenToolArgumentsV1`) so `TestTranscriptCodecGoldenV1` stays byte-identical as the item requires; its card is hand-built rather than presented, so the golden pins the wire shape and the key-sorted value and not grep's presenter wording (items 1–2 own that). The round-trip cases drive `presentToolCall` end-to-end instead — registered, depth-1 delegate, and unregistered tool.
 
 **What:** Depends on item 6. `wireToolView` gains `Args json.RawMessage \`json:"args,omitempty"\``;
 `toolView` gains `argsWire json.RawMessage` set at build time from the call's raw

@@ -179,6 +179,14 @@ type wireSkillSpan struct {
 // (TestTranscriptCodecGoldenV1), an older build ignores members it cannot place, and a blob written
 // before them decodes with no regions and paints the stacked rows its Details already hold — which is
 // the reading every such record was written under.
+//
+// Args rides the same rule and answers a different question from every member above it: those are
+// what the card SHOWED, this is what the call ASKED — the bounded, compact copy of the model's own
+// arguments (wireArgs, wireargs.go), carried by every card at every depth so a delegate's tool use
+// can still be read back once its run is closed. It is STORED and not replayed: nothing paints from
+// it (the store-only call for plan "2026-08-29 - 02"), decode hands it back exactly as it stands
+// (fromWireToolView) so the surface that later shows it has the bytes to show, and a blob written
+// before it decodes with none — which, again, is the reading it was written under.
 type wireToolView struct {
 	Label       string            `json:"label,omitempty"`
 	Verb        string            `json:"verb,omitempty"`
@@ -192,6 +200,7 @@ type wireToolView struct {
 	Details     []wireDetailLine  `json:"details,omitempty"`
 	Regions     []wireEditRegion  `json:"regions,omitempty"`
 	RegionFiles []string          `json:"regionFiles,omitempty"`
+	Args        json.RawMessage   `json:"args,omitempty"`
 }
 
 // wireDetailLine is the serialized form of a [detailLine]. Kind is stored as its underlying
@@ -444,7 +453,10 @@ func toWireSkillSpans(spans []skillSpan) []wireSkillSpan {
 	return out
 }
 
-// toWireToolView projects a toolView (its unexported name included) onto the wire.
+// toWireToolView projects a toolView (its unexported name included) onto the wire. The stored
+// arguments travel as the card already holds them (toolView.argsWire): they were bounded once at
+// build time, and this seam neither re-bounds nor re-encodes them — encodeTranscript's own Marshal
+// emits exactly the bytes wireArgs produced.
 func toWireToolView(tv toolView) *wireToolView {
 	w := &wireToolView{
 		Label:     tv.Label,
@@ -455,6 +467,7 @@ func toWireToolView(tv toolView) *wireToolView {
 		Stat:      tv.stat.spell(),
 		StatValue: toWireStatValue(tv.stat),
 		Task:      tv.task,
+		Args:      tv.argsWire,
 		Summary: wireBranchSummary{
 			wireDetailLine: wireDetailLine{Kind: int(tv.Summary.Kind), Text: tv.Summary.Text},
 			Quoted:         tv.Summary.quoted,
@@ -618,6 +631,12 @@ func fromWireSkillSpans(ws []wireSkillSpan) []skillSpan {
 // line is respelled whatever the mark says (TestTranscriptCodecReplaysAPromotedSummaryAsShown). A
 // resumed call still awaiting its result carries no summary at all, and enrichWithResult words the
 // slot afresh with a mark of its own when the result lands.
+//
+// The stored arguments (wireToolView.Args) come back untouched onto the card's own argsWire. They
+// are not display text and no seam here paints them, which is why sanitize below leaves them alone
+// exactly as it does on the way in — the surface that eventually shows them is the surface that
+// must strip them. Restoring them is what keeps a re-saved session's cards from silently shedding
+// the arguments the record already held.
 func fromWireToolView(w *wireToolView, done bool) toolView {
 	line := detailLine{Kind: detailKind(w.Summary.Kind), Text: w.Summary.Text}
 	summary := namedSummary(line)
@@ -636,6 +655,11 @@ func fromWireToolView(w *wireToolView, done bool) toolView {
 		Target: w.Target,
 		name:   stripEscapes(w.Name),
 		solo:   w.Solo,
+		// The record's copy of what the call asked, restored as it stands. It is not display text
+		// and nothing reads it on this path — it comes back so the card a resumed session carries
+		// is the one the record kept, arguments included, rather than one that quietly lost them on
+		// the next save (toolView.argsWire).
+		argsWire: w.Args,
 		// sanitize below strips the stat with the other display fields; a value with arithmetic in
 		// it has nothing to strip and comes back as the numbers it is.
 		stat:    fromWireStatValue(w.StatValue, w.Stat),

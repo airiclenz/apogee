@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"encoding/json"
 	"strconv"
 	"strings"
 
@@ -559,11 +560,24 @@ type toolView struct {
 	//
 	// It is display state's raw material and never display text: sanitize does not reach it, because
 	// nothing here is painted — every line the hook builds from it is a body line, and the seam
-	// strips those on the way out (enrichWithResult defers finishDisplay). It is deliberately not on
-	// the wire either (wireToolView): what a saved transcript keeps is the finished record, and the
-	// only call that could miss its arguments on replay is one still awaiting its answer — which
-	// falls back to the summary-only block it had before this existed.
+	// strips those on the way out (enrichWithResult defers finishDisplay). This MAP is deliberately
+	// not on the wire (wireToolView) — it is the presenter's working state, held for one hook and
+	// dropped for every other. The arguments a saved record keeps ride the bounded copy beside it
+	// (argsWire), which every call carries whether or not its presenter kept this one.
 	args map[string]any
+
+	// argsWire is the bounded, compact copy of the call's own JSON arguments that a saved
+	// transcript keeps (wireArgs, wireargs.go). It is settled once at build time, for EVERY call at
+	// every depth — an unregistered MCP tool included (presentToolCall's two exits) — because what
+	// makes a run's tool use reviewable after the fact is what each call ASKED, and a delegate's
+	// calls are exactly the ones no one watched go by.
+	//
+	// It is a second reading of the same request the map above holds, not a projection of it: that
+	// map is parsed for a presenter and dropped where no presenter reads it, while this is the
+	// record's copy and is never dropped. Nothing paints from it today (the store-only call for
+	// plan "2026-08-29 - 02"), which is why sanitize leaves it alone — a surface that later shows
+	// it is the surface that must strip it, the way every other card field is stripped here.
+	argsWire json.RawMessage
 }
 
 // headsRun reports whether this card is a delegation's — the sub_agent call whose block heads a run
@@ -660,14 +674,20 @@ func promotedOutput(text string, stat statValue) toolOutcome {
 // than replacing it — the argument stays on the screen as the model wrote it, with where it lands
 // beside it — because a surface that silently swapped one for the other would be answering a
 // question the reader did not ask and hiding the one they did.
+//
+// Both exits also settle the card's stored copy of the arguments (toolView.argsWire, bounded by
+// wireArgs): a call's own JSON is what makes its use reviewable once the run is closed, and
+// bounding it here — at the one place every call is built — is what keeps a tool nobody registered
+// from being the one whose arguments the record forgets.
 func presentToolCall(call domain.ToolCall, resolved string, ws workspaceRoot) toolView {
 	p, ok := toolRegistry[call.Tool]
 	if !ok {
 		tv := toolView{
-			Label:   call.Tool,
-			Verb:    "running " + call.Tool,
-			name:    call.Tool,
-			Details: newToolBody(argumentDetails(call.Arguments)),
+			Label:    call.Tool,
+			Verb:     "running " + call.Tool,
+			name:     call.Tool,
+			Details:  newToolBody(argumentDetails(call.Arguments)),
+			argsWire: wireArgs(call.Tool, call.Arguments),
 		}
 		tv.finishDisplay(ws)
 		return tv
@@ -720,6 +740,12 @@ func presentToolCall(call domain.ToolCall, resolved string, ws workspaceRoot) to
 	if p.outcome != nil {
 		tv.args = args // the request this presenter's result hook reads back (toolView.args)
 	}
+	// The record's own copy of the request (toolView.argsWire), settled for every call rather than
+	// only where a presenter kept the map above: a presenter with no result hook is precisely the
+	// case where nothing else would keep the arguments, and sub_agent — the call whose whole run
+	// hangs beneath it — is one of them. It is taken from the call's raw JSON and not from the
+	// parsed map so the stored form is the one wireArgs bounds, not one this presenter reshaped.
+	tv.argsWire = wireArgs(call.Tool, call.Arguments)
 	tv.finishDisplay(ws)
 	return tv
 }
