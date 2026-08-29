@@ -864,6 +864,12 @@
 // paint where a label of the surface's own lives; plus [resolvedPathNote], the one wording every
 // decision surface discloses a redirected path with, and [parseArgs], the same bytes as the map
 // the registry's target extractors read a field out of;
+// wireargs.go the STORED reading of those same arguments, which no surface paints — [wireArgs],
+// the bounded compact JSON a saved record keeps per tool call, dropping the write/edit tools'
+// content keys (the card's own Regions already carry that edit, ADR 0052), spending a long value
+// as its size rather than its bytes ([wireArgsFieldCap], [wireArgsCap]) and re-encoding through a
+// map so the result is already what encodeTranscript's own Marshal would emit — sorted, escaped
+// and byte-stable on the way to disk;
 // textutil.go the generic helpers none of that display owns alone — [clipDetail] and
 // [clipRunes], the flood bound they spend in runes rather than in the cells the screen bills
 // ([detailClipRunes], which states why and names the probe that measured it), [plural]'s naive

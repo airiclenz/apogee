@@ -233,7 +233,15 @@ No other line changes; `CLAUDE.md` stays the `@AGENTS.md` stub.
 
 **Commit:** `docs(agents): state the Bubble Tea v2 names and where layout.md lives`
 
-## 6. A bounded, compact wire form of a tool call's arguments
+## 6. A bounded, compact wire form of a tool call's arguments — ✅ DONE (2026-08-29)
+
+NOTES (2026-08-29): rule (3)'s `…[N bytes]` elision is applied RECURSIVELY (`boundedArgValue` walks nested objects and arrays), not to top-level string values only — the item says "any remaining string value over 1 KB", and bounding a nested value where it sits is what keeps one long member of an MCP tool's structured payload from pushing the whole call over `wireArgsCap` and collapsing the useful keys beside it. A table case pins it.
+
+NOTES (2026-08-29): rule (1) ("empty JSON → nil") is read to cover three shapes: empty/unparseable bytes, a payload that is not a JSON object (a bare array decodes to a nil map), and an object left with NO keys — either `{}` as sent, or a write/edit call whose only key rule (2) dropped. All four yield nil rather than `{}`; table cases pin each.
+
+NOTES (2026-08-29): the decode helper is a second, separate one (`decodeArgsPreservingNumbers`) rather than a `UseNumber` option on the existing `parseArgs` — `parseArgs` is the presenter's map and its float64 reading is what the target extractors already run on; changing it would be an out-of-scope edit to item 2's surface.
+
+NOTES (2026-08-29): no CHANGELOG entry — `wireArgs` has no call site yet (item 7 wires it), so nothing user- or model-facing changed with this commit; item 7's entry covers the shipped behaviour.
 
 **What:** new `internal/tui/wireargs.go`: `wireArgs(tool string, raw json.RawMessage) json.RawMessage`
 producing the argument JSON a saved transcript keeps. Rules, in order: (1) invalid or empty JSON →
