@@ -298,6 +298,33 @@ func TestDiagLogSuppressesUnchangedValues(t *testing.T) {
 	}
 }
 
+// TestDiagLogRecordsMouseEventKinds is the mouse half of the seam: the kind of every mouse
+// message bubbletea delivers is recorded, and change suppression keeps a drag to one line per
+// kind — which is what makes a terminal that stopped reporting visible as presses with nothing
+// following them.
+func TestDiagLogRecordsMouseEventKinds(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "diag.txt")
+	diag, err := newDiagLog(path)
+	if err != nil {
+		t.Fatalf("newDiagLog: %v", err)
+	}
+
+	diag.observe(tea.MouseClickMsg{X: 4, Y: 2, Button: tea.MouseLeft})
+	diag.observe(tea.MouseMotionMsg{X: 5, Y: 2, Button: tea.MouseLeft})
+	diag.observe(tea.MouseMotionMsg{X: 6, Y: 2, Button: tea.MouseLeft})
+	diag.observe(tea.MouseReleaseMsg{X: 6, Y: 2, Button: tea.MouseLeft})
+	diag.observe(tea.MouseWheelMsg{X: 6, Y: 2, Button: tea.MouseWheelUp})
+	if err := diag.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	got := readFileString(t, path)
+	want := "mouse-kind: press\nmouse-kind: motion\nmouse-kind: release\nmouse-kind: wheel\n"
+	if got != want {
+		t.Errorf("diag log =\n%q\nwant\n%q", got, want)
+	}
+}
+
 // TestDiagLogIsNilSafeWhenTheFlagIsUnset: nil is the off state and every observation point runs
 // unconditionally, so a nil log that panicked would take down every ordinary session.
 func TestDiagLogIsNilSafeWhenTheFlagIsUnset(t *testing.T) {
@@ -305,6 +332,10 @@ func TestDiagLogIsNilSafeWhenTheFlagIsUnset(t *testing.T) {
 	diag.start(os.Getenv, nil, ansi.WcWidth)
 	diag.observe(tea.WindowSizeMsg{Width: 80, Height: 24})
 	diag.observe(tea.ModeReportMsg{Mode: ansi.ModeUnicodeCore, Value: ansi.ModeSet})
+	diag.observe(tea.MouseClickMsg{X: 1, Y: 1, Button: tea.MouseLeft})
+	diag.observe(tea.MouseMotionMsg{X: 2, Y: 1, Button: tea.MouseLeft})
+	diag.observe(tea.MouseReleaseMsg{X: 2, Y: 1, Button: tea.MouseLeft})
+	diag.observe(tea.MouseWheelMsg{Button: tea.MouseWheelUp})
 	diag.record(diagWidthMethod, "wcwidth")
 	if err := diag.Close(); err != nil {
 		t.Errorf("Close on a nil log = %v, want nil", err)

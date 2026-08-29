@@ -108,11 +108,15 @@ func (o *tracedOutput) Fd() uintptr { return o.term.Fd() }
 // The diag log's keys. They are constants because two places write the width method — start-up
 // and the mode report that moves it — and a log whose key drifted between the two is a log
 // nobody can grep.
+//
+// A log holds these, one key per mode report the terminal answers ("mode 2027"), and
+// [diagMouseReassert], which lives in mousereassert.go beside the escape sequence it counts.
 const (
 	diagWidthMethod  = "width-method"
 	diagSize         = "size"
 	diagColorProfile = "color-profile"
-	diagUnset        = "(unset)" // an environment variable that is not set, spelled unambiguously
+	diagMouseKind    = "mouse-kind" // the kind of the last mouse event bubbletea delivered
+	diagUnset        = "(unset)"    // an environment variable that is not set, spelled unambiguously
 )
 
 // diagEnvKeys are the environment variables that decide how the renderer talks to this terminal,
@@ -225,12 +229,18 @@ func diagEnvOrUnset(value string) string {
 // [Model.Update] and consumes nothing: every message it recognises still reaches the switch
 // below it, so switching the log on cannot change what the program does.
 //
-// The three it recognises are the three the program learns about its terminal from — and the
-// mode report is the important one. It carries the terminal's answer to bubbletea's start-up
+// The first three are what the program learns about its terminal from — and the mode report is
+// the important one. It carries the terminal's answer to bubbletea's start-up
 // DECRQM queries, mode 2027 (Unicode core) among them, which is the answer that decides whether
 // the painter measures in grapheme clusters or in wcwidth. bubbletea acts on it and then hands
 // it on to Update (tea.go:786-798 does not `continue`), so this is an observation point that
 // already exists rather than one this seam had to create.
+//
+// The mouse kinds answer the other question a terminal can go quiet on: whether it is still
+// REPORTING. [diagLog.record] is change-suppressed, so a whole drag costs three lines —
+// press, motion, release — and a run of motions collapses into the one. That is what makes the
+// failure legible: a session whose tracking a tool child reset behind apogee's back
+// (mousereassert.go) writes presses with no motion or release ever following them.
 func (d *diagLog) observe(msg tea.Msg) {
 	if d == nil {
 		return
@@ -246,6 +256,14 @@ func (d *diagLog) observe(msg tea.Msg) {
 		}
 		d.record(fmt.Sprintf("mode %d", msg.Mode.Mode()),
 			fmt.Sprintf("%d (%s)", msg.Value, modeSettingName(msg.Value)))
+	case tea.MouseClickMsg:
+		d.record(diagMouseKind, "press")
+	case tea.MouseMotionMsg:
+		d.record(diagMouseKind, "motion")
+	case tea.MouseReleaseMsg:
+		d.record(diagMouseKind, "release")
+	case tea.MouseWheelMsg:
+		d.record(diagMouseKind, "wheel")
 	}
 }
 

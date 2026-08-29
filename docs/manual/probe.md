@@ -80,9 +80,13 @@ they sit on the root command, not on `apogee probe` — record the evidence a re
 argued from — `--tui-trace <file>` writes the exact bytes the renderer emitted, one quoted
 string per write, so a corrupted frame can be replayed rather than only described, and
 `--tui-diag <file>` writes what the terminal told apogee about itself: the environment the
-renderer read, the width method it started on, the window size, the colour profile, and
-every mode report the terminal sent — each written once and again only when it changes, so
-the file stays short enough to paste into a bug report.
+renderer read, the width method it started on, the window size, the colour profile,
+every mode report the terminal sent, the kind of each mouse event it delivered
+(`mouse-kind`: `press`, `motion`, `release`, `wheel`) and every re-assertion of mouse
+tracking apogee sent after a tool child (`mouse-reassert`, a running count) — each written
+once and again only when it changes, so the file stays short enough to paste into a bug
+report. A terminal that stopped reporting the mouse shows as `mouse-kind: press` with no
+`motion` or `release` line ever following it.
 Both default off and cost nothing unless you name a file, both work on every OS, and
 neither appears in `--help`: they are for a bug report, not for a session. `⌃l` is the
 in-session counterpart — it forces a full repaint and is usually all a smeared frame needs.

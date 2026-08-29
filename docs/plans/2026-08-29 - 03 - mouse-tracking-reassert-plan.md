@@ -236,7 +236,15 @@ to the whole token".
 
 ---
 
-## 4. `--tui-diag` records mouse event kinds
+## 4. `--tui-diag` records mouse event kinds — ✅ DONE (2026-08-29)
+
+NOTES (2026-08-29): `diagMouseReassert` stays declared in `mousereassert.go` where item 1 put it —
+the item asks that the two new keys be DOCUMENTED where the existing keys are listed, not moved, so
+the `diagnostics.go` const block's doc comment now names it and points at the file it lives in.
+
+NOTES (2026-08-29): the `observe` doc comment's "The three it recognises are the three the program
+learns about its terminal from" was rewritten rather than left — with the mouse cases added it was
+no longer true of the function it documents.
 
 **What:** `internal/tui/diagnostics.go` `observe` (:234-250) gains cases for
 `tea.MouseClickMsg` → `record("mouse-kind", "press")`, `tea.MouseMotionMsg` → `"motion"`,
