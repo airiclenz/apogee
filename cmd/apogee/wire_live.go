@@ -144,7 +144,7 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	// (ADR 0015 §1: wire.go collapses to a YAML→ID-list producer). Startup validates EVERY
 	// `mechanisms:` key here — enabled AND disabled — and hands only the enabled IDs to
 	// Config.EnableMechanisms; apogee.New/Resume then build them, derive their Deps (the Library store
-	// under LibraryDir, the resolved model fingerprint, the inert grammar seam), merge them into
+	// under LibraryDir, the resolved model fingerprint), merge them into
 	// Config.Mechanisms, and run the ordering / incompatibility / requirements gates. The disabled-key
 	// validation must stay here because the engine only ever sees the enabled IDs, so a typo'd DISABLED
 	// key — never constructed — must still fail loudly at this startup boundary. With nothing enabled
@@ -160,6 +160,15 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 		return err
 	}
 	w.cfg.EnableMechanisms = manualIDs
+
+	// A `mechanisms:` key naming a RETIRED Mechanism is tolerated rather than refused (the id was
+	// valid at the release before the removal), and this is the one caller that says so: startup runs
+	// before the alt screen, so a stderr line here reaches the human, where the same producer running
+	// under the live `/settings` apply or per delegate would paint over the TUI. It sits beside the
+	// validated-set notices below for the same reason they do.
+	for _, n := range retiredMechanismNotices(w.opts.Mechanisms) {
+		fmt.Fprintln(os.Stderr, n)
+	}
 
 	// The Validated-set runtime surface (ADR 0016): match the resolved model fingerprint
 	// against the shipped + user-local entries and fold an applying set into

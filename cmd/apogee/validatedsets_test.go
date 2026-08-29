@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
+	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/validated"
 )
 
@@ -68,8 +70,8 @@ func TestResolveValidatedSet_IdentityAliasApplies(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolveValidatedSet: %v", err)
 	}
-	if len(set) != 16 {
-		t.Fatalf("want the gemma 16 applied, got %d: %v", len(set), set)
+	if len(set) != 15 {
+		t.Fatalf("want the gemma 15 applied, got %d: %v", len(set), set)
 	}
 	for i := 1; i < len(set); i++ {
 		if set[i-1] >= set[i] {
@@ -77,7 +79,7 @@ func TestResolveValidatedSet_IdentityAliasApplies(t *testing.T) {
 		}
 	}
 	if len(notices) != 1 || !strings.Contains(notices[0], "applied via alias") ||
-		!strings.Contains(notices[0], "16 mechanisms on") || !strings.Contains(notices[0], validated.SourceShipped) {
+		!strings.Contains(notices[0], "15 mechanisms on") || !strings.Contains(notices[0], validated.SourceShipped) {
 		t.Fatalf("applied notice wrong: %v", notices)
 	}
 }
@@ -176,5 +178,82 @@ func TestResolveValidatedSet_MalformedUserFileWarnsEvenUnmatched(t *testing.T) {
 	}
 	if len(notices) != 1 || !strings.Contains(notices[0], "skipping validated-set entry") {
 		t.Fatalf("want the load warning to surface, got %v", notices)
+	}
+}
+
+// A user's saved record written before a Mechanism was RETIRED still applies: the retired member is
+// shed and the rest of the set arms, rather than the whole entry being skipped as an unknown id
+// would be (ADR 0016's 2026-08-29 amendment). The shed is announced — a curation change of ours is
+// not something to make silently — and the applied notice counts the members that actually armed.
+func TestResolveValidatedSetDropsARetiredIDWithANotice(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	// The record as it stood before the retirement: today's shipped gemma set plus `grammar`,
+	// written in the middle so the shed cannot be passing by position.
+	live := shippedGemmaSet(t)
+	legacy := append(append([]domain.MechanismID{}, live[:3]...), "grammar")
+	legacy = append(legacy, live[3:]...)
+	writeUserEntry(t, dir, validated.Entry{
+		Version:  validated.EntryVersion,
+		Key:      gemmaKey,
+		Set:      legacy,
+		Evidence: validated.Evidence{Campaign: "pre-retirement-run"},
+	})
+	opts := baseOpts(gemmaKey)
+	opts.ValidatedSetsAlias = map[string]string{gemmaKey: gemmaKey}
+
+	set, notices, err := resolveValidatedSet(opts, dir, t.TempDir())
+
+	if err != nil {
+		t.Fatalf("a record naming a retired mechanism must stay soft, got %v", err)
+	}
+	if len(set) != len(live) {
+		t.Fatalf("set = %v (%d ids), want the %d live members of the record", set, len(set), len(live))
+	}
+	for _, id := range set {
+		if id == "grammar" {
+			t.Fatalf("the retired id armed: %v", set)
+		}
+	}
+	if len(notices) != 2 {
+		t.Fatalf("want the shed notice plus the applied notice, got %v", notices)
+	}
+	if !strings.Contains(notices[0], "grammar") || !strings.Contains(notices[0], "retired") ||
+		!strings.Contains(notices[0], gemmaKey) {
+		t.Errorf("shed notice = %q, want it to name the entry, the id and the retirement", notices[0])
+	}
+	if !strings.Contains(notices[1], "pre-retirement-run") {
+		t.Errorf("applied notice = %q, want the record's campaign", notices[1])
+	}
+}
+
+// shippedGemmaSet is the live shipped gemma enable set — real curation data, so a test built on it
+// stays in step with the catalogue instead of pinning a copy that can rot.
+func shippedGemmaSet(t *testing.T) []domain.MechanismID {
+	t.Helper()
+	entries, err := validated.Shipped()
+	if err != nil {
+		t.Fatalf("validated.Shipped: %v", err)
+	}
+	for _, e := range entries {
+		if e.Key == gemmaKey {
+			return e.Set
+		}
+	}
+	t.Fatalf("no shipped entry for %q", gemmaKey)
+	return nil
+}
+
+// writeUserEntry drops one entry into a user-local validated-sets directory, the way a saved record
+// reaches startup.
+func writeUserEntry(t *testing.T, dir string, e validated.Entry) {
+	t.Helper()
+	blob, err := json.Marshal(e)
+	if err != nil {
+		t.Fatalf("marshal entry: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, e.Key+".json"), blob, 0o600); err != nil {
+		t.Fatal(err)
 	}
 }

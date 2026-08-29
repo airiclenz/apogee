@@ -356,8 +356,7 @@ func BuildMechanisms(cfg domain.Config, ids []domain.MechanismID) (*domain.Mecha
 // sub-agent catalogue BuildMechanisms builds — share a single store instead of each rewriting the
 // whole file from its own memory. Open Loads on its constructing call alone, which is what keeps the
 // degrade notice below a once-per-process line without any coordination here. LookPath is left nil
-// (the exec.LookPath default) and GrammarConstraint inert: neither is derived from Config, so
-// neither has a DepNeeds flag.
+// (the exec.LookPath default): it is not derived from Config, so it has no DepNeeds flag.
 func deriveDeps(cfg domain.Config, needs mechanisms.DepNeeds) mechanisms.Deps {
 	var deps mechanisms.Deps
 	// The exec fence a Mechanism resolving an executable measures against. It is derived for

@@ -305,3 +305,66 @@ func TestMechanismIDsConstructsUnderBypass(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = agent.Close() })
 }
+
+// A `mechanisms:` key naming a RETIRED Mechanism is DROPPED, not refused: the key was valid at the
+// release before the removal, so a config the user never edited must still start. It is dropped
+// whichever value it carries, it never reaches Config.EnableMechanisms, and the producer itself says
+// nothing — two of its three call paths run with the alt screen up, where stderr paints over the TUI.
+// Everything alongside it in the block still arms.
+func TestMechanismIDsRetiredIDIsDropped(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		enabled map[string]bool
+		want    []apogee.MechanismID
+	}{
+		{"retired and asked for", map[string]bool{"grammar": true}, nil},
+		{"retired and switched off", map[string]bool{"grammar": false}, nil},
+		{"retired beside a live row", map[string]bool{"grammar": true, "validate": true}, []apogee.MechanismID{"validate"}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var ids []apogee.MechanismID
+			var err error
+
+			printed := captureStderr(t, func() {
+				ids, err = mechanismIDs(tt.enabled, mechanisms.KnownIDs())
+			})
+
+			if err != nil {
+				t.Fatalf("mechanismIDs(%v): a retired id must be tolerated, got %v", tt.enabled, err)
+			}
+			if len(ids) != len(tt.want) {
+				t.Fatalf("mechanismIDs(%v) = %v, want %v", tt.enabled, ids, tt.want)
+			}
+			for i := range tt.want {
+				if ids[i] != tt.want[i] {
+					t.Errorf("mechanismIDs(%v)[%d] = %q, want %q", tt.enabled, i, ids[i], tt.want[i])
+				}
+			}
+			if printed != "" {
+				t.Errorf("mechanismIDs wrote to stderr: %q — the notice is retiredMechanismNotices' job", printed)
+			}
+		})
+	}
+}
+
+// The notice names every retired id the block turns ON, one line each, in sorted spelling — and says
+// what it is and what to do about it. A retired id set to FALSE earns no line (the user is not asking
+// for it), and neither does a live row or an empty block.
+func TestRetiredMechanismNoticesNameEachRetiredID(t *testing.T) {
+	t.Parallel()
+
+	got := retiredMechanismNotices(map[string]bool{"grammar": true, "validate": true})
+
+	want := []string{
+		`apogee: mechanism "grammar" was retired in ` + retiredMechanismRelease + ` and is ignored; remove it from mechanisms:`,
+	}
+	if len(got) != len(want) || got[0] != want[0] {
+		t.Errorf("retiredMechanismNotices = %q, want %q", got, want)
+	}
+
+	for _, quiet := range []map[string]bool{nil, {}, {"grammar": false}, {"validate": true}} {
+		if lines := retiredMechanismNotices(quiet); lines != nil {
+			t.Errorf("retiredMechanismNotices(%v) = %q, want no lines", quiet, lines)
+		}
+	}
+}

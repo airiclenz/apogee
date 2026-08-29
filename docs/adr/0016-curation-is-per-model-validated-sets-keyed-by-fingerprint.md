@@ -62,7 +62,8 @@ not to inject under uncertainty"). A model with no Validated set runs the D1 flo
 becomes per-model, backed by exactly that model's campaign.
 
 **6. First application — retroactive, and named openly.** gemma-4-e4b-it-qat receives the
-first Validated set: the pruned 16 (base minus `truncate_history`), on the Probe
+first Validated set: the pruned 15 (base minus `truncate_history`; 16 as recorded, minus
+`grammar`, retired 2026-08-29 under the amendment below), on the Probe
 `gemma-4-e4b-it-qat-20260714-minus-truncate-history` (NI p = 0.0003, engagement
 hand-verified in `runs.jsonl`), with the Screen's descriptive convergence as supporting
 context. This rule was authored *after* that evidence existed. That is acceptable because
@@ -133,3 +134,35 @@ reality, and the design grill crystallised four refinements to the Decision's le
 Storage (embedded shipped entries + user-local `~/.apogee/validated/*.json`, user-local
 winning a key collision), notice wording, and drift handling are implementation detail —
 see `docs/plans/validated-set-runtime-surface.md`.
+
+---
+
+## Amendment (2026-08-29) — a RETIRED id is shed, not a reason to skip the set
+
+Whole-set-or-nothing above rules that an entry naming an ID this binary does not know is
+skipped WHOLE. That rule is right for an UNKNOWN id — the set was measured with something
+this build cannot reproduce, so applying the remainder would arm an unvalidated stack under
+the validated banner. It is wrong for a **retired** id, and this amendment carves that case
+out.
+
+A row only ever joins `mechanisms.RetiredIDs()` when it was **inert by construction** at the
+moment it was retired: it could not fire on any backend the release supported. The set's
+evidence is therefore *unchanged* without it — the campaign that licensed the entry measured a
+stack in which that member did nothing — so shedding it is not a partial application of a
+measured set, it is the same measured set written without a no-op. Skipping the entry whole
+would punish a user for a curation change they did not make: their `~/.apogee/validated/*.json`
+was correct for the build that recorded it, and a Mechanism removal of ours must not silently
+cost them their model's whole set.
+
+The rule, then:
+
+- A **retired** id is dropped from the entry, with a per-session notice naming the entry and
+  the id, and the rest of the set applies (`validated.DropRetired`, called from
+  `cmd/apogee/validatedsets.go`'s startup ladder — before the entry is validated, so both the
+  startup apply and `probe model`'s effect line count the same members, per ADR 0021 §4).
+- An **unknown** (non-retired) id still skips the whole entry, exactly as ruled above.
+
+The same tolerance holds one layer out, for the same reason: a `mechanisms:` config key or a
+per-server `sub-agents:` posture naming a retired id is dropped rather than refused (ADR 0015's
+removed-ID posture is loud only for ids that were never valid). The first application of this
+amendment is `grammar`, retired 2026-08-29 — see CHANGELOG.

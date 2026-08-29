@@ -155,7 +155,7 @@ func TestBuildFromClonesDescriptorAndOrderingSlices(t *testing.T) {
 // The production catalogue carries the ported Mechanisms and only those: Wave 1 registered
 // validate/syntax/autofix (item 5) and the empty_response_recovery/tool_use_enforcer off-ramps
 // (item 6), Wave 2 added the truncate_history history-rewrite (item 7), item 9 added the
-// tool_result_cap pre-request capping Mechanism, Wave 3 added the toolfilter/filehint/grammar
+// tool_result_cap pre-request capping Mechanism, Wave 3 added the toolfilter/filehint
 // request shapers (item 10) and the error_enrichment/read_loop/read_repeat/tool_loop_interceptor/
 // cached_content_intercept history-aware family (item 11), Wave 4 added the decompose request
 // shaper plus the stall_nudge/list_nudge/tool_use_directive completion nudges (item 12), and item 14
@@ -168,7 +168,7 @@ func TestProductionCatalogueHasPortedWaves(t *testing.T) {
 		known[id] = true
 	}
 	// Every ported Mechanism that builds with no injected Deps.
-	for _, want := range []domain.MechanismID{"validate", "syntax", "autofix", "empty_response_recovery", "tool_use_enforcer", "truncate_history", "tool_result_cap", "toolfilter", "filehint", "grammar", "error_enrichment", "read_loop", "read_repeat", "tool_loop_interceptor", "cached_content_intercept", "decompose", "stall_nudge", "list_nudge", "tool_use_directive"} {
+	for _, want := range []domain.MechanismID{"validate", "syntax", "autofix", "empty_response_recovery", "tool_use_enforcer", "truncate_history", "tool_result_cap", "toolfilter", "filehint", "error_enrichment", "read_loop", "read_repeat", "tool_loop_interceptor", "cached_content_intercept", "decompose", "stall_nudge", "list_nudge", "tool_use_directive"} {
 		if !known[want] {
 			t.Errorf("KnownIDs() missing the ported Mechanism %q; got %v", want, KnownIDs())
 		}
@@ -203,15 +203,15 @@ func TestProductionCatalogueHasPortedWaves(t *testing.T) {
 func TestPreRequestOrderingSeeds(t *testing.T) {
 	t.Parallel()
 	deps := Deps{Library: library.NewStore(t.TempDir())}
-	// Every pre-request Mechanism, including the unordered request-prep injectors (filehint/grammar/
-	// read_loop), so the pin reflects the production registry. stall_nudge and list_nudge are
+	// Every pre-request Mechanism, including the unordered request-prep injectors (filehint/read_loop),
+	// so the pin reflects the production registry. stall_nudge and list_nudge are
 	// IncompatibleWith each other and never co-enabled in production, but Ordered is a pure topo-sort
 	// that does not gate on incompatibility, so registering both here only exercises their shared
 	// Before edge.
 	ids := []domain.MechanismID{
 		"toolfilter", "decompose", "tool_result_cap", "guided_decomposition",
 		"stall_nudge", "list_nudge", "tool_use_directive", "library",
-		"filehint", "grammar", "read_loop",
+		"filehint", "read_loop",
 	}
 	reg := domain.NewMechanismRegistry()
 	built := make(map[domain.MechanismID]domain.RegisteredMechanism, len(ids))
@@ -434,8 +434,8 @@ func TestDepsNeeded(t *testing.T) {
 // siblings in a depth-0 fan-out run at once, so a hook instance reached from two children at once
 // must either carry no per-run state or hand each child its own. A VALUE hook is exempt by
 // construction — its methods take value receivers, so a fire cannot mutate anything a sibling can
-// observe, and what a value hook does hold (autofix's resolved formatter table, grammar's gate
-// flag) is read-only after construction, the same standing the dangerous-action floor has when
+// observe, and what a value hook does hold (autofix's resolved formatter table) is read-only after
+// construction, the same standing the dangerous-action floor has when
 // Guards.ForSubAgent shares IT by pointer. Holding the hook by pointer is exactly the shape
 // per-instance state requires, so that is where the declaration is demanded: a new stateful
 // Mechanism fails this test on the day it is written rather than racing on the day it is armed

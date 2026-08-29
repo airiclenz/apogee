@@ -485,8 +485,8 @@ func (r *Request) SetDepth(depth int) { r.depth = depth }
 // Request built without it reports 0 — read as 1, the serial floor.
 func (r *Request) SetParallelAgents(width int) { r.parallelAgents = width }
 
-// Extra reports a preserved unknown request field (e.g. a grammar Mechanism checks
-// for an existing response_format before setting one).
+// Extra reports a preserved unknown request field — the read half of SetExtra (a
+// pre-request Mechanism checks for an existing response_format before setting one).
 func (r *Request) Extra(key string) (json.RawMessage, bool) {
 	v, ok := r.extras[key]
 	return v, ok
@@ -593,7 +593,7 @@ func (r *Request) SetTools(tools []ToolDef) {
 }
 
 // SetExtra sets an unknown request field, allocating the carrier if needed (e.g. a
-// grammar constraint sets response_format).
+// pre-request Mechanism setting a provider-specific response_format).
 func (r *Request) SetExtra(key string, v json.RawMessage) {
 	if r.extras == nil {
 		r.extras = make(map[string]json.RawMessage)

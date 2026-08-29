@@ -98,8 +98,8 @@ until bench-proven (D1).
   signal is not significant (see its row). Not ported to any wave.
 
 Relocations carried from the survey (plan item 1): `cached_content_intercept` → `pre-tool-exec`;
-`error_enrichment` → `post-tool-result`. `grammar` and `filehint` are pre-request (explicit
-assignment, `archived/hook-mutation-api.md` §8 #7).
+`error_enrichment` → `post-tool-result`. `filehint` is pre-request (explicit assignment,
+`archived/hook-mutation-api.md` §8 #7); `grammar` was too, until it was retired (see its Table A row).
 
 ---
 
@@ -123,7 +123,7 @@ consolidate or rename.
 | `tool_result_cap` | `context_compression` (cap half) | `internal/compress/compress.go` (`capToolResults` `:428/431`) | pre-request | proactive-nudge² | strikes-3 | After `decompose` — runs last among pre-request shapers (ratified 2026-07-04, review-fixes item 11 / option A; was "none" — §Ordering seed now declared, D7 amendment rule); protects the most-recent Turn; per-result 40%-budget cap |
 | `toolfilter` | `tool_filtering` | `internal/toolfilter/toolfilter.go:33,70` | pre-request | proactive-nudge | strikes-3³ | Before `decompose` (trim menu before user-msg rewrite) |
 | `filehint` | `file_hint` | `internal/filehint/filehint.go`; `internal/proxy/file_hint_detector.go`; desc `descriptor.go:130` | pre-request | proactive-nudge | strikes-3 | none (greenfield-suppressed internally). Untrusted-input rules (apogee-native, 2026-08-26 — the hint lands in the SYSTEM message, so a listed name is repo-controlled text on a prompt channel): every parsed name is sanitised at parse with `library.SanitizeContent` and dropped when it is empty after the fold, longer than `fileHintMaxNameBytes` (512), or is a listing tool's own `[…]` header/trailer rather than an entry — so a name can never open a fresh system-prompt line. Only a tool result whose `ToolCallID` answers a LISTING call in the opening turn (the list family plus `find_files`) is parsed for names; a `grep` result in the same batch is skipped, its rows being `file:line:text` whose text half is file CONTENT. |
-| `grammar` | `grammar` | `internal/grammar/grammar.go`; `internal/proxy/proxy.go:625` | pre-request | proactive-nudge | strikes-3³ | none — backend-capability gated (D3; see Table C) |
+| `grammar` | `grammar` | `internal/grammar/grammar.go`; `internal/proxy/proxy.go:625` | pre-request | proactive-nudge | strikes-3³ | **RETIRED 2026-08-29 — see CHANGELOG.** Was backend-capability gated (D3) on `Deps.GrammarConstraint`, which nothing ever populated, over a provider wire carrying no `response_format`: inert on every backend from the port onwards. The row, the seam and the gemma set's member are gone; the id is tolerated (`mechanisms.RetiredIDs`) |
 | `error_enrichment` | `error_enrichment` | `internal/proxy/error_enrichment.go`; desc `descriptor.go:136` | post-tool-result | response-repair | strikes-3 (C1) | none (classifies read-vs-write from originating call) |
 | `read_loop` | `read_loop_detector` (+ greenfield/successful) | `internal/proxy/read_loop_detector.go`; desc `descriptor.go:89-109` | pre-request | proactive-nudge | strikes-3 | IncompatibleWith `cached_content_intercept`, `read_repeat` (C2 folds the 3 sim variants) |
 | `cached_content_intercept` | `cached_content_intercept` | `internal/proxy/cached_content_intercept.go`; desc `descriptor.go:110` | pre-tool-exec | proactive-nudge | strikes-3 | IncompatibleWith `read_loop`, `read_repeat` (relocated from request-prep) |
@@ -181,7 +181,7 @@ low-confidence metadata label does not inject); observe records on any identifie
 | `tool_result_cap` | Context — **item 9** | PORT — surviving half of `compress`; 40%-budget per-result cap | `catalogue.md` §compress (40% cap, most-recent-turn protected) | pending |
 | `toolfilter` | Wave 3 — **item 10** | PORT — tool-menu narrowing (30+ tools or observed hallucination) | `catalogue.md` §filter (structurally gated) | pending |
 | `filehint` | Wave 3 — **item 10** | PORT — role-safe workspace hint; TF-IDF-ish scoring | `catalogue.md` §file_hint (greenfield-suppressed) | pending |
-| `grammar` | Wave 3 — **item 10** | PORT (capability-gated) — `response_format` only when the backend needs it | `catalogue.md`+ADR 0007 sim: fires only on llama.cpp **without** native tool-calls | pending (may no-op on all current apogee backends) |
+| `grammar` | Wave 3 — **item 10** | PORTED, then **RETIRED 2026-08-29 — see CHANGELOG**: the capability gate was never wired and the wire never carried `response_format`, so it no-op'd on every backend | `catalogue.md`+ADR 0007 sim: fires only on llama.cpp **without** native tool-calls | n/a (retired before it ever fired) |
 | `error_enrichment` | Wave 3 — **item 11** | PORT — read-vs-write error clarification; relocated to post-tool-result | `catalogue.md` §error_enrichment (exempt in sim; C1 narrows) | pending |
 | `read_loop` | Wave 3 — **item 11** | PORT — failed-re-read detector; 3 sim variants consolidated (C2) | `catalogue.md` §read_loop/§greenfield/§successful (threshold 1 vs 2 by greenfield) | pending |
 | `cached_content_intercept` | Wave 3 — **item 11** | PORT — redundant successful-re-read interceptor; relocated to pre-tool-exec | `catalogue.md` §cached_content_intercept: **help_rate 0.73** (11/4/1), repeated_tool_call 0.91→0.15/run (gpt-oss-20b); inert-but-correct on gemma | pending |
@@ -226,8 +226,9 @@ code now agree; the resulting order is pinned by `TestPreRequestOrderingSeeds`
   `cot` → `library` → `codeinfo`(dropped) → `filter` → `decompose` → `compress`(split).
   apogee edges: the `cot` nudges and `library` inject before `toolfilter`; `toolfilter` before
   `decompose`; `tool_result_cap` runs last among pre-request shapers (it trims after context is
-  assembled). `filehint`/`grammar`/`read_loop` are request-prep injectors with no hard order
-  against the transforms beyond the incompatibility edges in Table A.
+  assembled). `filehint`/`read_loop` are request-prep injectors with no hard order
+  against the transforms beyond the incompatibility edges in Table A (`grammar` was a third until it
+  was retired 2026-08-29).
 - **Post-response cascade (sim, `catalogue.md` §Response-side detection cascade):**
   `read_repeat` → `tool_loop_interceptor` → `validate` → (if valid) `autofix` → `syntax`:
   the sim repairs before it corrects — detect → `tryAutoFix` → correct-the-remainder
@@ -283,7 +284,8 @@ apogee rather than ported still lands a line here when it ships (so far one —
 | `truncate_history` | 7 | pending |
 | `correct_tool_result` | — (DEFER, owner-ratified 2026-07-04) | n/a until a bench-discovered trigger |
 | `tool_result_cap` | 9 | pending |
-| `toolfilter`, `filehint`, `grammar` | 10 | pending |
+| `toolfilter`, `filehint` | 10 | pending |
+| `grammar` | 10 | n/a (RETIRED 2026-08-29 — see CHANGELOG) |
 | `error_enrichment`, `read_loop`, `read_repeat`, `tool_loop_interceptor`, `cached_content_intercept` | 11 | pending |
 | `decompose`, `stall_nudge`, `list_nudge`, `tool_use_directive` | 12 | pending |
 | `library` | 14 | pending |
@@ -501,7 +503,7 @@ off-switch, and an explicit `mechanisms:` block or Bypass always wins (whole-set
 
 | Model (fingerprint key) | Validated set | Evidence | Entered |
 |---|---|---|---|
-| `gemma-4-e4b-it-qat` | The pruned 16 — base stack minus `truncate_history`, off-ramps in (the Screen's `without-truncate_history` enable set verbatim): `autofix`, `cached_content_intercept`, `decompose`, `empty_response_recovery`, `error_enrichment`, `filehint`, `grammar`, `library`, `list_nudge`, `syntax`, `tool_loop_interceptor`, `tool_result_cap`, `tool_use_directive`, `tool_use_enforcer`, `toolfilter`, `validate` — recorded verbatim from the Probe manifest 2026-07-19; **not derivable from the catalogue alone** (the base stack's incompatibility picks: `list_nudge` over `stall_nudge`, `cached_content_intercept` over `read_loop`/`read_repeat`) | Probe `gemma-4-e4b-it-qat-20260714-minus-truncate-history`: NI within fresh δ = 0.4643, W+ = 102.0, p = 0.0003, N = 14, engagement hand-verified; Screen `gemma-4-e4b-it-qat-20260708` descriptive convergence as supporting context | 2026-07-19, ADR 0016 first application (retroactive — named openly in the ADR) |
+| `gemma-4-e4b-it-qat` | The pruned 15 (`grammar` retired 2026-08-29) — base stack minus `truncate_history`, off-ramps in (the Screen's `without-truncate_history` enable set verbatim): `autofix`, `cached_content_intercept`, `decompose`, `empty_response_recovery`, `error_enrichment`, `filehint`, `library`, `list_nudge`, `syntax`, `tool_loop_interceptor`, `tool_result_cap`, `tool_use_directive`, `tool_use_enforcer`, `toolfilter`, `validate` — recorded verbatim from the Probe manifest 2026-07-19, minus the retired member; **not derivable from the catalogue alone** (the base stack's incompatibility picks: `list_nudge` over `stall_nudge`, `cached_content_intercept` over `read_loop`/`read_repeat`) | Probe `gemma-4-e4b-it-qat-20260714-minus-truncate-history`: NI within fresh δ = 0.4643, W+ = 102.0, p = 0.0003, N = 14, engagement hand-verified; Screen `gemma-4-e4b-it-qat-20260708` descriptive convergence as supporting context | 2026-07-19, ADR 0016 first application (retroactive — named openly in the ADR) |
 
 Not a Validated set: the full 17-member base stack on gemma (failed the gate twice);
 anything on `qwen25-coder-14b` (campaigns measured a non-engaged loop — void either way).

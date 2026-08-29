@@ -873,7 +873,25 @@ fails.
 
 **Commit.** `refactor(cmd): wire_test.go is split by seam; the drawer is gone (S-1, 4/4)`
 
-## 14. The grammar Mechanism and `Deps.GrammarConstraint` are retired; a config naming it is tolerated (S-2)
+## 14. The grammar Mechanism and `Deps.GrammarConstraint` are retired; a config naming it is tolerated (S-2) — ✅ DONE (2026-08-29)
+
+NOTES (2026-08-29): the item's Files name `internal/validated/validated.go` and `validated_test.go`, which do not exist — the package's ID check is `validate.go` / `validate_test.go`, and that is where `DropRetired` and its three tests landed.
+
+NOTES (2026-08-29): `mechanismIDs` keeps its `(enabled, known)` signature and consults `mechanisms.IsRetired` directly rather than taking the roll beside `known`. Injecting it would have changed six call sites, three of them (`headless.go`, `daemonfire.go`, `delegation.go`) outside the item's Files, and a path that forgot to pass the roll would REFUSE a retired id where its siblings tolerate it — the one failure mode this item exists to prevent. The roll is a build fact, not a per-caller policy.
+
+NOTES (2026-08-29): three files outside the item's Files list cited `grammar` as a live row and were reworded so the retirement leaves no dangling reference: `internal/mechanisms/toolresultcap.go:23` (the request-prep injector list in the ordering comment), and `internal/domain/hooks.go`'s `Extra` / `SetExtra` doc examples, which named "a grammar Mechanism" as the caller. `cmd/apogee/wire_live.go`'s "the inert grammar seam" clause is in the same class but that file was already on the list.
+
+NOTES (2026-08-29): the S-2 bullet's lead-in paragraph (`**Architecture pass, not fixes** — candidates for the next architecture-review plan …`) was removed together with the bullet. S-1 went with item 13, so the paragraph led no bullets at all, and item 15's inventory of what survives the section names only its preamble, "Signal the audits could not produce" and "Worth watching" — so leaving it would have desynchronised item 15.
+
+NOTES (2026-08-29): `TestResolveValidatedSet_IdentityAliasApplies` (`cmd/apogee/validatedsets_test.go:73,82`) was amended 16 → 15 in both its count assertion and its `"16 mechanisms on"` notice substring. The item names only `shipped_test.go`'s pin, but this is the third leg of the same three-way agreement (shipped JSON, catalogue table, wire-level pin) that dropping the gemma member moves.
+
+NOTES (2026-08-29): the Validated-set shed gets its OWN notice helper (`retiredSetMemberNotice`, `cmd/apogee/validatedsets.go`) rather than reusing `retiredMechanismNotices`. The two speak about different surfaces — a `mechanisms:` block key the user can edit by hand versus a saved record file — and the set line names the entry key so a user holding several records knows which file to fix. An applying entry that sheds a member therefore emits two notices (the shed line, then the applied line), which is what `TestResolveValidatedSetDropsARetiredIDWithANotice` asserts.
+
+NOTES (2026-08-29): the shed runs in `startupSetDecision` the instant a match is in hand — before the entry is validated and before the kind switch — so `probe model`'s effect line and startup's apply count the same members (ADR 0021 §4). A shed on the applying branch alone would have let the probe report promise a member startup does not arm.
+
+NOTES (2026-08-29): `retiredMechanismRelease = "v0.18.7"` is the plan's suggested bump, used verbatim as the plan's version-bump section instructs. No version identifier was changed — `VERSION` is still `v0.18.6`.
+
+NOTES (2026-08-29): `internal/mechanisms/retired.go`'s doc deliberately says "a backend-capability field on Deps" instead of spelling `GrammarConstraint`, so the item's Acceptance grep (`grep -rn 'GrammarConstraint' --include=*.go . | wc -l` → `0`) holds literally. The symbol survives only in Markdown that documents the retirement (the catalogue table, ADR 0015) and in the historical CHANGELOG.
 
 **What.** Ratified: delete, not wire. `internal/mechanisms/grammar.go` is reachable only through
 `Deps.GrammarConstraint` (`catalogue.go:42-54`), which `deriveDeps` (`internal/agent/construct.go:344`)

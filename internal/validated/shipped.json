@@ -9,7 +9,6 @@
       "empty_response_recovery",
       "error_enrichment",
       "filehint",
-      "grammar",
       "library",
       "list_nudge",
       "syntax",
@@ -22,7 +21,7 @@
     ],
     "evidence": {
       "campaign": "gemma-4-e4b-it-qat-20260714-minus-truncate-history",
-      "note": "NI within fresh delta=0.4643, W+=102.0, p=0.0003, N=14, engagement hand-verified; Screen gemma-4-e4b-it-qat-20260708 descriptive convergence as supporting context"
+      "note": "NI within fresh delta=0.4643, W+=102.0, p=0.0003, N=14, engagement hand-verified; Screen gemma-4-e4b-it-qat-20260708 descriptive convergence as supporting context — grammar removed 2026-08-29 (retired: inert on every backend, never fired in the campaign)"
     },
     "entered": "2026-07-19"
   }

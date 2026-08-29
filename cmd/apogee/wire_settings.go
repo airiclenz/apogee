@@ -1188,10 +1188,11 @@ var settingsTable = []settingsEntry{
 			// resolution — the enable list and the whole-set-or-nothing suppression rule (ADR 0016) —
 			// so they land in the holder and are committed by the rebind, the one door a model change
 			// and a config change share (rideTheRebind).
-			if err := a.reloadMechanisms(); err != nil {
+			notice, err := a.reloadMechanisms()
+			if err != nil {
 				return "", err
 			}
-			return "", a.rideTheRebind()
+			return notice, a.rideTheRebind()
 		},
 	},
 	{
@@ -1642,17 +1643,23 @@ func (a settingsApplier) reloadServers() (bool, error) {
 // derived through the startup producer (mechanismIDs), which validates EVERY key of the block —
 // enabled and disabled alike — so a Mechanism id this build does not know is refused here rather than
 // silently arming nothing, exactly as it is at launch (ADR 0015 §1).
-func (a settingsApplier) reloadMechanisms() error {
+//
+// It answers with the row's boundary note rather than nothing, because the one thing that producer
+// tolerates in SILENCE is still worth a sentence to whoever just edited the block: a key naming a
+// RETIRED Mechanism arms nothing and is not an error, so the note is where it gets said. Startup says
+// the same lines on stderr; here they ride back to the pane, which is the only surface a live apply
+// has (the alt screen owns the terminal).
+func (a settingsApplier) reloadMechanisms() (string, error) {
 	file, err := config.LoadFileConfig(a.configPath, os.ReadFile, func(string) {})
 	if err != nil {
-		return err
+		return "", err
 	}
 	ids, err := mechanismIDs(file.Mechanisms, mechanisms.KnownIDs())
 	if err != nil {
-		return err
+		return "", err
 	}
 	a.live.setMechanisms(ids, file.Mechanisms)
-	return nil
+	return strings.Join(retiredMechanismNotices(file.Mechanisms), " "), nil
 }
 
 // reloadValidatedSets re-reads the `validated-sets:` block. An absent off-switch resolves to ON —

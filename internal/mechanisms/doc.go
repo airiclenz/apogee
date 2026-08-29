@@ -17,7 +17,7 @@
 //
 // # The Mechanism files, one line each
 //
-// Nineteen files carrying twenty-one catalogue rows — one row per file, except cot.go, which
+// Eighteen files carrying twenty catalogue rows — one row per file, except cot.go, which
 // carries three. Each holds its Mechanism's init() registration, descriptor, constructor, hook
 // implementation, and the logic only that Mechanism uses.
 //
@@ -33,9 +33,7 @@
 // reply into a continue-the-task nudge (Bypass-exempt: without it a failed Turn has no exit).
 // errorenrich.go is error_enrichment, which classifies a tool error and appends category-shaped
 // suggestions when the same category repeats. filehint.go scores a freshly listed directory
-// against the user's prompt and hints at the files worth reading. grammar.go derives a json_schema
-// from the tool menu into the request's response_format, constraining a model that cannot emit
-// native tool calls into a valid tool-call shape. guideddecomposition.go is apogee's own
+// against the user's prompt and hints at the files worth reading. guideddecomposition.go is apogee's own
 // guided_decomposition (ADR 0014): the enumeration steer plus the batched sub-agent fan-out
 // follow-through, Depth-0 and once-per-Exchange gated. library.go is the Library Mechanism — the
 // only row that declares a needs (the Library store the engine derives). readloop.go detects a
@@ -52,8 +50,8 @@
 //
 // # The shared plumbing, one line each
 //
-// Seven files that register nothing. They hold the registry itself and the helpers more than one
-// Mechanism needs, so a shape lives once instead of once per Mechanism (D5).
+// Eight files that register nothing. They hold the registry itself, the roll of retired IDs, and the
+// helpers more than one Mechanism needs, so a shape lives once instead of once per Mechanism (D5).
 //
 // catalogue.go is the registry: the row, the package-private register() every Mechanism file
 // calls from init(), the injected Deps and the DepNeeds derivation, and the Build / KnownIDs /
@@ -64,7 +62,9 @@
 // historyscan.go owns one copy of each shared conversation-walk shape (read-attempt counting,
 // recent successful reads, write-path collection); membership and thresholds stay at the call
 // site. intent.go is the lexical action/analysis/question classifier — a shared helper with no
-// catalogue row of its own (catalogue C6). offramps.go carries the Wave-1 off-ramp helpers: the
+// catalogue row of its own (catalogue C6). retired.go is the roll of IDs this build no longer
+// catalogues, so a saved config or Validated set naming one is tolerated rather than refused.
+// offramps.go carries the Wave-1 off-ramp helpers: the
 // read-tool set, tool-call path extraction, and the conversation predicates the off-ramps gate on.
 // robustness.go carries the Wave-1 robustness helpers: the robustnessIssue type, the correction
 // message built from a set of issues, the write-tool sets, and the write payload accessors that

@@ -38,14 +38,16 @@ func TestShipped_PinnedAgainstCatalogue(t *testing.T) {
 }
 
 // TestShipped_GemmaEntryVerbatim pins the first Validated set (ADR 0016 §6) to the
-// catalogue table's exact 16 IDs — recorded verbatim from the Probe manifest
-// gemma-4-e4b-it-qat-20260714-minus-truncate-history, NOT derivable from the catalogue
-// alone (the base stack's incompatibility picks). The shipped JSON, the catalogue
-// table, and this pin must agree three ways.
+// catalogue table's exact 15 IDs: the 16 recorded verbatim from the Probe manifest
+// gemma-4-e4b-it-qat-20260714-minus-truncate-history, minus `grammar` — retired
+// 2026-08-29 as inert on every backend, which is exactly the case ADR 0016's amendment
+// lets a set shed without touching the evidence behind it. The remaining 15 are NOT
+// derivable from the catalogue alone (the base stack's incompatibility picks). The
+// shipped JSON, the catalogue table, and this pin must agree three ways.
 func TestShipped_GemmaEntryVerbatim(t *testing.T) {
 	want := []domain.MechanismID{
 		"autofix", "cached_content_intercept", "decompose", "empty_response_recovery",
-		"error_enrichment", "filehint", "grammar", "library", "list_nudge", "syntax",
+		"error_enrichment", "filehint", "library", "list_nudge", "syntax",
 		"tool_loop_interceptor", "tool_result_cap", "tool_use_directive",
 		"tool_use_enforcer", "toolfilter", "validate",
 	}

@@ -20,8 +20,8 @@ func init() {
 		// 2026-07-04, review-fixes item 11 / option A): it trims tool results after the other pre-request
 		// shapers assemble context, so it runs last among them. decompose is the last transform (the nudges
 		// and library precede toolfilter, which precedes decompose), so an After-decompose edge pushes
-		// tool_result_cap behind the whole shaper chain; filehint/grammar/read_loop are request-prep
-		// injectors with no hard order and fall by the D4 ID tiebreak.
+		// tool_result_cap behind the whole shaper chain; filehint/read_loop are request-prep injectors
+		// with no hard order and fall by the D4 ID tiebreak.
 		ordering:  domain.OrderingConstraints{After: []domain.MechanismID{decomposeID}},
 		construct: newToolResultCap,
 	})

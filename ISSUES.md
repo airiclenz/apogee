@@ -30,6 +30,9 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 
 ## Open defects
 
+- [ ] Finished sub-agents print the sug-agent output twice - once at the very beginning (unneededly) before the input-prompt event (also with terrible formatting) as well as at the end of the sub-agent transcript (that one is properly formatted and the one that we need to keep).
+
+
 ### Residuals deferred out of the 2026-08-28 deferred-residuals sweep
 
 **Status:** found 2026-08-28 at the close of the deferred-residuals sweep
@@ -763,12 +766,6 @@ merged-audit-findings.md`, untracked by design) was cut into plans `docs/plans/2
 Everything the three audits found that is NOT an item in one of those plans lives here with the reason
 it waits. Sources: `docs/reviews/code-audit-2026-08-25.md` (C-nn), `docs/skill-runs/security-audit/
 2026-08-25/report.md` (F-nn), `docs/skill-runs/refocus/2026-08-25/briefing.md` (R-n).
-
-**Architecture pass, not fixes** — candidates for the next architecture-review plan
-(`docs/plans/archived/2026-08-24 - 03 - architecture-review-deepening-plan.md` is already archived):
-
-- **S-2** `internal/mechanisms/grammar.go` — grammar-constraint plumbing reachable only through
-  `Deps.GrammarConstraint`, which nothing populates, over a provider wire that cannot carry it.
 
 **Signal the audits could not produce:** `golangci-lint` and `govulncheck` were not installed on the
 audit host — no lint and no dependency-vulnerability signal from any of the three audits, and the

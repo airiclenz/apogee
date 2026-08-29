@@ -54,7 +54,8 @@ file surface is unchanged.
 constructors inject is already a function of `Config`: the library store is loaded from
 `Config.LibraryDir` (only when `library` is enabled), the fingerprint is resolved from
 `Config.Model`, `LookPath` defaults itself, and `GrammarConstraint` remains the inert
-false seam. Because the inputs are consumed once, the builder-function failure mode —
+false seam [retired 2026-08-29 — the seam was never populated and was removed with the
+grammar Mechanism]. Because the inputs are consumed once, the builder-function failure mode —
 arming the library Mechanism against a different model than the loop runs — is
 unrepresentable, and nothing of `*library.Store` leaks into the v1 API.
 

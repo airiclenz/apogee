@@ -65,6 +65,11 @@ type setDecision struct {
 	// framing. Only collected once an identity resolved, matching the surface's silence
 	// when it has nothing to decide.
 	loadNotices []string
+	// droppedRetired names the RETIRED Mechanism ids shed from the matched entry before it was
+	// validated (ADR 0016's 2026-08-29 amendment). It is carried rather than folded into
+	// loadNotices because it is not a defect in the SOURCE: the file was written correctly for the
+	// build that recorded it, and both renderers word it as a curation change, not a warning.
+	droppedRetired []domain.MechanismID
 }
 
 // startupSetDecision is THE identity-and-match ladder: what the next session start decides
@@ -114,6 +119,12 @@ func startupSetDecision(opts config.Options, userDir, probeDir string) setDecisi
 		out.aliasErr = err
 		return out
 	}
+	// A saved record naming a Mechanism this build RETIRED sheds that id and keeps the rest, where an
+	// unknown id still disqualifies the entry whole (ADR 0016 amendment, 2026-08-29). It happens HERE,
+	// before anything reads the entry, so every renderer downstream — the startup apply and `probe
+	// model`'s effect line alike — counts the same members; a shed that ran only on the applying
+	// branch would let the probe report promise a member startup does not arm (ADR 0021 §4).
+	match.Entry, out.droppedRetired = validated.DropRetired(match.Entry, mechanisms.RetiredIDs())
 	out.match = match
 
 	switch match.Kind {
@@ -171,11 +182,24 @@ func resolveValidatedSet(opts config.Options, userDir, probeDir string) (set []a
 	case setApplied:
 		set = append([]apogee.MechanismID(nil), d.match.Entry.Set...)
 		sort.Slice(set, func(i, j int) bool { return set[i] < set[j] })
+		for _, id := range d.droppedRetired {
+			notices = append(notices, retiredSetMemberNotice(d.match.Entry, id))
+		}
 		notices = append(notices, appliedNotice(d.match))
 	default:
 		// setSurfaceOff, setNoIdentity, setNoMatch: the D1 floor needs no banner.
 	}
 	return set, notices, nil
+}
+
+// retiredSetMemberNotice is the line an applying set earns for each RETIRED member it shed. It names
+// the entry, so a user with several records knows which file to edit, and states that the rest of the
+// set still applies — the whole point of the ADR 0016 amendment being that a curation change of ours
+// must not cost the user their measured stack. Pure, so the wording is table-testable.
+func retiredSetMemberNotice(e validated.Entry, id domain.MechanismID) string {
+	return fmt.Sprintf(
+		"apogee: validated-set entry %q names mechanism %q, retired in %s — it is dropped and the rest of the set applies.",
+		e.Key, id, retiredMechanismRelease)
 }
 
 // appliedNotice is the per-session line for an applying set (ADR 0016 §5's "visible
