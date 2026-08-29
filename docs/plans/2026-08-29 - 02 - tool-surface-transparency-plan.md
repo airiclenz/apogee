@@ -216,7 +216,7 @@ the read_file case asserts the message quotes the pinned path, and `single_find_
 
 **Commit:** `feat(tools): missing-path refusals suggest sibling entries the model can use`
 
-## 5. AGENTS.md states the stack facts the model guessed wrong
+## 5. AGENTS.md states the stack facts the model guessed wrong — ✅ DONE (2026-08-29)
 
 **What:** two edits to `AGENTS.md`. In "Where knowledge lives" change the `layout.md` bullet to:
 ``- `layout.md` (repo root, not `docs/`) — the TUI layout/rendering spec in prose.``

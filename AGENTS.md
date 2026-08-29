@@ -12,7 +12,7 @@
 - `docs/plans/` — implementation plans in the house format: numbered `## N.` H2 items with What/Tests/Acceptance/commit. Plans are saved repo docs, executed item-by-item; completed plans get archived.
 - `docs/handoffs/` — multi-session work-in-flight handoffs (superseded ones move to `docs/handoffs/archived/`).
 - `docs/reviews/` — saved review reports.
-- `layout.md` - the TUI layout/rendering spec in prose.
+- `layout.md` (repo root, not `docs/`) — the TUI layout/rendering spec in prose.
 - `ISSUES.md` - known issues and deferred work; **open only**. A resolved or executed item is REMOVED from it and recorded in `CHANGELOG.md` (under `[Unreleased]`) — the changelog is the sole closed trail. Never leave a done item, or a narration of one, in `ISSUES.md` — never a regression (see Conventions).
 - `CHANGELOG.md` + `VERSION` — `VERSION` micro-bumps per shipped feature; `CHANGELOG.md` collects those under `[Unreleased]` and only gains a release heading when a release is cut. Versioning is deliberately 0.x while pre-production. Pushing a `VERSION` change to `main` auto-creates the annotated `vX.Y.Z` tag at that commit — every bump in the push, each at its own commit — so a bump is always a commit of its own and, at a release cut, the **last** one: the `CHANGELOG.md` rollup lands first, so the tagged tree already carries it.
 
@@ -24,6 +24,7 @@
 - **Regressions are never deferred.** A regression — behaviour that worked at the previous commit or release and does not now, or a path, name or value apogee itself announces to the user or model (an orientation line, a skill header, a `{{…}}` expansion) that a tool, mode or guard refuses or prompts on — is fixed in the run that finds it or blocks that run's closeout. It never enters `ISSUES.md` as deferred work and never ships; the 2026-08-26 read-root residual that shipped in v0.18.2 is the case this rule closes.
 - Distribution: a Homebrew tap (`airiclenz/tap`, binary formula) plus six prebuilt archives per release (`make dist`); building from source stays fully supported. Never `go install …@latest` — proxy.golang.org still serves the deleted v1.x tags from its immutable cache, so `@latest` resolves to stale `v1.7.0`; known, not a bug (`@main` and `@<sha>` are fine).
 - Config home is a single `~/.apogee` dotdir on every OS (like `~/.aws`). Settled decision — do not propose XDG / os.UserConfigDir`.
+- **Stack facts:** the TUI is Bubble Tea **v2** (`charm.land/bubbletea/v2`): key events are `tea.KeyPressMsg` matched on `msg.String()` (`"esc"`, `"ctrl+c"`); the v1 names (`tea.KeyMsg`, `tea.KeyCtrlC`) do not exist here. Sub-agent briefs that name an API must use the v2 names.
 - The Bubble Tea `Model` is copied by value on every `Update`: never let a `strings.Builder` (or any no-copy type) be held by value anywhere it reaches. Rule and guard test are in `internal/tui/` (see `doc.go`, ADR 0011).
 - Tests that need a live LLM are gated by `APOGEE_LIVE_ENDPOINT`; without it they skip. `make live-eval` drives the live path.
 - Early-development stance: prefer the best long-term architecture over lowest churn; the owner reshapes now to get it right.
