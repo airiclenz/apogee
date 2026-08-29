@@ -40,6 +40,24 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 - [ ] Finished sub-agents print the sug-agent output twice - once at the very beginning (unneededly) before the input-prompt event (also with terrible formatting) as well as at the end of the sub-agent transcript (that one is properly formatted and the one that we need to keep).
 
 
+### Residuals deferred out of the 2026-08-29 tool-surface-transparency run
+
+**Status:** found 2026-08-29 at the close of the tool-surface transparency plan
+(`docs/plans/archived/2026-08-29 - 02 - tool-surface-transparency-plan.md`), deferred out of that
+run.
+
+- [ ] **The sibling-suggestion helper's row-break escaping is never exercised end to end.**
+  `suggestSiblings` (`internal/tools/path_suggest.go:39`) escapes each rendered suggestion with
+  `escapeRowBreaks` (`:75`) and `notFoundMessage` (`:91`) assembles them, but no test drives a
+  sibling entry whose NAME carries a newline, so neither helper's escaping is proven on the path a
+  hostile filename would take.
+
+- [ ] **`contentArgs` duplicates the tools' schema key names inside `internal/tui` with no
+  cross-check against `internal/tools`.** The write/edit content keys the wire form drops are
+  spelled a second time at `internal/tui/wireargs.go:25`, matched by tool name against the schemas
+  that live in `internal/tools`; a future schema rename would silently stop dropping file content
+  onto the wire, and no test guards the pairing.
+
 ### Residuals deferred out of the 2026-08-29 audit-residue closeout
 
 **Status:** found 2026-08-29 at the close of the audit-residue closeout run

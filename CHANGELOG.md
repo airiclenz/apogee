@@ -10,6 +10,20 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- Every tool card in a saved session now keeps a **bounded copy of the arguments the model sent
+  with that call**. `presentToolCall` settles it at build time for every call at every depth —
+  an unregistered MCP tool included, through its other exit — from the call's own JSON via
+  `wireArgs`, so a delegate's tool use can still be read back off the record once its run has
+  closed. It rides the record on the new additive `wireToolView.Args` member (`args`, `omitempty`,
+  no `transcriptVersion` bump): a card with no arguments writes exactly the bytes it wrote before
+  (`TestTranscriptCodecGoldenV1` unchanged), and a blob written before the member decodes with
+  none. The stored form is a summary and not a transport — a write or edit's file content is
+  dropped (the card's Regions already carry the diff, ADR 0052), any other string over 1 KB and
+  any call still over 4 KB is stored as its size, and the keys come out sorted so the bytes on
+  disk do not shift with the order a model happened to spell its call in. Store only: nothing
+  paints it yet. `docs/manual/sessions.md` states what a record now keeps, and `ISSUES.md`'s
+  sub-agent-persistence non-goal names the exception.
+
 - `GatherTerminal`'s measurement engine is exercised for the first time. A new scripted terminal double (`internal/probe/terminal_fake_test.go`) parses what the probe writes and answers as a real terminal would — a small VT model tracking the cursor, the tab stops, the deferred or immediate last-column wrap, mode 2027 and the addressing capabilities, and nothing else — reusing the package's own `nextCSI` lifter rather than a second parser and holding a sequence cut across writes until the rest arrives. `TestGatherTerminalMeasuresAnAgreeingTerminal` drives the whole probe against a terminal that does exactly what the painter assumes and asserts all six sections come back in order (modes, glyphs off, glyphs on, tabs, wrap, capabilities) with no mismatch and the exact OK wording the report prints, that the tab-erasure row reports "unverified — no screen read-back on this OS" where there is no console to read cells out of, that the alternate screen is handed back (`showCursor` + `leaveAltScreen` last), and that mode 2027 is left in the setting it was found in. `TestFakeTerminalAnswersCPRAndDECRQM` proves the instrument itself: a DSR-CPR answered `ESC[3;7R`, a DECRQM answered as a DECRPM `ESC[?2027;2$y`, and a half-written sequence held rather than dropped. Package coverage rises from 50.4% to 91.8%. First half of audit finding **C-15 — `GatherTerminal`'s measurement engine is untested past its two abort paths**; the divergence tests and the `ISSUES.md` removal are item 4.
 
 - Every MISMATCH branch of the terminal probe is now proven to fire, each on its own scripted terminal so one divergence cannot mask another: an immediate last-column wrap (`TestGatherTerminalFlagsAnImmediateWrap`), a terminal that answers DECRQM for mode 2027 and then does not honour `CSI ?2027h` — with the glyph sweep that follows correctly measuring against wcwidth, the table the mode actually in force implies (`TestGatherTerminalFlagsAModeThatDoesNotTake`), tab stops DECST8C fails to move back to the every-8 model the renderer navigates against, paired with the complementary run where DECST8C does move them and is therefore no finding (`TestGatherTerminalFlagsStopsDECST8CDoesNotMove`, `TestGatherTerminalReportsStopsDECST8CMoved`), a capability the terminal answers that `xtermCaps(TERM=(unset))` never granted the painter — the Windows divergence — together with its inverse, a capability TERM grants that the terminal lacks, which is deliberately not flagged (`TestGatherTerminalFlagsACapabilityThePainterDoesNotKnow`), and a terminal that reports mode 2027 set while still advancing the two VS16 glyphs by wcwidth, flagged on exactly those two rows of the mode-on sweep alone (`TestGatherTerminalFlagsAGlyphTheTableMisses`). Two further runs pin what must NOT change: a terminal answering one byte per read measures byte-for-byte the same report as one answering whole replies (`TestGatherTerminalSurvivesRepliesSplitAcrossReads`), and a terminal found with mode 2027 already set is handed back set, with the glyph sweep still running its off pass first (`TestGatherTerminalRestoresAModeItFoundSet`). Package coverage is 92.6%, up from 50.4% before item 3. Closes audit finding **C-15 — `GatherTerminal`'s measurement engine is untested past its two abort paths**, whose `ISSUES.md` entry and now-empty "Test debt:" heading are removed.
@@ -303,6 +317,41 @@ point is a **minor** bump, not a breaking change.
   direction — now fails here instead of in a user's session.
 
 ### Changed
+
+- `grep` and `find_files` now say WHERE they searched. Every header and every empty-result
+  sentence carries a scope clause — `[39 total matches in internal/tui/model.go (*.go), showing
+  1-39]`, `No matches found in internal/tui/model.go (*.go)`, `[12 files found in internal/tui
+  (*.go), showing 1-12]`, `No files found in internal/tui (*.go)` — so a model reading only the
+  result can tell an empty answer about one file from an empty answer about the whole workspace,
+  and never has to reconstruct the scope from its own call. The scope is spelled as the model
+  gave the `path` argument (the announced-path rule: it can be handed straight back in the next
+  call), reads `the workspace` when `path` is empty or `.`, and appends the `include` (grep) /
+  `pattern` (find_files) glob list in parentheses. A shared `searchScope` helper builds it and
+  escapes it like a path, so a scope carrying a line break cannot forge a row; the existing
+  numbers, the `(capped at N)` clause, the truncation note and the `domain.MatchedLines` total
+  are untouched, and the TUI's `find_files` stat slot reads the empty sentence by its `No files
+  found` prefix.
+
+- The transcript row for a `grep` or `find_files` call now says WHERE the search ran, not just
+  what it looked for. `grepTarget` leads with the pattern and chains the scoped `path` and the
+  `include` glob behind it in the table's own separator — `KeyMsg · internal/tui/model.go ·
+  *.go` — and `find_files`, which until now showed its name pattern alone, gains a
+  `findFilesTarget` of the same shape (`*.go · internal/tui`). A qualifier the call omitted is
+  dropped, and a `path` of `.` is dropped with it: a whole-workspace search is the search every
+  search is until it says otherwise, and dropping it never leaves the row opening or closing on a
+  stray separator (`qualifiedTarget`). The path is a display path like every other target's, so
+  it goes through the existing `shortenPaths`/`finishDisplay` seam and gains no sanitising code
+  of its own. Together with the tools' own scope echo, the human reading the row and the model
+  reading the result now see the same scope.
+
+- `read_file`, `list_dir`, `grep` and `find_files` now answer a missing path with the near misses in its parent — `path not found: docs/adr/0025 — did you mean: docs/adr/0025-interjections.md` — read through the same fence the tool reads by, at most five, spelled onto the parent the model itself named. A fence refusal is never dressed up as a near miss, a path whose parent does not exist keeps its former message to the byte, and the write/edit/diff refusals are unchanged.
+
+- `AGENTS.md` now states the two stack facts a delegate guessed wrong in session
+  `20260829T175710Z-230c75f9`: the `layout.md` bullet says the spec lives at the repo root, not under
+  `docs/`, and a new **Stack facts** convention records that the TUI is Bubble Tea **v2**
+  (`charm.land/bubbletea/v2`) — key events are `tea.KeyPressMsg` matched on `msg.String()`
+  (`"esc"`, `"ctrl+c"`), the v1 names (`tea.KeyMsg`, `tea.KeyCtrlC`) do not exist here, and sub-agent
+  briefs that name an API must use the v2 names.
 
 - `Provider.Suggest`'s doc comment now states the guarantee it actually keeps — it ranks the snapshot in force at the moment it is called, taking its own `current()` load like every other accessor, so it is never paired with a preceding `List` (`Report` is the paired accessor); a suggestion is resolved by the loop through `ResolveSkills` against whatever catalog the last `Reload` installed. Closes the `ISSUES.md` residual **`Provider.Suggest`'s doc still claims it reads "the SAME snapshot List does"**.
 
