@@ -219,7 +219,8 @@ func (a *Agent) Rebind(spec RebindSpec) error {
 	next.Profile = spec.Profile
 
 	registry := domain.NewMechanismRegistry()
-	if err := buildEnabledMechanisms(next, registry); err != nil {
+	deps, err := buildEnabledMechanisms(next, registry)
+	if err != nil {
 		return err
 	}
 	if err := registry.ValidateOrdering(); err != nil {
@@ -245,6 +246,10 @@ func (a *Agent) Rebind(spec RebindSpec) error {
 	// Commit — from here on nothing can fail.
 	a.cfg = next
 	a.registry = registry
+	// The rebuilt catalogue's Library store, which library.Open makes the very instance this session
+	// already held whenever the LibraryDir is unchanged — so re-holding it costs nothing and a rebind
+	// that drops the `library` arm leaves nothing behind for Close to flush.
+	a.library = deps.Library
 	// The provider client's configured model WINS over the request's (provider.buildBody), so the
 	// wire model moves only if the Responder is told. It is an optional interface rather than a
 	// widening of the Responder seam: a fake responder in a test simply does not implement it, and

@@ -133,6 +133,45 @@ func NewStore(dir string) *Store {
 	}
 }
 
+// openStores is the per-process registry Open hands out: at most one Store per library directory,
+// keyed by the cleaned path, guarded by openMu. It is package state deliberately — the three build
+// paths that reach one Config.LibraryDir (an Agent's construction, its every Rebind, and a routed
+// sub-agent's catalogue, built with no Agent in sight) cannot see each other's Deps, so the
+// per-process identity has to live where all three can find it.
+var (
+	openMu     sync.Mutex
+	openStores = make(map[string]*Store)
+)
+
+// Open returns THE Store for dir in this process: the first call constructs and Loads it, and every
+// later call naming the same directory returns that same instance. Sharing is what keeps the
+// whole-file snapshot honest — two Stores on one library.json each rewrite the file from their own
+// memory, so the last writer silently drops the other's observations. It is the store-level twin of
+// what a catalogue crossing the delegation boundary already does (internal/mechanisms/library.go:
+// ForSubAgent shares the STORE while isolating the Mechanism's live state).
+//
+// The returned error is Load's soft error and is returned ON THE CONSTRUCTING CALL ONLY; every later
+// Open returns a nil error. A soft Load error still yields a usable, empty store (see Load), so the
+// caller that reports the degrade — deriveDeps in internal/agent/construct.go — prints its notice
+// exactly once per process without coordinating with anyone.
+//
+// NewStore stays the door to a PRIVATE store that shares nothing: a test's fixture, a bench Driver
+// seeding one. Closing a SHARED store is safe from any holder, because Close flushes and parks the
+// writer rather than ending the store — a later Record starts a fresh one (see Close).
+func Open(dir string) (*Store, error) {
+	key := filepath.Clean(dir)
+
+	openMu.Lock()
+	defer openMu.Unlock()
+
+	if shared, ok := openStores[key]; ok {
+		return shared, nil
+	}
+	shared := NewStore(key)
+	openStores[key] = shared
+	return shared, shared.Load()
+}
+
 // Load reads the store file under the injected directory into memory, dropping expired
 // entries and evicting past the cap. A missing store is not an error (a fresh install has no
 // Library yet). An unreadable, malformed, or too-new store degrades to an empty store and is

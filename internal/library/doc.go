@@ -13,7 +13,10 @@
 // and the bench points it at an ephemeral dir so a sim run never touches the production
 // Library (decision 11). The Store is process-local: it guards its in-memory map with a
 // mutex for intra-process safety but makes no cross-process locking claims in v1 — two
-// apogee processes sharing one LibraryDir may last-writer-win.
+// apogee processes sharing one LibraryDir may last-writer-win. WITHIN one process there is
+// exactly one Store per directory, because every whole-file snapshot is written from one
+// memory: Open hands each builder that names a directory the same instance, and NewStore is
+// the door to a private store that shares nothing (a test fixture, a bench Driver's seed).
 //
 // The write model is asynchronous: recording an observation only marks the store dirty, and a
 // single writer goroutine debounces those marks into one whole-file snapshot, so no caller — and

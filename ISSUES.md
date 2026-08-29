@@ -25,11 +25,8 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 
 ## Improvements / Ideas
 
-- [ ] sub agent names are often not descriptive. the model seems to not set it at all (sub-agent name just showing input proompt) -> separate auto-name call for sub agents if enabled and name was not set? (grill)
-- [ ] when many sub agents are running - the activity status often flickers back and forth between the different sub agents. the stati of the sub-agents need to be unified / merged (grill)
-- [ ] all content print-out of any tool need to display line numbers. The write tool does not do that currently. Verify all tools that print file diffs.
 - [ ] fold the five hand-rolled `LookPath` + fence pairs (`internal/tools/git.go:142`, `python_exec.go:239`, `run_tests.go:249`, `diagnostics.go:200`, `internal/present/opener.go:228`) onto `security.ResolveProgram`, so the resolver is the only exec entry rather than the newest of six — an architecture pass, deliberately out of scope of `docs/plans/2026-08-26 - 01`
-- [ ] Navigating sub-agents is not as smooth as it could be. when "expanding" a sub agent, I'd like to open it "full screen" automatically jumping to the bottom/latest response - meaning that it is taking the session space fully (excluding prompt box and so on..). A button to navigate one level up needs to be added as well (grill)
+
 
 ## Open defects
 
@@ -769,11 +766,6 @@ it waits. Sources: `docs/reviews/code-audit-2026-08-25.md` (C-nn), `docs/skill-r
 
 **Design discussion before code** — each wants its own grill; none is a one-item fix:
 
-- [ ] **C-13 — the library store persists under its lock.** `internal/library/store.go` `Record` /
-  `RecordSuccess` call `persist()` (MarshalIndent + temp file + rename) inside `s.mu.Lock()` with no
-  `ctx`, so ADR 0039 fan-out serialises every completion behind a disk rewrite and a hung filesystem
-  hangs the loop. Shape to settle (write model): mutate under the lock, encode and write outside it;
-  optionally a coalescing async writer. Not independently verified.
 - [ ] **C-20 + F-08 — the Windows pair.** `internal/platform/confiner_windows.go` keeps no mutex by
   stated design, so `Close` zeroes `token`/`caps` while `Confine` reads across a label walk; ordered
   exits are joined but bubbletea's abnormal exit (SIGINT, closed console) does not wait on Cmd

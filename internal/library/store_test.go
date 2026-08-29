@@ -795,3 +795,91 @@ func TestStoreRecordAfterCloseRestartsTheWriterAndTheNextCloseFlushes(t *testing
 		time.Sleep(10 * time.Millisecond)
 	}
 }
+
+// ----------------------------------------------------------------------------
+// Open — one shared store per process and directory
+// ----------------------------------------------------------------------------
+
+// TestOpenReturnsOneStorePerDirectory pins what makes the engine's three builders on one
+// LibraryDir safe (an Agent's construction, its every Rebind, and a routed sub-agent's catalogue):
+// Open hands every caller naming the same directory the SAME Store, so the whole-file snapshot each
+// one publishes is written from ONE memory rather than from three that overwrite each other. The
+// error is Load's and belongs to the constructing call alone — which is what keeps the caller's
+// degrade notice a once-per-process line.
+func TestOpenReturnsOneStorePerDirectory(t *testing.T) {
+	t.Parallel()
+
+	t.Run("the same directory yields the same store", func(t *testing.T) {
+		dir := t.TempDir()
+
+		first, err := Open(dir)
+		if err != nil {
+			t.Fatalf("the constructing Open of a fresh directory: %v, want a clean open", err)
+		}
+		t.Cleanup(func() { _ = first.Close() })
+
+		again, err := Open(dir)
+		if err != nil {
+			t.Fatalf("the second Open: %v, want nil — Load ran on the constructing call", err)
+		}
+		if again != first {
+			t.Errorf("Open(%q) twice = %p then %p; want one shared instance", dir, first, again)
+		}
+
+		// Another spelling of the same path is the same store: Open keys on the cleaned directory,
+		// so a caller that appended a separator does not get a second writer on one file.
+		slashed, err := Open(dir + string(filepath.Separator))
+		if err != nil {
+			t.Fatalf("Open of the trailing-slash spelling: %v", err)
+		}
+		if slashed != first {
+			t.Errorf("Open(%q) = %p; want the same instance %p as Open(%q)", dir+"/", slashed, first, dir)
+		}
+	})
+
+	t.Run("a different directory yields a different store", func(t *testing.T) {
+		here, there := t.TempDir(), t.TempDir()
+
+		first, err := Open(here)
+		if err != nil {
+			t.Fatalf("Open(%q): %v", here, err)
+		}
+		t.Cleanup(func() { _ = first.Close() })
+		other, err := Open(there)
+		if err != nil {
+			t.Fatalf("Open(%q): %v", there, err)
+		}
+		t.Cleanup(func() { _ = other.Close() })
+
+		if other == first {
+			t.Errorf("Open(%q) and Open(%q) returned the same store; two Library directories are two stores", here, there)
+		}
+	})
+
+	t.Run("Load's soft error is returned on the constructing call only", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, storeFileName), []byte("not json {]["), filePerm); err != nil {
+			t.Fatalf("seed a corrupt store: %v", err)
+		}
+
+		first, err := Open(dir)
+		if err == nil {
+			t.Fatal("the constructing Open of a corrupt store returned nil; want Load's soft error")
+		}
+		t.Cleanup(func() { _ = first.Close() })
+		if first == nil {
+			t.Fatal("Open returned no store alongside the soft error; a degraded store is still usable")
+		}
+		if n := first.Count(); n != 0 {
+			t.Errorf("the degraded store holds %d entries; want the empty store Load leaves behind", n)
+		}
+
+		again, err := Open(dir)
+		if err != nil {
+			t.Errorf("the second Open of the same corrupt store = %v; want nil — the notice is the constructing call's", err)
+		}
+		if again != first {
+			t.Errorf("the second Open returned a different instance; a soft Load error still shares the store")
+		}
+	})
+}

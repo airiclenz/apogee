@@ -429,7 +429,17 @@ the existing tests amended per the guard. All under `-race`.
 
 **Commit.** `fix(library): the store writes through a coalescing writer, never on the caller's path (C-13)`
 
-## 6. One library store per process and directory; the Agent flushes it at Close (C-13, engine half)
+## 6. One library store per process and directory; the Agent flushes it at Close (C-13, engine half) — ✅ DONE (2026-08-29)
+
+NOTES (2026-08-29): Driver enumeration, as the item requires — the TUI root reaches `Agent.Close` through `lateEngine.Close` (`cmd/apogee/wire_engine.go:488`), called by `rootWiring.close` (`cmd/apogee/wire.go:227`), the single deferred teardown `runRoot` registers; `internal/run.Once` (`run.go:230`) defers `_ = a.Close()` on the line after construction, covering headless, daemon Firings and an in-session Schedule. Both were already correct, so no `Close` call was added anywhere.
+
+NOTES (2026-08-29): the four engine-side tests live in a new `internal/agent/library_lifecycle_test.go` rather than in `agent_test.go` / the construct/rebind test files the item's Files line offers, because they are one concern cluster spanning construction, Rebind, `BuildMechanisms` and a spawn — and the package already files Library work that way (`library_bypass_test.go`, `library_corrupt_store_test.go`). No production file was added, so `TestDocMapNamesEveryFile` is unaffected.
+
+NOTES (2026-08-29): `TestChildAgentDoesNotCloseTheStore` does NOT set item 5's `persistDebounce` seam — item 5's own notes record that the seam is an unexported package var no other package can reach, and exporting a test-only setter from production code would be the worse trade. The test instead plants a regular FILE where the store's directory would go, which makes every flush fail loudly (`MkdirAll` cannot create over it): a delegate's `Close` that flushed would return that error and one that did not returns nil, and freeing the path lets the session's `Close` publish the observation. That is fully deterministic rather than merely faster than a 200 ms race. All four tests were verified to bite: disabling the flush fails all four, dropping the `depth > 0` guard fails the child test, and swapping `library.Open` back for `library.NewStore` fails the three sharing assertions.
+
+NOTES (2026-08-29): `internal/library/doc.go` gained one sentence beyond the item's Files list: the package doc's process-local paragraph said nothing about instance identity WITHIN a process, which is exactly what this item establishes, and it is the first thing a reader of the package sees.
+
+NOTES (2026-08-29): a `Rebind` that drops the `library` arm leaves `a.library` nil, exactly as the item's text specifies ("nil when no arm needs it"), so the session's `Close` no longer flushes the store an earlier arm opened. It costs nothing in practice — with no arm armed nothing records, and the writer goroutine still publishes what was already dirty within its debounce window — and the pre-item behaviour flushed nothing at any time.
 
 **What.** Depends on item 5. Recast at the regression check (2026-08-29): the draft assumed one
 store per process reachable for `Close`; the tree builds THREE on the same `LibraryDir` — `New`

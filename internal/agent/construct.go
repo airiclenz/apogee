@@ -44,7 +44,8 @@ func newAgent(cfg domain.Config, up provider.Responder) (*Agent, error) {
 	// Arm the catalogued Mechanisms named on Config.EnableMechanisms, merging them into registry
 	// BEFORE the ordering/incompatibility/requirements gates run over the whole graph (ADR 0015 §1–2).
 	// A build/merge failure (unknown ID, duplicate, hook-less) is a construction failure.
-	if err := buildEnabledMechanisms(cfg, registry); err != nil {
+	deps, err := buildEnabledMechanisms(cfg, registry)
+	if err != nil {
 		return nil, err
 	}
 	if err := registry.ValidateOrdering(); err != nil {
@@ -126,6 +127,7 @@ func newAgent(cfg domain.Config, up provider.Responder) (*Agent, error) {
 		consoles:           console.New(),                        // the engine's live Consoles, empty and per-process (ADR 0059)
 		tree:               newTreeSnapshotter(cfg.WorkspaceDir), // the tracked-file mutation floor around subprocess calls (treesnapshot.go)
 		now:                time.Now,                             // the request-render clock for the system prompt's {{datetime}}
+		library:            deps.Library,                         // the shared Library store this build opened, nil unless an armed row needed one — Close flushes it
 	}
 	// Fill the context-file cache for this session's first boundary: construction. Every later
 	// refill goes through the same seam at a session boundary (contextfiles.go).
@@ -262,9 +264,14 @@ func queuedApprovals(ap domain.Approver) domain.Approver {
 // hook-less Mechanism all propagate as construction failures.
 // An empty list builds nothing (the default-off posture untouched); the ordering, incompatibility,
 // and requirements gates then run over the merged registry unchanged.
-func buildEnabledMechanisms(cfg domain.Config, registry *domain.MechanismRegistry) error {
+//
+// The derived Deps come BACK so the caller can hold what the build opened: the Library store is the
+// one collaborator with a lifetime (a writer goroutine and pending observations), and the Agent that
+// derived it is what flushes it at Close. An empty list — and any failure — returns the zero Deps,
+// so a caller never holds a half-built collaborator.
+func buildEnabledMechanisms(cfg domain.Config, registry *domain.MechanismRegistry) (mechanisms.Deps, error) {
 	if len(cfg.EnableMechanisms) == 0 {
-		return nil
+		return mechanisms.Deps{}, nil
 	}
 
 	ids := slices.Clone(cfg.EnableMechanisms)
@@ -275,17 +282,17 @@ func buildEnabledMechanisms(cfg domain.Config, registry *domain.MechanismRegistr
 	for _, id := range ids {
 		m, err := mechanisms.Build(id, deps)
 		if err != nil {
-			return err
+			return mechanisms.Deps{}, err
 		}
 		if err := registry.Add(m); err != nil {
 			// Add's rejections already carry the "apogee: " prefix the house convention puts on a
 			// returned error, so the enable-path context is appended rather than prefixed — wrapping
 			// would print the prefix twice (cmd/apogee/main.go prints a returned error verbatim). Same
 			// shape as the ErrUnknownMechanism wrap in internal/mechanisms: the prefixed error leads.
-			return fmt.Errorf("%w — while enabling mechanism %q", err, id)
+			return mechanisms.Deps{}, fmt.Errorf("%w — while enabling mechanism %q", err, id)
 		}
 	}
-	return nil
+	return deps, nil
 }
 
 // BuildMechanisms builds the catalogued Mechanisms named by ids into a registry of their own and
@@ -317,7 +324,11 @@ func buildEnabledMechanisms(cfg domain.Config, registry *domain.MechanismRegistr
 func BuildMechanisms(cfg domain.Config, ids []domain.MechanismID) (*domain.MechanismRegistry, error) {
 	cfg.EnableMechanisms = ids
 	registry := domain.NewMechanismRegistry()
-	if err := buildEnabledMechanisms(cfg, registry); err != nil {
+	// The derived Deps are discarded here and nowhere else: this door hands back a REGISTRY, and the
+	// Library store behind it is the per-process instance library.Open shares — the session Agent
+	// built on the same LibraryDir holds it and flushes it at Close, so a routed child's catalogue
+	// needs no lifetime of its own.
+	if _, err := buildEnabledMechanisms(cfg, registry); err != nil {
 		return nil, err
 	}
 	if err := registry.ValidateOrdering(); err != nil {
@@ -339,9 +350,14 @@ func BuildMechanisms(cfg domain.Config, ids []domain.MechanismID) (*domain.Mecha
 // what (mechanisms.DepNeeds). A second Deps-bearing Mechanism therefore adds a flag and a row field,
 // never a branch in this package naming a Mechanism ID.
 //
-// A Library store is rooted at Config.LibraryDir and Loaded only for a needs.Library arm (never an
-// ambient ~/.apogee — ADR 0001). LookPath is left nil (the exec.LookPath default) and
-// GrammarConstraint inert: neither is derived from Config, so neither has a DepNeeds flag.
+// A Library store is rooted at Config.LibraryDir and opened only for a needs.Library arm (never an
+// ambient ~/.apogee — ADR 0001). It comes from library.Open rather than library.NewStore, so the
+// three paths that reach this function on ONE LibraryDir — New, every Rebind, and the routed
+// sub-agent catalogue BuildMechanisms builds — share a single store instead of each rewriting the
+// whole file from its own memory. Open Loads on its constructing call alone, which is what keeps the
+// degrade notice below a once-per-process line without any coordination here. LookPath is left nil
+// (the exec.LookPath default) and GrammarConstraint inert: neither is derived from Config, so
+// neither has a DepNeeds flag.
 func deriveDeps(cfg domain.Config, needs mechanisms.DepNeeds) mechanisms.Deps {
 	var deps mechanisms.Deps
 	// The exec fence a Mechanism resolving an executable measures against. It is derived for
@@ -372,13 +388,15 @@ func deriveDeps(cfg domain.Config, needs mechanisms.DepNeeds) mechanisms.Deps {
 	// the operator exported.
 	deps.SecretEnvVars = cfg.SecretEnvVars
 	if needs.Library {
-		store := library.NewStore(cfg.LibraryDir)
-		if err := store.Load(); err != nil {
+		store, err := library.Open(cfg.LibraryDir)
+		if err != nil {
 			// A broken/absent Library never blocks startup: Load leaves the store empty-and-usable on
 			// any soft error, so the run degrades to that empty store and proceeds (like the store's
 			// own persist path, the degrade is surfaced to stderr). Load's errors already carry the
 			// "apogee: " prefix the house convention puts on a returned error, so the consequence is
-			// appended rather than prefixed — wrapping would print it twice.
+			// appended rather than prefixed — wrapping would print it twice. Open returns the error on
+			// the CONSTRUCTING call only, so a Rebind or a routed catalogue re-deriving the same
+			// directory does not print the notice a second time.
 			fmt.Fprintf(os.Stderr, "%v — library store degraded to empty\n", err)
 		}
 		deps.Library = store
