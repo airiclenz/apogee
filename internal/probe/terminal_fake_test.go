@@ -110,6 +110,15 @@ func (f *fakeTerminal) painterWidth(text string) int {
 	return ansi.WcWidth.StringWidth(text)
 }
 
+// fakeReplyTimeout is the per-reply deadline the tests hand the probe. Every terminal in this
+// package answers from memory without sleeping, so a reply that is coming arrives on the first
+// read and the deadline is never actually waited out — a generous one costs a passing run
+// nothing. It has to be generous: await takes its deadline before the first read, so a
+// one-millisecond bound can be spent by nothing more than the scheduler parking the goroutine.
+// A full parallel suite did exactly that once, mid-probe, and turned a measured glyph section
+// into "no answer"; a deadline in whole seconds cannot be lost that way.
+const fakeReplyTimeout = 30 * time.Second
+
 // inputs is the TerminalInputs a measurement session talks to this terminal through. Fd is 0
 // because there is no console to read cells out of, which is what a non-Windows host looks like
 // and is why the screen read-back rows report "unverified".
@@ -121,7 +130,7 @@ func (f *fakeTerminal) inputs(term string) TerminalInputs {
 		Height:  f.height,
 		Fd:      0,
 		TERM:    term,
-		Timeout: time.Millisecond,
+		Timeout: fakeReplyTimeout,
 	}
 }
 

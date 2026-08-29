@@ -278,7 +278,7 @@ func TestGatherTerminalAbortsOnASilentTerminal(t *testing.T) {
 		Read:    func(time.Duration) []byte { return nil },
 		Width:   120,
 		Height:  29,
-		Timeout: time.Millisecond,
+		Timeout: fakeReplyTimeout,
 	})
 
 	if !strings.Contains(report.Aborted, "DSR-CPR") {
