@@ -147,7 +147,8 @@ func (t *Grep) Execute(ctx context.Context, call domain.ToolCall) (domain.ToolRe
 		return domain.ToolResult{}, err // only ctx cancellation propagates as a Go error
 	}
 
-	text, matched := t.renderMatches(root, matches, args.MaxResults, args.Offset, clampContextLines(args.ContextLines))
+	scope := searchScope(args.Path, globs)
+	text, matched := t.renderMatches(root, scope, matches, args.MaxResults, args.Offset, clampContextLines(args.ContextLines))
 	return okSummary(call.ID, text, matched), nil
 }
 
@@ -276,6 +277,22 @@ func parseIncludeGlobs(include string) []string {
 	return globs
 }
 
+// searchScope names the scope a search ran over, for the header and the no-match sentence grep
+// and find_files write. given is the `path` argument AS THE MODEL SPELLED IT — an announced value
+// the model can hand straight back — and an empty or "." path is the whole workspace; the glob
+// list that narrowed the search rides along in parentheses. The scope is data inside the header
+// row's grammar, so it is escaped like a path: a scope carrying a line break would forge rows.
+func searchScope(given string, globs []string) string {
+	scope := strings.TrimSpace(given)
+	if scope == "" || scope == "." {
+		scope = "the workspace"
+	}
+	if len(globs) > 0 {
+		scope += " (" + strings.Join(globs, ",") + ")"
+	}
+	return escapeRowBreaks(scope)
+}
+
 // matchesInclude reports whether a file name matches any include glob; no globs means
 // every file matches.
 func matchesInclude(name string, globs []string) bool {
@@ -290,17 +307,17 @@ func matchesInclude(name string, globs []string) bool {
 	return false
 }
 
-// renderMatches paginates from offset and prepends a header naming the total count. It
-// returns the total as a domain.MatchedLines on BOTH paths — a search that found nothing
-// reports Total 0 rather than no summary, so a host reads a number instead of testing the
-// "No matches found" sentence for a prefix.
+// renderMatches paginates from offset and prepends a header naming the total count and the
+// scope the search ran over (searchScope). It returns the total as a domain.MatchedLines on
+// BOTH paths — a search that found nothing reports Total 0 rather than no summary, so a host
+// reads a number instead of testing the "No matches found" sentence for a prefix.
 //
 // Pagination counts MATCHES only: contextLines rides along free, so the header's numbers and
 // the truncation note mean the same thing whether context was asked for or not. With
 // contextLines 0 the body is byte-identical to the pre-context output.
-func (t *Grep) renderMatches(root string, matches []grepMatch, maxResults, offset, contextLines int) (string, domain.MatchedLines) {
+func (t *Grep) renderMatches(root, scope string, matches []grepMatch, maxResults, offset, contextLines int) (string, domain.MatchedLines) {
 	if len(matches) == 0 {
-		return "No matches found", domain.MatchedLines{Total: 0}
+		return "No matches found in " + scope, domain.MatchedLines{Total: 0}
 	}
 	if maxResults <= 0 {
 		maxResults = defaultGrepResults
@@ -324,7 +341,7 @@ func (t *Grep) renderMatches(root string, matches []grepMatch, maxResults, offse
 	if total >= maxGrepMatches {
 		capped = fmt.Sprintf(" (capped at %d)", maxGrepMatches)
 	}
-	header := fmt.Sprintf("[%d total matches%s, showing %d-%d]", total, capped, start+1, end)
+	header := fmt.Sprintf("[%d total matches%s in %s, showing %d-%d]", total, capped, scope, start+1, end)
 	body := plainMatchLines(shown)
 	if contextLines > 0 {
 		body = t.renderContextMatches(root, shown, contextLines)

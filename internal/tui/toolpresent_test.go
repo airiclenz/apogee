@@ -1570,7 +1570,7 @@ func TestToolStat(t *testing.T) {
 		{name: "a failing run words FAIL", tool: "run_tests", result: domain.ToolResult{Content: "FAIL (pytest) — 3 failing tests"}, want: "FAIL", wantOK: true},
 		{name: "output in no verdict shape keeps its floor", tool: "run_tests", result: domain.ToolResult{Content: "go: no test files"}, wantOK: false},
 		{name: "find files reads its own total", tool: "find_files", result: domain.ToolResult{Content: "[12 files found, showing 1-12]\na.go"}, want: "12 files", wantOK: true},
-		{name: "find files states the empty case", tool: "find_files", result: domain.ToolResult{Content: "No files found"}, want: "0 files", wantOK: true},
+		{name: "find files states the empty case", tool: "find_files", result: domain.ToolResult{Content: "No files found in the workspace"}, want: "0 files", wantOK: true},
 		{name: "git status sums its typed section counts", tool: "git_status", result: domain.ToolResult{Content: "On branch main\n\nStaged (2):\n  a.go\n  b.go\n\nUntracked (1):\n  c.go", Summary: domain.ChangedFiles{Staged: 2, Untracked: 1}}, want: "3 changed", wantOK: true},
 		{name: "a clean tree changed nothing", tool: "git_status", result: domain.ToolResult{Content: "On branch main\n\nWorking tree clean", Summary: domain.ChangedFiles{}}, want: "0 changed", wantOK: true},
 		{name: "git log counts its commit lines", tool: "git_log", result: domain.ToolResult{Content: "a1b2c3d 2026-08-10 first\ne4f5a6b 2026-08-09 second"}, want: "2 commits", wantOK: true},

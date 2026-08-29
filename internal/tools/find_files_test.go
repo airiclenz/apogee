@@ -100,7 +100,7 @@ func TestFindFiles_Execute_MatchesBaseNameNotPath(t *testing.T) {
 
 	// The other half of the contract: a PATH pattern is not a supported syntax and matches
 	// nothing, rather than quietly behaving like a basename glob.
-	if got := findFiles(t, root, map[string]any{"pattern": "src/*.go"}); !strings.Contains(got, "No files found") {
+	if got := findFiles(t, root, map[string]any{"pattern": "src/*.go"}); !strings.Contains(got, "No files found in the workspace (src/*.go)") {
 		t.Errorf("a path pattern must not match; got %q", got)
 	}
 }
@@ -131,7 +131,7 @@ func TestFindFiles_Execute_SkipsExcludedDirs(t *testing.T) {
 
 	content := findFiles(t, root, map[string]any{"pattern": "blob.go"})
 
-	if !strings.Contains(content, "No files found") {
+	if !strings.Contains(content, "No files found in the workspace (blob.go)") {
 		t.Errorf(".git match leaked through exclusion: %q", content)
 	}
 }
@@ -165,7 +165,7 @@ func TestFindFiles_Execute_PaginatesWithTruncationNote(t *testing.T) {
 
 	first := findFiles(t, root, map[string]any{"pattern": "*.txt", "max_results": 2})
 
-	if !strings.Contains(first, "[5 files found, showing 1-2]") {
+	if !strings.Contains(first, "[5 files found in the workspace (*.txt), showing 1-2]") {
 		t.Errorf("header does not state the total and the page: %q", first)
 	}
 	if !strings.Contains(first, "[...3 more, continue with offset 2]") {
@@ -201,7 +201,7 @@ func TestFindFiles_Execute_MalformedGlobMatchesNothingLikeGrep(t *testing.T) {
 	// grep's include treats as "matches nothing". find_files parses the same way, so both
 	// tools answer a malformed glob the same — no error for the model to decode.
 	content := findFiles(t, root, map[string]any{"pattern": "["})
-	if !strings.Contains(content, "No files found") {
+	if !strings.Contains(content, "No files found in the workspace ([)") {
 		t.Errorf("a malformed glob must match nothing: %q", content)
 	}
 
@@ -210,7 +210,7 @@ func TestFindFiles_Execute_MalformedGlobMatchesNothingLikeGrep(t *testing.T) {
 	if err != nil {
 		t.Fatalf("grep Execute returned error: %v", err)
 	}
-	if !strings.Contains(grepped.Content, "No matches found") {
+	if !strings.Contains(grepped.Content, "No matches found in the workspace ([)") {
 		t.Errorf("grep's include is the oracle for malformed globs and it matched: %q", grepped.Content)
 	}
 }
@@ -370,7 +370,7 @@ func TestFindFiles_SearchesAnExtraRootBySymlinkSpelling(t *testing.T) {
 	workspace, extra, link := symlinkedExtraReadRoot(t)
 	tool := NewFindFiles(workspace, func() []string { return []string{extra} })
 
-	content := spelledLikeReal(t, tool,
+	content := spelledLikeRealBelowTheHeader(t, tool,
 		map[string]any{"pattern": "*.md", "path": link},
 		map[string]any{"pattern": "*.md", "path": extra})
 
@@ -416,5 +416,62 @@ func TestFindFiles_Execute_NewlineInAFilenameCannotForgeARow(t *testing.T) {
 	}
 	if !strings.Contains(lines[1], forgingRowSpelling) {
 		t.Errorf("row %q does not carry the escaped filename spelling %q", lines[1], forgingRowSpelling)
+	}
+}
+
+// TestFindFiles_Execute_HeaderNamesTheSearchedScope pins find_files' half of the scope clause,
+// in the shape grep's header has: the path as the model spelled it (the whole workspace when it
+// named none) with the glob list that narrowed the walk.
+func TestFindFiles_Execute_HeaderNamesTheSearchedScope(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		args map[string]any
+		want string
+	}{
+		{
+			name: "an unscoped walk says the workspace",
+			args: map[string]any{"pattern": "*.md"},
+			want: "[2 files found in the workspace (*.md), showing 1-2]",
+		},
+		{
+			name: "a dot path is the workspace too",
+			args: map[string]any{"pattern": "*.md", "path": "."},
+			want: "[2 files found in the workspace (*.md), showing 1-2]",
+		},
+		{
+			name: "a subdirectory is named as the model spelled it",
+			args: map[string]any{"pattern": "*.go", "path": "src"},
+			want: "[1 files found in src (*.go), showing 1-1]",
+		},
+		{
+			name: "a glob list keeps every glob the call named",
+			args: map[string]any{"pattern": "*.md, deep.go"},
+			want: "[3 files found in the workspace (*.md,deep.go), showing 1-3]",
+		},
+		{
+			name: "a path and a glob are both named",
+			args: map[string]any{"pattern": "*.go", "path": "a"},
+			want: "[1 files found in a (*.go), showing 1-1]",
+		},
+		{
+			name: "a scoped walk that found nothing names the scope it searched",
+			args: map[string]any{"pattern": "*.md", "path": "test"},
+			want: "No files found in test (*.md)",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			root := t.TempDir()
+			seedFindTree(t, root)
+
+			if got := firstResultLine(findFiles(t, root, tc.args)); got != tc.want {
+				t.Errorf("header = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }

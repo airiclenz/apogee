@@ -736,15 +736,16 @@ func testVerdictStat(res domain.ToolResult) (statValue, bool) {
 	return plainStat(m[1]), true
 }
 
-// foundFilesHead matches the header find_files opens its listing with — "[12 files found, showing
-// 1-12]", the count being the FULL total rather than the page.
+// foundFilesHead matches the header find_files opens its listing with — "[12 files found in
+// internal/tui (*.go), showing 1-12]", the count being the FULL total rather than the page.
 var foundFilesHead = regexp.MustCompile(`^\[(\d+) files found\b`)
 
 // foundFilesStat words find_files' slot as that total, and reads the tool's own empty-result
-// sentence as the zero it states.
+// sentence as the zero it states — matched by its "No files found" prefix, since the sentence
+// goes on to name the scope that was searched.
 func foundFilesStat(res domain.ToolResult) (statValue, bool) {
 	head := strings.TrimSpace(firstLine(res.Content))
-	if head == "No files found" {
+	if strings.HasPrefix(head, "No files found") {
 		return pluralStat(0, "file"), true
 	}
 	m := foundFilesHead.FindStringSubmatch(head)

@@ -46,7 +46,7 @@ func TestGrep_Execute_ExcludesNoiseDirs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute returned error: %v", err)
 	}
-	if !strings.Contains(result.Content, "No matches found") {
+	if !strings.Contains(result.Content, "No matches found in the workspace") {
 		t.Errorf("node_modules match leaked through exclusion: %q", result.Content)
 	}
 }
@@ -120,7 +120,7 @@ func TestGrep_Execute_ReportsMatchCount(t *testing.T) {
 		{
 			name:        "matches",
 			args:        map[string]any{"pattern": "^package "},
-			wantContent: "[2 total matches, showing 1-2]\nsrc/a.go:1:package a\nsrc/inner/b.go:1:package b",
+			wantContent: "[2 total matches in the workspace, showing 1-2]\nsrc/a.go:1:package a\nsrc/inner/b.go:1:package b",
 			wantSummary: domain.MatchedLines{Total: 2},
 		},
 		{
@@ -128,7 +128,7 @@ func TestGrep_Execute_ReportsMatchCount(t *testing.T) {
 			// than testing this sentence for a "No matches" prefix.
 			name:        "no matches",
 			args:        map[string]any{"pattern": "zzz-nothing-matches-this"},
-			wantContent: "No matches found",
+			wantContent: "No matches found in the workspace",
 			wantSummary: domain.MatchedLines{Total: 0},
 		},
 	}
@@ -385,7 +385,7 @@ func TestGrep_SearchesAnExtraRootBySymlinkSpelling(t *testing.T) {
 	workspace, extra, link := symlinkedExtraReadRoot(t)
 	tool := NewGrep(workspace, func() []string { return []string{extra} })
 
-	content := spelledLikeReal(t, tool,
+	content := spelledLikeRealBelowTheHeader(t, tool,
 		map[string]any{"pattern": "^name: ", "path": link},
 		map[string]any{"pattern": "^name: ", "path": extra})
 
@@ -420,7 +420,7 @@ func TestGrep_Execute_ContextLines(t *testing.T) {
 			name:  "context before and after a mid-file match",
 			lines: []string{"L1", "L2", "L3", "NEEDLE a", "L5", "L6", "L7"},
 			args:  map[string]any{"pattern": "NEEDLE", "context_lines": 2},
-			want: "[1 total matches, showing 1-1]\n" +
+			want: "[1 total matches in the workspace, showing 1-1]\n" +
 				"f.txt:2-L2\nf.txt:3-L3\nf.txt:4:NEEDLE a\nf.txt:5-L5\nf.txt:6-L6",
 		},
 		{
@@ -428,14 +428,14 @@ func TestGrep_Execute_ContextLines(t *testing.T) {
 			name:  "matches at line 1 and at EOF stay in range",
 			lines: []string{"NEEDLE a", "L2", "NEEDLE b"},
 			args:  map[string]any{"pattern": "NEEDLE", "context_lines": 2},
-			want: "[2 total matches, showing 1-2]\n" +
+			want: "[2 total matches in the workspace, showing 1-2]\n" +
 				"f.txt:1:NEEDLE a\nf.txt:2-L2\nf.txt:3:NEEDLE b",
 		},
 		{
 			name:  "overlapping context regions merge without duplicates",
 			lines: []string{"L1", "NEEDLE a", "L3", "NEEDLE b", "L5", "L6"},
 			args:  map[string]any{"pattern": "NEEDLE", "context_lines": 2},
-			want: "[2 total matches, showing 1-2]\n" +
+			want: "[2 total matches in the workspace, showing 1-2]\n" +
 				"f.txt:1-L1\nf.txt:2:NEEDLE a\nf.txt:3-L3\nf.txt:4:NEEDLE b\nf.txt:5-L5\nf.txt:6-L6",
 		},
 		{
@@ -444,7 +444,7 @@ func TestGrep_Execute_ContextLines(t *testing.T) {
 			name:  "touching context regions merge with no separator",
 			lines: []string{"L1", "NEEDLE a", "L3", "L4", "NEEDLE b", "L6"},
 			args:  map[string]any{"pattern": "NEEDLE", "context_lines": 1},
-			want: "[2 total matches, showing 1-2]\n" +
+			want: "[2 total matches in the workspace, showing 1-2]\n" +
 				"f.txt:1-L1\nf.txt:2:NEEDLE a\nf.txt:3-L3\nf.txt:4-L4\nf.txt:5:NEEDLE b\nf.txt:6-L6",
 		},
 		{
@@ -452,7 +452,7 @@ func TestGrep_Execute_ContextLines(t *testing.T) {
 			lines: []string{"L1", "NEEDLE a", "L3", "L4", "L5", "L6",
 				"L7", "L8", "L9", "L10", "NEEDLE b", "L12"},
 			args: map[string]any{"pattern": "NEEDLE", "context_lines": 1},
-			want: "[2 total matches, showing 1-2]\n" +
+			want: "[2 total matches in the workspace, showing 1-2]\n" +
 				"f.txt:1-L1\nf.txt:2:NEEDLE a\nf.txt:3-L3\n--\n" +
 				"f.txt:10-L10\nf.txt:11:NEEDLE b\nf.txt:12-L12",
 		},
@@ -460,13 +460,13 @@ func TestGrep_Execute_ContextLines(t *testing.T) {
 			name:  "zero context renders the historical bare form",
 			lines: []string{"L1", "NEEDLE a", "L3"},
 			args:  map[string]any{"pattern": "NEEDLE", "context_lines": 0},
-			want:  "[1 total matches, showing 1-1]\nf.txt:2:NEEDLE a",
+			want:  "[1 total matches in the workspace, showing 1-1]\nf.txt:2:NEEDLE a",
 		},
 		{
 			name:  "negative context is clamped to none",
 			lines: []string{"L1", "NEEDLE a", "L3"},
 			args:  map[string]any{"pattern": "NEEDLE", "context_lines": -5},
-			want:  "[1 total matches, showing 1-1]\nf.txt:2:NEEDLE a",
+			want:  "[1 total matches in the workspace, showing 1-1]\nf.txt:2:NEEDLE a",
 		},
 	}
 
@@ -509,7 +509,7 @@ func TestGrep_Execute_ContextLinesPaginateByMatches(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute returned a Go error: %v", err)
 	}
-	want := "[3 total matches, showing 2-2]\nf.txt:4-L4\nf.txt:5:NEEDLE b\nf.txt:6-L6"
+	want := "[3 total matches in the workspace, showing 2-2]\nf.txt:4-L4\nf.txt:5:NEEDLE b\nf.txt:6-L6"
 	if result.Content != want {
 		t.Errorf("Content =\n%s\nwant\n%s", result.Content, want)
 	}
@@ -568,7 +568,7 @@ func TestGrep_Execute_ContextLinesGroupPerFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute returned a Go error: %v", err)
 	}
-	want := "[2 total matches, showing 1-2]\n" +
+	want := "[2 total matches in src, showing 1-2]\n" +
 		"a.txt:1-a1\na.txt:2:NEEDLE a\na.txt:3-a3\n" +
 		"b.txt:1-b1\nb.txt:2:NEEDLE b\nb.txt:3-b3"
 	if result.Content != want {
@@ -590,7 +590,7 @@ func TestGrep_Execute_ContextLinesAbsentMatchesDefault(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute returned a Go error: %v", err)
 	}
-	if baseline.Content != "[2 total matches, showing 1-2]\nsrc/a.go:1:package a\nsrc/inner/b.go:1:package b" {
+	if baseline.Content != "[2 total matches in the workspace, showing 1-2]\nsrc/a.go:1:package a\nsrc/inner/b.go:1:package b" {
 		t.Fatalf("baseline output changed: %q", baseline.Content)
 	}
 
@@ -698,4 +698,117 @@ func TestGrep_Execute_NewlineInAFilenameCannotForgeARow(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestGrep_Execute_HeaderNamesTheSearchedScope pins the scope clause: every header and the
+// no-match sentence say WHERE the search ran, spelled as the model gave the path — so a model
+// reading only the result can tell an empty answer about one file from an empty answer about
+// the whole workspace, and can hand the scope straight back in the next call.
+func TestGrep_Execute_HeaderNamesTheSearchedScope(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		args map[string]any
+		want string
+	}{
+		{
+			name: "an unscoped search says the workspace",
+			args: map[string]any{"pattern": "^package "},
+			want: "[2 total matches in the workspace, showing 1-2]",
+		},
+		{
+			name: "a dot path is the workspace too",
+			args: map[string]any{"pattern": "^package ", "path": "."},
+			want: "[2 total matches in the workspace, showing 1-2]",
+		},
+		{
+			name: "a subdirectory is named as the model spelled it",
+			args: map[string]any{"pattern": "^package ", "path": "src"},
+			want: "[2 total matches in src, showing 1-2]",
+		},
+		{
+			name: "a single file is named as the model spelled it",
+			args: map[string]any{"pattern": "Beta", "path": "src/inner/b.go"},
+			want: "[1 total matches in src/inner/b.go, showing 1-1]",
+		},
+		{
+			name: "an include glob rides along in parentheses",
+			args: map[string]any{"pattern": "^package ", "include": "*.go"},
+			want: "[2 total matches in the workspace (*.go), showing 1-2]",
+		},
+		{
+			name: "a glob list keeps every glob the call named",
+			args: map[string]any{"pattern": "^package |^alpha", "include": "*.go, *.txt"},
+			want: "[3 total matches in the workspace (*.go,*.txt), showing 1-3]",
+		},
+		{
+			name: "a path and a glob are both named",
+			args: map[string]any{"pattern": "^package ", "path": "src", "include": "*.go"},
+			want: "[2 total matches in src (*.go), showing 1-2]",
+		},
+		{
+			name: "a scoped search that found nothing names the scope it searched",
+			args: map[string]any{"pattern": "zzz-nothing-matches-this", "path": "src", "include": "*.go"},
+			want: "No matches found in src (*.go)",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			root := t.TempDir()
+			seedTree(t, root)
+
+			result, err := NewGrep(root, nil).Execute(context.Background(), callWith(t, "c1", tc.args))
+
+			if err != nil {
+				t.Fatalf("Execute returned a Go error: %v", err)
+			}
+			if result.IsError {
+				t.Fatalf("unexpected tool error: %q", result.Content)
+			}
+			if got := firstResultLine(result.Content); got != tc.want {
+				t.Errorf("header = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// firstResultLine returns the first line of a tool result — the header or the sentinel
+// sentence, which is the whole claim a scope test makes.
+func firstResultLine(content string) string {
+	line, _, _ := strings.Cut(content, "\n")
+	return line
+}
+
+// spelledLikeRealBelowTheHeader is spelledLikeReal's rule for the two searching tools: it runs
+// tool once with the path spelled through a symlink and once with the mounted root's own name,
+// and fails unless everything BELOW the header — the names the search reports — is byte-identical.
+// The header itself is exempt because it names the scope AS THE CALL SPELLED IT (searchScope), so
+// the two runs legitimately differ there and nowhere else; the invariant being pinned is that the
+// reported names are still measured from the REAL root, never the link's.
+func spelledLikeRealBelowTheHeader(t *testing.T, tool domain.Tool, spelledArgs, realArgs map[string]any) string {
+	t.Helper()
+
+	spelled, err := tool.Execute(context.Background(), callWith(t, "c1", spelledArgs))
+	if err != nil {
+		t.Fatalf("Execute returned a Go error: %v", err)
+	}
+	if spelled.IsError {
+		t.Fatalf("the symlink spelling was refused: %q", spelled.Content)
+	}
+
+	resolved, err := tool.Execute(context.Background(), callWith(t, "c2", realArgs))
+	if err != nil {
+		t.Fatalf("Execute returned a Go error: %v", err)
+	}
+	_, spelledRows, _ := strings.Cut(spelled.Content, "\n")
+	_, realRows, _ := strings.Cut(resolved.Content, "\n")
+	if spelledRows != realRows {
+		t.Fatalf("the symlink spelling answered %q, want the real spelling's rows %q",
+			spelled.Content, resolved.Content)
+	}
+	return spelled.Content
 }

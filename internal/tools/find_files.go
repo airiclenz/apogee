@@ -116,7 +116,7 @@ func (t *FindFiles) Execute(ctx context.Context, call domain.ToolCall) (domain.T
 	if err != nil {
 		return domain.ToolResult{}, err // only ctx cancellation propagates as a Go error
 	}
-	return okResult(call.ID, renderFoundPaths(found, args.MaxResults, args.Offset)), nil
+	return okResult(call.ID, renderFoundPaths(found, searchScope(args.Path, globs), args.MaxResults, args.Offset)), nil
 }
 
 // walk collects the matching paths under target — the resolved absolute path of the search
@@ -209,13 +209,14 @@ func (t *FindFiles) reportable(root string, entry fs.DirEntry, rel string) bool 
 	return err == nil && info.Mode().IsRegular()
 }
 
-// renderFoundPaths paginates from offset and prepends a header naming the total count, in the
-// shape grep's header has (total, an optional collection cap, and the shown range). A page
-// that leaves paths behind ends in a truncation note naming the offset that continues the
-// listing, so a model that wants the rest does not have to work the arithmetic out.
-func renderFoundPaths(found []string, maxResults, offset int) string {
+// renderFoundPaths paginates from offset and prepends a header naming the total count and the
+// scope the walk covered (searchScope), in the shape grep's header has (total, an optional
+// collection cap, the scope, and the shown range). A page that leaves paths behind ends in a
+// truncation note naming the offset that continues the listing, so a model that wants the rest
+// does not have to work the arithmetic out.
+func renderFoundPaths(found []string, scope string, maxResults, offset int) string {
 	if len(found) == 0 {
-		return "No files found"
+		return "No files found in " + scope
 	}
 	if maxResults <= 0 {
 		maxResults = defaultFindFilesResults
@@ -238,7 +239,7 @@ func renderFoundPaths(found []string, maxResults, offset int) string {
 	if total >= maxFindFilesPaths {
 		capped = fmt.Sprintf(" (capped at %d)", maxFindFilesPaths)
 	}
-	header := fmt.Sprintf("[%d files found%s, showing %d-%d]", total, capped, start+1, end)
+	header := fmt.Sprintf("[%d files found%s in %s, showing %d-%d]", total, capped, scope, start+1, end)
 
 	// A path is data inside a one-row-per-line grammar: a filename carrying a line break
 	// would otherwise forge rows the model reads as this tool's own header or notes.
