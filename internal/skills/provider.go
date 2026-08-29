@@ -123,9 +123,14 @@ func (p *Provider) Skipped() []SkipError { return p.current().Skipped() }
 // this is the accessor that closes that window, and the one the report path uses.
 func (p *Provider) Report() (list []Skill, skipped []SkipError) { return p.current().Report() }
 
-// Suggest ranks the current snapshot's skills against a draft (see Catalog.Suggest). It reads the
-// SAME snapshot List does, so a suggestion the band paints is always a skill the "/" menu can
-// offer and the loop can resolve — never a row pointing at a skill the last Reload dropped.
+// Suggest ranks the skills of the snapshot in force at the moment it is called against a draft
+// (see Catalog.Suggest). Like every accessor here it takes its OWN p.current() load, so it is NOT
+// paired with a preceding List: a Reload landing between the two lets the "/" menu list one
+// snapshot while the band ranks the next (Report is the accessor that pairs two halves of one
+// scan; no caller has needed a List+Suggest pair). The guarantee is per call — every row the band
+// paints names a skill of the snapshot that ranked it, and the loop resolves an attached ID
+// through ResolveSkills against whatever catalog the last Reload installed, exactly as it
+// resolves one the "/" menu attached.
 func (p *Provider) Suggest(draft string, exclude func(id string) bool, limit int) []Suggestion {
 	return p.current().Suggest(draft, exclude, limit)
 }
