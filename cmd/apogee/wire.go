@@ -38,8 +38,10 @@ package main
 //   - wire_server.go — the entry a startup selection collapses to, the one step that binds any entry
 //     to a session, and the config-change wait the reload chain parks on.
 //
-// wire_test.go covers wire.go and the twelve files above; two composers are pinned at their own
-// construction site instead, in wire_firing_test.go and wire_options_test.go.
+// The tests mirror that split (S-1): wire_boot_test.go, wire_engine_test.go, wire_server_test.go,
+// wire_session_test.go, wire_settings_test.go and wire_tools_test.go cover wire.go and the twelve
+// files above, over the doubles and fixtures they share in wire_helpers_test.go; two composers are
+// pinned at their own construction site instead, in wire_firing_test.go and wire_options_test.go.
 
 import (
 	"context"

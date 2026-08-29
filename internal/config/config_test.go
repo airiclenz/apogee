@@ -1597,7 +1597,7 @@ func TestApplyConfigRememberModel(t *testing.T) {
 // The context-window config block parses into opts.contextWindow (item 3): a file-only key (no
 // flag/env). This proves the config-file surface lands in opts; the downstream opts →
 // ContextConfig.MaxContextTokens threading (which the Budget and Compaction bind against) is
-// pinned separately by TestRunRootThreadsContextWindow in wire_test.go.
+// pinned separately by TestRunRootThreadsContextWindow in wire_boot_test.go.
 func TestApplyConfigContextWindow(t *testing.T) {
 	t.Parallel()
 	home := testConfigHome(t, "")
@@ -1712,7 +1712,7 @@ func TestApplyConfigContextWindowRefusesAFractionOrANegative(t *testing.T) {
 // third one reachable — a stated bound, an absent key resolving to the built-in default, and an
 // explicit 0 that stays 0 because "unbounded" is a value here rather than the absence of one. The
 // downstream opts → Config.Delegation.MaxSteps threading is the composition root's, pinned by
-// TestBootConfigCarriesTheDelegateStepCap in wire_test.go.
+// TestBootConfigCarriesTheDelegateStepCap in wire_boot_test.go.
 func TestApplyConfigDelegateMaxSteps(t *testing.T) {
 	t.Parallel()
 	for _, tt := range []struct {
@@ -1826,7 +1826,7 @@ func TestLoadFileConfigAcceptsAResponseReserveShare(t *testing.T) {
 // like the context-window pin it stands beside, and spelled the same way — presence IS the positive
 // value, so 0 and an absent key both leave the whole advertised window as the working room. The
 // downstream opts → ContextConfig.WorkingWindow threading is the composition root's, pinned by
-// TestBindServerResolvesTheWorkingWindow in wire_test.go.
+// TestBindServerResolvesTheWorkingWindow in wire_server_test.go.
 func TestApplyConfigWorkingWindow(t *testing.T) {
 	t.Parallel()
 	for _, tt := range []struct {

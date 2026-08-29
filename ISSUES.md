@@ -767,8 +767,6 @@ it waits. Sources: `docs/reviews/code-audit-2026-08-25.md` (C-nn), `docs/skill-r
 **Architecture pass, not fixes** — candidates for the next architecture-review plan
 (`docs/plans/archived/2026-08-24 - 03 - architecture-review-deepening-plan.md` is already archived):
 
-- **S-1** `cmd/apogee/wire_test.go` — a 5,844-line single test drawer for a composition root that
-  ADR 0043 split by seam on the production side.
 - **S-2** `internal/mechanisms/grammar.go` — grammar-constraint plumbing reachable only through
   `Deps.GrammarConstraint`, which nothing populates, over a provider wire that cannot carry it.
 

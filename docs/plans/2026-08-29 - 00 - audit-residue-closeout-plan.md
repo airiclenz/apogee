@@ -835,7 +835,15 @@ Helpers: `saveAt`, `assertFiringScratchDir` (shared-use rule applies).
 
 **Commit.** `refactor(cmd): the session tests move to wire_session_test.go (S-1, 3/4)`
 
-## 13. `wire_test.go` split, part 4: boot, engine and tools tests take the remainder; `wire_test.go` is deleted (S-1)
+## 13. `wire_test.go` split, part 4: boot, engine and tools tests take the remainder; `wire_test.go` is deleted (S-1) — ✅ DONE (2026-08-29)
+
+NOTES (2026-08-29): `validCfg` went to `wire_helpers_test.go`, not to `wire_engine_test.go` as the item's list names — the binding shared-use rule of items 10–13 ("a helper with users in two or more files goes to `wire_helpers_test.go`") outranks the per-file assignment here: `validCfg` is called from `delegation_test.go`, `guided_decomposition_test.go`, `keysource_test.go`, `wire_session_test.go`, `wire_server_test.go` and `wire_settings_test.go` as well as from tests this item moves. `wire_engine_test.go` is therefore `TestFriendlyConstructErr` alone (21 lines) — the seam's other composers are pinned at their own construction sites (`wire_firing_test.go`, `wire_options_test.go`) as `wire.go`'s map records.
+
+NOTES (2026-08-29): `stubPresenter` went to `wire_boot_test.go` exactly as the item's list names, although its one caller (`TestRegistryWithMCPThreadsPresenter`, `cfg.Presenter = stubPresenter{}`) moved to `wire_tools_test.go` — the item names the destination explicitly, and the catch-all "goes with its users" sentence governs the declarations the lists do not name. The package being one, it compiles and passes either way; flagged here so a later reader knows it was weighed, not missed.
+
+NOTES (2026-08-29): three files outside the item's Files list held prose cross-references to the now-deleted `wire_test.go` and were corrected in the same commit, since this item's deletion is what makes them dangle: `cmd/apogee/wire.go:41-42` (the package file map — rewritten to name the six `wire_<seam>_test.go` files and `wire_helpers_test.go`), `internal/config/config_test.go` ×3 (`TestRunRootThreadsContextWindow` and `TestBootConfigCarriesTheDelegateStepCap` → `wire_boot_test.go`, `TestBindServerResolvesTheWorkingWindow` → `wire_server_test.go`, the last already stale since item 11) and `internal/agent/library_corrupt_store_test.go:26` (the `captureStderr` precedent → `wire_helpers_test.go`). Comment text only; `CHANGELOG.md:457`'s historical mention was left untouched.
+
+NOTES (2026-08-29): the move was verified exactly mechanical rather than only compiling — the multiset of non-blank lines below the import blocks is identical across `wire_test.go` before and the four destination files after (1163 lines, 0 lost, 0 added); the item's own invariants also hold (`^func Test` across `cmd/apogee/*_test.go` = 472 at HEAD and now, `sort | uniq -d` empty, `gofmt -l cmd/apogee` empty).
 
 **What.** Depends on item 12. What remains in `wire_test.go` is the boot / engine / tools set:
 `TestShouldPrewarmLabelWalk`, `TestCaptureStderrRestoresOnGoexit` (+ `captureStderr`),

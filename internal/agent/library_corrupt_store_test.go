@@ -23,7 +23,7 @@ import (
 
 // captureStderr swaps the process os.Stderr for a pipe, runs f, and returns everything f wrote to
 // stderr. The caller must NOT be a parallel test: os.Stderr is a process-global, so this is only
-// race-free during the sequential test phase (the cmd/apogee/wire_test.go precedent).
+// race-free during the sequential test phase (the cmd/apogee/wire_helpers_test.go precedent).
 func captureStderr(t *testing.T, f func()) string {
 	t.Helper()
 	orig := os.Stderr

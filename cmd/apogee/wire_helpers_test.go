@@ -243,3 +243,18 @@ func (f *fakeSwitcher) SwitchUpstream(spec apogee.UpstreamSpec) error {
 type fakeStamper struct{ models []string }
 
 func (f *fakeStamper) SetModel(model string) { f.models = append(f.models, model) }
+
+// validCfg is the minimum Config that constructs (Endpoint/Model/Events). It installs the
+// real Bridge sink — the same delegate the binary wires — so the buildAgent tests exercise
+// production wiring, not a stand-in. The endpoint is never dialled at construction, so a
+// placeholder URL is fine.
+func validCfg(t *testing.T) apogee.Config {
+	t.Helper()
+	return apogee.Config{
+		Endpoint:     "http://127.0.0.1:1111",
+		Model:        "fake",
+		Mode:         apogee.ModeAskBefore,
+		Events:       tui.NewBridge().Sink(),
+		WorkspaceDir: t.TempDir(),
+	}
+}
