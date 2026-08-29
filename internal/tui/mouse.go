@@ -26,9 +26,10 @@ import (
 // into the source Value, so it copies the exact typed text. The transcript (viewport) selection
 // is screen-space — "copy what you see": it anchors in content coordinates (rendered-line index
 // + display cell) and slices the cached rendered lines on release, so markers, rail gutters, and
-// soft-wraps are copied verbatim (the accepted terminal-native semantics, D4). The mouse
-// handlers arbitrate by region — a point in the input rect drives the editor, a point in the
-// viewport drives the transcript — so the two selections never coexist.
+// the painter's own wrap breaks are copied verbatim (the accepted terminal-native semantics, D4) —
+// and verbatim is exact here, because the viewport no longer wraps: a rendered line is a row
+// (newModel, model.go). The mouse handlers arbitrate by region — a point in the input rect drives
+// the editor, a point in the viewport drives the transcript — so the two selections never coexist.
 //
 // A transcript selection SURVIVES a repaint by the keep-if-unchanged rule (transcriptSel.
 // spanUnchanged, applied in refreshViewport): it lives on exactly while every rendered line it
@@ -695,8 +696,10 @@ func shadeCells(measure widthAuthority, line string, c0, c1 int, style lipgloss.
 // then for each spanned line cuts the display-cell range [c0,c1) with the width authority
 // (cell-accurate and escape-safe), strips the styling, and trims the block's trailing pad; the
 // lines join with '\n'. The first and last lines cut to the span's own columns; the lines between
-// take the whole width. Markers, rail gutters, and soft-wrap breaks are copied verbatim — the
-// accepted terminal-native semantics of a screen-space selection (D4).
+// take the whole width. Markers, rail gutters, and the painter's own wrap breaks are copied
+// verbatim — the accepted terminal-native semantics of a screen-space selection (D4). The breaks a
+// selection can meet are the painter's alone: the viewport does not wrap, so one cached line is one
+// row (newModel, model.go).
 //
 // The measure is the authority's (width.go) rather than ansi.Cut's hard-wired GraphemeWidth
 // because the columns came from a mouse report, which counts PAINTED cells: cutting in the measure

@@ -534,7 +534,22 @@ func newModel(parent context.Context, eng Engine, opts Options, notify func(tea.
 	th := newTheme(opts.colorScheme())
 
 	vp := viewport.New()
-	vp.SoftWrap = true // wrap long transcript lines to the viewport width
+	// The transcript viewport does NOT wrap: its rows are 1:1 with the stored lines. The painter
+	// already hard-wrapped every line at the width authority (ADR 0030 §7, wrap.go), so a second
+	// wrap here would be a second opinion — and it was a DIFFERENT one, because the widget re-measures
+	// with ansi.StringWidth (GraphemeWidth) while the painter measures in WcWidth. A full line
+	// carrying a VARIATION SELECTOR-16 glyph (⚠️ ✔️ ℹ️ — 1 cell to the painter, 2 to the widget) folded
+	// into two screen rows, and every reader of `contentLineAt(row) = YOffset() + row` below it (the
+	// sticky header, the anchored refresh, the block cursor, the selection highlight, the mouse's own
+	// hit test) then addressed the line one row off. With the wrap off, a line the widget measures
+	// wider than the width is CLIPPED at the right edge instead — nothing the painter drew is ever
+	// re-flowed, and the row map cannot drift.
+	vp.SoftWrap = false
+	// Horizontal scrolling is off with it: the transcript's x-offset stays 0 for the life of the
+	// session. A step of 0 disables the viewport's Left/Right keys, its wheel-left/right notches and
+	// its shift-wheel together (viewport.go), which is what keeps the clipped right edge from being
+	// a place the view can wander to and the mouse's column arithmetic from needing an offset term.
+	vp.SetHorizontalStep(0)
 
 	m := Model{
 		parent:       parent,
@@ -2034,7 +2049,8 @@ func (m Model) hiddenDraftRows() int {
 // once the reply beneath it has grown a screenful, and from there applyStickyHeader overlays the
 // owning prompt at row 0. While detached the offset is left exactly where the human put it;
 // submit re-arms following. The body is rendered to transcriptWidth — the viewport's width less
-// the right gutter — while the viewport soft-wraps the stored lines against its own full width.
+// the right gutter — and the viewport does not wrap at all: its rows ARE the stored lines, one for
+// one, with anything wider than its own full width clipped at the right edge (newModel).
 //
 // It is also where a live transcript drag-selection lives or dies, by the keep-if-unchanged rule
 // (transcriptSel.spanUnchanged, mouse.go): the predicate is evaluated against the OUTGOING lines

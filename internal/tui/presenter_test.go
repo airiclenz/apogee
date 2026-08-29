@@ -8,8 +8,12 @@ import (
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
+	lipgloss "charm.land/lipgloss/v2"
+
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/present"
+	"github.com/airiclenz/apogee/internal/scheme"
 )
 
 // ----------------------------------------------------------------------------
@@ -557,10 +561,12 @@ func TestPresentedEntryRendering(t *testing.T) {
 	}
 }
 
-// TestPresentedEntryKeepsPathAndURLWhole is the linkification invariant: at a width far too narrow
-// for them, the path and the URL are still each ONE physical line, unwrapped and unclipped, so the
-// terminal that turns them into something clickable sees a whole token. Only the title and the
-// status line — prose, not links — wrap.
+// TestPresentedEntryKeepsPathAndURLWhole is the linkification invariant, re-pinned 2026-08-29 to
+// what survives once the viewport stopped soft-wrapping: at a width far too narrow for them the
+// path and the URL are hard-wrapped here rather than left over the width, so THE ROWS JOIN TO THE
+// WHOLE TOKEN — nothing is clipped off the right edge, and no row is over the width. At a width
+// that fits them each is still one physical line, which is the case the terminal can linkify
+// (TestPresentedEntryRendering pins that shape).
 func TestPresentedEntryKeepsPathAndURLWhole(t *testing.T) {
 	t.Parallel()
 	const (
@@ -576,23 +582,60 @@ func TestPresentedEntryKeepsPathAndURLWhole(t *testing.T) {
 	})
 
 	lines := strings.Split(renderPlain(tr, 24), "\n")
-	var sawPath, sawURL bool
+	// The rows carry the block's own lead-in (the two-space indent) only where they open one, so
+	// dropping the leading blanks and joining is exactly "read the token off the screen".
+	var joined strings.Builder
+	measure := newTheme(scheme.Default()).measure
 	for _, ln := range lines {
-		switch strings.TrimSpace(ln) {
-		case path:
-			sawPath = true
-		case url:
-			sawURL = true
+		if w := measure.Width(ln); w > 24 {
+			t.Errorf("row %q is %d cells wide; the viewport would clip it at 24", ln, w)
 		}
+		joined.WriteString(strings.TrimLeft(ln, " "))
 	}
-	if !sawPath {
-		t.Errorf("the path was split or clipped at width 24:\n%s", strings.Join(lines, "\n"))
+	if !strings.Contains(joined.String(), path) {
+		t.Errorf("the path's rows do not join to the whole path at width 24:\n%s", strings.Join(lines, "\n"))
 	}
-	if !sawURL {
-		t.Errorf("the URL was split or clipped at width 24:\n%s", strings.Join(lines, "\n"))
+	if !strings.Contains(joined.String(), url) {
+		t.Errorf("the URL's rows do not join to the whole URL at width 24:\n%s", strings.Join(lines, "\n"))
 	}
 	if got := lines[0]; !strings.HasPrefix(got, "▤ A rather long") {
 		t.Errorf("first line = %q; want the wrapped title under the ▤ marker", got)
+	}
+}
+
+// TestPresentedURLSurvivesANarrowWindow is the same invariant on the live model, where the viewport
+// is the thing that used to save an over-wide raw line and no longer does. On a 24-column window the
+// served URL is many times the transcript's width: its rows must JOIN to the whole URL (nothing
+// clipped off the right edge), the transcript must still sit at x-offset 0 (there is no sideways
+// scroll to go and find the tail with), and the widget's rows must still be the stored lines one for
+// one — the wrap that saves the URL is the painter's, done before the line is stored.
+func TestPresentedURLSurvivesANarrowWindow(t *testing.T) {
+	const url = "http://192.168.64.2:51234/d/0123456789abcdef0123456789abcdef/architecture-review.html"
+
+	m := newTestModel(t)
+	m = step(t, m, tea.WindowSizeMsg{Width: 24, Height: 24})
+	m.transcript.reset()
+	m = step(t, m, presentedMsg{
+		Path:     "docs/reports/architecture-review.html",
+		Location: url,
+		Method:   domain.PresentServed,
+	})
+
+	if got := m.viewport.XOffset(); got != 0 {
+		t.Errorf("the transcript sits at x-offset %d; there is no sideways scroll to reach a clipped tail with", got)
+	}
+	if got, want := m.viewport.TotalLineCount(), len(m.lines); got != want {
+		t.Errorf("the viewport holds %d rows for %d stored lines", got, want)
+	}
+	var joined strings.Builder
+	for _, ln := range m.lines {
+		if w := lipgloss.Width(ln); w > m.viewport.Width() {
+			t.Errorf("stored line %q is %d cells wide; the viewport would clip it at %d", strip(ln), w, m.viewport.Width())
+		}
+		joined.WriteString(strings.TrimSpace(strip(ln)))
+	}
+	if !strings.Contains(joined.String(), url) {
+		t.Errorf("the URL's rows do not join to the whole URL at width 24:\n%s", strip(strings.Join(m.lines, "\n")))
 	}
 }
 

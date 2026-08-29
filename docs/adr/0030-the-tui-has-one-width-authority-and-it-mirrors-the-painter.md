@@ -103,12 +103,20 @@ using.** Owner's call, 2026-07-31: measurement must always match what gets paint
 6. **Widget mirrors are the deliberate exception: their oracle is the widget, never the
    painter.** `wrapRowStarts`/`runesWidth` (`inputaccent.go`), `cellToRuneOffset` (`mouse.go`) and
    `inputContentRows` (`inputaccent.go`) mirror third-party widgets' internal math — the textarea
-   wraps with `uniseg.StringWidth`, the viewport soft-wraps with `ansi.StringWidth`, and neither
-   moves when the painter does. *(Amended 2026-08-20: `inputContentRows` was written in `render.go`,
+   wraps with `uniseg.StringWidth`, and it does not move when the painter does.
+   *(Amended 2026-08-20: `inputContentRows` was written in `render.go`,
    moved to `chromelayout.go` with the render split, and now sits beside the other textarea mirrors
    this list names; the rule and the list are unchanged.)* *(`wrappedOffset` (`render.go`), the
    viewport mirror this list also named, was deleted 2026-08-03 with the submit-time jump-to-top
    that was its sole consumer; the rule is unchanged, and every live mirror is now the textarea's.)*
+   *(Amended 2026-08-29: the viewport is no longer one of the widgets this rule covers. It used to
+   soft-wrap with `ansi.StringWidth` — a second, GraphemeWidth opinion about lines the painter had
+   already wrapped in WcWidth, which folded a full line carrying a VARIATION SELECTOR-16 glyph into
+   two rows and drifted every `contentLineAt` reader by one. `SoftWrap` is now off (`newModel`,
+   `model.go`): the viewport does not wrap, its rows are the painter's lines one for one, and an
+   over-wide line is clipped at the right edge. The `cellToRuneOffset` column rule below is
+   unchanged — it addresses cells on a row the widget has drawn, which is still the painter's
+   business.)*
    They measure the way their widget measures, down to the one term where the textarea itself weighs
    a rune with go-runewidth (`textarea.go:1838-1839`, `lastCharLen`). The dividing line, stated at
    each site: a mirror's **rows** are the widget's — only it decides which runes it put on which

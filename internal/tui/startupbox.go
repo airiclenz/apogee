@@ -14,11 +14,14 @@ import (
 //	  http://192.168.64.2:51234/d/…/review.html
 //	  cmd+click to open
 //
-// The path and the URL are emitted RAW — no style, no wrap, no clip, one token per line — and
-// that is the whole mechanism: the terminal is what turns them into something clickable, so a
-// hanging indent inserted mid-token or an SGR run wrapped around them would break the only rung
-// that always works. width is therefore ignored for those two lines: an overlong path soft-wraps
-// in the viewport rather than being hard-wrapped here.
+// The path and the URL are emitted RAW — no style, no clip, and while they fit, one token per
+// line — and that is the whole mechanism: the terminal is what turns them into something
+// clickable, so a hanging indent inserted mid-token or an SGR run wrapped around them would break
+// the only rung that always works. width is not ignored for them, though (rawLink): the viewport
+// no longer soft-wraps (newModel, model.go), so a line left over the width would be CLIPPED at the
+// right edge and the tail of the path lost. Past the width they are hard-wrapped here instead —
+// still unstyled, still without a hanging indent, so the rows join to the whole token even where
+// no terminal can linkify it any more.
 // The marker keeps the title's styling even when there is no title, so the block opens the same
 // way either way.
 func renderPresentedBlock(th theme, v presentedView, width int) []string {
@@ -36,14 +39,34 @@ func renderPresentedBlock(th theme, v presentedView, width int) []string {
 	var out []string
 	if v.Title != "" {
 		out = append(out, hangingWrap(th, th.presentTitle, marker, v.Title, width)...)
-		out = append(out, bodyIndent+v.Path)
+		out = append(out, rawLink(th, bodyIndent, v.Path, width)...)
 	} else {
-		out = append(out, th.presentTitle.Render(marker)+v.Path)
+		out = append(out, rawLink(th, th.presentTitle.Render(marker), v.Path, width)...)
 	}
 	if v.Location != "" {
-		out = append(out, bodyIndent+v.Location)
+		out = append(out, rawLink(th, bodyIndent, v.Location, width)...)
 	}
 	return append(out, hangingWrap(th, th.noteText, bodyIndent, presentedStatus(v), width)...)
+}
+
+// rawLink lays out one of the presented block's link lines — the path or the served URL — as the
+// rows the transcript stores. lead is what the row opens with (the block's two-space indent, or the
+// styled ▤ marker when there is no title); token is the raw path or URL, which no style and no
+// break may enter while it fits, because a whole token on a line is the only thing that makes a
+// terminal linkify it.
+//
+// Past the width it IS broken, because the alternative is worse: the viewport stopped soft-wrapping
+// (newModel, model.go), so an over-wide row is clipped at the right edge and everything past it is
+// simply gone. The break is the painter's own wrapText, at the width the lead leaves — no hanging
+// indent on the rows it opens and no style anywhere near them — so the rows read as, and join back
+// to, the whole token. Linkification is lost on those windows; the token is not.
+func rawLink(th theme, lead, token string, width int) []string {
+	rows := wrapText(th, token, max(1, width-th.measure.Width(lead)))
+	if len(rows) == 0 {
+		return []string{lead}
+	}
+	rows[0] = lead + rows[0]
+	return rows
 }
 
 // startupWideMinGap is the smallest gap, in columns, the wide start-up layout keeps between the logo

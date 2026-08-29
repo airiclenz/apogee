@@ -171,7 +171,30 @@ path, no toggle, and the latch is cleared; (4) after a drag-copy completed (high
 
 ---
 
-## 3. Transcript viewport stops soft-wrapping: rows 1:1 with stored lines
+## 3. Transcript viewport stops soft-wrapping: rows 1:1 with stored lines — ✅ DONE (2026-08-29)
+
+NOTES (2026-08-29): the presented block's hard wrap is a new `rawLink` helper (`startupbox.go`) that
+wraps at the width the line's lead-in leaves — the two-space body indent, or the styled `▤` marker
+when there is no title — rather than at the full transcript width the item's text names. Wrapping
+`lead+token` at the full width puts a blank row ahead of the token (the wrap breaks after the
+indent), and wrapping the bare token at the full width overruns layout.md's absolute cap by the
+lead's own cells and drops the `▤` marker from an untitled block. As written, a line that fits is
+byte-identical to before (`TestPresentedEntryRendering` unchanged) and every row stays inside the
+width.
+
+NOTES (2026-08-29): test (1)'s click is aimed at the block's DRAWN row via a new `drawnRow` helper
+(the row the human sees, read off `m.viewport.View()`) rather than at `screenRow(header)`, which
+converts a stored-line index and so assumes the very 1:1 mapping the test exists to prove — aimed
+that way the assertion passes on the pre-item tree. It clicks the block's LAST row (the leader),
+which is the discriminating one: a row of drift there falls past the block entirely.
+
+NOTES (2026-08-29): the plan's line numbers had shifted on the pinned tree — `SoftWrap` was
+model.go:537 (not :525), the refreshViewport comment :2037 (not :2012) and the selection-text
+comment mouse.go:698 (not :687). All three sites were rewritten as the item's guard (c) asks.
+
+NOTES (2026-08-29): all four tests were confirmed to bite — (1) and (2) fail with `SoftWrap = true`
+restored, (3) fails with `SetHorizontalStep(0)` removed, and (4) plus the re-pinned
+`TestPresentedEntryKeepsPathAndURLWhole` fail with `rawLink` reverted to the raw appends.
 
 **What:** Recast at the regression check (2026-08-29). `internal/tui/model.go:525` —
 `vp.SoftWrap = false`. The painter already hard-wraps

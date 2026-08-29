@@ -5828,3 +5828,154 @@ func TestPopupBudgetShrinksToNothing(t *testing.T) {
 		})
 	}
 }
+
+// ----------------------------------------------------------------------------
+// The viewport does not wrap: its rows are the stored lines, one for one
+// ----------------------------------------------------------------------------
+
+// vs16WideModel builds a transcript whose committed assistant line is EXACTLY the transcript width
+// in the painter's measure (WcWidth) and two cells wider in the widget's (GraphemeWidth), because it
+// ends in two VARIATION SELECTOR-16 glyphs — `⚠️` is one painted cell and two grapheme cells (ADR
+// 0030). A tool block follows it, so the fixture carries a second block whose header row is a click
+// target. It is the exact shape that used to fold one stored line into two screen rows and put every
+// row-addressed reader one row off.
+func vs16WideModel(t *testing.T) Model {
+	t.Helper()
+	m := newTestModel(t) // 80x24
+	m.transcript.reset()
+	m.transcript.addUser("go", nil)
+	// −4: the assistant marker "✦ " spends two painted cells and the two ⚠️ spend one each.
+	m.transcript.commitAssistant(strings.Repeat("a", m.transcriptWidth()-4)+"⚠️⚠️", runRef{})
+	m.transcript.apply(domain.ToolCallEvent{Call: domain.ToolCall{
+		ID: "c1", Tool: "terminal", Arguments: []byte(`{"command":"go test ./..."}`)}})
+	m.transcript.apply(domain.ToolResultEvent{Result: domain.ToolResult{
+		CallID: "c1", Content: "ok   a\nok   b\nok   c\nPASS"}})
+	m.refreshViewport()
+	return m
+}
+
+// wideAssistantLine returns the index of the fixture's over-wide stored line, and asserts it is the
+// shape the fixture promises: at the width in the painter's measure, over it in the widget's.
+func wideAssistantLine(t *testing.T, m Model) int {
+	t.Helper()
+	th := newTheme(scheme.Default())
+	for i, ln := range m.lines {
+		if !strings.Contains(strip(ln), "aaaa") {
+			continue
+		}
+		if got := th.measure.Width(ln); got != m.transcriptWidth() {
+			t.Fatalf("setup: line %d measures %d painted cells, want the full width %d", i, got, m.transcriptWidth())
+		}
+		if got := ansi.StringWidth(ln); got <= m.viewport.Width() {
+			t.Fatalf("setup: line %d measures %d grapheme cells, want more than the viewport's %d "+
+				"(the widget would have no reason to wrap it)", i, got, m.viewport.Width())
+		}
+		return i
+	}
+	t.Fatal("setup: the fixture's over-wide assistant line is not in the rendered lines")
+	return -1
+}
+
+// TestViewportRowsStayOneForOneWithStoredLines is the row-map invariant. A stored line the WIDGET
+// measures wider than its width used to be soft-wrapped into two screen rows — the painter had
+// already wrapped it in WcWidth, the widget re-measured in GraphemeWidth, and a `⚠️` was the two
+// measures disagreeing. Every reader of `contentLineAt(row) = YOffset() + row` below such a line then
+// addressed the wrong line: a click on the NEXT block's header toggled whatever sat one row up.
+// With SoftWrap off the widget's rows ARE the stored lines, so the count matches and the click lands.
+func TestViewportRowsStayOneForOneWithStoredLines(t *testing.T) {
+	m := vs16WideModel(t)
+	wide := wideAssistantLine(t, m)
+
+	if got, want := m.viewport.TotalLineCount(), len(m.lines); got != want {
+		t.Errorf("the viewport holds %d rows for %d stored lines; the over-wide line at %d was re-wrapped",
+			got, want, wide)
+	}
+	if got, want := len(strings.Split(m.viewport.View(), "\n")), m.viewport.Height(); got != want {
+		t.Errorf("the viewport drew %d rows on a %d-row widget", got, want)
+	}
+
+	header := markedLine(t, m, targetHeader)
+	if header <= wide {
+		t.Fatalf("setup: the tool block's header is line %d, not below the over-wide line %d", header, wide)
+	}
+	if blockExpanded(t, m, header) {
+		t.Fatal("setup: the block is expanded before any click; collapsed is the default")
+	}
+	// The click is aimed where the row is DRAWN — the human clicks what is on the screen, and the
+	// model maps that row back through contentLineAt. The block's LAST row is the discriminating
+	// one: an extra screen row above it shifts the whole block down, so the mapped line falls past
+	// the block (past the transcript's end here) and the toggle misses entirely.
+	m = clickCell(t, m, 6, drawnRow(t, m, "go test ./..."))
+	if !blockExpanded(t, m, header) {
+		t.Error("a click on the drawn leader row below the over-wide line did not toggle that block: the row map drifted")
+	}
+}
+
+// drawnRow returns the viewport row the given text is DRAWN on — the screen row a human aiming at
+// that text would click. It is deliberately not screenRow, which converts a stored-line index and so
+// assumes the very 1:1 mapping these tests are here to prove.
+func drawnRow(t *testing.T, m Model, want string) int {
+	t.Helper()
+	for row, ln := range strings.Split(m.viewport.View(), "\n") {
+		if strings.Contains(strip(ln), want) {
+			return row
+		}
+	}
+	t.Fatalf("no drawn viewport row carries %q", want)
+	return -1
+}
+
+// TestViewportClipsAnOverWideLineInsteadOfWrappingIt is the other half of the same decision: a line
+// the widget measures over its width is CLIPPED at the right edge — one row, its tail cut — rather
+// than flowed onto a second row. Clipping is what keeps the row map total; the painter's own cap
+// (ADR 0030 §7) is what keeps real content off that edge in the first place.
+func TestViewportClipsAnOverWideLineInsteadOfWrappingIt(t *testing.T) {
+	m := vs16WideModel(t)
+	wide := wideAssistantLine(t, m)
+
+	rows := strings.Split(m.viewport.View(), "\n")
+	row := rows[wide-m.viewport.YOffset()]
+	if got := ansi.StringWidth(row); got > m.viewport.Width() {
+		t.Errorf("the drawn row is %d grapheme cells on a %d-cell viewport; it was not clipped", got, m.viewport.Width())
+	}
+	if n := strings.Count(strip(row), "⚠"); n != 1 {
+		t.Errorf("the drawn row carries %d ⚠️ glyphs, want 1: the second is what the right edge clips", n)
+	}
+	// The row BELOW it is the next stored line, not the remainder of this one.
+	if next := strip(rows[wide+1-m.viewport.YOffset()]); strings.Contains(next, "⚠") {
+		t.Errorf("row %d is %q; the over-wide line spilled onto a second row", wide+1, next)
+	}
+}
+
+// TestTranscriptNeverScrollsSideways pins the guard that comes with the clip: horizontal scrolling
+// is disabled outright (SetHorizontalStep(0), newModel), so no gesture can walk the view off column
+// 0 and leave the mouse's column arithmetic addressing cells that are not where it thinks. The three
+// gestures the widget binds are all asked: a wheel-left notch, a shift-modified wheel, and the
+// left/right keys in an inert state, where keys scroll the transcript.
+func TestTranscriptNeverScrollsSideways(t *testing.T) {
+	base := vs16WideModel(t)
+	wide := wideAssistantLine(t, base)
+	row := screenRow(t, base, wide)
+
+	cases := []struct {
+		name string
+		msg  tea.Msg
+	}{
+		{"wheel left", tea.MouseWheelMsg{X: 10, Y: row, Button: tea.MouseWheelLeft}},
+		{"wheel right", tea.MouseWheelMsg{X: 10, Y: row, Button: tea.MouseWheelRight}},
+		{"shift-wheel down", tea.MouseWheelMsg{X: 10, Y: row, Button: tea.MouseWheelDown, Mod: tea.ModShift}},
+		{"shift-wheel up", tea.MouseWheelMsg{X: 10, Y: row, Button: tea.MouseWheelUp, Mod: tea.ModShift}},
+		{"left key", tea.KeyPressMsg{Code: tea.KeyLeft}},
+		{"right key", tea.KeyPressMsg{Code: tea.KeyRight}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			m := base
+			m.state = stateErrored // the inert state where the keys scroll instead of typing
+			m = step(t, m, c.msg)
+			if got := m.viewport.XOffset(); got != 0 {
+				t.Errorf("%s left the transcript at x-offset %d; horizontal scrolling must stay off", c.name, got)
+			}
+		})
+	}
+}
