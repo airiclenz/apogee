@@ -40,6 +40,28 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 - [ ] Finished sub-agents print the sug-agent output twice - once at the very beginning (unneededly) before the input-prompt event (also with terrible formatting) as well as at the end of the sub-agent transcript (that one is properly formatted and the one that we need to keep).
 
 
+### Residuals deferred out of the 2026-08-29 audit-residue closeout
+
+**Status:** found 2026-08-29 at the close of the audit-residue closeout run
+(`docs/plans/archived/2026-08-29 - 00 - audit-residue-closeout-plan.md`), deferred out of that run.
+
+- [ ] **F-08's second remediation prong is untouched: the revert's tree walk still trusts a
+  journal's `Root` paths.** The restore side is now vouched — a `PriorSDDL` is applied only where
+  apogee's own Low label still stands — but the CLEAR side is not: `revertibleRoots`
+  (`internal/platform/winlabel/retire.go:120`) hands every `Root` a journal names to `ClearTree`
+  (`internal/platform/winlabel/walk_windows.go:367`, `:194`) unvalidated, so a journal planted or
+  corrupted under `~/.apogee` can still make apogee write a NULL SACL over an arbitrary tree.
+  `windowsProtectedRoots` guards the LABEL path only (`internal/platform/confiner_windows.go:180`),
+  not recovery. The closeout plan scoped its item to the restore side, so F-08 is half remediated
+  while the `ISSUES.md` entry it replaced and the CHANGELOG both record it as closed.
+
+- [ ] **No test drives the startup path that prints the grammar-retirement notice.** The retired-ID
+  work pinned the pure helper's wording and the producers' silence, but nothing exercises the
+  startup boundary itself — the `retiredMechanismNotices` loop writing to stderr at
+  `cmd/apogee/wire_live.go:169` — so the line a human actually sees when their `mechanisms:` block
+  names a retired ID is unpinned.
+
+
 ### Residuals deferred out of the 2026-08-28 deferred-residuals sweep
 
 **Status:** found 2026-08-28 at the close of the deferred-residuals sweep

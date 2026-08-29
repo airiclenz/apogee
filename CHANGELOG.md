@@ -10,6 +10,24 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- `GatherTerminal`'s measurement engine is exercised for the first time. A new scripted terminal double (`internal/probe/terminal_fake_test.go`) parses what the probe writes and answers as a real terminal would — a small VT model tracking the cursor, the tab stops, the deferred or immediate last-column wrap, mode 2027 and the addressing capabilities, and nothing else — reusing the package's own `nextCSI` lifter rather than a second parser and holding a sequence cut across writes until the rest arrives. `TestGatherTerminalMeasuresAnAgreeingTerminal` drives the whole probe against a terminal that does exactly what the painter assumes and asserts all six sections come back in order (modes, glyphs off, glyphs on, tabs, wrap, capabilities) with no mismatch and the exact OK wording the report prints, that the tab-erasure row reports "unverified — no screen read-back on this OS" where there is no console to read cells out of, that the alternate screen is handed back (`showCursor` + `leaveAltScreen` last), and that mode 2027 is left in the setting it was found in. `TestFakeTerminalAnswersCPRAndDECRQM` proves the instrument itself: a DSR-CPR answered `ESC[3;7R`, a DECRQM answered as a DECRPM `ESC[?2027;2$y`, and a half-written sequence held rather than dropped. Package coverage rises from 50.4% to 91.8%. First half of audit finding **C-15 — `GatherTerminal`'s measurement engine is untested past its two abort paths**; the divergence tests and the `ISSUES.md` removal are item 4.
+
+- Every MISMATCH branch of the terminal probe is now proven to fire, each on its own scripted terminal so one divergence cannot mask another: an immediate last-column wrap (`TestGatherTerminalFlagsAnImmediateWrap`), a terminal that answers DECRQM for mode 2027 and then does not honour `CSI ?2027h` — with the glyph sweep that follows correctly measuring against wcwidth, the table the mode actually in force implies (`TestGatherTerminalFlagsAModeThatDoesNotTake`), tab stops DECST8C fails to move back to the every-8 model the renderer navigates against, paired with the complementary run where DECST8C does move them and is therefore no finding (`TestGatherTerminalFlagsStopsDECST8CDoesNotMove`, `TestGatherTerminalReportsStopsDECST8CMoved`), a capability the terminal answers that `xtermCaps(TERM=(unset))` never granted the painter — the Windows divergence — together with its inverse, a capability TERM grants that the terminal lacks, which is deliberately not flagged (`TestGatherTerminalFlagsACapabilityThePainterDoesNotKnow`), and a terminal that reports mode 2027 set while still advancing the two VS16 glyphs by wcwidth, flagged on exactly those two rows of the mode-on sweep alone (`TestGatherTerminalFlagsAGlyphTheTableMisses`). Two further runs pin what must NOT change: a terminal answering one byte per read measures byte-for-byte the same report as one answering whole replies (`TestGatherTerminalSurvivesRepliesSplitAcrossReads`), and a terminal found with mode 2027 already set is handed back set, with the glyph sweep still running its off pass first (`TestGatherTerminalRestoresAModeItFoundSet`). Package coverage is 92.6%, up from 50.4% before item 3. Closes audit finding **C-15 — `GatherTerminal`'s measurement engine is untested past its two abort paths**, whose `ISSUES.md` entry and now-empty "Test debt:" heading are removed.
+
+- CI gained a `windows tests` job on `windows-latest` running
+  `go test -race -count=1 ./internal/platform/... ./internal/probe/...`, so every
+  `//go:build windows` test in `internal/platform` (the confinement backend, including
+  `winlabel`'s walk) runs on every push — until now no Windows-tagged test had ever run in
+  CI, and the C-20 `tokenConfiner` race test and the F-08 prior-label revert test were a
+  manual owner step. The job deliberately covers those two trees rather than `./...`: the
+  rest of the suite is Linux-shaped (the landlock battery, the PTY drivers), and the
+  Windows-half tests label the runner's own throwaway disk. `internal/probe` rides along so
+  the package's untagged tests also prove themselves on the Windows toolchain and a future
+  tagged test has a home; it has no Windows-tagged test today and the job claims none.
+  `make check` gained the executor-side floor `GOOS=windows go vet ./internal/platform/...
+  ./internal/probe/...`, so a Linux or macOS box catches a Windows-tagged test that no
+  longer compiles even though it cannot run one; `docs/manual/building.md` says so.
+
 - Ratified ADR 0061 — skill suggestion is a Driver concern painted over an engine-level matcher
   (`skills.Catalog.Suggest`: BM25 over id + display name + summary + `triggers:`, an evidence gate,
   top 3), and nothing about the catalog reaches the model: a suggestion becomes model-visible only
@@ -286,6 +304,73 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- `Provider.Suggest`'s doc comment now states the guarantee it actually keeps — it ranks the snapshot in force at the moment it is called, taking its own `current()` load like every other accessor, so it is never paired with a preceding `List` (`Report` is the paired accessor); a suggestion is resolved by the loop through `ResolveSkills` against whatever catalog the last `Reload` installed. Closes the `ISSUES.md` residual **`Provider.Suggest`'s doc still claims it reads "the SAME snapshot List does"**.
+
+- The decompose complexity classifier's phrase cap is documented and pinned as the calibration it is, closing audit finding C-04 as by-design. `decomposeCountPhraseMatches`'s doc comment now states that the delegation (4, 8), conditional (3, 6) and review (2, 4) sites saturate on the SECOND matching phrase and the phase-marker site (2, 6) on the THIRD — a category contributes "absent / one or two signals / saturated" and never an open count, because a category is evidence that a KIND of structure is present, not a tally of how often it is spelled — and that summing every match and capping the category total afterwards, the audit's proposed rewrite, is the same arithmetic. `TestDecomposePhraseCategorySaturatesOnTheSecondMatch` pins the two tables (delegation `0, 4, 8, 8, 8`; phase `0, 2, 4, 6, 6`) and the audit's own example (two delegation + two conditional phrases → score 14, `decomposeComplex`). No scoring, threshold or Bypass-floor behaviour changed: the only lever that moves classification is the calibration itself, which stays an apogee-sim bench question. Closes the `ISSUES.md` audit-residue entry **C-04 — the decompose scoring cap saturates**.
+
+- **`cmd/apogee/wire_test.go` starts splitting by production seam (architecture candidate S-1).**
+  Part 1 of four: the 39 tests whose subject is `applySetting`, the settings registry or the
+  live-apply seam move verbatim to a new `cmd/apogee/wire_settings_test.go`, and the test doubles
+  and fixtures they share with other files in the package (`applySettingSpy`, `rebindProbe`,
+  `writeSettingsFixture`, the MCP fixture family, `captureStderr`, `assertFiringScratchDir`) move
+  to a new `cmd/apogee/wire_helpers_test.go`. Mechanical only: no test is renamed, rewritten,
+  merged or dropped, every moved line is byte-identical, and the package's test count is unchanged.
+
+- **`cmd/apogee/wire_test.go` splits by production seam, part 2 of four (architecture candidate
+  S-1).** The 32 tests whose subject is the rebind path, the late-bound server construction
+  (ADR 0036 decision 3) or the llama-launcher seams (ADR 0029) move verbatim to a new
+  `cmd/apogee/wire_server_test.go`, taking their fixtures (`rosterSwitchWiring`, `liveSetHas`,
+  `launcherWiringFixture`, `twoServerConfig`, `wildcardBoundConfig`) with them; the `fakeSwitcher`
+  and `fakeStamper` doubles, which `keysource_test.go` and `upstream_test.go` also use, move to
+  `cmd/apogee/wire_helpers_test.go`. Mechanical only: no test is renamed, rewritten, merged or
+  dropped, every moved line is byte-identical, and the package's test count is unchanged at 472.
+
+- **`cmd/apogee/wire_test.go` splits by production seam, part 3 of four (architecture candidate
+  S-1).** The 19 tests whose subject is the store-backed session host, the resume/continue
+  resolution or the session scratch dirs — every `TestSessionHost*`, every `TestResolveResume*`,
+  `TestResolveContinuePicksWorkspaceNewest`, `TestBuildAgentResumeRoundTrip`,
+  `TestBuildAgentResumeFutureVersion`, `TestGCScratchDirsRemovesOldKeepsFresh` — move verbatim to a
+  new `cmd/apogee/wire_session_test.go`, taking the `saveAt` fixture with them. Mechanical only: no
+  test is renamed, rewritten, merged or dropped, every moved line is byte-identical, and the
+  package's test count is unchanged at 472.
+
+- **`cmd/apogee/wire_test.go` is gone: the split by production seam finishes, part 4 of four
+  (architecture candidate S-1, closed).** The 28 tests left in the drawer move verbatim to the
+  `_test.go` of the seam they exercise — the boot phase, the presentation ladder, the root's own
+  `runRoot` threading, mode/root resolution and `buildAgent` to a new `cmd/apogee/wire_boot_test.go`
+  (with `stubPresenter`); every `TestRegistryWithMCP*` and `TestMechanismIDs*` to a new
+  `cmd/apogee/wire_tools_test.go` beside `mechanismIDs` in `wire_tools.go` (with
+  `assertRegistryOffers` and `fakeKnown`); `TestFriendlyConstructErr` to a new
+  `cmd/apogee/wire_engine_test.go` — and `validCfg`, which six other `cmd/apogee` test files call,
+  joins the shared doubles in `cmd/apogee/wire_helpers_test.go`. `wire_test.go` itself is deleted,
+  and `wire.go`'s file map now names the six seam test files instead of the drawer. Mechanical only:
+  no test is renamed, rewritten, merged or dropped, every moved line is byte-identical, and the
+  package's test count is unchanged at 472.
+
+- **The `grammar` Mechanism is retired.** It derived a `json_schema` `response_format` from the tool
+  menu to constrain a model that cannot emit native tool calls — but its only gate was
+  `mechanisms.Deps.GrammarConstraint`, which nothing ever populated, over a provider wire that
+  carries no `response_format` field, so it no-op'd on every backend from the day it was ported.
+  `internal/mechanisms/grammar.go`, the `Deps.GrammarConstraint` seam, the catalogue row and the
+  `grammar` member of the shipped `gemma-4-e4b-it-qat` Validated set (16 IDs → 15) are gone; the
+  Table A/B rows in `docs/design/mechanism-catalogue.md` record the retirement, and ADR 0015's
+  "remains the inert false seam" sentence carries a dated retirement note. Closes the `ISSUES.md`
+  audit-residue candidate **S-2**. No behaviour changes for any model: an inert Mechanism cannot be
+  missed.
+
+- **A config naming a retired Mechanism ID is tolerated, never refused.** `internal/mechanisms`
+  gains a roll of retired IDs (`RetiredIDs`, `IsRetired`), and every path that reads a
+  `mechanisms:` block — startup, the live `/settings` apply, each delegate's `sub-agents:` posture —
+  now DROPS a retired ID instead of failing on it as an unknown one. Startup prints one stderr line
+  per retired ID the block turns on (`apogee: mechanism "grammar" was retired in v0.18.7 and is
+  ignored; remove it from mechanisms:`); the settings apply folds the same line into the row's note,
+  because the alt screen owns the terminal there. A retired ID set to `false` is dropped silently.
+  ADR 0016 gains a dated amendment carving retired IDs out of whole-set-or-nothing: a saved
+  Validated-set record naming one sheds that member with a notice and the rest of the set applies
+  (`validated.DropRetired`), while an UNKNOWN ID still skips the entry whole as ruled.
+
+- `ISSUES.md` no longer carries an audit-residue backlog: items 1–14 emptied both registers of their entries, and the two now-empty section shells — **Audit residue (2026-08-25 refocus / security / code audits)** and **Residuals deferred out of the 2026-08-28 code-audit fixes run** — are removed whole. The one live thing they held is re-homed as an "Improvements / Ideas" bullet, **Run `golangci-lint` and `govulncheck` in `make check` and CI**: neither tool was installed on the 2026-08-25 audit host and neither runs in `make check` or CI today, so the three audits produced no lint and no dependency-vulnerability signal and the security audit's `dependency-surface` family is still half unaudited. The "Worth watching" note is dropped — `filehint`'s stock-install reachability was C-08, fixed in plan `2026-08-26 - 02` item 5. Every finding of `docs/reviews/code-audit-2026-08-25.md` and `docs/reviews/code-audit-2026-08-28.md` is now either fixed or recorded here as closed by decision.
+
 - `/skills` now lists a skill's declared `triggers:` on an indented line under its row, so the
   reason a skill will or will not be suggested can be read off the listing; a skill that declares
   none is listed exactly as before.
@@ -316,6 +401,31 @@ point is a **minor** bump, not a breaking change.
   lives" map points at the convention.
 
 ### Fixed
+
+- The Library store no longer writes on the caller's goroutine (audit finding **C-13 — the library
+  store persists under its lock**). `Record` and `RecordSuccess` now mutate memory, mark the store
+  dirty and return; one writer goroutine — started lazily by the first observation, so a store that
+  is only loaded or queried never spawns one — debounces those marks (200ms) into a single
+  whole-file snapshot taken by value and encoded outside every lock. Before, each observation sorted
+  and rewrote the entire store under the write lock, so under ADR 0039 fan-out every sub-agent's
+  post-response hook serialised behind a file rewrite and a hung filesystem hung the loop. New
+  `Flush() error` publishes synchronously and returns the write error instead of printing it; new
+  `Close() error` (the store now satisfies `io.Closer`) flushes and PARKS the writer — idempotent,
+  and the store stays usable afterwards, since a later `Record` starts a fresh writer and the next
+  `Close` flushes again, so an instance shared between sessions or catalogues loses nothing to being
+  closed early. The whole of `Close` — stopping the writer, joining it, and the final write — is
+  bounded by a 2s deadline: past it `Close` reports that the last observations are not on disk and
+  abandons its helper, so a writer parked inside a hung write can never hold up a shutdown. A write
+  that fails is still the one-prefix soft notice it was, and leaves the observation pending so the
+  next flush retries it. The accepted cost is stated in the package doc: an observation reaches disk
+  within the debounce window or at `Close`, so a process that exits within 200ms of its last
+  observation without closing loses that one.
+
+- **The Library store is one instance per process and directory, flushed by the Agent's `Close`** — closes audit finding **C-13 — the library store persists under its lock** (the engine half; the store half landed with the coalescing writer). `library.Open(dir)` now hands every builder that reaches one `LibraryDir` the same `*Store` — an Agent's construction, its every `Rebind`, and the routed sub-agent catalogue `BuildMechanisms` builds for the host — so three writers can no longer each rewrite `library.json` from their own memory and drop one another's observations. `library.NewStore` stays the door to a private store (a test fixture, a bench Driver seeding one). The Agent holds the store its build derived and flushes it at `Close`, between the Consoles it tears down and the upstream socket it returns; a delegate at depth ≥ 1 never flushes it. Both Drivers that construct an Agent — the TUI root and `internal/run.Once` — already reach `Agent.Close` on their orderly exit, so an observation recorded in the last 200 ms of a session now reaches disk instead of dying with the process.
+
+- **On Windows, a shutdown racing a tool call can no longer start an UNCONFINED child** — closes audit finding C-20 (the first half of the `ISSUES.md` **C-20 + F-08 — the Windows pair** entry). `tokenConfiner` kept no lock over its lifecycle state, so `Confine` read the restricted token twice — once in its guard, once into `SysProcAttr` — with a memoised label walk in between, while the composition root's deferred `Close` zeroed that token on bubbletea's abnormal exit (SIGINT, a closed console). The child then started with `Token = 0`, outside the box, while the caller recorded it as confined. The backend now keeps one `RWMutex` over the token, the capabilities and a `closed` flag: `Confine` holds the read lock for its whole body and reads the token ONCE into a local, `Capabilities` and the startup label prewarm read under the same lock, and `Close` holds the write lock — so the handle is never released under a `CreateProcess` about to use it. After `Close`, `Confine` refuses with `ErrConfinementUnavailable` ("the Windows token backend has been closed — the session is shutting down"), which the confinement contract §4 demotes to a forced Gate: a command can fail to START during shutdown and can never start unconfined, and the console spawn inherits that refusal through `Prepare`. `Close` stays repeatable and still drives the journal's `Retire` on every call, because a handed-off label restore is designed to converge on a later one. ADR 0020 records all of it in a dated amendment.
+
+- **A label journal can no longer make apogee write mandatory labels onto paths it never labelled** — closes security-audit finding F-08 (the second half of the `ISSUES.md` **C-20 + F-08 — the Windows pair** entry; with C-20 fixed the entry is gone). On Windows the revert applied every `PriorSDDL` a journal named, and crash recovery did so for any journal whose owning process was dead, so a journal planted or corrupted under `~/.apogee` had the next `NewConfiner` write the labels it asked for — `IsLowLabel` vouched only the RECORD side (the journal refuses to record a Low prior). The read side is now checked: a prior is restored only onto a path that still carries the Low label this run, or a dead run, wrote — apogee's own mark is what makes the path apogee's to revert — and one that does not is dropped rather than applied. The verdict is taken BEFORE the trees are cleared, because the clear is exactly what turns a path apogee labelled into an unlabelled one, and it is persisted on the journal entry (`judged`), because the two passes that re-visit a path later — a prior handed off while a live sibling still claims the tree, and a retry after a restore that failed — both read it once some clear has unlabelled it. A journal written by an older apogee carries no flag and is judged on its first pass, while the label that vouches for it is still there; a path whose current label cannot be read at all aborts the revert with nothing cleared, so the next run judges it against an untouched disk.
 
 - The judge now reads the verdict past a stray brace. `parseVerdict` walks EVERY balanced `{…}`
   span in the model's reply, in order, and takes the first one that decodes to a verdict of
