@@ -126,7 +126,20 @@ as the guard says.
 
 ---
 
-## 2. Treat a button-less motion as the release while a press is armed
+## 2. Treat a button-less motion as the release while a press is armed — ✅ DONE (2026-08-29)
+
+NOTES (2026-08-29): test (1) builds its collapsed tool block with `modelWithToolBlock`, not the
+`modelWithTranscript` the item's Tests line names — `modelWithTranscript` seeds only a user prompt
+and has no block to toggle, so it cannot express the assertion the item asks for.
+
+NOTES (2026-08-29): test (2) asserts "model unchanged" as named state (block state, all three
+selections, flash, the latch) rather than a whole-Model comparison — `Model` holds slices and maps
+and is not comparable.
+
+NOTES (2026-08-29): the doc comment at `mouse.go:450-455` gained a short paragraph rather than the
+single sentence the item names, and the `tea.MouseMotionMsg` arm of the Update dispatch
+(`model.go:1098`) gained a clause — it is the only dispatch site for the converted event and its
+map line said motion only ever extends a live selection.
 
 **What:** Recast at the regression check (2026-08-29). In `handleMouseMotion`
 (`internal/tui/mouse.go:456`), before the `msg.Button != tea.MouseLeft` drop: when

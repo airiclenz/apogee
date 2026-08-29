@@ -42,6 +42,12 @@ func leftRelease(x, y int) tea.MouseReleaseMsg {
 	return tea.MouseReleaseMsg{X: x, Y: y, Button: tea.MouseLeft}
 }
 
+// noneMotion is the button-less motion some terminals send INSTEAD of a release (SGR
+// "ESC[<35;x;ym" — the release with the motion bit set): a motion carrying no button at all.
+func noneMotion(x, y int) tea.MouseMotionMsg {
+	return tea.MouseMotionMsg{X: x, Y: y, Button: tea.MouseNone}
+}
+
 func TestCaretOffset(t *testing.T) {
 	cases := []struct {
 		name       string
@@ -1238,6 +1244,110 @@ func TestTranscriptDragFromHeaderStillSelects(t *testing.T) {
 	if blockExpanded(t, m, header) {
 		t.Fatal("a drag that started on the header toggled the block; motion must win")
 	}
+}
+
+// TestButtonlessMotionIsTheRelease covers the decoder quirk (mouse.go, handleMouseMotion): a
+// terminal that encodes the release with the motion bit set delivers a BUTTON-LESS motion where a
+// release belongs, so while the press latch is armed that motion IS the release — a motionless one
+// toggles, a moved one copies — and with nothing armed it stays the no-op it reads as.
+func TestButtonlessMotionIsTheRelease(t *testing.T) {
+	const output = "ok   a\nok   b\nok   c\nPASS"
+
+	t.Run("a motionless press ended by it toggles the block", func(t *testing.T) {
+		m := modelWithToolBlock(t, output)
+		header := markedLine(t, m, targetHeader)
+		row := screenRow(t, m, header)
+		if blockExpanded(t, m, header) {
+			t.Fatal("setup: the block is expanded before any click; collapsed is the default")
+		}
+
+		m = step(t, m, leftClick(2, row))
+		m, cmd := stepCmd(t, m, noneMotion(2, row))
+		if cmd != nil {
+			t.Fatal("a toggle copies nothing, so the converted release should return no Cmd")
+		}
+		if !blockExpanded(t, m, header) {
+			t.Fatal("a press ended by a button-less motion did not toggle the block")
+		}
+		if m.transcriptSel.active {
+			t.Fatal("the converted release left the transcript selection armed")
+		}
+		if m.mousePressed {
+			t.Fatal("the converted release left the press latch armed")
+		}
+	})
+
+	t.Run("with nothing armed it is a no-op", func(t *testing.T) {
+		m := modelWithToolBlock(t, output)
+		header := markedLine(t, m, targetHeader)
+		row := screenRow(t, m, header)
+
+		m, cmd := stepCmd(t, m, noneMotion(2, row))
+		if cmd != nil {
+			t.Fatal("a button-less motion with no press in flight should return no Cmd")
+		}
+		if blockExpanded(t, m, header) {
+			t.Fatal("a button-less motion with no press in flight toggled the block")
+		}
+		if m.transcriptSel.active || m.sel.active || m.settings.sel.active {
+			t.Fatal("a button-less motion with no press in flight armed a selection")
+		}
+		if m.flash != "" {
+			t.Fatalf("flash = %q, want empty after a no-op motion", m.flash)
+		}
+		if m.mousePressed {
+			t.Fatal("a button-less motion armed the press latch")
+		}
+	})
+
+	t.Run("a drag ended by it copies instead of toggling", func(t *testing.T) {
+		m := modelWithToolBlock(t, output)
+		header := markedLine(t, m, targetHeader)
+		row := screenRow(t, m, header)
+		w := m.viewport.Width()
+
+		m = step(t, m, leftClick(0, row))
+		m = step(t, m, leftDrag(w, row)) // anchor != head: this is a drag, not a click
+		m, cmd := stepCmd(t, m, noneMotion(w, row))
+		if cmd == nil {
+			t.Fatal("a drag ended by a button-less motion returned no copy Cmd")
+		}
+		if !strings.Contains(m.flash, "copied") {
+			t.Fatalf("flash = %q, want a copy confirmation", m.flash)
+		}
+		if blockExpanded(t, m, header) {
+			t.Fatal("a drag ended by a button-less motion toggled the block; motion must win")
+		}
+		if m.mousePressed {
+			t.Fatal("the converted release left the press latch armed")
+		}
+	})
+
+	t.Run("after the copy a later motion is a no-op", func(t *testing.T) {
+		m := modelWithToolBlock(t, output)
+		header := markedLine(t, m, targetHeader)
+		row := screenRow(t, m, header)
+		w := m.viewport.Width()
+
+		m = step(t, m, leftClick(0, row))
+		m = step(t, m, leftDrag(w, row))
+		m = step(t, m, leftRelease(w, row))
+		if !m.transcriptSel.active {
+			t.Fatal("setup: the copied span's highlight should outlive the release that took it")
+		}
+		m.flash = "" // the copy's own confirmation, cleared so a second one would show
+
+		m, cmd := stepCmd(t, m, noneMotion(w, row))
+		if cmd != nil {
+			t.Fatal("a button-less motion after the release copied again; .active is not the latch")
+		}
+		if m.flash != "" {
+			t.Fatalf("flash = %q, want empty: the motion after the release copies nothing", m.flash)
+		}
+		if blockExpanded(t, m, header) {
+			t.Fatal("a button-less motion after the release toggled the block")
+		}
+	})
 }
 
 // TestTranscriptToggleKeepsTheClickedHeaderRow is the anchoring invariant: the line under the

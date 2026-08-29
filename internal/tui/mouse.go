@@ -398,6 +398,7 @@ func (m Model) handleMouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
 	if msg.Button != tea.MouseLeft {
 		return m, nil
 	}
+	m.mousePressed = true // the press latch is armed here and cleared by the release, whatever the click goes on to claim
 	// The frame the click was aimed at, carrying its geometry with it: the composition happens once
 	// here, and every rect below is a READ of it rather than a fresh render of every overlay
 	// ([Model.withFrameSpans], model.go).
@@ -453,7 +454,16 @@ func (m Model) handleMouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
 // outside the owning rectangle is ignored so a stray past the edge does not collapse or hijack
 // the selection. CellMotion reports motion only while a button is down, so this fires only
 // mid-drag.
+//
+// One decoder quirk lands here rather than in handleMouseRelease: some terminals encode the
+// release with the motion bit set (SGR "ESC[<35;x;ym"), which decodes to a BUTTON-LESS motion
+// (MouseNone) instead of a release, so while the press latch is armed such a motion IS the
+// release and is routed as one — otherwise the press stays armed for the rest of the session and
+// the drag never finishes. With nothing armed it stays the no-op it reads as.
 func (m Model) handleMouseMotion(msg tea.MouseMotionMsg) (tea.Model, tea.Cmd) {
+	if msg.Button == tea.MouseNone && m.mousePressed {
+		return m.handleMouseRelease(tea.MouseReleaseMsg{X: msg.X, Y: msg.Y, Button: tea.MouseLeft, Mod: msg.Mod})
+	}
 	if msg.Button != tea.MouseLeft {
 		return m, nil
 	}
@@ -490,6 +500,7 @@ func (m Model) handleMouseMotion(msg tea.MouseMotionMsg) (tea.Model, tea.Cmd) {
 // click-to-position from drag in the prompt — a drag that starts on a header line is a
 // drag-select like any other, because it never reaches this branch.
 func (m Model) handleMouseRelease(msg tea.MouseReleaseMsg) (tea.Model, tea.Cmd) {
+	m.mousePressed = false // the press is over on every path out of here, selection or not
 	switch {
 	case m.settings.sel.active:
 		// The /settings edit field copies what a release took, exactly as the prompt does: the value is

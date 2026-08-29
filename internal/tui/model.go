@@ -392,6 +392,14 @@ type Model struct {
 	// content-anchored coords therefore never index lines that say something else. It and sel never
 	// coexist (region arbitration).
 	transcriptSel transcriptSel
+	// mousePressed is the press latch: true from the moment a left press lands (handleMouseClick)
+	// until the release that ends it (handleMouseRelease clears it on every exit). It says "a
+	// button is still down", which is NOT what a selection's .active says — that one means
+	// "highlight shown" and outlives the release that copied it (mouse.go). Only the decoder-quirk
+	// conversion in handleMouseMotion reads it: a button-less motion is the missing release only
+	// while a press is genuinely in flight. A plain bool, so it rides the value-copied Model
+	// (ADR 0011).
+	mousePressed bool
 	// flash is a transient status-line note (e.g. "copied 12 chars") shown after a mouse copy and
 	// cleared by flashClearMsg after flashDuration.
 	flash string
@@ -1088,7 +1096,9 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		return m.handleMouseClick(msg)
 
 	case tea.MouseMotionMsg:
-		// A drag (button held) extends whichever selection is live — prompt or transcript (mouse.go).
+		// A drag (button held) extends whichever selection is live — prompt or transcript; a
+		// BUTTON-LESS motion while a press is armed is the release some terminals encode that way
+		// and is routed as one (mouse.go).
 		return m.handleMouseMotion(msg)
 
 	case tea.MouseReleaseMsg:
