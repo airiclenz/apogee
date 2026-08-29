@@ -813,7 +813,13 @@ count checks).
 
 **Commit.** `refactor(cmd): the server, launcher and rebind tests move to wire_server_test.go (S-1, 2/4)`
 
-## 12. `wire_test.go` split, part 3: the session tests move to `wire_session_test.go` (S-1)
+## 12. `wire_test.go` split, part 3: the session tests move to `wire_session_test.go` (S-1) — ✅ DONE (2026-08-29)
+
+NOTES (2026-08-29): the banner comment `// The store-backed session host and the resume resolution (item 5)` (1259–1261, the one item 11 left "for items 12–13") is the judgment call. Item 11's form of the precedent — a banner moves when EVERY declaration of its section leaves — does not strictly apply here: the section's tail (`fakeKnown`, the five `TestMechanismIDs*`, `TestFriendlyConstructErr`, 1633–1738) stays for item 13. It moved anyway, because the banner names exactly what this item takes and leaving it would have parked a "store-backed session host and resume resolution" heading over the mechanismIDs tests — the same harm item 11's note gives as its reason for moving the late-bound banner. The `// Session scratch dirs (workspace-clobber hardening, 2026-08-22)` banner (1740–1742) is the plain case: all three of its declarations move, so it moved with them.
+
+NOTES (2026-08-29): `cmd/apogee/wire_helpers_test.go` is on the item's Files list but needed no change. `assertFiringScratchDir` already lives there (item 10 moved it as a known cross-file case, `wire_helpers_test.go:205`, users in `daemonfire_test.go`, `schedule_test.go`, `headless_test.go`), and `saveAt`'s only call sites are `wire_test.go:1470` and `:1542-1544`, all three inside tests this item moves, so the shared-use rule sends it to `wire_session_test.go`. `validCfg` is used by both a moved test and `TestBuildAgentNew`, which stays; the item does not name it and item 13 takes the remainder, so it was left in place.
+
+NOTES (2026-08-29): the move was verified to be exactly mechanical rather than only compiling — `git diff --stat` on `wire_test.go` is 577 deletions and 0 insertions (whole-line removals only, so nothing reflowed), and the multiset of non-blank lines below the import block is identical across the two files before and after (1,685 each way, 0 lost, 0 added) with the blank-line count unchanged at 129. Each run of consecutive declarations was emitted as one verbatim line range, so gofmt brace alignment survives; imports were re-derived per file over the body with comments and string literals stripped first.
 
 **What.** Depends on item 11. Create `cmd/apogee/wire_session_test.go` and move: every
 `TestSessionHost*`, every `TestResolveResume*`, `TestResolveContinuePicksWorkspaceNewest`,
