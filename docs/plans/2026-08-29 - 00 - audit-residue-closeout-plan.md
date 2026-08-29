@@ -778,7 +778,15 @@ on the executor; `awk` is); `grep -h '^func Test' cmd/apogee/*_test.go | sort | 
 
 **Commit.** `refactor(cmd): the settings-apply tests move to wire_settings_test.go (S-1, 1/4)`
 
-## 11. `wire_test.go` split, part 2: the server / launcher / rebind tests move to `wire_server_test.go` (S-1)
+## 11. `wire_test.go` split, part 2: the server / launcher / rebind tests move to `wire_server_test.go` (S-1) — ✅ DONE (2026-08-29)
+
+NOTES (2026-08-29): the item's shared-use rule sent only the two doubles to `wire_helpers_test.go` — `fakeSwitcher` and `fakeStamper` have real users in `keysource_test.go` (`&fakeSwitcher{}`, `&fakeStamper{}` at :73/:80/:110/:117) and `upstream_test.go` (:902). All five named function helpers (`rosterSwitchWiring`, `liveSetHas`, `launcherWiringFixture`, `twoServerConfig`, `wildcardBoundConfig`) have call-users only in `wire_test.go`, and every one of those call sites is inside a test this item moves, so they went to `wire_server_test.go` as the item's first branch lists. `readfence_test.go:41` MENTIONS `rosterSwitchWiring` but only in prose ("It is rosterSwitchWiring's shape with the …"), never calls it — the item's grep form `grep -n '<helper>(' cmd/apogee/*_test.go` is what tells the two apart, and a bare `grep -l` would have mis-sent the helper.
+
+NOTES (2026-08-29): three banner comments are not declarations and so are on no list, but every declaration of the section each heads left `wire_test.go` in this item, so each moved with its section rather than being left dangling (item 10's precedent): `// Late-bound construction (ADR 0036 decision 3)` (1504–1506), `// The llama-launcher seams (ADR 0029 D1/D2)` (2308–2310) and `// The shared move's per-entry token bounds (ADR 0045, ADR 0046)` (3174–3176). The late-bound banner is the one judgment call — the four tests it heads all move here, while the resume tests that follow it (`TestBuildAgentResumeRoundTrip` and the three after it, item 12's) carry no banner of their own, so leaving it would have parked a "late-bound construction" heading over resume tests. The two banners whose sections stay (`// The store-backed session host and the resume resolution`, `// Session scratch dirs`) were left untouched for items 12–13.
+
+NOTES (2026-08-29): the item cites `fakeSwitcher (2476–2488)` and `fakeStamper (2490–2496)`; after item 10 they sit at 2312–2325 and 2327–2330. The names were the anchors, as the item's "Depends on item 10 … the NAMES are the anchors" says.
+
+NOTES (2026-08-29): the move was verified to be exactly mechanical rather than only compiling — the multiset of non-blank lines below the import block is identical across the three files before and after (0 lost, 0 added, 3,580 each way), and the blank-line count goes 290 → 291 for the one separator the third file's own post-import blank adds. Each run of consecutive declarations was emitted as one verbatim line range, so gofmt brace alignment survives; imports were re-derived per file over the body with comments and string literals stripped first (a bare identifier scan counts the prose `tools.disabled:` inside a `t.Fatal` string as a use of `internal/tools`).
 
 **What.** Depends on item 10 (the line numbers below shift after it; the NAMES are the anchors).
 Create `cmd/apogee/wire_server_test.go` and move: `TestRebindRecomposesTheToolSetUnderTheProfileRoster`,

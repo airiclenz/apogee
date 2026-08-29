@@ -223,3 +223,23 @@ func assertFiringScratchDir(t *testing.T, recordID, dir, root string) {
 		t.Errorf("the firing's scratch dir is mode %v, want 0700", info.Mode().Perm())
 	}
 }
+
+// fakeSwitcher stands in for the Agent at the one method a move calls, recording every spec it was
+// handed so a test can prove the wire moved — or, more often, that it did NOT.
+type fakeSwitcher struct {
+	specs []apogee.UpstreamSpec
+	err   error
+}
+
+func (f *fakeSwitcher) SwitchUpstream(spec apogee.UpstreamSpec) error {
+	if f.err != nil {
+		return f.err
+	}
+	f.specs = append(f.specs, spec)
+	return nil
+}
+
+// fakeStamper stands in for the session host at the metadata half of a move.
+type fakeStamper struct{ models []string }
+
+func (f *fakeStamper) SetModel(model string) { f.models = append(f.models, model) }
