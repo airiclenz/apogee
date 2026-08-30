@@ -110,7 +110,7 @@ type promptEditor struct {
 const (
 	idlePlaceholder      = "Send a message…  ⏎ send · ⌥⏎ newline · ↑ recall · ⌃c quit"
 	idleShiftPlaceholder = "Send a message…  ⏎ send · ⇧⏎/⌥⏎ newline · ↑ recall · ⌃c quit"
-	runningPlaceholder   = "queue a message…  ⏎ queue · ↑ recall · esc stop"
+	runningPlaceholder   = "queue a message…  ⏎ queue · ↑ recall · esc×2 stop"
 )
 
 // cursorShapes maps each name in the caret vocabulary onto the renderer constant it means. Only

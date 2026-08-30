@@ -342,3 +342,20 @@ func TestPromptEditorIdleLegendFollowsKeyDisambiguation(t *testing.T) {
 		t.Errorf("idleLegend() after the answer = %q, want %q for the next idle transition", got, idleShiftPlaceholder)
 	}
 }
+
+// The running legend is the one place an empty box announces the stop key, and it names the gesture
+// the key actually is: one esc arms, and only a second inside escStopWindow stops the run
+// (handleKey's `case "esc"`). The LITERAL is pinned here rather than the constant, because a
+// placeholder that still promised a one-press stop would be the chrome lying about the keyboard.
+func TestRunningPlaceholderAnnouncesTheDoubleEsc(t *testing.T) {
+	const want = "queue a message…  ⏎ queue · ↑ recall · esc×2 stop"
+
+	if runningPlaceholder != want {
+		t.Errorf("runningPlaceholder = %q, want the double-tap legend %q", runningPlaceholder, want)
+	}
+
+	m := runningModel(t)
+	if got := plain(m.View()); !strings.Contains(got, want) {
+		t.Errorf("the empty box while running paints no %q:\n%s", want, got)
+	}
+}

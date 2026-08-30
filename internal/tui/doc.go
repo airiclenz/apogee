@@ -304,7 +304,7 @@
 // coordinator that owns the lifecycle state machine, the transcript + render cache, the
 // stats/gauge, the theme, and the layout; the editor never touches the engine. The empty box's
 // invitation is state the Model SETS, not a render-time choice: setPlaceholder swaps the idle legend
-// ("⏎ send") for runningPlaceholder ("⏎ queue · esc stop") on the lifecycle transitions that open and
+// ("⏎ send") for runningPlaceholder ("⏎ queue · esc×2 stop") on the lifecycle transitions that open and
 // close an Exchange, so the chrome names what ⏎ will actually do — which is also why the ask
 // rendezvous swaps BACK to the idle legend while it borrows the box for an answer. The idle side of
 // that swap is two constants rather than one, because a key it names is not on every terminal: ⇧⏎

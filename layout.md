@@ -1170,9 +1170,9 @@ is tight, dropped whole rather than truncated.
 the context-usage gauge (`16k/32k 50% █████░░░░░` in the sketch above — the tokens used out of the
 window they are measured against, because a fill only means something beside the limit it fills,
 and where `░` draws the empty half of the ten-cell track: on screen those cells are a painted
-dark-gray field carrying no glyph of their own), the key hint that stands in for it (`esc stop`
-while a turn runs, `enter dismiss` after an error, the primed-`ctrl+c` line), and the mouse-copy
-flash. Whichever one is showing, it
+dark-gray field carrying no glyph of their own), the key hint that stands in for it (`esc×2 stop`
+while a turn runs, `enter dismiss` after an error, the primed-`ctrl+c` and armed-`esc` lines), and
+the mouse-copy flash. Whichever one is showing, it
 ends **two columns short of the window edge** (`bodyIndent`) — the mirror of the two columns the
 left slot leads with, and the same column the footer's mode marker below it ends in, so the
 gauge's last track cell in the sketch sits directly above the last character of `ask before`. The
@@ -1869,7 +1869,7 @@ dismisses the suggestion pane rather than re-deriving it, because that pane clai
 ever sees them — the walk would otherwise be stolen by its own first entry. The pane comes back the
 moment the human acts, which is the same moment the arrows do. The empty box advertises the gesture
 in its own legend, in both states: `Send a message…  ⏎ send · ⇧⏎/⌥⏎ newline · ↑ recall · ⌃c quit`
-at idle, `queue a message…  ⏎ queue · ↑ recall · esc stop` while the model works — a placeholder is
+at idle, `queue a message…  ⏎ queue · ↑ recall · esc×2 stop` while the model works — a placeholder is
 only ever painted on an empty box, which is exactly the box where ↑ starts a walk. **The idle legend
 names ⇧⏎ only on a terminal that negotiated the enhanced keyboard protocol**, which is what makes
 that chord arrive as a key of its own rather than as a plain ⏎ — a send. Until the terminal answers

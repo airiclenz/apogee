@@ -18,7 +18,7 @@
 ▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔ Hostile file names ▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔
   approval needed
 ╭──────────────────────────────────────────────────────────╮
-│ queue a message…  ⏎ queue · ↑ recall · esc stop          │
+│ queue a message…  ⏎ queue · ↑ recall · esc×2 stop        │
 ╰──────────────────────────────────────────────────────────╯
   probe-target ✦ hostile-model ✦ <workdir>
 ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁

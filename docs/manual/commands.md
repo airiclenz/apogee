@@ -65,7 +65,11 @@ full of files still fits.
 
 The keys are few, and the empty prompt box advertises them: `⏎` sends — *queues*, while
 the model works — `⇧⏎`/`⌥⏎` opens a new line, `↑`/`↓` walk back and forward through the
-prompts you have already sent in this workspace, `esc` stops a run, `⌃c` quits. The box
+prompts you have already sent in this workspace, `esc` twice stops a run, `⌃c` quits.
+Stopping is a double-tap, like quitting: the first `esc` arms the gesture for one second —
+the status line says `press esc again to stop` for as long as it is armed — and a second
+`esc` inside that window stops the run. Let the window lapse and the gesture disarms
+itself, so a stray `esc` never kills a turn that is under way. The box
 advertises `⇧⏎` only on terminals that negotiated the enhanced (kitty) keyboard
 protocol — the thing that makes that chord arrive as anything other than a plain `⏎`;
 everywhere else the legend names `⌥⏎` alone, which works on every terminal. Beyond
@@ -73,8 +77,10 @@ the box, `⇧⇥` cycles the autonomy mode — Plan → Ask-Before → Allow-Edi
 any time, mid-run included, and `PgUp`/`PgDn` scroll the transcript. When a mode gates a
 call, the approval prompt's decision keys — `a`, `s`, `d`, and the `⏎` that takes the
 highlighted row — take effect a moment after the prompt appears, so a keystroke already
-in flight cannot answer a call you have not read; `esc` cancels from the instant it is
-up. `⌥↑`/`⌥↓` light a
+in flight cannot answer a call you have not read; `esc` is live from the instant the
+prompt is up, and stops the run on the second press within the window, exactly as it does
+anywhere else while the model works — the pane's own `[esc]` Cancel row is the one-press
+spelling of the same stop. `⌥↑`/`⌥↓` light a
 bar on the transcript and hand the arrows to it: `↑`/`↓` walk from one foldable block to
 the next — a tool call, a group member, a type row — `⏎` opens or closes the one under
 the bar, and `esc`, or simply typing your next message, gives the keys back. `⌃l` is the

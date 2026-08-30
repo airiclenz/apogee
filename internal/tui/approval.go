@@ -13,8 +13,9 @@ import (
 // without navigating there first, and what taking it does. A row either sends a decision back over
 // the rendezvous or CANCELS the run — cancels is what tells the two apart, because no fourth
 // ApprovalDecision was added for it (the ratified design leaves the engine's Approver contract
-// untouched). The Cancel row IS the Esc key written down: the same stopWorker path, spelled out for
-// a human who has no legend left to learn it from.
+// untouched). The Cancel row IS the Esc gesture written down: the same stopWorker path, spelled out
+// for a human who has no legend left to learn it from — and taken in ONE press, where Esc itself is
+// the double-tap it is everywhere a worker runs (one press arms, a second inside escStopWindow stops).
 type approvalOption struct {
 	label string
 	key   string // the keypress that takes this row directly; also the text of its shortcut cell
@@ -38,7 +39,8 @@ var approvalMenu = []approvalOption{
 // approvalKeys maps a decision keypress to the ApprovalDecision it sends: the menu's own rows,
 // indexed by the letter each one advertises in its shortcut cell, so the two can never drift. The
 // Cancel row is absent by construction — it sends no decision, and Esc is claimed before the
-// approval routing is reached (handleKey's "esc" case) precisely so the cancel path is one path.
+// approval routing is reached (handleKey's "esc" case), so the pane inherits the double-tap the key
+// carries everywhere a worker runs rather than growing a cancel path of its own.
 var approvalKeys = approvalMenuKeys()
 
 // approvalArmDelay is how long after the approval pane is folded in that its DECISION keys start

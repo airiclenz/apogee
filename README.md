@@ -130,7 +130,8 @@ apogee --endpoint http://localhost:8080 --model qwen3-coder
 
 Then just describe what you want done. `Shift+Tab` cycles the autonomy mode —
 Plan (read-only) → Ask-Before → Allow-Edits → Auto — `/` opens the command
-menu, `@` references a file, and `esc` stops a run. The full tour is in
+menu, `@` references a file, and a double-tap of `esc` — twice within one second, so
+a stray key cannot do it — stops a run. The full tour is in
 [the manual](docs/manual/README.md).
 
 ## Features

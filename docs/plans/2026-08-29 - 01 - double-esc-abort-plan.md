@@ -120,7 +120,17 @@ line as rendered.
 
 **Commit:** `feat(tui): require a second esc within the window to stop a run`
 
-## 2. Announced-surface and doc wording for double-ESC
+## 2. Announced-surface and doc wording for double-ESC — ✅ DONE (2026-08-30)
+
+NOTES (2026-08-30): the guard's conditional files were checked and NOT touched, because its condition does not hold for them — `internal/tui/model_test.go:2722,2736` (pinned tree) and `docs/layout/user-questions-layout.md:47` are the ask prompt's `esc cancel` hint literals, and `layout.md:487,506,1833` likewise, none of which describe the running-state esc as one press. `docs/layout/user-questions-layout.md:15` names the `[esc]` cell only as a live shortcut, not as a press count.
+
+NOTES (2026-08-30): the plan's `model.go` prose target (the approval `⏎` case comment) was already reworded in item 1, so item 2 leaves `model.go` untouched.
+
+NOTES (2026-08-30): the golden frames were refreshed with a test-scoped update — `go test ./cmd/apogee/ -run 'TestE2EApprovalForcesALookAtTheControlPlane|TestE2EHostileWrapsUnderItsOwnIndent' -update` — rather than a bare `-update` over the package, so the refresh could not fold item 1's noted stale goldens into this item's commit. The two frames differ by the placeholder line and nothing else.
+
+NOTES (2026-08-30): the literal-string journey test is the new `TestRunningPlaceholderAnnouncesTheDoubleEsc` (prompteditor_test.go): it pins the exact `"queue a message…  ⏎ queue · ↑ recall · esc×2 stop"` against the constant AND against the rendered empty box of a running model. `TestPlaceholderFollowsTheExchange` (interject_test.go) is green untouched, so that file is not in FILES.
+
+NOTES (2026-08-30): pre-existing debt, NOT from this item — `go test ./cmd/apogee/` fails on `TestE2EDelegationStepCap`, `TestE2EHostileSurfacesKeepTheirOwnRows` and `TestE2EOutcomeCancelledDelegationCarriesTheFailureTone` with this item's changes stashed at HEAD (9b036386) too, the same three item 1 recorded: one-column version-string width drifts in `t04-step-cap-block`, `t12-skills` and `t15-cancelled-delegation`, left stale by the v0.18.10 VERSION bump. A `go test ./cmd/apogee -update` in a commit of its own closes them. Everything else in `./cmd/apogee/` and all of `./internal/tui/` is green.
 
 **What:** reword every remaining announcement of the one-press stop. `runningPlaceholder`
 (`internal/tui/prompteditor.go:113`) → `"queue a message…  ⏎ queue · ↑ recall · esc×2
