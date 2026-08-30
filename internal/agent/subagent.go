@@ -358,11 +358,12 @@ func (a *Agent) newChildAgent(spawnCallID, task, name string) (*Agent, error) {
 	// out from under the parent that is still speaking over it (Agent.Close).
 	child.ownsUpstream = ownsUpstream
 	// The wire shape an effort intent is expressed in, taken from the parent's LIVE field rather
-	// than from the childCfg copy newAgent just seeded it from. Rebind commits a newly observed
-	// dialect onto the Agent alone (rebind.go) — a.cfg.EffortDialect keeps the value construction
-	// read — so a session rebound since startup would otherwise spawn children speaking the shape
-	// of the server it left, and every effort-gated decision downstream (the compaction
-	// summarizer's EffortOff, compact.go) would read the wrong server. Routing does not change the
+	// than from the childCfg copy newAgent just seeded it from. The field is the authority the way
+	// it is everywhere else — the Config only ever SEEDS it (agent.go), and a Rebind writes the two
+	// together — so reading the field is what makes the child speak the shape the parent's own next
+	// request will speak, whatever a rebind arriving around this spawn leaves on the copy. Read the
+	// copy instead and every effort-gated decision downstream (the compaction summarizer's
+	// EffortOff, compact.go) could be taken against the wrong server. Routing does not change the
 	// answer: ADR 0045 replaces the dial facts and the two posture keys, and a dialect is neither,
 	// so a routed child speaks its parent's until a Rebind of its own observes the target's —
 	// which is what an unrouted child got from the Config before this line existed.

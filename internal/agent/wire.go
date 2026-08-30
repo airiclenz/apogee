@@ -101,6 +101,24 @@ func toProviderDialect(d domain.EffortDialect) provider.EffortDialect {
 	}
 }
 
+// toDomainDialect maps a provider effort dialect back onto the domain's vocabulary — the inverse of
+// toProviderDialect above, and the direction Rebind needs: a RebindSpec states the newly bound
+// server's dialect in the provider's words, and the Config it is mirrored onto is spelled in the
+// domain's.
+//
+// It is TOTAL for the same reason its inverse is: anything outside the named dialects maps to the
+// zero domain.EffortDialectNone, so the Config field this feeds stays one the enum recognises
+// (EffortDialect.Valid) whatever reaches it.
+func toDomainDialect(d provider.EffortDialect) domain.EffortDialect {
+	switch d {
+	case provider.EffortDialectKwargs, provider.EffortDialectReasoning,
+		provider.EffortDialectOpenAI, provider.EffortDialectOff:
+		return domain.EffortDialect(d)
+	default:
+		return domain.EffortDialectNone
+	}
+}
+
 // toolInstructions renders the non-native profile's wire-only tool menu + emission instructions
 // for menu (this request's mode-filtered tool menu) — the emit-side mirror of the parse seam's
 // ParserFor (processing.InstructionsFor). A native/zero profile or an empty menu renders "". The

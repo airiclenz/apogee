@@ -540,3 +540,62 @@ func TestRebindCarriesTheResponseReserveShare(t *testing.T) {
 		t.Errorf("reply reserve = %d after the pin was dropped, want the built-in fifth of 100,000", got)
 	}
 }
+
+// TestRebindMovesTheDialectAndClearsTheStandDownLatch: the two bindings a rebind moves that no
+// request of its own reveals — the newly bound server's effort dialect, mirrored onto the Config
+// beside the live field so no later reader of the Config is served the departed server's shape,
+// and the compaction stand-down latch, which recorded a fold that faulted against the pair just
+// departed and judges nothing about the pair now bound.
+func TestRebindMovesTheDialectAndClearsTheStandDownLatch(t *testing.T) {
+	cfg := baseConfig(&recordingSink{})
+	cfg.EffortDialect = domain.EffortDialectKwargs
+	responder := &captureAllResponder{scripts: [][]provider.Delta{contentScript("first")}}
+
+	a, err := newAgent(cfg, responder)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	runExchange(t, a, "before the rebind")
+	a.compactFailed = true // a fold faulted against the model and server now being left
+
+	if err := a.Rebind(RebindSpec{
+		Model:            "new-model",
+		MaxContextTokens: 16384,
+		EffortDialect:    provider.EffortDialectReasoning,
+	}); err != nil {
+		t.Fatalf("Rebind: %v", err)
+	}
+
+	if a.effortDialect != provider.EffortDialectReasoning {
+		t.Errorf("live dialect = %q, want %q", a.effortDialect, provider.EffortDialectReasoning)
+	}
+	if a.cfg.EffortDialect != domain.EffortDialectReasoning {
+		t.Errorf("cfg dialect = %q, want %q (the seed must not keep the departed server's shape)",
+			a.cfg.EffortDialect, domain.EffortDialectReasoning)
+	}
+	if a.compactFailed {
+		t.Error("the compaction stand-down latch survived the rebind")
+	}
+}
+
+// TestRebindToAnUnknownDialectDegradesTheConfigToNone: toDomainDialect is TOTAL, so a spec value
+// outside the named dialects lands on the Config as the zero — a value the enum still recognises
+// (EffortDialect.Valid) — rather than as a shape no reader of the Config can interpret.
+func TestRebindToAnUnknownDialectDegradesTheConfigToNone(t *testing.T) {
+	a, err := newAgent(baseConfig(&recordingSink{}), &captureAllResponder{})
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+
+	if err := a.Rebind(RebindSpec{
+		Model:            "new-model",
+		MaxContextTokens: 16384,
+		EffortDialect:    provider.EffortDialect("nonesuch"),
+	}); err != nil {
+		t.Fatalf("Rebind: %v", err)
+	}
+
+	if got := a.cfg.EffortDialect; got != domain.EffortDialectNone || !got.Valid() {
+		t.Errorf("cfg dialect = %q (valid=%t), want the zero the enum recognises", got, got.Valid())
+	}
+}

@@ -104,7 +104,8 @@ func TestSwitchUpstreamUnbindsTheModelAndKeepsTheSession(t *testing.T) {
 	runExchange(t, a, "remember this")
 	before := a.conv.Messages()
 	estimator := a.tokens
-	a.compactSat = true // the latch a switch must clear: it was judged against the old window
+	a.compactSat = true    // the latch a switch must clear: it was judged against the old window
+	a.compactFailed = true // and the stand-down latch beside it: that fold faulted on the old server
 
 	if err := a.SwitchUpstream(UpstreamSpec{Endpoint: "http://elsewhere.invalid:9999", APIKey: "new-key"}); err != nil {
 		t.Fatalf("SwitchUpstream: %v", err)
@@ -127,6 +128,9 @@ func TestSwitchUpstreamUnbindsTheModelAndKeepsTheSession(t *testing.T) {
 	}
 	if a.compactSat {
 		t.Error("the compaction saturation latch survived the switch")
+	}
+	if a.compactFailed {
+		t.Error("the compaction stand-down latch survived the switch; it judged the retired server")
 	}
 
 	after := a.conv.Messages()

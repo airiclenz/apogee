@@ -473,6 +473,19 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **A rebind now moves the effort dialect onto the Config and clears the fold stand-down latch.**
+  `Agent.Rebind` mirrored every binding a `RebindSpec` carries onto the Config copy it commits —
+  the model, the system prompt, the window, the Mechanism set, the profile — except the effort
+  dialect, which it wrote onto the live `effortDialect` field alone; `Config.EffortDialect` kept
+  the value read at construction, so any later reader of the Config was served the shape of the
+  server the session had left. It is mirrored now, through a new total `toDomainDialect`
+  (`internal/agent/wire.go`) that is the inverse of `toProviderDialect` and degrades an unnamed
+  dialect to the zero the enum recognises, so the Config never holds a shape nothing can read.
+  In the same commit both rebind boundaries clear `compactFailed` beside `compactSat`: a fold that
+  faulted against the retired server judges nothing about the one just bound. The latch was inert
+  in practice (a rebind is a depth-0 quiescent boundary, and the next `openExchange` cleared it
+  anyway), so this is the two latches moving together rather than a behaviour change.
+
 - The **compaction summarizer now asks for no reasoning pass at all**, whatever the session's
   effort resolves to. Compaction is maintenance, not a Turn: the summary call runs under a
   bounded 4096-token output cap, and a thinking model that spends that whole cap reasoning comes

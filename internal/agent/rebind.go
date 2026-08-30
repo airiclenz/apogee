@@ -217,6 +217,11 @@ func (a *Agent) Rebind(spec RebindSpec) error {
 	// applyProfile below writes the live a.cfg.Profile; carrying the profile on the copy too is
 	// what keeps `a.cfg = next` from putting the departed model's profile straight back.
 	next.Profile = spec.Profile
+	// The newly bound server's effort dialect, mirrored onto the Config the way every binding above
+	// is. The live answer is the a.effortDialect field written inside the commit below — the Config
+	// only ever SEEDS it (agent.go) — but leaving the seed on the departed server's shape here would
+	// leave a stale value behind for any future reader of the Config to pick up.
+	next.EffortDialect = toDomainDialect(spec.EffortDialect)
 
 	registry := domain.NewMechanismRegistry()
 	deps, err := buildEnabledMechanisms(next, registry)
@@ -266,6 +271,11 @@ func (a *Agent) Rebind(spec RebindSpec) error {
 	a.effortDialect = spec.EffortDialect
 	a.tokens = apogeectx.NewTokenEstimator()
 	a.compactSat = false
+	// The stand-down latch goes with the saturation one: it recorded that an automatic fold FAULTED
+	// against the server and model just departed, which says nothing about the pair now bound. The
+	// Exchange-scoped clear (turnLifecycle.openExchange) would reach it at the next Exchange anyway
+	// — a rebind is a quiescent boundary — so this only keeps the two latches moving together.
+	a.compactFailed = false
 	return nil
 }
 
@@ -389,5 +399,8 @@ func (a *Agent) SwitchUpstream(spec UpstreamSpec) error {
 	a.cfg.Context.ResponseReserveFraction = spec.ResponseReserveFraction
 	a.tokens = apogeectx.NewTokenEstimator()
 	a.compactSat = false
+	// Cleared with the saturation latch, for the reason Rebind clears it: a fold that faulted
+	// against the retired server judges nothing about the one just dialled.
+	a.compactFailed = false
 	return nil
 }

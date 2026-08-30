@@ -40,20 +40,6 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 - [ ] Finished sub-agents print the sug-agent output twice - once at the very beginning (unneededly) before the input-prompt event (also with terrible formatting) as well as at the end of the sub-agent transcript (that one is properly formatted and the one that we need to keep).
 
 
-### Residuals deferred out of the 2026-08-30 compaction empty-summary run
-
-**Status:** found 2026-08-30 at the close of the compaction empty-summary plan
-(`docs/plans/archived/2026-08-30 - 00 - compaction-empty-summary-plan.md`), deferred out of that run.
-
-- [ ] **An upstream switch clears `compactSat` but leaves the new `compactFailed` latch alone.**
-  `Agent.Rebind` (`internal/agent/rebind.go:268`) and `Agent.SwitchUpstream`
-  (`internal/agent/rebind.go:391`) each clear `compactSat`, but neither clears the failed-fold
-  stand-down latch that now sits beside it (`internal/agent/agent.go:285`), so a session moved to
-  another server carries the retired server's fold verdict across. Inert today — a rebind only
-  happens at a depth-0 quiescent boundary, where the next `openExchange`
-  (`internal/agent/turn.go:218`) clears the latch anyway — and left outside the stand-down item's
-  scope.
-
 ### Residuals deferred out of the 2026-08-29 tool-surface-transparency run
 
 **Status:** found 2026-08-29 at the close of the tool-surface transparency plan
