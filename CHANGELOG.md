@@ -8,6 +8,8 @@ point is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+## [0.19.0] — 2026-08-30
+
 ### Added
 
 - Added: a compaction summary the server cut off at the output cap is now **kept and marked**
