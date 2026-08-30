@@ -374,6 +374,26 @@ func (a *Agent) compactTranscriptChars() int {
 // request projection (toProviderRequest) and collects the streamed content into one string; a
 // cancelled ctx or a terminal stream fault surfaces as an error, so the reducer leaves the
 // conversation untouched and — having no completed call to account for — emits nothing.
+//
+// The summary call asks for NO reasoning, whatever the session's effort resolves to. Compaction is
+// maintenance, not a Turn: the summarizer does a mechanical job under a bounded output cap
+// (compactMaxTokens), and a thinking model that spends that whole cap on a reasoning pass comes
+// back with finish reason "length" and empty content — so the fold faults, and on a child agent
+// (which folds at every quiescent Turn boundary) it faults again at the next one, forever. That is
+// not hypothetical: on 2026-08-29 a delegate on Qwen3.8-27B looped for ~9 hours on an empty
+// summary, one ~40-minute summary call per Turn boundary. So the projection's resolved effort
+// (override ▸ profile ▸ nothing) is overridden to provider.EffortOff here, exactly as the naming
+// call does (internal/title). Like that one it states an INTENT, not a guarantee: the intent lands
+// only on a server whose chat template honours it.
+//
+// The override is gated on the SERVER's wire dialect (a.effortDialect — the dialect is the
+// server's, ADR 0060) being one whose "off" rung actually means off: llama.cpp's
+// chat_template_kwargs (what the incident server is detected as, through the /props probe) and
+// OpenRouter's reasoning object. The other three keep resolvedEffort exactly as today — on
+// EffortDialectNone because a caller that asks for nothing must change nothing on the wire
+// (ADR 0050), on EffortDialectOpenAI because "off" is a documented FLOOR there rather than an off
+// switch (it lands as `minimal`), and on EffortDialectOff because nothing effort-shaped reaches
+// the wire at all. The dialect itself is never touched here.
 type compactCompleter struct{ a *Agent }
 
 func (c compactCompleter) Complete(ctx context.Context, msgs []domain.Message) (string, error) {
@@ -382,11 +402,18 @@ func (c compactCompleter) Complete(ctx context.Context, msgs []domain.Message) (
 	temp, maxTok := compactTemperature, compactMaxTokens
 	req.SetSampling(domain.SamplingParams{Temperature: &temp, MaxTokens: &maxTok})
 
+	// No reasoning pass for the summarizer, on the dialects whose "off" rung means off — this
+	// type's doc carries the incident and why the other three keep the session's resolved effort.
+	preq := c.a.toProviderRequest(req)
+	if c.a.effortDialect == provider.EffortDialectKwargs || c.a.effortDialect == provider.EffortDialectReasoning {
+		preq.ThinkingEffort = provider.EffortOff
+	}
+
 	var content strings.Builder
 	var failed bool
 	var errMsg string
 	var usage *provider.Usage
-	for delta := range c.a.upstream.Stream(ctx, c.a.toProviderRequest(req)) {
+	for delta := range c.a.upstream.Stream(ctx, preq) {
 		switch delta.Kind {
 		case provider.DeltaContent:
 			content.WriteString(delta.Content)

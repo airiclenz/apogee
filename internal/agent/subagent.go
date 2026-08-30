@@ -357,6 +357,16 @@ func (a *Agent) newChildAgent(spawnCallID, task, name string) (*Agent, error) {
 	// A routed child closes the client it dialled; an unrouted one must never close the session's
 	// out from under the parent that is still speaking over it (Agent.Close).
 	child.ownsUpstream = ownsUpstream
+	// The wire shape an effort intent is expressed in, taken from the parent's LIVE field rather
+	// than from the childCfg copy newAgent just seeded it from. Rebind commits a newly observed
+	// dialect onto the Agent alone (rebind.go) — a.cfg.EffortDialect keeps the value construction
+	// read — so a session rebound since startup would otherwise spawn children speaking the shape
+	// of the server it left, and every effort-gated decision downstream (the compaction
+	// summarizer's EffortOff, compact.go) would read the wrong server. Routing does not change the
+	// answer: ADR 0045 replaces the dial facts and the two posture keys, and a dialect is neither,
+	// so a routed child speaks its parent's until a Rebind of its own observes the target's —
+	// which is what an unrouted child got from the Config before this line existed.
+	child.effortDialect = a.effortDialect
 	// The child's token estimator needs no reset for a routed spawn — the reason SwitchUpstream and
 	// Rebind reset theirs (a chars→token calibration that described the departed model) cannot
 	// arise here: newAgent seeds every child with a fresh apogeectx.NewTokenEstimator, and

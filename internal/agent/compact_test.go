@@ -434,3 +434,162 @@ func TestCompactSummaryRequestOmitsSystemPrompt(t *testing.T) {
 		}
 	}
 }
+
+// ---------------------------------------------------------------------------
+
+// summaryEffortResponder records the SUMMARIZER's request beside the last MAIN-turn one, so a
+// test can assert what the fold asked for on the wire and what the very next Turn asked for. It
+// tells the two apart by the summary system prompt, as scriptedCompactResponder does —
+// internal/context's summaryInstruction is unexported, and the leading substring is the stable
+// half of it.
+type summaryEffortResponder struct {
+	summary      string
+	reply        string
+	summaryReq   provider.Request
+	summaryCalls int
+	last         provider.Request
+}
+
+func (r *summaryEffortResponder) Stream(_ context.Context, req provider.Request) iter.Seq[provider.Delta] {
+	if len(req.Messages) > 0 && strings.Contains(req.Messages[0].Content, "compacting a conversation") {
+		r.summaryCalls++
+		r.summaryReq = req
+		return streamReply(r.summary)
+	}
+	r.last = req
+	return streamReply(r.reply)
+}
+
+// foldOnce folds a freshly seeded conversation and fails the test unless a summary call actually
+// went out — a skipped fold makes every assertion below it read a stale request.
+func foldOnce(t *testing.T, a *Agent, up *summaryEffortResponder, want int) {
+	t.Helper()
+	seedFoldable(a)
+	skipped, err := a.Compact(context.Background())
+	if err != nil {
+		t.Fatalf("Compact: %v", err)
+	}
+	if skipped {
+		t.Fatal("Compact skipped a foldable conversation; want a fold so a summary request was made")
+	}
+	if up.summaryCalls != want {
+		t.Fatalf("summarizer calls = %d, want %d", up.summaryCalls, want)
+	}
+}
+
+// TestCompactSummarizerAsksForNoReasoning pins the 2026-08-29 empty-summary fix on the dialect the
+// incident server speaks (llama.cpp's chat_template_kwargs): the summary call asks for no
+// reasoning pass whatever the session's effort resolves to, so a thinking model cannot spend the
+// whole 4096-token cap thinking and come back with nothing. The session override is the sharp
+// case — it outranks the profile everywhere else (ADR 0050), and it must still not reach this
+// maintenance call, while the very next real Turn carries it untouched.
+func TestCompactSummarizerAsksForNoReasoning(t *testing.T) {
+	t.Parallel()
+
+	cfg := baseConfig(&recordingSink{})
+	cfg.EffortDialect = domain.EffortDialectKwargs
+	cfg.Profile.Thinking.Effort = domain.EffortMedium
+	up := &summaryEffortResponder{summary: "FOLDED", reply: "done"}
+	a, err := newAgent(cfg, up)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+
+	foldOnce(t, a, up, 1)
+	if got := up.summaryReq.ThinkingEffort; got != provider.EffortOff {
+		t.Errorf("summary request effort = %q, want %q — the profile's level must not reach the summarizer",
+			got, provider.EffortOff)
+	}
+	if got := up.summaryReq.EffortDialect; got != provider.EffortDialectKwargs {
+		t.Errorf("summary request dialect = %q, want the server's %q left alone", got, provider.EffortDialectKwargs)
+	}
+
+	// The session override is intent about the conversation, not about a maintenance call.
+	a.SetEffortOverride(domain.EffortHigh)
+	foldOnce(t, a, up, 2)
+	if got := up.summaryReq.ThinkingEffort; got != provider.EffortOff {
+		t.Errorf("summary request effort under a session override = %q, want %q", got, provider.EffortOff)
+	}
+
+	// ...and the next real Turn still carries it, so the override was suppressed for the summary
+	// call alone rather than dropped.
+	if err := a.Submit(domain.UserInput{Text: "carry on"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if _, err := a.Step(context.Background()); err != nil {
+		t.Fatalf("Step: %v", err)
+	}
+	if got := up.last.ThinkingEffort; got != provider.EffortHigh {
+		t.Errorf("main-turn effort = %q, want the session override %q", got, provider.EffortHigh)
+	}
+}
+
+// TestCompactSummarizerKeepsTheResolvedEffortOnAnUndialledServer is the anchor half: on a server
+// that named no effort dialect, apogee asks for nothing it did not ask for before this override
+// existed (ADR 0050 — a caller that asks for nothing changes nothing on the wire), so the summary
+// request carries resolvedEffort byte for byte: nothing when nothing is configured, the session
+// override when one is set.
+func TestCompactSummarizerKeepsTheResolvedEffortOnAnUndialledServer(t *testing.T) {
+	t.Parallel()
+
+	up := &summaryEffortResponder{summary: "FOLDED", reply: "done"}
+	a, err := newAgent(baseConfig(&recordingSink{}), up) // baseConfig names no dialect
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+
+	foldOnce(t, a, up, 1)
+	if got := up.summaryReq.ThinkingEffort; got != provider.Effort("") {
+		t.Errorf("summary request effort = %q, want none — nothing is configured and no dialect was named", got)
+	}
+	if got := up.summaryReq.EffortDialect; got != provider.EffortDialectNone {
+		t.Errorf("summary request dialect = %q, want the zero anchor", got)
+	}
+
+	a.SetEffortOverride(domain.EffortHigh)
+	foldOnce(t, a, up, 2)
+	if got := up.summaryReq.ThinkingEffort; got != provider.EffortHigh {
+		t.Errorf("summary request effort = %q, want the session's resolved %q untouched on an undialled server",
+			got, provider.EffortHigh)
+	}
+}
+
+// TestChildSummarizerFollowsTheParentsReboundDialect is the delegate half of the incident: the
+// dialect is discovered and committed by Rebind onto the Agent, NOT onto the Config a child is
+// built from, so a child spawned after a rebind must take its parent's LIVE dialect — otherwise
+// exactly the delegate that looped for nine hours would keep speaking the shape of the server the
+// session was on at startup and the EffortOff override would never fire for it.
+func TestChildSummarizerFollowsTheParentsReboundDialect(t *testing.T) {
+	t.Parallel()
+
+	up := &summaryEffortResponder{summary: "FOLDED", reply: "done"}
+	parent, err := newAgent(baseConfig(&recordingSink{}), up) // the startup Config names no dialect
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	if err := parent.Rebind(RebindSpec{
+		Model:            "another-model",
+		MaxContextTokens: 8192,
+		EffortDialect:    provider.EffortDialectKwargs,
+	}); err != nil {
+		t.Fatalf("Rebind: %v", err)
+	}
+
+	child, err := parent.newChildAgent("call_sub", "the delegated task", "")
+	if err != nil {
+		t.Fatalf("newChildAgent: %v", err)
+	}
+	seedFoldable(child)
+	if _, err := child.Compact(context.Background()); err != nil {
+		t.Fatalf("child Compact: %v", err)
+	}
+	if up.summaryCalls != 1 {
+		t.Fatalf("summarizer calls = %d, want exactly the child's one fold", up.summaryCalls)
+	}
+	if got := up.summaryReq.EffortDialect; got != provider.EffortDialectKwargs {
+		t.Fatalf("child summary request dialect = %q, want the parent's rebound %q", got, provider.EffortDialectKwargs)
+	}
+	if got := up.summaryReq.ThinkingEffort; got != provider.EffortOff {
+		t.Errorf("child summary request effort = %q, want %q", got, provider.EffortOff)
+	}
+}
