@@ -94,15 +94,24 @@ func execFences(root string, box *domain.ConfinementBox) []string {
 // look is the PATH resolver, nil ⇒ exec.LookPath; a test injects its own. The three outcomes are
 // deliberately distinguishable, because they send an operator to three different places:
 //
-//   - ABSENT — look failed — is returned wrapped (%w), so errors.Is still reaches exec.ErrNotFound
-//     and never ErrExecFromWritablePath: the program is not installed, not refused.
+//   - ABSENT — look failed with anything other than exec.ErrDot — is returned wrapped (%w), so
+//     errors.Is still reaches exec.ErrNotFound and never ErrExecFromWritablePath: the program is
+//     not installed, not refused.
 //   - RELATIVE — look answered with a path that is not absolute, which is what PATH carrying a
-//     relative entry produces (Go's exec.ErrDot) — is refused with ErrExecFromWritablePath. The
-//     child would resolve it against a working directory that is usually the workspace itself,
+//     relative entry produces — is refused with ErrExecFromWritablePath. Go spells that answer as
+//     the relative path AND exec.ErrDot, so the error is read here as the relative answer it is
+//     rather than as a failed lookup; classifying on err alone would report the one case this
+//     branch exists for as a missing install. The refusal wraps ErrExecFromWritablePath alone and
+//     does NOT carry exec.ErrDot through — the inverse of the absent branch's contract. The child
+//     would resolve the path against a working directory that is usually the workspace itself,
 //     which is the very box the fence exists to keep out of argv[0].
 //   - REFUSED — the absolute program resolves inside the writable box — is
 //     RefuseExecFromWritablePath's own sentence, naming the resolved path so the operator reads
 //     which PATH entry to fix rather than hunting a missing install.
+//
+// Both refusals also hand back the path they refused, so a caller re-wording the refusal in its own
+// boundary wording can still name the program that was judged. Only a genuine lookup failure — the
+// ABSENT outcome, where there is no path to speak of — answers with an empty first return.
 //
 // The empty-fence rule carries over unchanged: no root and no box refuses nothing, because a
 // caller that cannot name a workspace has no policy to apply.
@@ -111,14 +120,15 @@ func ResolveProgram(look func(string) (string, error), name, root string, box *d
 		look = exec.LookPath
 	}
 	resolved, err := look(name)
-	if err != nil {
+	isRelativePathEntry := errors.Is(err, exec.ErrDot)
+	if err != nil && !isRelativePathEntry {
 		return "", fmt.Errorf("%s not available: %w", name, err)
 	}
-	if !filepath.IsAbs(resolved) {
-		return "", fmt.Errorf("%w: %s resolves to a relative program path", ErrExecFromWritablePath, resolved)
+	if isRelativePathEntry || !filepath.IsAbs(resolved) {
+		return resolved, fmt.Errorf("%w: %s resolves to a relative program path", ErrExecFromWritablePath, resolved)
 	}
 	if err := RefuseExecFromWritablePath(resolved, root, box); err != nil {
-		return "", err
+		return resolved, err
 	}
 	return resolved, nil
 }

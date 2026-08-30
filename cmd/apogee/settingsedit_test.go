@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -673,6 +674,34 @@ func TestExternalEditSpecRefusesAnEditorInsideTheWorkspace(t *testing.T) {
 	if resolved := security.EvalRealPath(planted); !strings.Contains(err.Error(), resolved) {
 		t.Errorf("refusal %q does not name the resolved program %q — the operator has a PATH entry to fix",
 			err, resolved)
+	}
+}
+
+// An editor found only through a RELATIVE PATH entry is refused with the fence's own sentence, not
+// the install hint. Go spells that entry as the relative path paired with exec.ErrDot, and the pane
+// would resolve it against a working directory that is the workspace itself — so the operator has a
+// PATH entry to fix, not a missing install to go looking for.
+func TestExternalEditSpecRefusesAnEditorOnARelativePathEntry(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	writeSettingsFixture(t, filepath.Join(home, "config.yaml"), "editor: vim\nmode: auto\n")
+	e := newExternalEdit(config.Options{ConfigDir: home}, t.TempDir(), func(string) string { return "" })
+	e.goos = "linux"
+	e.look = func(string) (string, error) { return "bin/vim", exec.ErrDot }
+
+	launch, err := e.spec("mode")
+
+	if err == nil {
+		t.Fatalf("spec over an editor on a relative PATH entry = %+v, want the fence's refusal", launch)
+	}
+	if !errors.Is(err, security.ErrExecFromWritablePath) {
+		t.Errorf("refusal %q does not wrap security.ErrExecFromWritablePath", err)
+	}
+	if !strings.Contains(err.Error(), "refusing to run editor") {
+		t.Errorf("refusal %q is not the fence's own sentence", err)
+	}
+	if strings.Contains(err.Error(), "cannot run editor") {
+		t.Errorf("refusal %q carries the install hint; a relative PATH entry is a refusal, not an absent program", err)
 	}
 }
 

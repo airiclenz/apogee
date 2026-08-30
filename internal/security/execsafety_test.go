@@ -3,6 +3,7 @@ package security
 import (
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -126,24 +127,49 @@ func TestResolveProgram(t *testing.T) {
 	})
 
 	t.Run("a program inside the fence is refused by name", func(t *testing.T) {
-		_, err := ResolveProgram(func(string) (string, error) { return inRoot, nil }, "tool", root, nil)
+		got, err := ResolveProgram(func(string) (string, error) { return inRoot, nil }, "tool", root, nil)
 		if !errors.Is(err, ErrExecFromWritablePath) {
 			t.Fatalf("err = %v, want ErrExecFromWritablePath", err)
 		}
 		if !strings.Contains(err.Error(), EvalRealPath(inRoot)) {
 			t.Errorf("refusal = %q, want it to name the resolved program path %q", err, inRoot)
 		}
+		if got != inRoot {
+			t.Errorf("ResolveProgram() = %q, want the refused path %q handed back beside the error", got, inRoot)
+		}
 	})
 
 	t.Run("a relative answer is refused", func(t *testing.T) {
-		// What exec.LookPath returns for a relative PATH entry (exec.ErrDot): the child would
-		// resolve it against a working directory that is the workspace itself.
+		// A relative answer with no error at all. Go's own exec.LookPath does not spell it this
+		// way — it pairs the relative path with exec.ErrDot, the subtest below — but an injected
+		// look may, and the child would resolve it against a working directory that is the
+		// workspace itself.
 		_, err := ResolveProgram(func(string) (string, error) { return "node_modules/.bin/tool", nil }, "tool", root, nil)
 		if !errors.Is(err, ErrExecFromWritablePath) {
 			t.Fatalf("err = %v, want ErrExecFromWritablePath for a relative program path", err)
 		}
 		if !strings.Contains(err.Error(), "resolves to a relative program path") {
 			t.Errorf("refusal = %q, want the relative-program-path sentence", err)
+		}
+	})
+
+	t.Run("a relative PATH entry is refused, not reported absent", func(t *testing.T) {
+		// The shape the production default actually produces: exec.LookPath answers a relative
+		// PATH entry with the relative path AND exec.ErrDot. Classifying on the error alone would
+		// send the one case this branch exists for down the absent path.
+		relative := "node_modules/.bin/tool"
+		got, err := ResolveProgram(func(string) (string, error) { return relative, exec.ErrDot }, "tool", root, nil)
+		if !errors.Is(err, ErrExecFromWritablePath) {
+			t.Fatalf("err = %v, want ErrExecFromWritablePath for a relative PATH entry", err)
+		}
+		if !strings.Contains(err.Error(), "resolves to a relative program path") {
+			t.Errorf("refusal = %q, want the relative-program-path sentence", err)
+		}
+		if errors.Is(err, exec.ErrNotFound) {
+			t.Errorf("err = %v, want a relative PATH entry NOT to read as an absent program", err)
+		}
+		if got != relative {
+			t.Errorf("ResolveProgram() = %q, want the refused path %q handed back beside the error", got, relative)
 		}
 	})
 
