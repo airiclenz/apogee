@@ -31,19 +31,12 @@ func resolveInRoot(input, root string) (string, error) {
 	return security.ResolveInRoot(input, root)
 }
 
-// refuseExecFromWritablePath refuses a program that resolves inside the writable confinement
-// box through the shared exec fence (security.RefuseExecFromWritablePath): every tool that
-// resolves an executable on PATH — git, python_exec, run_tests, diagnostics — calls it at the
-// resolution site, so bytes the model was allowed to write can never become argv[0]. The error
-// names the RESOLVED path, which is what tells an operator their in-repo virtualenv is the
-// cause rather than a missing install.
-func refuseExecFromWritablePath(argv0, root string, box *domain.ConfinementBox) error {
-	return security.RefuseExecFromWritablePath(argv0, root, box)
-}
-
 // confinementBox returns the box a confined call runs inside, or nil when no Confinement
 // handle rides on ctx — the gated/unconfined case, where the workspace root is the whole
-// fence. It is the small read the exec sites need to pass the box on to the fence above.
+// fence. It is the small read the exec sites need to pass the box on to
+// security.ResolveProgram, which resolves an executable and fences it in one step: every tool
+// that reaches PATH — git, python_exec, run_tests, diagnostics — goes through it, so bytes the
+// model was allowed to write can never become argv[0].
 func confinementBox(ctx context.Context) *domain.ConfinementBox {
 	if conf, ok := domain.ConfinementFromContext(ctx); ok {
 		return &conf.Box

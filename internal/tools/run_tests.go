@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os/exec"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/security"
 )
 
 // ----------------------------------------------------------------------------
@@ -236,18 +238,19 @@ func (t *RunTests) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 		return errorResult(call.ID, errMsg), nil
 	}
 
-	program, ok := lookTestProgram(runner.program)
-	if !ok {
+	program, err := security.ResolveProgram(lookTestProgram, runner.program, t.root, confinementBox(ctx))
+	if err != nil {
+		// A runner the model can write is the plant-then-exec chain itself —
+		// node_modules/.bin ahead of the system entries is the everyday shape of it. The
+		// fence's refusal passes through verbatim: it names the resolved path, so the cause
+		// is legible rather than arriving as the "not available" message below, which would
+		// send the operator installing a runner they already have.
+		if errors.Is(err, security.ErrExecFromWritablePath) {
+			return errorResult(call.ID, err.Error()), nil
+		}
 		// Graceful degradation (§3a): the marker says which runner this project uses, so a
 		// missing program is a clear, actionable result rather than a crash or a hard dep.
 		return errorResult(call.ID, fmt.Sprintf("%s not available: the project's markers select %s, but no %q executable was found on PATH", runner.name, runner.name, runner.program)), nil
-	}
-	// The runner is on PATH, but a runner the model can write is the plant-then-exec chain
-	// itself — node_modules/.bin ahead of the system entries is the everyday shape of it. The
-	// fence refuses it and names the resolved path, so the cause is legible rather than
-	// arriving as the "not available" message above.
-	if err := refuseExecFromWritablePath(program, t.root, confinementBox(ctx)); err != nil {
-		return errorResult(call.ID, err.Error()), nil
 	}
 
 	runnerArgs := runner.args(subtree, filter)
@@ -378,13 +381,11 @@ func detectNPMTest(root string) bool {
 	return strings.TrimSpace(pkg.Scripts.Test) != ""
 }
 
-// lookTestProgram resolves a runner's executable on PATH (a package var so a test can inject a
-// fake resolver). ok=false is the signal the tool degrades to a clear "not available"
-// result (§3a).
-var lookTestProgram = func(program string) (string, bool) {
-	path, err := exec.LookPath(program)
-	return path, err == nil
-}
+// lookTestProgram is the PATH lookup security.ResolveProgram performs for a runner's executable
+// (a package var so a test can inject a fake resolver). It carries the resolver's own look
+// shape — the absolute path and a nil error, or exec.LookPath's error when the runner is
+// absent, which Execute maps to the clear "not available" result (§3a).
+var lookTestProgram = exec.LookPath
 
 // runTestsSubprocess runs the detected test runner (a package var so a test can capture the exact
 // argv and environment this tool builds without launching one — the shape runPythonSubprocess

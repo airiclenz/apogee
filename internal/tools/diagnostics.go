@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"go/parser"
 	"go/token"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/security"
 )
 
 // ----------------------------------------------------------------------------
@@ -190,18 +192,18 @@ func (t *Diagnostics) diagnoseGo(ctx context.Context, callID, name, abs string, 
 		return okResult(callID, cleanGoMessage(abs)), nil
 	}
 
-	goPath, ok := lookGo()
-	if !ok {
+	goPath, err := security.ResolveProgram(lookGo, "go", t.root, confinementBox(ctx))
+	if err != nil {
+		if errors.Is(err, security.ErrExecFromWritablePath) {
+			// A toolchain the model can write is refused rather than run. vet is the optional
+			// half here, so the syntax verdict still stands and the refusal rides on the note —
+			// which names the resolved path, so the operator can see WHICH go was refused.
+			return okResult(callID, cleanGoMessage(abs)+"\n\ngo vet skipped: "+err.Error()), nil
+		}
 		// The syntax check passed; go vet is the optional enhancement that is
 		// unavailable here (§3a). Report the clean result plus a note, not an error —
 		// the toolchain is not a hard dependency.
 		return okResult(callID, cleanGoMessage(abs)+"\n\ngo vet skipped: no 'go' toolchain found on PATH."), nil
-	}
-	if err := refuseExecFromWritablePath(goPath, t.root, confinementBox(ctx)); err != nil {
-		// A toolchain the model can write is refused rather than run. vet is the optional
-		// half here, so the syntax verdict still stands and the refusal rides on the note —
-		// which names the resolved path, so the operator can see WHICH go was refused.
-		return okResult(callID, cleanGoMessage(abs)+"\n\ngo vet skipped: "+err.Error()), nil
 	}
 
 	vet, hadFindings, err := runGoVet(ctx, goPath, t.root, abs)
@@ -400,13 +402,11 @@ func detectLanguage(abs string) language {
 	}
 }
 
-// lookGo resolves the system Go toolchain on PATH (a package var so a test can
-// inject a fake resolver). It returns the absolute path and ok=false when go is
-// absent — the signal the vet half degrades to a graceful "skipped" note (§3a).
-var lookGo = func() (string, bool) {
-	path, err := exec.LookPath("go")
-	return path, err == nil
-}
+// lookGo is the PATH lookup security.ResolveProgram performs for the system Go toolchain (a
+// package var so a test can inject a fake resolver). It carries the resolver's own look
+// shape — the absolute path and a nil error, or exec.LookPath's error when go is absent, which
+// diagnoseGo maps to the graceful "skipped" note (§3a).
+var lookGo = exec.LookPath
 
 var (
 	_ domain.Tool           = (*Diagnostics)(nil)

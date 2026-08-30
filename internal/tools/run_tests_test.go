@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -332,7 +333,7 @@ func TestRunTestsRefusesArgumentsItCannotSafelyPass(t *testing.T) {
 // and never a hard dependency.
 func TestRunTestsMissingRunnerProgramDegradesGracefully(t *testing.T) {
 	original := lookTestProgram
-	lookTestProgram = func(string) (string, bool) { return "", false }
+	lookTestProgram = func(string) (string, error) { return "", exec.ErrNotFound }
 	t.Cleanup(func() { lookTestProgram = original })
 
 	root := writeProject(t, map[string]string{"go.mod": "module example.test/x\n\ngo 1.21\n"})
@@ -360,7 +361,7 @@ func TestRunTestsDropsApogeeCredentialsFromTheRunnerEnvironment(t *testing.T) {
 	// toolchain decides whether this test runs.
 	program := filepath.Join(t.TempDir(), "go")
 	original := lookTestProgram
-	lookTestProgram = func(string) (string, bool) { return program, true }
+	lookTestProgram = func(string) (string, error) { return program, nil }
 	t.Cleanup(func() { lookTestProgram = original })
 	captured := withCapturedTestRun(t)
 
@@ -398,7 +399,7 @@ func TestRunTestsDropsTheConfiguredSecretNamesFromTheRunnerEnvironment(t *testin
 	// toolchain decides whether this test runs.
 	program := filepath.Join(t.TempDir(), "go")
 	original := lookTestProgram
-	lookTestProgram = func(string) (string, bool) { return program, true }
+	lookTestProgram = func(string) (string, error) { return program, nil }
 	t.Cleanup(func() { lookTestProgram = original })
 	captured := withCapturedTestRun(t)
 
@@ -536,7 +537,7 @@ func firstLineOf(s string) string {
 // graceful posture the tool itself takes (§3a).
 func requireGo(t *testing.T) {
 	t.Helper()
-	if _, ok := lookTestProgram("go"); !ok {
+	if _, err := lookTestProgram("go"); err != nil {
 		t.Skip("no go toolchain on PATH")
 	}
 }

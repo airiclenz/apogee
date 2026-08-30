@@ -121,7 +121,7 @@ func subprocessEnv(secretEnv []string, extra ...string) []string {
 // workspace-resident PATH entry — an activated .venv, node_modules/.bin — would otherwise let
 // bytes the model wrote become the `git`, the `ssh` or the `curl` that the subprocess, or
 // anything it spawns, resolves for itself: the plant-then-exec chain apogee refuses at its own
-// resolution sites (refuseExecFromWritablePath) and cannot check inside somebody else's process.
+// resolution sites (security.ResolveProgram) and cannot check inside somebody else's process.
 //
 // The extras are appended AFTER the scoping — they are apogee's own additions rather than
 // inherited values, and appending keeps them last-wins in the child, which is how every exec

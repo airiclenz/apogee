@@ -224,7 +224,11 @@ re-run until only the new signature remains. This item's own sweep includes
 `internal/tools/python_exec_test.go:420` (`interp, found := lookInterpreter(pythonCandidates)` — the
 `[]string` parameter disappears), which the write-time list omitted.
 
-## 3. `internal/tools`: run_tests and diagnostics resolve through the resolver
+## 3. `internal/tools`: run_tests and diagnostics resolve through the resolver — ✅ DONE (2026-08-30)
+
+NOTES (2026-08-30): `lookTestProgram` and `lookGo` are written as the plain value assignment `var x = exec.LookPath` (the injected-default seam the plan's standing requirement preserves) rather than a wrapper literal; the inferred type is the required `func(string) (string, error)`, and `lookGo` gains the name parameter it lacked.
+NOTES (2026-08-30): the prose re-point is a rule, not the enumerated list — beyond `internal/tools/exec_common.go:124`, `path_safety.go`'s `confinementBox` doc said the box is passed "to the fence above", which named the deleted helper; it now names `security.ResolveProgram` and carries over the deleted paragraph's point (every PATH-reaching tool — git, python_exec, run_tests, diagnostics — goes through it, so bytes the model may write never become argv[0]). `grep -rn 'refuseExecFromWritablePath' internal/tools/` ends empty, comments included.
+NOTES (2026-08-30): no import became unused by the deletion — `path_safety.go` still needs `domain` (confinementBox's return) and `security` (ResolveInRoot, ErrPathEscape, the write primitives); `internal/tools` production code now has zero `exec.LookPath(` CALL sites, only the four look-var value assignments.
 
 **Depends on item 2** (shares `exec_fence_test.go`).
 

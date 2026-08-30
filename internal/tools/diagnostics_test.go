@@ -24,11 +24,18 @@ func diagnosticsCallNoVet(id, path string) domain.ToolCall {
 }
 
 // withFakeGo swaps lookGo for the duration of a test (restored on cleanup), so the
-// toolchain-absent path is exercisable without depending on the host's PATH.
+// toolchain-absent path is exercisable without depending on the host's PATH. It fakes the LOOK
+// alone — the fence security.ResolveProgram applies to what the look answers is the real one,
+// which is what makes the planted-toolchain refusal a genuine assertion.
 func withFakeGo(t *testing.T, found bool, path string) {
 	t.Helper()
 	orig := lookGo
-	lookGo = func() (string, bool) { return path, found }
+	lookGo = func(string) (string, error) {
+		if !found {
+			return "", exec.ErrNotFound
+		}
+		return path, nil
+	}
 	t.Cleanup(func() { lookGo = orig })
 }
 

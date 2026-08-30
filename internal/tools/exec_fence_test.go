@@ -93,7 +93,7 @@ func TestEveryExecSiteRefusesAProgramInsideTheWorkspace(t *testing.T) {
 				}
 				planted := plantExecutable(t, root, "node_modules/.bin/go")
 				original := lookTestProgram
-				lookTestProgram = func(string) (string, bool) { return planted, true }
+				lookTestProgram = func(string) (string, error) { return planted, nil }
 				t.Cleanup(func() { lookTestProgram = original })
 				res := runTestsCall(t, root, nil)
 				return planted, res.Content, res.IsError
