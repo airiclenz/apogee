@@ -50,6 +50,23 @@ func (m Model) foldEvent(e domain.Event) Model {
 	// oppositely — the window is the FALLBACK behind the reading's own (a routed child fills the
 	// Delegation target's window), the model the YARDSTICK the reading's own is measured against.
 	m.transcript.applyUsage(e, m.opts.ContextWindow, m.opts.Model)
+	// The band's half of the same delivery report the transcript just folded: a message the human
+	// addressed to a running child is accounted for by the engine (ADR 0063), so the staged row
+	// that stood for it comes off here rather than on a timer (interject.go).
+	if child, ok := e.(domain.ChildInterjectionEvent); ok {
+		m.foldChildDelivery(child)
+	}
+	// Inside a run view the prompt box addresses the child on screen, and what it may say to that
+	// child is the child's own lifecycle — which this event may have just moved. Re-resolved on
+	// exactly the two events that move it, so the invitation is never a phase behind the run it
+	// names, and every other event leaves the box alone (setPlaceholder is a transition, not a
+	// per-frame branch — doc.go).
+	if m.inRunView() {
+		switch e.(type) {
+		case domain.SubAgentPhaseEvent, domain.ToolResultEvent:
+			m.setPlaceholder(m.legendFor(m.topLegend()))
+		}
+	}
 	// foldActivity runs after apply and is HANDED what apply established: its ToolResultEvent
 	// rule asks whether a call is still open (a parallel batch holds the tool phrase), and only
 	// the call/result pairing apply performs can answer that.

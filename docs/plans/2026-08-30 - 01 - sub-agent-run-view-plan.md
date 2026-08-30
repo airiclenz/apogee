@@ -249,7 +249,39 @@ NOTES (2026-08-30): the delegation frame's whole drawing surface is now unreacha
 
 **Commit.** `fix(tui): a delegation shows its report once — the inline rail that repeated the tool-result body is gone`
 
-## 9. Prompt box addresses the viewed child
+## 9. Prompt box addresses the viewed child — ✅ DONE (2026-08-30)
+
+NOTES (2026-08-30): the three-way lifecycle the box routes on (`childPhaseOf`, runview.go) reads
+`subAgentReported` — `done || phase == finished` — for "over" rather than `entry.phase` alone. The
+phase is view-only and unpersisted, so routing on it alone would read every delegation in a resumed
+session as "has not started".
+
+NOTES (2026-08-30): sites folded in beyond the item's named Files, all made necessary by this item's
+own change. `internal/tui/runview.go` — the two view moves (`openRun`, `upRun`) set the box's
+legend, and the file holds the legend funnel (`viewedChild`, `childPhase`/`childPhaseOf`,
+`runLabel`, `legendFor`, `topLegend`). `internal/tui/ask.go` (2 sites), `internal/tui/commandrun.go`
+(4 sites) and `internal/tui/model.go` (`finishWorker`) route their existing `setPlaceholder` calls
+through `legendFor`, so a lifecycle transition in the conversation BELOW a view cannot re-label a
+box that is addressing a child. `internal/tui/fold.go` — `foldChildDelivery` (the band's half of the
+delivery report) and a legend re-resolve on the two events that move a run's lifecycle
+(`SubAgentPhaseEvent`, `ToolResultEvent`), so the invitation is never a phase behind the run it
+names.
+
+NOTES (2026-08-30): consequential edit — internal/tui/doc.go: made necessary by the third prompt
+legend and the legend funnel (the module map's placeholder paragraph said the swap was two legends
+on the Exchange's lifecycle transitions; the runview.go paragraph did not name what the box needs to
+address the run).
+
+NOTES (2026-08-30): consequential edit — cmd/apogee/e2e_delegation_test.go: made necessary by ⏎
+inside a view no longer submitting to the conversation. `TestE2EDelegationStepCap` submitted its
+second prompt with the run view still open; it now presses `esc` to back out first. No assertion of
+that test changed.
+
+NOTES (2026-08-30): the top-level `interjectBox` is deliberately bypassed for a child message — the
+engine mailbox IS that queue — so a child row lives on the display queue alone. It is off the band
+before any terminal boundary can flush it: the delegation's deferred close accounts for every
+message the mailbox still held before the child's report reaches the parent, and Events arrive in
+order. The invariant is documented on `queuedInterjection.spawn` rather than guarded with a branch.
 
 **What.** Depends on items 4, 7. While a view is open, `handleKey` `"enter"` (`model.go:1427-1453`) routes by the viewed child's phase (`entry.phase`, `transcript.go:247`, via `runHead` `subagentblock.go:101`): **running** → `stageChildMessage()` in `internal/tui/interject.go`: parse with `promptEditor.submitParse` exactly as `submit()`/`stageInterjection()` do (same `domain.UserInput` — text, file refs, skills; ADR 0005: no new privilege), `recordSend`, call `m.eng.InterjectChild(spawn, in)` from the program goroutine; success → the message shows in the staged band (`layout.md:1379`) with the label `queued for <name>` until item 4's `Landed` fold clears it; `ErrNoSuchChild` → the draft stays in the box and the notice `<name> has finished — message not sent` shows. **finished/scheduled/never-ran** → enter is a no-op with the notice `<name> is not running — go back to send a message`. Placeholders (`layout.md:1872` spelling, single source in `promptEditor`): running child `Message <name>…  ⏎ send · ↑ recall · esc back`; finished `<name> has finished · esc back`; scheduled `<name> has not started · esc back`. The top-level `interjectBox` is bypassed for child messages (the engine mailbox IS the queue). `Model.detached` follows as at top level: sending sets `detached = false`.
 

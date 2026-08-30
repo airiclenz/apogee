@@ -15,8 +15,8 @@ import (
 // ----------------------------------------------------------------------------
 
 // queuedInterjection is one message the human typed while the model was working, staged for
-// delivery into the running Exchange. It carries four things because four different consumers
-// need different halves of it:
+// delivery into the running Exchange — or, inside a run view, one addressed to the child on screen
+// (ADR 0063). It carries five things because five different consumers need different halves of it:
 //
 //   - id names the row across the two copies of the queue — the Model's display slice and the
 //     mailbox the worker drains — so the delivery fold can remove exactly the rows that landed
@@ -31,11 +31,23 @@ import (
 //     off domain.UserInput because the engine has no use for an offset (the wire-silent boundary,
 //     ADR 0031) and captured HERE because a delivered row becomes a transcript block later, by
 //     which time the parse that located them is long gone.
+//   - spawn is the RUN the row is addressed to: the spawn call-ID of the child whose engine-side
+//     mailbox took it ([Model.stageChildMessage], ADR 0063), and empty for a row staged for the
+//     human's own conversation. It is what the band labels the row by and what the delivery fold
+//     reconciles against ([Model.foldChildDelivery]) — a child row is never in the [interjectBox],
+//     because the engine mailbox IS its queue.
+//
+// A child row therefore only ever waits out the window between the ⏎ and the child's own account
+// of it, and that window closes strictly inside the Exchange: the delegation's scope reports every
+// message the mailbox still held before the child's report reaches the parent (agent/subagent.go's
+// deferred close), and Events arrive in order. So the terminal folds below — the flush, the held
+// queue — can never find one of these rows to send to the parent as if the human had typed it there.
 type queuedInterjection struct {
 	id         int
 	raw        string
 	input      domain.UserInput
 	skillSpans []skillSpan
+	spawn      string
 }
 
 // interjectBox is the per-Exchange mailbox: the Update goroutine pushes staged rows into it and
@@ -205,6 +217,136 @@ func (m Model) stageInterjection() (tea.Model, tea.Cmd) {
 	m, record = m.recordSend(sent) // the row is queued: the human sent this line, so ↑ hands it back
 	m.layout()                     // the emptied box shrinks back; the strip above it gains a row
 	return m, record
+}
+
+// ----------------------------------------------------------------------------
+// Addressing the child on screen — ⏎ inside a run view (ADR 0063)
+// ----------------------------------------------------------------------------
+
+// childGoneNote answers a message the engine refused because the child ended between the frame that
+// invited it and the ⏎ that sent it (domain.ErrNoSuchChild). It says the message did NOT go, because
+// the draft is still in the box and the human has to know whether pressing ⏎ again would send it
+// twice or send it at all.
+func childGoneNote(name string) string { return name + " has finished — message not sent" }
+
+// childNotRunningNote answers ⏎ in the view of a delegation that has no child behind it to read the
+// message — one that is over, and one no worker has dequeued yet. It names the way out, because the
+// box the human is typing in belongs to a run they have to leave before it can send anywhere.
+func childNotRunningNote(name string) string {
+	return name + " is not running — go back to send a message"
+}
+
+// stageChildMessage is what ⏎ does inside a run view: the message is addressed to the CHILD on
+// screen rather than to the conversation the view is opened from (ADR 0063). It queues into that
+// child's engine-side mailbox ([Engine.InterjectChild]) and lands at the child's next between-Steps
+// boundary as an ordinary interjection, with the child's own tools, mode and confinement unchanged
+// — addressing a child grants it nothing (ADR 0005).
+//
+// It is stageInterjection's shape with one seam swapped, and deliberately so: the parse is the same
+// ([promptEditor.submitParse]), so a message to a child carries its @file references and its skill
+// /tokens exactly as one to the model does; the two /command branches are the same, so a reporting
+// verb typed inside a view runs on the spot, an idle-only one is refused with its note and a lone
+// mistyped /word is refused with the typo guard's — none of them reaching the child, because a
+// command is a word for the HOST whatever the box happens to be addressing. What differs is where a
+// message goes: the top-level [interjectBox] is bypassed whole, because the engine mailbox IS the
+// queue for a child, and the display row is labelled with the run it went to.
+//
+// A view whose delegation is not running takes no message at all — there is no child to read one —
+// and the draft is left standing for the human to carry back up. The same is true of the race the
+// engine reports (ErrNoSuchChild): the child ended between the frame that invited the message and
+// the keypress that sent it, and a draft silently swallowed there would be the one outcome worse
+// than a refusal.
+func (m Model) stageChildMessage() (tea.Model, tea.Cmd) {
+	// The line verbatim, before anything empties the box — stageInterjection's reading, for
+	// stageInterjection's reason (recall.go, decision 3): only the paths that send or run record it.
+	sent := m.input.Value()
+	var record tea.Cmd
+
+	parsed := m.promptEditor.submitParse(m.knownSkillID)
+	if parsed.kind == kindCommand {
+		if !m.commandRunnable(parsed) {
+			return m.refuseIdleOnlyCommand()
+		}
+		m.promptEditor.reset()
+		if parsed.recallable() {
+			m, record = m.recordSend(sent)
+		}
+		next, cmd := m.runCommand(parsed)
+		return next, tea.Batch(cmd, record)
+	}
+	if parsed.kind == kindUnknownSlash {
+		return m.refuseUnknownSlash(parsed)
+	}
+	if parsed.text == "" {
+		return m, nil
+	}
+	spawn := m.viewedRun().spawn
+	head, ok := m.viewedChild()
+	if !ok || childPhaseOf(head) != childRunning {
+		return m.refuseChildMessage(childNotRunningNote(m.runLabel(spawn)))
+	}
+	in := domain.UserInput{Text: parsed.text, FileRefs: parsed.fileRefs, SkillIDs: parsed.skillIDs}
+	// Called from the Update goroutine, which the seam is written for: InterjectChild only appends
+	// to a guarded mailbox and never touches the child's conversation (tui.go, agent/children.go).
+	if err := m.eng.InterjectChild(spawn, in); err != nil {
+		return m.refuseChildMessage(childGoneNote(usageAgentName(head)))
+	}
+	m.interjectSeq++
+	// The display copy alone: nothing is pushed into m.box, because the child's own mailbox is
+	// already holding this message and a second queue would deliver it to the parent as well.
+	m.pendingInterjections = append(m.pendingInterjections, queuedInterjection{
+		id:         m.interjectSeq,
+		raw:        m.input.Value(),
+		input:      in,
+		skillSpans: parsed.skillSpans,
+		spawn:      spawn,
+	})
+	m.spendSkillHints() // the line has left the human's hands: the suggestion band is spent as at idle
+	m.promptEditor.reset()
+	m.detached = false // a sent message re-arms follow-the-tail, exactly as one sent at the top level does
+	m, record = m.recordSend(sent)
+	m.layout() // the emptied box shrinks back; the band above it gains a row
+	return m, record
+}
+
+// refuseChildMessage is the one posture both refusals inside a view take: the note, and NOTHING
+// else moved. The draft stays exactly as it was — refuseIdleOnlyCommand's posture, applied to a
+// message that is fine and merely has nowhere to go — so the human can carry the same line back up
+// a level and send it there.
+//
+// The note is the host speaking, so it lands at the top level like every other note rather than
+// inside the delegate's run (transcript.tailBeforeHostNotes, the 2026-08-18 design call): it is
+// waiting when the reader backs out.
+func (m Model) refuseChildMessage(note string) (tea.Model, tea.Cmd) {
+	m.transcript.addNote(note)
+	m.refreshViewport()
+	return m, nil
+}
+
+// foldChildDelivery takes the staged row a child's delivery report accounts for off the band. Every
+// message [Engine.InterjectChild] accepted earns exactly one domain.ChildInterjectionEvent, Landed
+// either way (ADR 0063), so the band empties on the engine's account of a message rather than on a
+// guess about when it was read — the same discipline the top-level queue keeps (foldInterjected).
+//
+// Rows are matched by RUN and taken oldest-first, because that is the only correspondence there is:
+// a child's mailbox is FIFO and its events come out in the order it took the messages in, while the
+// event itself carries no row id (the engine has no use for one — the wire-silent boundary,
+// ADR 0031). What the event says about the message's fate is the transcript's business, not the
+// band's: landed or not, the row is accounted for and leaves.
+func (m *Model) foldChildDelivery(e domain.ChildInterjectionEvent) {
+	for i, row := range m.pendingInterjections {
+		if row.spawn != e.CallID {
+			continue
+		}
+		// A fresh slice rather than an in-place splice: the Model is value-copied on every Update
+		// (ADR 0011), so shifting rows down inside the shared backing array would rewrite a copy
+		// some other frame is still holding (foldInterjected takes the same care).
+		kept := make([]queuedInterjection, 0, len(m.pendingInterjections)-1)
+		kept = append(kept, m.pendingInterjections[:i]...)
+		kept = append(kept, m.pendingInterjections[i+1:]...)
+		m.pendingInterjections = kept
+		return
+	}
 }
 
 // popInterjection lifts the NEWEST staged row back into the editor, reporting whether it did — and
@@ -517,7 +659,7 @@ func (m Model) renderPendingInterjections() string {
 		rows = append(rows, m.queuedRow(bodyIndent+fmt.Sprintf("… %d more queued", band.hidden)))
 	}
 	for _, it := range m.pendingInterjections[len(m.pendingInterjections)-band.shown:] {
-		rows = append(rows, m.queuedRow(bodyIndent+glyphInterject+" "+queuedRowText(it.raw)))
+		rows = append(rows, m.queuedRow(bodyIndent+glyphInterject+" "+m.queuedRowBody(it)))
 	}
 	// The closing framing row, unless the skill-suggestion row has been granted it: the two
 	// surfaces share ONE block above the box, so the group closes on the hint instead and
@@ -546,6 +688,23 @@ func (m Model) queuedRow(text string) string {
 		line += strings.Repeat(" ", pad)
 	}
 	return m.th.queuedText.Render(line)
+}
+
+// queuedRowBody is what one staged row says. A row waiting for the MODEL says the message and
+// nothing else — the band sits above the box the human typed it in, and there is only one place it
+// could be going. A row addressed to a child says where it is going first, because with several
+// runs live (ADR 0039) and a view that can be left the moment the message is queued, the row is the
+// only thing on screen that still knows which delegation it belongs to.
+//
+// The name is read at PAINT rather than captured at staging, so the label and the breadcrumb over
+// the same run are one string: a delegation the reader has since backed out of is still named the
+// way the /usage pane and the trail name it ([Model.runLabel]).
+func (m Model) queuedRowBody(it queuedInterjection) string {
+	text := queuedRowText(it.raw)
+	if it.spawn == "" {
+		return text
+	}
+	return "queued for " + m.runLabel(it.spawn) + " — " + text
 }
 
 // queuedRowText flattens one staged row's raw text to a single line: the band is chrome, not

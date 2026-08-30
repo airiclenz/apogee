@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"image/color"
 
 	tea "charm.land/bubbletea/v2"
@@ -112,6 +113,38 @@ const (
 	idleShiftPlaceholder = "Send a message…  ⏎ send · ⇧⏎/⌥⏎ newline · ↑ recall · ⌃c quit"
 	runningPlaceholder   = "queue a message…  ⏎ queue · ↑ recall · esc×2 stop"
 )
+
+// The prompt's third invitation, in the three forms a run view takes it. Inside a view the box
+// addresses the CHILD on screen rather than the conversation (ADR 0063), so the legend names that
+// child — and names esc as the way BACK rather than as the stop gesture, which the view's claimant
+// has taken off the key for as long as it is open (runview.go).
+//
+// Only a running child is invited to. A delegation whose report is in hand, and one no worker has
+// dequeued yet, have no mailbox to queue into, so their legends say which of the two it is instead
+// of promising a send the ⏎ would refuse ([Model.stageChildMessage]). Neither names ⏎ at all, for
+// idleShiftPlaceholder's reason: a legend may only advertise a key that does something.
+//
+// They carry the name as a %s and are spelled HERE beside the other two, so the box has one place
+// that decides what it invites and layout.md has one wording to match.
+const (
+	childRunningPlaceholder   = "Message %s…  ⏎ send · ↑ recall · esc back"
+	childFinishedPlaceholder  = "%s has finished · esc back"
+	childScheduledPlaceholder = "%s has not started · esc back"
+)
+
+// childLegend is what the empty box invites while the run view of the delegation named name is
+// open, chosen by that run's own lifecycle ([childPhaseOf]). Callers hand its result to
+// setPlaceholder exactly as they hand it idleLegend's.
+func childLegend(name string, phase childPhase) string {
+	switch phase {
+	case childRunning:
+		return fmt.Sprintf(childRunningPlaceholder, name)
+	case childOver:
+		return fmt.Sprintf(childFinishedPlaceholder, name)
+	default:
+		return fmt.Sprintf(childScheduledPlaceholder, name)
+	}
+}
 
 // cursorShapes maps each name in the caret vocabulary onto the renderer constant it means. Only
 // this half lives here: the NAMES live in [domain] (uivocab.go), so internal/config can validate a

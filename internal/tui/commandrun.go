@@ -87,7 +87,7 @@ func (m Model) launchExchange(in domain.UserInput) (tea.Model, tea.Cmd) {
 	cmd, cancel := startExchange(m.parent, m.eng, in, m.box, m.notify, m.flushEvents)
 	m.cancel = cancel
 	m.state = stateRunning
-	m.setPlaceholder(runningPlaceholder) // the empty box now invites a queued message, not a send
+	m.setPlaceholder(m.legendFor(runningPlaceholder)) // the empty box now invites a queued message, not a send
 	m.setActivity(runRef{}, actThinking, "")
 	m.reasoning.reset() // a new Exchange never inherits the last one's reasoning (reasoning.go)
 	tick := m.spin.arm()
@@ -293,7 +293,7 @@ func (m Model) runCommand(parsed parsedInput) (tea.Model, tea.Cmd) {
 			cmd, cancel := startResume(m.parent, m.eng, m.box, m.notify, m.flushEvents)
 			m.cancel = cancel
 			m.state = stateRunning
-			m.setPlaceholder(runningPlaceholder)
+			m.setPlaceholder(m.legendFor(runningPlaceholder))
 			m.setActivity(runRef{}, actThinking, "") // the resumed work is a request in flight (as in submit)
 			tick := m.spin.arm()
 			return m, tea.Batch(cmd, tick)
@@ -311,7 +311,7 @@ func (m Model) runCommand(parsed parsedInput) (tea.Model, tea.Cmd) {
 			domain.UserInput{Text: "Please continue"}, m.box, m.notify, m.flushEvents)
 		m.cancel = cancel
 		m.state = stateRunning
-		m.setPlaceholder(runningPlaceholder)
+		m.setPlaceholder(m.legendFor(runningPlaceholder))
 		m.setActivity(runRef{}, actThinking, "") // a canned turn is still a request in flight (as in submit)
 		tick := m.spin.arm()
 		return m, tea.Batch(cmd, tick)
@@ -425,7 +425,7 @@ func (m Model) runCommand(parsed parsedInput) (tea.Model, tea.Cmd) {
 		m.state = stateRunning
 		// Typing is live through a compaction too — the row simply waits for the terminal fold
 		// (there is no Exchange to interject into), so the legend says "queue" here as well.
-		m.setPlaceholder(runningPlaceholder)
+		m.setPlaceholder(m.legendFor(runningPlaceholder))
 		// Compaction emits no Events until it lands, so the phrase is set here or not at all.
 		m.setActivity(runRef{}, actCompacting, "")
 		tick := m.spin.arm()

@@ -35,7 +35,7 @@ func (m Model) foldAskRequest(msg askReqMsg) (tea.Model, tea.Cmd) {
 	m.input.Reset()
 	// The box is borrowed for the answer, so ⏎ sends rather than queues: the legend must say so
 	// for as long as the question stands (submitAnswer swaps it back when the answer is away).
-	m.setPlaceholder(m.idleLegend())
+	m.setPlaceholder(m.legendFor(m.idleLegend()))
 	m.sel = promptSel{} // the input was emptied for the answer; drop any stale selection
 	m.dropRecall()      // and any walk in progress: the box now belongs to the question
 	m.layout()
@@ -123,7 +123,7 @@ func (m Model) submitAnswer() (tea.Model, tea.Cmd) {
 	m.input.Reset()
 	m.restoreAskDraft() // the question has let go of the box: the message it interrupted comes back
 	m.state = stateRunning
-	m.setPlaceholder(runningPlaceholder) // the box is the human's own again — ⏎ queues from here
+	m.setPlaceholder(m.legendFor(runningPlaceholder)) // the box is the human's own again — ⏎ queues from here
 	m.layout()
 	tick := m.spin.arm()
 	return m, tick

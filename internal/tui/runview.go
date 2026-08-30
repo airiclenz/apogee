@@ -2,6 +2,8 @@ package tui
 
 import (
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/airiclenz/apogee/internal/domain"
 )
 
 // The run view: the stack of open views, the two moves between levels, and the one key that walks
@@ -40,6 +42,83 @@ func (m Model) viewedRun() runRef {
 
 // inRunView reports whether any run view is open.
 func (m Model) inRunView() bool { return len(m.viewStack) > 0 }
+
+// viewedChild is the HEAD of the run the human is looking at — the sub_agent call block the view
+// was opened from — and whether there is one at all. It is [Model.viewedRun] resolved to the entry
+// that answers for the run: its name, and its lifecycle.
+//
+// It answers false at the top level, and for a view whose head the transcript no longer holds — a
+// frame between a session reset and [Model.reseatViewStack], which the paint already degrades to
+// the whole conversation ([transcript.paintRoot]). Every caller here treats that as "no child to
+// address", which is the same answer the top level gives.
+func (m Model) viewedChild() (entry, bool) {
+	if !m.inRunView() {
+		return entry{}, false
+	}
+	return runHead(m.transcript.entries, m.viewedRun().spawn)
+}
+
+// childPhase is a delegation's life as the PROMPT BOX needs it: three states, because the box has
+// three different things to say about them. It is a projection of the two facts the transcript
+// keeps — the phase its child reported and the call/result pairing (entry.phase, entry.done) — read
+// through the display's own settled question for each end of that life, so the box, the row and the
+// status line cannot come to disagree about whether a run is over.
+type childPhase int
+
+const (
+	childScheduled childPhase = iota // announced, and no worker has dequeued it yet (ADR 0039)
+	childRunning                     // a child is driving Steps behind it — the one phase that takes a message
+	childOver                        // its report is in hand
+)
+
+// childPhaseOf reads that projection off a run's head. Over is asked FIRST and by
+// [subAgentReported] rather than by the phase alone: a replayed record carries no phases at all
+// (they are view-only and unpersisted, transcript.go), so a resumed session's delegations would
+// otherwise every one of them read as "has not started".
+func childPhaseOf(head entry) childPhase {
+	switch {
+	case subAgentReported(head.painted()):
+		return childOver
+	case head.phase == domain.SubAgentStarted:
+		return childRunning
+	}
+	return childScheduled
+}
+
+// runLabel names the run spawn opened, the way every other surface that names one does
+// ([usageAgentName]): the short name its call carried, else the task's first line, else the
+// constant. A spawn the transcript holds no head for falls back to that same constant, so a notice
+// worded about a run reads as something rather than as a hole in the sentence.
+func (m Model) runLabel(spawn string) string {
+	if head, ok := runHead(m.transcript.entries, spawn); ok {
+		return usageAgentName(head)
+	}
+	return usageAgentFallback
+}
+
+// legendFor picks what the empty box invites: the viewed child's own invitation while a run view is
+// open, and top — the legend the caller's lifecycle transition names — everywhere else. Every
+// setPlaceholder call site routes through it, which is what keeps a transition in the conversation
+// BELOW a view (an Exchange completing, an ask being answered) from re-labelling a box that is
+// addressing a child.
+func (m Model) legendFor(top string) string {
+	head, ok := m.viewedChild()
+	if !ok {
+		return top
+	}
+	return childLegend(usageAgentName(head), childPhaseOf(head))
+}
+
+// topLegend is the invitation the human's own conversation carries as the Model stands right now.
+// It is what the two view moves hand [Model.legendFor] as their fallback: opening and closing a
+// view is not a lifecycle transition, so there is no legend riding in with the call and the state
+// has to be asked.
+func (m Model) topLegend() string {
+	if m.busy() {
+		return runningPlaceholder
+	}
+	return m.idleLegend()
+}
 
 // openRunAt opens the run view for the delegation headed by entries[index], reporting whether that
 // entry was a run to open at all. It is the REDIRECT: every reach that used to flip a delegation's
@@ -83,6 +162,11 @@ func (m Model) openRun(ref runRef) Model {
 	m.cursor = blockCursor{}
 	m.transcript.setRoot(ref)
 	m.detached = false
+	// The box now addresses the child rather than the conversation, so it says so: the run's own
+	// invitation, by its own lifecycle (legendFor). Set on the move in, exactly as the two
+	// lifecycle transitions set theirs — the placeholder is Model state, never a render-time branch
+	// (doc.go).
+	m.setPlaceholder(m.legendFor(m.topLegend()))
 	m.refreshViewport()
 	return m
 }
@@ -114,6 +198,9 @@ func (m Model) upRun() Model {
 	m.cursor = blockCursor{}
 	m.transcript.setRoot(m.viewedRun())
 	m.detached = left.detached
+	// Whatever the box is addressing now — the level below's own child, or the conversation itself
+	// at the top — says so, by the same rule the move in used (openRun).
+	m.setPlaceholder(m.legendFor(m.topLegend()))
 	m.refreshViewport()
 	if left.detached {
 		m.viewport.SetYOffset(left.yOffset)

@@ -1667,3 +1667,150 @@ func TestInterjectBoxRaceClean(t *testing.T) {
 		}
 	}
 }
+
+// ----------------------------------------------------------------------------
+// Messaging the child on screen — ⏎ inside a run view (ADR 0063)
+// ----------------------------------------------------------------------------
+
+// TestRunViewInterjectsIntoTheViewedChild is the whole of the new send: ⏎ inside a view addresses
+// the run on screen through the engine seam, labels the staged row with it, and leaves the
+// conversation's own mailbox untouched — the child's engine-side mailbox IS the queue.
+func TestRunViewInterjectsIntoTheViewedChild(t *testing.T) {
+	eng := &fakeEngine{}
+	m := modelViewingChild(t, eng, childRunning)
+	box := m.box
+
+	m.input.SetValue("check the tests too")
+	next, cmd := stepCmd(t, m, keyEnter())
+
+	got := eng.childInterjections()
+	if len(got) != 1 {
+		t.Fatalf("InterjectChild calls = %+v; want exactly the message typed in the view", got)
+	}
+	if got[0].spawn != "s1" {
+		t.Errorf("addressed run = %q; want the run the view is open on", got[0].spawn)
+	}
+	if got[0].input.Text != "check the tests too" {
+		t.Errorf("message = %q; want the parsed text", got[0].input.Text)
+	}
+	if next.state != stateRunning {
+		t.Errorf("state = %v; want still running (messaging a child launches nothing)", next.state)
+	}
+	if cmd == nil {
+		t.Error("no Cmd returned; a sent line is recorded for ↑ exactly as one sent at the top level is")
+	}
+	if got := next.recall.entries; len(got) == 0 || got[len(got)-1] != "check the tests too" {
+		t.Errorf("recall entries = %v; want the line just sent at the end of the walk", got)
+	}
+	if v := next.input.Value(); v != "" {
+		t.Errorf("input = %q; want an emptied editor after the message went", v)
+	}
+	if n := len(next.pendingInterjections); n != 1 {
+		t.Fatalf("staged rows = %d; want the one row standing for the queued message", n)
+	}
+	if run := next.pendingInterjections[0].spawn; run != "s1" {
+		t.Errorf("staged row's run = %q; want the run it was addressed to", run)
+	}
+	if staged := box.drainAll(); len(staged) != 0 {
+		t.Errorf("the top-level mailbox took %+v; a child message must never be queued for the parent too", staged)
+	}
+	if next.detached {
+		t.Error("the view stayed detached; a sent message re-arms follow-the-tail")
+	}
+	if view := plain(next.View()); !strings.Contains(view, "queued for repo-scout") {
+		t.Errorf("the band does not label the row with the run it went to:\n%s", view)
+	}
+}
+
+// TestRunViewChildDeliveryClearsTheBand pins the reconciliation: the engine's own account of a
+// message (ChildInterjectionEvent) is what takes the row off the band, and the landed half puts the
+// message where the child actually read it — inside the run the view is showing.
+func TestRunViewChildDeliveryClearsTheBand(t *testing.T) {
+	m := modelViewingChild(t, &fakeEngine{}, childRunning)
+	m.input.SetValue("check the tests too")
+	m = step(t, m, keyEnter())
+	if len(m.pendingInterjections) != 1 {
+		t.Fatal("setup: nothing staged to reconcile")
+	}
+
+	m = step(t, m, eventMsg{Event: domain.ChildInterjectionEvent{
+		EventBase: domain.EventBase{Depth: 1, CallID: "s1"},
+		Input:     domain.UserInput{Text: "check the tests too"},
+		Landed:    true,
+	}})
+
+	if n := len(m.pendingInterjections); n != 0 {
+		t.Fatalf("staged rows = %d; the delivery report accounts for the row", n)
+	}
+	view := plain(m.View())
+	if strings.Contains(view, "queued for repo-scout") {
+		t.Errorf("the band still shows the delivered row:\n%s", view)
+	}
+	if !strings.Contains(view, "check the tests too") {
+		t.Errorf("the delivered message is not painted inside the run that read it:\n%s", view)
+	}
+}
+
+// TestRunViewChildGoneKeepsTheDraft is the race the engine reports: the child ended between the
+// frame that invited the message and the ⏎ that sent it. Nothing was queued, so nothing is shown as
+// queued — and the line stays in the box, because a draft silently swallowed there is the one
+// outcome worse than a refusal.
+func TestRunViewChildGoneKeepsTheDraft(t *testing.T) {
+	eng := &fakeEngine{interjectChildFn: func(string, domain.UserInput) error { return domain.ErrNoSuchChild }}
+	m := modelViewingChild(t, eng, childRunning)
+
+	m.input.SetValue("check the tests too")
+	m = step(t, m, keyEnter())
+
+	if got := m.input.Value(); got != "check the tests too" {
+		t.Errorf("input = %q; want the refused draft still in the box", got)
+	}
+	if n := len(m.pendingInterjections); n != 0 {
+		t.Errorf("staged rows = %d; want none — nothing was queued", n)
+	}
+	if want := "repo-scout has finished — message not sent"; !noteInTranscript(m, want) {
+		t.Errorf("the refusal note %q is not in the scrollback", want)
+	}
+}
+
+// TestRunViewCommandsNeverReachTheChild is the second regression guard: a /command is a word for the
+// HOST whatever the box is addressing, so the two command branches survive the swap — a reporting
+// verb runs on the spot and a mistyped one earns the typo guard's note, neither of them queued for
+// the run on screen.
+func TestRunViewCommandsNeverReachTheChild(t *testing.T) {
+	t.Run("a reporting verb runs", func(t *testing.T) {
+		eng := &fakeEngine{}
+		m := modelViewingChild(t, eng, childRunning)
+
+		m.input.SetValue("/usage")
+		m = step(t, m, keyEnter())
+
+		if got := eng.childInterjections(); len(got) != 0 {
+			t.Errorf("InterjectChild calls = %+v; a command is not a message", got)
+		}
+		if !m.usagePane.open {
+			t.Error("/usage typed inside a view opened no pane")
+		}
+		if n := len(m.pendingInterjections); n != 0 {
+			t.Errorf("staged rows = %d; want none — the verb ran", n)
+		}
+	})
+
+	t.Run("an unknown slash is refused", func(t *testing.T) {
+		eng := &fakeEngine{}
+		m := modelViewingChild(t, eng, childRunning)
+
+		m.input.SetValue("/nope")
+		m = step(t, m, keyEnter())
+
+		if got := eng.childInterjections(); len(got) != 0 {
+			t.Errorf("InterjectChild calls = %+v; a mistyped verb must no more be sent to a child than to the model", got)
+		}
+		if got := m.input.Value(); got != "/nope" {
+			t.Errorf("input = %q; the refused line stays in the box", got)
+		}
+		if n := len(m.pendingInterjections); n != 0 {
+			t.Errorf("staged rows = %d; want none", n)
+		}
+	})
+}

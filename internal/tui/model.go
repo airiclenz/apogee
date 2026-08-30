@@ -1463,8 +1463,18 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "enter":
 		switch m.state {
 		case stateIdle:
+			// Inside a run view the box addresses the CHILD on screen, not the conversation the
+			// view was opened from (ADR 0063) — at idle as much as while a worker runs, because
+			// the view outlives the run it was opened on and ⏎ there must not silently start an
+			// Exchange the reader thought they were steering a delegate with.
+			if m.inRunView() {
+				return m.stageChildMessage()
+			}
 			return m.submit()
 		case stateRunning:
+			if m.inRunView() {
+				return m.stageChildMessage()
+			}
 			// The single-worker invariant stands — this launches nothing. What the human typed is
 			// STAGED as an interjection and delivered into the running Exchange at the next
 			// between-Steps boundary (ADR 0025).
@@ -1789,7 +1799,7 @@ func (m *Model) finishWorker(next uiState) tea.Cmd {
 	// flushes them into a new Exchange (flushAfterCompletion), a stop or a fault holds them for
 	// the next ⏎ (noteHeldQueue) — ADR 0025.
 	m.box = nil
-	m.setPlaceholder(m.idleLegend()) // nothing is running: ⏎ sends again
+	m.setPlaceholder(m.legendFor(m.idleLegend())) // nothing is running: ⏎ sends again
 	m.genStart = time.Time{}
 	// The worker has unwound, so every run's activity is over — the whole board goes, including a
 	// sticky "stopping", which only this path clears, and any delegate slot whose child never got

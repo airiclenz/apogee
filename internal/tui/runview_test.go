@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/airiclenz/apogee/internal/domain"
 )
 
 // The run view's own suite: what opens one, what leaves one, and what the frame says while one is
@@ -335,6 +337,190 @@ func TestRunViewStackFollowsTheEntriesItNames(t *testing.T) {
 		}
 		if m.transcript.root.spawn != "s1" {
 			t.Errorf("the paint is rooted at %q; want the view that survived", m.transcript.root.spawn)
+		}
+	})
+}
+
+// ----------------------------------------------------------------------------
+// The prompt box inside a view — what it invites, and what ⏎ does (ADR 0063)
+// ----------------------------------------------------------------------------
+
+// viewOn folds one delegation named "repo-scout" (spawn id "s1") onto m's scrollback in the given
+// lifecycle and opens its run view through the same reach a click takes. It is the frame every test
+// below types into: the box on screen belongs to that child.
+func viewOn(t *testing.T, m Model, phase childPhase) Model {
+	t.Helper()
+	subAgentCall(&m.transcript, "s1", "repo-scout", 0)
+	if phase != childScheduled {
+		subAgentStarted(&m.transcript, "s1", 1)
+		readCall(&m.transcript, "r1", "a.go", 1, 5, 1)
+	}
+	if phase == childOver {
+		subAgentReport(&m.transcript, "s1", "all clear", 0)
+	}
+	m.refreshViewport()
+	m = enterOnLastBlock(t, m)
+	if !m.inRunView() {
+		t.Fatal("setup: ⏎ on the delegation opened no run view, so the box addresses nobody")
+	}
+	return m
+}
+
+// modelViewingChild is a model left in exactly the state a human steers a delegate from: a real
+// submit has opened an Exchange (stateRunning, a live mailbox), a delegation is on the scrollback
+// in the given lifecycle, and its view is open. Recall is wired, so what the box does with a sent
+// line is observable here too.
+func modelViewingChild(t *testing.T, eng *fakeEngine, phase childPhase) Model {
+	t.Helper()
+	m := newTestModelEng(t, eng, recallOpts(&fakeRecallHost{}))
+	m.input.SetValue("survey the repo")
+	m, _ = stepCmd(t, m, keyEnter())
+	if m.state != stateRunning {
+		t.Fatalf("setup: state = %v, want running", m.state)
+	}
+	return viewOn(t, m, phase)
+}
+
+// noteInTranscript reports whether the scrollback carries exactly this note.
+func noteInTranscript(m Model, text string) bool {
+	for _, e := range m.transcript.entries {
+		if e.kind == entryNote && e.text == text {
+			return true
+		}
+	}
+	return false
+}
+
+// TestRunViewPlaceholderNamesTheChild pins the box's third invitation: inside a view it addresses
+// the run on screen, so it names it — and it names esc as the way back, the meaning the view's
+// claimant gave that key. Only a running child is invited to; the other two lifecycles say why they
+// are not, because a legend may only advertise a key that does something.
+func TestRunViewPlaceholderNamesTheChild(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		phase childPhase
+		want  string
+	}{
+		{name: "running", phase: childRunning, want: "Message repo-scout…  ⏎ send · ↑ recall · esc back"},
+		{name: "finished", phase: childOver, want: "repo-scout has finished · esc back"},
+		{name: "scheduled", phase: childScheduled, want: "repo-scout has not started · esc back"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := modelViewingChild(t, &fakeEngine{}, tc.phase)
+
+			if got := m.input.Placeholder; got != tc.want {
+				t.Errorf("placeholder = %q; want %q", got, tc.want)
+			}
+		})
+	}
+
+	t.Run("backing out gives the conversation its own legend back", func(t *testing.T) {
+		m := modelViewingChild(t, &fakeEngine{}, childRunning)
+
+		m = step(t, m, keyEsc())
+
+		if m.inRunView() {
+			t.Fatal("setup: esc did not leave the view")
+		}
+		if got := m.input.Placeholder; got != runningPlaceholder {
+			t.Errorf("placeholder = %q; want the running legend back at the top level", got)
+		}
+	})
+
+	t.Run("the viewed child finishing re-words the box in place", func(t *testing.T) {
+		m := modelViewingChild(t, &fakeEngine{}, childRunning)
+
+		m = step(t, m, eventMsg{Event: domain.SubAgentPhaseEvent{
+			EventBase: domain.EventBase{Depth: 1, CallID: "s1"},
+			Phase:     domain.SubAgentFinished,
+		}})
+
+		want := "repo-scout has finished · esc back"
+		if got := m.input.Placeholder; got != want {
+			t.Errorf("placeholder = %q; want %q — the invitation must not outlive the run it names", got, want)
+		}
+	})
+
+	t.Run("a completing Exchange below does not re-label a box addressing a child", func(t *testing.T) {
+		m := modelViewingChild(t, &fakeEngine{}, childRunning)
+
+		m = step(t, m, exchangeDoneMsg{})
+
+		if got := m.input.Placeholder; got == idlePlaceholder || got == idleShiftPlaceholder {
+			t.Errorf("placeholder = %q; the conversation's own legend took a box that addresses a child", got)
+		}
+	})
+}
+
+// TestRunViewEnterRefusesANonRunningChild pins the two lifecycles with no mailbox behind them: ⏎ is
+// a no-op that says so and leaves the draft standing, so the same line can be carried back up.
+func TestRunViewEnterRefusesANonRunningChild(t *testing.T) {
+	for _, phase := range []childPhase{childOver, childScheduled} {
+		eng := &fakeEngine{}
+		m := modelViewingChild(t, eng, phase)
+
+		m.input.SetValue("check the tests too")
+		m = step(t, m, keyEnter())
+
+		if got := eng.childInterjections(); len(got) != 0 {
+			t.Errorf("phase %v: InterjectChild calls = %+v; want none — there is no child to read one", phase, got)
+		}
+		if got := m.input.Value(); got != "check the tests too" {
+			t.Errorf("phase %v: input = %q; a refused message must stay in the box", phase, got)
+		}
+		if n := len(m.pendingInterjections); n != 0 {
+			t.Errorf("phase %v: staged rows = %d; want none", phase, n)
+		}
+		if want := "repo-scout is not running — go back to send a message"; !noteInTranscript(m, want) {
+			t.Errorf("phase %v: the refusal note %q is not in the scrollback", phase, want)
+		}
+	}
+}
+
+// TestRunViewDecisionPanesKeepEnter is the regression guard: a child's ask and its approval render
+// through the very pane the view is painted under, so ⏎ there must still answer the question in
+// front of the human rather than message the run behind it.
+func TestRunViewDecisionPanesKeepEnter(t *testing.T) {
+	t.Run("an ask is answered, not sent to the child", func(t *testing.T) {
+		eng := &fakeEngine{}
+		m := modelViewingChild(t, eng, childRunning)
+		reply := make(chan domain.AskAnswer, 1)
+
+		m = step(t, m, askReqMsg{Request: domain.AskRequest{Question: "which file?"}, Reply: reply})
+		for _, r := range "42" {
+			m = step(t, m, keyRune(r))
+		}
+		m = step(t, m, keyEnter())
+
+		select {
+		case got := <-reply:
+			if got.Text != "42" {
+				t.Fatalf("answer = %q; want the typed text", got.Text)
+			}
+		default:
+			t.Fatal("⏎ under the ask pane did not answer it")
+		}
+		if got := eng.childInterjections(); len(got) != 0 {
+			t.Errorf("InterjectChild calls = %+v; an answer is not a message to the run", got)
+		}
+	})
+
+	t.Run("an approval is decided, not sent to the child", func(t *testing.T) {
+		eng := &fakeEngine{}
+		m := modelViewingChild(t, eng, childRunning)
+		reply := make(chan domain.ApprovalDecision, 1)
+
+		m = step(t, m, approvalReqMsg{Request: domain.ApprovalRequest{Tool: "terminal"}, Reply: reply})
+		m = step(t, m, approvalArmedMsg{seq: m.approvalSeq})
+		m = step(t, m, keyEnter())
+
+		select {
+		case <-reply:
+		default:
+			t.Fatal("⏎ under the approval pane did not take the highlighted row")
+		}
+		if got := eng.childInterjections(); len(got) != 0 {
+			t.Errorf("InterjectChild calls = %+v; a decision is not a message to the run", got)
 		}
 	})
 }

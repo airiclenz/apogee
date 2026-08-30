@@ -288,7 +288,10 @@
 // ([Model.runViewOwnsEsc] gating [Model.runViewKey] in [keyClaimOrder], above the block cursor and
 // below every pane whose own esc means cancel), and the one rule the stack lives by across a session
 // boundary ([Model.reseatViewStack]: a view stands exactly as long as the entries it names do, so
-// /clear closes every one and a restore that replays the same spawn id keeps its own). Because the
+// /clear closes every one and a restore that replays the same spawn id keeps its own). It also holds
+// what the box needs to ADDRESS the run on screen: the head that answers for it ([Model.viewedChild]),
+// that run's life as the box needs it ([childPhase], [childPhaseOf]) and the legend funnel every
+// setPlaceholder site routes through ([Model.legendFor]). Because the
 // claimant swallows esc, the double-tap stop is unreachable from inside a view — the status line
 // says "esc back" where it would otherwise offer the stop, and backing out first is the way to it.
 //
@@ -320,7 +323,12 @@
 // invitation is state the Model SETS, not a render-time choice: setPlaceholder swaps the idle legend
 // ("⏎ send") for runningPlaceholder ("⏎ queue · esc×2 stop") on the lifecycle transitions that open and
 // close an Exchange, so the chrome names what ⏎ will actually do — which is also why the ask
-// rendezvous swaps BACK to the idle legend while it borrows the box for an answer. The idle side of
+// rendezvous swaps BACK to the idle legend while it borrows the box for an answer. Inside a run view
+// there is a third invitation, and it outranks both: the box addresses the child on screen (ADR 0063),
+// so childLegend names that run and names esc as the way back — and only a RUNNING child is invited
+// to, the other two lifecycles saying instead why they are not ([childPhaseOf]). Every setPlaceholder
+// call site routes its legend through [Model.legendFor], which is what keeps a transition in the
+// conversation below a view from re-labelling a box that is addressing a delegate. The idle side of
 // that swap is two constants rather than one, because a key it names is not on every terminal: ⇧⏎
 // reaches the program only where the enhanced keyboard protocol's key disambiguation was negotiated,
 // and everywhere else the terminal folds the chord into a plain ⏎ — which is a SEND, so advertising

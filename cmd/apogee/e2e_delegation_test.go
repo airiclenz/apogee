@@ -246,6 +246,11 @@ func TestE2EDelegationStepCap(t *testing.T) {
 			}
 		}
 
+		// Back out of the view first: inside one the prompt box addresses the child on screen
+		// (ADR 0063), so the next prompt is one for the CONVERSATION and has to be typed there.
+		drv.Press(tuitest.Esc)
+		drv.WaitQuiet(settled)
+
 		// Step 9's edge — a call may lower the bound and never raise it: max_steps: 50 still stops
 		// at three, and the marker still names three.
 		before := childRequests(stub, childTask)
