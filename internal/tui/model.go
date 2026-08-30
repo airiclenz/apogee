@@ -1759,6 +1759,11 @@ func (m *Model) finishWorker(next uiState) tea.Cmd {
 	// closing MessageEvent, so this is the boundary that keeps a cancelled Turn's reasoning from
 	// outliving it (reasoning.go).
 	m.reasoning.reset()
+	// The run is over however it ended, so a first Esc still waiting for its confirming press has
+	// nothing left to stop: disarm here instead of waiting out escStopWindow. statusRight's armed
+	// branch sits above every occupant, so a stamp left standing would hold "press esc again to
+	// stop" on an already-idle status line for the rest of the window (handleKey's esc case).
+	m.lastEsc = time.Time{}
 	m.state = next
 	// The prompt cleared above may have been clamping a multi-line draft to leave itself its four
 	// rows (draftRowsCeiling); with it gone the box grows back to what the draft asks for.

@@ -654,6 +654,25 @@ func TestModelStopKeys(t *testing.T) {
 		}
 	})
 
+	t.Run("a worker that finishes mid-window takes the arm with it", func(t *testing.T) {
+		m := newTestModel(t)
+		m.cancel = func() {}
+		m.state = stateRunning
+		armed := step(t, m, keyEsc())
+		if got := plain(armed.View()); !strings.Contains(got, "press esc again to stop") {
+			t.Fatalf("the arm hint is not shown while the worker is still busy:\n%s", got)
+		}
+		// The Exchange reaches its own quiescent boundary inside the window: nothing is left to
+		// stop, so the hint goes with it rather than sitting out the rest of escStopWindow.
+		done := step(t, armed, exchangeDoneMsg{})
+		if !done.lastEsc.IsZero() {
+			t.Error("the finished worker left the stop gesture armed")
+		}
+		if got := plain(done.View()); strings.Contains(got, "press esc again to stop") {
+			t.Errorf("the arm hint lingers on the idle status line after the worker finished:\n%s", got)
+		}
+	})
+
 	t.Run("esc while idle does not quit", func(t *testing.T) {
 		m := newTestModel(t)
 		next, cmd := stepCmd(t, m, keyEsc())

@@ -40,19 +40,6 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 - [ ] Finished sub-agents print the sug-agent output twice - once at the very beginning (unneededly) before the input-prompt event (also with terrible formatting) as well as at the end of the sub-agent transcript (that one is properly formatted and the one that we need to keep).
 
 
-### Residuals deferred out of the 2026-08-30 double-ESC abort run
-
-**Status:** found 2026-08-30 at the close of the double-ESC abort plan
-(`docs/plans/archived/2026-08-29 - 01 - double-esc-abort-plan.md`), deferred out of that run.
-
-- [ ] **The armed "press esc again to stop" hint lingers on the idle status line when the worker
-  finishes on its own between the two presses.** Only the confirming press zeroes `m.lastEsc`
-  (`internal/tui/model.go:1421`); a worker that unwinds by itself inside the one-second window
-  leaves the stamp set, and the armed branch sits above every other occupant of `statusRight`
-  (`internal/tui/model.go:3228`), so the idle status line keeps promising a stop for the rest of
-  the window. The not-busy Esc is a no-op per the plan's literal text
-  (`internal/tui/model.go:1417`), so nothing clears it early.
-
 ### Residuals deferred out of the 2026-08-29 tool-surface-transparency run
 
 **Status:** found 2026-08-29 at the close of the tool-surface transparency plan

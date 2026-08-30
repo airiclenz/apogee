@@ -69,7 +69,9 @@ prompts you have already sent in this workspace, `esc` twice stops a run, `⌃c`
 Stopping is a double-tap, like quitting: the first `esc` arms the gesture for one second —
 the status line says `press esc again to stop` for as long as it is armed — and a second
 `esc` inside that window stops the run. Let the window lapse and the gesture disarms
-itself, so a stray `esc` never kills a turn that is under way. The box
+itself, so a stray `esc` never kills a turn that is under way; a run that ends on its
+own inside the window disarms it too, so the hint never outlives what it offered to
+stop. The box
 advertises `⇧⏎` only on terminals that negotiated the enhanced (kitty) keyboard
 protocol — the thing that makes that chord arrive as anything other than a plain `⏎`;
 everywhere else the legend names `⌥⏎` alone, which works on every terminal. Beyond

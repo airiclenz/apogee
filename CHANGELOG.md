@@ -1183,6 +1183,14 @@ point is a **minor** bump, not a breaking change.
   `2026-08-28 - 01` item 6 (the `list_dir` and the two write receipts were asserted on their own
   text alone). Test-only; no production behaviour changes.
 
+- **The armed double-ESC stop hint no longer outlives the run it offered to stop.** Only the
+  confirming press zeroed `m.lastEsc`, so a worker that unwound on its own between the two presses
+  left the stamp standing — and `statusRight`'s armed branch sits above every other occupant, so
+  the now-idle status line kept promising "press esc again to stop" for the rest of the one-second
+  window. `finishWorker` disarms the gesture at the boundary it returns the model to a terminal
+  state, so the arm dies with the run however it ended — completion, cancel or fault — instead of
+  waiting the window out. An Esc pressed while nothing runs is still the no-op it was.
+
 ## [0.18.0] — 2026-08-27
 
 ### Added
