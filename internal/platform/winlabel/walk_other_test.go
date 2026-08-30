@@ -24,7 +24,7 @@ func TestNonWindowsStubsReportUnsupported(t *testing.T) {
 		{name: "LabelTree", err: LabelTree(`C:\work`, Open(""))},
 		{name: "ClearTree", err: ClearTree(`C:\work`)},
 		{name: "ReadSDDL", err: readErr},
-		{name: "SetSDDL", err: SetSDDL(`C:\work`, dirSDDL)},
+		{name: "SetSDDL", err: SetSDDL(`C:\work`, lowSDDL)},
 	}
 
 	for _, tt := range tests {

@@ -79,15 +79,25 @@ raise. Minting is simultaneously the capability probe (§3).
 run and the label is reverted on teardown.**
 
 Because the token cannot carry the box, the only place a `ConfinementBox`'s *writable* half can
-be expressed is on the objects themselves. Each root gets `S:(ML;OICI;NW;;;LW)` — a mandatory
-label ACE, object- and container-inheritable, `NO_WRITE_UP`, Low — via
+be expressed is on the objects themselves. Each root gets `S:(ML;;NW;;;LW)` — a mandatory
+label ACE, `NO_WRITE_UP`, Low, **no inheritance flags** — via
 `SecurityDescriptorFromString` → `SACL()` → `SetNamedSecurityInfo(…, LABEL_SECURITY_INFORMATION,
 …)`.
 
-- **It must recurse over existing contents.** Inheritance applies to *newly created* objects
-  only. A file that predates the labelling is implicitly Medium, so a Low child editing an
-  existing source file would be denied — which is the single most common thing an agent does.
-  Item 8 walks the roots.
+- **It must recurse over existing contents.** The label is not inheritable, so nothing but the
+  walk reaches a file that predates the labelling; such a file is implicitly Medium, and a Low
+  child editing an existing source file would be denied — which is the single most common
+  thing an agent does. Item 8 walks the roots.
+- **Why not inheritable** (amended 2026-08-30; the label was `OICI` until then). The premise
+  that inheritance "covers newly created objects only" was wrong for `SetNamedSecurityInfo`,
+  which propagates an inheritable ACE to every *existing* descendant the moment the root is
+  labelled — before the walk's hard-link skip can refuse anything. The first run of the
+  Windows-tagged tests (CI job added 2026-08-29) showed a hard-linked file carrying
+  `S:AI(ML;ID;NW;;;LW)` at its name *outside* the box: a pnpm store labelled Low for the run.
+  Objects the confined child creates are labelled Low by the kernel from its own token, so the
+  flags bought nothing there. The accepted cost: an object a *Medium* subject creates inside
+  the box mid-run (apogee's own write tool, the user's editor) stays implicitly Medium until
+  the next label pass — readable by the child, not editable.
 - **Apogee's own writes and the user's editor are unaffected.** Medium subjects writing Low
   objects is a *write-down*, permitted by default, and `NO_READ_UP` is deliberately not set, so
   reads are untouched.

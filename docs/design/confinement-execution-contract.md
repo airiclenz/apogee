@@ -929,9 +929,11 @@ verbatim below the floor — no new wording, no new surface.
   no path policy, so it is box-independent, which also settles handle ownership under
   prepare-in-place.
 - **The box is a label on the disk.** `WorkspaceRoot ∪ WritablePaths`, collapsed to a minimal set of
-  non-overlapping roots, are labelled `S:(ML;OICI;NW;;;LW)` **recursively over existing contents**
-  (inheritance covers new objects only). The pass is **memoised per box** — once per session, not
-  per command — and is the one piece of I/O §2.2 now permits.
+  non-overlapping roots, are labelled `S:(ML;;NW;;;LW)` **recursively by a walk** — the label
+  carries no inheritance flags, because `SetNamedSecurityInfo` propagates an inheritable ACE to
+  existing descendants ahead of the walk's hard-link skip (ADR 0020 §2, amended 2026-08-30). The
+  pass is **memoised per box** — once per session, not per command — and is the one piece of
+  I/O §2.2 now permits.
 - **Guardrails:** a volume root, `%SystemRoot%`, `%ProgramFiles%`/`%ProgramFiles(x86)%` or the
   user-profile root is **refused** with `ErrConfinementUnavailable`, never labelled.
 - **Teardown reverts the labels.** The backend implements `io.Closer`; the composition root defers it

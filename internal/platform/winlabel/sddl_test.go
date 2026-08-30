@@ -64,7 +64,7 @@ func TestDescendantLabelDecision(t *testing.T) {
 		{
 			name: "own_low_prior_still_passes_through_the_journal",
 			facts: descendantFacts{
-				prior: fileSDDL, // recordEntry decides what the entry may say
+				prior: lowSDDL, // recordEntry decides what the entry may say
 				links: 1,
 			},
 			wantShouldJournal: true,
@@ -182,8 +182,7 @@ func TestIsLowLabelSDDL(t *testing.T) {
 	}{
 		{name: "empty_descriptor", sddl: ""},
 		{name: "no_label_ace", sddl: "S:"},
-		{name: "own_dir_label", sddl: dirSDDL, want: true},
-		{name: "own_file_label", sddl: fileSDDL, want: true},
+		{name: "own_label", sddl: lowSDDL, want: true},
 		{name: "inherited_own_label", sddl: "S:AI(ML;OICIID;NW;;;LW)", want: true},
 		{name: "canonical_low_sid", sddl: "S:AI(ML;;NW;;;s-1-16-4096)", want: true},
 		{name: "medium_label", sddl: "S:AI(ML;;NW;;;ME)"},

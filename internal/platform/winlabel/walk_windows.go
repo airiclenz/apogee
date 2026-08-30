@@ -41,9 +41,12 @@ import (
 // root label may really be on the disk, and what the unwind may remove is likewise the
 // journal's decision — an entry with a foreign prior is kept.
 //
-// The walk must recurse: inheritance applies to NEWLY CREATED objects only, so a file that
-// predates the labelling is implicitly Medium and a Low child editing an existing source file
-// would be denied.
+// The walk must recurse: the label carries no inheritance flags (lowSDDL), so nothing but the
+// walk reaches an existing file, and a file that predates the labelling is implicitly Medium —
+// a Low child editing an existing source file would be denied. Inheritance is left off on
+// purpose: SetNamedSecurityInfo propagates an inheritable ACE to every existing descendant the
+// instant the root is labelled, which would put the label on the hard links below before the
+// walk's skip could refuse them.
 //
 // Symlinks and other reparse points are skipped entirely — SetNamedSecurityInfo follows the
 // link, so labelling one would silently mutate a target outside the box. HARD links are
@@ -79,7 +82,7 @@ func LabelTree(root string, j *Journal) error {
 	if err != nil {
 		return err
 	}
-	if err := SetSDDL(root, dirSDDL); err != nil {
+	if err := SetSDDL(root, lowSDDL); err != nil {
 		if journalled {
 			j.unwind(root)
 		}
@@ -128,11 +131,7 @@ func LabelTree(root string, j *Journal) error {
 				return err
 			}
 		}
-		sddl := fileSDDL
-		if entry.IsDir() {
-			sddl = dirSDDL
-		}
-		_ = SetSDDL(path, sddl)
+		_ = SetSDDL(path, lowSDDL)
 		return nil
 	}); err != nil {
 		return err

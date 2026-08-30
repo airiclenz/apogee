@@ -4,12 +4,17 @@ import "strings"
 
 // The mandatory-label SDDL strings the backend writes (ADR 0020 §2).
 //
-//   - dirSDDL labels a DIRECTORY Low with NO_WRITE_UP, object- and
-//     container-inheritable, so objects created inside the box during the run are Low too.
-//   - fileSDDL labels an existing FILE Low; inheritance flags are meaningless
-//     on a leaf, and the label pass must reach existing files because inheritance covers
-//     newly created objects ONLY — a Low child editing a pre-existing source file would
-//     otherwise be denied, which is the single most common thing an agent does.
+//   - lowSDDL labels a path Low with NO_WRITE_UP and NO inheritance flags. It is the one label
+//     the backend writes, on directories and files alike. The label pass reaches every existing
+//     object by walking (LabelTree), and a Low child's own creations are labelled Low by the
+//     kernel from its token, so inheritance buys nothing the walk does not already deliver —
+//     and it cost something real: SetNamedSecurityInfo propagates an inheritable ACE to every
+//     EXISTING descendant the moment the root is labelled, before the walk can decide anything,
+//     which put apogee's Low label onto hard-linked files at every name they have, including
+//     names outside the box (the pnpm-store leak). The accepted cost is that an object a
+//     MEDIUM subject creates inside the box mid-run — apogee's own write tool, the user's
+//     editor — stays implicitly Medium until the next label pass; the confined child reads it
+//     but cannot edit it.
 //   - clearSDDL is a NULL SACL: no mandatory label at all, which is the state
 //     an unlabelled object is in (implicitly Medium with NO_WRITE_UP). It is what teardown
 //     writes to a path that carried no label before the run. Clearing via a NULL SACL keeps
@@ -17,8 +22,7 @@ import "strings"
 //     object; asking additionally for UNPROTECTED_SACL_SECURITY_INFORMATION would drag in
 //     the SACL privilege check (SeSecurityPrivilege) and fail for an ordinary user.
 const (
-	dirSDDL   = "S:(ML;OICI;NW;;;LW)"
-	fileSDDL  = "S:(ML;;NW;;;LW)"
+	lowSDDL   = "S:(ML;;NW;;;LW)"
 	clearSDDL = "S:"
 )
 
@@ -38,11 +42,12 @@ func foldPath(p string) string { return strings.ToUpper(p) }
 var lowLabelSIDs = map[string]bool{"LW": true, "S-1-16-4096": true}
 
 // IsLowLabel reports whether sddl carries a mandatory-label ACE naming the Low integrity
-// level. It is deliberately looser than comparing against dirSDDL /
-// fileSDDL verbatim: the same label read back from the OS carries descriptor flags
-// (S:AI(…)) and, on a path that inherited it from a labelled root, the inherited ACE flag
-// (OICIID), so a string equality test would recognise apogee's own label only in the one
-// spelling apogee happens to write it in.
+// level. It is deliberately looser than comparing against lowSDDL verbatim: the same label
+// read back from the OS carries descriptor flags (S:AI(…)), a label an earlier apogee wrote
+// with the inheritable spelling and propagated reads back with the inherited ACE flag
+// (OICIID), and the kernel's own Low label on an object the confined child created has yet
+// another spelling — so a string equality test would recognise apogee's label only in the one
+// form apogee happens to write it in.
 func IsLowLabel(sddl string) bool {
 	for rest := sddl; ; {
 		start := strings.Index(rest, labelACEPrefix)

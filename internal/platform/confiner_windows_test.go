@@ -36,7 +36,7 @@ import (
 // runs at the end of the test, so a failure never leaves labels on the developer's disk.
 func newProbeConfiner(t *testing.T) *tokenConfiner {
 	t.Helper()
-	c := newTokenConfiner(t.TempDir())
+	c := newTokenConfiner(tempDir(t))
 	t.Cleanup(func() { _ = c.Close() })
 	return c
 }
@@ -98,7 +98,7 @@ func TestWindowsConfineSetsOnlyTheToken(t *testing.T) {
 	// argv sentinel and no re-exec — the Linux 42-liner has no Windows counterpart — so a
 	// rewritten cmd.Path or cmd.Args would mean the design had drifted from ADR 0020 §1.
 	c := newProbeConfiner(t)
-	box := domain.ConfinementBox{WorkspaceRoot: t.TempDir()}
+	box := domain.ConfinementBox{WorkspaceRoot: tempDir(t)}
 	cmd := exec.Command("cmd", "/c", "echo hi")
 	wantPath, wantArgs := cmd.Path, append([]string(nil), cmd.Args...)
 
@@ -128,7 +128,7 @@ func TestWindowsConfineRefusesNetworkDenyBox(t *testing.T) {
 	// is refused outright; it never runs network-open behind the user's back.
 	c := newProbeConfiner(t)
 	box := domain.ConfinementBox{
-		WorkspaceRoot: t.TempDir(),
+		WorkspaceRoot: tempDir(t),
 		NetworkAllow:  []string{"example.com:443"},
 	}
 	cmd := exec.Command("cmd", "/c", "echo hi")
@@ -170,7 +170,7 @@ func TestWindowsGenuinelyTildeNamedRootIsContainable(t *testing.T) {
 	// failure, refusing the box into Gate mode. With the longPath seam carrying ok, the
 	// verified name is contained, the guardrail accepts it, and the label pass runs; a
 	// short name nothing on the disk can verify is still refused.
-	parent := t.TempDir()
+	parent := tempDir(t)
 	root := filepath.Join(parent, "demo~1")
 	if err := os.Mkdir(root, 0o700); err != nil {
 		t.Fatalf("mkdir %q: %v", root, err)
@@ -180,7 +180,7 @@ func TestWindowsGenuinelyTildeNamedRootIsContainable(t *testing.T) {
 		t.Errorf("Contains(%q, child) = false, want true — the OS resolver verified the name as its own long form", root)
 	}
 
-	c := newTokenConfiner(t.TempDir())
+	c := newTokenConfiner(tempDir(t))
 	t.Cleanup(func() { _ = c.Close() })
 	if !c.Capabilities().FSWrite {
 		t.Skip("no restricted token on this host; nothing to label")
@@ -202,7 +202,7 @@ func TestWindowsGenuinelyTildeNamedRootIsContainable(t *testing.T) {
 	// The refusal half: a short-shaped name with no object behind it cannot be verified by
 	// anything, so the guardrail still fails it closed rather than comparing a guess.
 	ghost := filepath.Join(parent, "nosuch~1")
-	after := newTokenConfiner(t.TempDir())
+	after := newTokenConfiner(tempDir(t))
 	t.Cleanup(func() { _ = after.Close() })
 	err := after.Confine(context.Background(), domain.ConfinementBox{WorkspaceRoot: ghost}, exec.Command("cmd", "/c", "echo hi"))
 	if err == nil || !errors.Is(err, domain.ErrConfinementUnavailable) {
@@ -221,9 +221,9 @@ func TestWindowsGuardrailSeesReparseRootsAndTrailingDotSpellings(t *testing.T) {
 	// the check as spelled and was then labelled through the OS's canonical form. Three
 	// refusals and one acceptance, against a temp stand-in wired into the protected list so
 	// no real system location is ever at stake.
-	base := t.TempDir()
+	base := tempDir(t)
 
-	c := newTokenConfiner(t.TempDir())
+	c := newTokenConfiner(tempDir(t))
 	t.Cleanup(func() { _ = c.Close() })
 	if !c.Capabilities().FSWrite {
 		t.Skip("no restricted token on this host; nothing to label")
@@ -340,7 +340,7 @@ func TestWindowsNoJournalHomeRefusesToLabel(t *testing.T) {
 		t.Error("a journal-less backend reports itself Auto-ineligible; the facility is present and construction must be unaffected")
 	}
 
-	ws := t.TempDir()
+	ws := tempDir(t)
 	cmd := exec.Command("cmd", "/c", "echo hi")
 
 	err := c.Confine(context.Background(), domain.ConfinementBox{WorkspaceRoot: ws}, cmd)
@@ -369,7 +369,7 @@ func TestWindowsUnwritableJournalRefusesToLabel(t *testing.T) {
 	// must follow is a refusal, not a labelled box: the flush failure happens between reading
 	// the root's prior label and writing the first new one, so this pins the ordering ("journal
 	// first, label second") as well as the fail-closed outcome.
-	home := t.TempDir()
+	home := tempDir(t)
 	if err := os.WriteFile(winlabel.JournalDir(home), []byte("not a directory"), 0o600); err != nil {
 		t.Fatalf("occupy the journal directory's path with a file: %v", err)
 	}
@@ -380,7 +380,7 @@ func TestWindowsUnwritableJournalRefusesToLabel(t *testing.T) {
 		t.Skip("no restricted token on this host; the flush refusal cannot be told apart from the mint failure")
 	}
 
-	ws := t.TempDir()
+	ws := tempDir(t)
 	cmd := exec.Command("cmd", "/c", "echo hi")
 
 	err := c.Confine(context.Background(), domain.ConfinementBox{WorkspaceRoot: ws}, cmd)
@@ -409,12 +409,12 @@ func TestWindowsLabelsAreRevertedOnTeardown(t *testing.T) {
 	// Contract §6.2 row #9: the disk mutation is undone. The assertion is behavioural as well
 	// as descriptive — after Close a confined child must be denied the very write that
 	// succeeded while the box was up, which is what "back to their prior state" MEANS.
-	c := newTokenConfiner(t.TempDir())
+	c := newTokenConfiner(tempDir(t))
 	if !c.Capabilities().FSWrite {
 		t.Skip("no restricted token on this host; nothing to revert")
 	}
 
-	ws := t.TempDir()
+	ws := tempDir(t)
 	existing := filepath.Join(ws, "existing.txt")
 	if err := os.WriteFile(existing, []byte("old"), 0o600); err != nil {
 		t.Fatalf("seed existing file: %v", err)
@@ -457,9 +457,9 @@ func TestWindowsLabelsAreRevertedOnTeardown(t *testing.T) {
 
 	// The behavioural half: a fresh backend's confined child, aimed at the now-unlabelled
 	// directory, is denied — the box is genuinely gone, not merely described as gone.
-	after := newTokenConfiner(t.TempDir())
+	after := newTokenConfiner(tempDir(t))
 	t.Cleanup(func() { _ = after.Close() })
-	elsewhere := domain.ConfinementBox{WorkspaceRoot: t.TempDir()}
+	elsewhere := domain.ConfinementBox{WorkspaceRoot: tempDir(t)}
 	target := filepath.Join(ws, "after-teardown.txt")
 	if err := runConfinedLine(t, after, elsewhere, target); err == nil {
 		t.Error("a confined write into the reverted directory succeeded; the label was not really removed")
@@ -477,8 +477,8 @@ func TestWindowsForeignPriorLabelIsRestoredOnTeardown(t *testing.T) {
 	// restoring priors SECOND (winlabel.revertJournal's order comment) — is otherwise invisible
 	// to the suite: deleting the prior-restore loop, or swapping the clear/restore order,
 	// passes every other test.
-	home := t.TempDir()
-	ws := t.TempDir()
+	home := tempDir(t)
+	ws := tempDir(t)
 	child := filepath.Join(ws, "foreign.txt")
 	sibling := filepath.Join(ws, "sibling.txt")
 	for _, path := range []string{child, sibling} {
@@ -586,8 +586,8 @@ func TestWindowsUnreadablePriorDescendantIsNotLabelled(t *testing.T) {
 	// instead be skipped entirely: no Low label, no journal entry, and the rest of the box
 	// labelled as normal. (The skip-versus-attempt distinction itself is pinned by the
 	// untagged TestDescendantLabelDecision; this proves the wiring against a real deny.)
-	home := t.TempDir()
-	ws := t.TempDir()
+	home := tempDir(t)
+	ws := tempDir(t)
 	child := filepath.Join(ws, "opaque.txt")
 	sibling := filepath.Join(ws, "sibling.txt")
 	for _, path := range []string{child, sibling} {
@@ -662,9 +662,9 @@ func TestWindowsHardLinkedDescendantIsNotLabelled(t *testing.T) {
 	// WorkspaceRoot ∪ WritablePaths: the box would hand every Low process on the machine write
 	// access to the user's package store. (The skip itself is pinned off-OS by
 	// TestDescendantLabelDecision; this proves the wiring against a real hard link.)
-	home := t.TempDir()
-	ws := t.TempDir()
-	store := t.TempDir() // stands in for the global package store outside the box
+	home := tempDir(t)
+	ws := tempDir(t)
+	store := tempDir(t) // stands in for the global package store outside the box
 	target := filepath.Join(store, "package.js")
 	if err := os.WriteFile(target, []byte("outside the box"), 0o600); err != nil {
 		t.Fatalf("seed %q: %v", target, err)
@@ -736,9 +736,9 @@ func TestWindowsHardLinkedDescendantIsNotClearedOnTeardown(t *testing.T) {
 	// preserve. The fixture plants a foreign Medium label on a file outside the box, hard-links
 	// it in, and asserts the label is still there verbatim after teardown. (The skip itself is
 	// pinned off-OS by TestDescendantClearDecision; this proves the wiring.)
-	home := t.TempDir()
-	ws := t.TempDir()
-	store := t.TempDir() // stands in for the global package store outside the box
+	home := tempDir(t)
+	ws := tempDir(t)
+	store := tempDir(t) // stands in for the global package store outside the box
 	target := filepath.Join(store, "package.js")
 	if err := os.WriteFile(target, []byte("outside the box"), 0o600); err != nil {
 		t.Fatalf("seed %q: %v", target, err)
@@ -871,8 +871,8 @@ func TestWindowsUnclearableDescendantKeepsTheJournal(t *testing.T) {
 	// revert, so the journal survives and the next session's recovery finishes the job once
 	// the obstacle is gone. Before this, winlabel.ClearTree swallowed every descendant failure
 	// and the Low label was stranded with no record and no residue report.
-	home := t.TempDir()
-	ws := t.TempDir()
+	home := tempDir(t)
+	ws := tempDir(t)
 	child := filepath.Join(ws, "stuck.txt")
 	if err := os.WriteFile(child, []byte("old"), 0o600); err != nil {
 		t.Fatalf("seed %q: %v", child, err)
@@ -929,8 +929,8 @@ func TestWindowsDeletedPriorLabelledPathDoesNotWedgeTheRevert(t *testing.T) {
 	// COMPLETED revert, not a failure — there is no object left to carry the label. Before
 	// this, the prior-restore loop failed on it forever: Close warned every session, recovery
 	// retried and failed every startup, and the only remedy was deleting the journal by hand.
-	home := t.TempDir()
-	ws := t.TempDir()
+	home := tempDir(t)
+	ws := tempDir(t)
 	child := filepath.Join(ws, "foreign.txt")
 	if err := os.WriteFile(child, []byte("old"), 0o600); err != nil {
 		t.Fatalf("seed %q: %v", child, err)
@@ -989,8 +989,8 @@ func TestWindowsFailedRootLabelWriteUnwindsItsJournalEntry(t *testing.T) {
 	// clear), so the journal was never retired and ConfinementResidue alarmed forever over a
 	// clean disk — a persistent false alarm that trains the user to ignore the real one. The
 	// refusal must instead leave NO journal debris.
-	home := t.TempDir()
-	ws := t.TempDir()
+	home := tempDir(t)
+	ws := tempDir(t)
 
 	c := newTokenConfiner(home)
 	t.Cleanup(func() { _ = c.Close() })
@@ -1058,8 +1058,8 @@ func TestWindowsInterruptedRunIsRecoveredFromTheJournal(t *testing.T) {
 	// ADR 0020 §2's interrupted-cleanup remedy. A process killed mid-run leaves labels and a
 	// journal; the next NewConfiner finishes the restore. It is simulated by dropping the
 	// backend on the floor (no Close) and constructing a second one against the same home.
-	home := t.TempDir()
-	ws := t.TempDir()
+	home := tempDir(t)
+	ws := tempDir(t)
 
 	crashed := newTokenConfiner(home)
 	if !crashed.Capabilities().FSWrite {
@@ -1102,8 +1102,8 @@ func TestWindowsReportConstructionLeavesAnOutstandingJournalAlone(t *testing.T) 
 	// backend consumed it first. The report constructor therefore skips recovery, and its
 	// session twin still performs it (TestWindowsInterruptedRunIsRecoveredFromTheJournal), which
 	// is what makes this a real distinction rather than a no-op.
-	home := t.TempDir()
-	ws := t.TempDir()
+	home := tempDir(t)
+	ws := tempDir(t)
 
 	crashed := newTokenConfiner(home)
 	if !crashed.Capabilities().FSWrite {
@@ -1146,8 +1146,8 @@ func TestWindowsRecoveryLeavesALiveProcessAlone(t *testing.T) {
 	// The other side of recovery: a journal owned by a process that is still running belongs
 	// to a concurrently running apogee whose labels are in use. Reverting them would un-fence
 	// that session, so recovery must skip it — and the host report must still surface it.
-	home := t.TempDir()
-	ws := t.TempDir()
+	home := tempDir(t)
+	ws := tempDir(t)
 
 	live := newTokenConfiner(home)
 	if !live.Capabilities().FSWrite {
@@ -1181,7 +1181,7 @@ func TestWindowsRecoveryLeavesAnUndecodableJournalInPlace(t *testing.T) {
 	// winlabel.ResidueIn must still name it afterwards — that report is the only path by which
 	// this state ever reaches a human, and a plausible "clean up what we can't decode" refactor
 	// would make it permanently unreachable while passing every decode-path test.
-	home := t.TempDir()
+	home := tempDir(t)
 	// A dead PID in the file name; the shield under test is the undecodability alone, since
 	// recovery never gets far enough to consult liveness for a journal it cannot read.
 	garbage := winlabel.JournalPath(home, 909)
@@ -1215,8 +1215,8 @@ func TestWindowsTeardownSparesALiveSiblingsRoot(t *testing.T) {
 	// would never re-label, so every later confined write in that session would be denied for
 	// its remaining lifetime. The survivor is simulated by a planted journal naming the same
 	// root, owned by a long-lived child process — a genuinely live PID that is not this one.
-	home := t.TempDir()
-	ws := t.TempDir()
+	home := tempDir(t)
+	ws := tempDir(t)
 
 	first := newTokenConfiner(home)
 	if !first.Capabilities().FSWrite {
@@ -1281,8 +1281,8 @@ func TestWindowsForeignPriorOnASharedRootSurvivesSiblingTeardown(t *testing.T) {
 	// the only record of the foreign prior was gone. Now A's Close hands the prior off instead
 	// — its journal survives, trimmed to exactly the prior-carrying entry — and the first
 	// construction after both sessions end completes the restore.
-	home := t.TempDir()
-	ws := t.TempDir()
+	home := tempDir(t)
+	ws := tempDir(t)
 
 	// The foreign prior sits on the shared ROOT itself, planted with the same helper the
 	// backend labels with and captured in the OS's own rendering — the verbatim the restore
@@ -1373,8 +1373,8 @@ func TestWindowsRelabellingNeverJournalsApogeesOwnLabel(t *testing.T) {
 	// reopened), and a second backend reading a box another session has already labelled. Under
 	// either, a journal that recorded apogee's own Low label as "prior state" would make
 	// teardown RE-APPLY it, and the residue would survive every future cleanup.
-	home := t.TempDir()
-	ws := t.TempDir()
+	home := tempDir(t)
+	ws := tempDir(t)
 	existing := filepath.Join(ws, "existing.txt")
 	if err := os.WriteFile(existing, []byte("old"), 0o600); err != nil {
 		t.Fatalf("seed existing file: %v", err)
@@ -1409,7 +1409,7 @@ func TestWindowsRelabellingNeverJournalsApogeesOwnLabel(t *testing.T) {
 	// A second backend with its own journal home, over the still-labelled box — the concurrent
 	// session's read of a transient Low label. (Its own home keeps construction from recovering
 	// the first backend's journal, which shares this process's PID.)
-	second := newTokenConfiner(t.TempDir())
+	second := newTokenConfiner(tempDir(t))
 	secondClosed := false
 	t.Cleanup(func() {
 		if !secondClosed {
@@ -1470,7 +1470,7 @@ func TestWindowsConfineRacesCloseAndNeverStartsUnconfined(t *testing.T) {
 	// and the second read stored a Token of 0 into SysProcAttr while Confine returned nil — so
 	// CreateProcess started the child UNCONFINED and the caller recorded it as confined. The
 	// per-iteration invariant is exactly that failure's negation: a nil error implies a token.
-	c := newTokenConfiner(t.TempDir())
+	c := newTokenConfiner(tempDir(t))
 	if !c.Capabilities().FSWrite {
 		t.Skip("no restricted token on this host; nothing to confine")
 	}
@@ -1480,7 +1480,7 @@ func TestWindowsConfineRacesCloseAndNeverStartsUnconfined(t *testing.T) {
 			_ = c.Close()
 		}
 	})
-	box := domain.ConfinementBox{WorkspaceRoot: t.TempDir()}
+	box := domain.ConfinementBox{WorkspaceRoot: tempDir(t)}
 
 	// One confinement up front: it pays the label pass, so the racing loop below exercises the
 	// lifecycle read rather than a repeated disk walk, and a box this host cannot label fails
@@ -1553,7 +1553,7 @@ func TestWindowsCloseIsRepeatable(t *testing.T) {
 	// asserted — the ordinary repeat is a no-op, and a repeat over a handed-off prior discharges
 	// the handoff instead of silently keeping it forever.
 	t.Run("a fully retired session's second Close is a no-op", func(t *testing.T) {
-		home, ws := t.TempDir(), t.TempDir()
+		home, ws := tempDir(t), tempDir(t)
 		c := newTokenConfiner(home)
 		if !c.Capabilities().FSWrite {
 			t.Skip("no restricted token on this host; nothing to revert")
@@ -1581,7 +1581,7 @@ func TestWindowsCloseIsRepeatable(t *testing.T) {
 	})
 
 	t.Run("a handed-off prior is discharged by the repeat", func(t *testing.T) {
-		home, ws := t.TempDir(), t.TempDir()
+		home, ws := tempDir(t), tempDir(t)
 		if err := winlabel.SetSDDL(ws, "S:(ML;OICI;NW;;;ME)"); err != nil {
 			t.Fatalf("apply the foreign Medium label to %q: %v", ws, err)
 		}
@@ -1651,7 +1651,7 @@ func TestWindowsCapabilitiesAfterCloseAreEmpty(t *testing.T) {
 	// Capability honesty across the lifecycle (contract §5): the facility is gone once the
 	// handle is, so the backend must stop claiming it — and with FSWrite false it stops being
 	// Auto-eligible, which is what keeps a torn-down backend from gating Auto in.
-	c := newTokenConfiner(t.TempDir())
+	c := newTokenConfiner(tempDir(t))
 	if !c.Capabilities().FSWrite {
 		t.Skip("no restricted token on this host; capabilities are already empty")
 	}
@@ -1673,7 +1673,7 @@ func TestWindowsPrewarmAfterCloseLabelsNothing(t *testing.T) {
 	// overlap a shutdown. A prewarm that walked on after Close would put a mandatory label on
 	// the disk with the journal already retired — a label with no record of how to undo it,
 	// which ADR 0020 §2 forbids outright.
-	home, ws := t.TempDir(), t.TempDir()
+	home, ws := tempDir(t), tempDir(t)
 	c := newTokenConfiner(home)
 	if !c.Capabilities().FSWrite {
 		t.Skip("no restricted token on this host; the prewarm is a no-op anyway")
@@ -1707,8 +1707,8 @@ func TestWindowsPlantedJournalDoesNotRelabelAForeignPath(t *testing.T) {
 	// instruction and wrote the label. Nothing in this test needs a restricted token — the
 	// harm is done by the recovery pass alone, which is exactly what makes it reachable on any
 	// Windows host that can be made to drop a file under ~/.apogee.
-	home := t.TempDir()
-	victim := filepath.Join(t.TempDir(), "victim.txt")
+	home := tempDir(t)
+	victim := filepath.Join(tempDir(t), "victim.txt")
 	if err := os.WriteFile(victim, []byte("not apogee's"), 0o600); err != nil {
 		t.Fatalf("seed %q: %v", victim, err)
 	}
@@ -1750,8 +1750,8 @@ func TestWindowsRecoverStillRestoresOurOwnPrior(t *testing.T) {
 	// foreign prior, one recovery pass — except that the label on the path IS apogee's,
 	// because this journal describes a run that really labelled it. A check that dropped
 	// everything would pass the test above and silently strip the package's whole purpose.
-	home := t.TempDir()
-	ws := t.TempDir()
+	home := tempDir(t)
+	ws := tempDir(t)
 	child := filepath.Join(ws, "foreign.txt")
 	if err := os.WriteFile(child, []byte("old"), 0o600); err != nil {
 		t.Fatalf("seed %q: %v", child, err)
@@ -1807,8 +1807,8 @@ func TestWindowsHandedOffPriorIsJudgedOnce(t *testing.T) {
 	// vouches for it. Judging once, before this session's clear, and persisting the verdict is
 	// what keeps that later pass able to restore it; a check that re-read the path would find
 	// nothing of apogee's and drop the foreign label for good.
-	home := t.TempDir()
-	ws := t.TempDir()
+	home := tempDir(t)
+	ws := tempDir(t)
 	if err := winlabel.SetSDDL(ws, "S:(ML;OICI;NW;;;ME)"); err != nil {
 		t.Fatalf("apply the foreign Medium label to %q: %v", ws, err)
 	}
@@ -1891,8 +1891,8 @@ func TestWindowsFailedRestoreIsRetriedNotDropped(t *testing.T) {
 	// the next run reads a path whose Low label the failed pass nonetheless removed, because
 	// the clear runs before the restore. The persisted verdict is what still entitles that
 	// retry to write the prior back.
-	home := t.TempDir()
-	ws := t.TempDir()
+	home := tempDir(t)
+	ws := tempDir(t)
 	child := filepath.Join(ws, "foreign.txt")
 	if err := os.WriteFile(child, []byte("old"), 0o600); err != nil {
 		t.Fatalf("seed %q: %v", child, err)
@@ -2055,4 +2055,20 @@ func liveChildPID(t *testing.T) (int, func()) {
 		t.Skipf("pid %d is not reported alive; cannot synthesise a live owner", cmd.Process.Pid)
 	}
 	return cmd.Process.Pid, kill
+}
+
+// tempDir is t.TempDir() in its LONG-name form. On a host whose %TEMP% is spelled with an 8.3
+// alias — GitHub's Windows runners live under C:\Users\RUNNER~1 — t.TempDir() returns the short
+// spelling, while the backend resolves every box root to its final on-disk form before it
+// labels or journals it (resolveBoxRoot). A test that compares journal entries, residue
+// notices or planted sibling journals against the raw t.TempDir() would then compare two
+// spellings of one location and never match; canonicalising here is what production does
+// with every root it is handed.
+func tempDir(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	if long, ok := longPathName(dir); ok {
+		return long
+	}
+	return dir
 }

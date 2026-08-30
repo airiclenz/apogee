@@ -258,13 +258,13 @@ func TestJournalLabelEntryNeverRecordsApogeesOwnLabel(t *testing.T) {
 		},
 		{
 			name:        "own_dir_label_as_root_prior_is_recorded_as_no_prior",
-			entry:       Entry{Path: `C:\work`, Root: true, PriorSDDL: dirSDDL},
+			entry:       Entry{Path: `C:\work`, Root: true, PriorSDDL: lowSDDL},
 			wantChanged: true,
 			wantEntries: []Entry{{Path: `C:\work`, Root: true}},
 		},
 		{
 			name:  "own_file_label_on_a_descendant_is_not_recorded_at_all",
-			entry: Entry{Path: `C:\work\main.go`, PriorSDDL: fileSDDL},
+			entry: Entry{Path: `C:\work\main.go`, PriorSDDL: lowSDDL},
 		},
 		{
 			name:  "inherited_own_label_on_a_descendant_is_not_recorded_at_all",
@@ -277,19 +277,19 @@ func TestJournalLabelEntryNeverRecordsApogeesOwnLabel(t *testing.T) {
 		{
 			name:        "duplicate_path_keeps_the_first_prior",
 			entries:     []Entry{{Path: `C:\work`, Root: true, PriorSDDL: foreignMedium}},
-			entry:       Entry{Path: `C:\work`, Root: true, PriorSDDL: dirSDDL},
+			entry:       Entry{Path: `C:\work`, Root: true, PriorSDDL: lowSDDL},
 			wantEntries: []Entry{{Path: `C:\work`, Root: true, PriorSDDL: foreignMedium}},
 		},
 		{
 			name:        "case_varied_duplicate_path_is_the_same_path",
 			entries:     []Entry{{Path: `C:\Work`, Root: true}},
-			entry:       Entry{Path: `c:\work`, Root: true, PriorSDDL: dirSDDL},
+			entry:       Entry{Path: `c:\work`, Root: true, PriorSDDL: lowSDDL},
 			wantEntries: []Entry{{Path: `C:\Work`, Root: true}},
 		},
 		{
 			name:        "a_journalled_descendant_can_still_become_a_root",
 			entries:     []Entry{{Path: `C:\work\vendor`, PriorSDDL: foreignMedium}},
-			entry:       Entry{Path: `C:\WORK\VENDOR`, Root: true, PriorSDDL: dirSDDL},
+			entry:       Entry{Path: `C:\WORK\VENDOR`, Root: true, PriorSDDL: lowSDDL},
 			wantChanged: true,
 			wantEntries: []Entry{{Path: `C:\work\vendor`, Root: true, PriorSDDL: foreignMedium}},
 		},
