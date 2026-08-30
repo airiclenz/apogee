@@ -40,15 +40,7 @@
                                                                             see less…
 
 ✦ Sub-Agent
-┌─┶ survey the tests ✓ ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ 2 tool calls · 12k/32k · Found 4 gaps ▼
-│
-│ Survey the tests and report the gaps you find.
-│
-│ ✦ Read
-│   ┕ a.go ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ 5 lines
-│
-│ ✦ Terminal
-│   ┕ go test ./... ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ exit 0 · +3 more lines ▶
+  ┕ survey the tests ✓ ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ 2 tool calls · 12k/32k · Found 4 gaps ▶
 
 ✦ This is the last message from the LLM. There must always be one empty line between
   chat content and the bottom prompt/information section like displayed here.
@@ -700,8 +692,9 @@ cap falls on — the block has no body to cap instead — and the remainder mark
 the branch marker's own width.
 
 **What the block's own chrome is painted in.** The `│` gutter an expanded member's continuation
-rows carry takes the detail gray and deliberately **not** the sub-agent rail's `tool-header` gold,
-so an open member inside a nested run cannot be read as a frame of the run. The dotted leader takes
+rows carry takes the detail gray and deliberately **not** the `tool-header` gold the delegation
+rail wore while that rail existed, so an open member is read as one block's chrome and never as the
+frame of a run — the frame itself is gone (below; ADR 0063), and the gutter is the only `│` left. The dotted leader takes
 the `tool-leader` role — `muted` damped a step further, so the dots recede behind the two things
 they join. And the `see less…` an open block closes on is the prompt block's own word for the same
 act: one vocabulary for "close this".
@@ -725,17 +718,14 @@ where the text does: it is the text's field and never the frame's.
 of its leading and trailing blank lines, and interior runs of two or more blank lines collapse
 to one — except inside a fenced code block, where blank lines are code and stay verbatim.
 
-Inside a sub-agent run that separating row is not empty: it carries the `│` rail gutter, drawn as
-deep as *both* neighbouring blocks reach, so the run's frame runs unbroken from its `┌─┶` header
-row to its last line. It is still exactly one row, and where the walk climbs out of an expanded
-`✦ Sub-Agent (N)` member's span *into the next row of that list* it is the `┊` closing that span —
-railed at the level the list resumes at, and standing *in* the separator's place rather than beside
-it, since a blank row next to it would say the run ended twice. That is the closer's only
-occasion (`docs/layout/tool-layout.md`, "Grouped Sub-agents"): a group's last member, a lone
-delegation and a run still streaming at the foot of the transcript are each followed by the
-ordinary separator. It is bare only where the two blocks share
-no rail — at a run's start, and between two sub-agent calls that follow one another, which is what
-keeps them from reading as one run.
+That row is **bare everywhere**, because no block opens a railed span inside another any more. A
+delegation's second shape is its **run view** (below), which paints that run's own rows at the
+transcript's own depth rather than nesting them under a frame, and every run left standing in the
+conversation is a collapsed row. The `│` rail an open delegation used to draw unbroken from a
+`┌─┶` header row down to its last line, and the `┊` that closed such a span where an
+`✦ Sub-Agent (N)` list resumed after it, went with the inline shape (ADR 0063) — the one `│` still
+on screen is an open group member's continuation gutter (above), which is that block's own chrome
+and never a run's frame.
 
 ---
 
@@ -749,7 +739,9 @@ spec's — [`docs/layout/tool-layout.md`](docs/layout/tool-layout.md), "Fold sta
 A **grouped** block is the one place the unit is smaller than the block: it has no state of its own,
 each member carries its own, and one member of ten opens while the other nine hold still. The
 sub-agent run is the one block whose collapsed paint goes further, eliding its report body along
-with the whole span behind it (below). Truncation is thereby a **render-time act on retained
+with the whole span behind it — and the one block with **no expanded shape at all**: opening a
+framed delegation opens its **run view** (below), so the collapsed row is the only shape it wears
+in the conversation. Truncation is thereby a **render-time act on retained
 facts**: the entry keeps every line, and the cap applies at paint, not at build.
 
 **One budget, and every tool-shaped block spends it: the header, and at most two content rows.**
@@ -797,7 +789,10 @@ because a record may collapse.
 **Collapsed is the default, always** — including a call still in flight, a member of a group and a
 sub-agent run still working. Only a click changes a block's state, so nothing ever expands or
 collapses by itself: a block opened mid-flight streams its body live and stays open when the result
-lands. The state is the view's alone — it is never encoded with the transcript, a resumed session
+lands. Expanding a **framed delegation** is the one act that is no fold at all: it opens that run's
+**run view** (below), which opens on the run's latest line and follows it as it grows. That is a
+different *surface* rather than a fold state moving under the reader, so the rule above stands
+untouched — a run has no expanded state for anything to change. The state is the view's alone — it is never encoded with the transcript, a resumed session
 paints everything collapsed, and `/clear` forgets it with everything else.
 
 **What a click means.** A motionless click — press and release in the same cell — **anywhere on a
@@ -838,8 +833,10 @@ so it speaks in apogee's voice like the marker does rather than in the detail gr
 summarises. A failed call's red overrides it and nothing else does; every kind of summary,
 promoted and quoted ones included, takes the marker tone. The sketch at the
 top of this file shows both states side by side: a collapsed `Terminal` row over its remainder
-marker, and a `Diff Preview` and a `Sub-Agent` deliberately drawn open so the shape of a full body
-appears too — the command among them, because collapsed it would show nothing of what it holds.
+marker, and a `Diff Preview` deliberately drawn open so the shape of a full body appears too — a
+body being the one thing a collapsed row shows nothing of. The `Sub-Agent` there
+is drawn shut, which is the only shape a run wears in the conversation: opening one leaves the
+transcript for its run view (below).
 
 **An open block reads a step brighter.** The plain detail gray a block paints its target and
 its body in has two tones, and they are two roles: the dim `muted` (`#8a8a8a` under
@@ -905,8 +902,8 @@ three-row shape, a deliberately expanded one sticks expanded, self-inflicted and
 click.
 
 **A sub-agent run collapses to its call block.** The `Sub-Agent` call block is the run's header
-block: collapsed, it stands alone and the whole railed span beneath it — every inner block, rail
-and all — is elided. **Its target — the text leading its row — is the
+block, and in the conversation it is the whole of the run: it stands alone and the whole span
+beneath it — every inner block — is elided, to be read in the run's own view (below). **Its target — the text leading its row — is the
 delegation's name** when the call gave one, and the delegated task's first line when it did not, so
 a fan-out reads as what each child is *for* rather than as several openings of one instruction. The
 name is clipped and escape-stripped exactly as a task line is, and an unnamed delegation's header
@@ -949,34 +946,34 @@ span**, because the summary slot already says that report's first line and no bl
 same text twice in two adjacent rows. It counts no `+N more lines` either — the transitive
 count is what says there is work behind the header, and the header is a toggle target however
 short the report is, so nothing is unreachable. **A run's live text is inside the run from its
-first token**: while the delegate is generating, the streamed preview paints at the depth that
-produced it — railed inside the run's own frame when the run is expanded, and elided
-with the whole span when it is collapsed, where the blinking head and the status line's
+first token**: while the delegate is generating, the streamed preview paints inside the run that
+produced it — shown in that run's own view, and elided with the whole span while the run is a
+collapsed row in the conversation, where the blinking head and the status line's
 `sub-agent · responding` already say a delegate is talking. A preview at the top level would say
-the opposite: that this is the main agent's answer. Expanding the run reveals the report in full
-and the inner blocks *in their own states*, each collapsed unless it was itself clicked open: the
-cascade is this one rule applied at every depth, not a special case. What expanding does **not**
-do is take the header's summary slot back: the open row carries the same `N tool calls · <fill>`
-and gist the collapsed row carried, and the report, the prompt and the span come out *beneath* it —
-a row that said less once opened than it did shut would punish the click that opened it.
+the opposite: that this is the main agent's answer. **The header has no open shape to grow into**:
+expanding a framed delegation opens its run view rather than unfolding the block, so the row the
+reader leaves behind is the row they clicked — summary slot, gist and all — and the task, the
+report and every inner block are read inside the view instead. Those inner blocks keep *their own
+states*, each collapsed unless it was itself clicked open, and a delegation among them opens a view
+of its own: the cascade is this one rule applied at every depth, not a special case.
 
 **Concurrent delegates get one run each.** When a reply asks for several delegations at once
 they run concurrently (ADR 0039), and the scrollback shows **one run per child, in the order
 the calls were made** — the first `sub_agent` call is the first of them — each holding only its own
 child's work; adjacent ones fold into the canon spec's `✦ Sub-Agent (N)` list, one row per child,
-and opening a row opens that child's span. Nothing about a single run's shape changes: each is the
+and opening a row opens that child's run view. Nothing about a single run's shape changes: each is the
 same collapsed call block
 described above, in the same two tempi, under the same cap. What changes is that the grouping can
 no longer be read off the nesting depth, because siblings share it: every delegated block belongs
 to the run whose `sub_agent` call spawned it, and it is *placed* in that run's stretch of the
 scrollback as it arrives, however the children's events interleave on the way in. So each block
 counts its **own** tool calls, states its **own** context fill, and ticks with its **own** activity
-phrase — which is what makes a fan-out readable at all, since the status line can name only one
-delegate at a time. Which one it is naming is no longer left to inference: the slot's phrase belongs
-to whichever child emitted the last event, and when that delegation was **given a name** the name
-takes the place of the generic word — `repo-scout · reading` rather than
-`sub-agent · reading`. A delegation that named nothing, and one whose run block has not
-opened yet, both keep the generic word. A child's live text follows its own block by the same rule: the streamed
+phrase. The status line keeps **one slot per run** and shows the one the reader is standing in
+(below): at the top level a single live delegate speaks under its own name — `repo-scout · reading`
+where the delegation was **given a name**, `sub-agent · reading` where it named nothing or its run
+block has not opened yet — and **two or more are merged into a count**, `2 sub-agents · working`,
+because a row with space for one sentence had to pick a delegate out of the fan-out and flickered
+between whichever spoke last. A child's live text follows its own block by the same rule: the streamed
 preview paints inside the run that produced it, elided while that run is collapsed, and two
 children talking at once neither share a block nor interleave a word. Expanding, collapsing,
 clicking and resuming are unchanged — a per-child block is a tool block like any other, and a
@@ -1013,6 +1010,110 @@ Firing runs, so the header never blinks whatever the frame's phase, and the bran
 what says the run is going. Everything else a Schedule does — created, skipped, stopped — stays a
 one-line note: those are lifecycle facts with no body, and a block around them would be an empty
 drawer.
+
+---
+
+## Run view
+
+**Expanding a delegation opens it, and opening it takes the transcript.** A framed `Sub-Agent`
+row — reached by a motionless click anywhere on it, or by `⏎` on the block cursor — opens that run
+as its **run view**: the transcript slot paints that one run and nothing else, rooted at the run's
+own task, opened on its latest line and following it as it grows. Everything around the slot stays
+exactly where it was — the top rule, the status line, the staged band, the prompt box and the
+footer — so this is a pane inside apogee's own frame and never an alternate screen (ADR 0035), and
+the conversation the reader left is one `esc` away rather than out of reach. A run has these two
+shapes and no third: the collapsed row it wears in the conversation, and this. The
+`✦ Sub-Agent (N)` umbrella is unchanged and still opens **inline** to its member rows — each of
+those rows is a collapsed run, and opening one opens its view.
+
+```text
+  ← main › scout                                                             esc back
+
+❯ Take the second half of the survey
+
+✦ Read
+  ┕ a.txt ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ 2 lines
+
+❯ What have you found so far
+
+✦ So far a.txt, and it says hello.
+
+▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔ centered session name ▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔
+  ⠉⠹ scout · reading · 3s                                                    esc back
+╭─────────────────────────────────────────────────────────────────────────────────────╮
+│ Message scout…  ⏎ send · ↑ recall · esc back                                        │
+╰─────────────────────────────────────────────────────────────────────────────────────╯
+  workstation ✦ qwen3.6-27B-Q4_K_S.gguf ✦ ~/Repos/apogee                 ◐ ask before
+▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+```
+
+**A run's rows are the view's own rows.** Inside the view the delegate's blocks are rebased to the
+transcript's own depth: no rail, no frame, no extra indent, and the full body column to wrap in —
+one run read the way the conversation is read, which is the whole point of taking the slot rather
+than nesting a frame inside it. The run's **task** leads the view as the first `❯` row, in the
+place the human's own prompt takes at the top level, because the task is what was said to this
+delegate; its report is its last `✦` row, said once, where it was said. The blocks between keep
+*their own* fold states, a nested delegation among them is a collapsed row that opens a view of its
+own, and everything the transcript does elsewhere — the scroll bar, the block cursor,
+drag-selection, `see more`, the live star — it does here.
+
+**The breadcrumb is the header, and it is the way back.** The first row of the view names the trail
+from the human's own conversation down to the run on screen — `← main › planner › repo-scout`, one
+crumb per level, each run named the way every other surface names it (the delegation's name, else
+its task's first line, else the generic word) — with `esc back` held `bodyIndent` off the right
+edge, in the same column the status line's right slot ends in, so the two rows on screen
+advertising a key end together. It is the **one sticky header a view has**: a rooted paint collects
+no `❯` block to stick, so the breadcrumb holds the top row for as long as the view is open, and it
+is squared out to the full width so the terminal's own background never shows through beside it.
+Where the width cannot pay for both, the hint gives way whole rather than truncating — a key hint
+nobody can read advertises nothing, and the trail is what the header is for. A motionless click
+anywhere on the row goes **one** level up, and `esc` does the same: the trail is a sign rather than
+a set of jump targets, so leaving a run two deep is two presses.
+
+**`esc` means back before it means stop.** While a view is open the status line's right slot reads
+`esc back` where it would otherwise offer `esc×2 stop`, and the stop is deliberately not reachable
+from inside: stopping is whole-run and belongs to the top level — a child cannot outlive the Turn
+it runs inside — so a reader one level down stops the run in three presses, one to walk out and the
+double-tap there. Each level remembers where the level **below** it was parked, so backing out
+lands the reader on the row they opened the run from rather than at the tail of a conversation they
+had scrolled up in; a level that was following the tail gets the tail, which is where the
+conversation has grown to in the meantime. The view is the display's state and nothing else's: it
+is never encoded with the transcript, never written to a session record and never restored, so a
+resumed session opens at the top level, and `/clear` forgets it with everything else.
+
+**One activity slot per run, and the row shows the one you are standing in.** Inside a view the
+status line's left slot is that run's own slot, verbatim — `scout · reading · 3s` — because the
+human is looking at one delegate and the row should say what *that* delegate is doing. At the top
+level with delegates running the row is theirs and not the parent's, which has nothing of its own
+to report while it waits: exactly one live delegate keeps its own phrase under its own name, and
+**two or more are merged into a count** — `2 sub-agents · working` — timed from the oldest live
+child's clock, so the number a reader is watching never restarts when a sibling emits. The merged
+row says only that delegates are working, because with a fan-out running it cannot honestly say
+*what* without picking one of them, which is the flicker the merge exists to end. A **stopping**
+top-level slot outranks every one of them, whatever view is open.
+
+**The prompt box addresses the child.** In the view of a **running** delegation the box's legend
+reads `Message <name>…  ⏎ send · ↑ recall · esc back`, and `⏎` sends that message to that child
+rather than to the conversation below: it queues into the child's own mailbox and lands at its next
+between-Steps boundary as an ordinary interjection, with the child's tools, mode and confinement
+exactly the ones it was spawned with (`CONTEXT.md`, "Interjection"; ADR 0063). The parse is the top
+level's, so `@file` references and skill `/tokens` ride along as they do anywhere else, while a
+`/command` is a word for apogee whatever the box is addressing and never reaches the child. A view
+of a run that is **over, or not yet started**, is read-only and says so in the same place —
+`<name> has finished · esc back`, `<name> has not started · esc back` — and a message typed into
+one is refused with a note at the top level and the draft left standing exactly as it was, to be
+carried back up and sent there.
+
+**A staged row names the run it is going to.** A message waiting for a child shows in the
+staged-interjection band (below) as `⧖ queued for <name> — <the message>`, because with several
+runs live and a view the reader may leave the moment they send, the row is the only thing on screen
+that still knows where it is going; a message waiting for the model itself is unlabelled, having
+only one place it could go. The name is read at paint rather than captured at staging, so the band,
+the breadcrumb and `/usage` cannot come to call the same run different things. The row leaves the
+band on the child's own delivery report, whatever that report says: a message that **landed**
+becomes the child's own `❯` block inside its run, at the boundary it actually reached, and one the
+child finished before reading becomes the note `<name> finished before your message landed` at the
+top level, where the reader finds it on the way out.
 
 ---
 
@@ -1171,7 +1272,8 @@ the context-usage gauge (`16k/32k 50% █████░░░░░` in the ske
 window they are measured against, because a fill only means something beside the limit it fills,
 and where `░` draws the empty half of the ten-cell track: on screen those cells are a painted
 dark-gray field carrying no glyph of their own), the key hint that stands in for it (`esc×2 stop`
-while a turn runs, `enter dismiss` after an error, the primed-`ctrl+c` and armed-`esc` lines), and
+while a turn runs, `esc back` while a run view is open, `enter dismiss` after an error, the
+primed-`ctrl+c` and armed-`esc` lines), and
 the mouse-copy flash. Whichever one is showing, it
 ends **two columns short of the window edge** (`bodyIndent`) — the mirror of the two columns the
 left slot leads with, and the same column the footer's mode marker below it ends in, so the
@@ -1400,7 +1502,8 @@ chrome — the status line's posture, one row up.
 line's text and the transcript's own body sit in, so the ⧖ lines up with the spinner column above),
 the ⧖ staged-interjection marker, one space, then the message flattened to a single line (runs of
 whitespace collapse to one space) as a preview. The message itself is untouched; this is only how a
-waiting row is shown.
+waiting row is shown. A row addressed to a **sub-agent** leads with where it is going —
+`  ⧖ queued for scout — check the tests` — for the reason the run view's own section gives above.
 
 **Order and cap.** Rows are in delivery order, oldest first — so the row nearest the input box is
 the newest, the one Backspace takes back. At most three content rows show at once

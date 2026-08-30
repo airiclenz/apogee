@@ -22,13 +22,15 @@ that report was long enough to lay out as a body, because the head's rows are
 painted before the span begins. And the done `✓` takes a new green `success`
 scheme role, which the sketches below leave uncoloured.
 
-The `┊` rule holds as written: the closer is drawn only where another grouped
-sub-agent follows the expanded one. It is still emitted by the seam that joins
-two blocks rather than by the group painter — the seam is the only place that
-can put a row after an open member's span — but that seam is told whether the
-list resumes, so a group's last expanded member, a **lone** expanded
-delegation, and a delegation still streaming at the foot of the transcript all
-end on the ordinary separator instead.
+**Since 2026-08-30 the delegation has no expanded shape at all**: expanding a
+sub-agent opens its **run view**, a surface of its own that takes the whole
+transcript slot, and the collapsed row is the only shape a run wears in the
+conversation ([ADR 0063](../adr/0063-sub-agent-runs-are-user-addressable-views.md),
+`layout.md`, "Run view"). The `┊` rule below is stated as it was written — the
+closer drawn only where another grouped sub-agent follows an expanded one, and
+emitted by the seam that joins two blocks rather than by the group painter — but
+nothing opens a span in place any more, so no paint reaches it: it stands as the
+record of a shape the screen no longer has.
 
 ## Rules
 
@@ -60,7 +62,7 @@ end on the ordinary separator instead.
   spinner star.
 - `<tool-header>` — short human label of one call ("Read", "Terminal", …).
 - `<tool-type-header>` — the same label for a run of same-type calls; plurality is carried by `(<group-count>)`.
-- `<tool-details>` — the one-line collapsed summary of one call. Usually the key argument (path, pattern, command). It may differ from the expanded rows: a sub-agent shows its *name* here but its task/result in the rows.
+- `<tool-details>` — the one-line collapsed summary of one call. Usually the key argument (path, pattern, command). It may differ from what opening the call shows: a sub-agent shows its *name* here and its task/result inside its run view.
 - `<tool-details-row-1..n>` — the expanded content of one call (diff, output, listing, …).
 - `<tool-top-level-details>` — the right-aligned outcome slot. It carries the
   **whole summary**, whatever kind: a typed stat ("12 lines", "exit 0 · 1.2s",
@@ -98,7 +100,10 @@ end on the ordinary separator instead.
 - Exactly **two states** per call: collapsed (capped preview + count in the
   outcome slot, as today) and expanded (the whole body) with a `see less…`
   footer as an extra collapse target. No third stage; scrollback handles long
-  bodies.
+  bodies. This holds for the delegation row too, and the **run view** is no
+  exception to it: a framed sub-agent has one state, collapsed, and opening it
+  opens a different *surface* rather than a third fold stage of the row
+  ([ADR 0063](../adr/0063-sub-agent-runs-are-user-addressable-views.md)).
 - The umbrella's floor is its type rows — it never folds to one line.
   Clicking the umbrella header **closes all open children**.
 - Failure marking: the red right-slot summary only; no glyph or header color
@@ -107,6 +112,10 @@ end on the ordinary separator instead.
   navigation and moves a highlight across the same toggle targets the mouse
   has (deepest visible level); inside the mode plain `up`/`down` move,
   `enter` toggles, `esc` or any printable key returns focus to the prompt.
+  `enter` on a framed sub-agent opens its run view instead of toggling it, and
+  from inside a view `esc` goes **one level back** up before it means anything
+  else — the block cursor is exited on the way in, and the breadcrumb header row
+  is the mouse's spelling of the same move.
 - Type-row aggregate (`<tool-top-level-details>` on a run): any failed member
   → red `N errors`; else the sum where the tool's stat sums naturally (lines,
   `+A −R`, hits · files, entries, changes); else blank — dots run to the `▶`.
@@ -206,35 +215,24 @@ One row per consecutive same-type run, in time order. A row's
 
 ## Grouped Sub-agents
 
-- expanded sub-agents carry no `⤷ sub-agent` label.
-- the vertical line on the very left of an expanded sub-agent is colored.
-- `┊` is only displayed if another grouped sub-agent follows after the expanded sub-agent. The last sub-agent in the group (if expanded) does not show this.
+- opening a sub-agent — from a click on its row or `enter` on the block cursor — opens its **run view** (`layout.md`, "Run view"), which takes the whole transcript slot under a `← main › <name>` breadcrumb and is left with `esc`. A member row of an `✦ Sub-Agent (N)` list opens the same way; the umbrella itself still opens **inline** to those rows.
+- the inline expanded shape that used to open a delegation's span in place — no `⤷ sub-agent` label on the open row, a colored vertical line down its left — was REMOVED on 2026-08-30 with the run view (ADR 0063), and its sketch went with it.
+- `┊` was only displayed if another grouped sub-agent followed after the expanded sub-agent, and the last sub-agent in the group (if expanded) did not show it. With nothing that opens a span in place, the closer has no occasion left and every grouped member is followed by the ordinary separator.
 - a RUNNING sub-agent's `<tool-top-level-details>` reads `N tool calls · <used>/<window>` and names no ongoing action. The call in flight is deliberately not spelled there: it changed several times a second while the two cells beside it held still, and each of those calls already has a block of its own inside the run, one click away. The one live word the slot adds is `· delegating`, and only while the most recent call open inside the run is itself a sub-agent — work the child has handed on, which its own blocks cannot show since the nested run is collapsed too. A finished sub-agent's slot is unchanged: its report's first line, or `· done` where the report became a body. A run routed to the Sub-agent server (ADR 0045) closes the slot with the model it ran on — `2 tool calls · 12k/32k · Found 4 gaps · qwen3-4b` — and only when that is not the session's own model; a same-model delegation shows no such cell. `<window>` is the CHILD's own window, so a routed run's fill is spelled against the Sub-agent server's window (`7k/8k`) rather than the session's (`7k/128k`); a run reporting no window of its own is spelled against the session's, which is what an unrouted child inherited. This holds for a lone sub-agent exactly as for a grouped member.
-- expanding a sub-agent only ADDS: the open row keeps the very `<tool-top-level-details>` its collapsed row wore — the count, the fill, and the gist or `· done` — and the report, the prompt and the railed span come out beneath it. Opening never takes back what the shut row said, so the two fold states differ in the BODY alone. This holds for a lone sub-agent exactly as for a grouped member, running and finished alike.
-- a sub-agent the engine has not started yet is SCHEDULED: the model asked for it and it is queued behind the `parallel-agents` cap, holding no slot. Its `<tool-top-level-details>` says exactly `scheduled` — no tool-call count, no context fill, no gist, none of which exist yet — and its row carries no indicator and no click target, because there is nothing behind it to open. The moment its child starts, the row becomes an ordinary live sub-agent row and expands like any other. A lone sub-agent starts immediately and never shows this.
+- opening a sub-agent takes nothing back either: the row the reader leaves behind keeps the very `<tool-top-level-details>` it wore — the count, the fill, and the gist or `· done` — and the task, the report and the child's own blocks are what the run view shows. This holds for a lone sub-agent exactly as for a grouped member, running and finished alike; a view of a finished or scheduled run opens read-only.
+- a sub-agent the engine has not started yet is SCHEDULED: the model asked for it and it is queued behind the `parallel-agents` cap, holding no slot. Its `<tool-top-level-details>` says exactly `scheduled` — no tool-call count, no context fill, no gist, none of which exist yet — and its row carries no indicator and no click target, because there is nothing behind it to open. The moment its child starts, the row becomes an ordinary live sub-agent row and opens like any other. A lone sub-agent starts immediately and never shows this.
 
 ```text
 ✦ Sub-Agent (<group-count>)
   ┝ first-sub-agent-collapsed ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ ▶
-┌─┶ sub-agent-expanded ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ <tool-top-level-details> ▼
-│
-│ The initial prompt for the sub agent should be displayed here. If it contains
-│ more than one row, it needs to be wrapped. Markdown needs to be properly
-│ formatted.
-│
-│ ✦ Tools (N calls)
-│   ┝ <tool-type-header> (<group-count>) ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ <tool-top-level-details> ▶
-│   ┕ <tool-type-header> (<group-count>) ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ <tool-top-level-details> ▶
-│
-│ ✦ Normal sub-agent response...
-┊
+  ┝ sub-agent-whose-row-opens-its-run-view ⋯⋯⋯⋯⋯⋯⋯⋯⋯ <tool-top-level-details> ▶
   ┝ another-collapsed-sub-agent ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ ▶
   ┕ last-grouped-and-collapsed-sub-agent ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ ▶
 ```
 
 Example for how finished sub agents should be displayed. The first sub-agent is done and receives a `✓` after the sub agent name ("done" is also printed in the <tool-top-level-details>, The second sub agent is still running in this example.
 
-Each member is marked PER MEMBER, the moment that sub-agent finishes — not when the group as a whole is done. A grouped run reports its results in one burst once every member has joined, so the display follows each delegation's own start/finish instead: the first to report wears its `✓` and its `done` while its siblings are still running, and expanding it shows the report it returned right then. A member that finished with a FAILURE wears no `✓` — its red `<tool-top-level-details>` is the whole of the marking.
+Each member is marked PER MEMBER, the moment that sub-agent finishes — not when the group as a whole is done. A grouped run reports its results in one burst once every member has joined, so the display follows each delegation's own start/finish instead: the first to report wears its `✓` and its `done` while its siblings are still running, and opening its run view shows the report it returned right then. A member that finished with a FAILURE wears no `✓` — its red `<tool-top-level-details>` is the whole of the marking.
 
 ```text
 ✦ Sub-Agent (<group-count>)
@@ -323,10 +321,12 @@ Notes:
   short hash above and the line lays out in the body.
 - ask_user renders as the live prompt while pending; this table describes its
   transcript form after the answer.
-- sub_agent deliberately shows *different* data collapsed (its name) vs
-  expanded (task + result). Its `N steps` stat is wired only if the engine
-  already exposes a step count; otherwise the slot shows `done`/`failed`
+- sub_agent deliberately shows *different* data on its row (its name) than
+  inside its run view (task + result). Its `N steps` stat is wired only if the
+  engine already exposes a step count; otherwise the slot shows `done`/`failed`
   alone. A delegation queued behind the `parallel-agents` cap shows
-  `scheduled` and is not expandable at all (see Grouped Sub-agents).
+  `scheduled` and opens nothing at all (see Grouped Sub-agents).
 - Expansion state lives on the transcript entry, so it survives scrolling and
-  new messages arriving. New blocks start collapsed.
+  new messages arriving. New blocks start collapsed. A run view is not an
+  expansion state and lives on no entry: it is the Driver's own stack of open
+  runs, dropped at a resume (ADR 0063).

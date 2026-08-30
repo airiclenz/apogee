@@ -67,7 +67,7 @@ func TestRoleTableCoversEveryRole(t *testing.T) {
 	// this the one assertion a silent struct/prose drift has to pass.
 	const wantRoleCount = 29
 	if len(roleKeys) != wantRoleCount {
-		t.Errorf("Scheme declares %d roles, the prose says %d — update README.md:188, layout.md:94 "+
+		t.Errorf("Scheme declares %d roles, the prose says %d — update README.md:188, layout.md:86 "+
 			"and newTheme's comment (internal/tui/theme.go:277), then this count",
 			len(roleKeys), wantRoleCount)
 	}

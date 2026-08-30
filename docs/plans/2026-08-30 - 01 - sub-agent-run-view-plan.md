@@ -346,7 +346,42 @@ the wire once the parent has every delegate's report and asks its next question.
 
 **Commit.** `test(e2e): the run view opens, messages a running sub-agent, and the parent hears about it`
 
-## 11. Docs: CONTEXT.md, layout specs, manual, IDEAS.md
+## 11. Docs: CONTEXT.md, layout specs, manual, IDEAS.md — ✅ DONE (2026-08-30)
+
+NOTES (2026-08-30): the acceptance grep `! grep -rn "expandedSubAgentView" … docs/adr …` still
+returns two lines, both in `docs/adr/0063-sub-agent-runs-are-user-addressable-views.md` (`:19`
+Context, `:129` Consequences), and they are LEFT AS THEY ARE. Both are past-tense record of the
+shape the ADR removed — the class the plan's own guard excludes as "not targets" (archived plans,
+this plan) — and ADR 0063 did not exist at the base commit the regression check ran against, which
+is why the enumeration omits it. Scrubbing the symbol from the ADR that decided its deletion would
+cost the record its `git log -S` handle for no gain. Every other target is clean: the grep over
+`layout.md docs/layout docs/manual docs/design CONTEXT.md` returns nothing.
+
+NOTES (2026-08-30): `IDEAS.md` is edited as the item requires (both `[P]` items removed) but is
+NOT in FILES — it is gitignored (`.gitignore:12`), so there is nothing to stage and `git add` on it
+would fail. The acceptance grep over the working tree passes.
+
+NOTES (2026-08-30): consequential edit — internal/scheme/scheme_test.go: made necessary by the top
+sketch losing eight rows (`layout.md:94` → `:86`, the role-count prose the failure message points a
+developer at).
+
+NOTES (2026-08-30): consequential edit — docs/adr/0063-sub-agent-runs-are-user-addressable-views.md:
+made necessary by this item's rewording of the two sentences that ADR cites by line — `layout.md:797`
+→ `:790` ("nothing ever expands or collapses by itself") and `docs/layout/tool-layout.md:98` → `:100`
+("exactly two states per call"). Text unchanged, pointers only.
+
+NOTES (2026-08-30): sites folded in beyond the item's named greps, each falsified by this item's own
+rewrite. `layout.md`: the top sketch's caption (a `Sub-Agent` "deliberately drawn open"), the chrome
+paragraph naming "the sub-agent rail's `tool-header` gold", the blank-line paragraph's whole railed
+separator rule, the fan-out paragraph's "the slot's phrase belongs to whichever child emitted the
+last event" (item 5 merged it) and "opening a row opens that child's span", and the right slot's key
+hints (`esc back` joins them). `docs/layout/tool-layout.md`: the `<tool-details>` bullet, the
+per-member marking sentence ("expanding it shows the report"), the block-cursor key list, the
+`sub_agent` row of the per-tool table and the "Expansion state lives on the transcript entry" bullet.
+
+NOTES (2026-08-30): `internal/tui/wrap_test.go:27` ("the absolute width cap (layout.md:159-160)")
+and `docs/adr/0035-*.md:57` (`layout.md:184`) were ALREADY pointing at unrelated prose at the base
+commit — pre-existing pointer drift this item neither caused nor fixed.
 
 **What.** Depends on item 10. `CONTEXT.md`: **Sub-agent** (`:106`) gains the addressing sentence (spawn call-ID → `InterjectChild`, mailbox drained between the child's Steps, trailer); **Interjection** (`:415`) notes the child form; new term **Run view** (Driver state; view, not fold state; never persisted) linking ADR 0063. `layout.md`: `:797` reworded — "Only a click changes a block's state" stays for folds, plus "expanding a framed delegation opens its **run view**, which opens on its latest line"; a `## Run view` section after `:742`'s block section with a frame sketch (breadcrumb header, child rows at depth 0, status `esc back`, placeholder `Message <name>…`), the status-line text for ≥2 children, and the band label `queued for <name>`. `docs/layout/tool-layout.md:98-109`: two states hold for the row; the run view is the third *surface*; key list adds `esc` back. `docs/manual/commands.md:66-92`: `⏎` on a delegation opens its run view, `esc` goes back, the prompt box then messages that sub-agent, `esc×2` stops only from the top level. `docs/manual/sessions.md`: a run view is not part of the record. `IDEAS.md`: items at `:14` and `:18` are removed (executed → `CHANGELOG.md` at closeout). `ISSUES.md`: the `## Open defects` entry at `:40` ("Finished sub-agents print the sub-agent output twice") is removed — closed by item 8; the closeout records it in `CHANGELOG.md`. Guard rule: every doc sentence or sketch that says a delegation "expands inline", "opens in place", names `expandedSubAgentView`, or draws or names the delegation frame is updated — find them with `grep -rn "expand" layout.md docs/layout docs/manual CONTEXT.md | grep -i "sub-agent\|delegat"` together with `grep -n "┌─┶\|┊\|drawn open\|rail" layout.md docs/layout/tool-layout.md`.
 

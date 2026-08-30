@@ -37,9 +37,6 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 
 ## Open defects
 
-- [ ] Finished sub-agents print the sug-agent output twice - once at the very beginning (unneededly) before the input-prompt event (also with terrible formatting) as well as at the end of the sub-agent transcript (that one is properly formatted and the one that we need to keep).
-
-
 ### Residuals deferred out of the 2026-08-29 tool-surface-transparency run
 
 **Status:** found 2026-08-29 at the close of the tool-surface transparency plan

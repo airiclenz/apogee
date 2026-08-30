@@ -139,6 +139,23 @@ A delegation may also carry a model-supplied short **name** — an optional `nam
 `sub_agent` call, normalised to a trimmed first line — which is what the session chat calls that
 child; it is display identity only, never privilege, and every display falls back to the
 delegated task's first line when it is absent.
+A **running** child is **addressable**, and by the handle it already has: the spawning call-ID.
+`Agent.InterjectChild(spawnCallID, in)` appends a message to that child's engine-side **mailbox**,
+recursing into registered children so a grandchild is reachable from the top-level agent and
+answering `domain.ErrNoSuchChild` when no such child is running; the goroutine driving that child
+pops the mailbox before every Step after the first and delivers each message through
+`Agent.Interject`, so it commits at the child's own between-Steps boundary as an ordinary
+**Interjection** — the one place a `Run` drains for an embedder, because per ADR 0013 D5 nobody
+else can drive a child's Steps. Every queued message earns one
+`domain.ChildInterjectionEvent{Input, Landed}` on the shared sink, so a Driver never has to guess
+whether it arrived, and a child that received such messages returns its result with the trailer
+`(the user sent N message(s) to this sub-agent while it ran)` on every outcome but a cancelled
+dispatch — a parent reading a result shaped by instructions it never issued must be able to see
+that from the result alone. Addressing a child buys no privilege (ADR 0005 stands), and all of
+it exists at **depth > 0 only**
+([ADR 0063](docs/adr/0063-sub-agent-runs-are-user-addressable-views.md)); the TUI's surface for it
+is the **Run view**.
+
 One shape to know when reading events: `domain.AuditEvent` carries a `CallID` of its own — the
 **audited** call, the tool call that record is about — which **shadows** the promoted
 `EventBase.CallID`, so an observer reading `ev.CallID` on an audit record gets the audited call;
@@ -183,6 +200,24 @@ down, no model) is not an error: the spawn **falls back** to the parent's Upstre
 parent posture, with one notice per routing state change. Ratified 2026-08-11 (ADR 0045).
 _Avoid_: "child upstream" (the target outlives any one child), "sub-agent endpoint" (it
 carries far more than an address).
+
+**Run view**:
+The surface one **Sub-agent** run is read and addressed in. Expanding a framed delegation — from the
+block cursor or a click on its row — opens the run view rather than flipping a fold flag: the TUI's
+transcript slot paints that run alone, rooted at its own task, opened on its latest line and
+following it as it grows, while the status line, prompt box and footer stay exactly where they are
+(a pane inside apogee's own frame, never an alternate screen — ADR 0035 stands). A clickable
+breadcrumb header (`← main › planner › repo-scout`) and `esc` each go **one** level up, the status
+line's right slot reads `esc back` while a view is open, and stopping stays whole-run from the top
+level. Inside a view of a **running** child the prompt box addresses that child (see
+**Interjection**); a view of a finished or scheduled one opens **read-only**. A run therefore has
+exactly two shapes — the collapsed row and the run view — while the `✦ Sub-Agent (N)` umbrella
+still opens inline to its member rows. It is **Driver state**: a stack of open runs in the TUI's
+`Model`, never encoded in the transcript, never written to a **Session record** and never restored,
+so a resumed session opens at the top level. Ratified 2026-08-30
+([ADR 0063](docs/adr/0063-sub-agent-runs-are-user-addressable-views.md)).
+_Avoid_: "full screen" (the frame's other rows stay — only the transcript slot is taken),
+"expanded sub-agent" (the inline expanded shape is gone; a run has no fold state), "drill-down".
 
 **Session** / **Session record**:
 A **Session** is one conversation the engine holds — the versioned `domain.Session` envelope
@@ -437,6 +472,17 @@ this session's engine — [ADR 0033](docs/adr/0033-the-scheduler-is-a-library-an
 immediately, every other verb is offered *tagged* in the menu and refused with a note that leaves
 the line in the box (ADR 0027, amending ADR 0025's decision 10). See
 [ADR 0025](docs/adr/0025-interjections-commit-at-the-between-steps-boundary.md).
+The same message shape reaches a **Sub-agent**. Inside its **Run view** the prompt box addresses
+that child: `Agent.InterjectChild` queues the message into the child's own engine-side mailbox and
+the goroutine driving that child delivers it at its next between-Steps boundary, so what lands is
+an ordinary Interjection in the child's conversation with the child's tools, mode and Confinement
+unchanged. It is ADR 0025's boundary unmoved, and the child is the one exception to that ADR's
+"drive `Step` yourself" advice — nobody else can drive a child's Steps — so the two options it
+rejected (a Run drain, an interjection Event) are superseded for **depth > 0 only**
+([ADR 0063](docs/adr/0063-sub-agent-runs-are-user-addressable-views.md)). A staged row addressed to
+a child names its run (`queued for <name> — …`), and the child's own delivery report is what takes
+it off the band: a message that landed becomes that child's user block inside its run, and one the
+child finished before reading becomes the note `<name> finished before your message landed`.
 _Avoid_: "steering" / "steer" (ADR 0014's guided-decomposition sense — a Mechanism shaping the
 model's own primary call, not a human speaking), "scheduled message" (nothing is clock-timed;
 it means deliver-at-the-next-boundary), "queued input" alone (the queue is the staging, the

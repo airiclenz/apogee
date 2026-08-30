@@ -59,3 +59,9 @@ Autonomy mode, tool approvals, confinement, and MCP connections are deliberately
 resume, so yesterday's approvals never silently apply to today's run, and any
 Console the previous conversation left open is closed at the switch.
 
+Nor is what you had **open** on screen. Which blocks you had unfolded is the
+view's own state, and so is a **run view** — the full-transcript reading of one
+sub-agent you get by opening its row. A resumed session opens at the top level
+with everything folded shut, however deep into a delegation you were when it was
+written; the run itself is in the record, and one click opens it again.
+

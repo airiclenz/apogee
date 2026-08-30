@@ -101,9 +101,9 @@ never restored — a resumed session opens at the top level.
 click on the run's header, no longer flips a fold flag: it opens the view, at the run's latest line,
 following it as it grows. The inline expanded shape is removed, so a run has exactly two shapes —
 collapsed row and run view — while the `✦ Sub-Agent (N)` umbrella keeps expanding inline to its
-member rows. This **amends `layout.md:797`**: "nothing ever expands or collapses by itself" continues
+member rows. This **amends `layout.md:790`**: "nothing ever expands or collapses by itself" continues
 to hold for fold states, and a run view opening at its latest line is not a fold state changing under
-the user, it is a different surface. For the same reason `docs/layout/tool-layout.md:98`'s "exactly
+the user, it is a different surface. For the same reason `docs/layout/tool-layout.md:100`'s "exactly
 two states per call" keeps holding — the run view is a third *surface*, not a third fold stage of the
 row.
 
