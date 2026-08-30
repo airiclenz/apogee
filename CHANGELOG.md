@@ -463,6 +463,15 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- The `detailClipRunes` flood-cap comment no longer names a mechanism that is gone.
+  `internal/tui/textutil.go` justified the 160-rune cap by "the renderer soft-wraps, so an
+  uncapped line becomes many rows" and closed on "a wide line wraps onto rows of its own" — both
+  written when the viewport widget did the wrapping. It has not since the transcript viewport
+  stopped soft-wrapping (`SoftWrap = false`, this same release): the painter's hard wrap at the
+  width authority is the only wrapper now, and the widget clips. Every claim the comment makes
+  still holds and the cap is unchanged — only the mechanism behind them is restated, so the next
+  reader is not sent looking for a soft wrap that no longer exists.
+
 - A tool child that resets the terminal's mouse tracking on its way out no longer leaves block
   toggles, drag-select and wheel scrolling dead for the rest of the session. Bubble Tea writes the
   tracking escapes only when a frame's `MouseMode` *changes* (`cursed_renderer.go`), and apogee's

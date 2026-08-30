@@ -40,18 +40,6 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 - [ ] Finished sub-agents print the sug-agent output twice - once at the very beginning (unneededly) before the input-prompt event (also with terrible formatting) as well as at the end of the sub-agent transcript (that one is properly formatted and the one that we need to keep).
 
 
-### Residuals deferred out of the 2026-08-29 mouse-tracking-reassert run
-
-**Status:** found 2026-08-30 at the close of the mouse-tracking re-assert plan
-(`docs/plans/archived/2026-08-29 - 03 - mouse-tracking-reassert-plan.md`), deferred out of that
-run.
-
-- [ ] **A stale mechanism in the `detailClipRunes` flood-cap comment.**
-  `internal/tui/textutil.go:28` still says "the renderer soft-wraps, so an uncapped line becomes
-  many rows" — the flood cap it justifies still holds (the painter wraps), but the named mechanism
-  is now stale; item 3's guard (c) enumerated three comment sites and this was not one of them.
-
-
 ### Residuals deferred out of the 2026-08-29 tool-surface-transparency run
 
 **Status:** found 2026-08-29 at the close of the tool-surface transparency plan

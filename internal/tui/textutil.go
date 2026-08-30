@@ -25,7 +25,8 @@ import (
 // an oversight — [detailClipRunes] states it, and names the probe that measured it.
 
 // detailClipRunes caps one detail/target line so a minified blob or a wall-of-text report cannot
-// flood the transcript (the renderer soft-wraps, so an uncapped line becomes many rows).
+// flood the transcript (the painter hard-wraps at the width authority, so an uncapped line
+// becomes many rows).
 //
 // The cap is a FLOOD bound and it is deliberately spent in RUNES, not in the cells the screen
 // bills. No rune paints more than two cells, so 160 runes buy at most 320 cells and therefore at
@@ -34,9 +35,10 @@ import (
 // shared with the context gauge, so an over-wide left slot pushes something the reader needs off the
 // screen — which is why that row carries the tool's verb alone now (toolActivityVerb, activity.go)
 // rather than a target it would have to cap in cells through the width authority. The
-// transcript shares nothing — a wide line wraps onto rows of its own and the block behind it paints
-// lower down, whole. TestPaintedWideDetailLineWrapsWithoutDisplacement (paint_test.go) is the probe
-// that measured all three of those claims and the pin that keeps them true.
+// transcript shares nothing — the painter wraps a wide line onto rows of its own and the block
+// behind it paints lower down, whole. TestPaintedWideDetailLineWrapsWithoutDisplacement
+// (paint_test.go) is the probe that measured all three of those claims and the pin that keeps
+// them true.
 const detailClipRunes = 160
 
 // clipDetail truncates s to detailClipRunes runes with an ellipsis.
