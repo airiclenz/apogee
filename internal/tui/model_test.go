@@ -591,17 +591,43 @@ func TestModelNewlineLegendFollowsKeyboardProtocol(t *testing.T) {
 // ----------------------------------------------------------------------------
 
 func TestModelStopKeys(t *testing.T) {
-	t.Run("esc while running cancels but does not quit", func(t *testing.T) {
+	t.Run("a single esc while running arms the gesture but cancels nothing", func(t *testing.T) {
 		m := newTestModel(t)
 		cancelled := false
 		m.cancel = func() { cancelled = true }
 		m.state = stateRunning
 		next, cmd := stepCmd(t, m, keyEsc())
+		if cancelled {
+			t.Error("a single esc cancelled the in-flight worker; it must only arm the gesture")
+		}
+		if next.lastEsc.IsZero() {
+			t.Error("a single esc did not arm the stop gesture")
+		}
+		if got := plain(next.View()); !strings.Contains(got, "press esc again to stop") {
+			t.Errorf("the arm hint is not shown after one esc:\n%s", got)
+		}
+		if _, isQuit := cmdMsg(cmd).(tea.QuitMsg); isQuit {
+			t.Error("esc quit the program instead of arming the stop gesture")
+		}
+	})
+
+	t.Run("esc twice while running cancels but does not quit", func(t *testing.T) {
+		m := newTestModel(t)
+		cancelled := false
+		m.cancel = func() { cancelled = true }
+		m.state = stateRunning
+		m = step(t, m, keyEsc())
+		next, cmd := stepCmd(t, m, keyEsc())
 		if !cancelled {
-			t.Error("esc did not cancel the in-flight worker")
+			t.Error("esc×2 did not cancel the in-flight worker")
 		}
 		if next.state != stateRunning {
 			t.Errorf("state = %v, want still running until the worker reports back", next.state)
+		}
+		// The confirming press disarms before it stops: statusRight's armed branch sits above
+		// every occupant, so a stamp left standing would hold the hint on an idle status line.
+		if !next.lastEsc.IsZero() {
+			t.Error("the confirming esc left the gesture armed; the stamp must be zeroed before the stop")
 		}
 		if msg := cmdMsg(cmd); msg != nil {
 			if _, isQuit := msg.(tea.QuitMsg); isQuit {
@@ -610,20 +636,44 @@ func TestModelStopKeys(t *testing.T) {
 		}
 	})
 
+	t.Run("a second esc after the window only re-arms", func(t *testing.T) {
+		m := newTestModel(t)
+		cancelled := false
+		m.cancel = func() { cancelled = true }
+		m.state = stateRunning
+		m = step(t, m, keyEsc())
+		m.lastEsc = m.lastEsc.Add(-2 * escStopWindow) // pretend the window lapsed
+		// Re-arming refreshes lastEsc to ~now; the stop path zeroes it. A refreshed, non-zero
+		// stamp therefore proves the press took the arm branch, not the stop branch.
+		next, _ := stepCmd(t, m, keyEsc())
+		if cancelled {
+			t.Error("esc after the window cancelled the worker instead of only re-arming")
+		}
+		if next.lastEsc.IsZero() || !next.lastEsc.After(m.lastEsc) {
+			t.Error("esc after the window did not re-arm the stop gesture")
+		}
+	})
+
 	t.Run("esc while idle does not quit", func(t *testing.T) {
 		m := newTestModel(t)
-		_, cmd := stepCmd(t, m, keyEsc())
+		next, cmd := stepCmd(t, m, keyEsc())
 		if _, isQuit := cmdMsg(cmd).(tea.QuitMsg); isQuit {
 			t.Error("esc at idle quit the program; it must never end the app")
+		}
+		if !next.lastEsc.IsZero() {
+			t.Error("esc at idle armed the stop gesture; there is no worker to stop")
 		}
 	})
 
 	t.Run("esc while errored does not quit", func(t *testing.T) {
 		m := newTestModel(t)
 		m.state = stateErrored
-		_, cmd := stepCmd(t, m, keyEsc())
+		next, cmd := stepCmd(t, m, keyEsc())
 		if _, isQuit := cmdMsg(cmd).(tea.QuitMsg); isQuit {
 			t.Error("esc while errored quit the program; it must never end the app")
+		}
+		if !next.lastEsc.IsZero() {
+			t.Error("esc while errored armed the stop gesture; there is no worker to stop")
 		}
 	})
 
@@ -806,6 +856,7 @@ func TestModelApprovalStaleArmDoesNotArmTheNextPane(t *testing.T) {
 
 	m.cancel = func() {}
 	m = step(t, m, keyEsc())
+	m = step(t, m, keyEsc())
 	m = step(t, m, cancelledMsg{Result: domain.StepResult{Status: domain.StatusCancelled}})
 	if m.state != stateIdle {
 		t.Fatalf("state = %v, want idle after the first prompt was cancelled", m.state)
@@ -841,16 +892,25 @@ func TestModelApprovalStaleArmDoesNotArmTheNextPane(t *testing.T) {
 }
 
 // Esc is deliberately OUTSIDE the latch: cancelling is the safe direction and the operator's stop
-// path, so it is never the key made harder to reach.
+// path, so it is never the key made harder to reach. It is the double-tap it is everywhere else a
+// worker runs (the frame's `case "esc"` covers the pane), and neither press waits on the arm.
 func TestModelApprovalEscapeIsLiveBeforeArming(t *testing.T) {
 	m, _ := newUnarmedApprovalModel(t, domain.ApprovalRequest{Tool: "write_file", Reason: "write"})
 	cancelled := false
 	m.cancel = func() { cancelled = true }
 
 	m = step(t, m, keyEsc())
+	if cancelled {
+		t.Error("a single esc before the arm cancelled the worker; it must only arm the gesture")
+	}
+	if m.lastEsc.IsZero() {
+		t.Error("esc before the arm did not arm the stop gesture")
+	}
+
+	m = step(t, m, keyEsc())
 
 	if !cancelled {
-		t.Error("esc before the arm did not cancel the in-flight worker")
+		t.Error("esc×2 before the arm did not cancel the in-flight worker")
 	}
 	if m.state != stateAwaitingApproval {
 		t.Errorf("state = %v, want still awaitingApproval until the worker reports back", m.state)
@@ -917,15 +977,19 @@ func TestModelApprovalIgnoresOtherKeys(t *testing.T) {
 }
 
 // A stop key while pending cancels the worker; the prompt clears when the worker reports back
-// (the cancel path is structural — esc → stopWorker → cancelledMsg → finishWorker).
+// (the cancel path is structural — esc×2 → stopWorker → cancelledMsg → finishWorker).
 func TestModelApprovalCancelClearsPrompt(t *testing.T) {
 	m, _ := newApprovalModel(t, domain.ApprovalRequest{Tool: "write_file", Reason: "write"})
 	cancelled := false
 	m.cancel = func() { cancelled = true }
 
 	m = step(t, m, keyEsc())
+	if cancelled {
+		t.Error("a single esc at the pane cancelled the worker; it must only arm the gesture")
+	}
+	m = step(t, m, keyEsc())
 	if !cancelled {
-		t.Error("esc did not cancel the in-flight worker")
+		t.Error("esc×2 did not cancel the in-flight worker")
 	}
 	if m.state != stateAwaitingApproval {
 		t.Errorf("state = %v, want still awaitingApproval until the worker reports back", m.state)
@@ -3898,10 +3962,11 @@ func TestModelStatusLineActivity(t *testing.T) {
 		t.Errorf("status line during a tool call = %q, want it to leave the target to the call's block", got)
 	}
 
-	// Esc registers the stop, and the phrase stays until the worker's terminal Msg unwinds it.
+	// Esc×2 registers the stop, and the phrase stays until the worker's terminal Msg unwinds it.
+	m = step(t, m, keyEsc())
 	m = step(t, m, keyEsc())
 	if got := statusText(t, m); !strings.Contains(got, "stopping") {
-		t.Errorf("status line after esc = %q, want it to contain %q", got, "stopping")
+		t.Errorf("status line after esc×2 = %q, want it to contain %q", got, "stopping")
 	}
 	m = step(t, m, cancelledMsg{})
 	if got := statusText(t, m); got != "" {
@@ -4064,7 +4129,7 @@ func TestStatusLineQuietSuffix(t *testing.T) {
 	})
 
 	t.Run("a stopping worker never shows it", func(t *testing.T) {
-		m := step(t, guardedRunningModel(t, after), keyEsc()) // esc fired the cancel; the worker unwinds
+		m := step(t, step(t, guardedRunningModel(t, after), keyEsc()), keyEsc()) // esc×2 fired the cancel; the worker unwinds
 		m = silentFor(m, quiet)
 
 		got := statusText(t, m)
@@ -4254,7 +4319,7 @@ func TestStatusLineRightSlotOccupantsShareTheMargin(t *testing.T) {
 		m := newTestModel(t)
 		m.input.SetValue("hello")
 		m = step(t, m, keyEnter()) // no usage yet, so the hint holds the slot
-		assertStatusRightTail(t, m, "esc stop"+bodyIndent)
+		assertStatusRightTail(t, m, "esc×2 stop"+bodyIndent)
 	})
 
 	t.Run("errored hint", func(t *testing.T) {

@@ -137,7 +137,9 @@ func TestE2EApprovalForcedLookSurvivesAutoMode(t *testing.T) {
 		t.Errorf("auto did not raise the forced pane:\n%s", pane)
 	}
 	// Cancel rather than allow: under auto the allow executes inside the workspace fence, so
-	// whether the command then succeeds is confinement's business and not this item's.
+	// whether the command then succeeds is confinement's business and not this item's. Esc×2 —
+	// the stop gesture arms on the first press and confirms on the second.
+	drv.Press(tuitest.Esc)
 	drv.Press(tuitest.Esc)
 	drv.WaitGone(approvalMarker)
 
@@ -186,9 +188,12 @@ func TestE2EApprovalKeysAreArmedAfterPaint(t *testing.T) {
 
 	// Step 6 — Esc is deliberately OUTSIDE the latch: it is the stop path, and the stop path is
 	// never the one made harder to reach. It is pressed the instant the pane's own text appears,
-	// which is inside the window every decision letter is still dead in.
+	// which is inside the window every decision letter is still dead in. Two presses: stopping a
+	// run is the double-tap gesture everywhere the worker is in flight, the pane included, and
+	// the driver's escapeGap sits well inside escStopWindow.
 	submit(drv, controlPrompt)
 	drv.WaitText(approvalMarker)
+	drv.Press(tuitest.Esc)
 	drv.Press(tuitest.Esc)
 	drv.WaitGone(approvalMarker)
 	waitIdle(drv)

@@ -232,6 +232,7 @@ func TestE2EHostileWrapsUnderItsOwnIndent(t *testing.T) {
 	tuitest.Golden(t, "t12-pane-60", pane, goldenRedactions(sess)...)
 
 	drv.Press(tuitest.Esc)
+	drv.Press(tuitest.Esc) // esc×2: the first press arms the stop, the second confirms it
 	drv.WaitGone(approvalMarker)
 	if err := sess.Quit(); err != nil {
 		t.Fatalf("the run returned %v; want a clean quit", err)
@@ -305,6 +306,7 @@ func wrappedPaneFrame(t *testing.T, ws string) tuitest.Frame {
 	submit(drv, "Echo the long string please")
 	pane := awaitApprovalPane(drv)
 	drv.Press(tuitest.Esc)
+	drv.Press(tuitest.Esc) // esc×2: the first press arms the stop, the second confirms it
 	drv.WaitGone(approvalMarker)
 	if err := sess.Quit(); err != nil {
 		t.Fatalf("the narrow run returned %v; want a clean quit", err)

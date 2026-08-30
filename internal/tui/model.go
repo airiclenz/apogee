@@ -278,6 +278,7 @@ type Model struct {
 	askDraft  string
 	lastErr   error     // the error behind stateErrored, shown in the status line
 	lastCtrlC time.Time // when the last Ctrl+C landed; a second within the window quits
+	lastEsc   time.Time // when the last Esc landed while busy; a second within the window stops the worker
 	quitting  bool      // a quit whose exit is deferred: to the worker's terminal Msg while busy (C4), else to the closing flush reaching disk (quit)
 
 	// activityBusy is the last value published through [Options.ReportActivity] — the high-water
@@ -884,6 +885,12 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		m.lastCtrlC = time.Time{}
 		return m, nil
 
+	case escStopResetMsg:
+		// The Esc stop window elapsed without a second press: disarm the gesture so the
+		// "press esc again to stop" hint clears (handleKey's esc case).
+		m.lastEsc = time.Time{}
+		return m, nil
+
 	case eventMsg:
 		// Any Event, any depth, any variant: the engine is not silent. Stamped before the fold and
 		// unconditionally, so an Event the folds deliberately ignore — usage accounting, an audit
@@ -1144,6 +1151,14 @@ const ctrlCQuitWindow = time.Second
 // "press ctrl+c again to quit" hint when the human does not follow through.
 type ctrlCResetMsg struct{}
 
+// escStopWindow is how long after one Esc a second press still stops the in-flight worker. A
+// lone Esc no longer kills a running turn; only a second press inside this window confirms it.
+const escStopWindow = time.Second
+
+// escStopResetMsg disarms the Esc stop gesture once the window elapses, clearing the
+// "press esc again to stop" hint when the human does not follow through.
+type escStopResetMsg struct{}
+
 // keyClaimant is one surface's answer to "is this keypress yours?" — the unit [keyClaimOrder]
 // states the overlay precedence in, so the order is a list to read rather than a run of hand-written
 // guards to trace.
@@ -1382,10 +1397,33 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "esc":
 		// Esc never ends the program; it only cancels an in-flight worker. At idle/errored it
 		// is a no-op (use Ctrl+C twice to exit), so a reflexive Esc never quits.
-		if m.busy() {
+		//
+		// The ask prompt is the one carve-out: its Esc is the answer box's own cancel, and a
+		// human backing out of a question is not aborting a turn they lost track of — one press
+		// still cancels there (ask.go's `esc cancel` hint).
+		if m.state == stateAwaitingAsk {
 			m.stopWorker()
+			return m, nil
 		}
-		return m, nil
+		// Everywhere else a worker runs — including under a live approval pane, which this case
+		// reaches before the approval routing below — a lone Esc no longer kills the turn. The
+		// first press arms the gesture (and shows the hint via statusRight); only a second press
+		// inside escStopWindow stops the worker. The tick disarms it if no second press follows
+		// (escStopResetMsg).
+		if !m.busy() {
+			return m, nil
+		}
+		now := time.Now()
+		if !m.lastEsc.IsZero() && now.Sub(m.lastEsc) <= escStopWindow {
+			// Disarm BEFORE stopping: statusRight's armed branch sits above every occupant, so a
+			// stamp left standing would keep "press esc again to stop" on an idle status line for
+			// the rest of the window after the worker unwound.
+			m.lastEsc = time.Time{}
+			m.stopWorker()
+			return m, nil
+		}
+		m.lastEsc = now
+		return m, tea.Tick(escStopWindow, func(time.Time) tea.Msg { return escStopResetMsg{} })
 	case "enter":
 		switch m.state {
 		case stateIdle:
@@ -1406,7 +1444,9 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			// Latched with the decision letters, and for the same reason: the menu opens on Allow,
 			// so an ⏎ already in the buffer when the pane appeared would allow a call nobody read.
 			// Unarmed it is swallowed here rather than falling through to the states below
-			// (approval.go). Esc, the safe direction, is claimed above and stays live throughout.
+			// (approval.go). Esc, the safe direction, is claimed above and stays live throughout —
+			// as the double-tap it is everywhere a worker runs: one press arms, a second inside
+			// escStopWindow stops. The ⏎-Cancel row below is the one-press spelling of it.
 			if !m.approvalArmed {
 				return m, nil
 			}
@@ -3184,6 +3224,10 @@ func (m Model) statusRight() string {
 	if !m.lastCtrlC.IsZero() {
 		return m.th.statusBar.Render("press ctrl+c again to quit")
 	}
+	// A primed Esc takes it next: tell the human a second press inside the window stops the run.
+	if !m.lastEsc.IsZero() {
+		return m.th.statusBar.Render("press esc again to stop")
+	}
 	// A fresh mouse-copy confirmation briefly takes the slot (flashClearMsg clears it).
 	if m.flash != "" {
 		return m.th.statusBar.Render(m.flash)
@@ -3193,7 +3237,7 @@ func (m Model) statusRight() string {
 	}
 	switch m.state {
 	case stateRunning:
-		return m.th.statusBar.Render("esc stop")
+		return m.th.statusBar.Render("esc×2 stop")
 	case stateErrored:
 		return m.th.statusBar.Render("enter dismiss")
 	default:

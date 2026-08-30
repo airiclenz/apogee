@@ -147,6 +147,7 @@ func TestE2EConsolesDieWithTheirOwner(t *testing.T) {
 	// there is no process to ask about.
 	pid := drv.Pid()
 	drv.Press(tuitest.Esc) // stop the hanging Turn so the quit is a quit and not a cancel-then-quit
+	drv.Press(tuitest.Esc) // esc×2: the first press arms the stop, the second confirms it
 	drv.WaitQuiet(settled)
 	drv.Quit()
 	awaitGone(t, drv, pid, parentSleep, "every Console to be reaped when apogee quits")

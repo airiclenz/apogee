@@ -140,6 +140,7 @@ func TestE2EStreamCancelKeepsWhatArrived(t *testing.T) {
 	submit(drv, streamPrompt)
 	drv.WaitText(streamLine(10))
 	drv.Press(tuitest.Esc)
+	drv.Press(tuitest.Esc) // esc×2: the first press arms the stop, the second confirms it
 	// Back at idle is the signal, read off the prompt box's own hint. The "cancelled" note is not:
 	// it is written ABOVE the text that had arrived, and by the time the worker unwinds that text
 	// has usually pushed it off the top of the window.
@@ -317,6 +318,7 @@ func TestE2EStreamRepaintCeiling(t *testing.T) {
 	// The measurement is taken; the rest of the reply is not needed. Cancel and wait for idle, so
 	// the quit below is a quit rather than one deferred behind a running worker.
 	drv.Press(tuitest.Esc)
+	drv.Press(tuitest.Esc) // esc×2: the first press arms the stop, the second confirms it
 	drv.WaitText("⌃c quit")
 	if err := sess.Quit(); err != nil {
 		t.Fatalf("the run returned %v; want a clean quit", err)
