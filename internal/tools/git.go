@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/security"
 )
 
 // ----------------------------------------------------------------------------
@@ -137,13 +138,11 @@ var gitHardeningEnv = []string{"GIT_CONFIG_NOSYSTEM=1"}
 // stored bytes rather than a driver's rendering of them.
 var gitDiffHardeningArgs = []string{"--no-textconv", "--no-ext-diff"}
 
-// lookGit resolves the system git on PATH (a package var so a test can inject a
-// fake resolver). It returns the absolute path and ok=false when git is absent —
-// the signal a tool degrades to a graceful "git not available" result (§3a).
-var lookGit = func() (string, bool) {
-	path, err := exec.LookPath("git")
-	return path, err == nil
-}
+// lookGit is the PATH lookup security.ResolveProgram performs for git (a package var so a test
+// can inject a fake resolver). It carries the resolver's own look shape — the absolute path and
+// a nil error, or exec.LookPath's error when git is absent, which resolveGit maps to the
+// graceful "git not available" result (§3a).
+var lookGit = exec.LookPath
 
 // gitProgram resolves the system git for a call scoped to root and applies the exec fence to
 // what it found. ok=false carries the model-facing message in refusal: the graceful "git not
@@ -164,12 +163,17 @@ func gitProgram(ctx context.Context, root string) (gitPath, refusal string, ok b
 // (ErrExecFromWritablePath) intact through errors.Is, which a message string cannot. Both forms
 // resolve and fence identically — gitProgram is this function plus the render.
 func resolveGit(ctx context.Context, root string) (string, error) {
-	path, found := lookGit()
-	if !found {
+	path, err := security.ResolveProgram(lookGit, "git", root, confinementBox(ctx))
+	if err != nil {
+		// The fence's refusal passes through with its sentinel and its own sentence — it
+		// NAMES the resolved path, so an operator reads which PATH entry to fix. Every other
+		// resolver failure is an absent git and becomes the graceful message (§3a); the
+		// mapping lives here rather than in gitProgram because RunGitQuery consumes this
+		// function directly and would otherwise emit the raw resolver wording.
+		if errors.Is(err, security.ErrExecFromWritablePath) {
+			return "", err
+		}
 		return "", errors.New(gitUnavailableMessage)
-	}
-	if err := refuseExecFromWritablePath(path, root, confinementBox(ctx)); err != nil {
-		return "", err
 	}
 	return path, nil
 }
@@ -179,7 +183,7 @@ func resolveGit(ctx context.Context, root string) (string, error) {
 // Every invocation goes through here, so this is where gitHardeningOptions and
 // gitHardeningEnv are applied — a caller cannot forget them, and a future git tool inherits
 // them by construction. It returns the captured outcome; a missing git is signalled by
-// ok=false on the caller's lookGit, not here. The Go error is non-nil only for ctx
+// the caller's resolveGit, not here. The Go error is non-nil only for ctx
 // cancellation or a confinement-unavailable demotion (the runSubprocess contract).
 //
 // It is also the choke point for the repo-local command-config refusal: a repository whose own

@@ -170,7 +170,11 @@ has no ErrDot look fake today (`editorAlwaysFound` at `:136`/`:182`/`:553`, a ba
 `:614`, two nil-error absolute paths at `:638`/`:663`), and neither it nor
 `internal/security/execsafety_test.go` imports `os/exec` — both imports land with the case.
 
-## 2. `internal/tools`: git and python_exec resolve through the resolver
+## 2. `internal/tools`: git and python_exec resolve through the resolver — ✅ DONE (2026-08-30)
+
+NOTES (2026-08-30): consequential edit — internal/tools/run_tests.go: made necessary by lookGit/lookInterpreter changing shape; `lookTestProgram`'s doc claimed "the shape lookGit and lookInterpreter already use", which item 2 makes false. Only that clause was dropped — the var itself and its `ok=false` contract are item 3's.
+NOTES (2026-08-30): `lookGit` and `lookInterpreter` are written as the plain value assignment `var x = exec.LookPath` (the injected-default seam the plan's standing requirement preserves) rather than a wrapper literal; the inferred type is the required `func(string) (string, error)`.
+NOTES (2026-08-30): the new terminal-refusal case is a standalone test in `exec_fence_test.go` (`TestPythonExecRefusalIsTerminalAcrossTheCandidates`) rather than a row of a table — `TestPythonExecRefusesAnInRepoVirtualenvByName` beside it is a single-case function, and this case needs a per-candidate look fake no shared helper offers.
 
 **Depends on item 1.**
 

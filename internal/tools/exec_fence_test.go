@@ -188,6 +188,40 @@ func TestPythonExecRefusesAnInRepoVirtualenvByName(t *testing.T) {
 	}
 }
 
+// TestPythonExecRefusalIsTerminalAcrossTheCandidates pins that a fence refusal on a candidate
+// that WAS found ends the probe: python3 resolves inside the workspace and python resolves
+// cleanly outside it, and the call is still refused. Falling through to the clean candidate
+// would run an interpreter the operator never chose and swallow the one sentence that names the
+// in-workspace PATH entry they must fix.
+func TestPythonExecRefusalIsTerminalAcrossTheCandidates(t *testing.T) {
+	root := tempRoot(t)
+	planted := plantExecutable(t, root, ".venv/bin/python3")
+	clean := plantExecutable(t, t.TempDir(), "python")
+
+	original := lookInterpreter
+	lookInterpreter = func(name string) (string, error) {
+		if name == "python3" {
+			return planted, nil
+		}
+		return clean, nil
+	}
+	t.Cleanup(func() { lookInterpreter = original })
+
+	res, err := NewPythonExec(root, nil).Execute(context.Background(), pythonCall("c1", "print(1)"))
+	if err != nil {
+		t.Fatalf("Execute returned a Go error (reserved for cancellation): %v", err)
+	}
+	if !res.IsError {
+		t.Fatalf("a refused python3 must not fall through to %q: %q", clean, res.Content)
+	}
+	if !strings.Contains(res.Content, planted) {
+		t.Errorf("refusal = %q, want it to name the refused %q", res.Content, planted)
+	}
+	if strings.Contains(res.Content, clean) {
+		t.Errorf("refusal = %q, must not have resolved the next candidate %q", res.Content, clean)
+	}
+}
+
 // TestExecFenceCoversTheConfinementBoxNotOnlyTheRoot pins that the box the disposition installs
 // on the call context is part of the fence: an extra writable path is as model-writable as the
 // workspace, and a program planted there is the same attack.

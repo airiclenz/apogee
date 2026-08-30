@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os/exec"
 	"path/filepath"
 	"strconv"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/security"
 )
 
 var pythonExecSpec = toolSpec{
@@ -36,16 +38,11 @@ type pythonExecArgs struct {
 // interpreter is used; none found is a graceful "unavailable" result, never a hard dep (§3a).
 var pythonCandidates = []string{"python3", "python"}
 
-// lookInterpreter resolves the first available interpreter on PATH (a package var so a test
-// can inject a fake resolver). It returns the absolute path and ok=false when none is found.
-var lookInterpreter = func(candidates []string) (string, bool) {
-	for _, name := range candidates {
-		if path, err := exec.LookPath(name); err == nil {
-			return path, true
-		}
-	}
-	return "", false
-}
+// lookInterpreter is the PATH lookup security.ResolveProgram performs for one interpreter name
+// (a package var so a test can inject a fake resolver). It carries the resolver's own look
+// shape — the absolute path and a nil error, or exec.LookPath's error when that name is absent —
+// so the candidate order lives in the caller's loop rather than inside the lookup.
+var lookInterpreter = exec.LookPath
 
 // The load-path policy: the workspace never precedes the standard library on sys.path.
 //
@@ -225,19 +222,29 @@ func (t *PythonExec) Execute(ctx context.Context, call domain.ToolCall) (domain.
 		return errorResult(call.ID, "code is required"), nil
 	}
 
-	interp, ok := lookInterpreter(pythonCandidates)
-	if !ok {
+	// The candidates are probed in preference order, each resolved AND fenced in one step.
+	// A fence refusal on a candidate that was FOUND is terminal, never a fall-through: an
+	// interpreter the model can write is not an interpreter, and silently running the next
+	// candidate would hide the in-workspace PATH entry (typically an activated .venv) that
+	// the refusal exists to name. That refusal is deliberately NOT the graceful "python not
+	// available" below — that message would send the operator installing a Python they
+	// already have.
+	var interp string
+	box := confinementBox(ctx)
+	for _, candidate := range pythonCandidates {
+		path, err := security.ResolveProgram(lookInterpreter, candidate, t.root, box)
+		if err == nil {
+			interp = path
+			break
+		}
+		if errors.Is(err, security.ErrExecFromWritablePath) {
+			return errorResult(call.ID, err.Error()), nil
+		}
+	}
+	if interp == "" {
 		// Graceful degradation (§3a): no interpreter is an unavailable result, not a crash
 		// and not a hard dependency.
 		return errorResult(call.ID, "python not available: no Python interpreter found on PATH (looked for "+strings.Join(pythonCandidates, ", ")+")"), nil
-	}
-	// An interpreter the model can write is not an interpreter: the exec fence refuses it and
-	// says so in its own words, naming the resolved path. This is deliberately NOT the
-	// graceful "python not available" above — that message would send the operator installing
-	// a Python they already have, when the cause is an in-workspace one (typically an
-	// activated .venv) sitting ahead of the system entries on PATH.
-	if err := refuseExecFromWritablePath(interp, t.root, confinementBox(ctx)); err != nil {
-		return errorResult(call.ID, err.Error()), nil
 	}
 
 	dir, err := t.resolveWorkdir(args.Workdir)

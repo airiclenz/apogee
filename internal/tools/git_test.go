@@ -17,11 +17,18 @@ import (
 )
 
 // withFakeGit swaps lookGit for the duration of a test (restored on cleanup), so the
-// graceful-degradation and confine paths are exercisable without depending on the host.
+// graceful-degradation and confine paths are exercisable without depending on the host. It
+// fakes the LOOK alone — the fence security.ResolveProgram applies to what the look answers is
+// the real one, which is what makes the planted-git refusal a genuine assertion.
 func withFakeGit(t *testing.T, found bool, path string) {
 	t.Helper()
 	orig := lookGit
-	lookGit = func() (string, bool) { return path, found }
+	lookGit = func(string) (string, error) {
+		if !found {
+			return "", exec.ErrNotFound
+		}
+		return path, nil
+	}
 	t.Cleanup(func() { lookGit = orig })
 }
 

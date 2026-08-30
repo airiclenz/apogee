@@ -21,11 +21,18 @@ func pythonCall(id, code string) domain.ToolCall {
 }
 
 // withFakeInterpreter swaps lookInterpreter for the duration of a test (restored on cleanup),
-// so the graceful-degradation path is exercisable without depending on the host's PATH.
+// so the graceful-degradation path is exercisable without depending on the host's PATH. Every
+// candidate name gets the same answer; it fakes the LOOK alone, never the fence
+// security.ResolveProgram applies to what the look answers.
 func withFakeInterpreter(t *testing.T, found bool, path string) {
 	t.Helper()
 	orig := lookInterpreter
-	lookInterpreter = func([]string) (string, bool) { return path, found }
+	lookInterpreter = func(string) (string, error) {
+		if !found {
+			return "", exec.ErrNotFound
+		}
+		return path, nil
+	}
 	t.Cleanup(func() { lookInterpreter = orig })
 }
 
@@ -417,8 +424,16 @@ func TestPythonExec_WorkspaceDoesNotShadowTheStdlib(t *testing.T) {
 	realPython(t)
 	t.Parallel()
 
-	interp, found := lookInterpreter(pythonCandidates)
-	if !found {
+	var interp string
+	for _, candidate := range pythonCandidates {
+		path, err := lookInterpreter(candidate)
+		if err != nil {
+			continue
+		}
+		interp = path
+		break
+	}
+	if interp == "" {
 		t.Skip("no Python interpreter on PATH; the stdlib-shadowing mechanism cannot be exercised here")
 	}
 	// No workspace root: this probe only reports which mechanism the run below exercises, so

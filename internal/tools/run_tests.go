@@ -379,8 +379,8 @@ func detectNPMTest(root string) bool {
 }
 
 // lookTestProgram resolves a runner's executable on PATH (a package var so a test can inject a
-// fake resolver — the shape lookGit and lookInterpreter already use). ok=false is the signal the
-// tool degrades to a clear "not available" result (§3a).
+// fake resolver). ok=false is the signal the tool degrades to a clear "not available"
+// result (§3a).
 var lookTestProgram = func(program string) (string, bool) {
 	path, err := exec.LookPath(program)
 	return path, err == nil
