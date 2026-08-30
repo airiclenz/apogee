@@ -103,7 +103,19 @@ NOTES (2026-08-30): the item cites the trailer as ADR 0063 D5; the ratified ADR 
 
 **Commit.** `feat(agent): a steered sub-agent's result tells the parent how many user messages it received`
 
-## 4. TUI engine seam: `InterjectChild` on `tui.Engine`, fold the delivery event
+## 4. TUI engine seam: `InterjectChild` on `tui.Engine`, fold the delivery event — ✅ DONE (2026-08-30)
+
+NOTES (2026-08-30): the `Engine` doubles the grep found are exactly two — `fakeEngine` (`internal/tui/seam_test.go`) and the PRODUCTION `lateEngine` (`cmd/apogee/wire_engine.go`); `*apogee.Agent` already carried `InterjectChild` from item 2, and no other type in the repo satisfies `tui.Engine`.
+
+NOTES (2026-08-30): `internal/tui/transcriptcodec.go` needed no change and is not in FILES — `toWireEntry`/`fromWireEntry` already carry `Depth` and `SpawnCallID` for every kind, so only the round-trip case was added (the item's own text says as much).
+
+NOTES (2026-08-30): consequential edit — internal/tui/fold_test.go: made necessary by the new `apply` case; `TestFoldEventCoversEveryEventVariant` was already failing at HEAD because item 2 added `domain.ChildInterjectionEvent` with no `foldCases` row, and this item is where the row is owed (both fates: landed → one entry, not landed → one note).
+
+NOTES (2026-08-30): the `apply` doc comment's variant arithmetic ("nine … of the twelve-variant Event set") was falsified by the new case and was already stale by one (`WireEvent`); it now reads "ten … of the fourteen-variant Event set" with `WireEvent` named in the inert list.
+
+NOTES (2026-08-30): a run whose span holds only a delivered message reads as RUNNING rather than queued ("0 tool calls"), because `subAgentScheduled` yields to `subAgentFramed` the moment a run has a span. Not reachable as a wrong reading through the engine: `runSubAgent` registers a child in the mailbox registry only once it is actually driving it, so a delegation still queued behind the Parallel-agents cap refuses `InterjectChild` with `ErrNoSuchChild` and never gets a span this way. Pinned in the collapsed-run subtest.
+
+NOTES (2026-08-30): `addUserAt` carries no `skillSpans` — the delivery event carries a bare `domain.UserInput` and the staged rows that hold the spans are item 9's state. A skill attached to a child message will highlight once item 9 wires the staging.
 
 **What.** Depends on item 2. Add `InterjectChild(spawnCallID string, in domain.UserInput) error` to the `Engine` interface (`internal/tui/tui.go:580-640`) with a doc comment stating it is the one engine call legal from the program goroutine besides `AbortExchange` (non-blocking enqueue). Update every test double implementing `Engine` (grep `func (.*) Interject(` under `internal/tui/` and `cmd/apogee/`; enumerate in a NOTES line). Fold `domain.ChildInterjectionEvent` where `SubAgentPhaseEvent` is folded today (grep `SubAgentPhaseEvent` in `internal/tui/`): `Landed: true` → `transcript.addUserAt(depth, spawn, in)` — a new `transcript` method that commits, through `transcript.place`, an `entryUser` entry carrying `depth` and `spawnCallID` so it paints inside the run and regroups on replay (`transcriptcodec` already persists both fields; add a round-trip case) — and clears the matching staged child message (item 9's state; until then, no-op); `Landed: false` → a transcript note `<name> finished before your message landed` via `transcript.addNote` (the one `/undo` and refusals use). The `Bridge`/event sink needs no change: the event rides the shared sink.
 

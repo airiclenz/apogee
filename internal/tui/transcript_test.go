@@ -3188,3 +3188,133 @@ func TestRunHeadPredicates(t *testing.T) {
 		}
 	})
 }
+
+// ----------------------------------------------------------------------------
+// A message addressed to a running child (ADR 0063)
+// ----------------------------------------------------------------------------
+
+// childMessage folds one delivery report for a message the human addressed to the run spawn
+// spawned, at the child's own depth — the shape Agent.drainMailbox emits (domain.ChildInterjectionEvent).
+func childMessage(tr *transcript, spawn, text string, depth int, landed bool) {
+	tr.apply(domain.ChildInterjectionEvent{
+		EventBase: domain.EventBase{Depth: depth, CallID: spawn},
+		Input:     domain.UserInput{Text: text},
+		Landed:    landed,
+	})
+}
+
+// TestChildInterjectionLandsInsideItsRun pins the delivery fold: a message the child actually read
+// becomes that child's own user block, inside its run and at the boundary it reached, and one that
+// never got there becomes a host note instead. Both halves are what a human who was shown a message
+// queued is owed — the account is never silence.
+func TestChildInterjectionLandsInsideItsRun(t *testing.T) {
+	t.Run("the entry carries the child's depth and run", func(t *testing.T) {
+		tr := &transcript{}
+		subAgentCall(tr, "s1", "survey the tests", 0)
+
+		childMessage(tr, "s1", "check the docs too", 1, true)
+
+		if len(tr.entries) != 2 {
+			t.Fatalf("transcript holds %d entries, want the head and the delivered message", len(tr.entries))
+		}
+		got := tr.entries[1]
+		if got.kind != entryUser || got.text != "check the docs too" {
+			t.Errorf("delivered entry = %v/%q, want an entryUser carrying the message", got.kind, got.text)
+		}
+		if got.depth != 1 || got.spawnCallID != "s1" {
+			t.Errorf("delivered entry depth/spawn = %d/%q, want 1/\"s1\" — the run it was addressed to",
+				got.depth, got.spawnCallID)
+		}
+	})
+
+	t.Run("a collapsed run elides it with the rest of its span", func(t *testing.T) {
+		tr := &transcript{}
+		subAgentCall(tr, "s1", "survey the tests", 0)
+
+		childMessage(tr, "s1", "check the docs too", 1, true)
+
+		// The head's own row and nothing else: the message went INSIDE the run, so the collapsed
+		// run's elision covers it exactly as it covers the delegate's own work. The row reads as a
+		// RUNNING delegation from here — the run has a span now, which is the same reading it takes
+		// on its delegate's first committed entry (subAgentScheduled).
+		want := strings.Join([]string{
+			"✦ Sub-Agent",
+			leaderEdgeRow("  ┕ survey the tests ⋯ 0 tool calls", glyphCollapsed),
+		}, "\n")
+		if got := renderPlain(tr, 80); got != want {
+			t.Errorf("collapsed run leaked the message addressed to it:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+		}
+	})
+
+	t.Run("with two siblings live it lands in its OWN run, not behind the last", func(t *testing.T) {
+		tr := &transcript{}
+		subAgentCall(tr, "s1", "survey the tests", 0)
+		readCall(tr, "c1", "a.go", 1, 5, 1)
+		subAgentCall(tr, "s2", "survey the docs", 0)
+
+		childMessage(tr, "s1", "check the docs too", 1, true)
+
+		// Appended, the message would sit past s2's stretch and subAgentSpan would read it as s2's.
+		// place puts it at the end of s1's own stretch instead: right behind the child's read call,
+		// and in FRONT of the sibling head.
+		if len(tr.entries) != 4 {
+			t.Fatalf("transcript holds %d entries, want two heads, the child's read block and the message", len(tr.entries))
+		}
+		if got := tr.entries[2]; got.kind != entryUser || got.spawnCallID != "s1" {
+			t.Errorf("entries[2] = %v/%q, want the message placed at the end of s1's stretch",
+				got.kind, got.spawnCallID)
+		}
+		if got := tr.entries[3]; !got.headsRunFor("s2") {
+			t.Errorf("entries[3] no longer heads s2's run (%v); the message was appended, not placed", got.kind)
+		}
+	})
+
+	t.Run("it registers no sticky user block", func(t *testing.T) {
+		tr := &transcript{}
+		tr.addUser("delegate it", nil)
+		subAgentCall(tr, "s1", "survey the tests", 0)
+		if !tr.setExpanded(1, true) {
+			t.Fatal("setExpanded(1, true) = false; want the run expanded so the message is painted at all")
+		}
+
+		childMessage(tr, "s1", "check the docs too", 1, true)
+
+		// One stop, the human's own prompt: a message steering a delegate is drawn like a prompt
+		// and walked past like a delegate's entry, so ctrl+↑/↓ offer only turns the reader started.
+		blocks := tr.renderView(newTheme(scheme.Default()), 80, false).userBlocks
+		if len(blocks) != 1 {
+			t.Errorf("renderView recorded %d user blocks, want 1 — the top-level prompt alone", len(blocks))
+		}
+	})
+
+	t.Run("a message that never landed is a note naming the delegation", func(t *testing.T) {
+		tr := &transcript{}
+		subAgentCall(tr, "s1", "survey the tests", 0)
+
+		childMessage(tr, "s1", "check the docs too", 1, false)
+
+		if len(tr.entries) != 2 {
+			t.Fatalf("transcript holds %d entries, want the head and the note", len(tr.entries))
+		}
+		got := tr.entries[1]
+		const want = "sub-agent finished before your message landed"
+		if got.kind != entryNote || got.text != want {
+			t.Errorf("undelivered fold = %v/%q, want an entryNote reading %q", got.kind, got.text, want)
+		}
+	})
+
+	t.Run("the note names a NAMED delegation", func(t *testing.T) {
+		tr := &transcript{}
+		tr.apply(domain.ToolCallEvent{
+			Call: domain.ToolCall{ID: "s1", Tool: "sub_agent",
+				Arguments: []byte(`{"name":"repo-scout","task":"survey the tests"}`)},
+		})
+
+		childMessage(tr, "s1", "check the docs too", 1, false)
+
+		const want = "repo-scout finished before your message landed"
+		if got := tr.entries[len(tr.entries)-1]; got.text != want {
+			t.Errorf("undelivered note = %q, want %q", got.text, want)
+		}
+	})
+}

@@ -576,7 +576,9 @@ type LauncherActs struct {
 // with a fake engine. The worker goroutine is the only caller of the Exchange-driving
 // methods (Submit/Step, and Interject at the boundary between them); ClearContext/Compact
 // are driven from the Update goroutine but only at idle, when no worker runs — so the
-// single-driver contract holds (phase-2 detail plan §3 C1).
+// single-driver contract holds (phase-2 detail plan §3 C1). Two calls stand outside it
+// deliberately, and both are engine-side-guarded rather than boundary-guarded: AbortExchange
+// and InterjectChild, which the Update goroutine may make while a worker drives.
 type Engine interface {
 	// Submit enqueues user input to begin or continue an Exchange.
 	Submit(domain.UserInput) error
@@ -593,6 +595,23 @@ type Engine interface {
 	// empty-interjection error when the input carries no text, references, or skills; on
 	// either refusal the conversation is untouched and the worker holds the remaining rows.
 	Interject(domain.UserInput) error
+	// InterjectChild queues a user message for the RUNNING sub-agent that the sub_agent call
+	// spawnCallID spawned, anywhere in the engine's tree — its own children, and recursively
+	// theirs. The message lands at that child's next between-Steps boundary as an ordinary
+	// interjection, committed by the goroutine that owns the child's Steps, with the child's own
+	// tools, mode and confinement unchanged: addressing a child grants it nothing (ADR 0063).
+	//
+	// Unlike Interject above it is NOT the worker's call. It is the one engine call besides
+	// AbortExchange that the program goroutine may make while a worker drives the loop: a
+	// non-blocking enqueue onto a guarded mailbox that touches no conversation, so it needs
+	// neither the between-Steps boundary nor the single-driver contract.
+	//
+	// It refuses with domain.ErrNoSuchChild when spawnCallID names no running sub-agent — the
+	// child finished, was cancelled, or never existed — and that refusal is the message's whole
+	// account: nothing was queued and no domain.ChildInterjectionEvent follows. On success exactly
+	// one such event reports the message's fate, Landed either way, and the fold turns it into the
+	// delivered block inside the run or the note that it never got there (transcript.apply).
+	InterjectChild(spawnCallID string, in domain.UserInput) error
 	// ClearContext drops the model's conversation history (the /clear command); the
 	// host's visible transcript is unaffected. Called only at idle (no worker running).
 	ClearContext() error

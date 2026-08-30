@@ -546,8 +546,13 @@ func (t *transcript) resolveBlock(th theme, head int, in paintInput, width int, 
 		draw: func() blockPaint {
 			return renderEntryLines(th, in, width, blink)
 		},
-		next:   head + 1,
-		isUser: in.kind.isUserPrompt(),
+		next: head + 1,
+		// A prompt stop, but only the human's OWN: a message addressed to a running sub-agent is
+		// an entryUser too (transcript.addUserAt), and it is the depth that parts the two. The
+		// prompt the on-screen work belongs to is the top-level one whatever a delegate is being
+		// told, so a delegated user block is drawn like a prompt and walked past like a delegate's
+		// entry — ctrl+↑/↓ offer stops the reader actually started a turn at.
+		isUser: in.kind.isUserPrompt() && in.depth == 0,
 	}
 }
 

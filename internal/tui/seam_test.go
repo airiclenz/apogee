@@ -137,19 +137,28 @@ type fakeEngine struct {
 
 	interjected []domain.UserInput // records Interject calls (the worker's between-Steps delivery), in order
 
+	childInterjected []childInterjection // records InterjectChild calls (a message addressed to a running child), in order
+
 	undoStep    undo.Step   // the step UndoPreview answers with; the zero value plus undoStepOK false is "nothing to undo"
 	undoStepOK  bool        // whether UndoPreview reports a step at all
 	undoReport  undo.Report // the report a permitted UndoRevert returns
 	undoErr     error       // the refusal UndoRevert returns instead (a stale generation, an empty journal)
 	undoReverts []uint64    // records the generations UndoRevert was called with, in order
 
-	submitFn    func(domain.UserInput) error
-	stepFn      func(ctx context.Context, call int) (domain.StepResult, error)
-	snapshotFn  func() (domain.Session, error)
-	clearFn     func() error
-	restoreFn   func(domain.Session) error // scripted RestoreSession error (nil ⇒ success)
-	compactFn   func(context.Context) (skipped bool, err error)
-	interjectFn func(domain.UserInput) error // scripted Interject error (nil ⇒ committed)
+	submitFn         func(domain.UserInput) error
+	stepFn           func(ctx context.Context, call int) (domain.StepResult, error)
+	snapshotFn       func() (domain.Session, error)
+	clearFn          func() error
+	restoreFn        func(domain.Session) error // scripted RestoreSession error (nil ⇒ success)
+	compactFn        func(context.Context) (skipped bool, err error)
+	interjectFn      func(domain.UserInput) error         // scripted Interject error (nil ⇒ committed)
+	interjectChildFn func(string, domain.UserInput) error // scripted InterjectChild error (nil ⇒ queued)
+}
+
+// childInterjection is one recorded InterjectChild call: the run it addressed and the message.
+type childInterjection struct {
+	spawn string
+	input domain.UserInput
 }
 
 // fakeEngine satisfies the narrow Engine seam the worker drives.
@@ -197,6 +206,30 @@ func (f *fakeEngine) interjections() []domain.UserInput {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]domain.UserInput(nil), f.interjected...)
+}
+
+// InterjectChild records the message the UI addressed to a running child and answers with whatever
+// the test scripted (nil ⇒ queued). A scripted refusal models the real Agent's domain.ErrNoSuchChild
+// without needing a live child tree. Like Interject it records the call whether or not it is
+// refused — and unlike Interject it is called from the Update goroutine, so it takes the same mutex
+// every other fake seam does.
+func (f *fakeEngine) InterjectChild(spawn string, in domain.UserInput) error {
+	f.mu.Lock()
+	f.childInterjected = append(f.childInterjected, childInterjection{spawn: spawn, input: in})
+	fn := f.interjectChildFn
+	f.mu.Unlock()
+	if fn != nil {
+		return fn(spawn, in)
+	}
+	return nil
+}
+
+// childInterjections reports the calls InterjectChild was handed, in order — empty when the UI
+// addressed no child.
+func (f *fakeEngine) childInterjections() []childInterjection {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]childInterjection(nil), f.childInterjected...)
 }
 
 func (f *fakeEngine) Snapshot() (domain.Session, error) {

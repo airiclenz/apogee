@@ -1342,6 +1342,37 @@ func TestTranscriptCodecRoundTripsTheSpawningCallID(t *testing.T) {
 		}
 	})
 
+	t.Run("a message addressed to a child replays into the same run", func(t *testing.T) {
+		// The delivered block is an entryUser at depth (transcript.addUserAt), so BOTH members have
+		// to survive for it: without the depth it replays railed at the top level, and without the
+		// run it regroups outside its head's span — a message the human sent to one delegate coming
+		// back beside the parent's own prompts.
+		tr := &transcript{entries: []entry{
+			{kind: entryUser, text: "delegate it"},
+			{kind: entryUser, text: "check the docs too", depth: 1, spawnCallID: "s1"},
+		}}
+
+		data, err := encodeTranscript(tr)
+		if err != nil {
+			t.Fatalf("encodeTranscript: %v", err)
+		}
+		got, err := decodeTranscript(data)
+		if err != nil {
+			t.Fatalf("decodeTranscript: %v", err)
+		}
+		if len(got) != 2 {
+			t.Fatalf("decoded %d entries, want the prompt and the delegated message", len(got))
+		}
+		if got[1].kind != entryUser || got[1].depth != 1 || got[1].spawnCallID != "s1" {
+			t.Errorf("the delegated message replayed as %v at depth %d in run %q, want an entryUser at 1 in \"s1\"",
+				got[1].kind, got[1].depth, got[1].spawnCallID)
+		}
+		if got[0].depth != 0 || got[0].spawnCallID != "" {
+			t.Errorf("the top-level prompt replayed at depth %d in run %q, want 0 and no run",
+				got[0].depth, got[0].spawnCallID)
+		}
+	})
+
 	t.Run("a blob written before the member decodes to no run identity", func(t *testing.T) {
 		legacy := []byte(`{"version":1,"entries":[{"kind":"assistant","text":"child answer","depth":1}]}`)
 		got, err := decodeTranscript(legacy)

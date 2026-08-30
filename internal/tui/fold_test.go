@@ -164,6 +164,32 @@ func foldCases() []foldCase {
 			wantProgressSave: true,
 		},
 		{
+			name: "ChildInterjectionEvent that landed commits the message inside the child's run",
+			// The delivery report is the ONE thing the view has to show for a message the human
+			// addressed to a running delegate: it becomes that child's own user block, placed in
+			// its run (transcript.addUserAt). On this fresh Model there is no run to place it in,
+			// so it appends — the placement itself is pinned in transcript_test.go. It moves no
+			// phrase (the child's own events say what it is doing) and fires no progress save: the
+			// record is re-persisted when the child next crosses a tool boundary.
+			event: domain.ChildInterjectionEvent{
+				EventBase: domain.EventBase{Depth: 1, CallID: "s1"},
+				Input:     domain.UserInput{Text: "check the tests too"},
+				Landed:    true,
+			},
+			wantEntries: 1,
+		},
+		{
+			name: "ChildInterjectionEvent that did not land is a host note",
+			// The child ended before the boundary the message was waiting for. There is no run
+			// left to put it in and nothing the child ever read, so the human who was shown it
+			// queued is owed a note instead — one entry either way, and never silence.
+			event: domain.ChildInterjectionEvent{
+				EventBase: domain.EventBase{Depth: 1, CallID: "s1"},
+				Input:     domain.UserInput{Text: "check the tests too"},
+			},
+			wantEntries: 1,
+		},
+		{
 			name:        "ApprovalEvent is a transcript note and no activity at all",
 			event:       domain.ApprovalEvent{Request: domain.ApprovalRequest{Tool: "terminal"}, Decision: domain.ApprovalAllow},
 			wantEntries: 1,

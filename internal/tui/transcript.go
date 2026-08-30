@@ -625,6 +625,29 @@ func (t *transcript) addInterjected(text string, spans []skillSpan) {
 	})
 }
 
+// addUserAt commits a message the human addressed to a RUNNING sub-agent, at the point in the
+// scrollback where that child actually received it (ADR 0063). The delivery fold calls it off the
+// child's domain.ChildInterjectionEvent, never the staging keypress, so the block stands for what
+// the child was given and when — the same honesty addInterjected keeps for the top-level Exchange.
+//
+// It IS an entryUser, unlike addInterjected: as far as that child is concerned the message is the
+// human speaking to it, under the same ❯ its parent's prompts wear. It still never becomes the
+// sticky header, and the depth is what keeps it from becoming one — renderView records a userBlock
+// only for a depth-0 prompt, because the prompt the on-screen work belongs to is the human's own
+// top-level one whatever a delegate is being told (render.go).
+//
+// It goes in through [transcript.place] like every other delegated entry rather than being
+// appended, and that is load-bearing with siblings live: an appended entry lands past the LAST
+// run's stretch, where [subAgentSpan] would read it as the sibling's.
+func (t *transcript) addUserAt(depth int, spawn string, in domain.UserInput) {
+	t.place(entry{
+		kind:        entryUser,
+		text:        in.Text,
+		depth:       depth,
+		spawnCallID: spawn,
+	})
+}
+
 // addNote appends a neutral note (e.g. "cancelled") — a transcript record of a UI-level
 // event that is not itself an engine Event.
 //
@@ -840,12 +863,12 @@ func presentedStatus(v presentedView) string {
 }
 
 // apply folds one engine Event into the transcript (the C6 rule). The switch covers the
-// nine transcript-rendered variants of the twelve-variant Event set, so the rendered set
-// stays honest as the engine evolves; the other three append no entry (ReasoningEvent feeds
-// the activity line, AuditEvent nothing in the TUI, and a UsageEvent is a reading rather than
-// a block — it lands ON an entry the run already has, through applyUsage, which foldEvent
-// calls with the window a fill needs and apply cannot see) and fall to the default case with
-// every future variant. Each
+// ten transcript-rendered variants of the fourteen-variant Event set, so the rendered set
+// stays honest as the engine evolves; the other four append no entry (ReasoningEvent feeds
+// the activity line, AuditEvent and WireEvent nothing the transcript draws, and a UsageEvent is a
+// reading rather than a block — it lands ON an entry the run already has, through applyUsage,
+// which foldEvent calls with the window a fill needs and apply cannot see) and fall to the default
+// case with every future variant. Each
 // case folds its event: tokens grow the in-progress buffer at the depth that emitted them (the
 // routing every other assistant-text case does through its own e.Depth); a StreamReset discards
 // the buffer its own level owns; a
@@ -853,7 +876,9 @@ func presentedStatus(v presentedView) string {
 // narration before recording the call; results, approvals, and recovered faults append
 // their own entries; a SubAgentPhase appends none — like a reading it lands ON the block a
 // delegation already has, marking it running or folding in the report its child just returned
-// (addSubAgentPhase); a MechanismFired is surfaced only in the debug view. It renders only —
+// (addSubAgentPhase); a ChildInterjection commits the message it reports INSIDE the child's run
+// when it landed and a note saying it never did when it did not (addChildInterjection); a
+// MechanismFired is surfaced only in the debug view. It renders only —
 // no agent logic (C5).
 func (t *transcript) apply(e domain.Event) {
 	switch e := e.(type) {
@@ -871,6 +896,8 @@ func (t *transcript) apply(e domain.Event) {
 		t.addToolResult(e.Result, runOf(e.EventBase))
 	case domain.SubAgentPhaseEvent:
 		t.addSubAgentPhase(e)
+	case domain.ChildInterjectionEvent:
+		t.addChildInterjection(e)
 	case domain.ApprovalEvent:
 		t.addApproval(e.Request, e.Decision, runOf(e.EventBase))
 	case domain.MechanismFiredEvent:
@@ -1200,6 +1227,29 @@ func (t *transcript) addSubAgentPhase(e domain.SubAgentPhaseEvent) {
 		}
 		return
 	}
+}
+
+// addChildInterjection folds one delivery report for a message the human addressed to a running
+// sub-agent (domain.ChildInterjectionEvent, ADR 0063). Every message the mailbox accepted gets
+// exactly one, so what the human was shown as queued is always accounted for on screen.
+//
+// A message that LANDED becomes that child's own user block, inside its run, at the boundary it
+// actually reached (addUserAt) — a collapsed run elides it with the rest of its span, and an open
+// one shows it railed where the child read it. One that did NOT land becomes a host note instead:
+// the child ended before the boundary its message was waiting for, so there is no run left to put
+// it in and nothing the child ever saw to record. The note names the delegation, falling back to
+// the status line's own word for an unnamed one, and escape-strips through addNote like every
+// other note worded from model-supplied text.
+func (t *transcript) addChildInterjection(e domain.ChildInterjectionEvent) {
+	if e.Landed {
+		t.addUserAt(e.Depth, e.CallID, e.Input)
+		return
+	}
+	name := t.runName(e.CallID)
+	if name == "" {
+		name = subAgentActivityName
+	}
+	t.addNote(name + " finished before your message landed")
 }
 
 // hasOpenToolCall reports whether any tool-call entry is still waiting for its result — the
