@@ -10,6 +10,18 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- `--tui-diag` now records the mouse as well as the terminal. `observe` gains the four mouse
+  messages bubbletea delivers — `mouse-kind: press`, `motion`, `release`, `wheel` — under a new
+  `diagMouseKind` key, and because `record` is change-suppressed a whole drag costs three lines
+  with a run of motions collapsing into one. That is what makes the failure this plan fixes
+  legible from a bug report alone: a terminal whose tracking a tool child reset behind apogee's
+  back writes `mouse-kind: press` with no `motion` or `release` line ever following it, while a
+  healthy session that lost tracking and got it back shows the `mouse-reassert` counter (item 1)
+  climbing beside those lines. `TestDiagLogRecordsMouseEventKinds` pins the exact file contents
+  for a click / motion / motion / release / wheel sequence, and the nil-log test now feeds the
+  four mouse messages through the off state too. `docs/manual/probe.md` names both new keys and
+  what a dead-mouse log looks like.
+
 - Every tool card in a saved session now keeps a **bounded copy of the arguments the model sent
   with that call**. `presentToolCall` settles it at build time for every call at every depth —
   an unregistered MCP tool included, through its other exit — from the call's own JSON via
@@ -450,6 +462,57 @@ point is a **minor** bump, not a breaking change.
   lives" map points at the convention.
 
 ### Fixed
+
+- A tool child that resets the terminal's mouse tracking on its way out no longer leaves block
+  toggles, drag-select and wheel scrolling dead for the rest of the session. Bubble Tea writes the
+  tracking escapes only when a frame's `MouseMode` *changes* (`cursed_renderer.go`), and apogee's
+  `View` sets `MouseModeCellMotion` on every laid-out frame — so the sequence went out exactly
+  once, at the first laid-out frame, and the renderer had nothing left to re-send once a child
+  program had turned reporting off behind apogee's back. The model now says it again itself
+  (`internal/tui/mousereassert.go`): every `domain.ToolResultEvent`, at any depth — a sub-agent's
+  children included — and every `tea.WindowSizeMsg` returns `tea.Raw("\x1b[?1002h\x1b[?1006h")`,
+  the exact bytes the renderer emits for cell motion. The sequence is idempotent, so a re-assert
+  nobody needed costs two escapes nobody sees, and nothing before the first `WindowSizeMsg` emits
+  one (the pre-ready frame carries no mouse mode at all). `--tui-diag` records a running
+  `mouse-reassert` count, so a bug report can say whether the escapes went out.
+
+- A terminal that encodes the mouse release with the motion bit set — the SGR `ESC[<35;x;ym` that
+  Windows Terminal and its kin send — no longer loses the release. That sequence decodes as a
+  BUTTON-LESS motion (`MouseNone`) rather than a release, so `handleMouseMotion` dropped it at its
+  `Button != tea.MouseLeft` guard and the press stayed armed for the rest of the session: block
+  toggles never fired and a drag never reached the clipboard. A press now arms a dedicated latch on
+  the model (`mousePressed`, set by `handleMouseClick`, cleared on every exit from
+  `handleMouseRelease`), and a button-less motion while that latch is armed is routed as the
+  release it really is — a motionless one toggles, a moved one copies. With nothing armed such a
+  motion stays the no-op it reads as. The latch is deliberately its own bool and not a selection's
+  `.active`, which means "highlight shown" and outlives the release that copied it.
+
+- The transcript viewport no longer wraps: its rows are the stored lines, one for one. The painter
+  had already hard-wrapped every line at the width authority (ADR 0030 §7), and the widget's second
+  wrap was a second *opinion* — it re-measured with `ansi.StringWidth` (GraphemeWidth) where the
+  painter measures in WcWidth, so a full line ending in a VARIATION SELECTOR-16 glyph (`⚠️ ✔️ ℹ️` —
+  one painted cell, two grapheme cells) folded into two screen rows. Every reader of
+  `contentLineAt(row) = YOffset() + row` below such a line then addressed the wrong line: a click
+  on the block under it toggled something else, and the sticky header, the anchored refresh, the
+  block cursor and the selection highlight all drifted with it. `SoftWrap` is now off, a line the
+  widget measures over its width is clipped at the right edge rather than re-flowed, and horizontal
+  scrolling is disabled with it (`SetHorizontalStep(0)`) so the view can never wander off column 0.
+
+- A presented document's path and served URL are hard-wrapped by the painter when they do not fit
+  the transcript width, instead of being left over it. They are still emitted raw and whole — no
+  style, no hanging indent, one token per line — on every window that fits them, which is the case
+  a terminal can linkify; on a window too narrow for them the rows now join to the whole token
+  rather than having its tail clipped off the right edge by the no-longer-wrapping viewport.
+
+- A transcript line the painter filled to the column keeps its trailing `⚠️` instead of losing it to
+  the right edge. With the viewport's soft wrap off, the widget CLIPS a line it measures wider than
+  its width — and it measures with `ansi.StringWidth` (GraphemeWidth), where a VARIATION SELECTOR-16
+  glyph is two cells against the one the painter spends on it, so a full line ending in such a glyph
+  had that glyph cut off the frame. The painter now reserves the widget's extra cells: the finished
+  paint is held to the viewport's own width in the widget's measure (`reserveWidgetCells`), breaking
+  the rare line that overruns into stored lines of its own — rows stay 1:1 with the stored lines, the
+  transcript still never scrolls sideways, and the widget's clip has nothing left to cut. The wrap
+  each surface chose in the painter's measure is untouched (ADR 0030 §7).
 
 - The Library store no longer writes on the caller's goroutine (audit finding **C-13 — the library
   store persists under its lock**). `Record` and `RecordSuccess` now mutate memory, mark the store
