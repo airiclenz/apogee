@@ -122,6 +122,52 @@ point is a **minor** bump, not a breaking change.
   a running sub-agent (with `esc×2` stopping from the top level only); `docs/manual/sessions.md`
   records that a run view — like a fold — is not part of a saved session.
 
+- `git` and `python_exec` now resolve their program through `security.ResolveProgram` — one step
+  that both looks the name up on PATH and applies the exec fence — instead of a hand-rolled
+  `exec.LookPath` plus a separate in-function fence call. Announced wordings are unchanged
+  (`git not available: no git executable found on PATH`, `python not available: no Python
+  interpreter found on PATH (looked for python3, python)`, and the fence's own refusal naming the
+  resolved path), and a fence refusal on a python candidate that WAS found is now explicitly
+  terminal: a `python3` inside the workspace is refused rather than silently falling through to a
+  clean system `python`.
+
+- `run_tests` and `diagnostics` now resolve their program through `security.ResolveProgram` — one
+  step that both looks the name up on PATH and applies the exec fence — instead of a hand-rolled
+  `exec.LookPath` plus a separate in-function fence call, and `internal/tools`' package-local
+  `refuseExecFromWritablePath` wrapper is gone with its last two callers. Announced wordings are
+  unchanged: `<runner> not available: the project's markers select <runner>, but no "<program>"
+  executable was found on PATH`, `go vet skipped: no 'go' toolchain found on PATH.`, and — still on
+  a SUCCESS result, so the clean-syntax verdict stands — `go vet skipped: <the fence's refusal>`.
+
+- The `present_document` opener now resolves its program through `security.ResolveProgram` — one
+  step that looks the name up on PATH and applies the exec fence — instead of a hand-rolled
+  `exec.LookPath` plus a separate in-function fence call, and `internal/present`'s package-local
+  `refuseExecFromWritablePath` wrapper is gone with its only caller. **Behaviour change:** an
+  opener name found only through a RELATIVE PATH entry (Go's `exec.ErrDot`, or an answer that is
+  simply not absolute) is now a LOUD refusal wrapping `security.ErrExecFromWritablePath` and
+  naming the path, where it previously degraded silently as `ErrNoOpener`. The child would
+  re-resolve such an answer against a working directory that is usually the workspace itself, so
+  it says something about this session's PATH rather than about this machine's desktop. Only a
+  genuine not-found still degrades to the baseline transcript rung (ADR 0019 §4); the refusal
+  reaches the transcript as `could not open: …` with the document still presented, and the
+  in-workspace refusal's `present: refusing to launch <program>: …` wording is unchanged.
+
+- autofix's construction-time formatter probe now resolves each external formatter through `security.ResolveProgram` instead of a package-local `exec.LookPath` + fence pair; a formatter that is absent, resolves inside the writable box, or is answered by a relative PATH entry is skipped silently exactly as before.
+
+- The keystore's store probe now resolves `security` / `secret-tool` through `security.ResolveProgram` instead of its own `exec.LookPath` + fence pair, so a store tool answered by a relative PATH entry is refused instead of run. Both boundary wordings survive byte-identical — the refusal is still `keystore: refusing to run the secret store tool <resolved path>: …` and an absent tool is still the `ErrNoStore`-wrapped `… is not on this machine's PATH` — so migration's "this machine has no store" notice stays distinct from "this store tool was refused".
+
+- `security.ResolveProgram` is now the **only** exec entry in production code, not merely the
+  newest: every site that resolves a program to run — the shells and the Mechanism hook door, MCP
+  stdio, the settings editor, `git`, `python_exec`, `run_tests`, `diagnostics`, rung 1's OS opener,
+  autofix's formatter probe, the keystore's secret-store probe and `internal/config`'s
+  `api-key-cmd` — goes through it, so no site can acquire a program without also acquiring the
+  judgement on it. The three package-local `refuseExecFromWritablePath` wrappers (`internal/tools`,
+  `internal/mechanisms`, `internal/present`) and every hand-rolled `exec.LookPath` + fence pair are
+  gone. Exactly two exceptions are declared: `internal/platform/confinetest` (test support) and the
+  injected look defaults callers hand to `ResolveProgram` itself. Recorded in
+  `internal/security/doc.go` and as the `Amended 2026-08-30` block of
+  `docs/design/confinement-execution-contract.md`.
+
 ### Fixed
 
 - Fixed: **a finished sub-agent no longer prints its report twice.** The early, badly formatted copy
@@ -172,6 +218,22 @@ point is a **minor** bump, not a breaking change.
   deliberately does not carry `statusRight`'s `stateErrored` half: esc still walks up there, so the
   header goes on saying so. `TestRunViewBreadcrumbHintFollowsTheKey` pins the header row under each
   pane and its return once the question is answered.
+
+- A program found only through a **relative PATH entry** is now refused by the exec fence instead
+  of being reported absent. Go's `exec.LookPath` answers such an entry with the relative path AND
+  `exec.ErrDot`, so `security.ResolveProgram` classified the one case its RELATIVE outcome exists
+  for as a missing install — and a relative argv[0] resolves against a working directory that is
+  the workspace itself. `ResolveProgram` now reads `exec.ErrDot` as the relative answer it is and
+  refuses it with `ErrExecFromWritablePath` (the refusal deliberately does not carry `exec.ErrDot`
+  through, mirroring the absent branch's inverse contract). Four live surfaces change their words
+  accordingly: the terminal/console argv[0], the platform shell, an MCP stdio server command, and
+  the settings editor — a `.`-on-PATH editor now announces `refusing to run editor "…"` and names
+  the resolved path, instead of the "cannot run editor" install hint that sent the operator after
+  a program that is installed. Both refusal branches (RELATIVE and REFUSED) now also hand back the
+  resolved path beside the error, so a caller re-wording the refusal can name the program judged;
+  an empty first return is now reserved for a genuine lookup failure.
+
+- An `api-key-cmd:` program is now resolved and fenced before it runs, through `security.ResolveProgram` like every other program apogee executes: a command whose `argv[0]` resolves inside the workspace is refused with `apogee: server "…": api-key-cmd: refusing to run "…"` and never runs, and one that is not on PATH now says `"…" is not on this machine's PATH` instead of arriving as a generic `failed:` wrap. A relative `argv[0]` carrying a path separator — the wrapper-script shape the manual documents — is made absolute against apogee's working directory first, exactly as `exec.Command` would have resolved it, so a wrapper outside the workspace keeps working. `probe model` and `daemon` hold no workspace and so fence nothing there, unchanged from before.
 
 ## [0.19.0] — 2026-08-30
 
