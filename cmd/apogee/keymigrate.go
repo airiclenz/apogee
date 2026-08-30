@@ -166,7 +166,10 @@ func (w *rootWiring) keyMigrator() func(string) (string, error) {
 			return "", fmt.Errorf("apogee: server %q carries no plaintext api-key to move", entry)
 		}
 		path := w.configPath()
-		if err := migrateKey(w.secrets, path, entry, key); err != nil {
+		// The RESOLVED workspace root, for prepareKeyMigration's reason: the read-back below runs
+		// the `api-key-cmd:` that is about to be persisted, and that command's program is fenced
+		// against the same root the file tools are scoped to.
+		if err := migrateKey(w.secrets, path, entry, key, w.roots.workspace); err != nil {
 			return "", err
 		}
 		return path, nil
@@ -205,13 +208,13 @@ func (w *rootWiring) plaintextKeyKeeper() func(string) (string, error) {
 // use: a resolution cached under this entry's name from a command that has not been persisted yet
 // would be a session-long answer derived from a file state that may never come to exist — and on
 // the mismatch branch it would be an answer known to be wrong.
-func migrateKey(store secretStore, path, entry, key string) error {
+func migrateKey(store secretStore, path, entry, key, workspaceRoot string) error {
 	if err := store.Write(entry, key); err != nil {
 		return err
 	}
 
 	command := store.ReadCmd(entry)
-	got, err := config.NewKeyResolver().Resolve(config.ServerEntry{Name: entry, APIKeyCmd: command})
+	got, err := config.NewKeyResolver(workspaceRoot).Resolve(config.ServerEntry{Name: entry, APIKeyCmd: command})
 	if err != nil {
 		return fmt.Errorf("apogee: server %q: the key is in %s, but reading it back with %q failed, "+
 			"so the config file was left alone: %w", entry, store.Name(), command, err)

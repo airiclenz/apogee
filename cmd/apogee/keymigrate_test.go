@@ -141,7 +141,7 @@ func TestMigrateKeyWritesVerifiesThenRewrites(t *testing.T) {
 	_, path := plaintextConfig(t, onePlaintextServer)
 	store := &fakeStore{t: t, configPath: path}
 
-	if err := migrateKey(store, path, "workstation", "sk-plain-as-day"); err != nil {
+	if err := migrateKey(store, path, "workstation", "sk-plain-as-day", ""); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 
@@ -194,7 +194,7 @@ func TestMigrateKeyAbortsBeforeRewriteOnAVerifyMismatch(t *testing.T) {
 	}
 	store := &fakeStore{t: t, configPath: path, handBack: "sk-something-else"}
 
-	err = migrateKey(store, path, "workstation", "sk-plain-as-day")
+	err = migrateKey(store, path, "workstation", "sk-plain-as-day", "")
 	if err == nil {
 		t.Fatal("a read-back mismatch was accepted; the config would point at a key nobody stored")
 	}
@@ -217,7 +217,7 @@ func TestMigrateKeyStopsAtAFailedStoreWrite(t *testing.T) {
 	_, path := plaintextConfig(t, onePlaintextServer)
 	store := &fakeStore{t: t, configPath: path, writeErr: errors.New("the keychain is locked")}
 
-	err := migrateKey(store, path, "workstation", "sk-plain-as-day")
+	err := migrateKey(store, path, "workstation", "sk-plain-as-day", "")
 	if err == nil || !strings.Contains(err.Error(), "the keychain is locked") {
 		t.Fatalf("error = %v; want the store's own refusal", err)
 	}

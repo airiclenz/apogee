@@ -67,7 +67,7 @@ func testDelegationWiring(
 	wiring := &delegationWiring{
 		server:       &subAgentServer{entry: entry, beat: beatSource(observed)},
 		userProfiles: noProfiles,
-		keys:         config.NewKeyResolver(),
+		keys:         config.NewKeyResolver(""),
 		engine:       engine,
 	}
 	if notices != nil {
@@ -282,7 +282,7 @@ func TestNewDelegationWiringWithoutAFlagObservesNothing(t *testing.T) {
 		{Name: "there", Endpoint: "http://127.0.0.1:2222"},
 	}
 	spy := &delegationSpy{}
-	wiring, err := newDelegationWiring(entries, validCfg(t), spy, noProfiles, nil, config.NewKeyResolver())
+	wiring, err := newDelegationWiring(entries, validCfg(t), spy, noProfiles, nil, config.NewKeyResolver(""))
 	if err != nil {
 		t.Fatalf("newDelegationWiring with no flagged entry: %v", err)
 	}
@@ -380,7 +380,7 @@ func TestNewDelegationWiringRefusesADefectiveMechanismsMap(t *testing.T) {
 		SubAgents:  true,
 		Mechanisms: map[string]bool{"libary": true},
 	}}
-	_, err := newDelegationWiring(entries, validCfg(t), &delegationSpy{}, noProfiles, nil, config.NewKeyResolver())
+	_, err := newDelegationWiring(entries, validCfg(t), &delegationSpy{}, noProfiles, nil, config.NewKeyResolver(""))
 	if err == nil {
 		t.Fatal("a misspelled mechanism key was accepted; want the run refused")
 	}
@@ -587,7 +587,7 @@ func TestDelegationRelistAddsTheFlag(t *testing.T) {
 	notices := &noticeSpy{}
 	wiring, err := newDelegationWiring(
 		[]config.ServerEntry{{Name: "here", Endpoint: "http://127.0.0.1:1111"}},
-		validCfg(t), spy, noProfiles, notices.add, config.NewKeyResolver())
+		validCfg(t), spy, noProfiles, notices.add, config.NewKeyResolver(""))
 	if err != nil {
 		t.Fatalf("newDelegationWiring: %v", err)
 	}

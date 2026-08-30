@@ -628,7 +628,12 @@ nothing can say which one the file meant. `api-key:` is the literal token above.
 `api-key-cmd: op read op://Private/rented-box/credential`), so the token stays in the
 manager that already holds it: the line is split on spaces and quotes and run **with no
 shell** — pipes, redirections and `$VARIABLES` need a wrapper script of your own — and
-the command's stdout, trailing whitespace trimmed, is the key. `api-key-env:` names an
+the command's stdout, trailing whitespace trimmed, is the key. Its **program is resolved
+before it runs and refused if it lands inside the workspace**, the way apogee fences every
+program it executes: the config file is yours, the workspace is the model's, and a key
+command sitting in the latter would hand the model the credential the key source exists to
+protect. So a wrapper script of your own belongs outside the workspace, or is named by an
+absolute path. `api-key-env:` names an
 environment variable rather than holding a key (`api-key-env: OPENROUTER_API_KEY`), read
 from the environment apogee itself was started in — and dropped from the environment the
 `terminal`, `python_exec`, `run_tests` and `console_open` tools hand a subprocess, so a command

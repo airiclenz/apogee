@@ -900,7 +900,7 @@ func TestMoveReFollowsTheParallelAgentsCap(t *testing.T) {
 		heartbeat.NewMonitor("http://old.invalid:1111", "old-model", "old-key"))
 	mover := sessionMover{
 		agent: &fakeSwitcher{}, holder: holder, host: &fakeStamper{},
-		live: newLiveSettings(config.Options{}, nil), keys: config.NewKeyResolver(), caps: caps,
+		live: newLiveSettings(config.Options{}, nil), keys: config.NewKeyResolver(""), caps: caps,
 	}
 
 	pinned := config.ServerEntry{

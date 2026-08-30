@@ -11,12 +11,15 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/airiclenz/apogee/internal/security"
 )
 
 // keyFixtureSentinel is the first argument that turns a run of this test binary into a key-source
@@ -108,12 +111,48 @@ func fixtureCommand(t *testing.T, args ...string) string {
 	if err != nil {
 		t.Fatalf("os.Executable: %v", err)
 	}
+	return fixtureCommandAt(exe, args...)
+}
+
+// fixtureCommandAt is fixtureCommand for a program somewhere other than this binary's own path —
+// the planted copies the exec fence's tests resolve, whose whole point is WHERE they sit.
+func fixtureCommandAt(program string, args ...string) string {
 	words := make([]string, 0, len(args)+2)
-	words = append(words, quoteFixtureArg(exe), keyFixtureSentinel)
+	words = append(words, quoteFixtureArg(program), keyFixtureSentinel)
 	for _, arg := range args {
 		words = append(words, quoteFixtureArg(arg))
 	}
 	return strings.Join(words, " ")
+}
+
+// plantKeyCommand copies THIS test binary to dir/name and returns its absolute path — a real,
+// runnable `api-key-cmd:` program sitting wherever the caller puts it. A copy rather than a symlink
+// because the fence resolves symlinks before judging (security.EvalRealPath), so a link inside the
+// workspace pointing at a binary outside it is not the collision the refusal exists for. Being this
+// binary, the copy answers the fixture sentinel like every other command here, which is what lets a
+// refusal test prove the program never ran.
+func plantKeyCommand(t *testing.T, dir, name string) string {
+	t.Helper()
+
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatalf("os.Executable: %v", err)
+	}
+	data, err := os.ReadFile(exe)
+	if err != nil {
+		t.Fatalf("reading this test binary: %v", err)
+	}
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("making the planted command's directory: %v", err)
+	}
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, data, 0o755); err != nil {
+		t.Fatalf("planting the key command: %v", err)
+	}
+	return path
 }
 
 // quoteFixtureArg wraps one argument in single quotes, POSIX-style.
@@ -147,7 +186,7 @@ func TestKeyResolverAnswersLiteralAndKeylessEntriesDirectly(t *testing.T) {
 	t.Parallel()
 
 	tally := tallyPath(t, "runs")
-	resolver := NewKeyResolver()
+	resolver := NewKeyResolver("")
 
 	if got, err := resolver.Resolve(ServerEntry{Name: "rented", APIKey: "sk-literal"}); err != nil || got != "sk-literal" {
 		t.Errorf("literal source resolved to (%q, %v), want the key as written", got, err)
@@ -198,7 +237,7 @@ func TestKeyResolverEnvSource(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := NewKeyResolver().Resolve(ServerEntry{Name: "openrouter", APIKeyEnv: tt.variable})
+			got, err := NewKeyResolver("").Resolve(ServerEntry{Name: "openrouter", APIKeyEnv: tt.variable})
 			assertResolved(t, got, err, tt.wantKey, tt.wantErr)
 		})
 	}
@@ -254,7 +293,7 @@ func TestKeyResolverCommandSource(t *testing.T) {
 		{
 			name:    "a program that is not on PATH refuses",
 			command: "apogee-no-such-key-command",
-			wantErr: []string{"openrouter", "failed"},
+			wantErr: []string{"openrouter", "is not on this machine's PATH"},
 		},
 	}
 	for _, tt := range tests {
@@ -267,6 +306,88 @@ func TestKeyResolverCommandSource(t *testing.T) {
 	}
 }
 
+// The `api-key-cmd:` program is resolved and FENCED before it runs, like every other exec apogee
+// performs: a command whose argv[0] lands inside the workspace is a program the model could have
+// written, and running it would hand the model the credential this key source exists to protect.
+func TestKeyResolverRefusesACommandProgramInsideTheWorkspace(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	planted := plantKeyCommand(t, filepath.Join(root, "node_modules", ".bin"), "getkey")
+	tally := tallyPath(t, "runs")
+
+	resolver := NewKeyResolver(root)
+	got, err := resolver.Resolve(ServerEntry{
+		Name:      "openrouter",
+		APIKeyCmd: fixtureCommandAt(planted, "count", tally, "sk-planted"),
+	})
+	if err == nil {
+		t.Fatalf("the planted command answered with %q, want a refusal", got)
+	}
+	if !errors.Is(err, security.ErrExecFromWritablePath) {
+		t.Errorf("the refusal does not carry security.ErrExecFromWritablePath: %v", err)
+	}
+	for _, want := range []string{"openrouter", "api-key-cmd", "refusing to run", security.EvalRealPath(planted)} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal never says %q:\n%s", want, err)
+		}
+	}
+	if runs := fixtureRuns(t, tally); runs != 0 {
+		t.Errorf("the planted command ran %d times, want 0 — the fence refuses BEFORE anything runs", runs)
+	}
+}
+
+// The fence judges where a program IS, not that one was named: a command outside the workspace
+// resolves and runs exactly as it did before the fence existed.
+func TestKeyResolverRunsACommandProgramOutsideTheWorkspace(t *testing.T) {
+	t.Parallel()
+
+	resolver := NewKeyResolver(t.TempDir())
+	got, err := resolver.Resolve(ServerEntry{
+		Name: "openrouter", APIKeyCmd: fixtureCommand(t, "print", "sk-outside"),
+	})
+	if err != nil || got != "sk-outside" {
+		t.Fatalf("resolved to (%q, %v), want the command's printed key", got, err)
+	}
+}
+
+// The manual's wrapper-script shape — `api-key-cmd: bin/getkey.sh` — is a relative argv[0], which
+// exec.Command resolves against apogee's own working directory rather than PATH. It is made
+// absolute against that same directory before the fence judges it, so a wrapper living OUTSIDE the
+// workspace keeps working; only one that actually resolves inside is refused.
+func TestKeyResolverRunsARelativeCommandProgramOutsideTheWorkspace(t *testing.T) {
+	home := t.TempDir()
+	planted := plantKeyCommand(t, filepath.Join(home, "bin"), "getkey")
+	t.Chdir(home)
+
+	resolver := NewKeyResolver(t.TempDir())
+	got, err := resolver.Resolve(ServerEntry{
+		Name:      "openrouter",
+		APIKeyCmd: fixtureCommandAt(filepath.Join("bin", filepath.Base(planted)), "print", "sk-wrapper"),
+	})
+	if err != nil || got != "sk-wrapper" {
+		t.Fatalf("the wrapper script resolved to (%q, %v), want its printed key", got, err)
+	}
+}
+
+// A resolver built with NO workspace root — the shape `probe model` and `daemon` pass, neither
+// having a workspace to measure a program against — inherits security.ResolveProgram's empty-fence
+// rule and refuses nothing, so a command those two commands could run before still runs.
+func TestKeyResolverWithNoWorkspaceRootFencesNothing(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	planted := plantKeyCommand(t, filepath.Join(root, "node_modules", ".bin"), "getkey")
+
+	resolver := NewKeyResolver("")
+	got, err := resolver.Resolve(ServerEntry{
+		Name: "openrouter", APIKeyCmd: fixtureCommandAt(planted, "print", "sk-unfenced"),
+	})
+	if err != nil || got != "sk-unfenced" {
+		t.Fatalf("the empty-root resolver answered (%q, %v), want the command's key — an empty fence refuses nothing", got, err)
+	}
+}
+
 // The answer is cached against the entry's NAME and its key fields: a second use is free, an edited
 // command re-resolves the way a config reload needs it to, and another entry is its own resolution.
 func TestKeyResolverCachesPerEntryAndSourceTriple(t *testing.T) {
@@ -274,7 +395,7 @@ func TestKeyResolverCachesPerEntryAndSourceTriple(t *testing.T) {
 
 	first := tallyPath(t, "first")
 	second := tallyPath(t, "second")
-	resolver := NewKeyResolver()
+	resolver := NewKeyResolver("")
 	entry := ServerEntry{Name: "openrouter", APIKeyCmd: fixtureCommand(t, "count", first, "sk-one")}
 
 	for use := 1; use <= 3; use++ {
@@ -320,7 +441,7 @@ func TestKeyResolverRetriesAfterAFailedSource(t *testing.T) {
 	t.Parallel()
 
 	tally := tallyPath(t, "runs")
-	resolver := NewKeyResolver()
+	resolver := NewKeyResolver("")
 	entry := ServerEntry{Name: "openrouter", APIKeyCmd: fixtureCommand(t, "countfail", tally, "keychain is locked")}
 
 	for use := 1; use <= 2; use++ {
@@ -339,7 +460,7 @@ func TestKeyResolverSingleFlightsConcurrentFirstUses(t *testing.T) {
 	t.Parallel()
 
 	tally := tallyPath(t, "runs")
-	resolver := NewKeyResolver()
+	resolver := NewKeyResolver("")
 	// The fixture sleeps before answering, so every caller below is inside the same in-flight run.
 	entry := ServerEntry{Name: "openrouter", APIKeyCmd: fixtureCommand(t, "count", tally, "sk-shared", "150")}
 

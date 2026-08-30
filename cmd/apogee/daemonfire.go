@@ -104,10 +104,14 @@ func newDaemonWiring(opts config.Options) (*daemonWiring, error) {
 	return &daemonWiring{
 		opts:      opts,
 		manualIDs: manualIDs,
-		keys:      config.NewKeyResolver(),
-		confiner:  newConfiner(),
-		store:     session.NewStore(roots.sessions),
-		adopted:   make(map[string]daemon.Entry),
+		// The key resolver is built with an EMPTY workspace root, so its `api-key-cmd:` exec
+		// fence refuses nothing: the daemon's workspace is the SCHEDULE ENTRY's, minted per
+		// Firing (wire_firing.go passes its own roots.workspace), so there is no one root the
+		// daemon itself could measure an api-key command against.
+		keys:     config.NewKeyResolver(""),
+		confiner: newConfiner(),
+		store:    session.NewStore(roots.sessions),
+		adopted:  make(map[string]daemon.Entry),
 	}, nil
 }
 

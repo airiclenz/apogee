@@ -605,7 +605,7 @@ func launcherWiringFixture(t *testing.T, ops launcherOps, endpoint string) (
 		sessionMover: sessionMover{
 			agent: agent, holder: holder, host: host,
 			live: newLiveSettings(config.Options{ContextWindow: 16384}, nil),
-			keys: config.NewKeyResolver(),
+			keys: config.NewKeyResolver(""),
 			caps: newParallelAgentsCap(widths),
 		},
 		ops:  ops,
@@ -1454,7 +1454,7 @@ func TestMoveCarriesTheEntrysWindowAndReplyCap(t *testing.T) {
 		heartbeat.NewMonitor("http://old.invalid:1111", "old-model", "old-key"))
 	live := newLiveSettings(config.Options{ContextWindow: 16384}, nil)
 	mover := sessionMover{agent: agent, holder: holder, host: host, live: live,
-		keys: config.NewKeyResolver(), caps: newParallelAgentsCap(&parallelAgentsSpy{})}
+		keys: config.NewKeyResolver(""), caps: newParallelAgentsCap(&parallelAgentsSpy{})}
 
 	pinned := config.ServerEntry{
 		Name: "workstation", Endpoint: "http://192.168.64.1:1111", APIKey: "new-key",
@@ -1541,7 +1541,7 @@ func TestMoveCarriesTheEntrysResponseReserveShare(t *testing.T) {
 		heartbeat.NewMonitor("http://old.invalid:1111", "old-model", "old-key"))
 	live := newLiveSettings(config.Options{ContextWindow: 16384, ResponseReserve: 0.2}, nil)
 	mover := sessionMover{
-		agent: agent, holder: holder, host: &fakeStamper{}, live: live, keys: config.NewKeyResolver(),
+		agent: agent, holder: holder, host: &fakeStamper{}, live: live, keys: config.NewKeyResolver(""),
 		caps: newParallelAgentsCap(&parallelAgentsSpy{}),
 	}
 
@@ -1698,7 +1698,7 @@ func TestServerBindHandsTheEntrysBoundsToTheEngine(t *testing.T) {
 				engine: engine,
 				holder: newUpstreamHolder(),
 				caps:   newParallelAgentsCap(engine),
-				keys:   config.NewKeyResolver(),
+				keys:   config.NewKeyResolver(""),
 				build: func(cfg apogee.Config, resumed *session.Record) (*apogee.Agent, error) {
 					handed = cfg
 					return buildAgent(cfg, resumed)
@@ -1770,7 +1770,7 @@ func TestServerBindHandsTheEntrysResponseReserveToTheEngine(t *testing.T) {
 				engine: engine,
 				holder: newUpstreamHolder(),
 				caps:   newParallelAgentsCap(engine),
-				keys:   config.NewKeyResolver(),
+				keys:   config.NewKeyResolver(""),
 				build: func(cfg apogee.Config, resumed *session.Record) (*apogee.Agent, error) {
 					handed = cfg
 					return buildAgent(cfg, resumed)
@@ -1830,7 +1830,7 @@ func TestBindServerResolvesTheWorkingWindow(t *testing.T) {
 				engine: engine,
 				holder: newUpstreamHolder(),
 				caps:   newParallelAgentsCap(engine),
-				keys:   config.NewKeyResolver(),
+				keys:   config.NewKeyResolver(""),
 				build: func(cfg apogee.Config, resumed *session.Record) (*apogee.Agent, error) {
 					handed = cfg
 					return buildAgent(cfg, resumed)

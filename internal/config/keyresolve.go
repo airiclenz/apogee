@@ -40,11 +40,13 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 	"unicode"
 
+	"github.com/airiclenz/apogee/internal/security"
 	"github.com/google/shlex"
 )
 
@@ -143,15 +145,23 @@ type KeyResolver struct {
 	mu    sync.Mutex
 	cache map[string]*keyResolution
 
+	// workspaceRoot is the fence an `api-key-cmd:` program is measured against before it runs (see
+	// runKeyCommand). It is the resolved workspace root of the Driver that built this resolver, and
+	// EMPTY on the two commands that have no workspace to name — `probe model` and `daemon` — where
+	// security.ResolveProgram's empty-fence rule then refuses nothing.
+	workspaceRoot string
+
 	// commandTimeout overrides keyCommandTimeout for one resolver. It exists for tests, which
 	// cannot wait a minute to see a hanging command refused; set it before the first Resolve, since
 	// it is read without the mutex.
 	commandTimeout time.Duration
 }
 
-// NewKeyResolver returns an empty resolver.
-func NewKeyResolver() *KeyResolver {
-	return &KeyResolver{}
+// NewKeyResolver returns an empty resolver fenced to workspaceRoot: an `api-key-cmd:` whose program
+// resolves inside that root is refused before it runs. An empty root fences nothing, which is what
+// a command holding no workspace passes.
+func NewKeyResolver(workspaceRoot string) *KeyResolver {
+	return &KeyResolver{workspaceRoot: workspaceRoot}
 }
 
 // Resolve returns the API key entry e's seam should send: its literal `api-key:` as written, the
@@ -184,7 +194,7 @@ func (r *KeyResolver) Resolve(e ServerEntry) (string, error) {
 		<-resolution.done
 		return resolution.key, resolution.err
 	}
-	resolution.key, resolution.err = resolveKeySource(e.Name, source, r.timeout())
+	resolution.key, resolution.err = resolveKeySource(e.Name, source, r.workspaceRoot, r.timeout())
 	if resolution.err != nil {
 		r.forget(e.Name, resolution)
 	}
@@ -235,11 +245,11 @@ func (r *KeyResolver) timeout() time.Duration {
 // resolveKeySource runs the one source that answers for this entry. Only the command and variable
 // kinds reach it — a literal needs no work and a keyless entry has none to do, and Resolve answers
 // both before any cache slot is claimed.
-func resolveKeySource(entry string, source keySource, timeout time.Duration) (string, error) {
+func resolveKeySource(entry string, source keySource, workspaceRoot string, timeout time.Duration) (string, error) {
 	if source.kind() == keySourceEnv {
 		return resolveEnvKey(entry, source.env)
 	}
-	return runKeyCommand(entry, source.command, timeout)
+	return runKeyCommand(entry, source.command, workspaceRoot, timeout)
 }
 
 // resolveEnvKey reads the variable an entry's `api-key-env:` names. The value is returned exactly as
@@ -312,12 +322,23 @@ func APIKeyEnvNames(opts Options) []string {
 // credential tool, and handing the string to a shell would buy `|` and `$(…)` at the price of making
 // every metacharacter in a config file executable.
 //
+// It still resolves on the USER's PATH — but a program that resolves INSIDE the workspace is refused
+// before it runs, through security.ResolveProgram like every other exec apogee performs. The config
+// file is the operator's and the workspace is the model's, so an `api-key-cmd:` landing in the
+// latter would hand the model the credential this key source exists to protect. A bare name goes
+// through the PATH lookup unchanged; an argv[0] carrying a path separator — the rule exec.Command
+// itself uses to skip PATH — is made absolute against apogee's working directory first, which is
+// exactly what exec.Command would have resolved it against, so the wrapper script the manual tells
+// operators to write keeps working unless it actually resolves inside the workspace. The box is nil:
+// this command runs on apogee's own behalf, before any confinement box exists (the keystore probe
+// and the opener are the precedent), so the workspace root each Driver holds is the whole fence.
+//
 // The child gets no stdin and neither of apogee's standard streams: it is running under a TUI that
 // owns the terminal, so a tool that tried to prompt there would draw over the frame and read the
 // keystrokes meant for apogee. It inherits the environment whole, deliberately — `pass`, `op`,
 // `security` and their agents need HOME, DISPLAY, the D-Bus and GPG agent addresses, and this is the
 // USER's own command rather than one the model chose (which is what internal/tools scrubs for).
-func runKeyCommand(entry, command string, timeout time.Duration) (string, error) {
+func runKeyCommand(entry, command, workspaceRoot string, timeout time.Duration) (string, error) {
 	argv, err := shlex.Split(command)
 	if err != nil {
 		return "", fmt.Errorf("apogee: server %q: api-key-cmd: %q cannot be read as a command line: %w — "+
@@ -330,10 +351,15 @@ func runKeyCommand(entry, command string, timeout time.Duration) (string, error)
 			entry, command, entry)
 	}
 
+	program, err := resolveKeyProgram(entry, argv[0], workspaceRoot)
+	if err != nil {
+		return "", err
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+	cmd := exec.CommandContext(ctx, program, argv[1:]...)
 	cmd.Stdin = nil
 	stdout := &cappedWriter{limit: maxKeyCommandOutput}
 	stderr := &cappedWriter{limit: maxKeyCommandStderr}
@@ -364,6 +390,34 @@ func runKeyCommand(entry, command string, timeout time.Duration) (string, error)
 			"send no Authorization header%s", entry, command, saidOnStderr(stderr.String()))
 	}
 	return key, nil
+}
+
+// resolveKeyProgram turns an `api-key-cmd:` argv[0] into the absolute program apogee will execute,
+// or the refusal it earns. It is the exec fence on the one exec path that used to run bare.
+//
+// An argv[0] carrying a path separator is made absolute FIRST, against apogee's own working
+// directory: that is exactly what exec.Command does with such a name — it skips PATH and hands the
+// relative path to the child, which resolves it against the same directory — so making it absolute
+// here changes nothing about which file runs and everything about whether the fence can see it. A
+// bare name has no such meaning and goes through the PATH lookup unchanged. An absolute form that
+// cannot be derived is left relative on purpose: ResolveProgram refuses a relative program path,
+// which is the same answer security.RefuseExecFromWritablePath gives for that case.
+func resolveKeyProgram(entry, argv0, workspaceRoot string) (string, error) {
+	program := argv0
+	if filepath.Base(program) != program {
+		if abs, err := filepath.Abs(program); err == nil {
+			program = abs
+		}
+	}
+
+	resolved, err := security.ResolveProgram(nil, program, workspaceRoot, nil)
+	switch {
+	case errors.Is(err, security.ErrExecFromWritablePath):
+		return "", fmt.Errorf("apogee: server %q: api-key-cmd: refusing to run %q: %w", entry, argv0, err)
+	case err != nil:
+		return "", fmt.Errorf("apogee: server %q: api-key-cmd: %q is not on this machine's PATH", entry, argv0)
+	}
+	return resolved, nil
 }
 
 // saidOnStderr renders what the command complained about as a tail for the refusal, or nothing at

@@ -86,7 +86,7 @@ func probeHostCommand(use, short, long string) *cobra.Command {
 			// message rather than probing without the key: "unreachable" would be the wrong
 			// finding, and it would send the user looking at their server instead of at the
 			// entry that could not produce a key (design call 4).
-			apiKey, err := config.NewKeyResolver().Resolve(startupEntry(opts))
+			apiKey, err := config.NewKeyResolver(roots.workspace).Resolve(startupEntry(opts))
 			if err != nil {
 				return err
 			}

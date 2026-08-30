@@ -79,7 +79,7 @@ func TestMoveResolvesACommandKeySource(t *testing.T) {
 		holder: holder,
 		host:   &fakeStamper{},
 		live:   newLiveSettings(config.Options{}, nil),
-		keys:   config.NewKeyResolver(),
+		keys:   config.NewKeyResolver(""),
 		caps:   newParallelAgentsCap(&parallelAgentsSpy{}),
 	}
 
@@ -116,7 +116,7 @@ func TestMoveRefusesWhenTheKeySourceFails(t *testing.T) {
 		holder: holder,
 		host:   &fakeStamper{},
 		live:   newLiveSettings(config.Options{}, nil),
-		keys:   config.NewKeyResolver(),
+		keys:   config.NewKeyResolver(""),
 		caps:   newParallelAgentsCap(&parallelAgentsSpy{}),
 	}
 
@@ -156,7 +156,7 @@ func TestBindResolvesACommandKeySource(t *testing.T) {
 		engine: engine,
 		holder: newUpstreamHolder(),
 		caps:   newParallelAgentsCap(engine),
-		keys:   config.NewKeyResolver(),
+		keys:   config.NewKeyResolver(""),
 		build: func(cfg apogee.Config, resumed *session.Record) (*apogee.Agent, error) {
 			handed = cfg
 			return buildAgent(cfg, resumed)
@@ -194,7 +194,7 @@ func TestBindRefusesWhenTheKeySourceFails(t *testing.T) {
 		engine: engine,
 		holder: newUpstreamHolder(),
 		caps:   newParallelAgentsCap(engine),
-		keys:   config.NewKeyResolver(),
+		keys:   config.NewKeyResolver(""),
 		build: func(cfg apogee.Config, resumed *session.Record) (*apogee.Agent, error) {
 			built = true
 			return buildAgent(cfg, resumed)
@@ -244,7 +244,7 @@ func TestStartupOverlayBeatsACommandKeySource(t *testing.T) {
 	if plain.APIKeyCmd != command {
 		t.Fatalf("opts.APIKeyCmd = %q; want the startup entry's own api-key-cmd", plain.APIKeyCmd)
 	}
-	key, err := config.NewKeyResolver().Resolve(startupEntry(plain))
+	key, err := config.NewKeyResolver("").Resolve(startupEntry(plain))
 	if err != nil {
 		t.Fatalf("resolve the startup entry: %v", err)
 	}
@@ -270,7 +270,7 @@ func TestStartupOverlayBeatsACommandKeySource(t *testing.T) {
 		t.Errorf("the overlay erased api-key-cmd (%q); it must overlay the value, not the file",
 			overlaid.APIKeyCmd)
 	}
-	overlaidKey, err := config.NewKeyResolver().Resolve(startupEntry(overlaid))
+	overlaidKey, err := config.NewKeyResolver("").Resolve(startupEntry(overlaid))
 	if err != nil {
 		t.Fatalf("resolve the overlaid startup entry: %v", err)
 	}

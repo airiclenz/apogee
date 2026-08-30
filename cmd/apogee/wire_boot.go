@@ -61,7 +61,7 @@ func newRootWiring(opts config.Options, mode apogee.Mode, roots stateRoots) *roo
 	// time, and a `/server` switch back and forth would prompt the human twice for a key they
 	// already gave. It reaches nothing on its own (an entry with a literal key, or none at all,
 	// never leaves the process), so it belongs here with the facilities that cannot fail.
-	w.keys = config.NewKeyResolver()
+	w.keys = config.NewKeyResolver(roots.workspace)
 
 	// Discover the user's skills from the layered source dirs: the global library
 	// (~/.apogee/skills), the project's .apogee/skills, and — when use-project-skills is on —

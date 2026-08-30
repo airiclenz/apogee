@@ -400,7 +400,12 @@ now returns alongside the refusal error; `fenceProgram`'s doc paragraph
 looked up") stays exactly as written and the message stays byte-identical — this item yields to that
 documented decision rather than reversing it.
 
-## 7. `internal/config`: the api-key command resolves through the resolver
+## 7. `internal/config`: the api-key command resolves through the resolver — ✅ DONE (2026-08-30)
+
+NOTES (2026-08-30): the lookup+fence landed as a small package-level helper, `resolveKeyProgram(entry, argv0, workspaceRoot)`, rather than inline in `runKeyCommand` — `runKeyCommand` is already long and the separator/Abs rule needs its own doc paragraph; the two ratified failure wordings are unchanged and live in that helper.
+NOTES (2026-08-30): an `argv[0]` whose absolute form cannot be derived (`filepath.Abs` failing) is deliberately left relative and handed to `ResolveProgram`, which refuses it as a relative program path — the same answer `security.RefuseExecFromWritablePath` documents for that case (`execsafety.go:52-56`) — rather than earning a third failure wording the item did not ratify.
+NOTES (2026-08-30): the four new cases are standalone test functions, not rows of `TestKeyResolverCommandSource`'s table: the item requires them to be built with `NewKeyResolver(root)` and that table's body builds `&KeyResolver{commandTimeout: tt.timeout}` (empty root), which the item explicitly says must stay. `plantKeyCommand` copies THIS test binary into the planted directory (a copy, not a symlink, since the fence resolves symlinks first), so the planted command is a real program that answers the fixture sentinel — which is what lets the refusal test prove it never ran via the existing tally machinery; `fixtureCommand` now delegates to a new `fixtureCommandAt(program, args…)` so a planted path can be rendered the same way.
+NOTES (2026-08-30): the empty-fence cost is stated at both rootless sites in code, not only in the plan — `cmd/apogee/probemodel.go` and `cmd/apogee/daemonfire.go` each gained a comment saying the resolver is built with an EMPTY workspace root and therefore refuses nothing, and why neither command has a root to measure against.
 
 **Depends on item 1.**
 

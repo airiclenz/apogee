@@ -102,7 +102,12 @@ func probeModelCommand() *cobra.Command {
 			// call and the battery cannot end up authenticating differently. A source that
 			// refuses fails the command here: this one spends real money on a live server, and
 			// probing it unauthenticated would buy a 401 and record nothing.
-			apiKey, err := config.NewKeyResolver().Resolve(startupEntry(opts))
+			//
+			// The resolver is built with an EMPTY workspace root, so its exec fence refuses
+			// nothing: this command reads no workspace (see the roots above), and an
+			// `api-key-cmd:` here resolves exactly as it did before the fence existed. Inventing
+			// a root to measure it against would be the --workspace flag this command refuses.
+			apiKey, err := config.NewKeyResolver("").Resolve(startupEntry(opts))
 			if err != nil {
 				return err
 			}

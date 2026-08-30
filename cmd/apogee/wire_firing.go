@@ -108,7 +108,7 @@ func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, []string
 	if apiKey == "" {
 		keys := in.keys
 		if keys == nil {
-			keys = config.NewKeyResolver()
+			keys = config.NewKeyResolver(in.roots.workspace)
 		}
 		resolved, err := keys.Resolve(in.entry)
 		if err != nil {
