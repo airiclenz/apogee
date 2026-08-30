@@ -541,10 +541,12 @@ func TestAutofixRefusesAFormatterInsideTheWritableBox(t *testing.T) {
 	inExtra := plant(filepath.Join(extra, "bin", "black"))
 	outside := fakeFormatter(t, fixedPy)
 
-	ladder := func(t *testing.T, box domain.ConfinementBox, path string) []repairer {
+	// build constructs autofix with look as the injected PATH lookup — a per-arm seam, because
+	// the relative-answer arm below needs a lookup the resolver refuses rather than a path.
+	build := func(t *testing.T, box domain.ConfinementBox, look func(string) (string, error)) autofixMechanism {
 		t.Helper()
 		m, err := Build(autofixID, Deps{
-			LookPath:    resolveOnly("black", path),
+			LookPath:    look,
 			WritableBox: box,
 		})
 		if err != nil {
@@ -554,22 +556,42 @@ func TestAutofixRefusesAFormatterInsideTheWritableBox(t *testing.T) {
 		if !ok {
 			t.Fatalf("mechanism %q is not an autofixMechanism (%T)", autofixID, m.Hook)
 		}
-		return af.repairs["python"]
+		return af
+	}
+	ladder := func(t *testing.T, box domain.ConfinementBox, look func(string) (string, error)) []repairer {
+		t.Helper()
+		return build(t, box, look).repairs["python"]
 	}
 
 	workspaceOnly := domain.ConfinementBox{WorkspaceRoot: workspace}
 	withExtra := domain.ConfinementBox{WorkspaceRoot: workspace, WritablePaths: []string{extra}}
 
-	if rungs := ladder(t, workspaceOnly, inside); len(rungs) != 0 {
+	if rungs := ladder(t, workspaceOnly, resolveOnly("black", inside)); len(rungs) != 0 {
 		t.Errorf("python ladder = %d rung(s), want 0 — a formatter inside the writable box must be left out", len(rungs))
 	}
-	if rungs := ladder(t, withExtra, inExtra); len(rungs) != 0 {
+	if rungs := ladder(t, withExtra, resolveOnly("black", inExtra)); len(rungs) != 0 {
 		t.Errorf("python ladder = %d rung(s), want 0 — a formatter inside an extra writable path must be left out", len(rungs))
 	}
 	// The control arm: the same formatter OUTSIDE the box is still laddered, so the test pins
 	// the fence rather than a broken probe.
-	if rungs := ladder(t, withExtra, outside); len(rungs) != 1 {
+	if rungs := ladder(t, withExtra, resolveOnly("black", outside)); len(rungs) != 1 {
 		t.Errorf("python ladder = %d rung(s), want 1 for a formatter outside the box", len(rungs))
+	}
+
+	// The refusal is SILENT and local: construction still succeeds (build fatals on an error),
+	// and only the refused formatter's language loses a rung — Go keeps its in-process gofmt
+	// tail, which spawns nothing and so has nothing to fence.
+	if rungs := build(t, workspaceOnly, resolveOnly("black", inside)).repairs["go"]; len(rungs) != 1 {
+		t.Errorf("go ladder = %d rung(s), want 1 — the in-process gofmt tail survives a refused formatter", len(rungs))
+	}
+
+	// PATH carrying a relative entry: Go answers it with the relative path AND exec.ErrDot, which
+	// security.ResolveProgram reads as the relative answer it is and refuses. The child would
+	// resolve that path against a working directory that is usually the workspace, so autofix
+	// skips the rung exactly as silently as it skips a planted one.
+	relativeEntry := func(string) (string, error) { return "bin/fmt", exec.ErrDot }
+	if rungs := ladder(t, workspaceOnly, relativeEntry); len(rungs) != 0 {
+		t.Errorf("python ladder = %d rung(s), want 0 — a relative PATH answer (exec.ErrDot) must be left out", len(rungs))
 	}
 }
 

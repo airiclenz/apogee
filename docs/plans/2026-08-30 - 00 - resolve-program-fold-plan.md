@@ -317,7 +317,10 @@ not regress. Both existing tests ALREADY drive `Open` (`opener_test.go:650`, `:7
 rewritten onto `resolveProgram` — the refusal test's only change is the table-ification the rows need
 and the gating of its planted-path assertion (`:659`).
 
-## 5. `internal/mechanisms`: autofix resolves formatters through the resolver
+## 5. `internal/mechanisms`: autofix resolves formatters through the resolver — ✅ DONE (2026-08-30)
+
+NOTES (2026-08-30): `TestAutofixRefusesAFormatterInsideTheWritableBox` is a set of arms sharing a `ladder` helper, not a table, so the item's "new cases on the existing table" landed as new arms; `ladder` was generalised from a planted `path` to a per-arm `look func(string) (string, error)` (the seam the ErrDot arm needs) with a `build` helper beneath it, and all three existing arms keep their assertions and messages byte-identical.
+NOTES (2026-08-30): the construction comment keeps the ratified rationale verbatim (a permit may authorise an unfenced spawn) and gains the relative-answer outcome, since every resolver error — absent, refused, relative — now collapses to the same `""`.
 
 **Depends on item 1.**
 

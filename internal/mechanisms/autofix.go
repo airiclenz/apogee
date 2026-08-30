@@ -3,7 +3,6 @@ package mechanisms
 import (
 	"context"
 	"go/format"
-	"os/exec"
 	"strings"
 	"time"
 
@@ -101,24 +100,13 @@ type spawnGate struct {
 	secretEnv   []string // operator-declared credential names the child must not inherit
 }
 
-// refuseExecFromWritablePath is this package's name for the shared exec fence
-// (security.RefuseExecFromWritablePath) — the same rule, under the same name, that every tool
-// exec site applies: a program resolving inside a path the model can write is never argv[0].
-func refuseExecFromWritablePath(argv0, root string, box *domain.ConfinementBox) error {
-	return security.RefuseExecFromWritablePath(argv0, root, box)
-}
-
-// newAutofix builds the autofix Mechanism, probing each external formatter's executable exactly
-// once through deps.LookPath (nil ⇒ exec.LookPath) and caching the resolved paths into the
-// per-language repair ladder — the sim's LookPath-cached formatter table, injected at
-// construction per D3 so fires never touch PATH. An absent executable simply leaves its rung
-// out; Go's in-process gofmt tail is always appended.
+// newAutofix builds the autofix Mechanism, resolving each external formatter's executable exactly
+// once through security.ResolveProgram — deps.LookPath is the injected lookup (nil ⇒ exec.LookPath)
+// and the resolver applies the exec fence in the same step, so the lookup cannot be had without it
+// — and caching the resolved paths into the per-language repair ladder: the sim's LookPath-cached
+// formatter table, injected at construction per D3 so fires never touch PATH. An absent or refused
+// executable simply leaves its rung out; Go's in-process gofmt tail is always appended.
 func newAutofix(deps Deps) (any, error) {
-	look := deps.LookPath
-	if look == nil {
-		look = exec.LookPath
-	}
-
 	// The fence the construction probe judges a formatter against, and the same root the spawn
 	// door re-judges argv[0] with at fire time.
 	workspaceRoot := deps.WritableBox.WorkspaceRoot
@@ -127,18 +115,17 @@ func newAutofix(deps Deps) (any, error) {
 	probe := func(command string) string {
 		path, done := resolved[command]
 		if !done {
-			p, err := look(command)
+			// A formatter that resolves inside the writable box — or that PATH answers
+			// with a relative entry — is treated exactly as an absent one, its rung left
+			// out of the ladder, which is why every error the resolver returns collapses
+			// to the same "". The refusal has to sit HERE, at the single construction-time
+			// resolution, rather than at the spawn: a permit may authorise an unfenced
+			// spawn (nil Confinement on a host with no confinement backend), which is
+			// precisely the run that must not execute bytes the model wrote. Autofix has no
+			// result surface to explain a refusal on, and a skipped rung is its documented
+			// degradation, so the fence is applied silently.
+			p, err := security.ResolveProgram(deps.LookPath, command, workspaceRoot, &deps.WritableBox)
 			if err != nil {
-				p = ""
-			}
-			// A formatter that resolves inside the writable box is treated exactly as an
-			// absent one — its rung is left out of the ladder. The refusal has to sit HERE,
-			// at the single construction-time resolution, rather than at the spawn: a permit
-			// may authorise an unfenced spawn (nil Confinement on a host with no confinement
-			// backend), which is precisely the run that must not execute bytes the model
-			// wrote. Autofix has no result surface to explain a refusal on, and a skipped
-			// rung is its documented degradation, so the fence is applied silently.
-			if p != "" && refuseExecFromWritablePath(p, workspaceRoot, &deps.WritableBox) != nil {
 				p = ""
 			}
 			resolved[command] = p
