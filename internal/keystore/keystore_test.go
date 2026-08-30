@@ -570,6 +570,44 @@ func TestProbeRefusesAStoreProgramInsideTheWorkspace(t *testing.T) {
 	}
 }
 
+// A store tool found only through a RELATIVE PATH entry is refused for the reason a planted one is:
+// the child resolves `bin/secret-tool` against a working directory that is usually the workspace
+// itself, so bytes the model may write become argv[0] one step later. Go answers such a lookup with
+// the relative path AND exec.ErrDot, which the resolver reads as the relative answer it is — a store
+// tool this machine HAS and apogee refuses, never a machine with no store at all.
+func TestProbeRefusesAStoreProgramFoundThroughARelativePathEntry(t *testing.T) {
+	tests := []struct {
+		name    string
+		goos    string
+		program string
+	}{
+		{name: "macOS keychain", goos: "darwin", program: keychainProgram},
+		{name: "secret service", goos: "linux", program: secretServiceProgram},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			relative := filepath.Join("bin", tc.program)
+			look := func(string) (string, error) { return relative, exec.ErrDot }
+
+			store, err := probe(tc.goos, look, runTool, t.TempDir())
+
+			if !errors.Is(err, security.ErrExecFromWritablePath) {
+				t.Fatalf("probe(%q) = %v, want the exec fence's refusal", tc.goos, err)
+			}
+			if errors.Is(err, ErrNoStore) {
+				t.Error("a store tool answered by a relative PATH entry was reported as no store at all")
+			}
+			if !strings.Contains(err.Error(), relative) {
+				t.Errorf("refusal %v does not name the relative program %q", err, relative)
+			}
+			if store.Name() != "" {
+				t.Errorf("probe(%q) handed back the store %q over a refused program", tc.goos, store.Name())
+			}
+		})
+	}
+}
+
 // plantStoreTool puts a store tool of the given name inside dir and makes that directory the whole
 // of PATH. The file is a stub rather than a copy of the fake tools: the fence refuses it before
 // anything runs it, and a test that needed it to RUN would be testing something else.

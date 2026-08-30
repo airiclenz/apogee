@@ -351,7 +351,11 @@ loud call. The spawn-door re-judgment at fire time and the `WritableBox` passing
 construction comment's rationale (a permit may authorise an unfenced spawn) stays verbatim. No file is
 added, renamed or deleted in `internal/mechanisms`, so `doc.go` and its `docmap_test` are untouched.
 
-## 6. `internal/keystore`: the store probe resolves through the resolver
+## 6. `internal/keystore`: the store probe resolves through the resolver — ✅ DONE (2026-08-30)
+
+NOTES (2026-08-30): the ErrDot case landed as its own test (`TestProbeRefusesAStoreProgramFoundThroughARelativePathEntry`, one arm per platform) — the second of the two shapes the item authorises — so `TestProbeRefusesAStoreProgramInsideTheWorkspace` stays byte-unchanged, its unconditional plant and planted-path assertion included.
+NOTES (2026-08-30): `Probe`'s doc paragraph (`keystore.go:88-94`) gained the relative-PATH-entry refusal shape and now names `security.ResolveProgram` as what judges this seam — the item's own change made its "the program resolved inside workspaceRoot" the-only-shape claim false. `fenceProgram`'s doc paragraph stays byte-identical, as the item's regression guard requires.
+NOTES (2026-08-30): the acceptance's `go test ./cmd/apogee/ -run 'KeyMigrate|Keystore'` half selects NO test in that package (exit 0, `[no tests to run]`) — the same shape item 7's re-check found for `KeyMigrate`. The keystore consumers there (`keymigrate.go:48`'s `ErrNoStore` branch included) are covered by `-run 'MigrateKey|KeyMigrator|PrepareKeyMigration|PlaintextKey|Headless'`, which I ran instead: ok.
 
 **Depends on item 1.**
 

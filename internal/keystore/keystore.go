@@ -28,7 +28,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os/exec"
 	"runtime"
 	"strings"
 
@@ -87,13 +86,14 @@ var ErrNoStore = errors.New("keystore: no secret store this machine can be migra
 // would consent to moving their key and be told afterwards that the move was never possible.
 //
 // The absence of a store is ErrNoStore. Any other error is a store tool that was found and REFUSED:
-// the program resolved inside workspaceRoot, which is where the exec fence
-// (security.RefuseExecFromWritablePath) is measured for this seam. The workspace root is the whole
-// fence because the probe runs at startup, before any confinement box exists — it is the same
-// model-writable boundary the file tools are scoped to, and the same treatment internal/present
-// gives the desktop opener, which likewise runs on apogee's own behalf and outside any box.
+// the program resolved inside workspaceRoot, or through a relative PATH entry the child would
+// resolve there — which is what the exec fence (security.ResolveProgram) judges for this seam. The
+// workspace root is the whole fence because the probe runs at startup, before any confinement box
+// exists — it is the same model-writable boundary the file tools are scoped to, and the same
+// treatment internal/present gives the desktop opener, which likewise runs on apogee's own behalf
+// and outside any box.
 func Probe(workspaceRoot string) (Store, error) {
-	return probe(runtime.GOOS, exec.LookPath, runTool, workspaceRoot)
+	return probe(runtime.GOOS, nil, runTool, workspaceRoot)
 }
 
 // probe is Probe with its machine-dependent inputs — the platform, the PATH lookup, the exec seam
@@ -102,22 +102,22 @@ func Probe(workspaceRoot string) (Store, error) {
 func probe(goos string, lookPath func(string) (string, error), run runner, workspaceRoot string) (Store, error) {
 	switch goos {
 	case "darwin":
-		program, err := lookPath(keychainProgram)
+		program, err := security.ResolveProgram(lookPath, keychainProgram, workspaceRoot, nil)
+		if errors.Is(err, security.ErrExecFromWritablePath) {
+			return Store{}, fenceProgram(program, err)
+		}
 		if err != nil {
 			return Store{}, fmt.Errorf("%w: %s is not on this machine's PATH", ErrNoStore, keychainProgram)
-		}
-		if err := fenceProgram(program, workspaceRoot); err != nil {
-			return Store{}, err
 		}
 		return Store{kind: kindKeychain, program: program, run: run}, nil
 
 	case "linux":
-		program, err := lookPath(secretServiceProgram)
+		program, err := security.ResolveProgram(lookPath, secretServiceProgram, workspaceRoot, nil)
+		if errors.Is(err, security.ErrExecFromWritablePath) {
+			return Store{}, fenceProgram(program, err)
+		}
 		if err != nil {
 			return Store{}, fmt.Errorf("%w: %s is not on this machine's PATH", ErrNoStore, secretServiceProgram)
-		}
-		if err := fenceProgram(program, workspaceRoot); err != nil {
-			return Store{}, err
 		}
 		store := Store{kind: kindSecretService, program: program, run: run}
 		if !store.answers() {
@@ -135,11 +135,8 @@ func probe(goos string, lookPath func(string) (string, error), run runner, works
 // would let a planted `secret-tool` be handed the very secret this package exists to get out of a
 // readable place — so the refusal belongs between the lookup and the first run, and it names the
 // resolved path (security.ErrExecFromWritablePath) rather than the name that was looked up.
-func fenceProgram(program, workspaceRoot string) error {
-	if err := security.RefuseExecFromWritablePath(program, workspaceRoot, nil); err != nil {
-		return fmt.Errorf("keystore: refusing to run the secret store tool %s: %w", program, err)
-	}
-	return nil
+func fenceProgram(resolved string, err error) error {
+	return fmt.Errorf("keystore: refusing to run the secret store tool %s: %w", resolved, err)
 }
 
 // answers asks the secret service one harmless question — look up an account nothing ever writes —
