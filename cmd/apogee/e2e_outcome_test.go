@@ -81,11 +81,15 @@ func TestE2EOutcomeSlotsCarryTheToolsVerdict(t *testing.T) {
 
 	// Step 5 — and opening it shows the delegate the prompt it was handed. This one got as far as
 	// being refused by its own server, so the run has an answer behind it and the prompt stands at
-	// the top of its rail, above that answer (the second half of the checklist's step 5).
-	expandLastBlock(drv)
+	// the top of its view, above that answer (the second half of the checklist's step 5).
+	openLastRun(drv)
 	if opened := drv.Frame(); !strings.Contains(flatten(opened.String()), doomedTask) {
-		t.Errorf("the expanded delegation does not show the prompt it carried:\n%s", opened)
+		t.Errorf("the delegation's run view does not show the prompt it carried:\n%s", opened)
 	}
+	// Back up to the conversation: the rest of the session is about blocks of the parent's own, and a
+	// view left open would be showing the delegate's run while they landed (ADR 0063).
+	drv.Press(tuitest.Esc)
+	drv.WaitQuiet(settled)
 
 	// Steps 6 and 7 — a command that EXITS 0 and quotes the word "error" on its way out. The slot
 	// carries the tool's own verdict, and the quoted text never colours it.

@@ -599,6 +599,22 @@ func expandLastBlock(drv *tuitest.Driver) {
 	drv.WaitQuiet(settled)
 }
 
+// openLastRun opens the last DELEGATION in the transcript as its run view — the same ⌥↑ ⏎ reach, on
+// the one block kind that answers it with a view rather than with a body opened in place (ADR 0063).
+//
+// It presses no esc afterwards, and that is the whole difference from expandLastBlock above: inside
+// a view esc is the way back OUT of it, so the tidy-up that leaves the block cursor would close the
+// very thing the test just opened. It costs nothing either — opening the view drops the block cursor
+// itself, so the repaint-anchoring that made expandLastBlock's esc necessary is already gone.
+func openLastRun(drv *tuitest.Driver) {
+	painted := drv.Screen().BytesWritten()
+	drv.Press(tuitest.AltUp)
+	drv.WaitFor(func() bool { return drv.Screen().BytesWritten() > painted },
+		tuitest.Awaiting("the block cursor to highlight a block"))
+	drv.Press(tuitest.Enter)
+	drv.WaitQuiet(settled)
+}
+
 // rowContaining is the frame's first row holding want, failing the test with the whole frame when
 // no row does. It is how a claim about ONE line — a stats line, a footer — is made against a frame
 // rather than against the frame's flattened text.

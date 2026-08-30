@@ -598,7 +598,19 @@ func (m Model) toggleBlockAt(line, releaseRow int) (Model, tea.Cmd) {
 	}
 	target := m.lineTargets[line]
 	switch target.kind {
+	case targetBreadcrumb:
+		// The run view's header row is not a block: it is the way back up, and a click on it leaves
+		// the view (runview.go). It returns here rather than falling to the anchoring below, which is
+		// about a body that grew or shrank under a header that STAYED — upRun repaints a different
+		// transcript and parks it by its own rule.
+		return m.upRun(), nil
 	case targetHeader:
+		// A framed delegation opens as a run VIEW rather than as a rail in place (ADR 0063): one
+		// redirect, asked before the flip, so the mouse and the block cursor's ⏎ — which arrives
+		// through this same call — cannot come to mean different things by the same gesture.
+		if next, opened := m.openRunAt(target.entry); opened {
+			return next, nil
+		}
 		if !m.transcript.toggleExpanded(target.entry) {
 			return m, nil
 		}

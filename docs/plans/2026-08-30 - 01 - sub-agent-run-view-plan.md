@@ -183,7 +183,27 @@ NOTES (2026-08-30): consequential edit — internal/tui/paintcache_test.go: `col
 
 **Commit.** `feat(tui): the transcript can paint rooted at one run, under a breadcrumb header`
 
-## 7. Model: open a run view on expand, `esc`/breadcrumb goes up, per-view scroll
+## 7. Model: open a run view on expand, `esc`/breadcrumb goes up, per-view scroll — ✅ DONE (2026-08-30)
+
+NOTES (2026-08-30): the redirect is stated ONCE, in `toggleBlockAt` (mouse.go), rather than once per reach as the item's text reads: `toggleAtBlockCursor` already delegates to it, so a second copy would be exactly the drift that call's own doc comment says the single click map exists to prevent. `blockcursor.go` gains the sentence saying so.
+
+NOTES (2026-08-30): `upRun` restores the level below's offset only where that level was DETACHED; a level that was following the tail gets the tail, which is where the conversation has grown to while the view was open rather than the row the tail stood on when it was left. The item says "restore offset and detached"; restoring an offset over a grown transcript would silently detach a reader who never scrolled.
+
+NOTES (2026-08-30): the status right slot's `esc back` sits just above the state switch rather than only inside its `stateRunning` arm, so a view open at idle says what its one key does too; `stateErrored` keeps `enter dismiss`, and a pane that owns esc (ask/approval) keeps the stop hint, both through the claimant's own `runViewOwnsEsc` predicate.
+
+NOTES (2026-08-30): `TestE2EFiringMarksAnAbandonedFinalTurn` (`cmd/apogee/e2e_schedule_test.go:55`) deliberately KEEPS `expandLastBlock`, against the item's enumeration of four callers: a Schedule Firing is not a delegation (`toolView.headsRun` is `sub_agent` only), so it never reaches the redirect and its body still opens in place. `e2e_outcome_test.go`'s two edit-diff callers keep it for the same reason.
+
+NOTES (2026-08-30): T-04's step 6 no longer asserts the parent-side result envelope on the frame (`stepCapResult` deleted with it) — see FOLLOW-UP; the golden `t04-step-cap-block.txt` is regenerated to the collapsed row, and step 7's no-error-tone claim moves to that same frame, which is where the head's slot is now read.
+
+NOTES (2026-08-30): `TestE2EOutcomeSlotsCarryTheToolsVerdict` presses `esc` after `openLastRun` — the rest of that session is about the parent's own blocks, and a view left open would be showing the delegate's run while they landed.
+
+NOTES (2026-08-30): consequential edit — internal/tui/doc.go: made necessary by the new file (the package's file map must name it) and by esc's new meaning inside a view.
+
+NOTES (2026-08-30): consequential edit — internal/tui/mouse_test.go: `TestTranscriptClickTogglesALiveBlockAcrossTheBlink` and `TestSubAgentGroupMemberClickOpensItsSpan` both click a FRAMED delegation, so both now assert the view the click opens; the second's "a second click closes it again" case becomes "the breadcrumb brings the list back", which is the same round trip through the shape a run actually has.
+
+NOTES (2026-08-30): `internal/tui/blockcursor_test.go` needed no change — `TestBlockCursorEnterTogglesWhatItStandsOn` stands on a plain shell block, as the item says.
+
+NOTES (2026-08-30): retry fix — `upRun` reads the restore guard off the stack entry (`if left.detached`), not off `m.detached`: the repaint runs while the VIEW's offset is still standing, and a view TALLER than the level below leaves that offset past the level's bottom, where `refreshViewport` clamps it and clears the flag on the way — so the reader's parked row was dropped and the conversation came back at its tail. The doc comment says why the field is not the one to ask, and `runview_test.go` gains "a view taller than the level below still hands that level's offset back", which fails on the old guard (offset 34, want 22) and passes on the new one.
 
 **What.** Depends on items 5, 6. `Model` gains `viewStack []runView` (`runView{ref runRef; yOffset int; detached bool}`) — the stack of open views, empty = top level. `openRun(spawn)`: push the current `viewport.YOffset`/`detached`, exit the block cursor, `transcript.setRoot`, repaint, `GotoBottom`, `detached = false` (follows the latest line — D5 of ADR 0063). `upRun()`: pop, `setRoot` to the parent, repaint, restore offset and `detached`, exit the block cursor. Redirect expand: `toggleExpanded` on a sub-agent head with `span > 0 || !head.done` (item 8's predicate — a running child opens its view before its first entry lands) from both reaches — `toggleAtBlockCursor` (`blockcursor.go:239`) and `toggleBlockAt` (`mouse.go:595`, `targetHeader`) — calls `openRun` instead of flipping `entry.expanded`; an unframed/never-ran delegation and the `✦` umbrella keep today's inline toggle. A click on `targetBreadcrumb` → `upRun`. Keys: a `runViewClaimant` in `keyClaimOrder` (`model.go:1221`) placed AFTER the modal panes (settings/picker/report) and BEFORE the block cursor, claiming only `esc` → `upRun`; every other key falls through (block cursor, prompt). Because the claimant swallows `esc`, `m.lastEsc` never arms inside a view. Status right slot (`layout.md:1173`, `model.go:3119` `statusLeft`/right composer) shows `esc back` in place of `esc×2 stop` while a view is open; `runningPhrase` receives the viewed `runRef` (item 5). A run's `SubAgentFinished` does NOT close the view. One rule for the stack: it pops whenever a `transcript.reset()` (`/clear` → `resetSessionView`, `commandrun.go:179`; `/new`; restore at `sessions.go:560`) leaves `runHead(root.spawn)` unresolvable; `/continue`/`RestoreSession` replaying the same spawn id keep it. Height budget: none — the view is the transcript itself; panes (`/usage`, `/inspect`, settings) stack over it unchanged.
 

@@ -49,7 +49,6 @@ const (
 	resumedNote     = "resumed: "
 	stepCapErrLead  = "delegate stopped at its step cap (3 steps)"
 	stepCapErrTail  = "raise delegate-max-steps"
-	stepCapResult   = "[delegate stopped at its step cap (3 steps); partial result"
 	childFinalWords = "The workspace holds a.txt and it says hello."
 )
 
@@ -213,30 +212,33 @@ func TestE2EDelegationStepCap(t *testing.T) {
 			t.Errorf("the child ran past its cap and answered:\n%s", drv.Frame())
 		}
 
-		expandLastBlock(drv)
-
-		// Step 6 — the result handed back to the parent leads with the partial marker. It rides the
-		// head of the block, so it is on the first frame the expansion produced.
-		opened := drv.Frame()
-		if !strings.Contains(flatten(opened.String()), flatten(stepCapResult)) {
-			t.Errorf("the delegate's result does not lead with the partial marker:\n%s", opened)
-		}
-
-		// Step 7 — and the block is NOT painted as a failure. A step cap is a stop, not an error.
+		// Step 7 — the delegation is NOT painted as a failure. A step cap is a stop, not an error.
 		// The row asked about is the head's own, found by the OUTCOME SLOT it ends with: the prompt
 		// two rows above names the delegation too, and a search for its name would settle the
-		// question against a line nobody was asking about.
-		assertNoErrorTone(t, opened, "tool calls · done")
+		// question against a line nobody was asking about. It is asked of the COLLAPSED row, which is
+		// the shape a delegation wears in the conversation now that expanding one opens its run view
+		// instead (ADR 0063).
+		collapsed := drv.Frame()
+		assertNoErrorTone(t, collapsed, "tool calls · done")
 
-		// The whole opened block, byte for byte: the one surface of T-04 that is a RENDERING claim
-		// rather than a wording one — where the marker sits, what the head's slot says beside it, and
-		// that the child's run is framed underneath. Refresh it with
+		// That row, byte for byte: the one surface of T-04 that is a RENDERING claim rather than a
+		// wording one — what the head's slot says, and that the run behind it is elided to the single
+		// line the conversation carries. Refresh it with
 		// `go test ./cmd/apogee -run TestE2EDelegationStepCap -update`.
-		tuitest.Golden(t, "t04-step-cap-block", opened, goldenRedactions(sess)...)
+		tuitest.Golden(t, "t04-step-cap-block", collapsed, goldenRedactions(sess)...)
+
+		openLastRun(drv)
+
+		// Step 6 — the run view opens on the child's own conversation: the task it was handed, and
+		// the work it got through before the cap stopped it.
+		opened := drv.Frame()
+		if !strings.Contains(flatten(opened.String()), flatten(childTask)) {
+			t.Errorf("the run view does not open on the task the child was handed:\n%s", opened)
+		}
 
 		// Step 5 — one error line, naming the cap and the key that raises it. It stands at the END
-		// of the child's run, past the bottom of a terminal an expanded delegation overflows, so it
-		// is read by scrolling rather than off one frame.
+		// of the child's run, past the bottom of a terminal the run overflows, so it is read by
+		// scrolling rather than off one frame.
 		flat := flatten(scrollTranscript(drv))
 		for _, want := range []string{stepCapErrLead + " — returning what it has", stepCapErrTail} {
 			if !strings.Contains(flat, flatten(want)) {
@@ -276,7 +278,7 @@ func TestE2EDelegationStepCap(t *testing.T) {
 		if got := childRequests(stub, childTask); got != 4 {
 			t.Errorf("the child made %d requests; unbounded, its script runs four turns", got)
 		}
-		expandLastBlock(drv)
+		openLastRun(drv)
 		flat := flatten(scrollTranscript(drv))
 		if !strings.Contains(flat, flatten(childFinalWords)) {
 			t.Errorf("the uncapped child never got to answer:\n%s", flat)
@@ -309,7 +311,7 @@ func TestJudgeDelegationStepCap(t *testing.T) {
 	submit(drv, capPrompt)
 	drv.WaitText("The delegate handed back what it had.")
 	drv.WaitQuiet(settled)
-	expandLastBlock(drv)
+	openLastRun(drv)
 
 	tones := schemeTones()
 	judge.Require(t, t.Context(), judge.Rubric{

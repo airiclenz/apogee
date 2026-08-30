@@ -1766,8 +1766,9 @@ func modelWithLiveToolBlock(t *testing.T) Model {
 // still holding an open call paints ✦ or a bare cell from the spinner's phase, so the tick rewrites
 // its header every half second — and the keep-if-unchanged rule used to zero the press anchor on
 // exactly that line, which is the answer the release needs. Collapsed spans are now exempt
-// (spanUnchanged), so the press outlives the blink and the toggle lands on a running tool like any
-// other.
+// (spanUnchanged), so the press outlives the blink and lands on a running tool like any other: the
+// block it lands on here heads a live delegation, so what the release opens is that run's view
+// (ADR 0063).
 func TestTranscriptClickTogglesALiveBlockAcrossTheBlink(t *testing.T) {
 	m := modelWithLiveToolBlock(t)
 	header := markedLine(t, m, targetHeader)
@@ -1789,8 +1790,8 @@ func TestTranscriptClickTogglesALiveBlockAcrossTheBlink(t *testing.T) {
 	}
 
 	m = step(t, m, leftRelease(2, row))
-	if !m.transcript.entries[entry].expanded {
-		t.Fatal("a click held across a star blink did not toggle the live block")
+	if !m.inRunView() {
+		t.Fatal("a click held across a star blink did not open the live block's run view")
 	}
 }
 
@@ -3204,9 +3205,10 @@ func modelWithSubAgentGroup(t *testing.T) Model {
 }
 
 // TestSubAgentGroupMemberClickOpensItsSpan is the folded list's interaction: a member row is its own
-// click surface, so a click opens THAT delegation's span and leaves its siblings folded, and a
-// second click on the same row closes it again. The group header itself toggles nothing — a list
-// has no state of its own, exactly as the same-label group's header has none.
+// click surface, so a click opens THAT delegation's span — as its run view, which is the one shape a
+// framed delegation opens into (ADR 0063) — and its siblings come nowhere near it. The breadcrumb
+// brings the list back. The group header itself toggles nothing — a list has no state of its own,
+// exactly as the same-label group's header has none.
 func TestSubAgentGroupMemberClickOpensItsSpan(t *testing.T) {
 	// The prompt is entries[0], so the three delegations head at 1, 3 and 5.
 	const first, middle, last = 1, 3, 5
@@ -3219,13 +3221,8 @@ func TestSubAgentGroupMemberClickOpensItsSpan(t *testing.T) {
 	t.Run("a click opens the delegation it landed on, alone", func(t *testing.T) {
 		m := modelWithSubAgentGroup(t)
 		m = clickLine(t, m, memberRows(t, m, middle)[0])
-		if !m.transcript.entries[middle].expanded {
-			t.Fatal("a click on the middle delegation's row did not open it")
-		}
-		for _, sibling := range []int{first, last} {
-			if m.transcript.entries[sibling].expanded {
-				t.Errorf("opening entry %d opened entry %d as well", middle, sibling)
-			}
+		if got := m.viewedRun().spawn; got != "s2" {
+			t.Fatalf("a click on the middle delegation's row opened run %q; want the run it heads", got)
 		}
 		body := strings.Join(m.lines, "\n")
 		if !strings.Contains(body, "b.go") {
@@ -3236,11 +3233,15 @@ func TestSubAgentGroupMemberClickOpensItsSpan(t *testing.T) {
 		}
 	})
 
-	t.Run("a second click closes it again", func(t *testing.T) {
+	t.Run("the breadcrumb brings the list back", func(t *testing.T) {
 		m := modelWithSubAgentGroup(t)
 		m = clickLine(t, m, memberRows(t, m, middle)[0])
-		if m = clickLine(t, m, memberRows(t, m, middle)[0]); m.transcript.entries[middle].expanded {
-			t.Error("a second click on the open delegation's row did not close it")
+		m = clickLine(t, m, markedLine(t, m, targetBreadcrumb))
+		if m.inRunView() {
+			t.Fatal("a click on the breadcrumb did not leave the middle delegation's view")
+		}
+		for _, member := range []int{first, middle, last} {
+			memberRows(t, m, member) // the folded list is painted again, all three rows of it
 		}
 	})
 

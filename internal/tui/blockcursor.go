@@ -233,6 +233,10 @@ func (m *Model) followBlockCursor() {
 // row still while the body appears are one rule for both ways in, and a second copy of it here
 // would be the drift the paint's single click map exists to prevent.
 //
+// "Opens" is not always in place. A framed delegation opens as its RUN VIEW (runview.go, ADR 0063),
+// which is the same redirect a click gets and for the same reason: the rule lives where the click
+// map is read, so ⏎ on a delegation and a click on one are one gesture with two ways in.
+//
 // The anchor row is where the cursor is DRAWN, so ⏎ holds the highlighted row exactly where the eye
 // already is. A cursor the view is not showing cannot be toggled — followBlockCursor keeps that
 // unreachable after any move, and refusing beats guessing a row for a line nobody can see.

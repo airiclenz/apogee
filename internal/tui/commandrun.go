@@ -183,6 +183,10 @@ func (m *Model) resetSessionView() {
 	// rather than assumed unchanged — the repo's AGENTS.md may have moved since launch). A pre-bound
 	// session has no engine to ask and the unbound holder's empty report adds nothing.
 	m.noteContextFiles()
+	// The conversation the reset threw away took every run inside it, so no open run view still names
+	// entries the transcript holds: the stack falls whole and the paint is re-rooted at the top level
+	// (runview.go states the rule once, for every reset that goes through it).
+	m.reseatViewStack()
 	// A held interjection queue deliberately SURVIVES the reset (ADR 0025): staged rows are
 	// outgoing input, not context — the human wrote them and has not unwritten them — so /clear
 	// drops what the model remembers and leaves what is still waiting to be sent.

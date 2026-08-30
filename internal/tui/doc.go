@@ -278,6 +278,20 @@
 // as the theme's one selection field, which the drag-selection it replaces on entry can therefore
 // never be confused with.
 //
+// runview.go is where those two reaches ARRIVE when what they open is a delegation. A run has two
+// shapes and no third (ADR 0063): the collapsed row it wears in the conversation, and its run VIEW —
+// the whole transcript slot painted rooted at that one run ([transcript.setRoot], render.go) under
+// the breadcrumb naming the way back. The file holds the stack of open levels ([runView], one entry
+// per level, each remembering where the level BELOW it was parked), the two moves between them
+// ([Model.openRun] and the [Model.openRunAt] redirect both reaches funnel through, [Model.upRun] for
+// esc and for a click on the breadcrumb), the claimant that gives esc that meaning
+// ([Model.runViewOwnsEsc] gating [Model.runViewKey] in [keyClaimOrder], above the block cursor and
+// below every pane whose own esc means cancel), and the one rule the stack lives by across a session
+// boundary ([Model.reseatViewStack]: a view stands exactly as long as the entries it names do, so
+// /clear closes every one and a restore that replays the same spawn id keeps its own). Because the
+// claimant swallows esc, the double-tap stop is unreachable from inside a view — the status line
+// says "esc back" where it would otherwise offer the stop, and backing out first is the way to it.
+//
 // Module map — the input cluster has its own home (review candidate #3). prompteditor.go lifts the
 // loose input-side concerns the architecture review called one coherent concept — the textarea, the
 // autocomplete overlay (+ its skillRegion edge-trigger), the workspace file cache, and the prompt

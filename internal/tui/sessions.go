@@ -563,6 +563,11 @@ func (m *Model) resumeLoaded(msg sessionLoadedMsg) tea.Cmd {
 	// start goes through too (replayScrollback): the facts are read off the record just loaded and
 	// off the live engine, the wording of all three notices is the shared function's.
 	m.replayScrollback(msg.rec.Transcript, title, m.eng.InExchange())
+	// An open run view survives exactly as far as the replayed scrollback carries its run: a record
+	// holding the same spawn id reopens on the same view, and anything else closes it (runview.go).
+	// It is asked AFTER the replay for that reason — judged against the empty list, every view would
+	// fall, including the one the restore just brought back.
+	m.reseatViewStack()
 	// A successful restore starts a new session, so the engine re-read the workspace context files
 	// (the resolved-live posture: a resumed session speaks from the CURRENT files, not the ones its
 	// snapshot was taken under) — the notice says what it is now carrying.

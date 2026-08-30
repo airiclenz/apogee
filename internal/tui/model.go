@@ -456,6 +456,12 @@ type Model struct {
 	// it names through a scroll or a stream — refreshViewport keeps it standing on a real click
 	// surface (blockCursor.clamp) exactly as it keeps the map above it honest.
 	cursor blockCursor
+	// viewStack is the run views that are open, outermost first, and empty at the top level: which
+	// delegation the transcript is painted rooted at, and where the level below each one was parked
+	// (runview.go, ADR 0063). The paint's own root lives on the transcript; this is the WALK — what
+	// esc and the breadcrumb go back to, and how a nested delegation is unwound one level at a time.
+	// A plain slice of plain values, so ADR 0011's copy rule needs no exception.
+	viewStack []runView
 	// spans is the geometry of the frame a pointer gesture was aimed at: where each boxed overlay of
 	// the transcript-side slot landed, published onto the pre-gesture snapshot ([Model.withFrameSpans])
 	// so every rectangle the gesture asks for is a READ of one composition rather than a composition
@@ -1292,6 +1298,24 @@ var keyClaimOrder = []keyClaimant{
 		// while one of them is closed, so the order between THEM decides nothing.
 		name:  "inspector pane",
 		claim: paneClaim(Model.inspectorKey),
+	},
+	{
+		// An open run view claims exactly one key — esc, which goes one level up (runview.go, ADR
+		// 0063) — and lets every other key fall through, so typing, scrolling and the block cursor's
+		// own gestures work inside a view exactly as they do outside it.
+		//
+		// It sits BELOW the panes above because each of them answers its own esc first: a report a
+		// keystroke opened is dismissed by the esc the human means for it, and the view is still there
+		// behind it. It sits ABOVE the block cursor because esc is the way OUT of the view, and a
+		// highlight standing inside one is left by the same key ([Model.upRun] drops it) — one press,
+		// one level, rather than a press spent leaving a mode the human did not think they were in.
+		//
+		// The gate keeps it shut while a pane is waiting for an answer, where esc already means cancel
+		// (ask.go, approval.go): that is also what keeps the double-tap stop reachable from those two
+		// states alone, and everywhere else inside a view esc never arms it (statusRight says so).
+		name:  "run view",
+		open:  Model.runViewOwnsEsc,
+		claim: paneClaim(Model.runViewKey),
 	},
 	{
 		// The transcript's modal block cursor claims its keys last of the claimants and ahead of the
@@ -3166,10 +3190,9 @@ func (m Model) statusLeft() string {
 	case stateRunning:
 		now := time.Now()
 		spinner, throughput := m.spin.view(m.th)+m.th.statusBar.Render(" "), m.throughputSuffix()
-		// The row speaks for the run the human is LOOKING at. That is the top-level conversation
-		// until a run view can be opened (ADR 0063), which is why the literal is here rather than a
-		// Model fact.
-		view := runRef{}
+		// The row speaks for the run the human is LOOKING at: the top-level conversation, or the
+		// delegation whose run view is open (ADR 0063, runview.go).
+		view := m.viewedRun()
 		phrase = spinner + m.runningPhrase(view, now, false) + throughput
 		if m.isStalled(view, now) {
 			qualified = spinner + m.runningPhrase(view, now, true) + throughput
@@ -3336,6 +3359,15 @@ func (m Model) statusRight() string {
 	}
 	if g := m.contextGauge(); g != "" {
 		return g
+	}
+	// Inside a run view esc goes one level up and never arms the stop — the claimant takes it
+	// (runview.go) — so the slot says what the key actually does, standing in the rung the stop hint
+	// stood in and wearing the breadcrumb's own wording, since the two rows advertise one key. It
+	// yields to stateErrored, whose occupant names the thing to dismiss; the view is still there
+	// behind the error. It also yields wherever a pane owns esc (runViewOwnsEsc): there the double-tap
+	// stop is still reachable and the row must keep saying so.
+	if m.runViewOwnsEsc() && m.state != stateErrored {
+		return m.th.statusBar.Render(breadcrumbHint)
 	}
 	switch m.state {
 	case stateRunning:
