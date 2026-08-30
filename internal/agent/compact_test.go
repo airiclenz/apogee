@@ -726,3 +726,70 @@ func TestCompactStripsInlineThinkingFromTheSummary(t *testing.T) {
 		t.Errorf("summary message = %q, want the inline thinking stripped out", folded)
 	}
 }
+
+// TestCompactKeepsASummaryCutAtTheCapAndMarksIt: a summary the server cut off at compactMaxTokens
+// still said something, and that something is worth more than the fault it would otherwise raise —
+// discarding it burns the fold's tokens for nothing and leaves the conversation as over-budget as
+// before. So it folds normally, with the truncation marker appended INSIDE the summary message
+// (after context.Compact's own prefix), because a cut summary loses precisely its tail — the recent
+// state and the next step — and a model reading it unmarked resumes from the wrong place. A summary
+// the server called finished carries no marker.
+func TestCompactKeepsASummaryCutAtTheCapAndMarksIt(t *testing.T) {
+	t.Parallel()
+
+	if strings.HasSuffix(summaryTruncatedMarker, "\n") {
+		t.Errorf("summaryTruncatedMarker = %q, want mustPrompt's single trailing newline stripped", summaryTruncatedMarker)
+	}
+
+	cases := []struct {
+		name       string
+		finish     string
+		wantMarker bool
+	}{
+		{name: "cut at the output cap", finish: "length", wantMarker: true},
+		{name: "the server called it finished", finish: "stop"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			up := cappedSummaryResponder{content: "partial summary", finish: tc.finish}
+			a, err := newAgent(baseConfig(&recordingSink{}), up)
+			if err != nil {
+				t.Fatalf("newAgent: %v", err)
+			}
+			seedFoldable(a)
+
+			skipped, err := a.Compact(context.Background())
+
+			if err != nil {
+				t.Fatalf("Compact: %v", err)
+			}
+			if skipped {
+				t.Fatal("Compact skipped a foldable conversation; want the fold so a summary was written")
+			}
+			msgs := a.conv.Messages()
+			if len(msgs) != 2 {
+				t.Fatalf("conv = %d messages after the fold, want 2 (the protected prefix, then the summary)", len(msgs))
+			}
+			sum := msgs[1]
+			if sum.Role != domain.RoleAssistant {
+				t.Errorf("summary role = %q, want assistant", sum.Role)
+			}
+			if !strings.HasPrefix(sum.Content, "Summary of the conversation so far:") {
+				t.Errorf("summary message = %q, want context.Compact's summary prefix", sum.Content)
+			}
+			if !strings.Contains(sum.Content, "partial summary") {
+				t.Errorf("summary message = %q, want the visible summary kept", sum.Content)
+			}
+			gotMarker := strings.HasSuffix(sum.Content, "\n\n"+summaryTruncatedMarker)
+			if gotMarker != tc.wantMarker {
+				t.Errorf("summary ends with the truncation marker = %v, want %v; message = %q", gotMarker, tc.wantMarker, sum.Content)
+			}
+			if !tc.wantMarker && strings.Contains(sum.Content, "cut off") {
+				t.Errorf("summary message = %q, want no truncation marker on a finished reply", sum.Content)
+			}
+		})
+	}
+}

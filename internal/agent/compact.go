@@ -13,8 +13,15 @@ import (
 )
 
 // Compaction sampling: a low temperature for a faithful, low-embellishment summary, and a
-// generous token cap so a long conversation's summary is bounded but not truncated. They are
-// fixed here (not a config surface) — a model-profile knob is a later, additive concern.
+// generous token cap so a long conversation's summary rarely reaches it. They are fixed here
+// (not a config surface) — a model-profile knob is a later, additive concern. A summary that
+// DOES reach the cap is KEPT, with summaryTruncatedMarker appended so the model reading the fold
+// later knows its tail is missing rather than trusting an ending that was never written. ADR 0046
+// rejects salvaging the visible text of a cut-off reply (:91-92) for a TURN — half an answer
+// committed as the model's answer is a worse failure than an honest fault — and in the same breath
+// exempts these auxiliaries from its budgeting (:93-94, "already bound themselves at 4096 and are
+// not turns"). The summary is one of them: nothing is committed as a Turn, and discarding it throws
+// away tokens already spent while leaving the conversation exactly as over-budget as before.
 const (
 	compactTemperature = 0.2
 	compactMaxTokens   = 4096
@@ -309,6 +316,18 @@ func mustPrompt(name string) string {
 // for context it will never get back.
 var overflowBridge = mustPrompt("overflow-bridge.txt")
 
+// summaryTruncatedMarker is appended to a summary the server cut off at compactMaxTokens
+// (prompts/summary-truncated.txt), separated by a blank line, so it rides INSIDE the summary
+// message the fold writes — after context.Compact's own summaryMessagePrefix — and is therefore
+// read by every later request the way the rest of the summary is. What it buys is the model's
+// trust calibration: a cut summary ends mid-thought, and its missing tail is exactly the part a
+// summary front-loads least — the most recent state and what was about to happen next — so a model
+// reading it without the marker takes a truncated history for a complete one and resumes from the
+// wrong place. The marker names the cut and points at the remedy that actually works from inside a
+// folded conversation (re-derive the state with tools), rather than asking for context no later
+// turn can hand back.
+var summaryTruncatedMarker = mustPrompt("summary-truncated.txt")
+
 // emergencyFold folds the conversation so an overflowed request can be retried against a history
 // that fits, reporting whether the caller may retry (true ⇒ the conversation WAS folded; false ⇒
 // nothing changed and the Turn must give up exactly as it does today). It is the overflow-driven
@@ -516,6 +535,14 @@ func (c compactCompleter) Complete(ctx context.Context, msgs []domain.Message) (
 			spent = fmt.Sprintf(", after roughly %d tokens of reasoning", c.a.tokens.EstimateTokens(len(thinking)))
 		}
 		return "", fmt.Errorf(cappedSummaryErrFmt, compactMaxTokens, spent)
+	}
+
+	// A summary that DID say something before the cap cut it off is kept and marked, not faulted:
+	// see the compactMaxTokens comment for why keeping beats discarding here and how that squares
+	// with ADR 0046. The marker rides inside the summary message, so context.Compact folds exactly
+	// as it does for a complete summary.
+	if finish == domain.FinishLength {
+		return visible + "\n\n" + summaryTruncatedMarker, nil
 	}
 	return visible, nil
 }

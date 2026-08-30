@@ -36,8 +36,9 @@
 // translation onto the provider seam: the domain request drained into a domain-free
 // provider.Request (ADR 0010). compact.go is conversation compaction — the explicit Compact,
 // the auto-compaction trigger and its allocation arithmetic, the emergency fold, the user bridge
-// that fold appends (this package's one embedded prompt asset, prompts/overflow-bridge.txt), and
-// the summarizer's own fixed sampling. selfreg.go is per-Session self-regulation: the proxy-signal
+// that fold appends and the marker a summary cut at the output cap carries
+// (prompts/overflow-bridge.txt, prompts/summary-truncated.txt), and the summarizer's own fixed
+// sampling. selfreg.go is per-Session self-regulation: the proxy-signal
 // safety net that withdraws a Mechanism hurting the model, deliberately weaker than the
 // bench's A/B gate and reset on Resume.
 //

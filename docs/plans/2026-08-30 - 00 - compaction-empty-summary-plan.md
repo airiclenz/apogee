@@ -156,7 +156,12 @@ the latch is set.
 
 Commit: `fix(agent): a failed automatic fold is never retried within the same exchange`
 
-## 4. A summary cut at the output cap is kept, with a truncation marker
+## 4. A summary cut at the output cap is kept, with a truncation marker — ✅ DONE (2026-08-30)
+
+NOTES (2026-08-30): consequential edit — internal/agent/doc.go: made necessary by the new embedded asset; the package file map's parenthetical called `prompts/overflow-bridge.txt` "this package's one embedded prompt asset" (already inaccurate since `orientation.txt`), so the enumeration now names the bridge and the truncation marker without the count. `internal/docmap` only enumerates `.go` files, so no structural test needed the new asset added.
+NOTES (2026-08-30): no agent-side `TestEmbeddedPromptsLoadWithoutTrailingNewline` counterpart exists (`internal/context`, `internal/title` and `internal/mechanisms` each have their own), so the item's fallback applies: the new test opens with the one-line assertion that `summaryTruncatedMarker` carries no trailing newline.
+NOTES (2026-08-30): the new test asserts the folded conversation is exactly 2 messages — the protected prefix (`seedFoldable`'s first user message) plus the assistant summary — which is what the item's "prefix + one assistant message" is under this fixture.
+NOTES (2026-08-30): the new test was confirmed non-vacuous by temporarily removing the production branch — the `length` case fails without it; the `stop` case is the no-marker anchor and passes either way by design.
 
 **What:** in `compactCompleter.Complete` (`internal/agent/compact.go`), when the visible text is
 non-blank AND the finish reason is `length`, return the text with `"\n\n"` and the marker
