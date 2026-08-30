@@ -88,7 +88,7 @@ func (m Model) launchExchange(in domain.UserInput) (tea.Model, tea.Cmd) {
 	m.cancel = cancel
 	m.state = stateRunning
 	m.setPlaceholder(runningPlaceholder) // the empty box now invites a queued message, not a send
-	m.setActivity(actThinking, "", 0, "")
+	m.setActivity(runRef{}, actThinking, "")
 	m.reasoning.reset() // a new Exchange never inherits the last one's reasoning (reasoning.go)
 	tick := m.spin.arm()
 	return m, tea.Batch(cmd, tick)
@@ -290,7 +290,7 @@ func (m Model) runCommand(parsed parsedInput) (tea.Model, tea.Cmd) {
 			m.cancel = cancel
 			m.state = stateRunning
 			m.setPlaceholder(runningPlaceholder)
-			m.setActivity(actThinking, "", 0, "") // the resumed work is a request in flight (as in submit)
+			m.setActivity(runRef{}, actThinking, "") // the resumed work is a request in flight (as in submit)
 			tick := m.spin.arm()
 			return m, tea.Batch(cmd, tick)
 		}
@@ -308,7 +308,7 @@ func (m Model) runCommand(parsed parsedInput) (tea.Model, tea.Cmd) {
 		m.cancel = cancel
 		m.state = stateRunning
 		m.setPlaceholder(runningPlaceholder)
-		m.setActivity(actThinking, "", 0, "") // a canned turn is still a request in flight (as in submit)
+		m.setActivity(runRef{}, actThinking, "") // a canned turn is still a request in flight (as in submit)
 		tick := m.spin.arm()
 		return m, tea.Batch(cmd, tick)
 
@@ -423,7 +423,7 @@ func (m Model) runCommand(parsed parsedInput) (tea.Model, tea.Cmd) {
 		// (there is no Exchange to interject into), so the legend says "queue" here as well.
 		m.setPlaceholder(runningPlaceholder)
 		// Compaction emits no Events until it lands, so the phrase is set here or not at all.
-		m.setActivity(actCompacting, "", 0, "")
+		m.setActivity(runRef{}, actCompacting, "")
 		tick := m.spin.arm()
 		return m, tea.Batch(cmd, tick)
 

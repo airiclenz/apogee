@@ -4011,7 +4011,7 @@ func guardedRunningModel(t *testing.T, after time.Duration) Model {
 // the activity is itself the engine being heard from, and would restamp both clocks this hands back.
 func silentFor(m Model, quiet time.Duration) Model {
 	m.lastEvent = time.Now().Add(-quiet)
-	m.act.since = m.lastEvent
+	backdateActivity(&m, m.lastEvent)
 	return m
 }
 
@@ -4112,7 +4112,7 @@ func TestStatusLineQuietSuffix(t *testing.T) {
 			// turn began — silentFor arranges the one-span shape, and the activity's own clock is
 			// then pushed the rest of the way back to that start.
 			m = silentFor(m, gap)
-			m.act.since = time.Now().Add(-streamed)
+			backdateActivity(&m, time.Now().Add(-streamed))
 
 			got := statusText(t, m)
 			if strings.Contains(got, "quiet") {

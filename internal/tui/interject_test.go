@@ -750,7 +750,7 @@ func TestSuppressedBandKeepsItsCountOnTheStatusLine(t *testing.T) {
 		{"running, a / menu open", func(t *testing.T, m Model) Model {
 			t.Helper()
 			m.state = stateRunning
-			m.setActivity(actTool, "reading", 0, "")
+			m.setActivity(runRef{}, actTool, "reading")
 			return dropdown(m)
 		}},
 		{"awaiting approval", func(t *testing.T, m Model) Model {

@@ -330,11 +330,18 @@ type Model struct {
 	skillHints  []skills.Suggestion
 	spentSkills map[string]bool
 
-	// act is the live activity the status line renders while a worker runs — thinking,
-	// responding, a named tool, retrying, compacting, stopping (activity.go). It is derived
+	// acts is the live activity board the status line renders while a worker runs — thinking,
+	// responding, a named tool, retrying, compacting, stopping (activity.go) — one slot per RUN
+	// rather than one for the session, keyed by the run identity (runActivities). It is derived
 	// from the Event stream (foldActivity) plus the transitions no Event announces, and it is
 	// deliberately NOT a uiState: the lifecycle machine above is untouched by it (ADR 0011).
-	act activity
+	//
+	// One slot per run is what a fan-out needs: concurrent delegates (ADR 0039) used to overwrite
+	// one another in a single slot, so the row jittered between whichever child spoke last. The
+	// board keeps each run's phrase and clock apart, and runningPhrase composes the ONE sentence
+	// the row has room for out of them. A map, like spentSkills above, and safe on the same terms
+	// (runActivities).
+	acts runActivities
 
 	// lastEvent is when the ENGINE was last heard from: any Event, at any depth, of any variant —
 	// including a ReasoningEvent, since a reasoning stream is life and the stall the guard was built
@@ -1703,12 +1710,15 @@ func (m Model) submit() (tea.Model, tea.Cmd) {
 // It switches the status line to "stopping" for that window: the cancel is not instant, the
 // worker keeps emitting events until it unwinds, and the human needs to see their stop was
 // registered. The phrase is sticky (foldActivity refuses to overwrite it) until finishWorker
-// clears it.
+// clears it, and it is sticky RUN-WIDE: the stop takes the whole run, delegates included, so a
+// child slot still on the board is not allowed to speak over it (Model.shownSlot). Their slots are
+// deliberately left standing rather than dropped here — the worker has not unwound yet, and
+// finishWorker is what closes the board.
 func (m *Model) stopWorker() {
 	if m.cancel != nil {
 		m.cancel()
 	}
-	m.setActivity(actStopping, "", 0, "")
+	m.setActivity(runRef{}, actStopping, "")
 }
 
 // finishWorker returns the model to a terminal state once the worker's terminal Msg
@@ -1752,9 +1762,10 @@ func (m *Model) finishWorker(next uiState) tea.Cmd {
 	m.box = nil
 	m.setPlaceholder(m.idleLegend()) // nothing is running: ⏎ sends again
 	m.genStart = time.Time{}
-	// The worker has unwound, so the activity is over — including a sticky "stopping", which
-	// only this path clears (activity.go). Idle renders an empty left slot.
-	m.act = activity{}
+	// The worker has unwound, so every run's activity is over — the whole board goes, including a
+	// sticky "stopping", which only this path clears, and any delegate slot whose child never got
+	// to report (activity.go). Idle renders an empty left slot.
+	m.acts = nil
 	// Whatever the model was reasoning about died with the worker: a stop and a fault emit no
 	// closing MessageEvent, so this is the boundary that keeps a cancelled Turn's reasoning from
 	// outliving it (reasoning.go).
@@ -3142,9 +3153,13 @@ func (m Model) statusLeft() string {
 	case stateRunning:
 		now := time.Now()
 		spinner, throughput := m.spin.view(m.th)+m.th.statusBar.Render(" "), m.throughputSuffix()
-		phrase = spinner + m.runningPhrase(now, false) + throughput
-		if m.act.quiet(m.lastEvent, now, m.opts.StallAfter) {
-			qualified = spinner + m.runningPhrase(now, true) + throughput
+		// The row speaks for the run the human is LOOKING at. That is the top-level conversation
+		// until a run view can be opened (ADR 0063), which is why the literal is here rather than a
+		// Model fact.
+		view := runRef{}
+		phrase = spinner + m.runningPhrase(view, now, false) + throughput
+		if m.isStalled(view, now) {
+			qualified = spinner + m.runningPhrase(view, now, true) + throughput
 		}
 	case stateAwaitingApproval:
 		phrase = m.th.statusBar.Render("approval needed")
@@ -3175,6 +3190,73 @@ func (m Model) statusLeft() string {
 	return lead + m.th.measure.Truncate(phrase, room, "…") + queued
 }
 
+// shownSlot resolves WHICH run the status line speaks for, the slot it renders, and the NAME that
+// slot's phrase wears. view is the run the human is looking at — the top-level conversation, or the
+// delegation whose run view is open (ADR 0063).
+//
+// Four cases, in the order they outrank one another:
+//
+//   - A stopping TOP-LEVEL slot takes the row whatever else is on the board. The stop is the whole
+//     run's — a child cannot outlive the Turn it runs inside (ADR 0013 D5) — so a child slot left
+//     standing while the worker unwinds must never speak over it (activity.go).
+//   - Inside a run view the row is that run's own slot, verbatim: the human is looking at one
+//     delegate, so the row says what THAT delegate is doing.
+//   - At the top level with delegates running, the row is theirs and not the parent's: a parent
+//     inside a delegation is doing nothing of its own to report. Exactly one live delegate keeps
+//     its own phrase under its own name — "repo-scout · reading".
+//   - Two or more live delegates are MERGED into one count, "2 sub-agents · working", because the
+//     row has space for one sentence and picking a delegate out of a fan-out made it flicker
+//     between whichever spoke last. The merged slot counts from the OLDEST live child's clock, so
+//     the number the human is reading never restarts when a sibling emits.
+//
+// The name is resolved here rather than at fold time: it is display identity the run head may not
+// have folded yet, and an unresolved one costs a fallback word, not a wrong word (transcript.runName).
+func (m Model) shownSlot(view runRef) (runRef, runActivity, string) {
+	if top := m.acts.at(runRef{}); top.act.kind == actStopping {
+		return runRef{}, top, ""
+	}
+	if view != (runRef{}) {
+		return view, m.acts.at(view), m.transcript.runName(view.spawn)
+	}
+	kids := m.acts.children()
+	switch len(kids) {
+	case 0:
+		return runRef{}, m.acts.at(runRef{}), ""
+	case 1:
+		return kids[0], m.acts.at(kids[0]), m.transcript.runName(kids[0].spawn)
+	}
+	oldest, _ := m.acts.oldestChild()
+	slot := m.acts.at(oldest)
+	// A synthesised phrase, because no single slot is being shown: the count goes in where a name
+	// would, so the merged sentence composes through activity.text's own sub-agent prefix rule.
+	slot.act = activity{kind: actWorking, depth: oldest.depth, spawn: oldest.spawn, since: slot.since}
+	return oldest, slot, fmt.Sprintf("%d %ss", len(kids), subAgentActivityName)
+}
+
+// isStalled is whether the row owes the human the fact that the run it is SHOWING has gone silent
+// (activity.quiet). The stall guard evaluates the shown slot and not the board: with a fan-out
+// running, a busy sibling is no evidence that the delegate on the row is alive.
+func (m Model) isStalled(view runRef, now time.Time) bool {
+	run, slot, _ := m.shownSlot(view)
+	return slot.act.quiet(m.quietClock(run, slot), now, m.opts.StallAfter)
+}
+
+// quietClock is WHEN the run behind a shown slot was last heard from — the origin the stall guard
+// measures its silence from (activity.quiet).
+//
+// A DELEGATE reads its own slot's stamp, which is what gives each child of a fan-out a silence of
+// its own. The top-level run reads the engine-wide clock ([Model.lastEvent]) instead, because that
+// one is restamped by EVERY Event variant — usage accounting, an audit record, a fired mechanism —
+// and not only by the ones that move an activity, so the parent's guard keeps exactly the reach it
+// had before the board existed. A delegate slot that has not been stamped yet falls back to the
+// same clock rather than to the epoch, the elapsed/quiet posture throughout.
+func (m Model) quietClock(run runRef, slot runActivity) time.Time {
+	if run.depth == 0 || slot.lastEvent.IsZero() {
+		return m.lastEvent
+	}
+	return slot.lastEvent
+}
+
 // runningPhrase composes the running left slot's styled text: the activity phrase, the stall
 // guard's bare `quiet` qualifier when quiet says the row owes it, and the clock counting THIS
 // activity — "thinking · quiet · 2m 59s" while the engine is silent, "thinking · 12s" in every
@@ -3195,13 +3277,15 @@ func (m Model) statusLeft() string {
 // case: activity.quiet speaks only for thinking and responding, and both always word themselves.
 // now is passed in so the composition is testable off the wall clock.
 //
-// This is the seam where the acting delegation's NAME is resolved: activity carries the spawning
-// call id, the transcript owns the run heads, and the phrase itself stays pure (activity.go). The
-// lookup happens per frame rather than at fold time on purpose — the name is display identity that
-// the head may not have folded yet, and an unresolved one costs a fallback word, not a wrong word.
-func (m Model) runningPhrase(now time.Time, quiet bool) string {
-	clock := formatElapsed(m.act.elapsed(now))
-	phrase := m.act.text(m.transcript.runName(m.act.spawn))
+// WHICH run's slot it composes is shownSlot's answer, not this function's: view names the run the
+// human is looking at, and the board decides whether that is the parent's own phrase, a single
+// delegate's under its own name, or a fan-out merged into one count. The phrase itself stays pure
+// (activity.go) — the name is resolved per frame against the transcript, because it is display
+// identity the run head may not have folded yet.
+func (m Model) runningPhrase(view runRef, now time.Time, quiet bool) string {
+	_, slot, name := m.shownSlot(view)
+	clock := formatElapsed(slot.act.elapsed(now))
+	phrase := slot.act.text(name)
 	switch {
 	case phrase == "":
 		return m.th.statusBar.Render(clock)

@@ -12,6 +12,25 @@ import (
 // The status vocabulary (activity.text)
 // ----------------------------------------------------------------------------
 
+// shownAct is the activity the status line would render at the TOP LEVEL — the activity board's
+// answer for the human's own conversation, which is the parent's own slot when nothing is
+// delegated and the acting delegate's while one runs (Model.shownSlot). It is what the single
+// single Model activity field used to hold before the board existed, so the assertions below read
+// the same fact through the surface that now owns it.
+func shownAct(m Model) activity {
+	_, slot, _ := m.shownSlot(runRef{})
+	return slot.act
+}
+
+// backdateActivity pushes the top-level slot's PHRASE clock back to at, so a row whose activity
+// has been running for a while can be asserted without waiting for one. It is the board's writer
+// for tests that arrange a clock rather than move an activity (silentFor, model_test.go).
+func backdateActivity(m *Model, at time.Time) {
+	slot := m.acts.at(runRef{})
+	slot.act.since = at
+	m.acts.put(runRef{}, slot)
+}
+
 // TestActivityText proves the phrase every kind renders, that idle says nothing at all, and
 // that a Depth > 0 activity is prefixed with the same sub-agent label the transcript rail uses.
 func TestActivityText(t *testing.T) {
@@ -285,7 +304,7 @@ func TestMoveActivityRestampsOnlyWatchedKinds(t *testing.T) {
 			heardAt := time.Now().Add(-20 * time.Minute)
 			m.lastEvent = heardAt
 
-			m.moveActivity(activity{kind: tc.kind})
+			m.moveActivity(runRef{}, activity{kind: tc.kind})
 
 			if restamped := m.lastEvent.After(heardAt); restamped != tc.wantRestamp {
 				t.Errorf("after a move to %v the clock restamped = %v, want %v", tc.kind, restamped, tc.wantRestamp)
@@ -329,14 +348,14 @@ func TestFoldActivitySequence(t *testing.T) {
 	}
 	for _, s := range steps {
 		m = m.foldEvent(s.event)
-		if got := m.act.text(""); got != s.want {
+		if got := shownAct(m).text(""); got != s.want {
 			t.Errorf("after %s the phrase is %q, want %q", s.name, got, s.want)
 		}
 	}
 
 	// A re-streamed turn says so.
 	m = m.foldEvent(domain.StreamResetEvent{})
-	if got := m.act.text(""); got != "retrying" {
+	if got := shownAct(m).text(""); got != "retrying" {
 		t.Errorf("after a stream reset the phrase is %q, want %q", got, "retrying")
 	}
 }
@@ -352,19 +371,19 @@ func TestFoldActivityClockRunsPerPhrase(t *testing.T) {
 	m := newTestModel(t)
 
 	m = m.foldEvent(domain.TokenEvent{Text: "one"})
-	started := m.act.since
+	started := shownAct(m).since
 	if started.IsZero() {
 		t.Fatal("the first token did not start the clock")
 	}
 	for i := 0; i < 3; i++ {
 		m = m.foldEvent(domain.TokenEvent{Text: "more"})
 	}
-	if !m.act.since.Equal(started) {
-		t.Errorf("a stream of tokens restarted the clock (%v → %v)", started, m.act.since)
+	if !shownAct(m).since.Equal(started) {
+		t.Errorf("a stream of tokens restarted the clock (%v → %v)", started, shownAct(m).since)
 	}
 
 	m = m.foldEvent(domain.MessageEvent{Text: "done"})
-	if m.act.since.Equal(started) {
+	if shownAct(m).since.Equal(started) {
 		t.Error("the phrase changed to thinking but the clock kept the responding start")
 	}
 
@@ -374,23 +393,23 @@ func TestFoldActivityClockRunsPerPhrase(t *testing.T) {
 	}
 
 	m = m.foldEvent(read("1", "a.go"))
-	first := m.act.since
-	if got, want := m.act.text(""), "reading"; got != want {
+	first := shownAct(m).since
+	if got, want := shownAct(m).text(""), "reading"; got != want {
 		t.Fatalf("tool phrase = %q, want %q — the rest of this test rests on the two calls reading alike", got, want)
 	}
 
 	// The same call announced again (a streamed argument settling) is the same work: one clock.
 	m = m.foldEvent(read("1", "a.go"))
-	if !m.act.since.Equal(first) {
-		t.Errorf("a repeat announcement of call 1 restarted the clock (%v → %v)", first, m.act.since)
+	if !shownAct(m).since.Equal(first) {
+		t.Errorf("a repeat announcement of call 1 restarted the clock (%v → %v)", first, shownAct(m).since)
 	}
 
 	// A second call wording itself identically is nonetheless new work: a clock of its own.
 	m = m.foldEvent(read("2", "b.go"))
-	if m.act.since.Equal(first) {
+	if shownAct(m).since.Equal(first) {
 		t.Error("a second call with the same verb kept the first call's clock")
 	}
-	if got, want := m.act.call, "2"; got != want {
+	if got, want := shownAct(m).call, "2"; got != want {
 		t.Errorf("the activity names call %q, want %q", got, want)
 	}
 }
@@ -404,12 +423,12 @@ func TestFoldActivityDepthPrefixesSubAgent(t *testing.T) {
 		EventBase: domain.EventBase{Depth: 1},
 		Call:      domain.ToolCall{ID: "1", Tool: "grep", Arguments: []byte(`{"pattern":"TODO"}`)},
 	})
-	if got, want := m.act.text(""), "sub-agent · searching"; got != want {
+	if got, want := shownAct(m).text(""), "sub-agent · searching"; got != want {
 		t.Errorf("nested tool phrase = %q, want %q", got, want)
 	}
 
 	m = m.foldEvent(domain.MessageEvent{Text: "back"})
-	if got, want := m.act.text(""), "thinking"; got != want {
+	if got, want := shownAct(m).text(""), "thinking"; got != want {
 		t.Errorf("phrase after the parent resumed = %q, want %q", got, want)
 	}
 }
@@ -455,7 +474,7 @@ func TestStatusPhraseNamesTheActingDelegation(t *testing.T) {
 				EventBase: domain.EventBase{Depth: 1, CallID: "s1"},
 				Text:      "working on it",
 			})
-			if got := strip(m.runningPhrase(m.act.since, false)); got != tc.want {
+			if got := strip(m.runningPhrase(runRef{}, shownAct(m).since, false)); got != tc.want {
 				t.Errorf("status phrase = %q, want %q", got, tc.want)
 			}
 		})
@@ -470,13 +489,136 @@ func TestStatusPhraseDropsTheNameWhenTheParentResumes(t *testing.T) {
 		Call: domain.ToolCall{ID: "s1", Tool: "sub_agent", Arguments: []byte(`{"name":"repo-scout","task":"audit"}`)},
 	})
 	m = m.foldEvent(domain.TokenEvent{EventBase: domain.EventBase{Depth: 1, CallID: "s1"}, Text: "working"})
-	if got, want := strip(m.runningPhrase(m.act.since, false)), "repo-scout · responding · 0s"; got != want {
+	if got, want := strip(m.runningPhrase(runRef{}, shownAct(m).since, false)), "repo-scout · responding · 0s"; got != want {
 		t.Fatalf("delegate phrase = %q, want %q", got, want)
 	}
 
 	m = m.foldEvent(domain.MessageEvent{Text: "back"})
-	if got, want := strip(m.runningPhrase(m.act.since, false)), "thinking · 0s"; got != want {
+	if got, want := strip(m.runningPhrase(runRef{}, shownAct(m).since, false)), "thinking · 0s"; got != want {
 		t.Errorf("phrase after the parent resumed = %q, want %q", got, want)
+	}
+}
+
+// fannedOutModel is a Model mid-fan-out: two named delegations issued, both children live and each
+// holding a slot of its own (ADR 0039). It is the shape the merged phrase exists for — repo-scout
+// spoke first, so it owns the oldest slot and therefore the merged clock.
+func fannedOutModel(t *testing.T) Model {
+	t.Helper()
+
+	m := newTestModel(t)
+	m = m.foldEvent(domain.ToolCallEvent{
+		Call: domain.ToolCall{ID: "s1", Tool: "sub_agent", Arguments: []byte(`{"name":"repo-scout","task":"audit the config loader"}`)},
+	})
+	m = m.foldEvent(domain.ToolCallEvent{
+		Call: domain.ToolCall{ID: "s2", Tool: "sub_agent", Arguments: []byte(`{"name":"doc-scout","task":"read the manual"}`)},
+	})
+	m = m.foldEvent(domain.TokenEvent{EventBase: domain.EventBase{Depth: 1, CallID: "s1"}, Text: "one"})
+	m = m.foldEvent(domain.TokenEvent{EventBase: domain.EventBase{Depth: 1, CallID: "s2"}, Text: "two"})
+	return m
+}
+
+// TestStatusPhraseMergesConcurrentDelegates proves the top-level row stops flickering under a
+// fan-out (IDEAS.md:18). One slot for the whole session made two concurrent children overwrite each
+// other, so the row flipped to whichever spoke last and restarted its clock doing so; a slot per run
+// lets the row say the one honest thing it has space for — how many are working, and for how long.
+func TestStatusPhraseMergesConcurrentDelegates(t *testing.T) {
+	m := fannedOutModel(t)
+
+	if got, want := len(m.acts.children()), 2; got != want {
+		t.Fatalf("the board holds %d delegate slots, want %d", got, want)
+	}
+	// The clock is read off the OLDEST live slot, so the assertion states the whole row.
+	at := m.acts.at(runRef{depth: 1, spawn: "s1"}).since.Add(90 * time.Second)
+	const want = "2 sub-agents · working · 1m 30s"
+	if got := strip(m.runningPhrase(runRef{}, at, false)); got != want {
+		t.Fatalf("top-level phrase under a fan-out = %q, want %q", got, want)
+	}
+
+	m = m.foldEvent(domain.ToolCallEvent{
+		EventBase: domain.EventBase{Depth: 1, CallID: "s2"},
+		Call:      domain.ToolCall{ID: "1", Tool: "read_file", Arguments: []byte(`{"path":"a.go"}`)},
+	})
+
+	if got := strip(m.runningPhrase(runRef{}, at, false)); got != want {
+		t.Errorf("phrase after the other delegate emitted = %q, want the unchanged %q", got, want)
+	}
+	if got, want := len(m.acts.children()), 2; got != want {
+		t.Errorf("the board holds %d delegate slots after both spoke, want %d", got, want)
+	}
+}
+
+// TestStatusPhraseFallsBackAsDelegatesFinish proves a finished delegation's slot is CLOSED by its
+// own phase event, and that the row falls back a rung each time: the merged count to the one
+// delegate still working, and that one to the parent's own word.
+func TestStatusPhraseFallsBackAsDelegatesFinish(t *testing.T) {
+	m := fannedOutModel(t)
+
+	m = m.foldEvent(domain.SubAgentPhaseEvent{
+		EventBase: domain.EventBase{Depth: 1, CallID: "s2"},
+		Phase:     domain.SubAgentFinished,
+		Result:    domain.ToolResult{CallID: "s2", Content: "report"},
+	})
+	if got, want := strip(m.runningPhrase(runRef{}, shownAct(m).since, false)), "repo-scout · responding · 0s"; got != want {
+		t.Errorf("phrase with one delegate left = %q, want %q", got, want)
+	}
+
+	m = m.foldEvent(domain.SubAgentPhaseEvent{
+		EventBase: domain.EventBase{Depth: 1, CallID: "s1"},
+		Phase:     domain.SubAgentFinished,
+		Result:    domain.ToolResult{CallID: "s1", Content: "report"},
+	})
+	if got, want := len(m.acts.children()), 0; got != want {
+		t.Errorf("%d delegate slots outlived their delegations, want %d", got, want)
+	}
+	if got, want := strip(m.runningPhrase(runRef{}, shownAct(m).since, false)), "delegating · 0s"; got != want {
+		t.Errorf("phrase once every delegate finished = %q, want the parent's own %q", got, want)
+	}
+}
+
+// TestActivityBoardClosesChildSlotsWhenTheParentSpeaks proves the two halves of the closing rule a
+// fan-out needs. A child runs atomically inside its parent's Turn (ADR 0013 D5), so the parent
+// being heard from at depth 0 is proof every delegate of that Turn is over — including one whose
+// finished phase never arrived. A SIBLING starting is not that: phase events are stamped at the
+// child's own depth (internal/agent/dispatch.go), so a queued delegate joining leaves the running
+// ones exactly where they are.
+func TestActivityBoardClosesChildSlotsWhenTheParentSpeaks(t *testing.T) {
+	m := fannedOutModel(t)
+
+	m = m.foldEvent(domain.SubAgentPhaseEvent{
+		EventBase: domain.EventBase{Depth: 1, CallID: "s3"},
+		Phase:     domain.SubAgentStarted,
+	})
+	if got, want := len(m.acts.children()), 2; got != want {
+		t.Errorf("a sibling's start left %d delegate slots, want %d", got, want)
+	}
+
+	m = m.foldEvent(domain.MessageEvent{Text: "back"})
+
+	if got, want := len(m.acts.children()), 0; got != want {
+		t.Errorf("a depth-0 event left %d delegate slots, want %d", got, want)
+	}
+	if got, want := strip(m.runningPhrase(runRef{}, shownAct(m).since, false)), "thinking · 0s"; got != want {
+		t.Errorf("phrase after the parent resumed = %q, want %q", got, want)
+	}
+}
+
+// TestStatusPhraseStopsTheWholeRun proves the stop is RUN-WIDE on the board too. Esc×2 stops the
+// whole run, delegates included, and they keep emitting until they unwind — so a child's event
+// reaching the fold after the stop must never take the row back and tell the human their stop was
+// ignored (activity.go, model.go stopWorker).
+func TestStatusPhraseStopsTheWholeRun(t *testing.T) {
+	m := fannedOutModel(t)
+
+	m.stopWorker()
+
+	if got, want := strip(m.runningPhrase(runRef{}, shownAct(m).since, false)), "stopping · 0s"; got != want {
+		t.Fatalf("phrase after esc×2 under a fan-out = %q, want %q", got, want)
+	}
+
+	m = m.foldEvent(domain.TokenEvent{EventBase: domain.EventBase{Depth: 1, CallID: "s1"}, Text: "more"})
+
+	if got, want := strip(m.runningPhrase(runRef{}, shownAct(m).since, false)), "stopping · 0s"; got != want {
+		t.Errorf("a delegate's event after the stop = %q, want the sticky %q", got, want)
 	}
 }
 
@@ -489,12 +631,12 @@ func TestFoldActivityBatchStaysOnTool(t *testing.T) {
 	m = m.foldEvent(domain.ToolCallEvent{Call: domain.ToolCall{ID: "2", Tool: "read_file", Arguments: []byte(`{"path":"b.go"}`)}})
 
 	m = m.foldEvent(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "1", Content: "ok"}})
-	if got, want := m.act.text(""), "reading"; got != want {
+	if got, want := shownAct(m).text(""), "reading"; got != want {
 		t.Errorf("phrase with one call still open = %q, want %q", got, want)
 	}
 
 	m = m.foldEvent(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "2", Content: "ok"}})
-	if got, want := m.act.text(""), "thinking"; got != want {
+	if got, want := shownAct(m).text(""), "thinking"; got != want {
 		t.Errorf("phrase after the batch drained = %q, want %q", got, want)
 	}
 }
@@ -504,7 +646,7 @@ func TestFoldActivityBatchStaysOnTool(t *testing.T) {
 // overwrite "stopping". Only finishWorker clears it.
 func TestFoldActivityStoppingIsSticky(t *testing.T) {
 	m := newTestModel(t)
-	m.setActivity(actStopping, "", 0, "")
+	m.setActivity(runRef{}, actStopping, "")
 
 	for _, e := range []domain.Event{
 		domain.ReasoningEvent{Text: "still going"},
@@ -515,13 +657,13 @@ func TestFoldActivityStoppingIsSticky(t *testing.T) {
 		domain.StreamResetEvent{},
 	} {
 		m = m.foldEvent(e)
-		if got := m.act.text(""); got != "stopping" {
+		if got := shownAct(m).text(""); got != "stopping" {
 			t.Fatalf("%T overwrote the sticky stop phrase with %q", e, got)
 		}
 	}
 
 	m.finishWorker(stateIdle)
-	if got := m.act.text(""); got != "" {
+	if got := shownAct(m).text(""); got != "" {
 		t.Errorf("finishWorker left the phrase %q, want the idle empty slot", got)
 	}
 }
@@ -531,7 +673,7 @@ func TestFoldActivityStoppingIsSticky(t *testing.T) {
 func TestFoldActivityIgnoresObservationalEvents(t *testing.T) {
 	m := newTestModel(t)
 	m = m.foldEvent(domain.ToolCallEvent{Call: domain.ToolCall{ID: "1", Tool: "terminal", Arguments: []byte(`{"command":"go test"}`)}})
-	want := m.act
+	want := shownAct(m)
 
 	for _, e := range []domain.Event{
 		domain.UsageEvent{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15},
@@ -541,8 +683,8 @@ func TestFoldActivityIgnoresObservationalEvents(t *testing.T) {
 		domain.ApprovalEvent{Request: domain.ApprovalRequest{Tool: "terminal"}, Decision: domain.ApprovalAllow},
 	} {
 		m = m.foldEvent(e)
-		if m.act != want {
-			t.Errorf("%T changed the activity: %+v, want %+v", e, m.act, want)
+		if shownAct(m) != want {
+			t.Errorf("%T changed the activity: %+v, want %+v", e, shownAct(m), want)
 		}
 	}
 }

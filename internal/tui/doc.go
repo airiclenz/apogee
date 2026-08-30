@@ -373,6 +373,14 @@
 // file's call straight through the second. A tool activity therefore carries the id of the call it
 // describes (domain.ToolCall.ID) and restarts when that changes; every other kind keeps the
 // phrase-change rule, since for those the text is what actually changed.
+// There is one such phrase per RUN and not one per session ([Model.acts], runActivities): concurrent
+// delegates (ADR 0039) used to overwrite each other in a single slot, so the row flipped to whichever
+// child spoke last and restarted its clock doing so. Each run now owns a phrase and a clock, and the
+// row composes the one sentence it has space for out of the board — the parent's own word when
+// nothing is delegated, the delegate's under its own name when one runs, and "2 sub-agents · working"
+// on the oldest child's clock when several do (Model.shownSlot). Slots close on the child's
+// SubAgentFinished, on any depth-0 event (a child runs atomically inside the parent's Turn, ADR 0013
+// D5) and wholesale in finishWorker.
 // [Model.foldActivity] derives all of it from the same
 // Event stream the transcript folds (including [domain.ReasoningEvent], the observability seam
 // that makes "thinking" a fact rather than a guess), and the transitions no Event announces —

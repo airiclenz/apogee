@@ -22,6 +22,10 @@ import (
 // ADR 0011 state machine is untouched: statusLine still switches on m.state and only the
 // running branch consults the activity.
 //
+// There is one activity per RUN and not one per session (runActivities, [Model.acts]): concurrent
+// delegates (ADR 0039) each own a phrase and a clock, the status line composes ONE sentence out of
+// the board, and a run view can show its own child's slot (ADR 0063).
+//
 // This file is pure — no lipgloss, no I/O — the toolregistry.go discipline, so the whole
 // vocabulary is table-testable (activity_test.go); statusLine owns the styling. activity is a
 // plain value type reached by the value-copied Model, so it must never hold a strings.Builder
@@ -40,6 +44,7 @@ const (
 	actRetrying                       // the loop is re-streaming the Turn (StreamResetEvent)
 	actCompacting                     // the /compact worker is folding the conversation
 	actStopping                       // Esc fired the cancel; the worker has not unwound yet
+	actWorking                        // ≥2 delegates are acting at once: the merged top-level phrase
 )
 
 // activity is the status line's live left slot: what is happening, since when, at which
@@ -65,6 +70,115 @@ type activity struct {
 	// than freezing a stale answer here.
 	spawn string
 	since time.Time // when this activity began — the elapsed clock's origin
+}
+
+// runActivity is ONE run's slot on the activity board: what that agent is doing now, when its slot
+// was opened, and when that run was last heard from.
+//
+// since is the RUN's clock and deliberately not the phrase's: it is stamped once, when the run's
+// first event opens the slot, and never restamped, while [activity.since] inside act moves with
+// every change of phrase. The merged top-level phrase counts from the OLDEST live child's since
+// (runningPhrase), so a sibling emitting cannot restart the number the human is reading.
+//
+// lastEvent is this run's own stall clock: a child's silence is measured from ITS last word,
+// because a busy sibling is no evidence the quiet one is alive. The top-level run keeps reading the
+// engine-wide clock instead ([Model.lastEvent], Model.quietClock) — every Event variant refreshes
+// that one, including the ones no fold acts on.
+//
+// Three plain value fields with no no-copy type, so the board rides the value-copied Model
+// (ADR 0011; doc.go).
+type runActivity struct {
+	act       activity
+	since     time.Time
+	lastEvent time.Time
+}
+
+// runActivities is the status line's activity board: one [runActivity] per RUN, keyed by the run
+// identity that names it (runRef — transcript.go), where the ZERO key is the human's own top-level
+// conversation and every other key is a delegate.
+//
+// One slot per run is what stopped the single slot flickering. Concurrent children (ADR 0039) all
+// wrote the one slot in turn, so a fan-out's status line jittered between whichever delegate spoke
+// last; now each run owns its own phrase and clock, the top level composes ONE sentence out of them
+// (runningPhrase), and a run view can show its own child's slot verbatim (ADR 0063).
+//
+// Slots are opened by the Event fold (foldActivity) and closed by exactly three things: the child's
+// SubAgentFinished phase, a depth-0 event — a parent event means its children are over, ADR 0013 D5
+// — and finishWorker, which drops the whole board when the worker unwinds.
+//
+// It is a map, so it is a reference the value-copied Model shares between its copies rather than a
+// value each copy owns ([Model.spentSkills] is the same shape). That is safe for the same reason:
+// the Event fold is its only writer and the Update that folds is the only owner of the Model at
+// that moment, so no second copy is reading the board while it changes.
+type runActivities map[runRef]runActivity
+
+// at is run's slot, or the zero slot when that run holds none — a run with no slot has said nothing
+// yet, which is exactly what an idle activity renders (activity.text).
+func (a runActivities) at(run runRef) runActivity {
+	return a[run]
+}
+
+// put writes run's slot, allocating the board on first use so a zero Model needs no constructor.
+func (a *runActivities) put(run runRef, slot runActivity) {
+	if *a == nil {
+		*a = runActivities{}
+	}
+	(*a)[run] = slot
+}
+
+// drop closes one run's slot. Dropping a run that holds none is a no-op, which is what lets the
+// SubAgentFinished of a delegation that never emitted anything fold like any other.
+func (a runActivities) drop(run runRef) {
+	delete(a, run)
+}
+
+// dropChildren closes every DELEGATE's slot, leaving the top-level one alone. A child runs
+// atomically inside its parent's Turn (ADR 0013 D5), so the parent being heard from at depth 0 is
+// proof every child of that Turn is over — including one whose SubAgentFinished the view never saw
+// (a cancelled group is dropped unappended and emits no finished phase).
+func (a runActivities) dropChildren() {
+	for run := range a {
+		if run.depth > 0 {
+			delete(a, run)
+		}
+	}
+}
+
+// children is every live delegate slot's run, in no particular order. It is the top-level phrase's
+// one input: none means the human's own conversation is what is running, one names that delegate,
+// and two or more are merged into a single count (runningPhrase).
+func (a runActivities) children() []runRef {
+	if len(a) == 0 {
+		return nil
+	}
+	kids := make([]runRef, 0, len(a))
+	for run := range a {
+		if run.depth > 0 {
+			kids = append(kids, run)
+		}
+	}
+	return kids
+}
+
+// oldestChild is the delegate whose slot opened FIRST, and false when no delegate holds one. It is
+// what the merged phrase's clock counts from, so that clock measures the fan-out rather than
+// whichever sibling happened to speak last. Ties — two children whose first events landed inside
+// the same clock tick — break on the spawning call id, so the answer is stable across repaints
+// rather than a map iteration's accident.
+func (a runActivities) oldestChild() (runRef, bool) {
+	var oldest runRef
+	found := false
+	for _, run := range a.children() {
+		if !found {
+			oldest, found = run, true
+			continue
+		}
+		since, best := a[run].since, a[oldest].since
+		if since.Before(best) || (since.Equal(best) && run.spawn < oldest.spawn) {
+			oldest = run
+		}
+	}
+	return oldest, found
 }
 
 // subAgentActivityName is what the status line calls an UNNAMED delegate — "sub-agent · reading".
@@ -101,6 +215,11 @@ func (a activity) text(name string) string {
 		phrase = "compacting"
 	case actStopping:
 		phrase = "stopping"
+	case actWorking:
+		// The merged phrase says only that delegates are working, because with a fan-out running the
+		// slot cannot honestly say WHAT without picking one of them (runningPhrase). The count rides
+		// in as the name, so "2 sub-agents · working" composes through the same prefix rule.
+		phrase = "working"
 	}
 	if phrase == "" {
 		return "" // an actTool with no label (a tool with neither verb nor target): say nothing
@@ -203,19 +322,25 @@ func toolActivityVerb(call domain.ToolCall, ws workspaceRoot) string {
 	return presentToolCall(call, "", ws).Verb
 }
 
-// setActivity moves the model to a new activity that is not an open tool call, keyed on the phrase
-// it renders (kind and label). Tool calls go through setToolActivity, which carries the identity
-// their clock is keyed on instead.
-func (m *Model) setActivity(kind activityKind, label string, depth int, spawn string) {
-	m.moveActivity(activity{kind: kind, label: label, depth: depth, spawn: spawn})
+// setActivity moves ONE run's slot to a new activity, keyed on the phrase it renders (kind and
+// label). It is the seat for the handful of transitions no Event announces — a submit, a /compact,
+// a stop — which all speak for the top-level run (runRef{}); the Event fold writes its slots
+// through foldSlot instead, because those carry a rule about the OTHER slots that these do not.
+func (m *Model) setActivity(run runRef, kind activityKind, label string) {
+	m.moveActivity(run, activity{kind: kind, label: label})
 }
 
-// setToolActivity moves the model to the tool call an announcement opened: verb is the phrase the
-// slot renders (toolActivityVerb) and call is the id of the call it describes (domain.ToolCall.ID),
-// which is what the elapsed clock is keyed on — a second read of a second file is a new call and
-// deserves a clock of its own even though both phrases read "reading".
-func (m *Model) setToolActivity(verb, call string, depth int, spawn string) {
-	m.moveActivity(activity{kind: actTool, label: verb, call: call, depth: depth, spawn: spawn})
+// foldSlot writes the slot ONE Event names, and carries the rule that is the Event stream's alone:
+// a depth-0 event means every delegate of this Turn is over — a child runs atomically inside its
+// parent's Turn (ADR 0013 D5) — so the parent's own word closes their slots as it takes the board
+// back. A stop deliberately does NOT go through here (setActivity above): a stop is not the parent
+// resuming, and the sticky stopping phrase outranks whatever the child slots hold anyway
+// (runningPhrase).
+func (m *Model) foldSlot(run runRef, next activity) {
+	if run.depth == 0 {
+		m.acts.dropChildren()
+	}
+	m.moveActivity(run, next)
 }
 
 // moveActivity is the single seat of the elapsed clock's origin: next inherits the running clock
@@ -236,12 +361,25 @@ func (m *Model) setToolActivity(verb, call string, depth int, spawn string) {
 // never outgrow the one that reports: a move to compacting or stopping leaves the clock where it
 // was — neither claims the engine is working, and the guard says nothing for either — while a move
 // to thinking or responding measures the new claim's silence from now.
-func (m *Model) moveActivity(next activity) {
-	next.since = m.act.since
-	if m.act.kind != next.kind || m.act.label != next.label || m.act.call != next.call {
+func (m *Model) moveActivity(run runRef, next activity) {
+	slot := m.acts.at(run)
+	// The slot's key already says whose run this is, so the activity's own copy of that pair is
+	// filled in here rather than by every caller: text() stays a pure function of the slot.
+	next.depth, next.spawn = run.depth, run.spawn
+	next.since = slot.act.since
+	if slot.act.kind != next.kind || slot.act.label != next.label || slot.act.call != next.call {
 		next.since = time.Now()
 	}
-	m.act = next
+	slot.act = next
+	// The RUN's own clock starts when its slot opens and never moves again: the merged phrase counts
+	// the fan-out from it, and a phrase changing inside one child must not restart that number.
+	if slot.since.IsZero() {
+		slot.since = next.since
+	}
+	if next.kind.isQuietWatched() {
+		slot.lastEvent = time.Now()
+	}
+	m.acts.put(run, slot)
 	if next.kind.isQuietWatched() {
 		m.noteEngineHeard()
 	}
@@ -264,9 +402,11 @@ func (m *Model) noteEngineHeard() {
 // accounting, an audit record, a fired mechanism, an approval record — leave the activity
 // alone, so the phrase does not flicker off the work actually in flight.
 //
-// stopping is STICKY: once Esc has fired the cancel the worker keeps emitting events until it
-// reaches a quiescent boundary, and overwriting the phrase there would tell the human their
-// stop was ignored. Only finishWorker clears it, when the worker has actually unwound.
+// stopping is STICKY, and run-wide: once Esc has fired the cancel the worker keeps emitting events
+// until it reaches a quiescent boundary, and overwriting the phrase there would tell the human
+// their stop was ignored. The stop is the whole RUN's — a child cannot outlive the Turn it runs
+// inside (ADR 0013 D5) — so a stopping TOP-LEVEL slot freezes every slot on the board, not just its
+// own. Only finishWorker clears it, when the worker has actually unwound.
 //
 // Every arm carries the emitting agent's SPAWNING call id beside its depth, and reads it as
 // e.EventBase.CallID rather than e.CallID: a variant that also reports a call of its own names it
@@ -274,19 +414,26 @@ func (m *Model) noteEngineHeard() {
 // spelling must not depend on which arm you are in). It is the id the delegation's name is looked
 // up by; empty at depth 0, where nothing spawned the emitter.
 func (m Model) foldActivity(e domain.Event, openCall bool) Model {
-	if m.act.kind == actStopping {
+	if m.acts.at(runRef{}).act.kind == actStopping {
 		return m
 	}
 	switch e := e.(type) {
 	case domain.ReasoningEvent:
 		// The honest "thinking": the model is reasoning, not merely unanswered.
-		m.setActivity(actThinking, "", e.Depth, e.EventBase.CallID)
+		m.foldSlot(runOf(e.EventBase), activity{kind: actThinking})
 	case domain.TokenEvent:
-		m.setActivity(actResponding, "", e.Depth, e.EventBase.CallID)
+		m.foldSlot(runOf(e.EventBase), activity{kind: actResponding})
 	case domain.StreamResetEvent:
-		m.setActivity(actRetrying, "", e.Depth, e.EventBase.CallID)
+		m.foldSlot(runOf(e.EventBase), activity{kind: actRetrying})
 	case domain.ToolCallEvent:
-		m.setToolActivity(toolActivityVerb(e.Call, m.transcript.ws), e.Call.ID, e.Depth, e.EventBase.CallID)
+		// call is the id of the call the phrase describes, and is what the elapsed clock is keyed
+		// on: a second read of a second file is new work and deserves a clock of its own even
+		// though both phrases read "reading" (moveActivity).
+		m.foldSlot(runOf(e.EventBase), activity{
+			kind:  actTool,
+			label: toolActivityVerb(e.Call, m.transcript.ws),
+			call:  e.Call.ID,
+		})
 	case domain.ToolResultEvent:
 		// One result does not end the tool phase while another call is still open (a parallel
 		// batch); today's loop dispatches sequentially, so this normally falls straight through
@@ -294,11 +441,19 @@ func (m Model) foldActivity(e domain.Event, openCall bool) Model {
 		if openCall {
 			break
 		}
-		m.setActivity(actThinking, "", e.Depth, e.EventBase.CallID)
+		m.foldSlot(runOf(e.EventBase), activity{kind: actThinking})
 	case domain.MessageEvent:
 		// A completed message does not mean idle: the loop may keep stepping (a tool turn
 		// follows a narration). finishWorker is what decides the exchange is over.
-		m.setActivity(actThinking, "", e.Depth, e.EventBase.CallID)
+		m.foldSlot(runOf(e.EventBase), activity{kind: actThinking})
+	case domain.SubAgentPhaseEvent:
+		// The delegation is OVER: its slot goes, and the top-level phrase falls back to whatever is
+		// still running — a sibling, the merged count, or the parent's own word (runningPhrase).
+		// Its start is deliberately not folded: a child that has produced nothing has nothing to
+		// say, and its first real event opens the slot.
+		if e.Phase == domain.SubAgentFinished {
+			m.acts.drop(runOf(e.EventBase))
+		}
 	}
 	return m
 }

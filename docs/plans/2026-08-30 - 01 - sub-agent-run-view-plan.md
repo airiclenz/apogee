@@ -129,7 +129,25 @@ NOTES (2026-08-30): `addUserAt` carries no `skillSpans` — the delivery event c
 
 **Commit.** `feat(tui): the engine seam addresses children — InterjectChild on Engine, delivery events fold into the run`
 
-## 5. Per-run activity slots and the merged top-level phrase
+## 5. Per-run activity slots and the merged top-level phrase — ✅ DONE (2026-08-30)
+
+NOTES (2026-08-30): `.act` producers/consumers moved — `activity.go` (`moveActivity` clock inheritance and write, `foldActivity`'s sticky-stopping guard, `setActivity`, `setToolActivity`), `model.go` (`stopWorker` :1711, `finishWorker`'s reset :1757, `statusLine`'s quiet gate :3146, `runningPhrase`'s clock and phrase :3203-3204), `commandrun.go` (4 `setActivity` calls: :91, :293, :311, :426); tests in `activity_test.go`, `fold_test.go`, `model_test.go`, `interject_test.go`.
+
+NOTES (2026-08-30): `setToolActivity` was DELETED rather than moved — its only caller was `foldActivity`'s `ToolCallEvent` arm, which now writes through the new `foldSlot`, so keeping it would have left a one-caller pass-through. Its clock-key rule is stated at that arm and in `moveActivity`.
+
+NOTES (2026-08-30): the depth-0 drop lives in `foldSlot` (the Event fold's write seat) and not in `moveActivity`, so the transitions no Event announces — submit, /compact, and the stop — drop nothing. That is what keeps the child slots standing while "stopping" is on the row, exactly as regression guard (a) describes; the drop therefore fires on depth-0 events that MOVE an activity rather than on every depth-0 event, which is the set `foldActivity` can name a run for.
+
+NOTES (2026-08-30): `Model.lastEvent` was kept as the engine-wide stall clock and the top-level slot reads it, because every Event variant restamps it — including the ones no fold acts on — so the parent's guard keeps exactly the reach it had. A delegate slot reads its own `lastEvent` (stamped in `moveActivity`), which is the per-run half the item asks for: a busy sibling is no longer evidence that a quiet delegate is alive (`Model.quietClock`).
+
+NOTES (2026-08-30): test spelling only — `m.act` readers now read through a new `shownAct(m)` helper (the top-level slot the row would render) and `silentFor`/the streamed-turn loop backdate through `backdateActivity`. `TestStatusPhraseDropsTheNameWhenTheParentResumes` and `TestFoldActivityDepthPrefixesSubAgent` keep their assertions unedited, as the regression guard requires.
+
+NOTES (2026-08-30): consequential edit — internal/tui/doc.go: made necessary by the single `Model.act` slot becoming the per-run `Model.acts` board (the package narrative described one phrase per session).
+
+NOTES (2026-08-30): consequential edit — internal/tui/commandrun.go: made necessary by the `setActivity` signature taking the run it writes.
+
+NOTES (2026-08-30): consequential edit — internal/tui/interject_test.go: made necessary by the same `setActivity` signature change.
+
+NOTES (2026-08-30): `IDEAS.md:18` is deliberately left standing — item 11 owns the doc sweep.
 
 **What.** Closes `IDEAS.md:18`. Replace the single `Model.act activity` (`internal/tui/activity.go:49`, written by `foldActivity` `:276` / `setActivity` `:209` / `setToolActivity` `:217` / `moveActivity` `:239`) with `Model.acts runActivities` — a small type in `activity.go` keyed by spawn call-ID (`""` = top level) holding one `activity` per run plus its own `since`/`lastEvent`. `foldActivity` writes the slot named by `e.EventBase.CallID`+`Depth` (`spawn` from the event as today); `SubAgentFinished` deletes the child's slot. `Model.runningPhrase` (`model.go:3202`) composes from a `runRef` argument — the viewed run (item 7; top level until then): top level with exactly one live child → today's `<name> · <phrase>`; ≥2 live children → exactly `N sub-agents · working` with the elapsed clock of the oldest live child slot; no live child → the top-level slot as today. The stall qualifier (`activity.quiet`, `quietQualifier` `model.go:3219`) evaluates the slot being shown. Producers/consumers of `m.act` (grep `\.act\b` in `internal/tui/`) are all moved; enumerate in a NOTES line. `subAgentActivityName` fallback stays.
 
