@@ -340,6 +340,19 @@ point is a **minor** bump, not a breaking change.
 
 ### Changed
 
+- A stray Esc no longer kills a running turn: mirroring the double-Ctrl+C quit, the first Esc
+  arms a one-second window (the status line shows "press esc again to stop") and only a second
+  Esc inside it stops the in-flight worker — anywhere the worker is running, the approval pane
+  included. The window's expiry disarms the gesture, and the running-state status hint now reads
+  "esc×2 stop". The ask prompt keeps its one-press cancel, and Esc at idle or after an error
+  stays the no-op it was.
+
+- Every surface that still promised a one-press stop now names the gesture: the running
+  placeholder reads `queue a message…  ⏎ queue · ↑ recall · esc×2 stop`, and the manual, the
+  README and `layout.md` describe the double-tap and its one-second window — including at the
+  approval prompt, where the pane's `[esc]` Cancel row stays the one-press spelling of the same
+  stop. The ask prompt's `esc cancel` hint is unchanged: one press still cancels there.
+
 - `grep` and `find_files` now say WHERE they searched. Every header and every empty-result
   sentence carries a scope clause — `[39 total matches in internal/tui/model.go (*.go), showing
   1-39]`, `No matches found in internal/tui/model.go (*.go)`, `[12 files found in internal/tui
@@ -472,6 +485,17 @@ point is a **minor** bump, not a breaking change.
   lives" map points at the convention.
 
 ### Fixed
+
+- Fixed (Windows): the box label is no longer inheritable — `S:(ML;;NW;;;LW)` on directories and
+  files alike, `lowSDDL`. The inheritable `OICI` label was propagated by `SetNamedSecurityInfo` to
+  every existing descendant before the label walk ran, so a hard-linked file — pnpm's whole
+  `node_modules` — was marked Low at its name outside the box too, defeating the walk's hard-link
+  skip. Existing files are reached by the walk, the confined child's own creations are Low from
+  its token; an object a Medium subject writes into the box mid-run stays Medium until the next
+  label pass (ADR 0020 §2 amended). Found by the first execution of the Windows-tagged tests.
+- Fixed (tests): the Windows confiner tests compare against the long-name form of `t.TempDir()`
+  (`tempDir`), matching what `resolveBoxRoot` journals; on a runner whose `%TEMP%` is an 8.3
+  alias (`C:\Users\RUNNER~1`) eight tests compared two spellings of one path and failed.
 
 - **A rebind now moves the effort dialect onto the Config and clears the fold stand-down latch.**
   `Agent.Rebind` mirrored every binding a `RebindSpec` carries onto the Config copy it commits —
