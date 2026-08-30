@@ -502,7 +502,10 @@ signature or this item's own acceptance cannot compile, and the refusal tests ar
 empty root that refuses nothing. The acceptance pattern is `MigrateKey|KeyMigrat|Probe|Boot|Firing` —
 the old `KeyMigrate` matched no test, so the three `migrateKey` callers never ran under it.
 
-## 8. Docs and the ISSUES close — the resolver is the only exec entry
+## 8. Docs and the ISSUES close — the resolver is the only exec entry — ✅ DONE (2026-08-30)
+
+NOTES (2026-08-30): the `ISSUES.md` entry was removed together with its trailing blank separator, so the "Improvements / Ideas" section keeps its blank-line-between-entries shape; the `golangci-lint` / `govulncheck` entry now follows the heading directly.
+NOTES (2026-08-30): the amendment block states the two edges where the fold is not behaviour-neutral — the fence reaching `api-key-cmd` (item 7) and a relative PATH answer now being refused as relative rather than reported absent (item 1) — beyond the item's "the wrappers are gone and every site now calls `security.ResolveProgram`" minimum, so the contract does not read as claiming a pure no-op.
 
 **Depends on item 7.**
 

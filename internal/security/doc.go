@@ -113,9 +113,13 @@
 // keeps an argv[0] that resolves inside the writable box from ever being executed, so bytes a
 // confined call was allowed to WRITE cannot become the program a later unconfined call RUNS.
 // ResolveProgram beside it is that fence's complete form — resolve on PATH, refuse a relative
-// answer, then apply the refusal — and the one entry a new exec site takes, the Mechanism door
-// tools.RunHookSubprocess among them, so no site can acquire a program without also acquiring
-// the judgement on it.
+// answer, then apply the refusal — and the ONLY exec entry, not merely the newest one: every site
+// resolves through it — the shells, the Mechanism door tools.RunHookSubprocess, MCP stdio, the
+// settings editor, git, python_exec, run_tests, diagnostics, rung 1's OS opener, autofix's
+// formatter probe, the keystore's store probe, internal/config's api-key command — so no site can
+// acquire a program without also acquiring the judgement on it. Exactly two exceptions are
+// declared: internal/platform/confinetest, a test-support package, and the injected look defaults
+// callers hand to ResolveProgram itself.
 //
 // The network boundary, likewise in two layers. urlsafety.go is URLGuard, judged on the URL as
 // WRITTEN: scheme and host allow-deny with deny-first precedence, plus NormalizeURL and its

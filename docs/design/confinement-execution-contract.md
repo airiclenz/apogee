@@ -506,6 +506,22 @@ one level down (D2), for free, with no threading.
 > its repo-authored runners need — a workspace-resident `node_modules/.bin/jest` IS the test
 > command there.
 
+> **Amended 2026-08-30 (the resolver is the only exec entry).** The package-local wrappers the
+> 2026-08-12 record names — `refuseExecFromWritablePath` in `internal/tools`, `internal/mechanisms`
+> and `internal/present` — are gone, and with them every hand-rolled `exec.LookPath` + fence pair
+> beside them. Every site that resolves a program now calls `security.ResolveProgram`, which does
+> the lookup and applies the refusal in one step: the shells and the hook door, MCP stdio, the
+> settings editor, `git`, `python_exec`, `run_tests`, `diagnostics`, rung 1's OS opener, autofix's
+> formatter probe, the keystore's secret-store probe, and `internal/config`'s `api-key-cmd`, which
+> ran bare until now. It stays a **tool-side fence, not a ladder cell**: no cell moves and no
+> verdict changes. Two things do move, at the edges. The fence reaches one program more — an
+> `api-key-cmd` whose `argv[0]` resolves inside the workspace is refused before it runs, a relative
+> `argv[0]` being made absolute against apogee's working directory first, so the wrapper script the
+> manual tells operators to write keeps working unless it actually lands in the workspace. And a
+> relative PATH answer — Go's `exec.ErrDot` included — is now refused AS relative rather than
+> reported absent, so the settings editor announces a refusal where it used to announce an install
+> hint, and the OS opener refuses loudly where it used to degrade silently.
+
 A Resolution is one of five **kinds** — `Run` · `Confine` · `Gate` · `Refuse` · `Delegate` —
 computed in a fixed, load-bearing order:
 

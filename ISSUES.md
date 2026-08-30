@@ -25,8 +25,6 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 
 ## Improvements / Ideas
 
-- [ ] fold the five hand-rolled `LookPath` + fence pairs (`internal/tools/git.go:142`, `python_exec.go:239`, `run_tests.go:249`, `diagnostics.go:200`, `internal/present/opener.go:228`) onto `security.ResolveProgram`, so the resolver is the only exec entry rather than the newest of six — an architecture pass, deliberately out of scope of `docs/plans/2026-08-26 - 01`
-
 - [ ] **Run `golangci-lint` and `govulncheck` in `make check` and CI.**
   Neither `golangci-lint` nor `govulncheck` was installed on the 2026-08-25 audit host, so none of
   the three audits produced lint or dependency-vulnerability signal, and the dependency half of the
