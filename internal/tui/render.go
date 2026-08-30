@@ -193,9 +193,12 @@ func (t *transcript) renderView(th theme, width int, blink bool) renderedTranscr
 	// header itself (ADR 0063).
 	//
 	// The prompt is the head's retained task and goes through the ordinary entry painter, so a task
-	// too tall for the block folds under the very rule a human's own long prompt folds under — and
-	// the fold flips the head's own expanded flag, which is the one state left for that flag to mean
-	// inside a view (ADR 0063: a run has two shapes, the collapsed row and this view).
+	// too tall for the block folds under the very rule a human's own long prompt folds under. Its
+	// rows are marked for the HEAD, the one entry a rooted paint never lays down as a block, and
+	// activating one does nothing: the redirect refuses the view's own head ([Model.openRunAt]) and
+	// setExpanded refuses the flag on a framed run (transcript.go) — the row must not open a second
+	// view of the run already on screen (ADR 0063: a run has two shapes, the collapsed row and this
+	// view).
 	if root.rooted() {
 		head := t.entries[root.first-1]
 		lines = append(lines, breadcrumbRow(th, breadcrumbTrail(t.entries, root.ref.spawn), width))

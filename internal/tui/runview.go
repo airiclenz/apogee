@@ -144,6 +144,14 @@ func (m Model) topLegend() string {
 // later. A delegation that is over and left nothing behind it (refused at the depth bound, faulted
 // before its first event) is not a run: it keeps the ordinary block's inline toggle, as does the
 // ✦ Sub-Agent umbrella, whose click is its own kind (targetUmbrella).
+//
+// The one run that is NOT a run to open is the one already on screen. A rooted paint spends its
+// root's head on the header and on the task row beneath it, and marks that row for the head like any
+// other foldable prompt (render.go) — so a view whose child was handed a task too tall to fit has a
+// click surface, inside itself, naming itself. Asked without this guard the redirect would answer
+// yes and push a SECOND level of the run already open, leaving esc to be pressed twice to leave one
+// view. Refusing is the whole answer: the fold that would otherwise follow is the flag
+// [transcript.setExpanded] refuses on a framed run, so the row simply does nothing.
 func (m Model) openRunAt(index int) (Model, bool) {
 	if index < 0 || index >= len(m.transcript.entries) {
 		return m, false
@@ -152,10 +160,18 @@ func (m Model) openRunAt(index int) (Model, bool) {
 	if !head.headsRun() {
 		return m, false
 	}
+	// The refs are compared WHOLE rather than by spawn id: at the top level the viewed run is the
+	// zero ref, which no head's ref can equal — a run's entries stand one level below the call that
+	// opened them, so the depth here is never 0 — and an id-only comparison would make an entry
+	// carrying no call id match it.
+	ref := runRef{depth: head.depth + 1, spawn: head.callID}
+	if m.viewedRun() == ref {
+		return m, false
+	}
 	if subAgentSpan(m.transcript.entries, index) == 0 && head.done {
 		return m, false
 	}
-	return m.openRun(runRef{depth: head.depth + 1, spawn: head.callID}), true
+	return m.openRun(ref), true
 }
 
 // openRun pushes ref onto the view stack and repaints the transcript rooted at it.

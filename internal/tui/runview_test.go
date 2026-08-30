@@ -115,6 +115,52 @@ func TestRunViewOpensOnExpand(t *testing.T) {
 	})
 }
 
+// TestRunViewOwnHeadDoesNotReopenItself pins the one head the redirect must refuse: the view's own.
+// A rooted paint spends its root's head on the breadcrumb and on the task row beneath it, and marks
+// that row for the head exactly as it marks any foldable prompt (render.go) — so a run handed a task
+// too tall to fit carries, inside itself, a click surface naming itself. Activating it must leave the
+// stack alone: a second level of the run already on screen is a view esc has to be pressed twice to
+// leave.
+func TestRunViewOwnHeadDoesNotReopenItself(t *testing.T) {
+	// Long enough to fold at 80 columns, so the task row is a click surface at all (promptCollapsedRows).
+	const tallTask = "survey the repository from top to bottom and write down every package it holds, " +
+		"what each one is for, which of them the TUI reaches into, and which of them reach back — " +
+		"then say which of those edges look like the ones a newcomer would trip over first, and why"
+
+	m := newTestModel(t) // 80x24
+	m.transcript.reset()
+	m.transcript.addUser("survey the repo", nil)
+	subAgentCall(&m.transcript, "s1", tallTask, 0)
+	readCall(&m.transcript, "r1", "a.go", 1, 5, 1)
+	subAgentReport(&m.transcript, "s1", "all clear", 0)
+	m.refreshViewport()
+
+	m = enterOnLastBlock(t, m)
+	if got := m.viewedRun().spawn; got != "s1" {
+		t.Fatalf("setup: ⏎ on the delegation opened run %q; want the run it heads", got)
+	}
+
+	task := markedLine(t, m, targetHeader)
+	if got := m.lineTargets[task].entry; got != 1 {
+		t.Fatalf("setup: the first foldable row inside the view is marked for entry %d; want the head at 1, whose task it paints", got)
+	}
+
+	m = clickCell(t, m, 2, screenRow(t, m, task))
+
+	if n := len(m.viewStack); n != 1 {
+		t.Fatalf("a click on the view's own task row left %d levels open; want the one view that was already there", n)
+	}
+	if got := m.viewedRun().spawn; got != "s1" {
+		t.Errorf("the click re-rooted the paint at %q; it stands on the run it was already showing", got)
+	}
+
+	m = step(t, m, keyEsc())
+
+	if m.inRunView() {
+		t.Errorf("one esc left %d level(s) open; the click stacked a duplicate of the run on itself", len(m.viewStack))
+	}
+}
+
 func TestRunViewEscGoesOneLevelUp(t *testing.T) {
 	t.Run("esc returns to the level below, at the offset and follow it was left at", func(t *testing.T) {
 		// A scrollback taller than the viewport with the delegation part-way UP it, so "where the
