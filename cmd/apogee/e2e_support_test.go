@@ -447,12 +447,55 @@ func (s *e2eSession) FullRepaints() int { return s.drv.Screen().FullRepaints() }
 // a golden re-recorded on Tuesday fails on Wednesday, and one recorded on this machine fails on
 // every other.
 func (s *e2eSession) Redactions() []tuitest.Redaction {
+	return frameRedactions(s.ws, s.home, apogee.Version())
+}
+
+// frameRedactions is [e2eSession.Redactions] with its three inputs handed in, so the set can be
+// exercised without a driven run — which is how TestFrameRedactionsSurviveAVersionWidthChange
+// proves the version redaction is immune to the version's own width.
+//
+// The version is redacted PADDED (tuitest.RedactPadded): it sits in the start-up card's info
+// column, which pads it out to a border, so redacting only its text leaves the border one column
+// left of where it was the day the version grew a digit. That is a whitespace-only diff with no
+// meaning in it, and it reds every golden the card appears in until they are all re-recorded.
+func frameRedactions(ws, home, version string) []tuitest.Redaction {
 	return []tuitest.Redaction{
-		tuitest.Redaction{Pattern: regexp.MustCompile(regexp.QuoteMeta(s.ws)), With: "<ws>"},
-		tuitest.Redaction{Pattern: regexp.MustCompile(regexp.QuoteMeta(s.home)), With: "<home>"},
-		tuitest.Redaction{Pattern: regexp.MustCompile(regexp.QuoteMeta(apogee.Version())), With: "<version>"},
+		tuitest.Redaction{Pattern: regexp.MustCompile(regexp.QuoteMeta(ws)), With: "<ws>"},
+		tuitest.Redaction{Pattern: regexp.MustCompile(regexp.QuoteMeta(home)), With: "<home>"},
+		tuitest.RedactPadded(regexp.QuoteMeta(version), "<version>"),
 		tuitest.Redact(`Session \d{4}-\d{2}-\d{2}`, "Session <date>"),
 		tuitest.Redact(`\d+ (sec|min|hour|day)s? ago`, "<age>"),
+	}
+}
+
+// TestFrameRedactionsSurviveAVersionWidthChange pins the fix for the drift that cost commit
+// 29f0dfba three re-recorded frames. The start-up card pads its version row out to the card's
+// border, so a version one column longer than the last release's moves that border and reds every
+// golden the card appears in — on a diff that carries no information whatsoever. A redaction that
+// swallows the padding it perturbs makes the recorded frame the same frame at every version width.
+func TestFrameRedactionsSurviveAVersionWidthChange(t *testing.T) {
+	t.Parallel()
+
+	const (
+		ws   = "/tmp/e2e-ws"
+		home = "/tmp/e2e-home"
+		edge = 34 // the card's content edge: where the padding behind the value ends
+	)
+	// card is the start-up card's version row in miniature — the label column, the value, then the
+	// spaces out to the content edge and the box's right border, which is what actually moves.
+	card := func(version string) string {
+		row := "\u2502 version  " + version
+		return row + strings.Repeat(" ", edge-len([]rune(row))) + " \u2502"
+	}
+
+	short := tuitest.ApplyRedactions(card("v0.18.9"), frameRedactions(ws, home, "v0.18.9")...)
+	grown := tuitest.ApplyRedactions(card("v0.18.10"), frameRedactions(ws, home, "v0.18.10")...)
+	if short != grown {
+		t.Errorf("the redacted row moved when the version grew a digit:\n v0.18.9  = %q\n v0.18.10 = %q",
+			short, grown)
+	}
+	if !strings.Contains(short, "<version>") {
+		t.Errorf("the redacted row lost its version token: %q", short)
 	}
 }
 

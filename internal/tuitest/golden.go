@@ -7,6 +7,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/charmbracelet/x/ansi"
 )
 
 // Goldens are for RENDERING surfaces and nothing else (ADR 0062): a pane whose whole point is how
@@ -30,6 +32,11 @@ var goldenDir = filepath.Join("testdata", "frames")
 type Redaction struct {
 	Pattern *regexp.Regexp
 	With    string
+
+	// KeepWidth pads With back out to the columns the match itself occupied, instead of
+	// substituting it as-is. It is what makes a redacted value that a surface pads a column out to
+	// immune to its own width — see [RedactPadded], which is how one is built.
+	KeepWidth bool
 }
 
 // Redact builds a [Redaction] from a pattern, panicking on a bad one the way regexp.MustCompile
@@ -39,15 +46,47 @@ func Redact(pattern, with string) Redaction {
 	return Redaction{Pattern: regexp.MustCompile(pattern), With: with}
 }
 
+// RedactPadded is [Redact] for a value a surface pads a column out to — the build version in the
+// start-up card, where the value and the spaces behind it together fill a fixed number of columns
+// up to a border. Such a value redacts its TEXT but not its WIDTH: a version one column longer
+// than yesterday's eats one of those spaces, and every golden it appears in goes red on a diff
+// that is nothing but a moved border (v0.18.9 → v0.18.10 cost three re-recorded frames). So the
+// run of spaces behind the value is swallowed with it and the token is padded back out to the
+// same width, which does not depend on the value's own.
+//
+// The token is never cut to fit: where the run it replaces is narrower than the token (a value at
+// the end of a row, whose padding the frame already trimmed) the line grows by the token's excess
+// — the same excess at every value width, so the golden is stable there too. What this does not
+// suit is a value followed by a single separating space and then more text: the space is part of
+// the run and would be swallowed. Use [Redact] for those.
+func RedactPadded(pattern, with string) Redaction {
+	return Redaction{Pattern: regexp.MustCompile(pattern + ` *`), With: with, KeepWidth: true}
+}
+
 // ApplyRedactions runs every redaction over text, in order.
 func ApplyRedactions(text string, redact ...Redaction) string {
 	for _, r := range redact {
 		if r.Pattern == nil {
 			continue
 		}
+		if r.KeepWidth {
+			text = r.Pattern.ReplaceAllStringFunc(text, func(match string) string {
+				return padToWidth(r.With, ansi.StringWidth(match))
+			})
+			continue
+		}
 		text = r.Pattern.ReplaceAllString(text, r.With)
 	}
 	return text
+}
+
+// padToWidth is s with enough trailing spaces to fill width columns, and s untouched when it
+// already fills them or more: a redacted token that got cut would hide what it stood for.
+func padToWidth(s string, width int) string {
+	if pad := width - ansi.StringWidth(s); pad > 0 {
+		return s + strings.Repeat(" ", pad)
+	}
+	return s
 }
 
 // Golden compares a frame's plain text — redacted — against testdata/frames/<name>.txt in the

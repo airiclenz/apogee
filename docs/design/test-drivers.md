@@ -350,6 +350,14 @@ session title with today's date in it, or a relative age: without them the golde
 run. `Redact(pattern, with)` builds one; `-update` records the **redacted** text, so what is on
 disk is what a later comparison sees. The in-process driver supplies the default set (plan item 5).
 
+A value the surface pads a column out to takes `RedactPadded(pattern, with)` instead: it swallows
+the run of spaces behind the value along with it and pads the token back out to the same width, so
+the redacted line holds its columns whatever the value's own width is. The build version is the
+case that named it — it sits in the start-up card's info column, and `v0.18.9` → `v0.18.10` moved
+the card's border one column left in every golden the card appears in, reddening three frames on a
+diff that was nothing but whitespace. Use plain `Redact` for a value followed by a single
+separating space and then more text: `RedactPadded` would swallow that space too.
+
 ### The composition seam: `tui.Build`
 
 Drivers are Drivers in the ADR 0031 sense — they enter through the composition, not beside it.

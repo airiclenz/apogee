@@ -73,3 +73,36 @@ func TestApplyRedactionsRunsInOrder(t *testing.T) {
 		t.Errorf("ApplyRedactions = %q, want %q", got, want)
 	}
 }
+
+// TestRedactPaddedHoldsTheColumnAtEveryValueWidth: a value the surface pads out to a border takes
+// the padding with it when it is redacted, so the border stays where it was however wide the value
+// is. Redacting the text alone moves the border by the value's own drift and reds every golden the
+// surface appears in on a diff that says nothing (v0.18.9 → v0.18.10 cost three frames).
+func TestRedactPaddedHoldsTheColumnAtEveryValueWidth(t *testing.T) {
+	t.Parallel()
+
+	row := func(value string) string {
+		return "version  " + value + strings.Repeat(" ", 12-len(value)) + "│"
+	}
+	short := ApplyRedactions(row("v0.18.9"), RedactPadded(regexp.QuoteMeta("v0.18.9"), "<version>"))
+	grown := ApplyRedactions(row("v0.18.10"), RedactPadded(regexp.QuoteMeta("v0.18.10"), "<version>"))
+	if want := "version  <version>   │"; short != want {
+		t.Errorf("the short version redacted to %q, want %q", short, want)
+	}
+	if short != grown {
+		t.Errorf("the column moved when the value grew: %q vs %q", short, grown)
+	}
+}
+
+// TestRedactPaddedNeverCutsTheToken: where the run it replaces is narrower than the token itself —
+// a value at the end of a row, whose padding the frame already trimmed — the token stays whole. A
+// cut token would read as a value rather than as a redaction, which is the one thing a redaction
+// must never do.
+func TestRedactPaddedNeverCutsTheToken(t *testing.T) {
+	t.Parallel()
+
+	got := ApplyRedactions("apogee v0.18.10", RedactPadded(regexp.QuoteMeta("v0.18.10"), "<version>"))
+	if want := "apogee <version>"; got != want {
+		t.Errorf("ApplyRedactions = %q, want %q", got, want)
+	}
+}

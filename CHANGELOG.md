@@ -1191,6 +1191,19 @@ point is a **minor** bump, not a breaking change.
   state, so the arm dies with the run however it ended — completion, cancel or fault — instead of
   waiting the window out. An Esc pressed while nothing runs is still the no-op it was.
 
+- Fixed (tests): **a golden frame is no longer reddened by the version string's own width.** The
+  e2e frame redaction replaced the build version's TEXT with `<version>` but not the COLUMNS it
+  occupied, and the start-up card pads that value out to the card's border — so `v0.18.9` →
+  `v0.18.10` moved the border one column left in every golden the card appears in and failed
+  three of them on a diff with no information in it (commit `29f0dfba` re-recorded them by hand).
+  The new `tuitest.RedactPadded` swallows the run of spaces behind the value along with it and
+  pads the token back out to the same width, which no longer depends on the value's; the token is
+  never cut, so a value with no padding behind it still redacts whole. `cmd/apogee`'s redaction
+  set is now built by `frameRedactions(ws, home, version)`, which
+  `TestFrameRedactionsSurviveAVersionWidthChange` drives at two version widths and requires to
+  produce byte-identical rows. The three affected goldens are re-recorded one column narrower —
+  whitespace only, no content change.
+
 ## [0.18.0] — 2026-08-27
 
 ### Added
