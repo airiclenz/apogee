@@ -37,6 +37,43 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 
 ## Open defects
 
+### Residuals deferred out of the 2026-08-30 sub-agent run-view plan
+
+**Status:** found 2026-08-30 at the close of the sub-agent run-view plan
+(`docs/plans/archived/2026-08-30 - 01 - sub-agent-run-view-plan.md`), deferred out of that run.
+
+- [ ] **`ErrNoSuchChild` has no alias in the public root package.** Every other Agent-surface
+  sentinel is re-exported for embedders (`apogee.go:584` `ErrInputPending`, `:588`
+  `ErrNoOpenExchange`), but `InterjectChild`'s refusal is only `domain.ErrNoSuchChild`
+  (`internal/domain/errors.go:67`), and `internal/` is unimportable from outside the module
+  (ADR 0010) — so an embedder cannot `errors.Is` it. The comment at
+  `cmd/apogee/wire_engine.go:223` already names the alias that does not exist.
+
+- [ ] **A refusal raised inside an open run view is never painted while the reader is in it.**
+  `childGoneNote` / the not-running note (`internal/tui/interject.go:230`, `:236`) are host notes
+  committed at depth 0, so the two sentences a reader earns by pressing `⏎` on a child that has
+  finished or has not started are only visible after backing out. Fixing it means deciding which
+  surface carries a refusal inside a view: the ratified rule (2026-08-18 design call 4) keeps host
+  notes out of a delegate's run, so this is a design call, not a one-line move.
+
+- [ ] **`assertLastBodyRow` finds the transcript's end by the session-title rule.** It scans for
+  the first row starting with `▔` (`cmd/apogee/e2e_subagent_view_test.go:341`) and treats it as the
+  bottom of the body. A session whose own title happens to start with that glyph, or a layout change
+  that moves the rule, silently retargets every assertion the helper makes rather than failing it.
+
+- [ ] **The steering half of the run view has no real-engine e2e assertion.** `TestE2ESubAgentView`
+  pins the steered run's collapsed row with `countedOutcome = "tool calls · done"`
+  (`cmd/apogee/e2e_subagent_view_test.go:52`), a `Contains` check that passes with or without the
+  `· steered by 1 message` cell the same run added — so nothing outside `internal/tui` proves the
+  steering cell reaches the painted row. The step-cap half of the same slot IS covered end to end,
+  by T-04.
+
+- [ ] **`openRunAt`'s self-redirect guard is unpinned.** Deleting `m.viewedRun() == ref`
+  (`internal/tui/runview.go:170`) leaves both `./internal/tui` and `cmd/apogee`'s `SubAgent|RunView`
+  e2e tests green: the only test that used to reach it now clicks a `targetTask` row, which never
+  asks the redirect, so the rule that a view's own head must not open a second copy of the run has
+  no test standing behind it.
+
 ### Residuals deferred out of the 2026-08-29 tool-surface-transparency run
 
 **Status:** found 2026-08-29 at the close of the tool-surface transparency plan

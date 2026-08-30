@@ -8,6 +8,171 @@ point is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+### Added
+
+- Ratified ADR 0063 — a sub-agent run is a user-addressable view: a child is addressed by its
+  spawn call-ID through `Agent.InterjectChild`, an engine-side mailbox drained by the goroutine
+  driving that child's Steps (superseding ADR 0025's rejected Run-drain / interjection-Event
+  options for depth > 0 only — the top-level contract is unchanged), with
+  `domain.ErrNoSuchChild` and `domain.ChildInterjectionEvent{Landed}` so any Driver can paint
+  delivery honestly, and a parent-notice trailer on a steered child's result. Expanding a framed
+  delegation opens its **run view** — a transcript-slot takeover in apogee's own frame (ADR 0035
+  stands, no alternate screen), Driver state that is never persisted, with `esc` and a
+  breadcrumb going one level up; the inline expanded rail goes away, closing the duplicated
+  report body. Privileges are unchanged (ADR 0005).
+
+- A running sub-agent can now be **addressed by the call that spawned it**. The engine gains
+  `Agent.InterjectChild(spawnCallID, domain.UserInput)`: it queues a user message into a per-child
+  mailbox — non-blocking and safe from any goroutine, the second engine call legal from an
+  interactive host's own goroutine beside `AbortExchange` — which the child's own `Run` drains at
+  each between-Steps boundary it is about to step past, committing the message as an ordinary
+  interjection with the child's tool set, mode and confinement untouched (ADR 0005). The lookup
+  walks the whole tree, so a host holding only the top-level Agent reaches a grandchild at depth 2;
+  an id naming no running child is refused with the new `domain.ErrNoSuchChild`. Every message the
+  mailbox accepted is accounted for exactly once by the new `domain.ChildInterjectionEvent`, which
+  carries the child run's own identity (depth + spawn call-ID) and reports `Landed` either way — so
+  a Driver can paint delivery honestly instead of leaving a message it showed as queued
+  unaccounted for. This is the child half of ADR 0063 D1/D2 and supersedes ADR 0025's rejected
+  Run-side drain for depth > 0 only: a top-level `Run` still drains nothing and emits no such
+  event, and an embedder that wants a mid-Exchange remark still drives `Step` and calls `Interject`
+  between the Steps it makes.
+
+- Sub-agents: a delegation the human spoke to while it ran now says so in its result. A child that
+  received user messages returns its result with the final line
+  `(the user sent N message(s) to this sub-agent while it ran)` — singular for one — on every
+  outcome that produces a result: the child's answer, a step-capped partial, a fault, and the
+  loop-level Run error alike. Only a cancelled dispatch carries nothing, because it surfaces no
+  result at all. The parent model is the one reader that never saw those messages — they land in
+  the child's own conversation — so without the notice it reads a result shaped by instructions it
+  never issued with no evidence that anything moved under it (ADR 0063 D3). The count is of what
+  LANDED, so a message the child finished before reaching never inflates it, and the notice is the
+  result's final line so it survives the structural clamp's head/tail elision intact.
+
+- The TUI's engine seam can address a running sub-agent: `tui.Engine` gains `InterjectChild`, the second engine call legal from the program goroutine beside `AbortExchange`, and `cmd/apogee`'s late-bound engine forwards it (refusing with the no-server-bound note until a server is chosen). The child's delivery report (`domain.ChildInterjectionEvent`) now folds into the transcript: a message that landed becomes that child's own user block placed inside its run, and one that never reached the model becomes a note saying the delegation finished before it landed. A delegated user block never becomes a sticky prompt header, so ctrl+↑/↓ still stop only at the human's own top-level prompts.
+
+- The transcript can now paint **rooted at one sub-agent run** — the paint the run view is made of
+  (ADR 0063). `transcript.setRoot` restricts the render to that delegation's own entries, rebased to
+  the root's depth so the child's blocks paint as top-level rows with no rail, its nested
+  delegations collapsed as they are at the top level, and its live streaming tail following. The
+  head itself is not painted: it becomes the sticky header `← main › repo-scout` — the trail chains
+  through every enclosing run — with `esc back` ending two columns short of the edge, the column the
+  status line's right slot ends in. The header is a click surface of its own (`targetBreadcrumb`),
+  the block cursor's stops and the mouse's map derive from that same rooted paint, and the paint
+  cache keys on the root, so a view and the conversation never serve each other's rows. Rooted back
+  at the zero value the transcript paints byte for byte what it painted before.
+
+- Inside a sub-agent **run view** the prompt box now addresses that child. `⏎` parses the line
+  exactly as a top-level send does — text, `@file` refs, skill `/tokens` — and queues it into the
+  child's engine-side mailbox (`Engine.InterjectChild`, ADR 0063), where it lands at the child's
+  next between-Steps boundary. The staged row shows in the band above the box labelled
+  `queued for <name>` until the engine's own delivery report accounts for it, and the box's legend
+  names the run and the way out: `Message <name>…  ⏎ send · ↑ recall · esc back`. A delegation that
+  has finished, or that no worker has dequeued yet, takes no message: `⏎` is a no-op that says so
+  and leaves the draft in the box for the human to carry back up, and the legend reads
+  `<name> has finished · esc back` / `<name> has not started · esc back`. Addressing a child grants
+  it nothing — its tools, mode and confinement are unchanged (ADR 0005). `/commands` typed inside a
+  view still run as commands, a mistyped `/word` still earns the typo guard's note, and `⏎` under a
+  child's ask or approval pane still answers the question in front of the human.
+
+- The run view is now driven end to end. `TestE2ESubAgentView` (`cmd/apogee/e2e_subagent_view_test.go`,
+  fixture `testdata/stubllm/run-view.yaml`) launches the real composition on a `parallel-agents: 2`
+  entry, fans out two delegates, and walks the whole rope a human would: the status line merges two
+  live children into `2 sub-agents · working`; ⌥↑ ⏎ on the last delegation opens its run view under
+  `← main › scout` with `esc back`, showing the child's task as the first row, its latest line as the
+  last, and nothing belonging to the parent or the sibling; the row then speaks for the run on screen
+  rather than for the board; a message typed into that box stages as `queued for scout`, lands as a
+  user row inside the run, and reaches the child's own conversation on the wire — while no other
+  conversation hears it; the delegation result the parent reads ends with
+  `(the user sent 1 message to this sub-agent while it ran)`, which the fixture's own capture echoes
+  back onto the screen; the box says `scout has finished · esc back` once the run is over; and `esc`
+  returns to the conversation with both delegates wearing one collapsed row — the steered child's
+  falling back to the count and the outcome, the unsteered sibling's still promoting its one-line
+  report, which is the trade the parent notice buys. Two golden frames, `t17-run-view` (working) and
+  `t18-run-view-finished` (at rest), pin the layout.
+
+### Changed
+
+- The status line keeps one activity slot per run instead of one for the session, so concurrent sub-agents no longer overwrite each other's phrase and clock. With two or more delegates working the top level reads `N sub-agents · working` on the oldest child's clock; with one it still reads `<name> · <phrase>`; with none it reads the parent's own word. A delegate's slot closes on its `SubAgentFinished`, on any depth-0 event, and wholesale when the worker unwinds.
+
+- Expanding a delegation now **opens it as a run view** instead of unrolling a rail in place
+  (ADR 0063): the transcript is painted rooted at that child under the `← main › <name>` breadcrumb,
+  following its latest line, and the conversation behind it keeps the scroll position it was left at.
+  `esc` — or a click on the breadcrumb — goes one level up, so a delegation inside a delegation
+  unwinds one press at a time. Inside a view `esc` no longer arms the stop gesture: the status line's
+  right slot says `esc back` in its place, and backing out first restores `esc×2 stop`. A running
+  child can be opened before its first entry lands; a delegation that ran and left nothing behind it,
+  and the `✦ Sub-Agent (N)` umbrella, keep the inline toggle they had. The status line speaks for the
+  run on screen, so a view shows that child's own phrase and clock. A view stands exactly as long as
+  the entries it names: `/clear` and `/new` close it, and a restored session that replays the same
+  delegation reopens on the same view.
+
+- Changed: **the specs and the manual now describe the run view.** `CONTEXT.md` gains the term
+  **Run view** (Driver state — a view, never a fold state, never persisted) and states child
+  addressing under **Sub-agent** (spawn call-ID → `Agent.InterjectChild`, the mailbox drained
+  between the child's Steps, `ChildInterjectionEvent`, the parent-notice trailer) and under
+  **Interjection** (the child form, and ADR 0025's depth > 0 exception). `layout.md` gains a
+  `## Run view` section — frame sketch, breadcrumb header, `esc back`, the one-slot-per-run status
+  line with its merged `2 sub-agents · working`, the `queued for <name>` band row — and every
+  sentence and sketch that drew a delegation open in place is restated against the two-shape rule:
+  the top sketch's `Sub-Agent` is the collapsed row, the `│` rail and `┊` closer are recorded as
+  removed, and "nothing ever expands or collapses by itself" keeps holding for folds.
+  `docs/layout/tool-layout.md` keeps "exactly two states per call" for the row and names the run
+  view as a third *surface*, with the framed sketch replaced by the group's real shape.
+  `docs/manual/commands.md` documents `⏎` on a delegation, the breadcrumb, `esc back` and messaging
+  a running sub-agent (with `esc×2` stopping from the top level only); `docs/manual/sessions.md`
+  records that a run view — like a fold — is not part of a saved session.
+
+### Fixed
+
+- Fixed: **a finished sub-agent no longer prints its report twice.** The early, badly formatted copy
+  was the delegation's own tool-result body, which the inline expanded shape (`expandedSubAgentView`)
+  laid out above the run's span the moment the row was opened; the copy that stays is the child's own
+  last assistant row, inside the run where it was said. The shape is gone with it: under ADR 0063 a
+  delegation has two shapes and no third — the collapsed row it wears in the conversation, and its
+  run view — so `renderSubAgentRun` and `renderSubAgentGroup` always paint the collapsed reading,
+  `resolveBlock` elides a run's span whole rather than walking into it, and `transcript.setExpanded`
+  refuses the flag on any head with a run to open (entries behind it, or not yet reported), the same
+  predicate the run view's redirect uses — so a replayed or stale state cannot reopen a rail either.
+  A delegation that ran and left nothing behind it keeps its inline toggle onto the prompt it carried
+  (`unframedSubAgentView`), and the `✦ Sub-Agent (N)` umbrella still lists its members as collapsed
+  rows.
+
+- Fixed: a delegation's **collapsed row now says how the run actually ended**. With the inline
+  expanded shape gone (ADR 0063), that row is the only place a reader of the parent conversation
+  meets a delegation's result — and its outcome slot was pinned to the fixed word `done`, so the
+  engine's own result envelope had nowhere left to paint: a run the step cap stopped mid-task and
+  one the human steered while it ran read exactly like one that finished whole. The slot is now
+  worded from the envelope: `stopped at its step cap` where the cap stopped the run, and
+  `· steered by 2 messages` appended to whichever verdict stands where the human addressed the
+  child (ADR 0063 D3) — the failure layer carrying that same steering cell after a faulted run's
+  cause, which is the one outcome that reads its summary off the result's first line and so would
+  otherwise drop it. Both are read off lines the engine formats deliberately and both are total: a
+  child that merely quotes one mid-report is still `done`. T-04's step-6 assertion on the parent
+  side is restored and `t04-step-cap-block.txt` regenerated;
+  `TestCollapsedRunSlotCarriesTheResultEnvelope` pins all six outcome shapes on the painted row.
+
+- Fixed: inside a sub-agent run view, an `ask_user` question or an approval pane no longer leaves
+  the prompt box inviting a message to the child. The box wore `Message <name>…  ⏎ send · ↑ recall ·
+  esc back` while a pane stood over it, advertising a key that does something else there — the view's
+  esc claimant deliberately steps aside for both decision states, so `esc` under a pane CANCELS the
+  question, which is what the pane's own row one line above already said. `Model.legendFor` now
+  yields to a borrowed box, the approval pane borrows and gives back the legend the way the
+  `ask_user` rendezvous already did, an event arriving under an open pane can no longer put the
+  child's invitation back, and a question that dies with its Exchange — a stop, a fault — hands the
+  box back to the run view still open behind it.
+
+- Fixed: the run view's sticky **breadcrumb header** no longer advertises `esc back` while a child's
+  ask or approval pane stands inside the view. The status line's right slot already gated that
+  wording on `Model.runViewOwnsEsc` — "the two rows advertise one key" — but `breadcrumbRow` took no
+  state and painted the hint unconditionally, so the two rows disagreed and the header named a press
+  esc did not have (esc answers the pane there, not the view). The hint is now a frame fact threaded
+  the way `blink` is: `Model.backHint` answers `breadcrumbHint` while the view owns esc and the empty
+  string otherwise, `renderView` takes it as a parameter and hands it to `breadcrumbRow`, which
+  paints the trail alone — squared to the width, as in the too-narrow case — for an empty hint. It
+  deliberately does not carry `statusRight`'s `stateErrored` half: esc still walks up there, so the
+  header goes on saying so. `TestRunViewBreadcrumbHintFollowsTheKey` pins the header row under each
+  pane and its return once the question is answered.
+
 ## [0.19.0] — 2026-08-30
 
 ### Added
