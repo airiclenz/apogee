@@ -117,10 +117,11 @@ func TestRunViewOpensOnExpand(t *testing.T) {
 
 // TestRunViewOwnHeadDoesNotReopenItself pins the one head the redirect must refuse: the view's own.
 // A rooted paint spends its root's head on the breadcrumb and on the task row beneath it, and marks
-// that row for the head exactly as it marks any foldable prompt (render.go) — so a run handed a task
-// too tall to fit carries, inside itself, a click surface naming itself. Activating it must leave the
-// stack alone: a second level of the run already on screen is a view esc has to be pressed twice to
-// leave.
+// that row for the head (render.go) — so a run handed a task too tall to fit carries, inside itself,
+// a click surface naming itself. Activating it must leave the stack alone: a second level of the run
+// already on screen is a view esc has to be pressed twice to leave. The row's kind is what settles
+// it — targetTask folds the task and asks the redirect nothing — and the guard inside the redirect
+// stands behind that, for any reach that asks it about the run it is already showing.
 func TestRunViewOwnHeadDoesNotReopenItself(t *testing.T) {
 	// Long enough to fold at 80 columns, so the task row is a click surface at all (promptCollapsedRows).
 	const tallTask = "survey the repository from top to bottom and write down every package it holds, " +
@@ -140,7 +141,7 @@ func TestRunViewOwnHeadDoesNotReopenItself(t *testing.T) {
 		t.Fatalf("setup: ⏎ on the delegation opened run %q; want the run it heads", got)
 	}
 
-	task := markedLine(t, m, targetHeader)
+	task := markedLine(t, m, targetTask)
 	if got := m.lineTargets[task].entry; got != 1 {
 		t.Fatalf("setup: the first foldable row inside the view is marked for entry %d; want the head at 1, whose task it paints", got)
 	}
@@ -158,6 +159,108 @@ func TestRunViewOwnHeadDoesNotReopenItself(t *testing.T) {
 
 	if m.inRunView() {
 		t.Errorf("one esc left %d level(s) open; the click stacked a duplicate of the run on itself", len(m.viewStack))
+	}
+}
+
+// seeMoreCount reads the number a collapsed prompt's see-more marker advertises off the row carrying
+// it — the claim the fold makes to the reader, taken from the marker's own wording (promptSeeMore)
+// rather than from a literal spelled twice.
+func seeMoreCount(t *testing.T, row string) int {
+	t.Helper()
+	open := strings.SplitN(promptSeeMoreFormat, "%s", 2)[0]
+	i := strings.Index(row, open)
+	if i < 0 {
+		t.Fatalf("row %q carries no see-more marker, so it advertises nothing to open", row)
+	}
+	count := row[i+len(open):]
+	if j := strings.IndexByte(count, ' '); j >= 0 {
+		count = count[:j]
+	}
+	n, err := strconv.Atoi(count)
+	if err != nil {
+		t.Fatalf("the see-more marker in %q counts %q, which is not a number", row, count)
+	}
+	return n
+}
+
+// TestRunViewTaskFoldOpensWhatItAdvertises is the marker's promise kept. A rooted paint folds the
+// task its run was handed by the ordinary prompt rule (render.go), and that rule paints a see-more
+// marker counting the rows it holds back — so activating that row must show exactly those rows.
+// While the fold borrowed the HEAD's block state it could not: setExpanded refuses that flag on a
+// framed run, which is what keeps a delegation to the two shapes ADR 0063 gives it, and the view was
+// left advertising a click nothing would answer. The fold has a state of its own now
+// (entry.taskExpanded), and the flag it must NOT have started writing is pinned here beside it —
+// that one is the inline rail this plan deleted.
+func TestRunViewTaskFoldOpensWhatItAdvertises(t *testing.T) {
+	// Tall enough at 80 columns to hide several rows behind the marker, and ending in a word that
+	// appears nowhere else, so "did the hidden rows come out?" is one lookup (promptCollapsedRows).
+	const lastWord = "loosestrife"
+	const tallTask = "survey the repository from top to bottom and write down every package it holds, " +
+		"what each one is for, which of them the TUI reaches into, and which of them reach back — " +
+		"then say which of those edges look like the ones a newcomer would trip over first, and why; " +
+		"finish by naming the three files you would read first tomorrow morning, in order, and give " +
+		"each of them one sentence saying what it would tell you, ending on the word " + lastWord
+
+	m := newTestModel(t) // 80x24
+	m.transcript.reset()
+	m.transcript.addUser("survey the repo", nil)
+	subAgentCall(&m.transcript, "s1", tallTask, 0)
+	readCall(&m.transcript, "r1", "a.go", 1, 5, 1)
+	subAgentReport(&m.transcript, "s1", "all clear", 0)
+	m.refreshViewport()
+
+	m = enterOnLastBlock(t, m)
+	if got := m.viewedRun().spawn; got != "s1" {
+		t.Fatalf("setup: ⏎ on the delegation opened run %q; want the run it heads", got)
+	}
+	painted := func() string { return strip(strings.Join(m.lines, "\n")) }
+
+	folded := markedRows(t, m, targetTask)
+	if len(folded) != promptCollapsedRows {
+		t.Fatalf("the folded task paints %d marked row(s), want the collapsed cap of %d", len(folded), promptCollapsedRows)
+	}
+	marker := folded[len(folded)-1]
+	hidden := seeMoreCount(t, strip(m.lines[marker]))
+	if hidden < 1 {
+		t.Fatalf("setup: the folded task advertises %d hidden row(s); the fixture's task is not tall enough", hidden)
+	}
+	if strings.Contains(painted(), lastWord) {
+		t.Fatalf("setup: the folded task already shows %q, so the marker is hiding nothing", lastWord)
+	}
+
+	m = clickCell(t, m, 2, screenRow(t, m, marker))
+
+	opened := markedRows(t, m, targetTask)
+	if want := promptCollapsedRows + hidden + 1; len(opened) != want {
+		t.Errorf("the marker advertised %d more row(s) and opening it painted %d marked row(s); want %d — the %d it already showed, the %d it counted, and the see-less row closing them",
+			hidden, len(opened), want, promptCollapsedRows, hidden)
+	}
+	if !strings.Contains(painted(), lastWord) {
+		t.Errorf("the opened task still hides %q, which its own marker counted:\n%s", lastWord, painted())
+	}
+	if last := strip(m.lines[opened[len(opened)-1]]); !strings.Contains(last, promptSeeLess) {
+		t.Errorf("the opened task ends on %q, want the %q row that folds it again", last, promptSeeLess)
+	}
+
+	// The fold is the view's own, and the rail ADR 0063 deleted stays deleted: the head's block
+	// state is untouched, and it still refuses the flag that used to open that rail in place.
+	if strings.Contains(painted(), subAgentOpenMarker) {
+		t.Errorf("opening the task drew %q — the inline sub-agent rail, back from the dead:\n%s", subAgentOpenMarker, painted())
+	}
+	if m.transcript.entries[1].expanded {
+		t.Error("opening the task wrote the head's expanded flag; that flag is the deleted inline rail's, not the view's")
+	}
+	if m.transcript.setExpanded(1, true) {
+		t.Error("setExpanded(1, true) = true: the framed head takes the rail's flag again, and a replayed record could reopen the shape ADR 0063 removed")
+	}
+
+	m = clickCell(t, m, 2, screenRow(t, m, markedRows(t, m, targetTask)[0]))
+
+	if again := markedRows(t, m, targetTask); len(again) != promptCollapsedRows {
+		t.Errorf("the reopened task folds back to %d marked row(s), want the collapsed cap of %d", len(again), promptCollapsedRows)
+	}
+	if strings.Contains(painted(), lastWord) {
+		t.Errorf("the task folded back but still shows %q:\n%s", lastWord, painted())
 	}
 }
 

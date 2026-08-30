@@ -1057,7 +1057,10 @@ transcript's own depth: no rail, no frame, no extra indent, and the full body co
 one run read the way the conversation is read, which is the whole point of taking the slot rather
 than nesting a frame inside it. The run's **task** leads the view as the first `❯` row, in the
 place the human's own prompt takes at the top level, because the task is what was said to this
-delegate; its report is its last `✦` row, said once, where it was said. The blocks between keep
+delegate; its report is its last `✦` row, said once, where it was said. A task too tall for the
+collapsed cap folds under the ordinary prompt rule and opens on its own `see more`, and that fold
+is the **view's** — the collapsed row the delegation wears in the conversation below is untouched
+by it, and opens nothing but the view. The blocks between keep
 *their own* fold states, a nested delegation among them is a collapsed row that opens a view of its
 own, and everything the transcript does elsewhere — the scroll bar, the block cursor,
 drag-selection, `see more`, the live star — it does here.

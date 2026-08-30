@@ -29,6 +29,13 @@ package tui
 // goes UP a level rather than opening anything — so it names no entry, and the toggle switch every
 // other kind runs through leaves it alone (Model.toggleBlockAt).
 //
+// targetTask is the task row a rooted paint draws under that breadcrumb: the prompt the viewed run
+// was handed, folded by the ordinary user block's rule and opened again by its own state
+// (transcript.setTaskExpanded, entry.taskExpanded). It is a toggle like targetHeader and names the
+// run's head exactly as that kind would — a separate kind because what it flips is separate: the
+// head's expanded flag is refused on a framed run (ADR 0063 keeps a delegation to two shapes), so a
+// row marked targetHeader here would paint a see-more marker that nothing could act on.
+//
 // A super-group adds the two kinds its extra LEVEL needs (renderSuperGroup). targetType is a type
 // row: it toggles the run's own second state (transcript.toggleTypeExpanded) rather than the
 // expanded flag every other target flips, which is what lets a reader open a run to its member rows
@@ -43,6 +50,7 @@ const (
 	targetType
 	targetUmbrella
 	targetBreadcrumb
+	targetTask
 )
 
 // lineTarget is one rendered line's click surface: what the line is, and the index into

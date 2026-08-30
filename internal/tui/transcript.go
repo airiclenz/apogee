@@ -232,6 +232,15 @@ type parkedText struct {
 // members, and a member is then opened to reveal its own body — so one flag could not say which of
 // the two steps the reader took. It is view-only and unpersisted for exactly expanded's reasons.
 //
+// taskExpanded is the THIRD such state, and it means something only on the head of a run whose VIEW
+// is open (ADR 0063): whether the task that run was handed, painted as the user row it is directly
+// under the breadcrumb (render.go's rooted paint), stands folded to the collapsed cap or open in
+// full. It is a separate field for typeExpanded's reason and one more: expanded is refused outright
+// on a head with a run to open (setExpanded), so the in-view fold could not borrow it without
+// re-opening the door that refusal closes — a run has two shapes and no third, and a task the
+// reader unfolded inside a view is a fact about the view, not a rail in the conversation below it.
+// It is view-only and unpersisted for exactly expanded's reasons.
+//
 // ctxUsed / ctxLimit are the CHILD's context fill on the head of a sub-agent run (applyUsage): how
 // much of its window the delegate had filled when it last reported, and the window that reading
 // filled — the CHILD's own, which for a run routed to the Sub-agent server is the Delegation
@@ -257,6 +266,9 @@ type entry struct {
 	expanded bool // view-only block state: false = collapsed (the default); never persisted
 	// view-only state of the TYPE ROW this entry heads inside a super-group; never persisted
 	typeExpanded bool
+	// view-only fold of the TASK this entry's run was handed, as the run's own view paints it
+	// above the child's work (render.go's rooted paint); never persisted
+	taskExpanded bool
 	ephemeral    bool // display-only: rendered, never persisted (see encodeTranscript)
 	// entryUser / entryInterjected: where the skills this message invoked sit IN text — one span
 	// per occurrence
@@ -1327,6 +1339,13 @@ func (t *transcript) hasOpenToolCall() bool {
 // reported yet. A delegation that is OVER and left nothing behind it is not a run — it keeps the
 // ordinary block's inline toggle onto the prompt it carried (unframedSubAgentView), which is the
 // one meaning left for the flag on a sub_agent call.
+//
+// What that refusal does NOT cover is the fold INSIDE the run's own view: the task the run was
+// handed is painted there as a user row and folds like any other tall prompt, and that fold has a
+// state of its own the framed head does allow ([transcript.setTaskExpanded], entry.taskExpanded).
+// The two are different acts — one opens a rail in the conversation, the other opens a row inside
+// the view already on screen — so refusing the first must not leave the second advertising a
+// see-more marker nothing can act on.
 func (t *transcript) setExpanded(index int, expanded bool) bool {
 	if index < 0 || index >= len(t.entries) || !t.entries[index].kind.carriesBlockState() {
 		return false
@@ -1378,6 +1397,41 @@ func (t *transcript) toggleTypeExpanded(index int) bool {
 		return false
 	}
 	return t.setTypeExpanded(index, !t.entries[index].typeExpanded)
+}
+
+// setTaskExpanded opens or closes the TASK row of the run headed by entries[index] — the fold a
+// rooted paint draws directly under its breadcrumb (render.go), whose click surface is
+// targetTask — and reports whether it found a run head to set. Only a delegation has a task a view
+// can paint (entry.headsRun), so every other kind answers false and changes nothing, as does an
+// index outside the slice: this sits where setExpanded sits, on the path a click and a repaint
+// share, where a panic is the whole session.
+//
+// It is a state of its OWN rather than the head's expanded flag because that flag is refused on a
+// head with a run to open ([transcript.setExpanded]) — the refusal that keeps a delegation to its
+// two shapes under ADR 0063. The refusal stands; this is not a way around it. A run in the
+// conversation still cannot be flipped open in place, and what this writes is read by exactly one
+// paint, the view rooted at that very run, where the row it folds is a prompt and not a rail.
+//
+// Like setTypeExpanded, it does not ask whether the view is open TODAY: the flag is simply a fact
+// nothing paints while the run is a collapsed row in the conversation, and it is still there when
+// the reader opens the view again.
+func (t *transcript) setTaskExpanded(index int, expanded bool) bool {
+	if index < 0 || index >= len(t.entries) || !t.entries[index].headsRun() {
+		return false
+	}
+	t.entries[index].taskExpanded = expanded
+	return true
+}
+
+// toggleTaskExpanded flips a view's task row between its two states and reports whether it found a
+// run head to flip — the meaning of a click, or the block cursor's ⏎, on that row. The kind and
+// range guards are setTaskExpanded's, so an index that heads no run answers false from one place;
+// the bound here only makes the READ of the current state safe.
+func (t *transcript) toggleTaskExpanded(index int) bool {
+	if index < 0 || index >= len(t.entries) {
+		return false
+	}
+	return t.setTaskExpanded(index, !t.entries[index].taskExpanded)
 }
 
 // closeSuperGroup closes every open child of the umbrella headed by entries[head] — what a click on

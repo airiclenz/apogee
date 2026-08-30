@@ -554,7 +554,10 @@ func (m Model) handleMouseRelease(msg tea.MouseReleaseMsg) (tea.Model, tea.Cmd) 
 // A super-group's two extra kinds are the same rule at its two extra levels (renderSuperGroup): a
 // TYPE ROW flips the second state of the run it heads — its member rows, not their bodies — and the
 // UMBRELLA HEADER closes every open child beneath it rather than toggling anything, its floor being
-// the type rows it never folds below (docs/layout/tool-layout.md, design call 9).
+// the type rows it never folds below (docs/layout/tool-layout.md, design call 9). A run view's TASK
+// ROW is the same rule again at the level ADR 0063 added: it flips the fold of the task the viewed
+// run was handed, which is the view's own state and not the head's block state (render.go's rooted
+// paint marks the row, transcript.setTaskExpanded holds it).
 //
 // WHAT a toggle line names is the paint's business and not this function's, which is why one case
 // covers a single block, its body and a group member alike. A single tool block marks every row it
@@ -612,6 +615,14 @@ func (m Model) toggleBlockAt(line, releaseRow int) (Model, tea.Cmd) {
 			return next, nil
 		}
 		if !m.transcript.toggleExpanded(target.entry) {
+			return m, nil
+		}
+	case targetTask:
+		// Inside a run view the task row folds by its own state, never by the head's block state:
+		// the redirect above would refuse the view's own head and setExpanded would refuse the flag,
+		// leaving the see-more marker the fold painted advertising rows nothing could open
+		// (transcript.setTaskExpanded, ADR 0063).
+		if !m.transcript.toggleTaskExpanded(target.entry) {
 			return m, nil
 		}
 	case targetType:

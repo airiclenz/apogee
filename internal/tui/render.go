@@ -108,6 +108,27 @@ func (p blockPaint) railed(th theme, depth int) blockPaint {
 	return blockPaint{lines: railLines(th, p.lines, depth), targets: p.targets}
 }
 
+// retargeted restates what a click on this paint's already-marked lines MEANS, leaving the lines
+// and the member offsets exactly as the painter emitted them. It is the one place a block is laid
+// down somewhere its painter does not know about: the run view's task row, which is the ordinary
+// user block — so it folds by the ordinary rule — but whose fold is the VIEW's state and not the
+// head entry's block state (transcript.setTaskExpanded, renderView's rooted opening).
+//
+// A line the painter left unmarked stays unmarked: this re-labels a click surface, it never grows
+// one, so the lockstep [blockPaint.addFor] exists to protect is untouched — what moves is the
+// meaning of a mark, which is a fact about where the block was placed rather than about how it was
+// drawn.
+func (p blockPaint) retargeted(kind targetKind) blockPaint {
+	marks := make([]lineMark, len(p.targets))
+	for i, mark := range p.targets {
+		if mark.kind != targetNone {
+			mark.kind = kind
+		}
+		marks[i] = mark
+	}
+	return blockPaint{lines: p.lines, targets: marks}
+}
+
 // renderView renders the committed entries plus any in-progress assistant buffer into the
 // viewport's lines, recording the line range of every user block. Blocks are separated by one
 // line (layout.md), railed at the depth the two blocks share so a sub-agent run's frame is
@@ -193,12 +214,17 @@ func (t *transcript) renderView(th theme, width int, blink bool) renderedTranscr
 	// header itself (ADR 0063).
 	//
 	// The prompt is the head's retained task and goes through the ordinary entry painter, so a task
-	// too tall for the block folds under the very rule a human's own long prompt folds under. Its
-	// rows are marked for the HEAD, the one entry a rooted paint never lays down as a block, and
-	// activating one does nothing: the redirect refuses the view's own head ([Model.openRunAt]) and
-	// setExpanded refuses the flag on a framed run (transcript.go) — the row must not open a second
-	// view of the run already on screen (ADR 0063: a run has two shapes, the collapsed row and this
-	// view).
+	// too tall for the block folds under the very rule a human's own long prompt folds under — and
+	// what that rule paints is a see-more marker, which must therefore open what it counts.
+	//
+	// Its rows are marked for the HEAD, the one entry a rooted paint never lays down as a block, and
+	// the mark is retargeted to targetTask: activating one flips the view's own fold of the task
+	// (entry.taskExpanded, [transcript.setTaskExpanded]) and nothing else. It cannot be the ordinary
+	// targetHeader, whose click asks the redirect first — that redirect refuses the view's own head
+	// ([Model.openRunAt]) and setExpanded refuses the flag on a framed run (transcript.go), which is
+	// exactly right for a row that must not open a second view of the run already on screen (ADR
+	// 0063: a run has two shapes, the collapsed row and this view) and exactly wrong for a marker
+	// advertising rows to unfold.
 	if root.rooted() {
 		head := t.entries[root.first-1]
 		lines = append(lines, breadcrumbRow(th, breadcrumbTrail(t.entries, root.ref.spawn), width))
@@ -208,9 +234,10 @@ func (t *transcript) renderView(th theme, width int, blink bool) renderedTranscr
 			prompt := paintInput{
 				kind:       entryUser,
 				text:       head.tool.task,
-				entryState: entryState{expanded: head.expanded},
+				entryState: entryState{expanded: head.taskExpanded},
 			}
-			appendJoined(false, false, 0, root.first-1, renderEntryLines(th, prompt, width, blink))
+			appendJoined(false, false, 0, root.first-1,
+				renderEntryLines(th, prompt, width, blink).retargeted(targetTask))
 		}
 	}
 

@@ -150,8 +150,10 @@ func (m Model) topLegend() string {
 // other foldable prompt (render.go) — so a view whose child was handed a task too tall to fit has a
 // click surface, inside itself, naming itself. Asked without this guard the redirect would answer
 // yes and push a SECOND level of the run already open, leaving esc to be pressed twice to leave one
-// view. Refusing is the whole answer: the fold that would otherwise follow is the flag
-// [transcript.setExpanded] refuses on a framed run, so the row simply does nothing.
+// view. Refusing is only half the answer, though: that row is not asked here at all, because the
+// rooted paint marks it targetTask rather than targetHeader — so activating it folds and unfolds
+// the task by the view's own state ([transcript.setTaskExpanded]), which is what its see-more
+// marker advertises, and never re-opens the run.
 func (m Model) openRunAt(index int) (Model, bool) {
 	if index < 0 || index >= len(m.transcript.entries) {
 		return m, false
