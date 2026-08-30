@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/airiclenz/apogee/internal/domain"
@@ -80,11 +81,18 @@ func subAgentFramed(head paintInput, span int) bool {
 // A run with no spawning call to walk from — a hand-built test transcript, a record replayed from a
 // blob written before the id was stamped — still answers by the depth rule this began as: the most
 // recent still-open head at each enclosing level.
-func insideCollapsedRun(entries []entry, run runRef) bool {
+//
+// root is where the walk STOPS: the run the paint is rooted at (transcript.root), whose own head is
+// not on screen to be collapsed — inside a run view that head is the breadcrumb, and the view is
+// showing what a reader opened. Without the stop a view's own live tail would be elided by the very
+// row the reader replaced with the header: a run has two shapes under ADR 0063 — the collapsed row
+// and its view — so opening a view leaves the head collapsed the whole time it is open. The zero
+// root stops the walk at the top of the transcript, which is the rule as it was written.
+func insideCollapsedRun(entries []entry, run, root runRef) bool {
 	if run.spawn == "" {
 		return insideCollapsedRunAtDepth(entries, run.depth)
 	}
-	for spawn := run.spawn; spawn != ""; {
+	for spawn := run.spawn; spawn != "" && spawn != root.spawn; {
 		head, ok := runHead(entries, spawn)
 		if !ok {
 			return false
@@ -97,14 +105,105 @@ func insideCollapsedRun(entries []entry, run runRef) bool {
 	return false
 }
 
+// runUnder reports whether run IS root or lies anywhere inside it — the question a rooted paint asks
+// of the live streaming buffer, which is the one block that is not an entry and so cannot be placed
+// by the walk's own bounds (render.go). The chain is walked by SPAWNING CALL for
+// [insideCollapsedRun]'s reason: with siblings live (ADR 0039) a depth says which level a run stands
+// at and never which run it is.
+//
+// The zero root is the whole transcript, and every run is under that.
+func runUnder(entries []entry, run, root runRef) bool {
+	if root.spawn == "" {
+		return true
+	}
+	for spawn := run.spawn; spawn != ""; {
+		if spawn == root.spawn {
+			return true
+		}
+		head, ok := runHead(entries, spawn)
+		if !ok {
+			return false
+		}
+		spawn = head.spawnCallID
+	}
+	return false
+}
+
 // runHead finds the sub_agent call block that opened the run spawn names.
 func runHead(entries []entry, spawn string) (entry, bool) {
+	at, ok := runHeadAt(entries, spawn)
+	if !ok {
+		return entry{}, false
+	}
+	return entries[at], true
+}
+
+// runHeadAt is [runHead] as a POSITION: where the sub_agent call block that opened the run spawn
+// names sits in the list, which is what a paint rooted at that run needs — the run IS the head's
+// [subAgentSpan], and a span is a range of indices. −1 and false where the list holds no such head.
+func runHeadAt(entries []entry, spawn string) (int, bool) {
 	for i := len(entries) - 1; i >= 0; i-- {
-		if h := entries[i]; h.headsRunFor(spawn) {
-			return h, true
+		if entries[i].headsRunFor(spawn) {
+			return i, true
 		}
 	}
-	return entry{}, false
+	return -1, false
+}
+
+// The run view's header row, spelled once (render.go): the way back (←), the separator between the
+// runs the trail names (›), and the key that takes it. The hint is the status line's own grammar for
+// a key — the verb after the key that presses it (layout.md, "The status line's right slot") — and
+// it stands in the same column that slot's occupants end in, so the two rows on screen advertising a
+// key end together.
+const (
+	breadcrumbBack = "←"
+	breadcrumbSep  = "›"
+	breadcrumbHint = "esc back"
+)
+
+// breadcrumbTrail is the header's TEXT for a paint rooted at the run spawn names: the trail of run
+// names from the human's own conversation down to that run — "← main › planner › repo-scout" — so a
+// reader two levels in sees both where they are and what stands between them and the top.
+//
+// Each run is named the way every other surface that names one does ([usageAgentName]): the short
+// name its call carried, else the task's first line, else the constant. An unnamed delegation
+// therefore reads as something rather than as a hole in the trail, and the /usage pane and this row
+// cannot come to call the same run different things.
+//
+// The walk climbs by SPAWNING CALL rather than by depth, for [insideCollapsedRun]'s reason: with
+// siblings live (ADR 0039) a depth says which level a run stands at and never which run it is. A
+// spawn the list holds no head for ends the climb where it stands — the trail names what it can and
+// still leads back to main, which is the one crumb that is always true.
+func breadcrumbTrail(entries []entry, spawn string) string {
+	var names []string
+	for id := spawn; id != ""; {
+		at, ok := runHeadAt(entries, id)
+		if !ok {
+			break
+		}
+		names = append(names, usageAgentName(entries[at]))
+		id = entries[at].spawnCallID
+	}
+	slices.Reverse(names) // climbed from the run upwards; the trail reads downwards
+	return breadcrumbBack + " " + strings.Join(append([]string{usageMainLabel}, names...), " "+breadcrumbSep+" ")
+}
+
+// breadcrumbRow paints that trail as the run view's own sticky header: the trail in the transcript's
+// body column, the key that leaves the view held bodyIndent off the right edge, on the one
+// full-width field the frame already spends on a header (the user block's).
+//
+// Where the width cannot pay for both, the hint gives way whole: the trail is what the header is
+// FOR, and a truncated key hint would advertise a keystroke nobody could read. The row is squared to
+// the width either way, so the field runs the whole way across rather than showing the terminal's
+// own background through the gap.
+func breadcrumbRow(th theme, trail string, width int) string {
+	body := bodyIndent + trail
+	hint := breadcrumbHint + bodyIndent
+	gap := width - th.measure.Width(body) - th.measure.Width(hint)
+	if gap < 1 {
+		return th.userBlock.Render(squareLine(th.measure, body, width))
+	}
+	return th.userBlock.Render(squareLine(th.measure, body+strings.Repeat(" ", gap)+hint, width))
 }
 
 // insideCollapsedRunAtDepth is insideCollapsedRun's answer for a run with no spawning call id: each

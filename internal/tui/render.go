@@ -43,6 +43,12 @@ type renderedTranscript struct {
 	// the painter itself and is never re-derived by a second reader: a click resolves against the
 	// exact accounting the paint used (ADR 0030's rule, one authority per measurement).
 	targets []lineTarget
+	// header is the sticky header the PAINT itself owns, as the lines it occupies at the top of the
+	// slice: the breadcrumb row of a paint rooted at one run (transcript.setRoot), and the zero
+	// value — count 0 — for the ordinary whole-transcript paint, whose sticky headers are the user
+	// blocks beside it. The overlay is one mechanism either way (Model.stickyHeaderSpan): a header
+	// is a content line frozen at row 0, and this only says WHICH line without asking the offset.
+	header userBlock
 }
 
 // blockPaint is one painted block: its physical lines and, parallel to them, what each line is to
@@ -122,9 +128,14 @@ func (t *transcript) renderView(th theme, width int, blink bool) renderedTranscr
 	if width < 1 {
 		width = 1
 	}
+	// What this paint covers, asked once: the whole list, or the one run a view is open on
+	// ([paintRoot]). Everything below reads the answer instead of the root itself, so the bounds the
+	// walk keeps and the depth its rows are rebased by cannot come to disagree.
+	root := t.paintRoot()
 	var lines []string
 	var targets []lineTarget
 	var userBlocks []userBlock
+	var header userBlock
 
 	// prevBlockDepth is the depth of the block appended last — the left half of the next spacer's
 	// join. It is deliberately per-APPENDED-BLOCK rather than per-entry: an OPEN delegation's head
@@ -149,7 +160,10 @@ func (t *transcript) renderView(th theme, width int, blink bool) renderedTranscr
 			lines = append(lines, railJoin(th, prevBlockDepth, depth, closes))
 			targets = append(targets, lineTarget{}) // a separator belongs to neither block
 		}
-		if isUser {
+		// A ROOTED paint registers none, whatever it is laying down: inside a view the breadcrumb is
+		// the only sticky header there is (header, above), and a user row that claimed the slot would
+		// freeze the child's task — or a message sent to it — over the child's own output.
+		if isUser && !root.rooted() {
 			userBlocks = append(userBlocks, userBlock{start: len(lines), count: len(block.lines)})
 		}
 		// The line and its mark are appended in ONE loop, and the mark is read defensively, so the
@@ -172,6 +186,31 @@ func (t *transcript) renderView(th theme, width int, blink bool) renderedTranscr
 	// before the loop so a render never reads a row about a block that is gone.
 	t.paints.prune(len(t.entries))
 
+	// A rooted paint opens with two things of its own before the walk lays a single entry down: the
+	// breadcrumb naming the way back up, and the prompt the run was handed, painted as the user row
+	// it is — a child's conversation opens with what it was asked, exactly as the human's own does.
+	// Both are read off the one entry a rooted paint never paints: the head, which has become the
+	// header itself (ADR 0063).
+	//
+	// The prompt is the head's retained task and goes through the ordinary entry painter, so a task
+	// too tall for the block folds under the very rule a human's own long prompt folds under — and
+	// the fold flips the head's own expanded flag, which is the one state left for that flag to mean
+	// inside a view (ADR 0063: a run has two shapes, the collapsed row and this view).
+	if root.rooted() {
+		head := t.entries[root.first-1]
+		lines = append(lines, breadcrumbRow(th, breadcrumbTrail(t.entries, root.ref.spawn), width))
+		targets = append(targets, lineTarget{kind: targetBreadcrumb})
+		header = userBlock{start: 0, count: 1}
+		if strings.TrimSpace(head.tool.task) != "" {
+			prompt := paintInput{
+				kind:       entryUser,
+				text:       head.tool.task,
+				entryState: entryState{expanded: head.expanded},
+			}
+			appendJoined(false, false, 0, root.first-1, renderEntryLines(th, prompt, width, blink))
+		}
+	}
+
 	// previewAt is the index the live buffer paints AT — the end of the run that filled it
 	// (transcript.runEnd), which is where that run's blocks end rather than where the list does. In
 	// a serial session, and for the human's own conversation, the two are the same index and the
@@ -179,8 +218,14 @@ func (t *transcript) renderView(th theme, width int, blink bool) renderedTranscr
 	// child that is talking instead of after whichever child was announced last. −1 means the
 	// buffer is not painted this frame at all: nothing is streaming, or the run holding it is
 	// collapsed and its whole span elided with it.
+	//
+	// A rooted paint asks one question more, and asks it first: whether the run holding the buffer is
+	// the view's own or one of its descendants (runUnder). A sibling's tokens land at an index this
+	// walk never reaches, and the parent's at the end of a span the walk stops inside — either would
+	// paint another agent's live sentence into this run's view.
 	previewAt := -1
-	if t.streaming && !insideCollapsedRun(t.entries, t.pendingRun) {
+	if t.streaming && runUnder(t.entries, t.pendingRun, root.ref) &&
+		!insideCollapsedRun(t.entries, t.pendingRun, root.ref) {
 		previewAt = t.runEnd(t.pendingRun.spawn)
 	}
 	// paintPreview appends the in-progress buffer as a block of its own run, at index at. What it
@@ -193,15 +238,16 @@ func (t *transcript) renderView(th theme, width int, blink bool) renderedTranscr
 		// The live buffer is painted at the depth that FILLED it (transcript.pendingRun), like every
 		// committed block above: its own rail is what says which run is talking, and a delegate that
 		// streams before producing any entry needs nothing else to announce the level.
+		depth := t.pendingRun.depth - root.depth
 		preview := renderEntryLines(th, paintInput{
 			kind:  entryAssistant,
 			text:  previewTail(t.pending.tail(previewTailLines)),
-			depth: t.pendingRun.depth,
+			depth: depth,
 		}, width, blink)
-		appendJoined(false, false, t.pendingRun.depth, at, preview)
+		appendJoined(false, false, depth, at, preview)
 	}
 
-	for i := 0; i < len(t.entries); {
+	for i := root.first; i < root.last; {
 		// The preview is painted the moment the walk reaches its run's end. The test is >= rather
 		// than == because the walk SKIPS index ranges — a collapsed run's span, a folded tool run's
 		// members — and a preview whose index fell inside one would otherwise never be painted.
@@ -214,14 +260,14 @@ func (t *transcript) renderView(th theme, width int, blink bool) renderedTranscr
 		// memo names are one value (paintcache.go). The entries themselves stay with the walk, which
 		// is the only part that needs them — where a block ENDS is a question about the list
 		// (subAgentGroupAt, subAgentSpan, toolSuperGroup, toolCallRun), never about a paint.
-		in := t.entries[i].painted()
+		in := root.painted(t.entries[i])
 		// One question, asked once: what block starts here? The answer carries its shape, the records
 		// it covers, its paint and the index the walk resumes at ([resolvedBlock]), so the step past a
 		// folded run or a collapsed span is stated by the code that resolved that span rather than by
 		// a per-branch `i += …` — the one arithmetic in the renderer whose off-by-one would silently
 		// skip a block or paint it twice.
-		block := t.resolveBlock(th, i, in, width, blink)
-		key := blockKey(block.shape, block.ins, th, width, blink, block.live)
+		block := t.resolveBlock(th, i, in, width, blink, root)
+		key := blockKey(block.shape, block.ins, th, width, blink, block.live, root.ref)
 		appendJoined(block.isUser, block.closes, in.depth, i, t.paintBlock(i, key, block.draw))
 		// A block ending on an OPEN span does not end the run: that span follows, railed one level
 		// deeper, and the separator between the two belongs to THAT rail rather than to the block's
@@ -233,9 +279,9 @@ func (t *transcript) renderView(th theme, width int, blink bool) renderedTranscr
 		i = block.next
 	}
 	if previewAt >= 0 {
-		paintPreview(len(t.entries))
+		paintPreview(root.last)
 	}
-	return renderedTranscript{lines: lines, userBlocks: userBlocks, targets: targets}
+	return renderedTranscript{lines: lines, userBlocks: userBlocks, targets: targets, header: header}
 }
 
 // reserveWidgetCells holds every rendered line inside limit columns in the measure the VIEWPORT
@@ -294,13 +340,22 @@ func (r renderedTranscript) reserveWidgetCells(limit int) renderedTranscript {
 		shift[i+1] = shift[i] + len(segs) - 1
 	}
 
-	blocks := make([]userBlock, len(r.userBlocks))
-	for i, b := range r.userBlocks {
+	// One rule for every span the paint published, the rooted paint's own header included: a span is
+	// moved by the rows added above it and stretched by the rows added inside it.
+	moved := func(b userBlock) userBlock {
 		start := clampInt(b.start, 0, len(r.lines))
 		end := clampInt(b.start+b.count, start, len(r.lines))
-		blocks[i] = userBlock{start: b.start + shift[start], count: b.count + shift[end] - shift[start]}
+		return userBlock{start: b.start + shift[start], count: b.count + shift[end] - shift[start]}
 	}
-	return renderedTranscript{lines: lines, userBlocks: blocks, targets: targets}
+	blocks := make([]userBlock, len(r.userBlocks))
+	for i, b := range r.userBlocks {
+		blocks[i] = moved(b)
+	}
+	header := r.header
+	if header.count > 0 {
+		header = moved(header)
+	}
+	return renderedTranscript{lines: lines, userBlocks: blocks, targets: targets, header: header}
 }
 
 // overWidgetWidth reports whether the viewport widget would cut ln at limit columns. The BYTE
@@ -334,6 +389,82 @@ func splitAtWidgetWidth(ln string, limit int) []string {
 		out = append(out, ansi.Cut(ln, idx, idx+limit))
 	}
 	return out
+}
+
+// paintRoot is the window of the transcript ONE paint covers: the entry range the walk may lay
+// down, the depth every row inside it is rebased by, and the run that answers for both. The zero
+// value — no run, the whole list, no rebase — is the ordinary whole-transcript paint, which is what
+// keeps a session that never opens a run view painting exactly what it always did, byte for byte.
+//
+// It is resolved ONCE per render ([transcript.paintRoot]) and handed down from there, because its
+// two halves are two readings of one entry: a paint that re-derived the head at each question could
+// bound the walk by one run and rebase its rows by another.
+//
+// Rebasing is the whole of what makes a view a view. Nothing is rewritten and no entry moves: the
+// records the painters read are handed their depth less the root's, so a child's blocks paint as
+// top-level rows — no rail, wrapped to the full column — while the entries themselves still say
+// exactly where they sit in the conversation.
+type paintRoot struct {
+	ref   runRef // the run the paint is rooted at, as the paint key names it (paintcache.go)
+	first int    // the first entry the walk may paint: the root's head is NOT painted, being the header
+	last  int    // one past the last — the end of the root's span, or of the entry list
+	depth int    // the root run's own nesting level: what every painted row's depth is rebased by
+}
+
+// rooted reports whether this paint covers ONE run rather than the whole transcript.
+func (r paintRoot) rooted() bool { return r.ref.spawn != "" }
+
+// painted states one entry as its painter's record ([entry.painted]), rebased to the root.
+func (r paintRoot) painted(e entry) paintInput {
+	in := e.painted()
+	in.depth -= r.depth
+	return in
+}
+
+// inputs states a whole block's entries as painter records ([paintInputs]), rebased to the root.
+func (r paintRoot) inputs(entries []entry) []paintInput {
+	return r.rebase(paintInputs(entries))
+}
+
+// rebase rewrites a block's painter records to the root's level, in place — the records are built
+// fresh for the block being resolved ([paintInputs], toolCallRun), never shared with the entries
+// they were read off. It is the one place the rebase reaches a multi-entry block, so a block's head
+// and its span can never be painted at levels that disagree, and it is what the paint key reads:
+// the records the rows are drawn from are the records the key names (paintcache.go).
+func (r paintRoot) rebase(ins []paintInput) []paintInput {
+	for i := range ins {
+		ins[i].depth -= r.depth
+	}
+	return ins
+}
+
+// paintRoot resolves the window this paint covers from the run the transcript is rooted at
+// ([transcript.setRoot]): the head that run hangs off, the span behind it, and the level that span
+// stands at.
+//
+// A root whose head the list no longer holds — a run whose entries a /clear or a session switch took
+// away — resolves to the WHOLE transcript rather than to an empty view: the Model pops such a view
+// the moment it notices, and a frame painted before that lands shows the conversation instead of a
+// blank screen.
+func (t *transcript) paintRoot() paintRoot {
+	whole := paintRoot{last: len(t.entries)}
+	if t.root.spawn == "" {
+		return whole
+	}
+	at, ok := runHeadAt(t.entries, t.root.spawn)
+	if !ok {
+		return whole
+	}
+	return paintRoot{
+		ref:   t.root,
+		first: at + 1,
+		last:  at + 1 + subAgentSpan(t.entries, at),
+		// The HEAD answers for the run's depth, not the ref the caller handed in: the two agree by
+		// construction — a run's entries stand one level below the call that opened them
+		// (transcript.closeRun builds its ref from exactly this) — and the head is the half this
+		// paint has in front of it.
+		depth: t.entries[at].depth + 1,
+	}
 }
 
 // resolvedBlock is the answer to "what block starts at this entry?": everything
@@ -370,7 +501,7 @@ type resolvedBlock struct {
 // subAgentSpan, toolSuperGroup, toolCallRun); everything it hands back speaks in paint records
 // instead, which is what keeps a painter to what it needs to draw and nothing it could write through
 // (paintcache.go, ADR 0011).
-func (t *transcript) resolveBlock(th theme, head int, in paintInput, width int, blink bool) resolvedBlock {
+func (t *transcript) resolveBlock(th theme, head int, in paintInput, width int, blink bool, root paintRoot) resolvedBlock {
 	// A descent used to be announced by a label block of its own. Nothing announces it now: the
 	// delegation's own header row opens the frame with ┌─┶ and the rail runs down the span from there
 	// (docs/layout/tool-layout.md, "Grouped Sub-agents"), so a label saying the same thing one row
@@ -402,7 +533,7 @@ func (t *transcript) resolveBlock(th theme, head int, in paintInput, width int, 
 		// One record per covered entry, stated once and read by both the key and the rows: a
 		// member's own record sits at its offset from the head and its span is the records behind
 		// it, so what the paint reads is exactly what the key named (paintcache.go).
-		ins := paintInputs(t.entries[head : head+cover])
+		ins := root.inputs(t.entries[head : head+cover])
 		members := make([]subAgentMember, 0, end-pos+1)
 		for k := pos; k <= end; k++ {
 			at := grp[k].at - head
@@ -460,7 +591,7 @@ func (t *transcript) resolveBlock(th theme, head int, in paintInput, width int, 
 	// (design call 4). A run reaching this branch closes with no ┊ at all: the closer belongs to
 	// a list resuming after one of its members, and a delegation standing here stands alone.
 	if span := subAgentSpan(t.entries, head); subAgentFramed(in, span) {
-		ins := paintInputs(t.entries[head : head+span+1])
+		ins := root.inputs(t.entries[head : head+span+1])
 		live := !subAgentReported(in) || anyOpenCall(ins[1:])
 		next := head + 1
 		if !in.expanded {
@@ -491,7 +622,7 @@ func (t *transcript) resolveBlock(th theme, head int, in paintInput, width int, 
 	// paint (paintcache.go).
 	if sup := toolSuperGroup(t.entries, head); len(sup) > 0 {
 		calls := sup.calls()
-		ins := paintInputs(t.entries[head : head+calls])
+		ins := root.inputs(t.entries[head : head+calls])
 		live := anyOpenCall(ins)
 		return resolvedBlock{
 			shape: shapeToolSuper,
@@ -519,7 +650,7 @@ func (t *transcript) resolveBlock(th theme, head int, in paintInput, width int, 
 	// Every one of those flags is in the paint key already: blockKey spans the whole run and
 	// spanFlags packs expanded at bit 0 of each covered entry, so opening the tenth member of a
 	// group is a different key and a fresh paint (paintcache.go).
-	if run := toolCallRun(t.entries, head); len(run) > 1 {
+	if run := root.rebase(toolCallRun(t.entries, head)); len(run) > 1 {
 		live := anyOpenCall(run)
 		return resolvedBlock{
 			shape: shapeToolRun,

@@ -55,6 +55,7 @@ func coldRender(tr *transcript, th theme, width int, blink bool) renderedTranscr
 		streaming:  tr.streaming,
 		pendingRun: tr.pendingRun,
 		ws:         tr.ws,
+		root:       tr.root, // the oracle paints the same VIEW, not just the same entries
 	}
 	return cold.renderView(th, width, blink)
 }
@@ -463,4 +464,27 @@ func equalLines(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+// A row is memoised by head ENTRY INDEX, and an entry has exactly one of those however the paint is
+// rooted — so the root has to be in the key or a view opened on a child would be handed the railed
+// paint the top level left behind at those very indices. Both directions are checked, because the
+// hazard is symmetric: what a view memoises must not be served back to the conversation either.
+func TestPaintCacheKeysOnTheRoot(t *testing.T) {
+	tr, root := rootedFixture()
+	tr = warmed(tr)
+	th := newTheme(scheme.Default())
+
+	tr.renderView(th, 80, false) // cold, filling the cache at the top level
+	sameRender(t, "the top level served warm", tr.renderView(th, 80, false), coldRender(tr, th, 80, false))
+
+	misses := tr.paints.misses
+	tr.setRoot(root)
+	sameRender(t, "rooted at the child", tr.renderView(th, 80, false), coldRender(tr, th, 80, false))
+	if tr.paints.misses == misses {
+		t.Error("the rooted paint drew nothing fresh; want the root in the key, not the top level's rows served back")
+	}
+
+	tr.setRoot(runRef{})
+	sameRender(t, "back at the top level", tr.renderView(th, 80, false), coldRender(tr, th, 80, false))
 }

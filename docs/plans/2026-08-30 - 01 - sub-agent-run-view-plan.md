@@ -161,7 +161,15 @@ NOTES (2026-08-30): `IDEAS.md:18` is deliberately left standing — item 11 owns
 
 **Commit.** `feat(tui): one activity slot per run — concurrent children no longer flicker the status line`
 
-## 6. Render: paint a transcript rooted at one run, with a breadcrumb header
+## 6. Render: paint a transcript rooted at one run, with a breadcrumb header — ✅ DONE (2026-08-30)
+
+NOTES (2026-08-30): the breadcrumb names each run through `usageAgentName` (the call's name, else the task's first line, else "sub-agent") rather than `runName` alone, so an unnamed delegation is not a hole in the trail; "main" is `usageMainLabel`, one word for one thing across the two surfaces.
+
+NOTES (2026-08-30): the root's depth is read off the head the paint just resolved (`head.depth+1`) rather than off the `runRef`'s own `depth` field; the two agree by construction (`transcript.closeRun`), and the head is the half a paint has in front of it.
+
+NOTES (2026-08-30): a rooted paint opens with the run's TASK painted as a plain user row (the item's "shows its task as the first user row"), read off the head that is no longer painted; it registers no `userBlock`, per the item's regression guard.
+
+NOTES (2026-08-30): consequential edit — internal/tui/paintcache_test.go: `coldRender`'s oracle transcript now copies `root`, made necessary by the paint now depending on it.
 
 **What.** In `internal/tui/transcript.go` add `root runRef` (zero = whole transcript) and `func (t *transcript) setRoot(r runRef)`. `render` (`internal/tui/render.go`, block resolution `:373`) restricted to a root paints ONLY the root's head entry plus its span (`subAgentSpan`, `subagentblock.go:27`), with every row's depth shifted by the root's depth so the child's entries paint as top-level rows (no rail); the head itself is not painted as a row — it becomes the **sticky header** `← main › <name>` (`transcript.runName(spawn)`, `transcript.go:488`; nested roots chain names: `← main › planner › repo-scout`), the right slot reads `esc back`, ending two columns short like the status right slot (`layout.md:1173`). Rows inside the root: nested delegations paint collapsed exactly as at top level (their spans skipped), `insideCollapsedRun` (`subagentblock.go:83`) is evaluated relative to the root so the root's own live tail paints; the block cursor's stops (`blockcursor.go:49`) and `lineTargets` derive from the same rooted paint (`layout.md:117` one derivation). The paint cache (`paintcache.go`) keys on the root. Sticky header height counts against the transcript rows exactly as the existing sticky header does. Header row gets a `lineTarget` of a new kind `targetBreadcrumb` (item 7 handles the click).
 

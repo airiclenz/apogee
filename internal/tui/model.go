@@ -445,6 +445,11 @@ type Model struct {
 	lines       []string
 	userBlocks  []userBlock
 	lineTargets []lineTarget
+	// header is the sticky header the PAINT owns rather than the scrollback: the breadcrumb row of a
+	// transcript rooted at one run (renderedTranscript.header, render.go), and the zero value while
+	// the whole transcript is on screen. It takes the overlay slot outright when it is there — inside
+	// a run view the breadcrumb is the only header, and the paint registers no user block beside it.
+	header userBlock
 	// cursor is the transcript's modal KEYBOARD pointer over those same targets (blockcursor.go):
 	// whether the walk is on, and which content line its highlight is standing on. Two plain fields
 	// by ADR 0011, and a content line rather than a screen row so the highlight travels with the text
@@ -2129,6 +2134,7 @@ func (m *Model) refreshViewport() {
 	}
 	m.lines = rendered.lines // stashed for the sticky-header overlay (View)
 	m.userBlocks = rendered.userBlocks
+	m.header = rendered.header       // a rooted paint's breadcrumb, and nothing at all otherwise
 	m.lineTargets = rendered.targets // the paint's own click surface, for the mouse (render.go)
 	// The keyboard cursor stands on that same map, so it is re-seated against the paint that just
 	// landed: this is the ONE place the map is restashed, and a highlight left on a line whose
@@ -2572,6 +2578,13 @@ func (m Model) promptCursor() *tea.Cursor {
 // It is the single source of truth for the overlay's geometry: applyStickyHeader draws from it and
 // contentLineAt inverts it, so what the mouse addresses can never drift from what is drawn.
 func (m Model) stickyHeaderSpan() (start, count int) {
+	// A rooted paint hands the overlay its OWN header — the run view's breadcrumb — and registers no
+	// user block at all (render.go), so inside a view there is one header and it never hands over:
+	// the trail back up is true at every offset, where a prompt's header is only true above its own
+	// replies.
+	if m.header.count > 0 {
+		return m.header.start, m.header.count
+	}
 	if len(m.userBlocks) == 0 {
 		return 0, 0
 	}

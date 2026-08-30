@@ -1388,3 +1388,73 @@ func TestUnframedSubAgentNeverFoldsIntoASuperGroup(t *testing.T) {
 		t.Errorf("a delegation among reads lost its own block:\n--- got ---\n%s\n--- want it to contain ---\n%s", got, want)
 	}
 }
+
+// ----------------------------------------------------------------------------
+// The run view's breadcrumb (ADR 0063)
+// ----------------------------------------------------------------------------
+
+// The trail names every run between the human's own conversation and the one on screen, in reading
+// order, and it names each of them the way the rest of the frame does: the call's own short name,
+// else the task it was given, else the constant — so a delegation the model named nothing still
+// reads as something rather than as a gap between two separators.
+func TestBreadcrumbTrailNamesTheWayBackUp(t *testing.T) {
+	tr := &transcript{}
+	delegationCall(tr, "", "s1", "planner", "plan the work", 0)
+	delegationCall(tr, "s1", "s2", "repo-scout", "scout the repo", 1)
+	tr.apply(domain.ToolCallEvent{
+		EventBase: domain.EventBase{Depth: 2, CallID: "s2"},
+		Call:      domain.ToolCall{ID: "s3", Tool: "sub_agent", Arguments: []byte(`{"task":"read the tests"}`)},
+	})
+	tr.apply(domain.ToolCallEvent{
+		EventBase: domain.EventBase{Depth: 2, CallID: "s2"},
+		Call:      domain.ToolCall{ID: "s4", Tool: "sub_agent", Arguments: []byte(`{}`)},
+	})
+
+	cases := []struct {
+		name  string
+		spawn string
+		want  string
+	}{
+		{"the top level itself", "", "← main"},
+		{"one level down", "s1", "← main › planner"},
+		{"two levels down", "s2", "← main › planner › repo-scout"},
+		{"an unnamed run takes its task", "s3", "← main › planner › repo-scout › read the tests"},
+		{"a run with neither takes the constant", "s4", "← main › planner › repo-scout › " + usageAgentFallback},
+		{"a run the list has no head for", "gone", "← main"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := breadcrumbTrail(tr.entries, c.spawn); got != c.want {
+				t.Errorf("breadcrumbTrail(%q) = %q, want %q", c.spawn, got, c.want)
+			}
+		})
+	}
+}
+
+// The row spends its width in the order it is READ for: the trail first, the key hint second. Where
+// the two cannot both fit, the hint goes whole rather than being truncated to a keystroke nobody can
+// make out — and the row is squared to the width either way, so the header's field runs the whole
+// way across instead of showing the terminal's background through the gap.
+func TestBreadcrumbRowSpendsItsWidthInOrder(t *testing.T) {
+	th := newTheme(scheme.Default())
+	const trail = "← main › repo-scout"
+
+	wide := strip(breadcrumbRow(th, trail, 60))
+	if want := bodyIndent + trail; !strings.HasPrefix(wide, want) {
+		t.Errorf("the row is %q, want it to lead with %q", wide, want)
+	}
+	if want := breadcrumbHint + bodyIndent; !strings.HasSuffix(wide, want) {
+		t.Errorf("the row is %q, want it to end with %q", wide, want)
+	}
+	if got := th.measure.Width(wide); got != 60 {
+		t.Errorf("the row is %d columns wide, want 60", got)
+	}
+
+	narrow := strip(breadcrumbRow(th, trail, 24))
+	if strings.Contains(narrow, breadcrumbHint) {
+		t.Errorf("the row is %q at 24 columns; want the hint dropped whole", narrow)
+	}
+	if got := th.measure.Width(narrow); got != 24 {
+		t.Errorf("the narrow row is %d columns wide, want 24", got)
+	}
+}

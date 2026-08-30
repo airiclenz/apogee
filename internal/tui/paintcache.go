@@ -180,6 +180,14 @@ type paintKey struct {
 	// previous palette remains to be found.
 	measure widthAuthority
 
+	// root is the run the paint was rooted at ([transcript.setRoot], render.go), and the zero value
+	// is the whole transcript. It is named because a rooted paint of the SAME entry is a different
+	// picture of it: every row is rebased to the root's depth, so the block loses its rail and is
+	// wrapped to the wider column that leaves. Two roots never key a stored row apart by index alone
+	// — a row is stored by head index, and the same entry has one — so without this a view opened on
+	// a child would serve the railed paint the top level had left behind for it.
+	root runRef
+
 	span  int    // how many entries the paint covers — a run that grew a member is a different block
 	live  bool   // whether the block still holds an open call (blockState.live), which is what makes the star blink
 	blink bool   // the frame's star phase, folded in ONLY while live — a settled block paints identically at either phase
@@ -372,14 +380,17 @@ func (c *paintCache) clear() {
 // remembering what five painter files touch.
 //
 // live is the caller's because it is the PAINTER's own liveness rule and each branch has a
-// different one (blockState.live); everything else is read off the records and the frame.
-func blockKey(shape blockShape, ins []paintInput, th theme, width int, blink, live bool) paintKey {
+// different one (blockState.live); root is the caller's for the same reason one level up — it is a
+// fact about the paint being composed rather than about the records — and everything else is read
+// off the records and the frame.
+func blockKey(shape blockShape, ins []paintInput, th theme, width int, blink, live bool, root runRef) paintKey {
 	return paintKey{
 		shape:   shape,
 		kind:    ins[0].kind,
 		depth:   ins[0].depth,
 		width:   width,
 		measure: th.measure,
+		root:    root,
 		span:    len(ins),
 		live:    live,
 		blink:   blink && live, // a settled block's paint does not depend on the phase; folding it in anyway would miss on every phase flip

@@ -51,6 +51,15 @@ type transcript struct {
 	// fact about the RUN rather than about the conversation, so reset preserves it as it does debug.
 	// The zero value shortens nothing, which is what a hand-built test transcript gets.
 	ws workspaceRoot
+	// root is the run the transcript is currently PAINTED at: the delegation whose own entries fill
+	// the view, with everything above and beside it left out (render.go, [transcript.setRoot]). The
+	// zero value is the whole transcript — the human's own conversation with every run folded into
+	// it — which is what every session paints until a reader opens a run view (ADR 0063).
+	//
+	// It is view state and nothing more: no entry moves, no depth is rewritten, and the same
+	// transcript rooted back at the zero value paints exactly what it painted before. That is what
+	// lets a view be opened and left with no record of it anywhere but here.
+	root runRef
 	// paints memoises the per-block paints renderView produced last time, so a repaint mid-stream
 	// costs the live tail rather than the whole scrollback (paintcache.go). It is a POINTER for the
 	// reason entries is a shared backing array: the Model is copied by value on every Update (ADR
@@ -495,6 +504,18 @@ func (t *transcript) runName(spawn string) string {
 		}
 	}
 	return ""
+}
+
+// setRoot roots the paint at run r — the run view's whole mechanism (ADR 0063): from here the
+// renderer paints that delegation's own entries as if they were the conversation, under the
+// breadcrumb header naming the way back up. The zero value roots it at the whole transcript again,
+// which is how a view is left.
+//
+// It invalidates nothing by hand. The root is part of every paint's key (paintcache.go), so a row
+// memoised at one root is never served at another — the rooted picture of an entry is a different
+// picture, rebased to the root's depth and wrapped to the wider column that leaves.
+func (t *transcript) setRoot(r runRef) {
+	t.root = r
 }
 
 // displace empties the live buffer slot for the run whose event is arriving, by the rule that fits

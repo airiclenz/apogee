@@ -457,3 +457,162 @@ func TestPreviewTailEdges(t *testing.T) {
 		t.Errorf("previewTail kept %d raw lines, want the bound %d", got, previewTailLines)
 	}
 }
+
+// ----------------------------------------------------------------------------
+// A transcript rooted at ONE run — the run view's paint (ADR 0063)
+// ----------------------------------------------------------------------------
+
+// delegationCall folds the sub_agent call that opens a NAMED run, stamped with the run it is being
+// made from: callID is the id the child's own events will carry, parent the run the call itself
+// belongs to ("" for the human's own conversation). Both halves matter to a rooted paint — the id
+// is what the root is named by, and the parent is the link the breadcrumb climbs.
+func delegationCall(tr *transcript, parent, callID, name, task string, depth int) {
+	args := `{"task":"` + task + `","name":"` + name + `"}`
+	tr.apply(domain.ToolCallEvent{
+		EventBase: domain.EventBase{Depth: depth, CallID: parent},
+		Call:      domain.ToolCall{ID: callID, Tool: "sub_agent", Arguments: []byte(args)},
+	})
+}
+
+// delegatedRead folds one read_file call and its result as the work OF a run: the EventBase carries
+// both halves of the run identity (ADR 0039), which is what the rooted paint reads to tell one
+// child's entries from its sibling's.
+func delegatedRead(tr *transcript, spawn, callID, path string, depth int) {
+	base := domain.EventBase{Depth: depth, CallID: spawn}
+	tr.apply(domain.ToolCallEvent{
+		EventBase: base,
+		Call:      domain.ToolCall{ID: callID, Tool: "read_file", Arguments: []byte(`{"path":"` + path + `"}`)},
+	})
+	tr.apply(domain.ToolResultEvent{
+		EventBase: base,
+		Result: domain.ToolResult{
+			CallID:  callID,
+			Content: "[File: " + path + ", 5 lines total, showing lines 1-5]\n…",
+			Summary: domain.ReadSpan{Start: 1, End: 5, Total: 5},
+		},
+	})
+}
+
+// rootedFixture is one conversation with two live delegations in it: the human's prompt, a running
+// "repo-scout" that has read a file and delegated onwards to "deep-dive", and a sibling "sweeper"
+// beside it. It is the shape every question about a rooted paint needs — a parent above, a sibling
+// beside, a nested run within — and the run it returns the ref of is the one a view opens on.
+func rootedFixture() (*transcript, runRef) {
+	tr := &transcript{}
+	tr.addUser("what changed?", nil)
+	delegationCall(tr, "", "s1", "repo-scout", "scout the repo", 0)
+	delegatedRead(tr, "s1", "r1", "a.go", 1)
+	delegationCall(tr, "s1", "s2", "deep-dive", "read the tests", 1)
+	delegatedRead(tr, "s2", "r2", "b.go", 2)
+	delegationCall(tr, "", "s3", "sweeper", "sweep the docs", 0)
+	delegatedRead(tr, "s3", "r3", "c.go", 1)
+	return tr, runRef{depth: 1, spawn: "s1"}
+}
+
+// A rooted paint IS the run view: the child's own entries, painted as if that child were the whole
+// conversation. It opens with the prompt the child was handed, its work stands at the top level with
+// no rail to say otherwise, its live tail follows, and everything else in the transcript — the
+// human's prompt above it, the sibling delegation beside it, the nested run's own span — is not
+// there at all.
+func TestRootedPaintShowsOneRunAndNothingElse(t *testing.T) {
+	tr, root := rootedFixture()
+	tr.apply(domain.TokenEvent{EventBase: domain.EventBase{Depth: 1, CallID: "s1"}, Text: "still looking"})
+	tr.setRoot(root)
+	got := renderPlain(tr, 80)
+
+	for _, want := range []string{
+		"← main › repo-scout", // the head became the header
+		"scout the repo",      // the prompt the run was handed, as its first user row
+		"a.go",                // its own work
+		"deep-dive",           // the run it opened, as a row
+		"still looking",       // its live tail
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the rooted paint does not show %q:\n%s", want, got)
+		}
+	}
+	for _, absent := range []string{
+		"what changed?", // the parent's prompt
+		"sweeper",       // a sibling delegation
+		"c.go",          // that sibling's work
+		"b.go",          // the nested run's span, which its collapsed row elides
+		glyphSubRail,    // every row of the view stands at the top level
+	} {
+		if strings.Contains(got, absent) {
+			t.Errorf("the rooted paint shows %q, which belongs to another run:\n%s", absent, got)
+		}
+	}
+}
+
+// The breadcrumb is the ONLY sticky header inside a view. The child's task row is a user block by
+// paint and not by accounting: it never freezes at the top of the viewport, because the thing a
+// reader needs frozen in a run view is the way back out.
+func TestRootedPaintRegistersNoUserBlock(t *testing.T) {
+	tr, root := rootedFixture()
+	tr.setRoot(root)
+	view := tr.renderView(newTheme(scheme.Default()), 80, false)
+
+	if len(view.userBlocks) != 0 {
+		t.Errorf("the rooted paint registered %d user blocks, want none: %+v", len(view.userBlocks), view.userBlocks)
+	}
+	if want := (userBlock{start: 0, count: 1}); view.header != want {
+		t.Errorf("the rooted paint's header span = %+v, want %+v", view.header, want)
+	}
+	if view.targets[0].kind != targetBreadcrumb {
+		t.Errorf("line 0 is a %v, want the breadcrumb's own kind", view.targets[0].kind)
+	}
+}
+
+// A view is opened and left, and leaving it must cost the reader nothing: the transcript rooted back
+// at the zero value paints byte for byte what it painted before the view was ever opened — the same
+// lines, the same click surface, the same user blocks, and no header of its own.
+func TestUnrootedPaintIsUnchangedByAVisit(t *testing.T) {
+	tr, root := rootedFixture()
+	tr.paints = newPaintCache()
+	th := newTheme(scheme.Default())
+
+	before := tr.renderView(th, 80, false)
+	tr.setRoot(root)
+	tr.renderView(th, 80, false)
+	tr.setRoot(runRef{})
+	after := tr.renderView(th, 80, false)
+
+	sameRender(t, "back at the top level", after, before)
+	if !slices.Equal(after.userBlocks, before.userBlocks) {
+		t.Errorf("user blocks = %+v after the visit, want %+v", after.userBlocks, before.userBlocks)
+	}
+	if after.header != (userBlock{}) {
+		t.Errorf("the unrooted paint published a header span %+v, want none", after.header)
+	}
+}
+
+// The breadcrumb reaches the screen the way every sticky header does — as a Model overlay frozen at
+// row 0 over the lines the paint laid down (applyStickyHeader) — and not as a row the renderer
+// happens to draw first. It reads as the spec words it: the trail in the body column, the key that
+// leaves the view held two columns off the right edge, the very margin the status line's right slot
+// keeps below it (layout.md, "The status line's right slot").
+func TestRunViewHeaderIsDrawnByTheStickyOverlay(t *testing.T) {
+	tr, root := rootedFixture()
+	m := newTestModel(t)
+	m.transcript = *tr
+	m.transcript.setRoot(root)
+	m.refreshViewport()
+
+	start, count := m.stickyHeaderSpan()
+	if start != 0 || count != 1 {
+		t.Fatalf("sticky header span = (%d, %d), want the breadcrumb at (0, 1)", start, count)
+	}
+	row := strip(m.lines[0])
+	if want := bodyIndent + "← main › repo-scout"; !strings.HasPrefix(row, want) {
+		t.Errorf("the header row is %q; want it to lead with %q", row, want)
+	}
+	if want := breadcrumbHint + bodyIndent; !strings.HasSuffix(row, want) {
+		t.Errorf("the header row is %q; want it to end with %q", row, want)
+	}
+	if got, want := m.th.measure.Width(row), m.transcriptWidth(); got != want {
+		t.Errorf("the header row is %d columns wide, want the transcript's own %d", got, want)
+	}
+	if drawn := strings.Split(m.applyStickyHeader("a\nb\nc"), "\n")[0]; drawn != m.lines[0] {
+		t.Errorf("the overlay drew %q at row 0, want the breadcrumb %q", strip(drawn), row)
+	}
+}
