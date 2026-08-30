@@ -10,6 +10,16 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- Added: a compaction summary the server cut off at the output cap is now **kept and marked**
+  rather than discarded. When the summary call ends on finish reason `length` with visible text,
+  the fold appends a marker line — the new embedded asset
+  `internal/agent/prompts/summary-truncated.txt` — inside the summary message, telling the model
+  reading the fold later that the tail it lost (the most recent state and the next steps) must be
+  re-derived from the tools rather than trusted. Discarding a cut summary burned the fold's tokens
+  for nothing and left the conversation exactly as over-budget as before. ADR 0046's rejection of
+  salvaging a cut-off reply binds Turns; the summary is an auxiliary under that ADR's own
+  exemption, and is never committed as the model's answer.
+
 - `--tui-diag` now records the mouse as well as the terminal. `observe` gains the four mouse
   messages bubbletea delivers — `mouse-kind: press`, `motion`, `release`, `wheel` — under a new
   `diagMouseKind` key, and because `record` is change-suppressed a whole drag costs three lines
@@ -462,6 +472,54 @@ point is a **minor** bump, not a breaking change.
   lives" map points at the convention.
 
 ### Fixed
+
+- The **compaction summarizer now asks for no reasoning pass at all**, whatever the session's
+  effort resolves to. Compaction is maintenance, not a Turn: the summary call runs under a
+  bounded 4096-token output cap, and a thinking model that spends that whole cap reasoning comes
+  back with finish reason `length` and empty content — the fold then faults, and on a delegate
+  (which folds at every quiescent Turn boundary) it faults again at the next one, forever. On
+  2026-08-29 that cost a Qwen3.8-27B delegate roughly nine hours on `compaction: apogee:
+  compaction produced an empty summary`, one ~40-minute summary call per Turn boundary. The
+  summary request now carries `off` in place of the resolved effort (override ▸ profile), exactly
+  as the session-naming call already does. Like that one it states an intent rather than a
+  guarantee: it lands only on a server whose chat template honours it.
+  The override fires only where "off" actually means off — llama.cpp's `chat_template_kwargs`
+  dialect (what the incident server is detected as) and OpenRouter's `reasoning` object. A server
+  that named no dialect keeps sending byte-identical requests, an OpenAI-shaped one keeps its
+  resolved level because `off` is a documented floor there rather than an off switch, and a
+  server declared to take no dial still puts nothing effort-shaped on the wire.
+
+- A **sub-agent now speaks its parent's live effort wire dialect** rather than the one the
+  session was constructed with. The dialect is a server fact that `Rebind` commits onto the
+  Agent alone, so a session rebound since startup was spawning delegates that still described the
+  server it had left — which would have left the summarizer fix above dark for exactly the
+  delegate that hit the nine-hour loop.
+
+- A **compaction summary that came back blank because it ran into its output cap now says so**,
+  instead of reporting `apogee: compaction produced an empty summary`. The two failures are not
+  the same: an empty summary describes a model that produced nothing, while the 2026-08-29
+  incident's model answered — at length, for as long as apogee allowed — and spent the entire
+  4096-token cap on a reasoning pass the summarizer had explicitly asked it not to make. The
+  fault now names both numbers the remedy turns on, the cap and roughly what was burned under
+  it, and why the two do not add up: `compaction summary hit its output cap (4096 tokens) with no
+  visible text to show for it, after roughly N tokens of reasoning — the summarizer asked for no
+  reasoning; this server's template did not honour that`. Like the Turn-level capped-reply fault
+  it deliberately does not invite a retry; the same fold meets the same cap. Every other blank
+  summary keeps the empty-summary error verbatim, and every fault still leaves the conversation
+  untouched.
+
+- **Inline thinking no longer rides into the folded conversation.** On a delimited-thinking
+  profile the summarizer's reply carries its reasoning in the content itself, and compaction was
+  writing that `<think>` span into the summary message — so a fold handed the model its own
+  scratchpad back as history. The summary is now assembled the way a Turn's reply is: the same
+  stripper lifts the inline span out, and what it lifts joins the server's split reasoning
+  channel to make up the reasoning-spend figure the capped fault reports.
+
+- Fixed: an automatic Compaction fold that faults now stands the estimate-driven trigger down for
+  the rest of the Exchange instead of re-running the identical failing summary call at every Turn
+  boundary — the delegate retry runaway of 2026-08-29 (one ~40-minute failing summary call per Turn
+  for ~9 h). The single ErrorEvent says so; the main agent re-arms at its next Exchange opening, a
+  child stands down for the delegation, and the emergency fold and `/compact` keep their own shot.
 
 - The `detailClipRunes` flood-cap comment no longer names a mechanism that is gone.
   `internal/tui/textutil.go` justified the 160-rune cap by "the renderer soft-wraps, so an
