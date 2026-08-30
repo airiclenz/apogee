@@ -57,7 +57,7 @@ func coldRender(tr *transcript, th theme, width int, blink bool) renderedTranscr
 		ws:         tr.ws,
 		root:       tr.root, // the oracle paints the same VIEW, not just the same entries
 	}
-	return cold.renderView(th, width, blink)
+	return cold.renderView(th, width, blink, breadcrumbHint)
 }
 
 // A second render of an untouched transcript is served entirely from the cache and is identical to
@@ -74,11 +74,11 @@ func TestPaintCacheServesAnUnchangedTranscript(t *testing.T) {
 	))
 	tr.addStartup(startupView{Host: "localhost", Model: "test", Version: "0.0.0"})
 
-	first := tr.renderView(th, 80, false)
+	first := tr.renderView(th, 80, false, breadcrumbHint)
 	sameRender(t, "first render", first, coldRender(tr, th, 80, false))
 
 	before := tr.paints.misses
-	second := tr.renderView(th, 80, false)
+	second := tr.renderView(th, 80, false, breadcrumbHint)
 	sameRender(t, "second render", second, first)
 
 	// One miss and one only: the start-up box, which is never cacheable.
@@ -100,23 +100,23 @@ func TestPaintCacheRepaintsWhenTheKeyMoves(t *testing.T) {
 		domain.ToolCallEvent{Call: domain.ToolCall{ID: "1", Tool: "read_file", Arguments: json.RawMessage(`{"path":"a.go"}`)}},
 		domain.ToolResultEvent{Result: domain.ToolResult{CallID: "1", Content: "line one\nline two\nline three\nline four\nline five"}},
 	))
-	tr.renderView(th, 80, false) // warm
+	tr.renderView(th, 80, false, breadcrumbHint) // warm
 
 	// The tool block, expanded: a different `expanded` flag, so a different key.
 	if !tr.toggleExpanded(1) {
 		t.Fatal("entries[1] is not a toggleable block — fixture is wrong")
 	}
-	sameRender(t, "after a toggle", tr.renderView(th, 80, false), coldRender(tr, th, 80, false))
+	sameRender(t, "after a toggle", tr.renderView(th, 80, false, breadcrumbHint), coldRender(tr, th, 80, false))
 
 	// A narrower window re-wraps everything.
-	sameRender(t, "after a width change", tr.renderView(th, 40, false), coldRender(tr, th, 40, false))
+	sameRender(t, "after a width change", tr.renderView(th, 40, false, breadcrumbHint), coldRender(tr, th, 40, false))
 
 	// A live call, and the star's two phases. The blink phase reaches only a live block's header,
 	// so the two phases must differ here and be right at both.
 	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "2", Tool: "shell", Arguments: json.RawMessage(`{"command":"ls"}`)}})
-	settled := tr.renderView(th, 80, false)
+	settled := tr.renderView(th, 80, false, breadcrumbHint)
 	sameRender(t, "live block, settled phase", settled, coldRender(tr, th, 80, false))
-	blinked := tr.renderView(th, 80, true)
+	blinked := tr.renderView(th, 80, true, breadcrumbHint)
 	sameRender(t, "live block, blink phase", blinked, coldRender(tr, th, 80, true))
 	if equalLines(settled.lines, blinked.lines) {
 		t.Error("the blink phase painted a live block identically — the fixture holds no open call")
@@ -128,15 +128,15 @@ func TestPaintCacheRepaintsWhenTheKeyMoves(t *testing.T) {
 	// line that has no fill cell at all.
 	subAgentCall(tr, "s1", "survey the tests", 0)
 	readCall(tr, "r1", "suite_test.go", 1, 90, 1)
-	before := tr.renderView(th, 80, false) // warm the run's block, with no reading on it yet
+	before := tr.renderView(th, 80, false, breadcrumbHint) // warm the run's block, with no reading on it yet
 	subAgentUsage(tr, 1, 12000, 32768)
-	first := tr.renderView(th, 80, false)
+	first := tr.renderView(th, 80, false, breadcrumbHint)
 	sameRender(t, "after the delegate's first reading", first, coldRender(tr, th, 80, false))
 	if equalLines(before.lines, first.lines) {
 		t.Error("the first context reading changed no line — the fixture's run paints no fill cell")
 	}
 	subAgentUsage(tr, 1, 18000, 32768)
-	second := tr.renderView(th, 80, false)
+	second := tr.renderView(th, 80, false, breadcrumbHint)
 	sameRender(t, "after the reading moved", second, coldRender(tr, th, 80, false))
 	if equalLines(first.lines, second.lines) {
 		t.Error("a moved reading served the previous figure — paintKey does not name it")
@@ -161,13 +161,13 @@ func TestPaintCacheCoversEveryGroupMemberState(t *testing.T) {
 			Arguments: []byte(`{"command":"` + c[0] + `"}`)}})
 		tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: id, Content: c[1]}})
 	}
-	collapsed := tr.renderView(th, 80, false) // warm
+	collapsed := tr.renderView(th, 80, false, breadcrumbHint) // warm
 
 	for member := range 3 {
 		if !tr.setExpanded(member, true) {
 			t.Fatalf("entries[%d] is not a toggleable block — fixture is wrong", member)
 		}
-		opened := tr.renderView(th, 80, false)
+		opened := tr.renderView(th, 80, false, breadcrumbHint)
 		sameRender(t, fmt.Sprintf("member %d open", member), opened, coldRender(tr, th, 80, false))
 		if equalLines(opened.lines, collapsed.lines) {
 			t.Errorf("opening member %d served the collapsed paint; the key does not cover its state", member)
@@ -176,7 +176,7 @@ func TestPaintCacheCoversEveryGroupMemberState(t *testing.T) {
 			t.Fatalf("entries[%d] would not close again", member)
 		}
 	}
-	sameRender(t, "closed again", tr.renderView(th, 80, false), collapsed)
+	sameRender(t, "closed again", tr.renderView(th, 80, false, breadcrumbHint), collapsed)
 }
 
 // A session switch re-uses head indices for a different conversation's entries, and reset is what
@@ -187,12 +187,12 @@ func TestPaintCacheDoesNotSurviveAReset(t *testing.T) {
 	tr := warmed(&transcript{})
 	tr.addStartup(startupView{Host: "localhost", Model: "test"})
 	tr.addUser("the first session's prompt", nil)
-	tr.renderView(th, 80, false) // warm
+	tr.renderView(th, 80, false, breadcrumbHint) // warm
 
 	tr.reset()
 	tr.addStartup(startupView{Host: "localhost", Model: "test"})
 	tr.addUser("a different session entirely", nil)
-	sameRender(t, "after a session switch", tr.renderView(th, 80, false), coldRender(tr, th, 80, false))
+	sameRender(t, "after a session switch", tr.renderView(th, 80, false, breadcrumbHint), coldRender(tr, th, 80, false))
 }
 
 // The equivalence matrix — the guard the whole cache rests on. A memo is only as good as its key,
@@ -219,7 +219,7 @@ func TestPaintCacheMatchesAColdRenderThroughEveryMutation(t *testing.T) {
 	width, blink := 80, false
 	check := func(what string) {
 		t.Helper()
-		sameRender(t, what, tr.renderView(th, width, blink), coldRender(tr, th, width, blink))
+		sameRender(t, what, tr.renderView(th, width, blink, breadcrumbHint), coldRender(tr, th, width, blink))
 	}
 	check("the opening scrollback") // also the cold fill: from here the cache holds every block
 
@@ -269,11 +269,11 @@ func TestPaintCacheMatchesAColdRenderThroughEveryMutation(t *testing.T) {
 		mutate: func() {
 			runCall(tr, "c5", "go test ./...", "ok   internal/tui\nok   internal/agent\nok   internal/run\nok   internal/schedule\nok   internal/domain\nPASS", 0)
 			head := len(tr.entries) - 1
-			shut := tr.renderView(th, width, blink)
+			shut := tr.renderView(th, width, blink, breadcrumbHint)
 			if !tr.toggleTypeExpanded(head) {
 				t.Fatalf("entries[%d] heads no run — the script's fixture is wrong", head)
 			}
-			listed := tr.renderView(th, width, blink)
+			listed := tr.renderView(th, width, blink, breadcrumbHint)
 			check("the Run's type row opened")
 			if equalLines(shut.lines, listed.lines) {
 				t.Error("the type row painted identically open and shut — it lists nothing")
@@ -281,7 +281,7 @@ func TestPaintCacheMatchesAColdRenderThroughEveryMutation(t *testing.T) {
 			if !tr.toggleExpanded(head) {
 				t.Fatalf("entries[%d] is not a toggleable block — the script's fixture is wrong", head)
 			}
-			expanded := tr.renderView(th, width, blink)
+			expanded := tr.renderView(th, width, blink, breadcrumbHint)
 			check("the Run expanded")
 			if equalLines(listed.lines, expanded.lines) {
 				t.Error("the Run painted identically open and shut — its output hides nothing")
@@ -297,10 +297,10 @@ func TestPaintCacheMatchesAColdRenderThroughEveryMutation(t *testing.T) {
 		// the one thing in the paint that follows the phase.
 		name: "a blink flip with a live block",
 		mutate: func() {
-			settled := tr.renderView(th, width, false)
+			settled := tr.renderView(th, width, false, breadcrumbHint)
 			blink = true
 			check("the star's hollow phase")
-			if equalLines(settled.lines, tr.renderView(th, width, true).lines) {
+			if equalLines(settled.lines, tr.renderView(th, width, true, breadcrumbHint).lines) {
 				t.Error("the two star phases painted identically — the script holds no open call")
 			}
 			blink = false
@@ -328,16 +328,16 @@ func TestPaintCacheMatchesAColdRenderThroughEveryMutation(t *testing.T) {
 		mutate: func() {
 			subAgentCall(tr, "s2", "check the docs", 0)
 			readCall(tr, "d1", "README.md", 1, 30, 1)
-			quiet := tr.renderView(th, width, blink)
+			quiet := tr.renderView(th, width, blink, breadcrumbHint)
 			check("the second run, before its delegate has reported")
 			subAgentUsage(tr, 1, 12000, 32768)
-			first := tr.renderView(th, width, blink)
+			first := tr.renderView(th, width, blink, breadcrumbHint)
 			check("the delegate's first reading")
 			if equalLines(quiet.lines, first.lines) {
 				t.Error("the first reading changed no line — the script's run paints no fill cell")
 			}
 			subAgentUsage(tr, 1, 18000, 32768)
-			if equalLines(first.lines, tr.renderView(th, width, blink).lines) {
+			if equalLines(first.lines, tr.renderView(th, width, blink, breadcrumbHint).lines) {
 				t.Error("a moved reading served the previous figure — paintKey does not name it")
 			}
 		},
@@ -378,7 +378,7 @@ func TestPaintCacheRepaintsOnlyTheStreamingTail(t *testing.T) {
 	tr.apply(domain.TokenEvent{Text: "the next reply is still "})
 	const blocks = 2 * exchanges
 
-	if got := tr.renderView(th, 80, false); len(got.lines) == 0 {
+	if got := tr.renderView(th, 80, false, breadcrumbHint); len(got.lines) == 0 {
 		t.Fatal("the fixture rendered nothing")
 	}
 	if got := tr.paints.misses; got != blocks {
@@ -388,7 +388,7 @@ func TestPaintCacheRepaintsOnlyTheStreamingTail(t *testing.T) {
 	// One more token, and a repaint. Only the tail moved.
 	hits, misses := tr.paints.hits, tr.paints.misses
 	tr.apply(domain.TokenEvent{Text: "coming in"})
-	appended := tr.renderView(th, 80, false)
+	appended := tr.renderView(th, 80, false, breadcrumbHint)
 	if got := tr.paints.misses - misses; got != 0 {
 		t.Errorf("appending one token repainted %d settled blocks; want 0 — only the streaming tail moved", got)
 	}
@@ -400,7 +400,7 @@ func TestPaintCacheRepaintsOnlyTheStreamingTail(t *testing.T) {
 	// And a second render of the very same state is all hits: the reuse is a steady state, not a
 	// one-off that the first repaint's own store happened to satisfy.
 	hits, misses = tr.paints.hits, tr.paints.misses
-	second := tr.renderView(th, 80, false)
+	second := tr.renderView(th, 80, false, breadcrumbHint)
 	if got := tr.paints.misses - misses; got != 0 {
 		t.Errorf("an identical second render took %d misses; want 0", got)
 	}
@@ -436,7 +436,7 @@ func BenchmarkRenderViewStreaming(b *testing.B) {
 	repaint := func(b *testing.B, tr *transcript) {
 		b.ReportAllocs()
 		for b.Loop() {
-			if got := tr.renderView(th, 100, false); len(got.lines) == 0 {
+			if got := tr.renderView(th, 100, false, breadcrumbHint); len(got.lines) == 0 {
 				b.Fatal("rendered nothing")
 			}
 		}
@@ -448,7 +448,7 @@ func BenchmarkRenderViewStreaming(b *testing.B) {
 	// streaming session actually sits in.
 	b.Run("warm", func(b *testing.B) {
 		tr := warmed(build())
-		tr.renderView(th, 100, false)
+		tr.renderView(th, 100, false, breadcrumbHint)
 		repaint(b, tr)
 	})
 }
@@ -475,16 +475,16 @@ func TestPaintCacheKeysOnTheRoot(t *testing.T) {
 	tr = warmed(tr)
 	th := newTheme(scheme.Default())
 
-	tr.renderView(th, 80, false) // cold, filling the cache at the top level
-	sameRender(t, "the top level served warm", tr.renderView(th, 80, false), coldRender(tr, th, 80, false))
+	tr.renderView(th, 80, false, breadcrumbHint) // cold, filling the cache at the top level
+	sameRender(t, "the top level served warm", tr.renderView(th, 80, false, breadcrumbHint), coldRender(tr, th, 80, false))
 
 	misses := tr.paints.misses
 	tr.setRoot(root)
-	sameRender(t, "rooted at the child", tr.renderView(th, 80, false), coldRender(tr, th, 80, false))
+	sameRender(t, "rooted at the child", tr.renderView(th, 80, false, breadcrumbHint), coldRender(tr, th, 80, false))
 	if tr.paints.misses == misses {
 		t.Error("the rooted paint drew nothing fresh; want the root in the key, not the top level's rows served back")
 	}
 
 	tr.setRoot(runRef{})
-	sameRender(t, "back at the top level", tr.renderView(th, 80, false), coldRender(tr, th, 80, false))
+	sameRender(t, "back at the top level", tr.renderView(th, 80, false, breadcrumbHint), coldRender(tr, th, 80, false))
 }

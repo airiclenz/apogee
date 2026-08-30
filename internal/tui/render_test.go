@@ -550,7 +550,7 @@ func TestRootedPaintShowsOneRunAndNothingElse(t *testing.T) {
 func TestRootedPaintRegistersNoUserBlock(t *testing.T) {
 	tr, root := rootedFixture()
 	tr.setRoot(root)
-	view := tr.renderView(newTheme(scheme.Default()), 80, false)
+	view := tr.renderView(newTheme(scheme.Default()), 80, false, breadcrumbHint)
 
 	if len(view.userBlocks) != 0 {
 		t.Errorf("the rooted paint registered %d user blocks, want none: %+v", len(view.userBlocks), view.userBlocks)
@@ -571,11 +571,11 @@ func TestUnrootedPaintIsUnchangedByAVisit(t *testing.T) {
 	tr.paints = newPaintCache()
 	th := newTheme(scheme.Default())
 
-	before := tr.renderView(th, 80, false)
+	before := tr.renderView(th, 80, false, breadcrumbHint)
 	tr.setRoot(root)
-	tr.renderView(th, 80, false)
+	tr.renderView(th, 80, false, breadcrumbHint)
 	tr.setRoot(runRef{})
-	after := tr.renderView(th, 80, false)
+	after := tr.renderView(th, 80, false, breadcrumbHint)
 
 	sameRender(t, "back at the top level", after, before)
 	if !slices.Equal(after.userBlocks, before.userBlocks) {
@@ -596,6 +596,10 @@ func TestRunViewHeaderIsDrawnByTheStickyOverlay(t *testing.T) {
 	m := newTestModel(t)
 	m.transcript = *tr
 	m.transcript.setRoot(root)
+	// The view stack too, not just the paint's root: the header's hint is a fact about the FRAME
+	// (Model.backHint), so a Model rooted at a run with no view open would paint a trail with no key
+	// beside it and this test would be asserting on a state the program never reaches.
+	m.viewStack = []runView{{ref: root}}
 	m.refreshViewport()
 
 	start, count := m.stickyHeaderSpan()

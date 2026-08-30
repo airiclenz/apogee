@@ -1074,7 +1074,11 @@ advertising a key end together. It is the **one sticky header a view has**: a ro
 no `❯` block to stick, so the breadcrumb holds the top row for as long as the view is open, and it
 is squared out to the full width so the terminal's own background never shows through beside it.
 Where the width cannot pay for both, the hint gives way whole rather than truncating — a key hint
-nobody can read advertises nothing, and the trail is what the header is for. A motionless click
+nobody can read advertises nothing, and the trail is what the header is for. It gives way for a
+second reason too: while a child's ask or approval pane stands inside the view, `esc` answers the
+pane and no longer walks up, so the header drops the hint exactly where the status line's right slot
+drops it — the two rows advertise one key, and neither may name a press the other does not have. The
+trail itself stays, because where the reader is is still true. A motionless click
 anywhere on the row goes **one** level up, and `esc` does the same: the trail is a sign rather than
 a set of jump targets, so leaving a run two deep is two presses.
 

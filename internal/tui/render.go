@@ -145,7 +145,12 @@ func (p blockPaint) retargeted(kind targetKind) blockPaint {
 // belongs to the frame being drawn and not to the scrollback — the same entries painted a tick
 // later are the same entries (ADR 0011: the Model is copied by value, and the renderer stays a
 // pure function of what it is handed).
-func (t *transcript) renderView(th theme, width int, blink bool) renderedTranscript {
+//
+// backHint is the wording the rooted paint's breadcrumb advertises for esc, and is a PARAMETER for
+// the same reason blink is: whether esc leaves the view or answers a pane standing inside it is a
+// fact about the frame ([Model.backHint]), not about the scrollback. A caller with no frame hands
+// the plain [breadcrumbHint]; empty paints the trail with no hint at all (breadcrumbRow).
+func (t *transcript) renderView(th theme, width int, blink bool, backHint string) renderedTranscript {
 	if width < 1 {
 		width = 1
 	}
@@ -227,7 +232,7 @@ func (t *transcript) renderView(th theme, width int, blink bool) renderedTranscr
 	// advertising rows to unfold.
 	if root.rooted() {
 		head := t.entries[root.first-1]
-		lines = append(lines, breadcrumbRow(th, breadcrumbTrail(t.entries, root.ref.spawn), width))
+		lines = append(lines, breadcrumbRow(th, breadcrumbTrail(t.entries, root.ref.spawn), width, backHint))
 		targets = append(targets, lineTarget{kind: targetBreadcrumb})
 		header = userBlock{start: 0, count: 1}
 		if strings.TrimSpace(head.tool.task) != "" {
@@ -717,7 +722,7 @@ func (t *transcript) resolveBlock(th theme, head int, in paintInput, width int, 
 // the star's SETTLED phase: the blink is a fact about the frame being drawn, and a caller that has
 // no frame (a width probe, a substring assertion) has no phase either.
 func (t *transcript) renderLines(th theme, width int) []string {
-	return t.renderView(th, width, false).lines
+	return t.renderView(th, width, false, breadcrumbHint).lines
 }
 
 // previewTailLines is how much of the in-flight buffer the streaming preview renders: its last 256

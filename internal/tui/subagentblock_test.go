@@ -281,7 +281,7 @@ func TestSubAgentScheduledUntilItStarts(t *testing.T) {
 // beside the lines it belongs to — the accounting the paint itself built (renderedTranscript), so a
 // test asks what a click would resolve to rather than re-deriving it from the text.
 func targetedRender(tr *transcript, width int) ([]string, []lineTarget) {
-	view := tr.renderView(newTheme(scheme.Default()), width, false)
+	view := tr.renderView(newTheme(scheme.Default()), width, false, breadcrumbHint)
 	lines := make([]string, len(view.lines))
 	for i, ln := range view.lines {
 		lines[i] = strings.TrimRight(collapseLeader(ansiPattern.ReplaceAllString(ln, "")), " ")
@@ -529,8 +529,8 @@ func TestSubAgentInterruptedHeadIsNotFinished(t *testing.T) {
 
 	replayed := &transcript{}
 	replayed.replay(entries)
-	settled := replayed.renderView(newTheme(scheme.Default()), 80, false)
-	blinked := replayed.renderView(newTheme(scheme.Default()), 80, true)
+	settled := replayed.renderView(newTheme(scheme.Default()), 80, false, breadcrumbHint)
+	blinked := replayed.renderView(newTheme(scheme.Default()), 80, true, breadcrumbHint)
 	if !equalLines(settled.lines, blinked.lines) {
 		t.Error("the blink phase repainted the run; an interrupted delegation must wear no running star")
 	}
@@ -982,7 +982,7 @@ func TestBreadcrumbRowSpendsItsWidthInOrder(t *testing.T) {
 	th := newTheme(scheme.Default())
 	const trail = "← main › repo-scout"
 
-	wide := strip(breadcrumbRow(th, trail, 60))
+	wide := strip(breadcrumbRow(th, trail, 60, breadcrumbHint))
 	if want := bodyIndent + trail; !strings.HasPrefix(wide, want) {
 		t.Errorf("the row is %q, want it to lead with %q", wide, want)
 	}
@@ -993,7 +993,7 @@ func TestBreadcrumbRowSpendsItsWidthInOrder(t *testing.T) {
 		t.Errorf("the row is %d columns wide, want 60", got)
 	}
 
-	narrow := strip(breadcrumbRow(th, trail, 24))
+	narrow := strip(breadcrumbRow(th, trail, 24, breadcrumbHint))
 	if strings.Contains(narrow, breadcrumbHint) {
 		t.Errorf("the row is %q at 24 columns; want the hint dropped whole", narrow)
 	}

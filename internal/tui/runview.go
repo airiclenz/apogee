@@ -273,6 +273,23 @@ func (m Model) runViewOwnsEsc() bool {
 	return m.state != stateAwaitingAsk && m.state != stateAwaitingApproval
 }
 
+// backHint is the wording the view's sticky breadcrumb advertises for esc in THIS frame, and the
+// header's half of the one rule [Model.statusRight] keeps for the status line: the two rows
+// advertise one key, so neither may name a press the other does not have. While a child's ask or
+// approval pane stands inside the view esc answers the pane ([Model.runViewOwnsEsc]), and the header
+// says nothing rather than promising a way out the key no longer takes; the trail itself stays, so
+// the reader can still see where they are.
+//
+// It deliberately does NOT carry statusRight's stateErrored half. There esc still walks one level up
+// — the claimant keeps the key — and only the status slot yields, to name the thing to dismiss; the
+// header goes on advertising what the press actually does.
+func (m Model) backHint() string {
+	if m.runViewOwnsEsc() {
+		return breadcrumbHint
+	}
+	return ""
+}
+
 // runViewKey is the view's whole key contract: esc goes one level up, and every other key falls
 // through untouched — to the block cursor below it in the claim order, and to the prompt box below
 // that. Claiming esc is also what keeps the stop gesture out of a view: m.lastEsc never arms while

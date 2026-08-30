@@ -191,13 +191,22 @@ func breadcrumbTrail(entries []entry, spawn string) string {
 // body column, the key that leaves the view held bodyIndent off the right edge, on the one
 // full-width field the frame already spends on a header (the user block's).
 //
+// hint is that key's wording for THIS frame rather than a constant, for the reason the status line's
+// right slot gates the same wording ([Model.statusRight]): while a child's ask or approval pane
+// stands inside the view, esc answers the pane and not the view ([Model.runViewOwnsEsc]), and a
+// header still advertising `esc back` would name a key the press does not have. An empty hint paints
+// the trail alone — the two rows advertise one key, so they fall silent together ([Model.backHint]).
+//
 // Where the width cannot pay for both, the hint gives way whole: the trail is what the header is
 // FOR, and a truncated key hint would advertise a keystroke nobody could read. The row is squared to
 // the width either way, so the field runs the whole way across rather than showing the terminal's
 // own background through the gap.
-func breadcrumbRow(th theme, trail string, width int) string {
+func breadcrumbRow(th theme, trail string, width int, hint string) string {
 	body := bodyIndent + trail
-	hint := breadcrumbHint + bodyIndent
+	if hint == "" {
+		return th.userBlock.Render(squareLine(th.measure, body, width))
+	}
+	hint += bodyIndent
 	gap := width - th.measure.Width(body) - th.measure.Width(hint)
 	if gap < 1 {
 		return th.userBlock.Render(squareLine(th.measure, body, width))

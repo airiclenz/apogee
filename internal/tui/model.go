@@ -2166,7 +2166,7 @@ func (m Model) hiddenDraftRows() int {
 // is still down — is exempt and always survives: it shades nothing, and the release still needs the
 // line the press named to toggle the block under it (spanUnchanged, mouse.go).
 func (m *Model) refreshViewport() {
-	rendered := m.transcript.renderView(m.th, m.transcriptWidth(), m.spin.blink()).
+	rendered := m.transcript.renderView(m.th, m.transcriptWidth(), m.spin.blink(), m.backHint()).
 		reserveWidgetCells(m.viewport.Width())
 	if !m.transcriptSel.spanUnchanged(m.lines, rendered.lines) {
 		m.transcriptSel = transcriptSel{} // the ground under the span moved: let go (mouse.go)

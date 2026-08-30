@@ -38,7 +38,7 @@ type blockMark struct {
 // safe to use as an index into the targets on the mouse path (model.go).
 func blockMarks(t *testing.T, tr *transcript, width int) []blockMark {
 	t.Helper()
-	rendered := tr.renderView(newTheme(scheme.Default()), width, false)
+	rendered := tr.renderView(newTheme(scheme.Default()), width, false, breadcrumbHint)
 	if len(rendered.targets) != len(rendered.lines) {
 		t.Fatalf("targets and lines out of lockstep: %d targets for %d lines",
 			len(rendered.targets), len(rendered.lines))
@@ -400,7 +400,7 @@ func TestRemainderCountRidesTheOutcomeSlot(t *testing.T) {
 		ID: "c1", Tool: "terminal", Arguments: []byte(`{"command":"go test ./..."}`)}})
 	tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c1", Content: "ok   a\nok   b\nPASS"}})
 
-	rendered := tr.renderView(th, 80, false)
+	rendered := tr.renderView(th, 80, false, breadcrumbHint)
 	if len(rendered.lines) != 2 {
 		t.Fatalf("the collapsed block paints %d rows, want its header and one leader row:\n%s",
 			len(rendered.lines), ansi.Strip(strings.Join(rendered.lines, "\n")))
@@ -465,7 +465,7 @@ func TestPromptBlockIsOneClickSurface(t *testing.T) {
 			tr := &transcript{}
 			tc.build(t, tr)
 
-			rendered := tr.renderView(newTheme(scheme.Default()), width, false)
+			rendered := tr.renderView(newTheme(scheme.Default()), width, false, breadcrumbHint)
 			if len(rendered.targets) != len(rendered.lines) {
 				t.Fatalf("targets and lines out of lockstep: %d targets for %d lines",
 					len(rendered.targets), len(rendered.lines))
@@ -602,7 +602,7 @@ func branchIndicator(t *testing.T, tr *transcript) string {
 
 func headerStar(t *testing.T, tr *transcript, blink bool) string {
 	t.Helper()
-	lines := tr.renderView(newTheme(scheme.Default()), 80, blink).lines
+	lines := tr.renderView(newTheme(scheme.Default()), 80, blink, breadcrumbHint).lines
 	if len(lines) == 0 {
 		t.Fatal("the transcript rendered nothing at all")
 	}

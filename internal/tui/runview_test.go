@@ -776,3 +776,70 @@ func TestRunViewDecisionPaneOwnsTheLegend(t *testing.T) {
 		}
 	})
 }
+
+// TestRunViewBreadcrumbHintFollowsTheKey is the same guard on the row ABOVE the transcript. The
+// header and the status line's right slot advertise ONE key (statusRight, "the two rows advertise
+// one key"), so the breadcrumb may not go on promising `esc back` while a child's ask or approval
+// pane holds esc for its own answer. The trail itself stays either way — it says where the reader
+// is, which is true under a pane — and the hint comes back the moment the question is away.
+func TestRunViewBreadcrumbHintFollowsTheKey(t *testing.T) {
+	// header is the row the sticky overlay freezes at the top of the view (render.go), plainly.
+	header := func(t *testing.T, m Model) string {
+		t.Helper()
+		m.refreshViewport()
+		if len(m.lines) == 0 {
+			t.Fatal("the view painted no lines at all")
+		}
+		return strip(m.lines[0])
+	}
+
+	for _, tc := range []struct {
+		name   string
+		open   tea.Msg
+		answer []tea.Msg
+	}{
+		{
+			name:   "an ask",
+			open:   askReqMsg{Request: domain.AskRequest{Question: "which file?"}, Reply: make(chan domain.AskAnswer, 1)},
+			answer: []tea.Msg{keyRune('4'), keyEnter()},
+		},
+		{
+			name: "an approval",
+			open: approvalReqMsg{Request: domain.ApprovalRequest{Tool: "terminal"}, Reply: make(chan domain.ApprovalDecision, 1)},
+		},
+	} {
+		t.Run(tc.name+" takes the hint off the header", func(t *testing.T) {
+			m := modelViewingChild(t, &fakeEngine{}, childRunning)
+			before := header(t, m)
+			if !strings.Contains(before, breadcrumbHint) {
+				t.Fatalf("setup: the header is %q; want it to advertise %q", before, breadcrumbHint)
+			}
+			trail := strings.TrimSpace(before[:strings.Index(before, breadcrumbHint)])
+
+			m = step(t, m, tc.open)
+
+			under := header(t, m)
+			if strings.Contains(under, breadcrumbHint) {
+				t.Errorf("the header is %q under %s; esc answers the pane here, so it must not advertise the way back", under, tc.name)
+			}
+			if !strings.Contains(under, trail) {
+				t.Errorf("the header is %q under %s; want it to keep the trail %q — where the reader is is still true", under, tc.name, trail)
+			}
+			if got := plainSlot(m.statusRight()); strings.Contains(got, breadcrumbHint) {
+				t.Errorf("the status slot is %q under %s; the two rows advertise one key and must fall silent together", got, tc.name)
+			}
+
+			// The answer, and the header wears the key again — the view stood behind the pane.
+			if tc.answer == nil {
+				m = step(t, m, approvalArmedMsg{seq: m.approvalSeq})
+				m = step(t, m, keyEnter())
+			}
+			for _, msg := range tc.answer {
+				m = step(t, m, msg)
+			}
+			if after := header(t, m); !strings.Contains(after, breadcrumbHint) {
+				t.Errorf("the header is %q once the question is away; want %q back", after, breadcrumbHint)
+			}
+		})
+	}
+}

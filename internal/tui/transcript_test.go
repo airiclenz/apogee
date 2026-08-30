@@ -3211,7 +3211,7 @@ func TestChildInterjectionLandsInsideItsRun(t *testing.T) {
 
 		// One stop, the human's own prompt: a message steering a delegate is drawn like a prompt
 		// and walked past like a delegate's entry, so ctrl+↑/↓ offer only turns the reader started.
-		blocks := tr.renderView(th, 80, false).userBlocks
+		blocks := tr.renderView(th, 80, false, breadcrumbHint).userBlocks
 		if len(blocks) != 1 {
 			t.Errorf("renderView recorded %d user blocks, want 1 — the top-level prompt alone", len(blocks))
 		}
@@ -3219,7 +3219,7 @@ func TestChildInterjectionLandsInsideItsRun(t *testing.T) {
 		// Inside the run's own view, where the message IS painted, it claims no stop either: the
 		// breadcrumb is the only sticky header a view has (ADR 0063).
 		tr.setRoot(runRef{depth: 1, spawn: "s1"})
-		view := tr.renderView(th, 80, false)
+		view := tr.renderView(th, 80, false, breadcrumbHint)
 		if !strings.Contains(strings.Join(view.lines, "\n"), "check the docs too") {
 			t.Fatalf("the run's view does not paint the message addressed to it:\n%s", strings.Join(view.lines, "\n"))
 		}
