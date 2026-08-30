@@ -209,46 +209,35 @@ func (o Opener) osArgv(program string, args ...string) ([]string, error) {
 //
 // The two failure directions are deliberately different, because they mean different things:
 //
-//   - NOT FOUND — nothing on PATH, or a name found only through a relative PATH entry
-//     (exec.ErrDot, which carries no absolute path to run) — is ErrNoOpener, the same NORMAL
-//     outcome as a headless session: this machine has no opener, so the ladder degrades to the
-//     baseline transcript rung and the document is still presented (ADR 0019 §4).
-//   - REFUSED — the program resolves inside the workspace — is a real error, surfaced by the
-//     caller rather than swallowed. Degrading silently there would hide the one case worth
-//     saying out loud, and unlike a missing opener it is not a fact about the machine's desktop:
-//     it says the PATH this session inherited points into bytes the model may write. The message
-//     names the resolved path and the fence that refused it (security.ErrExecFromWritablePath),
-//     so the operator can see which PATH entry to fix rather than hunting a missing install.
+//   - NOT FOUND — nothing on PATH at all — is ErrNoOpener, the same NORMAL outcome as a headless
+//     session: this machine has no opener, so the ladder degrades to the baseline transcript rung
+//     and the document is still presented (ADR 0019 §4). It is the ONLY outcome that degrades.
+//   - REFUSED — the program resolves inside the workspace, or resolves to a relative path
+//     (exec.ErrDot, or an answer that simply is not absolute, both of which the child would
+//     re-resolve against a working directory that is usually the workspace itself) — is a real
+//     error, surfaced by the caller rather than swallowed. Degrading silently there would hide
+//     the one case worth saying out loud, and unlike a missing opener it is not a fact about the
+//     machine's desktop: it says the PATH this session inherited points into bytes the model may
+//     write. The message names the resolved path and the fence that refused it
+//     (security.ErrExecFromWritablePath), so the operator can see which PATH entry to fix rather
+//     than hunting a missing install.
 //
+// The lookup and the refusal are one step, security.ResolveProgram — the entry every exec site
+// takes, so this one cannot acquire a program without also acquiring the fence that judges it.
 // The fence is the workspace root alone, with no confinement box: the opener runs OUTSIDE tool
 // confinement by design (ADR 0019 §5, package doc), so there is no box at this seam — the
 // model-writable set it can name is the root the file tools are scoped to. It is the same rule
 // every exec site in internal/tools applies, measured against the same boundary, so the two
 // cannot drift apart.
 func (o Opener) resolveProgram(program string) (string, error) {
-	look := o.LookPath
-	if look == nil {
-		look = exec.LookPath
-	}
-	resolved, err := look(program)
-	if err != nil || !filepath.IsAbs(resolved) {
+	resolved, err := security.ResolveProgram(o.LookPath, program, o.WorkspaceRoot, nil)
+	if err != nil {
+		if errors.Is(err, security.ErrExecFromWritablePath) {
+			return "", fmt.Errorf("present: refusing to launch %s: %w", program, err)
+		}
 		return "", ErrNoOpener
 	}
-	if err := refuseExecFromWritablePath(resolved, o.WorkspaceRoot); err != nil {
-		return "", fmt.Errorf("present: refusing to launch %s: %w", program, err)
-	}
 	return resolved, nil
-}
-
-// refuseExecFromWritablePath is this package's name for the shared exec fence
-// (security.RefuseExecFromWritablePath) — the same rule, under the same name, that every tool
-// exec site applies: a program resolving inside a path the model can write is never argv[0].
-//
-// It takes no confinement box, unlike the wrappers in internal/tools and internal/mechanisms:
-// the opener runs outside tool confinement by design (ADR 0019 §5), so there is no box to pass
-// and a parameter that could only ever be nil would read as one that is sometimes filled.
-func refuseExecFromWritablePath(argv0, root string) error {
-	return security.RefuseExecFromWritablePath(argv0, root, nil)
 }
 
 // openerRenderableExts is rung 1's allow-list: the extensions whose desktop handler RENDERS the

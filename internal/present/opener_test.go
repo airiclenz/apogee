@@ -625,6 +625,11 @@ func TestOpenerSurfacesARunnerFailure(t *testing.T) {
 // mode, with no approval and no confinement box. The refusal must therefore be LOUD — a real
 // error naming the resolved file, not the ErrNoOpener a headless machine reports — because
 // unlike a missing opener it says something is wrong with this session, not with this desktop.
+//
+// A relative answer is the same refusal wearing a different hat: exec.LookPath's ErrDot shape (a
+// name found only through a relative PATH entry), or an answer that simply is not absolute. The
+// child would re-resolve either against a working directory that is usually the workspace — the
+// very box the fence exists to keep out of argv[0] — so neither may degrade quietly.
 func TestOpenerRefusesAProgramInsideTheWorkspace(t *testing.T) {
 	t.Parallel()
 
@@ -638,37 +643,68 @@ func TestOpenerRefusesAProgramInsideTheWorkspace(t *testing.T) {
 		t.Fatalf("write %s: %v", planted, err)
 	}
 
-	runner := &recordingRunner{}
-	opener := Opener{
-		GOOS:          "linux",
-		Env:           envFrom(map[string]string{"DISPLAY": ":0"}),
-		WorkspaceRoot: root,
-		LookPath:      func(name string) (string, error) { return filepath.Join(bin, name), nil },
-		Run:           runner.run,
+	tests := []struct {
+		name string
+		look func(string) (string, error)
+		// wantResolved is the absolute path the message must name, empty on the rows whose
+		// answer is relative and so has no resolved file to point the operator at.
+		wantResolved string
+	}{
+		{
+			name:         "a program planted inside the workspace",
+			look:         func(name string) (string, error) { return filepath.Join(bin, name), nil },
+			wantResolved: security.EvalRealPath(planted),
+		},
+		{
+			name: "found only through a relative PATH entry (ErrDot)",
+			look: func(name string) (string, error) { return filepath.Join("bin", name), exec.ErrDot },
+		},
+		{
+			name: "a relative answer with no error at all",
+			look: func(name string) (string, error) { return filepath.Join("bin", name), nil },
+		},
 	}
 
-	err := opener.Open(testDocPath)
-	if !errors.Is(err, security.ErrExecFromWritablePath) {
-		t.Fatalf("Open() = %v, want the exec fence's refusal", err)
-	}
-	if errors.Is(err, ErrNoOpener) {
-		t.Error("Open() reported ErrNoOpener for a refused program, degrading silently past the one case worth saying")
-	}
-	// The operator has to be able to see WHICH file was refused: "not available" would send them
-	// after a missing install instead of after their own PATH.
-	if resolved := security.EvalRealPath(planted); !strings.Contains(err.Error(), resolved) {
-		t.Errorf("Open() = %v, want the message to name the resolved program %q", err, resolved)
-	}
-	if len(runner.calls) != 0 {
-		t.Errorf("Open() launched %v, want nothing run", runner.calls)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			runner := &recordingRunner{}
+			opener := Opener{
+				GOOS:          "linux",
+				Env:           envFrom(map[string]string{"DISPLAY": ":0"}),
+				WorkspaceRoot: root,
+				LookPath:      tt.look,
+				Run:           runner.run,
+			}
+
+			err := opener.Open(testDocPath)
+			if !errors.Is(err, security.ErrExecFromWritablePath) {
+				t.Fatalf("Open() = %v, want the exec fence's refusal", err)
+			}
+			if errors.Is(err, ErrNoOpener) {
+				t.Error("Open() reported ErrNoOpener for a refused program, degrading silently past the one case worth saying")
+			}
+			if !strings.Contains(err.Error(), "xdg-open") {
+				t.Errorf("Open() = %v, want the message to name the program", err)
+			}
+			// The operator has to be able to see WHICH file was refused: "not available" would
+			// send them after a missing install instead of after their own PATH.
+			if tt.wantResolved != "" && !strings.Contains(err.Error(), tt.wantResolved) {
+				t.Errorf("Open() = %v, want the message to name the resolved program %q", err, tt.wantResolved)
+			}
+			if len(runner.calls) != 0 {
+				t.Errorf("Open() launched %v, want nothing run", runner.calls)
+			}
+		})
 	}
 }
 
-// A program that cannot be resolved to an absolute path is a fact about the MACHINE, so it takes
-// the machine's answer: ErrNoOpener, and the ladder degrades to the baseline transcript rung with
-// the document still presented. The relative rows are exec.LookPath's own ErrDot shape — a name
-// found only through a relative PATH entry, which the child would re-resolve against its working
-// directory (the workspace) — and are refused for the same reason the absolute check exists.
+// Nothing on PATH is a fact about the MACHINE, so it takes the machine's answer: ErrNoOpener, and
+// the ladder degrades to the baseline transcript rung with the document still presented. It is
+// the only lookup outcome that degrades — a relative answer is refused loudly instead, in
+// TestOpenerRefusesAProgramInsideTheWorkspace, because it says something about this session's
+// PATH rather than about this desktop.
 func TestOpenerDegradesWhenTheProgramDoesNotResolve(t *testing.T) {
 	t.Parallel()
 
@@ -679,14 +715,6 @@ func TestOpenerDegradesWhenTheProgramDoesNotResolve(t *testing.T) {
 		{
 			name: "nothing on PATH",
 			look: func(string) (string, error) { return "", exec.ErrNotFound },
-		},
-		{
-			name: "found only through a relative PATH entry (ErrDot)",
-			look: func(name string) (string, error) { return filepath.Join("bin", name), exec.ErrDot },
-		},
-		{
-			name: "a relative answer with no error at all",
-			look: func(name string) (string, error) { return filepath.Join("bin", name), nil },
 		},
 	}
 

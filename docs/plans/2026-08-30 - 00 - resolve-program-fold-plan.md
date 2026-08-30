@@ -275,7 +275,10 @@ every comment naming `refuseExecFromWritablePath` is re-pointed to `security.Res
 `internal/tools/exec_common.go:124` being the prose site the write-time list missed, so
 `grep -rn 'refuseExecFromWritablePath' internal/tools/` must end empty with comments included.
 
-## 4. `internal/present`: the opener resolves through the resolver — loud refusal
+## 4. `internal/present`: the opener resolves through the resolver — loud refusal — ✅ DONE (2026-08-30)
+
+NOTES (2026-08-30): the file's `exec` and `filepath` imports STAY — the item's "if nothing else uses them" condition is not met: `exec.Command` at `opener.go:434` (the launch itself) and `filepath.Ext` at `opener.go:346` (OpenerRenderable) are unrelated users. `grep -n 'exec\.LookPath' internal/present/*.go` now matches only comment text, no call form.
+NOTES (2026-08-30): `TestOpenerDegradesWhenTheProgramDoesNotResolve` keeps its table with the single surviving "nothing on PATH" row rather than being flattened to a straight-line test — the item says the subtest is what survives, and the row's name is what states which outcome still degrades.
 
 **Depends on item 1** (the ErrDot classification is what makes this item's ratified call reachable).
 
