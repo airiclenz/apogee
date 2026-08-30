@@ -4,6 +4,7 @@ import (
 	"context"
 	"embed"
 	"errors"
+	"fmt"
 	"strings"
 
 	apogeectx "github.com/airiclenz/apogee/internal/context"
@@ -363,6 +364,18 @@ func (a *Agent) compactTranscriptChars() int {
 	return int(float64(transcriptTokens) * a.budget().CharsPerToken)
 }
 
+// cappedSummaryErrFmt is the fault text for a summary call that came back with no visible text
+// after running into compactMaxTokens — the 2026-08-29 incident's shape, and the one blank reply
+// context.Compact's errEmptySummary would misdescribe: the model DID answer, at length, and spent
+// the entire cap on a reasoning pass apogee had explicitly asked it not to make (compactCompleter's
+// EffortOff override). So the message names the cap, the reasoning spent under it when the reply
+// carried any, and why the two do not add up — a server template that ignored the off rung — because
+// those are what an operator acts on: another server, or a profile whose template honours it. Like
+// cappedReplyErrFmt (ADR 0046) it deliberately does not invite a retry; the same fold meets the same
+// cap.
+const cappedSummaryErrFmt = "compaction summary hit its output cap (%d tokens) with no visible text " +
+	"to show for it%s — the summarizer asked for no reasoning; this server's template did not honour that"
+
 // compactCompleter adapts the Agent's provider seam to context.Completer: a single upstream
 // completion that is silent in the transcript but NOT unaccounted. Unlike streamResponse it emits
 // no TokenEvent — compaction is a maintenance call, not a Turn, so it must not stream into the
@@ -409,16 +422,20 @@ func (c compactCompleter) Complete(ctx context.Context, msgs []domain.Message) (
 		preq.ThinkingEffort = provider.EffortOff
 	}
 
-	var content strings.Builder
+	var content, upstreamThinking strings.Builder
 	var failed bool
 	var errMsg string
+	var finish domain.FinishReason
 	var usage *provider.Usage
 	for delta := range c.a.upstream.Stream(ctx, preq) {
 		switch delta.Kind {
 		case provider.DeltaContent:
 			content.WriteString(delta.Content)
+		case provider.DeltaThinking:
+			upstreamThinking.WriteString(delta.Thinking)
 		case provider.DeltaDone:
 			usage = delta.Usage // nil when the server omits its accounting, exactly as in streamResponse
+			finish = domain.FinishReason(delta.FinishReason)
 		case provider.DeltaError, provider.DeltaContextOverflow:
 			failed = true
 			errMsg = delta.Err
@@ -436,6 +453,13 @@ func (c compactCompleter) Complete(ctx context.Context, msgs []domain.Message) (
 	// what actually completed, and unlike streamResponse this call does NOT calibrate the chars→token
 	// estimator: the summarizer prompt is a rendered transcript, not the conversation the estimator
 	// models.
+	// The summary is assembled the way a Turn's reply is (assembleResponse): the inline thinking a
+	// delimited profile emits is lifted out of the content, so no <think> span can ride into the
+	// summary message and from there back into the folded conversation, and what is lifted joins the
+	// Upstream-split channel for the spend the fault below reports.
+	visible, inlineThinking := c.a.stripper.Strip(content.String())
+	thinking := joinThinking(upstreamThinking.String(), inlineThinking)
+
 	if usage != nil {
 		event := c.a.usage.record(
 			c.a.base(c.a.turns.index), c.a.cfg.Model, c.a.cfg.Context.MaxContextTokens,
@@ -444,5 +468,19 @@ func (c compactCompleter) Complete(ctx context.Context, msgs []domain.Message) (
 		event.Maintenance = true
 		c.a.cfg.Events.Emit(event)
 	}
-	return content.String(), nil
+
+	// A reasoning-only reply that ran into compactMaxTokens is not "an empty summary": the call
+	// completed, spent the whole cap, and produced nothing visible — so it faults here, naming both
+	// numbers, instead of reaching the reducer's errEmptySummary, which describes a model that
+	// produced nothing at all. Every OTHER blank reply still returns "" and keeps that error
+	// verbatim. The reasoning spend is an estimate through the chars→token estimator (the stream
+	// carries the text, never the server's count of it), hence "roughly" — as in emptyReplyFault.
+	if strings.TrimSpace(visible) == "" && finish == domain.FinishLength {
+		spent := ""
+		if thinking != "" {
+			spent = fmt.Sprintf(", after roughly %d tokens of reasoning", c.a.tokens.EstimateTokens(len(thinking)))
+		}
+		return "", fmt.Errorf(cappedSummaryErrFmt, compactMaxTokens, spent)
+	}
+	return visible, nil
 }

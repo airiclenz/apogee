@@ -77,7 +77,12 @@ request carries `EffortOff`.
 
 Commit: `fix(agent): the compaction summarizer asks for no reasoning, whatever the session's effort`
 
-## 2. A capped, reasoning-only summary faults honestly; inline thinking is stripped
+## 2. A capped, reasoning-only summary faults honestly; inline thinking is stripped — ✅ DONE (2026-08-30)
+
+NOTES (2026-08-30): the format constant lives in `internal/agent/compact.go` (`cappedSummaryErrFmt`, next to the `compactCompleter` it serves) rather than beside `cappedReplyErrFmt` in `loop.go` — the item names either as acceptable, and compact.go is one of the two files the item lists.
+NOTES (2026-08-30): the capped fault returns AFTER the Maintenance-flagged UsageEvent is emitted, not before — the call completed and spent real tokens, so the session tally must still see them; the item does not order the two.
+NOTES (2026-08-30): test (c) is an agent-seam subtest (blank content, finish `stop`, error text asserted byte for byte) in addition to the existing `internal/context` test the item names, so the "only `length` diverts" split is pinned where the split is made.
+NOTES (2026-08-30): the new tests were confirmed non-vacuous by temporarily reverting the production edit — cases (a), (b) and (d) fail without it; case (c) is the unchanged-behaviour anchor and passes either way by design.
 
 **What:** fix for the 2026-08-29 empty-summary fault (`internal/agent/compact.go`,
 `compactCompleter.Complete`): collect `DeltaThinking` text and the `DeltaDone` finish reason

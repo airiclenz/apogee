@@ -593,3 +593,136 @@ func TestChildSummarizerFollowsTheParentsReboundDialect(t *testing.T) {
 		t.Errorf("child summary request effort = %q, want %q", got, provider.EffortOff)
 	}
 }
+
+// cappedSummaryResponder scripts one summary stream by its three observable parts: the reasoning
+// channel the server splits out (reasoning_content), the visible content, and the finish reason it
+// ends on. It is the fake for the 2026-08-29 incident — a thinking model that spends the whole
+// compactMaxTokens cap reasoning and ends on "length" with nothing visible — and, with content and
+// no separate channel, for the inline-<think> shape a delimited profile emits.
+type cappedSummaryResponder struct {
+	thinking string
+	content  string
+	finish   string
+}
+
+func (r cappedSummaryResponder) Stream(context.Context, provider.Request) iter.Seq[provider.Delta] {
+	return func(yield func(provider.Delta) bool) {
+		if r.thinking != "" && !yield(provider.Delta{Kind: provider.DeltaThinking, Thinking: r.thinking}) {
+			return
+		}
+		if r.content != "" && !yield(provider.Delta{Kind: provider.DeltaContent, Content: r.content}) {
+			return
+		}
+		yield(provider.Delta{Kind: provider.DeltaDone, FinishReason: r.finish})
+	}
+}
+
+// TestCompactBlankSummaryFaultsOnTheCapOnlyWhenItWasCut pins what a blank summary SAYS. A reply
+// that ran into compactMaxTokens is the 2026-08-29 incident's shape — the model answered, at
+// length, and spent the entire cap on a reasoning pass the summarizer asked it not to make — so the
+// fault names the cap and, when the reply carried reasoning, roughly what it burned under it; those
+// are the two numbers an operator acts on. Every OTHER blank reply keeps the reducer's
+// errEmptySummary verbatim, which describes a different failure (a model that produced nothing at
+// all). All three leave the conversation untouched — context.Compact's guarantee.
+func TestCompactBlankSummaryFaultsOnTheCapOnlyWhenItWasCut(t *testing.T) {
+	t.Parallel()
+
+	const reasoning = "The user asked for a fold; I should restate the task, the files touched, and the open question."
+
+	cases := []struct {
+		name      string
+		up        cappedSummaryResponder
+		capped    bool
+		wantSpend bool
+	}{
+		{
+			name:      "reasoning-only reply cut at the cap",
+			up:        cappedSummaryResponder{thinking: reasoning, finish: "length"},
+			capped:    true,
+			wantSpend: true,
+		},
+		{
+			name:   "reply cut at the cap with no reasoning channel",
+			up:     cappedSummaryResponder{finish: "length"},
+			capped: true,
+		},
+		{
+			name: "blank reply the server called finished",
+			up:   cappedSummaryResponder{finish: "stop"},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			a, err := newAgent(baseConfig(&recordingSink{}), tc.up)
+			if err != nil {
+				t.Fatalf("newAgent: %v", err)
+			}
+			seedFoldable(a)
+			before := a.conv.Len()
+
+			skipped, err := a.Compact(context.Background())
+
+			if err == nil {
+				t.Fatal("Compact err = nil, want a blank summary surfaced as a fault")
+			}
+			if skipped {
+				t.Error("skipped = true on a blank summary; a fault is not a skip")
+			}
+			want := "apogee: compaction produced an empty summary"
+			if tc.capped {
+				spend := ""
+				if tc.wantSpend {
+					spend = fmt.Sprintf(", after roughly %d tokens of reasoning", a.tokens.EstimateTokens(len(reasoning)))
+				}
+				want = fmt.Sprintf("compaction summary hit its output cap (4096 tokens) with no visible text to "+
+					"show for it%s — the summarizer asked for no reasoning; this server's template did not honour that",
+					spend)
+			}
+			if err.Error() != want {
+				t.Errorf("Compact err = %q, want %q", err, want)
+			}
+			if a.conv.Len() != before {
+				t.Errorf("conv mutated despite a fault: Len = %d, want %d", a.conv.Len(), before)
+			}
+		})
+	}
+}
+
+// TestCompactStripsInlineThinkingFromTheSummary: on a delimited-thinking profile the summarizer's
+// reply carries its reasoning inline, and the fold runs it through the same stripper a Turn's reply
+// goes through — otherwise the <think> span is written into the summary message and the folded
+// conversation carries the model's scratchpad forward as if it were history.
+func TestCompactStripsInlineThinkingFromTheSummary(t *testing.T) {
+	t.Parallel()
+
+	cfg := baseConfig(&recordingSink{})
+	cfg.Profile = domain.ModelProfile{
+		Thinking: domain.ThinkingProfile{Style: domain.ThinkingDelimited, Start: "<think>", End: "</think>"},
+	}
+	up := cappedSummaryResponder{content: "<think>plan</think>Summary text", finish: "stop"}
+	a, err := newAgent(cfg, up)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	seedFoldable(a)
+
+	skipped, err := a.Compact(context.Background())
+
+	if err != nil {
+		t.Fatalf("Compact: %v", err)
+	}
+	if skipped {
+		t.Fatal("Compact skipped a foldable conversation; want the fold so a summary was written")
+	}
+	msgs := a.conv.Messages()
+	folded := msgs[len(msgs)-1].Content
+	if !strings.Contains(folded, "Summary text") {
+		t.Errorf("summary message = %q, want the visible summary kept", folded)
+	}
+	if strings.Contains(folded, "<think>") || strings.Contains(folded, "plan") {
+		t.Errorf("summary message = %q, want the inline thinking stripped out", folded)
+	}
+}
