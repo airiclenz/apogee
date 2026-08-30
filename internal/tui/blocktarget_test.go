@@ -237,28 +237,24 @@ func TestRenderMarksTheWholeBlock(t *testing.T) {
 			},
 		},
 		{
-			// Expanded, the run's head keeps its mark — that is the click that closes it again —
-			// even though its own one-line report hides nothing. The prompt rows opening its span
-			// carry that same mark: they are body the head painted, so clicking the delegation's
-			// prompt closes the delegation, exactly as clicking a tool block's output closes it.
-			// The span itself carries no marks of its own here, the read inside it having nothing
-			// to reveal either.
-			name:  "an expanded sub-agent head stays clickable",
+			// A FINISHED run is the same two marked rows, and no more: it has one shape in the
+			// conversation and expanding it opens its view instead of a rail (ADR 0063), so the
+			// click surface cannot grow prompt rows or a span of its own. The mark is what makes
+			// the row reach that view at all.
+			name:  "a finished sub-agent run is two marked rows and no rail",
 			width: 80,
 			build: func(t *testing.T, tr *transcript) {
 				subAgentCall(tr, "s1", "survey the tests", 0)
 				readCall(tr, "c1", "a.go", 1, 5, 1)
 				subAgentReport(tr, "s1", "survey complete", 0)
-				if !tr.setExpanded(0, true) {
-					t.Fatal("setExpanded(0, true) = false; want the run's head expanded")
+				if tr.setExpanded(0, true) {
+					t.Fatal("setExpanded(0, true) = true; a run opens as a view, never as a rail")
 				}
 			},
 			want: []blockMark{
 				{line: 0, kind: targetHeader, entry: 0, text: "✦ Sub-Agent"},
 				{line: 1, kind: targetHeader, entry: 0,
-					text: leaderEdgeRow("┌─┶ survey the tests ✓ ⋯ 1 tool call · survey complete", glyphExpanded)},
-				{line: 2, kind: targetHeader, entry: 0, text: "│"},
-				{line: 3, kind: targetHeader, entry: 0, text: "│ survey the tests"},
+					text: groupMemberLine("  ┕ survey the tests ✓ ⋯ 1 tool call · survey complete")},
 			},
 		},
 		{
@@ -294,7 +290,9 @@ func TestRenderMarksTheWholeBlock(t *testing.T) {
 // transcript rather than across two fixtures, because that is the claim: nothing about the entry
 // changes but the flag the painter reads. The block kinds that reach the indicator by three
 // different routes are each here: a hidden body (blockHidesWhenCollapsed), a sub-agent run's elided
-// span (blockState.elides) and a Firing wearing the borrowed shape under its own glyph.
+// span (blockState.elides) and a Firing wearing the borrowed shape under its own glyph. The run is
+// the one that never flips: what its ▶ opens is the run's VIEW and not a body of its own (ADR
+// 0063), so the flag is refused and the glyph goes on pointing the one way it can.
 //
 // The glyph rides the BRANCH ROW, at the right edge past the outcome slot, and the header carries
 // the label alone (renderToolBlock) — so each case names the header it keeps and the row the
@@ -305,6 +303,7 @@ func TestHeaderIndicatorFollowsTheBlockState(t *testing.T) {
 		build                       func() *transcript
 		wantHeader                  string
 		wantCollapsed, wantExpanded string
+		refusesToggle               bool // the block opens a run view instead of a body (ADR 0063)
 	}{
 		{
 			name: "a hidden body",
@@ -328,7 +327,8 @@ func TestHeaderIndicatorFollowsTheBlockState(t *testing.T) {
 				return tr
 			},
 			wantHeader:    "✦ Sub-Agent",
-			wantCollapsed: glyphCollapsed, wantExpanded: glyphExpanded,
+			wantCollapsed: glyphCollapsed, wantExpanded: glyphCollapsed,
+			refusesToggle: true,
 		},
 		{
 			name:          "a Firing under its own glyph",
@@ -347,11 +347,14 @@ func TestHeaderIndicatorFollowsTheBlockState(t *testing.T) {
 			if got := branchIndicator(t, tr); got != tc.wantCollapsed {
 				t.Errorf("collapsed branch wears %q, want %q", got, tc.wantCollapsed)
 			}
-			if !tr.toggleExpanded(0) {
-				t.Fatal("toggleExpanded(0) = false; want the block expanded")
+			if got := tr.toggleExpanded(0); got == tc.refusesToggle {
+				t.Fatalf("toggleExpanded(0) = %v; want %v", got, !tc.refusesToggle)
 			}
 			if got := branchIndicator(t, tr); got != tc.wantExpanded {
 				t.Errorf("expanded branch wears %q, want %q", got, tc.wantExpanded)
+			}
+			if tc.refusesToggle {
+				return // there is no way back from a state the block never took
 			}
 			if !tr.toggleExpanded(0) {
 				t.Fatal("toggleExpanded(0) = false on the way back; want the block collapsed again")

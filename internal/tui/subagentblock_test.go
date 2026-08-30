@@ -1,8 +1,6 @@
 package tui
 
 import (
-	"encoding/json"
-	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -87,29 +85,21 @@ func TestRenderSubAgentGroupSketchStates(t *testing.T) {
 		}
 	})
 
-	t.Run("one member opened to its span", func(t *testing.T) {
+	// A framed member has no second shape in the list: expanding one opens its RUN VIEW (ADR 0063),
+	// so the state that used to open a rail under the row is refused outright and the group paints
+	// exactly the rows it painted shut — no ┌─┶, no railed span, no prompt.
+	t.Run("a framed member refuses to open a rail in place", func(t *testing.T) {
 		tr := build(t)
-		if !tr.setExpanded(secondHead, true) {
-			t.Fatalf("setExpanded(%d, true) = false; want the second delegation open", secondHead)
+		if tr.setExpanded(secondHead, true) {
+			t.Fatalf("setExpanded(%d, true) = true; a run opens as a view, never as a rail", secondHead)
 		}
-		want := strings.Join([]string{
-			header,
-			rows[0],
-			// Open, the row keeps the very <tool-top-level-details> it wore shut — rows[1] word for
-			// word — and opens the frame: ┌ at column 0, the arm across to the branch, and the ▼
-			// still at the far edge. Only the body below it is the fold's business.
-			leaderEdgeRow("┌─┶ build ✓ ⋯ 1 tool call · all clear", glyphExpanded),
-			"│",       // the separator is railed too: the frame does not break under its own corner
-			"│ build", // the span opens with the prompt the delegate was handed (item 6)
-			"│",
-			"│ ✦ Read",
-			"│   ┕ b.go ⋯ 5 lines", // the nested read hides nothing, so its row wears no indicator
-			"┊",                    // one lone closer ends the span, in the separator's place
-			rows[2],                // the list resumes, and its last row still closes the whole group
-		}, "\n")
+		want := strings.Join(append([]string{header}, rows...), "\n")
 		got := renderPlain(tr, 80)
 		if got != want {
-			t.Errorf("opened fan-out mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+			t.Errorf("framed member mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+		}
+		if strings.Contains(got, subAgentOpenMarker) {
+			t.Errorf("the group drew the open marker %q:\n%s", subAgentOpenMarker, got)
 		}
 	})
 
@@ -142,7 +132,7 @@ func TestRenderSubAgentGroupSketchStates(t *testing.T) {
 // its slowest sibling ran. Its own finished phase is what says otherwise
 // (domain.SubAgentPhaseEvent), and this is the difference that makes on screen: the ✓ and the "done"
 // appear on THAT row while the sibling beside it is still going, and the report the phase carried is
-// readable inside it — all before either call has been paired.
+// what its run view opens on (ADR 0063) — all before either call has been paired.
 //
 // The burst then adds nothing at all, which is the other half of the claim: the payload already rode
 // the phase, and folding it a second time would print the report twice (transcript.addToolResult).
@@ -176,23 +166,6 @@ func TestSubAgentMemberDoneOnItsOwnFinishedPhase(t *testing.T) {
 		groupMemberLine("  ┝ survey ✓ ⋯ 1 tool call · done"),
 		groupMemberLine("  ┕ build ⋯ 1 tool call"), // still working: no ✓, and no gist of its own
 	}, "\n")
-	opened := strings.Join([]string{
-		"✦ Sub-Agent (2)",
-		// The open row says exactly what the collapsed one above it does — the count, then the
-		// finished delegation's one word — and adds the report beneath it, which is the whole of
-		// what the fold ever hid.
-		leaderEdgeRow("┌─┶ survey ✓ ⋯ 1 tool call · done", glyphExpanded),
-		"  │ found the bug", // the report the phase carried, laid out under the member gutter
-		"  │ in the parser",
-		"│",
-		"│ survey", // the span opens with the prompt the delegate was handed
-		"│",
-		"│ ✦ Read",
-		"│   ┕ a.go ⋯ 5 lines",
-		"┊",
-		groupMemberLine("  ┕ build ⋯ 1 tool call"),
-	}, "\n")
-
 	for _, tc := range []struct {
 		name  string
 		burst bool
@@ -204,12 +177,15 @@ func TestSubAgentMemberDoneOnItsOwnFinishedPhase(t *testing.T) {
 			if got := renderPlain(build(t, tc.burst), 80); got != collapsed {
 				t.Errorf("collapsed mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, collapsed)
 			}
+			// The row is the delegation's whole shape here, so the phase's verdict has nowhere else
+			// to be read: the report it carried is what the run's VIEW opens on (ADR 0063), and the
+			// fold that used to lay it out under the row is refused.
 			tr := build(t, tc.burst)
-			if !tr.setExpanded(0, true) {
-				t.Fatal("setExpanded(0, true) = false; want the finished delegation open")
+			if tr.setExpanded(0, true) {
+				t.Fatal("setExpanded(0, true) = true; a finished run opens as a view, never as a rail")
 			}
-			if got := renderPlain(tr, 80); got != opened {
-				t.Errorf("opened mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, opened)
+			if got := renderPlain(tr, 80); got != collapsed {
+				t.Errorf("row moved under a refused expand:\n--- got ---\n%s\n--- want ---\n%s", got, collapsed)
 			}
 		})
 	}
@@ -334,72 +310,6 @@ func rowWith(t *testing.T, lines []string, text string) int {
 	return found
 }
 
-// The ┊ has ONE reason to be drawn, and the spec gives it as a rule rather than as a sketch:
-// "`┊` is only displayed if another grouped sub-agent follows after the expanded sub-agent. The last
-// sub-agent in the group (if expanded) does not show this" (docs/layout/tool-layout.md, "Grouped
-// Sub-agents"). Both halves are read off ONE fixture, opened at the first member and then at the
-// last, so what is pinned is the difference the member's POSITION makes — two goldens of two
-// fixtures could drift apart and still both pass.
-func TestSubAgentCloserOnlyWhenAnotherGroupedMemberFollows(t *testing.T) {
-	build := func(t *testing.T, head int) *transcript {
-		t.Helper()
-		tr := &transcript{}
-		loneDelegation(tr, "s1", "survey", "a.go", "all clear")
-		loneDelegation(tr, "s2", "build", "b.go", "all clear")
-		// The parent's own answer gives the LAST member's span something to stand before: a run at the
-		// foot of the transcript has no seam at all, and a rule about seams cannot be read off one.
-		tr.apply(domain.MessageEvent{Text: "back to parent"})
-		if !tr.setExpanded(head, true) {
-			t.Fatalf("setExpanded(%d, true) = false; want that delegation open", head)
-		}
-		return tr
-	}
-	const header = "✦ Sub-Agent (2)"
-
-	t.Run("first member open: the list resumes, so its span closes with ┊", func(t *testing.T) {
-		want := strings.Join([]string{
-			header,
-			leaderEdgeRow("┌─┶ survey ✓ ⋯ 1 tool call · all clear", glyphExpanded),
-			"│",
-			"│ survey",
-			"│",
-			"│ ✦ Read",
-			"│   ┕ a.go ⋯ 5 lines",
-			"┊", // another grouped sub-agent follows: the closer parts the span from its row
-			groupMemberLine("  ┕ build ✓ ⋯ 1 tool call · all clear"),
-			"",
-			"✦ back to parent",
-		}, "\n")
-		if got := renderPlain(build(t, 0), 80); got != want {
-			t.Errorf("open first member mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
-		}
-	})
-
-	t.Run("last member open: nothing of the group follows, so no ┊ at all", func(t *testing.T) {
-		want := strings.Join([]string{
-			header,
-			groupMemberLine("  ┝ survey ✓ ⋯ 1 tool call · all clear"),
-			leaderEdgeRow("┌─┶ build ✓ ⋯ 1 tool call · all clear", glyphExpanded),
-			"│",
-			"│ build",
-			"│",
-			"│ ✦ Read",
-			"│   ┕ b.go ⋯ 5 lines",
-			// The group is out of rows, so the span is parted from the parent's answer by the ordinary
-			// separator — the closer would be claiming a member still to come.
-			"",
-			"✦ back to parent",
-		}, "\n")
-		got := renderPlain(build(t, 2), 80)
-		if got != want {
-			t.Errorf("open last member mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
-		}
-		if strings.Contains(got, glyphRailClose) {
-			t.Errorf("a group's last expanded member still drew a %s:\n%s", glyphRailClose, got)
-		}
-	})
-}
-
 // loneDelegation folds one delegation with a nested read behind it, reported unless report is "".
 // It is deliberately the same fixture shape the fan-out golden above builds, so the two shapes are
 // compared on the same delegation rather than on two that merely look alike.
@@ -411,79 +321,67 @@ func loneDelegation(tr *transcript, id, task, path, report string) {
 	}
 }
 
-// A LONE delegation is drawn in the very frame a grouped one is (design call 3 of
+// A LONE delegation wears the very ROW a grouped one does (design call 3 of
 // docs/plans/"2026-08-11 - 01"): folding changes what stands AROUND a delegation and never the
 // delegation itself, so the row a reader learned to read in a fan-out reads the same when the run
-// happened to stand by itself — ┌─┶ at column 0, the span behind the rail, and the ✓ after the name
-// of a delegation that has reported. The ┊ is the one thing it does not take: that closer parts an
-// expanded member from the next row of its list, and a lone run has no list (railJoin).
-func TestLoneSubAgentRunOpensInTheGroupMembersFrame(t *testing.T) {
-	openHead := func(t *testing.T, tr *transcript) {
-		t.Helper()
-		if !tr.setExpanded(0, true) {
-			t.Fatal("setExpanded(0, true) = false; want the delegation open")
-		}
-	}
-
-	t.Run("opened to its span", func(t *testing.T) {
-		tr := &transcript{}
-		loneDelegation(tr, "s1", "survey", "a.go", "all clear")
-		tr.apply(domain.MessageEvent{Text: "back to parent"}) // gives the run something to close before
-		openHead(t, tr)
-
-		want := strings.Join([]string{
-			"✦ Sub-Agent",
-			// Open, the head keeps the collapsed row's <tool-top-level-details> and adds the span.
-			leaderEdgeRow("┌─┶ survey ✓ ⋯ 1 tool call · all clear", glyphExpanded),
-			"│",        // the separator is railed: the frame does not break under its own corner
-			"│ survey", // the span opens with the prompt the delegate was handed (item 6)
-			"│",
-			"│ ✦ Read",
-			"│   ┕ a.go ⋯ 5 lines",
-			"", // nothing of a group follows, so the span ends on the ordinary separator
-			"✦ back to parent",
-		}, "\n")
-		if got := renderPlain(tr, 80); got != want {
-			t.Errorf("lone run mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
-		}
-	})
-
+// happened to stand by itself. Under ADR 0063 that row is the whole of the shape either way — a run
+// opens as a VIEW and never as a rail in place, so neither shape has a frame of its own to differ in.
+func TestLoneSubAgentRunWearsTheGroupMembersRow(t *testing.T) {
 	// The claim is stronger than "it looks like the sketch": the two rows are compared BYTE FOR BYTE
-	// on the same delegation, folded and unfolded, rather than restated as a second golden — two
+	// on the same delegation, lone and grouped, rather than restated as a second golden — two
 	// goldens is exactly how the two shapes would come to disagree.
 	t.Run("row is the grouped member's, to the byte", func(t *testing.T) {
 		lone := &transcript{}
 		loneDelegation(lone, "s1", "survey", "a.go", "all clear")
+		// The survey stands LAST in the group, which is where a lone run stands in its own list of
+		// one: the branch marker is a fact about the row's POSITION (┝ mid-list, ┕ last), and this
+		// claim is about everything else on the row.
 		grouped := &transcript{}
-		loneDelegation(grouped, "s1", "survey", "a.go", "all clear")
 		loneDelegation(grouped, "s2", "build", "b.go", "all clear")
-		openHead(t, lone)
-		openHead(t, grouped)
+		loneDelegation(grouped, "s1", "survey", "a.go", "all clear")
 
-		// Line 0 is the block header ("✦ Sub-Agent", "✦ Sub-Agent (2)"), line 1 the delegation's row.
+		// Line 0 is the block header ("✦ Sub-Agent", "✦ Sub-Agent (2)"), then one row per member.
 		row := strings.Split(renderPlain(lone, 80), "\n")[1]
-		if member := strings.Split(renderPlain(grouped, 80), "\n")[1]; row != member {
-			t.Errorf("lone run's open row = %q; want the grouped member's %q", row, member)
+		if member := strings.Split(renderPlain(grouped, 80), "\n")[2]; row != member {
+			t.Errorf("lone run's row = %q; want the grouped member's %q", row, member)
+		}
+	})
+
+	// A lone run refuses to open in place exactly as a grouped member does, and its span stays
+	// elided: what expanding it opens is its run view (ADR 0063).
+	t.Run("it refuses to open a rail of its own", func(t *testing.T) {
+		tr := &transcript{}
+		loneDelegation(tr, "s1", "survey", "a.go", "all clear")
+		tr.apply(domain.MessageEvent{Text: "back to parent"})
+
+		before := renderPlain(tr, 80)
+		if tr.setExpanded(0, true) {
+			t.Fatal("setExpanded(0, true) = true; a run opens as a view, never as a rail")
+		}
+		want := strings.Join([]string{
+			"✦ Sub-Agent",
+			groupMemberLine("  ┕ survey ✓ ⋯ 1 tool call · all clear"),
+			"",
+			"✦ back to parent",
+		}, "\n")
+		if got := renderPlain(tr, 80); got != want || got != before {
+			t.Errorf("lone run mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
 		}
 	})
 
 	// The ✓ says a report came off, in the lone shape exactly as in the folded one: a delegation
 	// still working has not reported at all, and one that reported a failure is marked by its red
-	// outcome slot alone (design call 6). Both states are pinned collapsed and open.
+	// outcome slot alone (design call 6).
 	t.Run("no ✓ while running and none on failure", func(t *testing.T) {
 		for _, tc := range []struct {
-			name   string
-			build  func(tr *transcript)
-			row    string
-			opened string // the same <tool-top-level-details> as row: the fold takes only the body
-			prompt string // the task the fixture delegated, as the open span's first line
+			name  string
+			build func(tr *transcript)
+			row   string
 		}{
 			{
-				name:   "still working",
-				build:  func(tr *transcript) { loneDelegation(tr, "s1", "working", "a.go", "") },
-				row:    "  ┕ working ⋯ 1 tool call",
-				opened: "┌─┶ working ⋯ 1 tool call",
-				prompt: "│ working",
+				name:  "still working",
+				build: func(tr *transcript) { loneDelegation(tr, "s1", "working", "a.go", "") },
+				row:   "  ┕ working ⋯ 1 tool call",
 			},
 			{
 				name: "reported a failure",
@@ -492,48 +390,32 @@ func TestLoneSubAgentRunOpensInTheGroupMembersFrame(t *testing.T) {
 					tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{
 						CallID: "s1", Content: "it fell over", IsError: true}})
 				},
-				row:    "  ┕ broken ⋯ 1 tool call · error: it fell over",
-				opened: "┌─┶ broken ⋯ 1 tool call · error: it fell over",
-				prompt: "│ broken",
+				row: "  ┕ broken ⋯ 1 tool call · error: it fell over",
 			},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
 				tr := &transcript{}
 				tc.build(tr)
 
-				collapsed := strings.Join([]string{"✦ Sub-Agent", groupMemberLine(tc.row)}, "\n")
-				if got := renderPlain(tr, 80); got != collapsed {
-					t.Errorf("collapsed mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, collapsed)
-				}
-				openHead(t, tr)
-				want := strings.Join([]string{
-					"✦ Sub-Agent",
-					leaderEdgeRow(tc.opened, glyphExpanded),
-					"│",
-					tc.prompt,
-					"│",
-					"│ ✦ Read",
-					"│   ┕ a.go ⋯ 5 lines",
-				}, "\n")
+				want := strings.Join([]string{"✦ Sub-Agent", groupMemberLine(tc.row)}, "\n")
 				if got := renderPlain(tr, 80); got != want {
-					t.Errorf("opened mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+					t.Errorf("row mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
 				}
 			})
 		}
 	})
 }
 
-// Opening a delegation ADDS — its report, the prompt it was handed, the whole railed span — and
-// takes nothing away: the open row keeps the very <tool-top-level-details> the shut row wore, the
-// run's own count of the work, the delegate's context fill and its gist
-// (docs/layout/tool-layout.md, Grouped Sub-agents). A head reverting to its raw view on the way
-// open would tell a reader LESS about the delegation than leaving it shut, which is the one thing
-// an expand may never do.
+// A delegation's row carries its whole reading — the run's own count of the work, the delegate's
+// context fill and its gist (docs/layout/tool-layout.md, Grouped Sub-agents) — and keeps it however
+// the reader reaches for the run behind it. Under ADR 0063 that reach opens the run's VIEW, so the
+// row is what stays in the list: expanding may never take a cell away from it, and here it takes
+// nothing at all.
 //
 // The claim is pinned by CONSTRUCTION rather than by two goldens that could drift: the slot text is
-// written once and stands in the collapsed golden and the open one alike, running member and
-// finished member both.
-func TestExpandedSubAgentKeepsItsTopLevelDetails(t *testing.T) {
+// written once and stands in the golden and in the after-the-expand comparison alike, running
+// member and finished member both.
+func TestFramedSubAgentRowKeepsItsTopLevelDetails(t *testing.T) {
 	// The first delegation is still working and has a reading of its own; the second has reported.
 	// The usage lands while only the first is open, which is the run it is attributed to.
 	build := func(t *testing.T) *transcript {
@@ -559,362 +441,28 @@ func TestExpandedSubAgentKeepsItsTopLevelDetails(t *testing.T) {
 		groupMemberLine("  ┕ " + done),
 	}, "\n")
 	if got := renderPlain(build(t), 80); got != collapsed {
-		t.Errorf("collapsed group mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, collapsed)
+		t.Errorf("group mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, collapsed)
 	}
 
 	for _, tc := range []struct {
 		name string
 		head int
-		want []string
 	}{
-		{
-			name: "a running member keeps its count and fill",
-			head: 0,
-			want: []string{
-				header,
-				leaderEdgeRow("┌─┶ "+working, glyphExpanded),
-				"│",
-				"│ survey",
-				"│",
-				"│ ✦ Read",
-				"│   ┕ a.go ⋯ 5 lines",
-				"┊",
-				groupMemberLine("  ┕ " + done),
-			},
-		},
-		{
-			name: "a finished member keeps its count and gist",
-			head: 2,
-			want: []string{
-				header,
-				groupMemberLine("  ┝ " + working),
-				leaderEdgeRow("┌─┶ "+done, glyphExpanded),
-				"│",
-				"│ build",
-				"│",
-				"│ ✦ Read",
-				"│   ┕ b.go ⋯ 5 lines",
-			},
-		},
+		{name: "a running member keeps its count and fill", head: 0},
+		{name: "a finished member keeps its count and gist", head: 2},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			tr := build(t)
-			if !tr.setExpanded(tc.head, true) {
-				t.Fatalf("setExpanded(%d, true) = false; want that delegation open", tc.head)
+			if tr.setExpanded(tc.head, true) {
+				t.Fatalf("setExpanded(%d, true) = true; a run opens as a view, never as a rail", tc.head)
 			}
-			if got, want := renderPlain(tr, 80), strings.Join(tc.want, "\n"); got != want {
-				t.Errorf("open member mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
-			}
-		})
-	}
-}
-
-// delegateWithPrompt folds one delegation carrying an ARBITRARY task — newlines, backticks and all
-// — with a nested read behind it and a report closing it. It marshals the arguments rather than
-// splicing them into a JSON literal the way subAgentCall's one-word fixture does, which is what lets
-// a golden pin a real multi-line markdown prompt.
-func delegateWithPrompt(t *testing.T, tr *transcript, id, task string) {
-	t.Helper()
-	args, err := json.Marshal(map[string]string{"task": task})
-	if err != nil {
-		t.Fatalf("marshal the delegated task: %v", err)
-	}
-	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: id, Tool: "sub_agent", Arguments: args}})
-	readCall(tr, "r"+id, "a.go", 1, 5, 1)
-	subAgentReport(tr, id, "all clear", 0)
-}
-
-// An EXPANDED delegation's span opens with what the delegation was actually asked
-// (docs/layout/tool-layout.md, "Grouped Sub-agents"): one blank rail line, the task rendered through
-// the transcript's own markdown pipeline behind the rail, then the blank line the span's first block
-// already brings with it. The header row says what the delegation IS — its name, or the task's
-// clipped first line — and this says what it was GIVEN, which is the half a collapsed row has no
-// room for.
-func TestExpandedSubAgentOpensWithItsPrompt(t *testing.T) {
-	// A heading, a paragraph too long for the railed column, and a bullet list: enough markdown that
-	// a plain wrap of the raw text could not produce the golden below.
-	const task = "# Survey\n\nRead the tests and report the gaps you find.\n\n- read `a.go`\n- be brief"
-
-	openHead := func(t *testing.T, tr *transcript, at int) {
-		t.Helper()
-		if !tr.setExpanded(at, true) {
-			t.Fatalf("setExpanded(%d, true) = false; want the delegation open", at)
-		}
-	}
-
-	// The width is deliberately narrow: the paragraph must WRAP, and it must wrap to the column left
-	// inside the run's own rail rather than to the terminal's, which is the whole of "behind the rail".
-	t.Run("the markdown prompt wraps and formats inside the rail", func(t *testing.T) {
-		tr := &transcript{}
-		delegateWithPrompt(t, tr, "s1", task)
-		openHead(t, tr, 0)
-
-		want := strings.Join([]string{
-			"✦ Sub-Agent",
-			// The open head carries the run's own <tool-top-level-details> like any other, and at
-			// 34 columns that line leaves the name too little room to stand in — so the
-			// promote-guard demotes it to the head's first body row and the typed `done` takes the
-			// slot (guardRefuses). The prompt begins under the body it laid out.
-			leaderEdgeRow("┌─┶ # Survey ✓ ⋯ done", glyphExpanded),
-			"    1 tool call · all clear",
-			seeLessFooterLine(t, 34),
-			"│", // the frame's opening row: one blank rail line, never two
-			"│ Survey",
-			"│",
-			"│ Read the tests and report the",
-			"│ gaps you find.",
-			"│",
-			"│ • read a.go",
-			"│ • be brief",
-			"│", // the closing row is the span's own block separator, railed (railJoin)
-			"│ ✦ Read",
-			"│   ┕ a.go ⋯ 5 lines",
-		}, "\n")
-		if got := renderPlain(tr, 34); got != want {
-			t.Errorf("prompt body mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
-		}
-	})
-
-	// Folding changes the frame around a delegation and never what the delegation shows of itself, so
-	// a member of a group opens on the very same prompt rows. They are compared BYTE FOR BYTE against
-	// the lone run's rather than restated as a second golden.
-	t.Run("a grouped member opens on the same prompt", func(t *testing.T) {
-		lone := &transcript{}
-		delegateWithPrompt(t, lone, "s1", task)
-		grouped := &transcript{}
-		delegateWithPrompt(t, grouped, "s1", task)
-		delegateWithPrompt(t, grouped, "s2", "second")
-		openHead(t, lone, 0)
-		openHead(t, grouped, 0)
-
-		// The prompt runs from the bare rail line that opens the frame to the span's first block. What
-		// stands ABOVE it is each painter's own reading of the head's report — the lone block closes
-		// its body with a see-less footer and the group member gutters its own — and that difference
-		// is not this claim.
-		promptOf := func(painted string) []string {
-			rows := strings.Split(painted, "\n")
-			for i, row := range rows {
-				if row != "│" {
-					continue
-				}
-				for j := i; j < len(rows); j++ {
-					if strings.Contains(rows[j], "✦ Read") {
-						return rows[i:j]
-					}
-				}
-				break
-			}
-			t.Fatalf("no prompt frame stood before the span:\n%s", painted)
-			return nil
-		}
-		want, got := promptOf(renderPlain(lone, 34)), promptOf(renderPlain(grouped, 34))
-		if !reflect.DeepEqual(got, want) {
-			t.Errorf("grouped member's prompt = %q; want the lone run's %q", got, want)
-		}
-	})
-
-	// A delegation with no prompt to show opens no block at all — not a blank rail line over an empty
-	// row. The two cases are the same claim: an argument that was never sent (a record written before
-	// the text was retained) and one that carries nothing but whitespace. Each pins its OWN head rows,
-	// because an empty task also empties the header's target and that is a shape this item did not
-	// choose — what it asserts is what stands between those rows and the span.
-	for _, tc := range []struct {
-		name, task string
-		head       []string
-	}{
-		{
-			name: "no task at all",
-			task: "",
-			// With no target the block wears the targetless shape: the indicator rides the header
-			// and the one-line report lays out as a body under it (renderToolBlock).
-			head: []string{"✦ Sub-Agent ▼", "  ┕ 1 tool call · all clear", seeLessFooterLine(t, 80)},
-		},
-		{
-			name: "whitespace alone",
-			task: "  \n\t\n ",
-			head: []string{"✦ Sub-Agent", leaderEdgeRow("┌─┶    ✓ ⋯ 1 tool call · all clear", glyphExpanded)},
-		},
-	} {
-		t.Run("an empty prompt opens no block: "+tc.name, func(t *testing.T) {
-			tr := &transcript{}
-			delegateWithPrompt(t, tr, "s1", tc.task)
-			openHead(t, tr, 0)
-
-			want := strings.Join(append(append([]string{}, tc.head...),
-				"│", // the span's own separator, and nothing else: no stray blank rows
-				"│ ✦ Read",
-				"│   ┕ a.go ⋯ 5 lines"), "\n")
-			if got := renderPlain(tr, 80); got != want {
-				t.Errorf("empty-prompt mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+			if got := renderPlain(tr, 80); got != collapsed {
+				t.Errorf("row moved under a refused expand:\n--- got ---\n%s\n--- want ---\n%s", got, collapsed)
 			}
 		})
 	}
 }
 
-// delegateAsked folds one delegation the way the engine emits it: the sub_agent call carrying an
-// arbitrary prompt, the started phase a worker emits the instant it takes the job, and one nested
-// call the child made — stamped with the SPAWNING call's id, which is what keeps that work in this
-// delegation's own stretch of the entry list while siblings run at once (transcript.place, ADR
-// 0039). Without the stamp a fan-out's child work lands behind whichever delegation was announced
-// last, and the member under test would be left with no span to open at all.
-//
-// report closes the run; "" leaves it working, so ONE fixture serves both halves of every pair
-// below rather than a running shape and a finished one being built by two different hands.
-func delegateAsked(t *testing.T, tr *transcript, id, task, report string) {
-	t.Helper()
-	args, err := json.Marshal(map[string]string{"task": task})
-	if err != nil {
-		t.Fatalf("marshal the delegated task: %v", err)
-	}
-	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: id, Tool: "sub_agent", Arguments: args}})
-	subAgentStarted(tr, id, 1)
-	childCall(tr, id, "r"+id, "a.go")
-	if report != "" {
-		subAgentReport(tr, id, report, 0)
-	}
-}
-
-// Exactly ONE railed blank line stands between an expanded delegation's own rows and the prompt it
-// was handed (docs/layout/tool-layout.md, "Grouped Sub-agents") — never none, and never two. It is
-// the spacer [subAgentPromptRows] opens the span with, and what it parts is the two halves of the
-// frame: what the delegation SAYS of itself above, what it was ASKED below.
-//
-// The claim is pinned across the whole matrix of expanded readings because the rows directly above
-// that spacer are different in every one of them and the spacer must not be. A lone run and a
-// grouped member wear different frames; a run still working has no report at all; a short report is
-// promoted into the header's summary slot and leaves no body behind it, while a long one lays out
-// as one — flush under a lone head, behind the member gutter when the delegation is folded into a
-// list. Six shapes, one blank line, in the same place in each.
-func TestExpandedSubAgentPromptOpensOnOneBlankRailLine(t *testing.T) {
-	const task = "Survey the tests\n\nReport every gap you find, and be brief about it."
-	// A report too long for the summary slot becomes the head's BODY, which is what puts rows
-	// between the header row and the prompt's spacer.
-	longReport := strings.Repeat("the tests cover the parser and nothing else at all. ", 3)
-
-	// The prompt as it stands inside the frame — the spacer, then the task's two paragraphs rendered
-	// as markdown behind the rail — and the span opening under it. Both are stated once, so what a
-	// case below carries of its own is only ever the head's rows.
-	prompt := []string{
-		"│",
-		"│ Survey the tests",
-		"│",
-		"│ Report every gap you find, and be brief about it.",
-	}
-	span := []string{"│", "│ ✦ Read", "│   ┕ a.go ⋯ 1 - 10"}
-	// The list resumes after the open member's span: the ┊ closing it, then the sibling's own row.
-	sibling := []string{"┊", groupMemberLine("  ┕ survey the docs ⋯ 1 tool call")}
-
-	for _, tc := range []struct {
-		name  string
-		build func(t *testing.T) *transcript
-		want  []string
-	}{
-		{
-			name: "a lone run still working",
-			build: func(t *testing.T) *transcript {
-				tr := &transcript{}
-				delegateAsked(t, tr, "s1", task, "")
-				return tr
-			},
-			want: slices.Concat([]string{
-				"✦ Sub-Agent",
-				leaderEdgeRow("┌─┶ Survey the tests ⋯ 1 tool call", glyphExpanded),
-			}, prompt, span),
-		},
-		{
-			name: "a lone run whose report was promoted into the slot",
-			build: func(t *testing.T) *transcript {
-				tr := &transcript{}
-				delegateAsked(t, tr, "s1", task, "all clear")
-				return tr
-			},
-			want: slices.Concat([]string{
-				"✦ Sub-Agent",
-				leaderEdgeRow("┌─┶ Survey the tests ✓ ⋯ 1 tool call · all clear", glyphExpanded),
-			}, prompt, span),
-		},
-		{
-			name: "a lone run whose report became a body",
-			build: func(t *testing.T) *transcript {
-				tr := &transcript{}
-				delegateAsked(t, tr, "s1", task, longReport)
-				return tr
-			},
-			want: slices.Concat([]string{
-				"✦ Sub-Agent",
-				leaderEdgeRow("┌─┶ Survey the tests ✓ ⋯ done", glyphExpanded),
-				"    1 tool call · the tests cover the parser and nothing else at all. the tests",
-				"    cover the parser and nothing else at all. the tests cover the parser and",
-				"    nothing else at all.",
-				seeLessFooterLine(t, 80),
-			}, prompt, span),
-		},
-		{
-			name: "a grouped member still working",
-			build: func(t *testing.T) *transcript {
-				tr := &transcript{}
-				delegateAsked(t, tr, "s1", task, "")
-				delegateAsked(t, tr, "s2", "survey the docs", "")
-				return tr
-			},
-			want: slices.Concat([]string{
-				"✦ Sub-Agent (2)",
-				leaderEdgeRow("┌─┶ Survey the tests ⋯ 1 tool call", glyphExpanded),
-			}, prompt, span, sibling),
-		},
-		{
-			name: "a grouped member whose report was promoted into the slot",
-			build: func(t *testing.T) *transcript {
-				tr := &transcript{}
-				delegateAsked(t, tr, "s1", task, "all clear")
-				delegateAsked(t, tr, "s2", "survey the docs", "")
-				return tr
-			},
-			want: slices.Concat([]string{
-				"✦ Sub-Agent (2)",
-				leaderEdgeRow("┌─┶ Survey the tests ✓ ⋯ 1 tool call · all clear", glyphExpanded),
-			}, prompt, span, sibling),
-		},
-		{
-			name: "a grouped member whose report became a body",
-			build: func(t *testing.T) *transcript {
-				tr := &transcript{}
-				delegateAsked(t, tr, "s1", task, longReport)
-				delegateAsked(t, tr, "s2", "survey the docs", "")
-				return tr
-			},
-			// The body sits behind the member gutter, and the spacer under it is railed at the run's
-			// own depth: two different columns, one blank line between them and the prompt.
-			want: slices.Concat([]string{
-				"✦ Sub-Agent (2)",
-				leaderEdgeRow("┌─┶ Survey the tests ✓ ⋯ done", glyphExpanded),
-				"  │ 1 tool call · the tests cover the parser and nothing else at all. the",
-				"  │ tests cover the parser and nothing else at all. the tests cover the parser",
-				"  │ and nothing else at all.",
-			}, prompt, span, sibling),
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			tr := tc.build(t)
-			if !tr.setExpanded(0, true) {
-				t.Fatal("setExpanded(0, true) = false; want the delegation open")
-			}
-			if got, want := renderPlain(tr, 80), strings.Join(tc.want, "\n"); got != want {
-				t.Errorf("expanded prompt frame mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
-			}
-		})
-	}
-}
-
-// A delegation with NO span joins its neighbours' list exactly as a full one does (subAgentGroup,
-// item 7). The painter's span rule cannot carry the group on its own — it fires only for a head
-// with nested entries behind it, and a delegation refused at the depth bound (executeRefuse,
-// internal/agent) leaves a head with none — so the group is derived off the TOOL and two refusals
-// in a row read as one "✦ Sub-Agent (2)" with a red row each.
-//
-// What the presenter's solo mark still keeps out is the MIXED umbrella (design call 12): these
-// heads are ungroupable in [sameLabelRun]'s sense and so head no super-group, which is the other
-// half of the rule and is asserted here beside the paint.
 func TestSpanlessSubAgentHeadsGroupWithEachOther(t *testing.T) {
 	const refusal = "sub-agent depth limit reached (max 2): cannot spawn a deeper sub-agent"
 	tr := &transcript{}
@@ -1050,17 +598,12 @@ func TestFailedDelegationPaintsItsSlotRed(t *testing.T) {
 
 	const failedSlot = "1 tool call · error: it fell over"
 
-	t.Run("a lone failed run is red shut and open", func(t *testing.T) {
+	t.Run("a lone failed run is red on the one row it has", func(t *testing.T) {
 		tr := &transcript{}
 		loneDelegation(tr, "s1", "broken", "a.go", "")
 		tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{
 			CallID: "s1", Content: "it fell over", IsError: true}})
 
-		assertSlot(t, paintedRow(t, tr, failedSlot), failedSlot, true, false)
-
-		if !tr.setExpanded(0, true) {
-			t.Fatal("setExpanded(0, true) = false; want the delegation open")
-		}
 		assertSlot(t, paintedRow(t, tr, failedSlot), failedSlot, true, false)
 	})
 
@@ -1218,23 +761,23 @@ func TestUnframedSubAgentShowsThePromptWhenExpanded(t *testing.T) {
 		}
 	})
 
-	t.Run("a delegation with a span keeps its framed prompt", func(t *testing.T) {
+	// The prompt is the UNFRAMED reading's alone. A delegation with a run behind it shows its task
+	// in its view (ADR 0063), so the block here neither opens nor grows the lead line.
+	t.Run("a delegation with a span shows no prompt body at all", func(t *testing.T) {
 		tr := &transcript{}
 		subAgentCall(tr, "s1", refusedTask, 0)
 		readCall(tr, "r1", "a.go", 1, 5, 1)
 		subAgentReport(tr, "s1", "all clear", 0)
-		if !tr.setExpanded(0, true) {
-			t.Fatalf("setExpanded(0, true) = false; want the delegation open")
+		if tr.setExpanded(0, true) {
+			t.Fatalf("setExpanded(0, true) = true; a run opens as a view, never as a rail")
 		}
 
-		// The framed reading paints the prompt INSIDE the rail as markdown (subAgentPromptRows), so
-		// the unframed body's lead line must not appear anywhere in it.
 		got := renderPlain(tr, width)
 		if strings.Contains(got, unframedSubAgentPromptLead) {
 			t.Errorf("a framed delegation grew the unframed lead line:\n%s", got)
 		}
-		if !strings.Contains(got, "│ survey the tests") {
-			t.Errorf("a framed delegation lost its railed prompt:\n%s", got)
+		if strings.Contains(got, "│ survey the tests") {
+			t.Errorf("a framed delegation opened a railed prompt:\n%s", got)
 		}
 	})
 }
@@ -1457,4 +1000,150 @@ func TestBreadcrumbRowSpendsItsWidthInOrder(t *testing.T) {
 	if got := th.measure.Width(narrow); got != 24 {
 		t.Errorf("the narrow row is %d columns wide, want 24", got)
 	}
+}
+
+// ----------------------------------------------------------------------------
+// A run has two shapes and no third (ADR 0063)
+// ----------------------------------------------------------------------------
+
+// A delegation with a run behind it — or one that has not reported yet, which is the same
+// delegation a beat earlier — owns no block state at all: expanding it opens its VIEW, so the flag
+// that used to open a rail in place is refused wherever it is written from ([transcript.setExpanded]
+// is the one writer, and [Model.openRunAt] is the redirect that reaches it). What that leaves the
+// flag meaning on a sub_agent call is the one reading that is not a run: a delegation that is OVER
+// and left nothing behind it still opens onto the prompt it carried (unframedSubAgentView).
+func TestRunHeadOwnsNoBlockState(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		build      func(tr *transcript)
+		wantToggle bool
+	}{
+		{
+			name: "a finished run with entries behind it",
+			build: func(tr *transcript) {
+				loneDelegation(tr, "s1", "survey", "a.go", "all clear")
+			},
+		},
+		{
+			name: "a run still working",
+			build: func(tr *transcript) {
+				loneDelegation(tr, "s1", "survey", "a.go", "")
+			},
+		},
+		{
+			// The one a redirect keyed on the FRAME alone would get wrong: a child announced and not
+			// yet talking is unframed while its row is shut, and must still open its view rather
+			// than a rail that the view would replace a moment later (subAgentFramed).
+			name: "a child announced before its first entry lands",
+			build: func(tr *transcript) {
+				subAgentCall(tr, "s1", "survey", 0)
+				subAgentStarted(tr, "s1", 1)
+			},
+		},
+		{
+			name: "a delegation that ran and left nothing",
+			build: func(tr *transcript) {
+				refusedDelegation(tr, "s1", refusedTask)
+			},
+			wantToggle: true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tr := &transcript{}
+			tc.build(tr)
+
+			shut := renderPlain(tr, 80)
+			if got := tr.setExpanded(0, true); got != tc.wantToggle {
+				t.Fatalf("setExpanded(0, true) = %v, want %v", got, tc.wantToggle)
+			}
+			open := renderPlain(tr, 80)
+			if tc.wantToggle {
+				if open == shut {
+					t.Errorf("the block took the state and painted no differently:\n%s", open)
+				}
+				return
+			}
+			if open != shut {
+				t.Errorf("a refused state still moved the row:\n--- got ---\n%s\n--- want ---\n%s", open, shut)
+			}
+			if strings.Contains(open, subAgentOpenMarker) {
+				t.Errorf("the run opened a rail with %q:\n%s", subAgentOpenMarker, open)
+			}
+		})
+	}
+}
+
+// A finished delegation says its report ONCE (ISSUES.md, "Finished sub-agents print the sub-agent
+// output twice"). The early, badly formatted copy was the head's own tool-result body, laid out
+// above the run's span the moment the head was opened; the copy that stays is the child's last
+// assistant row, inside the run where it was said.
+//
+// Both halves are pinned on one fixture: the conversation's row, which carries the report's first
+// line as its gist and no more of it anywhere, and the run's own view, where the report stands
+// exactly once — as the last row, after the work, under the task the child was handed.
+func TestFinishedRunSaysItsReportOnce(t *testing.T) {
+	const report = "Found 4 gaps\nin the suite\nhere they are"
+	build := func() *transcript {
+		tr := &transcript{}
+		subAgentCall(tr, "s1", "survey the tests", 0)
+		subAgentStarted(tr, "s1", 1)
+		childCall(tr, "s1", "c1", "a.go")
+		tr.apply(domain.MessageEvent{EventBase: domain.EventBase{Depth: 1, CallID: "s1"}, Text: report})
+		subAgentReport(tr, "s1", report, 0)
+		return tr
+	}
+
+	t.Run("the conversation's row keeps the gist and nothing else", func(t *testing.T) {
+		tr := build()
+		if tr.setExpanded(0, true) {
+			t.Fatal("setExpanded(0, true) = true; a run opens as a view, never as a rail")
+		}
+
+		got := renderPlain(tr, 80)
+		if strings.Contains(got, subAgentOpenMarker) {
+			t.Errorf("the row opened a rail with %q:\n%s", subAgentOpenMarker, got)
+		}
+		for _, line := range []string{"in the suite", "here they are"} {
+			if strings.Contains(got, line) {
+				t.Errorf("the row printed the report line %q a second time:\n%s", line, got)
+			}
+		}
+	})
+
+	t.Run("the run's view holds the one formatted copy", func(t *testing.T) {
+		tr := build()
+		tr.setRoot(runRef{depth: 1, spawn: "s1"})
+
+		lines := strings.Split(renderPlain(tr, 80), "\n")
+		if hits := strings.Count(strings.Join(lines, "\n"), "here they are"); hits != 1 {
+			t.Errorf("the report's last line appears %d times in the view, want exactly 1:\n%s",
+				hits, strings.Join(lines, "\n"))
+		}
+		// Row 0 is the breadcrumb the head became; the task the child was handed opens the view
+		// directly beneath it, and its own work follows (render.go's rooted paint).
+		if !strings.Contains(lines[0], breadcrumbBack) {
+			t.Fatalf("line 0 is %q, not the breadcrumb:\n%s", lines[0], strings.Join(lines, "\n"))
+		}
+		task := -1
+		for i, ln := range lines {
+			if strings.HasPrefix(ln, glyphUser) {
+				task = i
+				break
+			}
+		}
+		if task < 0 {
+			t.Fatalf("the view shows no task row at all:\n%s", strings.Join(lines, "\n"))
+		}
+		if !strings.Contains(lines[task], "survey the tests") {
+			t.Errorf("the task row reads %q, want the prompt the child was handed", lines[task])
+		}
+		for i, ln := range lines[1:task] {
+			if strings.TrimSpace(ln) != "" {
+				t.Errorf("line %d (%q) stands between the breadcrumb and the task row", i+1, ln)
+			}
+		}
+		if last := lines[len(lines)-1]; !strings.Contains(last, "here they are") {
+			t.Errorf("the view's last row is %q, want the end of the report the run returned", last)
+		}
+	})
 }

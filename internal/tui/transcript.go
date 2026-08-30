@@ -1315,8 +1315,23 @@ func (t *transcript) hasOpenToolCall() bool {
 // collapsed row cap at the current width — simply paints the same either way. That is deliberate:
 // the gate is about which kinds OWN a block state, so a resize can change whether a body collapses
 // without the transcript ever hearing about it.
+//
+// A RUN owns no such state at all. Under ADR 0063 a delegation has two shapes and neither is a fold
+// of the other: the collapsed row it wears in the conversation, and the run VIEW that expanding it
+// opens ([Model.openRunAt], the one reach every click and ⏎ funnels through). So a head with a run
+// to open answers false here, and the flag stays where it was — a stale one replayed from a record,
+// or written by a caller that has not asked the redirect first, cannot re-open a rail the painter
+// no longer draws.
+//
+// The predicate is the redirect's, word for word: entries behind the head, or a head that has not
+// reported yet. A delegation that is OVER and left nothing behind it is not a run — it keeps the
+// ordinary block's inline toggle onto the prompt it carried (unframedSubAgentView), which is the
+// one meaning left for the flag on a sub_agent call.
 func (t *transcript) setExpanded(index int, expanded bool) bool {
 	if index < 0 || index >= len(t.entries) || !t.entries[index].kind.carriesBlockState() {
+		return false
+	}
+	if head := t.entries[index]; head.headsRun() && (subAgentSpan(t.entries, index) > 0 || !head.done) {
 		return false
 	}
 	t.entries[index].expanded = expanded

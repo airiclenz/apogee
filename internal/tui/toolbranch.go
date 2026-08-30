@@ -299,9 +299,11 @@ func branchMarker(last bool) string {
 	return "  " + glyphBranch + " "
 }
 
-// subAgentOpenMarker is branchMarker's answer for an EXPANDED delegation: the frame it opens takes
-// the row's whole left edge, so the two blank columns a ┝/┕ hangs off become the corner and the arm
-// carrying it across to the branch (docs/layout/tool-layout.md, "Grouped Sub-agents"). The "─" is
+// subAgentOpenMarker was branchMarker's answer for an EXPANDED delegation: the frame it opened took
+// the row's whole left edge, so the two blank columns a ┝/┕ hangs off became the corner and the arm
+// carrying it across to the branch (docs/layout/tool-layout.md, "Grouped Sub-agents"). No painter
+// asks for it under ADR 0063 — a run has two shapes, the collapsed row and its view, and neither
+// opens a rail in place — so it is what the tests name to say a paint has NOT grown one back. The "─" is
 // written out rather than named because it is the corner's ARM and nothing else in the transcript
 // draws one — the markdown table's rule (glyphTableRule) is a different element that happens to
 // share the shape.

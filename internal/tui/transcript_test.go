@@ -1299,16 +1299,16 @@ func runCall(tr *transcript, id, command, output string, depth int) {
 		Result: domain.ToolResult{CallID: id, Content: output}})
 }
 
-// TestSubAgentRunCollapsesToItsCallBlock is the item's acceptance golden, in both directions. By
-// default the whole run is ONE block reading as ONE summarised line: the rail, the inner blocks and
-// every spacer among them are gone, the report body is gone with them, and the head's summary slot
-// carries the cascading count and gist.
-// Expanded, the head keeps that same summary slot — the fold is about the BODY and nothing else —
-// shows the report it actually returned, opens the ┌─┶ frame a grouped
-// delegation's row opens (design call 3), and the railed span comes back inside it — with each
-// inner block in its OWN state, which is why the umbrella the two inner calls fold under
-// (renderSuperGroup) comes back with both of its type rows still shut. The head has reported, so
-// its name carries the done ✓ in both states (design call 6).
+// TestSubAgentRunCollapsesToItsCallBlock is the item's acceptance golden, and under ADR 0063 it has
+// one direction only. The whole run is ONE block reading as ONE summarised line: the rail, the inner
+// blocks and every spacer among them are gone, the report body is gone with them, and the head's
+// summary slot carries the cascading count and gist. The head has reported, so its name carries the
+// done ✓ (design call 6).
+//
+// There is no second shape to toggle into. Expanding a run opens its VIEW (runview.go), so the fold
+// is refused here and the row does not move — which is also what closed the double print: the body
+// this head laid out open WAS the report, unformatted, above the formatted copy the run's own last
+// assistant row already carried (ISSUES.md, 2026-08-30).
 func TestSubAgentRunCollapsesToItsCallBlock(t *testing.T) {
 	tr := &transcript{}
 	subAgentCall(tr, "s1", "survey the tests", 0)
@@ -1328,34 +1328,19 @@ func TestSubAgentRunCollapsesToItsCallBlock(t *testing.T) {
 		t.Errorf("the collapsed run kept a rail; its span is elided whole:\n%s", collapsed)
 	}
 
-	if !tr.toggleExpanded(0) {
-		t.Fatal("toggleExpanded(0) = false; want the run's head entry expanded")
+	if tr.toggleExpanded(0) {
+		t.Fatal("toggleExpanded(0) = true; a run opens as a view, never as a rail in place")
 	}
-	expanded := strings.Join([]string{
-		"✦ Sub-Agent",
-		// Open, the lone run wears the grouped member's frame: ┌ at column 0, the arm across to its
-		// own branch, the ✓ after the name and the ▼ still at the far edge.
-		leaderEdgeRow("┌─┶ survey the tests ✓ ⋯ 2 tool calls · 12k/32k · done", glyphExpanded),
-		"    Found 4 gaps",
-		"    in the suite",
-		"    here they are",
-		seeLessFooterLine(t, 80), // the head's own body closes with the footer; its span follows below
-		"│",                      // the span opens on the prompt the delegate was handed (item 6)…
-		"│ survey the tests",
-		"│", // …and the separator is railed: an open head's span continues its frame
-		"│ ✦ Tools (2 calls)",
-		leaderEdgeRow("│   ┝ Read ⋯ 5 lines", glyphCollapsed),
-		leaderEdgeRow("│   ┕ Terminal ⋯ exit 0", glyphCollapsed),
-	}, "\n")
-	if got := renderPlain(tr, 80); got != expanded {
-		t.Errorf("expanded run mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, expanded)
+	got := renderPlain(tr, 80)
+	if got != collapsed {
+		t.Errorf("the run moved under a refused expand:\n--- got ---\n%s\n--- want ---\n%s", got, collapsed)
 	}
-
-	if !tr.toggleExpanded(0) {
-		t.Fatal("toggleExpanded(0) = false on the way back; want the run's head collapsed again")
-	}
-	if got := renderPlain(tr, 80); got != collapsed {
-		t.Errorf("re-collapsed run mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, collapsed)
+	// The report's own lines are the ones that used to be printed twice; only its FIRST reaches the
+	// row, and here not even that (the report is long enough that the slot says the typed word).
+	for _, line := range []string{"in the suite", "here they are"} {
+		if strings.Contains(got, line) {
+			t.Errorf("the run printed the report line %q above its own span:\n%s", line, got)
+		}
 	}
 }
 
@@ -1571,14 +1556,15 @@ func TestSubAgentCountIsTransitive(t *testing.T) {
 	}
 }
 
-// TestNestedSubAgentRunStaysCollapsedInsideAnExpandedParent is the cascade: expanding a run reveals
-// its inner blocks in their own states, and an inner block that is itself a run collapses its own
-// span by this same rule. One rule, applied at every depth — not a special case for nesting.
+// A run VIEW paints the run it is rooted at and nothing deeper: a nested delegation inside it keeps
+// its OWN state, which is the collapsed row every run wears in a conversation (ADR 0063). One rule,
+// applied at every depth — not a special case for nesting — and the way further in is the same one
+// that got the reader here: expanding that row opens ITS view.
 //
-// The frame cascades with it: the open outer run draws its ┌─┶ at column 0 and the nested run's
-// still-collapsed row keeps the tree's ┕ inside that rail, so the two levels are told apart by
-// where their markers stand rather than by anything either says about itself.
-func TestNestedSubAgentRunStaysCollapsedInsideAnExpandedParent(t *testing.T) {
+// Everything the view paints stands at the top level, the rebasing (paintRoot) taking the rail with
+// it: the levels are told apart by which view a reader is in rather than by how deep a row is
+// indented.
+func TestNestedSubAgentRunStaysCollapsedInsideItsParentsView(t *testing.T) {
 	tr := &transcript{}
 	subAgentCall(tr, "s1", "survey the repo", 0)
 	subAgentCall(tr, "s2", "read the tests", 1)
@@ -1586,21 +1572,19 @@ func TestNestedSubAgentRunStaysCollapsedInsideAnExpandedParent(t *testing.T) {
 	subAgentReport(tr, "s2", "tests read", 1)
 	subAgentReport(tr, "s1", "survey complete", 0)
 
-	if !tr.setExpanded(0, true) {
-		t.Fatal("setExpanded(0, true) = false; want the outer run expanded")
-	}
+	tr.setRoot(runRef{depth: 1, spawn: "s1"})
 
-	want := strings.Join([]string{
-		"✦ Sub-Agent",
-		leaderEdgeRow("┌─┶ survey the repo ✓ ⋯ 2 tool calls · survey complete", glyphExpanded),
-		"│",
-		"│ survey the repo", // the outer span opens with the prompt the delegate was handed
-		"│",
-		"│ ✦ Sub-Agent", // the nested run keeps its OWN state, and its indicator says so
-		leaderEdgeRow("│   ┕ read the tests ✓ ⋯ 1 tool call · tests read", glyphCollapsed),
-	}, "\n")
-	if got := renderPlain(tr, 80); got != want {
-		t.Errorf("nested run mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	got := renderPlain(tr, 80)
+	if !strings.Contains(got, groupMemberLine("  ┕ read the tests ✓ ⋯ 1 tool call · tests read")) {
+		t.Errorf("the nested run is not the collapsed row it wears everywhere else:\n%s", got)
+	}
+	for _, absent := range []string{
+		"b.go",       // the nested run's own span, which its collapsed row elides
+		glyphSubRail, // every row of a view stands at the top level
+	} {
+		if strings.Contains(got, absent) {
+			t.Errorf("the view shows %q, which belongs to the run one level further in:\n%s", absent, got)
+		}
 	}
 }
 
@@ -1735,105 +1719,68 @@ func TestSubAgentStreamStaysInsideItsCollapsedRun(t *testing.T) {
 	}
 }
 
-// TestSubAgentStreamPreviewRailedWhenRunExpanded is the other half of the rule: an expanded run
-// shows the delegate's stream where it happens — railed at the child's depth, under the delegation
-// that opened the level. Its RAIL is the whole of what announces the descent: the label that used
-// to stand above the preview is gone (item 5), and nothing replaces it, the head above having
-// already named the delegate.
-//
-// The frame is the LIVE one (design call 4 of docs/plans/"2026-08-11 - 01"): the delegate has
-// streamed and committed nothing, so the run has no span at all, and the head still opens the ┌─┶
-// its span will paint inside (subAgentFramed). Nothing about the shape waits for the words to
-// settle — that is what makes settling into the committed run a matter of the ✓ appearing and
-// nothing else. No ┊ closes it while it is going: the run has not been left.
-func TestSubAgentStreamPreviewRailedWhenRunExpanded(t *testing.T) {
+// A delegate's live words stand inside the RUN VIEW of the child that streamed them, at the top
+// level of that view and with no rail to say otherwise (ADR 0063, render.go's rooted paint). This is
+// design call 4 of docs/plans/"2026-08-11 - 01" as the view states it: what the LIVE paint draws is
+// exactly what the COMMITTED paint draws, so nothing a reader is watching jumps when a token stops
+// streaming and starts being scrollback. The same run is painted twice — once with the words still
+// in the buffer, once after its MessageEvent has folded those same words into an entry of the run —
+// and the two paints must be identical to the byte.
+func TestSubAgentStreamSettlesWithoutMovingTheView(t *testing.T) {
 	tr := &transcript{}
 	subAgentCall(tr, "s1", "survey the tests", 0)
-	streamAt(tr, 1, "child words")
+	tr.apply(domain.TokenEvent{EventBase: domain.EventBase{Depth: 1, CallID: "s1"}, Text: "child words"})
+	tr.setRoot(runRef{depth: 1, spawn: "s1"})
 
-	if !tr.setExpanded(0, true) {
-		t.Fatal("setExpanded(0, true) = false; want the run expanded")
-	}
-
-	want := strings.Join([]string{
-		"✦ Sub-Agent",
-		// No ✓: the delegation has not reported, and the star — settled in a substring render — is
-		// the whole of what says it is working (design call 6).
-		leaderEdgeRow("┌─┶ survey the tests ⋯ 0 tool calls", glyphExpanded),
-		"│",                  // the frame opens on the prompt the delegate was handed (item 6)…
-		"│ survey the tests", //
-		"│",                  // …and the join is railed, so the stream lands INSIDE the frame
-		"│ ✦ child words",
-	}, "\n")
-	if got := renderPlain(tr, 80); got != want {
-		t.Errorf("expanded run's live preview mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
-	}
-}
-
-// TestSubAgentStreamSettlesWithoutMovingTheFrame is design call 4's other claim, which the preview
-// golden alone cannot make: what the LIVE paint draws is exactly what the committed paint draws. The
-// same delegation is rendered twice — once while the delegate's words are still in the buffer, once
-// after its MessageEvent has folded those same words into an entry of the run — and the two paints
-// must be identical to the byte.
-//
-// It is the claim the old shape could not have made: the frame used to wait for the first committed
-// entry, so this hand-over moved the header from a flat ┕ row to a ┌─┶ one and re-indented
-// everything under it. Nothing the reader is watching may jump when a token stops streaming and
-// starts being scrollback. The ✓ is the one thing that does appear later, and it appears with the
-// REPORT rather than here (design call 6, pinned by TestSubAgentRunCollapsesToItsCallBlock).
-func TestSubAgentStreamSettlesWithoutMovingTheFrame(t *testing.T) {
-	tr := &transcript{}
-	subAgentCall(tr, "s1", "survey the tests", 0)
-	streamAt(tr, 1, "child words")
-	if !tr.setExpanded(0, true) {
-		t.Fatal("setExpanded(0, true) = false; want the run expanded")
-	}
 	live := renderPlain(tr, 80)
+	if !strings.Contains(live, "✦ child words") {
+		t.Fatalf("the view does not show the delegate's live tail:\n%s", live)
+	}
+	if strings.Contains(live, glyphSubRail) {
+		t.Errorf("the view railed the run's own words:\n%s", live)
+	}
 
 	// The delegate's Turn ends: the streamed words commit as an entry of its run, and the run itself
 	// is still open — it has not reported.
-	tr.apply(domain.MessageEvent{EventBase: domain.EventBase{Depth: 1}, Text: "child words"})
+	tr.apply(domain.MessageEvent{EventBase: domain.EventBase{Depth: 1, CallID: "s1"}, Text: "child words"})
 
 	if settled := renderPlain(tr, 80); settled != live {
-		t.Errorf("the frame moved when the delegate's stream committed:\n--- live ---\n%s\n--- settled ---\n%s",
+		t.Errorf("the view moved when the delegate's stream committed:\n--- live ---\n%s\n--- settled ---\n%s",
 			live, settled)
 	}
 }
 
-// TestSubAgentStreamFramesAnOpenGroupMember is the live shape where a delegation was FOLDED into a
-// list: the open member's row is the top of its frame while it is still talking, the delegate's
-// stream stands inside that frame, and the ┊ closes it where the list picks its remaining rows back
-// up. Folding changes the frame around a delegation and never the delegation, so the live rule
-// cannot be one the lone shape has and a member of a group has not.
-//
-// The stream is stamped with its SPAWNING call (ADR 0039), which is what lands the preview inside
-// the child that is talking rather than after the sibling announced last (transcript.runEnd).
-func TestSubAgentStreamFramesAnOpenGroupMember(t *testing.T) {
+// While siblings run at once (ADR 0039) a delegate's stream belongs to the child that is TALKING and
+// to no other: in the conversation every member of the fan-out is one collapsed row and the words
+// are elided with the rest of that child's run, and in a view they stand in the run whose spawning
+// call stamped them — never behind whichever sibling was announced last (transcript.runEnd).
+func TestSubAgentStreamBelongsToTheChildThatIsTalking(t *testing.T) {
 	tr := &transcript{}
 	subAgentCall(tr, "s1", "survey the tests", 0)
 	subAgentCall(tr, "s2", "survey the docs", 0)
-	// Both children are RUNNING: the sibling has a slot of its own, so its row is a working one
-	// rather than the queued row a delegation waiting for a slot wears (subAgentScheduled, pinned by
-	// TestSubAgentScheduledUntilItStarts).
+	// Both children are RUNNING — each has a slot of its own, as the engine says by starting them —
+	// so both rows are working ones rather than the queued row a delegation waiting for a slot wears
+	// (subAgentScheduled, pinned by TestSubAgentScheduledUntilItStarts).
+	subAgentStarted(tr, "s1", 1)
 	subAgentStarted(tr, "s2", 1)
 	tr.apply(domain.TokenEvent{EventBase: domain.EventBase{Depth: 1, CallID: "s1"}, Text: "child words"})
 
-	if !tr.setExpanded(0, true) {
-		t.Fatal("setExpanded(0, true) = false; want the first delegation expanded")
-	}
-
 	want := strings.Join([]string{
 		"✦ Sub-Agent (2)",
-		leaderEdgeRow("┌─┶ survey the tests ⋯ 0 tool calls", glyphExpanded),
-		"│",
-		"│ survey the tests",
-		"│",
-		"│ ✦ child words",
-		"┊",                     // the frame closes where the list resumes…
-		"  ┕ survey the docs ⋯", // …and the sibling still working is a plain twig of it
+		"  ┝ survey the tests ⋯",
+		"  ┕ survey the docs ⋯",
 	}, "\n")
 	if got := renderPlain(tr, 80); got != want {
-		t.Errorf("open group member's live frame mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+		t.Errorf("the fan-out leaked a child's live words:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+
+	tr.setRoot(runRef{depth: 1, spawn: "s1"})
+	if got := renderPlain(tr, 80); !strings.Contains(got, "✦ child words") {
+		t.Errorf("the talking child's view does not show its own words:\n%s", got)
+	}
+	tr.setRoot(runRef{depth: 1, spawn: "s2"})
+	if got := renderPlain(tr, 80); strings.Contains(got, "child words") {
+		t.Errorf("the silent sibling's view shows the other child's words:\n%s", got)
 	}
 }
 
@@ -1906,30 +1853,15 @@ func TestParentMessageKeepsTheDelegatesStreamInsideItsRun(t *testing.T) {
 		t.Errorf("the parent's answer committed at depth %d, want 0", parent.depth)
 	}
 
-	// Where the two land is a paint, not only a field: collapsed, the run elides the delegate's words
-	// and the parent's answer stands alone; expanded, the words come back railed under the descent.
+	// Where the two land is a paint, not only a field: in the conversation the run elides the
+	// delegate's words and the parent's answer stands alone, while the words themselves are one
+	// view away — inside the run that streamed them (ADR 0063).
 	if got := renderPlain(tr, 80); strings.Contains(got, "child words") || !strings.Contains(got, "parent answer") {
-		t.Errorf("the collapsed run did not elide the delegate's words beside the parent's answer:\n%s", got)
+		t.Errorf("the run did not elide the delegate's words beside the parent's answer:\n%s", got)
 	}
-	if !tr.setExpanded(0, true) {
-		t.Fatal("setExpanded(0, true) = false; want the run expanded")
-	}
-	want := strings.Join([]string{
-		"✦ Sub-Agent",
-		// The frame opens on the run being OPEN and not on its being over: this delegate never
-		// reported, so the row wears the ┌─┶ and no ✓ (design call 6).
-		leaderEdgeRow("┌─┶ survey the tests ⋯ 0 tool calls", glyphExpanded),
-		"│",
-		"│ survey the tests", // the span opens with the prompt, whatever the delegate went on to say
-		"│",
-		"│ ✦ child words",
-		// The run is a LONE one, so it is parted from the parent's own thread by the ordinary
-		// separator: the ┊ belongs to a group resuming after one of its members (railJoin).
-		"",
-		"✦ parent answer",
-	}, "\n")
-	if got := renderPlain(tr, 80); got != want {
-		t.Errorf("expanded run mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	tr.setRoot(runRef{depth: 1, spawn: "s1"})
+	if got := renderPlain(tr, 80); !strings.Contains(got, "✦ child words") || strings.Contains(got, "parent answer") {
+		t.Errorf("the run's view does not hold its own rescued words:\n%s", got)
 	}
 }
 
@@ -3270,20 +3202,29 @@ func TestChildInterjectionLandsInsideItsRun(t *testing.T) {
 	})
 
 	t.Run("it registers no sticky user block", func(t *testing.T) {
+		th := newTheme(scheme.Default())
 		tr := &transcript{}
 		tr.addUser("delegate it", nil)
 		subAgentCall(tr, "s1", "survey the tests", 0)
-		if !tr.setExpanded(1, true) {
-			t.Fatal("setExpanded(1, true) = false; want the run expanded so the message is painted at all")
-		}
 
 		childMessage(tr, "s1", "check the docs too", 1, true)
 
 		// One stop, the human's own prompt: a message steering a delegate is drawn like a prompt
 		// and walked past like a delegate's entry, so ctrl+↑/↓ offer only turns the reader started.
-		blocks := tr.renderView(newTheme(scheme.Default()), 80, false).userBlocks
+		blocks := tr.renderView(th, 80, false).userBlocks
 		if len(blocks) != 1 {
 			t.Errorf("renderView recorded %d user blocks, want 1 — the top-level prompt alone", len(blocks))
+		}
+
+		// Inside the run's own view, where the message IS painted, it claims no stop either: the
+		// breadcrumb is the only sticky header a view has (ADR 0063).
+		tr.setRoot(runRef{depth: 1, spawn: "s1"})
+		view := tr.renderView(th, 80, false)
+		if !strings.Contains(strings.Join(view.lines, "\n"), "check the docs too") {
+			t.Fatalf("the run's view does not paint the message addressed to it:\n%s", strings.Join(view.lines, "\n"))
+		}
+		if len(view.userBlocks) != 0 {
+			t.Errorf("the view recorded %d user blocks, want none: %+v", len(view.userBlocks), view.userBlocks)
 		}
 	})
 

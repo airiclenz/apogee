@@ -54,12 +54,11 @@
 // there it is the single ┊ closing the span. Every other climb-out keeps its spacer, because the
 // spec draws the closer only where another grouped sub-agent follows the expanded one — a group's
 // last member and a lone delegation alike close against nothing and so show none
-// (docs/layout/tool-layout.md, "Grouped Sub-agents"). Nothing announces a DESCENT any more — the
-// delegation's own ┌─┶ header row opens the frame and the rail runs down from it, on the live
-// preview's path as much as on the committed one. What opens it is the delegation being OPEN and not
-// its having produced anything yet ([subAgentFramed]): a delegate's first words are in the streaming
-// buffer and in no entry at all, so a frame waiting for the span to exist would snap open under the
-// reader the moment those words settled. The whole frame —
+// (docs/layout/tool-layout.md, "Grouped Sub-agents"); the rule is [railJoin]'s and stands, though
+// under ADR 0063 no shape opens such a span in place for it to close. Nothing announces a DESCENT,
+// and nothing draws one either: a delegation's span is elided whole in the conversation and painted
+// in its RUN VIEW, where [transcript.paintRoot] rebases every row to the top level and the rail
+// goes with it. The whole frame —
 // rail, corner and closer alike — is one style role (theme's subRail) in the tool-header gold (the
 // scheme's `tool-header` role), coherent with the gold ✦ tool markers; the arm and tee reaching
 // across to the delegation's branch stay in that row's own detail tone ([paintRowMarker]). A run's stretch stays CONTIGUOUS however its events
@@ -81,16 +80,17 @@
 // is itself a sub_agent: the one live fact the run's own blocks cannot stand in for, since opening
 // that row shows a nested run that is itself collapsed. Once the report lands the gist
 // becomes that report's own first line, the one durable thing it had to say. The head's own
-// report body is elided with that frame, so a collapsed run reads as ONE summarised line and never
-// repeats in a body row what the summary slot just said; the framing and the full report are what
-// expanding it reveals, each inner block in its own state (layout.md, "Collapsed and expanded
-// blocks"). That summary slot is the one thing the fold does NOT take: an open head wears the very
-// line its shut row wore ([expandedSubAgentView]) and adds the report under it, since a row that
-// dropped the count and the fill on the way open would say LESS about the delegation than leaving
-// it shut. An OPEN run's railed span opens on the prompt the delegate was handed — the retained
-// task text rendered as markdown behind the rail ([subAgentPromptRows]) — so the frame reads as
-// what was ASKED, then the work, then what came back; the header row above it says what the
-// delegation IS and how the run went, and the prompt is the half only the span has room for. While anything behind a block's header is still waiting for a result, that
+// report body is elided with that frame, so a run reads as ONE summarised line in the conversation
+// and never repeats in a body row what the summary slot just said. That row is the whole of the
+// delegation's shape here: a run has TWO shapes and no third (ADR 0063), the collapsed row and its
+// RUN VIEW, and expanding it opens the view rather than a rail in place ([Model.openRunAt],
+// runview.go). The view is the framing and the full report — the span painted as a transcript
+// rooted at that run, each inner block in its own state (layout.md, "Collapsed and expanded
+// blocks"), opening on the prompt the delegate was handed as the user row it is, under the
+// breadcrumb naming the way back. So the run reads as what was ASKED, then the work, then what came
+// back, and the row it left behind says what the delegation IS and how the run went. Nothing is
+// printed twice for it either: the body this head used to lay out open was that same report,
+// unformatted, above the formatted copy the span already carried (ISSUES.md, 2026-08-30). While anything behind a block's header is still waiting for a result, that
 // header's ✦ blinks against a bare cell ([blockState.star]) on the STATUS SPINNER's half-second
 // phase ([spinnerAnim.blink]) — the transcript keeps no clock of its own, and the spinner tick
 // repaints the viewport only on the tick that flips that phase and only while

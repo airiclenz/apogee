@@ -193,23 +193,18 @@ func TestSerialRunRendersAsItDidBeforeTheRunIdentity(t *testing.T) {
 		return tr
 	}
 
-	for _, expanded := range []bool{false, true} {
-		stamped, bare := build("s1"), build("")
-		head := headIndex(t, stamped, "s1")
-		stamped.setExpanded(head, expanded)
-		bare.setExpanded(head, expanded)
+	stamped, bare := build("s1"), build("")
 
-		if got, want := plainRender(stamped), plainRender(bare); got != want {
-			t.Errorf("expanded=%v: the stamped run renders differently:\n--- got ---\n%s\n--- want ---\n%s",
-				expanded, got, want)
-		}
+	if got, want := plainRender(stamped), plainRender(bare); got != want {
+		t.Errorf("the stamped run renders differently:\n--- got ---\n%s\n--- want ---\n%s", got, want)
 	}
 }
 
-// TestPerChildBlockExpandsAlone pins the block state on a grouped run: opening the second child's
-// block reveals the second child's work and leaves the first collapsed, exactly as any two tool
-// blocks in the scrollback behave.
-func TestPerChildBlockExpandsAlone(t *testing.T) {
+// TestPerChildRunOpensAlone pins what opening one child of a fan-out shows: its OWN work and no
+// sibling's. The reach is the run view (ADR 0063) rather than a block state — a run has one row in
+// the conversation and one view behind it — and the paint rooted at the second child is the
+// second child's alone, exactly as its block used to be.
+func TestPerChildRunOpensAlone(t *testing.T) {
 	t.Parallel()
 
 	tr := &transcript{}
@@ -225,15 +220,16 @@ func TestPerChildBlockExpandsAlone(t *testing.T) {
 	}
 
 	second := headIndex(t, tr, "s2")
-	if !tr.toggleExpanded(second) {
-		t.Fatal("the second child's block did not toggle")
+	if tr.toggleExpanded(second) {
+		t.Fatal("the second child's block toggled; a run opens as a view, never as a rail")
 	}
+	tr.setRoot(runRef{depth: 1, spawn: "s2"})
 	got := plainRender(tr)
 	if !strings.Contains(got, "beta.md") {
-		t.Errorf("the expanded child's block did not reveal its own work:\n%s", got)
+		t.Errorf("the opened child's view did not show its own work:\n%s", got)
 	}
 	if strings.Contains(got, "alpha.go") {
-		t.Errorf("expanding one child's block opened its sibling's:\n%s", got)
+		t.Errorf("opening one child's view showed its sibling's work:\n%s", got)
 	}
 }
 
@@ -318,35 +314,47 @@ func TestConcurrentSiblingStreamsCommitWhole(t *testing.T) {
 }
 
 // TestLivePreviewPaintsInsideTheRunThatFilledIt pins where the in-progress buffer lands once the
-// list is grouped: at the end of ITS OWN run, not at the end of the scrollback. An expanded child
-// that is talking shows its words railed inside its own block, with its sibling's block still
-// standing after it — appending the preview to the list would have painted the same words below
-// both blocks, reading as a third voice.
+// list is grouped: at the end of ITS OWN run, not at the end of the scrollback. In the conversation
+// every run is one row and the words are elided with the rest of the span; in the talking child's
+// VIEW (ADR 0063) they stand after that child's own work and nothing of a sibling stands with them.
+// Appending the preview to the list would have painted them after a sibling's entries instead,
+// reading as a third voice.
 func TestLivePreviewPaintsInsideTheRunThatFilledIt(t *testing.T) {
 	t.Parallel()
 
 	tr := &transcript{}
 	subAgentCall(tr, "s1", "survey the tests", 0)
 	subAgentCall(tr, "s2", "survey the docs", 0)
-	tr.setExpanded(headIndex(t, tr, "s1"), true)
+	childCall(tr, "s1", "a1", "alpha.go")
+	// The sibling's work lands AFTER the talking child's, which is what makes the two ends of the
+	// list different places: appended, the preview would follow this row instead.
+	childCall(tr, "s2", "b1", "beta.md")
 
 	tr.apply(domain.TokenEvent{EventBase: domain.EventBase{Depth: 1, CallID: "s1"}, Text: "the tests all pass"})
 
+	if got := plainRender(tr); strings.Contains(got, "the tests all pass") {
+		t.Fatalf("a collapsed run leaked its delegate's live words:\n%s", got)
+	}
+
+	tr.setRoot(runRef{depth: 1, spawn: "s1"})
 	lines := strings.Split(plainRender(tr), "\n")
-	preview, sibling := -1, -1
+	preview, own := -1, -1
 	for i, ln := range lines {
 		switch {
 		case strings.Contains(ln, "the tests all pass"):
 			preview = i
-		case strings.Contains(ln, "survey the docs"):
-			sibling = i
+		case strings.Contains(ln, "alpha.go"):
+			own = i
 		}
 	}
-	if preview < 0 || sibling < 0 {
-		t.Fatalf("preview at %d, sibling block at %d:\n%s", preview, sibling, strings.Join(lines, "\n"))
+	if preview < 0 || own < 0 {
+		t.Fatalf("preview at %d, the run's own work at %d:\n%s", preview, own, strings.Join(lines, "\n"))
 	}
-	if preview > sibling {
-		t.Errorf("the live preview painted after its sibling's block:\n%s", strings.Join(lines, "\n"))
+	if preview < own {
+		t.Errorf("the live preview painted before the run's own work:\n%s", strings.Join(lines, "\n"))
+	}
+	if strings.Contains(strings.Join(lines, "\n"), "beta.md") {
+		t.Errorf("the talking child's view holds a sibling's work:\n%s", strings.Join(lines, "\n"))
 	}
 }
 

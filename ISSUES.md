@@ -88,10 +88,10 @@ run.
 - [ ] **A GROUPED never-ran delegation still wears no ▶ and never shows its prompt.** The sweep
   fixed the single-block reading only (`subAgentHidesPrompt`, `internal/tui/subagentblock.go:243`).
   The grouped path is unchanged: `renderGroupMember` grants the indicator on
-  `tv.Details.len() > 0` alone (`internal/tui/toolblock.go:325`), and the group adds
-  `subAgentPromptRows` only for a SPANNED member (`internal/tui/subagentblock.go:190`, `:532`) — so
-  a folded delegation whose refusal stays promoted has no hidden lines to count, wears no ▶, and its
-  prompt is unreachable at every width. Fixing it means asking the member the same
+  `tv.Details.len() > 0` alone (`internal/tui/toolblock.go:325`), while a SPANNED member shows its
+  prompt in the run view its row opens (ADR 0063, `renderSubAgentMemberRows`) — so a folded
+  delegation whose refusal stays promoted has no hidden lines to count, wears no ▶, and its prompt
+  is unreachable at every width. Fixing it means asking the member the same
   prompt-shaped question the ungrouped block now asks.
 
 - [ ] **`settingsNoteWidth` measures the value column before the apply appends its ` *` marker.**

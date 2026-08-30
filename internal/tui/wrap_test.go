@@ -726,47 +726,31 @@ func TestRenderSpacerRailsAtTheJoinDepth(t *testing.T) {
 	}
 }
 
-// The issue's core case: two sub-agent calls back to back are never visually connected. The first
-// run's frame is CLOSED by its ┊ before the second call's own header row opens a frame of its own,
-// so the two rails meet nowhere — the closer is what makes the boundary legible now that no label
-// stands between them.
-//
-// Both runs are EXPANDED first, because a collapsed run elides its span whole (layout.md) and a run
-// with no rail on screen cannot say anything about how two rails meet. The rule under test is the
-// expanded paint's, and this pins it unchanged.
+// The issue's core case: two sub-agent calls back to back are never visually connected. Under ADR
+// 0063 they cannot be — each run is ONE row of the list they fold into, its span elided whole
+// (layout.md), so there is no rail on screen for a second one to run into. What used to part them
+// was the first frame's ┊ closer; now nothing stands between the rows because nothing hangs off
+// them, and neither delegation's words reach the conversation at all.
 func TestRenderConsecutiveSubAgentRunsAreNotConnected(t *testing.T) {
 	tr := &transcript{}
 	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "s1", Tool: "sub_agent", Arguments: []byte(`{"task":"first"}`)}})
-	tr.apply(domain.MessageEvent{EventBase: domain.EventBase{Depth: 1}, Text: "first child"})
+	tr.apply(domain.MessageEvent{EventBase: domain.EventBase{Depth: 1, CallID: "s1"}, Text: "first child"})
 	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "s2", Tool: "sub_agent", Arguments: []byte(`{"task":"second"}`)}})
-	tr.apply(domain.MessageEvent{EventBase: domain.EventBase{Depth: 1}, Text: "second child"})
-	for _, head := range []int{0, 2} {
-		if !tr.setExpanded(head, true) {
-			t.Fatalf("setExpanded(%d, true) = false; want the sub-agent head expanded", head)
-		}
-	}
+	tr.apply(domain.MessageEvent{EventBase: domain.EventBase{Depth: 1, CallID: "s2"}, Text: "second child"})
 
 	want := strings.Join([]string{
 		"✦ Sub-Agent (2)", // the two adjacent delegations are rows of one list (subAgentGroup)
-		// A member is always a toggle target (its span), so its row always wears the state. Open, it
-		// is the ┌─┶ header of its own frame — the ┕ the last row would have closed the list with
-		// included, since the frame it opens is what that row now says.
-		// Each open head keeps the run's own <tool-top-level-details>, exactly as its shut row
-		// would: these two delegates have streamed words and called nothing yet.
-		leaderEdgeRow("┌─┶ first ⋯ 0 tool calls", glyphExpanded),
-		"│",
-		"│ first", // each span opens with the prompt its own delegation was handed
-		"│",
-		"│ ✦ first child",
-		"┊", // the first run closes here…
-		leaderEdgeRow("┌─┶ second ⋯ 0 tool calls", glyphExpanded),
-		"│", // …and the second opens a frame of its own, touching nothing of the first
-		"│ second",
-		"│",
-		"│ ✦ second child",
+		groupMemberLine("  ┝ first ⋯ 0 tool calls"),
+		groupMemberLine("  ┕ second ⋯ 0 tool calls"),
 	}, "\n")
-	if got := renderPlain(tr, 80); got != want {
+	got := renderPlain(tr, 80)
+	if got != want {
 		t.Errorf("consecutive sub-agent runs mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+	for _, absent := range []string{glyphSubRail, glyphRailClose, glyphRailCorner} {
+		if strings.Contains(got, absent) {
+			t.Errorf("two adjacent runs drew %q between them:\n%s", absent, got)
+		}
 	}
 }
 

@@ -22,11 +22,10 @@ package tui
 // is the star, so every existing caller keeps the glyph it always painted without saying so, and a
 // block that names one has no live state to express: a Firing runs in a session of its own.
 //
-// marker replaces the branch marker the SINGLE shape's row would lead with — today the ┌─┶ an
-// EXPANDED lone delegation opens its frame with (renderSubAgentRun, design call 3 of
-// docs/plans/"2026-08-11 - 01"), which is the very marker a grouped delegation's open row takes
-// (renderSubAgentGroup). Its ZERO VALUE is the ┝/┕ of the tree, so every other block keeps the
-// marker it always drew without saying so. It reaches the single shape alone: a group's markers are
+// marker replaces the branch marker the SINGLE shape's row would lead with — the ┌─┶ a lone
+// delegation opened its frame with (design call 3 of docs/plans/"2026-08-11 - 01") until ADR 0063
+// left a run its collapsed row and its view, since when no caller names one. Its ZERO VALUE is the
+// ┝/┕ of the tree, so every block keeps the marker it always drew without saying so. It reaches the single shape alone: a group's markers are
 // the LIST's — which row closes it is the list's own arithmetic — and a caller cannot hand one in.
 //
 // members is the GROUPED shape's answer to the same question, one flag per view in the block's own

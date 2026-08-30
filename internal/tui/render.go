@@ -574,38 +574,34 @@ func (t *transcript) resolveBlock(th theme, head int, in paintInput, width int, 
 			openTail: open,
 		}
 	}
-	// A sub-agent run is ONE block while it is collapsed (layout.md): its head paints with the
+	// A sub-agent run is ONE block, always (layout.md, ADR 0063): its head paints with the
 	// cascading summary and the whole span is then skipped outright, which is what elides the
 	// inner blocks and every rail and spacer among them — nothing is painted and afterwards
-	// taken back. Expanded, only the head is painted here — in the ┌─┶ frame a grouped
-	// delegation's open row opens (renderSubAgentRun, design call 3) — and the walk steps into
-	// the span exactly as it always has, so every inner block keeps its OWN state and a nested
-	// run collapses inside an expanded parent by this same rule, at every depth.
+	// taken back. There is no second shape to walk into here. Expanding a delegation opens its
+	// RUN VIEW (runview.go), and a view paints the span as a transcript rooted at it, through
+	// this same walk with its own bounds — so an inner block keeps its own state there as it
+	// always did, and a nested run collapses inside its parent's view by this very rule, at
+	// every depth.
+	//
 	// The paint covers the head AND its span: the collapsed summary counts the work behind
 	// the header (subAgentSummary) and the star asks the span whether anything is still open,
 	// so a nested entry arriving or landing its result is a different block (paintcache.go).
 	//
-	// An OPEN delegation reaches this branch with a span of nothing (subAgentFramed): its
-	// frame is drawn live, and openTail hands the seam below the level the frame stands at,
-	// which is what lays the streaming preview inside the rail rather than flat beside it
-	// (design call 4). A run reaching this branch closes with no ┊ at all: the closer belongs to
-	// a list resuming after one of its members, and a delegation standing here stands alone.
+	// A delegation reaches this branch with a span of nothing where a reader opened it before its
+	// first entry landed (subAgentFramed): the row is the same row either way, and the streaming
+	// tail behind it is elided with the rest of the run (insideCollapsedRun). A run reaching this
+	// branch closes with no ┊ at all: the closer belongs to a list resuming after one of its
+	// members, and a delegation standing here stands alone.
 	if span := subAgentSpan(t.entries, head); subAgentFramed(in, span) {
 		ins := root.inputs(t.entries[head : head+span+1])
-		live := !subAgentReported(in) || anyOpenCall(ins[1:])
-		next := head + 1
-		if !in.expanded {
-			next += span // a collapsed run's span is elided whole; an open one's is walked into
-		}
 		return resolvedBlock{
 			shape: shapeSubAgentRun,
 			ins:   ins,
-			live:  live,
+			live:  !subAgentReported(in) || anyOpenCall(ins[1:]),
 			draw: func() blockPaint {
 				return renderSubAgentRun(th, ins[0], ins[1:], width, blink)
 			},
-			next:     next,
-			openTail: in.expanded,
+			next: head + span + 1, // the span is elided whole: it is read in the run's own view
 		}
 	}
 	// Adjacent runs of DIFFERENT tools fold under one umbrella (toolSuperGroup, item 5), which

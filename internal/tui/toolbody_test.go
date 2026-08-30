@@ -94,13 +94,14 @@ func TestEveryToolBodyFrameKeepsItsOwnFraming(t *testing.T) {
 			},
 		},
 		{
-			name: "renderSubAgentMemberRows — a spanned delegation's report runs under the member gutter",
+			name: "renderSubAgentMemberRows — an open delegation's report runs under the member gutter",
 			got: func() []string {
-				// No task text, so the prompt rows a spanned member closes with are empty
-				// (subAgentPromptRows) and what is left under the ▼ leader row is the report body.
+				// A member with a RUN behind it is one collapsed row and opens no body at all (ADR
+				// 0063), so the frame is asked of the delegation that never ran — the one reading
+				// that still lays its result out in place (unframedSubAgentView).
 				rows, _ := renderSubAgentMemberRows(th, toolView{Target: "explore", Details: newToolBody(body)},
-					memberGutter, width, width, true, true)
-				return rows[1:]
+					memberGutter, width, width, true, false)
+				return rows[1 : len(rows)-1] // between the ▼ leader row and the see-less row
 			},
 			want: func() []string {
 				var out []string

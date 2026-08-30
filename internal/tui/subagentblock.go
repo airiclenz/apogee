@@ -43,14 +43,13 @@ func subAgentSpan(entries []entry, i int) int {
 // two facts the answer turns on, so [transcript.renderView] and [renderSubAgentGroup] frame a
 // delegation by one rule instead of each wording one of its own.
 //
-// Committed entries behind it are one answer. The other is the LIVE one: an OPEN delegation that has
-// been expanded frames its span before that span exists, because the first thing standing inside the
-// rail is the delegate's streamed text — which the buffer holds and no entry carries yet
-// (renderView's preview), so subAgentSpan answers 0 for it however much the child has said. Waiting
-// for the first committed entry would announce the descent twice: a flat ┕ row while the child
-// talks, and the frame snapping open beneath it the moment those words settle. Design call 4 of
-// docs/plans/"2026-08-11 - 01" is the rule — settling into the committed run changes nothing
-// visually beyond the ✓ appearing.
+// Committed entries behind it are one answer. The other is the LIVE one, kept from the shape that
+// framed a run in place: a head marked open before its span exists is framed, because the first
+// thing standing inside the rail was the delegate's streamed text — which the buffer holds and no
+// entry carries yet (renderView's preview), so subAgentSpan answers 0 for it however much the child
+// has said. Under ADR 0063 nothing writes that flag on a run any more ([transcript.setExpanded]
+// refuses it) and the rows the answer picks between paint the same either way, so what the second
+// arm still buys is a replayed record's stale flag landing on the shape the walk expects.
 //
 // A delegation that is OVER and left nothing behind it — a child refused at the depth bound, one
 // that faulted before its first event — is framed by neither answer, and must not be: a frame opened
@@ -227,24 +226,28 @@ func insideCollapsedRunAtDepth(entries []entry, depth int) bool {
 	return false
 }
 
-// renderSubAgentRun paints the head block of a sub-agent run — the whole of what a COLLAPSED run
-// shows, since renderView elides its span, and the opening block of an expanded one. The two states
-// differ in exactly what layout.md says they do, and in nothing else: both heads carry the same
-// cascading summary of the work behind them (subAgentSummary), and expanded the head shows its full
-// report as well and opens the frame the span paints inside.
+// renderSubAgentRun paints the head block of a sub-agent run — the whole of what the run shows in
+// the conversation, since renderView elides its span. A framed delegation has ONE shape here and a
+// second that is no block at all: the collapsed row, and the run VIEW that expanding it opens
+// (ADR 0063, runview.go). The head's own fold state reaches nothing in this paint, so neither a
+// replayed record nor a stale flag can re-open a rail in place — and [transcript.setExpanded]
+// refuses to write one in the first place.
 //
 // A LONE run is drawn in the very shape a grouped one is (design call 3 of
-// docs/plans/"2026-08-11 - 01"): the same ┌─┶ opening its frame when it is open, the same rail down
-// its span, and the same ✓ after its name once it has reported
-// (subAgentFinished). Whether the delegations either side of it happened to fold it into a list is
-// a fact about the frame around a delegation and never about the delegation, so the two paths ask
-// the same two questions of the same head rather than each wording an answer of its own.
+// docs/plans/"2026-08-11 - 01"): the same cascading summary of the work behind it
+// (subAgentSummary), and the same ✓ after its name once it has reported (subAgentFinished).
+// Whether the delegations either side of it happened to fold it into a list is a fact about the
+// frame around a delegation and never about the delegation, so the two paths ask the same two
+// questions of the same head rather than each wording an answer of its own.
 //
-// A COLLAPSED run's head is ONE summarised line: the report body is elided along with the span,
-// because the summary slot already carries that report's first line and no block says the same
-// thing twice in two adjacent rows (layout.md, "A sub-agent run collapses to its call block"). The
-// count in that line is what says work is hidden behind the header, so the run needs no
-// "+N more lines" marker to say it too — and the header is a target however short the report is
+// The head is ONE summarised line: the report body is elided along with the span, because the
+// summary slot already carries that report's first line and no block says the same thing twice in
+// two adjacent rows (layout.md, "A sub-agent run collapses to its call block"). That elision is
+// also what closed the double print (ISSUES.md, "Finished sub-agents print the sub-agent output
+// twice"): the body this block laid out while the head was open WAS the delegation's report,
+// unformatted, standing above the same report as the span's own last assistant row. The count in
+// the summary is what says work is hidden behind the header, so the run needs no "+N more lines"
+// marker to say it too — and the header is a target however short the report is
 // (blockState.elides), so nothing is unreachable.
 //
 // The head's view is COPIED before its summary is replaced and its body dropped, so both are
@@ -256,78 +259,30 @@ func insideCollapsedRunAtDepth(entries []entry, depth int) bool {
 // star. Either way the block still contains an open call, which is exactly what layout.md makes the
 // star's rule.
 func renderSubAgentRun(th theme, head paintInput, span []paintInput, width int, blink bool) blockPaint {
-	// Both readings word the same <tool-top-level-details>; what the fold takes is the report BODY
-	// under it, and nothing else (expandedSubAgentView).
 	view := collapsedSubAgentView(head, span)
-	if head.expanded {
-		view = expandedSubAgentView(head, span)
-	}
 	view.finished = subAgentFinished(head)
-	// An OPEN lone run wears the very frame a grouped one does (design call 3): the ┌─┶ takes the
-	// row's left edge and the rail runs on down the span beneath it, which renderView already paints
-	// one level deeper. What it does NOT wear is the ┊ — that closer parts an expanded member from
-	// the next row of its list, and a lone run has no list (railJoin). A delegation reads the same
-	// whether or not the delegations beside it happened to fold it into one.
-	marker := ""
-	if head.expanded {
-		marker = subAgentOpenMarker
-	}
-	inner := railedWidth(width, head.depth)
-	block := renderToolBlock(th, []toolView{view}, inner, blockState{
-		expanded: head.expanded,
-		elides:   true,
-		live:     !subAgentReported(head) || anyOpenCall(span),
-		blink:    blink,
-		marker:   marker,
+	block := renderToolBlock(th, []toolView{view}, railedWidth(width, head.depth), blockState{
+		elides: true,
+		live:   !subAgentReported(head) || anyOpenCall(span),
+		blink:  blink,
 	})
-	// The prompt opens the SPAN and so is added after the head's own rows — under the report the
-	// head promoted or laid out, and above the first block the delegate produced. It joins the
-	// head's click surface (targetHeader) because a spanned delegation always elides something and
-	// so is always a toggle: every row this block paints closes it again, the rule the block's own
-	// body rows already answer to (renderToolBlock).
-	if head.expanded {
-		block.add(subAgentPromptRows(th, view.task, inner), targetHeader)
-	}
 	return block.railed(th, head.depth)
 }
 
-// subAgentPromptRows opens an EXPANDED delegation's railed span with what the delegation was
-// actually ASKED: one blank rail line, then the retained prompt (toolView.task) rendered through the
-// transcript's own markdown pipeline behind the rail (docs/layout/tool-layout.md, "Grouped
-// Sub-agents"). The span's own first block brings the blank line that CLOSES the frame with it — a
-// block separator railed at the span's depth (railJoin) — so emitting one here would open a two-row
-// gap under the prompt.
-//
-// It is [renderMarkdownBody] and not a plain wrap because the prompt is prose a model wrote: its
-// headings, lists and fences are how it reads, and rendering it any other way would show a prompt
-// nobody would recognise as the one they sent. width is the block's already-railed inner column, so
-// the text is wrapped to what is left inside the run's own rail.
-//
-// A delegation with no prompt to show — an empty task, whitespace alone, a record written before the
-// text was retained (transcriptcodec.go) — opens no block at all rather than a blank rail line over
-// an empty row: the frame exists to hold the prompt, and there is nothing here for it to hold.
-func subAgentPromptRows(th theme, task string, width int) []string {
-	if strings.TrimSpace(task) == "" {
-		return nil
-	}
-	body := renderMarkdownBody(th, task, railedWidth(width, 1))
-	return append([]string{railSpacer(th, 1)}, railLines(th, body, 1)...)
-}
-
 // unframedSubAgentPromptLead labels the prompt where an UNFRAMED delegation shows it. The framed
-// reading needs no label — the prompt opens a rail that visibly belongs to the delegation
-// (subAgentPromptRows) — but a body line under an ordinary tool block has nothing around it saying
-// whose words it is, and a prompt read as the delegate's output would be the block lying about who
-// spoke.
+// reading needs no label — a run's prompt opens its own view as the user row it is (render.go's
+// rooted paint), where the marker says whose words they are — but a body line under an ordinary
+// tool block has nothing around it saying that, and a prompt read as the delegate's output would be
+// the block lying about who spoke.
 const unframedSubAgentPromptLead = "task: "
 
 // subAgentHidesPrompt reports whether a DELEGATION's collapsed row is holding back the prompt it
 // carried. It is the toggle-target rule (blockHidesWhenCollapsed) asked about the one thing a
 // delegation's block hides that is nowhere among its views: every reading a delegation opens onto
-// paints the prompt — the framed run inside its rail (subAgentPromptRows), the never-ran block as
-// its body (unframedSubAgentView) — while the collapsed row is one leader row that never does, the
-// task's first line riding the header as the target being the header's text and not the prompt
-// (subAgentTarget).
+// paints the prompt — the framed run as the user row its view opens with (ADR 0063, render.go's
+// rooted paint), the never-ran block as its body (unframedSubAgentView) — while the collapsed row
+// is one leader row that never does, the task's first line riding the header as the target being
+// the header's text and not the prompt (subAgentTarget).
 //
 // It is asked of the VIEW rather than of the entry because the promote-guard is exactly what it must
 // not depend on: a refusal short enough to keep the outcome slot leaves the block bodiless, so the
@@ -365,8 +320,8 @@ func subAgentHidesPrompt(tv toolView) bool {
 // alone, a record replayed from a session written before the text was retained (transcriptcodec.go)
 // — keeps the view it had: a lead line over nothing would be a heading for an empty body.
 //
-// The copy is a paint-time act on facts the entry keeps whole, exactly as the framed readings'
-// are (expandedSubAgentView).
+// The copy is a paint-time act on facts the entry keeps whole, exactly as the framed reading's
+// is (collapsedSubAgentView).
 func unframedSubAgentView(head paintInput) toolView {
 	view := head.tool
 	body := subAgentPromptDetails(view.task)
@@ -422,8 +377,8 @@ type subAgentMember struct {
 	offset int          // the member's entry, as an offset from the block's head (blockPaint.addFor)
 
 	// last marks the GROUP's final member, whose row closes the list with ┕. It is the group's
-	// answer and not the block's: a group interrupted by an open delegation's span paints its
-	// remaining rows in a second block, and the ┕ still belongs to the last row of the whole list.
+	// answer and not the block's: a group interrupted by an open member paints its remaining rows
+	// in a second block, and the ┕ still belongs to the last row of the whole list.
 	last bool
 }
 
@@ -439,19 +394,19 @@ const subAgentGroupLabel = "Sub-Agent"
 // (renderToolGroup), and the member rows go through the very painter that block's do, so a
 // delegation reads as a row of a list wherever it is folded.
 //
-// What is NOT here is the half that makes a delegation different: an open member's SPAN. Expanding
-// one reveals the whole nested run — its rails, its own blocks, each with its own
-// state — and those are entries in their own right, painted by [transcript.renderView]'s ordinary
-// walk exactly as they are under a lone expanded delegation. So a group interrupted by an open
-// member paints its rows up to that member here and its remaining rows in a second block of this
-// same shape after the span, which is why count and last are stated separately: count opens the
-// header and is 0 on the continuation block, while last belongs to the whole group's final row.
+// What is NOT here is the half that makes a delegation different: its RUN. A framed member's span is
+// never painted beside its row — expanding one opens the run's own view (ADR 0063), where those
+// entries are painted by [transcript.renderView]'s ordinary walk rooted at that run. So every framed
+// member is one collapsed row here, whatever its fold flag says.
 //
-// An open member therefore carries no see-less footer of its own: the row that closes it would sit
-// ABOVE the span it opened rather than at the end of it, which is an affordance pointing at the
-// wrong thing (item 4's rule). Its own leader row keeps the click in both states, as every member's
-// does. A member with no span at all is an ordinary group member and takes that painter whole,
-// footer included — its body is the whole of what it hides.
+// The list can still be interrupted, by the one member that opens a body in place: a delegation that
+// never ran (unframedSubAgentView). The group then paints its rows up to that member here and its
+// remaining rows in a second block of this same shape, which is why count and last are stated
+// separately: count opens the header and is 0 on the continuation block, while last belongs to the
+// whole group's final row.
+//
+// A member with no span is an ordinary group member and takes that painter whole, footer included —
+// its body is the whole of what it hides.
 //
 // What a row SAYS is not the group's business at all: each member is read exactly as the lone block
 // it folded from (collapsedSubAgentView), so folding changes the frame around a delegation and
@@ -473,14 +428,12 @@ func renderSubAgentGroup(th theme, count int, members []subAgentMember, width in
 		// (scheduledSubAgentView). It cannot be spanned by construction: a delegation with entries
 		// behind it has started.
 		//
-		// The two fold states differ in the BODY alone: an open member keeps the very
-		// <tool-top-level-details> its shut row wore (expandedSubAgentView), so the click that
-		// opened it adds the report without taking the summary of the run away.
+		// A FRAMED member has no open reading to differ from: expanding it opens its run view
+		// (ADR 0063), so the row it leaves behind in the list is the collapsed one whatever its own
+		// fold flag says.
 		switch {
 		case subAgentScheduled(m.head, len(m.span)):
 			view = scheduledSubAgentView(m.head)
-		case spanned && m.head.expanded:
-			view = expandedSubAgentView(m.head, m.span)
 		case spanned:
 			view = collapsedSubAgentView(m.head, m.span)
 		case m.head.expanded:
@@ -490,12 +443,6 @@ func renderSubAgentGroup(th theme, count int, members []subAgentMember, width in
 			// here rather than inside the member painter so the promote-guard below sees the body
 			// the row is actually about to hide.
 			view = unframedSubAgentView(m.head)
-		}
-		// An OPEN delegation's row is the top of a frame rather than a twig of the list: the corner
-		// takes the two columns the ┝/┕ hung off and the rail runs on down the span (design call 2).
-		// It is exactly branchMarker's width, so the row does not move under the click that opened it.
-		if spanned && m.head.expanded {
-			marker = subAgentOpenMarker
 		}
 		view.finished = subAgentFinished(m.head)
 		view = guardPromotions(th, []toolView{view}, room, marker)[0]
@@ -603,9 +550,9 @@ func groupLabelOf(members []subAgentMember) string {
 // click target, the same question every folded shape asks (renderGroupMember).
 //
 // A delegation that left a RUN behind it always hides something, whatever its own report says: the
-// span is what expanding reveals. Its row is one line collapsed, and open it is that same line plus
-// the report the delegate returned, under the member gutter — the span itself follows outside this
-// block (renderSubAgentGroup).
+// run is what expanding reveals, and it is revealed in its own VIEW rather than under this row
+// (ADR 0063). So a framed member is ONE collapsed line in every state the flag can be in — the row
+// stays a target, and what it opens is a screen and not a body.
 //
 // A delegation with no span is an ordinary member and goes through the ordinary painter, so a
 // refused delegation folds, opens and closes exactly as a read or a terminal call does.
@@ -614,52 +561,34 @@ func renderSubAgentMemberRows(th theme, tv toolView, marker string, width, room 
 	if !spanned {
 		return renderGroupMember(th, tv, marker, memberGutter, width, room, expanded)
 	}
-	row := leaderRow(th, tv, marker, room, expanded, noRemainder)
-	if !expanded {
-		return []string{indicatorRow(th, row, width, glyphCollapsed)}, true
-	}
-	out := []string{indicatorRow(th, row, width, glyphExpanded)}
-	// The member gutter is the ordinary open member's frame (openMemberFrame), and the body under it
-	// is painted through the same painter. It is the frame ALONE that is shared: this row's report is
-	// the sub_agent call's own and no Edit region can reach it, so the split reading has nothing to
-	// offer here and is not asked for (paintToolBody, renderExpandedMember).
-	rows, _ := openMemberFrame(memberGutter).paint(th, tv.Details.all(), room)
-	out = append(out, rows...)
-	// The span this row opened begins with the prompt the delegate was handed, exactly as a lone
-	// run's does (renderSubAgentRun): folding changes the frame around a delegation and never what
-	// the delegation shows of itself.
-	return append(out, subAgentPromptRows(th, tv.task, width)...), true
+	row := leaderRow(th, tv, marker, room, false, noRemainder)
+	return []string{indicatorRow(th, row, width, glyphCollapsed)}, true
 }
 
-// expandedSubAgentView is what an OPEN delegation shows of itself, wherever it is folded: its own
-// header view with the run's cascading summary in the outcome slot (subAgentSummary), over the
-// report body the collapsed reading drops.
+// collapsedSubAgentView is the whole of what a framed delegation shows of itself, wherever it is
+// folded: its own header view with the run's cascading summary in the outcome slot
+// (subAgentSummary), and no body at all. It is the ONLY reading a run has in the conversation —
+// under ADR 0063 the other shape is its run view, which paints the run's own entries rather than a
+// view of the head.
 //
-// The slot is the same one in both states BECAUSE the fold is about the body alone. What the head
-// carries of its own — a report gist promoted into the slot by the presenter, or the typed `done`
-// where the report became a body — is not lost by the swap: subAgentSummary's last cell is exactly
-// that text, now behind the count of the work and the delegate's fill. An open row reverting to the
-// raw head view would drop the two cells the collapsed row had just shown, so opening a delegation
-// would tell the reader LESS about it than leaving it shut.
+// What the head carries of its own — a report gist promoted into the slot by the presenter, or the
+// typed `done` where the report became a body — is not lost by the swap: subAgentSummary's last
+// cell is exactly that text, now behind the count of the work and the delegate's fill.
 //
-// The copy is a paint-time act on facts the entry keeps whole, which is why the body it lays out is
-// the report the delegation actually returned.
-func expandedSubAgentView(head paintInput, span []paintInput) toolView {
-	view := head.tool
-	view.Summary = subAgentSummary(head, span)
-	return view
-}
-
-// collapsedSubAgentView is what a COLLAPSED delegation shows of itself, wherever it is folded: the
-// open reading above with no body at all. The body is dropped because the summary already carries
-// the report's first line and no block says the same thing twice in two adjacent rows.
+// The BODY is dropped because the summary already carries the report's first line and no block says
+// the same thing twice in two adjacent rows — the defect this closed was exactly that, the report
+// laid out here in full above the formatted copy the span's last assistant row already held
+// (ISSUES.md, "Finished sub-agents print the sub-agent output twice"). It is a paint-time act on
+// facts the entry keeps whole, so the report the run view opens on is the one the delegation
+// actually returned.
 //
 // One reading serves the lone block and the folded group's member row alike (renderSubAgentRun,
 // renderSubAgentGroup): grouping changes the frame a delegation is drawn in, and a second wording
-// of "what does a collapsed delegation say" would part company with this one — taking the per-child
+// of "what does a delegation's row say" would part company with this one — taking the per-child
 // live tail a fan-out is observed through (ADR 0039) with it.
 func collapsedSubAgentView(head paintInput, span []paintInput) toolView {
-	view := expandedSubAgentView(head, span)
+	view := head.tool
+	view.Summary = subAgentSummary(head, span)
 	view.Details = toolBody{} // the zero body: no lines, and so nothing to lay out beneath
 	return view
 }
