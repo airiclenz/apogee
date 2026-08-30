@@ -90,7 +90,7 @@ func TestE2ESubAgentView(t *testing.T) {
 
 	// Scene 2, top level — two children are working and the row says so as ONE sentence. It is the
 	// merged phrase or nothing: a row that named one of them would flicker between whichever spoke
-	// last, which is the defect this phrase exists to close (IDEAS.md:18).
+	// last, which is the defect this phrase exists to close (ADR 0063, consequences).
 	drv.WaitText(mergedPhrase)
 	if row := statusRow(t, drv.Frame()); !strings.Contains(row, mergedPhrase) {
 		t.Errorf("the merged phrase is not on the status line: %q", row)

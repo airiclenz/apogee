@@ -537,20 +537,20 @@ type resolvedBlock struct {
 // instead, which is what keeps a painter to what it needs to draw and nothing it could write through
 // (paintcache.go, ADR 0011).
 func (t *transcript) resolveBlock(th theme, head int, in paintInput, width int, blink bool, root paintRoot) resolvedBlock {
-	// A descent used to be announced by a label block of its own. Nothing announces it now: the
-	// delegation's own header row opens the frame with ┌─┶ and the rail runs down the span from there
-	// (docs/layout/tool-layout.md, "Grouped Sub-agents"), so a label saying the same thing one row
-	// lower was the run introducing itself twice.
+	// A descent used to be announced by a label block of its own, and then by the delegation's own
+	// header row opening a ┌─┶ frame over its span. Neither happens now: under ADR 0063 a
+	// delegation has the collapsed row it wears in this list and its run view, and no third shape
+	// (docs/layout/tool-layout.md, "Grouped Sub-agents").
 	//
 	// Adjacent delegations fold into ONE "✦ Sub-Agent (N)" list (subAgentGroupAt), asked first
 	// because every member of one is also a run head and would otherwise resolve as a block of its
-	// own below. The question is asked at every member and not only at the first: an OPEN member's
-	// span is painted by the same walk, so the list resumes in a second block of the same shape after
+	// own below. The question is asked at every member and not only at the first: a member carrying
+	// the open flag ENDS this block, so the list resumes in a second block of the same shape after
 	// it, headerless, its rows still counted against the whole group.
 	//
-	// The block covers the members whose rows it paints and stops at the first open one, resuming the
-	// walk ON that member so it steps into its span exactly as it does under a lone expanded
-	// delegation. A collapsed member's span is skipped whole, by the rule below.
+	// Only an UNFRAMED member can carry that flag: setExpanded refuses it on any head with a run to
+	// open (transcript.go), so the block that stops at one steps past a member with no span rather
+	// than into a railed one, and a framed member's span is skipped whole, by the rule below.
 	if grp, pos, ok := subAgentGroupAt(t.entries, head); ok {
 		end := len(grp) - 1
 		for k := pos; k < len(grp); k++ {
@@ -602,9 +602,11 @@ func (t *transcript) resolveBlock(th theme, head int, in paintInput, width int, 
 					blockState{live: live, blink: blink}).railed(th, in.depth)
 			},
 			next: next,
-			// pos > 0 is this block RESUMING a list whose earlier rows an expanded member's span
-			// interrupted — precisely the spec's "another grouped sub-agent follows the expanded one",
-			// and so the one seam in the whole transcript that closes with a ┊.
+			// pos > 0 is this block RESUMING a list an open member ended — precisely the spec's
+			// "another grouped sub-agent follows the expanded one", and so the one seam in the whole
+			// transcript that closes with a ┊. Nothing draws that ┊ since ADR 0063: the only member
+			// that can be open is unframed, it rails no span, and railJoin's closer arm needs the
+			// deeper preceding depth a span would have left behind.
 			closes:   pos > 0,
 			openTail: open,
 		}

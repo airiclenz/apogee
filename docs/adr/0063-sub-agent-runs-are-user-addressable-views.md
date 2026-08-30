@@ -19,8 +19,8 @@ Three structural facts stand behind those complaints.
 `expandedSubAgentView` (`internal/tui/subagentblock.go:548`): a rail drawn *inside* the parent
 transcript, the child's rows one depth deeper than the parent's, sharing the scroll position and the
 sticky header with everything around it. It also paints the delegation's tool-result body above the
-child's prompt rows, which is the open defect at `ISSUES.md:40` — the report printed twice, once
-badly formatted at the top and once properly at the end.
+child's prompt rows, which is the open double-print defect `ISSUES.md` records as this is written —
+the report printed twice, once badly formatted at the top and once properly at the end.
 
 **2 — A running child cannot be addressed at all.**
 [ADR 0025](0025-interjections-commit-at-the-between-steps-boundary.md) gave the human a way into a
@@ -127,9 +127,9 @@ cannot widen it beyond its parent.
 - **The parent's context grows by one line per steered child** (D3), and only when a child was
   actually steered — an unsteered child's result is byte-identical to today's.
 - **One TUI shape disappears and a defect closes with it.** `expandedSubAgentView` and the rail it
-  drew are deleted, which removes the duplicated, badly formatted report body recorded at
-  `ISSUES.md:40`. Every doc sentence and sketch that draws a delegation "expanded in place" is
-  restated against the two-shape rule.
+  drew are deleted, which removes the duplicated, badly formatted report body `ISSUES.md` records as
+  this is written (its entry goes with the fix). Every doc sentence and sketch that draws a
+  delegation "expanded in place" is restated against the two-shape rule.
 - **The activity line gets one slot per run.** With ≥2 children live the top level reads
   `N sub-agents · working` instead of alternating between them, and a run view shows that child's own
   slot — `IDEAS.md:18` closes. Stopping stays sticky and run-wide.

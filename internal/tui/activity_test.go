@@ -518,7 +518,7 @@ func fannedOutModel(t *testing.T) Model {
 }
 
 // TestStatusPhraseMergesConcurrentDelegates proves the top-level row stops flickering under a
-// fan-out (IDEAS.md:18). One slot for the whole session made two concurrent children overwrite each
+// fan-out (ADR 0063, consequences). One slot for the whole session made two concurrent children overwrite each
 // other, so the row flipped to whichever spoke last and restarted its clock doing so; a slot per run
 // lets the row say the one honest thing it has space for — how many are working, and for how long.
 func TestStatusPhraseMergesConcurrentDelegates(t *testing.T) {

@@ -48,11 +48,11 @@ func TestSubAgentReflowAtSmallWidths(t *testing.T) {
 // the lone block's own collapsed reading (collapsedSubAgentView) — the work behind it and the gist
 // its delegate reported — because folding changes the frame around a delegation, not the record.
 //
-// Opening one reveals its SPAN rather than a body, and the frame the spec draws around it: the row
-// becomes a ┌─┶ header at the very left of the block, the span runs behind a column-0 │ rail, and
-// one ┊ closes it before the list resumes — its last row still closing the whole group with ┕. That
-// interruption is why the group's remaining rows are painted in a second block, and it is what this
-// golden pins. A FINISHED delegation carries a ✓ after its name in both states (design call 6).
+// Opening one reveals nothing here any more: expanding a framed delegation opens its RUN VIEW
+// (ADR 0063), so transcript.setExpanded refuses the flag and the list paints the very rows it
+// painted shut — no ┌─┶ header, no column-0 │ rail over a span, no ┊ closing it before the list
+// resumes — and that refusal is what this golden pins. A FINISHED delegation carries a ✓ after its
+// name whatever its own fold flag says (design call 6).
 func TestRenderSubAgentGroupSketchStates(t *testing.T) {
 	// The three delegations stand at entries 0, 2 and 4 — each with one nested read between them.
 	const secondHead = 2
