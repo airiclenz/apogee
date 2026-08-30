@@ -61,7 +61,10 @@ func (m Model) foldEvent(e domain.Event) Model {
 	// exactly the two events that move it, so the invitation is never a phase behind the run it
 	// names, and every other event leaves the box alone (setPlaceholder is a transition, not a
 	// per-frame branch — doc.go).
-	if m.inRunView() {
+	// A pane that has borrowed the box keeps it, question and legend both: an event arriving under
+	// an open ask or approval must not put the child's invitation back on a box the human is
+	// answering with (legendFor yields on the same two states).
+	if m.inRunView() && !m.state.decisionPending() {
 		switch e.(type) {
 		case domain.SubAgentPhaseEvent, domain.ToolResultEvent:
 			m.setPlaceholder(m.legendFor(m.topLegend()))

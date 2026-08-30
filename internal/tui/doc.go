@@ -328,7 +328,11 @@
 // so childLegend names that run and names esc as the way back — and only a RUNNING child is invited
 // to, the other two lifecycles saying instead why they are not ([childPhaseOf]). Every setPlaceholder
 // call site routes its legend through [Model.legendFor], which is what keeps a transition in the
-// conversation below a view from re-labelling a box that is addressing a delegate. The idle side of
+// conversation below a view from re-labelling a box that is addressing a delegate. That third
+// invitation yields to a BORROWED box, though: while an ask or an approval pane stands the box is
+// the question's, and esc cancels the question rather than leaving the view
+// ([Model.runViewOwnsEsc] steps aside for both states), so legendFor hands back the conversation's
+// own legend until the question is away — answered, or dead with its Exchange. The idle side of
 // that swap is two constants rather than one, because a key it names is not on every terminal: ⇧⏎
 // reaches the program only where the enhanced keyboard protocol's key disambiguation was negotiated,
 // and everywhere else the terminal folds the chord into a plain ⏎ — which is a SEND, so advertising

@@ -1799,7 +1799,6 @@ func (m *Model) finishWorker(next uiState) tea.Cmd {
 	// flushes them into a new Exchange (flushAfterCompletion), a stop or a fault holds them for
 	// the next ⏎ (noteHeldQueue) — ADR 0025.
 	m.box = nil
-	m.setPlaceholder(m.legendFor(m.idleLegend())) // nothing is running: ⏎ sends again
 	m.genStart = time.Time{}
 	// The worker has unwound, so every run's activity is over — the whole board goes, including a
 	// sticky "stopping", which only this path clears, and any delegate slot whose child never got
@@ -1815,6 +1814,12 @@ func (m *Model) finishWorker(next uiState) tea.Cmd {
 	// stop" on an already-idle status line for the rest of the window (handleKey's esc case).
 	m.lastEsc = time.Time{}
 	m.state = next
+	// The box invites again — asked AFTER the flip above, because the legend it lands on is the
+	// state's to decide: a question that died with its Exchange has just let go of the box, and
+	// legendFor yields for as long as the state still says a pane is standing over it (runview.go).
+	// Resolved a line earlier, a stop or a fault under an ask or an approval pane would hand the
+	// conversation's own invitation to a box the run view behind that pane takes back right here.
+	m.setPlaceholder(m.legendFor(m.idleLegend())) // nothing is running: ⏎ sends again
 	// The prompt cleared above may have been clamping a multi-line draft to leave itself its four
 	// rows (draftRowsCeiling); with it gone the box grows back to what the draft asks for.
 	m.layout()

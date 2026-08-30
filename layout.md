@@ -1107,7 +1107,11 @@ level's, so `@file` references and skill `/tokens` ride along as they do anywher
 of a run that is **over, or not yet started**, is read-only and says so in the same place —
 `<name> has finished · esc back`, `<name> has not started · esc back` — and a message typed into
 one is refused with a note at the top level and the draft left standing exactly as it was, to be
-carried back up and sent there.
+carried back up and sent there. While an `ask_user` question or an approval pane stands, the box is
+that pane's and says so: it wears the conversation's own legend again for as long as the question
+does, because `esc` there cancels the question rather than leaving the view — the child's invitation
+comes back the moment the question is away, whether it was answered or died with the Exchange a stop
+or a fault ended.
 
 **A staged row names the run it is going to.** A message waiting for a child shows in the
 staged-interjection band (below) as `⧖ queued for <name> — <the message>`, because with several

@@ -78,6 +78,10 @@ func approvalMenuKeys() map[string]domain.ApprovalDecision {
 // nothing (Update's approvalArmedMsg case) — the counter lives on the Model, not on the question,
 // so it is never reset back onto a number a tick still in flight already carries.
 func (m Model) foldApprovalRequest(msg approvalReqMsg) (tea.Model, tea.Cmd) {
+	// What the conversation itself invites, read while the state still describes the conversation:
+	// the pane is about to borrow the box, and the legend it hands it is the one the box would be
+	// wearing with no view open (below).
+	top := m.topLegend()
 	m.state = stateAwaitingApproval
 	m.pending = &msg
 	m.approvalSel = listCursor{} // the menu opens on Allow for every request (docs/layout/user-questions-layout.md)
@@ -85,7 +89,12 @@ func (m Model) foldApprovalRequest(msg approvalReqMsg) (tea.Model, tea.Cmd) {
 	m.approvalSeq++
 	seq := m.approvalSeq
 	m.dismissAutocomplete() // a stale menu never shares the frame with a decision surface
-	m.layout()              // the pane the decision turns on outranks the draft's extra rows
+	// The pane BORROWS the box below it, so the box stops inviting what it was inviting: inside a
+	// run view that was the child's own legend, whose "esc back" this pane's Cancel row contradicts
+	// (legendFor yields for as long as the question stands). At the top level the legend it lands
+	// on is the one already showing, so this is a no-op there.
+	m.setPlaceholder(m.legendFor(top))
+	m.layout() // the pane the decision turns on outranks the draft's extra rows
 	return m, tea.Tick(approvalArmDelay, func(time.Time) tea.Msg { return approvalArmedMsg{seq: seq} })
 }
 
@@ -218,7 +227,8 @@ func (m Model) sendApproval(decision domain.ApprovalDecision) (tea.Model, tea.Cm
 	m.pending = nil
 	m.approvalArmed = false // the latch belongs to the pane that just closed, not to the next one
 	m.state = stateRunning
-	m.layout() // the pane is gone: a draft the prompt had clamped grows back (draftRowsCeiling)
+	m.setPlaceholder(m.legendFor(runningPlaceholder)) // the question has let go of the box (submitAnswer's rule)
+	m.layout()                                        // the pane is gone: a draft the prompt had clamped grows back (draftRowsCeiling)
 	return m, m.spin.arm()
 }
 

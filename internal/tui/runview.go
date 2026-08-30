@@ -101,7 +101,19 @@ func (m Model) runLabel(spawn string) string {
 // setPlaceholder call site routes through it, which is what keeps a transition in the conversation
 // BELOW a view (an Exchange completing, an ask being answered) from re-labelling a box that is
 // addressing a child.
+//
+// It yields to a BORROWED box. While an ask or an approval pane stands, the box belongs to that
+// question (ask.go, approval.go) and the keys mean what the pane says they mean: esc CANCELS there,
+// because the view's claimant deliberately steps aside for both states ([Model.runViewOwnsEsc]), so
+// the child legend's "esc back" would contradict the pane's own row one line above it. The yield is
+// that claimant's gate read back — the two DECISION states, not "everything that is not live": at
+// errored esc still walks up, so the box there goes on naming it. The view is still open behind the
+// pane and takes the box back the moment the question is answered ([Model.submitAnswer],
+// [Model.sendApproval]) — or dies with its Exchange ([Model.finishWorker]).
 func (m Model) legendFor(top string) string {
+	if m.state.decisionPending() {
+		return top
+	}
 	head, ok := m.viewedChild()
 	if !ok {
 		return top

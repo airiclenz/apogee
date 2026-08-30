@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"strconv"
 	"strings"
 	"testing"
@@ -521,6 +522,108 @@ func TestRunViewDecisionPanesKeepEnter(t *testing.T) {
 		}
 		if got := eng.childInterjections(); len(got) != 0 {
 			t.Errorf("InterjectChild calls = %+v; a decision is not a message to the run", got)
+		}
+	})
+}
+
+// TestRunViewDecisionPaneOwnsTheLegend is the other half of that guard, on the row the human READS:
+// a pane borrows the box below it, so while an ask or an approval stands the box must not go on
+// inviting a message to the child — the child legend names esc as the way back, and esc under a
+// pane cancels the question instead (runViewOwnsEsc steps aside for both states). The view is still
+// open behind the pane, so the child's own invitation comes back the moment the question is away.
+func TestRunViewDecisionPaneOwnsTheLegend(t *testing.T) {
+	const childLegendText = "Message repo-scout…  ⏎ send · ↑ recall · esc back"
+
+	t.Run("an ask hands the box the answering legend", func(t *testing.T) {
+		m := modelViewingChild(t, &fakeEngine{}, childRunning)
+		if got := m.input.Placeholder; got != childLegendText {
+			t.Fatalf("setup: placeholder = %q; want the child legend", got)
+		}
+		reply := make(chan domain.AskAnswer, 1)
+
+		m = step(t, m, askReqMsg{Request: domain.AskRequest{Question: "which file?"}, Reply: reply})
+
+		if got := m.input.Placeholder; got != m.idleLegend() {
+			t.Errorf("placeholder = %q; want the answering legend %q — the box belongs to the question", got, m.idleLegend())
+		}
+		if strings.Contains(m.input.Placeholder, "esc back") {
+			t.Errorf("placeholder = %q; esc cancels the question here, so the box must not advertise it as the way back", m.input.Placeholder)
+		}
+
+		// An event arriving under the open pane must not put the child's invitation back either.
+		m = step(t, m, eventMsg{Event: domain.SubAgentPhaseEvent{
+			EventBase: domain.EventBase{Depth: 1, CallID: "s1"},
+			Phase:     domain.SubAgentFinished,
+		}})
+		if got := m.input.Placeholder; got != m.idleLegend() {
+			t.Errorf("placeholder = %q after an event under the pane; want the answering legend to stand", got)
+		}
+
+		for _, r := range "42" {
+			m = step(t, m, keyRune(r))
+		}
+		m = step(t, m, keyEnter())
+
+		if got := m.input.Placeholder; got != "repo-scout has finished · esc back" {
+			t.Errorf("placeholder = %q; the answered question gives the box back to the run on screen", got)
+		}
+	})
+
+	t.Run("an approval keeps the conversation's own legend", func(t *testing.T) {
+		m := modelViewingChild(t, &fakeEngine{}, childRunning)
+		reply := make(chan domain.ApprovalDecision, 1)
+
+		m = step(t, m, approvalReqMsg{Request: domain.ApprovalRequest{Tool: "terminal"}, Reply: reply})
+
+		if got := m.input.Placeholder; got != runningPlaceholder {
+			t.Errorf("placeholder = %q; want %q — the pane's Cancel row owns esc, not the view", got, runningPlaceholder)
+		}
+		if strings.Contains(m.input.Placeholder, "esc back") {
+			t.Errorf("placeholder = %q; esc cancels the approval here, so the box must not advertise it as the way back", m.input.Placeholder)
+		}
+
+		m = step(t, m, approvalArmedMsg{seq: m.approvalSeq})
+		m = step(t, m, keyEnter())
+
+		if got := m.input.Placeholder; got != childLegendText {
+			t.Errorf("placeholder = %q; want the child legend back once the decision is away", got)
+		}
+	})
+
+	// A pane does not always end in an answer: a stop or a fault takes the whole Exchange, question
+	// and all, and the box it borrowed goes back to the run STILL OPEN behind it rather than to the
+	// conversation below. finishWorker resolves the legend after its own state flip for exactly
+	// this — while the state still named the pane, legendFor would yield and the top level's
+	// invitation would land on a box that is addressing a child.
+	for _, tc := range []struct {
+		name string
+		open tea.Msg
+	}{
+		{name: "an ask", open: askReqMsg{Request: domain.AskRequest{Question: "which file?"}, Reply: make(chan domain.AskAnswer, 1)}},
+		{name: "an approval", open: approvalReqMsg{Request: domain.ApprovalRequest{Tool: "terminal"}, Reply: make(chan domain.ApprovalDecision, 1)}},
+	} {
+		t.Run("a stop under "+tc.name+" hands the box back to the view", func(t *testing.T) {
+			m := modelViewingChild(t, &fakeEngine{}, childRunning)
+			m = step(t, m, tc.open)
+
+			m = step(t, m, cancelledMsg{})
+
+			if got := m.input.Placeholder; got != childLegendText {
+				t.Errorf("placeholder = %q; want the child legend %q — the view outlived the question", got, childLegendText)
+			}
+		})
+	}
+
+	t.Run("a fault under a pane hands it back too", func(t *testing.T) {
+		m := modelViewingChild(t, &fakeEngine{}, childRunning)
+		m = step(t, m, approvalReqMsg{Request: domain.ApprovalRequest{Tool: "terminal"}, Reply: make(chan domain.ApprovalDecision, 1)})
+
+		m = step(t, m, errMsg{Err: errors.New("upstream fell over")})
+
+		// Errored is not a borrowed box: esc still walks one level up there (runViewOwnsEsc), so
+		// the legend goes on naming it.
+		if got := m.input.Placeholder; got != childLegendText {
+			t.Errorf("placeholder = %q; want the child legend %q — esc still leaves the view at errored", got, childLegendText)
 		}
 	})
 }
