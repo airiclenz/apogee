@@ -295,7 +295,44 @@ order. The invariant is documented on `queuedInterjection.spawn` rather than gua
 
 **Commit.** `feat(tui): inside a run view the prompt box messages that sub-agent`
 
-## 10. End-to-end: open, message, back, and the parent's trailer
+## 10. End-to-end: open, message, back, and the parent's trailer — ✅ DONE (2026-08-30)
+
+NOTES (2026-08-30): the launch does NOT go through `launchTUIConfigured(t, drv, stub, parallelPin)`
+as the item's regression guard names it. `parallel-agents:` sits INSIDE a `servers:` entry and
+`appendHomeConfig` appends after the top-level `server:` key, which is not merely the wrong scope
+but invalid YAML (`yaml: line 6: mapping values are not allowed in this context`, verified against
+gopkg.in/yaml.v3). The home is written directly by a local `runViewHome` and launched with
+`launchTUIOn`, which exists for exactly this case (its doc names the key-inside-an-entry problem);
+the pin itself is still `parallelPin` from `e2e_parallel_test.go:38`, as the guard requires.
+
+NOTES (2026-08-30): scene (1) opens the WORKING run with a local `openWorkingRun` rather than item
+7's `openLastRun`. `openLastRun` ends on `drv.WaitQuiet(settled)`, which a working session can never
+satisfy — its status line animates a spinner every frame — so it always ends in the wait's 5s
+timeout (observed). `openWorkingRun` presses the same ⌥↑ ⏎ and waits on the view's own breadcrumb
+instead. `openLastRun` is still used for scene (5)'s finished view, which is the state its settle
+suits. See DEFER.
+
+NOTES (2026-08-30): the child's mid-run window is a `token_delay:` on a TOOL-CALL turn (three
+seconds between the call's two SSE fragments) rather than the item's "slow token stream" of text.
+stubllm refuses a turn carrying both text and tool calls ("a turn is exactly one kind"), and a
+sentence still arriving repaints the very frame the t17 golden pins; a `hang:` cannot serve either,
+since it answers with nothing at all and a child whose run is over cannot be steered. The park turn
+repeats, so a slow machine finds the child still working rather than already gone.
+
+NOTES (2026-08-30): `t17-run-view` is redacted with `goldenRedactions(sess)` PLUS one `RedactPadded`
+over the status line's whole live left slot (the spinner's braille phase, the phrase, the elapsed
+clock) — a golden of a working view has an animation and a second counter on it, and only the whole
+slot has a stable width. `t18-run-view-finished` uses `goldenRedactions(sess)` alone, as the item
+says. What the slot says is pinned on cells instead (`scout · `, and never `sub-agents`).
+
+NOTES (2026-08-30): scene (4) also pins the consequence item 3 accepted and pointed at t18 — but t18
+is the run view, which never paints the collapsed row. The pair of member rows at the TOP level is
+where it shows, so the assertion lives there: the steered child's row reads `tool calls · done` (its
+report is no longer one line) while the unsteered sibling's still promotes `The first half is done.`
+
+NOTES (2026-08-30): the parent-notice check is a `WaitFor` rather than a bare assertion — the
+child's answer is on screen the moment the child says it, but the result carrying it only reaches
+the wire once the parent has every delegate's report and asks its next question.
 
 **What.** Depends on items 3, 5, 8, 9. Add `cmd/apogee/e2e_subagent_view_test.go` on the in-process `tuitest.Driver` (`docs/design/test-drivers.md:386,780` — no `t.Parallel`, waits on content never time) launched through `launchTUIConfigured(t, drv, stub, …)` with the `parallel-agents: 2` line (`parallelPin`, `cmd/apogee/e2e_parallel_test.go:38`), with a stubllm fixture under `cmd/apogee/testdata/stubllm/` scripting: parent delegates two children; child A runs ≥3 Steps with a slow token stream so the test can act mid-run; the parent's final reply echoes the tool result. Scenes: (1) `openLastRun` (item 7, `cmd/apogee/e2e_support_test.go`) opens the run view — `WaitText("← main › ")`, the child's task is the first row, the frame's bottom row is the child's latest line; (2) status line reads `2 sub-agents · working` at top level and `<name> · <phrase>` in the view; (3) type a message + `⏎` → `queued for <name>` band, then the user row inside the run, then stubllm's request log shows the message as a user message in child A's next request (`when:` match) and the parent's tool-result content ending with the exact trailer `(the user sent 1 message to this sub-agent while it ran)`; (4) `esc` returns to top level with the collapsed row; (5) a finished child's view shows `<name> has finished · esc back`. Golden frames via `tuitest.Golden(t, "t17-run-view", frame, goldenRedactions(sess)...)` and `t18-run-view-finished` alike.
 

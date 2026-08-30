@@ -1,0 +1,82 @@
+# The upstream TestE2ESubAgentView talks to: one reply that sends TWO delegates over the workspace,
+# and the two conversations behind it — a short one that only has to stand beside the other, and a
+# long one the human opens, reads and then talks to (ADR 0063).
+#
+# The second delegate is the one the test addresses, and it is second on purpose: the run view is
+# opened with ⌥↑ ⏎, which stands on the LAST block in the conversation, so the child the keyboard
+# reaches is the child this fixture makes interesting.
+#
+# Both delegates are slowed by `token_delay:` rather than stopped by `hang:`, because a hang answers
+# with nothing at all and a run that is over cannot be steered. The long delegate's slow turn is a
+# TOOL CALL: its two fragments are three seconds apart, so the child spends those seconds mid-reply
+# with its previous card already settled — a window that is wide enough to act in and, unlike a
+# streaming sentence, still on screen when the golden is taken. It repeats, so a test that takes
+# longer than one window to type its message finds the child still working rather than already gone:
+# the window is a floor, never a deadline.
+#
+# The wrap-up ECHOES the notice the steered child's result carries, through a capture rather than a
+# literal. A capture that finds nothing is an error the stub answers with HTTP 500, so a run whose
+# result lost its parent notice cannot quietly finish: the fixture itself is the second assertion.
+model: run-view-model
+turns:
+    # The session title. apogee asks for one off the first prompt, so this has to be matched BEFORE
+    # the prompt's own turn or it would take it (see smoke.yaml).
+    - when:
+        last_message: The user's first request
+      repeat: true
+      text: Two delegates
+    # The parent's wrap-up, once BOTH delegations have reported. Matched before the fan-out turn so
+    # a parent request can never be answered as anything else.
+    - when:
+        tool_result: sub_agent
+      repeat: true
+      captures:
+        - name: notice
+          from: last_message
+          pattern: '(\(the user sent [^)]*\))'
+      text: Delegates back — {{notice}}
+    # The fan-out itself.
+    - when:
+        last_message: ^Send two delegates
+      repeat: true
+      tool_calls:
+        - name: sub_agent
+          arguments: '{"task":"Take the first half of the survey","name":"tally"}'
+        - name: sub_agent
+          arguments: '{"task":"Take the second half of the survey","name":"scout"}'
+    # The SHORT delegate: one sentence, spelled out a letter at a time so that it is still working
+    # while the status line is asked what two live children read as. It answers by itself — the
+    # parent cannot wrap up until every delegate has reported, and the notice this fixture echoes
+    # rides that wrap-up.
+    - when:
+        last_message: first half of the survey
+      repeat: true
+      text: The first half is done.
+      chunk_runes: 1
+      token_delay: 100ms
+    # The LONG delegate's answer to the human — matched by the message the test types into the run
+    # view, which reaches this child as an interjection and is therefore the request's last message.
+    # It carries no tool call, so answering it is what ends the child's run.
+    - when:
+        last_message: What have you found so far
+      repeat: true
+      text: So far a.txt, and it says hello.
+    # The long delegate's first Step, picked by the half of the survey it was handed.
+    - when:
+        last_message: second half of the survey
+      repeat: true
+      tool_calls:
+        - name: read_file
+          arguments: '{"path":"a.txt"}'
+    # And its window: the same read again, its two fragments three seconds apart. The child is
+    # between Steps when the call finally lands, which is where a queued message is delivered.
+    - when:
+        tool_result: read_file
+      repeat: true
+      tool_calls:
+        - name: read_file
+          arguments: '{"path":"a.txt"}'
+      token_delay: 3s
+    # Anything neither the parent nor a child claims.
+    - repeat: true
+      text: Nothing else to add.
