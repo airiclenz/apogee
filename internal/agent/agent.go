@@ -277,16 +277,17 @@ type Agent struct {
 	// cached). newAgent always supplies it; nil is an inactive floor, never an error.
 	tree *treeSnapshotter
 
-	conv         domain.Conversation // serializable conversation state (ADR 0001)
-	pendingInput *domain.UserInput   // queued by Submit, consumed by the next Step
-	turns        *turnLifecycle      // owns the Turn/Exchange lifecycle state (index, inExchange, exchangeStart) and, from item 2 on, the exits — internal/agent/turn.go
-	compacting   bool                // guards the automatic Compaction trigger against re-entry (item 9)
-	compactSat   bool                // saturation latch: a prior auto-fold could not bring history under its allocation, so further automatic folds stand down until the estimate drops back under it (S2)
-	depth        int                 // sub-agent nesting level: 0 = top-level; a sub-agent runs at parent+1 (ADR 0013)
-	callID       string              // this Agent's run identity: the id of the sub_agent call that spawned it, stamped on every Event it emits (domain.EventBase.CallID); empty at depth 0
-	consoleOwner string              // this Agent's Console PRIVILEGE identity: the engine-minted key (console.Registry.MintOwner) its Consoles are stamped with and its end reaps by; empty at depth 0. Deliberately not callID — that id is the model's to choose, and two siblings of one Turn can collide on it (ADR 0059 §6)
-	task         string              // the task this Agent was delegated, from the spawning sub_agent call's arguments — what an Approval prompt names it by (domain.ApprovalRequest.SubAgentTask); empty at depth 0
-	name         string              // this Agent's display identity in words: the optional short name the spawning sub_agent call supplied, normalised to a trimmed first line; empty = unnamed, and every display falls back to task. Display only, never privilege (ADR 0005)
+	conv          domain.Conversation // serializable conversation state (ADR 0001)
+	pendingInput  *domain.UserInput   // queued by Submit, consumed by the next Step
+	turns         *turnLifecycle      // owns the Turn/Exchange lifecycle state (index, inExchange, exchangeStart) and, from item 2 on, the exits — internal/agent/turn.go
+	compacting    bool                // guards the automatic Compaction trigger against re-entry (item 9)
+	compactSat    bool                // saturation latch: a prior auto-fold could not bring history under its allocation, so further automatic folds stand down until the estimate drops back under it (S2)
+	compactFailed bool                // stand-down latch: an automatic fold FAULTED, so the estimate-driven trigger stands down for the rest of THIS Exchange rather than re-running the identical failing summary call at every Turn boundary (turnLifecycle.openExchange clears it; the emergency fold and the on-demand /compact ignore it)
+	depth         int                 // sub-agent nesting level: 0 = top-level; a sub-agent runs at parent+1 (ADR 0013)
+	callID        string              // this Agent's run identity: the id of the sub_agent call that spawned it, stamped on every Event it emits (domain.EventBase.CallID); empty at depth 0
+	consoleOwner  string              // this Agent's Console PRIVILEGE identity: the engine-minted key (console.Registry.MintOwner) its Consoles are stamped with and its end reaps by; empty at depth 0. Deliberately not callID — that id is the model's to choose, and two siblings of one Turn can collide on it (ADR 0059 §6)
+	task          string              // the task this Agent was delegated, from the spawning sub_agent call's arguments — what an Approval prompt names it by (domain.ApprovalRequest.SubAgentTask); empty at depth 0
+	name          string              // this Agent's display identity in words: the optional short name the spawning sub_agent call supplied, normalised to a trimmed first line; empty = unnamed, and every display falls back to task. Display only, never privilege (ADR 0005)
 
 	// stepCap bounds the Turns this Agent may take in ONE Exchange before Run ends it; 0 =
 	// unbounded. It is a DELEGATE bound: only newChildAgent seeds it (from

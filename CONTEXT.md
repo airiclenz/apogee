@@ -1139,7 +1139,11 @@ fires at an Exchange boundary when the history outgrows its Budget allocation, a
 fold allowed to run **mid-Exchange** on the main agent, closing with a user-role bridge so the
 retried request stays template-legal. A **child agent** also folds mid-Exchange, at any quiescent
 Turn boundary under budget pressure, because its whole life is one Exchange and the boundary the
-main agent waits for never comes. `auto-compact: false` opts out of all of them; the on-demand
+main agent waits for never comes. A fold that **faults** leaves the history untouched, so it stands
+the estimate-driven trigger down for the rest of that Exchange rather than re-running the identical
+failing call at the next boundary — the main agent re-arms when its next Exchange opens, a child
+stands down for the delegation, and the emergency fold and `/compact` keep their own shot.
+`auto-compact: false` opts out of all of them; the on-demand
 `/compact` stays boundary-only. See
 [ADR 0018](docs/adr/0018-context-overflow-recovers-structurally-the-emergency-fold-and-one-retry.md).
 _Avoid_: "compression", "truncation" (Compaction is generative and summarises).

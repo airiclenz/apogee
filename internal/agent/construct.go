@@ -134,7 +134,7 @@ func newAgent(cfg domain.Config, up provider.Responder) (*Agent, error) {
 	a.reloadContextFiles()
 	// Wire the Turn lifecycle owner AFTER the literal so conv points at the Agent's field: a later
 	// restoreState value-assigns a.conv, and the pointer keeps that write visible through a.turns.
-	a.turns = &turnLifecycle{conv: &a.conv, tracker: a.tracker}
+	a.turns = &turnLifecycle{conv: &a.conv, tracker: a.tracker, compactFailed: &a.compactFailed}
 	return a, nil
 }
 

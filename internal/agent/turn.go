@@ -25,6 +25,12 @@ type turnLifecycle struct {
 	// deliberately not serialized: a snapshot is taken at a quiescent boundary, and a resumed
 	// Exchange's cap starts counting again from there.
 	exchangeTurns int
+
+	// compactFailed points at Agent.compactFailed — the stand-down latch a FAILED automatic fold
+	// sets (compact.go). It is a POINTER for the same reason conv is one: the Agent owns the
+	// value, this type owns the moment it resets, and construct.go wires the two together. nil is
+	// inert, never an error — a bare lifecycle in a unit test has no Agent behind it.
+	compactFailed *bool
 }
 
 // turnRun is the working state of one Turn attempt — the values step() used to thread as five
@@ -203,6 +209,14 @@ func (l *turnLifecycle) openExchange() {
 	// A new Exchange is a new step-cap budget: the cap bounds the Turns of ONE Exchange, so the
 	// count starts over here rather than accumulating across a delegation's life (Agent.Run).
 	l.exchangeTurns = 0
+	// And a new automatic-fold budget, for the same reason: a fold that faulted stood the
+	// estimate-driven trigger down for the Exchange it faulted in (Agent.compactFailed,
+	// compact.go), not forever. The main agent therefore re-arms at every opening; a CHILD never
+	// reaches here a second time — its whole life is one Exchange — so its stand-down lasts the
+	// delegation, which is the retry runaway this closes.
+	if l.compactFailed != nil {
+		*l.compactFailed = false
+	}
 }
 
 // reanchorAfterShrink repairs the cached Exchange boundary (S2) after a mid-Exchange history

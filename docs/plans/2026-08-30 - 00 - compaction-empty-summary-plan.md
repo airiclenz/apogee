@@ -112,7 +112,12 @@ summary message containing `Summary text` and no `<think>`.
 
 Commit: `fix(agent): a reasoning-only capped summary names the cap and the spend; inline thinking never enters the summary`
 
-## 3. A failed automatic fold stands down for the rest of the Exchange
+## 3. A failed automatic fold stands down for the rest of the Exchange — ✅ DONE (2026-08-30)
+
+NOTES (2026-08-30): consequential edit — internal/agent/construct.go: made necessary by turnLifecycle gaining the `compactFailed *bool` back-reference the plan's "openExchange clears it" requires; the pointer is wired beside `conv` at the same post-literal site, so a later `restoreState` value-assign of `a.conv` keeps both writes visible.
+NOTES (2026-08-30): `turnLifecycle` holds the latch as a `*bool` into `Agent.compactFailed` (the field stays on `Agent`, beside `compactSat`, as the item says) — the type had no Agent reference. nil is inert, which keeps the ten bare `turnLifecycle{...}` literals in turn_test.go working unchanged.
+NOTES (2026-08-30): beyond the two doc comments the item names, `emergencyFold`'s "compactSat is deliberately untouched" paragraph and `Agent.Compact`'s doc were reworded to name both latches — each stated latch policy that the new latch would otherwise have made incomplete. The test file's header index gained the new property (d) for the same reason.
+NOTES (2026-08-30): `rebind.go` clears `compactSat` on an upstream switch but not `compactFailed`. Inert today (a rebind only happens at a depth-0 quiescent boundary, where the next `openExchange` clears the latch anyway), so it was left alone rather than widened past this item's scope.
 
 **What:** fix for the 2026-08-29 retry runaway (a child agent re-ran the identical failing
 summary call at every Turn boundary). Add `compactFailed bool` to `Agent` (`internal/agent/agent.go`,

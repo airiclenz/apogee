@@ -1,7 +1,8 @@
 package agent
 
 // Second-review fixes for the automatic Compaction trigger (phase-4-second-review-fixes item 2,
-// design record S2). Three properties beyond the four baseline autocompact tests: (a) the trigger
+// design record S2), plus the failed-fold stand-down (plan 2026-08-30 - 00 item 3). Four properties
+// beyond the four baseline autocompact tests: (a) the trigger
 // is Exchange-boundary-only — a mid-Exchange over-budget Turn defers the fold to the next Exchange
 // opening — and its twin, that an Agent which compacts mid-Exchange (midExchangeCompaction, what
 // every child agent carries) folds on that same Turn instead; (b) a fold that cannot bring the
@@ -9,7 +10,9 @@ package agent
 // then it stands down until the estimate drops under the allocation, then re-arms; (c)
 // exchangeStart is repaired after a mid-Exchange history rewrite — and after a mid-Exchange fold —
 // so AbortExchange still rolls back exactly to the Exchange boundary (no orphaned tool results, no
-// over-drop into the protected prefix).
+// over-drop into the protected prefix); (d) a fold that FAULTS stands the trigger down for the rest
+// of the Exchange — one ErrorEvent naming the stand-down, then silence — while openExchange re-arms
+// the main agent and the emergency fold and /compact keep their own shot.
 
 import (
 	"context"
@@ -412,5 +415,204 @@ func TestAutoCompactFoldsMidExchangeOnAnAgentThatCompactsMidExchange(t *testing.
 	}
 	if last := a.conv.At(a.conv.Len() - 1); !strings.Contains(last.Content, "FOLDED") {
 		t.Errorf("last message after abort = %+v, want the folded summary", last)
+	}
+}
+
+// compactionErrorTexts returns the Err text of every ErrorEvent attributed to the "compaction"
+// source, in order — so a test can assert what the fold actually told the human, not just how many
+// times it told them.
+func compactionErrorTexts(events []domain.Event) []string {
+	var out []string
+	for _, e := range events {
+		if ee, ok := e.(domain.ErrorEvent); ok && ee.Source == "compaction" {
+			out = append(out, ee.Err)
+		}
+	}
+	return out
+}
+
+// TestAutoCompactFailedFoldStandsDownForTheRestOfTheExchange drives the 2026-08-29 retry runaway:
+// a CHILD agent (midExchangeCompaction) whose history sits over budget re-ran the identical failing
+// summary call at every Turn boundary — one ~40-minute call per Turn for ~9 h. A fold that FAULTS
+// leaves the conversation untouched (Compact's guarantee), so the next boundary would hand the same
+// call the same history: the fault must latch the estimate-driven trigger off for the rest of the
+// Exchange. Four over-budget Turns must therefore produce exactly ONE summary call and ONE
+// ErrorEvent, and that event must say the trigger stood down.
+//
+// The four Turns keep the existing 25k-char result + "ok" reply shape deliberately: that keeps every
+// request under requestExceedsWindow's doubled uncalibrated room (loop.go), so the latch-exempt
+// emergencyFold never fires and adds a summary call of its own — summaryCalls == 1 is the
+// estimate-driven trigger's own count.
+func TestAutoCompactFailedFoldStandsDownForTheRestOfTheExchange(t *testing.T) {
+	sink := &recordingSink{}
+	up := &scriptedCompactResponder{
+		summaryReply: "", // an empty summary is a fault: context.Compact rejects it (errEmptySummary)
+		scripts: [][]provider.Delta{
+			toolCallScript("c1", "probe", "{}"), // Turn 0 (opening): the oversized result puts the history over budget
+			toolCallScript("c2", "peek", "{}"),  // Turn 1: over budget at its top → the fold RUNS and faults
+			toolCallScript("c3", "peek", "{}"),  // Turn 2: still over budget → the latch must stand the trigger down
+			toolCallScript("c4", "peek", "{}"),  // Turn 3: ditto — a second silent boundary
+		},
+	}
+	cfg := autoCompactConfig(sink)
+	toolReg := domain.NewToolRegistry()
+	// The oversized result (~25k chars ≈ 6.2k tokens) exceeds the ~3.9k-token History allocation for
+	// the 8k window; the small one keeps the Exchange open afterwards without shrinking it back.
+	if err := toolReg.Register(fakeTool{name: "probe", readOnly: true, result: strings.Repeat("x", 25000)}); err != nil {
+		t.Fatalf("Register(probe): %v", err)
+	}
+	if err := toolReg.Register(fakeTool{name: "peek", readOnly: true, result: "ok"}); err != nil {
+		t.Fatalf("Register(peek): %v", err)
+	}
+	cfg.Tools = toolReg
+	a, err := newAgent(cfg, up)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	a.midExchangeCompaction = true // what newChildAgent stamps on a delegate
+
+	if err := a.Submit(domain.UserInput{Text: "start"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	for turn := 0; turn < 4; turn++ {
+		res, err := a.Step(context.Background())
+		if err != nil {
+			t.Fatalf("Step %d: %v", turn, err)
+		}
+		if res.Status != domain.StatusTurnComplete {
+			t.Fatalf("Turn %d status = %q, want %q (a tool Turn keeps the Exchange open)", turn, res.Status, domain.StatusTurnComplete)
+		}
+	}
+
+	if !a.historyExceedsAllocation() {
+		t.Fatal("setup: the history is not over budget after the failed fold; the stand-down would be untested")
+	}
+	if up.summaryCalls != 1 {
+		t.Fatalf("summarizer calls = %d, want 1 — a faulted fold was retried at a later Turn boundary", up.summaryCalls)
+	}
+	errs := compactionErrorTexts(sink.events)
+	if len(errs) != 1 {
+		t.Fatalf("compaction ErrorEvents = %d (%q), want exactly 1 — one event, then silence", len(errs), errs)
+	}
+	if !strings.HasSuffix(errs[0], foldStandDownSuffix) {
+		t.Errorf("compaction ErrorEvent = %q, want it to end with %q so the human learns why the failure is not repeated", errs[0], foldStandDownSuffix)
+	}
+	if !strings.Contains(errs[0], "empty summary") {
+		t.Errorf("compaction ErrorEvent = %q, want the underlying fault still named", errs[0])
+	}
+}
+
+// TestAutoCompactFailedFoldReArmsAtTheNextExchangeOpening is the main agent's half: its fold runs at
+// an Exchange OPENING, and openExchange clears the latch immediately after, so the next Exchange
+// folds afresh rather than inheriting a stand-down from the last one. Because no stand-down actually
+// happens there, neither error carries the suffix — telling the human that automatic folding stood
+// down for an Exchange that is already over would be a lie.
+func TestAutoCompactFailedFoldReArmsAtTheNextExchangeOpening(t *testing.T) {
+	sink := &recordingSink{}
+	up := &scriptedCompactResponder{
+		summaryReply: "", // every fold faults
+		scripts: [][]provider.Delta{
+			contentScript("one"), // Exchange 1: one Turn, after the fold at its opening faulted
+			contentScript("two"), // Exchange 2: the trigger must have re-armed
+		},
+	}
+	a, err := newAgent(autoCompactConfig(sink), up)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	// Oversized protected prefix (~25k chars ≈ 6.2k tokens > the ~3.9k-token History allocation) plus
+	// a foldable tail: over budget at every opening, and a faulted fold leaves it that way.
+	a.conv.Append(domain.Message{Role: domain.RoleUser, Content: strings.Repeat("g", 25000)})
+	a.conv.Append(domain.Message{Role: domain.RoleAssistant, Content: "a1"})
+	a.conv.Append(domain.Message{Role: domain.RoleUser, Content: "u1"})
+	a.conv.Append(domain.Message{Role: domain.RoleAssistant, Content: "a2"})
+
+	runExchange(t, a, "q1")
+	if up.summaryCalls != 1 {
+		t.Fatalf("the first opening did not fold once: summarizer calls = %d, want 1", up.summaryCalls)
+	}
+	if a.compactFailed {
+		t.Error("the stand-down latch survived openExchange; the main agent must re-arm at every opening")
+	}
+
+	runExchange(t, a, "q2")
+	if up.summaryCalls != 2 {
+		t.Fatalf("the trigger did not re-arm at the next Exchange opening: summarizer calls = %d, want 2", up.summaryCalls)
+	}
+	errs := compactionErrorTexts(sink.events)
+	if len(errs) != 2 {
+		t.Fatalf("compaction ErrorEvents = %d (%q), want 2 — one per faulted fold", len(errs), errs)
+	}
+	for i, e := range errs {
+		if strings.Contains(e, foldStandDownSuffix) {
+			t.Errorf("compaction ErrorEvent %d = %q, want no stand-down suffix: the fold ran at an Exchange opening, and openExchange re-arms it", i, e)
+		}
+	}
+}
+
+// TestFailedFoldStandDownDoesNotBlockTheEmergencyFold pins the latch's exemption: the overflow-driven
+// emergency fold is the Turn's ONLY remedy for a request the server just rejected, so it keeps its
+// single shot even in an Exchange whose estimate-driven trigger already stood down. A child folds at
+// the Turn boundary and faults (latch set), the same Turn's request then comes back
+// DeltaContextOverflow, and the emergency fold's own summary call must still be made.
+func TestFailedFoldStandDownDoesNotBlockTheEmergencyFold(t *testing.T) {
+	sink := &recordingSink{}
+	up := &scriptedCompactResponder{
+		summaryReply: "", // both folds fault, so the emergency fold's shot is visible in the call count alone
+		scripts: [][]provider.Delta{
+			toolCallScript("c1", "probe", "{}"),                                             // Turn 0 (opening): the oversized result puts the history over budget
+			{{Kind: provider.DeltaContextOverflow, Err: "apogee: context window exceeded"}}, // Turn 1: fold faults, then the request is rejected
+		},
+	}
+	cfg := autoCompactConfig(sink)
+	toolReg := domain.NewToolRegistry()
+	if err := toolReg.Register(fakeTool{name: "probe", readOnly: true, result: strings.Repeat("x", 25000)}); err != nil {
+		t.Fatalf("Register(probe): %v", err)
+	}
+	cfg.Tools = toolReg
+	a, err := newAgent(cfg, up)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	a.midExchangeCompaction = true
+
+	if err := a.Submit(domain.UserInput{Text: "start"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if _, err := a.Step(context.Background()); err != nil {
+		t.Fatalf("Step 0: %v", err)
+	}
+	if _, err := a.Step(context.Background()); err != nil {
+		t.Fatalf("Step 1: %v", err)
+	}
+
+	if !a.compactFailed {
+		t.Fatal("setup: the Turn-boundary fold did not fault, so the latch is not set and the exemption is untested")
+	}
+	if up.summaryCalls != 2 {
+		t.Fatalf("summarizer calls = %d, want 2 — the stand-down latch swallowed the emergency fold's one shot", up.summaryCalls)
+	}
+}
+
+// TestCompactOnDemandIgnoresTheStandDownLatch pins the other exemption: /compact is the human asking
+// for this fold now, so a stand-down left by a failed automatic fold must not silently refuse them.
+func TestCompactOnDemandIgnoresTheStandDownLatch(t *testing.T) {
+	up := &compactSpyResponder{reply: "SUMMARY"}
+	a, err := newAgent(autoCompactConfig(&recordingSink{}), up)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	seedFoldable(a)
+	a.compactFailed = true // what a faulted automatic fold left behind earlier in this Exchange
+
+	skipped, err := a.Compact(context.Background())
+	if err != nil {
+		t.Fatalf("Compact: %v", err)
+	}
+	if skipped {
+		t.Fatal("Compact skipped; the seeded tail is foldable, so the assertion below would be vacuous")
+	}
+	if up.summaryCalls != 1 {
+		t.Fatalf("summarizer calls = %d, want 1 — the on-demand fold must ignore the stand-down latch", up.summaryCalls)
 	}
 }

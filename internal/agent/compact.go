@@ -67,6 +67,8 @@ const (
 // boundary; calling it mid-Exchange is refused (ErrInputPending) so a half-streamed Turn is
 // never orphaned, mirroring ClearContext. The Turn counter is untouched and the Agent stays
 // snapshot-safe after it returns. A summary-call failure leaves the conversation unchanged.
+// The automatic trigger's latches (compactSat, compactFailed) are not consulted: /compact is the
+// human asking for this fold now, and its fault is reported to them directly rather than swallowed.
 //
 // skipped reports that the conversation was too small to be worth folding (the reducer's
 // Result.Skipped — no upstream call, conv untouched), so the caller can say "nothing to
@@ -80,6 +82,13 @@ func (a *Agent) Compact(ctx context.Context) (skipped bool, err error) {
 	return res.Skipped, err
 }
 
+// foldStandDownSuffix is appended to a failed automatic fold's ErrorEvent when that fold ran
+// INSIDE an open Exchange — a child agent's Turn-boundary fold, the only place the stand-down
+// latch actually bites, since a main-agent fold runs at an Exchange opening whose openExchange
+// clears the latch immediately after. It tells the human why the identical failure will not be
+// reported again: one event, then silence for the rest of the Exchange.
+const foldStandDownSuffix = " — automatic folding stands down for the rest of this exchange"
+
 // autoCompact runs generative Compaction at a quiescent boundary when the conversation history has
 // outgrown its Budget allocation — the automatic, budget-driven trigger (Phase-4 item 9, CONTEXT:
 // Compaction "the default reducer"). It is STRUCTURAL, not a Mechanism (D6): it runs even under
@@ -92,7 +101,9 @@ func (a *Agent) Compact(ctx context.Context) (skipped bool, err error) {
 // compacting guard) and quiet on success — the Replace is the visible effect (the next Turn's
 // UsageEvent re-measures the reduced fill); a fault surfaces as an ErrorEvent and leaves the
 // conversation untouched (Compact's own guarantee), so a failed auto-fold never corrupts history and
-// the Turn proceeds with the full conversation. A cancellation is not a fault: the Turn's own stream
+// the Turn proceeds with the full conversation — and, because that untouched history is exactly what
+// the next boundary would hand the same failing call, the fault also stands the trigger down for the
+// rest of the Exchange (compactFailed). A cancellation is not a fault: the Turn's own stream
 // carries the cancel to a clean boundary. Two S2 refinements govern WHEN it folds: the trigger is
 // Exchange-boundary-only on the MAIN agent (shouldAutoCompact's inExchange guard — a mid-Exchange
 // over-budget Turn defers to the next opening; a CHILD agent lifts that guard and folds at
@@ -115,7 +126,20 @@ func (a *Agent) autoCompact(ctx context.Context, turn int) {
 		if ctx.Err() != nil {
 			return // a cancel masquerades as a stream error; the Turn's main stream handles it
 		}
-		a.cfg.Events.Emit(domain.ErrorEvent{EventBase: a.base(turn), Source: "compaction", Err: err.Error()})
+		// The fold FAULTED, and Compact left the conversation untouched — so the very same
+		// summary call, over the very same history, is what the next Turn boundary would run.
+		// Latch the estimate-driven trigger off for the rest of this Exchange: retrying it is the
+		// 2026-08-29 runaway (a delegate spent ~9 h on one 40-minute failing summary call per
+		// Turn, seven times). openExchange clears the latch, so the main agent re-arms at its
+		// next opening while a child — whose whole life is ONE Exchange — stands down for the
+		// delegation. The emergency fold keeps its own single shot and /compact still folds on
+		// demand; neither consults this latch.
+		a.compactFailed = true
+		msg := err.Error()
+		if a.turns.inExchange {
+			msg += foldStandDownSuffix
+		}
+		a.cfg.Events.Emit(domain.ErrorEvent{EventBase: a.base(turn), Source: "compaction", Err: msg})
 		return
 	}
 	// A skipped fold folded nothing (Compact found too few messages past the protected prefix), so it
@@ -181,7 +205,9 @@ func (a *Agent) autoCompact(ctx context.Context, turn int) {
 // gate and always folds), at an Exchange boundary (NOT inExchange — S2) or, on an Agent that folds
 // mid-Exchange (midExchangeCompaction — every child agent), at any Turn boundary,
 // and when the history has outgrown its Budget History allocation
-// (domain.Budget.HistoryExceedsAllocation) AND the trigger is not saturated (compactSat). It
+// (domain.Budget.HistoryExceedsAllocation) AND neither latch is set: compactFailed, which a fold
+// that FAULTED sets for the rest of the Exchange (cleared by openExchange), and compactSat, which a
+// fold that RAN and still left the history over its allocation sets. It
 // clears the saturation latch the moment the estimate falls back under the allocation, so growth
 // alone cannot re-trigger a fold that already proved it cannot help. An unbudgeted Agent (no window
 // known, so no allocation) measures against the conservative unknown-window ceiling instead of
@@ -206,6 +232,13 @@ func (a *Agent) shouldAutoCompact() bool {
 	// no tool result and role alternation holds. The main loop keeps the guard, so bench arms
 	// comparing Mechanisms against Bypass are unchanged by this exception.
 	if a.turns.inExchange && !a.midExchangeCompaction {
+		return false
+	}
+	// A fold that FAULTED this Exchange stands the trigger down (compactFailed, set by
+	// autoCompact). It is checked before the allocation compare deliberately: the compare is also
+	// where compactSat clears, and a stand-down must not double as a reason to leave that
+	// saturation latch stale. Cleared by openExchange, so the main agent re-arms next Exchange.
+	if a.compactFailed {
 		return false
 	}
 	if !a.historyExceedsAllocation() {
@@ -313,10 +346,12 @@ var overflowBridge = mustPrompt("overflow-bridge.txt")
 // clean boundary rather than into the protected prefix; that owner method carries the full
 // rationale and mirrors the S2 repair step() performs after a mid-Exchange truncate_history shrink.
 //
-// compactSat is deliberately untouched: that latch guards the estimate-driven trigger against
-// re-folding a history it already proved it cannot shrink, whereas this path is bounded by the
-// caller's one-fold-per-Turn rule — a second overflow after a fold gives up rather than folding
-// again.
+// Neither estimate-driven latch is read or written here. compactSat guards that trigger against
+// re-folding a history it already proved it cannot shrink, and compactFailed stands it down for an
+// Exchange in which a fold faulted; this path is bounded instead by the caller's one-fold-per-Turn
+// rule — a second overflow after a fold gives up rather than folding again — and it is the Turn's
+// only remedy, so an Exchange that stood the boundary trigger down still gets its single emergency
+// shot.
 func (a *Agent) emergencyFold(ctx context.Context, turn int) bool {
 	if !a.compactionEnabled() || a.compacting {
 		return false
