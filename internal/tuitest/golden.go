@@ -59,8 +59,14 @@ func Redact(pattern, with string) Redaction {
 // — the same excess at every value width, so the golden is stable there too. What this does not
 // suit is a value followed by a single separating space and then more text: the space is part of
 // the run and would be swallowed. Use [Redact] for those.
+//
+// The pattern is wrapped in a non-capturing group before the run of spaces is appended, because
+// Go's alternation binds looser than concatenation: an ungrouped `foo|bar` would compile as
+// `foo` or `bar *` and silently drop the padding swallow from the first alternative, which is a
+// width-unstable redaction that reports no error at all. Grouping adds no submatch, so a pattern's
+// own capture-group numbering is untouched.
 func RedactPadded(pattern, with string) Redaction {
-	return Redaction{Pattern: regexp.MustCompile(pattern + ` *`), With: with, KeepWidth: true}
+	return Redaction{Pattern: regexp.MustCompile(`(?:` + pattern + `) *`), With: with, KeepWidth: true}
 }
 
 // ApplyRedactions runs every redaction over text, in order.

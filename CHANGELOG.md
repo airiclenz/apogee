@@ -486,6 +486,15 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- Fixed (tests): `tuitest.RedactPadded` wraps the caller's pattern in a non-capturing group before
+  appending the run of spaces it swallows. Go's alternation binds looser than concatenation, so a
+  pattern carrying a top-level `|` compiled as `foo` or `bar *`: the first alternative matched
+  without its padding, redacting the value's text but not its width, and the width-stability the
+  helper exists for was silently gone — no error, just goldens that move again the next time a
+  value changes length. The only current caller passes `regexp.QuoteMeta` output, so no
+  metacharacter survived and no recorded frame is affected; the group is non-capturing, so a
+  pattern's own submatch numbering is untouched. `TestRedactPaddedGroupsThePattern` fails against
+  the ungrouped form.
 - Fixed (Windows): the box label is no longer inheritable — `S:(ML;;NW;;;LW)` on directories and
   files alike, `lowSDDL`. The inheritable `OICI` label was propagated by `SetNamedSecurityInfo` to
   every existing descendant before the label walk ran, so a hard-linked file — pnpm's whole

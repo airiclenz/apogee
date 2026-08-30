@@ -106,3 +106,23 @@ func TestRedactPaddedNeverCutsTheToken(t *testing.T) {
 		t.Errorf("ApplyRedactions = %q, want %q", got, want)
 	}
 }
+
+// TestRedactPaddedGroupsThePattern: an alternation the caller writes binds as ONE alternative set
+// against the padding, not as `first` or `second <padding>`. Go's alternation is looser than
+// concatenation, so an ungrouped pattern would swallow the padding behind the last alternative
+// only — every other one redacts its text but not its width, silently, with no error to notice.
+func TestRedactPaddedGroupsThePattern(t *testing.T) {
+	t.Parallel()
+
+	row := func(value string) string {
+		return "model  " + value + strings.Repeat(" ", 10-len(value)) + "│"
+	}
+	first := ApplyRedactions(row("alpha"), RedactPadded(`alpha|beta`, "<model>"))
+	second := ApplyRedactions(row("beta"), RedactPadded(`alpha|beta`, "<model>"))
+	if want := "model  <model>   │"; first != want {
+		t.Errorf("the first alternative redacted to %q, want %q", first, want)
+	}
+	if first != second {
+		t.Errorf("the column moved between alternatives: %q vs %q", first, second)
+	}
+}
