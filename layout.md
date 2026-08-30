@@ -917,7 +917,12 @@ and only while the most recent call open in the span is itself a sub-agent — t
 the work on and has nothing of its own in flight, which is the one live fact its own blocks cannot
 stand in for, the nested run they would show being collapsed too. Once the report arrives the slot
 carries the **report's first line**, or `· done` where the report was long enough to become a
-body. The count is **transitive** — every call in the span counts, whatever its
+body — unless the engine wrapped that report in an **outcome envelope**, which takes the slot
+instead: `· stopped at its step cap` where the step cap stopped the run mid-task, and
+`· steered by 2 messages` appended to whichever verdict stands where the human addressed the child
+while it ran (ADR 0063 D3); a failed run's red slot carries that same steering cell after its
+cause. The collapsed row is the only place in the parent's conversation any of that can be read,
+the run's own conversation being a level down. The count is **transitive** — every call in the span counts, whatever its
 depth — so one number says how much work happened in there, at every nesting level by the same
 rule. The middle cell is the other half of that summary: **how full the delegate's own context
 got** (`12k/32k`), spelled in the unit-capped form the status line's gauge spells its window in so

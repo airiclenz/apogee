@@ -49,6 +49,11 @@ const (
 	resumedNote     = "resumed: "
 	stepCapErrLead  = "delegate stopped at its step cap (3 steps)"
 	stepCapErrTail  = "raise delegate-max-steps"
+	// stepCapSlot is what the CONVERSATION's own row says about a capped delegation — the outcome
+	// slot internal/tui words from the result envelope the engine wrapped the partial answer in
+	// (delegationVerdict). It is the parent-side half of the same fact stepCapErrLead is the
+	// child-side half of, and the only place a reader who never opens the run meets it.
+	stepCapSlot     = "stopped at its step cap"
 	childFinalWords = "The workspace holds a.txt and it says hello."
 )
 
@@ -212,14 +217,23 @@ func TestE2EDelegationStepCap(t *testing.T) {
 			t.Errorf("the child ran past its cap and answered:\n%s", drv.Frame())
 		}
 
+		// Step 6's parent-side half — the conversation's own row says the delegation was STOPPED
+		// SHORT. Since a run collapses to that single row, it is the whole of what a reader who
+		// never opens the child sees, so the partial-result envelope the engine wraps the answer in
+		// has to reach it; a row reading "done" over a capped run would report a finish that never
+		// happened.
+		collapsed := drv.Frame()
+		if _, _, ok := collapsed.Find("tool calls · " + stepCapSlot); !ok {
+			t.Errorf("the conversation's row does not say the delegation stopped at its cap:\n%s", collapsed)
+		}
+
 		// Step 7 — the delegation is NOT painted as a failure. A step cap is a stop, not an error.
 		// The row asked about is the head's own, found by the OUTCOME SLOT it ends with: the prompt
 		// two rows above names the delegation too, and a search for its name would settle the
 		// question against a line nobody was asking about. It is asked of the COLLAPSED row, which is
 		// the shape a delegation wears in the conversation now that expanding one opens its run view
 		// instead (ADR 0063).
-		collapsed := drv.Frame()
-		assertNoErrorTone(t, collapsed, "tool calls · done")
+		assertNoErrorTone(t, collapsed, "tool calls · "+stepCapSlot)
 
 		// That row, byte for byte: the one surface of T-04 that is a RENDERING claim rather than a
 		// wording one — what the head's slot says, and that the run behind it is elided to the single

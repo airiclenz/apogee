@@ -1147,3 +1147,113 @@ func TestFinishedRunSaysItsReportOnce(t *testing.T) {
 		}
 	})
 }
+
+// ----------------------------------------------------------------------------
+// The result envelope on the collapsed row (ADR 0063 D3; the F1 follow-up)
+// ----------------------------------------------------------------------------
+
+// The three envelope shapes the ENGINE wraps a delegation's result in, restated here for the reason
+// cmd/apogee restates its own (internal/agent's stepCapResultFormat, subAgentFaultPrefix and
+// userSteeredTrailer are unexported, and this package reads them off the output by shape): they are
+// what a human reads, so a rename over there has to fail here.
+const (
+	envelopeCapMarker  = "[delegate stopped at its step cap (3 steps); partial result — its last visible text follows]"
+	envelopeFaultLine  = "sub-agent faulted before finishing the delegated task: the upstream died"
+	envelopeSteeredOne = "\n\n(the user sent 1 message to this sub-agent while it ran)"
+	envelopeSteeredTwo = "\n\n(the user sent 2 messages to this sub-agent while it ran)"
+)
+
+// A run collapses to ONE row in the parent's conversation (collapsedSubAgentView), so that row is
+// the only place a reader of that conversation can learn a delegation was stopped at its step cap,
+// faulted, or was steered while it ran. The envelope the engine wraps the child's answer in carries
+// all three; the row's outcome slot is where it has to land. Before this the slot said the fixed
+// word "done" over a capped run and over a steered one alike, which is the regression this pins.
+func TestCollapsedRunSlotCarriesTheResultEnvelope(t *testing.T) {
+	// One painted row per case: the head's own, found by the count its slot opens with. The width is
+	// generous on purpose — what is under test is what the slot SAYS, and a row narrow enough to clip
+	// it would assert the geometry instead.
+	row := func(t *testing.T, tr *transcript) string {
+		t.Helper()
+		for _, ln := range strings.Split(renderPlain(tr, 160), "\n") {
+			if strings.Contains(ln, "1 tool call · ") {
+				return strings.TrimSpace(ln)
+			}
+		}
+		t.Fatalf("no row carries the run's summary:\n%s", renderPlain(tr, 160))
+		return ""
+	}
+	report := func(tr *transcript, content string, failed bool) {
+		tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{
+			CallID: "s1", Content: content, IsError: failed}})
+	}
+
+	cases := []struct {
+		name    string
+		content string
+		failed  bool
+		want    string
+	}{
+		{
+			name:    "a whole run still reads done",
+			content: "Found 4 gaps\nin the suite",
+			want:    "done",
+		},
+		{
+			name:    "a capped run says it was stopped short",
+			content: envelopeCapMarker + "\nI had read two files so far",
+			want:    "stopped at its step cap",
+		},
+		{
+			name:    "a steered run says how many messages reached it",
+			content: "Found 4 gaps\nin the suite" + envelopeSteeredTwo,
+			want:    "done · steered by 2 messages",
+		},
+		{
+			name:    "a capped run that was steered says both",
+			content: envelopeCapMarker + "\nI had read two files so far" + envelopeSteeredOne,
+			want:    "stopped at its step cap · steered by 1 message",
+		},
+		{
+			name:    "a faulted run keeps its cause and gains the steering",
+			content: envelopeFaultLine + envelopeSteeredOne,
+			failed:  true,
+			want:    "error: " + envelopeFaultLine + " · steered by 1 message",
+		},
+		{
+			name:    "a faulted run nobody steered reads exactly as it did",
+			content: envelopeFaultLine,
+			failed:  true,
+			want:    "error: " + envelopeFaultLine,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tr := &transcript{}
+			loneDelegation(tr, "s1", "survey the tests", "a.go", "")
+			report(tr, tc.content, tc.failed)
+
+			if got := row(t, tr); !strings.Contains(got, tc.want) {
+				t.Errorf("the run's row reads %q, want its slot to say %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// The envelope is read off the engine's OWN lines and nothing else: a child that merely QUOTES one
+// of them mid-report has not been capped and has not been steered, and a row that said so would be
+// reporting a fact the run never produced.
+func TestResultEnvelopeIsReadOffTheEnginesOwnLinesOnly(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		content string
+	}{
+		{"the cap marker quoted mid-report", "The child said:\n" + envelopeCapMarker},
+		{"the notice quoted mid-report", "The child said:" + envelopeSteeredTwo + "\nand carried on"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := delegationVerdict(tc.content); got != delegationDoneVerdict {
+				t.Errorf("delegationVerdict = %q, want %q", got, delegationDoneVerdict)
+			}
+		})
+	}
+}

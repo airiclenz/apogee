@@ -416,11 +416,12 @@ var toolRegistry = map[string]toolPresenter{
 		stat:   searchHitsStat,
 	},
 	"sub_agent": {
-		label:  "Sub-Agent",
-		verb:   "delegating",
-		target: subAgentTarget, // the delegation's name when it was given one, else the task's first line
-		detail: outputDetail,   // the report's gist; the nested run already rendered railed
-		stat:   delegationStat, // "done"; a failed delegation is an error result and reads red
+		label:   "Sub-Agent",
+		verb:    "delegating",
+		target:  subAgentTarget,    // the delegation's name when it was given one, else the task's first line
+		detail:  outputDetail,      // the report's gist; the nested run already rendered railed
+		stat:    delegationStat,    // the engine's own result envelope: done, capped, steered
+		failure: delegationFailure, // a failed delegation reads red, and still says it was steered
 	},
 	askUserToolName: {
 		label:   "Ask User",
@@ -714,11 +715,94 @@ func consoleOpenStat(res domain.ToolResult) (statValue, bool) {
 // line the failure layer already paints.
 func cleanStat(domain.ToolResult) (statValue, bool) { return plainStat("clean"), true }
 
-// delegationStat words a sub-agent's slot. A delegation that failed comes back as an error result
-// and reads red, so a result reaching here is one that finished. The table asks for a step count
-// beside the verdict; the engine exposes none on the result (design call 14), so the verdict
-// stands alone.
-func delegationStat(domain.ToolResult) (statValue, bool) { return plainStat("done"), true }
+// The three words a delegation's outcome slot is built from. `done` is the ordinary verdict — a
+// child that reached its own boundary and reported; the step-cap verdict replaces it wholesale,
+// because a run the engine stopped mid-task did not finish; and the steering cell is appended to
+// whichever verdict stands, since a human may steer a child on any outcome (ADR 0063 D3).
+const (
+	delegationDoneVerdict    = "done"
+	delegationCappedVerdict  = "stopped at its step cap"
+	delegationSteeredLead    = "steered by "
+	delegationSteeredMessage = "message"
+)
+
+// delegationStepCapHead matches the marker line a STEP-CAPPED delegation's result opens with —
+// "[delegate stopped at its step cap (3 steps); partial result — its last visible text follows]"
+// (internal/agent's stepCapResultFormat) — anchored at the START, where the engine writes it, so a
+// line the child itself printed cannot be read as the marker.
+var delegationStepCapHead = regexp.MustCompile(`^\[delegate stopped at its step cap \(\d+ steps?\);`)
+
+// delegationSteeredTail matches the PARENT NOTICE a steered delegation's result closes with — "(the
+// user sent 2 messages to this sub-agent while it ran)" (internal/agent's userSteeredTrailer, ADR
+// 0063 D3) — anchored at the END, which is both where the engine appends it and the half the
+// structural clamp keeps, so a result clipped on its way to the parent still reads here.
+var delegationSteeredTail = regexp.MustCompile(`\n\(the user sent (\d+) messages? to this sub-agent while it ran\)$`)
+
+// readDelegationSteering splits the parent notice off a delegation's result: the content without it,
+// and how many messages it reports. A result carrying no notice comes back whole with a zero, which
+// is the ordinary unsteered case and the only answer a foreign shape can give.
+func readDelegationSteering(content string) (body string, steered int) {
+	trimmed := strings.TrimRight(content, "\n")
+	m := delegationSteeredTail.FindStringSubmatchIndex(trimmed)
+	if m == nil {
+		return content, 0
+	}
+	n, err := strconv.Atoi(trimmed[m[2]:m[3]])
+	if err != nil || n <= 0 {
+		return content, 0
+	}
+	return strings.TrimRight(trimmed[:m[0]], "\n"), n
+}
+
+// delegationSteeredCell spells the steering the slot reports: how many messages the human sent into
+// the child while it ran. The notice's own sentence is the PARENT MODEL's to read; the row says the
+// same fact in the space a slot has, and says nothing about what was sent — that is the child's
+// conversation, one click away in its run view.
+func delegationSteeredCell(steered int) string {
+	return delegationSteeredLead + plural(steered, delegationSteeredMessage)
+}
+
+// delegationVerdict words a finished delegation's slot from the RESULT ENVELOPE the engine wraps a
+// child's answer in: the step-cap marker it opens with, and the parent notice it closes with. Both
+// are the engine's own lines rather than the child's, and since a run's block collapsed to a single
+// row (collapsedSubAgentView) the slot is the ONE place in the parent's conversation either can be
+// read — the reader who has to know a delegation was stopped short, or was steered, is reading that
+// row and nothing else. It is read off the output for the reason every other stat here is (design
+// call 14: the engine is not grown for presentation), anchored on lines the engine formats
+// deliberately, and TOTAL: a shape it does not recognise is the ordinary `done`.
+func delegationVerdict(content string) string {
+	body, steered := readDelegationSteering(content)
+	verdict := delegationDoneVerdict
+	if delegationStepCapHead.MatchString(body) {
+		verdict = delegationCappedVerdict
+	}
+	if steered > 0 {
+		verdict += " · " + delegationSteeredCell(steered)
+	}
+	return verdict
+}
+
+// delegationStat words a sub-agent's slot with that verdict. A delegation that FAILED comes back as
+// an error result and never reaches here — it reads red through the failure layer instead
+// (delegationFailure) — so a result arriving here is one the engine let finish, capped or whole.
+func delegationStat(res domain.ToolResult) (statValue, bool) {
+	return plainStat(delegationVerdict(res.Content)), true
+}
+
+// delegationFailure carries the steering half of that envelope onto a FAILED delegation's red line —
+// a faulted child, or one whose loop-level error the engine reported (internal/agent's
+// subAgentFaultPrefix and its "sub-agent failed: " sibling). The notice rides every outcome that
+// produces a result (ADR 0063 D3), and the failure layer words its summary from the result's FIRST
+// line, so without this the one outcome a reader most wants the fact on would be the one that drops
+// it. A result with no notice on it declines, which leaves that first line exactly as it reads today.
+func delegationFailure(content string) (word, output string, ok bool) {
+	body, steered := readDelegationSteering(content)
+	if steered == 0 {
+		return "", "", false
+	}
+	head, rest, _ := strings.Cut(body, "\n")
+	return head + " · " + delegationSteeredCell(steered), strings.TrimSpace(rest), true
+}
 
 // testVerdictHead matches the verdict token run_tests opens its condensed report with — "PASS (go
 // test)", "FAIL (pytest) — 3 failing tests" — anchored at the start so a later line reading "FAIL"
