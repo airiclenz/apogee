@@ -196,7 +196,8 @@ func (m Model) promptWheel(msg tea.MouseWheelMsg) (Model, bool) {
 // resolveApproval takes the menu row approvalSel points at — what ⏎ means on this pane. A decision
 // row replies like its letter would; the Cancel row takes the Esc path instead, cancelling the
 // in-flight worker and leaving the prompt standing until the worker reports back with its
-// cancelledMsg (finishWorker clears it), exactly as Esc has always behaved here.
+// cancelledMsg (finishWorker clears it) — in ONE press, where Esc itself is the double-tap it is
+// everywhere a worker runs (one press arms, a second inside escStopWindow stops).
 func (m Model) resolveApproval() (tea.Model, tea.Cmd) {
 	if m.pending == nil {
 		return m, nil
