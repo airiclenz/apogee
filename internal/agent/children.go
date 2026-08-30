@@ -179,6 +179,10 @@ func (a *Agent) drainMailbox(turn int) {
 			a.reportUndelivered(turn, queued[i:])
 			return
 		}
+		// Counted here and nowhere else: what LANDED is what the parent is told about when this
+		// child's result comes back (runSubAgent's trailer), so a refused or undelivered message
+		// never inflates the count.
+		a.steered++
 		a.cfg.Events.Emit(domain.ChildInterjectionEvent{EventBase: a.base(turn), Input: in, Landed: true})
 	}
 }

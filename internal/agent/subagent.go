@@ -65,6 +65,27 @@ const subAgentFaultNoCause = "its exchange was abandoned (see the preceding erro
 // to show, rather than being handed a bare marker line with an empty body.
 const stepCapNoTextMarker = "(no visible text)"
 
+// userSteeredTrailerSingular and userSteeredTrailerPluralFormat are the two renderings of the
+// PARENT NOTICE a delegation's result carries when the human addressed the child while it ran
+// (ADR 0063 D3). The parent model is the one reader that never saw those messages — they landed in
+// the CHILD's conversation — so a result it reads as "the task I delegated came back" would
+// otherwise hide that the task moved under it. The notice states the COUNT and nothing else: what
+// was said is the child's to fold into its own answer, and quoting it here would let a human steer
+// the parent through a child they only addressed. %d is the number of messages that LANDED.
+const (
+	userSteeredTrailerSingular     = "(the user sent 1 message to this sub-agent while it ran)"
+	userSteeredTrailerPluralFormat = "(the user sent %d messages to this sub-agent while it ran)"
+)
+
+// userSteeredTrailer renders the parent notice for steered landed messages — singular for exactly
+// one, plural for any other count. Callers append it only when steered > 0.
+func userSteeredTrailer(steered int) string {
+	if steered == 1 {
+		return userSteeredTrailerSingular
+	}
+	return fmt.Sprintf(userSteeredTrailerPluralFormat, steered)
+}
+
 // isSubAgentCall reports whether call targets the sub_agent recursion point — the signal
 // resolveAndExecute drives a nested Agent for the call rather than executing a leaf tool.
 func isSubAgentCall(call domain.ToolCall) bool {
@@ -145,19 +166,33 @@ func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall) (domain.T
 	// addresses it by the identity it already paints (ADR 0063 D1).
 	a.children.register(call.ID, sub)
 	res, err := sub.Run(ctx)
-	if err != nil {
+	return sub.delegationResult(call.ID, res, err)
+}
+
+// delegationResult renders a child's FINISHED run as the ToolResult the parent model reads on its
+// next Turn. It holds the whole outcome switch — a loop-level Run error, a cancel, a fault, the
+// step cap, or the child's final answer — and, after it, the ONE site the user-steered trailer is
+// appended at, so no outcome can grow a result that forgets to tell the parent the human spoke to
+// its delegate.
+//
+// The receiver is the CHILD, not the spawning parent: the run being reported on is the child's and
+// so is every value the report is made of (steered, lastFault, lastVisibleText, finalMessageText).
+// callID belongs to the parent's sub_agent call, because the result answers THAT call.
+func (a *Agent) delegationResult(callID string, res domain.StepResult, err error) (domain.ToolResult, dispatchOutcome) {
+	var result domain.ToolResult
+	switch {
+	case err != nil:
 		// Run returns a Go error only for a loop-level fault the nested Agent could not
 		// localise — surface it as an error result to the parent model rather than failing
 		// the parent Turn.
-		return errorToolResult(call.ID, "sub-agent failed: "+err.Error()), dispatchDone
-	}
-	if res.Status == domain.StatusCancelled {
+		result = errorToolResult(callID, "sub-agent failed: "+err.Error())
+	case res.Status == domain.StatusCancelled:
 		// The cancel reached the nested loop's boundary and it returned resumably; the parent
 		// Turn must now roll back wholesale (D2: the recovery point is the pre-sub_agent
-		// boundary — the sub-agent's progress is discarded, no partial result surfaced).
+		// boundary — the sub-agent's progress is discarded, no partial result surfaced). Nothing
+		// reaches the parent, the trailer included: there is no result to carry it.
 		return domain.ToolResult{}, dispatchCancelled
-	}
-	if res.Faulted {
+	case res.Faulted:
 		// The nested Exchange was ABANDONED, not completed — an Upstream fault, a recovered
 		// extension panic, or an overflow the child's one fold could not rescue. It closes on
 		// StatusExchangeComplete exactly as a real completion does, so the fault marker is the
@@ -170,32 +205,42 @@ func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall) (domain.T
 		// reached the shared EventSink at Depth+1, so the human sees the cause — and the cause now
 		// rides the RESULT too, because "see the preceding error" addresses a reader the parent
 		// MODEL is not: it reads one tool result and has no transcript to look back through.
-		cause := sub.lastFault
+		cause := a.lastFault
 		if cause == "" {
 			cause = subAgentFaultNoCause
 		}
-		return errorToolResult(call.ID, subAgentFaultPrefix+cause), dispatchDone
-	}
-
-	if res.StepCapped {
+		result = errorToolResult(callID, subAgentFaultPrefix+cause)
+	case res.StepCapped:
 		// The engine STOPPED the child at its step cap (Agent.Run) — it was still asking for tools,
 		// so what it has is partial. That is not a failure and must not be reported as one: an error
 		// result would throw away Turns of real work AND book the delegation as harmful for
 		// self-regulation (noteToolProductivity, R3). So the parent gets a NON-error result whose
 		// first line is the marker saying the answer below is partial, followed by whatever the
 		// child last said out loud. The child's own ErrorEvent already told the human the cap hit.
-		text := sub.lastVisibleText()
+		text := a.lastVisibleText()
 		if text == "" {
 			text = stepCapNoTextMarker
 		}
-		return domain.ToolResult{
-			CallID:  call.ID,
-			Content: fmt.Sprintf(stepCapResultFormat, sub.stepCap) + "\n" + text,
+		result = domain.ToolResult{
+			CallID:  callID,
+			Content: fmt.Sprintf(stepCapResultFormat, a.stepCap) + "\n" + text,
 			IsError: false,
-		}, dispatchDone
+		}
+	default:
+		result = domain.ToolResult{CallID: callID, Content: a.finalMessageText(), IsError: false}
 	}
 
-	return domain.ToolResult{CallID: call.ID, Content: sub.finalMessageText(), IsError: false}, dispatchDone
+	// The parent notice, appended once for EVERY outcome that produces a result (ADR 0063 D3) —
+	// the success above, the step cap, the fault and the Run error alike, because a human who
+	// steered a delegate must be told they did whichever way it ended. It is deliberately the
+	// result's FINAL line: the only clamp a delegation result meets is the structural floor in
+	// appendToolResult (dispatch.go), which runs after this returns and elides the MIDDLE of an
+	// oversized body while keeping its head and tail lines — so the trailer survives a clamped
+	// result by shape rather than by being re-appended anywhere later.
+	if a.steered > 0 {
+		result.Content += "\n\n" + userSteeredTrailer(a.steered)
+	}
+	return result, dispatchDone
 }
 
 // newChildAgent constructs the nested Agent for a sub-agent, threading this Agent's privileges

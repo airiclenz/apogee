@@ -296,6 +296,12 @@ type Agent struct {
 	// parent's registry and delivered out of the child's mailbox, by the child's own Run.
 	children childRegistry
 	mailbox  childMailbox
+	// steered counts the mailbox messages that LANDED in this Agent while it ran as somebody's
+	// child — what its result tells the parent model about in the steered trailer
+	// (subagent.go, ADR 0063 D3). Unguarded on purpose: the child's own Step-driving goroutine is
+	// the only writer (drainMailbox) and runSubAgent reads it on that same goroutine, after the
+	// child's Run has returned.
+	steered int
 
 	// stepCap bounds the Turns this Agent may take in ONE Exchange before Run ends it; 0 =
 	// unbounded. It is a DELEGATE bound: only newChildAgent seeds it (from

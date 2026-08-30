@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -1502,5 +1503,184 @@ func TestSubAgent_CappedChildReplyWithToolCallContinues(t *testing.T) {
 	}
 	if reads != 1 {
 		t.Errorf("read_thing ran %d times, want 1 — the tool on the capped reply must still run", reads)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// The parent notice: a steered child says how many messages the human sent it
+// ---------------------------------------------------------------------------
+//
+// The parent model never sees a message addressed to its delegate — it lands in the CHILD's
+// conversation — so the result carries a count of what landed (ADR 0063 D3). These tests read it
+// off the committed ToolResultEvent, which is where the parent model's copy actually comes from:
+// the structural clamp runs on the way there.
+
+// runSteeredDelegation drives ONE delegation whose child takes two Turns — a tool call, then its
+// final answer, so there is exactly one between-Steps boundary for queued messages to land at —
+// queues each remark for the child while its first Turn streams, and returns the sub_agent tool
+// result the parent model saw. With no remarks it is the unsteered baseline.
+func runSteeredDelegation(t *testing.T, answer string, remarks ...string) domain.ToolResult {
+	t.Helper()
+
+	sink := &recordingSink{}
+	looked := 0
+	cfg := subAgentConfig(sink, domain.ModeAskBefore, fakeTool{name: "look", readOnly: true, ran: &looked, result: "looked"})
+	responder := &requestLogResponder{scripts: [][]provider.Delta{
+		subAgentCallScript("c1", "survey the repo"), // [0] parent delegates
+		toolCallScript("t1", "look", `{}`),          // [1] child Turn 1 — a tool call, so a Turn 2 follows
+		contentScript(answer),                       // [2] child Turn 2 — its final answer
+		contentScript("parent done"),                // [3] parent finishes
+	}}
+	a, err := newAgent(cfg, responder)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	responder.before = func(call int) {
+		if call != 1 {
+			return
+		}
+		for _, remark := range remarks {
+			if err := a.InterjectChild("c1", domain.UserInput{Text: remark}); err != nil {
+				t.Errorf("InterjectChild while the child runs: %v", err)
+			}
+		}
+	}
+
+	if err := a.Submit(domain.UserInput{Text: "please research"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if _, err := a.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	res, ok := lastSubAgentResult(sink.events)
+	if !ok {
+		t.Fatal("no sub_agent tool result emitted")
+	}
+	return res
+}
+
+// TestSubAgent_SteeredChildResultCarriesTheParentNotice pins the notice the parent model reads,
+// singular and plural, as the exact final line of the result.
+func TestSubAgent_SteeredChildResultCarriesTheParentNotice(t *testing.T) {
+	const answer = "child done"
+
+	cases := []struct {
+		name    string
+		remarks []string
+		want    string
+	}{
+		{"one message", []string{"focus on the tests"}, "(the user sent 1 message to this sub-agent while it ran)"},
+		{"two messages", []string{"focus on the tests", "and the docs"}, "(the user sent 2 messages to this sub-agent while it ran)"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			res := runSteeredDelegation(t, answer, tc.remarks...)
+
+			if want := answer + "\n\n" + tc.want; res.Content != want {
+				t.Errorf("sub_agent result = %q, want %q", res.Content, want)
+			}
+		})
+	}
+}
+
+// TestSubAgent_UnsteeredChildResultIsUnchanged is the floor the notice must not move: a delegation
+// nobody addressed reports exactly the child's final message, byte for byte, as it always did.
+func TestSubAgent_UnsteeredChildResultIsUnchanged(t *testing.T) {
+	const answer = "child done"
+
+	res := runSteeredDelegation(t, answer)
+
+	if res.Content != answer {
+		t.Errorf("sub_agent result = %q, want the child's final message alone", res.Content)
+	}
+}
+
+// TestSubAgent_ParentNoticeSurvivesTheStructuralClamp proves the notice reaches the parent MODEL,
+// not just runSubAgent's return value: an oversized child answer is elided by the structural clamp
+// (appendToolResult) on its way into the conversation, and because that elision is head/tail LINE
+// based with the tail kept, the notice — the result's final line — comes through it.
+func TestSubAgent_ParentNoticeSurvivesTheStructuralClamp(t *testing.T) {
+	// Far past the structural floor at any window this harness can have, and many-lined, so the
+	// clamp's head/tail rendering really does shrink it.
+	answer := strings.TrimSuffix(strings.Repeat("the child has a great deal to say about the repo\n", 4000), "\n")
+
+	res := runSteeredDelegation(t, answer, "focus on the tests")
+
+	if len(res.Content) >= len(answer) {
+		t.Fatalf("committed result is %d bytes for a %d-byte answer: the structural clamp never fired, so this proves nothing", len(res.Content), len(answer))
+	}
+	want := "\n\n" + userSteeredTrailerSingular
+	if !strings.HasSuffix(res.Content, want) {
+		t.Errorf("clamped result ends %q, want it to end with the parent notice %q", res.Content[max(0, len(res.Content)-120):], want)
+	}
+}
+
+// TestSubAgent_ParentNoticeOnEveryOutcomeButCancelled pins the ONE-site rule where it lives: every
+// outcome that produces a result carries the notice, and the cancelled one produces no result to
+// carry it. It drives delegationResult directly because two of these outcomes cannot be scripted
+// through a.Run — Run returns a Go error only for a loop-level fault it cannot localise, and a
+// cancelled child surfaces no ToolResultEvent at all.
+func TestSubAgent_ParentNoticeOnEveryOutcomeButCancelled(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name     string
+		child    *Agent
+		res      domain.StepResult
+		err      error
+		wantBody string
+	}{
+		{"run error", &Agent{steered: 2}, domain.StepResult{}, errors.New("boom"), "sub-agent failed: boom"},
+		{"faulted", &Agent{steered: 2, lastFault: "the upstream died"}, domain.StepResult{Faulted: true}, nil, subAgentFaultPrefix + "the upstream died"},
+		{"step capped", &Agent{steered: 2, stepCap: 3}, domain.StepResult{StepCapped: true}, nil, fmt.Sprintf(stepCapResultFormat, 3)},
+		{"success", &Agent{steered: 2}, domain.StepResult{}, nil, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, outcome := tc.child.delegationResult("c1", tc.res, tc.err)
+
+			if outcome != dispatchDone {
+				t.Fatalf("outcome = %v, want dispatchDone", outcome)
+			}
+			if !strings.HasPrefix(got.Content, tc.wantBody) {
+				t.Errorf("result = %q, want it to open with the outcome's own body %q", got.Content, tc.wantBody)
+			}
+			if want := "\n\n" + userSteeredTrailer(2); !strings.HasSuffix(got.Content, want) {
+				t.Errorf("result = %q, want it to end with the parent notice %q", got.Content, want)
+			}
+		})
+	}
+
+	t.Run("cancelled", func(t *testing.T) {
+		child := &Agent{steered: 2}
+
+		got, outcome := child.delegationResult("c1", domain.StepResult{Status: domain.StatusCancelled}, nil)
+
+		if outcome != dispatchCancelled {
+			t.Fatalf("outcome = %v, want dispatchCancelled", outcome)
+		}
+		if got != (domain.ToolResult{}) {
+			t.Errorf("cancelled result = %+v, want an empty result — a rolled-back delegation carries no notice either", got)
+		}
+	})
+}
+
+// TestUserSteeredTrailer_SingularAndPlural pins the two renderings the parent model reads.
+func TestUserSteeredTrailer_SingularAndPlural(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		steered int
+		want    string
+	}{
+		{1, "(the user sent 1 message to this sub-agent while it ran)"},
+		{2, "(the user sent 2 messages to this sub-agent while it ran)"},
+		{7, "(the user sent 7 messages to this sub-agent while it ran)"},
+	}
+	for _, tc := range cases {
+		if got := userSteeredTrailer(tc.steered); got != tc.want {
+			t.Errorf("userSteeredTrailer(%d) = %q, want %q", tc.steered, got, tc.want)
+		}
 	}
 }

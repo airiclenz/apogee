@@ -81,7 +81,15 @@ NOTES (2026-08-30): the request-recording responder the item names is `requestLo
 
 **Commit.** `feat(agent): children are addressable — InterjectChild queues into a per-child mailbox drained between the child's Steps`
 
-## 3. Engine: parent-notice trailer on a steered child's result
+## 3. Engine: parent-notice trailer on a steered child's result — ✅ DONE (2026-08-30)
+
+NOTES (2026-08-30): consequential edit — internal/agent/agent.go: made necessary by the `steered` counter the item specifies "on the child" — a Go struct field can only be declared on the Agent struct, which lives here.
+
+NOTES (2026-08-30): consequential edit — internal/agent/children.go: made necessary by the item's own "incremented by the drain of item 2" — that drain (drainMailbox) lives here, so the increment does too.
+
+NOTES (2026-08-30): the ONE append site is reached by extracting runSubAgent's post-Run outcome switch into `(*Agent).delegationResult` (same file, same behaviour) rather than by rewriting the switch in place: it keeps runSubAgent short and makes the two outcomes that cannot be scripted through `a.Run` — the loop-level Run error and the cancelled dispatch — directly testable, which the item's test list requires.
+
+NOTES (2026-08-30): the item cites the trailer as ADR 0063 D5; the ratified ADR records it as **D3** (D5 is the run view). Code comments cite D3.
 
 **What.** Depends on item 2. In `internal/agent/subagent.go`, the child counts landed interjections (`steered int` on the child, incremented by the drain of item 2). In `runSubAgent`, for every result that is not `dispatchCancelled` — success (`:187`), step-capped (`stepCapResultFormat`), faulted (`subAgentFaultPrefix`) and the Run-error `sub-agent failed:` path (`:143-148`) — at ONE site after the outcome switch, append `"\n\n" + userSteeredTrailer(n)` to `ToolResult.Content` when `n > 0`, where `userSteeredTrailer` renders exactly `(the user sent 1 message to this sub-agent while it ran)` / `(the user sent 2 messages to this sub-agent while it ran)`. The trailer is the result's final line: the structural clamp (`clampToolResult` in `appendToolResult`, `dispatch.go:1106`, after `runSubAgent` returns) is head/tail LINE elision with the tail kept, so it survives by shape — say so in a comment at the append site. `headless` stderr line (`docs/manual/headless.md:36-43`) is unchanged.
 
