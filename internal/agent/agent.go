@@ -289,6 +289,14 @@ type Agent struct {
 	task          string              // the task this Agent was delegated, from the spawning sub_agent call's arguments — what an Approval prompt names it by (domain.ApprovalRequest.SubAgentTask); empty at depth 0
 	name          string              // this Agent's display identity in words: the optional short name the spawning sub_agent call supplied, normalised to a trimmed first line; empty = unnamed, and every display falls back to task. Display only, never privilege (ADR 0005)
 
+	// children and mailbox are the child-addressing pair (ADR 0063 D1 — internal/agent/children.go):
+	// children is the set of sub-agents THIS Agent currently has running, keyed by spawn call-ID, and
+	// mailbox is what a human queued for THIS Agent while it runs as somebody's child. They are
+	// separate because they sit on opposite ends of the same hop: a message is addressed through the
+	// parent's registry and delivered out of the child's mailbox, by the child's own Run.
+	children childRegistry
+	mailbox  childMailbox
+
 	// stepCap bounds the Turns this Agent may take in ONE Exchange before Run ends it; 0 =
 	// unbounded. It is a DELEGATE bound: only newChildAgent seeds it (from
 	// Config.Delegation.MaxSteps, the `delegate-max-steps` key), and a sub_agent call's optional
@@ -528,9 +536,16 @@ func (a *Agent) Step(ctx context.Context) (domain.StepResult, error) { return a.
 // returns at its own quiescent boundary, so a cancel delivered through ctx is honoured at
 // the next boundary exactly as it is under Step. The bench drives Step directly.
 //
-// Run owns the between-Steps boundaries it loops over, so there is no seam to interject at:
-// an embedder that wants to commit a mid-Exchange user message (Interject) drives Step
-// itself and calls it between the Steps it makes.
+// Run owns the between-Steps boundaries it loops over, so a TOP-LEVEL Run offers no seam to
+// interject at: an embedder that wants to commit a mid-Exchange user message (Interject) drives
+// Step itself and calls it between the Steps it makes.
+//
+// A CHILD's Run is the one exception, and it exists because nothing outside the engine drives a
+// sub-agent's Steps — a delegation runs to its boundary inside the parent's Turn, so there is no
+// host loop to hang the delivery on. So a child's Run drains its own mailbox at every boundary it
+// is about to step past, committing what a human addressed to that child through InterjectChild
+// (children.go). ADR 0063 D1 records this and supersedes ADR 0025's rejected Run-side drain for
+// depth > 0 ONLY: the top-level contract in the paragraph above stands unchanged.
 //
 // It is also the one place the DELEGATE STEP CAP is enforced (Agent.stepCap): a child agent that
 // is still asking for tools after its capped number of Turns has its Exchange ended here rather
@@ -552,6 +567,11 @@ func (a *Agent) Run(ctx context.Context) (domain.StepResult, error) {
 		if a.stepCap > 0 && a.turns.exchangeTurns >= a.stepCap {
 			return a.endAtStepCap(res), nil
 		}
+		// AFTER the cap check, because this boundary is only a delivery point if another Turn
+		// actually follows it: committing a remark into an Exchange that ends here would report it
+		// as landed to a model that never reads it. What stays queued is reported undelivered when
+		// the run ends (runSubAgent).
+		a.drainMailbox(a.turns.index)
 	}
 }
 

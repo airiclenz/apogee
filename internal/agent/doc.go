@@ -56,7 +56,9 @@
 // one per agent tree, so an allow granted anywhere in it is remembered everywhere.
 //
 // The mid-session doors. interject.go commits the human's remark into the OPEN Exchange at a
-// between-Steps boundary. rebind.go swaps every per-model binding together when the Upstream's
+// between-Steps boundary. children.go is that same door one level down: the registry a parent
+// publishes its RUNNING sub-agents in, the mailbox each child drains at its own between-Steps
+// boundaries, and InterjectChild, which addresses a child by its spawn call-ID (ADR 0063). rebind.go swaps every per-model binding together when the Upstream's
 // loaded model changes, and moves the session to another server (ADR 0024). setprofile.go is
 // the separate, explicit door for changing the model PROFILE, which Rebind deliberately leaves
 // alone (ADR 0037). swaptools.go is the single door for handing the engine a freshly built

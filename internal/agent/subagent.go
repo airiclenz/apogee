@@ -128,11 +128,22 @@ func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall) (domain.T
 	// reaps the Consoles this delegation opened (ADR 0059 §6), routed or not, and tears down a
 	// ROUTED child's own client; an unrouted child borrowed the parent's client, so that one is
 	// left running for the parent (ownsUpstream).
-	defer func() { _ = sub.Close() }()
+	defer func() {
+		// Unregister and close the mailbox before the child's resources go: after this the child
+		// is no longer addressable, and anything a human queued for it that never reached a
+		// boundary is reported undelivered rather than left unaccounted for (ADR 0063 D2).
+		a.children.unregister(call.ID)
+		sub.reportUndelivered(sub.turns.index, sub.mailbox.close())
+		_ = sub.Close()
+	}()
 
 	if err := sub.Submit(domain.UserInput{Text: args.Task}); err != nil {
 		return errorToolResult(call.ID, "could not start sub-agent: "+err.Error()), dispatchDone
 	}
+	// The child is addressable for exactly as long as it runs: published under the id the model
+	// chose for this call — the same id the child stamps on every Event it emits, so a Driver
+	// addresses it by the identity it already paints (ADR 0063 D1).
+	a.children.register(call.ID, sub)
 	res, err := sub.Run(ctx)
 	if err != nil {
 		// Run returns a Go error only for a loop-level fault the nested Agent could not

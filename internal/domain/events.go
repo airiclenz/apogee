@@ -180,6 +180,31 @@ type SubAgentPhaseEvent struct {
 	Result ToolResult
 }
 
+// ChildInterjectionEvent reports the fate of ONE user message a human addressed to a running
+// sub-agent through Agent.InterjectChild (ADR 0063 D2). Landed is true when the message was
+// committed into the child's open Exchange at a between-Steps boundary and the child's next
+// request therefore carries it, and false when it never reached the model — the child ended
+// before the boundary the message was waiting for, or the commit itself was refused.
+//
+// One event is emitted for EVERY message the mailbox accepted, exactly once, so a Driver can
+// paint delivery honestly instead of leaving a message it showed as queued unaccounted for. A
+// message InterjectChild refused (ErrNoSuchChild) was never queued and produces no event: the
+// error is its whole account.
+//
+// Its EventBase is the CHILD run's identity, exactly as SubAgentPhaseEvent's is: Depth is the
+// child's nesting level and CallID the id of the sub_agent call that spawned it — the stamp every
+// event that child emits carries — so an observer attributes the delivery to the run it steers
+// without threading anything through. Turn is the Turn the message is about to reach.
+//
+// It is emitted only for agents at Depth > 0. A top-level Agent's Run performs no drain and emits
+// no such event: a top-level interjection is the host's own Interject call between the Steps it
+// drives, which stays event-free (ADR 0025).
+type ChildInterjectionEvent struct {
+	EventBase
+	Input  UserInput
+	Landed bool
+}
+
 // ApprovalEvent reports that an Approval was requested/decided for a tool call.
 // (The decision is obtained synchronously via the Approver; this event is for
 // observers — TUI display, bench accounting.)

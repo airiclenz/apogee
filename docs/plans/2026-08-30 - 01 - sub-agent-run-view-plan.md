@@ -55,7 +55,19 @@ NOTES (2026-08-30): none — the item's regression guard was already folded into
 
 **Commit.** `docs(adr): 0063 — sub-agent runs are user-addressable views`
 
-## 2. Engine: child registry, `InterjectChild`, mailbox drain, delivery event
+## 2. Engine: child registry, `InterjectChild`, mailbox drain, delivery event — ✅ DONE (2026-08-30)
+
+NOTES (2026-08-30): consequential edit — internal/agent/doc.go: made necessary by adding internal/agent/children.go; TestDocMapNamesEveryFile (docmap_test.go) fails when a non-test file is missing from doc.go's file map, so children.go joins the "mid-session doors" paragraph.
+
+NOTES (2026-08-30): consequential edit — internal/agent/subagent_test.go: made necessary by adding domain.ChildInterjectionEvent; eventBaseOf enumerates every Event variant and t.Fatals with "teach it the new variant" on an unknown one, so the new variant gains its case.
+
+NOTES (2026-08-30): the mailbox CLOSES when the child's run ends (childMailbox.close, called from runSubAgent's defer beside the unregister) and InterjectChild answers ErrNoSuchChild for a closed one. Not in the item's literal text; it is what makes D2's "one event per queued message" hold — without it, a message added in the window between a successful registry lookup and the flush would sit in a mailbox nothing drains, with no event to account for it.
+
+NOTES (2026-08-30): the drain runs AFTER Run's step-cap check, so a boundary that ends the Exchange is not treated as a delivery point; whatever stays queued is reported Landed:false by runSubAgent's defer.
+
+NOTES (2026-08-30): item 3's `steered` counter is deliberately NOT added here — item 2's What never names it and an unused field is dead code. Item 3 adds `steered int` to Agent and one increment beside the `Landed: true` emit in `(*Agent).drainMailbox` (internal/agent/children.go), which therefore joins item 3's Files.
+
+NOTES (2026-08-30): the request-recording responder the item names is `requestLogResponder` in children_test.go — `recordingResponder` was already taken by harness_test.go:54.
 
 **What.** In `internal/domain`: add `ErrNoSuchChild = errors.New("no running sub-agent with that call-ID")` beside `ErrNoOpenExchange`, and `ChildInterjectionEvent{EventBase; Input UserInput; Landed bool}` in `internal/domain/events.go` next to `SubAgentPhaseEvent` (`:141`) — `EventBase.Depth` = the child's depth, `CallID` = the spawn call-ID, exactly as the child's other events. In `internal/agent`: a `childRegistry` (mutex-guarded `map[string]*Agent`, spawn call-ID → child) on `Agent`; `runSubAgent` (`internal/agent/subagent.go:98`) registers `sub` under `call.ID` before `sub.Run(ctx)` (`:136`) and unregisters in the same defer that `Close`s it (`:131`). Each `Agent` gets a `mailbox` (mutex-guarded `[]domain.UserInput`); `(*Agent).InterjectChild(spawnCallID string, in domain.UserInput) error` appends to the named child's mailbox when it is registered on this agent, else recurses into every registered child (grandchildren, depth 2), else returns `ErrNoSuchChild`. Non-blocking, safe from any goroutine — the TUI calls it from its program goroutine, as `AbortExchange` already is. Drain: in `(*Agent).Run` (`internal/agent/agent.go:540`), before every Step after the first, the driving goroutine pops the mailbox in order and calls `a.Interject(in)` (`internal/agent/interject.go:51` — legal here: same goroutine, between Steps); each delivered input emits `ChildInterjectionEvent{Landed: true}` through the shared sink; an `Interject` error stops the drain the way `deliverInterjections` does (`internal/tui/worker.go:202-210`) and emits `Landed: false` for the rest. On `runSubAgent` return, anything still in the mailbox is emitted `Landed: false`. The drain and the `ChildInterjectionEvent` apply only to agents with depth > 0: a top-level `Run` performs no drain and emits no such event. Top-level `Interject` behaviour and `ErrInputPending` rules are untouched. Standards: the registry and mailbox are two small types with their own files (`internal/agent/children.go`), not fields folded into `agent.go`; no goroutine is spawned.
 
