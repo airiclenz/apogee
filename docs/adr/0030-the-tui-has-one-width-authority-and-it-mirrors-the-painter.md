@@ -114,9 +114,17 @@ using.** Owner's call, 2026-07-31: measurement must always match what gets paint
    already wrapped in WcWidth, which folded a full line carrying a VARIATION SELECTOR-16 glyph into
    two rows and drifted every `contentLineAt` reader by one. `SoftWrap` is now off (`newModel`,
    `model.go`): the viewport does not wrap, its rows are the painter's lines one for one, and an
-   over-wide line is clipped at the right edge. The `cellToRuneOffset` column rule below is
+   over-wide line would be clipped at the right edge. The `cellToRuneOffset` column rule below is
    unchanged — it addresses cells on a row the widget has drawn, which is still the painter's
-   business.)*
+   business.)* *(Amended 2026-08-30: with the wrap off, that CLIP became the way the same
+   disagreement could still lose content — a full line ending in a VS16 glyph measures a cell over
+   the viewport's own width and had that glyph cut off the frame. The painter now reserves the
+   widget's extra cells: `reserveWidgetCells` (`render.go`) holds the finished paint to the
+   viewport's width in the widget's measure and breaks the rare line that overruns into stored
+   lines of its own, so the clip has nothing left to cut. That pass IS a mirror under this rule —
+   it asks `ansi.StringWidth` and cuts with `ansi.Cut`, the viewport's own two calls, so the
+   painter breaks exactly where the widget would have — and it runs after every block is composed,
+   so the wrap each surface chose in the painter's measure is untouched.)*
    They measure the way their widget measures, down to the one term where the textarea itself weighs
    a rune with go-runewidth (`textarea.go:1838-1839`, `lastCharLen`). The dividing line, stated at
    each site: a mirror's **rows** are the widget's — only it decides which runes it put on which
@@ -129,6 +137,13 @@ using.** Owner's call, 2026-07-31: measurement must always match what gets paint
    `ansi.Wrap("| --- | --- | --- |", 8, "")` returns an eleven-cell first line. The one thing no
    break can divide is a single grapheme wider than the limit; that gets a line to itself and
    nothing else is allowed over.
+   *(Extended 2026-08-30: the cap is the painter's own measure, and exactly one surface needs a
+   second budget beside it — the transcript, whose finished lines are handed to a widget that
+   measures them in `ansi.GraphemeWidth` and cuts what it calls over-wide. `reserveWidgetCells`
+   (`render.go`) is that reserve, and it is applied to the finished PAINT rather than to the wrap:
+   `wrapText` still breaks where the painter's measure says — a table cell, a pop-up body and
+   every narrow-limit wrap are unchanged — and only a transcript line that would really have lost
+   cells to the widget is re-laid. See rule 6.)*
 8. **Painted cells are the standard of proof.** `internal/tui/paint_test.go` renders a `Model`
    the way bubbletea does and reads the cell grid back (`paintFrame`, `paintedWidth`,
    `paintedColumn`, `paintedAs`), so the width claims are asserted in the cells a terminal

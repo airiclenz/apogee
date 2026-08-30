@@ -56,8 +56,10 @@ func renderPresentedBlock(th theme, v presentedView, width int) []string {
 // terminal linkify it.
 //
 // Past the width it IS broken, because the alternative is worse: the viewport stopped soft-wrapping
-// (newModel, model.go), so an over-wide row is clipped at the right edge and everything past it is
-// simply gone. The break is the painter's own wrapText, at the width the lead leaves — no hanging
+// (newModel, model.go), so an over-wide row is one the painter has to break itself — and the break
+// the paint's own reserve would make for it (reserveWidgetCells, render.go) is a blunt cut at the
+// viewport's width, under the lead rather than beside it. The break is the painter's own wrapText,
+// at the width the lead leaves — no hanging
 // indent on the rows it opens and no style anywhere near them — so the rows read as, and join back
 // to, the whole token. Linkification is lost on those windows; the token is not.
 func rawLink(th theme, lead, token string, width int) []string {

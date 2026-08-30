@@ -19,7 +19,12 @@ package tui
 // columns per level — the tree-branch and depth-indent primitives are built here now so the
 // P3.14 sub-agent renderer extends these seams rather than reworking them.
 
-import "strings"
+import (
+	"slices"
+	"strings"
+
+	"github.com/charmbracelet/x/ansi"
+)
 
 // userBlock is the line range a single user prompt occupies within the rendered lines: its
 // first line index and its physical-line count. The sticky-header overlay treats each as a
@@ -231,6 +236,104 @@ func (t *transcript) renderView(th theme, width int, blink bool) renderedTranscr
 		paintPreview(len(t.entries))
 	}
 	return renderedTranscript{lines: lines, userBlocks: userBlocks, targets: targets}
+}
+
+// reserveWidgetCells holds every rendered line inside limit columns in the measure the VIEWPORT
+// WIDGET spends them in, breaking the few that overrun onto rows of their own. limit is the
+// viewport's OWN width — the transcript width the paint was composed to plus the right gutter
+// (bodyRightGutter) — because that is the width the widget compares its lines against.
+//
+// It is the painter reserving the widget's extra cells, and it is here because the two measures in
+// play disagree about exactly the clusters ADR 0030's Context names. The painter wraps in its own
+// measure — ansi.WcWidth until a terminal answers mode 2027 — where a VARIATION SELECTOR-16 glyph
+// (⚠️ ✔️ ℹ️) is ONE cell; the viewport reads its longest line with ansi.StringWidth and cuts every
+// drawn row with ansi.Cut (bubbles/v2@v2.1.0 viewport.go:762, :362), both hard-wired to
+// ansi.GraphemeWidth, where the same glyph is TWO. With the widget's soft wrap off (newModel) a
+// line the painter had filled to the column and the widget measured wider than its width had its
+// tail CUT — the trailing glyph the painter drew never reached the screen at all. Breaking the line
+// here gives that glyph a row instead, and the row map stays 1:1 because the break makes it a
+// stored line rather than a second row of one.
+//
+// The break MIRRORS the widget (ADR 0030 §6 — a mirror's oracle is the widget, never the painter):
+// it asks ansi.StringWidth and cuts with ansi.Cut, the very two calls the viewport's own wrap made,
+// so the painter breaks precisely where the widget would have cut and a broken row is styled the
+// way that wrap styled it. And it is the LAST thing that happens to the paint, after every block is
+// composed: the wrap the painter CHOSE is untouched, so a surface whose own limit is narrower than
+// the frame — a table cell, a pop-up body — keeps breaking in the painter's measure exactly as
+// ADR 0030 §7 decided, and only a line that would really have lost cells is re-laid. On content the
+// two measures agree about (everything without a VS16 or ZWJ cluster) nothing here fires and the
+// paint is returned as it came.
+//
+// Lines, targets and user-block spans move TOGETHER. A continuation row carries the target of the
+// line it came from — every physical row a header occupies is the same click surface
+// ([blockPaint.add]) — and a block's span is moved by the rows added above it and stretched by the
+// rows added inside it, so the accounting the mouse reads is still the one the paint laid down.
+func (r renderedTranscript) reserveWidgetCells(limit int) renderedTranscript {
+	if limit < 1 || !slices.ContainsFunc(r.lines, func(ln string) bool { return overWidgetWidth(ln, limit) }) {
+		return r
+	}
+
+	lines := make([]string, 0, len(r.lines)+1)
+	targets := make([]lineTarget, 0, len(r.lines)+1)
+	// shift[i] is how many EXTRA rows the lines before i added between them: the offset a line
+	// index at i moves by, and — differenced across a span — the rows that span grew by.
+	shift := make([]int, len(r.lines)+1)
+	for i, ln := range r.lines {
+		segs := []string{ln}
+		if overWidgetWidth(ln, limit) {
+			segs = dropBlankTail(splitAtWidgetWidth(ln, limit))
+		}
+		target := lineTarget{}
+		if i < len(r.targets) {
+			target = r.targets[i]
+		}
+		for range segs {
+			targets = append(targets, target)
+		}
+		lines = append(lines, segs...)
+		shift[i+1] = shift[i] + len(segs) - 1
+	}
+
+	blocks := make([]userBlock, len(r.userBlocks))
+	for i, b := range r.userBlocks {
+		start := clampInt(b.start, 0, len(r.lines))
+		end := clampInt(b.start+b.count, start, len(r.lines))
+		blocks[i] = userBlock{start: b.start + shift[start], count: b.count + shift[end] - shift[start]}
+	}
+	return renderedTranscript{lines: lines, userBlocks: blocks, targets: targets}
+}
+
+// overWidgetWidth reports whether the viewport widget would cut ln at limit columns. The BYTE
+// length is asked first and settles most lines for nothing: a display cell costs at least one byte,
+// so a line shorter than limit in bytes cannot be wider than limit in cells, and the escape-parsing
+// scan is spent only where the answer is actually in doubt.
+func overWidgetWidth(ln string, limit int) bool {
+	return len(ln) > limit && ansi.StringWidth(ln) > limit
+}
+
+// dropBlankTail drops the rows a break opened for cells that show NOTHING — the trailing pad of a
+// squared line (squareLine, boxdraw.go), counted in the painter's measure and therefore counted
+// higher by the widget. Spending a row of the transcript on a run of spaces would put a blank line
+// through the middle of a block where the widget's clip simply ended the row, and the reserve is
+// here to keep GLYPHS on the screen, not padding.
+func dropBlankTail(segs []string) []string {
+	for len(segs) > 1 && strings.TrimSpace(ansi.Strip(segs[len(segs)-1])) == "" {
+		segs = segs[:len(segs)-1]
+	}
+	return segs
+}
+
+// splitAtWidgetWidth cuts ln into limit-column runs in the widget's measure — the viewport's own
+// soft wrap (bubbles/v2@v2.1.0 viewport.go:415-440), which is what makes the rows this returns the
+// rows that widget used to draw for the same line. ansi.Cut carries the styling of the run it
+// slices through onto each piece, so a broken row is coloured like the line it came from.
+func splitAtWidgetWidth(ln string, limit int) []string {
+	width := ansi.StringWidth(ln)
+	out := make([]string, 0, width/limit+1)
+	for idx := 0; idx < width; idx += limit {
+		out = append(out, ansi.Cut(ln, idx, idx+limit))
+	}
+	return out
 }
 
 // resolvedBlock is the answer to "what block starts at this entry?": everything

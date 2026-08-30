@@ -541,9 +541,12 @@ func newModel(parent context.Context, eng Engine, opts Options, notify func(tea.
 	// carrying a VARIATION SELECTOR-16 glyph (⚠️ ✔️ ℹ️ — 1 cell to the painter, 2 to the widget) folded
 	// into two screen rows, and every reader of `contentLineAt(row) = YOffset() + row` below it (the
 	// sticky header, the anchored refresh, the block cursor, the selection highlight, the mouse's own
-	// hit test) then addressed the line one row off. With the wrap off, a line the widget measures
-	// wider than the width is CLIPPED at the right edge instead — nothing the painter drew is ever
-	// re-flowed, and the row map cannot drift.
+	// hit test) then addressed the line one row off. With the wrap off, nothing the painter drew is
+	// ever re-flowed and the row map cannot drift. The widget would CLIP a line it measures wider
+	// than its width — the tail simply gone — so the painter reserves the widget's extra cells and
+	// breaks such a line into stored lines itself before the viewport ever sees it
+	// (reserveWidgetCells, render.go). The clip stays as the widget's own backstop and has nothing
+	// left to cut.
 	vp.SoftWrap = false
 	// Horizontal scrolling is off with it: the transcript's x-offset stays 0 for the life of the
 	// session. A step of 0 disables the viewport's Left/Right keys, its wheel-left/right notches and
@@ -2050,7 +2053,10 @@ func (m Model) hiddenDraftRows() int {
 // owning prompt at row 0. While detached the offset is left exactly where the human put it;
 // submit re-arms following. The body is rendered to transcriptWidth — the viewport's width less
 // the right gutter — and the viewport does not wrap at all: its rows ARE the stored lines, one for
-// one, with anything wider than its own full width clipped at the right edge (newModel).
+// one (newModel). The paint is then held to the viewport's own width in the widget's measure
+// (reserveWidgetCells, render.go), so the widget's clip finds nothing to cut: a line the painter
+// filled to the column and the widget measures wider — a full line ending in a VS16 glyph — is
+// broken into stored lines HERE rather than losing its tail at the right edge.
 //
 // It is also where a live transcript drag-selection lives or dies, by the keep-if-unchanged rule
 // (transcriptSel.spanUnchanged, mouse.go): the predicate is evaluated against the OUTGOING lines
@@ -2060,7 +2066,8 @@ func (m Model) hiddenDraftRows() int {
 // is still down — is exempt and always survives: it shades nothing, and the release still needs the
 // line the press named to toggle the block under it (spanUnchanged, mouse.go).
 func (m *Model) refreshViewport() {
-	rendered := m.transcript.renderView(m.th, m.transcriptWidth(), m.spin.blink())
+	rendered := m.transcript.renderView(m.th, m.transcriptWidth(), m.spin.blink()).
+		reserveWidgetCells(m.viewport.Width())
 	if !m.transcriptSel.spanUnchanged(m.lines, rendered.lines) {
 		m.transcriptSel = transcriptSel{} // the ground under the span moved: let go (mouse.go)
 	}
