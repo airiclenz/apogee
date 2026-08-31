@@ -10,6 +10,43 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- The transcript wire model and codec are now **Driver-neutral**: `internal/session` gains the
+  exported scrollback types (`Entry`, `SkillSpan`, `ToolView`, `DetailLine`, `BranchSummary`,
+  `StatValue`, `EditRegion`, `Presented`), the nine persisted entry-kind constants, its own
+  `TranscriptVersion` / `ErrTranscriptVersion` sentinel pair, and `EncodeTranscript`,
+  `DecodeTranscript` and `CloseInterruptedCalls`. The blob is byte-identical to the one
+  `internal/tui` has always written — the JSON tags are the contract, pinned by a golden v1
+  fixture — so every session file on disk keeps decoding, and any Driver (a bench harness, the
+  daemon) can now write and replay scrollback rather than only the TUI (ADR 0031, ADR 0022 §5).
+  Decode keeps the defence-in-depth strip over untrusted disk input and widens it: the card's
+  label, verb, target, name, task, outcome phrase, the nouns its arithmetic spells a total with,
+  every body line and gutter, the diff regions and their file names all come back escape-stripped,
+  while stored tool arguments come back exactly as recorded.
+
+- The transcript codec's TUI copy is gone: `internal/tui/transcriptcodec.go` is replaced by
+  `internal/tui/transcriptbridge.go`, which projects the package's own entries and cards onto the
+  neutral `session.Entry` wire model and back. Blobs are byte-identical and replay identically —
+  the codec's whole corpus round-trips unchanged — and the two rules that belong to a consumer
+  rather than to the format stay in the TUI: an entry whose kind this build does not know is
+  skipped, and a skill span is re-checked against the text it arrives with. Escape-stripping is now
+  two-layer (`session.DecodeTranscript` strips every paintable field; the card's own `sanitize`
+  pass still runs), and the blob's owner in ADR 0022 §5 and ADR 0052 §5 is `internal/session`.
+
+- Unattended Firing records now carry the run's token spend: `Meta.Usage` takes the Firing's own cumulative totals and `Meta.DelegateUsage` the sum over every delegated sub-agent run, so the /sessions browser's spend cell reports what a scheduled run cost instead of nothing. A Firing that delegated nothing leaves `DelegateUsage` at the zero value, which `omitzero` keeps out of the record JSON entirely — the on-disk shape is unchanged for such records.
+
+- Unattended runs now record their scrollback. `internal/run` folds the engine's event stream into the neutral transcript blob (`internal/run/transcript.go`), so a Firing saved by `apogee headless`, the daemon or the TUI's own `/schedule` replays in `/sessions` — prompt, assistant text, tool calls with bounded arguments, tool results and errors, each at the depth that emitted it — instead of opening with "no scrollback recorded". Records written before this keep the degrade note, and a blob that cannot be encoded degrades the same way rather than failing the save.
+
+- A scheduled Firing now reports what it cost. `schedule.Outcome` gains two runner-reported
+  flat readings — `TotalTokens` (the run's own cumulative spend plus every delegated run's, the
+  same sum `/sessions` shows for a record) and `SubAgents` (how many runs it delegated) — filled
+  by both builders of an Outcome, the daemon's and a session's Schedule. The daemon's completed
+  line names them after the counts (`… 9 turns, 0 denied, 41k tokens, 2 sub-agents, saved as …`)
+  and the TUI's firing block gains the matching stats cells (`· 41k tokens · 2 sub-agents`),
+  placed after the denial cell so `· faulted` stays the line's last word. Both readings are
+  self-hiding: a Firing that delegated nothing, or one whose server reports no usage, renders
+  exactly the line it did before. The library still reads none of it — it stays runner-agnostic
+  (ADR 0033).
+
 - Ratified ADR 0063 — a sub-agent run is a user-addressable view: a child is addressed by its
   spawn call-ID through `Agent.InterjectChild`, an engine-side mailbox drained by the goroutine
   driving that child's Steps (superseding ADR 0025's rejected Run-drain / interjection-Event
