@@ -620,3 +620,156 @@ func TestApplyConfigRefusesTheRetiredProfileKey(t *testing.T) {
 		}
 	}
 }
+
+// The consented `sub-agents:` flag migration (ADR 0045): the detection, and the one edit the offer's
+// "move it" row makes.
+
+// A config carrying the retired flag names the entries that carry it, in the file's own order — and
+// a config carrying none, or no file at all, offers nothing.
+func TestRetiredSubAgentsEntriesNamesTheFlaggedEntries(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		body string
+		want []string
+	}{
+		{
+			name: "one flagged entry",
+			body: "servers:\n  - name: box\n    endpoint: http://a\n    sub-agents: true\nserver: box\n",
+			want: []string{"box"},
+		},
+		{
+			name: "two flagged entries keep the file's order",
+			body: "servers:\n  - name: first\n    endpoint: http://a\n    sub-agents: true\n" +
+				"  - name: second\n    endpoint: http://b\n    sub-agents: true\nserver: first\n",
+			want: []string{"first", "second"},
+		},
+		{
+			name: "an explicit false is not the flag",
+			body: "servers:\n  - name: box\n    endpoint: http://a\n    sub-agents: false\nserver: box\n",
+		},
+		{
+			name: "no flag at all",
+			body: startupServerYAML,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			names, err := RetiredSubAgentsEntries(writeMigrationConfig(t, tc.body))
+			if err != nil {
+				t.Fatalf("RetiredSubAgentsEntries: %v", err)
+			}
+			if strings.Join(names, ",") != strings.Join(tc.want, ",") {
+				t.Errorf("named %v, want %v", names, tc.want)
+			}
+		})
+	}
+}
+
+// A config that is not there yet carries nothing retired: no names, and no error — a start-up
+// question is never a reason a start fails.
+func TestRetiredSubAgentsEntriesIsSilentWithoutAConfig(t *testing.T) {
+	t.Parallel()
+	names, err := RetiredSubAgentsEntries(filepath.Join(t.TempDir(), "config.yaml"))
+	if err != nil || len(names) != 0 {
+		t.Fatalf("RetiredSubAgentsEntries on an absent config = %v, %v; want nothing at all", names, err)
+	}
+}
+
+// The edit itself: every flag line goes, the root key arrives naming the entry that was answered
+// with, and every other line of the user's file is exactly where it was.
+func TestMigrateSubAgentsServerDropsTheFlagsAndWritesTheKey(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name  string
+		entry string
+		given string
+		want  string
+	}{
+		{
+			name:  "one flagged entry, with its comments and its neighbours",
+			entry: "cheap",
+			given: "# my apogee\nservers:\n  - name: box\n    endpoint: http://a\n" +
+				"  - name: cheap\n    endpoint: http://b\n    sub-agents: true  # the delegation box\n" +
+				"server: box\nauto-title: false\n",
+			want: "# my apogee\nservers:\n  - name: box\n    endpoint: http://a\n" +
+				"  - name: cheap\n    endpoint: http://b\n" +
+				"server: box\nauto-title: false\n\nsub-agents-server: cheap\n",
+		},
+		{
+			name:  "two flagged entries lose both lines; the answered one is the key",
+			entry: "first",
+			given: "servers:\n  - name: first\n    endpoint: http://a\n    sub-agents: true\n" +
+				"  - name: second\n    endpoint: http://b\n    sub-agents: true\nserver: first\n",
+			want: "servers:\n  - name: first\n    endpoint: http://a\n" +
+				"  - name: second\n    endpoint: http://b\nserver: first\n\nsub-agents-server: first\n",
+		},
+		{
+			name:  "the key is already there: only the flag line goes",
+			entry: "cheap",
+			given: "servers:\n  - name: cheap\n    endpoint: http://b\n    sub-agents: true\n" +
+				"server: cheap\nsub-agents-server: cheap\n",
+			want: "servers:\n  - name: cheap\n    endpoint: http://b\n" +
+				"server: cheap\nsub-agents-server: cheap\n",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			path := writeMigrationConfig(t, tc.given)
+			if err := MigrateSubAgentsServer(path, tc.entry); err != nil {
+				t.Fatalf("MigrateSubAgentsServer: %v", err)
+			}
+			data, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("read back: %v", err)
+			}
+			if string(data) != tc.want {
+				t.Errorf("the migrated file reads\n%s\nwant\n%s", data, tc.want)
+			}
+		})
+	}
+}
+
+// The rewrite has to survive the read-back the seam performs: the whole-file gate zeroes BOTH paths
+// the edit changes, so a config whose OTHER settings the splice left alone passes, and the resolved
+// key is the entry that was answered with.
+func TestMigrateSubAgentsServerResolvesToTheAnsweredEntry(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeConfigHome(t, dir, "servers:\n  - name: testbox\n    endpoint: http://127.0.0.1:1111\n"+
+		"  - name: cheap\n    endpoint: http://127.0.0.1:2222\n    sub-agents: true\nserver: testbox\n")
+	path := filepath.Join(dir, "config.yaml")
+	if err := MigrateSubAgentsServer(path, "cheap"); err != nil {
+		t.Fatalf("MigrateSubAgentsServer: %v", err)
+	}
+	opts := Options{ConfigDir: dir}
+	if err := ApplyConfig(&opts, func(string) bool { return false },
+		func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
+		t.Fatalf("the migrated config would not load: %v", err)
+	}
+	if opts.SubAgentsServer != "cheap" {
+		t.Errorf("sub-agents-server resolved to %q, want cheap", opts.SubAgentsServer)
+	}
+}
+
+// A name no entry carries is refused with the writer's "by hand" idiom, and the file is left exactly
+// as it was: the offer answers with an entry name, and a name the list does not hold is a name
+// nothing can be written for.
+func TestMigrateSubAgentsServerRefusesANameNoEntryCarries(t *testing.T) {
+	t.Parallel()
+	given := "servers:\n  - name: box\n    endpoint: http://a\n    sub-agents: true\nserver: box\n"
+	path := writeMigrationConfig(t, given)
+	err := MigrateSubAgentsServer(path, "nope")
+	if err == nil {
+		t.Fatal("a name no entry carries was accepted")
+	}
+	if !strings.Contains(err.Error(), "edit the file by hand") {
+		t.Errorf("refusal reads %q, want the writer's by-hand idiom", err)
+	}
+	data, _ := os.ReadFile(path)
+	if string(data) != given {
+		t.Errorf("the refused edit rewrote the file:\n%s", data)
+	}
+}

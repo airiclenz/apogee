@@ -271,7 +271,16 @@ not come back from the watcher as an external change (the `changed()` exemption)
 
 **Depends on:** item 3.
 
-## 5. The migration offer for configs still carrying the flag
+## 5. The migration offer for configs still carrying the flag — ✅ DONE (2026-08-31)
+
+NOTES (2026-08-31): the writer lives in internal/config (configmigrate.go, under its own heading) rather than in a Files-listed file — the item's own regression guard requires `sameApartFrom(before, after, serversKey, "sub-agents-server")`, which is unexported there. Its gate additionally compares the `servers:` entries one by one, since zeroing serversKey would otherwise stop checking them.
+NOTES (2026-08-31): cmd/apogee/delegation.go was listed in Files but needed no edit — the seam calls the already-exported `delegationWiring.Retarget` from cmd/apogee/keymigrate.go, so item 3's code is used as-is rather than changed.
+NOTES (2026-08-31): consequential edit — internal/config/doc.go: made necessary by the new heading in configmigrate.go (the package's file map names each file's subjects)
+NOTES (2026-08-31): consequential edit — cmd/apogee/doc.go: made necessary by the second offer added to keymigrate.go (the composition root's file map)
+NOTES (2026-08-31): consequential edit — internal/tui/doc.go: made necessary by the third unasked start-up pane, which the overlay narration enumerates
+NOTES (2026-08-31): consequential edit — internal/tui/model.go: "the one other question a start-up may ask unasked" became false once a second one was added
+NOTES (2026-08-31): the both-offers case is pinned at the Options level in internal/tui/keymigration_test.go (the renderer never sees file text); the config-shaped `api-key:` + flag pairing has no meaning at that layer.
+NOTES (2026-08-31): docs/manual and the ADR are item 6's; nothing user-facing was documented here.
 
 **What:** Detect retired `sub-agents: true` lines by scanning the resolved config file's raw YAML
 under `servers:` entries (the struct no longer holds the key) in the composition root, and offer

@@ -602,6 +602,13 @@
 // pre-bound ask above, because a session with no server has the more urgent question and "not now"
 // is what this one already means.
 //
+// A THIRD unasked pane sits behind that one in the same file (ADR 0045): a `servers:` entry still
+// spelling the retired `sub-agents: true` flag earns a two-row question — move it, not now — and
+// taking it calls [Options.MigrateSubAgentsServer], which rewrites the file onto the root
+// `sub-agents-server:` key and re-points this session's delegations at the entry. It is one question
+// rather than a round, because the answer is a single key naming a single entry, and it gives way to
+// the key migration exactly as that gives way to the pre-bound ask.
+//
 // That fold has ONE owner (post-v0.8 architecture deepening, review candidate 06). fold.go's
 // [Model.foldEvent] is the single door every engine Event enters the view through: the Update
 // loop's eventMsg case hands it over and does nothing else with it, and foldEvent runs the four

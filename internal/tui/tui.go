@@ -1138,6 +1138,28 @@ type Options struct {
 	// cannot be recorded, the nil-seam degrade every seam here takes.
 	KeepPlaintextKey func(entry string) (path string, err error)
 
+	// SubAgentsMigration is the OTHER start-up offer, and the one thing it has in common with the
+	// pair above is its posture: the `servers:` entries whose block still spells ADR 0045's retired
+	// `sub-agents: true` flag, in the file's own order. Nothing decodes that key any more — the root
+	// `sub-agents-server:` key replaced it — so a config carrying it delegates nowhere its owner
+	// meant, and the start-up offers the one edit that fixes it (keymigration.go).
+	//
+	// The FIRST name is the entry the pane asks about, and taking the offer drops the flag line from
+	// every one of them: two flagged entries were a config the retired refusal used to reject, so a
+	// file that has one is a file that never ran, and the choice between them is the human's. Empty —
+	// the ordinary case — raises nothing at all.
+	SubAgentsMigration []string
+
+	// MigrateSubAgentsServer takes that offer for the named entry: the retired flag lines go, and
+	// `sub-agents-server:` names this entry, in one edit of the file — after which the session's own
+	// delegations are re-pointed there, so the answer is in force now rather than at the next
+	// start-up. It reports the file it rewrote, so the confirmation can name where to look.
+	//
+	// The [SettingsHost.Write] contract in every other respect: synchronous on the keypress that
+	// answered, and a failure means the file was left exactly as it was and is REPORTED. nil ⇒ no
+	// offer is raised at all.
+	MigrateSubAgentsServer func(entry string) (path string, err error)
+
 	// RecordModelChoice persists the model this session just bound as the one its server comes back on
 	// NEXT time — the `model:` key of the `servers:` entry the session is on, written only while the
 	// `remember-model:` toggle is on. The renderer calls it with the id the human picked and knows

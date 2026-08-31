@@ -636,11 +636,16 @@ func newModel(parent context.Context, eng Engine, opts Options, notify func(tea.
 	// after every notice above — because it is the one thing the human has to act on before the
 	// session can do anything at all (prebound.go).
 	m.openPrebound()
-	// And, on a session that HAS its server, the one other question a start-up may ask unasked: a
-	// plaintext `api-key:` this machine's secret store could hold instead (ADR 0047, keymigration.go).
+	// And, on a session that HAS its server, the first of the two questions a start-up may ask
+	// unasked: a plaintext `api-key:` this machine's secret store could hold instead (ADR 0047,
+	// keymigration.go).
 	// It goes last because it gives way to the ask above — a session with no server has a more urgent
 	// question, and this one costs nothing by coming back at the next start-up.
 	m.openKeyMigration()
+	// And the second of those questions, which gives way to the first exactly as the first gives way
+	// to the ask above: a `servers:` entry still carrying ADR 0045's retired `sub-agents: true` flag,
+	// which now routes nothing (keymigration.go).
+	m.openSubAgentsMigration()
 	return m
 }
 

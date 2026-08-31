@@ -190,3 +190,116 @@ func (m Model) keepPlaintextKeyNote(entry string) string {
 	return fmt.Sprintf("%s keeps its key in the file — %s records plaintext-key-ok: true, and "+
 		"deleting that line asks again", stripEscapes(entry), stripEscapes(path))
 }
+
+// ----------------------------------------------------------------------------
+// The start-up sub-agents-flag offer (ADR 0045)
+// ----------------------------------------------------------------------------
+//
+// A `servers:` entry may still spell `sub-agents: true`, which is how ADR 0045 first marked the
+// Sub-agent server. The root `sub-agents-server:` key replaced it, and nothing decodes the flag any
+// more: the file reads without complaint and the delegations run on the session's own server, which
+// is not what its owner wrote. Where the start-up finds that, it offers the one edit that fixes it —
+// drop the flag line, name the entry in the root key, and re-point THIS session's delegations at it.
+//
+// It is the key migration's posture in every respect that is not the question: the pane comes up
+// unasked under a notice saying why, it gives way to anything already open, esc is "not now" and
+// persists nothing, and the renderer is handed entry NAMES and one seam. What it is not is a round —
+// there is one question, because the answer is a single root key naming a single entry, and the
+// entries beyond the first are named in the notice rather than asked about one at a time.
+
+// The two answers, in the order the rows are offered. There is deliberately no "never" row: the flag
+// is dead weight its owner removes once, so an answer that made the question permanent would
+// preserve a line that does nothing (the ratified call).
+const (
+	subAgentsMigrationMove = iota
+	subAgentsMigrationNotNow
+)
+
+// openSubAgentsMigration raises the offer at construction, after the key migration has had its turn —
+// openKeyMigration's seam, and it gives way the same way and for the same reason. A plaintext key and
+// an unbound session are both more urgent than a routing key that has been wrong since the flag was
+// retired, and two unasked-for panes at once are a stack of questions the human clears without
+// reading.
+func (m *Model) openSubAgentsMigration() {
+	if len(m.opts.SubAgentsMigration) == 0 || m.opts.MigrateSubAgentsServer == nil {
+		return
+	}
+	if m.picker.open || m.settings.open {
+		return
+	}
+	m.transcript.addNote(subAgentsMigrationNotice(m.opts.SubAgentsMigration))
+	m.picker = picker{open: true, kind: pickerSubAgentsMigration}
+}
+
+// subAgentsMigrationNotice is the line the unasked-for pane comes up under: which entries carry the
+// retired flag, and what has become of it. It names them rather than counting them, for the key
+// migration's reason — which server the file meant is the fact that decides how this is answered.
+func subAgentsMigrationNotice(entries []string) string {
+	return fmt.Sprintf("sub-agents: true is retired on %s — the sub-agents-server: key names the "+
+		"delegation target now", entryNameList(entries))
+}
+
+// subAgentsMigrationTitle names the entry the pane would write as the key. The offering's first name
+// is that entry (Options.SubAgentsMigration), so a file that flagged two says which one it is about
+// rather than leaving the human to guess which of the two the answer covers.
+func (m Model) subAgentsMigrationTitle() string {
+	if len(m.opts.SubAgentsMigration) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("delegate to %s — move the flag into sub-agents-server:?",
+		stripEscapes(m.opts.SubAgentsMigration[0]))
+}
+
+// subAgentsMigrationRows is the offering: two answers, each with a gloss saying what it does to the
+// file, because "move it" is one edit of a file the human owns and "not now" has to say that the
+// question comes back. Two cells, so the glosses line up in one column.
+func subAgentsMigrationRows(entries []string) []popupRow {
+	name := ""
+	if len(entries) > 0 {
+		name = stripEscapes(entries[0])
+	}
+	return []popupRow{
+		{"move it", "— write sub-agents-server: " + name + " and drop the retired flag"},
+		{"not now", "— leave the file alone; the offer comes back at the next start-up"},
+	}
+}
+
+// acceptSubAgentsMigration answers the offer. Each answer is one note and, for "move it", one seam
+// call, exactly as the key migration's answers are: the seam is synchronous file work on a keypress
+// the human is waiting on, and an error is REPORTED rather than swallowed.
+//
+// Either way the overlay closes for the rest of the session. There is nothing left to ask — the
+// question was about one key, and "not now" is a whole answer that persists nothing and comes back
+// at the next start-up.
+func (m Model) acceptSubAgentsMigration(choice int) (tea.Model, tea.Cmd) {
+	entries := m.opts.SubAgentsMigration
+	if len(entries) == 0 {
+		return m, nil
+	}
+	switch choice {
+	case subAgentsMigrationMove:
+		m.transcript.addNote(m.migrateSubAgentsNote(entries[0]))
+	case subAgentsMigrationNotNow:
+		m.transcript.addNote(fmt.Sprintf("%s keeps its retired sub-agents: flag — the offer comes "+
+			"back at the next start-up", entryNameList(entries)))
+	}
+	m.picker = picker{}
+	m.layout()
+	return m, nil
+}
+
+// migrateSubAgentsNote performs the move and words what came of it. The seam does the whole of it —
+// the rewrite, and the retarget that puts the answer in force in THIS session — and reports the file
+// it wrote, so the confirmation can name where to look.
+func (m Model) migrateSubAgentsNote(entry string) string {
+	if m.opts.MigrateSubAgentsServer == nil {
+		return "moving the sub-agents flag is not available in this build"
+	}
+	path, err := m.opts.MigrateSubAgentsServer(entry)
+	if err != nil {
+		return fmt.Sprintf("could not move %s's sub-agents flag: %s",
+			stripEscapes(entry), stripEscapes(err.Error()))
+	}
+	return fmt.Sprintf("sub-agents-server: %s now — %s names it, and this session's delegations "+
+		"run there", stripEscapes(entry), stripEscapes(path))
+}

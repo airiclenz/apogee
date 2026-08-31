@@ -86,7 +86,9 @@
 // hold their API key in the file, the notice that goes out instead of an offer and the two
 // reasons it carries — this machine has no secret store, or a headless run cannot prompt to
 // offer one — and the consented move itself: store write, read-back through the very
-// command about to be persisted, then the entry rewrite;
+// command about to be persisted, then the entry rewrite; and the second start-up offer
+// beside it, for a `servers:` entry still carrying ADR 0045's retired `sub-agents: true`
+// flag — the raw-YAML detection, and the rewrite-then-retarget the answer runs;
 // launcher.go the only file
 // importing the llama-launcher facade, kept behind
 // the nil-degrading [tui.LauncherHost] the seven launcher acts cross to the renderer as

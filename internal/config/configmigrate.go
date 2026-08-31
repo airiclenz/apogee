@@ -651,3 +651,220 @@ func profilesBlock(block string) string {
 	}
 	return profilesKey + ":\n" + indent + "\"<pattern>\":\n" + strings.Join(lines, "\n") + "\n"
 }
+
+// ----------------------------------------------------------------------------
+// The consented `sub-agents:` flag migration (ADR 0045)
+// ----------------------------------------------------------------------------
+//
+// ADR 0045's first shape marked the Sub-agent server with a `sub-agents: true` flag on the entry
+// itself. The root `sub-agents-server:` key replaced it, and the flag is now a key ServerEntry has
+// no field for — so a config still carrying it reads without complaint and delegates nowhere the
+// human meant. The start-up notices that and OFFERS the one edit that fixes it
+// (cmd/apogee/keymigrate.go, internal/tui/keymigration.go).
+//
+// Everything above this line is the ONE write apogee makes unasked; this one is the opposite, and
+// the difference is why it sits under its own heading rather than beside the fold. Nothing here runs
+// on its own, there is no backup, and a config left alone keeps working exactly as it does today: it
+// is ADR 0035's deliberate-edit grain, one answered question and one edit.
+//
+// Two halves are all the offer needs — which entries still carry the flag, and the single edit that
+// drops every one of those lines and writes the root key naming the entry the human chose. Both read
+// the RAW YAML, because a key nothing parses cannot be found in a parsed config.
+
+// subAgentsKey is the retired per-entry flag, spelled as the ServerEntry field that used to carry it
+// tagged it. Nothing decodes it any more: it is a name this file matches in the node tree.
+const subAgentsKey = "sub-agents"
+
+// retiredSubAgentsFlag is one entry still carrying the flag: the name the offer would write as the
+// root key, and the two nodes the deletion measures its line from.
+type retiredSubAgentsFlag struct {
+	name  string
+	key   *yaml.Node
+	value *yaml.Node
+}
+
+// RetiredSubAgentsEntries names the `servers:` entries of the config at path that still spell
+// `sub-agents: true`, in the file's own order — the whole of the start-up's detection. The first name
+// is the one the offer asks about (the ratified call), and every one of them loses its flag line when
+// the offer is taken.
+//
+// A config that is not there yet has nothing retired in it, which is an answer rather than a failure:
+// no file, no names, no error. Anything else that stops the read — unreadable bytes, a file that is
+// not one YAML document of settings — comes back as the error it is, and the caller raises no offer;
+// a start-up question is never a reason a start fails.
+func RetiredSubAgentsEntries(path string) ([]string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("apogee: read config %q: %w", path, err)
+	}
+	flags, err := retiredSubAgentsFlags(data)
+	if err != nil {
+		return nil, fmt.Errorf("apogee: read config %q: %w", path, err)
+	}
+	names := make([]string, 0, len(flags))
+	for _, flag := range flags {
+		names = append(names, flag.name)
+	}
+	return names, nil
+}
+
+// retiredSubAgentsFlags finds those entries in the raw document. The value is DECODED rather than
+// string-matched, so the flag is recognised in every spelling yaml itself reads as true — which is
+// the only definition of it that was ever in force, since a bool field is what used to parse it.
+//
+// A nameless entry is skipped: the offer's whole answer is a name to write as the root key, and an
+// entry that has none cannot be that answer. ValidateServers has already refused such a file by the
+// time anything here runs, so this is the defensive half of a case that does not arise.
+//
+// Shapes it cannot read — a file that is not a mapping of settings, a `servers:` that is not a list —
+// carry no flags rather than an error: the detection asks "is there something to offer", and the
+// answer for a file this cannot read is no.
+func retiredSubAgentsFlags(data []byte) ([]retiredSubAgentsFlag, error) {
+	doc, err := Document(data)
+	if err != nil {
+		return nil, err
+	}
+	root, err := rootMapping(doc)
+	if err != nil || root == nil {
+		return nil, err
+	}
+	_, list := mappingEntry(root, serversKey)
+	if list == nil || list.Kind != yaml.SequenceNode {
+		return nil, nil
+	}
+	var flags []retiredSubAgentsFlag
+	for _, item := range list.Content {
+		keyNode, valueNode := mappingEntry(item, subAgentsKey)
+		var on bool
+		if keyNode == nil || valueNode == nil || valueNode.Decode(&on) != nil || !on {
+			continue
+		}
+		_, nameNode := mappingEntry(item, entryNameKey)
+		if nameNode == nil || strings.TrimSpace(nameNode.Value) == "" {
+			continue
+		}
+		flags = append(flags, retiredSubAgentsFlag{
+			name: strings.TrimSpace(nameNode.Value), key: keyNode, value: valueNode,
+		})
+	}
+	return flags, nil
+}
+
+// MigrateSubAgentsServer is the edit the offer's "move it" row makes: every retired
+// `sub-agents: true` line is deleted, and `sub-agents-server:` is written naming the entry the human
+// answered with. ONE edit, because it is one answer to one question — a file left holding the flag
+// AND the key would say two things about where delegations go, and a file that lost the flag without
+// gaining the key would silently stop delegating anywhere.
+//
+// It is the ordinary write transaction (configedit.go) with the entry writers' read, which does not
+// seed: the name must be an entry the file already carries, and a seeded template names none. The
+// gate is stricter than a scalar write's for the reason the fold's is — two paths change at once, so
+// it states BOTH of them and holds everything else byte-for-byte, including the `servers:` list,
+// whose entries the deletion must leave exactly as a reader already saw them.
+func MigrateSubAgentsServer(path, name string) error {
+	if strings.TrimSpace(name) == "" {
+		return errors.New("apogee: cannot record the sub-agents server: no entry was named")
+	}
+	k, ok := LookupKey(subAgentsServerPath)
+	if !ok {
+		return errors.New("apogee has no sub-agents-server: setting to point at the entry")
+	}
+	splice := func(before fileConfig, data []byte) ([]byte, error) {
+		if _, err := serverEntryAt(before, name); err != nil {
+			return nil, err
+		}
+		dropped, err := dropRetiredSubAgentsFlags(data)
+		if err != nil {
+			return nil, err
+		}
+		base := data
+		if dropped != nil {
+			base = dropped
+		}
+		// The key rides the ordinary scalar writer over the bytes the deletion left, so it lands
+		// below its own commented example (ADR 0035) and is verified as any other setting is. Its nil
+		// — the file already names this entry — leaves the deletion standing as the whole edit, and
+		// with nothing deleted either there is nothing to write at all.
+		updated, err := setScalarSetting(base, k, name)
+		if err != nil {
+			return nil, err
+		}
+		if updated == nil {
+			return dropped, nil
+		}
+		return updated, nil
+	}
+	verify := func(before, after fileConfig, updated []byte) error {
+		return verifySubAgentsMigration(before, after, updated, name)
+	}
+	return editFrom(path, readConfigForEntryEdit, splice, verify)
+}
+
+// dropRetiredSubAgentsFlags returns the config text with every retired flag line removed, or nil
+// bytes when it carries none — which the splice above reads as "this half changed nothing".
+//
+// Each line is read with scalarLineParts before it is deleted, exactly as the legacy fold reads the
+// lines it drops: a value that runs past its key's line would leave its tail behind, and a text and
+// a node tree that disagree about where the key sits would take somebody else's line. The lines are
+// removed in ONE pass over the original, so every line number the node tree reported still means
+// what it said (spliceFold's rule, with no insertion to make).
+func dropRetiredSubAgentsFlags(data []byte) ([]byte, error) {
+	flags, err := retiredSubAgentsFlags(data)
+	if err != nil || len(flags) == 0 {
+		return nil, err
+	}
+	lines := SplitConfigLines(data)
+	drop := make(map[int]bool, len(flags))
+	for _, flag := range flags {
+		t := ScalarTarget{Key: subAgentsKey, Kind: KindBool, KeyNode: flag.key, ValueNode: flag.value}
+		if _, _, _, err := scalarLineParts(lines, t); err != nil {
+			return nil, err
+		}
+		drop[flag.key.Line] = true
+	}
+	out := make([]string, 0, len(lines))
+	for i, line := range lines {
+		if !drop[i+1] {
+			out = append(out, line)
+		}
+	}
+	return joinConfigLines(out), nil
+}
+
+// verifySubAgentsMigration is the gate: the rewritten file must carry the retired flag nowhere, must
+// name the chosen entry in `sub-agents-server:`, must hold the `servers:` list a reader already saw
+// entry for entry, and must agree with the original on every other setting.
+//
+// The flags are read out of the edited BYTES, because they are what fileConfig has no field for — the
+// parsed after says nothing about a `sub-agents:` line the deletion was supposed to take away. And
+// the whole-file comparison zeroes BOTH changed paths (the fold's two-path precedent): the entry
+// writers' single-path gate would refuse the root key as "more than the servers: list", and zeroing
+// `servers:` is only safe here because the entries themselves are compared one line above.
+func verifySubAgentsMigration(before, after fileConfig, updated []byte, name string) error {
+	flags, err := retiredSubAgentsFlags(updated)
+	switch {
+	case err != nil:
+		return fmt.Errorf("the edited file would not read back: %w", err)
+	case len(flags) > 0:
+		return errors.New("the edit would have left a retired sub-agents: flag behind; edit the file by hand")
+	case after.SubAgentsServer != name:
+		return fmt.Errorf("the edit did not point sub-agents-server: at %q where a reader would look "+
+			"for it; edit the file by hand", name)
+	case !sameServers(before.Servers, after.Servers):
+		return errors.New("the edit would have changed the servers: list itself; edit the file by hand")
+	case !sameApartFrom(before, after, serversKey, subAgentsServerPath):
+		return errors.New("the edit would have changed more than the sub-agents: flag and " +
+			"sub-agents-server:; edit the file by hand")
+	}
+	return nil
+}
+
+// sameServers reports whether two parsed `servers:` lists are the same list, entry for entry. It is
+// serversAppended's comparison without the appended entry, and it goes through reflect.DeepEqual for
+// serversAppended's reason: a ServerEntry holding a map cannot be `==`d.
+func sameServers(before, after []ServerEntry) bool {
+	return slices.EqualFunc(before, after, func(a, b ServerEntry) bool { return reflect.DeepEqual(a, b) })
+}

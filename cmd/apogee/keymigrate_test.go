@@ -18,6 +18,7 @@ import (
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/config"
+	"github.com/airiclenz/apogee/internal/heartbeat"
 	"github.com/airiclenz/apogee/internal/keystore"
 	"github.com/airiclenz/apogee/internal/run"
 )
@@ -404,5 +405,124 @@ func TestHeadlessNoticesPlaintextKeysAndNeverPrompts(t *testing.T) {
 	}
 	if !strings.Contains(string(data), "api-key: sk-plain-as-day") {
 		t.Errorf("an unattended run edited the config it was only meant to report on:\n%s", data)
+	}
+}
+
+// ----------------------------------------------------------------------------
+// The start-up sub-agents-flag migration (ADR 0045)
+// ----------------------------------------------------------------------------
+
+// subAgentsFlagYAML is a config still written the retired way: two entries, the second flagged as the
+// Sub-agent server with a key nothing decodes any more.
+const subAgentsFlagYAML = "servers:\n  - name: testbox\n    endpoint: http://127.0.0.1:1111\n" +
+	"  - name: cheaper\n    endpoint: http://127.0.0.1:3333\n    sub-agents: true\nserver: testbox\n"
+
+// The detection reads the FILE, because the struct has no field to find the retired key in — and it
+// wires the answer seam exactly when it found something to ask about.
+func TestPrepareSubAgentsMigrationNamesTheFlaggedEntries(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a config still carrying the flag", func(t *testing.T) {
+		t.Parallel()
+		home := testConfigHome(t, subAgentsFlagYAML)
+		w := wiringFor(home, nil)
+
+		w.prepareSubAgentsMigration()
+
+		if got := w.subAgentsFlagged; len(got) != 1 || got[0] != "cheaper" {
+			t.Errorf("flagged entries = %v; want the one entry the file flags", got)
+		}
+		if w.subAgentsMigrator() == nil {
+			t.Error("the answer seam is nil on a run that found the retired flag")
+		}
+	})
+
+	t.Run("a config written since the key was retired", func(t *testing.T) {
+		t.Parallel()
+		w := wiringFor(testConfigHome(t, ""), nil)
+
+		w.prepareSubAgentsMigration()
+
+		if len(w.subAgentsFlagged) != 0 {
+			t.Errorf("flagged entries = %v; want none", w.subAgentsFlagged)
+		}
+		if w.subAgentsMigrator() != nil {
+			t.Error("the answer seam is wired on a run with nothing to migrate")
+		}
+	})
+}
+
+// The answer is one edit and one apply (ADR 0037): the file loses the retired flag and gains the root
+// key, and THIS session's delegations move onto the named entry rather than waiting for the next
+// start-up. The path it reports is the file it rewrote, so the confirmation can name it.
+func TestSubAgentsMigratorRewritesThenRetargets(t *testing.T) {
+	t.Parallel()
+
+	home := testConfigHome(t, subAgentsFlagYAML)
+	entries := []config.ServerEntry{
+		{Name: "testbox", Endpoint: "http://127.0.0.1:1111"},
+		{Name: "cheaper", Endpoint: "http://127.0.0.1:3333"},
+	}
+	w := wiringFor(home, entries)
+	w.opts.ConfigDir = home
+	w.externalEdits = newExternalEdit(w.opts, home, func(string) string { return "" })
+	w.delegation = retargetableWiring(t, entries[0], entries,
+		heartbeat.Beat{Reachable: true, ActiveModel: "cheap-7b"}, &delegationSpy{}, &noticeSpy{})
+	w.prepareSubAgentsMigration()
+
+	path, err := w.subAgentsMigrator()("cheaper")
+	if err != nil {
+		t.Fatalf("the migration seam: %v", err)
+	}
+	if want := filepath.Join(home, "config.yaml"); path != want {
+		t.Errorf("reported path = %q; want the config it rewrote (%q)", path, want)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read the migrated config: %v", err)
+	}
+	if strings.Contains(string(data), "sub-agents: true") {
+		t.Errorf("the retired flag survived the migration:\n%s", data)
+	}
+	if !strings.Contains(string(data), "sub-agents-server: cheaper") {
+		t.Errorf("the root key did not land:\n%s", data)
+	}
+	if w.delegation.target != "cheaper" {
+		t.Errorf("the session still delegates to %q; the answer has to be in force now", w.delegation.target)
+	}
+	// The watcher must see nothing for a write apogee itself just made (ADR 0041 decision 8), which
+	// is what the baseline refresh inside the seam is for.
+	applied, err := w.externalEdits.changed()
+	if err != nil {
+		t.Fatalf("the external-edit watcher: %v", err)
+	}
+	if len(applied) != 0 {
+		t.Errorf("the watcher reported %+v for apogee's own migration write", applied)
+	}
+}
+
+// A name no entry carries is refused with nothing written and nothing retargeted: the writer
+// validates before it persists, so a failed answer leaves both the file and the session as they were.
+func TestSubAgentsMigratorRefusesAnUnknownEntry(t *testing.T) {
+	t.Parallel()
+
+	home := testConfigHome(t, subAgentsFlagYAML)
+	entries := []config.ServerEntry{{Name: "testbox", Endpoint: "http://127.0.0.1:1111"}}
+	w := wiringFor(home, entries)
+	w.opts.ConfigDir = home
+	w.externalEdits = newExternalEdit(w.opts, home, func(string) string { return "" })
+	w.delegation = retargetableWiring(t, entries[0], entries,
+		heartbeat.Beat{Reachable: true}, &delegationSpy{}, &noticeSpy{})
+	w.subAgentsFlagged = []string{"gone"}
+
+	if _, err := w.subAgentsMigrator()("gone"); err == nil {
+		t.Fatal("a name no entry carries was migrated")
+	}
+	data, err := os.ReadFile(filepath.Join(home, "config.yaml"))
+	if err != nil {
+		t.Fatalf("read the config back: %v", err)
+	}
+	if string(data) != subAgentsFlagYAML {
+		t.Errorf("the refused migration rewrote the file:\n%s", data)
 	}
 }

@@ -4,6 +4,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	tea "charm.land/bubbletea/v2"
 )
 
 // ----------------------------------------------------------------------------
@@ -226,5 +228,162 @@ func TestKeyMigrationEscEndsTheRound(t *testing.T) {
 	}
 	if len(w.migrated) != 0 || len(w.kept) != 0 {
 		t.Errorf("esc wrote something: migrated=%v kept=%v", w.migrated, w.kept)
+	}
+}
+
+// ----------------------------------------------------------------------------
+// The start-up sub-agents-flag offer (keymigration.go, ADR 0045)
+// ----------------------------------------------------------------------------
+
+// fakeSubAgentsMigrator stands in for the composition root's one seam behind that offer, recording
+// every entry it was asked about so a test can assert that the answer the human did NOT give wrote
+// nothing at all. Called synchronously on the test's goroutine, so it needs no guard.
+type fakeSubAgentsMigrator struct {
+	moved []string
+	path  string
+	err   error
+}
+
+func (f *fakeSubAgentsMigrator) migrate(entry string) (string, error) {
+	f.moved = append(f.moved, entry)
+	return f.path, f.err
+}
+
+// subAgentsOfferOpts are the Options a start-up hands a session whose config still carries the
+// retired flag: the flagged entries in the file's own order, and the one seam wired.
+func subAgentsOfferOpts(f *fakeSubAgentsMigrator, entries ...string) Options {
+	opts := testOpts
+	opts.SubAgentsMigration = entries
+	opts.MigrateSubAgentsServer = f.migrate
+	return opts
+}
+
+// subAgentsOfferModel is a ready 80×24 session that opened with the offer up.
+func subAgentsOfferModel(t *testing.T, f *fakeSubAgentsMigrator, entries ...string) Model {
+	t.Helper()
+	return newTestModelEng(t, &fakeEngine{}, subAgentsOfferOpts(f, entries...))
+}
+
+// The pane comes up unasked at construction, under a notice naming the entries that carry the
+// retired flag, and it asks about the FIRST of them — the name the answer would write as the key.
+func TestSubAgentsMigrationOfferOpensWithItsNotice(t *testing.T) {
+	f := &fakeSubAgentsMigrator{path: "/home/x/.apogee/config.yaml"}
+	m := subAgentsOfferModel(t, f, "cheap", "spare")
+
+	if !m.picker.open || m.picker.kind != pickerSubAgentsMigration {
+		t.Fatalf("picker = %+v, want the sub-agents offer open at start-up", m.picker)
+	}
+	if title := m.pickerTitle(); !strings.Contains(title, "cheap") {
+		t.Errorf("title = %q, want the first flagged entry named", title)
+	}
+	if rows := m.pickerOfferingRows(); len(rows) != 2 {
+		t.Errorf("rows = %v, want exactly move it and not now — there is no never row", rows)
+	}
+	notes := strings.Join(noteTexts(m), "\n")
+	if !strings.Contains(notes, "sub-agents: true") || !strings.Contains(notes, "cheap and spare") {
+		t.Errorf("notices = %q, want the retired key and both entries named", notes)
+	}
+}
+
+// A config carrying no retired flag — every config written since the root key replaced it — is asked
+// nothing, and neither is one whose seam the binary left unwired.
+func TestSubAgentsMigrationNeedsAnEntryAndASeam(t *testing.T) {
+	f := &fakeSubAgentsMigrator{}
+	if m := newTestModelEng(t, &fakeEngine{}, subAgentsOfferOpts(f)); m.picker.open {
+		t.Errorf("picker = %+v, want nothing raised for a config with no retired flag", m.picker)
+	}
+	opts := subAgentsOfferOpts(f, "cheap")
+	opts.MigrateSubAgentsServer = nil
+	if m := newTestModelEng(t, &fakeEngine{}, opts); m.picker.open {
+		t.Errorf("picker = %+v, want nothing raised where the answer could not be carried out", m.picker)
+	}
+}
+
+// "move it" is one call about the entry the pane named, and the note says the key that now names it
+// and the file that carries it. What the seam DOES — the rewrite and the retarget — is the binary's
+// (keymigrate.go's own suite).
+func TestSubAgentsMigrationMoveCallsTheSeam(t *testing.T) {
+	f := &fakeSubAgentsMigrator{path: "/home/x/.apogee/config.yaml"}
+	m := subAgentsOfferModel(t, f, "cheap", "spare")
+
+	m = step(t, m, keyEnter()) // "move it" is the first row
+
+	if len(f.moved) != 1 || f.moved[0] != "cheap" {
+		t.Errorf("MigrateSubAgentsServer calls = %v, want the entry the pane was asking about", f.moved)
+	}
+	if m.picker.open {
+		t.Errorf("picker = %+v, want the one question answered and closed", m.picker)
+	}
+	if note := lastNote(m); !strings.Contains(note, "sub-agents-server: cheap") ||
+		!strings.Contains(note, f.path) {
+		t.Errorf("note = %q, want the key it wrote and the file that carries it", note)
+	}
+}
+
+// A move that FAILED says so, and the file is the seam's business: nothing here claims a routing
+// change that did not happen.
+func TestSubAgentsMigrationReportsAFailedMove(t *testing.T) {
+	f := &fakeSubAgentsMigrator{err: errors.New("the servers: list has no entry named \"cheap\"")}
+	m := subAgentsOfferModel(t, f, "cheap")
+
+	m = step(t, m, keyEnter())
+
+	if note := lastNote(m); !strings.Contains(note, "could not move") ||
+		!strings.Contains(note, "no entry named") {
+		t.Errorf("note = %q, want the failure and what the writer said", note)
+	}
+}
+
+// "not now" and esc are the same answer spelled two ways: nothing is written, and the offer comes
+// back at the next start-up because the file still carries the flag.
+func TestSubAgentsMigrationDeclinedPersistsNothing(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		key  func() tea.KeyPressMsg
+		down bool
+	}{
+		{name: "not now", key: keyEnter, down: true},
+		{name: "esc", key: keyEsc},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := &fakeSubAgentsMigrator{}
+			m := subAgentsOfferModel(t, f, "cheap")
+			if tc.down {
+				m = step(t, m, keyDown())
+			}
+			m = step(t, m, tc.key())
+
+			if len(f.moved) != 0 {
+				t.Errorf("a declined offer wrote something: %v", f.moved)
+			}
+			if m.picker.open {
+				t.Errorf("picker = %+v, want the offer closed", m.picker)
+			}
+		})
+	}
+}
+
+// The two unasked start-up panes never race. A config carrying BOTH a literal `api-key:` and the
+// retired flag opens the key migration — the offer that was already there — and the sub-agents offer
+// gives way exactly as the key migration gives way to the pre-bound ask: nothing of it is written,
+// and the Options still describe what this start-up found, so the next one asks.
+func TestSubAgentsMigrationGivesWayToTheKeyMigration(t *testing.T) {
+	w := &fakeKeyWriter{path: "/home/x/.apogee/config.yaml"}
+	f := &fakeSubAgentsMigrator{path: w.path}
+	opts := offerOpts(w, "workstation")
+	opts.SubAgentsMigration = []string{"cheap"}
+	opts.MigrateSubAgentsServer = f.migrate
+
+	m := newTestModelEng(t, &fakeEngine{}, opts)
+
+	if !m.picker.open || m.picker.kind != pickerKeyMigration {
+		t.Fatalf("picker = %+v, want the key migration to keep the frame", m.picker)
+	}
+	if len(f.moved) != 0 {
+		t.Errorf("the offer that gave way wrote something: %v", f.moved)
+	}
+	if len(m.opts.SubAgentsMigration) != 1 {
+		t.Errorf("SubAgentsMigration = %v, want the start-up's finding kept for the next one",
+			m.opts.SubAgentsMigration)
 	}
 }

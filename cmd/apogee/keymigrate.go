@@ -15,6 +15,13 @@ package main
 // Nothing here migrates anything on its own. A plaintext key with nowhere to go earns a NOTICE
 // naming the manual alternatives, an offer is raised only where the whole move can be completed,
 // and the move runs only on the human's own answer (ADR 0035's deliberate-edit grain).
+//
+// The start-up's SECOND offer keeps it company here, because it is the same act in the same window
+// over the same file: a `servers:` entry still carrying ADR 0045's retired `sub-agents: true` flag,
+// which the root `sub-agents-server:` key replaced. It is assembled here for this file's own reason —
+// the rewrite is internal/config's, the retarget that puts it in force is the delegation wiring's,
+// and "rewrite it, then move this session's routing onto it" is a policy about the human's answer
+// rather than a fact about either.
 
 import (
 	"errors"
@@ -88,6 +95,57 @@ func (w *rootWiring) prepareKeyMigration(probe func(workspaceRoot string) (secre
 	}
 	w.secrets = store
 	w.keyOffer = tui.KeyMigrationOffer{StoreName: store.Name(), Entries: names}
+}
+
+// prepareSubAgentsMigration decides what this run does about a `servers:` entry still carrying ADR
+// 0045's retired `sub-agents: true` flag: the root `sub-agents-server:` key replaced it, nothing
+// decodes it any more, and a config that has one delegates nowhere its owner meant.
+//
+// The detection is a scan of the file's RAW YAML (config.RetiredSubAgentsEntries) rather than a read
+// of the resolved Options, for the reason there is anything to migrate at all: ServerEntry has no
+// field for the key, so the struct every other start-up question is asked of cannot see it.
+//
+// It goes beside prepareKeyMigration because it is the same kind of thing — a start-up fact about the
+// human's own file — and it answers the same way: what it finds is recorded for the renderer to
+// raise, and what it cannot read raises nothing at all. A file the scan stumbles on is silent rather
+// than fatal: this run resolved that same file a moment ago, so anything the scan cannot make sense
+// of is a question apogee has no business stopping a start-up over.
+func (w *rootWiring) prepareSubAgentsMigration() {
+	names, err := config.RetiredSubAgentsEntries(w.configPath())
+	if err != nil || len(names) == 0 {
+		return
+	}
+	w.subAgentsFlagged = names
+}
+
+// subAgentsMigrator is the [tui.Options.MigrateSubAgentsServer] seam: the whole of the offer's "move
+// it" answer, reported by the file it rewrote. nil when this run found no retired flag, which is also
+// when no offer was raised.
+//
+// It is ADR 0037's validate → persist → apply in three lines. The writer validates and persists (a
+// name no entry carries, or a file whose shape it will not risk, is refused with nothing written);
+// the baseline refresh is what keeps the watcher from reporting apogee's OWN write back as somebody's
+// edit (ADR 0041 decision 8); and the retarget is the apply, because a key that only took effect at
+// the next start-up would leave the human with a fixed file and an unfixed session.
+//
+// A retarget that fails is REPORTED, and the file keeps the rewrite it already earned: the key names
+// the entry the human chose either way, so the next start-up routes there even where this session
+// could not be moved.
+func (w *rootWiring) subAgentsMigrator() func(string) (string, error) {
+	if len(w.subAgentsFlagged) == 0 {
+		return nil
+	}
+	return func(entry string) (string, error) {
+		path := w.configPath()
+		if err := config.MigrateSubAgentsServer(path, entry); err != nil {
+			return "", err
+		}
+		w.externalEdits.refresh()
+		if err := w.delegation.Retarget(entry); err != nil {
+			return "", err
+		}
+		return path, nil
+	}
 }
 
 // plaintextKeyEntries names the `servers:` entries whose key is sitting in the config file: a

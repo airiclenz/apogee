@@ -185,6 +185,12 @@ func (w *rootWiring) options() tui.Options {
 		KeyMigration:     w.keyOffer,
 		MigrateKey:       w.keyMigrator(),
 		KeepPlaintextKey: w.plaintextKeyKeeper(),
+		// The other start-up offer, in the same shape (keymigrate.go, ADR 0045): the entries whose
+		// block still spells the retired `sub-agents: true` flag, and the one answer that writes
+		// anything — the rewrite, and the retarget that puts it in force in this session. Both stay
+		// zero on a config that carries no retired flag, which is every config written since.
+		SubAgentsMigration:     w.subAgentsFlagged,
+		MigrateSubAgentsServer: w.subAgentsMigrator(),
 		// The whole `/settings` seam as one named capability (ADR 0054): the rows the pane shows,
 		// the write and the reset that splice this run's config.yaml, and the apply that puts the
 		// key just persisted into effect. Everything behind it — the registry, the file format, the

@@ -125,6 +125,10 @@ func runRoot(ctx context.Context, opts config.Options, launch launcher) error {
 	// sentences, because it is the same kind of thing — a start-up fact about the human's own
 	// machine, told while stderr is still a safe place to write.
 	w.prepareKeyMigration(probeKeyStore, os.Stderr)
+	// And the other start-up question about this file: a `servers:` entry still carrying ADR 0045's
+	// retired `sub-agents: true` flag, which the root `sub-agents-server:` key replaced (keymigrate.go).
+	// It writes nothing here — it only records what the renderer may offer.
+	w.prepareSubAgentsMigration()
 
 	// The running session: connections, registry, holders, hosts, and the one bind that fills
 	// them (wire_live.go).
@@ -168,8 +172,13 @@ type rootWiring struct {
 	// run can complete a move into, and the offer the renderer raises over it. Both stay zero on a
 	// config that names no plaintext key — the store is not even probed then — and the nil store is
 	// what leaves the two migration seams unwired.
-	secrets      secretStore
-	keyOffer     tui.KeyMigrationOffer
+	secrets  secretStore
+	keyOffer tui.KeyMigrationOffer
+	// The start-up sub-agents-flag migration (keymigrate.go): the `servers:` entries whose block
+	// still spells ADR 0045's retired `sub-agents: true`. Empty on every config written since the
+	// root key replaced it, which is what leaves that offer's seam unwired too.
+	subAgentsFlagged []string
+
 	bridge       *tui.Bridge
 	presentation *livePresentation
 	confiner     domain.Confiner

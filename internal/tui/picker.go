@@ -78,15 +78,16 @@ import (
 type pickerKind int
 
 const (
-	pickerModel           pickerKind = iota // the models the Upstream advertises — /model without a launcher
-	pickerServer                            // the servers config.yaml names — /server, over m.opts.Server
-	pickerLoad                              // the Launch profiles the launcher defines — /model with one
-	pickerCycle                             // how often a new Schedule fires — /schedule's first popup
-	pickerScheduleMode                      // the mode that Schedule's Firings run in — /schedule's second
-	pickerScheduleStop                      // the live Schedules — /schedule-stop with more than one
-	pickerKeyMigration                      // what to do about one entry's plaintext key — the start-up offer
-	pickerEffort                            // the levels the bound model's thinking-effort dial offers — /effort
-	pickerSubAgentsServer                   // the servers a delegation may run on — /sub-agents-server
+	pickerModel              pickerKind = iota // the models the Upstream advertises — /model without a launcher
+	pickerServer                               // the servers config.yaml names — /server, over m.opts.Server
+	pickerLoad                                 // the Launch profiles the launcher defines — /model with one
+	pickerCycle                                // how often a new Schedule fires — /schedule's first popup
+	pickerScheduleMode                         // the mode that Schedule's Firings run in — /schedule's second
+	pickerScheduleStop                         // the live Schedules — /schedule-stop with more than one
+	pickerKeyMigration                         // what to do about one entry's plaintext key — the start-up offer
+	pickerEffort                               // the levels the bound model's thinking-effort dial offers — /effort
+	pickerSubAgentsServer                      // the servers a delegation may run on — /sub-agents-server
+	pickerSubAgentsMigration                   // what to do about a retired sub-agents: flag — the start-up offer
 )
 
 // picker is the overlay's inline state on the Model. Its zero value is "closed", so it lives inline
@@ -147,6 +148,8 @@ func pickerHintFor(k pickerKind) string {
 	switch k {
 	case pickerCycle, pickerScheduleMode, pickerEffort, pickerSubAgentsServer:
 		return "type to filter · ↑/↓ select · ⏎ choose · esc close"
+	case pickerSubAgentsMigration:
+		return keyMigrationHint
 	case pickerScheduleStop:
 		return "type to filter · ↑/↓ select · ⏎ stop · esc close"
 	case pickerKeyMigration:
@@ -862,6 +865,8 @@ func (m Model) acceptPicker() (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m.retargetSubAgents(targets[offered].Name)
+	case pickerSubAgentsMigration:
+		return m.acceptSubAgentsMigration(offered)
 	}
 	return m, nil
 }
@@ -1027,6 +1032,8 @@ func (m Model) pickerTitle() string {
 		return "thinking effort — how hard the model thinks"
 	case pickerSubAgentsServer:
 		return subAgentsServerTitle
+	case pickerSubAgentsMigration:
+		return m.subAgentsMigrationTitle()
 	}
 	return ""
 }
@@ -1064,6 +1071,8 @@ func (m Model) pickerOfferingRows() []popupRow {
 		return effortRows(m.effortSupport())
 	case pickerSubAgentsServer:
 		return m.subAgentsServerRows()
+	case pickerSubAgentsMigration:
+		return subAgentsMigrationRows(m.opts.SubAgentsMigration)
 	}
 	return nil
 }
