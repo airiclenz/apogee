@@ -77,9 +77,9 @@ file carries no secrets. Leave `server:` out and the schedule runs on whatever `
 in `config.yaml` names as the startup default.
 
 `config.yaml` is read **once**, at startup: changing your servers means restarting the
-daemon. `schedules.yaml` is the only live surface. A `mechanisms:` key there naming a
-Mechanism this release retired is ignored rather than refused, and the daemon logs one
-line saying so as it starts.
+daemon. `schedules.yaml` is the only live surface. A `mechanisms:` key in `config.yaml`
+naming a Mechanism this release retired is ignored rather than refused, and the daemon
+logs one line saying so as it starts.
 
 The daemon **never loads a model**. On a server llama-launcher fronts, `model:` would be
 a request to *load* that model, so it is refused there — drop the key and the firing
