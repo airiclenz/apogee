@@ -10,7 +10,6 @@ import (
 // INSIDE this package — no external package can add a variant, exactly as with Event.
 var (
 	_ ToolSummary = ReadSpan{}
-	_ ToolSummary = WroteBytes{}
 	_ ToolSummary = ListedEntries{}
 	_ ToolSummary = MatchedLines{}
 	_ ToolSummary = DiffStat{}
@@ -27,7 +26,6 @@ func TestToolSummaryVariantsAreSealed(t *testing.T) {
 	// line in the host's renderer, the two places a summary is of any use.
 	variants := []ToolSummary{
 		ReadSpan{},
-		WroteBytes{},
 		ListedEntries{},
 		MatchedLines{},
 		DiffStat{},
@@ -36,7 +34,7 @@ func TestToolSummaryVariantsAreSealed(t *testing.T) {
 		EditRegions{},
 	}
 
-	const want = 8
+	const want = 7
 	if len(variants) != want {
 		t.Fatalf("ToolSummary variants = %d, want %d", len(variants), want)
 	}

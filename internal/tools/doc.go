@@ -19,11 +19,11 @@
 // attached beside it (okSummary, tools.go) is the structured half, written for a HOST — the
 // TUI's tool card today, a headless or bench renderer later — carrying as data the facts the
 // tool already computed for its own header. Exactly TEN built-ins attach one: read_file
-// (ReadSpan), write_file (WroteBytes), list_dir (ListedEntries), grep (MatchedLines),
+// (ReadSpan), list_dir (ListedEntries), grep (MatchedLines),
 // view_diff (DiffStat), web_search (SearchHits), git_status (ChangedFiles, the three section
-// counts its report states), and the three edit tools
-// single_find_and_replace, multi_find_and_replace and edit_existing_file (EditRegions, the
-// changed regions of the edit they just applied) — the
+// counts its report states), and the four writing tools
+// write_file, single_find_and_replace, multi_find_and_replace and edit_existing_file
+// (EditRegions, the changed regions of the write they just applied) — the
 // ones whose outcome a host would otherwise have to re-derive from the sentence. The rest
 // deliberately do not, and that is not an omission to fill in later: quoting a fixed one-line
 // sentence (web_fetch, http_request, ask_user, present_document) or compressing
@@ -292,7 +292,7 @@
 // wording — one helper rather than a near-miss search copied into every read tool.
 // workspace_scoped.go is the
 // unexported workspaceScopedWriter marker and the write-target resolvers that say WHICH
-// argument a given writer lands on. regions.go is the one Edit-region builder the three edit
+// argument a given writer lands on. regions.go is the one Edit-region builder the four writing
 // tools share — editRegions, which cuts diff.go's line-diff operations into the changed regions
 // with their line numbers and up to three context lines each side, tiled so neighbouring regions
 // never claim the same line twice (ADR 0052) — kept here rather than in any one tool's file

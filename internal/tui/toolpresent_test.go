@@ -109,7 +109,8 @@ func TestPresentToolCall(t *testing.T) {
 			name: "write_file → Write + the line count of what it writes",
 			call: domain.ToolCall{ID: "2", Tool: "write_file", Arguments: []byte(`{"path":"notes.txt","content":"hello"}`)},
 			result: domain.ToolResult{CallID: "2", Content: "wrote 5 bytes to notes.txt",
-				Summary: domain.WroteBytes{Bytes: 5}},
+				Summary: domain.EditRegions{Regions: []domain.EditRegion{
+					{BeforeStart: 1, AfterStart: 1, Inserted: []string{"hello"}}}}},
 			wantLabel:  "Write",
 			wantVerb:   "writing",
 			wantTarget: "notes.txt", wantDetail: "1 line",
@@ -1256,7 +1257,8 @@ func TestWriteBodySurvivesItsByteCountSummary(t *testing.T) {
 	tv := presentToolCall(domain.ToolCall{ID: "1", Tool: "write_file",
 		Arguments: []byte(`{"path":"notes.txt","content":"hello"}`)}, "", workspaceRoot{})
 	tv.enrichWithResult(domain.ToolResult{CallID: "1", Content: "wrote 5 bytes to notes.txt",
-		Summary: domain.WroteBytes{Bytes: 5}}, workspaceRoot{})
+		Summary: domain.EditRegions{Regions: []domain.EditRegion{
+			{BeforeStart: 1, AfterStart: 1, Inserted: []string{"hello"}}}}}, workspaceRoot{})
 
 	if got := tv.Summary.Text; got != "1 line" {
 		t.Errorf("summary = %q, want the written line count on the branch", got)
@@ -1828,7 +1830,7 @@ func TestReadFileBodyRecordsTheLocateReport(t *testing.T) {
 	if none := readFileBody(domain.ToolResult{Summary: domain.ReadSpan{Start: 1, End: 3, Total: 3}}); len(none) != 0 {
 		t.Errorf("a read that asked for no term has no report: %+v", none)
 	}
-	if other := readFileBody(domain.ToolResult{Summary: domain.WroteBytes{Bytes: 5}}); len(other) != 0 {
+	if other := readFileBody(domain.ToolResult{Summary: domain.MatchedLines{Total: 5}}); len(other) != 0 {
 		t.Errorf("another tool's summary is not read_file's report: %+v", other)
 	}
 	long := strings.Repeat("x", detailClipRunes+40)

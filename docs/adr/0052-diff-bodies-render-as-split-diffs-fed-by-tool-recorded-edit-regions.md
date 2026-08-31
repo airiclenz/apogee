@@ -51,6 +51,17 @@ transcript codec mirrors of the regions for a width-dependent re-paint is decisi
 field on the codec's own wire type, not persistence of the summary. The edit blocks'
 `+A −R` slot reads the same summary instead of re-deriving from arguments.
 
+*Amendment (2026-08-31) — `write_file` is a fourth recorder.* Decision 1 named the three edit
+tools because they were the whole of the group on the day it was written. `write_file` now
+records Edit regions too, cut the same way from the file it read before the write against the
+content it wrote (`okEditRegions`; a target with no readable before side records the whole
+content as one pure insertion, `okInsertedRegion`). The recorders are therefore FOUR —
+`write_file`, `edit_existing_file`, `single_find_and_replace`, `multi_find_and_replace` — and
+`domain.WroteBytes`, the byte count `write_file` used to attach instead, is retired with no
+producer left. Nothing else in this decision moves: the same one builder cuts the regions, the
+same "no regions ⇒ no summary" floor applies, and `write_file`'s outcome slot keeps stating the
+line count its own REQUEST holds rather than reading the regions back.
+
 **2 — The other two diff blocks change no tool: the renderer recovers their positions.**
 `view_diff`'s body is a whole-file diff, so its line numbers are counted walking the tagged
 lines from 1; `git_diff_range`'s come from parsing the `@@` headers git already emits. Both are

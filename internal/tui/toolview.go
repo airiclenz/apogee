@@ -463,7 +463,7 @@ type toolView struct {
 	// them: the change itself keeps one home, and either reading regroups the two back into the
 	// file sections it paints (regionFileSections, diffFileRegions).
 	//
-	// It is empty for every source that names no file: the three edit tools, whose block's own row
+	// It is empty for every source that names no file: the four writing tools, whose block's own row
 	// already names the file they wrote, and view_diff's whole-file body. Such a body paints
 	// exactly as it did before file sections existed — no header row over it.
 	//
@@ -1109,7 +1109,7 @@ func (tv *toolView) absorbProse(p toolPresenter, known bool, result domain.ToolR
 }
 
 // recordedRegions is the Edit regions a tool RECORDED on its result, and whether it recorded any
-// (domain.EditRegions, attached at apply time by the three edit tools). It is the one reading of
+// (domain.EditRegions, attached at apply time by the four writing tools). It is the one reading of
 // that summary — the stat hook and the enrichment path both ask here — so what counts as "this
 // result has regions" cannot come to mean two things.
 //
@@ -1215,7 +1215,7 @@ func (tv *toolView) showFileRegions(sections []diffFileRegions) {
 // need the same section boundaries.
 //
 // A view whose names are missing or do not line up with its regions is one nameless section — the
-// three edit tools and view_diff leave the names empty, and a decoded record that lost them (the
+// four writing tools and view_diff leave the names empty, and a decoded record that lost them (the
 // names are display state, not the change) must still paint the change rather than nothing.
 func regionFileSections(regions []domain.EditRegion, files []string) []diffFileRegions {
 	if len(regions) == 0 {

@@ -176,9 +176,11 @@ const askUserToolName = "ask_user"
 // which leaves the tool's own prose floor in the slot rather than inventing a number.
 //
 // Every detail extractor here renders PROSE. The ten tools that report a typed summary
-// (read_file, write_file, list_dir, grep, view_diff, web_search, git_status, and the three edit
-// tools single_find_and_replace, multi_find_and_replace and edit_existing_file) word their slot
-// from that summary through their stat hook, and keep their detail extractor as the floor for a
+// (read_file, list_dir, grep, view_diff, web_search, git_status, and the four writing tools
+// write_file, single_find_and_replace, multi_find_and_replace and edit_existing_file) word their slot
+// from that summary through their stat hook — write_file is the one exception, keeping the line
+// count its own REQUEST states (writtenLinesStat) rather than restating the regions it recorded —
+// and keep their detail extractor as the floor for a
 // result that carries none — firstLineDetail for all but git_status, whose report is free-form
 // output and floors on outputDetail — so a degraded card is that tool's own words, never a file
 // dumped into the transcript. A summary-bearing tool whose floor lays out a BODY has to register a
@@ -487,8 +489,8 @@ func readSpanStat(res domain.ToolResult) (statValue, bool) {
 }
 
 // writtenLinesStat words write_file's slot as the number of lines the call WRITES, read off its
-// own content argument — the table asks for lines and the tool reports bytes (domain.WroteBytes),
-// and the request already holds the answer. It is the same reading the body takes (writtenLines),
+// own content argument — the table asks for lines and the tool's own summary is the Edit regions
+// of what it wrote (domain.EditRegions), not a count, and the request already holds the answer. It is the same reading the body takes (writtenLines),
 // so the two cannot disagree about what the call puts in the file.
 func writtenLinesStat(args map[string]any) (statValue, bool) {
 	content, ok := args["content"].(string)

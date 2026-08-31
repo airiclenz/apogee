@@ -21,7 +21,7 @@ import (
 //
 // A body reaches the painter one of two ways, and both end in domain.EditRegion values:
 //
-//   - RECORDED — the three edit tools record what they applied, so their bodies are derived from
+//   - RECORDED — the four writing tools record what they applied, so their bodies are derived from
 //     the call's own ARGUMENTS ([changedLines] over [editPair]s: [singleReplacementBody],
 //     [multiReplacementBody], [fileEditBody], [writtenLines]) with no file read and no guess.
 //   - RECOVERED — the two diff tools print a diff and nothing typed, so the regions are walked
@@ -677,8 +677,8 @@ const stackedRegionRuleCells = 8
 // docs/layout/split-diff-layout.md sketches, and the reading a body falls back to at every width
 // the split panes do not fit (ratified call 5).
 //
-// It is the ONE builder of those rows. Every block that has regions renders through it — the three
-// edit tools, whose tools record them at apply time, and the two diff tools, whose renderers
+// It is the ONE builder of those rows. Every block that has regions renders through it — the four
+// writing tools, whose tools record them at apply time, and the two diff tools, whose renderers
 // recover them — so the narrow reading of a diff cannot come to differ per tool.
 //
 // The number gutter is sized once for the whole body and right-aligned, so the numbers line up

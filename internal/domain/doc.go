@@ -69,7 +69,7 @@
 // object answering one parameter twice with differing values.
 // tooledit.go is the tool stage's pair of hook working values — ToolCallEdit and
 // ToolResultEdit, the revision-bearing wrappers the two tool-stage hooks reshape a pending
-// call and a returned result through. toolsummary.go is ToolSummary and its eight variants,
+// call and a returned result through. toolsummary.go is ToolSummary and its seven variants,
 // the structured half of an outcome, written for a host rather than for the model. confinement.go is the Confiner interface, its
 // capability and box value types, the per-call Confinement / SubprocessPermit context
 // carriers (ADR 0012), and the WriteEscapePermit that carries one approved out-of-workspace

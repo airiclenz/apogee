@@ -8,7 +8,7 @@ package domain
 // for the MODEL, and its wording is free to change. A ToolSummary is the structured
 // half: it is written for a HOST — the TUI's tool card today, a headless or bench
 // renderer later — and it carries the facts the tool already computed for its own
-// header (the read span, the byte count, the diffstat) as data rather than as a
+// header (the read span, the match count, the diffstat) as data rather than as a
 // sentence a reader has to parse back out.
 //
 // It exists because a host that wants those facts otherwise has to re-derive them from
@@ -38,7 +38,7 @@ package domain
 // codec's own additive contract about its rendering; it is not a wire form for this type.
 
 // ToolSummary is the sealed sum type of the structured outcomes a tool may report
-// alongside its prose Content. The variants are the eight below; the marker method is
+// alongside its prose Content. The variants are the seven below; the marker method is
 // unexported, so no package outside internal/* can add one.
 type ToolSummary interface {
 	isToolSummary() // sealing marker; carries no data
@@ -64,11 +64,6 @@ type ReadSpan struct {
 }
 
 func (ReadSpan) isToolSummary() {}
-
-// WroteBytes is write_file's outcome: how many bytes were written to the target.
-type WroteBytes struct{ Bytes int }
-
-func (WroteBytes) isToolSummary() {}
 
 // ListedEntries is list_dir's outcome: how many entries the directory holds in total, and
 // how many of them the listing skipped before the first one shown — the pagination offset
@@ -128,8 +123,9 @@ type EditRegion struct {
 	Trailing []string
 }
 
-// EditRegions is the three edit tools' outcome — edit_existing_file, single_find_and_replace
-// and multi_find_and_replace: every changed region of the edit just applied, in file order.
+// EditRegions is the four writing tools' outcome — write_file, edit_existing_file,
+// single_find_and_replace and multi_find_and_replace: every changed region of the write just
+// applied, in file order.
 // It rides the Tool summary contract unchanged, which is to say it is DISPLAY DATA — never sent
 // to the model, and the summary VALUE has no wire form — and it is what the Split diff and its
 // Stacked reading are painted from (ADR 0052). The neutral codec in internal/session does mirror the region

@@ -295,7 +295,8 @@ func TestTranscriptLayoutGolden(t *testing.T) {
 	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c8", Tool: "write_file",
 		Arguments: []byte(`{"path":"notes.md","content":"# Notes\n\nrewrote main.go\n"}`)}})
 	tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c8",
-		Content: "wrote 25 bytes to notes.md", Summary: domain.WroteBytes{Bytes: 25}}})
+		Content: "wrote 25 bytes to notes.md", Summary: domain.EditRegions{Regions: []domain.EditRegion{
+			{BeforeStart: 1, AfterStart: 1, Inserted: []string{"# Notes", "", "rewrote main.go"}}}}}})
 	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c9", Tool: "mcp_search",
 		Arguments: []byte(`{"query":"collapse","limit":20}`)}})
 	tr.apply(domain.ApprovalEvent{Request: domain.ApprovalRequest{Tool: "terminal"}, Decision: domain.ApprovalAllow})

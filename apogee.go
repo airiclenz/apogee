@@ -331,9 +331,6 @@ type ToolSummary = domain.ToolSummary
 // file's total line count.
 type ReadSpan = domain.ReadSpan
 
-// WroteBytes is write_file's summary: the number of bytes written.
-type WroteBytes = domain.WroteBytes
-
 // ListedEntries is list_dir's summary: the directory's total entry count and how many
 // the listing skipped.
 type ListedEntries = domain.ListedEntries
@@ -352,7 +349,7 @@ type ChangedFiles = domain.ChangedFiles
 // up to three unchanged context lines each side, and the line it starts on in each side.
 type EditRegion = domain.EditRegion
 
-// EditRegions is the three edit tools' summary: every changed region of the applied edit,
+// EditRegions is the four writing tools' summary: every changed region of the applied write,
 // in file order, with Stat reporting the lines it adds and removes.
 type EditRegions = domain.EditRegions
 

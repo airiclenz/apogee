@@ -1181,15 +1181,15 @@ The **structured half** of a tool's outcome, carried beside the prose half on th
 tool result: `Content` is the prose half and is written for the **model** (its wording is
 free to change); a `ToolSummary` is written for a **host** — the TUI's tool card today, a
 headless or bench renderer later — and carries the facts the tool already computed for its
-own header (a read span, a byte count, a diffstat) **as data** rather than as a sentence a
+own header (a read span, a match count, a diffstat) **as data** rather than as a sentence a
 reader has to parse back out. It is a **sealed sum** in `domain`, exactly like an Event: the
 marker method is unexported, so an embedder can *read* every variant and *add* none.
 **Optional by construction**, so tools stay an open extension point
 ([ADR 0002](docs/adr/0002-tools-are-an-open-extension-point-mechanisms-are-curated.md)) — a
 tool that emits none renders from prose exactly as before, and only the **ten** built-ins
-whose outcome the view used to re-derive carry one (`read_file`, `write_file`, `list_dir`,
-`grep`, `view_diff`, `web_search`, `git_status`, and — as **Edit regions** — the three edit tools
-`edit_existing_file`, `single_find_and_replace`, `multi_find_and_replace`) — `read_file`'s
+whose outcome the view used to re-derive carry one (`read_file`, `list_dir`,
+`grep`, `view_diff`, `web_search`, `git_status`, and — as **Edit regions** — the four writing tools
+`write_file`, `edit_existing_file`, `single_find_and_replace`, `multi_find_and_replace`) — `read_file`'s
 carries the locate facts too, the substring asked for and the absolute line numbers it fell
 on. A summary is **never sent to the model** — it is display data a host consumes, and the
 summary *value* has no wire form; what the transcript codec may mirror into the session record are

@@ -76,7 +76,14 @@ empty — and keep the summary: `internal/tui/toolsummary_pin_test.go:95-99,163-
 write_file to attach one.
 `fix(tools): write_file records the Edit regions of what it wrote`
 
-## 2. Retire `WroteBytes` and correct every line that enumerates the summary variants
+## 2. Retire `WroteBytes` and correct every line that enumerates the summary variants — ✅ DONE (2026-08-31)
+
+NOTES (2026-08-31): the grep is a floor — four sites beyond the item's named list were folded in: `internal/tools/regions.go:24,56` and `internal/tui/toolview.go:466,1112,1218` (Edit-regions producer claims), plus a line-wrapped `the three edit\n// tools share` in `internal/tools/doc.go:295` the item's grep pattern could not match.
+NOTES (2026-08-31): `internal/domain/toolsummary.go:11` and `CONTEXT.md:1184` listed "a byte count" among the facts a summary carries — the one remaining naming of `WroteBytes`' fact — and were corrected to "a match count".
+NOTES (2026-08-31): `internal/tui/toolregistry.go:181`'s claim that every summary-bearing tool words its slot "from that summary through their stat hook" became false for `write_file` under the ratified `N lines` call; the sentence now names `write_file` as the one exception (`writtenLinesStat`, request-derived).
+NOTES (2026-08-31): `docs/adr/0002`'s dated 2026-08-20 amendment also calls the producers "the three edit tools". Left as found — it is a dated historical amendment and ADR house style amends rather than rewrites; its "nine built-ins" count was already stale (git_status made it ten on 2026-08-26), pre-existing debt this item did not create.
+NOTES (2026-08-31): sentences about the three edit tools' SLOT wording (`editRegionsStat`, `toolregistry.go:541`, `toolsummary_pin_test.go:125`, `toolpresent_test.go:2484`) and about their argument-derived bodies (`toolregistry.go:197`, `diffbody.go:292`, `internal/tui/doc.go:903`) are still exactly true of three tools and were deliberately left alone; `internal/tools/doc.go:275` already enumerated "write_file and the three edit tools" correctly.
+NOTES (2026-08-31): `internal/tui/render_test.go`'s golden and `TestWriteBodySurvivesItsByteCountSummary` pass unchanged with the `EditRegions` result substituted for `WroteBytes` — the write card's slot and body read the same as before.
 
 Depends on item 1.
 

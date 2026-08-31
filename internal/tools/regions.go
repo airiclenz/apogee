@@ -21,7 +21,7 @@ import (
 const editRegionContext = 3
 
 // editRegions returns the changed regions of an edit that turned oldText into newText: the
-// domain.EditRegions summary the three edit tools attach at apply time (ADR 0052). It is the ONE
+// domain.EditRegions summary the four writing tools attach at apply time (ADR 0052). It is the ONE
 // builder all of them call — a per-tool variant would let two edit blocks disagree about what a
 // region is while painting into the same body — and it derives everything from the diff
 // OPERATIONS, never from a rendered diff, the same counted-not-reparsed rule unifiedLineDiff's
@@ -53,8 +53,9 @@ func editRegions(oldText, newText string) domain.EditRegions {
 
 // okEditRegions returns an edit tool's success result: the prose sentence the model reads, with
 // the Edit regions of the change just applied attached beside it as the structured half a host
-// paints the Split diff from (ADR 0052). All three edit tools return through here, so the one
-// question they share — does a summary ride along at all? — is answered in one place.
+// paints the Split diff from (ADR 0052). All four writing tools return through here — write_file
+// only where it read an original, an absent before side going through okInsertedRegion instead —
+// so the one question they share — does a summary ride along at all? — is answered in one place.
 //
 // A pair editRegions declines to cut, because the two texts are identical or because the pair is
 // over the diff budget, attaches NO summary rather than an empty one. Absent is the signal the
