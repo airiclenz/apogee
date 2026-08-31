@@ -94,8 +94,12 @@ func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 		// Order: attached-skill blocks → @file-ref blocks → the user's text. Skills are
 		// per-turn instructions, so prepending them scopes them to this one message (the right
 		// semantics; it avoids a skill leaking into every later turn as a system-prompt edit).
-		skillBlocks := a.resolveSkillRefs(turn, a.pendingInput.SkillIDs)
-		refs := a.resolveFileRefs(ctx, turn, a.pendingInput.FileRefs)
+		// One structural bound for the whole message (refBound), computed from BOTH reference
+		// counts and handed to both resolvers: the blocks land in one message and split one
+		// allocation between them.
+		bound := a.refBound(len(a.pendingInput.SkillIDs) + len(a.pendingInput.FileRefs))
+		skillBlocks := a.resolveSkillRefs(turn, a.pendingInput.SkillIDs, bound)
+		refs := a.resolveFileRefs(ctx, turn, a.pendingInput.FileRefs, bound)
 		a.conv.Append(domain.Message{Role: domain.RoleUser, Content: skillBlocks + refs + a.pendingInput.Text})
 		a.pendingInput = nil
 	}
@@ -1012,6 +1016,23 @@ func (a *Agent) requestExceedsWindow(req *domain.Request) bool {
 // trimming is the deferred context-builder's job (TDD §8 #8).
 const maxRefFileBytes = 10 * 1024 * 1024
 
+// refBound is the structural bound ONE reference block of a message gets: the whole History
+// allocation (structuralFloor) SPLIT across the references that message carries, so however many
+// it carries their assembled blocks still fit the allocation.
+//
+// The divisor counts EVERY reference the message submitted — attached skills and @file refs
+// together, because both kinds are resolved into the one user message and spend the one
+// allocation; splitting each list against the whole floor separately would let a message carrying
+// one of each commit twice the allocation the fold can render. It counts the references
+// SUBMITTED, not the ones that resolve: a ref that fails leaves the survivors a stricter bound,
+// never a looser one, and a lone reference keeps the whole floor — the number a tool result gets.
+//
+// Computed ONCE per message by the caller (loop.go's pending-input consumption, Interject) and
+// handed to both resolvers, so the two seams cannot drift into two different arithmetics.
+func (a *Agent) refBound(refs int) int {
+	return max(a.structuralFloor()/max(refs, 1), 1)
+}
+
 // resolveFileRefs reads each @file reference within the workspace fence and returns the
 // content blocks to prepend to the user message. Each ref is read through security.SafeOpen —
 // the os.Root-pinned, TOCTOU-safe open the read_file tool builds on — so a ref can never
@@ -1035,7 +1056,10 @@ const maxRefFileBytes = 10 * 1024 * 1024
 // Every block carries the same STRUCTURAL floor a tool result has (clampToolResult, dispatch.go):
 // content past its share of the History allocation is elided to the shared head/tail-plus-marker
 // shape BEFORE the header is added, so the model still reads which file an elided block came from
-// and, for a document, how many pages it had. The floor is structural (ADR 0006), not a Mechanism:
+// and, for a document, how many pages it had. The bound is the CALLER'S (refBound), not this
+// function's: one message's attached skill blocks and @file blocks divide a single allocation
+// between them, so neither kind is bounded generously merely because the other kind carried the
+// rest of the references. The floor is structural (ADR 0006), not a Mechanism:
 // it consults no config, is never disabled under Bypass, and self-regulation cannot withdraw it.
 // Like the tool floor it edits the conversation itself — the raw block never reaches history, and
 // so never reaches a snapshot or the rendered transcript. That is the price of a floor every later
@@ -1049,16 +1073,11 @@ const maxRefFileBytes = 10 * 1024 * 1024
 // thousand-page document to produce it costs the Turn its time and memory for bytes that are
 // dropped on arrival. The walk also stops on the step's ctx, so a cancelled Turn does not finish
 // extracting a document nobody will read.
-func (a *Agent) resolveFileRefs(ctx context.Context, turn int, refs []string) string {
+func (a *Agent) resolveFileRefs(ctx context.Context, turn int, refs []string, bound int) string {
 	if len(refs) == 0 {
 		return ""
 	}
 	var b strings.Builder
-	// The floor is SPLIT across the references of one message, so however many a message carries
-	// their assembled blocks still fit the allocation. The divisor counts the references SUBMITTED,
-	// not the ones that resolve: a ref that fails leaves the survivors a stricter bound, never a
-	// looser one, and a lone reference keeps the whole floor — the number a tool result gets.
-	bound := max(a.structuralFloor()/len(refs), 1)
 	// TWICE the clamp's char budget, so a document elided to the head/tail shape has real content
 	// at both ends rather than a head the extractor stopped in the middle of.
 	extractBytes := 2 * int(float64(bound)*a.budget().CharsPerToken)
@@ -1165,7 +1184,17 @@ const skillDirToken = "{{SKILL_DIR}}"
 // token is the skill author's portability problem, and other hosts leave it untouched too, so
 // a cross-host skill carries its own fallback text — and the block is byte-identical to what
 // it was before.
-func (a *Agent) resolveSkillRefs(turn int, ids []string) string {
+//
+// A body meets the same STRUCTURAL floor an @file block does (clampToBound, dispatch.go): content
+// past its share of the History allocation is elided to the shared head/tail-plus-marker shape
+// BEFORE the header and the files: line are added, so the model still reads which skill an elided
+// block came from and where its bundled files live. A skill body is instruction text a human
+// wrote, but nothing bounds its size — a SKILL.md is any file on disk — and the fold's
+// keep-the-most-recent-message rule cannot shed the message a skill block rides in, so an
+// unclamped body could wedge the very Turn it was invoked to steer. The bound arrives from the
+// caller (refBound), shared with the @file blocks of the same message. {{SKILL_DIR}} is expanded
+// BEFORE the clamp measures the body: the model is bounded against the text it actually reads.
+func (a *Agent) resolveSkillRefs(turn int, ids []string, bound int) string {
 	if len(ids) == 0 {
 		return ""
 	}
@@ -1205,7 +1234,7 @@ func (a *Agent) resolveSkillRefs(turn int, ids []string) string {
 				"touch this folder\n", s.Dir)
 			body = strings.ReplaceAll(body, skillDirToken, s.Dir)
 		}
-		fmt.Fprintf(&b, "%s\n</skill>\n\n", body)
+		fmt.Fprintf(&b, "%s\n</skill>\n\n", a.clampToBound(body, bound))
 	}
 	return b.String()
 }

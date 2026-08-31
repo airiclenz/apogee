@@ -1179,10 +1179,11 @@ func (a *Agent) clampToBound(content string, bound int) string {
 // transcript. That is the price of a floor that must hold for every later reducer — and the model
 // is told, in the marker, to re-read the omitted range.
 //
-// A tool result is not the only body with this floor: resolveFileRefs (loop.go) clamps every @file
-// block against the same bound, divided across the references of one message, so an assembled block
-// of references can no more outgrow the allocation than a result can. The two seams share
-// structuralFloor and clampToBound because they have one reason to change — the fold's arithmetic.
+// A tool result is not the only body with this floor: resolveFileRefs and resolveSkillRefs
+// (loop.go) clamp every @file block and every attached skill body against the same bound, divided
+// across ALL the references of one message (refBound), so an assembled block of references can no
+// more outgrow the allocation than a result can. The seams share structuralFloor and clampToBound
+// because they have one reason to change — the fold's arithmetic.
 func (a *Agent) clampToolResult(content string) string {
 	return a.clampToBound(content, a.structuralFloor())
 }

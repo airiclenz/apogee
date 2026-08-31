@@ -203,14 +203,18 @@ func clampingRefAgent(t *testing.T, dir string) (*Agent, int) {
 // refAgentWithWindow is clampingRefAgent for a window the caller picks, and returns the same
 // single-reference bound in characters. A test that has to overshoot the bound with a FIXTURE
 // rather than with generated filler needs the smaller window: a committed document is only so
-// many pages long.
-func refAgentWithWindow(t *testing.T, dir string, window int) (*Agent, int) {
+// many pages long. Each opt runs against the config before the agent is built, for a test that
+// needs one more thing wired (a skill catalog, say).
+func refAgentWithWindow(t *testing.T, dir string, window int, opts ...func(*domain.Config)) (*Agent, int) {
 	t.Helper()
 
 	sink := &recordingSink{}
 	cfg := baseConfig(sink)
 	cfg.WorkspaceDir = dir
 	cfg.Context.MaxContextTokens = window
+	for _, opt := range opts {
+		opt(&cfg)
+	}
 	a, err := newAgent(cfg, echoResponder{reply: "ok"})
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
@@ -234,13 +238,19 @@ func refLine(index int, filler string) string {
 func writeRefFile(t *testing.T, dir, name string, lines int, filler string) string {
 	t.Helper()
 
+	content := refBody(lines, filler)
+	writeWorkspaceFile(t, dir, name, content)
+	return content
+}
+
+// refBody renders a body of the given number of numbered filler lines — the shape a reference
+// file and an oversized skill body share, so both are measured against the same arithmetic.
+func refBody(lines int, filler string) string {
 	rows := make([]string, lines)
 	for i := range rows {
 		rows[i] = refLine(i, filler)
 	}
-	content := strings.Join(rows, "\n")
-	writeWorkspaceFile(t, dir, name, content)
-	return content
+	return strings.Join(rows, "\n")
 }
 
 // blockBody returns the fenced body of the first @file block in a user message — the region the
@@ -432,5 +442,193 @@ func TestClampToBound_SharedByToolResultsAndFileRefs(t *testing.T) {
 
 	if viaFileRef != viaToolResult {
 		t.Errorf("the @file block renders %d chars and the tool result %d; the two seams diverged", len(viaFileRef), len(viaToolResult))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// The same STRUCTURAL floor on attached SKILL blocks (plan 2026-08-31 - 00, item 5).
+// A skill body is prose a human wrote, but nothing bounds a SKILL.md's size, and
+// the block rides the one message the emergency fold may not shed — so it meets
+// the @file block's clamp, against a bound the two kinds SPLIT between them.
+// ---------------------------------------------------------------------------
+
+// clampingSkillAgent is clampingRefAgent with a skill catalog wired: the same small known window,
+// the same returned single-reference bound in characters, so a skill body and a reference file can
+// be sized against one number.
+func clampingSkillAgent(t *testing.T, dir string, skills map[string]domain.ResolvedSkill) (*Agent, int) {
+	t.Helper()
+
+	return refAgentWithWindow(t, dir, floorWindow, func(cfg *domain.Config) {
+		cfg.Skills = fakeSkillResolver{skills: skills}
+	})
+}
+
+// submitSkillsAndRefs submits text with attached skill IDs and @file references together and
+// drives the opening Turn, returning the assembled user message.
+func submitSkillsAndRefs(t *testing.T, a *Agent, text string, ids, refs []string) string {
+	t.Helper()
+
+	if err := a.Submit(domain.UserInput{Text: text, SkillIDs: ids, FileRefs: refs}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if _, err := a.Step(context.Background()); err != nil {
+		t.Fatalf("Step: %v", err)
+	}
+	return a.conv.At(0).Content
+}
+
+// skillBlockBody returns the text between a skill block's opening header line and its closing
+// tag — the region the clamp rewrites, above and below which the header and the tag survive.
+func skillBlockBody(t *testing.T, message string) string {
+	t.Helper()
+
+	_, afterOpen, opened := strings.Cut(message, ">\n")
+	if !opened {
+		t.Fatalf("no skill block in the user message:\n%.200s", message)
+	}
+	body, _, closed := strings.Cut(afterOpen, "\n</skill>")
+	if !closed {
+		t.Fatalf("unterminated skill block in the user message:\n%.200s", message)
+	}
+	return body
+}
+
+// TestResolveSkillRefs_ClampsAnOversizedBody is the item's core fact: a body past the structural
+// bound is elided to the shared head/tail-plus-marker shape, and the header naming the skill
+// survives above it — the clamp rewrites the body, never the label that says which skill it is.
+func TestResolveSkillRefs_ClampsAnOversizedBody(t *testing.T) {
+	dir := t.TempDir()
+	a, floorChars := clampingSkillAgent(t, dir, nil)
+
+	lines := floorChars * 2 / (len(refLine(0, refFiller)) + 1)
+	body := refBody(lines, refFiller)
+	if len(body) <= floorChars {
+		t.Fatalf("body of %d chars must overshoot the %d-char bound for the clamp to fire", len(body), floorChars)
+	}
+	a.cfg.Skills = fakeSkillResolver{skills: map[string]domain.ResolvedSkill{
+		"review": {ID: "review", DisplayName: "Code Review", Body: body},
+	}}
+
+	got := submitSkillsAndRefs(t, a, "please look", []string{"review"}, nil)
+
+	if !strings.Contains(got, elisionMarker) {
+		t.Errorf("an oversized skill body was not clamped (no elision marker):\n%.200s", got)
+	}
+	header := strings.Index(got, "<skill: Code Review>")
+	if header != 0 {
+		t.Errorf("skill header index = %d, want the clamped block to still open with it", header)
+	}
+	if marker := strings.Index(got, elisionMarker); marker <= header {
+		t.Errorf("elision marker at %d, header at %d: the clamp swallowed the header", marker, header)
+	}
+	if !strings.Contains(got, "</skill>") {
+		t.Error("the clamped skill block lost its closing tag")
+	}
+	if !strings.Contains(got, refLine(0, refFiller)) {
+		t.Error("the body's first line did not survive the clamp")
+	}
+	if !strings.Contains(got, refLine(lines-1, refFiller)) {
+		t.Error("the body's last line did not survive the clamp")
+	}
+	if len(got) >= len(body) {
+		t.Errorf("user message is %d chars for a %d-char body; the clamp did not shrink it", len(got), len(body))
+	}
+}
+
+// TestResolveSkillRefs_SmallBodyPassesUntouched is the floor's other half: it is a floor, not a
+// budgeter. A body under the bound reaches the model byte-identical, tokens and all — the block
+// is exactly what it was before the clamp existed.
+func TestResolveSkillRefs_SmallBodyPassesUntouched(t *testing.T) {
+	dir := t.TempDir()
+	body := "REVIEW INSTRUCTIONS\nread the diff\nname the risks"
+	a, _ := clampingSkillAgent(t, dir, map[string]domain.ResolvedSkill{
+		"review": {ID: "review", DisplayName: "Code Review", Body: body},
+	})
+
+	got := submitSkillsAndRefs(t, a, "please look", []string{"review"}, nil)
+
+	if want := "<skill: Code Review>\n" + body + "\n</skill>\n\nplease look"; got != want {
+		t.Errorf("a body under the bound was rewritten:\ngot  %q\nwant %q", got, want)
+	}
+}
+
+// TestResolveRefs_SkillAndFileShareOneSplit pins the binding call: the skill blocks and the @file
+// blocks of ONE message divide ONE allocation. A body and a file that each pass alone are both
+// clamped when submitted together, and the assembled message still fits the History allocation —
+// which is what keeps the fold's keep-the-most-recent-message rule survivable whatever mix of
+// references a message carries.
+func TestResolveRefs_SkillAndFileShareOneSplit(t *testing.T) {
+	dir := t.TempDir()
+
+	// Each payload sits between half the single-reference bound and the whole of it: under the
+	// floor alone, over the halved share the two of them split.
+	_, floorChars := clampingRefAgent(t, dir)
+	lines := floorChars * 7 / 10 / (len(refLine(0, refFiller)) + 1)
+	body := refBody(lines, refFiller)
+	file := writeRefFile(t, dir, "notes.txt", lines, refFiller)
+	if len(body) >= floorChars || len(body) <= floorChars/2 {
+		t.Fatalf("payload of %d chars must sit between half the bound and the bound (%d chars)", len(body), floorChars)
+	}
+	if len(file) >= floorChars || len(file) <= floorChars/2 {
+		t.Fatalf("file of %d chars must sit between half the bound and the bound (%d chars)", len(file), floorChars)
+	}
+	skills := map[string]domain.ResolvedSkill{
+		"review": {ID: "review", DisplayName: "Code Review", Body: body},
+	}
+
+	alone, _ := clampingSkillAgent(t, dir, skills)
+	if solo := submitSkillsAndRefs(t, alone, "please look", []string{"review"}, nil); strings.Contains(solo, elisionMarker) {
+		t.Fatalf("a %d-char body was clamped alone under a %d-char bound; the split proves nothing", len(body), floorChars)
+	}
+
+	together, _ := clampingSkillAgent(t, dir, skills)
+	got := submitSkillsAndRefs(t, together, "please look", []string{"review"}, []string{"notes.txt"})
+
+	if markers := strings.Count(got, elisionMarker); markers != 2 {
+		t.Errorf("elision marker appears %d times, want one per block: the floor was not split across the skill and the file", markers)
+	}
+	b := together.budget()
+	if estimated := b.EstimateTokens(len(got)); estimated > b.History {
+		t.Errorf("the assembled message estimates %d tokens, past the History allocation of %d", estimated, b.History)
+	}
+}
+
+// TestInterjectSharesOneSplitAcrossSkillAndFile proves the interjection path inherits the whole
+// arithmetic with no code of its own: Interject computes the same shared bound from its own
+// reference set, so a remark carrying one skill and one @file splits the allocation exactly as an
+// opening message does — the second caller of both resolvers cannot drift into per-list bounds.
+func TestInterjectSharesOneSplitAcrossSkillAndFile(t *testing.T) {
+	dir := t.TempDir()
+	_, floorChars := clampingRefAgent(t, dir)
+	lines := floorChars * 7 / 10 / (len(refLine(0, refFiller)) + 1)
+	body := refBody(lines, refFiller)
+	writeRefFile(t, dir, "notes.txt", lines, refFiller)
+
+	cfg := interjectConfig(&recordingSink{})
+	cfg.WorkspaceDir = dir
+	cfg.Context.MaxContextTokens = floorWindow
+	cfg.Skills = fakeSkillResolver{skills: map[string]domain.ResolvedSkill{
+		"review": {ID: "review", DisplayName: "Code Review", Body: body},
+	}}
+	a, _ := interjectAgentAtBoundary(t, cfg)
+
+	if err := a.Interject(domain.UserInput{
+		Text:     "and this too",
+		SkillIDs: []string{"review"},
+		FileRefs: []string{"notes.txt"},
+	}); err != nil {
+		t.Fatalf("Interject: %v", err)
+	}
+
+	got := a.conv.At(a.conv.Len() - 1).Content
+	if markers := strings.Count(got, elisionMarker); markers != 2 {
+		t.Errorf("elision marker appears %d times in the interjection, want one per block: the split did not reach Interject", markers)
+	}
+	if body := skillBlockBody(t, got); strings.Contains(body, refLine(lines/2, refFiller)) {
+		t.Error("the interjected skill body kept its middle; it was not clamped")
+	}
+	b := a.budget()
+	if estimated := b.EstimateTokens(len(got)); estimated > b.History {
+		t.Errorf("the interjected message estimates %d tokens, past the History allocation of %d", estimated, b.History)
 	}
 }

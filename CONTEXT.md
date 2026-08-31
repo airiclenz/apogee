@@ -1093,9 +1093,10 @@ annotation `(PDF, N pages; extracted text, read-only)`, and a document holding n
 `notes.pdf` still injects its text under the plain header. Each block also carries a **structural
 floor** (ADR 0006, no config key, never disabled under Bypass): `resolveFileRefs` clamps a
 reference's content — before its header is added — against the [Budget](#context-and-history)'s
-History allocation *split across the references of that one message*, so anything past that share
-is elided to the same head/tail-plus-marker shape a capped tool result gets and no reference can
-hand the emergency fold a most-recent message it cannot shed.
+History allocation *split across every reference of that one message* — @file blocks and attached
+**Skill** bodies alike, since the two kinds land in one message and spend one allocation — so
+anything past that share is elided to the same head/tail-plus-marker shape a capped tool result
+gets and no reference can hand the emergency fold a most-recent message it cannot shed.
 _Avoid_: "attachment", "upload" (a reference is read live from the workspace, not stored).
 
 **Skill**:
@@ -1120,9 +1121,12 @@ holding whitespace or a control character, because a repo writes both the frontm
 folder name an id can come from. Like an `@file`, a skill is
 **turn-local**: the loop resolves the extracted IDs (`UserInput.SkillIDs`) through `Config.Skills`
 and prepends each body to *that one* user message, so a skill never persists as a system-prompt
-edit. The TUI parses and offers (one merged `/` menu, and `/skills` to browse the catalog — every
-row labelled with the source it came from, and `/skills export <id>` copying a shipped skill's
-folder into the global library, refusing to overwrite one already there); the agent resolves. The
+edit; each body meets the same **structural floor** a **File reference** block does, elided
+head/tail before its header against that message's shared reference split, so an outsized
+`SKILL.md` cannot wedge the Turn it was invoked to steer. The TUI parses and offers (one merged
+`/` menu, and `/skills` to browse the catalog — every row labelled with the source it came from,
+and `/skills export <id>` copying a shipped skill's folder into the global library, refusing to
+overwrite one already there); the agent resolves. The
 `/token` is not the model's only door: **`load_skill`** is a default-on **tool** — an ordinary
 `tools.enabled`/`tools.disabled` entry, never a Mechanism — with which the model fetches a body on
 its own initiative, one adaptive call returning an exact id's body, a confident match's body plus
