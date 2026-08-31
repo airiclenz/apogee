@@ -8,6 +8,11 @@
 // this package versions the wrapper (RecordVersion) and rejects a newer wrapper with
 // ErrRecordVersion.
 //
+// transcript.go holds the neutral transcript model and codec — the exported wire form of a
+// scrollback (Entry and its views), TranscriptVersion, EncodeTranscript/DecodeTranscript and
+// CloseInterruptedCalls — so any Driver, not the TUI alone, can write and replay the Transcript
+// blob (ADR 0031).
+//
 // The Store owns the on-disk format and naming so its callers never duplicate that
 // knowledge. Ids from NewID are sortable UTC stamps with a random suffix; Save writes
 // atomically (temp file + rename) under <id>.json and updates in place; List/Load skip or
