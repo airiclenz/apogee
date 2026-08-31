@@ -66,7 +66,8 @@ func newRootWiring(opts config.Options, mode apogee.Mode, roots stateRoots) *roo
 	// Discover the user's skills from the layered source dirs: the global library
 	// (~/.apogee/skills), the project's .apogee/skills, and — when use-project-skills is on —
 	// the project's bare skills/, plus — when use-shipped-skills is on — the skills apogee
-	// ships compiled into the binary, which every folder on disk shadows (ADR 0065 §4). The Provider holds the current catalog and can Reload it from
+	// ships compiled into the binary, which every folder on disk shadows (ADR 0065 §4). The
+	// Provider holds the current catalog and can Reload it from
 	// these same dirs on demand: the merged "/" menu refreshes it each time it opens, so a skill
 	// added or edited after launch is picked up without restarting. The initial load error is
 	// soft (a missing dir is skipped, a malformed skill is skipped), so the catalog is always

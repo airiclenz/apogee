@@ -18,8 +18,10 @@ import (
 // block the loop injects, which names it so the model can read the resources bundled beside the
 // SKILL.md (refs/, prompts, scripts) without re-walking the source dirs; an empty Dir omits that
 // line entirely (internal/agent's resolveSkillRefs).
-// It plays no part in identity — two skills with the same ID collide regardless of Dir, and
-// the later-loaded source wins (load.go).
+// It plays no part in identity — two skills with the same ID collide regardless of Dir, and the
+// FIRST source that claims the id wins: the walk runs highest-priority-first and Catalog.set keeps
+// what it already holds (ADR 0032, load.go). The embedded shipped source is walked last, so every
+// skill folder on disk shadows a shipped id of the same name.
 type Skill struct {
 	ID          string
 	DisplayName string
