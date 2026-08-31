@@ -752,7 +752,7 @@ func TestAnsweredAskUserBlocksNeverGroup(t *testing.T) {
 	})
 
 	// The mark is a verdict the presenter reached when the result landed, and decode never re-runs a
-	// presenter — so it rides the wire (wireToolView.Solo). Without it a resumed session would fold
+	// presenter — so it rides the wire (session.ToolView.Solo). Without it a resumed session would fold
 	// two records into one group, which is the scrollback changing shape across a restart.
 	t.Run("a replayed record still stands alone", func(t *testing.T) {
 		tr := &transcript{}

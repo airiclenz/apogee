@@ -55,7 +55,18 @@ NOTES (2026-08-31): the golden fixture was cross-checked against `internal/tui`'
 
 **Commit.** `feat(session): the transcript wire model and codec become Driver-neutral`
 
-## 2. The TUI reads the codec from `internal/session` and drops its copy
+## 2. The TUI reads the codec from `internal/session` and drops its copy — ✅ DONE (2026-08-31)
+
+NOTES (2026-08-31): the item said "the four literal `stripEscapes` calls in the `fromWire*` bodies are dropped"; there were seven (2 in `fromWireEntry`, 1 in `fromWireToolView`, 4 in `fromWirePresented`) and all seven went — `session.DecodeTranscript` strips every one of those fields per item 1's `stripEntry`/`stripToolView`, and `toolView.sanitize()` is kept as the item requires.
+NOTES (2026-08-31): consequential edit — internal/tui/toolview.go: made necessary by the deletion of `wireToolView` (four comment references retargeted to `session.ToolView`).
+NOTES (2026-08-31): consequential edit — internal/tui/toolbranch_test.go: made necessary by the deletion of `wireToolView` (one comment reference retargeted).
+NOTES (2026-08-31): consequential edit — internal/tui/usage_test.go: made necessary by the deletion of `wireEntry` (one comment reference retargeted to `session.Entry`).
+NOTES (2026-08-31): consequential edit — internal/domain/toolsummary.go: made necessary by the deletion of `wireEditRegion` (the `EditRegions` doc comment at :136, beside the ownership re-point at :32-38 the item names).
+NOTES (2026-08-31): consequential edit — docs/adr/0052-*.md:80: made necessary by the deletion of `wireDetailLine` (renamed to `session.DetailLine` in decision 5's text).
+NOTES (2026-08-31): ADR 0022's paragraph 2 opening sentence (":60", "the TUI's own versioned scrollback blob") and §5's "three owners" phrase were amended alongside the :63/:87 sites the item names — both state exactly the fact those two lines changed, and leaving them would have kept the ADR saying the blob is TUI-owned.
+NOTES (2026-08-31): `session.CloseInterruptedCalls` is exported and currently has no caller outside `internal/session`'s own tests — it exists for the other Drivers, and the TUI keeps its own `[]entry` pass per the item's regression guard. Item 4 is the first consumer.
+NOTES (2026-08-31): fix-retry — the four sites the verifier found still naming the TUI as the blob's or codec's owner were re-pointed to the neutral codec in `internal/session`, matching the `CONTEXT.md:1176-1177` / `toolsummary.go:35-36` wording already made: `internal/domain/toolsummary.go:135` ("The TUI's session codec does mirror" → "The neutral codec in internal/session does mirror"), `CONTEXT.md:226` ("the TUI's own versioned transcript blob" → "the versioned transcript blob written by the neutral codec in `internal/session`", reflowed), `CONTEXT.md:1195` ("the TUI's session codec mirrors" → "the neutral codec in `internal/session` mirrors", reflowed) and `internal/session/store.go:166` ("the TUI transcript blob alike" → "the neutral transcript blob alike").
+NOTES (2026-08-31): consequential edit — internal/session/store_test.go: made necessary by the store.go:166 re-point (TestSaveAndRenameNeverLoseTheNewerPayload's doc comment restates that sentence verbatim and said "the TUI transcript blob alike"; it now says "the neutral transcript blob alike"). Found by re-running the item's scoped ownership grep, whose only remaining hit is ADR 0052:197's amendment note quoting the old "a host's codec" text as history.
 
 Depends on item 1.
 

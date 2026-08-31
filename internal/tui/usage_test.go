@@ -343,7 +343,7 @@ func TestUsageCachedColumnIsDrawnOnlyWhereAServerReportedOne(t *testing.T) {
 // TestUsageRestoredDelegateKeepsItsCachedShare is the transcript round trip asserted where a
 // reader meets it. The pane draws its cached column for the WHOLE report (usageRows), and a resumed
 // run head is never re-fed by a live child — the share reaches its row only through the record
-// (wireEntry.UsageCachedPromptTokens). A wire that dropped it would leave that one cell blank under
+// (session.Entry.UsageCachedPromptTokens). A wire that dropped it would leave that one cell blank under
 // a column its neighbours still fill, which reads as a delegate whose server stated no share rather
 // than as a number the record lost.
 func TestUsageRestoredDelegateKeepsItsCachedShare(t *testing.T) {

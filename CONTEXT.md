@@ -223,8 +223,9 @@ _Avoid_: "full screen" (the frame's other rows stay — only the transcript slot
 A **Session** is one conversation the engine holds — the versioned `domain.Session` envelope
 `{Version, State}`, opaque to everything outside the engine. A **Session record** is how that
 Session is *persisted*: the on-disk `session.Record` wrapper (`internal/session`) around **two
-opaque payloads** — the untouched engine Session **and** the TUI's own versioned **transcript
-blob** (the scrollback: user/assistant text, tool cards, notes, sub-agent `Depth` and the
+opaque payloads** — the untouched engine Session **and** the versioned **transcript blob**
+written by the neutral codec in `internal/session` (the scrollback: user/assistant text, tool
+cards, notes, sub-agent `Depth` and the
 **call-ID** of the `sub_agent` call that spawned each delegated entry, so a resumed fan-out
 regroups per child) — plus
 browsable `Meta` (title, timestamps, workspace, model, message count, last context fill). Not
@@ -1177,9 +1178,9 @@ whose outcome the view used to re-derive carry one (`read_file`, `write_file`, `
 `edit_existing_file`, `single_find_and_replace`, `multi_find_and_replace`) — `read_file`'s
 carries the locate facts too, the substring asked for and the absolute line numbers it fell
 on. A summary is **never sent to the model** — it is display data a host consumes, and the
-summary *value* has no wire form; what a host's codec may mirror into the session record are
-the **facts** a variant carries, which is what the TUI's transcript codec does for the **Edit
-regions** below
+summary *value* has no wire form; what the transcript codec may mirror into the session record are
+the **facts** a variant carries, which is what the neutral codec in `internal/session` does for the
+**Edit regions** below
 ([ADR 0052](docs/adr/0052-diff-bodies-render-as-split-diffs-fed-by-tool-recorded-edit-regions.md) §5).
 A Mechanism that rewrites `Content` on the `PostToolResult` seam does not invalidate it: a
 summary records what the tool *did*, not what the text *says*.
@@ -1192,8 +1193,8 @@ start lines, its removed and inserted lines, and up to three merged unchanged li
 each side — counted from the applied change itself, so a view never re-reads the file or
 re-derives positions from arguments. It rides the **Tool summary** contract unchanged — display
 data, never sent to the model, and no wire form for the summary value — and the region facts are
-the one part of a summary the TUI's session codec mirrors onto a wire type of its own, so a
-resumed session renders the same split diffs
+the one part of a summary the neutral codec in `internal/session` mirrors onto a wire type of
+its own, so a resumed session renders the same split diffs
 ([ADR 0052](docs/adr/0052-diff-bodies-render-as-split-diffs-fed-by-tool-recorded-edit-regions.md) §5).
 A result carrying none renders the argument-derived list exactly as before, which is what keeps
 tools an open extension point ([ADR 0002](docs/adr/0002-tools-are-an-open-extension-point-mechanisms-are-curated.md)).

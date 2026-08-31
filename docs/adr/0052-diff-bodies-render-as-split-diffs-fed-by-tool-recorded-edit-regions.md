@@ -77,7 +77,7 @@ existing `muted` role; no new scheme keys
 ([ADR 0040](0040-color-schemes-are-embedded-roles-with-user-shadowing.md)).
 
 **5 — Persistence is additive on the transcript codec, and the stacked rows remain what
-`Details` carries.** The codec persists rendered rows (`wireDetailLine`, kind integers pinned);
+`Details` carries.** The codec persists rendered rows (`session.DetailLine`, kind integers pinned);
 the region structure a re-flow needs travels in a **new additive field** beside `Details`, while
 `Details` itself keeps the stacked rows. An older build replays the stacked body unchanged; a
 record written before this decodes with no regions and paints as it always did.
@@ -177,8 +177,10 @@ persisted in the session record", and `internal/domain/toolsummary.go` said the 
 the `NEVER PERSISTED` paragraph of the Tool summary block comment (on `ToolSummary`) and the
 `EditRegions` doc comment. Read literally, that contradicted **decision 5**, which ratifies the
 region structure travelling in an additive field on the transcript codec's wire — and
-`internal/tui/transcriptcodec.go` performs exactly that (`wireEditRegion`, `toWireToolView` /
-`fromWireToolView`).
+`internal/session/transcript.go` performs exactly that (`session.EditRegion`, projected from the
+TUI's cards by `toWireToolView` / `fromWireToolView` in `internal/tui/transcriptbridge.go`).
+*(File amended 2026-08-31: the codec moved out of `internal/tui/transcriptcodec.go` when it became
+Driver-neutral; the contract below is unchanged.)*
 
 The rule, stated once so both halves are true:
 
@@ -187,11 +189,13 @@ The rule, stated once so both halves are true:
   replay path re-runs a presenter or reconstructs a `ToolSummary` — so a session written before a
   variant existed reopens unchanged and ADR 0022's contract is untouched. This half was always
   load-bearing and stays.
-- **A host's codec MAY mirror the FACTS a variant carries onto a wire type of its own**, where a
-  replayed view cannot be re-composed without them. The TUI does that for the regions, because the
-  Split reading is composed at paint time against the live width and has nothing to compose from
-  once the regions are gone. That mirror is the codec's own additive contract (decision 5, the
-  `wireEntry` omitempty rule), not persistence of `domain.EditRegions`.
+- **The transcript codec MAY mirror the FACTS a variant carries onto a wire type of its own**,
+  where a replayed view cannot be re-composed without them. The neutral codec in `internal/session`
+  does that for the regions, because the Split reading is composed at paint time against the live
+  width and has nothing to compose from once the regions are gone. That mirror is the codec's own
+  additive contract (decision 5, the `session.Entry` omitempty rule), not persistence of
+  `domain.EditRegions`. *(Owner amended 2026-08-31 — it read "a host's codec" while the codec lived
+  in the TUI; the permission and its bound are unchanged.)*
 
 The two Go comments are rewritten to that wording; decision 5, the codec and its round-trip test are
 untouched. The rejected alternative "Persisting the summary in the session record" stands as

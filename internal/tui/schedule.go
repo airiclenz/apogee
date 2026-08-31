@@ -406,7 +406,7 @@ const scheduleRunningSummary = "firing now"
 const scheduleNoAnswerSummary = "finished — no answer"
 
 // scheduleInterruptedSummary is what a block that was still open when the session was recorded comes
-// back as on resume (transcriptcodec.go). A Firing dies with the TUI that scheduled it (ADR 0033),
+// back as on resume (transcriptbridge.go). A Firing dies with the TUI that scheduled it (ADR 0033),
 // so a replayed block still holding the running marker would claim a run is in flight that ended the
 // moment the program did — the record says how far it got, and this says it never got further.
 const scheduleInterruptedSummary = "never finished — schedules die with the TUI"

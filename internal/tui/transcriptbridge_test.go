@@ -11,10 +11,11 @@ import (
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/schedule"
+	"github.com/airiclenz/apogee/internal/session"
 )
 
 // ----------------------------------------------------------------------------
-// The transcript codec (session-system plan §3)
+// The transcript bridge (the TUI half of the neutral codec)
 // ----------------------------------------------------------------------------
 
 // mixedEntries is a scrollback covering every persisted entry kind and the tricky corners a
@@ -854,8 +855,8 @@ func TestTranscriptCodecFutureVersionRejected(t *testing.T) {
 	t.Parallel()
 	data := []byte(`{"version":999,"entries":[{"kind":"note","text":"from the future"}]}`)
 	got, err := decodeTranscript(data)
-	if !errors.Is(err, ErrTranscriptVersion) {
-		t.Fatalf("decodeTranscript error = %v; want ErrTranscriptVersion", err)
+	if !errors.Is(err, session.ErrTranscriptVersion) {
+		t.Fatalf("decodeTranscript error = %v; want session.ErrTranscriptVersion", err)
 	}
 	if got != nil {
 		t.Errorf("decoded entries = %+v; want nil on a rejected version", got)
@@ -887,6 +888,36 @@ func TestTranscriptCodecUnknownKindSkipped(t *testing.T) {
 	}
 	if len(got) != 1 || got[0].kind != entryNote || got[0].text != "kept" {
 		t.Errorf("decoded = %+v; want only the note entry", got)
+	}
+}
+
+// TestTranscriptBridgeSkipsAKindTheCodecKeeps pins WHERE that skip lives now that the codec is
+// Driver-neutral. [session.DecodeTranscript] hands an unrecognised kind back AS STORED — only a
+// consumer knows whether it can do anything with a kind it does not paint — and this package's
+// [decodeTranscript] is the consumer that drops it. The two halves are asserted over the one blob,
+// so a future move of the rule into the codec (which would silently deny every other Driver the
+// entry) fails here rather than in a Driver nobody was looking at.
+func TestTranscriptBridgeSkipsAKindTheCodecKeeps(t *testing.T) {
+	t.Parallel()
+	data := []byte(`{"version":1,"entries":[` +
+		`{"kind":"future-variant","text":"who knows"},` +
+		`{"kind":"note","text":"kept"}` +
+		`]}`)
+
+	wire, wireErr := session.DecodeTranscript(data)
+	entries, bridgeErr := decodeTranscript(data)
+
+	if wireErr != nil {
+		t.Fatalf("session.DecodeTranscript: %v", wireErr)
+	}
+	if len(wire) != 2 || wire[0].Kind != "future-variant" {
+		t.Errorf("codec returned %+v; want both entries, the unknown kind as stored", wire)
+	}
+	if bridgeErr != nil {
+		t.Fatalf("decodeTranscript: %v", bridgeErr)
+	}
+	if len(entries) != 1 || entries[0].kind != entryNote {
+		t.Errorf("bridge returned %+v; want the unknown kind skipped", entries)
 	}
 }
 
@@ -1049,9 +1080,10 @@ func assertNoESC(t *testing.T, s string) {
 // that delegated, so a reopened session still says how much of its window that delegate had filled
 // — the reading as it stood when the run reported, not one a later window rebind could rewrite.
 //
-// The pair is ADDITIVE within transcriptVersion and needs no bump, on the wireEnvelope rule: a run
-// that never reported writes neither member, and a blob written before they existed decodes to the
-// zero pair — which is the nothing-to-say case the summary line already hides, so no migration.
+// The pair is ADDITIVE within session.TranscriptVersion and needs no bump, on the envelope's own
+// rule: a run that never reported writes neither member, and a blob written before they existed
+// decodes to the zero pair — which is the nothing-to-say case the summary line already hides, so
+// no migration.
 func TestTranscriptCodecRoundTripsASubAgentFill(t *testing.T) {
 	t.Parallel()
 	const window = 32768
@@ -1148,7 +1180,7 @@ func TestTranscriptCodecRoundTripsASubAgentFill(t *testing.T) {
 // The member census is the guard on that claim. Display state added to toolView can always be got
 // onto the screen after a resume by widening the wire; the two field lists below are what makes
 // such a widening a decision someone took rather than a silent format change (both structs are
-// inside transcriptVersion 1, so every member is forever). Task is such a decision — a delegation's
+// inside session.TranscriptVersion 1, so every member is forever). Task is such a decision — a delegation's
 // retained prompt, which the run's expanded body is built from and which no other member could
 // carry — and it stands in the list beside the members that reached it the same way. So is
 // UsageCachedPromptTokens, added by plan `2026-08-28 - 02` item 10 so a resumed delegate keeps the
@@ -1209,15 +1241,15 @@ func TestTranscriptCodecPersistsANamedDelegationAsItsTarget(t *testing.T) {
 			"UsageTotalTokens",
 			"SkillSpans", "Tool", "Presented",
 		}
-		if got := fields(wireEntry{}); !slices.Equal(got, wantEntry) {
-			t.Errorf("wireEntry members = %v, want %v — widening the wire needs its own decision", got, wantEntry)
+		if got := fields(session.Entry{}); !slices.Equal(got, wantEntry) {
+			t.Errorf("session.Entry members = %v, want %v — widening the wire needs its own decision", got, wantEntry)
 		}
 		wantTool := []string{
 			"Label", "Verb", "Target", "Name", "Solo", "Stat", "StatValue", "Task", "Summary",
 			"Details", "Regions", "RegionFiles", "Args",
 		}
-		if got := fields(wireToolView{}); !slices.Equal(got, wantTool) {
-			t.Errorf("wireToolView members = %v, want %v — widening the wire needs its own decision", got, wantTool)
+		if got := fields(session.ToolView{}); !slices.Equal(got, wantTool) {
+			t.Errorf("session.ToolView members = %v, want %v — widening the wire needs its own decision", got, wantTool)
 		}
 	})
 }
@@ -1225,7 +1257,7 @@ func TestTranscriptCodecPersistsANamedDelegationAsItsTarget(t *testing.T) {
 // TestTranscriptCodecRoundTripsTheDelegatedPrompt pins the half of a delegation the record cannot
 // re-derive. A run's expanded span opens with the prompt the model wrote (toolView.task), and that
 // text lives nowhere else the block can paint FROM: the header keeps one clipped line of it, and
-// the arguments it came from ride the record as a stored value nothing paints (wireToolView.Args),
+// the arguments it came from ride the record as a stored value nothing paints (session.ToolView.Args),
 // so a blob that dropped this member would replay the run without its opening block — the
 // scrollback changing shape across a restart.
 //
@@ -1302,7 +1334,7 @@ func TestTranscriptCodecRoundTripsTheDelegatedPrompt(t *testing.T) {
 // TestTranscriptCodecRoundTripsTheSpawningCallID pins the run identity a delegated entry keeps
 // across a resume (ADR 0039): the id of the sub_agent call that spawned the agent whose event
 // folded into it, which is what tells two concurrent children's blocks apart once several run at
-// once — depth cannot, because siblings share it. The member is additive within transcriptVersion,
+// once — depth cannot, because siblings share it. The member is additive within session.TranscriptVersion,
 // so it must be absent from a top-level entry's wire form and must decode to "" from a blob
 // written before it existed: such a record had exactly one run in flight at a time, which is what
 // an empty identity already means.
@@ -1550,7 +1582,7 @@ func TestTranscriptCodecGoldenV1(t *testing.T) {
 // TestTranscriptCodecReplaysADelegatedPresentationRailed proves a child's document reopens where it
 // was drawn. The entry is committed at the presenting agent's own depth and under its own run
 // (transcript.addPresented), and both facts ride the wire on the GENERIC members every entry uses
-// (wireEntry.Depth / wireEntry.SpawnCallID) — no presented-specific codec work — so a resumed
+// (session.Entry.Depth / session.Entry.SpawnCallID) — no presented-specific codec work — so a resumed
 // scrollback rails the block exactly as the live one did instead of flattening a delegate's
 // presentation onto the human's own conversation.
 func TestTranscriptCodecReplaysADelegatedPresentationRailed(t *testing.T) {
@@ -1592,7 +1624,7 @@ func TestTranscriptCodecReplaysADelegatedPresentationRailed(t *testing.T) {
 // report (usageRows), so a delegate that came back without its share would sit under a header the
 // main agent's row still fills — the resumed session answering the same question two ways.
 //
-// The members are ADDITIVE within transcriptVersion on the wireEntry rule: a run that reported no
+// The members are ADDITIVE within session.TranscriptVersion on the session.Entry rule: a run that reported no
 // accounting writes none of them, and a blob written before they existed decodes to zero totals —
 // the same nothing-to-report state a pre-feature session reopens in, so there is no migration.
 func TestTranscriptCodecRoundTripsASubAgentsTotals(t *testing.T) {
@@ -1691,7 +1723,7 @@ func TestTranscriptCodecRoundTripsASubAgentsTotals(t *testing.T) {
 // survives the record and keeps painting after a resume (ADR 0045): it reaches the wire under its
 // own key, comes back on the head that delegated, and is still the last cell of that run's line.
 //
-// It is ADDITIVE within transcriptVersion on the wireEntry rule: an unrouted run — one that ran on
+// It is ADDITIVE within session.TranscriptVersion on the session.Entry rule: an unrouted run — one that ran on
 // the session's own model — writes no member at all, and a blob written before routing existed
 // decodes to no model, which is exactly what such a session was.
 func TestTranscriptCodecRoundTripsARoutedSubAgentsModel(t *testing.T) {

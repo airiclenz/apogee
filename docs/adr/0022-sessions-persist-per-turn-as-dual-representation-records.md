@@ -57,11 +57,14 @@ the Step, so a snapshot the worker sends *after* the Step returns is ordered str
 Turn's events — the transcript the Model holds when the snapshot folds in is consistent with it.
 
 **2. Persistence is dual-representation.** The on-disk `Record` wraps **two opaque payloads**
-beside its metadata: the untouched engine `domain.Session` envelope **and** the TUI's own
-versioned scrollback blob. Resume repaints the scrollback exactly — sub-agent `Depth`, tool
+beside its metadata: the untouched engine `domain.Session` envelope **and** the versioned
+scrollback blob. Resume repaints the scrollback exactly — sub-agent `Depth`, tool
 cards, notes, presented documents — instead of showing a bare box over a remembering engine. The
-transcript blob is **TUI-owned and versioned independently**, opaque to the store, mirroring how
-`Session.State` is engine-owned and opaque to `domain`. The store never decodes either payload;
+transcript blob is **owned by `internal/session` and versioned independently**, opaque to the
+store, mirroring how `Session.State` is engine-owned and opaque to `domain`. *(Owner amended
+2026-08-31: the blob was TUI-owned until the codec became Driver-neutral —
+`internal/session/transcript.go` — so that any Driver, not the TUI alone, can write and replay a
+scrollback.)* The store never decodes either payload;
 it wraps them with browsable `Meta` (title, timestamps, workspace, model, user-message count,
 last context fill).
 
@@ -79,12 +82,14 @@ snapshot-before-clear ordering falls out; on a `ClearContext` error the view is 
 and the completed save is harmless (the session was closing anyway).
 
 **5. Each layer rejects or degrades only its own version.** Three independent schema versions,
-three owners, three sentinels — the layer-ownership-of-versions rule:
+three sentinels, each owned at its own boundary — the layer-ownership-of-versions rule. *(Amended
+2026-08-31: the wrapper and the scrollback blob are both `internal/session`'s since the codec
+became Driver-neutral, and they still version independently of each other.)*
 
 | version | owner | sentinel on a newer-than-this-build payload |
 |---|---|---|
 | `session.RecordVersion` (the store wrapper) | `internal/session` | `ErrRecordVersion` |
-| the transcript blob's version | `internal/tui` | `ErrTranscriptVersion` |
+| `session.TranscriptVersion` (the scrollback blob) | `internal/session` | `session.ErrTranscriptVersion` |
 | `domain.SessionVersion` (the engine envelope) | the engine | `ErrSessionVersion` |
 
 A layer never reaches into another's payload to version-check it. A future wrapper is refused by

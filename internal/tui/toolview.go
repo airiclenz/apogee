@@ -502,7 +502,7 @@ type toolView struct {
 	// rather than "sub-agent · reading main.go".
 	//
 	// It is display text like the fields above it and is escape-stripped with them (sanitize), but
-	// deliberately NOT on the wire (wireToolView): the status line is live-only, and the persisted
+	// deliberately NOT on the wire (session.ToolView): the status line is live-only, and the persisted
 	// header display already rides Target.
 	agentName string
 
@@ -521,7 +521,7 @@ type toolView struct {
 	// It is display text and travels the sanitize seam with the fields above it, but not the
 	// shortening one: the prompt is text the block QUOTES, so an absolute path inside it is the
 	// model's own wording and respelling it would show a prompt the child never received
-	// (shortenPaths). Unlike agentName it IS on the wire (wireToolView.Task) — the body a resumed
+	// (shortenPaths). Unlike agentName it IS on the wire (session.ToolView.Task) — the body a resumed
 	// session paints is built from it, so a record that lost it would come back a different block.
 	task string
 
@@ -534,7 +534,7 @@ type toolView struct {
 	// serve the collapsed row, the expanded ┌─┶ header and the lone run alike — a second wording
 	// would part company with this one the first time either moved.
 	//
-	// It is deliberately not on the wire (wireToolView) and not display text: nothing sanitises a
+	// It is deliberately not on the wire (session.ToolView) and not display text: nothing sanitises a
 	// bool, and a replayed record re-derives the mark from the entry it decoded.
 	finished bool
 
@@ -561,7 +561,7 @@ type toolView struct {
 	// It is display state's raw material and never display text: sanitize does not reach it, because
 	// nothing here is painted — every line the hook builds from it is a body line, and the seam
 	// strips those on the way out (enrichWithResult defers finishDisplay). This MAP is deliberately
-	// not on the wire (wireToolView) — it is the presenter's working state, held for one hook and
+	// not on the wire (session.ToolView) — it is the presenter's working state, held for one hook and
 	// dropped for every other. The arguments a saved record keeps ride the bounded copy beside it
 	// (argsWire), which every call carries whether or not its presenter kept this one.
 	args map[string]any

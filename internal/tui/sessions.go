@@ -695,8 +695,8 @@ func sessionRows(b sessionBrowser, workspace string, now time.Time) []popupRow {
 // Every fact the Meta supplies — the title, the workspace path behind its base, and a Firing's
 // schedule name — is escape-stripped here, exactly as the pickers strip every cell they build from
 // launcher text (launchProfileRows). A Meta is untrusted DISK input: List() reads session files
-// that no codec has sanitized (transcriptcodec strips the record's transcript on the way back in,
-// never its Meta), so a title carrying "\x1bc" would otherwise reach the pane as a live RIS
+// that no codec has sanitized (the transcript codec in internal/session strips the record's
+// transcript on the way back in, never its Meta), so a title carrying "\x1bc" would otherwise reach the pane as a live RIS
 // terminal reset — the popup module strips nothing and truncates ANSI-preservingly — and would also
 // lie to the column math, since an ESC byte occupies no display cell but does occupy the string.
 func sessionRowCells(meta session.Meta, currentWorkspace string, all bool, now time.Time) popupRow {

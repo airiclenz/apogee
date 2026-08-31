@@ -1,5 +1,7 @@
 package tui
 
+import "github.com/airiclenz/apogee/internal/session"
+
 // entryKind tags a transcript entry so the renderer can prefix and style it. The set
 // mirrors the C6 entry kinds (user / assistant / tool call+result / error / note).
 //
@@ -36,9 +38,10 @@ type entryKindRule struct {
 	// persistedName is the kind's stable wire string in a saved session record, or "" for a kind
 	// that is never serialized. It is a STRING rather than the [entryKind] iota so a future
 	// reordering of the const block above cannot silently re-tag every stored entry
-	// (transcriptcodec.go). A new name is ADDITIVE within transcriptVersion and needs no bump: an
-	// older build simply does not find the string and skips that entry, exactly as it skips a
-	// "future-variant" today.
+	// (transcriptbridge.go). The strings themselves are [session]'s own kind constants — the wire
+	// form is owned there, and naming them here is what keeps the two halves from drifting. A new
+	// name is ADDITIVE within [session.TranscriptVersion] and needs no bump: an older build simply
+	// does not find the string and skips that entry, exactly as it skips a "future-variant" today.
 	persistedName string
 
 	// carriesBlockState reports whether the kind owns a collapsed/expanded block state — the gate
@@ -87,22 +90,22 @@ type entryKindRule struct {
 // a degrade rather than a licence — [TestEntryKindRulesAnswerForEveryKind] fails on the missing
 // row — and it is why the accessors below can read the map straight rather than guarding each read.
 var entryKindRules = map[entryKind]entryKindRule{
-	entryUser:       {persistedName: "user", carriesBlockState: true, cacheable: true, isUserPrompt: true},
-	entryAssistant:  {persistedName: "assistant", cacheable: true},
-	entryToolCall:   {persistedName: "toolCall", carriesBlockState: true, cacheable: true, hasLiveStar: true},
-	entryToolResult: {persistedName: "toolResult", carriesBlockState: true, cacheable: true},
-	entryError:      {persistedName: "error", cacheable: true},
-	entryNote:       {persistedName: "note", cacheable: true, isHostNote: true},
-	entryPresented:  {persistedName: "presented", cacheable: true},
+	entryUser:       {persistedName: session.EntryKindUser, carriesBlockState: true, cacheable: true, isUserPrompt: true},
+	entryAssistant:  {persistedName: session.EntryKindAssistant, cacheable: true},
+	entryToolCall:   {persistedName: session.EntryKindToolCall, carriesBlockState: true, cacheable: true, hasLiveStar: true},
+	entryToolResult: {persistedName: session.EntryKindToolResult, carriesBlockState: true, cacheable: true},
+	entryError:      {persistedName: session.EntryKindError, cacheable: true},
+	entryNote:       {persistedName: session.EntryKindNote, cacheable: true, isHostNote: true},
+	entryPresented:  {persistedName: session.EntryKindPresented, cacheable: true},
 	// The start-up box is opening chrome re-seeded fresh on every launch: never serialized (an
 	// empty persistedName is what encodeTranscript skips on, and a "startup" string on decode is
 	// unknown and skipped — symmetric), and never cached for refreshStartup's sake.
 	entryStartup:     {},
-	entryInterjected: {persistedName: "interjected", carriesBlockState: true, cacheable: true},
-	// "schedule" — the firing block — joined transcriptVersion 1 on the additive terms above. It is
-	// a host note because a Firing is the program's own headless run announcing itself in the
-	// scrollback while the conversation is elsewhere (ADR 0033).
-	entrySchedule: {persistedName: "schedule", carriesBlockState: true, cacheable: true, isHostNote: true},
+	entryInterjected: {persistedName: session.EntryKindInterjected, carriesBlockState: true, cacheable: true},
+	// "schedule" — the firing block — joined [session.TranscriptVersion] 1 on the additive terms
+	// above. It is a host note because a Firing is the program's own headless run announcing itself
+	// in the scrollback while the conversation is elsewhere (ADR 0033).
+	entrySchedule: {persistedName: session.EntryKindSchedule, carriesBlockState: true, cacheable: true, isHostNote: true},
 }
 
 // entryKindByName is the decode-side inverse of the table's persistedName column, built once at

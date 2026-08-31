@@ -854,7 +854,7 @@ func TestNeverRanDelegationRowIsExpandableAtEveryWidth(t *testing.T) {
 
 // TestSubAgentPromptDetailsLeadsWithTheTask pins the body lines the prompt becomes: its first line
 // under the lead, every further line plain beneath it, and nothing at all for a prompt that is blank
-// throughout — which is what leaves a record with no retained task (transcriptcodec.go) showing the
+// throughout — which is what leaves a record with no retained task (transcriptbridge.go) showing the
 // view it always showed.
 func TestSubAgentPromptDetailsLeadsWithTheTask(t *testing.T) {
 	long := strings.Repeat("x", detailClipRunes+20)

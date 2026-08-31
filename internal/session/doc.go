@@ -3,10 +3,12 @@
 // after every Turn.
 //
 // A Record wraps two opaque payloads in browsable Meta: the engine's Session envelope
-// (internal/domain, versioned and resumed by the engine) and the TUI's Transcript blob
-// (versioned by internal/tui). Each layer owns and forward-rejects only its own version;
-// this package versions the wrapper (RecordVersion) and rejects a newer wrapper with
-// ErrRecordVersion.
+// (internal/domain, versioned and resumed by the engine) and the Transcript blob — the
+// scrollback, versioned HERE by TranscriptVersion (transcript.go). Each payload owns and
+// forward-rejects only its own version; this package versions the wrapper (RecordVersion) and
+// rejects a newer wrapper with ErrRecordVersion, and it versions the scrollback separately and
+// rejects a newer blob with ErrTranscriptVersion. The store itself still treats both payloads as
+// opaque bytes.
 //
 // transcript.go holds the neutral transcript model and codec — the exported wire form of a
 // scrollback (Entry and its views), TranscriptVersion, EncodeTranscript/DecodeTranscript and

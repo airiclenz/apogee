@@ -234,7 +234,7 @@ func TestPerChildRunOpensAlone(t *testing.T) {
 }
 
 // TestConcurrentRunsSurviveTheSessionRecord is the resume half: the run identity is on the wire
-// (transcriptcodec.go), so a replayed record re-groups into the same per-child blocks rather than
+// (transcriptbridge.go), so a replayed record re-groups into the same per-child blocks rather than
 // collapsing into one braid behind the last call.
 func TestConcurrentRunsSurviveTheSessionRecord(t *testing.T) {
 	t.Parallel()

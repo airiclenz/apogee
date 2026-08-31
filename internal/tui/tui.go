@@ -59,8 +59,9 @@ type SkillCatalog interface {
 // for [Options.Skills].
 type SessionHost interface {
 	// Save persists the active session's current state, minting its ID on the first call and
-	// updating that same file thereafter. transcript is the TUI's opaque scrollback blob
-	// (transcriptcodec.go); title, userMsgs, ctxUsed, usage — the main agent's cumulative token
+	// updating that same file thereafter. transcript is the opaque scrollback blob — the neutral
+	// wire form internal/session versions, which transcriptbridge.go projects this package's
+	// entries onto; title, userMsgs, ctxUsed, usage — the main agent's cumulative token
 	// accounting as of this save — and delegateUsage — the sum its sub-agents reported by then —
 	// populate the browsable metadata. The two accountings arrive apart and are stored apart: what
 	// the SESSION spent is their sum, which is the browser's business rather than the host's.
@@ -1358,13 +1359,14 @@ type ActuationResult struct {
 }
 
 // ResumedSession is the startup-replay payload the composition root hands the TUI when a run
-// resumes a stored session: the opaque transcript blob to repaint (the TUI's own wire form,
-// transcriptcodec.go), the browsable title for the "resumed: <title>" note, the last observed
+// resumes a stored session: the opaque transcript blob to repaint (the neutral wire form
+// internal/session versions, read back through transcriptbridge.go), the browsable title for the
+// "resumed: <title>" note, the last observed
 // context fill to relight the status-line gauge, and the stored user-message count. An empty or
 // undecodable Transcript degrades to a no-scrollback note rather than a fatal error — a resumed
 // legacy session still lists and resumes, it just has no scrollback to repaint.
 type ResumedSession struct {
-	Transcript []byte // the TUI's opaque scrollback blob; empty (a legacy record) ⇒ no replay
+	Transcript []byte // the opaque scrollback blob; empty (a legacy record) ⇒ no replay
 	Title      string // the session's browsable title, shown in the resume note
 	CtxUsed    int    // the last observed context fill, relighting the gauge on resume
 	UserMsgs   int    // the stored user-message count (metadata parity; the transcript re-derives it)

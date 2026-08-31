@@ -300,7 +300,7 @@ const unframedSubAgentPromptLead = "task: "
 // the terminal's columns (ISSUES.md, 2026-08-27).
 //
 // A delegation with no prompt to show — an empty task, whitespace alone, a record replayed from a
-// session written before the text was retained (transcriptcodec.go) — answers false: the readings
+// session written before the text was retained (transcriptbridge.go) — answers false: the readings
 // above open onto nothing for it, and an indicator over an empty frame is the affordance the rule
 // exists to withhold.
 func subAgentHidesPrompt(tv toolView) bool {
@@ -326,7 +326,7 @@ func subAgentHidesPrompt(tv toolView) bool {
 //
 // The result's own lines follow after a blank one, so the refusal reads as a second voice rather
 // than as more of the request. A delegation with no prompt to show — an empty task, whitespace
-// alone, a record replayed from a session written before the text was retained (transcriptcodec.go)
+// alone, a record replayed from a session written before the text was retained (transcriptbridge.go)
 // — keeps the view it had: a lead line over nothing would be a heading for an empty body.
 //
 // The copy is a paint-time act on facts the entry keeps whole, exactly as the framed reading's
@@ -676,7 +676,7 @@ func subAgentModel(head paintInput) string {
 // A missing half means no cell at all: a fill without its limit is a number with no scale, and the
 // status gauge hides itself on the very same condition rather than showing one. That is also what a
 // run whose child never reported paints — and what a session recorded before the reading existed
-// decodes to (transcriptcodec.go), so nothing needs a migration to look right.
+// decodes to (transcriptbridge.go), so nothing needs a migration to look right.
 func subAgentFill(head paintInput) string {
 	if head.ctxUsed <= 0 || head.ctxLimit <= 0 {
 		return ""

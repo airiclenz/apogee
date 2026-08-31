@@ -33,7 +33,7 @@ type savePayload struct {
 }
 
 // snapshotPayload assembles a savePayload around a captured engine snapshot: it encodes the
-// current transcript (transcriptcodec.go), derives the browsable title from the first user
+// current transcript (transcriptbridge.go), derives the browsable title from the first user
 // message, counts the user messages, and reads the live context fill and both halves of the usage
 // totals — the main agent's and its delegates'. A transcript that fails to encode yields ok=false
 // so the caller drops the save rather than persisting a half-record.

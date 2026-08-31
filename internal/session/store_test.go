@@ -310,7 +310,7 @@ func raceTwo(a, b func()) {
 // A Rename running beside a Save must never roll the record back. Rename is a read-modify-write of
 // the WHOLE record — Load, retitle, Save — so without the store lock a Save landing between its read
 // and its write is silently overwritten by the pre-save record, costing a complete Turn: the engine
-// Session and the TUI transcript blob alike (the audit's probe, kept as a regression). Which of the
+// Session and the neutral transcript blob alike (the audit's probe, kept as a regression). Which of the
 // two writes wins the lock decides the TITLE, which the caller above owns; it must never decide the
 // PAYLOAD.
 func TestSaveAndRenameNeverLoseTheNewerPayload(t *testing.T) {

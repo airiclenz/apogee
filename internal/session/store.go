@@ -37,8 +37,8 @@ const idRandomBytes = 4
 // RecordVersion is the schema version Save stamps on every wrapper it writes. Decoding a
 // higher version fails with ErrRecordVersion — the same reject-forward rule the engine
 // applies to domain.SessionVersion, but owned by this layer (only internal/session
-// versions the wrapper; the engine versions the Session payload; the TUI versions the
-// Transcript blob).
+// versions the wrapper; the engine versions the Session payload; TranscriptVersion —
+// this package's too, and independent of this one — versions the Transcript blob).
 const RecordVersion = 1
 
 // ErrRecordVersion is returned when a stored record's RecordVersion exceeds this build's
@@ -141,8 +141,9 @@ type Usage struct {
 }
 
 // Record is the on-disk shape: the metadata wrapper around the two opaque payloads.
-// Transcript is the TUI's versioned scrollback blob (opaque here, exactly as
-// Session.State is opaque to domain); Session is the untouched engine envelope.
+// Transcript is the versioned scrollback blob — opaque to the store exactly as Session.State is
+// opaque to domain, with its wire form and its own version in transcript.go; Session is the
+// untouched engine envelope.
 type Record struct {
 	RecordVersion int             `json:"recordVersion"`
 	Meta          Meta            `json:"meta"`
@@ -162,7 +163,7 @@ type Store struct {
 	// mu serializes the three writers — Save, Rename and Delete — against each other. Rename is
 	// why it exists: its Load→retitle→Save is a read-modify-write over the WHOLE record, so a Save
 	// landing between its read and its write is silently rolled back, taking a complete Turn (the
-	// engine Session and the TUI transcript blob alike) off disk. The TUI serializes its own record
+	// engine Session and the neutral transcript blob alike) off disk. The TUI serializes its own record
 	// writes at the fold layer as well; this is the floor under every caller in the process,
 	// including a store two goroutines reach without going through that fold.
 	//

@@ -2735,7 +2735,7 @@ var sanitizeExemptToolViewMembers = map[string]string{
 // member the fixture does not fill with an escape fails just as loudly as one the strip does not
 // reach, so adding a field to toolView forces a decision — fill it and be stripped, or be named in
 // sanitizeExemptToolViewMembers with the reason. It is the member-census idiom the wire structs are
-// held to (transcriptcodec_test.go), turned on the seam instead of on the format.
+// held to (transcriptbridge_test.go), turned on the seam instead of on the format.
 func TestToolViewSanitizeReachesEveryStringMember(t *testing.T) {
 	t.Parallel()
 
