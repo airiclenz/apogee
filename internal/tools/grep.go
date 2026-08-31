@@ -8,14 +8,11 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"os"
-	"path"
 	"path/filepath"
 	"regexp"
 	"strings"
 
 	"github.com/airiclenz/apogee/internal/domain"
-	"github.com/airiclenz/apogee/internal/security"
 )
 
 var grepSpec = toolSpec{
@@ -92,10 +89,11 @@ type Grep struct {
 }
 
 // NewGrep returns a grep tool that resolves paths within root, and — for ABSOLUTE paths only —
-// within any extra read-only root extraReadRoots reports at call time. A nil extraReadRoots
-// means workspace-only: byte-identical to the fence before extra roots existed.
-func NewGrep(root string, extraReadRoots func() []string) *Grep {
-	return &Grep{toolSpec: grepSpec, scope: readScope{root: root, extra: extraReadRoots}}
+// within any extra read-only root mounts reports at call time, plus any virtual mount it names.
+// A zero ReadMounts means workspace-only: byte-identical to the fence before either mount seam
+// existed.
+func NewGrep(root string, mounts ReadMounts) *Grep {
+	return &Grep{toolSpec: grepSpec, scope: mounts.scope(root)}
 }
 
 // ReadOnly reports that grep performs no writes (domain.ReadOnlyTool).
@@ -131,27 +129,19 @@ func (t *Grep) Execute(ctx context.Context, call domain.ToolCall) (domain.ToolRe
 	if searchPath == "" {
 		searchPath = "."
 	}
-	root, resolved, err := t.scope.resolve(searchPath)
-	if err != nil {
-		return errorResult(call.ID, err.Error()), nil
-	}
-
-	info, err := os.Stat(resolved)
-	if err != nil {
-		// The path was already accepted by the fence, so an absent one is a mis-spelling the
-		// model can fix: offer its near misses in the parent it named.
-		siblings := suggestSiblings(root, workspaceRelative(resolved, root), args.Path)
-		return errorResult(call.ID, notFoundMessage("path not found: ", args.Path, siblings)), nil
+	target, refusal := t.scope.searchTarget(searchPath, args.Path)
+	if refusal != "" {
+		return errorResult(call.ID, refusal), nil
 	}
 
 	globs := parseIncludeGlobs(args.Include)
-	matches, err := t.search(ctx, root, resolved, info, re, globs)
+	matches, err := t.search(ctx, target, re, globs)
 	if err != nil {
 		return domain.ToolResult{}, err // only ctx cancellation propagates as a Go error
 	}
 
 	scope := searchScope(args.Path, globs)
-	text, matched := t.renderMatches(root, scope, matches, args.MaxResults, args.Offset, clampContextLines(args.ContextLines))
+	text, matched := t.renderMatches(target, scope, matches, args.MaxResults, args.Offset, clampContextLines(args.ContextLines))
 	return okSummary(call.ID, text, matched), nil
 }
 
@@ -166,34 +156,22 @@ func clampContextLines(n int) int {
 	return n
 }
 
-// search collects matches from a single file or by walking a directory. root is the root the
-// search path was accepted under and target is its resolved absolute path; target is used to
-// ENUMERATE names only — every file is opened by its root-relative name through that root's
-// fence, never by an absolute path the walk handed out.
-func (t *Grep) search(ctx context.Context, root, target string, info os.FileInfo, re *regexp.Regexp, globs []string) ([]grepMatch, error) {
+// search collects matches from a single file or by walking a directory. target carries the tree to
+// enumerate and the opener every file is read through (searchTarget, path_read.go): the tree is
+// used to ENUMERATE names only — a name is opened through its own source's fence, never by an
+// absolute path the walk handed out.
+func (t *Grep) search(ctx context.Context, target searchTarget, re *regexp.Regexp, globs []string) ([]grepMatch, error) {
 	matches := make([]grepMatch, 0, defaultGrepResults)
-	// The name is measured from the MATCHED root, symlink-resolved by the shared guard:
-	// resolveInRoot hands back real paths, so on a host where a root is reached through a link
-	// (macOS's /tmp, a symlinked /home) the raw root is a prefix of nothing.
-	targetRel := workspaceRelative(target, root)
 
-	if !info.IsDir() {
+	if !target.isDir() {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		t.searchFile(root, targetRel, targetRel, re, &matches)
+		t.searchFile(target, target.rel, target.rel, re, &matches)
 		return matches, nil
 	}
 
-	// prefix lifts a walk-relative name to a root-relative one ("" when the search
-	// root IS the matched root). fs.WalkDir yields slash-separated names, so the join
-	// is path.Join, not filepath.Join.
-	prefix := filepath.ToSlash(targetRel)
-	if prefix == "." {
-		prefix = ""
-	}
-
-	walkErr := fs.WalkDir(os.DirFS(target), ".", func(rel string, entry fs.DirEntry, err error) error {
+	walkErr := fs.WalkDir(target.tree, ".", func(rel string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return nil // skip unreadable entries rather than aborting the whole search
 		}
@@ -209,7 +187,7 @@ func (t *Grep) search(ctx context.Context, root, target string, info os.FileInfo
 		if !matchesInclude(entry.Name(), globs) {
 			return nil
 		}
-		t.searchFile(root, path.Join(prefix, rel), rel, re, &matches)
+		t.searchFile(target, target.openName(rel), rel, re, &matches)
 		if len(matches) >= maxGrepMatches {
 			return errGrepStop
 		}
@@ -227,15 +205,15 @@ func (t *Grep) search(ctx context.Context, root, target string, info os.FileInfo
 // root, skipping a file that is oversized or binary (contains a NUL byte in its leading
 // bytes).
 //
-// rel is opened THROUGH root's fence (os.Root-pinned, security.SafeOpen), so a walked entry
+// rel is opened THROUGH the target's own fence (target.open — os.Root-pinned on disk), so a walked entry
 // that is a symlink out of that root — a clone can plant `notes.txt -> ~/.ssh/id_rsa`, and
 // grep is read-only, hence unapproved in every mode — is refused rather than followed, and
 // the size bound is an fstat of the very descriptor the content is then read from. A search
 // that began under an extra read-only root is fenced by THAT root, so its files never open
 // through the workspace's. A refusal is skipped like any other unreadable file: grep reports
 // matches, not an inventory, so a silently absent file is the existing contract.
-func (t *Grep) searchFile(root, rel, display string, re *regexp.Regexp, matches *[]grepMatch) {
-	file, err := security.SafeOpen(root, rel)
+func (t *Grep) searchFile(target searchTarget, rel, display string, re *regexp.Regexp, matches *[]grepMatch) {
+	file, err := target.open(rel)
 	if err != nil {
 		return
 	}
@@ -318,7 +296,7 @@ func matchesInclude(name string, globs []string) bool {
 // Pagination counts MATCHES only: contextLines rides along free, so the header's numbers and
 // the truncation note mean the same thing whether context was asked for or not. With
 // contextLines 0 the body is byte-identical to the pre-context output.
-func (t *Grep) renderMatches(root, scope string, matches []grepMatch, maxResults, offset, contextLines int) (string, domain.MatchedLines) {
+func (t *Grep) renderMatches(target searchTarget, scope string, matches []grepMatch, maxResults, offset, contextLines int) (string, domain.MatchedLines) {
 	if len(matches) == 0 {
 		return "No matches found in " + scope, domain.MatchedLines{Total: 0}
 	}
@@ -347,7 +325,7 @@ func (t *Grep) renderMatches(root, scope string, matches []grepMatch, maxResults
 	header := fmt.Sprintf("[%d total matches%s in %s, showing %d-%d]", total, capped, scope, start+1, end)
 	body := plainMatchLines(shown)
 	if contextLines > 0 {
-		body = t.renderContextMatches(root, shown, contextLines)
+		body = t.renderContextMatches(target, shown, contextLines)
 	}
 	return header + "\n" + strings.Join(body, "\n"), domain.MatchedLines{Total: total}
 }
@@ -368,14 +346,14 @@ func plainMatchLines(matches []grepMatch) []string {
 // Matches from one file arrive contiguously (each file is scanned once and pagination keeps
 // the order), so a file's group is a consecutive run and its context is gathered in a single
 // reopen of that file.
-func (t *Grep) renderContextMatches(root string, matches []grepMatch, contextLines int) []string {
+func (t *Grep) renderContextMatches(target searchTarget, matches []grepMatch, contextLines int) []string {
 	lines := make([]string, 0, len(matches)*(2*contextLines+1))
 	for start := 0; start < len(matches); {
 		end := start + 1
 		for end < len(matches) && matches[end].openPath == matches[start].openPath {
 			end++
 		}
-		lines = append(lines, t.renderFileGroup(root, matches[start:end], contextLines)...)
+		lines = append(lines, t.renderFileGroup(target, matches[start:end], contextLines)...)
 		start = end
 	}
 	return lines
@@ -385,9 +363,9 @@ func (t *Grep) renderContextMatches(root string, matches []grepMatch, contextLin
 // non-adjacent spans with the conventional "--" line. A file whose context cannot be reread
 // (deleted or newly refused since the match pass) degrades to bare match lines rather than
 // failing the whole search.
-func (t *Grep) renderFileGroup(root string, group []grepMatch, contextLines int) []string {
+func (t *Grep) renderFileGroup(target searchTarget, group []grepMatch, contextLines int) []string {
 	spans := mergeContextSpans(group, contextLines)
-	surrounding := t.readContextLines(root, group[0].openPath, spans)
+	surrounding := t.readContextLines(target, group[0].openPath, spans)
 	if surrounding == nil {
 		return plainMatchLines(group)
 	}
@@ -441,13 +419,13 @@ func mergeContextSpans(group []grepMatch, contextLines int) []lineSpan {
 }
 
 // readContextLines reads the lines covered by spans from the file named by openPath within
-// root, keyed by 1-based line number. The file is reopened THROUGH the same root's fence
-// (security.SafeOpen), exactly as the match pass opened it, so context can never be gathered
+// the target, keyed by 1-based line number. The file is reopened THROUGH the same fence
+// (target.open), exactly as the match pass opened it, so context can never be gathered
 // from a file the fence refuses; a refused or vanished file yields nil. Lines in the gaps
 // BETWEEN spans are scanned past, never retained, so two far-apart matches in a large file
 // do not pull the whole file into memory.
-func (t *Grep) readContextLines(root, openPath string, spans []lineSpan) map[int]string {
-	file, err := security.SafeOpen(root, openPath)
+func (t *Grep) readContextLines(target searchTarget, openPath string, spans []lineSpan) map[int]string {
+	file, err := target.open(openPath)
 	if err != nil {
 		return nil
 	}

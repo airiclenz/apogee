@@ -121,7 +121,7 @@ func escapeCases() []escapeCase {
 			setup: func(t *testing.T, root, target string) {
 				writeFixture(t, filepath.Join(root, "src.txt"), "copied\n", 0o644)
 			},
-			tool: func(root string) domain.Tool { return NewCopyFile(root, nil) },
+			tool: func(root string) domain.Tool { return NewCopyFile(root, ReadMounts{}) },
 			args: func(target string) map[string]any {
 				return map[string]any{"source": "src.txt", "destination": target}
 			},
@@ -284,7 +284,7 @@ func TestApprovedEscapeCreatesMissingParents(t *testing.T) {
 	target := filepath.Join(tempRoot(t), "nested", "deeper", "landed.txt")
 	writeFixture(t, filepath.Join(root, "src.txt"), "copied\n", 0o644)
 
-	result := runWrite(t, escapePermit(target), NewCopyFile(root, nil), map[string]any{
+	result := runWrite(t, escapePermit(target), NewCopyFile(root, ReadMounts{}), map[string]any{
 		"source": "src.txt", "destination": target,
 	})
 	if result.IsError {
@@ -343,7 +343,7 @@ func TestPermitWidensNoRead(t *testing.T) {
 	target := filepath.Join(tempRoot(t), "approved.txt")
 	writeFixture(t, target, "outside bytes\n", 0o644)
 
-	result := runWrite(t, escapePermit(target), NewReadFile(root, nil), map[string]any{"path": target})
+	result := runWrite(t, escapePermit(target), NewReadFile(root, ReadMounts{}), map[string]any{"path": target})
 	if !result.IsError {
 		t.Fatalf("a permit widened a read: %q", result.Content)
 	}

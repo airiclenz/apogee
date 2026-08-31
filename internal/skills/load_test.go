@@ -801,11 +801,11 @@ func TestLoadShippedSkillsAllParse(t *testing.T) {
 		if sk.Body == "" {
 			t.Errorf("shipped skill %q loaded with an empty body", id)
 		}
-		// Body-only for now: a shipped skill names no folder, so the injected block carries no
-		// files: line and apogee never announces a path nothing can open (ADR 0065 §3 changes this
-		// when the virtual mount lands).
-		if sk.Dir != "" {
-			t.Errorf("shipped skill %q announces Dir = %q, want none until the virtual mount exists", id, sk.Dir)
+		// A shipped skill announces its folder under the virtual mount its own tree is served
+		// through (ADR 0065 §3), so the injected block's files: line and every {{SKILL_DIR}} in
+		// the body name an address the read tools resolve — never a host path nothing can open.
+		if want := ShippedMountPrefix + id; sk.Dir != want {
+			t.Errorf("shipped skill %q announces Dir = %q, want %q", id, sk.Dir, want)
 		}
 	}
 }

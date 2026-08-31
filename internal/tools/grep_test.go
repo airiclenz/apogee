@@ -17,7 +17,7 @@ func TestGrep_Execute_FindsMatchesWithLocation(t *testing.T) {
 	root := t.TempDir()
 	seedTree(t, root)
 
-	result, err := NewGrep(root, nil).Execute(context.Background(),
+	result, err := NewGrep(root, ReadMounts{}).Execute(context.Background(),
 		callWith(t, "c1", map[string]any{"pattern": "^package "}))
 
 	if err != nil {
@@ -40,7 +40,7 @@ func TestGrep_Execute_ExcludesNoiseDirs(t *testing.T) {
 	root := t.TempDir()
 	seedTree(t, root)
 
-	result, err := NewGrep(root, nil).Execute(context.Background(),
+	result, err := NewGrep(root, ReadMounts{}).Execute(context.Background(),
 		callWith(t, "c1", map[string]any{"pattern": "noise"}))
 
 	if err != nil {
@@ -57,7 +57,7 @@ func TestGrep_Execute_IncludeGlobNarrows(t *testing.T) {
 	root := t.TempDir()
 	seedTree(t, root)
 
-	result, err := NewGrep(root, nil).Execute(context.Background(),
+	result, err := NewGrep(root, ReadMounts{}).Execute(context.Background(),
 		callWith(t, "c1", map[string]any{"pattern": "func", "include": "*.go"}))
 
 	if err != nil {
@@ -76,7 +76,7 @@ func TestGrep_Execute_InvalidRegexFallsBackToLiteral(t *testing.T) {
 
 	// "Alpha(" is not a valid regex (unclosed group); it must be matched literally
 	// against "func Alpha() {}".
-	result, err := NewGrep(root, nil).Execute(context.Background(),
+	result, err := NewGrep(root, ReadMounts{}).Execute(context.Background(),
 		callWith(t, "c1", map[string]any{"pattern": "Alpha("}))
 
 	if err != nil {
@@ -93,7 +93,7 @@ func TestGrep_Execute_SearchesSingleFile(t *testing.T) {
 	root := t.TempDir()
 	seedTree(t, root)
 
-	result, err := NewGrep(root, nil).Execute(context.Background(),
+	result, err := NewGrep(root, ReadMounts{}).Execute(context.Background(),
 		callWith(t, "c1", map[string]any{"pattern": "Beta", "path": "src/inner/b.go"}))
 
 	if err != nil {
@@ -109,7 +109,7 @@ func TestGrep_Execute_ReportsMatchCount(t *testing.T) {
 
 	root := t.TempDir()
 	seedTree(t, root)
-	tool := NewGrep(root, nil)
+	tool := NewGrep(root, ReadMounts{})
 
 	cases := []struct {
 		name        string
@@ -178,7 +178,7 @@ func TestGrep_Execute_SearchesSubdirectory(t *testing.T) {
 		t.Skipf("symlinks unsupported: %v", err)
 	}
 
-	result, err := NewGrep(root, nil).Execute(context.Background(),
+	result, err := NewGrep(root, ReadMounts{}).Execute(context.Background(),
 		callWith(t, "c1", map[string]any{"pattern": "a|TOKEN", "path": "src"}))
 
 	if err != nil {
@@ -235,7 +235,7 @@ func TestGrep_RefusesEscapingSymlink(t *testing.T) {
 	if err := os.Symlink("inside.txt", filepath.Join(root, "link.txt")); err != nil {
 		t.Skipf("symlinks unsupported: %v", err)
 	}
-	tool := NewGrep(root, nil)
+	tool := NewGrep(root, ReadMounts{})
 
 	t.Run("directory walk", func(t *testing.T) {
 		t.Parallel()
@@ -302,7 +302,7 @@ func TestGrep_Execute_SearchesUnderAnExtraReadRoot(t *testing.T) {
 		t.Fatalf("setup: %v", err)
 	}
 
-	tool := NewGrep(root, func() []string { return []string{extra} })
+	tool := NewGrep(root, ReadMounts{Roots: func() []string { return []string{extra} }})
 
 	cases := []struct {
 		name    string
@@ -357,7 +357,7 @@ func TestGrep_Execute_RefusesSymlinkEscapingAnExtraReadRoot(t *testing.T) {
 		t.Skipf("symlinks unsupported: %v", err)
 	}
 
-	result, err := NewGrep(root, func() []string { return []string{extra} }).Execute(context.Background(),
+	result, err := NewGrep(root, ReadMounts{Roots: func() []string { return []string{extra} }}).Execute(context.Background(),
 		callWith(t, "c1", map[string]any{"pattern": "TOKEN=", "path": extra}))
 
 	if err != nil {
@@ -383,7 +383,7 @@ func TestGrep_SearchesAnExtraRootBySymlinkSpelling(t *testing.T) {
 	t.Parallel()
 
 	workspace, extra, link := symlinkedExtraReadRoot(t)
-	tool := NewGrep(workspace, func() []string { return []string{extra} })
+	tool := NewGrep(workspace, ReadMounts{Roots: func() []string { return []string{extra} }})
 
 	content := spelledLikeRealBelowTheHeader(t, tool,
 		map[string]any{"pattern": "^name: ", "path": link},
@@ -477,7 +477,7 @@ func TestGrep_Execute_ContextLines(t *testing.T) {
 			root := t.TempDir()
 			writeGrepLines(t, root, "f.txt", tc.lines...)
 
-			result, err := NewGrep(root, nil).Execute(context.Background(), callWith(t, "c1", tc.args))
+			result, err := NewGrep(root, ReadMounts{}).Execute(context.Background(), callWith(t, "c1", tc.args))
 
 			if err != nil {
 				t.Fatalf("Execute returned a Go error: %v", err)
@@ -502,7 +502,7 @@ func TestGrep_Execute_ContextLinesPaginateByMatches(t *testing.T) {
 	writeGrepLines(t, root, "f.txt",
 		"L1", "NEEDLE a", "L3", "L4", "NEEDLE b", "L6", "L7", "NEEDLE c", "L9")
 
-	result, err := NewGrep(root, nil).Execute(context.Background(), callWith(t, "c1", map[string]any{
+	result, err := NewGrep(root, ReadMounts{}).Execute(context.Background(), callWith(t, "c1", map[string]any{
 		"pattern": "NEEDLE", "context_lines": 1, "max_results": 1, "offset": 1,
 	}))
 
@@ -534,7 +534,7 @@ func TestGrep_Execute_ContextLinesClampedToMaximum(t *testing.T) {
 	root := t.TempDir()
 	writeGrepLines(t, root, "f.txt", lines...)
 
-	result, err := NewGrep(root, nil).Execute(context.Background(),
+	result, err := NewGrep(root, ReadMounts{}).Execute(context.Background(),
 		callWith(t, "c1", map[string]any{"pattern": "NEEDLE", "context_lines": 99}))
 
 	if err != nil {
@@ -561,7 +561,7 @@ func TestGrep_Execute_ContextLinesGroupPerFile(t *testing.T) {
 	writeGrepLines(t, root, "src/a.txt", "a1", "NEEDLE a", "a3")
 	writeGrepLines(t, root, "src/b.txt", "b1", "NEEDLE b", "b3")
 
-	result, err := NewGrep(root, nil).Execute(context.Background(), callWith(t, "c1", map[string]any{
+	result, err := NewGrep(root, ReadMounts{}).Execute(context.Background(), callWith(t, "c1", map[string]any{
 		"pattern": "NEEDLE", "path": "src", "context_lines": 1,
 	}))
 
@@ -583,7 +583,7 @@ func TestGrep_Execute_ContextLinesAbsentMatchesDefault(t *testing.T) {
 
 	root := t.TempDir()
 	seedTree(t, root)
-	tool := NewGrep(root, nil)
+	tool := NewGrep(root, ReadMounts{})
 
 	baseline, err := tool.Execute(context.Background(),
 		callWith(t, "c1", map[string]any{"pattern": "^package "}))
@@ -611,7 +611,7 @@ func TestGrep_Execute_ToolErrors(t *testing.T) {
 
 	root := t.TempDir()
 	seedTree(t, root)
-	tool := NewGrep(root, nil)
+	tool := NewGrep(root, ReadMounts{})
 
 	cases := []struct {
 		name        string
@@ -675,7 +675,7 @@ func TestGrep_Execute_NewlineInAFilenameCannotForgeARow(t *testing.T) {
 			root := t.TempDir()
 			seedForgingFile(t, root, tc.content)
 
-			result, err := NewGrep(root, nil).Execute(context.Background(), callWith(t, "c1", tc.args))
+			result, err := NewGrep(root, ReadMounts{}).Execute(context.Background(), callWith(t, "c1", tc.args))
 
 			if err != nil {
 				t.Fatalf("Execute returned error: %v", err)
@@ -761,7 +761,7 @@ func TestGrep_Execute_HeaderNamesTheSearchedScope(t *testing.T) {
 			root := t.TempDir()
 			seedTree(t, root)
 
-			result, err := NewGrep(root, nil).Execute(context.Background(), callWith(t, "c1", tc.args))
+			result, err := NewGrep(root, ReadMounts{}).Execute(context.Background(), callWith(t, "c1", tc.args))
 
 			if err != nil {
 				t.Fatalf("Execute returned a Go error: %v", err)
@@ -822,7 +822,7 @@ func TestGrep_Execute_MissingPathSuggestsSiblings(t *testing.T) {
 
 	root := tempRoot(t)
 	writeFixtureFile(t, filepath.Join(root, "docs", "adr", "0025-interjections.md"), "adr body")
-	tool := NewGrep(root, nil)
+	tool := NewGrep(root, ReadMounts{})
 
 	cases := []struct {
 		name string

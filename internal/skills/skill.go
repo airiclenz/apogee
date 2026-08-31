@@ -10,9 +10,11 @@ import (
 // key the chat input attaches and the loop resolves; DisplayName and Summary drive the merged "/"
 // menu; Body is the instruction text the loop prepends to the turn when the skill is attached.
 //
-// Dir is the absolute path to the skill's folder, or empty when the skill announces no readable
-// folder at all — which is what a shipped skill does today: its bytes are in the binary, not on
-// disk, so naming a path would name one nothing can open. It rides through ResolveSkills into the
+// Dir is the ADDRESS of the skill's folder — the absolute host path for a skill found on disk, and
+// the `shipped:<id>` virtual-mount address for one of apogee's own, whose bytes are in the binary
+// rather than under any host path (ADR 0065 §3, ShippedMountPrefix). Both are addresses the read
+// tools resolve; empty means the skill announces no readable folder at all. It rides through
+// ResolveSkills into the
 // block the loop injects, which names it so the model can read the resources bundled beside the
 // SKILL.md (refs/, prompts, scripts) without re-walking the source dirs; an empty Dir omits that
 // line entirely (internal/agent's resolveSkillRefs).

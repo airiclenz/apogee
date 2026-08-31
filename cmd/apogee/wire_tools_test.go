@@ -11,6 +11,7 @@ import (
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/mechanisms"
+	"github.com/airiclenz/apogee/internal/skills"
 )
 
 // registryWithMCP is the one place the composition root assembles HostTools by hand, so it must
@@ -54,6 +55,37 @@ func TestRegistryWithMCPThreadsExtraReadRoots(t *testing.T) {
 	}
 	if result.IsError || !strings.Contains(result.Content, "bundled bytes") {
 		t.Errorf("read under the mounted root failed: %q — the MCP build dropped ExtraReadRoots", result.Content)
+	}
+}
+
+// The pathless mounts reach the same assembly, and by the same argument: a shipped skill's block
+// announces `shipped:<id>` in every session, so an MCP build that dropped the mount would make that
+// announced address readable without an MCP server and unreadable with one. The provider is the
+// real one — the address under test is the address the loader stamps.
+func TestRegistryWithMCPThreadsVirtualReadRoots(t *testing.T) {
+	t.Parallel()
+	provider := skills.NewProvider(skills.Sources{UseShippedSkills: true})
+	cfg := validCfg(t)
+	cfg.VirtualReadRoots = provider.VirtualReadRoots
+
+	sk, ok := provider.Get("debugging")
+	if !ok {
+		t.Fatal("the shipped debugging skill did not load")
+	}
+	tool, found := registryWithMCP(cfg.WorkspaceDir, cfg, nil).Lookup("list_dir")
+	if !found {
+		t.Fatal("list_dir is missing from the MCP registry build")
+	}
+	result, err := tool.Execute(context.Background(), apogee.ToolCall{
+		ID:        "c1",
+		Tool:      "list_dir",
+		Arguments: []byte(`{"path":` + strconv.Quote(sk.Dir) + `}`),
+	})
+	if err != nil {
+		t.Fatalf("list_dir returned a Go error: %v", err)
+	}
+	if result.IsError || !strings.Contains(result.Content, "SKILL.md") {
+		t.Errorf("listing the announced %q failed: %q — the MCP build dropped VirtualReadRoots", sk.Dir, result.Content)
 	}
 }
 

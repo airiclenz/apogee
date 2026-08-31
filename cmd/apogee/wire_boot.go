@@ -239,6 +239,13 @@ func (w *rootWiring) resolveConfig() error {
 		// tool INSTANCES (domain.ToolRegistry.Subset), so the same read tools — and with them
 		// this same func — ride along at every depth.
 		ExtraReadRoots: w.skillProvider.ReadRoots,
+		// The same mount for the source that has NO host path: apogee's own shipped skills live in
+		// the binary, so their bundled files are reachable only under the `shipped:<id>` address
+		// their SKILL.md block announces (ADR 0065 §3). Without this the announced files: line
+		// would name a folder every read tool refuses — the one thing an announced path may not do.
+		// Like ReadRoots it is the PROVIDER's method value, so a `use-shipped-skills` flip moves
+		// the mount with no re-wiring, and sub-agents inherit it through the same tool instances.
+		VirtualReadRoots: w.skillProvider.VirtualReadRoots,
 		// The `context-window:` PIN (0 when unpinned — nothing probes at startup any more). It is
 		// the budget /compact and the automatic Compaction trigger bound their summary request
 		// against so compaction survives high fill (the summary call would otherwise overflow near

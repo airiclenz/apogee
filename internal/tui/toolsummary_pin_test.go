@@ -87,7 +87,7 @@ func TestToolSummariesRenderThroughThePresenter(t *testing.T) {
 	}{
 		{
 			name: "read_file",
-			tool: tools.NewReadFile(root, nil),
+			tool: tools.NewReadFile(root, tools.ReadMounts{}),
 			args: `{"path":"main.go"}`,
 			want: "3 lines",
 		},
@@ -99,13 +99,13 @@ func TestToolSummariesRenderThroughThePresenter(t *testing.T) {
 		},
 		{
 			name: "list_dir",
-			tool: tools.NewListDir(root, nil),
+			tool: tools.NewListDir(root, tools.ReadMounts{}),
 			args: `{"path":"sub"}`,
 			want: "2 entries",
 		},
 		{
 			name: "grep",
-			tool: tools.NewGrep(root, nil),
+			tool: tools.NewGrep(root, tools.ReadMounts{}),
 			args: `{"pattern":"func main","path":"main.go"}`,
 			want: "1 hit",
 		},

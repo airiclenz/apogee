@@ -44,10 +44,11 @@ type ReadFile struct {
 }
 
 // NewReadFile returns a read_file tool that resolves paths within root, and — for ABSOLUTE
-// paths only — within any extra read-only root extraReadRoots reports at call time. A nil
-// extraReadRoots means workspace-only: byte-identical to the fence before extra roots existed.
-func NewReadFile(root string, extraReadRoots func() []string) *ReadFile {
-	return &ReadFile{toolSpec: readFileSpec, scope: readScope{root: root, extra: extraReadRoots}}
+// paths only — within any extra read-only root mounts reports at call time, plus any virtual
+// mount it names. A zero ReadMounts means workspace-only: byte-identical to the fence before
+// either mount seam existed.
+func NewReadFile(root string, mounts ReadMounts) *ReadFile {
+	return &ReadFile{toolSpec: readFileSpec, scope: mounts.scope(root)}
 }
 
 // ReadOnly reports that read_file performs no writes (domain.ReadOnlyTool).

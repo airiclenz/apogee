@@ -41,7 +41,7 @@ func TestListDir_Execute_ListsTopLevel(t *testing.T) {
 	root := t.TempDir()
 	seedTree(t, root)
 
-	result, err := NewListDir(root, nil).Execute(context.Background(),
+	result, err := NewListDir(root, ReadMounts{}).Execute(context.Background(),
 		callWith(t, "c1", map[string]any{"path": "."}))
 
 	if err != nil {
@@ -64,7 +64,7 @@ func TestListDir_Execute_RecursesWhenAsked(t *testing.T) {
 	root := t.TempDir()
 	seedTree(t, root)
 
-	result, err := NewListDir(root, nil).Execute(context.Background(),
+	result, err := NewListDir(root, ReadMounts{}).Execute(context.Background(),
 		callWith(t, "c1", map[string]any{"path": "src", "recursive": true}))
 
 	if err != nil {
@@ -81,7 +81,7 @@ func TestListDir_Execute_NonRecursiveStopsAtTop(t *testing.T) {
 	root := t.TempDir()
 	seedTree(t, root)
 
-	result, err := NewListDir(root, nil).Execute(context.Background(),
+	result, err := NewListDir(root, ReadMounts{}).Execute(context.Background(),
 		callWith(t, "c1", map[string]any{"path": "src"}))
 
 	if err != nil {
@@ -97,7 +97,7 @@ func TestListDir_Execute_ReportsEntryCounts(t *testing.T) {
 
 	root := t.TempDir()
 	seedTree(t, root)
-	tool := NewListDir(root, nil)
+	tool := NewListDir(root, ReadMounts{})
 
 	cases := []struct {
 		name        string
@@ -172,7 +172,7 @@ func TestListDir_RefusesEscapingSymlink(t *testing.T) {
 	if err := os.Symlink(filepath.Join(outside, "ssh"), filepath.Join(root, "escape")); err != nil {
 		t.Skipf("symlinks unsupported: %v", err)
 	}
-	tool := NewListDir(root, nil)
+	tool := NewListDir(root, ReadMounts{})
 
 	t.Run("named directly", func(t *testing.T) {
 		t.Parallel()
@@ -230,7 +230,7 @@ func TestListDir_Execute_ListsUnderAnExtraReadRoot(t *testing.T) {
 	seedTree(t, root)
 	seedTree(t, extra)
 
-	tool := NewListDir(root, func() []string { return []string{extra} })
+	tool := NewListDir(root, ReadMounts{Roots: func() []string { return []string{extra} }})
 
 	cases := []struct {
 		name      string
@@ -327,7 +327,7 @@ func TestListDir_ListsAnExtraRootBySymlinkSpelling(t *testing.T) {
 	t.Parallel()
 
 	workspace, extra, link := symlinkedExtraReadRoot(t)
-	tool := NewListDir(workspace, func() []string { return []string{extra} })
+	tool := NewListDir(workspace, ReadMounts{Roots: func() []string { return []string{extra} }})
 
 	content := spelledLikeReal(t, tool,
 		map[string]any{"path": link, "recursive": true},
@@ -345,7 +345,7 @@ func TestListDir_Execute_ToolErrors(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "f.txt"), []byte("x"), 0o644); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
-	tool := NewListDir(root, nil)
+	tool := NewListDir(root, ReadMounts{})
 
 	cases := []struct {
 		name        string
@@ -388,7 +388,7 @@ func TestListDir_DangerousActionClassification(t *testing.T) {
 	t.Parallel()
 
 	guard := security.DefaultDangerousActionGuard()
-	tool := NewListDir(t.TempDir(), nil)
+	tool := NewListDir(t.TempDir(), ReadMounts{})
 
 	for _, tc := range []struct {
 		name, path string
@@ -423,7 +423,7 @@ func TestListDir_Execute_NewlineInAFilenameCannotForgeARow(t *testing.T) {
 	root := t.TempDir()
 	seedForgingFile(t, root, "x")
 
-	result, err := NewListDir(root, nil).Execute(context.Background(),
+	result, err := NewListDir(root, ReadMounts{}).Execute(context.Background(),
 		callWith(t, "c1", map[string]any{"path": "."}))
 
 	if err != nil {
@@ -450,7 +450,7 @@ func TestListDir_Execute_MissingDirectorySuggestsSiblings(t *testing.T) {
 
 	root := tempRoot(t)
 	writeFixtureFile(t, filepath.Join(root, "docs", "adr", "0025-interjections", "note.md"), "note")
-	tool := NewListDir(root, nil)
+	tool := NewListDir(root, ReadMounts{})
 
 	cases := []struct {
 		name string

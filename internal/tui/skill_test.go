@@ -1027,6 +1027,7 @@ func TestSkillSourceNamesTheRootItCameFrom(t *testing.T) {
 		{"the project's .apogee/skills", filepath.Join(ws, ".apogee", "skills", "x"), skillSourceWorkspace},
 		{"the project's bare skills/", filepath.Join(ws, "skills", "x"), skillSourceWorkspace},
 		{"the user's library", filepath.Join(home, "skills", "x"), skillSourceLibrary},
+		{"a shipped skill's virtual mount", skills.ShippedMountPrefix + "debugging", skillSourceShipped},
 		{"a sibling that merely starts alike", filepath.Join(ws, "skills-vendored", "x"), skillSourceElsewhere},
 		{"a dir under neither root", filepath.Join("/elsewhere", "skills", "x"), skillSourceElsewhere},
 		{"no Dir at all", "", ""},

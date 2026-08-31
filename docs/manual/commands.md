@@ -153,13 +153,21 @@ A comma-separated string does the same (`triggers: cut a release, publish to hom
 ## `{{SKILL_DIR}}` in skill bodies
 
 A skill's SKILL.md may write the literal token `{{SKILL_DIR}}` anywhere in its body; when
-the skill is attached, apogee replaces every occurrence with the skill's **absolute
-directory** — the folder holding the SKILL.md and the files bundled beside it. That lets a
+the skill is attached, apogee replaces every occurrence with the skill's **directory
+address** — the folder holding the SKILL.md and the files bundled beside it. That lets a
 skill's instructions name exact paths ("read `{{SKILL_DIR}}/prompts/recon.md`") instead of
 asking the model to find the folder first. The expansion happens only when apogee knows the
 skill's directory — a skill resolved without one keeps the token as written. Other hosts
 leave the token literal too, so a skill meant to travel should not lean on it exclusively:
 phrase the surrounding text so it still reads sensibly unexpanded.
+
+For a skill on disk that address is the absolute path of its folder. For one apogee
+[ships](configuration.md#skills-apogee-ships--use-shipped-skills) there is no folder on your
+machine, so the address is `shipped:<id>` — `shipped:debugging/checklist.md` names a file
+inside the binary. Both spellings work in `read_file`, `list_dir`, `grep`, `find_files` and as
+the **source** of a `copy_file`, which is how you take a bundled file out into your project.
+Neither is writable: `shipped:` is refused by every write, and the skill folders on disk are
+mounted read-only.
 
 ## Undoing the agent's file writes — `/undo`
 

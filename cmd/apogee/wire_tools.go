@@ -238,6 +238,10 @@ func registryWithMCP(workspace string, cfg apogee.Config, mcpTools []apogee.Tool
 		// read tool loses them, or the model could read a skill's bundled files in a session
 		// without MCP and not in one with it.
 		ExtraReadRoots: cfg.ExtraReadRoots,
+		// And the pathless mounts beside them (the shipped skills' `shipped:<id>` tree), off the
+		// same Config for the same reason: an MCP session must not be the one place a shipped
+		// skill's announced files: line names a folder the read tools refuse.
+		VirtualReadRoots: cfg.VirtualReadRoots,
 	})
 	for _, t := range mcpTools {
 		if err := registry.Register(t); err != nil {

@@ -104,6 +104,12 @@ func ResolvedWriteTarget(t domain.Tool, call domain.ToolCall) string {
 // pane and the card share the TUI's); what all three must not do is disagree about the path,
 // which is why they all read resolveTargetUnbounded.
 func resolvedTargetNote(input, root string) string {
+	if _, _, isMount := virtualMountRef(input); isMount {
+		// A virtual-mount reference names no host path at all (path_virtual.go), so there is
+		// nothing for this note to disclose — and joining it onto the workspace root would
+		// invent one.
+		return ""
+	}
 	target, ok := resolveTargetUnbounded(input, root)
 	if !ok || target.Real == target.Named {
 		return ""

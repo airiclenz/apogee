@@ -100,6 +100,14 @@ Prove the fix works, and prove you broke nothing.
 - If the fix did not work, go back to step 2 with what you just learned. Do not stack a
   second guess on top of the first.
 
+## When step 2 stalls
+
+If you have a reproducer, have read the code, and still cannot name the diverging line,
+read `{{SKILL_DIR}}/checklist.md` (read_file) and work down it. It is a list of the
+questions that most often produce the next fact: question the reproducer, question what
+you think you read, question the boundaries. Do not read it before you are stuck — the
+four steps above are the protocol, and this is only the way out of step 2.
+
 ## Reporting
 
 When you are done, say four things and no more:

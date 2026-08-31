@@ -2,6 +2,7 @@ package domain
 
 import (
 	"fmt"
+	"io/fs"
 	"time"
 )
 
@@ -168,6 +169,19 @@ type Config struct {
 	// discipline, ADR 0012 D1), so mounting a directory never makes it writable — copy_file may
 	// READ its source from a mount, and still writes only inside WorkspaceDir.
 	ExtraReadRoots func() []string
+
+	// VirtualReadRoots names read-only trees the same READ-ONLY tools may reach that have NO host
+	// path at all — served from an fs.FS and addressed by the prefix their contents are announced
+	// under (`shipped:<id>`), keyed by that prefix. It carries ExtraReadRoots' contract clause for
+	// clause — read-only, absolute-address-only, evaluated LIVE once per tool call, nil ⇒ none,
+	// default-tool-set only — and differs in exactly one thing: there is no path a root string
+	// could have named, which is why it is a second seam rather than more entries in the first.
+	//
+	// It is as generic as its sibling: apogee's embedded shipped skills are the first thing mounted
+	// through it, but nothing here knows what a skill is (ADR 0031). A WRITE never reaches it —
+	// the address spelling itself is refused on the write side — so mounting a tree here can no
+	// more make it writable than mounting a directory there can.
+	VirtualReadRoots func() map[string]fs.FS
 
 	// ExternalEffects is the single injectable boundary for non-forkable effects
 	// (network, MCP). nil ⇒ live. The bench injects a deterministic stub for v1;

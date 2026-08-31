@@ -6,13 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"os"
 	"path"
-	"path/filepath"
 	"strings"
 
 	"github.com/airiclenz/apogee/internal/domain"
-	"github.com/airiclenz/apogee/internal/security"
 )
 
 var findFilesSpec = toolSpec{
@@ -64,10 +61,11 @@ type FindFiles struct {
 }
 
 // NewFindFiles returns a find_files tool that resolves paths within root, and — for ABSOLUTE
-// paths only — within any extra read-only root extraReadRoots reports at call time. A nil
-// extraReadRoots means workspace-only: byte-identical to the fence before extra roots existed.
-func NewFindFiles(root string, extraReadRoots func() []string) *FindFiles {
-	return &FindFiles{toolSpec: findFilesSpec, scope: readScope{root: root, extra: extraReadRoots}}
+// paths only — within any extra read-only root mounts reports at call time, plus any virtual
+// mount it names. A zero ReadMounts means workspace-only: byte-identical to the fence before
+// either mount seam existed.
+func NewFindFiles(root string, mounts ReadMounts) *FindFiles {
+	return &FindFiles{toolSpec: findFilesSpec, scope: mounts.scope(root)}
 }
 
 // ReadOnly reports that find_files performs no writes (domain.ReadOnlyTool).
@@ -98,65 +96,45 @@ func (t *FindFiles) Execute(ctx context.Context, call domain.ToolCall) (domain.T
 	if searchPath == "" {
 		searchPath = "."
 	}
-	root, resolved, err := t.scope.resolve(searchPath)
-	if err != nil {
-		return errorResult(call.ID, err.Error()), nil
-	}
-
-	info, err := os.Stat(resolved)
-	if err != nil {
-		// The path was already accepted by the fence, so an absent one is a mis-spelling the
-		// model can fix: offer its near misses in the parent it named.
-		siblings := suggestSiblings(root, workspaceRelative(resolved, root), args.Path)
-		return errorResult(call.ID, notFoundMessage("path not found: ", args.Path, siblings)), nil
+	target, refusal := t.scope.searchTarget(searchPath, args.Path)
+	if refusal != "" {
+		return errorResult(call.ID, refusal), nil
 	}
 
 	// The glob list is parsed by grep's own include parser, so the two tools agree on the
 	// syntax — comma-separated basename globs — and on a malformed glob, which filepath.Match
 	// reports as "no match" rather than an error the model has to decode.
 	globs := parseIncludeGlobs(args.Pattern)
-	found, err := t.walk(ctx, root, resolved, info, globs)
+	found, err := t.walk(ctx, target, globs)
 	if err != nil {
 		return domain.ToolResult{}, err // only ctx cancellation propagates as a Go error
 	}
 	return okResult(call.ID, renderFoundPaths(found, searchScope(args.Path, globs), args.MaxResults, args.Offset)), nil
 }
 
-// walk collects the matching paths under target — the resolved absolute path of the search
-// path — as names relative to root, the root that path was accepted under. target is used to
-// ENUMERATE names only; nothing is opened by an absolute path the walk handed out. A target
-// that is a file is matched by its own base name, so naming one file is a legal (if pointless)
-// query rather than an error.
+// walk collects the matching paths under target as the names that target REPORTS them under
+// (searchTarget, path_read.go): root-relative on disk, the mount's announced address in a virtual
+// mount. The tree is used to ENUMERATE names only; nothing is opened by an absolute path the walk
+// handed out. A target that is a file is matched by its own base name, so naming one file is a
+// legal (if pointless) query rather than an error.
 //
 // The walk skips the same noise directories grep skips (grepExcludeDirs) and is always
 // recursive: name discovery is this tool's whole point, so there is no depth or recursion
 // parameter to get wrong.
-func (t *FindFiles) walk(ctx context.Context, root, target string, info os.FileInfo, globs []string) ([]string, error) {
+func (t *FindFiles) walk(ctx context.Context, target searchTarget, globs []string) ([]string, error) {
 	found := make([]string, 0, defaultFindFilesResults)
-	// The name is measured from the MATCHED root, symlink-resolved by the shared guard, for the
-	// reason grep measures its own that way: the walk's absolute paths come back
-	// symlink-resolved, so on a host whose root is reached through a link the raw root is a
-	// prefix of nothing.
-	targetRel := filepath.ToSlash(workspaceRelative(target, root))
 
-	if !info.IsDir() {
+	if !target.isDir() {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		if matchesInclude(path.Base(targetRel), globs) {
-			found = append(found, targetRel)
+		if matchesInclude(path.Base(target.rel), globs) {
+			found = append(found, target.rel)
 		}
 		return found, nil
 	}
 
-	// prefix lifts a walk-relative name to a root-relative one ("" when the search root IS
-	// the matched root). fs.WalkDir yields slash-separated names, so the join is path.Join.
-	prefix := targetRel
-	if prefix == "." {
-		prefix = ""
-	}
-
-	walkErr := fs.WalkDir(os.DirFS(target), ".", func(rel string, entry fs.DirEntry, err error) error {
+	walkErr := fs.WalkDir(target.tree, ".", func(rel string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return nil // skip unreadable entries rather than aborting the whole walk
 		}
@@ -172,11 +150,10 @@ func (t *FindFiles) walk(ctx context.Context, root, target string, info os.FileI
 		if !matchesInclude(entry.Name(), globs) {
 			return nil
 		}
-		name := path.Join(prefix, rel)
-		if !t.reportable(root, entry, name) {
+		if !t.reportable(target, entry, target.openName(rel)) {
 			return nil
 		}
-		found = append(found, name)
+		found = append(found, target.reportName(rel))
 		if len(found) >= maxFindFilesPaths {
 			return errFindFilesStop
 		}
@@ -194,15 +171,15 @@ func (t *FindFiles) walk(ctx context.Context, root, target string, info os.FileI
 // relative to root. A regular file always may: the walk never descends through a symlink, so
 // every component above it is a real directory inside the searched subtree. Anything else — a
 // symlink, a device, a socket — is only reported when it still opens to a regular file THROUGH
-// root's fence (security.SafeOpen), so a planted `notes.txt -> ~/.ssh/id_rsa` is refused rather
+// the target's own fence (target.open), so a planted `notes.txt -> ~/.ssh/id_rsa` is refused rather
 // than named — and a walk that began under an extra read-only root is checked against THAT
 // root, so a link escaping it is refused just as one escaping the workspace is. A refused entry
 // is silently absent, the same contract grep gives an unreadable file.
-func (t *FindFiles) reportable(root string, entry fs.DirEntry, rel string) bool {
+func (t *FindFiles) reportable(target searchTarget, entry fs.DirEntry, rel string) bool {
 	if entry.Type().IsRegular() {
 		return true
 	}
-	file, err := security.SafeOpen(root, rel)
+	file, err := target.open(rel)
 	if err != nil {
 		return false
 	}

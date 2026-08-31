@@ -79,14 +79,14 @@ type CopyFile struct {
 }
 
 // NewCopyFile returns a copy_file tool that writes within root and resolves its SOURCE within root
-// plus — for ABSOLUTE paths only — any extra read-only root extraReadRoots reports at call time
-// (the same live seam NewReadFile takes). A nil extraReadRoots means workspace-only:
-// byte-identical to the fence before extra roots existed.
-func NewCopyFile(root string, extraReadRoots func() []string) *CopyFile {
+// plus — for ABSOLUTE paths only — any extra read-only root mounts reports at call time, plus any
+// virtual mount it names (the same live seam NewReadFile takes). A zero ReadMounts means
+// workspace-only: byte-identical to the fence before either mount seam existed.
+func NewCopyFile(root string, mounts ReadMounts) *CopyFile {
 	return &CopyFile{
 		toolSpec: copyFileSpec,
 		root:     root,
-		scope:    readScope{root: root, extra: extraReadRoots},
+		scope:    mounts.scope(root),
 	}
 }
 
@@ -131,6 +131,10 @@ func (t *CopyFile) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 	if !ok {
 		return fail, nil
 	}
+	if v, ok := t.scope.virtualLocate(args.Source); ok {
+		return t.copyFromMount(ctx, call, v, args)
+	}
+
 	sourceRoot, source, err := t.scope.locate(args.Source)
 	if err != nil {
 		sourceRoot, source = t.root, args.Source
@@ -162,6 +166,48 @@ func (t *CopyFile) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 	}
 	return okResult(call.ID, fmt.Sprintf("copied %s to %s%s", args.Source, args.Destination, resolved)), nil
 }
+
+// copyFromMount is Execute's virtual-mount branch: a copy whose SOURCE lives in a tree with no
+// host path (path_virtual.go), which is how a shipped skill's bundled file is materialized into
+// the workspace. The bytes are read through the mount's bounded read and written through the
+// workspace fence, so the sanctioned crossing stays exactly what it is for a disk mount — the
+// source is a READ, the destination is the only end this call writes.
+//
+// Everything the model sees is the disk copy's: the same destination refusals
+// (checkFileOpsDestination), the same success sentence naming the spellings it wrote, and the same
+// journal record on the destination alone (safeWriteFile captures it), so an undo takes the copy
+// back exactly as it takes back a copy from disk.
+func (t *CopyFile) copyFromMount(ctx context.Context, call domain.ToolCall, v virtualTarget, args fileOpsArgs) (domain.ToolResult, error) {
+	if args.Destination == "" {
+		return errorResult(call.ID, "destination is required"), nil
+	}
+
+	info, err := v.stat()
+	if err != nil {
+		return errorResult(call.ID, escapeOrMessage(err, "file not found: "+args.Source)), nil
+	}
+	if info.IsDir() {
+		return errorResult(call.ID, "not a file: "+args.Source+" (directories are not supported)"), nil
+	}
+	data, failure := v.readBounded()
+	if failure != "" {
+		return errorResult(call.ID, failure), nil
+	}
+	if refusal := checkFileOpsDestination(ctx, args, t.root); refusal != "" {
+		return errorResult(call.ID, refusal), nil
+	}
+
+	resolved := resolvedTargetNote(args.Destination, t.root)
+	if err := safeWriteFile(ctx, args.Destination, t.root, data, copiedFilePerm); err != nil {
+		return errorResult(call.ID, err.Error()), nil
+	}
+	return okResult(call.ID, fmt.Sprintf("copied %s to %s%s", args.Source, args.Destination, resolved)), nil
+}
+
+// copiedFilePerm is the mode a file copied OUT OF a virtual mount lands under. A mount carries no
+// host mode to preserve — the bytes were compiled into the binary — so the copy takes the same
+// ordinary file mode every other tool-authored write does.
+const copiedFilePerm = 0o644
 
 // MoveFile moves or renames a workspace file. It is a write tool — the loop routes it through
 // Approval in Ask-Before before Execute is called.
@@ -347,6 +393,14 @@ func checkFileOpsPathsFrom(
 		return "not a file: " + args.Source + " (directories are not supported)"
 	}
 
+	return checkFileOpsDestination(ctx, args, destinationRoot)
+}
+
+// checkFileOpsDestination is the DESTINATION half of that check, on its own because copy_file's
+// virtual-mount branch has no source to stat through a fence — the mount is the fence — while its
+// destination is judged by exactly these rules. Splitting it is what keeps the two copy routes
+// giving one answer, refusal wording included, to the same destination mistake.
+func checkFileOpsDestination(ctx context.Context, args fileOpsArgs, destinationRoot string) string {
 	destination, err := statWriteTarget(ctx, args.Destination, destinationRoot)
 	switch {
 	// A root that will not open leads, ahead of both the escape arm and the free-to-land arm:

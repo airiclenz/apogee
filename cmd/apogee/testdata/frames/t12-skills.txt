@@ -6,8 +6,8 @@
   in config.yaml                                                                                   ┃
                                                                                                    ┃
 · 2 skills available:                                                                              ┃
-    /debugging  Debugging — Chase a bug down in four steps — reproduce, isolate, fix the cause,    ┃
-  verify — with the rules that keep each step honest.                                              ┃
+    /debugging · shipped  Debugging — Chase a bug down in four steps — reproduce, isolate, fix the ┃
+  cause, verify — with the rules that keep each step honest.                                       ┃
       triggers: debug this, fix this bug, why is this failing, why does this crash, this test      ┃
   fails, test is failing, stack trace, panic…                                                      ┃
     /dupe · workspace  Dupe — a duplicate id                                                       ┃

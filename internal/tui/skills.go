@@ -172,12 +172,13 @@ func emptyCatalogLines(home, workspace string) []string {
 // was not needed. Beside the id it is bounded by the id's own clip (skillIDCell) and cannot be
 // moved by anything a SKILL.md says.
 
-// The three source labels a skill row may carry. They name the SOURCE DIR the skill was loaded
-// from (sourceDirs, internal/skills/load.go), not a trust level: trust is the human's call, and
-// the label's job is to hand them the fact they need to make it.
+// The four source labels a skill row may carry. They name the SOURCE the skill was loaded from
+// (sourceDirs and the embedded tree, internal/skills/load.go), not a trust level: trust is the
+// human's call, and the label's job is to hand them the fact they need to make it.
 const (
 	skillSourceWorkspace = "workspace" // <ws>/.apogee/skills or <ws>/skills — the project's own
 	skillSourceLibrary   = "library"   // <home>/skills — the user's global library (ADR 0032)
+	skillSourceShipped   = "shipped"   // compiled into the binary — apogee's own (ADR 0065)
 	skillSourceElsewhere = "elsewhere" // under neither root: a relocated or unwired source dir
 )
 
@@ -199,6 +200,13 @@ const skillSourceSep = " · "
 func skillSource(dir, home, workspace string) string {
 	if dir == "" {
 		return ""
+	}
+	// The shipped source is asked before either root because it is not a path at all: a skill of
+	// apogee's own announces the virtual mount its bundled files are served through
+	// (skills.ShippedMountPrefix), so measuring it against a host root would answer "elsewhere"
+	// for the one source this run can account for exactly.
+	if strings.HasPrefix(dir, skills.ShippedMountPrefix) {
+		return skillSourceShipped
 	}
 	// The library is asked FIRST because it is the source that WINS an id collision (ADR 0032), and
 	// because a home may legitimately sit inside the workspace (--config <ws>/.apogee): when one

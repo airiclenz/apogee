@@ -61,6 +61,15 @@ const (
 	shippedSource = "shipped"
 )
 
+// ShippedMountPrefix is the address a shipped skill's folder is ANNOUNCED under — the `shipped:`
+// half of `shipped:debugging`, colon included, so it is the mount key a host hands the read tools
+// verbatim (VirtualReadRoots). It is exported because two other layers spell it: the tools layer
+// keys its virtual mounts by it, and the TUI labels a skill loaded from it (ADR 0065 §3).
+//
+// It is deliberately NOT a host path and can never be mistaken for one: nothing on this machine
+// answers to it, which is the whole reason a shipped skill needs an address of its own.
+const ShippedMountPrefix = shippedSource + ":"
+
 // Sources are the injected roots Load discovers skills under (ADR 0001 — no implicit ~/.apogee).
 // Home is the apogee home (its skills/ subdir is the global library); Workspace is the project
 // root (its .apogee/skills and, when UseProjectSkills, its skills/ folder). An empty Home or
@@ -221,6 +230,28 @@ func readRoots(src Sources) []string {
 	return roots
 }
 
+// virtualReadRoots renders the shipped source as the MOUNT view the read tools take: the embedded
+// tree keyed by the prefix its skills announce their folders under. It is readRoots' counterpart
+// for the source that has no host path — the two are separate seams because they are separate
+// KINDS of thing, not two spellings of one: a host path is resolved and fenced, a mount is served.
+//
+// Nothing is mounted when the shipped source is off, which is the gate holding on both halves at
+// once: no shipped skill is in the catalog to announce an address, and no address resolves.
+//
+// A broken embed yields no mount rather than a panic, matching loadShipped, which records the same
+// failure as a skip: a build that lost its shipped tree still runs, with the /skills report saying
+// what went missing.
+func virtualReadRoots(src Sources) map[string]fs.FS {
+	if !src.UseShippedSkills {
+		return nil
+	}
+	fsys, err := fs.Sub(shippedFiles, shippedDir)
+	if err != nil {
+		return nil
+	}
+	return map[string]fs.FS{ShippedMountPrefix: fsys}
+}
+
 // loadDir opens one DISK source dir through os.Root and hands it to walkSkills (a missing source
 // dir records nothing — it is simply skipped). The fence is pinned by openAnchor. For a workspace
 // source dir it covers the ANCHOR as well as the walk below it: neither a symlinked `.apogee`,
@@ -275,11 +306,12 @@ func loadShipped(cat *Catalog) {
 	walkSkills(cat, sourceTree{
 		fsys: fsys,
 		name: shippedSource,
-		// Body-only for now: a shipped skill announces no directory, so resolveSkillRefs emits no
-		// files: line and no path apogee names is unreadable. The virtual `shipped:<id>` mount that
-		// makes the bundled files reachable arrives with it (ADR 0065 §3), and this is the one line
-		// that changes when it does.
-		dirFor: func(string) string { return "" },
+		// A shipped skill announces its folder under the VIRTUAL mount the same tree is served
+		// through (ADR 0065 §3): `shipped:debugging`, an address the read tools resolve and
+		// nothing on the host answers to. It is what resolveSkillRefs' files: line names and what
+		// every {{SKILL_DIR}} in the body expands to, so a bundled file is reachable by the exact
+		// spelling the model is handed.
+		dirFor: func(relDir string) string { return ShippedMountPrefix + relDir },
 	})
 }
 

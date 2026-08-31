@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -42,10 +44,11 @@ type ListDir struct {
 }
 
 // NewListDir returns a list_dir tool that resolves paths within root, and — for ABSOLUTE
-// paths only — within any extra read-only root extraReadRoots reports at call time. A nil
-// extraReadRoots means workspace-only: byte-identical to the fence before extra roots existed.
-func NewListDir(root string, extraReadRoots func() []string) *ListDir {
-	return &ListDir{toolSpec: listDirSpec, scope: readScope{root: root, extra: extraReadRoots}}
+// paths only — within any extra read-only root mounts reports at call time, plus any virtual
+// mount it names. A zero ReadMounts means workspace-only: byte-identical to the fence before
+// either mount seam existed.
+func NewListDir(root string, mounts ReadMounts) *ListDir {
+	return &ListDir{toolSpec: listDirSpec, scope: mounts.scope(root)}
 }
 
 // ReadOnly reports that list_dir performs no writes (domain.ReadOnlyTool).
@@ -71,6 +74,10 @@ func (t *ListDir) Execute(ctx context.Context, call domain.ToolCall) (domain.Too
 	}
 	if args.Path == "" {
 		return errorResult(call.ID, "path is required"), nil
+	}
+
+	if v, ok := t.scope.virtualLocate(args.Path); ok {
+		return t.listVirtual(ctx, call, v, args)
 	}
 
 	root, dir, err := t.scope.resolve(args.Path)
@@ -159,7 +166,7 @@ func (t *ListDir) collectEntries(ctx context.Context, dir *os.File, root, rel st
 			break
 		}
 		name := item.Name()
-		if strings.HasPrefix(name, ".") || name == "node_modules" {
+		if skipDirEntry(name) {
 			continue
 		}
 
@@ -195,6 +202,94 @@ func (t *ListDir) collectSubdir(ctx context.Context, root, rel string, recursive
 	}
 	defer sub.Close()
 	return t.collectEntries(ctx, sub, root, rel, recursive, maxDepth, depth)
+}
+
+// skipDirEntry reports whether a directory entry is one list_dir never shows: dot-prefixed
+// (hidden) or node_modules. It is shared by the disk walk and the virtual one so a mount cannot
+// come to list what the workspace hides.
+func skipDirEntry(name string) bool {
+	return strings.HasPrefix(name, ".") || name == "node_modules"
+}
+
+// listVirtual answers a listing of a VIRTUAL mount (path_virtual.go) — a tree with no host path,
+// hence no os.Root to pin and no fence to enforce: the mount IS the boundary, and fs.ReadDir over
+// it can no more leave it than a walk can leave an os.Root. Everything a human or a model sees is
+// the disk listing's: the same absent/not-a-directory refusals quoting the address they spelled,
+// the same hidden-entry rule (skipDirEntry), the same caps, the same rendering.
+//
+// The one thing it does NOT carry is the near-miss suggestions a fenced refusal offers: those are
+// read off a host directory, and a mount has none.
+func (t *ListDir) listVirtual(ctx context.Context, call domain.ToolCall, v virtualTarget, args listDirArgs) (domain.ToolResult, error) {
+	info, err := v.stat()
+	if err != nil {
+		return errorResult(call.ID, escapeOrMessage(err, "directory not found: "+args.Path)), nil
+	}
+	if !info.IsDir() {
+		return errorResult(call.ID, "not a directory: "+args.Path), nil
+	}
+
+	tree, err := v.sub()
+	if err != nil {
+		return errorResult(call.ID, escapeOrMessage(err, "directory not found: "+args.Path)), nil
+	}
+
+	maxDepth := defaultDirDepth
+	if args.MaxDepth > 0 {
+		maxDepth = args.MaxDepth
+	}
+	if maxDepth > maxDirDepthLimit {
+		maxDepth = maxDirDepthLimit
+	}
+
+	entries, err := collectVirtualEntries(ctx, tree, ".", args.Recursive, maxDepth, 0, nil)
+	if err != nil {
+		return domain.ToolResult{}, err // only ctx cancellation propagates as a Go error
+	}
+
+	text, listed := renderEntries(entries, args.Offset)
+	return okSummary(call.ID, text, listed), nil
+}
+
+// collectVirtualEntries is collectEntries over an fs.FS: the same ordering (fs.ReadDir sorts by
+// name, which is the order the disk walk restores by hand), the same indentation, the same
+// row-break escaping and the same maxDirEntries cap, accumulated into entries so the cap counts
+// across the whole recursion exactly as it does on disk.
+func collectVirtualEntries(ctx context.Context, tree fs.FS, dir string, recursive bool, maxDepth, depth int, entries []string) ([]string, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	items, err := fs.ReadDir(tree, dir)
+	if err != nil {
+		return entries, nil // an unreadable subdirectory is silently skipped, as on disk
+	}
+
+	indent := strings.Repeat("  ", depth)
+	for _, item := range items {
+		if len(entries) >= maxDirEntries {
+			break
+		}
+		name := item.Name()
+		if skipDirEntry(name) {
+			continue
+		}
+
+		// The name is data inside a one-entry-per-line grammar: a directory entry carrying a
+		// line break would otherwise forge rows the model reads as further entries.
+		row := escapeRowBreaks(name)
+
+		if !item.IsDir() {
+			entries = append(entries, indent+row)
+			continue
+		}
+		entries = append(entries, indent+row+"/")
+		if recursive && depth+1 < maxDepth {
+			entries, err = collectVirtualEntries(ctx, tree, path.Join(dir, name), recursive, maxDepth, depth+1, entries)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+	return entries, nil
 }
 
 // renderEntries paginates from offset and prepends a header naming the total count. It

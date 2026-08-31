@@ -57,7 +57,7 @@ func TestIsURLFilteredNetworker_MarkerCarrier(t *testing.T) {
 func TestIsURLFilteredNetworker_NonCarrier(t *testing.T) {
 	t.Parallel()
 
-	if IsURLFilteredNetworker(NewReadFile(t.TempDir(), nil)) {
+	if IsURLFilteredNetworker(NewReadFile(t.TempDir(), ReadMounts{})) {
 		t.Error("IsURLFilteredNetworker(read_file) = true, want false (a non-funnel tool carries no marker)")
 	}
 }

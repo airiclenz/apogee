@@ -6,7 +6,9 @@
 // shape matches the apogee-code oracle and the Anthropic/Claude-Code agent-skills convention,
 // so a skill written for one is interoperable with the others and carries the bundled
 // resources (refs/, scripts) hung off the same folder: the Dir field is the seam that hands
-// that folder to the loop, which names it in the injected block for the model to read.
+// that folder to the loop, which names it in the injected block for the model to read. Dir is an
+// ADDRESS rather than always a host path — a disk skill announces its absolute folder, a shipped
+// one announces the `shipped:<id>` virtual mount its own tree is served through.
 //
 // The package is the discovery half of the post-v1 apogee-code feature-parity skills feature:
 // it loads skills, and a *Catalog resolves attached IDs both for the agent loop (which prepends
@@ -56,6 +58,10 @@
 // The shipped skills are served straight out of the binary and are never INSTALLED: no
 // ~/.apogee/skills directory is auto-created for them (the creation-deferred convention — a
 // writer creates what it needs), so an upgrade refreshes all four for every user and nothing on
-// disk goes stale (ADR 0065). The gate is Sources.UseShippedSkills, whose zero value is off, so
-// a caller that never asks for them loads exactly the disk sources it always did.
+// disk goes stale (ADR 0065). Their bundled files are reachable all the same: virtualReadRoots
+// hands the same embedded tree to the host as a read-only MOUNT under the `shipped:` prefix
+// (ShippedMountPrefix), which is the address their Dir announces — the pathless counterpart of
+// readRoots, for the source that has no path. The gate is Sources.UseShippedSkills, whose zero
+// value is off, so a caller that never asks for them loads exactly the disk sources it always
+// did — and mounts nothing.
 package skills

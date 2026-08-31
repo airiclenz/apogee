@@ -1,6 +1,7 @@
 package skills
 
 import (
+	"io/fs"
 	"sync"
 	"sync/atomic"
 
@@ -109,6 +110,17 @@ func (p *Provider) SourceDirs() []string { return sourceDirs(p.sources()) }
 // SetSources — a `use-project-skills` flip — moves the mount with no re-wiring, and a caller
 // holding this method value is holding a live view.
 func (p *Provider) ReadRoots() []string { return readRoots(p.sources()) }
+
+// VirtualReadRoots lists the read-only trees the host mounts under a NAME rather than a host path,
+// keyed by the prefix their addresses are spelled with — today the embedded shipped source alone,
+// under `shipped:` (load.go's virtualReadRoots). It is ReadRoots' counterpart for the source that
+// has no host path, and the host hands it to the read tools through the same live seam
+// (domain.Config.VirtualReadRoots), so a shipped skill's announced `files: shipped:<id>` line names
+// a folder the model can actually read.
+//
+// Like SourceDirs and ReadRoots it reads the CURRENT sources, so a `use-shipped-skills` flip moves
+// the mount with no re-wiring, and a caller holding this method value is holding a live view.
+func (p *Provider) VirtualReadRoots() map[string]fs.FS { return virtualReadRoots(p.sources()) }
 
 // current returns the live catalog snapshot. It is always non-nil: NewProvider stores one and
 // Reload only ever stores the non-nil result of Load.

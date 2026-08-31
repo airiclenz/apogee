@@ -274,7 +274,78 @@ belongs to a concurrent session and was left exactly as found; it is in neither 
 **Acceptance:** `go test ./internal/config/... ./internal/skills/... && go build ./...`
 **Commit:** `feat(config): use-shipped-skills gates the embedded skill source`
 
-## 9. Virtual read mount for shipped skill files
+## 9. Virtual read mount for shipped skill files — ✅ DONE (2026-08-31)
+
+NOTES (2026-08-31): the five read tools' second constructor parameter became ONE `ReadMounts`
+value (`Roots func() []string` + `Virtual func() map[string]fs.FS`) instead of gaining a third
+argument. The two seams answer one question — what else may this tool read — and pairing them in
+`HostTools.readMounts()` is what makes it impossible to wire a tool with the disk roots and
+without the mounts. The cost is mechanical: ~40 test call sites now pass `ReadMounts{}` /
+`ReadMounts{Roots: …}`, and the zero value is byte-identical to the old `nil`.
+NOTES (2026-08-31): grep and find_files were generalized onto ONE resolved subject,
+`readScope.searchTarget` (path_read.go) — the tree to enumerate, the target's own name, the
+spelling `open` takes and the spelling the tool REPORTS. Both tools already walked an `fs.FS`
+(`os.DirFS`, an enumerator and never a fence), so the mount slots in without weakening anything:
+every file is still opened through its own source's fence. It also removed the duplicated
+resolve + `os.Stat` + "path not found" block the two carried in parallel.
+NOTES (2026-08-31): list_dir did NOT take that route — it got a parallel `collectVirtualEntries`
+over `fs.ReadDir`, sharing the entry rules (`skipDirEntry`, `escapeRowBreaks`, the caps,
+`renderEntries`). Its disk walk re-opens every subdirectory through an `os.Root`, which is a
+fence; replacing that with `os.DirFS` to share one walk would have been a security regression, so
+the walk is the one thing the two branches do not share.
+NOTES (2026-08-31): the write refusal is by SYNTAX, not by mount table — `refuseVirtualWrite` is
+called from `safeWriteFile`, `statWriteTarget` and `journaledMutation` (the three funnels every
+write verb reaches), none of which holds the host's mounts. It therefore RESERVES the mount-
+reference grammar: a path whose first segment is `<name>:` with a name of 2+ chars drawn from
+[a-z0-9_-] is refused by every write, whether or not anything is mounted under it. That is the
+deliberate reading of ADR 0065 §3's "reserved `shipped:` namespace", and the alternative is
+worse than strict: a `shipped:…` path a write resolved as an ordinary relative name would create
+a colon-named file inside the workspace and report the write as landed. A Windows drive letter is
+one character and an upper-case prefix is not in the set, so `C:\…` and `NOTES:x` stay on the disk
+side; the narrowing costs the ability to WRITE a workspace file literally named e.g.
+`notes:draft.md`, which nothing apogee announces and no test exercised.
+NOTES (2026-08-31): consequential edit — docs/manual/commands.md: made necessary by the shipped
+`Dir` — the `{{SKILL_DIR}}` section promised "the skill's **absolute directory**", false for a
+shipped skill; it now says "directory address" and a new paragraph gives both spellings, which
+tools resolve them, and that neither is writable.
+NOTES (2026-08-31): consequential edit — internal/skills/skill.go, internal/skills/doc.go: made
+necessary by the shipped `Dir` — `Skill.Dir`'s doc called it "the absolute path to the skill's
+folder … empty [for] a shipped skill", and the package doc recorded no mount at all.
+NOTES (2026-08-31): consequential edit — internal/tools/doc.go: made necessary by the new
+path_virtual.go — the package's file map is enforced by `TestDocMapNamesEveryFile`.
+NOTES (2026-08-31): consequential edit — internal/tools/workspace_scoped.go: made necessary by
+the mount addresses — `resolvedTargetNote` would otherwise join `shipped:…` onto the workspace
+root and disclose a host path that does not exist.
+NOTES (2026-08-31): consequential edit — cmd/apogee/testdata/frames/t12-skills.txt: made
+necessary by the "shipped" source label this item lands (golden frame regenerated with `-update`;
+the `/debugging` row now reads `/debugging · shipped`).
+NOTES (2026-08-31): `internal/skills/load_test.go`'s shipped-`Dir` assertion was inverted rather
+than deleted — item 7 wrote it as "want none UNTIL the virtual mount exists", so this item is the
+one that supplies the expected `shipped:<id>`.
+NOTES (2026-08-31): proven gap-closing in both halves. With `virtualLocate` short-circuited to
+false and `refuseVirtualWrite` neutered, every new tools test fails (all four read tools, the
+copy, all four write refusals, the climb-out); both were restored and the full suite is green.
+NOTES (2026-08-31): the announced-surface test lives in `internal/agent` because that is where
+the two halves meet: it SCRAPES every `shipped:` address out of `resolveSkillRefs`' own output —
+the `files:` line's folder and every `{{SKILL_DIR}}` the body expanded — and drives each one
+through the read tools of the same Agent, so no fixture path is spelled twice and a body that
+names a file the mount does not carry fails the test.
+NOTES (2026-08-31): neighbouring-doc improvement only, recorded here and nowhere else — the four
+read tools' `description` strings still name only "a configured read-only root (such as the
+skills library)" and say nothing of `shipped:`. Left as is deliberately: the address is announced
+by the skill block's own `files:` line, which names those tools, and widening four descriptions
+would spend prompt tokens in every session for a case only an attached skill reaches.
+NOTES (2026-08-31): the untracked `docs/plans/2026-08-31 - 01 - transcript-codec-hoist-plan.md`
+belongs to a concurrent session and was left exactly as found; it is in neither FILES nor the
+commit.
+NOTES (2026-08-31): fix-retry — eight shell-quoting artifacts (`'"'"'` where an apostrophe
+belonged) had leaked into comments written this item: `internal/tools/path_read.go` (:382, :394,
+:406) and `internal/tools/file_ops.go` (:170, :171, :172, :176, :399). All eight repaired; a
+repo-wide grep for the sequence over `.go`/`.md` now returns nothing.
+NOTES (2026-08-31): fix-retry — `internal/tools/registry.go`: the item's new `readMounts` had been
+inserted BETWEEN `rosterDeltas`' doc comment and `rosterDeltas`, so one comment block headed the
+wrong symbol. Split into two doc comments, each starting with its own symbol name; neither func
+moved and neither body changed.
 
 **What:** Depends on item 7. Shipped skills' bundled files become readable: the tools layer gains virtual read roots — a `map[prefix]fs.FS` consulted by the shared path resolver **before** disk roots, serving `read_file`/`list_dir`/`grep`/`find_files` and `copy_file` **as source only** (destinations stay disk-fenced). Bound spelling: a shipped skill's announced dir is `shipped:<id>` — set as the skill's `Dir` so `resolveSkillRefs`' `files:` line and `{{SKILL_DIR}}` expand to it. Move a bundled reference file into `shipped/debugging/` (e.g. a checklist) and flip `debugging` to `Dir="shipped:debugging"`. Writes into a virtual root are refused with the standard out-of-root error.
 **Regression guard.** The mount rides the ExtraReadRoots path exactly (`wire_boot.go:235` → `construct.go` → `registry.go:193-203` → `wire_tools.go:238`): thread the virtual roots through the domain.Config carrier, `internal/agent`'s hostTools (`construct.go:427-446`) and `cmd/apogee/wire_tools.go`'s `registryWithMCP` (:215-240), or an MCP session's announced `files: shipped:debugging` line read-refuses. The `shipped:` write refusal lives on the write-side fence (`path_safety.go` / the write tools' resolution) — `path_read.go` never sees a write (:137-139), so it cannot be the refusal site. The "shipped" source label lands in this item (`internal/tui/skills.go` `skillSource` + the "/" dropdown's row feed) so a shipped skill is never listed "elsewhere" before item 10.

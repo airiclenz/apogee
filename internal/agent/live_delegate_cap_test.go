@@ -196,9 +196,9 @@ func TestLiveDelegateCapAndWorkingWindow(t *testing.T) {
 	registry := domain.NewToolRegistry()
 	for _, tool := range []domain.Tool{
 		tools.NewSubAgent(),
-		tools.NewFindFiles(root, nil),
-		tools.NewListDir(root, nil),
-		tools.NewReadFile(root, nil),
+		tools.NewFindFiles(root, tools.ReadMounts{}),
+		tools.NewListDir(root, tools.ReadMounts{}),
+		tools.NewReadFile(root, tools.ReadMounts{}),
 	} {
 		if err := registry.Register(tool); err != nil {
 			t.Fatalf("register %s: %v", tool.Name(), err)

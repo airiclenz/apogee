@@ -73,7 +73,7 @@ func TestResolvedPathRidesTheCallAndTheApproval(t *testing.T) {
 
 		sink := &recordingSink{}
 		conf := &fakeConfiner{caps: capsBoth()}
-		cfg := autoConfigWS(sink, conf, true, ws, tools.NewReadFile(ws, nil))
+		cfg := autoConfigWS(sink, conf, true, ws, tools.NewReadFile(ws, tools.ReadMounts{}))
 		cfg.Approver = &fakeApprover{decision: domain.ApprovalAllow}
 
 		driveToolCall(t, cfg, sink, "c1", "read_file", `{"path":"notes.md"}`)
@@ -106,7 +106,7 @@ func TestResolvedPathAgreesWithTheResultForEveryWriteKey(t *testing.T) {
 	}{
 		{
 			name:     "copy_file discloses its resolved destination",
-			newTool:  func(ws string) domain.Tool { return tools.NewCopyFile(ws, nil) },
+			newTool:  func(ws string) domain.Tool { return tools.NewCopyFile(ws, tools.ReadMounts{}) },
 			tool:     "copy_file",
 			args:     `{"source":"payload.txt","destination":"docs/notes.md","overwrite":true}`,
 			sentence: "copied payload.txt to docs/notes.md",

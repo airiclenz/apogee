@@ -261,7 +261,11 @@ func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, []string
 		// ReadRoots, like the session's own mount, is the resolved-path view of the same sources —
 		// a workspace anchor that is a symlink out of the workspace is dropped rather than mounted
 		// (audit 2026-08-25 F-13), and it stays a method value so the mount follows SetSources.
-		ExtraReadRoots:   skillProvider.ReadRoots,
+		ExtraReadRoots: skillProvider.ReadRoots,
+		// And the mount a shipped skill's bundled files are served through, so an unattended run
+		// reads the `shipped:<id>` address its own injected block announces exactly as a session
+		// does (ADR 0031's Driver parity).
+		VirtualReadRoots: skillProvider.VirtualReadRoots,
 		EnableMechanisms: spec.EnableMechanisms,
 		ParallelAgents:   config.ResolveParallelAgents(in.entry.ParallelAgents, slots),
 		Context: apogee.ContextConfig{

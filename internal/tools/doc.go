@@ -278,7 +278,12 @@
 // the READ half carved out beside it: the one-handle bounded read every read tool goes through,
 // the model-facing wording a fenced failure is rendered as, and readScope — the READ-only
 // multi-root resolver that tries the workspace first and then any extra read-only roots the
-// host mounts, returning the matched root so a caller pins every later fenced operation to it.
+// host mounts, returning the matched root so a caller pins every later fenced operation to it —
+// plus ReadMounts, the one value a read tool is wired with, and searchTarget, the resolved subject
+// grep and find_files walk. path_virtual.go is that resolver's VIRTUAL half: read-only trees the
+// host mounts under a NAME (`shipped:<id>`) rather than under a host path, because they have none
+// — the mount-reference grammar, the fs.FS-backed target every read tool serves them through, and
+// the write-side refusal that keeps the spelling from ever becoming a colon-named workspace file.
 // path_suggest.go is the "did you mean" half of a refusal: suggestSiblings, which reads the
 // missing path's parent THROUGH the fence and answers the prefix-matching entries spelled the way
 // the model spelled the path, and notFoundMessage, which appends them to a tool's own not-found

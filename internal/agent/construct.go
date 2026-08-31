@@ -515,6 +515,10 @@ func hostTools(cfg domain.Config) tools.HostTools {
 		// carries the func without evaluating it, so WHICH dirs are mounted stays the host's
 		// question and stays live per call (Config.ExtraReadRoots). nil ⇒ workspace-only.
 		ExtraReadRoots: cfg.ExtraReadRoots,
+		// The read-only mounts that have no host path — the same seam, carried the same way: the
+		// engine holds the func without evaluating it, so WHICH trees are mounted stays the host's
+		// question and stays live per call (Config.VirtualReadRoots). nil ⇒ none.
+		VirtualReadRoots: cfg.VirtualReadRoots,
 	}
 }
 

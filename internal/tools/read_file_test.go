@@ -99,7 +99,7 @@ func TestReadFile_Execute(t *testing.T) {
 		t.Fatalf("setup: %v", err)
 	}
 
-	tool := NewReadFile(root, nil)
+	tool := NewReadFile(root, ReadMounts{})
 
 	cases := []struct {
 		name        string
@@ -169,7 +169,7 @@ func TestReadFile_Execute_ReportsTheSpanItRendered(t *testing.T) {
 		t.Fatalf("setup: %v", err)
 	}
 
-	tool := NewReadFile(root, nil)
+	tool := NewReadFile(root, ReadMounts{})
 
 	cases := []struct {
 		name        string
@@ -237,7 +237,7 @@ func TestReadFile_Execute_LocatesASubstring(t *testing.T) {
 		t.Fatalf("setup: %v", err)
 	}
 
-	tool := NewReadFile(root, nil)
+	tool := NewReadFile(root, ReadMounts{})
 
 	cases := []struct {
 		name        string
@@ -299,7 +299,7 @@ func TestReadFile_Execute_LocatesASubstring(t *testing.T) {
 func TestReadFile_Execute_ErrorCarriesNoSummary(t *testing.T) {
 	t.Parallel()
 
-	result, err := NewReadFile(tempRoot(t), nil).Execute(context.Background(),
+	result, err := NewReadFile(tempRoot(t), ReadMounts{}).Execute(context.Background(),
 		callWith(t, "c1", map[string]any{"path": "absent.txt"}))
 
 	if err != nil {
@@ -336,7 +336,7 @@ func TestReadFile_Execute_RefusesEscapingSymlink(t *testing.T) {
 		t.Skipf("symlinks unsupported: %v", err)
 	}
 
-	result, err := NewReadFile(root, nil).Execute(context.Background(),
+	result, err := NewReadFile(root, ReadMounts{}).Execute(context.Background(),
 		callWith(t, "c1", map[string]any{"path": "ssh/id_rsa"}))
 
 	if err != nil {
@@ -363,7 +363,7 @@ func TestReadFile_Execute_RefusesComponentSwappedMidRead(t *testing.T) {
 
 	root := tempRoot(t)
 
-	escapes := escapesUnderComponentSwap(t, NewReadFile(root, nil), root, 2000)
+	escapes := escapesUnderComponentSwap(t, NewReadFile(root, ReadMounts{}), root, 2000)
 
 	if escapes != 0 {
 		t.Errorf("%d of 2000 reads returned the file outside the workspace, want 0", escapes)
@@ -388,7 +388,7 @@ func TestReadFile_Execute_RefusesAbsoluteInRootSymlink(t *testing.T) {
 		t.Skipf("symlinks unsupported: %v", err)
 	}
 
-	result, err := NewReadFile(root, nil).Execute(context.Background(),
+	result, err := NewReadFile(root, ReadMounts{}).Execute(context.Background(),
 		callWith(t, "c1", map[string]any{"path": "link.txt"}))
 
 	if err != nil {
@@ -425,7 +425,7 @@ func TestReadFile_Execute_ReadsRelativeInRootSymlink(t *testing.T) {
 		t.Run(path, func(t *testing.T) {
 			t.Parallel()
 
-			result, err := NewReadFile(root, nil).Execute(context.Background(),
+			result, err := NewReadFile(root, ReadMounts{}).Execute(context.Background(),
 				callWith(t, "c1", map[string]any{"path": path}))
 
 			if err != nil {
@@ -460,7 +460,7 @@ func TestReadFile_Execute_DisclosesTheResolvedPath(t *testing.T) {
 	}
 	writeFixtureFile(t, filepath.Join(root, "plain.txt"), "plain bytes")
 
-	tool := NewReadFile(root, nil)
+	tool := NewReadFile(root, ReadMounts{})
 
 	cases := []struct {
 		name     string
@@ -512,7 +512,7 @@ func TestReadFile_Execute_DisclosesTheResolvedPathUnderAnExtraReadRoot(t *testin
 		t.Skipf("symlinks unsupported: %v", err)
 	}
 
-	tool := NewReadFile(root, func() []string { return []string{extra} })
+	tool := NewReadFile(root, ReadMounts{Roots: func() []string { return []string{extra} }})
 
 	linked := runFileOp(t, tool, map[string]any{"path": filepath.Join(extra, "linked.md")})
 	if linked.IsError {
@@ -550,7 +550,7 @@ func TestReadFile_Execute_ReadsAnExtraRootFileBySymlinkSpelling(t *testing.T) {
 		t.Skipf("symlinks unsupported: %v", err)
 	}
 
-	tool := NewReadFile(root, func() []string { return []string{extra} })
+	tool := NewReadFile(root, ReadMounts{Roots: func() []string { return []string{extra} }})
 
 	result := runFileOp(t, tool, map[string]any{"path": filepath.Join(link, "skill", "SKILL.md")})
 
@@ -573,7 +573,7 @@ func TestReadFile_Execute_RejectsRangeOnLineTwo(t *testing.T) {
 		t.Fatalf("setup: %v", err)
 	}
 
-	result, err := NewReadFile(root, nil).Execute(context.Background(),
+	result, err := NewReadFile(root, ReadMounts{}).Execute(context.Background(),
 		callWith(t, "c1", map[string]any{"path": "f.txt", "start_line": 2, "end_line": 3}))
 
 	if err != nil {
@@ -599,7 +599,7 @@ func TestReadFile_Execute_ReadsUnderAnExtraReadRoot(t *testing.T) {
 	writeFixtureFile(t, filepath.Join(extra, "skill", "SKILL.md"), "skill bytes")
 	writeFixtureFile(t, filepath.Join(outside, "id_rsa"), outsideMarker)
 
-	tool := NewReadFile(root, func() []string { return []string{extra} })
+	tool := NewReadFile(root, ReadMounts{Roots: func() []string { return []string{extra} }})
 
 	cases := []struct {
 		name    string
@@ -646,7 +646,7 @@ func TestReadFile_Execute_ExtraRootIsReadableNotWritable(t *testing.T) {
 	target := filepath.Join(extra, "SKILL.md")
 	writeFixtureFile(t, target, "skill bytes")
 
-	read, err := NewReadFile(root, func() []string { return []string{extra} }).Execute(
+	read, err := NewReadFile(root, ReadMounts{Roots: func() []string { return []string{extra} }}).Execute(
 		context.Background(), callWith(t, "c1", map[string]any{"path": target}))
 	if err != nil {
 		t.Fatalf("read of the extra root returned a Go error: %v", err)
@@ -688,7 +688,7 @@ func TestReadFile_Execute_HonoursCancelledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, err := NewReadFile(tempRoot(t), nil).Execute(ctx, callWith(t, "c1", map[string]any{"path": "x"}))
+	_, err := NewReadFile(tempRoot(t), ReadMounts{}).Execute(ctx, callWith(t, "c1", map[string]any{"path": "x"}))
 
 	if err == nil {
 		t.Fatalf("Execute on a cancelled ctx returned nil error, want ctx error")
@@ -734,7 +734,7 @@ func TestReadFile_Execute_ReadsAPDFAsExtractedText(t *testing.T) {
 
 	const header = "[File: minimal.pdf (PDF, 1 page; extracted text, read-only), 3 lines total, showing lines"
 
-	tool := NewReadFile(pdfWorkspace(t, "minimal.pdf"), nil)
+	tool := NewReadFile(pdfWorkspace(t, "minimal.pdf"), ReadMounts{})
 
 	cases := []struct {
 		name        string
@@ -794,7 +794,7 @@ func TestReadFile_Execute_ReadsAPDFAsExtractedText(t *testing.T) {
 func TestReadFile_Execute_RefusesAPDFWithNoText(t *testing.T) {
 	t.Parallel()
 
-	result, err := NewReadFile(pdfWorkspace(t, "notext.pdf"), nil).Execute(context.Background(),
+	result, err := NewReadFile(pdfWorkspace(t, "notext.pdf"), ReadMounts{}).Execute(context.Background(),
 		callWith(t, "c1", map[string]any{"path": "notext.pdf"}))
 
 	if err != nil {
@@ -823,7 +823,7 @@ func TestReadFile_Execute_BoundsAPhantomPageCount(t *testing.T) {
 	t.Parallel()
 
 	start := time.Now()
-	result, err := NewReadFile(pdfWorkspace(t, "phantompages.pdf"), nil).Execute(context.Background(),
+	result, err := NewReadFile(pdfWorkspace(t, "phantompages.pdf"), ReadMounts{}).Execute(context.Background(),
 		callWith(t, "c1", map[string]any{"path": "phantompages.pdf"}))
 	elapsed := time.Since(start)
 
@@ -852,7 +852,7 @@ func TestReadFile_Execute_JudgesAPDFByContentNotName(t *testing.T) {
 	root := tempRoot(t)
 	writeFixtureFile(t, filepath.Join(root, "notes.pdf"), "plain words\nsecond line")
 
-	result, err := NewReadFile(root, nil).Execute(context.Background(),
+	result, err := NewReadFile(root, ReadMounts{}).Execute(context.Background(),
 		callWith(t, "c1", map[string]any{"path": "notes.pdf"}))
 
 	if err != nil {
@@ -908,7 +908,7 @@ func TestReadFile_Execute_MissingFileSuggestsSiblings(t *testing.T) {
 
 	root := tempRoot(t)
 	writeFixtureFile(t, filepath.Join(root, "docs", "adr", "0025-interjections.md"), "adr body")
-	tool := NewReadFile(root, nil)
+	tool := NewReadFile(root, ReadMounts{})
 
 	cases := []struct {
 		name string
@@ -964,7 +964,7 @@ func TestReadFile_Execute_MissingFileSuggestionsQuoteThePinnedPath(t *testing.T)
 		t.Skipf("symlinks unsupported: %v", err)
 	}
 
-	tool := NewReadFile(root, func() []string { return []string{extra} })
+	tool := NewReadFile(root, ReadMounts{Roots: func() []string { return []string{extra} }})
 
 	result := runFileOp(t, tool, map[string]any{"path": filepath.Join(link, "skill", "0025")})
 

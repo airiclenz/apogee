@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"io/fs"
 	"strings"
 
 	"github.com/airiclenz/apogee/internal/domain"
@@ -74,6 +75,20 @@ type HostTools struct {
 	// its own os.Root fence, so a symlink inside one that escapes it is still refused, and a root
 	// that does not exist yet is skipped rather than failing the call.
 	ExtraReadRoots func() []string
+
+	// VirtualReadRoots reports read-only trees the host mounts under a NAME rather than under a
+	// host path, keyed by the prefix their addresses are spelled with (`shipped:`). It carries
+	// ExtraReadRoots' four clauses unchanged — read-only, live per call, nil ⇒ none — and adds
+	// the one property that makes it a separate seam: there is no host path at all, so no root
+	// string could have named these trees (apogee's shipped skills are compiled into the binary,
+	// ADR 0065 §3). Consulted BEFORE the disk roots, which costs nothing: a mount reference is a
+	// spelling no host path can take (path_virtual.go).
+	//
+	// It is generic in the same way ExtraReadRoots is: shipped skills are the first thing mounted
+	// through it, but nothing in this package knows what a skill is (ADR 0031). A write NEVER
+	// reaches it — the spelling itself is refused on the write side — so mounting a tree here can
+	// no more make it writable than mounting a directory there can.
+	VirtualReadRoots func() map[string]fs.FS
 
 	// SecretEnvVars names environment variables the EXECUTION tools (terminal, python_exec,
 	// run_tests) must drop from the environment they hand a subprocess, on top of apogee's own
@@ -161,9 +176,10 @@ func DefaultTools(root string) []domain.Tool {
 // no more an ExternalEffectTool than ask_user is — showing the user a document they already
 // own is not a non-forkable remote effect.
 //
-// host.ExtraReadRoots is threaded into the four read-only file tools (read_file, list_dir, grep,
-// find_files) and — since 2026-08-12, for its SOURCE alone — into copy_file, each of which resolves
-// an ABSOLUTE path over those roots when the workspace refuses it; a nil func leaves them
+// host.ExtraReadRoots and host.VirtualReadRoots are threaded, as ONE ReadMounts, into the four
+// read-only file tools (read_file, list_dir, grep, find_files) and — since 2026-08-12, for its
+// SOURCE alone — into copy_file, each of which resolves an ABSOLUTE path over those roots (or a
+// mount reference over those mounts) when the workspace refuses it; a zero ReadMounts leaves them
 // workspace-only. Nothing else receives it, and no WRITE widens: copy_file's destination, like
 // every other write and execution tool, stays workspace-fenced — see the field's contract.
 //
@@ -189,17 +205,18 @@ func DefaultToolsWithHost(root string, host HostTools) []domain.Tool {
 // the ladder starts from: DefaultToolsWithHost applies the deltas to it, and KnownToolNames reads
 // its names off it, so a default-off tool is still a name apogee knows while nothing offers it.
 func builtinTools(root string, host HostTools) []domain.Tool {
+	mounts := host.readMounts()
 	all := []domain.Tool{
-		NewReadFile(root, host.ExtraReadRoots),
+		NewReadFile(root, mounts),
 		NewWriteFile(root),
-		NewListDir(root, host.ExtraReadRoots),
-		NewGrep(root, host.ExtraReadRoots),
-		NewFindFiles(root, host.ExtraReadRoots),
+		NewListDir(root, mounts),
+		NewGrep(root, mounts),
+		NewFindFiles(root, mounts),
 		NewSingleFindReplace(root),
 		NewMultiFindReplace(root),
 		NewEditExistingFile(root),
 		NewViewDiff(root),
-		NewCopyFile(root, host.ExtraReadRoots),
+		NewCopyFile(root, mounts),
 		NewMoveFile(root),
 		NewDeleteFile(root),
 		NewTerminal(root, host.SecretEnvVars),
@@ -230,6 +247,12 @@ func builtinTools(root string, host HostTools) []domain.Tool {
 		all = append(all, NewPresentDocument(root, host.Presenter))
 	}
 	return all
+}
+
+// readMounts pairs the host's two read-only mount seams into the one value every read tool takes,
+// so a tool can never be wired with the disk roots and without the virtual mounts.
+func (h HostTools) readMounts() ReadMounts {
+	return ReadMounts{Roots: h.ExtraReadRoots, Virtual: h.VirtualReadRoots}
 }
 
 // rosterDeltas reads the two CONFIGURATION rungs of the ladder off HostTools: the global lists the

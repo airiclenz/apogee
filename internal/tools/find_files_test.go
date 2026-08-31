@@ -40,7 +40,7 @@ func seedFindTree(t *testing.T, root string) {
 // error or an unexpected tool error.
 func findFiles(t *testing.T, root string, args map[string]any) string {
 	t.Helper()
-	result, err := NewFindFiles(root, nil).Execute(context.Background(), callWith(t, "c1", args))
+	result, err := NewFindFiles(root, ReadMounts{}).Execute(context.Background(), callWith(t, "c1", args))
 	if err != nil {
 		t.Fatalf("Execute returned error: %v", err)
 	}
@@ -205,7 +205,7 @@ func TestFindFiles_Execute_MalformedGlobMatchesNothingLikeGrep(t *testing.T) {
 		t.Errorf("a malformed glob must match nothing: %q", content)
 	}
 
-	grepped, err := NewGrep(root, nil).Execute(context.Background(),
+	grepped, err := NewGrep(root, ReadMounts{}).Execute(context.Background(),
 		callWith(t, "c1", map[string]any{"pattern": "x", "include": "["}))
 	if err != nil {
 		t.Fatalf("grep Execute returned error: %v", err)
@@ -218,7 +218,7 @@ func TestFindFiles_Execute_MalformedGlobMatchesNothingLikeGrep(t *testing.T) {
 func TestFindFiles_Execute_RequiresPattern(t *testing.T) {
 	t.Parallel()
 
-	result, err := NewFindFiles(t.TempDir(), nil).Execute(context.Background(),
+	result, err := NewFindFiles(t.TempDir(), ReadMounts{}).Execute(context.Background(),
 		callWith(t, "c1", map[string]any{"pattern": "   "}))
 
 	if err != nil {
@@ -235,7 +235,7 @@ func TestFindFiles_Execute_RefusesPathEscape(t *testing.T) {
 	root := t.TempDir()
 	seedFindTree(t, root)
 
-	result, err := NewFindFiles(root, nil).Execute(context.Background(),
+	result, err := NewFindFiles(root, ReadMounts{}).Execute(context.Background(),
 		callWith(t, "c1", map[string]any{"pattern": "*.go", "path": "../"}))
 
 	if err != nil {
@@ -289,7 +289,7 @@ func TestFindFiles_Execute_FindsUnderAnExtraReadRoot(t *testing.T) {
 	seedFindTree(t, root)
 	seedFindTree(t, extra)
 
-	tool := NewFindFiles(root, func() []string { return []string{extra} })
+	tool := NewFindFiles(root, ReadMounts{Roots: func() []string { return []string{extra} }})
 
 	cases := []struct {
 		name    string
@@ -342,7 +342,7 @@ func TestFindFiles_Execute_SkipsSymlinkOutOfAnExtraReadRoot(t *testing.T) {
 		t.Fatalf("setup write: %v", err)
 	}
 
-	result, err := NewFindFiles(root, func() []string { return []string{extra} }).Execute(context.Background(),
+	result, err := NewFindFiles(root, ReadMounts{Roots: func() []string { return []string{extra} }}).Execute(context.Background(),
 		callWith(t, "c1", map[string]any{"pattern": "*.txt", "path": extra}))
 
 	if err != nil {
@@ -368,7 +368,7 @@ func TestFindFiles_SearchesAnExtraRootBySymlinkSpelling(t *testing.T) {
 	t.Parallel()
 
 	workspace, extra, link := symlinkedExtraReadRoot(t)
-	tool := NewFindFiles(workspace, func() []string { return []string{extra} })
+	tool := NewFindFiles(workspace, ReadMounts{Roots: func() []string { return []string{extra} }})
 
 	content := spelledLikeRealBelowTheHeader(t, tool,
 		map[string]any{"pattern": "*.md", "path": link},
@@ -484,7 +484,7 @@ func TestFindFiles_Execute_MissingPathSuggestsSiblings(t *testing.T) {
 
 	root := tempRoot(t)
 	writeFixtureFile(t, filepath.Join(root, "docs", "adr", "0025-interjections.md"), "adr body")
-	tool := NewFindFiles(root, nil)
+	tool := NewFindFiles(root, ReadMounts{})
 
 	cases := []struct {
 		name string

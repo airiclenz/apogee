@@ -4,7 +4,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 
 	"github.com/airiclenz/apogee/internal/security"
@@ -38,7 +40,15 @@ func readWorkspaceFileBounded(path, root string) ([]byte, string) {
 		return nil, readFileErrorMessage(err, path)
 	}
 	defer f.Close()
+	return readOpenedBounded(f, path)
+}
 
+// readOpenedBounded is that contract from the OPEN onwards — the fstat, the directory and cap
+// refusals, the bounded read and the growth backstop — over an already-opened handle named by the
+// spelling a refusal should quote. It takes an fs.File rather than an *os.File so a virtual mount,
+// which has no descriptor to pin, is bounded by the very same rules a disk read is
+// (path_virtual.go): one cap, one set of refusal wordings, one growth backstop.
+func readOpenedBounded(f fs.File, path string) ([]byte, string) {
 	info, err := f.Stat()
 	if err != nil {
 		return nil, readFileErrorMessage(err, path)
@@ -115,6 +125,31 @@ func escapeOrMessage(err error, absent string) string {
 	return absent
 }
 
+// ReadMounts are the read-only trees a read tool resolves a path over BESIDE its own workspace
+// root: Roots names extra DISK roots (host paths the operator opened up — a skills library), and
+// Virtual names trees that have no host path at all, keyed by the prefix their addresses are
+// spelled under (`shipped:` — path_virtual.go). Both are evaluated LIVE, once per tool call, so a
+// mid-session change on the host's side is honoured by the next read with no re-wiring.
+//
+// The ZERO value is workspace-only and is byte-identical to the fence before either seam existed,
+// which is why it is the value every test and every tool-less host passes. It is one struct rather
+// than two parameters because the two answer ONE question — what else may this tool read — and a
+// tool that grows a third kind of mount should not grow a fourth constructor argument.
+type ReadMounts struct {
+	// Roots reports extra read-only DISK roots, each the host's symlink-RESOLVED real path
+	// (readScope's contract). nil ⇒ the workspace root alone.
+	Roots func() []string
+	// Virtual reports the host's virtual mounts by prefix, colon included. nil ⇒ none.
+	Virtual func() map[string]fs.FS
+}
+
+// scope builds the resolver a read tool fences itself with: the workspace root, plus whatever
+// mounts the host named. It is the ONE place the two halves are paired, so no tool can be wired
+// with the disk roots and without the virtual ones.
+func (m ReadMounts) scope(root string) readScope {
+	return readScope{root: root, extra: m.Roots, virtual: m.Virtual}
+}
+
 // readScope resolves the path argument of a READ-ONLY tool over the workspace root plus any
 // extra read-only roots the host configured. It is a generic seam: a skills library is the
 // first thing mounted through it, but nothing here knows that (ADR 0031 — engine seams stay
@@ -144,6 +179,9 @@ type readScope struct {
 	// extra reports the extra read-only roots, evaluated once per call. nil means
 	// workspace-only.
 	extra func() []string
+	// virtual reports the host's virtual read mounts by prefix, evaluated once per call and
+	// consulted BEFORE any disk root (path_virtual.go). nil means disk-only.
+	virtual func() map[string]fs.FS
 }
 
 // extraRoots evaluates the live extra-root func for ONE call, answering nil when there is
@@ -236,6 +274,9 @@ func (s readScope) open(input string) (*os.File, string, error) {
 // fails: the refusal the caller renders is then the workspace's own, exactly as it is with no
 // extra roots configured.
 func (s readScope) readBounded(input string) ([]byte, string) {
+	if v, ok := s.virtualLocate(input); ok {
+		return v.readBounded()
+	}
 	root, target, err := s.locate(input)
 	if err != nil {
 		return readWorkspaceFileBounded(input, s.root)
@@ -274,6 +315,116 @@ func (s readScope) readRoot(input string) string {
 		return s.root
 	}
 	return root
+}
+
+// searchTarget is the resolved subject of ONE walking read tool's call — grep's and find_files',
+// which differ in what they do with a file, never in how they find one. It is the whole of what
+// those walks need to know about where the target came from: the tree they enumerate, the target's
+// own name, and the two renderings a walked name needs — the spelling open takes, and the spelling
+// the tool REPORTS. On disk the two coincide (both root-relative); in a virtual mount they do not
+// (a walk name opens as itself and reports as `mount:path`), which is exactly why they are two
+// funcs and not one.
+//
+// tree is nil when the target is a single FILE: naming one file is a legal query for both tools,
+// and neither walks then.
+type searchTarget struct {
+	tree       fs.FS
+	rel        string
+	openName   func(walkRel string) string
+	reportName func(walkRel string) string
+	open       func(name string) (fs.File, error)
+}
+
+// isDir reports whether the target is a directory the caller should walk.
+func (t searchTarget) isDir() bool { return t.tree != nil }
+
+// searchTarget resolves the `path` argument of grep or find_files — over the virtual mounts first,
+// then the workspace root, then the extra disk roots — and returns the walk's subject, or the
+// model-facing refusal to report (empty on success). given is the argument AS THE MODEL SPELLED
+// IT, which every refusal quotes.
+//
+// It is one function rather than a copy in each tool because the two ask the identical question
+// and must give the identical answer: a path one of them can search is a path the other can walk,
+// and a refusal one of them renders is the refusal the other renders.
+func (s readScope) searchTarget(input, given string) (searchTarget, string) {
+	if v, ok := s.virtualLocate(input); ok {
+		return virtualSearchTarget(v, given)
+	}
+
+	root, resolved, err := s.resolve(input)
+	if err != nil {
+		return searchTarget{}, err.Error()
+	}
+	info, err := os.Stat(resolved)
+	if err != nil {
+		// The path was already accepted by the fence, so an absent one is a mis-spelling the
+		// model can fix: offer its near misses in the parent it named.
+		siblings := suggestSiblings(root, workspaceRelative(resolved, root), given)
+		return searchTarget{}, notFoundMessage("path not found: ", given, siblings)
+	}
+
+	// The name is measured from the MATCHED root, symlink-resolved by the shared guard:
+	// resolveInRoot hands back real paths, so on a host where a root is reached through a link
+	// (macOS's /tmp, a symlinked /home) the raw root is a prefix of nothing.
+	targetRel := filepath.ToSlash(workspaceRelative(resolved, root))
+	// prefix lifts a walk-relative name to a root-relative one ("" when the search root IS the
+	// matched root). fs.WalkDir yields slash-separated names, so the join is path.Join.
+	prefix := targetRel
+	if prefix == "." {
+		prefix = ""
+	}
+	lift := func(walkRel string) string { return path.Join(prefix, walkRel) }
+
+	target := searchTarget{
+		rel:        targetRel,
+		openName:   lift,
+		reportName: lift,
+		// Every file is opened THROUGH the matched root's fence, never by an absolute path the
+		// walk handed out, so a walked entry that is a symlink out of that root is refused.
+		open: func(name string) (fs.File, error) { return security.SafeOpen(root, name) },
+	}
+	if info.IsDir() {
+		// os.DirFS ENUMERATES only: it is not a boundary, and is not asked to be one — every
+		// file the walk names is opened through the fence above.
+		target.tree = os.DirFS(resolved)
+	}
+	return target, ""
+}
+
+// virtualSearchTarget is searchTarget's virtual-mount branch (path_virtual.go). There is no fence
+// to pin because the mount IS the boundary, and no near-miss suggestions to offer because there is
+// no host directory to read them from — the absent case keeps the same "path not found" wording
+// the disk branch gives, quoting the address the model spelled.
+func virtualSearchTarget(v virtualTarget, given string) (searchTarget, string) {
+	info, err := v.stat()
+	if err != nil {
+		return searchTarget{}, escapeOrMessage(err, "path not found: "+given)
+	}
+
+	target := searchTarget{
+		rel: v.name(),
+		// A walk name opens as ITSELF inside the mount and is reported under the mount's
+		// announced address, which is the one spelling the model can hand back to any read tool.
+		openName:   func(walkRel string) string { return walkRel },
+		reportName: v.child,
+	}
+	if !info.IsDir() {
+		target.open = func(string) (fs.File, error) { return v.open() }
+		return target, ""
+	}
+
+	tree, err := v.sub()
+	if err != nil {
+		return searchTarget{}, escapeOrMessage(err, "path not found: "+given)
+	}
+	target.tree = tree
+	target.open = func(name string) (fs.File, error) {
+		if !fs.ValidPath(name) {
+			return nil, ErrPathEscape
+		}
+		return tree.Open(name)
+	}
+	return target, ""
 }
 
 // matchRoot reports the first root in roots that is usable AND contains input, with the path

@@ -21,7 +21,7 @@ func TestMarkerAccessors_NonMarkerTool(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
-	ro := NewReadFile(root, nil) // read-only; carries no marker
+	ro := NewReadFile(root, ReadMounts{}) // read-only; carries no marker
 
 	if IsWorkspaceScopedWriter(ro) {
 		t.Error("IsWorkspaceScopedWriter(read_file) = true, want false (read-only tool is not a workspace-scoped writer)")
@@ -93,7 +93,7 @@ func writeTargetProbes(root string) []writeTargetProbe {
 		{tool: NewSingleFindReplace(root), args: singleFindReplaceArgs{}, targetKey: pathArgKey},
 		{tool: NewMultiFindReplace(root), args: multiFindReplaceArgs{}, targetKey: pathArgKey},
 		{tool: NewEditExistingFile(root), args: fileEditArgs{}, targetKey: pathArgKey},
-		{tool: NewCopyFile(root, nil), args: fileOpsArgs{}, targetKey: destinationArgKey},
+		{tool: NewCopyFile(root, ReadMounts{}), args: fileOpsArgs{}, targetKey: destinationArgKey},
 		{tool: NewMoveFile(root), args: fileOpsArgs{}, targetKey: destinationArgKey},
 		{tool: NewDeleteFile(root), args: deleteFileArgs{}, targetKey: pathArgKey},
 	}

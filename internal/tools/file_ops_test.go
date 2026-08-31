@@ -47,7 +47,7 @@ func TestCopyFile_CopiesContentAndModeCreatingParents(t *testing.T) {
 	root := tempRoot(t)
 	writeFixture(t, filepath.Join(root, "run.sh"), "#!/bin/sh\necho hi\n", 0o755)
 
-	result := runFileOp(t, NewCopyFile(root, nil), map[string]any{
+	result := runFileOp(t, NewCopyFile(root, ReadMounts{}), map[string]any{
 		"source": "run.sh", "destination": "bin/nested/run.sh",
 	})
 	if result.IsError {
@@ -83,7 +83,7 @@ func TestCopyFile_LeavesNoStagingFile(t *testing.T) {
 	root := tempRoot(t)
 	writeFixture(t, filepath.Join(root, "a.txt"), "one", 0o644)
 
-	if result := runFileOp(t, NewCopyFile(root, nil), map[string]any{
+	if result := runFileOp(t, NewCopyFile(root, ReadMounts{}), map[string]any{
 		"source": "a.txt", "destination": "b.txt",
 	}); result.IsError {
 		t.Fatalf("unexpected tool error: %q", result.Content)
@@ -111,7 +111,7 @@ func TestCopyFile_RefusesOccupiedDestinationUnlessOverwrite(t *testing.T) {
 	writeFixture(t, filepath.Join(root, "src.txt"), "fresh", 0o644)
 	writeFixture(t, filepath.Join(root, "dst.txt"), "existing", 0o644)
 
-	result := runFileOp(t, NewCopyFile(root, nil), map[string]any{
+	result := runFileOp(t, NewCopyFile(root, ReadMounts{}), map[string]any{
 		"source": "src.txt", "destination": "dst.txt",
 	})
 	if !result.IsError {
@@ -124,7 +124,7 @@ func TestCopyFile_RefusesOccupiedDestinationUnlessOverwrite(t *testing.T) {
 		t.Errorf("a refused copy must change nothing, destination now = %q", string(got))
 	}
 
-	if result := runFileOp(t, NewCopyFile(root, nil), map[string]any{
+	if result := runFileOp(t, NewCopyFile(root, ReadMounts{}), map[string]any{
 		"source": "src.txt", "destination": "dst.txt", "overwrite": true,
 	}); result.IsError {
 		t.Fatalf("overwrite:true must force the copy: %q", result.Content)
@@ -168,7 +168,7 @@ func TestCopyFile_RefusesDirectories(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			result := runFileOp(t, NewCopyFile(root, nil), tc.args)
+			result := runFileOp(t, NewCopyFile(root, ReadMounts{}), tc.args)
 			if !result.IsError {
 				t.Fatalf("%s must be refused", tc.name)
 			}
@@ -184,7 +184,7 @@ func TestCopyFile_RefusesDirectories(t *testing.T) {
 func TestCopyFile_MissingSourceIsAnErrorResult(t *testing.T) {
 	t.Parallel()
 
-	result := runFileOp(t, NewCopyFile(tempRoot(t), nil), map[string]any{
+	result := runFileOp(t, NewCopyFile(tempRoot(t), ReadMounts{}), map[string]any{
 		"source": "nope.txt", "destination": "b.txt",
 	})
 	if !result.IsError {
@@ -220,7 +220,7 @@ func TestCopyFile_RefusesEscapes(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			result := runFileOp(t, NewCopyFile(root, nil), tc.args)
+			result := runFileOp(t, NewCopyFile(root, ReadMounts{}), tc.args)
 			if !result.IsError {
 				t.Fatalf("%s must be refused", tc.name)
 			}
@@ -263,7 +263,7 @@ func TestCopyFile_CopiesFromAnExtraReadRoot(t *testing.T) {
 
 	root, extra, _, mounted := extraRootFixture(t)
 
-	result := runFileOp(t, NewCopyFile(root, func() []string { return []string{extra} }), map[string]any{
+	result := runFileOp(t, NewCopyFile(root, ReadMounts{Roots: func() []string { return []string{extra} }}), map[string]any{
 		"source": mounted, "destination": "docs/run.sh",
 	})
 	if result.IsError {
@@ -305,7 +305,7 @@ func TestCopyFile_CopiesFromAnExtraRootBySymlinkSpelling(t *testing.T) {
 		t.Skipf("symlinks unsupported: %v", err)
 	}
 
-	result := runFileOp(t, NewCopyFile(root, func() []string { return []string{extra} }), map[string]any{
+	result := runFileOp(t, NewCopyFile(root, ReadMounts{Roots: func() []string { return []string{extra} }}), map[string]any{
 		"source": filepath.Join(link, "skill", "run.sh"), "destination": "prompts/x.md",
 	})
 	if result.IsError {
@@ -341,7 +341,7 @@ func TestCopyFile_ExtraReadRootRefusals(t *testing.T) {
 
 	root, extra, outside, mounted := extraRootFixture(t)
 	writeFixture(t, filepath.Join(root, "inside.txt"), "ours", 0o644)
-	tool := NewCopyFile(root, func() []string { return []string{extra} })
+	tool := NewCopyFile(root, ReadMounts{Roots: func() []string { return []string{extra} }})
 
 	type refusalCase struct {
 		name string
@@ -414,7 +414,7 @@ func TestCopyFile_WriteTargetStaysTheDestinationForAMountedSource(t *testing.T) 
 
 	root, extra, _, mounted := extraRootFixture(t)
 
-	target, ok := NewCopyFile(root, func() []string { return []string{extra} }).workspaceWriteTarget(
+	target, ok := NewCopyFile(root, ReadMounts{Roots: func() []string { return []string{extra} }}).workspaceWriteTarget(
 		callWith(t, "c1", map[string]any{"source": mounted, "destination": "run.sh"}))
 
 	if !ok {
@@ -600,7 +600,7 @@ func TestCopyFile_GuardJudgesOnlyTheDestination(t *testing.T) {
 
 	guard := security.DefaultDangerousActionGuard()
 	root := tempRoot(t)
-	copier := NewCopyFile(root, nil)
+	copier := NewCopyFile(root, ReadMounts{})
 	mover := NewMoveFile(root)
 
 	if got := domain.ReadSourceArgKeys(mover); got != nil {
@@ -706,7 +706,7 @@ func TestCopyFile_ExtraReadRootSourceFollowsSymlinksIntoTheWorkspace(t *testing.
 		t.Skipf("symlinks unsupported: %v", err)
 	}
 
-	tool := NewCopyFile(root, func() []string { return []string{extra} })
+	tool := NewCopyFile(root, ReadMounts{Roots: func() []string { return []string{extra} }})
 	direct := runFileOp(t, tool, map[string]any{
 		"source": mounted, "destination": "docs/run.sh",
 	})
@@ -739,7 +739,7 @@ func TestCopyFile_DisclosesTheResolvedDestination(t *testing.T) {
 	config := symlinkedReadFixture(t, root, "docs", "notes.md")
 	writeFixture(t, filepath.Join(root, "payload.txt"), "payload\n", 0o644)
 
-	tool := NewCopyFile(root, nil)
+	tool := NewCopyFile(root, ReadMounts{})
 	redirected := runFileOp(t, tool, map[string]any{
 		"source": "payload.txt", "destination": "docs/notes.md", "overwrite": true,
 	})

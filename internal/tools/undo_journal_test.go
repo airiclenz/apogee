@@ -387,7 +387,7 @@ func TestCopyFileJournalsTheDestinationOnly(t *testing.T) {
 				writeFixtureFile(t, destination, tc.destBefore)
 			}
 
-			journal, changes := journalledChanges(t, NewCopyFile(root, nil), map[string]any{
+			journal, changes := journalledChanges(t, NewCopyFile(root, ReadMounts{}), map[string]any{
 				"source": "src.txt", "destination": "dst.txt", "overwrite": tc.overwrite,
 			})
 			if len(changes) != 1 {
@@ -618,7 +618,7 @@ func TestFileOpsJournalNothingWhenRefused(t *testing.T) {
 	}{
 		{
 			name:    "copy_file onto an occupied destination",
-			newTool: func(root string) domain.Tool { return NewCopyFile(root, nil) },
+			newTool: func(root string) domain.Tool { return NewCopyFile(root, ReadMounts{}) },
 			args:    map[string]any{"source": "src.txt", "destination": "taken.txt"},
 		},
 		{

@@ -50,6 +50,11 @@ func confinementBox(ctx context.Context) *domain.ConfinementBox {
 // subprocess — is refused rather than followed (security review H1). It replaces the
 // former resolveInRoot+os.WriteFile pair, which re-walked the path with a check/use gap.
 //
+// A path spelled as a virtual-mount reference is refused here before anything else happens
+// (refuseVirtualWrite): those trees are read-only by construction, and resolving `shipped:…`
+// as an ordinary relative name would create a colon-named file inside the workspace and report
+// the write as landed.
+//
 // The final argument is security's approved-escape permit (ADR 0049), read off ctx: empty for
 // every ordinary call, so the workspace root alone bounds the write exactly as it always did,
 // and otherwise the ONE resolved path the operator was shown and approved — which security
@@ -61,6 +66,9 @@ func confinementBox(ctx context.Context) *domain.ConfinementBox {
 // edit_existing_file, single_find_and_replace, multi_find_and_replace — reaches the filesystem
 // through here, that is one capture site rather than four.
 func safeWriteFile(ctx context.Context, input, root string, data []byte, perm os.FileMode) error {
+	if err := refuseVirtualWrite(input); err != nil {
+		return err
+	}
 	pre := capturePreImage(ctx, input, root)
 	if err := security.SafeWriteFile(root, input, data, perm, writeEscapeTarget(ctx)); err != nil {
 		return err
@@ -124,6 +132,16 @@ func journaledMutation(
 	paths []mutationPath,
 	body func(escape string) (landed []bool, err error),
 ) error {
+	for _, path := range paths {
+		// Every path here is one this mutation WRITES, so a virtual-mount reference is refused
+		// before anything is captured: the mounts are read-only by construction, and a copy,
+		// move or delete that resolved `shipped:…` as an ordinary relative name would touch a
+		// colon-named file inside the workspace instead (path_virtual.go).
+		if err := refuseVirtualWrite(path.input); err != nil {
+			return err
+		}
+	}
+
 	captured := make([]*preImage, len(paths))
 	for i, path := range paths {
 		captured[i] = capturePreImage(ctx, path.input, path.root)
@@ -233,6 +251,9 @@ func readWriteTarget(ctx context.Context, input, root string) ([]byte, error) {
 // touched. The safety is still the fenced primitive's: it re-decides containment at operation
 // time, so a name swapped after this returns can only turn a friendly refusal into a blunt one.
 func statWriteTarget(ctx context.Context, path, root string) (os.FileInfo, error) {
+	if err := refuseVirtualWrite(path); err != nil {
+		return nil, err
+	}
 	pinPath, pinRoot, absent := escapeTargetPin(ctx, path, root)
 	if absent {
 		return nil, os.ErrNotExist
