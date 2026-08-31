@@ -73,7 +73,12 @@ Callers: `internal/agent/subagent.go:101` `delegationName` → returns `title.Fi
 
 **Commit.** `refactor(title): one delegate-naming rule replaces the agent, run, headless and tui copies`
 
-## 3. `internal/refs` owns the `@file` / `/skill` reference grammar
+## 3. `internal/refs` owns the `@file` / `/skill` reference grammar — ✅ DONE (2026-08-31)
+
+NOTES (2026-08-31): doc.go carries the package narration only — no `Files:` map. `internal/refs`
+holds two non-test files, far under the ~10-file threshold that earns a map, and the plan's file
+list has no `docmap_test.go`, so an unguarded map that can rot silently was left out rather than a
+fourth file added.
 
 **What.** New package `internal/refs` (files `doc.go`, `refs.go`, `refs_test.go`; imports stdlib only) holding the grammar now at `internal/tui/command.go:612-770`, moved verbatim in behaviour: `type Span struct { Start, End int; Name string }`; `FileSpans(s string) []Span`; `SkillSpans(s string, known func(string) bool) []Span` (nil `known` → nil); `Names(spans []Span) []string` (first-seen de-dupe); `ScanToken(s string, start int) (string, int)`; `IsSpace(b byte) bool`; `FileRefs(s string) []string` = `Names(FileSpans(s))`; `SkillRefs(s string, known func(string) bool) []string`. The doc comments travel with the functions (they are the grammar's spec: word boundary, bare/quoted forms, no escapes, a token never crosses a newline). `doc.go` names the package the parse half of CONTEXT.md's **File reference** and **Skill** `/token`, and says resolution is the agent's. This item ADDS the package only; tui keeps its copy until item 4 (no behaviour change here).
 
