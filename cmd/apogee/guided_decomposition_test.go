@@ -1,7 +1,7 @@
 package main
 
 // Config-surface acceptance for the guided_decomposition stack (ADR 0014, plan item 5): the
-// `mechanisms:` block resolves to Config.EnableMechanisms (mechanismIDs over the production
+// `mechanisms:` block resolves to Config.EnableMechanisms (mechanisms.ResolveEnabled over the production
 // catalogue) and construction (apogee.New) enforces the ADR 0014 §4 stacking gates — Requires
 // tool_result_cap, IncompatibleWith decompose — as loud startup errors, not silent misconfiguration.
 
@@ -14,14 +14,14 @@ import (
 	"github.com/airiclenz/apogee/internal/mechanisms"
 )
 
-// guidedEnable resolves the enabled IDs the config surface would hand the engine (mechanismIDs over
+// guidedEnable resolves the enabled IDs the config surface would hand the engine (mechanisms.ResolveEnabled over
 // the real catalogue) onto cfg.EnableMechanisms — the same seam runRoot drives. Building and the ADR
 // 0014 §4 stacking gates fire at apogee.New, exactly as they do from a real `mechanisms:` block.
 func guidedEnable(t *testing.T, cfg *apogee.Config, enabled map[string]bool) {
 	t.Helper()
-	ids, err := mechanismIDs(enabled, mechanisms.KnownIDs())
+	ids, _, err := mechanisms.ResolveEnabled(enabled, mechanisms.KnownIDs())
 	if err != nil {
-		t.Fatalf("mechanismIDs(%v): %v", enabled, err)
+		t.Fatalf("ResolveEnabled(%v): %v", enabled, err)
 	}
 	cfg.EnableMechanisms = ids
 }

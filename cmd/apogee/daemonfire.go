@@ -90,7 +90,9 @@ func newDaemonWiring(opts config.Options) (*daemonWiring, error) {
 	if err != nil {
 		return nil, err
 	}
-	manualIDs, err := mechanismIDs(opts.Mechanisms, mechanisms.KnownIDs())
+	// The retired-id notices are bound and dropped here — item 10 of the tui-host-hoist plan logs
+	// them at daemon startup; nothing about the ids changes either way.
+	manualIDs, _, err := mechanisms.ResolveEnabled(opts.Mechanisms, mechanisms.KnownIDs())
 	if err != nil {
 		return nil, err
 	}

@@ -1640,11 +1640,11 @@ func (a settingsApplier) reloadServers() (bool, error) {
 }
 
 // reloadMechanisms re-reads the `mechanisms:` block and installs both halves of it. The ids are
-// derived through the startup producer (mechanismIDs), which validates EVERY key of the block —
-// enabled and disabled alike — so a Mechanism id this build does not know is refused here rather than
-// silently arming nothing, exactly as it is at launch (ADR 0015 §1).
+// derived through the same resolver startup uses (mechanisms.ResolveEnabled), which validates EVERY
+// key of the block — enabled and disabled alike — so a Mechanism id this build does not know is
+// refused here rather than silently arming nothing, exactly as it is at launch (ADR 0015 §1).
 //
-// It answers with the row's boundary note rather than nothing, because the one thing that producer
+// It answers with the row's boundary note rather than nothing, because the one thing that resolver
 // tolerates in SILENCE is still worth a sentence to whoever just edited the block: a key naming a
 // RETIRED Mechanism arms nothing and is not an error, so the note is where it gets said. Startup says
 // the same lines on stderr; here they ride back to the pane, which is the only surface a live apply
@@ -1654,12 +1654,12 @@ func (a settingsApplier) reloadMechanisms() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	ids, err := mechanismIDs(file.Mechanisms, mechanisms.KnownIDs())
+	ids, notices, err := mechanisms.ResolveEnabled(file.Mechanisms, mechanisms.KnownIDs())
 	if err != nil {
 		return "", err
 	}
 	a.live.setMechanisms(ids, file.Mechanisms)
-	return strings.Join(retiredMechanismNotices(file.Mechanisms), " "), nil
+	return strings.Join(notices, " "), nil
 }
 
 // reloadValidatedSets re-reads the `validated-sets:` block. An absent off-switch resolves to ON —

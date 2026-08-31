@@ -40,8 +40,8 @@
 // The seams those phases build, split off by concern (ADR 0043): wire_settings.go the
 // live settings holder, the dispatcher a committed /settings key is applied through,
 // and the per-model re-resolution a heartbeat rebind drives; wire_tools.go the live
-// tool registry and the builders that assemble one — built-ins plus MCP — and validate
-// the `mechanisms:` block against the catalogue; wire_mcp.go the connected MCP sessions
+// tool registry and the builders that assemble one — built-ins plus MCP;
+// wire_mcp.go the connected MCP sessions
 // and the validate-then-commit reconnect that moves a session onto another set;
 // wire_present.go the presentation ladder this host can walk and the holder that
 // rebuilds and re-installs it; wire_session.go the session-persistence and

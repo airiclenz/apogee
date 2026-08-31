@@ -155,7 +155,7 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	// choice, model-independent by construction, and the rebind seam re-runs the
 	// "an explicit mechanisms: block suppresses a validated set" rule against it for every new
 	// model — so it must survive the validated-set overwrite two blocks down.
-	manualIDs, err := mechanismIDs(w.opts.Mechanisms, mechanisms.KnownIDs())
+	manualIDs, retiredNotices, err := mechanisms.ResolveEnabled(w.opts.Mechanisms, mechanisms.KnownIDs())
 	if err != nil {
 		return err
 	}
@@ -163,10 +163,10 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 
 	// A `mechanisms:` key naming a RETIRED Mechanism is tolerated rather than refused (the id was
 	// valid at the release before the removal), and this is the one caller that says so: startup runs
-	// before the alt screen, so a stderr line here reaches the human, where the same producer running
+	// before the alt screen, so a stderr line here reaches the human, where the same resolver running
 	// under the live `/settings` apply or per delegate would paint over the TUI. It sits beside the
 	// validated-set notices below for the same reason they do.
-	for _, n := range retiredMechanismNotices(w.opts.Mechanisms) {
+	for _, n := range retiredNotices {
 		fmt.Fprintln(os.Stderr, n)
 	}
 

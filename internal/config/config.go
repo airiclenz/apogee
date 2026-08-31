@@ -3027,7 +3027,7 @@ func ApogeeHome(configDir string) (string, error) {
 }
 
 // ServerNameList renders the switchable names for findServer's error (an empty list renders
-// "(none)", matching knownMechanismList's shape for the same job).
+// "(none)", matching mechanisms.ResolveEnabled's known-catalogue tail for the same job).
 func ServerNameList(entries []ServerEntry) string {
 	if len(entries) == 0 {
 		return "(none)"

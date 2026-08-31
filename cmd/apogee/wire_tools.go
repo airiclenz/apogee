@@ -4,20 +4,18 @@ package main
 //
 // What the session's tools are made of and how they change: the live holder that owns the registry
 // the engine is running on — re-pointing a registered tool where it can, going through the single
-// SwapTools door where it must (ADR 0037 binding F) — plus the startup builders behind it, the
-// registry assembly that folds the discovered MCP tools onto the built-in set, and the validation
-// that turns a `mechanisms:` config block into the ID list the engine arms (ADR 0015 §1).
+// SwapTools door where it must (ADR 0037 binding F) — plus the startup builders behind it and the
+// registry assembly that folds the discovered MCP tools onto the built-in set. Turning a
+// `mechanisms:` config block into the ID list the engine arms is mechanisms.ResolveEnabled's job
+// (ADR 0015 §1), which every Driver reaches directly.
 
 import (
 	"fmt"
 	"os"
-	"sort"
-	"strings"
 	"sync"
 
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/domain"
-	"github.com/airiclenz/apogee/internal/mechanisms"
 	"github.com/airiclenz/apogee/internal/security"
 	"github.com/airiclenz/apogee/internal/tools"
 )
@@ -247,102 +245,4 @@ func registryWithMCP(workspace string, cfg apogee.Config, mcpTools []apogee.Tool
 		}
 	}
 	return registry
-}
-
-// mechanismIDs validates every `mechanisms:` config key against the known catalogue and returns the
-// enabled IDs in sorted canonical order for Config.EnableMechanisms — the engine (apogee.New/Resume)
-// builds them, derives their Deps, and runs the stacking gates (ADR 0015 §1: wire.go collapses to a
-// YAML→ID-list producer). EVERY key is validated here, enabled AND disabled: the engine only ever
-// sees the enabled IDs, so a typo'd DISABLED key — never constructed — must still fail loudly at this
-// startup boundary (phase-4-review-fixes item 5). An unknown key, whether true or false, is a loud
-// error naming the known catalogue. Keys are walked in sorted spelling so the returned list (and any
-// engine-side build error over it) is deterministic; the dispatch order is the registry's own
-// topo-sort (ADR 0003), independent of this order. With nothing enabled it returns nil, so
-// Config.EnableMechanisms stays empty and the engine arms nothing (today's behaviour for a config
-// without a mechanisms block).
-//
-// A RETIRED id (mechanisms.RetiredIDs — a row this build removed) is DROPPED, silently and whatever
-// its value: the key was valid at the release before the removal, so refusing it would break a
-// config the user never edited. The roll is read here rather than injected beside `known` because
-// this producer runs on three paths that must all tolerate it identically — startup, the live
-// `/settings` apply (reloadMechanisms) and each delegate's `sub-agents:` posture — and a path that
-// forgot to pass it would refuse where its siblings tolerate. Silence is the same requirement: two
-// of those three paths run with the alt screen up, where a stderr line is painted over the TUI. The
-// user-facing word is retiredMechanismNotices, which only the pre-TUI callers print.
-func mechanismIDs(enabled map[string]bool, known []apogee.MechanismID) ([]apogee.MechanismID, error) {
-	knownSet := make(map[string]bool, len(known))
-	for _, id := range known {
-		knownSet[string(id)] = true
-	}
-
-	keys := make([]string, 0, len(enabled))
-	for id := range enabled {
-		keys = append(keys, id)
-	}
-	sort.Strings(keys)
-
-	ids := make([]apogee.MechanismID, 0, len(keys))
-	for _, id := range keys {
-		if mechanisms.IsRetired(domain.MechanismID(id)) {
-			continue
-		}
-		if !knownSet[id] {
-			return nil, fmt.Errorf("apogee: unknown mechanism %q; known: %s", id, knownMechanismList(known))
-		}
-		if enabled[id] {
-			ids = append(ids, apogee.MechanismID(id))
-		}
-	}
-	if len(ids) == 0 {
-		return nil, nil
-	}
-	return ids, nil
-}
-
-// retiredMechanismRelease is the version whose notes carry the retirements retiredMechanismNotices
-// names. One string serves the whole roll because everything on it went at once; a later removal in
-// a different release turns this into a per-id field on mechanisms' roll rather than a second const.
-const retiredMechanismRelease = "v0.18.7"
-
-// retiredMechanismNotices is the user-facing half of the retired-id tolerance mechanismIDs keeps
-// silently: one line per retired id the `mechanisms:` block turns ON, so a config that still asks
-// for a removed Mechanism says so once instead of arming nothing without explanation. A retired id
-// set to FALSE earns no line — the user is not asking for it, and telling them to delete a key that
-// already disables nothing is noise.
-//
-// It is pure (a map in, lines out, sorted by id) so the wording is table-testable, and it PRINTS
-// nothing itself: the caller decides where the lines go, because only the pre-TUI startup path may
-// write to stderr — the live `/settings` apply folds them into the answer the pane renders.
-func retiredMechanismNotices(enabled map[string]bool) []string {
-	named := make([]string, 0, len(enabled))
-	for id, on := range enabled {
-		if on && mechanisms.IsRetired(domain.MechanismID(id)) {
-			named = append(named, id)
-		}
-	}
-	sort.Strings(named)
-
-	notices := make([]string, 0, len(named))
-	for _, id := range named {
-		notices = append(notices, fmt.Sprintf(
-			"apogee: mechanism %q was retired in %s and is ignored; remove it from mechanisms:",
-			id, retiredMechanismRelease))
-	}
-	if len(notices) == 0 {
-		return nil
-	}
-	return notices
-}
-
-// knownMechanismList renders the known catalogue for the unknown-key error, matching the engine's
-// own unknown-ID error tail (an empty catalogue renders "(none)").
-func knownMechanismList(known []apogee.MechanismID) string {
-	if len(known) == 0 {
-		return "(none)"
-	}
-	parts := make([]string, len(known))
-	for i, id := range known {
-		parts[i] = string(id)
-	}
-	return strings.Join(parts, ", ")
 }

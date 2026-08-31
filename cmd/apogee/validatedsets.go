@@ -199,7 +199,7 @@ func resolveValidatedSet(opts config.Options, userDir, probeDir string) (set []a
 func retiredSetMemberNotice(e validated.Entry, id domain.MechanismID) string {
 	return fmt.Sprintf(
 		"apogee: validated-set entry %q names mechanism %q, retired in %s — it is dropped and the rest of the set applies.",
-		e.Key, id, retiredMechanismRelease)
+		e.Key, id, mechanisms.RetiredRelease)
 }
 
 // appliedNotice is the per-session line for an applying set (ADR 0016 §5's "visible

@@ -20,7 +20,7 @@ import (
 // `mechanisms:` block is a single structured row, because its children are not a schema at all —
 // they are the Mechanism catalogue's ids, which the binary knows (mechanisms.KnownIDs()) and this
 // package does not. So this writer is addressed by (id, value), and WHICH ids exist stays the
-// caller's question, the same division cmd/apogee's mechanismIDs already keeps. What the writer
+// caller's question, the same division mechanisms.ResolveEnabled already keeps. What the writer
 // checks for itself is narrower and is about the FILE: an id it could not spell as a plain key is
 // refused rather than quoted into a line a reader would take back out under a different name.
 //

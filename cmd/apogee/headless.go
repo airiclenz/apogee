@@ -339,7 +339,9 @@ func runHeadless(cmd *cobra.Command, args []string, opts *config.Options, noSave
 	// Every `mechanisms:` key is validated here — enabled AND disabled — exactly as startup
 	// validates them: the engine only ever sees the enabled IDs, so a typo'd disabled key would
 	// otherwise never be reported at all (ADR 0015 §1).
-	manualIDs, err := mechanismIDs(opts.Mechanisms, mechanisms.KnownIDs())
+	// The retired-id notices are bound and dropped here — item 10 of the tui-host-hoist plan prints
+	// them on this Driver's stderr; nothing about the ids changes either way.
+	manualIDs, _, err := mechanisms.ResolveEnabled(opts.Mechanisms, mechanisms.KnownIDs())
 	if err != nil {
 		return notStarted(err)
 	}

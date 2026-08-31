@@ -212,88 +212,15 @@ func assertRegistryOffers(t *testing.T, registry *apogee.ToolRegistry, name stri
 	}
 }
 
-// fakeKnown is a stand-in catalogue for the pure key-validation tests: mechanismIDs only checks a
-// `mechanisms:` key against the known set and selects the enabled ones (the engine builds, so no
-// constructor is needed here — the unknown-ID and construct-under-Bypass paths below drive the REAL
-// catalogue via mechanisms.KnownIDs / apogee.New).
-var fakeKnown = []apogee.MechanismID{"alpha", "beta", "off"}
-
-// An enabled ID is selected; a `false` entry is not. mechanismIDs returns the enabled IDs in sorted
-// canonical order for Config.EnableMechanisms — the engine builds them (ADR 0015 §1).
-func TestMechanismIDsEnablesOnlyTrue(t *testing.T) {
-	t.Parallel()
-	ids, err := mechanismIDs(map[string]bool{"alpha": true, "beta": false}, fakeKnown)
-	if err != nil {
-		t.Fatalf("mechanismIDs: %v", err)
-	}
-	if len(ids) != 1 || ids[0] != "alpha" {
-		t.Errorf("mechanismIDs = %v; want exactly [alpha] (the `false` entry is skipped)", ids)
-	}
-}
-
-// Nothing enabled ⇒ a nil ID list, so Config.EnableMechanisms stays empty and New arms nothing
-// (today's behaviour unchanged for a config with no mechanisms block). A KNOWN key mapped to false
-// selects nothing — disabled Mechanisms are validated by name, never enabled.
-func TestMechanismIDsDefaultNone(t *testing.T) {
-	t.Parallel()
-	for _, enabled := range []map[string]bool{nil, {}, {"off": false}} {
-		ids, err := mechanismIDs(enabled, fakeKnown)
-		if err != nil {
-			t.Fatalf("mechanismIDs(%+v): %v", enabled, err)
-		}
-		if ids != nil {
-			t.Errorf("mechanismIDs(%+v) = %v; want nil (nothing enabled)", enabled, ids)
-		}
-	}
-}
-
-// An unknown ENABLED ID is a loud startup error — proven against the real catalogue via
-// mechanisms.KnownIDs, so a typo'd `mechanisms:` key fails startup rather than silently vanishing.
-func TestMechanismIDsUnknownIDErrors(t *testing.T) {
-	t.Parallel()
-	_, err := mechanismIDs(map[string]bool{"nope": true}, mechanisms.KnownIDs())
-	if err == nil {
-		t.Fatal("enabling an unknown mechanism: want an error, got nil")
-	}
-}
-
-// A typo'd key mapped to FALSE is a startup error too (phase-4-review-fixes item 5): the disabled-key
-// validation stays cmd-side because the engine only ever sees the ENABLED IDs. The error lists the
-// real catalogue's known IDs; a valid disabled key still selects nothing — validated against
-// mechanisms.KnownIDs.
-func TestMechanismIDsUnknownDisabledKeyErrors(t *testing.T) {
-	t.Parallel()
-
-	_, err := mechanismIDs(map[string]bool{"typo": false}, mechanisms.KnownIDs())
-	if err == nil {
-		t.Fatal(`{"typo": false}: want a startup error, got nil`)
-	}
-	if !strings.Contains(err.Error(), `"typo"`) {
-		t.Errorf("error = %q, want it to name the unknown key", err)
-	}
-	if !strings.Contains(err.Error(), "validate") {
-		t.Errorf("error = %q, want it to list the known catalogue (e.g. %q)", err, "validate")
-	}
-
-	// The same key spelled correctly and disabled is fine: validated by name, never enabled.
-	ids, err := mechanismIDs(map[string]bool{"validate": false}, mechanisms.KnownIDs())
-	if err != nil {
-		t.Fatalf(`{"validate": false}: %v`, err)
-	}
-	if ids != nil {
-		t.Errorf(`{"validate": false} = %v; want nil (a disabled Mechanism is never enabled)`, ids)
-	}
-}
-
 // The enabled IDs thread through New as Config.EnableMechanisms and the engine arms them — even under
 // Bypass, enabling a real catalogued Mechanism (validate) constructs cleanly (the dispatch gate that
 // skips it under Bypass is the engine's, exercised in internal/agent). This proves the config →
 // EnableMechanisms → engine-build path is coherent end-to-end.
 func TestMechanismIDsConstructsUnderBypass(t *testing.T) {
 	t.Parallel()
-	ids, err := mechanismIDs(map[string]bool{"validate": true}, mechanisms.KnownIDs())
+	ids, _, err := mechanisms.ResolveEnabled(map[string]bool{"validate": true}, mechanisms.KnownIDs())
 	if err != nil {
-		t.Fatalf("mechanismIDs: %v", err)
+		t.Fatalf("ResolveEnabled: %v", err)
 	}
 	cfg := validCfg(t)
 	cfg.Bypass = true
@@ -304,67 +231,4 @@ func TestMechanismIDsConstructsUnderBypass(t *testing.T) {
 		t.Fatalf("New with an enabled Mechanism under Bypass: %v", err)
 	}
 	t.Cleanup(func() { _ = agent.Close() })
-}
-
-// A `mechanisms:` key naming a RETIRED Mechanism is DROPPED, not refused: the key was valid at the
-// release before the removal, so a config the user never edited must still start. It is dropped
-// whichever value it carries, it never reaches Config.EnableMechanisms, and the producer itself says
-// nothing — two of its three call paths run with the alt screen up, where stderr paints over the TUI.
-// Everything alongside it in the block still arms.
-func TestMechanismIDsRetiredIDIsDropped(t *testing.T) {
-	for _, tt := range []struct {
-		name    string
-		enabled map[string]bool
-		want    []apogee.MechanismID
-	}{
-		{"retired and asked for", map[string]bool{"grammar": true}, nil},
-		{"retired and switched off", map[string]bool{"grammar": false}, nil},
-		{"retired beside a live row", map[string]bool{"grammar": true, "validate": true}, []apogee.MechanismID{"validate"}},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			var ids []apogee.MechanismID
-			var err error
-
-			printed := captureStderr(t, func() {
-				ids, err = mechanismIDs(tt.enabled, mechanisms.KnownIDs())
-			})
-
-			if err != nil {
-				t.Fatalf("mechanismIDs(%v): a retired id must be tolerated, got %v", tt.enabled, err)
-			}
-			if len(ids) != len(tt.want) {
-				t.Fatalf("mechanismIDs(%v) = %v, want %v", tt.enabled, ids, tt.want)
-			}
-			for i := range tt.want {
-				if ids[i] != tt.want[i] {
-					t.Errorf("mechanismIDs(%v)[%d] = %q, want %q", tt.enabled, i, ids[i], tt.want[i])
-				}
-			}
-			if printed != "" {
-				t.Errorf("mechanismIDs wrote to stderr: %q — the notice is retiredMechanismNotices' job", printed)
-			}
-		})
-	}
-}
-
-// The notice names every retired id the block turns ON, one line each, in sorted spelling — and says
-// what it is and what to do about it. A retired id set to FALSE earns no line (the user is not asking
-// for it), and neither does a live row or an empty block.
-func TestRetiredMechanismNoticesNameEachRetiredID(t *testing.T) {
-	t.Parallel()
-
-	got := retiredMechanismNotices(map[string]bool{"grammar": true, "validate": true})
-
-	want := []string{
-		`apogee: mechanism "grammar" was retired in ` + retiredMechanismRelease + ` and is ignored; remove it from mechanisms:`,
-	}
-	if len(got) != len(want) || got[0] != want[0] {
-		t.Errorf("retiredMechanismNotices = %q, want %q", got, want)
-	}
-
-	for _, quiet := range []map[string]bool{nil, {}, {"grammar": false}, {"validate": true}} {
-		if lines := retiredMechanismNotices(quiet); lines != nil {
-			t.Errorf("retiredMechanismNotices(%v) = %q, want no lines", quiet, lines)
-		}
-	}
 }

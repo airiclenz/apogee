@@ -128,7 +128,7 @@ type delegationWiring struct {
 //
 // It fails the run rather than degrading when the flagged entry's `mechanisms:` map is defective —
 // an unknown key, or a set the stacking gates refuse. That is the same posture the session's own
-// block takes at this same boundary (mechanismIDs, wireSession): a typo in a file outlives the day
+// block takes at this same boundary (mechanisms.ResolveEnabled, wireSession): a typo in a file outlives the day
 // it was written, and a posture that silently armed nothing would be invisible for months.
 func newDelegationWiring(
 	entries []config.ServerEntry,
@@ -473,7 +473,7 @@ func resolveDelegationTarget(
 // The build goes through the engine's own BuildMechanisms rather than assembling a registry here,
 // because the Deps a catalogue row needs — the Library store, the identity ladder keyed on the
 // model — are the engine's to derive (ADR 0015 §2). What this layer owns is the two things the
-// engine cannot know: that the map's keys are catalogued at all (mechanismIDs, the same validation
+// engine cannot know: that the map's keys are catalogued at all (mechanisms.ResolveEnabled, the same validation
 // the session's own block gets, typo'd DISABLED keys included), and that the identity is the
 // SUB-AGENT server's — hence the endpoint and model swapped onto the config copy the build reads.
 //
@@ -484,9 +484,12 @@ func subAgentCatalogue(entry config.ServerEntry, base apogee.Config) (func() *ap
 	if len(entry.Mechanisms) == 0 {
 		return nil, nil
 	}
-	ids, err := mechanismIDs(entry.Mechanisms, mechanisms.KnownIDs())
+	// The retired-id notices are DISCARDED here: a child's posture is resolved with the alt screen
+	// up, where a stderr line paints over the TUI, and the session's own block already said the same
+	// lines on stderr at startup.
+	ids, _, err := mechanisms.ResolveEnabled(entry.Mechanisms, mechanisms.KnownIDs())
 	if err != nil {
-		// mechanismIDs already carries the house "apogee: " prefix, so the entry that asked for it is
+		// ResolveEnabled already carries the house "apogee: " prefix, so the entry that asked for it is
 		// appended rather than prefixed (buildEnabledMechanisms' rule): the message would otherwise
 		// print the prefix twice, and a user with two servers listed needs to know which one is meant.
 		return nil, fmt.Errorf("%w — in the `sub-agents:` server %q", err, entry.Name)
