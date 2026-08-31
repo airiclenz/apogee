@@ -372,7 +372,14 @@ NOTES (2026-08-31): docs/manual/configuration.md gained a one-line cross-link fr
 **Acceptance:** `go test ./internal/tui/... ./internal/skills/... && go build ./...`
 **Commit:** `feat(tui): /skills lists the catalog and exports a shipped skill`
 
-## 11. Shipped skills: planning and code-review
+## 11. Shipped skills: planning and code-review — ✅ DONE (2026-08-31)
+
+NOTES (2026-08-31): both bodies are body-only and use no `{{SKILL_DIR}}` token — neither protocol needs a bundled reference the way `debugging`'s stall checklist does, and a token with nothing to point at is worse than none. `Dir` still resolves to `shipped:<id>` through item 9's mount, which `load_test.go`'s shipped table already asserts for every folder in the tree.
+NOTES (2026-08-31): the frontmatter carries both `summary:` and `description:` as the item asks, matching `debugging`'s shape — under apogee's parser only the first is read (`firstNonEmpty(fm.Summary, fm.Description)`), so `description:` stays interop text for tools that read only that key, and the matcher vocabulary rides `triggers:` (11 phrases each, under the 32/64 caps).
+NOTES (2026-08-31): bodies are 108 and 111 lines against the item's ≤150 cap; no new test was written — item 7's table test enumerates the embedded tree from disk, so both folders were covered the moment they existed (verified: `go test ./internal/skills/...` green, and the shipped-count assertion is derived from `shippedIDs`, not a literal).
+NOTES (2026-08-31): the untracked `docs/plans/2026-08-31 - 01 - transcript-codec-hoist-plan.md` belongs to a concurrent session and was left exactly as found; it is in neither FILES nor the commit.
+NOTES (2026-08-31): consequential edit — cmd/apogee/e2e_smoke_test.go: made necessary by the two new shipped skills. Step 12's restored-transcript read waited for "What files are in this workspace?" on a 30-row frame, but the four-skill /skills report saved in the transcript now scrolls that prompt off the tail; the taller `next.Resize(e2eSize.W, 40)` + `WaitQuiet(settled)` pair moved above the `WaitText`, so the read happens on the viewport the assertion was always written for.
+NOTES (2026-08-31): consequential edit — cmd/apogee/testdata/frames/t12-skills.txt: made necessary by the two new shipped skills. The golden frame enumerates the /skills listing, which now carries `/code-review` and `/planning` beside `/debugging` and `/dupe`; re-recorded with `-update`. The test's own claims (two rows per failed/shadowed section, exactly one loaded-skill row, no leaked colour) are unchanged and still assert on the new frame.
 
 **What:** Depends on item 7. Author `shipped/planning/SKILL.md` (plan-then-implement: restate goal, enumerate steps with files, execute one at a time, verify each) and `shipped/code-review/SKILL.md` (review discipline: correctness first, realistic triggers, no style noise, verify findings against the tree). Each: full frontmatter with `triggers:`, body ≤150 lines, body-only or with bundled files under the item-9 mount at the author's discretion.
 **Files:** `internal/skills/shipped/planning/SKILL.md` (new), `internal/skills/shipped/code-review/SKILL.md` (new)

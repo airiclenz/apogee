@@ -176,12 +176,13 @@ func TestE2ESmokeInProcess(t *testing.T) {
 
 	// Step 12 — the restored transcript is the one that was saved: both prompts, both replies, and
 	// the tool blocks with their outcomes.
-	next.WaitText("What files are in this workspace?")
-	// A taller viewport for this one read. The saved transcript now also carries step 7's /skills
-	// report, which a fresh install fills with the shipped set, and 30 rows show only its tail. The
-	// claim here is about what was RESTORED, not about what happens to fit on one screen.
+	// A taller viewport before the first read. The saved transcript now also carries step 7's
+	// /skills report, which a fresh install fills with the shipped set, and 30 rows show only its
+	// tail — the earliest prompt scrolls off. The claim here is about what was RESTORED, not about
+	// what happens to fit on one screen.
 	next.Resize(e2eSize.W, 40)
 	next.WaitQuiet(settled)
+	next.WaitText("What files are in this workspace?")
 	restored := next.Frame().String()
 	for _, want := range []string{
 		"What files are in this workspace?",
