@@ -39,11 +39,20 @@
 // Ask-Before and Allow-Edits are refused, because both exist to consult a human
 // (decision 2 of ADR 0033).
 //
-// # What v1 deliberately does not do
+// # The scrollback the record replays from
 //
-// No scrollback is recorded. The saved record carries no transcript blob, so resuming a
-// Firing from the /sessions browser takes ADR 0022's documented degrade path ("resumed,
-// no scrollback recorded") — correct and already handled, not a defect.
+// The saved record carries a transcript blob of its own, folded from the engine's Event
+// stream as the run goes (transcript.go), so resuming a Firing from the /sessions browser
+// repaints what it actually did instead of taking ADR 0022's no-scrollback degrade path.
+// The fold is deliberately narrow: the submitted prompt, committed assistant text, tool
+// calls with bounded arguments, tool results and errors, each at the Depth that emitted it.
+// Nothing a PRESENTER decided is in it — a runner paints nothing, so a card carries the
+// call's raw name and no invented label — and where the stream lacks a fact an entry needs,
+// the entry is omitted rather than synthesized. A blob that could not be encoded degrades
+// to a record without one, which replays exactly as a pre-blob record does; the save itself
+// never fails over it.
+//
+// # What v1 deliberately does not do
 //
 // The record is saved ONCE, at completion, and on a failed run it still saves whatever
 // completed. That is a deliberate scoping of ADR 0022's per-Turn cadence to the

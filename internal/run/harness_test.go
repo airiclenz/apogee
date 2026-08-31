@@ -341,3 +341,23 @@ type stubPresenter struct{}
 func (stubPresenter) Present(context.Context, domain.PresentRequest) (domain.PresentOutcome, error) {
 	return domain.PresentOutcome{}, nil
 }
+
+// ---------------------------------------------------------------------------
+
+// notingTool is a read-only tool with a trivial, quotable outcome. It exists so a scripted
+// Firing can exercise the ordinary tool-call/tool-result pair in Plan mode — the class the
+// ladder runs rather than gates — without a gate, a subprocess or a file on disk.
+type notingTool struct{}
+
+func (notingTool) Name() string            { return "note_something" }
+func (notingTool) Description() string     { return "records a note and reads it straight back" }
+func (notingTool) Schema() json.RawMessage { return json.RawMessage(`{"type":"object"}`) }
+func (notingTool) ReadOnly() bool          { return true }
+
+func (notingTool) Execute(_ context.Context, call domain.ToolCall) (domain.ToolResult, error) {
+	var decoded struct {
+		Note string `json:"note"`
+	}
+	_ = json.Unmarshal(call.Arguments, &decoded)
+	return domain.ToolResult{CallID: call.ID, Content: "noted: " + decoded.Note}, nil
+}

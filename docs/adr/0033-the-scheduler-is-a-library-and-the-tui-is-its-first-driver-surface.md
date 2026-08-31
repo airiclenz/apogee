@@ -137,6 +137,11 @@ facade-export question re-opens. It does not get to stay unbenched inside a Driv
 - **A Firing's record resumes without scrollback.** v1's runner records no transcript blob, so
   resuming a Firing from `/sessions` takes ADR 0022's documented degrade path ("resumed, no
   scrollback recorded") — an engine-only resume, correct and already handled, not a defect.
+  *(Amended 2026-08-31: no longer true. Now that the transcript codec is Driver-neutral
+  (`internal/session/transcript.go`), the runner folds its own scrollback from the Event stream
+  and fills `Record.Transcript` — `internal/run/transcript.go` — so a Firing's record REPLAYS.
+  The fold is narrower than the TUI's by design: stream facts only, no presenter verdicts. The
+  degrade path stands for records written before this and for a blob that could not be encoded.)*
 - **A Firing runs without MCP tools.** MCP connections are live host state re-established per
   session (ADR 0022, [ADR 0008](0008-stateless-tools-and-non-forkable-external-effects.md) —
   external effects are non-forkable); handing the TUI's live connections to a concurrent second

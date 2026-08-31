@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -85,14 +86,23 @@ func TestOncePersistsAFiringUnderItsScheduleIdentity(t *testing.T) {
 		t.Errorf("Meta.CreatedAt = %v, want the pinned %v", meta.CreatedAt, fired.UTC())
 	}
 
-	// The record is engine-resumable and carries no scrollback: v1 records no transcript
-	// blob, so a resume takes ADR 0022's documented degrade path by design.
+	// The record is engine-resumable AND carries its own scrollback: the runner folds the run's
+	// entries onto Record.Transcript, so a resume repaints what the Firing did instead of taking
+	// ADR 0022's no-scrollback degrade path.
 	rec, err := store.Load(res.SessionID)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if len(rec.Transcript) != 0 {
-		t.Errorf("record carries a transcript blob (%d bytes); a firing records none", len(rec.Transcript))
+	entries, err := session.DecodeTranscript(rec.Transcript)
+	if err != nil {
+		t.Fatalf("DecodeTranscript: %v", err)
+	}
+	wantEntries := []session.Entry{
+		{Kind: session.EntryKindUser, Text: "check the build"},
+		{Kind: session.EntryKindAssistant, Text: "the build is green"},
+	}
+	if !reflect.DeepEqual(entries, wantEntries) {
+		t.Errorf("the record's blob decodes to %+v, want %+v", entries, wantEntries)
 	}
 	if rec.Session.Version != domain.SessionVersion {
 		t.Errorf("record session version = %d, want %d", rec.Session.Version, domain.SessionVersion)
@@ -1146,6 +1156,155 @@ func TestOnceRecordsWhatTheFiringAndItsDelegatesSpent(t *testing.T) {
 		t.Errorf("Meta.DelegateUsage = %+v, want %+v — the SUM over both delegated runs",
 			rec.Meta.DelegateUsage, wantDelegated)
 	}
+}
+
+// TestOnceRecordsTheRunsScrollback is item 4's headline: the saved record carries a transcript
+// blob folded from the run's own Event stream, so an unattended Firing REPLAYS in /sessions
+// instead of taking ADR 0022's no-scrollback degrade path. The script exercises every kind the
+// fold writes — the submitted prompt, a plain tool call and its result, a delegation and the
+// text its child committed at depth 1, and the parent's final answer.
+func TestOnceRecordsTheRunsScrollback(t *testing.T) {
+	t.Parallel()
+
+	const delegated = "summarise the notes"
+
+	registry := domain.NewToolRegistry()
+	if err := registry.Register(notingTool{}); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	if err := registry.Register(tools.NewSubAgent()); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	up := newUpstream(t, func(w http.ResponseWriter, req request) {
+		switch {
+		case req.lastTextHas(delegated):
+			writeFinal(w, "the notes are short")
+		case req.lastRoleIs(domain.RoleTool) && req.toolMsgs() == 1:
+			writeToolCall(w, "call_2", tools.SubAgentToolName, `{"task":"`+delegated+`"}`)
+		case req.lastRoleIs(domain.RoleTool):
+			writeFinal(w, "all done")
+		default:
+			writeToolCall(w, "call_1", "note_something", `{"note":"hello"}`)
+		}
+	})
+
+	store := session.NewStore(t.TempDir())
+	spec := planSpec(up.url, "close out the day")
+	spec.Config.Tools = registry
+	spec.Store = store
+
+	res, err := Once(context.Background(), spec)
+	if err != nil {
+		t.Fatalf("Once: %v", err)
+	}
+
+	rec, err := store.Load(res.SessionID)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	entries, err := session.DecodeTranscript(rec.Transcript)
+	if err != nil {
+		t.Fatalf("DecodeTranscript: %v", err)
+	}
+
+	want := []foldedEntry{
+		{kind: session.EntryKindUser, text: "close out the day"},
+		{kind: session.EntryKindToolCall, name: "note_something", args: `{"note":"hello"}`, done: true},
+		{kind: session.EntryKindToolResult, text: "noted: hello"},
+		{kind: session.EntryKindToolCall, name: tools.SubAgentToolName, args: `{"task":"` + delegated + `"}`, done: true},
+		{kind: session.EntryKindAssistant, text: "the notes are short", depth: 1, spawn: "call_2"},
+		{kind: session.EntryKindToolResult, text: "the notes are short"},
+		{kind: session.EntryKindAssistant, text: "all done"},
+	}
+	if got := foldedEntries(entries); !reflect.DeepEqual(got, want) {
+		t.Errorf("the record's blob decodes to\n%+v\nwant\n%+v", got, want)
+	}
+}
+
+// TestOnceBoundsTheStoredToolArguments pins the cap the fold applies to a call's stored
+// arguments. internal/run may not import internal/tui, so the bound is a MIRROR of the
+// 1024-byte per-field cap internal/tui/wireargs.go applies (wireArgsFieldCap) rather than a
+// shared helper — an unbounded ToolView.Args in a runner-written blob is exactly the regression
+// this constant prevents, and the two spellings must not drift.
+func TestOnceBoundsTheStoredToolArguments(t *testing.T) {
+	t.Parallel()
+
+	oversized := strings.Repeat("x", boundArgsFieldCap+1)
+
+	registry := domain.NewToolRegistry()
+	if err := registry.Register(notingTool{}); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	up := newUpstream(t, func(w http.ResponseWriter, req request) {
+		if req.lastRoleIs(domain.RoleTool) {
+			writeFinal(w, "noted")
+			return
+		}
+		args, err := json.Marshal(map[string]string{"note": oversized})
+		if err != nil {
+			return // the handler runs on the server goroutine; a fixed literal never fails
+		}
+		writeToolCall(w, "call_1", "note_something", string(args))
+	})
+
+	store := session.NewStore(t.TempDir())
+	spec := planSpec(up.url, "write a long note")
+	spec.Config.Tools = registry
+	spec.Store = store
+
+	res, err := Once(context.Background(), spec)
+	if err != nil {
+		t.Fatalf("Once: %v", err)
+	}
+
+	rec, err := store.Load(res.SessionID)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	entries, err := session.DecodeTranscript(rec.Transcript)
+	if err != nil {
+		t.Fatalf("DecodeTranscript: %v", err)
+	}
+
+	var stored string
+	for _, e := range entries {
+		if e.Kind == session.EntryKindToolCall && e.Tool != nil {
+			stored = string(e.Tool.Args)
+		}
+	}
+	want := fmt.Sprintf(`{"note":"…[%d bytes]"}`, len(oversized))
+	if stored != want {
+		t.Errorf("stored arguments = %s, want %s — the over-long value is replaced by its own size",
+			stored, want)
+	}
+}
+
+// foldedEntry is the projection the scrollback assertions compare on: the facts the fold is
+// responsible for, without the wire members it never writes. Comparing whole session.Entry values
+// would pin members this item does not own and break on the next additive one.
+type foldedEntry struct {
+	kind  string
+	text  string
+	depth int
+	spawn string
+	name  string
+	args  string
+	done  bool
+}
+
+// foldedEntries projects a decoded blob onto that shape.
+func foldedEntries(entries []session.Entry) []foldedEntry {
+	out := make([]foldedEntry, 0, len(entries))
+	for _, e := range entries {
+		f := foldedEntry{kind: e.Kind, text: e.Text, depth: e.Depth, spawn: e.SpawnCallID, done: e.Done}
+		if e.Tool != nil {
+			f.name, f.args = e.Tool.Name, string(e.Tool.Args)
+		}
+		out = append(out, f)
+	}
+	return out
 }
 
 // TestOnceRecordsNoDelegateSpendWhenNothingWasDelegated is the zero-value guard: a Firing that

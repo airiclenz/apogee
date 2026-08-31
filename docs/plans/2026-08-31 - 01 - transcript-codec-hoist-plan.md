@@ -106,7 +106,12 @@ NOTES (2026-08-31): `request.toolMsgs()` added to `harness_test.go` beside the e
 
 **Commit.** `feat(run): unattended records carry the run's spend`
 
-## 4. The runner writes the transcript blob — unattended records replay
+## 4. The runner writes the transcript blob — unattended records replay — ✅ DONE (2026-08-31)
+
+NOTES (2026-08-31): the fold does NOT mirror the tui's `contentArgs` drop (write/edit content keys) — that drop exists because the tui's card already carries the edit as Regions/Details, which a runner-written card has none of, so dropping would lose the edit from the record entirely; the mirrored 1024-byte per-field cap still bounds an oversized body. Both caps (`boundArgsFieldCap`, `boundArgsCap`) are mirrored from `internal/tui/wireargs.go` with comments naming the counterpart, per the item's no-import/no-move call.
+NOTES (2026-08-31): no `session.EntryKindSchedule` entry is written — a Firing's own stream carries no schedule block (that entry belongs to the parent session that launched it) and the Asker/Presenter are pinned off, so the note/presented kinds have no fact to fold from. Documented in `internal/run/transcript.go`'s file-top comment; this is the item's "where the stream lacks a fact an entry needs, the entry is omitted" rule.
+NOTES (2026-08-31): consequential edit — internal/run/harness_test.go: made necessary by the scripted tool-call/tool-result test, which needs a read-only tool double the Plan-mode ladder runs rather than gates (the harness's existing `gatingTool` is write-capable by design). Added `notingTool` beside the other doubles.
+NOTES (2026-08-31): the fold closes a tool call's entry (`Done`) when its result lands, so a completed runner record does not replay every card as interrupted; a call still open at save time stays open and `session.CloseInterruptedCalls` words it, exactly as for a TUI-written record.
 
 Depends on items 1 and 3.
 

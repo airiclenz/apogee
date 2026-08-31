@@ -225,6 +225,9 @@ func Once(ctx context.Context, spec Spec) (Result, error) {
 		inner:  spec.Config.Events,
 		window: spec.Config.Context.MaxContextTokens,
 		model:  spec.Config.Model,
+		// The scrollback is seeded with the prompt about to be submitted: the engine reports no
+		// event for a submission, so the fold cannot learn the run's first line from the stream.
+		scrollback: newTranscriptFold(spec.Prompt),
 	}
 	cfg := spec.Config
 	cfg.Approver = den
@@ -300,6 +303,10 @@ func Once(ctx context.Context, spec Spec) (Result, error) {
 			DelegateUsage: delegateTotals(tap.subAgentRuns()),
 		},
 		Session: snap,
+		// The run's own scrollback, so an unattended record REPLAYS in /sessions rather than
+		// taking ADR 0022's no-scrollback degrade path (transcript.go). A blob that could not be
+		// spelled comes back nil and degrades exactly as an older record does — never a failed save.
+		Transcript: tap.scrollback.blob(),
 	}
 	if err := spec.Store.Save(rec); err != nil {
 		return res, errors.Join(runErr, fmt.Errorf("apogee: save the firing's record: %w", err))
@@ -450,6 +457,9 @@ type eventTap struct {
 	// against, never a value reported on its own. It is what makes SubAgentUsage.Model mean
 	// "different from the session's" rather than "whatever this run used".
 	model string
+	// scrollback is the Firing's own transcript fold — the entries the saved record replays from
+	// (transcript.go). It carries its own lock, so nothing here takes the tap's for it.
+	scrollback *transcriptFold
 
 	mu    sync.Mutex
 	total int
@@ -482,8 +492,14 @@ type openSubAgent struct {
 }
 
 // Emit records a top-level usage total and answer, tracks the sub-agent runs that pass
-// through, and forwards the event unchanged.
+// through, folds the event into the Firing's scrollback, and forwards the event unchanged.
 func (t *eventTap) Emit(e domain.Event) {
+	// The scrollback fold runs beside the extraction below rather than inside it: the two read the
+	// same stream for different reasons — one accumulates readings, the other a sequence — and a
+	// fold folded into the switch would have to grow a case for every variant either one wants.
+	if t.scrollback != nil {
+		t.scrollback.fold(e)
+	}
 	switch ev := e.(type) {
 	case domain.UsageEvent:
 		t.noteUsage(ev)

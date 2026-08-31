@@ -3082,6 +3082,50 @@ func TestNewModelReplaysResumedScrollback(t *testing.T) {
 	}
 }
 
+// TestNewModelReplaysARunnerWrittenScrollback is the blank-replay gap closed from the reading
+// end: a blob the RUNNER wrote (internal/run's fold — stream facts only, no presenter verdicts)
+// replays as real entries, and the "no scrollback recorded" degrade note stops firing for it.
+// The entries are built as session.Entry values and encoded with session.EncodeTranscript rather
+// than through this package's own transcript, because a runner-written record never passes
+// through a TUI transcript at all — that is the whole point of the neutral codec.
+func TestNewModelReplaysARunnerWrittenScrollback(t *testing.T) {
+	t.Parallel()
+
+	blob, err := session.EncodeTranscript([]session.Entry{
+		{Kind: session.EntryKindUser, Text: "check the build"},
+		{
+			Kind:   session.EntryKindToolCall,
+			CallID: "call_1",
+			Done:   true,
+			Tool:   &session.ToolView{Name: "note_something", Args: json.RawMessage(`{"note":"hello"}`)},
+		},
+		{Kind: session.EntryKindToolResult, Text: "noted: hello"},
+		{Kind: session.EntryKindAssistant, Text: "the build is green", Depth: 1, SpawnCallID: "call_1"},
+	})
+	if err != nil {
+		t.Fatalf("EncodeTranscript: %v", err)
+	}
+
+	m := newModel(context.Background(), &fakeEngine{}, Options{
+		Resumed: &ResumedSession{Transcript: blob, Title: "check the build"},
+	}, nil)
+
+	if !hasEntry(m, entryUser, "check the build") {
+		t.Error("the runner's user entry did not replay")
+	}
+	if !hasEntry(m, entryToolResult, "noted: hello") {
+		t.Error("the runner's tool result did not replay")
+	}
+	if !hasEntry(m, entryAssistant, "the build is green") {
+		t.Error("the runner's delegated assistant text did not replay")
+	}
+	for _, e := range m.transcript.entries {
+		if strings.Contains(e.text, "no scrollback recorded — the model still remembers") {
+			t.Fatalf("the degrade note still fires on a runner-written blob: %q", e.text)
+		}
+	}
+}
+
 // A corrupt (undecodable) blob is never fatal: no replayed entries land, the view is left fresh,
 // and an honest degrade note says the model still remembers.
 func TestNewModelResumeCorruptBlobDegrades(t *testing.T) {
