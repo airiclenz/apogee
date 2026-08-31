@@ -3307,6 +3307,165 @@ func TestGitDiffRangeBodySurvivesATypedSummary(t *testing.T) {
 	}
 }
 
+// TestFileContentBodiesAreNumbered pins the numbering rule across BOTH kinds of body a tool card
+// lays out: a body that shows FILE CONTENT carries the line numbers that content sits on, and a
+// body that shows PROSE carries none.
+//
+// The two halves of the table are stated differently on purpose. The file-content half is a LIST,
+// because six tools put a file's own lines beneath a branch and a seventh joining them without a
+// numbered reading is exactly what this test exists to catch. Each of the six is driven through the
+// presenter with a REAL result — never by calling its body hook directly — because the numbers are
+// the Edit regions', whether the tool RECORDED them as it applied the change (the four writing
+// tools) or this package RECOVERED them from a diff the tool merely printed (view_diff's whole-file
+// walk, git_diff_range's `@@` headers, toolregistry.go). A tool that stops recording, or a walk
+// that stops recovering, fails here rather than quietly falling back to the argument-derived body
+// the call was presented with, which is why every numbered row also asserts the regions are on the
+// view.
+//
+// The prose half is a RULE rather than a list, walked over toolRegistry: every entry whose body
+// lines come from outputBody/outputDetail carries no gutter. A command's output, git_status, a
+// delegation report and diagnostics are the ratified EXAMPLES of that half — asserted to be among
+// the walk, so a driver that matched nothing cannot pass — and never its boundary: python_exec,
+// git_branch and git_log floor on the same helper, and a closed list would leave them unguarded the
+// day one of them started numbering. The half is not "all outputBody" either — diagnostics
+// registers no `body` hook at all and the delegation report floors on `outputDetail` — which is why
+// membership is decided by what the entry's body READS LIKE rather than by which hook drew it.
+// git_diff_range answers in both halves for the same reason its two tests do: output the diff walk
+// can place is the numbered reading, and output it refuses is this plain one (ratified call 9).
+func TestFileContentBodiesAreNumbered(t *testing.T) {
+	t.Parallel()
+
+	type bodyCase struct {
+		name     string
+		tv       toolView
+		numbered bool
+	}
+
+	// The regions the four writing tools record as they apply a change. One region is enough: what
+	// the numbered reading is asserted on is that the rows wear numbers at all, and the shape of
+	// the rows those regions render as is pinned at the builder
+	// (TestStackedDiffLinesRendersTheLayoutSketch).
+	applied := domain.EditRegions{Regions: []domain.EditRegion{{
+		BeforeStart: 6, AfterStart: 6,
+		Leading:  []string{"func main() {"},
+		Removed:  []string{"\tprintln(1)"},
+		Inserted: []string{"\tprintln(2)"},
+		Trailing: []string{"}"},
+	}}}
+	writeCard := func(tool, args, content string) toolView {
+		tv := presentToolCall(domain.ToolCall{ID: "1", Tool: tool, Arguments: []byte(args)}, "", workspaceRoot{})
+		tv.enrichWithResult(domain.ToolResult{CallID: "1", Content: content, Summary: applied}, workspaceRoot{})
+		return tv
+	}
+
+	cases := []bodyCase{
+		{
+			name: "write_file",
+			tv: writeCard("write_file", `{"path":"main.go","content":"package main\n\nfunc main() {}\n"}`,
+				"wrote 34 bytes to main.go"),
+			numbered: true,
+		},
+		{
+			name: "edit_existing_file",
+			tv: writeCard("edit_existing_file", `{"path":"main.go","content":"package main\n\nfunc main() {}\n"}`,
+				"updated main.go"),
+			numbered: true,
+		},
+		{
+			name: "single_find_and_replace",
+			tv: writeCard("single_find_and_replace", `{"path":"main.go","oldText":"println(1)","newText":"println(2)"}`,
+				"replaced text in main.go"),
+			numbered: true,
+		},
+		{
+			name: "multi_find_and_replace",
+			tv: writeCard("multi_find_and_replace", `{"path":"main.go","replacements":[`+
+				`{"oldText":"println(1)","newText":"println(2)"},{"oldText":"a","newText":"b"}]}`,
+				"applied 2 replacements to main.go"),
+			numbered: true,
+		},
+		{
+			// Records nothing: view_diff applies nothing, so its numbers come from walking the
+			// whole-file diff it printed (viewDiffRegions).
+			name:     "view_diff",
+			tv:       viewDiffCard(t, []string{"  one", "  two", "- three", "+ THREE", "  four"}, domain.DiffStat{Added: 1, Removed: 1}),
+			numbered: true,
+		},
+		{
+			// Records nothing either: git's own `@@` headers carry the numbers, file section by
+			// file section (gitDiffRangeRegions).
+			name:     "git_diff_range",
+			tv:       gitDiffCard(t, regionPerFileSectionDiff()),
+			numbered: true,
+		},
+	}
+
+	// The prose half of the table, walked rather than listed. Every registry entry is driven with
+	// the same free-form output and no typed summary — the shape a result flooring on
+	// outputDetail has — and an entry whose body comes back as the lines outputBody lays out is one
+	// of them, whichever hook drew it.
+	const proseOutput = "one thing happened\nanother thing happened\nand a third"
+	lineTexts := func(lines []detailLine) []string {
+		out := make([]string, 0, len(lines))
+		for _, line := range lines {
+			out = append(out, line.Text)
+		}
+		return out
+	}
+	names := make([]string, 0, len(toolRegistry))
+	for name := range toolRegistry {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+	wantProse := lineTexts(outputBody(proseOutput))
+	var walked []string
+	for _, name := range names {
+		tv := presentToolCall(domain.ToolCall{ID: "1", Tool: name, Arguments: []byte(`{}`)}, "", workspaceRoot{})
+		tv.enrichWithResult(domain.ToolResult{CallID: "1", Content: proseOutput}, workspaceRoot{})
+		if !slices.Equal(lineTexts(tv.Details.all()), wantProse) {
+			continue // this entry reads its own result or its own arguments, not the prose floor
+		}
+		walked = append(walked, name)
+		cases = append(cases, bodyCase{name: name + " (prose floor)", tv: tv})
+	}
+	for _, example := range []string{"terminal", "git_status", "sub_agent", "diagnostics"} {
+		if !slices.Contains(walked, example) {
+			t.Errorf("the walk did not reach %s, one of the ratified prose examples — it covered %v", example, walked)
+		}
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			body := tc.tv.Details.all()
+			if !tc.numbered {
+				for i, line := range body {
+					if line.Gutter != "" {
+						t.Errorf("prose row %d (%q) carries the gutter %q, want none — a number claims a position this body does not know",
+							i, line.Text, line.Gutter)
+					}
+				}
+				return
+			}
+			if len(tc.tv.Regions) == 0 {
+				t.Fatalf("card kept no regions, so its body is not the change's own rows:\n%s", detailDump(body))
+			}
+			diffLines := 0
+			for i, line := range body {
+				if line.Kind != detailDiffAdded && line.Kind != detailDiffRemoved {
+					continue // a file section's name row and the `⋯` elision rule sit on no line
+				}
+				diffLines++
+				if line.Gutter == "" {
+					t.Errorf("diff row %d (%q) carries no gutter, want the line number it sits on", i, line.Text)
+				}
+			}
+			if diffLines == 0 {
+				t.Fatalf("body lays out no diff lines at all:\n%s", detailDump(body))
+			}
+		})
+	}
+}
+
 // detailTexts is a body's lines as plain strings, for assertions that are about the rows' text
 // rather than about which half of the outcome they landed in.
 //

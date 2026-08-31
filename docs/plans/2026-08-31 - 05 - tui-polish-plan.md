@@ -271,7 +271,13 @@ modal the human can neither answer nor close — the very thing that rung's comm
 approval, /settings up, /sessions up).
 `feat(tui): clicking the footer mode marker opens the mode picker`
 
-## 7. Pin that every file-content body is numbered, and say which are not
+## 7. Pin that every file-content body is numbered, and say which are not — ✅ DONE (2026-08-31)
+
+NOTES (2026-08-31): the item names `docs/layout/tool-layout.md:267` for write_file's row; the row is at `:273` after items 4 and 6 landed (line drift, same row, same "the written content" cell). It now reads "the recorded diff of what it wrote, numbered — split/stacked diff, see `split-diff-layout.md`", matching the three edit rows beneath it.
+NOTES (2026-08-31): the prose half's membership is decided by what an entry's body READS LIKE — the entry is driven with free-form output and no typed summary, and it joins the rule when its body's texts are exactly `outputBody`'s — rather than by comparing hook identity. Comparing `detail`/`body` function pointers would have needed a closed list of the WRAPPER helpers (`consoleDetail`, `consoleOpenDetail`, `commitDetail`, `gitStatusBody`, `gitDiffRangeBody`), which is the closed list the item rules out. The walk reaches thirteen entries — the four ratified examples plus `python_exec`, `git_branch`, `git_log`, `git_commit`, the four Console rows and `git_diff_range`'s unwalkable floor — and asserts the four examples are among them so a driver that matched nothing cannot pass.
+NOTES (2026-08-31): `git_diff_range` appears in BOTH halves, numbered on a diff the walk can place and unnumbered on output it refuses (ratified call 9, the case `TestGitDiffRangeFallsBackToPlainOutputWholesale` already pins). Stated in the test's doc comment rather than excluded.
+NOTES (2026-08-31): the numbered half also asserts each card kept its regions (`toolView.Regions`), because write_file's argument-derived body is numbered too (item 3) — without that assertion a write_file that stopped recording regions would still pass, which the item's regression guard forbids.
+NOTES (2026-08-31): mutation-checked both halves: deleting the `Gutter` from `stackedRow.line` fails 15 assertions in the numbered half, and giving `outputBody` a gutter fails 39 in the prose half.
 
 Depends on items 1 and 3.
 

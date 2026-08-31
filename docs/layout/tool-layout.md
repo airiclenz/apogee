@@ -270,7 +270,7 @@ its body whole while collapsed, and it appears only when the two differ.
 | Tool | `<tool-header>` | `<tool-details>` (collapsed) | `<tool-top-level-details>` | `<tool-details-row-*>` (expanded) |
 |---|---|---|---|---|
 | read_file | Read | path (`:12–80` when ranged, `· locate "…"` when set) | `N lines` | the located lines (`Located "…" on lines: …`) when locate is set, else — |
-| write_file | Write | path | `N lines` | the written content |
+| write_file | Write | path | `N lines` | the recorded diff of what it wrote, numbered — split/stacked diff, see `split-diff-layout.md` |
 | edit_existing_file | Edit | path | `+A −R` | split/stacked diff, see `split-diff-layout.md` |
 | single_find_and_replace | Replace | path | `+A −R` | split/stacked diff, see `split-diff-layout.md` |
 | multi_find_and_replace | Replace | path | `+A −R` (`N changes` when the result records no regions) | split/stacked diff, see `split-diff-layout.md` |
