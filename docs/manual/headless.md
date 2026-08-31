@@ -35,8 +35,10 @@ approval, and an unattended run has nobody to approve (see
 action is refused rather than parked — the refusals are the `denied:` count — `ask_user`
 and `present_document` are not registered, and no MCP server is contacted.
 
-Only the model's answer goes to **stdout**; resolution notices and the one-line summary
-go to **stderr**, so a pipeline reads the text and nothing else. A run that delegated
+Only the model's answer goes to **stdout**; resolution notices — including one line per
+`mechanisms:` key naming a Mechanism this release retired, which is ignored rather than
+refused — and the one-line summary go to **stderr**, so a pipeline reads the text and
+nothing else. A run that delegated
 adds one stderr line per sub-agent run just ahead of that summary —
 `sub-agent: 12k/32k · <the name it was given, else the task>`, in the order the runs
 finished — because

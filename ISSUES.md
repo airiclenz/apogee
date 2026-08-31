@@ -105,13 +105,6 @@ run.
   not recovery. The closeout plan scoped its item to the restore side, so F-08 is half remediated
   while the `ISSUES.md` entry it replaced and the CHANGELOG both record it as closed.
 
-- [ ] **No test drives the startup path that prints the grammar-retirement notice.** The retired-ID
-  work pinned the pure helper's wording and the producers' silence, but nothing exercises the
-  startup boundary itself — the `retiredMechanismNotices` loop writing to stderr at
-  `cmd/apogee/wire_live.go:169` — so the line a human actually sees when their `mechanisms:` block
-  names a retired ID is unpinned.
-
-
 ### Residuals deferred out of the 2026-08-28 deferred-residuals sweep
 
 **Status:** found 2026-08-28 at the close of the deferred-residuals sweep

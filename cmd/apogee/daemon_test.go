@@ -398,6 +398,32 @@ func TestDaemonDisclosesTheFenceResidualAtStartup(t *testing.T) {
 	}
 }
 
+// A `mechanisms:` key naming a Mechanism this release retired is tolerated rather than refused —
+// the id was valid at the release before the removal — and the daemon says so once at startup,
+// through the log that is its whole user interface. Without the line a daemon left running for
+// weeks fires every entry with a Mechanism nobody was told had stopped existing.
+func TestDaemonReportsARetiredMechanismAtStartup(t *testing.T) {
+	h := newDaemonHarness(t)
+	writeConfigHome(t, h.home, "mechanisms:\n  grammar: true\n")
+	h.writeSchedules(t, oneScheduleYAML(t.TempDir()))
+
+	h.stop()
+	wait := h.run(t)
+	if err := wait(); err != nil {
+		t.Fatalf("daemon: %v\n%s", err, h.errOut.String())
+	}
+
+	want := retiredMechanismNotice("grammar")
+	if got := strings.Count(h.out.String(), want); got != 1 {
+		t.Errorf("the retired-mechanism notice appeared %d times in the log; want exactly 1 line\n"+
+			"want: %q\nlog: %q", got, want, h.out.String())
+	}
+	if strings.Contains(h.errOut.String(), want) {
+		t.Errorf("the notice reached stderr; the daemon's narration is the log a supervisor journals: %q",
+			h.errOut.String())
+	}
+}
+
 // ----------------------------------------------------------------------------
 // Adoption and the run
 // ----------------------------------------------------------------------------
@@ -599,7 +625,7 @@ func TestDaemonHostLooksUpTheStartupDefault(t *testing.T) {
 			{Name: "fronted", Endpoint: testServerEndpoint, LlamaLauncher: "auto"},
 		},
 	}
-	wiring, err := newDaemonWiring(opts)
+	wiring, _, err := newDaemonWiring(opts)
 	if err != nil {
 		t.Fatalf("newDaemonWiring: %v", err)
 	}
@@ -639,7 +665,7 @@ func TestDaemonHostLooksUpTheStartupDefault(t *testing.T) {
 func TestDaemonHostRefusesAModelOnTheLauncherFrontedDefault(t *testing.T) {
 	h := newDaemonHarness(t)
 	opts := config.Options{ConfigDir: h.home, StartupLauncher: "auto"}
-	wiring, err := newDaemonWiring(opts)
+	wiring, _, err := newDaemonWiring(opts)
 	if err != nil {
 		t.Fatalf("newDaemonWiring: %v", err)
 	}
@@ -658,7 +684,7 @@ func TestDaemonHostRefusesAutoOnAHostThatCannotFence(t *testing.T) {
 	h := newDaemonHarness(t)
 	newConfiner = func() apogee.Confiner { return fakeConfiner{} }
 	opts := config.Options{ConfigDir: h.home, ConfineToWorkspace: true}
-	wiring, err := newDaemonWiring(opts)
+	wiring, _, err := newDaemonWiring(opts)
 	if err != nil {
 		t.Fatalf("newDaemonWiring: %v", err)
 	}
@@ -824,7 +850,7 @@ func newReloadHarness(t *testing.T, body string) *reloadHarness {
 		os.Getenv, os.ReadFile, func(string) {}); err != nil {
 		t.Fatalf("resolve the config: %v", err)
 	}
-	wiring, err := newDaemonWiring(opts)
+	wiring, _, err := newDaemonWiring(opts)
 	if err != nil {
 		t.Fatalf("newDaemonWiring: %v", err)
 	}

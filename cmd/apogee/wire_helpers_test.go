@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -12,9 +13,21 @@ import (
 
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/mcp"
+	"github.com/airiclenz/apogee/internal/mechanisms"
 	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/tui"
 )
+
+// retiredMechanismNotice is the exact line a `mechanisms:` key naming a retired Mechanism earns,
+// for the three Drivers that print it: the TUI's startup (wire_live.go), a headless run and a
+// daemon's log. The release comes from [mechanisms.RetiredRelease] rather than being spelled here,
+// so the roll moving to a later version is a one-line change in the library and not a hunt through
+// three test files; the wording is spelled out, because these tests exist to pin the line a human
+// actually reads.
+func retiredMechanismNotice(id string) string {
+	return fmt.Sprintf("apogee: mechanism %q was retired in %s and is ignored; remove it from mechanisms:",
+		id, mechanisms.RetiredRelease)
+}
 
 // captureStderr swaps the process os.Stderr for a pipe, runs f, and returns everything f wrote to
 // stderr. The caller must NOT be a parallel test: os.Stderr is a process-global, so this is only

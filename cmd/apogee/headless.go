@@ -339,11 +339,18 @@ func runHeadless(cmd *cobra.Command, args []string, opts *config.Options, noSave
 	// Every `mechanisms:` key is validated here — enabled AND disabled — exactly as startup
 	// validates them: the engine only ever sees the enabled IDs, so a typo'd disabled key would
 	// otherwise never be reported at all (ADR 0015 §1).
-	// The retired-id notices are bound and dropped here — item 10 of the tui-host-hoist plan prints
-	// them on this Driver's stderr; nothing about the ids changes either way.
-	manualIDs, _, err := mechanisms.ResolveEnabled(opts.Mechanisms, mechanisms.KnownIDs())
+	manualIDs, retiredNotices, err := mechanisms.ResolveEnabled(opts.Mechanisms, mechanisms.KnownIDs())
 	if err != nil {
 		return notStarted(err)
+	}
+	// A key naming a RETIRED Mechanism is tolerated rather than refused — it was valid at the
+	// release before the removal — and this is where this Driver says so. Without the line the run
+	// arms nothing and explains nothing: a script whose config still asks for a removed Mechanism
+	// would keep paying for runs that quietly differ from the ones it was tuned on. It goes to
+	// stderr, beside the plaintext-key and confinement notices above, because stdout is the
+	// model's answer and nothing else.
+	for _, notice := range retiredNotices {
+		cmd.PrintErrln(notice)
 	}
 
 	// This run's own record id, minted here because the runner is handed it beside the Config

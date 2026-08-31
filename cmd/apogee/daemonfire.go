@@ -83,18 +83,22 @@ type daemonWiring struct {
 // fails before a clock is started when any of it is wrong: a `mechanisms:` key naming no Mechanism
 // is a defect in the config the daemon must report at startup rather than at 3am in a saved record.
 //
+// The retired-id notices come back BESIDE the wiring rather than being printed here, for the reason
+// [daemonWiring.closeConfiner] returns its own: where a daemon's narration goes is the daemon's
+// decision (daemon.go), and a Firing's own stderr is not it. A caller that took the wiring and
+// dropped the lines would arm nothing and say nothing about a `mechanisms:` key naming a Mechanism
+// this release retired.
+//
 // The adopted set starts empty. A daemon adopts its first file immediately after this, through the
 // same [daemonWiring.adopt] call every later reload makes.
-func newDaemonWiring(opts config.Options) (*daemonWiring, error) {
+func newDaemonWiring(opts config.Options) (*daemonWiring, []string, error) {
 	roots, err := resolveRoots(opts.ConfigDir, "")
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	// The retired-id notices are bound and dropped here — item 10 of the tui-host-hoist plan logs
-	// them at daemon startup; nothing about the ids changes either way.
-	manualIDs, _, err := mechanisms.ResolveEnabled(opts.Mechanisms, mechanisms.KnownIDs())
+	manualIDs, retiredNotices, err := mechanisms.ResolveEnabled(opts.Mechanisms, mechanisms.KnownIDs())
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	// The scratch sweep, run once at startup for the reason runRoot runs it (wire.go): a daemon
@@ -114,7 +118,7 @@ func newDaemonWiring(opts config.Options) (*daemonWiring, error) {
 		confiner: newConfiner(),
 		store:    session.NewStore(roots.sessions),
 		adopted:  make(map[string]daemon.Entry),
-	}, nil
+	}, retiredNotices, nil
 }
 
 // closeConfiner tears the confinement backend down at the end of the daemon's life and reports the

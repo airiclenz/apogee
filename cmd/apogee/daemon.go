@@ -207,7 +207,7 @@ func runDaemon(ctx context.Context, opts *config.Options, changed func(string) b
 
 	// The host half of every Firing — the confinement backend, the key resolver, the sessions store,
 	// the validated `mechanisms:` list — resolved once, because config.yaml is read once (ADR 0055).
-	wiring, err := newDaemonWiring(*opts)
+	wiring, retiredNotices, err := newDaemonWiring(*opts)
 	if err != nil {
 		return err
 	}
@@ -220,6 +220,16 @@ func runDaemon(ctx context.Context, opts *config.Options, changed func(string) b
 			fmt.Fprintln(errOut, notice)
 		}
 	}()
+	// A `mechanisms:` key naming a Mechanism this release RETIRED is tolerated rather than refused
+	// — it was valid at the release before the removal — and this is where the daemon says so:
+	// through the log, which is its whole user interface (ADR 0034 decision 10), not through the
+	// stderr a Firing never writes to. It is said once at startup, before the schedules file is
+	// loaded, because config.yaml is read once (ADR 0055): a daemon left running for weeks on a
+	// config still asking for a removed Mechanism would otherwise fire every entry with a posture
+	// nobody was ever told about.
+	for _, notice := range retiredNotices {
+		log.line("%s", notice)
+	}
 	// The confinement posture a Firing will run under, said once at startup where a supervisor
 	// journals it. Only the residual cell speaks here: a backend that fences but knowingly leaves
 	// a write-class access open (landlock ABI 1–2 and truncate(2)) — disclosure, never a blocker.
