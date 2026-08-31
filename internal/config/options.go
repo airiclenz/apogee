@@ -218,6 +218,12 @@ type Options struct {
 	// loaded from the config file only. ApplyConfig sets it from the resolved settings.
 	UseProjectSkills bool
 
+	// useShippedSkills gates the skill source compiled into the binary (default true, config file
+	// only) — the lowest-priority source, which every folder on disk shadows (ADR 0065 §4).
+	// ApplyConfig sets it from the resolved settings; the composition roots fold it into the
+	// skills.Sources they hand the Provider, sessions and Firings alike.
+	UseShippedSkills bool
+
 	// useDefaultPrompt allows the EMBEDDED default system prompt when nothing is configured
 	// (default true, config file only) — the last rung of the resolution ladder (ADR 0064 §2).
 	// ApplyConfig sets it from the resolved settings; the composition root hands it to

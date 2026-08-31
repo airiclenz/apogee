@@ -117,6 +117,11 @@ func TestResolvePrecedence(t *testing.T) {
 			want: func(o *Options) { o.UseProjectSkills = false },
 		},
 		{
+			name: "use-shipped-skills is file-only and defaults true",
+			file: fileConfig{UseShippedSkills: boolptr(false)},
+			want: func(o *Options) { o.UseShippedSkills = false },
+		},
+		{
 			name: "auto-compact is file-only and defaults true",
 			file: fileConfig{AutoCompact: boolptr(false)},
 			want: func(o *Options) { o.AutoCompact = false },
@@ -287,6 +292,7 @@ func TestResolvePrecedence(t *testing.T) {
 func wantDefaults() Options {
 	return Options{
 		Mode: "ask-before", ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: true,
+		UseShippedSkills: true,
 		UseDefaultPrompt: true,
 		DelegateMaxSteps: defaultDelegateMaxSteps,
 		AutoTitle:        true, ValidatedSetsEnable: true, ContextFiles: []string{"AGENTS.md"},
@@ -503,6 +509,7 @@ func TestEveryConfigKeyReachesTheOptions(t *testing.T) {
 		"Mode": true, "Bypass": true, "Servers": true, "StartupServer": true, "Editor": true,
 		"ConfineToWorkspace": true, "UnconfinedHosts": true, "WebSearchEndpoint": true,
 		"UseProjectSkills": true, "AutoCompact": true, "DelegateMaxSteps": true,
+		"UseShippedSkills": true,
 		"UseDefaultPrompt": true,
 		"AutoTitle":        true, "RememberModel": true,
 		"ContextWindow": true, "ResponseReserve": true, "MCPServers": true, "ToolsDisabled": true,
@@ -545,6 +552,7 @@ func everyKeyFileConfig() fileConfig {
 		UnconfinedHosts:    []UnconfinedHost{{ID: "another-host", Acknowledged: "2026-08-20"}},
 		WebSearch:          "https://search.example.com",
 		UseProjectSkills:   boolptr(false), AutoCompact: boolptr(false), AutoTitle: boolptr(false),
+		UseShippedSkills: boolptr(false),
 		UseDefaultPrompt: boolptr(false),
 		DelegateMaxSteps: intptr(12),
 		RememberModel:    boolptr(true),

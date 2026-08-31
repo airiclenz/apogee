@@ -288,9 +288,13 @@ type settingsEngine interface {
 }
 
 // settingsSkills is the skill-catalogue surface the dispatcher drives, narrowed off *skills.Provider
-// for settingsEngine's reason. The two calls are one act — re-point, then re-scan — because the
-// Provider deliberately keeps serving the catalogue it has until someone asks for a fresh one.
+// for settingsEngine's reason. Re-pointing and re-scanning are one act — SetSources, then Reload —
+// because the Provider deliberately keeps serving the catalogue it has until someone asks for a
+// fresh one. Sources is the read half of that act: two independent keys gate the sources
+// (`use-project-skills`, `use-shipped-skills`), so an apply changes ONE field of the value already
+// installed rather than composing a fresh literal that would zero the other key's.
 type settingsSkills interface {
+	Sources() skills.Sources
 	SetSources(skills.Sources)
 	Reload() error
 }

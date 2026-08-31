@@ -70,6 +70,14 @@ func (p *Provider) SetSources(src Sources) {
 	p.src = src
 }
 
+// Sources reports the source set the next Reload would scan — the value SetSources last installed,
+// or the one NewProvider started from. It exists for the host that changes ONE field of a live
+// Sources (a `use-project-skills` or `use-shipped-skills` flip is one key each, applied
+// independently): read this, replace the one field, hand the whole value back to SetSources. A
+// caller that rebuilt the literal from scratch instead would silently reset every field the key it
+// is applying does not own.
+func (p *Provider) Sources() Sources { return p.sources() }
+
 // sources reads the current source dirs under the lock, so a Reload racing a SetSources scans one
 // coherent set rather than a torn one.
 func (p *Provider) sources() Sources {

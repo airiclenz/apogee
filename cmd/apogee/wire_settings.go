@@ -1080,23 +1080,18 @@ var settingsTable = []settingsEntry{
 		key:     "use-project-skills",
 		reaches: func(a settingsApplier) bool { return a.skills != nil },
 		apply: func(a settingsApplier, key, value string) (string, error) {
-			on, err := settingBool(key, value)
-			if err != nil {
-				return "", err
-			}
-			// The same layering startup spells, with the flag as it now stands. Re-pointing alone would
-			// change nothing anybody sees — the Provider serves the catalogue it has until asked for a
-			// fresh one — so the re-scan is part of the same act.
-			a.skills.SetSources(skills.Sources{
-				Home:             a.roots.config,
-				Workspace:        a.roots.workspace,
-				UseProjectSkills: on,
+			return applySkillSourceGate(a, key, value, func(src *skills.Sources, on bool) {
+				src.UseProjectSkills = on
 			})
-			// The scan's error is soft and is dropped here for the reason the "/" menu's reload drops
-			// it: Load never signals an unusable catalogue — a malformed skill is skipped and shown in
-			// the /skills report — so a partial scan is not a failed apply.
-			_ = a.skills.Reload()
-			return "", nil
+		},
+	},
+	{
+		key:     "use-shipped-skills",
+		reaches: func(a settingsApplier) bool { return a.skills != nil },
+		apply: func(a settingsApplier, key, value string) (string, error) {
+			return applySkillSourceGate(a, key, value, func(src *skills.Sources, on bool) {
+				src.UseShippedSkills = on
+			})
 		},
 	},
 	{
@@ -1293,6 +1288,35 @@ func applySystemPromptBlock(a settingsApplier, key, value string) (string, error
 		return "", err
 	}
 	return "", a.rideTheRebind()
+}
+
+// applySkillSourceGate commits one of the two skill-source gates — `use-project-skills` and
+// `use-shipped-skills` — with set naming the field that key owns. Both are booleans over ONE
+// skills.Sources value, so the layering is spelled the way startup spells it (this session's
+// resolved roots) but the SIBLING gate is read back off the Provider rather than recomposed here:
+// the two keys are committed independently, and a literal built from the key in hand alone would
+// zero whichever gate the human is not currently editing.
+//
+// Re-pointing alone would change nothing anybody sees — the Provider serves the catalogue it has
+// until asked for a fresh one — so the re-scan is part of the same act.
+func applySkillSourceGate(
+	a settingsApplier,
+	key, value string,
+	set func(src *skills.Sources, on bool),
+) (string, error) {
+	on, err := settingBool(key, value)
+	if err != nil {
+		return "", err
+	}
+	src := a.skills.Sources()
+	src.Home, src.Workspace = a.roots.config, a.roots.workspace
+	set(&src, on)
+	a.skills.SetSources(src)
+	// The scan's error is soft and is dropped here for the reason the "/" menu's reload drops it:
+	// Load never signals an unusable catalogue — a malformed skill is skipped and shown in the
+	// /skills report — so a partial scan is not a failed apply.
+	_ = a.skills.Reload()
+	return "", nil
 }
 
 // applyURLSafetyHosts is the one apply behind both `url-safety:` host lists — the key it is given

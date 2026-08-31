@@ -277,6 +277,31 @@ sources are re-scanned there and then — the `/` menu changes in the session yo
 may write [`{{SKILL_DIR}}`](commands.md#skill_dir-in-skill-bodies) to name the files bundled
 beside its own `SKILL.md`.
 
+## Skills apogee ships — `use-shipped-skills:`
+
+Apogee carries a small set of skills of its own, compiled into the binary rather than installed:
+there is no folder to look in, nothing to keep up to date, and they simply appear in the `/` menu
+beside the ones you wrote. `use-shipped-skills:` (default `true`) is the switch that leaves them
+out.
+
+```yaml
+# ~/.apogee/config.yaml
+use-shipped-skills: false
+```
+
+They are the **weakest** claim on a skill id in the system — below your global library, below the
+project's folders, below everything on disk. A skill of the same id anywhere else wins, and the
+shipped copy is recorded as shadowed rather than dropped, so writing your own `debugging` replaces
+apogee's without your having to switch anything off. That is the same collision rule
+[ADR 0032](../adr/0032-the-user-skill-library-outranks-the-workspace.md) states for the folders,
+with the shipped source added at the bottom.
+
+The flip is live, exactly like `use-project-skills:` above: commit the `use-shipped-skills` row in
+`/settings`, or save the file, and the catalog is re-scanned in the session you are already in.
+It is file-only — no flag, no environment variable — and it reads the same in every Driver, so a
+`/skill` token in a [headless](headless.md) prompt or a [daemon](daemon.md) Firing resolves to the
+same body your session resolves.
+
 ## Skill suggestions — `ui.skill-suggestions:`
 
 A library grows past what anyone can recall, which is exactly where a menu you have to open stops

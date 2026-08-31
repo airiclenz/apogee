@@ -132,6 +132,43 @@ func TestProviderSetSourcesLandsOnTheNextReload(t *testing.T) {
 	}
 }
 
+// The shipped source is live for the same reason the disk sources are: `use-shipped-skills:` is a
+// key a human can move mid-session, and the flip has to reach the ONE catalogue the loop and the
+// "/" menu share. Sources is the read half of that act — the applier changes the one field it owns
+// and hands the whole value back, so flipping the shipped gate cannot disturb the project gate.
+func TestProviderShippedGateFlipsOnTheNextReload(t *testing.T) {
+	home := t.TempDir()
+	workspace := t.TempDir()
+
+	p := NewProvider(Sources{Home: home, Workspace: workspace, UseProjectSkills: true, UseShippedSkills: true})
+	if _, ok := p.Get("debugging"); !ok {
+		t.Fatal("a shipped skill is missing with the gate on; the fixture proves nothing")
+	}
+
+	src := p.Sources()
+	src.UseShippedSkills = false
+	p.SetSources(src)
+	if err := p.Reload(); err != nil {
+		t.Fatalf("Reload soft error: %v", err)
+	}
+	if _, ok := p.Get("debugging"); ok {
+		t.Error("a shipped skill survived a reload with use-shipped-skills off")
+	}
+	if !p.Sources().UseProjectSkills {
+		t.Error("the project gate was zeroed by a shipped-gate flip; Sources is a read-modify-write")
+	}
+
+	src = p.Sources()
+	src.UseShippedSkills = true
+	p.SetSources(src)
+	if err := p.Reload(); err != nil {
+		t.Fatalf("Reload soft error: %v", err)
+	}
+	if _, ok := p.Get("debugging"); !ok {
+		t.Error("the shipped skill did not come back with the gate on again")
+	}
+}
+
 // TestProviderSourceDirsFollowSetSources pins the read-root seam's live-ness at its source: the
 // host mounts SourceDirs as the read tools' extra read-only roots (domain.Config.ExtraReadRoots),
 // and a mount frozen at construction would leave the model reading a dir the catalogue no longer

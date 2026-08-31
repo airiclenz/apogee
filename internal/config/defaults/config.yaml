@@ -459,6 +459,15 @@ context-files:
 # use-project-skills: true
 
 # =============================================================================
+# Offer the skills apogee itself ships with. They are compiled into the binary rather than
+# installed, so there is no folder to look in and nothing to keep up to date — they simply appear in
+# the "/" menu beside your own. They are also the WEAKEST claim on a skill id: a skill of the same
+# id in any folder on disk (your library, the project) wins, so writing your own copy replaces the
+# shipped one rather than fighting it. Set this to false to leave them out of the catalog entirely.
+# Config-file only (no flag or env). Default: true.
+# use-shipped-skills: true
+
+# =============================================================================
 # Automatic context Compaction: when the conversation history outgrows its share of the model's
 # context window, apogee summarises the older turns into a compact brief (the same fold the
 # /compact command runs) before the next request, so a long session does not overflow the window.

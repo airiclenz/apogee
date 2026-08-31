@@ -164,6 +164,11 @@ func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, []string
 			Home:             in.roots.config,
 			Workspace:        in.roots.workspace,
 			UseProjectSkills: in.opts.UseProjectSkills,
+			// Both skill gates come off the SAME resolved options a session reads, so an unattended
+			// run's catalog is the session's catalog (ADR 0031's Driver parity). Leaving this one out
+			// would hand a Firing the zero value — shipped skills off — and a `/debugging` token in a
+			// headless prompt would resolve in the TUI and silently stay prose here.
+			UseShippedSkills: in.opts.UseShippedSkills,
 		})
 	}
 

@@ -544,6 +544,12 @@ var keyAccessors = []keyAccessor{
 		},
 	},
 	{
+		row: mustKey("use-shipped-skills"),
+		fromFile: func(o *Options, fc fileConfig) {
+			o.UseShippedSkills = fc.UseShippedSkills == nil || *fc.UseShippedSkills
+		},
+	},
+	{
 		row: mustKey("use-default-prompt"),
 		fromFile: func(o *Options, fc fileConfig) {
 			o.UseDefaultPrompt = fc.UseDefaultPrompt == nil || *fc.UseDefaultPrompt
@@ -1069,6 +1075,11 @@ type fileConfig struct {
 	// UseProjectSkills gates discovery of the workspace's bare skills/ folder. A pointer so an
 	// explicit `use-project-skills: false` is distinguishable from an absent key (default true).
 	UseProjectSkills *bool `yaml:"use-project-skills"`
+	// UseShippedSkills gates the skills compiled into the binary (ADR 0065 §4) — the lowest-priority
+	// source, below every folder on disk. A pointer for UseProjectSkills' reason: an explicit
+	// `use-shipped-skills: false` is a deliberate "ship me nothing", and an absent key is the
+	// default true.
+	UseShippedSkills *bool `yaml:"use-shipped-skills"`
 	// UseDefaultPrompt gates the EMBEDDED default system prompt — the third rung of the
 	// resolution ladder (ADR 0064 §2), reached only when nothing above it is configured. A
 	// pointer for use-project-skills' reason: an explicit `use-default-prompt: false` is the

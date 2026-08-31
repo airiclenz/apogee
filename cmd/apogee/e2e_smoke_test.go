@@ -107,15 +107,18 @@ func TestE2ESmokeInProcess(t *testing.T) {
 	}
 	closePane(drv, "session token usage")
 
-	// Step 7 — /skills is honest about an empty library rather than blank or broken.
+	// Step 7 — /skills reports the catalog a fresh install has, which since `use-shipped-skills:`
+	// (default true) is apogee's own shipped set rather than an empty library. The crash markers are
+	// spelled as a runtime would spell them: the report now paints skill prose, and a skill whose
+	// job is chasing bugs names "panic" and "error" in its own summary and triggers.
 	submit(drv, "/skills")
 	drv.WaitQuiet(settled)
 	skills := drv.Frame().String()
-	if !strings.Contains(strings.ToLower(skills), "skill") {
-		t.Errorf("/skills said nothing about skills:\n%s", skills)
+	if !strings.Contains(skills, "/debugging") {
+		t.Errorf("/skills did not list the shipped skills a fresh install carries:\n%s", skills)
 	}
-	if strings.Contains(skills, "panic") || strings.Contains(skills, "error") {
-		t.Errorf("/skills reported an error:\n%s", skills)
+	if strings.Contains(skills, "panic:") || strings.Contains(skills, "goroutine ") {
+		t.Errorf("/skills crashed:\n%s", skills)
 	}
 	drv.Press(tuitest.Esc)
 	drv.WaitQuiet(settled)
@@ -174,6 +177,10 @@ func TestE2ESmokeInProcess(t *testing.T) {
 	// Step 12 — the restored transcript is the one that was saved: both prompts, both replies, and
 	// the tool blocks with their outcomes.
 	next.WaitText("What files are in this workspace?")
+	// A taller viewport for this one read. The saved transcript now also carries step 7's /skills
+	// report, which a fresh install fills with the shipped set, and 30 rows show only its tail. The
+	// claim here is about what was RESTORED, not about what happens to fit on one screen.
+	next.Resize(e2eSize.W, 40)
 	next.WaitQuiet(settled)
 	restored := next.Frame().String()
 	for _, want := range []string{

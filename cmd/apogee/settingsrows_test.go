@@ -40,6 +40,7 @@ func fabricatedSettings() config.Options {
 		URLAllowHosts:      []string{"docs.example.com"},
 		URLDenyHosts:       nil, // the honest asymmetry: a configured allow list beside an unset deny list
 		UseProjectSkills:   false,
+		UseShippedSkills:   false,
 		UseDefaultPrompt:   false,
 		AutoCompact:        true,
 		DelegateMaxSteps:   40,
@@ -315,6 +316,7 @@ func TestSettingsRowsCarryTheirSection(t *testing.T) {
 		"context-files.names":   "System prompt",
 		"unconfined-hosts":      "Confinement",
 		"use-project-skills":    "Tools & skills",
+		"use-shipped-skills":    "Tools & skills",
 		"context-window":        "Session",
 		"present.host":          "Presentation",
 		"cursor-shape":          "Interface",
@@ -355,6 +357,7 @@ func TestSettingsRowsFormatEffectiveValues(t *testing.T) {
 		"url-safety.allow-hosts": "[docs.example.com]",
 		"url-safety.deny-hosts":  "[]", // unset: a list row's empty spelling, and every host is still floored
 		"use-project-skills":     "false",
+		"use-shipped-skills":     "false",
 		"auto-compact":           "true",
 		"delegate-max-steps":     "40",
 		"auto-title":             "false",

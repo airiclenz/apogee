@@ -238,7 +238,34 @@ commit.
 **Acceptance:** `go test ./internal/skills/... && go build ./...`
 **Commit:** `feat(skills): shipped skills load from an embedded source below every user dir`
 
-## 8. use-shipped-skills gates the embedded source
+## 8. use-shipped-skills gates the embedded source — ✅ DONE (2026-08-31)
+
+NOTES (2026-08-31): the guard's first-named option was taken — `settingsSkills` gains `Sources()`
+(a new exported accessor over `Provider.sources()`), and both applies run through one
+`applySkillSourceGate` helper that read-modify-writes the live value. `a.roots` still spells
+Home/Workspace, which is that field's documented role; only the sibling gate is read back. Proven:
+with `src := a.skills.Sources()` replaced by `var src skills.Sources`,
+`TestApplySettingSkillGatesLeaveEachOtherAlone` fails on both halves.
+NOTES (2026-08-31): the Firing half of the guard is pinned by a new
+`TestFiringConfigCarriesTheShippedSkillGate` (both polarities). Proven gap-closing: with the one
+`UseShippedSkills:` line removed from `wire_firing.go`, its gate-on case fails.
+NOTES (2026-08-31): default-true makes shipped skills reach a live session for the first time, which
+broke two `cmd/apogee` e2e tests that passed at HEAD. Both were adapted rather than worked around —
+neither is a regression of prior behaviour, both are this item's own intended consequence:
+(a) `cmd/apogee/testdata/frames/t12-skills.txt` regenerated with `-update` — the `/skills` report
+now carries the shipped `/debugging` row (unlabeled, since the "shipped" source label is item 9's
+listed work; `skillSource("")` returns "", so it is never mislabeled "elsewhere" in the meantime);
+(b) `cmd/apogee/e2e_smoke_test.go` — step 7's crash proxy was `strings.Contains(skills, "panic") ||
+… "error"`, which the shipped debugging skill's own summary and triggers now trip on legitimately.
+The assertion is re-spelled as a runtime would spell a crash (`"panic:"`, `"goroutine "`) and gains
+a positive claim (the report lists `/debugging` on a fresh install); step 12's restored-transcript
+read takes a taller viewport, because step 7's four-line report now pushes the earlier tool block's
+"entries" off a 30-row screen and that step's claim is about what was RESTORED, not about what fits.
+NOTES (2026-08-31): the `defaults/config.yaml` block and the new manual section deliberately do NOT
+mention `/skills export <id>` — that verb is item 10's work, and naming it here would announce a
+command the binary at this commit refuses.
+NOTES (2026-08-31): the untracked `docs/plans/2026-08-31 - 01 - transcript-codec-hoist-plan.md`
+belongs to a concurrent session and was left exactly as found; it is in neither FILES nor the commit.
 
 **What:** Depends on item 7. New `use-shipped-skills` `*bool`, default true, an exact mirror of `use-project-skills` (`internal/config/config.go:1063-1065`, registry row at `registry.go:330-335`, settings row near `wire_settings.go:1034`, template docs in `defaults/config.yaml`, live-appliable via `Provider.SetSources` + `Reload` per ADR 0037). `false` drops the shipped source from the walk. Document in `docs/manual/configuration.md` beside `use-project-skills`.
 **Regression guard.** `cmd/apogee/wire_firing.go:163-166` builds a Firing's Sources with only `UseProjectSkills`: pass the resolved `use-shipped-skills` in too, or headless/Firing runs get the zero value false while sessions default true — a Driver-parity break (ADR 0031) that leaves item 6's shipped-id `/token` unresolvable headless. Both settings applies (`wire_settings.go:1038-1053` and the new mirror) compose the full Sources from current state — read-modify-write the provider's last-set Sources (extend the `settingsSkills` seam, `wire.go:294`) or hand the applier both resolved flags — so a mid-session `use-project-skills` flip cannot zero `UseShippedSkills`.

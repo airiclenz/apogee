@@ -1331,6 +1331,59 @@ func TestApplySettingUseProjectSkillsRescansTheSources(t *testing.T) {
 	}
 }
 
+// The two skill-source gates — `use-project-skills` and `use-shipped-skills` — are separate keys
+// over ONE skills.Sources value, so each apply must leave the other exactly as it stands. An apply
+// that recomposed the literal from the key in hand would zero its sibling: committing the project
+// gate would silently switch the shipped skills off, and the reverse.
+func TestApplySettingSkillGatesLeaveEachOtherAlone(t *testing.T) {
+	t.Parallel()
+	workspace := t.TempDir()
+	roots, err := resolveRoots(t.TempDir(), workspace)
+	if err != nil {
+		t.Fatalf("resolveRoots: %v", err)
+	}
+	writeSkillFixture(t, filepath.Join(workspace, "skills", "project-only"),
+		"---\nid: project-only\nsummary: from the bare project folder\n---\nbody")
+
+	provider := skills.NewProvider(skills.Sources{
+		Home:             roots.config,
+		Workspace:        roots.workspace,
+		UseProjectSkills: true,
+		UseShippedSkills: true,
+	})
+	if _, ok := provider.Get("debugging"); !ok {
+		t.Fatal("a shipped skill is missing with both gates on; the test proves nothing")
+	}
+	apply := applySettingFor(settingsApplier{engine: &applySettingSpy{}, skills: provider, roots: roots})
+
+	if _, err := apply("use-project-skills", "false"); err != nil {
+		t.Fatalf("apply use-project-skills=false: %v", err)
+	}
+	if !provider.Sources().UseShippedSkills {
+		t.Error("a use-project-skills apply zeroed use-shipped-skills")
+	}
+	if _, ok := provider.Get("debugging"); !ok {
+		t.Error("the shipped skills left the catalog when the project gate moved")
+	}
+
+	if _, err := apply("use-shipped-skills", "false"); err != nil {
+		t.Fatalf("apply use-shipped-skills=false: %v", err)
+	}
+	if _, ok := provider.Get("debugging"); ok {
+		t.Error("a shipped skill still resolves with use-shipped-skills off; the re-scan did not happen")
+	}
+
+	if _, err := apply("use-project-skills", "true"); err != nil {
+		t.Fatalf("apply use-project-skills=true: %v", err)
+	}
+	if _, ok := provider.Get("project-only"); !ok {
+		t.Error("the project skill did not come back with its own gate on again")
+	}
+	if _, ok := provider.Get("debugging"); ok {
+		t.Error("a use-project-skills apply switched the shipped source back on")
+	}
+}
+
 // A committed `present.` key rebuilds the ladder exactly as startup built it and re-installs it, so
 // the presenter the engine captured walks the new rungs from the next presentation (ADR 0037). A
 // value the block refuses changes nothing.

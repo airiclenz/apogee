@@ -1,15 +1,15 @@
-│ ▗▄▄▌▌  ▌▌  ▌▌  ▌▙▄▄▌▙▄▄▌                                              model    gpt[31m-oss-20b │ │
-│ ▚▄▄▌▙▄▄▘▚▄▄▘▚▄▄▌▚▄▄ ▚▄▄                                               version  <version>       │ │
-│     ▌        ▄▄▘                                                                               │ ┃
-╰────────────────────────────────────────────────────────────────────────────────────────────────╯ ┃
-                                                                                                   ┃
-· model 'gpt[31m-oss-20b' is not advertised by the server; using it as configured (context window  ┃
-  unknown — Budget and auto-compaction inactive)                                                   ┃
-                                                                                                   ┃
-· context window unknown — automatic compaction and the Budget are inactive; set context-window:   ┃
+                                                                                                   │
+· model 'gpt[31m-oss-20b' is not advertised by the server; using it as configured (context window  │
+  unknown — Budget and auto-compaction inactive)                                                   │
+                                                                                                   │
+· context window unknown — automatic compaction and the Budget are inactive; set context-window:   │
   in config.yaml                                                                                   ┃
                                                                                                    ┃
-· 1 skill available:                                                                               ┃
+· 2 skills available:                                                                              ┃
+    /debugging  Debugging — Chase a bug down in four steps — reproduce, isolate, fix the cause,    ┃
+  verify — with the rules that keep each step honest.                                              ┃
+      triggers: debug this, fix this bug, why is this failing, why does this crash, this test      ┃
+  fails, test is failing, stack trace, panic…                                                      ┃
     /dupe · workspace  Dupe — a duplicate id                                                       ┃
                                                                                                    ┃
   1 skill found but not loaded:                                                                    ┃

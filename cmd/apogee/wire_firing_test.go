@@ -322,6 +322,49 @@ func TestFiringConfigDefaultsItsSeams(t *testing.T) {
 	}
 }
 
+// Driver parity for the shipped skill source (ADR 0031): a Firing with no session to share builds
+// its own catalog from the resolved options, so BOTH skill gates must travel to it. Left out,
+// `use-shipped-skills` would reach the fresh Sources as its zero value — shipped off — and a
+// `/debugging` token in a headless or daemon prompt would attach the body in the TUI and silently
+// stay prose in every unattended run.
+func TestFiringConfigCarriesTheShippedSkillGate(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range []struct {
+		name string
+		on   bool
+		want int
+	}{
+		{name: "gate on resolves the shipped skill", on: true, want: 1},
+		{name: "gate off leaves it out of the catalog", on: false, want: 0},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			cfg, _, err := firingConfig(context.Background(), firingInputs{
+				opts:  config.Options{Bypass: true, UseShippedSkills: tt.on},
+				entry: config.ServerEntry{Endpoint: "http://box.example/v1", ParallelAgents: 1, EffortDialect: "reasoning"},
+				// The one shared seam left nil on purpose: this is the headless and daemon shape, where
+				// the catalog is composed here rather than handed over by a longer-lived session.
+				apiKey:   "sk-test",
+				roots:    firingRoots(t),
+				confiner: fenceableHost,
+				mode:     domain.ModePlan,
+				recordID: "2026-08-24T14-00-00-firing",
+			})
+			if err != nil {
+				t.Fatalf("firingConfig: %v", err)
+			}
+			if cfg.Skills == nil {
+				t.Fatal("Config.Skills is nil; the run has no catalog to resolve a /token through")
+			}
+			if got := cfg.Skills.ResolveSkills([]string{"debugging"}); len(got) != tt.want {
+				t.Errorf("ResolveSkills(debugging) resolved %d skills, want %d", len(got), tt.want)
+			}
+		})
+	}
+}
+
 // The delegates run.Once pins for itself stay nil, and so does the tool registry: a Firing reaches
 // no external MCP server (ADR 0034), and handing the runner an Approver, an Asker, a Presenter or an
 // Events sink is how an unattended run acquires a human it does not have (ADR 0033 decision 2).

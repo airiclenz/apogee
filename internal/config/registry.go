@@ -346,6 +346,12 @@ var KeyRegistry = []Key{
 		Read:     func(o Options) string { return boolValue(o.UseProjectSkills) },
 	},
 	{
+		Path: "use-shipped-skills", Kind: KindBool, Default: "true",
+		Editable: true,
+		Desc:     "Offer the skills apogee ships with, below every skill folder on disk.",
+		Read:     func(o Options) string { return boolValue(o.UseShippedSkills) },
+	},
+	{
 		Path: "auto-compact", Kind: KindBool, Default: "true",
 		Editable: true,
 		Desc:     "Fold older turns into a compact brief before the context window overflows.",
