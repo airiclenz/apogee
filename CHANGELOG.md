@@ -10,6 +10,69 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- Config: a new root key `sub-agents-server:` names which `servers:` entry takes the sub-agents a
+  session delegates to. File-only and opt-in — absent or empty, delegations keep running on the
+  session's own upstream, and a name no entry carries is not refused. `/settings` shows the target
+  as a read-only row; nothing routes by it yet.
+
+- **Delegations now route by the `sub-agents-server:` root key, and the `sub-agents: true` entry
+  flag is gone.** Name the `servers:` entry that should take the delegations in the root key; the
+  session observes that server and routes every delegation spawned after it there. An unset key is
+  the default and means what it always meant — delegations run on the session's own upstream. A key
+  naming an entry the list does not carry is not a refusal: one notice says which name went missing
+  and which names the file does carry, and delegations fall back to the session server. The
+  `bypass:`/`mechanisms:` posture keys are now valid on ANY `servers:` entry — they say what
+  delegations to that server run as, and they apply whenever the root key names it — so the two
+  startup refusals that rode the flag (a second flagged entry, posture without the flag) are gone.
+
+- Sub-agent routing can now be re-pointed WITHOUT a relaunch and without the config file changing
+  first: `delegationWiring.Retarget(name)` resolves the name against the `servers:` list as it stands
+  then, builds that entry's beat and Mechanism catalogue, and swaps the Sub-agent server so every
+  delegation spawned after it runs there — children already in flight keep the server they were
+  spawned against. It unlatches the old server on the spot (an in-flight beat's landing is dropped by
+  the generation guard, so the old box cannot take delegations for another interval) and forgets the
+  routing state, so the new server announces itself exactly once on its first beat, per state change
+  rather than per spawn. It refuses a name no entry carries and an entry whose `mechanisms:` map this
+  build does not know, changing nothing when it does; an empty name is the opt-out, and delegations
+  fall back to the session's own upstream. A retarget also survives the `servers:` re-read the watcher
+  fires on any save: the wiring keeps the live target and takes the file's `sub-agents-server:` key
+  only when that key itself moved, so an unrelated save no longer reverts the choice and re-latches
+  the old server. The seam reaches the renderer as `tui.Options.Delegation` (`tui.DelegationHost`),
+  nil for a Driver that routes nothing.
+
+- `/sub-agents-server` picks the `servers:` entry this session's delegations run on (ADR 0045).
+  Bare it opens the shared picker over the entries the CONFIG file carries — never the synthesized
+  `--endpoint` row of the switchable list, and with no "· current" mark borrowed from the server the
+  session itself is bound to — and `/sub-agents-server <name>` takes one directly. The pick
+  retargets through the wiring seam, so every delegation spawned after it runs there while children
+  already in flight keep their server, and it is recorded as the `sub-agents-server:` key so the
+  next session routes there without being asked. Unlike `/server` it is safe while the agent works,
+  which is exactly when a human wants it; esc changes nothing. The recording is written by
+  `config.SaveSubAgentsServer` — the key's settings row stays read-only, so this verb is its single
+  writing surface — and it is exempt from the config watcher's change report, so apogee's own write
+  never comes back as an external change.
+
+- A config still carrying ADR 0045's retired `sub-agents: true` flag now gets a start-up migration
+  offer. The composition root scans the config file's raw YAML (the struct has no field for the key
+  any more), names every flagged `servers:` entry in a notice, and raises a two-row picker — "move
+  it" / "not now" — asking about the FIRST flagged entry. Taking it makes one edit
+  (`config.MigrateSubAgentsServer`): every retired flag line goes, `sub-agents-server:` lands naming
+  the chosen entry, and the session's own delegations are retargeted on the spot, so the answer is in
+  force now rather than at the next start-up. Esc persists nothing and the offer comes back next
+  start-up. The pane gives way to the plaintext-key offer and to the pre-bound ask exactly as those
+  give way to each other, so the unasked start-up panes never race.
+
+- ADR 0066 records the routing re-shape and amends ADR 0045's decisions 1-2 (the entry flag becomes
+  the root `sub-agents-server:` key; `bypass:`/`mechanisms:` are valid on ANY entry and apply
+  whenever it is the target), leaving that record's decisions 3-7 — the second heartbeat monitor,
+  the Delegation-target latch, the loud fallback, the receiving server's cap, the untouched Bypass
+  invariant, the surfacing — standing as the mechanism the key now steers, and model-chosen routing
+  deferred with one consultation point. CONTEXT.md's **Sub-agent server** term is re-worded around
+  the root key (its "only one entry may carry the flag" sentence is gone, "flagged server" joins the
+  Avoid list), the configuration manual documents the key, the `/sub-agents-server` picker and its
+  recording, the read-only settings row and the start-up migration offer, `commands.md` gains the
+  verb, and layout.md specifies the second server-kind picker and the retired-flag offer pane.
+
 - `domain.RepeatedArgumentKeys` reports every argument name one tool-call object answers more than
   once with differing values — `{"task":"a","task":"b"}` → `"task"` — walking nested objects and
   objects inside arrays, comparing each occurrence's bytes after `json.Compact` so whitespace is

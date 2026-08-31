@@ -35,6 +35,35 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 
 ## Open defects
 
+### Residuals deferred out of the 2026-08-31 sub-agents-server routing plan
+
+**Status:** found 2026-08-31 at the close of the sub-agents-server root key and picker plan
+(`docs/plans/archived/2026-08-31 - 03 - sub-agents-server-root-key-and-picker-plan.md`), deferred
+out of that run.
+
+- [ ] **`Retarget` pushes the nil Delegation target after releasing the mutex.**
+  `cmd/apogee/delegation.go:609-637` swaps the server, bumps the generation and unlocks, then calls
+  `d.engine.SetDelegationTarget(nil)` outside the lock — mirroring `relist`'s stale path
+  (`cmd/apogee/delegation.go:566-570`). A new-generation beat landing in that microsecond window
+  would be clobbered by the nil; unobservable in practice, since a beat takes seconds.
+
+- [ ] **The `/sub-agents-server` picker offers no "auto (session server)" row.** Its rows come from
+  the configured entries alone (`internal/tui/picker.go:488-492`, `:860-863`), so the ratified
+  empty-key opt-out — `Retarget("")`, delegations falling back to the session's own upstream
+  (`cmd/apogee/delegation.go:609-611`) — stays reachable only by hand-editing `config.yaml`.
+
+- [ ] **A headless run says nothing about a retired `sub-agents: true` flag.** Detection and offer
+  are interactive-only (`cmd/apogee/keymigrate.go:113`, called from `cmd/apogee/wire.go:131`,
+  reaching the renderer as `Options.SubAgentsMigration` at `cmd/apogee/wire_options.go:192`), where
+  the plaintext-key precedent also prints a stderr notice on the headless path
+  (`cmd/apogee/headless.go:277-278`). A headless session whose config still carries the flag
+  delegates to its own server without saying so.
+
+- [ ] **The both-offers case is pinned only at the Options level.**
+  `TestSubAgentsMigrationGivesWayToTheKeyMigration` (`internal/tui/keymigration_test.go:370`) hands
+  the renderer hand-built Options; no test carries a real config file with `api-key:` plus the
+  retired flag through the composition root, so the file-shaped pairing has no end-to-end coverage.
+
 ### Residuals deferred out of the 2026-08-31 base-guidance-and-shipped-skills plan
 
 **Status:** found 2026-08-31 at the close of the base guidance and shipped skills plan
