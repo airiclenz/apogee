@@ -230,7 +230,11 @@ cover "every kind the overlay lists" and is what `TestPickerFilteredViewAgreesOn
 the new kind's filtered-accept mapping unexercised.
 `feat(tui): a mode picker offers the four autonomy rungs`
 
-## 6. Clicking the footer's mode marker opens that picker
+## 6. Clicking the footer's mode marker opens that picker — ✅ DONE (2026-08-31)
+
+NOTES (2026-08-31): `footerContent`'s left half is extracted alongside the span as `footerLeftText` — `footerModeSpan(w)` has to measure the info and offline segments to know whether the marker fits, and the item's signature takes only `w`, so composing that half once is what keeps the extraction from adding a second arithmetic instead of removing one. The plain marker text itself is joined in one place (`footerModeText`), which both the span and the painter's two-tone `unconfined` split read.
+NOTES (2026-08-31): the item's `handleMouseClick` insertion point is honoured as written — after the settings pane and both report panes, before the prompt and transcript rects — and the claim is gated exactly on `m.state.live() && !m.picker.open && !m.sessionBrowser.open && !m.settingsOwnsInput()` per the Regression guard.
+NOTES (2026-08-31): the footer row is derived by a named `footerRowY()` (`m.height - bottomRuleHeight - footerHeight`) rather than a literal, mirroring `inputContentRect`'s term-by-term posture; `TestClickOnBottomChromeSelectsNothing` already pins that same row arithmetic.
 
 Depends on item 5.
 

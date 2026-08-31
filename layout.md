@@ -1397,6 +1397,18 @@ black field — the offline segment's treatment — because it is the one state 
 the user's full privileges, and the footer says so in the colour that means it. The word is read
 live, so a `/confine off` moves it on the next frame.
 
+**And it is a control.** The whole marker is a click target — the glyph, the word, and on `auto` the
+blast-radius word with them, ONE rect acting on the MODE. A click opens the four-rung mode picker:
+the same ladder `⇧⇥` walks, taking the rung it lands on through the same seam that chord does. It is
+a picker and never a cycle, because a pointer that advances one rung per click hides the rungs it
+skipped. The confinement word is along for the ride rather than a second control: it is a fact ABOUT
+the mode, so a click on it says exactly what a click on the glyph says. The claim is the PICKER's
+own — the marker answers a click only while the picker could hold the keyboard: a live state with no
+picker already open, no `/sessions` browser and no `/settings` pane owning input, since an overlay
+opened from under a higher modal rung is one the human can neither answer nor close. `⇧⇥` stays the
+every-state route. And where the window drops the marker whole (below), nothing is drawn and a click
+on the footer names nothing.
+
 **What it is.** ONE frameless row below the prompt box, which closes its own `╰─╯` frame. The
 footer used to be three rows of chrome — a `├──┤` divider standing in for the edge the box was
 missing, the content between two `│` bars, and a `╰──╯` rule under it — and it now takes the

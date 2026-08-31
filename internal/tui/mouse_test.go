@@ -4335,3 +4335,113 @@ func TestDropdownWheelYieldsToAModalPrompt(t *testing.T) {
 			after.autocomplete.selected)
 	}
 }
+
+// ----------------------------------------------------------------------------
+// The footer's mode marker as a pointer target (handleFooterModeClick, mouse.go)
+// ----------------------------------------------------------------------------
+
+// footerMarkerCells reports the footer's own row and the first, middle and last column the mode
+// marker is painted on in m's frame. It asks footerModeSpan — the ONE value the painter draws from
+// — rather than restating the arithmetic, so a case below can only fail for the reason it names.
+func footerMarkerCells(t *testing.T, m Model) (y, first, middle, last int) {
+	t.Helper()
+	text, col, ok := m.footerModeSpan(m.width)
+	if !ok {
+		t.Fatalf("the mode marker does not fit a %dx%d window; these cases need it drawn", m.width, m.height)
+	}
+	width := m.th.measure.Width(text)
+	return m.footerRowY(), col, col + width/2, col + width - 1
+}
+
+// TestClickOnTheFooterModeMarkerOpensTheModePicker is the marker's pointer contract: every cell of
+// it opens the mode picker, the cell beside it does not, and a window too narrow to draw the marker
+// leaves the whole footer row naming nothing.
+func TestClickOnTheFooterModeMarkerOpensTheModePicker(t *testing.T) {
+	base := newTestModel(t)
+	y, first, middle, last := footerMarkerCells(t, base)
+
+	for _, tc := range []struct {
+		name string
+		x    int
+	}{
+		{"first cell", first},
+		{"middle cell", middle},
+		{"last cell", last},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			live := step(t, base, leftClick(tc.x, y))
+
+			if !live.picker.open || live.picker.kind != pickerMode {
+				t.Fatalf("a click at column %d gave picker %+v, want the mode picker open", tc.x, live.picker)
+			}
+		})
+	}
+
+	t.Run("one cell to its left", func(t *testing.T) {
+		live := step(t, base, leftClick(first-1, y))
+
+		if live.picker.open {
+			t.Fatalf("a click one cell left of the marker opened %+v", live.picker)
+		}
+	})
+
+	t.Run("a window too narrow for the marker", func(t *testing.T) {
+		narrow := step(t, base, tea.WindowSizeMsg{Width: 30, Height: 24})
+		if _, _, ok := narrow.footerModeSpan(narrow.width); ok {
+			t.Fatalf("30 columns still fit the marker; this case needs a window that drops it whole")
+		}
+
+		for x := 0; x < narrow.width; x++ {
+			if live := step(t, narrow, leftClick(x, narrow.footerRowY())); live.picker.open {
+				t.Fatalf("a click at column %d of a footer with no marker opened %+v", x, live.picker)
+			}
+		}
+	})
+}
+
+// TestClickOnTheFooterModeMarkerIsRefusedWhereThePickerCannotBeAnswered pins the claim's gate to the
+// PICKER's own entitlement rather than to "no picker open": renderPicker paints on m.picker.open
+// alone while the picker rung claims keys only in a live state and below the two higher modal rungs
+// (keyClaimOrder, model.go), so a marker that opened the overlay from under one of those — or with a
+// call awaiting approval — would put up a modal the human can neither answer nor close.
+func TestClickOnTheFooterModeMarkerIsRefusedWhereThePickerCannotBeAnswered(t *testing.T) {
+	base := newTestModel(t)
+	y, _, middle, _ := footerMarkerCells(t, base)
+
+	for _, tc := range []struct {
+		name     string
+		block    func(Model) Model
+		wantOpen bool
+		wantKind pickerKind
+	}{
+		{
+			// The one case with something to preserve: the open overlay must survive untouched
+			// rather than be replaced by a second one stacked under the same key routing.
+			name:     "a picker is already open",
+			block:    func(m Model) Model { m.picker = picker{open: true, kind: pickerModel}; m.layout(); return m },
+			wantOpen: true,
+			wantKind: pickerModel,
+		},
+		{
+			name:  "a call is awaiting approval",
+			block: func(m Model) Model { m.state = stateAwaitingApproval; return m },
+		},
+		{
+			name:  "the /settings pane owns input",
+			block: func(m Model) Model { m.settings.open = true; m.layout(); return m },
+		},
+		{
+			name:  "the /sessions browser is up",
+			block: func(m Model) Model { m.sessionBrowser = sessionBrowser{open: true}; m.layout(); return m },
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			live := step(t, tc.block(base), leftClick(middle, y))
+
+			if live.picker.open != tc.wantOpen || (tc.wantOpen && live.picker.kind != tc.wantKind) {
+				t.Fatalf("a click on the marker while %s gave picker %+v, want open=%v kind=%v",
+					tc.name, live.picker, tc.wantOpen, tc.wantKind)
+			}
+		})
+	}
+}

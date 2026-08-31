@@ -377,7 +377,8 @@ func selectionText(value string, a, b int) string {
 
 // handleMouseClick starts a fresh, collapsed selection under a left-click. It arbitrates by
 // region: a click on the open /settings pane's row list belongs to the pane (selecting a row, or
-// seating the caret in the row being typed into); a click in the prompt's editable text area
+// seating the caret in the row being typed into); a click on the footer's mode marker opens the mode
+// picker ([Model.handleFooterModeClick]) and selects nothing; a click in the prompt's editable text area
 // positions the caret and arms a prompt selection there; otherwise a click in the transcript viewport
 // arms a transcript selection at that rendered cell; a click in none of them clears all three. Starting
 // one selection clears the others, so no two coexist. Non-left buttons are ignored.
@@ -423,6 +424,13 @@ func (m Model) handleMouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
 		return inspector, nil
 	}
 	m = inspector
+	// The footer's mode marker is the frame's one CHROME control ([Model.handleFooterModeClick]): a
+	// click on it opens the mode picker. It is asked after the panes that draw OVER the transcript —
+	// they can cover any row, the footer's included, and a click on a pane belongs to the pane — and
+	// before the prompt and transcript rects, which own the rows above it.
+	if footer, claimed := m.handleFooterModeClick(pre, msg); claimed {
+		return footer, nil
+	}
 	if m.inputEditable() {
 		if visRow, visCol, ok := pre.pointInputRow(msg.X, msg.Y); ok {
 			m.transcriptSel = transcriptSel{} // the prompt claims it: drop any transcript selection
@@ -447,6 +455,51 @@ func (m Model) handleMouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
 	m.sel = promptSel{} // a click off both fields deselects
 	m.transcriptSel = transcriptSel{}
 	return m, nil
+}
+
+// footerRowY is the screen row the footer line is painted on. View stacks the input box, the
+// footer's single frameless line and the ▁ bottom-edge hairline at the bottom of the window
+// (model.go), so the footer stands exactly bottomRuleHeight rows above the terminal's last line.
+// Both terms are named rather than folded into a literal, for inputContentRect's reason: an omitted
+// one is exactly the off-by-one that puts the rect on the hairline.
+func (m Model) footerRowY() int {
+	return m.height - bottomRuleHeight - footerHeight
+}
+
+// handleFooterModeClick gives the footer's mode marker its pointer: a click anywhere on it opens
+// the four-rung mode picker (pickerMode, picker.go), whose accept takes the rung through the same
+// SetMode path shift+tab does. It is a second ROUTE to the ladder and never a cycle — the human
+// sees the four rungs and names one.
+//
+// The rect is the footer's own row and the columns [Model.footerModeSpan] reports for the frame the
+// click was aimed at (pre) — the same value the painter drew from, so the pointer can never address
+// a column the painter did not paint, and the narrow branch that drops the marker whole
+// (ok false) leaves the footer naming nothing. The WHOLE marker is the hit area, Auto's
+// blast-radius word included: that word is a FACT about the mode rather than a second control, so
+// every cell of the marker acts on the mode. The confinement word stays display-only in the sense
+// that matters — clicking it opens the mode picker, not a confinement one.
+//
+// The claim is gated on the PICKER's OWN entitlement rather than on !m.picker.open alone.
+// renderPicker paints on m.picker.open by itself, while the picker rung claims keys only under
+// m.state.live() && m.picker.open and the two higher modal rungs — the /sessions browser and the
+// /settings pane — claim before it (keyClaimOrder, model.go). Opening the overlay from underneath
+// one of those, or while a Turn is awaiting approval, would put up a modal the human can neither
+// answer nor close, which is the very thing that rung's comment forbids. shift+tab stays the
+// every-state route to the ladder.
+func (m Model) handleFooterModeClick(pre Model, msg tea.MouseClickMsg) (Model, bool) {
+	if !m.state.live() || m.picker.open || m.sessionBrowser.open || m.settingsOwnsInput() {
+		return m, false
+	}
+	text, col, ok := pre.footerModeSpan(pre.width)
+	if !ok || msg.Y != pre.footerRowY() {
+		return m, false
+	}
+	if msg.X < col || msg.X >= col+pre.th.measure.Width(text) {
+		return m, false
+	}
+	m.picker = picker{open: true, kind: pickerMode}
+	m.layout()
+	return m, true
 }
 
 // handleMouseMotion extends whichever selection is live as the mouse drags with the left button

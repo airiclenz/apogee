@@ -6240,3 +6240,44 @@ func TestTranscriptNeverScrollsSideways(t *testing.T) {
 		})
 	}
 }
+
+// TestFooterModeMarkerSpanAgreesWithThePaintedCells is the painter/pointer pin. The marker's text
+// and the column it lands on used to be two arithmetics that agreed — footerContent composed the
+// marker and measured its way to the right edge, and anything asking WHERE it was drawn had to
+// repeat both. They are one value now ([Model.footerModeSpan]), and this is the assertion that
+// keeps them one: the cells the span reports hold exactly the string it reports, in the real
+// rendered footer. Auto is the case that matters, because its blast-radius word is part of the same
+// marker and is painted in two tones.
+func TestFooterModeMarkerSpanAgreesWithThePaintedCells(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		eng  *fakeEngine
+		mode domain.Mode
+		want string
+	}{
+		{"ask before", &fakeEngine{}, domain.ModeAskBefore, modeMarker(domain.ModeAskBefore)},
+		{"auto confined", &fakeEngine{confine: true}, domain.ModeAuto, modeMarker(domain.ModeAuto) + " · " + confinedWord},
+		{"auto unconfined", &fakeEngine{confine: false}, domain.ModeAuto, modeMarker(domain.ModeAuto) + " · " + unconfinedWord},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := newTestModelEng(t, tc.eng, confineOpts(capableHost, tc.mode))
+
+			for _, w := range []int{80, 120} {
+				text, col, ok := m.footerModeSpan(w)
+				if !ok {
+					t.Fatalf("width %d: the marker does not fit, want it drawn", w)
+				}
+				if text != tc.want {
+					t.Errorf("width %d: span text = %q, want %q", w, text, tc.want)
+				}
+
+				flat := ansiPattern.ReplaceAllString(m.footerContent(w), "")
+				right := col + m.th.measure.Width(text)
+
+				if got := m.th.measure.Cut(flat, col, right); got != text {
+					t.Errorf("width %d: painted cells [%d,%d) = %q, want the reported %q", w, col, right, got, text)
+				}
+			}
+		})
+	}
+}

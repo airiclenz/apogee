@@ -2882,21 +2882,13 @@ func (m Model) footerView() string {
 // producers' behalf rather than trusting any of them — one unterminated OSC 8 opener painted into
 // the footer's black field turns the rest of the frame into a link to somebody else's URL.
 func (m Model) footerContent(w int) string {
-	segments := append([]string{stripEscapes(hostDisplay(m.opts))}, m.upstreamSegments()...)
-	// The effort word joins the run with the upstream facts and BEFORE the workdir: how hard the
-	// model is asked to think is a property of the model answering, not of where the session is
-	// pointed, so it sits on the upstream side of the outward-in reading. A model whose dial the
-	// server reports nothing about contributes no word at all — the segment is present exactly when
-	// /effort is (ADR 0060) — and, like every unnamed segment, it leaves with its separator.
-	override, profile := m.eng.ThinkingEffort()
-	support := m.effortSupport()
-	if effort, show := footerEffortLabel(override, profile, stripEscapes(support.Default), support.Supported); show {
-		segments = append(segments, effort)
-	}
-	info := strings.Join(nonEmpty(append(segments, m.workdir)...), " "+glyphAssistant+" ")
-	offline := ""
-	if m.hb.offline {
-		offline = " " + glyphAssistant + " " + offlineLabel
+	info, offline := m.footerLeftText()
+	text, col, ok := m.footerModeSpan(w)
+	if !ok {
+		// Too narrow for both ends: keep the left info, truncate to the window, pad the field black.
+		body := m.th.measure.Truncate(bodyIndent+info+offline, max(0, w), "…")
+		body += strings.Repeat(" ", max(0, w-m.th.measure.Width(body)))
+		return m.th.footerText.Render(body)
 	}
 	// footerText keeps the black background; only the foreground swaps to the mode's colour. Symbol
 	// and word go through that ONE Render, so the glyph can never take a tone of its own. The
@@ -2909,36 +2901,92 @@ func (m Model) footerContent(w int) string {
 	// Render; "unconfined" is split off into the error tone on the footer's own black field, the
 	// offline segment's treatment below, because it is the one state where Auto runs with the user's
 	// full privileges. Its separator travels with the word, exactly as offline's ✦ does, so no
-	// styled run ever ends on a space.
+	// styled run ever ends on a space — which is why the split re-joins to exactly the span's text
+	// (footerModeText), the one string the pointer addresses.
 	markerStyle := m.th.footerText.Foreground(m.th.modeColor(m.opts.Mode))
-	marker := modeMarker(m.opts.Mode)
-	var mode string
-	switch word := confinementWord(m.opts.Confinement, m.opts.Mode, m.eng.ConfineToWorkspace()); word {
-	case "":
-		mode = markerStyle.Render(marker)
-	case unconfinedWord:
-		mode = markerStyle.Render(marker) + m.th.footerText.Foreground(m.th.errorFg).Render(" · "+word)
-	default:
-		mode = markerStyle.Render(marker + " · " + word)
+	mode := markerStyle.Render(text)
+	if word := confinementWord(m.opts.Confinement, m.opts.Mode, m.eng.ConfineToWorkspace()); word == unconfinedWord {
+		mode = markerStyle.Render(modeMarker(m.opts.Mode)) +
+			m.th.footerText.Foreground(m.th.errorFg).Render(" · "+word)
 	}
 	mode += m.th.footerText.Render(bodyIndent)
 
-	gap := w - m.th.measure.Width(bodyIndent) - m.th.measure.Width(info) -
-		m.th.measure.Width(offline) - m.th.measure.Width(mode)
-	if gap < 1 {
-		// Too narrow for both ends: keep the left info, truncate to the window, pad the field black.
-		body := m.th.measure.Truncate(bodyIndent+info+offline, max(0, w), "…")
-		body += strings.Repeat(" ", max(0, w-m.th.measure.Width(body)))
-		return m.th.footerText.Render(body)
-	}
 	left := m.th.footerText.Render(bodyIndent + info)
 	if offline != "" {
 		// Styled independently, like the mode marker: the segment carries the error tone on the
 		// footer's own black field, so the state reads at a glance without recolouring the line.
 		left += m.th.footerText.Foreground(m.th.errorFg).Render(offline)
 	}
-	fill := m.th.footerText.Render(strings.Repeat(" ", gap))
+	// The fill is what carries the marker to the column the span REPORTS: the painter follows the
+	// pointer's arithmetic instead of restating it, so the cells the marker lands on and the cells a
+	// click may address cannot drift apart.
+	gap := col - m.th.measure.Width(bodyIndent) - m.th.measure.Width(info) - m.th.measure.Width(offline)
+	fill := m.th.footerText.Render(strings.Repeat(" ", max(0, gap)))
 	return left + fill + mode
+}
+
+// footerLeftText composes the footer's left half as PLAIN text: info is the outward-in fact line
+// (host ✦ model ✦ effort ✦ workdir, every unnamed segment leaving with its separator), and offline
+// is the ✦-led word for the state a send is refused in — "" while the heartbeat is up.
+//
+// The effort word joins the run with the upstream facts and BEFORE the workdir: how hard the
+// model is asked to think is a property of the model answering, not of where the session is
+// pointed, so it sits on the upstream side of the outward-in reading. A model whose dial the
+// server reports nothing about contributes no word at all — the segment is present exactly when
+// /effort is (ADR 0060) — and, like every unnamed segment, it leaves with its separator.
+//
+// Both halves of the footer need this value — [Model.footerContent] paints it, and the mode
+// marker's own arithmetic ([Model.footerModeSpan]) measures it to know whether the marker fits at
+// all — so it is composed ONCE here rather than twice in agreement.
+func (m Model) footerLeftText() (info, offline string) {
+	segments := append([]string{stripEscapes(hostDisplay(m.opts))}, m.upstreamSegments()...)
+	override, profile := m.eng.ThinkingEffort()
+	support := m.effortSupport()
+	if effort, show := footerEffortLabel(override, profile, stripEscapes(support.Default), support.Supported); show {
+		segments = append(segments, effort)
+	}
+	info = strings.Join(nonEmpty(append(segments, m.workdir)...), " "+glyphAssistant+" ")
+	if m.hb.offline {
+		offline = " " + glyphAssistant + " " + offlineLabel
+	}
+	return info, offline
+}
+
+// footerModeText joins the mode marker with Auto's blast-radius word the way the footer paints
+// them: the separator travels WITH the word, exactly as the offline segment's ✦ does, so no styled
+// run ever ends on a space. A rung that names no blast radius is its marker alone.
+func footerModeText(marker, word string) string {
+	if word == "" {
+		return marker
+	}
+	return marker + " · " + word
+}
+
+// footerModeSpan words the footer's mode marker and PLACES it in a window w wide. text is the plain
+// string the marker is painted with — the mode's symbol and label, plus Auto's blast-radius word —
+// and col is the screen column its first cell lands on; the marker is right-anchored, with the
+// slot's own trailing bodyIndent margin between its last cell and the window edge.
+//
+// ok is false in the narrow branch where both ends do not fit and the marker drops WHOLE (a clipped
+// mode word would name a blast radius the session is not in). A click on the footer then names
+// nothing, because there is nothing drawn to click.
+//
+// This is the marker's ONE composition: [Model.footerContent] paints from it and
+// [Model.handleFooterModeClick] (mouse.go) addresses the cells it reports, so what is drawn and
+// what is clickable are one value rather than two arithmetics that merely agree today.
+func (m Model) footerModeSpan(w int) (text string, col int, ok bool) {
+	info, offline := m.footerLeftText()
+	text = footerModeText(
+		modeMarker(m.opts.Mode),
+		confinementWord(m.opts.Confinement, m.opts.Mode, m.eng.ConfineToWorkspace()),
+	)
+	margin := m.th.measure.Width(bodyIndent)
+	gap := w - margin - m.th.measure.Width(info) - m.th.measure.Width(offline) -
+		m.th.measure.Width(text) - margin
+	if gap < 1 {
+		return "", 0, false
+	}
+	return text, w - margin - m.th.measure.Width(text), true
 }
 
 // The two words the footer says about the Upstream that are not facts about a model.

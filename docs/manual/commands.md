@@ -77,7 +77,13 @@ advertises `⇧⏎` only on terminals that negotiated the enhanced (kitty) keybo
 protocol — the thing that makes that chord arrive as anything other than a plain `⏎`;
 everywhere else the legend names `⌥⏎` alone, which works on every terminal. Beyond
 the box, `⇧⇥` cycles the autonomy mode — Plan → Ask-Before → Allow-Edits → Auto — at
-any time, mid-run included, and `PgUp`/`PgDn` scroll the transcript. When a mode gates a
+any time, mid-run included, and `PgUp`/`PgDn` scroll the transcript. Clicking the mode
+marker in the footer — the glyph, the word, and on Auto its blast-radius word, all one
+target — opens a picker listing the four rungs, so you can name the one you want instead
+of cycling to it; the picker takes the rung through exactly the path `⇧⇥` does. The
+marker answers a click only when the picker could actually be answered — not while
+another picker, the `/sessions` browser or the `/settings` screen is up, and not while a
+call is awaiting approval — and `⇧⇥` stays the route that works in every state. When a mode gates a
 call, the approval prompt's decision keys — `a`, `s`, `d`, and the `⏎` that takes the
 highlighted row — take effect a moment after the prompt appears, so a keystroke already
 in flight cannot answer a call you have not read; `esc` is live from the instant the
