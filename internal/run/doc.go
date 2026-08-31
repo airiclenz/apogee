@@ -9,6 +9,12 @@
 // internal/tui, and it knows nothing about cycles, overlap or deferral — every
 // when-and-how decision belongs to the scheduler above it.
 //
+// A Firing's Prompt is a full apogee message, not a bare string: its @file tokens are parsed
+// here through internal/refs and submitted as domain.UserInput.FileRefs, so the loop resolves
+// them within the workspace fence exactly as it resolves a session's. A missing or escaping
+// ref is skipped WITHOUT notice — the loop reports one as an ErrorEvent, and a Firing has no
+// event sink to carry it (headless and the daemon both leave Config.Events nil).
+//
 // # Nothing waits for a human
 //
 // A Firing has no human to rendezvous with, so Once PINS all three interactive host

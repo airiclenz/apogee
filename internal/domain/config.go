@@ -673,8 +673,9 @@ func modeRank(m Mode) int {
 // references the loop resolves into context, plus reserved skill references. Stays a value
 // (no live handles) so it snapshots cleanly.
 //
-// FileRefs (@file tokens parsed from the chat input) are resolved at Step time — the loop
-// reads each within the workspace fence and prepends its content to the user message.
+// FileRefs (@file tokens, parsed by internal/refs from the prompt — a session's message or a
+// Firing's alike) are resolved at Step time — the loop reads each within the workspace fence
+// and prepends its content to the user message.
 // SkillIDs are the skills the user attached in chat (inline "/id" tokens); the loop resolves
 // each through Config.Skills and prepends its body to the user message for that one turn. The
 // refs round-trip through a snapshot, so a resumed session re-resolves them.

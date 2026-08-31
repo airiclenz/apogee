@@ -10,6 +10,7 @@ import (
 
 	"github.com/airiclenz/apogee/internal/agent"
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/refs"
 	"github.com/airiclenz/apogee/internal/session"
 	"github.com/airiclenz/apogee/internal/title"
 	"github.com/airiclenz/apogee/internal/tools"
@@ -233,7 +234,9 @@ func Once(ctx context.Context, spec Spec) (Result, error) {
 	}
 	defer func() { _ = a.Close() }()
 
-	if err := a.Submit(domain.UserInput{Text: spec.Prompt}); err != nil {
+	// The prompt carries the same @file grammar a chat message does (internal/refs), so a
+	// Firing's references resolve in the loop exactly as a session's do.
+	if err := a.Submit(domain.UserInput{Text: spec.Prompt, FileRefs: refs.FileRefs(spec.Prompt)}); err != nil {
 		return Result{}, fmt.Errorf("apogee: submit the firing's prompt: %w", err)
 	}
 

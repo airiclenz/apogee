@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"os"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
@@ -1154,4 +1156,72 @@ func titleZoneFixture(t *testing.T) (local, away time.Time) {
 		t.Fatalf("the fixture no longer distinguishes the zones: away %s, local %s", away, local)
 	}
 	return local, away
+}
+
+// ---------------------------------------------------------------------------
+
+// TestOnceResolvesTheFiringsFileRefs is the Driver-parity claim of ADR 0031: the @file grammar
+// a session's message carries is read from a Firing's prompt too (internal/refs), so an
+// unattended run reaches the very same file context the loop builds for a chat message.
+func TestOnceResolvesTheFiringsFileRefs(t *testing.T) {
+	t.Parallel()
+
+	const firstLine = "module github.com/airiclenz/apogee"
+	ws := t.TempDir()
+	if err := os.WriteFile(filepath.Join(ws, "go.mod"), []byte(firstLine+"\n\ngo 1.25\n"), 0o600); err != nil {
+		t.Fatalf("write go.mod: %v", err)
+	}
+
+	up := newUpstream(t, alwaysFinal("it declares the module"))
+	spec := planSpec(up.url, "summarise @go.mod")
+	spec.Config.WorkspaceDir = ws
+
+	if _, err := Once(context.Background(), spec); err != nil {
+		t.Fatalf("Once: %v", err)
+	}
+
+	reqs := up.requests()
+	if len(reqs) != 1 {
+		t.Fatalf("the Upstream saw %d requests, want 1", len(reqs))
+	}
+	got := reqs[0].Texts[len(reqs[0].Texts)-1]
+	if !strings.Contains(got, "Referenced file `go.mod`:\n") {
+		t.Errorf("the firing's user message carries no file-context block for @go.mod:\n%s", got)
+	}
+	if !strings.Contains(got, firstLine) {
+		t.Errorf("the firing's user message does not carry go.mod's first line %q:\n%s", firstLine, got)
+	}
+	if !strings.HasSuffix(got, "summarise @go.mod") {
+		t.Errorf("the prompt itself did not survive the prepended file context:\n%s", got)
+	}
+}
+
+// TestOnceSkipsAMissingFileRefWithoutNotice pins what a Firing CANNOT do: the loop reports an
+// unresolvable @ref as an ErrorEvent, and a Firing has no event sink to carry one (headless and
+// the daemon both leave Config.Events nil). So the run simply completes, nothing is injected,
+// and the prompt travels verbatim — the skip leaves no notice behind.
+func TestOnceSkipsAMissingFileRefWithoutNotice(t *testing.T) {
+	t.Parallel()
+
+	const prompt = `summarise @"no such.md"`
+
+	up := newUpstream(t, alwaysFinal("there was nothing to read"))
+	spec := planSpec(up.url, prompt)
+	spec.Config.WorkspaceDir = t.TempDir()
+
+	res, err := Once(context.Background(), spec)
+	if err != nil {
+		t.Fatalf("Once: %v", err)
+	}
+	if res.Err != nil {
+		t.Errorf("Result.Err = %v, want nil; a missing ref is skipped, never fatal", res.Err)
+	}
+
+	reqs := up.requests()
+	if len(reqs) != 1 {
+		t.Fatalf("the Upstream saw %d requests, want 1", len(reqs))
+	}
+	if got := reqs[0].Texts[len(reqs[0].Texts)-1]; got != prompt {
+		t.Errorf("the firing's user message = %q, want the prompt verbatim %q", got, prompt)
+	}
 }

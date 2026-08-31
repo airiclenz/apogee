@@ -15,7 +15,10 @@ session: 20260805-141233-7f2a · turns: 3 · denied: 0
 
 The prompt is the single **quoted** argument; with no argument the whole of stdin is
 the prompt, so `cat task.md | apogee headless` works too. Empty from both is a usage
-error. `--endpoint`, `--model`, `--workspace` and `--config` resolve exactly as a
+error. `@path` tokens in the prompt are **file references** — bare or quoted
+(`@"a b.md"`) — read from the workspace and attached to the message as in a session; a
+missing ref is skipped without notice — a Firing has no event sink.
+`--endpoint`, `--model`, `--workspace` and `--config` resolve exactly as a
 session's do — flag over `APOGEE_*` environment over `config.yaml` — so the run has the
 shape a session on this host would have; which listed entry it starts on comes from
 `APOGEE_SERVER` or the `server:` key, there being no `--server` flag on this command.

@@ -1071,7 +1071,10 @@ is **bare** (`@path`, a run of non-whitespace) or **quoted** (`@"path with space
 accepted too, only `"` is ever produced), where the closing quote ends the token and an
 unterminated one runs to the end of that line; there are no escape sequences. Parsing
 the token belongs to `internal/refs` — a Driver-neutral grammar every Driver reads, not a TUI-private
-one; resolution is the agent's. It is the same inline grammar a **Skill**
+one; resolution is the agent's. A **Firing**'s prompt is read on that same grammar, so a headless
+or scheduled run resolves its references exactly as a session does — except that a missing or
+escaping one is skipped *without* the notice, a Firing having no event sink to carry it.
+It is the same inline grammar a **Skill**
 `/token` uses, and the prompt box accents both on the same rule: a token lights up exactly when it
 resolves — the path is in the workspace listing, the id is in the catalog — so a typo visibly
 fails to light instead of failing at submit (ADR 0027). A reference is judged by its BYTES, not
