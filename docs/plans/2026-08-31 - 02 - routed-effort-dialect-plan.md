@@ -194,7 +194,11 @@ is the existing byte-level half — do not duplicate it).
 
 `fix(agent): a routed child speaks the Sub-agent server's effort dialect`
 
-## 3. The compaction fault asserts only what the engine knows
+## 3. The compaction fault asserts only what the engine knows — ✅ DONE (2026-08-31)
+
+NOTES (2026-08-31): the fault text is now a head const (`cappedSummaryErrFmt`, gaining a third verb) plus two cause consts rather than two whole message consts — the cap/spend half is one piece of knowledge and stays in one place.
+NOTES (2026-08-31): the plan's "a capped summary that DID produce visible text still returns the truncation marker and no error" is already asserted by the existing `TestCompactKeepsASummaryCutAtTheCapAndMarksIt`; it was left as-is and re-run rather than duplicated.
+NOTES (2026-08-31): `TestCompactBlankSummaryFaultsOnTheCapOnlyWhenItWasCut` pinned the old wording on a dialect-less config; its expectation was updated to the not-asked cause (the same config now reads as never having asked).
 
 **What:** `cappedSummaryErrFmt` (`internal/agent/compact.go:430`) ends
 "the summarizer asked for no reasoning; this server's template did not honour that" — on

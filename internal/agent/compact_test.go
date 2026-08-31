@@ -678,7 +678,7 @@ func TestCompactBlankSummaryFaultsOnTheCapOnlyWhenItWasCut(t *testing.T) {
 					spend = fmt.Sprintf(", after roughly %d tokens of reasoning", a.tokens.EstimateTokens(len(reasoning)))
 				}
 				want = fmt.Sprintf("compaction summary hit its output cap (4096 tokens) with no visible text to "+
-					"show for it%s — the summarizer asked for no reasoning; this server's template did not honour that",
+					"show for it%s — the cap went on a reasoning pass this server was never asked to skip",
 					spend)
 			}
 			if err.Error() != want {
@@ -686,6 +686,67 @@ func TestCompactBlankSummaryFaultsOnTheCapOnlyWhenItWasCut(t *testing.T) {
 			}
 			if a.conv.Len() != before {
 				t.Errorf("conv mutated despite a fault: Len = %d, want %d", a.conv.Len(), before)
+			}
+		})
+	}
+}
+
+// TestCompactCappedSummaryFaultNamesOnlyWhatTheRequestAsked pins the halves of the capped-summary
+// fault. The engine cannot inspect the server it just called, so the text stops at what it knows:
+// when the summary request itself carried the off rung it says the ask went out and the server
+// reasoned regardless; when it carried none — the three dialects compactCompleter leaves alone —
+// it says the cap went on a pass nobody asked to skip, rather than accusing a template of ignoring
+// a key that was never sent. The split is keyed on the REQUEST, not the dialect: the last case is a
+// session on no dialect at all whose profile pins `effort: off`, which DID ask (applyEffort emits
+// the kwargs hint for it) and must read as the asked half.
+func TestCompactCappedSummaryFaultNamesOnlyWhatTheRequestAsked(t *testing.T) {
+	t.Parallel()
+
+	const reasoning = "Restate the task, the files touched, and the open question before summarising."
+	const head = "compaction summary hit its output cap (4096 tokens) with no visible text to show for it"
+	const asked = " — the summarizer asked for no reasoning and this server reasoned anyway"
+	const notAsked = " — the cap went on a reasoning pass this server was never asked to skip"
+
+	cases := []struct {
+		name     string
+		dialect  domain.EffortDialect
+		effort   domain.ThinkingEffort
+		wantTail string
+	}{
+		{name: "kwargs carries the off override", dialect: domain.EffortDialectKwargs, wantTail: asked},
+		{name: "reasoning carries the off override", dialect: domain.EffortDialectReasoning, wantTail: asked},
+		{name: "openai floors rather than switches off", dialect: domain.EffortDialectOpenAI, wantTail: notAsked},
+		{name: "no dialect asks for nothing", wantTail: notAsked},
+		{name: "the dialect is off outright", dialect: domain.EffortDialectOff, wantTail: notAsked},
+		{
+			name:     "no dialect but the profile pins effort off",
+			effort:   domain.EffortOff,
+			wantTail: asked,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			cfg := baseConfig(&recordingSink{})
+			cfg.EffortDialect = tc.dialect
+			cfg.Profile.Thinking.Effort = tc.effort
+			a, err := newAgent(cfg, cappedSummaryResponder{thinking: reasoning, finish: "length"})
+			if err != nil {
+				t.Fatalf("newAgent: %v", err)
+			}
+			seedFoldable(a)
+
+			_, err = a.Compact(context.Background())
+
+			if err == nil {
+				t.Fatal("Compact err = nil, want the capped-summary fault")
+			}
+			spend := fmt.Sprintf(", after roughly %d tokens of reasoning", a.tokens.EstimateTokens(len(reasoning)))
+			want := head + spend + tc.wantTail
+			if err.Error() != want {
+				t.Errorf("Compact err = %q, want %q", err, want)
 			}
 		})
 	}

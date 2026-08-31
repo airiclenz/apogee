@@ -418,17 +418,34 @@ func (a *Agent) compactTranscriptChars() int {
 	return int(float64(transcriptTokens) * a.budget().CharsPerToken)
 }
 
-// cappedSummaryErrFmt is the fault text for a summary call that came back with no visible text
-// after running into compactMaxTokens — the 2026-08-29 incident's shape, and the one blank reply
-// context.Compact's errEmptySummary would misdescribe: the model DID answer, at length, and spent
-// the entire cap on a reasoning pass apogee had explicitly asked it not to make (compactCompleter's
-// EffortOff override). So the message names the cap, the reasoning spent under it when the reply
-// carried any, and why the two do not add up — a server template that ignored the off rung — because
-// those are what an operator acts on: another server, or a profile whose template honours it. Like
+// cappedSummaryErrFmt is the head of the fault text for a summary call that came back with no
+// visible text after running into compactMaxTokens — the 2026-08-29 incident's shape, and the one
+// blank reply context.Compact's errEmptySummary would misdescribe: the model DID answer, at length,
+// and spent the entire cap on a reasoning pass. So the message names the cap, the reasoning spent
+// under it when the reply carried any, and then one of the two causes below, because those are what
+// an operator acts on: another server, or a profile whose template honours the off rung. Like
 // cappedReplyErrFmt (ADR 0046) it deliberately does not invite a retry; the same fold meets the same
 // cap.
+//
+// The cause is chosen on what THIS request actually asked for — its own ThinkingEffort — and never
+// on the dialect. compactCompleter's EffortOff override fires on two dialects only, but a session
+// whose profile pins `effort: off` carries EffortOff under any of them (internal/agent/wire.go's
+// resolvedEffort), and telling that session it never asked would be a lie. The engine cannot
+// inspect the server either, so neither cause diagnoses one: the asked half reports what was asked
+// and what came back, and stops short of a verdict on a template it has never seen.
 const cappedSummaryErrFmt = "compaction summary hit its output cap (%d tokens) with no visible text " +
-	"to show for it%s — the summarizer asked for no reasoning; this server's template did not honour that"
+	"to show for it%s — %s"
+
+// cappedSummaryAskedOffCause is the cause for a summary request that carried the off rung: the
+// intent went out and the server reasoned regardless. Why it did — a template that drops the key, a
+// model that cannot stop thinking — is beyond the engine, so the text says only what happened.
+const cappedSummaryAskedOffCause = "the summarizer asked for no reasoning and this server reasoned anyway"
+
+// cappedSummaryNotAskedCause is the cause for a summary request that carried no off rung at all —
+// the three dialects compactCompleter leaves alone, with nothing pinning `effort: off`. Nothing was
+// ignored there: the cap simply went on a reasoning pass nobody suppressed, and the remedy is to ask
+// (a profile `effort: off`, or a server whose dialect apogee can switch off).
+const cappedSummaryNotAskedCause = "the cap went on a reasoning pass this server was never asked to skip"
 
 // compactCompleter adapts the Agent's provider seam to context.Completer: a single upstream
 // completion that is silent in the transcript but NOT unaccounted. Unlike streamResponse it emits
@@ -475,6 +492,10 @@ func (c compactCompleter) Complete(ctx context.Context, msgs []domain.Message) (
 	if c.a.effortDialect == provider.EffortDialectKwargs || c.a.effortDialect == provider.EffortDialectReasoning {
 		preq.ThinkingEffort = provider.EffortOff
 	}
+	// What the request itself ended up asking for decides which cause the capped-summary fault
+	// names — read here, off the request that actually goes out, so a session that pinned
+	// `effort: off` in its profile counts as having asked even on a dialect the override skips.
+	askedForNoReasoning := preq.ThinkingEffort == provider.EffortOff
 
 	var content, upstreamThinking strings.Builder
 	var failed bool
@@ -525,16 +546,21 @@ func (c compactCompleter) Complete(ctx context.Context, msgs []domain.Message) (
 
 	// A reasoning-only reply that ran into compactMaxTokens is not "an empty summary": the call
 	// completed, spent the whole cap, and produced nothing visible — so it faults here, naming both
-	// numbers, instead of reaching the reducer's errEmptySummary, which describes a model that
-	// produced nothing at all. Every OTHER blank reply still returns "" and keeps that error
-	// verbatim. The reasoning spend is an estimate through the chars→token estimator (the stream
-	// carries the text, never the server's count of it), hence "roughly" — as in emptyReplyFault.
+	// numbers and the cause the request itself supports, instead of reaching the reducer's
+	// errEmptySummary, which describes a model that produced nothing at all. Every OTHER blank reply
+	// still returns "" and keeps that error verbatim. The reasoning spend is an estimate through the
+	// chars→token estimator (the stream carries the text, never the server's count of it), hence
+	// "roughly" — as in emptyReplyFault.
 	if strings.TrimSpace(visible) == "" && finish == domain.FinishLength {
 		spent := ""
 		if thinking != "" {
 			spent = fmt.Sprintf(", after roughly %d tokens of reasoning", c.a.tokens.EstimateTokens(len(thinking)))
 		}
-		return "", fmt.Errorf(cappedSummaryErrFmt, compactMaxTokens, spent)
+		cause := cappedSummaryNotAskedCause
+		if askedForNoReasoning {
+			cause = cappedSummaryAskedOffCause
+		}
+		return "", fmt.Errorf(cappedSummaryErrFmt, compactMaxTokens, spent, cause)
 	}
 
 	// A summary that DID say something before the cap cut it off is kept and marked, not faulted:
