@@ -64,7 +64,7 @@ construction, and `commandByName` is the one membership test both sides read.
 `/code-audit please check the parser` invokes the skill, exactly as `@path` names a file. The
 token sits at a word boundary, is whitespace-delimited, and **stays in the text** at submit: the
 model sees the token *and* the injected skill body. Only a token the catalog confirms is a
-reference (`extractSkillRefs` over `refSpan`, gated by `Model.knownSkillID`); any other `/word`
+reference (`refs.SkillRefs` over `refs.Span`, gated by `Model.knownSkillID`); any other `/word`
 inside a message is prose, so `/usr/bin` and a typo travel untouched. The extracted ids ride out
 as `domain.UserInput.SkillIDs` — the field and the agent-side resolution are unchanged.
 
@@ -246,7 +246,7 @@ with it, and the transcript's drag-selection is still shaded afterwards and stil
 
 **The accent is fed by spans PERSISTED on the entry, not by a catalog lookup at paint time.** The
 chip row's job was to be *the record of what the model was actually given*; the spans inherit that
-job. `skillRefSpans` — already the one scanner decision 7 names — hands its byte offsets to the
+job. `refs.SkillSpans` — already the one scanner decision 7 names — hands its byte offsets to the
 transcript entry at send time, the codec round-trips them, and `renderUserBlock` stays a free
 function that never sees a `SkillCatalog`. Two consequences fall out of that choice: a replayed
 session keeps its accents after the skill is renamed or deleted, and a skill invoked twice paints

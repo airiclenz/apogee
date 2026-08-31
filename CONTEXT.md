@@ -1070,7 +1070,8 @@ as that request's *file context* — and reports-and-skips a missing or escaping
 is **bare** (`@path`, a run of non-whitespace) or **quoted** (`@"path with spaces"` — `'` is
 accepted too, only `"` is ever produced), where the closing quote ends the token and an
 unterminated one runs to the end of that line; there are no escape sequences. Parsing
-the token is the TUI's job; resolution is the agent's. It is the same inline grammar a **Skill**
+the token belongs to `internal/refs` — a Driver-neutral grammar every Driver reads, not a TUI-private
+one; resolution is the agent's. It is the same inline grammar a **Skill**
 `/token` uses, and the prompt box accents both on the same rule: a token lights up exactly when it
 resolves — the path is in the workspace listing, the id is in the catalog — so a typo visibly
 fails to light instead of failing at submit (ADR 0027). A reference is judged by its BYTES, not

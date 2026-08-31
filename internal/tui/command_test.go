@@ -704,53 +704,11 @@ func TestParseInputMessageExtractsFileRefs(t *testing.T) {
 	}
 }
 
-func TestExtractFileRefs(t *testing.T) {
-	cases := []struct {
-		name string
-		in   string
-		want []string
-	}{
-		{"none", "just a plain message", nil},
-		{"at start", "@file.go here", []string{"file.go"}},
-		{"after space", "see @a/b.go", []string{"a/b.go"}},
-		{"multiple", "@x @y @z", []string{"x", "y", "z"}},
-		{"dedup first-seen", "@x and @x again", []string{"x"}},
-		{"email is not a ref", "mail me at foo@bar.com", nil},
-		{"mid-word @ is not a ref", "user@host path", nil},
-		{"trailing bare @ ignored", "ends with @", nil},
-		{"path with dots", "@./internal/x.go", []string{"./internal/x.go"}},
-		// Quoted refs — a path with spaces is unreachable without them (ISSUES [A]).
-		{
-			"quoted path with spaces",
-			`@"docs/plans/2026-07-23 - 04 - version-build-number-plan.md"`,
-			[]string{"docs/plans/2026-07-23 - 04 - version-build-number-plan.md"},
-		},
-		{"closing quote ends the token", `see @"a b.md", thanks`, []string{"a b.md"}},
-		{"single quotes accepted", "see @'a b.md' now", []string{"a b.md"}},
-		{"quoted without spaces", `@"main.go"`, []string{"main.go"}},
-		{"dedup across forms", `@x and @"x"`, []string{"x"}},
-		{"quoted then bare", `@"a b.md" and @main.go`, []string{"a b.md", "main.go"}},
-		{"unterminated quote runs to end", `@"a b`, []string{"a b"}},
-		{"unterminated quote stops at newline", "@\"a b\nnext @c.go line", []string{"a b", "c.go"}},
-		{"unterminated quote right-trimmed", "@\"a b  \t\nnext", []string{"a b"}},
-		{"empty quoted path ignored", `@"" here`, nil},
-		{"quoted email is still not a ref", `mail me at foo@"bar baz.com"`, nil},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			_, refs := extractFileRefs(c.in)
-			if !reflect.DeepEqual(refs, c.want) {
-				t.Errorf("extractFileRefs(%q) = %v, want %v", c.in, refs, c.want)
-			}
-		})
-	}
-}
-
 // ----------------------------------------------------------------------------
 // Inline "/id" skill tokens — the second half of the mini-language
 // ----------------------------------------------------------------------------
 
-// knownSkills builds the catalog predicate parseInput/extractSkillRefs resolve against, from a
+// knownSkills builds the catalog predicate parseInput resolves inline "/token"s against, from a
 // literal set of ids — the pure-layer stand-in for Model.knownSkillID.
 func knownSkills(ids ...string) func(string) bool {
 	set := make(map[string]bool, len(ids))
@@ -758,42 +716,6 @@ func knownSkills(ids ...string) func(string) bool {
 		set[id] = true
 	}
 	return func(id string) bool { return set[id] }
-}
-
-func TestExtractSkillRefs(t *testing.T) {
-	known := knownSkills("grill-me", "code-audit", "clear")
-	cases := []struct {
-		name string
-		in   string
-		want []string
-	}{
-		{"none", "just a plain message", nil},
-		{"at start", "/grill-me please", []string{"grill-me"}},
-		{"after space", "now /code-audit this", []string{"code-audit"}},
-		{"whole input", "/grill-me", []string{"grill-me"}},
-		{"multiple", "/grill-me and /code-audit", []string{"grill-me", "code-audit"}},
-		{"dedup first-seen", "/code-audit twice /code-audit", []string{"code-audit"}},
-		{"unknown token ignored", "/code-adit please", nil},
-		{"absolute path survives", "look in /usr/bin for it", nil},
-		{"mid-word slash is not a token", "and/or /grill-me", []string{"grill-me"}},
-		{"trailing punctuation is part of the token", "/grill-me, thanks", nil},
-		{"newline is a boundary", "first line\n/code-audit", []string{"code-audit"}},
-		{"tab is a boundary", "go\t/grill-me", []string{"grill-me"}},
-		{"bare slash ignored", "/ alone", nil},
-		{"nested path token not split", "/usr/grill-me", nil},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			if got := extractSkillRefs(c.in, known); !reflect.DeepEqual(got, c.want) {
-				t.Errorf("extractSkillRefs(%q) = %v, want %v", c.in, got, c.want)
-			}
-		})
-	}
-
-	// A nil predicate means no catalog is wired: every token is prose.
-	if got := extractSkillRefs("/grill-me now", nil); got != nil {
-		t.Errorf("extractSkillRefs with a nil predicate = %v, want nil", got)
-	}
 }
 
 // A message keeps its skill tokens IN the text (the @ref posture) and reports them as references,

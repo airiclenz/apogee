@@ -7,6 +7,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/airiclenz/apogee/internal/refs"
 	"github.com/airiclenz/apogee/internal/skills"
 )
 
@@ -315,15 +316,15 @@ func reselectRow(prev, next autocompleteState) int {
 // no region matches.
 //
 // Two invariants the callers rely on: start <= caret <= end, and start is either 0 or preceded by
-// whitespace, so a token is at a word boundary by construction (the extractSkillRefs/extractFileRefs
+// whitespace, so a token is at a word boundary by construction (internal/refs' own word-boundary
 // rule, arrived at from the other direction).
 func caretToken(value string, caret int) (start, end int) {
 	caret = clampInt(caret, 0, len(value))
 	start, end = caret, caret
-	for start > 0 && !isInputSpace(value[start-1]) {
+	for start > 0 && !refs.IsSpace(value[start-1]) {
 		start--
 	}
-	for end < len(value) && !isInputSpace(value[end]) {
+	for end < len(value) && !refs.IsSpace(value[end]) {
 		end++
 	}
 	return start, end
@@ -354,7 +355,7 @@ func caretSlashToken(value string, caret int) (start, end int, partial string, o
 // (and after any opening quote), and whether the caret stands in such a token. The token must sit at
 // a word boundary (start of value or after whitespace); a caret on whitespace stands in no token.
 //
-// It reads both shapes of the ref grammar (scanRefToken owns it, command.go):
+// It reads both shapes of the ref grammar (refs.ScanToken owns it, internal/refs):
 //
 //   - bare — the caret's own whitespace-delimited word, "@internal/loop.go";
 //   - quoted — a word-boundary "@" followed by a quote whose token spans the caret. An open quote
@@ -369,13 +370,13 @@ func caretFileToken(value string, caret int) (start, end int, partial string, ok
 		if value[i] != '@' {
 			continue
 		}
-		if i > 0 && !isInputSpace(value[i-1]) { // not at a word boundary ⇒ not a ref (e.g. an email)
+		if i > 0 && !refs.IsSpace(value[i-1]) { // not at a word boundary ⇒ not a ref (e.g. an email)
 			continue
 		}
 		if i+1 >= len(value) || (value[i+1] != '"' && value[i+1] != '\'') {
 			continue
 		}
-		p, e := scanRefToken(value, i+1)
+		p, e := refs.ScanToken(value, i+1)
 		if i <= caret && caret <= e { // the caret stands in (or just after) this quoted token
 			return i, e, p, true
 		}
@@ -545,7 +546,7 @@ func (m Model) skillSuggestions(partial, outside string) []acItem {
 		return nil
 	}
 	attached := map[string]bool{}
-	for _, id := range extractSkillRefs(outside, m.knownSkillID) {
+	for _, id := range refs.SkillRefs(outside, m.knownSkillID) {
 		attached[id] = true
 	}
 	needle := strings.ToLower(partial)
@@ -640,7 +641,7 @@ func skillRow(sk skills.Skill, rank int, source string) acItem {
 //
 // Keeping the value raw "so the reference still resolves on disk" was never the trade it looked
 // like, because display and resolution are the SAME string: an @ref resolves from the token read
-// back out of the composed text (extractFileRefs → UserInput.FileRefs → the loop's resolveFileRefs),
+// back out of the composed text (refs.FileRefs → UserInput.FileRefs → the loop's resolveFileRefs),
 // never from the acItem, so there is no second channel a raw path could travel down. What the
 // mismatch did buy was a bug: the box held the widget's sanitized text while the row held the raw
 // path, so autocompleteExactMatch could never match such a row and ⏎ on a fully-typed token
@@ -925,7 +926,7 @@ func (m Model) removeCompletionToken() Model {
 	value := m.input.Value()
 	start, end := m.completionRegion()
 	head, tail := value[:start], value[end:]
-	if head != "" && tail != "" && isInputSpace(head[len(head)-1]) && isInputSpace(tail[0]) {
+	if head != "" && tail != "" && refs.IsSpace(head[len(head)-1]) && refs.IsSpace(tail[0]) {
 		tail = tail[1:] // collapse the doubled separator the cut would otherwise leave
 	}
 	m.input.SetValue(head + tail)
@@ -969,11 +970,11 @@ func (m Model) spliceCompletion(token string) (Model, tea.Cmd) {
 	start, end := m.completionRegion()
 	head, tail := value[:start], value[end:]
 	lead := ""
-	if head != "" && !isInputSpace(head[len(head)-1]) {
+	if head != "" && !refs.IsSpace(head[len(head)-1]) {
 		lead = " " // an empty region at the end of a word: the token needs a boundary to be one
 	}
 	sep := " "
-	if tail != "" && isInputSpace(tail[0]) {
+	if tail != "" && refs.IsSpace(tail[0]) {
 		sep = "" // the draft already separates this token from what follows it
 	}
 	m.input.SetValue(head + lead + token + sep + tail)

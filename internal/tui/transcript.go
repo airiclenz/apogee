@@ -299,7 +299,7 @@ type entry struct {
 // of restating the invocation beside it.
 //
 // It is a send-time VERDICT, captured where the parse layer resolved the token against the catalog
-// (parseInput → [refSpan]) and carried with the message from then on — never a lookup the painter
+// (parseInput → [refs.Span]) and carried with the message from then on — never a lookup the painter
 // repeats. That is what makes it the record of what the model was actually given: a replayed
 // session paints the same tokens it painted the day they were sent, even if the skill has since
 // been renamed, removed, or shadowed by a workspace that no longer ships it.

@@ -99,7 +99,9 @@
 // The chat mini-language (post-v1 apogee-code feature-parity) adds a thin parse/route layer
 // between the input box and the engine without thickening the renderer (ADR 0011 still holds):
 // command.go is a pure [parseInput] that classifies a line as a local /command or an agent
-// message and extracts @file references; autocomplete.go is the suggestion overlay (ONE merged menu
+// message and reads its @file and /skill references through internal/refs — the grammar itself
+// lives there, below every Driver, and command.go keeps only skillTokenSpans, the render-typed
+// adapter from a refs.Span to the byte range a sent block paints; autocomplete.go is the suggestion overlay (ONE merged menu
 // of commands and skills on a "/" token, a bounded os.Root workspace-file listing on "@") rendered
 // above the input like the approval-prompt slot. Every region is scoped to the TOKEN AT THE CARET
 // (caretToken — the word it stands in or just after, found by scanning to the whitespace on either
@@ -179,7 +181,7 @@
 // The skill flow (post-v1 apogee-code feature-parity) is the mini-language's second half, and it
 // is TEXT rather than state beside it: a skill is invoked by naming its id as a "/token" at a word
 // boundary in the message — "/code-audit please check the parser" — exactly as an @path names a
-// file. extractSkillRefs collects the tokens the [SkillCatalog] confirms (any other /word inside a
+// file. internal/refs collects the tokens the [SkillCatalog] confirms (any other /word inside a
 // message is prose, so a path or a typo travels untouched), the token STAYS in the text the model
 // reads, and the ids ride out as [domain.UserInput.SkillIDs] on a submitted message and on a staged
 // interjection alike. Like @file, *resolution* (turning an ID into the prepended skill body) stays
@@ -197,7 +199,7 @@
 // prompt block that accents a token exactly when it RESOLVES — a "/id" the catalog confirms, an
 // "@path" the workspace listing holds — and leaves everything else plain, so a typo or a
 // non-existent file fails to light up instead of failing at submit. Both grammars are located by
-// the one scanner the extractors read (refSpan, command.go), so what lights up is by construction
+// the one scanner the parse layer reads (internal/refs), so what lights up is by construction
 // what would be acted on; the byte ranges become visual cells through a mirror of the widget's own
 // soft-wrap (wrapRowStarts, pinned against a real textarea), and [Model.inputView] composes the
 // pass BEFORE the drag-selection so a selection wins over any accent it covers. The render path
@@ -997,7 +999,7 @@
 // third-party internal standing in for a seam — so fileSuggestions sanitizes the workspace path
 // itself, once, before the row's value and cell are both derived from it. Nothing is lost to a second
 // channel by that: an @ref resolves from the "@token" read back out of the composed text
-// (extractFileRefs → the loop's resolveFileRefs), never from the acItem, so display and resolution
+// (refs.FileRefs → the loop's resolveFileRefs), never from the acItem, so display and resolution
 // are one string and are sanitized once — which also keeps fileRefToken's promise that a row shows
 // exactly what accepting it inserts, the property autocompleteExactMatch's ⏎-submits rule needs.
 // A LINE or TAB break in that filename goes through the same door and is flattened at it

@@ -7,6 +7,8 @@ import (
 
 	"github.com/mattn/go-runewidth"
 	"github.com/rivo/uniseg"
+
+	"github.com/airiclenz/apogee/internal/refs"
 )
 
 // ----------------------------------------------------------------------------
@@ -66,12 +68,12 @@ func (m Model) resolvingTokens() []accentSpan {
 		return nil
 	}
 	var spans []accentSpan
-	for _, sp := range skillRefSpans(value, m.knownSkillID) {
-		spans = append(spans, accentSpan{start: sp.start, end: sp.end, kind: accentSkill})
+	for _, sp := range refs.SkillSpans(value, m.knownSkillID) {
+		spans = append(spans, accentSpan{start: sp.Start, end: sp.End, kind: accentSkill})
 	}
-	for _, sp := range fileRefSpans(value) {
-		if m.knownWorkspaceFile(sp.name) {
-			spans = append(spans, accentSpan{start: sp.start, end: sp.end, kind: accentFile})
+	for _, sp := range refs.FileSpans(value) {
+		if m.knownWorkspaceFile(sp.Name) {
+			spans = append(spans, accentSpan{start: sp.Start, end: sp.End, kind: accentFile})
 		}
 	}
 	return spans
@@ -142,8 +144,8 @@ func (m Model) accentTokens(view string) string {
 // the painter's — measure, the width authority (width.go) — because they address cells on a row the
 // terminal has already drawn, which is what the caller then re-styles.
 //
-// A token never crosses a newline — both grammars break on one (isInputSpace includes '\n', and a
-// quoted @ref stops at it, scanRefToken) — so a range spanning two logical lines is not a token this
+// A token never crosses a newline — both grammars break on one (refs.IsSpace includes '\n', and a
+// quoted @ref stops at it, refs.ScanToken) — so a range spanning two logical lines is not a token this
 // pass drew and yields nothing rather than a guess. Within its line the range may still straddle any
 // number of soft-wraps, and it yields one span per row it touches.
 func inputCellSpans(measure widthAuthority, value string, width, from, to int) []inputCellSpan {

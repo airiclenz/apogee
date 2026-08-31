@@ -23,7 +23,7 @@ import (
 // without a Model (the confine.go posture).
 
 // knownSkillID reports whether id names a skill in the wired catalog. It is the predicate the pure
-// parse layer resolves inline "/token" references against (parseInput → extractSkillRefs) and the
+// parse layer resolves inline "/token" references against (parseInput → refs.SkillSpans) and the
 // one place the "is this word a skill?" question is answered, so the parser, the highlighter and
 // the dropdown can never disagree about what resolves. A nil catalog knows nothing — every token is
 // then plain prose, which is exactly right for a build with no skills wired.

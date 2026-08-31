@@ -3,6 +3,8 @@ package tui
 import (
 	"fmt"
 	"strings"
+
+	"github.com/airiclenz/apogee/internal/refs"
 )
 
 // ----------------------------------------------------------------------------
@@ -284,15 +286,15 @@ func parseInput(raw string, known func(string) bool) parsedInput {
 	}
 	// The skill grammar is scanned ONCE and read twice — the ids that travel with the message, the
 	// spans that paint it — and both offsets and text come from the same trimmed line, since
-	// extractFileRefs hands the text back unchanged. That is what makes skillSpans offsets into
-	// parsedInput.text, and so into the entry the submit path stores.
-	text, refs := extractFileRefs(trimmed)
-	skills := skillRefSpans(trimmed, known)
+	// internal/refs locates tokens without touching the text they came from. That is what makes
+	// skillSpans offsets into parsedInput.text, and so into the entry the submit path stores.
+	fileRefs := refs.FileRefs(trimmed)
+	skills := refs.SkillSpans(trimmed, known)
 	return parsedInput{
 		kind:       kindMessage,
-		text:       text,
-		fileRefs:   refs,
-		skillIDs:   spanNames(skills),
+		text:       trimmed,
+		fileRefs:   fileRefs,
+		skillIDs:   refs.Names(skills),
 		skillSpans: skillTokenSpans(skills),
 	}
 }
@@ -306,7 +308,7 @@ func parseInput(raw string, known func(string) bool) parsedInput {
 //   - "/code-adit"          → guarded: a mistyped skill (or command) that would otherwise be sent
 //     to the model verbatim, which is exactly the confusion this guard exists to end;
 //   - "/code-adit the parser" → a message: more than the one token means prose, whatever it opens
-//     with (the mid-message "/word is prose" rule of extractSkillRefs, unchanged);
+//     with (the mid-message "/word is prose" rule of internal/refs, unchanged);
 //   - "/clear", "/grill-me" → not unknown: a verb matchCommand recognises never reaches here, and a
 //     token `known` confirms is an ordinary message that happens to invoke a skill (edge default:
 //     an input that is ONLY a skill token sends);
@@ -610,161 +612,18 @@ func parseUndo(args []string) (undoAction, error) {
 	}
 }
 
-// refSpan is one resolving token of the mini-language, LOCATED in the text: the byte range
-// [start,end) it occupies and the name it resolves to (a workspace-relative path for an @ref, a
-// skill id for a "/" one). Two readers want different halves of that pair — the extractors below
-// take the names to send with the message, the inline accents take the ranges to paint
-// (inputaccent.go) — so both grammars are scanned in exactly ONE place and the two readers can
-// never disagree about what is a token.
-type refSpan struct {
-	start, end int
-	name       string
-}
-
-// fileRefSpans locates the @file references in s. An @-ref is an "@" at the start of s or
-// immediately after whitespace — so an email like foo@bar.com (where "@" follows a non-space) is
-// not a reference — followed by a token in one of two forms (scanRefToken owns the grammar):
-//
-//   - bare: a run of non-whitespace characters, @internal/agent/loop.go;
-//   - quoted: @"path with spaces" or @'path with spaces' — both quote characters are
-//     accepted, the closing quote ends the token so ordinary text may follow it, and an
-//     unterminated quote runs to the end of that line. There are no escape sequences.
-//
-// The span covers the literal token, quotes included; the name is the path without the "@" and
-// without any quotes. A token naming nothing (a bare "@", an empty quoted pair) is skipped, but
-// the scan still resumes past it.
-func fileRefSpans(s string) []refSpan {
-	var spans []refSpan
-	for i := 0; i < len(s); i++ {
-		if s[i] != '@' {
-			continue
-		}
-		if i > 0 && !isInputSpace(s[i-1]) { // not at a word boundary ⇒ not a ref (e.g. an email)
-			continue
-		}
-		path, end := scanRefToken(s, i+1)
-		if path != "" {
-			spans = append(spans, refSpan{start: i, end: end, name: path})
-		}
-		i = end - 1 // resume scanning past this token (the loop's own i++ lands on end)
-	}
-	return spans
-}
-
-// skillRefSpans locates the inline skill references in s. A skill reference is the exact mirror of
-// an @file one — the same word-boundary, whitespace-delimited grammar, and the same "the token
-// stays in the text" rule — so the two halves of the prompt mini-language read alike:
-//
-//	/code-audit please check @internal/tui/command.go
-//
-// The token must start at the beginning of s or immediately after whitespace, and it runs to the
-// next whitespace byte. Only a token whose bare name `known` confirms as a catalog ID counts:
-// every other slash-prefixed word is ordinary prose, which is what lets a path (/usr/bin), a
-// fraction (and/or) or a typo (/code-adit) travel to the model untouched. Skill IDs are directory
-// names and so never contain whitespace, which is why this grammar needs no quoted form.
-func skillRefSpans(s string, known func(string) bool) []refSpan {
-	if known == nil {
-		return nil
-	}
-	var spans []refSpan
-	for i := 0; i < len(s); i++ {
-		if s[i] != '/' {
-			continue
-		}
-		if i > 0 && !isInputSpace(s[i-1]) { // not at a word boundary ⇒ prose (a path, a fraction)
-			continue
-		}
-		end := i + 1
-		for end < len(s) && !isInputSpace(s[end]) {
-			end++
-		}
-		if id := s[i+1 : end]; id != "" && known(id) {
-			spans = append(spans, refSpan{start: i, end: end, name: id})
-		}
-		i = end - 1 // resume past this token (the loop's own i++ lands on end)
-	}
-	return spans
-}
-
-// spanNames reduces located tokens to the names they resolve to, de-duplicated in first-seen
-// order — so @x and @"x" collapse to one reference, and a skill named twice is invoked once.
-func spanNames(spans []refSpan) []string {
-	var names []string
-	seen := map[string]bool{}
-	for _, sp := range spans {
-		if seen[sp.name] {
-			continue
-		}
-		seen[sp.name] = true
-		names = append(names, sp.name)
-	}
-	return names
-}
-
-// skillTokenSpans reduces located tokens to the bare byte ranges a sent block paints — the other
-// half of the refSpan pair, and the half spanNames throws away. It keeps one span per OCCURRENCE
-// where spanNames de-dupes by name, because painting is about where the words are: a skill named
-// twice is invoked once and lights up twice.
-func skillTokenSpans(spans []refSpan) []skillSpan {
+// skillTokenSpans reduces located tokens to the bare byte ranges a sent block paints — the render
+// half of a [refs.Span] pair, and the half refs.Names throws away. It keeps one span per OCCURRENCE
+// where refs.Names de-dupes by name, because painting is about where the words are: a skill named
+// twice is invoked once and lights up twice. It is the one render-typed adapter over the shared
+// grammar: the parse itself lives in internal/refs, and this turns its spans into the screen type.
+func skillTokenSpans(spans []refs.Span) []skillSpan {
 	if len(spans) == 0 {
 		return nil
 	}
 	out := make([]skillSpan, 0, len(spans))
 	for _, sp := range spans {
-		out = append(out, skillSpan{start: sp.start, end: sp.end})
+		out = append(out, skillSpan{start: sp.Start, end: sp.End})
 	}
 	return out
-}
-
-// extractFileRefs returns s unchanged plus the workspace-relative paths its @file references name
-// (fileRefSpans owns the grammar). The literal @token — quotes included — is left in the text so
-// the model sees what the human pointed at.
-func extractFileRefs(s string) (string, []string) {
-	return s, spanNames(fileRefSpans(s))
-}
-
-// extractSkillRefs returns the catalog IDs the inline "/" tokens of s name (skillRefSpans owns the
-// grammar). The literal token is left in the text — the owner's explicit choice over stripping it:
-// the model sees the invocation the human typed AND the skill body the agent prepends for it.
-func extractSkillRefs(s string, known func(string) bool) []string {
-	return spanNames(skillRefSpans(s, known))
-}
-
-// scanRefToken scans the token of an @file reference and reports the referenced path together
-// with the offset just past the token. start is the byte immediately after the "@"; the caller
-// owns the word-boundary rule.
-//
-// A token opening with a quote character (" or ') runs to the next occurrence of that same
-// character on the same line: the path is the text between the quotes, and the closing quote
-// ends the token — anything after it (a comma, more prose) is ordinary text again. An
-// unterminated quote runs to the end of the line ("\n") or of s, with the path right-trimmed of
-// spaces and tabs: a word-boundary @" is unambiguous intent, and a token never crosses a
-// newline, so a stray quote cannot swallow the rest of a multi-line message. There are no
-// escape sequences — a path containing " is quoted with ', and vice versa. Any other token is
-// the bare form: a run of non-whitespace bytes.
-func scanRefToken(s string, start int) (string, int) {
-	if start >= len(s) {
-		return "", start
-	}
-	if quote := s[start]; quote == '"' || quote == '\'' {
-		for j := start + 1; j < len(s); j++ {
-			switch s[j] {
-			case quote:
-				return s[start+1 : j], j + 1
-			case '\n':
-				return strings.TrimRight(s[start+1:j], " \t"), j
-			}
-		}
-		return strings.TrimRight(s[start+1:], " \t"), len(s)
-	}
-	j := start
-	for j < len(s) && !isInputSpace(s[j]) {
-		j++
-	}
-	return s[start:j], j
-}
-
-// isInputSpace reports whether b is an ASCII whitespace byte used as a token boundary.
-func isInputSpace(b byte) bool {
-	return b == ' ' || b == '\t' || b == '\n' || b == '\r'
 }

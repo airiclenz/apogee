@@ -3,6 +3,8 @@ package tui
 import (
 	"sort"
 	"strings"
+
+	"github.com/airiclenz/apogee/internal/refs"
 )
 
 // ----------------------------------------------------------------------------
@@ -61,7 +63,7 @@ func (m Model) recomputeSkillHints(value string) Model {
 		return m
 	}
 	invoked := map[string]bool{}
-	for _, id := range extractSkillRefs(value, m.knownSkillID) {
+	for _, id := range refs.SkillRefs(value, m.knownSkillID) {
 		invoked[id] = true
 	}
 	spent := m.spentSkills
@@ -76,29 +78,29 @@ func (m Model) recomputeSkillHints(value string) Model {
 // hintDraft is the draft the matcher ranks: value with the byte ranges of its resolving "/token"s
 // and "@file" references cut out, each replaced by a single space so the words on either side of a
 // removed token stay two words. The grammars are the ones the sent message is parsed with
-// (skillRefSpans, fileRefSpans), so the band and the parser agree on what counts as a reference:
+// (refs.SkillSpans, refs.FileSpans), so the band and the parser agree on what counts as a reference:
 // anything the parser would NOT resolve is ordinary prose and stays in, which is what keeps a plain
 // "/" or an email address from silently editing the text being matched.
 //
-// known is the catalog probe skillRefSpans needs; a nil probe locates no skill tokens, exactly as it
+// known is the catalog probe refs.SkillSpans needs; a nil probe locates no skill tokens, exactly as it
 // does everywhere else in the package.
 func hintDraft(value string, known func(id string) bool) string {
-	spans := append(skillRefSpans(value, known), fileRefSpans(value)...)
+	spans := append(refs.SkillSpans(value, known), refs.FileSpans(value)...)
 	if len(spans) == 0 {
 		return value
 	}
-	sort.Slice(spans, func(i, j int) bool { return spans[i].start < spans[j].start })
+	sort.Slice(spans, func(i, j int) bool { return spans[i].Start < spans[j].Start })
 
 	var b strings.Builder
 	b.Grow(len(value))
 	cut := 0
 	for _, sp := range spans {
-		if sp.start < cut { // two grammars overlapping on one token: the first cut already took it
+		if sp.Start < cut { // two grammars overlapping on one token: the first cut already took it
 			continue
 		}
-		b.WriteString(value[cut:sp.start])
+		b.WriteString(value[cut:sp.Start])
 		b.WriteByte(' ')
-		cut = sp.end
+		cut = sp.End
 	}
 	b.WriteString(value[cut:])
 	return b.String()
