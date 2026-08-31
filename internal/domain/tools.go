@@ -275,7 +275,9 @@ func simpleFoldMinimum(r rune) rune {
 // It walks the whole value — nested objects and objects inside arrays included — because a tool's
 // arguments decode all the way down through the same case-insensitive matcher. A key repeated
 // with the SAME spelling (`{"path":1,"path":2}`) is not a collision: last-wins for an exact
-// duplicate is a pinned contract every reader already shares.
+// duplicate is a pinned contract every reader already shares. That same repeat carrying two
+// DIFFERING values is RepeatedArgumentKeys' business, not this one's: this check only ever
+// reports one parameter spelled two ways.
 //
 // Arguments that are not a JSON object, or that do not parse, are an error rather than an empty
 // result, so a caller can tell "nothing collides" from "nothing could be read"; a caller that
@@ -385,6 +387,132 @@ func renderCollisionGroup(names []string) string {
 func containsString(names []string, name string) bool {
 	for _, existing := range names {
 		if existing == name {
+			return true
+		}
+	}
+	return false
+}
+
+// RepeatedArgumentKeys reports the quoted spelling of every argument name one object answers more
+// than once with at least two DIFFERING values — the shape `{"task":"a","task":"b"}`, where
+// last-wins runs the call with one answer while the model wrote two and every surface reading the
+// raw bytes may show either. Each name is rendered quoted (`"task"`), sorted, deduped across the
+// whole value, so one argument object always reports one way. An empty result means no name was
+// given two different answers.
+//
+// It walks the whole value — nested objects and objects inside arrays included — because a tool's
+// arguments decode all the way down. Values are compared by running each occurrence's raw bytes
+// through json.Compact and comparing the results: whitespace-insensitive, so `[1, 2]` and `[1,2]`
+// are one answer, but spelling-honest, so `1` and `1.0` are TWO — a repeat the executor could
+// round differently is not a repeat that agrees with itself.
+//
+// A fold collision alone is not this rule's business: `{"a":1,"A":2}` names one parameter under
+// two spellings and returns no group here — that is CollidingArgumentKeys' check.
+//
+// Arguments that are not a JSON object, or that do not parse, are an error rather than an empty
+// result — the same three reports CollidingArgumentKeys makes, under the same prefix — so a
+// caller can tell "nothing repeats" from "nothing could be read".
+func RepeatedArgumentKeys(raw json.RawMessage) ([]string, error) {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	opening, err := decoder.Token()
+	if err != nil {
+		return nil, fmt.Errorf("argument object: %w", err)
+	}
+	delim, isDelim := opening.(json.Delim)
+	if !isDelim || delim != '{' {
+		return nil, errors.New("argument object: arguments are not a JSON object")
+	}
+
+	names := map[string]struct{}{}
+	if err := collectRepeatedKeys(decoder, names); err != nil {
+		return nil, fmt.Errorf("argument object: %w", err)
+	}
+	if _, err := decoder.Token(); !errors.Is(err, io.EOF) {
+		return nil, errors.New("argument object: trailing content after the closing brace")
+	}
+
+	out := make([]string, 0, len(names))
+	for name := range names {
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+// collectRepeatedKeys consumes one object's members — the opening brace is already read — and adds
+// the quoted spelling of every name this object answered with two values that are not the same
+// bytes once compacted, descending into each member's value on the way.
+func collectRepeatedKeys(decoder *json.Decoder, names map[string]struct{}) error {
+	answers := map[string][]json.RawMessage{}
+	for decoder.More() {
+		token, err := decoder.Token()
+		if err != nil {
+			return err
+		}
+		name, isString := token.(string)
+		if !isString {
+			return errors.New("object member name is not a string")
+		}
+		var value json.RawMessage
+		if err := decoder.Decode(&value); err != nil {
+			return err
+		}
+		compacted := &bytes.Buffer{}
+		if err := json.Compact(compacted, value); err != nil {
+			return err
+		}
+		answers[name] = append(answers[name], json.RawMessage(compacted.Bytes()))
+		if err := descendRepeatedValue(value, names); err != nil {
+			return err
+		}
+	}
+	if _, err := decoder.Token(); err != nil { // the closing brace
+		return err
+	}
+	for name, values := range answers {
+		if answersDiffer(values) {
+			names[strconv.Quote(name)] = struct{}{}
+		}
+	}
+	return nil
+}
+
+// descendRepeatedValue walks one captured member value, entering the objects inside it — the value
+// itself when it is an object, and any object an array carries — and stopping at a scalar.
+func descendRepeatedValue(value json.RawMessage, names map[string]struct{}) error {
+	decoder := json.NewDecoder(bytes.NewReader(value))
+	token, err := decoder.Token()
+	if err != nil {
+		return err
+	}
+	delim, isDelim := token.(json.Delim)
+	if !isDelim {
+		return nil
+	}
+	switch delim {
+	case '{':
+		return collectRepeatedKeys(decoder, names)
+	case '[':
+		for decoder.More() {
+			var element json.RawMessage
+			if err := decoder.Decode(&element); err != nil {
+				return err
+			}
+			if err := descendRepeatedValue(element, names); err != nil {
+				return err
+			}
+		}
+		_, err := decoder.Token() // the closing bracket
+		return err
+	default:
+		return errors.New("unbalanced JSON value")
+	}
+}
+
+// answersDiffer reports whether one name's compacted answers are not all the same bytes.
+func answersDiffer(values []json.RawMessage) bool {
+	for _, value := range values[1:] {
+		if !bytes.Equal(value, values[0]) {
 			return true
 		}
 	}

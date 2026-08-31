@@ -195,7 +195,7 @@ func TestIsDefaultOff_ReadsTheMarkerAndDefaultsToOnTheMenu(t *testing.T) {
 }
 
 // ----------------------------------------------------------------------------
-// The argument-key fold (FoldArgumentKey, CollidingArgumentKeys)
+// The argument-key fold (FoldArgumentKey, CollidingArgumentKeys, RepeatedArgumentKeys)
 // ----------------------------------------------------------------------------
 
 // longS and kelvinSign are the two runes stdlib's field fold reaches that lower-casing does not:
@@ -362,6 +362,123 @@ func TestCollidingArgumentKeys(t *testing.T) {
 		}
 		if strings.ContainsAny(got[0], "\r\n") {
 			t.Errorf("group %q carries a raw line break — a key must not forge rows in the text that reports it", got[0])
+		}
+	})
+}
+
+// TestRepeatedArgumentKeys pins what counts as one parameter given two answers. The SAME spelling
+// carrying two DIFFERING values is the shape a streamed call arrives in when fragments are
+// concatenated — `{"task":A,"task":B}`, where last-wins runs one answer while the model wrote two
+// — and it is reported wherever it sits, nested objects and objects inside arrays included. A
+// byte-identical repeat is not: last-wins for an exact duplicate is a pinned contract. Comparison
+// is whitespace-insensitive but spelling-honest, so `[1, 2]` equals `[1,2]` while `1` and `1.0`
+// are two answers. A fold collision alone belongs to CollidingArgumentKeys and reports nothing
+// here. Arguments that are not an object are an error, so a caller can tell "nothing repeats"
+// from "nothing could be read".
+func TestRepeatedArgumentKeys(t *testing.T) {
+	t.Parallel()
+
+	found := []struct {
+		name string
+		raw  string
+		want []string
+	}{
+		{"one key, two answers", `{"task":"a","task":"b"}`, []string{`"task"`}},
+		{
+			"the shape the incident arrived in",
+			`{"name":"sub_agent","task":"A","max_steps":1,"max_steps":1,"task":"B"}`,
+			[]string{`"task"`},
+		},
+		{"two spellings of one number are two answers", `{"a":1,"a":1.0}`, []string{`"a"`}},
+		{"a repeat inside a nested object is reported", `{"o":{"p":1,"p":2}}`, []string{`"p"`}},
+		{"a repeat inside an object in an array is reported", `{"o":[{"p":1,"p":2}]}`, []string{`"p"`}},
+		{
+			"two repeated keys are reported in a stable order",
+			`{"b":1,"b":2,"a":3,"a":4}`,
+			[]string{`"a"`, `"b"`},
+		},
+		{
+			"the same name repeated in two places is reported once",
+			`{"o":{"p":1,"p":2},"q":[{"p":3,"p":4}]}`,
+			[]string{`"p"`},
+		},
+	}
+	for _, tc := range found {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := domain.RepeatedArgumentKeys(json.RawMessage(tc.raw))
+			if err != nil {
+				t.Fatalf("RepeatedArgumentKeys(%s) returned err %v, want the repeated keys", tc.raw, err)
+			}
+			if len(got) != len(tc.want) {
+				t.Fatalf("RepeatedArgumentKeys(%s) = %q, want %q", tc.raw, got, tc.want)
+			}
+			for i := range got {
+				if got[i] != tc.want[i] {
+					t.Errorf("RepeatedArgumentKeys(%s) = %q, want %q", tc.raw, got, tc.want)
+					break
+				}
+			}
+		})
+	}
+
+	clean := []struct {
+		name string
+		raw  string
+	}{
+		{"the empty object answers nothing twice", `{}`},
+		{"distinct parameters are not a repeat", `{"command":"npm test","workdir":"/w"}`},
+		{"a byte-identical repeat stays last-wins", `{"a":1,"a":1}`},
+		{"whitespace alone is not a second answer", `{"a":[1, 2],"a":[1,2]}`},
+		{"two key cases of one parameter are a collision, not a repeat", `{"a":1,"A":2}`},
+		{"scalars and arrays of scalars are walked past", `{"a":[1,"x",null],"b":true}`},
+	}
+	for _, tc := range clean {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := domain.RepeatedArgumentKeys(json.RawMessage(tc.raw))
+			if err != nil {
+				t.Fatalf("RepeatedArgumentKeys(%s) returned err %v, want no repeats", tc.raw, err)
+			}
+			if len(got) != 0 {
+				t.Errorf("RepeatedArgumentKeys(%s) = %q, want none", tc.raw, got)
+			}
+		})
+	}
+
+	unreadable := []struct {
+		name string
+		raw  string
+	}{
+		{"an array is not an argument object", `[]`},
+		{"a string is not an argument object", `"x"`},
+		{"null is not an argument object", `null`},
+		{"empty arguments carry no object to read", ``},
+		{"an unclosed object cannot be read", `{`},
+		{"a truncated member cannot be read", `{"a":`},
+		{"a second document behind the first is not one object", `{"a":1}{"b":2}`},
+		{"trailing text after the object is not one object", `{"a":1} x`},
+	}
+	for _, tc := range unreadable {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got, err := domain.RepeatedArgumentKeys(json.RawMessage(tc.raw)); err == nil {
+				t.Errorf("RepeatedArgumentKeys(%q) = %q with no error, want the unreadable-arguments error", tc.raw, got)
+			}
+		})
+	}
+
+	t.Run("a name carrying a line break is quoted, not pasted", func(t *testing.T) {
+		t.Parallel()
+		got, err := domain.RepeatedArgumentKeys(json.RawMessage("{\"a\\nb\":1,\"a\\nb\":2}"))
+		if err != nil {
+			t.Fatalf("RepeatedArgumentKeys returned err %v, want the repeated key", err)
+		}
+		if len(got) != 1 {
+			t.Fatalf("keys = %q, want exactly one", got)
+		}
+		if strings.ContainsAny(got[0], "\r\n") {
+			t.Errorf("key %q carries a raw line break — a name must not forge rows in the text that reports it", got[0])
 		}
 	})
 }
