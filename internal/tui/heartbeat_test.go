@@ -751,6 +751,103 @@ func TestSwitchClearsAnExcludedEffortOverride(t *testing.T) {
 	}
 }
 
+// A model whose reasoning cannot be turned off says so at the bind. The fact is host-side (ADR 0060
+// D9) and the human's only handle on it is knowing that the engine's capped internal calls — the
+// compaction fold and the title call — spend part of that cap on a pass the model cannot decline.
+// It is guarded on Supported as well as Mandatory: EffortSupport documents every field below
+// Supported as meaningless when it is false, so a beat that sets Mandatory with no dial behind it
+// is reporting nothing and must stay silent.
+//
+// The wanted text is built from the emitting function rather than pinned as a fixture string: the
+// wording is the note's, and a test that restated it would only assert its own copy.
+func TestSwitchNotesAModelThatCannotDisableReasoning(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		support  provider.EffortSupport
+		wantNote bool
+	}{
+		{
+			name: "a model that reports a mandatory dial is announced",
+			support: provider.EffortSupport{
+				Supported: true, Dialect: provider.EffortDialectReasoning, Mandatory: true,
+			},
+			wantNote: true,
+		},
+		{
+			name: "a dial that can be turned off is silent",
+			support: provider.EffortSupport{
+				Supported: true, Dialect: provider.EffortDialectReasoning,
+			},
+		},
+		{
+			name:    "Mandatory under an unsupported dial is meaningless and silent",
+			support: provider.EffortSupport{Mandatory: true},
+		},
+		{
+			name: "a beat that reports nothing is silent",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			m := wireRebind(t, testOpts, &fakeHeartbeat{}, &fakeRebind{})
+			m = foldBeatMsg(t, m, upBeat("test-model", 32768)) // the first beat observes what is bound
+
+			switched := upBeat("new-model", 32768)
+			switched.EffortSupport = tt.support
+			m = foldBeatMsg(t, m, switched)
+
+			want := mandatoryEffortNote("new-model")
+			got := countNotes(m, want)
+			if tt.wantNote && got != 1 {
+				t.Errorf("notes = %q, want exactly one reading %q", noteTexts(m), want)
+			}
+			if !tt.wantNote && got != 0 {
+				t.Errorf("notes = %q, want none naming a mandatory dial", noteTexts(m))
+			}
+		})
+	}
+}
+
+// A switch can be both things at once: the new model rules the session override out AND cannot turn
+// its reasoning off. Both notes are printed, and in a stable order — the clear first, then the
+// consequence of what remains — so the scrollback reads the same way every time.
+func TestSwitchEmitsBothEffortNotesInAStableOrder(t *testing.T) {
+	t.Parallel()
+
+	m := wireRebind(t, testOpts, &fakeHeartbeat{}, &fakeRebind{})
+	m = foldBeatMsg(t, m, upBeat("test-model", 32768))
+	m.eng.SetEffortOverride(domain.EffortHigh)
+
+	switched := upBeat("new-model", 32768)
+	switched.EffortSupport = provider.EffortSupport{
+		Supported: true, Dialect: provider.EffortDialectReasoning,
+		Efforts: []string{"low", "medium"}, Mandatory: true,
+	}
+	m = foldBeatMsg(t, m, switched)
+
+	notes := noteTexts(m)
+	cleared, mandatory := -1, -1
+	for i, note := range notes {
+		switch {
+		case strings.Contains(note, "effort override"):
+			cleared = i
+		case note == mandatoryEffortNote("new-model"):
+			mandatory = i
+		}
+	}
+	if cleared < 0 || mandatory < 0 {
+		t.Fatalf("notes = %q, want both the cleared-override note and the mandatory-dial note", notes)
+	}
+	if cleared > mandatory {
+		t.Errorf("notes = %q, want the cleared-override note before the mandatory-dial note", notes)
+	}
+}
+
 // The cold start binds LATE: the binary launches with no model at all and the first landed beat is
 // startup discovery. It runs the ordinary rebind path from empty — the seam is asked for the
 // observed model, the display adopts what came back, and both places that name a model (the footer

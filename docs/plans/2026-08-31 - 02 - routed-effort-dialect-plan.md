@@ -232,7 +232,9 @@ text still returns the truncation marker and no error.
 
 `fix(agent): the compaction fault names only what the engine can know`
 
-## 4. The host says when a bound model cannot disable reasoning
+## 4. The host says when a bound model cannot disable reasoning — ✅ DONE (2026-08-31)
+
+NOTES (2026-08-31): no deviations — wording is the plan's binding string, emitted from `mandatoryEffortNote` and asserted through that function rather than a fixture; the emitting condition is `intent.effort.Supported && intent.effort.Mandatory` as the regression guard requires.
 
 Depends on item 1.
 

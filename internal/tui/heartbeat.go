@@ -407,6 +407,14 @@ func (m Model) applyRebind(intent rebindIntent) (Model, bool) {
 		m.eng.SetEffortOverride("")
 		m.transcript.addNote(effortClearedNote(override, profile, m.opts.Model, intent.effort.Default))
 	}
+	// A model whose reasoning cannot be turned off is a host-side fact (ADR 0060 D9), so the human
+	// learns it the way the excluded-override clear above already tells them: a note at the bind,
+	// after the clear so a switch that does both reads clear-then-consequence. Guarded on Supported
+	// as well as Mandatory because EffortSupport documents every field below Supported as meaningless
+	// when it is false — a beat that reports Mandatory with no dial is reporting nothing.
+	if intent.effort.Supported && intent.effort.Mandatory {
+		m.transcript.addNote(mandatoryEffortNote(m.opts.Model))
+	}
 	return m, true
 }
 
@@ -450,6 +458,20 @@ func effortClearedNote(override, profile domain.ThinkingEffort, model, reportedD
 	fallback, _ := footerEffortLabel("", profile, reportedDefault, true)
 	return fmt.Sprintf("effort override %q is not offered by %s — cleared; back to %s",
 		override, displayModel(model), fallback)
+}
+
+// mandatoryEffortNote words the one thing a human can act on about a model that cannot switch its
+// reasoning off: the engine's internal calls — the compaction fold and the title call — bound their
+// replies with an output cap (ADR 0046), and a thinking pass they cannot decline spends part of it.
+// A plain fact in the shape of the rebind notes beside it, with no verdict and no remedy: the level
+// vocabulary and the caps stay host-side facts the human already sees elsewhere.
+//
+// The model is rendered through displayModel like every id the chrome shows, so this note, the
+// cleared-override note above it and the footer below cannot name the same model three ways. It is
+// not escape-stripped here: the note's one destination is addNote, which strips at the seam for
+// every producer.
+func mandatoryEffortNote(model string) string {
+	return displayModel(model) + " cannot switch its reasoning off — compaction and title calls spend part of their output cap on it"
 }
 
 // applyPendingRebind binds a change that was captured while the engine was not the Update loop's to
