@@ -68,6 +68,34 @@ func okEditRegions(callID, content, oldText, newText string) domain.ToolResult {
 	return okSummary(callID, content, regions)
 }
 
+// okInsertedRegion returns a write's success result for a target with NO readable before side:
+// the whole content as one region of pure insertion, starting at line 1 of both files. write_file
+// is its caller, on the ordinary create and on the rare original it could not read (write_file.go).
+//
+// It exists because an absent file is ZERO before lines, and okEditRegions cannot say that: an
+// empty before text splits to [""], one empty line, which records a phantom removed blank line and
+// reads a blank line in the content as unchanged context. Empty content changes nothing to show and
+// attaches NO summary — the same prose floor okEditRegions falls back to for a pair it declines.
+func okInsertedRegion(callID, content, newText string) domain.ToolResult {
+	inserted := insertedLines(newText)
+	if len(inserted) == 0 {
+		return okResult(callID, content)
+	}
+	region := domain.EditRegion{BeforeStart: 1, AfterStart: 1, Inserted: inserted}
+	return okSummary(callID, content, domain.EditRegions{Regions: []domain.EditRegion{region}})
+}
+
+// insertedLines cuts text into the lines a pure insertion inserts. A single trailing newline
+// terminates the last line rather than opening an empty one, so the count matches what editRegions
+// reports for the same content against a non-empty original — there the trailing empty split
+// element pairs off as context on both sides instead of being inserted.
+func insertedLines(text string) []string {
+	if text == "" {
+		return nil
+	}
+	return strings.Split(strings.TrimSuffix(text, "\n"), "\n")
+}
+
 // cutRegions walks a line diff's operations in order and cuts them into regions, in file order.
 // It returns nil when the operations carry no change at all.
 func cutRegions(ops []diffOp) []domain.EditRegion {

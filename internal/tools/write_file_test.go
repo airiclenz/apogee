@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -69,14 +70,178 @@ func TestWriteFile_Execute_ReportsBytesWritten(t *testing.T) {
 	if want := "wrote 5 bytes to out.txt"; result.Content != want {
 		t.Errorf("Content = %q, want %q", result.Content, want)
 	}
-	wrote, ok := result.Summary.(domain.WroteBytes)
-	if !ok {
-		t.Fatalf("Summary = %#v, want a domain.WroteBytes", result.Summary)
-	}
-	if want := (domain.WroteBytes{Bytes: 5}); wrote != want {
-		t.Errorf("Summary = %+v, want %+v", wrote, want)
+	// The sentence still counts BYTES; the structured half beside it is the change itself.
+	if _, ok := result.Summary.(domain.EditRegions); !ok {
+		t.Fatalf("Summary = %#v, want a domain.EditRegions", result.Summary)
 	}
 }
+
+// A write onto nothing records the whole content as ONE region of pure insertion. The before side
+// of a create is ZERO lines, not one empty one, and this pins the difference: an empty before text
+// handed to the region cutter splits to [""], which would record a phantom removed blank line and
+// read the BLANK LINE in this content as unchanged context instead of an inserted one.
+func TestWriteFile_Execute_RecordsACreateAsOneInsertedRegion(t *testing.T) {
+	t.Parallel()
+
+	root := tempRoot(t)
+
+	result, err := NewWriteFile(root).Execute(context.Background(),
+		callWith(t, "c1", map[string]any{"path": "new.txt", "content": "alpha\n\nbeta\n"}))
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("unexpected tool error: %q", result.Content)
+	}
+
+	region := onlyRegion(t, result)
+	if region.BeforeStart != 1 || region.AfterStart != 1 {
+		t.Errorf("start lines = before %d / after %d, want 1 / 1", region.BeforeStart, region.AfterStart)
+	}
+	if len(region.Removed) != 0 {
+		t.Errorf("Removed = %q, want empty — a create removes nothing", region.Removed)
+	}
+	if want := []string{"alpha", "", "beta"}; !slices.Equal(region.Inserted, want) {
+		t.Errorf("Inserted = %q, want %q", region.Inserted, want)
+	}
+	if len(region.Leading) != 0 || len(region.Trailing) != 0 {
+		t.Errorf("context = leading %q / trailing %q, want neither — there is no before file to give it",
+			region.Leading, region.Trailing)
+	}
+}
+
+// An overwrite reports the lines that DIFFER, not the file it wrote: one region at the real line
+// numbers of the change, with the usual three lines of context each side.
+func TestWriteFile_Execute_RecordsTheChangedRegionOfAnOverwrite(t *testing.T) {
+	t.Parallel()
+
+	root := tempRoot(t)
+	before := numberedLines(40)
+	after := slices.Clone(before)
+	after[19] = "line 20 changed"
+	if err := os.WriteFile(filepath.Join(root, "f.txt"), []byte(wholeFile(before)), 0o644); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	result, err := NewWriteFile(root).Execute(context.Background(),
+		callWith(t, "c1", map[string]any{"path": "f.txt", "content": wholeFile(after)}))
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("unexpected tool error: %q", result.Content)
+	}
+
+	region := onlyRegion(t, result)
+	if region.BeforeStart != 17 || region.AfterStart != 17 {
+		t.Errorf("start lines = before %d / after %d, want 17 / 17 (line 20 less three of context)",
+			region.BeforeStart, region.AfterStart)
+	}
+	if want := []string{"line 20"}; !slices.Equal(region.Removed, want) {
+		t.Errorf("Removed = %q, want %q", region.Removed, want)
+	}
+	if want := []string{"line 20 changed"}; !slices.Equal(region.Inserted, want) {
+		t.Errorf("Inserted = %q, want %q", region.Inserted, want)
+	}
+	if want := []string{"line 17", "line 18", "line 19"}; !slices.Equal(region.Leading, want) {
+		t.Errorf("Leading = %q, want %q", region.Leading, want)
+	}
+	if want := []string{"line 21", "line 22", "line 23"}; !slices.Equal(region.Trailing, want) {
+		t.Errorf("Trailing = %q, want %q", region.Trailing, want)
+	}
+}
+
+// A write that changes nothing attaches NO summary: an EditRegions holding no region would claim
+// the write changed nothing WHILE asking the card to paint a diff, so the card keeps its prose floor.
+func TestWriteFile_Execute_RecordsNoSummaryForIdenticalContent(t *testing.T) {
+	t.Parallel()
+
+	root := tempRoot(t)
+	if err := os.WriteFile(filepath.Join(root, "f.txt"), []byte("same\n"), 0o644); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	result, err := NewWriteFile(root).Execute(context.Background(),
+		callWith(t, "c1", map[string]any{"path": "f.txt", "content": "same\n"}))
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("unexpected tool error: %q", result.Content)
+	}
+	if result.Summary != nil {
+		t.Errorf("Summary = %#v, want none for a write that changed nothing", result.Summary)
+	}
+	if want := "wrote 5 bytes to f.txt"; result.Content != want {
+		t.Errorf("Content = %q, want %q", result.Content, want)
+	}
+}
+
+// The pre-read is for the CARD, never a precondition of the write: an original the tool cannot read
+// degrades to an empty before side, exactly as an absent one does. A tool that read nothing at all
+// until today must not start refusing writes on a read error.
+func TestWriteFile_Execute_WritesThroughAnUnreadableOriginal(t *testing.T) {
+	t.Parallel()
+
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: a mode-0 file is still readable, so an unreadable original cannot be staged")
+	}
+
+	root := tempRoot(t)
+	path := filepath.Join(root, "f.txt")
+	if err := os.WriteFile(path, []byte("old\n"), 0o000); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	result, err := NewWriteFile(root).Execute(context.Background(),
+		callWith(t, "c1", map[string]any{"path": "f.txt", "content": "alpha\nbeta\n"}))
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("the write was refused over an unreadable original: %q", result.Content)
+	}
+
+	// The replacement inherits the original's mode, so the check has to open the door it just
+	// walked through: what is under test is the WRITE, not the perms it preserved.
+	if err := os.Chmod(path, 0o644); err != nil {
+		t.Fatalf("chmod after the write: %v", err)
+	}
+	got, readErr := os.ReadFile(path)
+	if readErr != nil {
+		t.Fatalf("file was not written: %v", readErr)
+	}
+	if string(got) != "alpha\nbeta\n" {
+		t.Errorf("content = %q, want the written content", string(got))
+	}
+
+	region := onlyRegion(t, result)
+	if region.BeforeStart != 1 || region.AfterStart != 1 || len(region.Removed) != 0 {
+		t.Errorf("region = %+v, want an empty before side starting at line 1", region)
+	}
+	if want := []string{"alpha", "beta"}; !slices.Equal(region.Inserted, want) {
+		t.Errorf("Inserted = %q, want %q — the whole content reads as inserted", region.Inserted, want)
+	}
+}
+
+// onlyRegion returns the single Edit region a write result carries, failing the test when the
+// result carries no regions summary or carries more than one region.
+func onlyRegion(t *testing.T, result domain.ToolResult) domain.EditRegion {
+	t.Helper()
+
+	regions, ok := result.Summary.(domain.EditRegions)
+	if !ok {
+		t.Fatalf("Summary = %#v, want a domain.EditRegions", result.Summary)
+	}
+	if len(regions.Regions) != 1 {
+		t.Fatalf("regions = %d, want exactly 1: %+v", len(regions.Regions), regions.Regions)
+	}
+	return regions.Regions[0]
+}
+
+// wholeFile joins lines into the bytes of a newline-TERMINATED file, the shape an ordinary text
+// file has and the one whose trailing empty split element must not read as a written line.
+func wholeFile(lines []string) string { return strings.Join(lines, "\n") + "\n" }
 
 // The sentence a write reports names where it landed when that is not where the argument said. It
 // is the result-string third of one disclosure — the approval pane and the tool card say the same

@@ -58,6 +58,14 @@ func (t *WriteFile) workspaceWriteTarget(call domain.ToolCall) (writeTarget, boo
 // cancellation. Bad arguments, oversized content, or a path that escapes the root are
 // reported as IsError results; the write itself is atomic to the model's view (it
 // either fully succeeds or the result is an error).
+//
+// The result carries the Edit regions of what the write CHANGED as its domain.ToolSummary
+// (okEditRegions, regions.go), cut from the file as it was read against the content as written —
+// so an overwrite reports the lines that differ rather than the whole file, and a host paints the
+// Split diff from the same structured half the edit tools hand it (ADR 0052). A create, and any
+// original the pre-read could not reach, records the whole content as one inserted region
+// (okInsertedRegion); content identical to what is already there records no region and the result
+// carries no summary at all. The prose sentence the model reads is the same either way.
 func (t *WriteFile) Execute(ctx context.Context, call domain.ToolCall) (domain.ToolResult, error) {
 	if err := ctx.Err(); err != nil {
 		return domain.ToolResult{}, err
@@ -74,6 +82,14 @@ func (t *WriteFile) Execute(ctx context.Context, call domain.ToolCall) (domain.T
 		return errorResult(call.ID, fmt.Sprintf("content too large: %d bytes (max %d)", len(args.Content), maxFileContentBytes)), nil
 	}
 
+	// The file as it stands, read through the fence the write itself uses, so the result can
+	// carry the Edit regions of what this call actually changed (ADR 0052) rather than only the
+	// content the request already stated. A read that fails for ANY reason degrades to an EMPTY
+	// before side — the ordinary create, where nothing is there yet, and the rare unreadable
+	// original alike: a tool that read nothing at all until today must not start refusing writes
+	// on a read error.
+	original, readErr := readWriteTarget(ctx, args.Path, t.root)
+
 	// Where this write REALLY lands, read before the write rather than after it, so the
 	// sentence below says the same thing the approval pane said about the same call — after
 	// the write the final name is a plain file whatever it was, and the two surfaces would
@@ -89,9 +105,11 @@ func (t *WriteFile) Execute(ctx context.Context, call domain.ToolCall) (domain.T
 		return errorResult(call.ID, err.Error()), nil
 	}
 
-	return okSummary(call.ID,
-		fmt.Sprintf("wrote %d bytes to %s%s", len(args.Content), args.Path, resolved),
-		domain.WroteBytes{Bytes: len(args.Content)}), nil
+	content := fmt.Sprintf("wrote %d bytes to %s%s", len(args.Content), args.Path, resolved)
+	if readErr != nil {
+		return okInsertedRegion(call.ID, content, args.Content), nil
+	}
+	return okEditRegions(call.ID, content, string(original), args.Content), nil
 }
 
 var (
