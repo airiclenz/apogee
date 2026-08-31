@@ -15,10 +15,10 @@
 │   system-prompt-text                                                                                                                   │ │
 │   system-prompt-file                                                                                                                   │ │
 │   system-prompt-models    none          · ⏎ opens $EDITOR                                                                              │ │
+│   use-default-prompt      true                                                                                                         │ │
 │   context-files.enable    true                                                                                                         │ │
 │   context-files.names     [AGENTS.md]                                                                                                  │ │
 │                                                                                                                                        │ │
-│   Confinement                                                                                                                          │ │
 │ ↑/↓ select · ⏎ edit · ⌫ reset · esc close                                                                                                │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
 ▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔

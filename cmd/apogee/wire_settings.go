@@ -145,6 +145,11 @@ type liveSettings struct {
 	// (ADR 0023). It is held whole rather than per key because selection is whole-entry replacement:
 	// the three keys are one prompt, and ResolveSystemPrompt collapses them per model at every rebind.
 	systemPrompt config.SystemPromptSettings
+	// useDefaultPrompt is the fourth key of that one prompt — `use-default-prompt:`, the last rung
+	// of the ladder (ADR 0064 §2). It is held beside the block, and installed with it under one
+	// lock, because the rebind reads the two as a single question: what prompt does this session
+	// resolve right now?
+	useDefaultPrompt bool
 
 	// contextFilesEnable and contextFileNames are the `context-files:` block's two keys as the session
 	// holds them NOW. They live here because each key's edit has to carry the OTHER half — the engine
@@ -231,6 +236,7 @@ func newLiveSettings(opts config.Options, manualIDs []apogee.MechanismID) *liveS
 		validatedEnable:    opts.ValidatedSetsEnable,
 		validatedAlias:     opts.ValidatedSetsAlias,
 		systemPrompt:       opts.SystemPrompt,
+		useDefaultPrompt:   opts.UseDefaultPrompt,
 		contextFilesEnable: len(opts.ContextFiles) > 0,
 		contextFileNames:   opts.ContextFiles,
 		modelProfiles:      opts.ModelProfiles,
@@ -410,13 +416,16 @@ func (s *liveSettings) choices(base config.Options) []config.ServerEntry {
 	return upstreamChoices(base)
 }
 
-// setSystemPrompt installs a re-read `system-prompt-*` block. The caller validates first: this is the
-// commit half of a validate-then-commit, so a block the file cannot express never displaces a working
-// prompt.
-func (s *liveSettings) setSystemPrompt(sp config.SystemPromptSettings) {
+// setSystemPrompt installs a re-read `system-prompt-*` block and the `use-default-prompt:` switch
+// that closes it. The caller validates first: this is the commit half of a validate-then-commit, so
+// a block the file cannot express never displaces a working prompt. The two move together, under one
+// lock, for the reason setContextFilesEnable's pair does — the rebind resolves them as one prompt,
+// and installing half of one edit beside half of another would resolve a prompt nobody configured.
+func (s *liveSettings) setSystemPrompt(sp config.SystemPromptSettings, useDefault bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.systemPrompt = sp
+	s.useDefaultPrompt = useDefault
 }
 
 // setContextFilesEnable flips the `context-files:` off-switch and reports the names to install with
@@ -665,6 +674,7 @@ func (s *liveSettings) optionsLocked() config.Options {
 	next.ValidatedSetsAlias = maps.Clone(s.validatedAlias)
 	next.SystemPrompt = s.systemPrompt
 	next.SystemPrompt.Models = maps.Clone(s.systemPrompt.Models)
+	next.UseDefaultPrompt = s.useDefaultPrompt
 	next.ModelProfiles = slices.Clone(s.modelProfiles)
 	next.RememberModel = s.rememberModel
 
@@ -746,6 +756,7 @@ func (s *liveSettings) rebindInputs(base config.Options, bound upstreamBinding) 
 	base.ValidatedSetsEnable = s.validatedEnable
 	base.ValidatedSetsAlias = s.validatedAlias
 	base.SystemPrompt = s.systemPrompt
+	base.UseDefaultPrompt = s.useDefaultPrompt
 	base.ModelProfiles = s.modelProfiles
 	// And the other bound the server states: the reply ceiling the bound entry pins (ADR 0046). It
 	// travels beside the window because the spec the caller builds carries it beside the window, and
@@ -945,6 +956,14 @@ var settingsTable = []settingsEntry{
 	},
 	{
 		key:     "system-prompt-models",
+		reaches: settingsApplier.rides,
+		apply:   applySystemPromptBlock,
+	},
+	{
+		// The fourth key of the same one prompt (ADR 0064 §2), so it lands on the same apply: what
+		// the switch changes is which prompt the block resolves to, and only the re-resolution can
+		// say that.
+		key:     "use-default-prompt",
 		reaches: settingsApplier.rides,
 		apply:   applySystemPromptBlock,
 	},
@@ -1235,10 +1254,11 @@ func settingsEntryFor(key string) (settingsEntry, bool) {
 	return settingsEntry{}, false
 }
 
-// applySystemPromptBlock is the one apply behind all three `system-prompt-*` rows: they spell ONE
-// prompt (ADR 0023, whole-entry selection), so whichever row was committed re-resolves the block.
+// applySystemPromptBlock is the one apply behind all three `system-prompt-*` rows and the
+// `use-default-prompt:` switch beneath them: they spell ONE prompt (ADR 0023, whole-entry selection;
+// ADR 0064 §2 for the switch), so whichever row was committed re-resolves the block.
 func applySystemPromptBlock(a settingsApplier, key, value string) (string, error) {
-	// The value the pane persisted is deliberately not read here: these three keys are ONE
+	// The value the pane persisted is deliberately not read here: these four keys are ONE
 	// prompt (ADR 0023, whole-entry selection) and `system-prompt-models:` is a map no single
 	// string spells, so the block is re-read from the file the pane just wrote and re-resolved
 	// per model by the rebind — exactly the resolution startup made.
@@ -1593,7 +1613,7 @@ func (a settingsApplier) reloadSystemPrompt() error {
 	if err := sp.Validate(); err != nil {
 		return err
 	}
-	a.live.setSystemPrompt(sp)
+	a.live.setSystemPrompt(sp, file.UseDefaultPrompt)
 	return nil
 }
 
@@ -1803,7 +1823,7 @@ func rebindSpecFor(
 	next := opts
 	next.Model = model
 
-	sysPrompt, err := config.ResolveSystemPrompt(next.SystemPrompt, model, roots.config, os.ReadFile)
+	sysPrompt, err := config.ResolveSystemPrompt(next.SystemPrompt, model, roots.config, next.UseDefaultPrompt, os.ReadFile)
 	if err != nil {
 		return apogee.RebindSpec{}, nil, err
 	}

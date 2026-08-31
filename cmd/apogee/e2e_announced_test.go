@@ -191,8 +191,9 @@ const announcedScratchEcho = "scratch-ok"
 // The orientation block RIDES ALONG on a standing system message rather than seeding one of its own
 // (ADR 0023 §6 amendment), so a home with neither a prompt nor a workspace context file sends no
 // system message at all and states no host facts — there would be nothing announced to test. A real
-// install's seeded config.yaml carries `system-prompt-text:` as its one active key, so this fixture
-// carries one too.
+// install always has that message: since ADR 0064 a config stating no prompt at all resolves the
+// EMBEDDED default. This fixture states a prompt of its own rather than leaning on that text, so
+// what is asserted below stays about the orientation block and not about the default's wording.
 const announcedStandingPrompt = "system-prompt-text: |\n  You are apogee, a terminal coding agent.\n"
 
 // TestE2EAnnouncedScratchDirRunsUnpromptedInAuto is the invariant over the orientation block: the

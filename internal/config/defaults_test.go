@@ -55,14 +55,21 @@ func TestSeedConfigDoesNotOverwrite(t *testing.T) {
 	}
 }
 
-// The embedded starter config is valid YAML and moves EXACTLY what it means to move: the default
-// system prompt (ADR 0023) plus the short list of settings the template deliberately ships with a
-// value of their own. Every other key stays at its built-in default, so seeding the template on
-// first run resolves those keys exactly as a run with no config file at all would. The exception
-// list is the point of the test: a key that starts differing from its built-in default without
-// being named there is drift, and fails here. It is the "the template is behaviour-neutral"
-// invariant twice amended — once when the shipped prompt went active, once when the template
-// started shipping settings of its own.
+// The embedded starter config is valid YAML and moves EXACTLY what it means to move: the short
+// list of settings the template deliberately ships with a value of their own, and nothing else.
+// Every other key stays at its built-in default, so seeding the template on first run resolves
+// those keys exactly as a run with no config file at all would. The exception list is the point of
+// the test: a key that starts differing from its built-in default without being named there is
+// drift, and fails here. It is the "the template is behaviour-neutral" invariant twice amended —
+// once when the template started shipping settings of its own, and once when ADR 0064 took the
+// system prompt back OUT of it.
+//
+// The prompt half is now the mirror image of what it used to assert. The template carries NO
+// active prompt key — the three `system-prompt-*` spellings are commented examples and
+// `use-default-prompt:` resolves to its default true — because a prompt seeded once is frozen per
+// install. What a fresh run is steered by instead is the EMBEDDED default (ADR 0064 §1), so that
+// is what is checked for the persona line, the placeholders it renders, and the prompt.Validate
+// every configured prompt also faces.
 func TestEmbeddedDefaultConfigSetsOnlyTheSystemPrompt(t *testing.T) {
 	t.Parallel()
 	if len(defaultConfigYAML) == 0 {
@@ -77,14 +84,36 @@ func TestEmbeddedDefaultConfigSetsOnlyTheSystemPrompt(t *testing.T) {
 		t.Fatalf("embedded default config does not parse: %v", err)
 	}
 
-	// The one active key: an inline global prompt, no file, no per-model entries.
-	text := file.SystemPrompt.Global.Text
-	if text == "" {
-		t.Fatal("embedded default config carries no system prompt; the shipped default must be active")
+	// No active prompt key: every `system-prompt-*` spelling is a commented example, so a fresh
+	// install resolves the embedded default rather than a copy of it frozen in its own config.
+	if got := file.SystemPrompt.Global.Text; got != "" {
+		t.Errorf("shipped system-prompt-text = %q; want empty — the inline key stays a commented "+
+			"example, and the default it used to carry is embedded now (ADR 0064)", got)
 	}
+	if got := file.SystemPrompt.Global.File; got != "" {
+		t.Errorf("shipped system-prompt-file = %q; want empty — the file key stays a commented example", got)
+	}
+	if file.SystemPrompt.Models != nil {
+		t.Errorf("shipped system-prompt-models = %+v; want none — the per-model block stays a commented example",
+			file.SystemPrompt.Models)
+	}
+	if !file.UseDefaultPrompt {
+		t.Error("shipped use-default-prompt resolves false; want true — the key stays a commented " +
+			"example, so a fresh install runs on the embedded default")
+	}
+	if err := file.SystemPrompt.Validate(); err != nil {
+		t.Errorf("shipped system-prompt block fails validate: %v", err)
+	}
+
+	// And what a fresh install IS steered by: the embedded default, which has to survive both gates
+	// a user's own prompt faces.
 	// {{scratch}} is deliberately absent: the engine's own orientation block names the scratch
-	// dir now, so the shipped persona template no longer spends a line on it. The placeholder
+	// dir now, so the default persona template no longer spends a line on it. The placeholder
 	// itself stays supported — the closed set is pinned by the validation test in config_test.go.
+	text := DefaultSystemPrompt()
+	if text == "" {
+		t.Fatal("the embedded default system prompt is empty; the embed did not pick up defaults/prompt.txt")
+	}
 	for _, want := range []string{
 		"You are apogee",
 		prompt.PlaceholderWorkspace,
@@ -92,37 +121,24 @@ func TestEmbeddedDefaultConfigSetsOnlyTheSystemPrompt(t *testing.T) {
 		prompt.PlaceholderMode,
 	} {
 		if !strings.Contains(text, want) {
-			t.Errorf("shipped system prompt does not contain %q:\n%s", want, text)
+			t.Errorf("the embedded default system prompt does not contain %q:\n%s", want, text)
 		}
 	}
-	if file.SystemPrompt.Global.File != "" {
-		t.Errorf("shipped system-prompt-file = %q; want empty — the file key stays a commented example",
-			file.SystemPrompt.Global.File)
-	}
-	if file.SystemPrompt.Models != nil {
-		t.Errorf("shipped system-prompt-models = %+v; want none — the per-model block stays a commented example",
-			file.SystemPrompt.Models)
-	}
-
-	// The shipped prompt must survive both gates a user's own prompt faces.
 	if err := prompt.Validate(text); err != nil {
-		t.Errorf("shipped system prompt fails prompt.Validate: %v", err)
-	}
-	if err := file.SystemPrompt.Validate(); err != nil {
-		t.Errorf("shipped system-prompt block fails validate: %v", err)
+		t.Errorf("the embedded default system prompt fails prompt.Validate: %v", err)
 	}
 
 	// Every other key still resolves to its built-in default, except the settings the template
 	// ships active with a value of their own. Each line here mirrors one template line and names
 	// it: the template is the ground truth, so a deliberate change there is meant to be echoed
-	// here, and an unannounced one is what this fails on.
+	// here, and an unannounced one is what this fails on. The system prompt no longer needs
+	// clearing before the comparison — the template states none, so it already IS the default.
 	want := wantDefaults()
 	want.RememberModel = true              // `remember-model: true`
 	want.UI.StallAfter = 120 * time.Second // `ui.stall-after: 120s`
 
-	file.SystemPrompt = SystemPromptSettings{}
 	if diffs := structDiff(file, want); len(diffs) != 0 {
-		t.Errorf("embedded default config moves keys beyond the system prompt and the settings it ships active:\n%s",
+		t.Errorf("embedded default config moves keys beyond the settings it ships active:\n%s",
 			strings.Join(diffs, "\n"))
 	}
 }

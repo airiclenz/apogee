@@ -7,6 +7,7 @@ package agent
 // facts and their shape stay pinned.
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -133,15 +134,34 @@ func TestOrientation_EmptyReadRootsOmitTheLine(t *testing.T) {
 // TestOrientation_NoTemplateAndNoContextFilesSeedsNothing pins the native anchor: the block
 // rides along, it never seeds a system message of its own, so the documented "send no system
 // prompt" configuration stays byte-identical even with a workspace and a scratch dir wired.
+//
+// What reaches this state changed above the engine and not in it. Since ADR 0064 a config that
+// states no prompt resolves the EMBEDDED default, so an empty Config.SystemPrompt is now what
+// `use-default-prompt: false` resolves to rather than what an unconfigured install falls into —
+// which makes the anchor MORE load-bearing, not less: it is the only thing that key now buys, and
+// the emptiness has to reach the wire, not just standingSystem().
 func TestOrientation_NoTemplateAndNoContextFilesSeedsNothing(t *testing.T) {
 	cfg := baseConfig(&recordingSink{})
 	cfg.WorkspaceDir = orientationWorkspaceDir
 	cfg.ScratchDir = orientationScratchDir
 
-	a := newProfileAgent(t, cfg, &recordingResponder{reply: "All done."})
+	responder := &recordingResponder{reply: "All done."}
+	a := newProfileAgent(t, cfg, responder)
 
 	if got := a.standingSystem(); got != "" {
 		t.Errorf("standingSystem() = %q, want \"\" (nothing configured seeds nothing)", got)
+	}
+
+	// And on the wire, which is where the promptless run is actually promised: the request opens
+	// with the user's own message and carries no system message at all.
+	if err := a.Submit(domain.UserInput{Text: "hi"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if _, err := a.Step(context.Background()); err != nil {
+		t.Fatalf("Step: %v", err)
+	}
+	if n := countSystemMessages(responder.last.Messages); n != 0 {
+		t.Errorf("wire request has %d system messages, want none: %+v", n, responder.last.Messages)
 	}
 }
 

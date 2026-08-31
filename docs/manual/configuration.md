@@ -3,9 +3,9 @@
 Settings resolve by precedence, highest first: a command-line flag overrides an
 `APOGEE_*` environment variable, which overrides `~/.apogee/config.yaml`, which
 overrides the built-in default. A documented starter `config.yaml` is written to
-`~/.apogee` on first run (your edits are never overwritten): every setting is
-there as a commented example, with one exception — `system-prompt-text:`, the
-default system prompt, ships active. Three keys carry all four layers —
+`~/.apogee` on first run (your edits are never overwritten): nearly every setting
+is there as a commented example, and the few that ship active carry the value
+apogee already recommends. Three keys carry all four layers —
 `server:` (`--server`, `APOGEE_SERVER`), `mode:` and `bypass:`. Every other key
 is **file-only** (no flag or env): the `servers:` list, the system prompt, the
 model profile, MCP servers, [the web-search
@@ -746,10 +746,35 @@ launcher on **another machine** is a different thing — reach that one as an
 ## The system prompt
 
 The system prompt is the standing instruction apogee sends ahead of your first
-message, as the first system message of every request. A fresh install starts with
-a short default one; **delete it or comment it out to send no system prompt at
-all**. An existing `~/.apogee/config.yaml` — which an upgrade never touches —
-carries no such key, so nothing changes for a setup you already run.
+message, as the first system message of every request.
+
+**With nothing configured, apogee sends its own default prompt** — base steering
+built into the binary, so every upgrade brings you the current text instead of a
+copy frozen on the day you installed. Nothing needs uncommenting to get it.
+
+Four rungs, first hit wins:
+
+1. a `system-prompt-models:` entry matching the model this session is bound to;
+2. the top-level `system-prompt-text:` or `system-prompt-file:`;
+3. apogee's **built-in default**, unless `use-default-prompt: false`;
+4. no system prompt at all.
+
+Whatever hits **replaces** everything below it, whole: your prompt is never merged
+with apogee's, and half a prompt is never sent. So `use-default-prompt:` (default
+`true`) matters in exactly one case — nothing configured — where `false` is how you
+ask for the promptless run:
+
+```yaml
+# ~/.apogee/config.yaml
+use-default-prompt: false
+```
+
+An existing `~/.apogee/config.yaml` that carries a `system-prompt-text:` of its own
+keeps it: that is rung 2, and it wins, so nothing changes under a setup you already
+run. To start from apogee's text instead, open `system-prompt-text` in `/settings`
+with nothing configured — the built-in prompt is already in the editor, yours to
+change and save. There is deliberately no export command for it: a second copy on
+disk would freeze again exactly what building it in unfroze.
 
 Whenever a system message goes out at all — because you have a prompt, or workspace
 context files (below), or both — apogee places its own short **orientation block**
@@ -761,6 +786,7 @@ of it, and is not sent when you have configured neither a prompt nor context fil
 
 ```yaml
 # ~/.apogee/config.yaml
+# Your own prompt, replacing apogee's built-in one whole:
 system-prompt-text: |
   You are apogee, a coding agent working in the workspace at {{workspace}}.
   Today's date is {{datetime}}. You are operating in {{mode}} mode.

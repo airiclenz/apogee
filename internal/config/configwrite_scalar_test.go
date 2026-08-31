@@ -346,9 +346,11 @@ func TestSpliceScalarSettingWritesTheValidatedSetsOffSwitch(t *testing.T) {
 }
 
 // The block-scalar writer, against the file it will actually meet: the seeded template, whose
-// `system-prompt-text:` block is its ONE active key and the only multi-line value the schema has. The
-// template is the hardest case the writer has — the prompt sits in the middle of twenty lines of
-// documentation, with more documentation directly under it — so what is checked is that every one of
+// `system-prompt-text:` block is the only multi-line value the schema has. Since ADR 0064 the
+// template states the key COMMENTED — a fresh install runs on the embedded default and this is the
+// example showing where a prompt of your own would go — which leaves the writer the same job it
+// always had, on the hardest file it has: the commented block sits in the middle of thirty lines of
+// documentation, with more documentation directly under it, so what is checked is that every one of
 // those lines survives a set, a re-set and a reset, and that what a reader takes back out of the file
 // is what was written.
 func TestSpliceTextBlockRewritesTheTemplatesPrompt(t *testing.T) {

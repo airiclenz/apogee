@@ -15,14 +15,33 @@ import (
 
 // defaultConfigYAML is the starter config compiled into the binary from
 // defaults/config.yaml. //go:embed re-reads that file on every build, so the seeded
-// template can never drift from the binary that ships it. It is a commented template with
-// exactly ONE active key — system-prompt-text:, the default system prompt (ADR 0023) —
-// so parsed, it sets that and nothing else: seeding it on first run changes nothing else
-// about how a run resolves, and deleting or commenting out that one key sends no system
-// prompt at all. Everything else it drops is documentation the user can edit.
+// template can never drift from the binary that ships it. Every key it states is commented
+// out (ADR 0064 §4), so parsed, it resolves nothing: seeding it on first run changes nothing
+// about how a run resolves, and everything it drops is documentation the user can edit. The
+// default system prompt used to be its one active key; it is defaultSystemPrompt below now,
+// because a key seeded once is frozen per install and can never be improved again.
 //
 //go:embed defaults/config.yaml
 var defaultConfigYAML []byte
+
+// defaultSystemPrompt is the base steering apogee runs on when no prompt is configured
+// (ADR 0064 §1): the standing instructions ResolveSystemPrompt falls back to on the third
+// rung of the ladder, unless `use-default-prompt: false` says to send none. It is EMBEDDED
+// rather than seeded, for the reason the built-in color schemes are (ADR 0040 §1): every
+// upgrade ships the current text to every user, including one whose config.yaml was written
+// a year ago. It is never installed anywhere — there is no export command for it, because a
+// second copy on disk would re-freeze exactly what embedding unfroze; the settings editor
+// hands the bytes to whoever wants to edit them.
+//
+//go:embed defaults/prompt.txt
+var defaultSystemPrompt string
+
+// DefaultSystemPrompt is the embedded default system-prompt template — the text
+// [ResolveSystemPrompt] falls back to, and the text the settings editor pre-fills the
+// `system-prompt-text` field with when nothing is configured. It is a TEMPLATE like any
+// configured prompt: the placeholders are substituted per request, and it passes the same
+// prompt.Validate the configured ones face.
+func DefaultSystemPrompt() string { return defaultSystemPrompt }
 
 // SeedDefaultConfig writes the embedded starter config to <home>/config.yaml on first run
 // — when no config file exists there yet — creating the home directory. It honours

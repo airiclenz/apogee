@@ -544,6 +544,12 @@ var keyAccessors = []keyAccessor{
 		},
 	},
 	{
+		row: mustKey("use-default-prompt"),
+		fromFile: func(o *Options, fc fileConfig) {
+			o.UseDefaultPrompt = fc.UseDefaultPrompt == nil || *fc.UseDefaultPrompt
+		},
+	},
+	{
 		row: mustKey("auto-compact"),
 		fromFile: func(o *Options, fc fileConfig) {
 			o.AutoCompact = fc.AutoCompact == nil || *fc.AutoCompact
@@ -1063,6 +1069,13 @@ type fileConfig struct {
 	// UseProjectSkills gates discovery of the workspace's bare skills/ folder. A pointer so an
 	// explicit `use-project-skills: false` is distinguishable from an absent key (default true).
 	UseProjectSkills *bool `yaml:"use-project-skills"`
+	// UseDefaultPrompt gates the EMBEDDED default system prompt — the third rung of the
+	// resolution ladder (ADR 0064 §2), reached only when nothing above it is configured. A
+	// pointer for use-project-skills' reason: an explicit `use-default-prompt: false` is the
+	// deliberate "send no prompt at all" that deleting the key used to spell, and an absent key
+	// is the default true. It has no effect whatsoever when a prompt IS configured at either
+	// level — an explicit prompt already replaces everything below it.
+	UseDefaultPrompt *bool `yaml:"use-default-prompt"`
 	// AutoCompact gates the automatic, budget-driven generative Compaction trigger (item 9). A pointer
 	// so an explicit `auto-compact: false` is distinguishable from an absent key (default true).
 	// Compaction is structural (it stays on under Bypass), so this is the only way to turn it off.
@@ -3093,7 +3106,14 @@ func FilePath(configDir string) string {
 // Everything that is only checkable for the SELECTED source happens here — the file must read,
 // and the template's placeholders must be the known four. Both errors name the config key the
 // prompt came from, because the same two spellings appear at every level.
-func ResolveSystemPrompt(sp SystemPromptSettings, model, home string, readFile func(string) ([]byte, error)) (string, error) {
+//
+// useDefault is the `use-default-prompt` key as resolved (default true), and it is the LAST rung
+// of the ladder ADR 0064 §2 states: a matching per-model entry > the top-level text/file > the
+// EMBEDDED default when useDefault allows > nothing. It governs only the nothing-configured case —
+// a configured prompt at either level has already replaced everything beneath it, so the flag is
+// never consulted there. The fallback is whole, like every other rung: the embedded text is never
+// appended to or merged into a prompt the user wrote.
+func ResolveSystemPrompt(sp SystemPromptSettings, model, home string, useDefault bool, readFile func(string) ([]byte, error)) (string, error) {
 	src := sp.Global
 	modelKey := "" // non-empty ⇒ the selected prompt came from a system-prompt-models entry
 	if m, ok := sp.Models[model]; ok {
@@ -3121,6 +3141,13 @@ func ResolveSystemPrompt(sp SystemPromptSettings, model, home string, readFile f
 			field = "system-prompt-file"
 		}
 		return "", fmt.Errorf("apogee: %s: %w", systemPromptKey(field, modelKey), err)
+	}
+	// Nothing configured anywhere: the embedded default (ADR 0064 §1) rather than the promptless
+	// run that used to be here, unless `use-default-prompt: false` asked for exactly that. The
+	// default is validated by its own test rather than here — it ships with the binary, so a bad
+	// placeholder in it is a build-time defect, not a user's config error to be named.
+	if template == "" && useDefault {
+		template = DefaultSystemPrompt()
 	}
 	return template, nil
 }

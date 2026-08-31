@@ -40,6 +40,7 @@ func fabricatedSettings() config.Options {
 		URLAllowHosts:      []string{"docs.example.com"},
 		URLDenyHosts:       nil, // the honest asymmetry: a configured allow list beside an unset deny list
 		UseProjectSkills:   false,
+		UseDefaultPrompt:   false,
 		AutoCompact:        true,
 		DelegateMaxSteps:   40,
 		AutoTitle:          false,
@@ -278,6 +279,7 @@ func TestSettingsRowsFormatEffectiveValues(t *testing.T) {
 		"system-prompt-text":     "2 lines",
 		"system-prompt-file":     "", // unset, and an editable string row's blank is what the field seeds from
 		"system-prompt-models":   "1 model",
+		"use-default-prompt":     "false", // the fabricated session runs on a prompt of its own
 		"context-files.enable":   "true",
 		"context-files.names":    "[AGENTS.md, CLAUDE.md]",
 		"confine-to-workspace":   "false",

@@ -122,8 +122,10 @@ func (w *rootWiring) resolveConfig() error {
 	// per-model entry lands seconds later, on the first beat's rebind (rebindSpecFor re-runs
 	// exactly this call with the observed model). A selected file that cannot be read, or a
 	// template carrying an unknown placeholder, fails startup naming the config key — the prompt is
-	// structural configuration, not something to degrade quietly around.
-	sysPrompt, err := config.ResolveSystemPrompt(w.opts.SystemPrompt, w.opts.Model, w.roots.config, os.ReadFile)
+	// structural configuration, not something to degrade quietly around. With nothing configured at
+	// all, this resolves apogee's own embedded default (ADR 0064) unless `use-default-prompt: false`
+	// asked for a promptless run.
+	sysPrompt, err := config.ResolveSystemPrompt(w.opts.SystemPrompt, w.opts.Model, w.roots.config, w.opts.UseDefaultPrompt, os.ReadFile)
 	if err != nil {
 		return err
 	}
@@ -209,9 +211,11 @@ func (w *rootWiring) resolveConfig() error {
 		// table. A model neither tier knows gets the zero profile: native tool calls with no inline
 		// thinking, exactly as an unprofiled model has always behaved.
 		Profile: profile,
-		// The configured system-prompt TEMPLATE (ADR 0023), which the loop renders fresh per
-		// request and seeds as the first system message. Empty ⇒ no prompt: the request opens with
-		// the user's own message, exactly as it did before this key existed.
+		// The resolved system-prompt TEMPLATE (ADR 0023), which the loop renders fresh per request
+		// and seeds as the first system message — the user's own prompt, or apogee's embedded
+		// default when nothing is configured (ADR 0064). Empty ⇒ no prompt, which now takes an
+		// explicit `use-default-prompt: false`: the request opens with the user's own message,
+		// exactly as it did before this key existed.
 		SystemPrompt: sysPrompt,
 		// The workspace context files (`context-files:`, file-only): the names the engine looks for
 		// in the workspace root at every session boundary, whose content rides the same first system

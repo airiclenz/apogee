@@ -17,10 +17,10 @@
 # server's bearer token and model hint, or overlay those two fields of the listed entry the run
 # starts on.
 #
-# Every line below is commented out with ONE exception — system-prompt-text:, the default
-# system prompt — so out of the box this file changes nothing else; it is a documented
-# starting point. Uncomment a line and edit it to make it your default; delete or comment
-# out the system prompt to send none.
+# Nearly every line below is commented out, and the few keys left active ship the value apogee
+# recommends — so this file is a documented starting point rather than a set of overrides. The
+# system prompt is no longer among them: apogee's own default is built into the binary now, so
+# there is nothing to uncomment to get it. Uncomment a line and edit it to make it your default.
 #
 # The /settings command shows these values in-app and edits the simple ones, writing each
 # change back into this file — one key at a time, comments and layout kept as you left them.
@@ -211,11 +211,19 @@
 # The system prompt: the standing instructions apogee sends ahead of your own first message,
 # as the first system message of every request. Config-file only (no flag or env).
 #
-# system-prompt-text: below is the ONE active setting in this file — the default prompt a fresh
-# install starts with. Edit it to make it your own; delete it, or comment it out, and apogee
-# sends no system prompt at all (how apogee behaved before this key existed).
+# With nothing set here, apogee sends its OWN default prompt — a base set of standing
+# instructions built into the binary, so every upgrade brings you the current text rather than a
+# copy frozen on the day you installed. Nothing in this file has to be uncommented to get it.
 #
-# Write it inline with system-prompt-text, or keep it in a file of its own and name that file
+# To send your own instead, write them below: whatever you set REPLACES the default whole (there
+# is no merging, and no half a prompt). The settings pane starts you off from apogee's text —
+# open system-prompt-text there with nothing configured and the built-in prompt is already in the
+# editor, yours to change and save.
+#
+# To send NO system prompt at all — how apogee behaved before this key existed — leave the two
+# keys below unset and switch the built-in prompt off with use-default-prompt: false.
+#
+# Write your prompt inline with system-prompt-text, or keep it in a file of its own and name that file
 # with system-prompt-file — one or the other, never both at the same level (setting both is a
 # startup error). A file path may start with ~ for your home directory, and a relative path is
 # resolved against this apogee home — the directory this config.yaml lives in — so a prompt
@@ -238,32 +246,24 @@
 # The spelling is strict and the set is closed: anything else between double braces — including
 # `{{ workspace }}`, with spaces — is a startup error listing these four.
 
-system-prompt-text: |
-  You are apogee, a coding agent working in the workspace at {{workspace}}.
-  Today's date is {{datetime}}. You are operating in {{mode}} mode.
-
-  Work step by step: read before you change, keep edits small and focused,
-  and verify your work. Be direct and concise; when a task is done,
-  summarise what changed. When you need the user's input or a decision,
-  call the ask_user tool — never ask in plain chat text.
-
-  Be extremely concise: answer only what was asked — no filler, no preamble.
-  Lead with the result: what you did, whether it worked, what comes next.
-  Prefer short bullet lists over long paragraphs; a short answer stays one line.
-  When asking the user to decide, give at most two options and recommend one.
-  Write paths, commands, and names exactly — never paraphrase them.
-
-  Delegate with the sub_agent tool when finding something would flood your context
-  with material you will not need again: searching the codebase, scanning logs or
-  command output, surveying many files, answering where/whether/which questions.
-  Give one self-contained task per delegation and say exactly what to report back —
-  findings, paths and line numbers, not file contents.
-  Do it yourself instead when you already know the file, when you are about to edit
-  it and need its exact text, or when one or two tool calls would settle it.
+# system-prompt-text: |
+#   You are apogee, a coding agent working in the workspace at {{workspace}}.
+#   Today's date is {{datetime}}. You are operating in {{mode}} mode.
+#
+#   Work step by step: read before you change, keep edits small and focused,
+#   and verify your work. Be direct and concise; when a task is done,
+#   summarise what changed. When you need the user's input or a decision,
+#   call the ask_user tool — never ask in plain chat text.
 
 # The same prompt, kept in a file instead of inline. Use one or the other: uncommenting this
-# while the text above is still active is the both-set startup error.
+# while the text above is also uncommented is the both-set startup error.
 # system-prompt-file: ~/prompts/apogee.md
+
+# Whether apogee's built-in prompt is used when neither key above sets one. Default true.
+# Setting it false with nothing configured is the only way to run with no system prompt at all;
+# it changes nothing while a prompt IS configured, since that prompt already replaces the
+# default whole.
+# use-default-prompt: true
 
 # Per-model prompts. Key an entry by the model name apogee resolves at startup (the name in the
 # status footer) and it REPLACES the global prompt above for that model — whole: an entry that

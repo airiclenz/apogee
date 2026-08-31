@@ -73,7 +73,34 @@ belongs to a concurrent session and was left exactly as found; it is not in this
 **Acceptance:** files exist; `grep -c "0065" docs/adr/0061-*.md` ≥ 1.
 **Commit:** `docs(adr): shipped skills and the load_skill door (ADR 0065)`
 
-## 3. Embedded default system prompt behind use-default-prompt
+## 3. Embedded default system prompt behind use-default-prompt — ✅ DONE (2026-08-31)
+
+NOTES (2026-08-31): `use-default-prompt` is held on `liveSettings` beside `systemPrompt` and installed
+with it under one lock (`setSystemPrompt` gained a second argument), so its `/settings` row rides the
+existing `applySystemPromptBlock` — the four keys are one prompt, and a flip re-resolves through the
+same rebind the three prompt rows already use.
+NOTES (2026-08-31): `cmd/apogee/wire_firing.go:250` needed no edit — it passes `spec.SystemPrompt`
+off the spec `resolveRebindSpec` builds, which now carries the resolved default; the same holds for
+`wire_settings.go:1849`. Only the two genuine `ResolveSystemPrompt` call sites (`wire_boot.go:126`,
+`wire_settings.go:1806`) took the new argument, and `wire_boot.go:215`'s "Empty ⇒ no prompt" comment
+was rewritten. `wire_firing.go` is therefore absent from the FILES list.
+NOTES (2026-08-31): the embedded `prompt.txt` is 38 lines across the six bound sections rather than
+~50 — the sections are all present and each carries its rules; padding a system prompt to hit a line
+count would spend context the item's own concision section tells the model not to spend.
+NOTES (2026-08-31): the template's `use-default-prompt:` prose had to avoid a second comment line
+beginning `# use-default-prompt:` — the block-scalar writer refuses a key it finds commented in two
+places (`TestSpliceScalarSettingRoundTripsEveryEditableKey`), so the sentence naming the switch was
+reworded to carry it mid-line.
+NOTES (2026-08-31): consequential edit — cmd/apogee/testdata/frames/t16-settings-rows.txt: made
+necessary by the new `use-default-prompt` registry row (golden frame regenerated with `-update`).
+NOTES (2026-08-31): consequential edit — docs/adr/0026-workspace-context-files-are-session-scoped-prompt-data.md: made necessary by the seed's `system-prompt-text:` going commented (its ":206 bullet claimed the key "remains the ONE active key a fresh install gets"); a dated superseded-by-ADR-0064 note was added under the bullet rather than rewriting the historical record.
+NOTES (2026-08-31): `internal/config/options.go` and `internal/agent/orientation_test.go` are edited
+beyond the item's Files list but inside its text — the resolved `Options.UseDefaultPrompt` field the
+key writes to, and the ride-along anchor test the item's Tests line says to extend (it now also
+asserts the wire request carries no system message when resolution is empty).
+NOTES (2026-08-31): `TestEmbeddedDefaultConfigSetsOnlyTheSystemPrompt` keeps its name though its
+invariant inverted — ADR 0026:206 and three archived plans cite it by name, and the item's guard
+asks only for the invariant to be rewritten.
 
 **What:** Depends on item 1. New asset `internal/config/defaults/prompt.txt` (~50 lines, `//go:embed`), bound sections: (1) identity + `{{workspace}}`/`{{datetime}}`/`{{mode}}`; (2) workflow discipline — read before edit, small focused edits, verify by running tests, finish the whole task; (3) tool habits — exact paths, targeted reads; (4) output concision (current seeded rules survive); (5) `sub_agent` delegation (current guidance survives, tightened); (6) `ask_user` usage. Only the four placeholders; must pass `prompt.Validate`. `ResolveSystemPrompt` (`internal/config/config.go:3079`) falls back to the embedded default when the whole resolution yields empty and `UseDefaultPrompt` (new `*bool`, default true) allows; per-model entries win as today. Add the `use-default-prompt` key: schema + registry row (beside the system-prompt rows) + settings row; comment out the active `system-prompt-text` block in `internal/config/defaults/config.yaml` and rewrite its surrounding docs (absence → embedded default; `use-default-prompt: false` → nothing). Update `docs/manual/configuration.md`. Call-site signature updates: `cmd/apogee/wire_boot.go:126,215`, `wire_settings.go:1806,1849`, `wire_firing.go:250`.
 **Regression guard.** Two pinned tests are amended in-item: `internal/config/defaults_test.go:83` fatals once the seed's `system-prompt-text` block is commented out — rewrite its invariant to "no active prompt key; the embedded `prompt.txt` passes `prompt.Validate` instead"; `cmd/apogee/settingsrows_test.go:323-326` pins `len(want) == len(config.KeyRegistry)` — pin the new `use-default-prompt` row's value. Also sweep the two prose sites recording the seed's "one active key" premise — comments at `cmd/apogee/e2e_announced_test.go:194` and `internal/config/configwrite_scalar_test.go:349` (comments only, both tests stay green) — rewrite them to the embedded-default semantics.

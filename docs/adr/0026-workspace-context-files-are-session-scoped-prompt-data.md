@@ -205,6 +205,10 @@ owns all three boundaries where the notice belongs.
 - **The shipped template documents the block, commented.** `system-prompt-text:` remains the ONE
   active key a fresh install gets (ADR 0023 §8), and `TestEmbeddedDefaultConfigSetsOnlyTheSystemPrompt`
   still holds — the defaults come from resolution, not from the file.
+  *(Superseded 2026-08-31 by [ADR 0064](0064-the-system-prompt-ships-an-embedded-default.md): the
+  template ships `system-prompt-text:` COMMENTED and the default prompt is embedded in the binary,
+  so a fresh install gets no active prompt key at all. The named test still holds, with its
+  invariant rewritten to match; nothing else in this bullet changes.)*
 - **CONTEXT.md gains one term — *Context files*** — worded to match this ADR and distinguished from
   the System prompt it rides with, from an `@file` reference, and from a Skill.
 

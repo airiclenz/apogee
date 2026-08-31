@@ -122,6 +122,11 @@ func TestResolvePrecedence(t *testing.T) {
 			want: func(o *Options) { o.AutoCompact = false },
 		},
 		{
+			name: "use-default-prompt is file-only and defaults true",
+			file: fileConfig{UseDefaultPrompt: boolptr(false)},
+			want: func(o *Options) { o.UseDefaultPrompt = false },
+		},
+		{
 			name: "delegate-max-steps is file-only and defaults 80",
 			file: fileConfig{DelegateMaxSteps: intptr(12)},
 			want: func(o *Options) { o.DelegateMaxSteps = 12 },
@@ -282,6 +287,7 @@ func TestResolvePrecedence(t *testing.T) {
 func wantDefaults() Options {
 	return Options{
 		Mode: "ask-before", ConfineToWorkspace: true, UseProjectSkills: true, AutoCompact: true,
+		UseDefaultPrompt: true,
 		DelegateMaxSteps: defaultDelegateMaxSteps,
 		AutoTitle:        true, ValidatedSetsEnable: true, ContextFiles: []string{"AGENTS.md"},
 		Present: PresentSettings{AutoOpen: true}, UI: wantUIDefault,
@@ -497,7 +503,8 @@ func TestEveryConfigKeyReachesTheOptions(t *testing.T) {
 		"Mode": true, "Bypass": true, "Servers": true, "StartupServer": true, "Editor": true,
 		"ConfineToWorkspace": true, "UnconfinedHosts": true, "WebSearchEndpoint": true,
 		"UseProjectSkills": true, "AutoCompact": true, "DelegateMaxSteps": true,
-		"AutoTitle": true, "RememberModel": true,
+		"UseDefaultPrompt": true,
+		"AutoTitle":        true, "RememberModel": true,
 		"ContextWindow": true, "ResponseReserve": true, "MCPServers": true, "ToolsDisabled": true,
 		"URLAllowHosts": true, "URLDenyHosts": true, "ModelProfiles": true, "Mechanisms": true,
 		"ValidatedSetsEnable": true, "ValidatedSetsAlias": true, "Present": true,
@@ -538,6 +545,7 @@ func everyKeyFileConfig() fileConfig {
 		UnconfinedHosts:    []UnconfinedHost{{ID: "another-host", Acknowledged: "2026-08-20"}},
 		WebSearch:          "https://search.example.com",
 		UseProjectSkills:   boolptr(false), AutoCompact: boolptr(false), AutoTitle: boolptr(false),
+		UseDefaultPrompt: boolptr(false),
 		DelegateMaxSteps: intptr(12),
 		RememberModel:    boolptr(true),
 		ContextWindow:    64000, ResponseReserve: 0.3,
@@ -3246,6 +3254,11 @@ func TestSystemPromptSettingsValidate(t *testing.T) {
 // RESOLVED model (ADR 0023): whole-entry replacement on an exact model match, an inert entry for
 // every other model, `~` and apogee-home-relative file paths, and the two checks that belong to
 // the selected source alone — the file must read and the placeholders must be the known four.
+//
+// And the rung ADR 0064 §2 added beneath all of them: with nothing configured anywhere the
+// EMBEDDED default is what this session runs on, and only `use-default-prompt: false` — the flag
+// this table spells inverted — brings back the promptless run. The flag is inert wherever a prompt
+// is configured, which is what the two paired cases pin.
 func TestResolveSystemPrompt(t *testing.T) {
 	// Deliberately NOT parallel: the `~` case redirects the environment os.UserHomeDir reads.
 	userHome := t.TempDir()
@@ -3271,7 +3284,11 @@ func TestResolveSystemPrompt(t *testing.T) {
 	tests := []struct {
 		name string
 		sp   SystemPromptSettings
-		want string
+		// noDefault is `use-default-prompt: false`. It is spelled inverted so the zero value is the
+		// KEY's default (true): every case that configures a prompt resolves the same either way,
+		// which is the point of the flag, and only the nothing-configured pair has to say so.
+		noDefault bool
+		want      string
 		// wantErr are the substrings the message must carry; empty ⇒ want must be returned.
 		wantErr []string
 	}{
@@ -3304,7 +3321,30 @@ func TestResolveSystemPrompt(t *testing.T) {
 			},
 			want: "the global prompt",
 		},
-		{name: "no prompt configured anywhere", sp: SystemPromptSettings{}, want: ""},
+		{
+			name: "nothing configured resolves the embedded default",
+			sp:   SystemPromptSettings{},
+			want: DefaultSystemPrompt(),
+		},
+		{
+			name:      "nothing configured with use-default-prompt false sends no prompt",
+			sp:        SystemPromptSettings{},
+			noDefault: true,
+			want:      "",
+		},
+		{
+			name:      "a configured prompt is unaffected by use-default-prompt false",
+			sp:        SystemPromptSettings{Global: PromptSource{Text: "hi {{workspace}}"}},
+			noDefault: true,
+			want:      "hi {{workspace}}",
+		},
+		{
+			name: "a matching model entry wins over the embedded default",
+			sp: SystemPromptSettings{
+				Models: map[string]PromptSource{model: {Text: "the per-model prompt"}},
+			},
+			want: "the per-model prompt",
+		},
 		{
 			name: "an absolute file is read as written",
 			sp:   SystemPromptSettings{Global: PromptSource{File: absFile}},
@@ -3338,7 +3378,7 @@ func TestResolveSystemPrompt(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := ResolveSystemPrompt(tt.sp, model, home, readFile)
+			got, err := ResolveSystemPrompt(tt.sp, model, home, !tt.noDefault, readFile)
 			if len(tt.wantErr) == 0 {
 				if err != nil {
 					t.Fatalf("ResolveSystemPrompt: %v", err)

@@ -218,6 +218,12 @@ type Options struct {
 	// loaded from the config file only. ApplyConfig sets it from the resolved settings.
 	UseProjectSkills bool
 
+	// useDefaultPrompt allows the EMBEDDED default system prompt when nothing is configured
+	// (default true, config file only) — the last rung of the resolution ladder (ADR 0064 §2).
+	// ApplyConfig sets it from the resolved settings; the composition root hands it to
+	// ResolveSystemPrompt beside the block above, which is where it is consulted or ignored.
+	UseDefaultPrompt bool
+
 	// autoCompact gates the automatic, budget-driven generative Compaction trigger (default true),
 	// loaded from the config file only. ApplyConfig sets it from settings; runRoot folds it into
 	// apogee.Config.Context.CompactionEnabled.

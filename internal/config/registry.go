@@ -236,6 +236,15 @@ var KeyRegistry = []Key{
 		Structure: func(o Options) any { return o.SystemPrompt.Models },
 	},
 	{
+		// The last rung of the prompt ladder (ADR 0064 §2), and therefore this row's home: it is
+		// read as part of the same question the three rows above answer. It changes nothing while
+		// any of them is set — the row says so rather than pretending an effect it does not have.
+		Path: "use-default-prompt", Kind: KindBool, Default: "true",
+		Editable: true,
+		Desc:     "Fall back to apogee's built-in system prompt when none of the keys above sets one.",
+		Read:     func(o Options) string { return boolValue(o.UseDefaultPrompt) },
+	},
+	{
 		Path: "context-files.enable", Kind: KindBool, Default: "true",
 		Editable: true,
 		Desc:     "Fold the workspace context files below into the system prompt at session start.",
