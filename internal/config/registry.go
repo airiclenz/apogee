@@ -192,6 +192,22 @@ var KeyRegistry = []Key{
 		Read:     func(o Options) string { return o.StartupServer },
 	},
 	{
+		// KindServer for its neighbour's reason — the names it takes are whatever THIS config's
+		// `servers:` list spells — but NOT editable, and that is deliberate: the settings pane routes
+		// ⏎ by a row's Kind and never by its Path, so an editable KindServer row would call the
+		// `/server` switch and move the SESSION's upstream instead of the delegation target. A
+		// read-only row leaves ADR 0037 decision 4 exactly as it stands one row up, and
+		// /sub-agents-server is the single way this key changes.
+		Path: "sub-agents-server", Kind: KindServer,
+		Desc: "Which servers: entry takes delegations; /sub-agents-server records the choice.",
+		Read: func(o Options) string {
+			if o.SubAgentsServer == "" {
+				return "auto (session server)"
+			}
+			return o.SubAgentsServer
+		},
+	},
+	{
 		Path: "mode", Kind: KindEnum, Default: string(domain.ModeAskBefore), EnumValues: modeValues,
 		EnvVar: EnvMode, FlagName: "mode",
 		Editable: true, // Shift+Tab drives the same seam this key's live apply does

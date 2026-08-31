@@ -194,6 +194,20 @@
 # server: my-box
 
 # =============================================================================
+# Which servers: entry takes the sub-agents this session delegates to — the name of one of the
+# entries above, which may be the same one the session itself runs on or a different machine
+# entirely. apogee keeps this current for you the way it does server: above — every
+# /sub-agents-server choice writes the key back into this file.
+#
+# Leave it unset and delegations simply run on whatever server the session is bound to, which is
+# what apogee did before this key existed. A name no entry above carries is not refused: apogee
+# says which name went missing at start-up and falls back to the session's own server.
+#
+# Any entry above may carry bypass: and mechanisms: keys of its own; they say what DELEGATIONS to
+# that server run as, and they apply whenever it is the target named here — never to the session.
+# sub-agents-server: my-box
+
+# =============================================================================
 # Autonomy mode: how tool calls are gated (the privilege ladder, least to most autonomous).
 #   plan        — read-only: no writes, no command execution
 #   ask-before  — every write, command, and external reach needs your approval (the default)

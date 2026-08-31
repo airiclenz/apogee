@@ -88,6 +88,13 @@ type Options struct {
 	// and ApplyConfig then overwrites it with the resolved value. Empty ⇒ no entry is named.
 	StartupServer string
 
+	// SubAgentsServer is the resolved `sub-agents-server:` key — the NAME of the servers entry
+	// that takes the DELEGATIONS this session spawns, which /sub-agents-server records after a
+	// change. File-only, unlike the pointer above it (no flag, no variable): which machine runs the
+	// children is a config act rather than an invocation. Empty ⇒ no target is named, and
+	// delegations run on the session's own upstream (SubAgentsServerTarget).
+	SubAgentsServer string
+
 	// serverFlagBound says the command being run registers the `--server` flag. Only the root
 	// command does: `apogee headless` and `apogee probe` declare their own flag surface and take
 	// the startup name from `APOGEE_SERVER` / `server:` alone. Exactly one thing reads it — the

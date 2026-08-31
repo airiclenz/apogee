@@ -341,6 +341,7 @@ func TestSettingsRowsFormatEffectiveValues(t *testing.T) {
 	want := map[string]string{
 		"servers":                "3 servers",
 		"server":                 "rented-box",
+		"sub-agents-server":      "auto (session server)",
 		"mode":                   "auto",
 		"system-prompt-text":     "2 lines",
 		"system-prompt-file":     "", // unset, and an editable string row's blank is what the field seeds from
@@ -409,6 +410,24 @@ func TestSettingsRowsNeverCarryAnAPIKey(t *testing.T) {
 	}
 	if got := rowsByPath(t, settingsRows(opts))["servers"].Value; got != "3 servers" {
 		t.Errorf("servers row value = %q; want the count — an entry's fields never reach the pane", got)
+	}
+}
+
+// The delegation target renders as a KindServer row the pane will NOT write. It shares its
+// neighbour's kind because it takes the same vocabulary — the names this config's `servers:` list
+// spells — but the pane routes ⏎ by kind alone, so an editable row here would call the `/server`
+// switch and move the SESSION's upstream instead of the target. Read-only is what keeps the two
+// rows apart, and /sub-agents-server is the one place the key changes.
+func TestSettingsRowsSubAgentsServerIsAReadOnlyServerRow(t *testing.T) {
+	t.Parallel()
+
+	got := rowsByPath(t, settingsRows(fabricatedSettings()))["sub-agents-server"]
+	if got.Kind != tui.SettingServer {
+		t.Errorf("sub-agents-server row kind = %q; want %q", got.Kind, tui.SettingServer)
+	}
+	if got.Editable {
+		t.Error("sub-agents-server row is editable; ⏎ on a server row switches the SESSION's upstream, " +
+			"so this key changes through /sub-agents-server alone")
 	}
 }
 

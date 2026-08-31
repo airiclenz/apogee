@@ -416,6 +416,13 @@ var keyAccessors = []keyAccessor{
 		fromFlag: func(o *Options, flags Options) { o.StartupServer = flags.StartupServer },
 	},
 	{
+		// File-only, unlike the pointer above it: which machine takes the DELEGATIONS is a config
+		// act — `/sub-agents-server` records the choice back into the file — not something one
+		// invocation overrides, so the key has neither a variable nor a flag.
+		row:      mustKey("sub-agents-server"),
+		fromFile: func(o *Options, fc fileConfig) { o.SubAgentsServer = fc.SubAgentsServer },
+	},
+	{
 		row: mustKey("mode"),
 		fromFile: func(o *Options, fc fileConfig) {
 			// The default comes from the row, so the mode resolution starts from and the mode /settings
@@ -1049,6 +1056,15 @@ type fileConfig struct {
 	// A name no entry carries is not refused here — which names exist is what the list says, so
 	// selection answers it.
 	Server string `yaml:"server"`
+	// SubAgentsServer names which entry of the list above takes the DELEGATIONS this session
+	// spawns — the sub-agent target, as distinct from the session's own upstream that `server:`
+	// above names. File-only, like the list itself: which machine runs the children is a config
+	// act rather than an invocation one, and `/sub-agents-server` records the choice back here.
+	// Absent/empty ⇒ delegations run on the session's own upstream, which is the behaviour that
+	// predates the key: the feature is opt-in. A name no entry carries is not refused here, for
+	// `server:`'s reason one field up — which names exist is what the list says, so selection
+	// answers it.
+	SubAgentsServer string `yaml:"sub-agents-server"`
 	// Editor names the command an external edit is opened with — the ⏎ jump the /settings pane makes
 	// on a key no field can hold, and any other edit of this file. A top-level scalar beside Server
 	// above, file-only (no flag/env), carried verbatim: `editor: code -w` is split
@@ -1715,6 +1731,26 @@ func joinAnd(names []string) string {
 func SubAgentServer(entries []ServerEntry) (ServerEntry, bool) {
 	for _, e := range entries {
 		if e.SubAgents {
+			return e, true
+		}
+	}
+	return ServerEntry{}, false
+}
+
+// SubAgentsServerTarget answers the same question one key out: which `servers:` entry the root
+// `sub-agents-server:` key names. name is that key's value, and an empty one is the ordinary case —
+// no target is configured, so false means delegations run on the session's own upstream exactly as
+// they did before the key existed.
+//
+// A name that matches nothing also answers false rather than an error, for the reason the key's own
+// comment gives: which names exist is what the list says, so a stale name is answered where the list
+// is known — at selection, with a notice — rather than by refusing to load a file over it.
+func SubAgentsServerTarget(entries []ServerEntry, name string) (ServerEntry, bool) {
+	if name == "" {
+		return ServerEntry{}, false
+	}
+	for _, e := range entries {
+		if e.Name == name {
 			return e, true
 		}
 	}

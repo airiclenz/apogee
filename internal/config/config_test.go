@@ -507,6 +507,7 @@ func TestEveryConfigKeyReachesTheOptions(t *testing.T) {
 	// rather than from a source of the precedence ladder.
 	want := map[string]bool{
 		"Mode": true, "Bypass": true, "Servers": true, "StartupServer": true, "Editor": true,
+		"SubAgentsServer":    true,
 		"ConfineToWorkspace": true, "UnconfinedHosts": true, "WebSearchEndpoint": true,
 		"UseProjectSkills": true, "AutoCompact": true, "DelegateMaxSteps": true,
 		"UseShippedSkills": true,
@@ -547,6 +548,7 @@ func TestEveryConfigKeyReachesTheOptions(t *testing.T) {
 func everyKeyFileConfig() fileConfig {
 	return fileConfig{
 		Mode: "auto", Bypass: boolptr(true), Server: "the-box", Editor: "hx",
+		SubAgentsServer:    "the-box",
 		Servers:            []ServerEntry{{Name: "the-box", Endpoint: "http://localhost:9000"}},
 		ConfineToWorkspace: boolptr(false),
 		UnconfinedHosts:    []UnconfinedHost{{ID: "another-host", Acknowledged: "2026-08-20"}},
@@ -2984,6 +2986,97 @@ func TestSubAgentServer(t *testing.T) {
 			}
 			if got.Name != tt.want {
 				t.Errorf("SubAgentServer = %q, want %q", got.Name, tt.want)
+			}
+		})
+	}
+}
+
+// SubAgentsServerTarget is the same lookup one key out: the entry the root `sub-agents-server:`
+// key names. Not-found is again the ordinary answer rather than a defect — an unset key means no
+// target is configured, and a name no entry carries is answered here, with the notice the key's
+// comment promises, rather than by refusing the file that holds it.
+func TestSubAgentsServerTarget(t *testing.T) {
+	t.Parallel()
+	entries := []ServerEntry{
+		{Name: "workstation", Endpoint: "http://one:1111"},
+		{Name: "grunt-box", Endpoint: "http://two:1111"},
+	}
+	tests := []struct {
+		name    string
+		entries []ServerEntry
+		key     string
+		want    string
+	}{
+		{
+			name:    "the named entry is returned whole, wherever it sits in the list",
+			entries: entries,
+			key:     "grunt-box",
+			want:    "grunt-box",
+		},
+		{
+			name:    "an empty key is not found — delegations stay on the session's own server",
+			entries: entries,
+		},
+		{
+			name:    "a name no entry carries is not found rather than an error",
+			entries: entries,
+			key:     "retired-box",
+		},
+		{name: "an empty list is not found", key: "grunt-box"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got, found := SubAgentsServerTarget(tt.entries, tt.key)
+			if found != (tt.want != "") {
+				t.Fatalf("SubAgentsServerTarget(%q) found = %v, want %v", tt.key, found, tt.want != "")
+			}
+			if got.Name != tt.want {
+				t.Errorf("SubAgentsServerTarget(%q) = %q, want %q", tt.key, got.Name, tt.want)
+			}
+		})
+	}
+}
+
+// The root key round-trips: a file that states it lands on the Options field, and a file that omits
+// it leaves the field empty — the opt-in default, where delegations run on the session's upstream.
+func TestApplyConfigSubAgentsServer(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		yaml string
+		want string
+	}{
+		{
+			name: "the key names the delegation target",
+			yaml: "sub-agents-server: grunt-box\n",
+			want: "grunt-box",
+		},
+		{
+			name: "a name no entry carries is carried through rather than refused",
+			yaml: "sub-agents-server: retired-box\n",
+			want: "retired-box",
+		},
+		{name: "the key absent leaves no target named"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			const servers = `servers:
+  - name: workstation
+    endpoint: http://one:1111
+  - name: grunt-box
+    endpoint: http://two:1111
+server: workstation
+`
+			home := testConfigHome(t, servers+tt.yaml)
+			opts := Options{ConfigDir: home}
+			if err := ApplyConfig(&opts, func(string) bool { return false },
+				func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
+				t.Fatalf("ApplyConfig: %v", err)
+			}
+			if opts.SubAgentsServer != tt.want {
+				t.Errorf("SubAgentsServer = %q, want %q", opts.SubAgentsServer, tt.want)
 			}
 		})
 	}
