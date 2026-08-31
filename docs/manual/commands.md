@@ -11,12 +11,12 @@ cursor is on, so you can start typing a message and reach for a command halfway
 through, or go back and fix a misspelled name. Accepting a command from the menu
 **runs it and keeps the rest of your draft** — unless the command takes arguments, in
 which case the menu completes it to `/command ` and waits for you to type them; `/model`,
-`/server` and `/skills` are the exception to that exception and run straight away, since bare
-they only open a picker or print a report. The menu stays open while the model is working, too —
+`/server`, `/sub-agents-server` and `/skills` are the exception to that exception and run straight
+away, since bare they only open a picker or print a report. The menu stays open while the model is working, too —
 commands that need a quiet engine wear an `— idle only` tag for as long as the engine
 is busy, and say so if you pick one anyway, while `/version`, `/usage`,
-`/inspect`, `/effort`, `/schedule`, `/schedule-stop`, `/skills`' listing and `/confine`'s status
-report answer immediately. Once the engine is idle that tag is gone from the menu entirely — there
+`/inspect`, `/effort`, `/schedule`, `/schedule-stop`, `/sub-agents-server`, `/skills`' listing and
+`/confine`'s status report answer immediately. Once the engine is idle that tag is gone from the menu entirely — there
 is nothing left for it to warn about. A token
 lights up in the box exactly when it resolves — the `skill` role for a skill your catalog
 has, the `file-ref` role for a file your workspace has (violet and green under `dark`) — so
@@ -42,6 +42,7 @@ a typo is visible before you send.
 | `/rename` | Rename this session — `/rename <name>` sets it, bare `/rename` asks the model for one | — |
 | `/model` | Switch model — the Launch profiles [llama-launcher](configuration.md#local-servers--llama-launcher) defines when one is configured, what this server serves when not; picker, or `/model <name>` | — |
 | `/server` | Move this session to another server you configured — picker, or `/server <name>` | — |
+| `/sub-agents-server` | Pick the `servers:` entry this session's delegations run on — picker, or `/sub-agents-server <name>`; the choice is recorded and the next delegation goes there — see [below](configuration.md#the-servers-you-run-models-on) | ✅ |
 | `/unload-model` | Free the model of the server this session is on — see [below](configuration.md#local-servers--llama-launcher) | — |
 | `/stop-server` | Stop the server this session is on — see [below](configuration.md#local-servers--llama-launcher) | — |
 | `/color-scheme` | Recolour the screen — bare lists what you can switch to, `/color-scheme <name>` switches and saves, `/color-scheme export <name>` writes an editable copy of a built-in to `~/.apogee/schemes/` | — |

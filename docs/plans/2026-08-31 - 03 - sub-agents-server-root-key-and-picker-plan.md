@@ -328,7 +328,13 @@ survives the read-back verification the seam already performs (`sameApartFrom` o
 
 **Depends on:** item 2 (files overlap item 4's — serial regardless).
 
-## 6. Docs and the ADR
+## 6. Docs and the ADR — ✅ DONE (2026-08-31)
+
+NOTES (2026-08-31): layout.md gained a paragraph specifying the start-up retired-flag offer pane (notice, title, two rows, hint, esc) beyond the item's literal "overlay section gains the second server-kind question" — item 5 shipped that pane and its NOTES left every doc to this item, and the rendering spec would otherwise be silent on a pane that opens unasked. The preceding paragraph's "the start-up's one offer about a key" became "the start-up's offer about a plaintext key" with it.
+NOTES (2026-08-31): layout.md's `/schedule` paragraph claimed its three panes are "the only panes that open while the model is working"; `/sub-agents-server` is `whileRunning: true`, so the sentence was amended rather than left false.
+NOTES (2026-08-31): docs/manual/commands.md's two prose lists were amended beside the new table row — the "run straight away" exception (bare form opens a picker) and the "answer immediately" list (the verb carries no `— idle only` tag) — since the row alone would have left both false.
+NOTES (2026-08-31): the migration paragraph in configuration.md names the retired flag as "a `sub-agents:` flag" rather than the literal `sub-agents: true`, because the item's own Acceptance requires zero occurrences of that string under docs/manual.
+NOTES (2026-08-31): CONTEXT.md's Avoid list kept "delegation server" with a new reason (its old one cited the retired key spelling) and gained "flagged server"; the Sub-agent term's "the per-slot window the flagged server advertises" now says "the target server", with ADR 0066 linked beside 0045 in both places.
 
 **What:** Write `docs/adr/0066-sub-agent-routing-follows-the-sub-agents-server-root-key.md`:
 records this grill, amends ADR 0045's decisions 1-2 (flag → root key; posture valid on any

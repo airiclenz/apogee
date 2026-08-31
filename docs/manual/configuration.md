@@ -558,7 +558,7 @@ An entry's `name` is the label `/server` lists it under, the argument
 footer shows while the session is on it — one name for all four jobs, so no two
 entries may share one. `endpoint` is required; `api-key` (or `api-key-cmd` /
 `api-key-env` — exactly one of the three), `model`, `parallel-agents`,
-`sub-agents`, `working-window` (the room a session on that server works in, above)
+`working-window` (the room a session on that server works in, above)
 and `effort-dialect` (which of the three wires carries the
 thinking-effort dial, described above) are optional, as is `llama-launcher`,
 which lets apogee start, switch and stop that server itself — [below](#local-servers--llama-launcher).
@@ -580,26 +580,53 @@ moves the session arrives at the new server's cap the same way; because the entr
 profile load builds pins nothing, delegations run one at a time there until that
 server's own first heartbeat says how many slots it has.
 
-**Delegations can run on a server of their own.** `sub-agents: true` on one
-entry (a file-only key) sends every delegation there: your conversation stays on
-the session's server while sub-agents fill the flagged one, and each delegated
-run says which model it ran on. If that server's API key cannot be resolved,
-delegations fall back to the session's own server and the reason is reported
-once.
+**Delegations can run on a server of their own.** The root `sub-agents-server:`
+key names the entry every delegation runs on: your conversation stays on the
+session's server while sub-agents fill that one, and each delegated run says
+which model it ran on. Any entry may be named, the one this session is on
+included, and leaving the key unset is what apogee did before it existed —
+delegations share the session's server. If the named server's API key cannot be
+resolved, delegations fall back to the session's own server and the reason is
+reported once. A name no entry carries is not refused either: apogee says which
+name went missing, lists the names your file does carry, and routes to the
+session's server.
+
+    sub-agents: no servers entry named "rented-bx" — delegations run on the session server (configured: workstation, rented-box)
+
+**And they move mid-session.** `/sub-agents-server` opens a picker over your
+entries — `/sub-agents-server <name>` takes one straight away — and every
+delegation spawned after the pick runs there; sub-agents already working stay on
+the server they started on. The pick is written back into the file as
+`sub-agents-server: <name>`, the way `/server` records its own choice, so your
+next session delegates to the same place without being asked. Unlike the file's key, a name the picker
+does not know is refused and nothing moves. It is also the only way the key
+changes from inside apogee: the `sub-agents-server` row on the
+[settings screen](commands.md#the-settings-screen--settings) is read-only — it
+reads `auto (session server)` while the key is unset — because `⏎` on a server
+row switches the *session's* upstream, which is the one thing this key does not
+do.
 
 Sub-agents there also ask for thinking effort the way that server understands
 it — the entry's `effort-dialect:` if it names one, else whatever the server
-advertises. A flagged server that advertises no dialect and pins none is the
+advertises. A target that advertises no dialect and pins none is the
 one gap: its delegates keep speaking the *session* server's dialect, so a
-sub-agent's request to think less can go out in a shape the flagged server
+sub-agent's request to think less can go out in a shape the target server
 never reads — most visibly when a long sub-agent run compacts and its summary
 comes back as reasoning and nothing else. apogee tells you once when it routes
 there:
 
     sub-agents: rented-box advertises no thinking-effort dialect — delegates there speak this session's; set effort-dialect: on its entry
 
-Adding `effort-dialect:` to the flagged entry — the same key, the same
+Adding `effort-dialect:` to that entry — the same key, the same
 values as above — is the fix.
+
+**A config that still flags an entry is offered the move.** Earlier builds marked
+the delegation target with a `sub-agents:` flag on the entry itself. Nothing reads
+that flag any more, so a file still carrying it would quietly delegate to the
+session's own server; where apogee finds one it says so at start-up and offers
+one edit — `move it` writes `sub-agents-server: <name>`, drops the retired flag,
+and re-points this session's delegations at that entry there and then. `not now`
+leaves the file exactly as it is and the offer comes back at the next start-up.
 
 **`server:` keeps itself current.** Every `/server` switch onto a listed entry
 splices `server: <name>` back into the file — that one key, your comments and layout

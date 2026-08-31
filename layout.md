@@ -1776,17 +1776,29 @@ everything on either side is untouched.
 rest of what was typed stays in the box with the caret where it belongs. The verbs that need what
 follows them are the exception and complete instead: the ones that take arguments — today
 `/color-scheme`, `/confine`, `/rename` and `/schedule` (and arguments are only ever read from a
-whole-line invocation). `/model` and `/server` take an argument too, but their bare form is a whole
-verb — it opens a picker and changes nothing until that picker is accepted — so accepting their row
-runs them like any other. Accepting a skill row writes that skill's own `/id ` token into the text.
+whole-line invocation). `/model`, `/server` and `/sub-agents-server` take an argument too, but their
+bare form is a whole verb — it opens a picker and changes nothing until that picker is accepted — so
+accepting their row runs them like any other. Accepting a skill row writes that skill's own `/id ` token into the text.
 
-**One overlay for "which one?".** `/model` and `/server` with nothing after them open a
+**One overlay for "which one?".** `/model`, `/server` and `/sub-agents-server` with nothing after
+them open a
 picker: the same bordered pane as the `/sessions` browser, one row per choice, one highlight,
 `type to filter · ↑/↓ select · ⏎ switch · esc close` under it, at most eight rows with a window
 scrolling around the selection. It is modal — while it is open every key belongs to it. `/server` lists the servers
 `config.yaml` names plus the one this session started on, in three columns — `name`, `— endpoint`,
 `· current` — and the row the session is on is the one that fills the third, faintly; picking it
-says so instead of switching. `/model` has
+says so instead of switching. **The second server-kind question is `/sub-agents-server`**, which
+asks something else of the same list: not where this session runs but where its DELEGATIONS run.
+Its title says so — `sub-agents server — where delegations run` — and its rows are those same
+entries in two columns only, `name` and `— endpoint`. There is deliberately no third cell: the
+`· current` mark means "the session is bound here", which is the one thing a delegation target is
+not, and it opens on the FIRST row rather than on a marked one, because which entry takes the
+delegations right now is the wiring's state and a highlight guessed from the session's own server
+would point at the wrong row on every session that routes elsewhere. Taking a row moves where the
+delegations spawned from then on go and leaves the session exactly where it is — nothing about this
+session switches, so its hint reads `⏎ choose` — and the transcript gets
+one line naming the entry, with `· sub-agents-server: saved` after it when the choice was recorded
+into the file. `/model` has
 two offerings and lists whichever one the session's own server can answer from: while it is on a
 `servers:` entry that names a llama-launcher config,
 the Launch profiles that config defines, in the launcher's own order, in five columns — `name`,
@@ -1796,8 +1808,8 @@ other entry, what the server currently advertises, in two columns — `model`, `
 place if a heartbeat lands underneath it. Either way what
 the session is ALREADY on is not among the rows — there is no `· current` mark to pick, because
 there is no row that would switch nothing, which is what makes the hint's `⏎ switch` true of every
-row. Given an argument (`/model <name>`, `/server <name>`) the verb acts straight away and no pane
-opens at all. When there is nothing to
+row. Given an argument (`/model <name>`, `/server <name>`, `/sub-agents-server <name>`) the verb acts
+straight away and no pane opens at all. When there is nothing to
 pick — no monitor, an unreachable server, nothing advertised yet, nothing but the model already
 bound, no `servers:` block, no launcher config where one was named, no profiles in it, only the
 profile already loaded — the answer is one honest line in the transcript and no empty pane.
@@ -1833,11 +1845,11 @@ Auto-eligibility ladder has closed it. That row is still offered and still selec
 prints the reason and leaves the pane open, so `plan` is one keypress away and the prompt need not
 be retyped. `/schedule-stop` with more than one schedule live opens a third pane over them — `name`,
 `— every 1h`, `· plan`, `· running` — and stops the row that is taken. None of the three switches
-anything, so the hint under them reads `⏎ choose` and, for the stop pane, `⏎ stop`. They are the
+anything, so the hint under them reads `⏎ choose` and, for the stop pane, `⏎ stop`. They and the `/sub-agents-server` picker are the
 only panes that open while the model is working, and they claim the keyboard there exactly as they
 do at idle.
 
-**And the same overlay makes the start-up's one offer about a key.** A `servers:` entry whose
+**And the same overlay makes the start-up's offer about a plaintext key.** A `servers:` entry whose
 `api-key:` is written out in the config file, on a machine whose own secret store apogee can both
 write to and read back from, opens a pane nobody asked for — after the pre-bound ask, and never
 beside it: a session with no server is asked that question alone, and this one simply comes back at
@@ -1851,6 +1863,21 @@ look like one that did — and the next entry's pane opens where the last one cl
 round outright: whatever is left is a `not now`, and nothing is written. On a machine with no such
 store the pane never opens at all; the notice naming the entries and the manual alternatives goes to
 stderr before the alternate screen, with the confinement warnings.
+
+**And one more, about a key that was retired.** A `servers:` entry still spelled with the retired
+`sub-agents: true` flag opens the same pane once more, after the key offer has had its turn and
+never beside it — and it is one question rather than a round, because the answer is a single root
+key naming a single entry, and any further flagged entries are named in the notice rather than
+asked about one at a time. The note comes first —
+`sub-agents: true is retired on <names> — the sub-agents-server: key names the delegation target
+now` — and under it a pane titled `delegate to <name> — move the flag into sub-agents-server:?`
+over two rows in two columns: `move it`, `— write sub-agents-server: <name> and drop the retired
+flag`; `not now`, `— leave the file alone; the offer comes back at the next start-up`. The hint is
+`⏎ choose` again, since nothing here switches anything. There is no third row: the flag is dead
+weight its owner removes once, so an answer that made the question permanent would preserve a line
+nothing reads. Either answer prints one line — the move naming the file it wrote, a failed move
+saying so, `not now` saying the offer comes back — and closes the pane for the rest of the session;
+`esc` is a `not now` and writes nothing.
 
 **The `/sessions` browser types too, which is why its verbs are chords.** The browser filters
 exactly as those panes do — any printable key builds the same case-insensitive filter over the row's

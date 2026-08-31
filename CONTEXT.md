@@ -110,9 +110,10 @@ events nest into the parent's event stream at **`Depth = parent+1`**. An **unrou
 **context window is not reduced**: it inherits the parent's `Config` verbatim
 (`internal/agent/subagent.go`), so it works against a window — and a Budget over it — of the same
 size the parent has. A child **routed** to the **Sub-agent server** works against the **Delegation
-target's** window instead (that entry's `context-window:` pin, else the per-slot window the flagged
+target's** window instead (that entry's `context-window:` pin, else the per-slot window the target
 server advertises), which is a different model's window and may be smaller or larger than the
-parent's ([ADR 0045](docs/adr/0045-sub-agents-route-to-the-flagged-server-with-its-own-posture.md)).
+parent's ([ADR 0045](docs/adr/0045-sub-agents-route-to-the-flagged-server-with-its-own-posture.md),
+[ADR 0066](docs/adr/0066-sub-agent-routing-follows-the-sub-agents-server-root-key.md)).
 When that entry names **neither** — no pin, and nothing observed — the routed child keeps the
 **parent's** window rather than running windowless: no window at all would leave its Budget and
 automatic Compaction inactive and its readings unmeasurable.
@@ -179,20 +180,27 @@ _Avoid_: "slots" (the server's own term for its side of the trade), "concurrency
 cap).
 
 **Sub-agent server**:
-The one `servers:` entry flagged `sub-agents: true` — the server **every delegation routes
-to**, so a cheap grunt model does delegated work while a smarter model orchestrates. At most
-one entry may carry the flag (a second is a startup error). The flagged entry may also carry
-the children's **posture** — `bypass:` and `mechanisms:` overrides that apply to every child
-*routed there* (present key replaces whole, absent key inherits the parent's live value;
-where the *parent* runs is irrelevant). Delegations there also speak that server's own
+The `servers:` entry the root `sub-agents-server:` key names — the server **every delegation
+routes to**, so a cheap grunt model does delegated work while a smarter model orchestrates.
+Every entry is an eligible target, including the one the session itself runs on, and the choice
+**moves in a running session**: `/sub-agents-server` re-points the delegations spawned from then
+on and records the name back into the file, while children already in flight keep the server they
+were spawned against. ANY entry may also carry the children's **posture** — `bypass:` and
+`mechanisms:` overrides that apply to every child *routed there* whenever that entry is the
+target (present key replaces whole, absent key inherits the parent's live value; where the
+*parent* runs is irrelevant). Delegations there also speak that server's own
 [Thinking-effort](#identity-and-shape) **wire dialect** — its `effort-dialect:` pin, else
 what it advertises — because the dialect is a property of the server a request lands on; an entry
 that names neither leaves its delegates speaking the SESSION server's dialect, and apogee says so
-once when routing engages. No flag anywhere means today's behavior: children
-share the parent's Upstream. Ratified 2026-08-11
-([ADR 0045](docs/adr/0045-sub-agents-route-to-the-flagged-server-with-its-own-posture.md)).
-_Avoid_: "grunt server" (colloquial), "worker server", "delegation server" (the config key
-says `sub-agents:`).
+once when routing engages. An unset key means today's behavior: children share the parent's
+Upstream. A name no entry carries is not a startup error — apogee says which name went missing,
+names the entries the file does carry, and routes to the session's own server. Ratified
+2026-08-11, re-shaped as a root key 2026-08-31
+([ADR 0045](docs/adr/0045-sub-agents-route-to-the-flagged-server-with-its-own-posture.md),
+[ADR 0066](docs/adr/0066-sub-agent-routing-follows-the-sub-agents-server-root-key.md)).
+_Avoid_: "grunt server" (colloquial), "worker server", "delegation server" (too close to the
+**Delegation target**, which is the latched spec rather than the entry), "flagged server" (there
+is no flag any more — the root key names it).
 
 **Delegation target**:
 The engine-side latched spec a sub-agent spawn reads to build its own Upstream: the
