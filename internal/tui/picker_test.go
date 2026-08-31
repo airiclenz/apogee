@@ -1932,6 +1932,26 @@ func pickerKindCases() []pickerKindCase {
 				}
 			},
 		},
+		{
+			name:   "autonomy rungs",
+			filter: "allow",
+			want:   modeMarker(domain.ModeAllowEdits),
+			open: func(t *testing.T) (Model, func(*testing.T, Model)) {
+				t.Helper()
+				m, eng := openModePicker(t, domain.ModePlan)
+				return m, func(t *testing.T, m Model) {
+					t.Helper()
+					want := []domain.Mode{domain.ModeAllowEdits}
+					if got := eng.modesSet(); !reflect.DeepEqual(got, want) {
+						t.Errorf("SetMode calls = %v, want %v — the rung the filter left, not the first on the ladder",
+							got, want)
+					}
+					if m.opts.Mode != domain.ModeAllowEdits {
+						t.Errorf("opts.Mode = %q, want the filtered rung %q", m.opts.Mode, domain.ModeAllowEdits)
+					}
+				}
+			},
+		},
 	}
 }
 
@@ -2231,7 +2251,7 @@ func TestPickerCycleAcceptClearsTheFilter(t *testing.T) {
 func TestPickerHintsLeadWithTypeToFilter(t *testing.T) {
 	kinds := []pickerKind{
 		pickerModel, pickerServer, pickerLoad, pickerCycle, pickerScheduleMode, pickerScheduleStop,
-		pickerEffort,
+		pickerEffort, pickerMode,
 	}
 	for _, kind := range kinds {
 		if got := pickerHintFor(kind); !strings.HasPrefix(got, "type to filter · ") {
@@ -2833,5 +2853,116 @@ func TestSubAgentsServerRunsWhileTheWorkerWorks(t *testing.T) {
 	m, _ = stepCmd(t, m, keyEnter())
 	if want := []string{"remote", "test-host"}; !reflect.DeepEqual(host.retargets, want) {
 		t.Errorf("retargets = %v, want %v — the picker's own accept lands mid-run", host.retargets, want)
+	}
+}
+
+// ----------------------------------------------------------------------------
+// The autonomy ladder — the mode picker
+// ----------------------------------------------------------------------------
+
+// openModePicker is an idle, sized session on `start` with the mode picker up, plus the fakeEngine
+// whose SetMode the accept has to drive. The pane has no verb of its own — Shift+Tab stays the
+// keyboard route and the footer's marker is what opens it — so the state is set here the way the
+// marker's click sets it.
+func openModePicker(t *testing.T, start domain.Mode) (Model, *fakeEngine) {
+	t.Helper()
+	m, eng := newModeModel(t, start)
+	m.picker = picker{open: true, kind: pickerMode}
+	return m, eng
+}
+
+// The pane offers the whole ladder in the order Shift+Tab walks it, each row led by the very marker
+// the footer paints for that rung and followed by what the rung permits, under the choosing legend:
+// nothing here re-points the session at another model or server, which is all "switch" may promise.
+func TestPickerModeOffersTheLadderInOrder(t *testing.T) {
+	m, _ := openModePicker(t, domain.ModePlan)
+
+	rows := m.pickerRows()
+	var got []string
+	for _, row := range rows {
+		got = append(got, row[0])
+	}
+	want := []string{
+		modeMarker(domain.ModePlan), modeMarker(domain.ModeAskBefore),
+		modeMarker(domain.ModeAllowEdits), modeMarker(domain.ModeAuto),
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("rows = %v, want the four rungs in ladder order %v", got, want)
+	}
+	for i, row := range rows {
+		if len(row) != 2 || strings.TrimSpace(strings.TrimPrefix(row[1], "—")) == "" {
+			t.Errorf("row %d = %v, want the marker and a sentence for what the rung permits", i, row)
+		}
+	}
+	if got := m.pickerTitle(); !strings.Contains(got, "autonomy mode") {
+		t.Errorf("title = %q, want it to name the autonomy ladder", got)
+	}
+	if got := pickerHintFor(pickerMode); !strings.Contains(got, "⏎ choose") {
+		t.Errorf("hint = %q, want the choosing verb rather than a switch", got)
+	}
+}
+
+// ⏎ on a rung does exactly what Shift+Tab onto that rung does — the engine seam first, then
+// opts.Mode, which is what the footer reads — and closes the overlay behind it.
+func TestPickerModeAcceptMovesTheRungLikeShiftTab(t *testing.T) {
+	m, eng := openModePicker(t, domain.ModePlan)
+
+	m = step(t, m, keyDown()) // plan → ask before
+	m = step(t, m, keyDown()) // → allow edits
+	m, _ = stepCmd(t, m, keyEnter())
+
+	if m.picker.open {
+		t.Errorf("the overlay is still open after ⏎")
+	}
+	if m.opts.Mode != domain.ModeAllowEdits {
+		t.Errorf("opts.Mode = %q, want %q — the footer renders the mode from opts", m.opts.Mode, domain.ModeAllowEdits)
+	}
+	if got := eng.modesSet(); len(got) != 1 || got[0] != domain.ModeAllowEdits {
+		t.Errorf("engine SetMode = %v, want [%q]", got, domain.ModeAllowEdits)
+	}
+	if footer := ansiPattern.ReplaceAllString(m.footerContent(80), ""); !strings.Contains(footer, "allow edits") {
+		t.Errorf("footer = %q, want the rung the pane took", footer)
+	}
+}
+
+// The Auto row is offered on every host and taking it ACTS, unlike /schedule's blocked-auto answer:
+// this is the session's own ladder, which Shift+Tab already reaches unconditionally, so refusing it
+// in one route only would be a new restriction.
+func TestPickerModeAutoRungActsOnEveryHost(t *testing.T) {
+	m, eng := openModePicker(t, domain.ModePlan)
+	m.opts.ScheduleAutoBlocked = "this host cannot fence the filesystem"
+
+	if got := len(m.pickerRows()); got != 4 {
+		t.Fatalf("rows = %d, want all four rungs offered whatever the host can fence", got)
+	}
+	for i := 0; i < 3; i++ {
+		m = step(t, m, keyDown())
+	}
+	m, _ = stepCmd(t, m, keyEnter())
+
+	if m.opts.Mode != domain.ModeAuto {
+		t.Errorf("opts.Mode = %q, want %q", m.opts.Mode, domain.ModeAuto)
+	}
+	if got := eng.modesSet(); len(got) != 1 || got[0] != domain.ModeAuto {
+		t.Errorf("engine SetMode = %v, want [%q] — the rung acts, it is not answered", got, domain.ModeAuto)
+	}
+}
+
+// esc is a "not now": the overlay closes and neither the engine's rung nor the one the footer reads
+// has moved, even from a highlight the human walked onto.
+func TestPickerModeEscapeMovesNothing(t *testing.T) {
+	m, eng := openModePicker(t, domain.ModeAskBefore)
+
+	m = step(t, m, keyDown())
+	m = step(t, m, keyEsc())
+
+	if m.picker.open {
+		t.Errorf("the overlay is still open after esc")
+	}
+	if m.opts.Mode != domain.ModeAskBefore {
+		t.Errorf("opts.Mode = %q, want the rung the session was on", m.opts.Mode)
+	}
+	if got := eng.modesSet(); len(got) != 0 {
+		t.Errorf("engine SetMode = %v, want no call at all", got)
 	}
 }

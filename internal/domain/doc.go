@@ -20,7 +20,7 @@
 //
 // The construction surface and the session envelope. config.go is Config, the whole
 // construction surface (ADR 0001), plus the mode ladder it opens on — Mode, ParseMode,
-// NextMode, TighterMode — the UserInput a Driver submits, the StepResult it gets back, the
+// ModeLadder, NextMode, TighterMode — the UserInput a Driver submits, the StepResult it gets back, the
 // SkillResolver seam, and the ModelProfile with its three axes: tool-call format, thinking
 // channel, and the ToolRosterDelta a profile equips a model with (ADR 0057). uivocab.go is the presentation vocabulary a Driver is CONFIGURED
 // with — the spinner styles with their parse, the cursor-shape NAMES with their validator, and

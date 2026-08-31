@@ -9,6 +9,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/format"
 	"github.com/airiclenz/apogee/internal/heartbeat"
 )
@@ -88,6 +89,7 @@ const (
 	pickerEffort                               // the levels the bound model's thinking-effort dial offers — /effort
 	pickerSubAgentsServer                      // the servers a delegation may run on — /sub-agents-server
 	pickerSubAgentsMigration                   // what to do about a retired sub-agents: flag — the start-up offer
+	pickerMode                                 // the autonomy rungs this session may run at — the footer's mode marker
 )
 
 // picker is the overlay's inline state on the Model. Its zero value is "closed", so it lives inline
@@ -146,7 +148,7 @@ const pickerHint = "type to filter · ↑/↓ select · ⏎ switch · esc close"
 // wrong on every kind that is not one.
 func pickerHintFor(k pickerKind) string {
 	switch k {
-	case pickerCycle, pickerScheduleMode, pickerEffort, pickerSubAgentsServer:
+	case pickerCycle, pickerScheduleMode, pickerEffort, pickerSubAgentsServer, pickerMode:
 		return "type to filter · ↑/↓ select · ⏎ choose · esc close"
 	case pickerSubAgentsMigration:
 		return keyMigrationHint
@@ -867,7 +869,32 @@ func (m Model) acceptPicker() (tea.Model, tea.Cmd) {
 		return m.retargetSubAgents(targets[offered].Name)
 	case pickerSubAgentsMigration:
 		return m.acceptSubAgentsMigration(offered)
+	case pickerMode:
+		return m.acceptMode(offered)
 	}
+	return m, nil
+}
+
+// acceptMode takes the mode picker's highlighted row, named by its index into the OFFERING
+// (acceptPicker resolves the filter first), and moves this session onto that rung. It does exactly
+// what Shift+Tab does with the rung it lands on (model.go's "shift+tab" case): the engine seam
+// first, then opts.Mode, which is what the footer renders. The pane is a second ROUTE to the ladder
+// and never a second policy — every rung the chord can reach is takeable here, Auto included,
+// because this is the session's own autonomy and refusing it in one route only would be a new
+// restriction.
+//
+// The ladder is re-derived rather than trusted from the frame that drew the rows (acceptEffort's
+// posture), so an index naming no rung closes the overlay and moves nothing.
+func (m Model) acceptMode(offered int) (tea.Model, tea.Cmd) {
+	ladder := domain.ModeLadder()
+	m.picker = picker{}
+	if offered < 0 || offered >= len(ladder) {
+		return m, nil
+	}
+	mode := ladder[offered]
+	m.eng.SetMode(mode)
+	m.opts.Mode = mode // the footer renders the mode from opts.Mode (footerContent)
+	m.layout()
 	return m, nil
 }
 
@@ -1034,6 +1061,8 @@ func (m Model) pickerTitle() string {
 		return subAgentsServerTitle
 	case pickerSubAgentsMigration:
 		return m.subAgentsMigrationTitle()
+	case pickerMode:
+		return modePickerTitle
 	}
 	return ""
 }
@@ -1073,6 +1102,8 @@ func (m Model) pickerOfferingRows() []popupRow {
 		return m.subAgentsServerRows()
 	case pickerSubAgentsMigration:
 		return subAgentsMigrationRows(m.opts.SubAgentsMigration)
+	case pickerMode:
+		return modeRows()
 	}
 	return nil
 }
@@ -1119,4 +1150,40 @@ func (m Model) serverRows() []popupRow {
 		})
 	}
 	return rows
+}
+
+// modePickerTitle names what the pane offers: the session's own autonomy ladder, the same four
+// rungs Shift+Tab cycles, said in the terms the choice is actually made in.
+const modePickerTitle = "autonomy mode — how much apogee does without asking"
+
+// modeRows is one row per rung of the autonomy ladder, in the order Shift+Tab walks it
+// ([domain.ModeLadder] — one list, so the offering and the cycle can never disagree). Each row
+// leads with the marker the footer paints for that rung (modeMarker: the same glyph and the same
+// word, so the pane and the chrome underneath it can never name a mode two different ways) and
+// says what the rung permits. Two cells, so the sentences start at one column under the shortest
+// and the longest marker alike.
+func modeRows() []popupRow {
+	ladder := domain.ModeLadder()
+	rows := make([]popupRow, 0, len(ladder))
+	for _, mode := range ladder {
+		rows = append(rows, popupRow{modeMarker(mode), "— " + modeGloss(mode)})
+	}
+	return rows
+}
+
+// modeGloss says what a rung permits in THIS session, which is not what scheduleModeGloss says
+// about the same word inside a Firing: there is a human here to answer, so the two middle rungs are
+// told apart by what they still ASK about rather than by what fails unattended.
+func modeGloss(mode domain.Mode) string {
+	switch mode {
+	case domain.ModePlan:
+		return "reads and reports; it changes nothing"
+	case domain.ModeAskBefore:
+		return "asks first for every edit and every command"
+	case domain.ModeAllowEdits:
+		return "edits files on its own; commands still ask"
+	case domain.ModeAuto:
+		return "edits and runs commands on its own, inside the fence"
+	}
+	return ""
 }

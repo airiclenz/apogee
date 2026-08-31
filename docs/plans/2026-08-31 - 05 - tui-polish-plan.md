@@ -198,7 +198,12 @@ superseded here and must itself name the delegation exception. Ownership of that
 owns its write_file body row, this item owns its outcome-slot tone lines.
 `feat(tui): a finished delegation's done verdict reads in the success colour`
 
-## 5. A mode picker offers the four autonomy rungs
+## 5. A mode picker offers the four autonomy rungs — ✅ DONE (2026-08-31)
+
+NOTES (2026-08-31): the accept restates `SetMode` + `opts.Mode` rather than extracting a helper Shift+Tab would also call — the item spells those two statements and `model.go` is not in its Files (item 6 owns that file); `acceptMode`'s comment names the chord as its twin.
+NOTES (2026-08-31): consequential edit — internal/domain/doc.go: made necessary by exporting `ModeLadder`, which the config.go file-map line enumerates the mode-ladder surface without ("Mode, ParseMode, NextMode, TighterMode").
+NOTES (2026-08-31): consequential edit — internal/tui/picker_test.go: `TestPickerHintsLeadWithTypeToFilter`'s kind list enumerates the kinds whose hint leads with the filter segment and gains `pickerMode` (beyond the item's own `pickerKindCases` case).
+NOTES (2026-08-31): one test beyond the item's list — `TestPickerModeAutoRungActsOnEveryHost` pins the ratified call that Auto is offered and acts even where `/schedule`'s blocked-auto answer would refuse it.
 
 **What.** `internal/domain/config.go` exports the ladder — `func ModeLadder() []Mode` returning a
 copy of `modeLadder` (`config.go:642`) — so the picker and `NextMode` read ONE list rather than two

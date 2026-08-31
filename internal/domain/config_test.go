@@ -1,10 +1,31 @@
 package domain_test
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
 )
+
+// TestModeLadder proves the ladder the pickers OFFER is the one Shift+Tab cycles: the four rungs in
+// cycle order, and a COPY — a caller that reorders or truncates what it was handed cannot move
+// NextMode, which is what keeps one list from quietly becoming two.
+func TestModeLadder(t *testing.T) {
+	want := []domain.Mode{domain.ModePlan, domain.ModeAskBefore, domain.ModeAllowEdits, domain.ModeAuto}
+	got := domain.ModeLadder()
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("ModeLadder() = %v, want the cycle order %v", got, want)
+	}
+
+	got[0] = domain.ModeAuto
+	got = got[:1]
+	if again := domain.ModeLadder(); !reflect.DeepEqual(again, want) {
+		t.Errorf("after mutating the result, ModeLadder() = %v, want the untouched %v", again, want)
+	}
+	if next := domain.NextMode(domain.ModePlan); next != domain.ModeAskBefore {
+		t.Errorf("after mutating the result, NextMode(plan) = %q, want %q", next, domain.ModeAskBefore)
+	}
+}
 
 // TestNextMode walks the autonomy privilege ladder: each rung advances to the next, Auto wraps
 // back to Plan, and an unknown/empty mode starts the cycle at Plan (never stuck off-ladder).

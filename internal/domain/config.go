@@ -3,6 +3,7 @@ package domain
 import (
 	"fmt"
 	"io/fs"
+	"slices"
 	"time"
 )
 
@@ -640,6 +641,15 @@ func ParseMode(s string) (Mode, error) {
 // modeLadder is the autonomy privilege ladder in cycle order (least to most autonomous);
 // the cycle wraps Auto → Plan. It is the single source of truth for Shift+Tab mode cycling.
 var modeLadder = []Mode{ModePlan, ModeAskBefore, ModeAllowEdits, ModeAuto}
+
+// ModeLadder returns the rungs in cycle order (least to most autonomous), so a Driver that OFFERS
+// the ladder — the TUI's mode picker — reads the same list [NextMode] cycles rather than restating
+// a second one that agrees with it today. The result is a COPY: the ladder is the single source of
+// truth for the cycle, and a caller holding a slice into it could otherwise reorder what Shift+Tab
+// walks.
+func ModeLadder() []Mode {
+	return slices.Clone(modeLadder)
+}
 
 // NextMode returns the mode one rung up the privilege ladder, wrapping Auto back to Plan.
 // An unknown or empty mode starts the cycle at Plan (the safest rung), so a caller can never
