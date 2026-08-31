@@ -1019,17 +1019,25 @@ advertised window is `Window`).
 The standing instructions apogee sends ahead of the user's own messages — the **first system
 message of every request**, rendered fresh per request from a **template** the user configures
 in `~/.apogee/config.yaml` (`system-prompt-text` / `system-prompt-file`, plus per-model
-overrides in `system-prompt-models`; file-only — no flag or env). The template's whole
-vocabulary is three strictly-spelled placeholders — `{{workspace}}`, `{{datetime}}` (the
-**date** only, so a local server's prefix cache survives a turn), `{{mode}}` — and an unknown
-one is a startup error, never raw braces on the wire. It is **request-scoped**: seeded into the
+overrides in `system-prompt-models`; file-only — no flag or env) — or, when the user configures
+none, from the **embedded default** apogee compiles into the binary and refreshes with every
+upgrade, unless `use-default-prompt: false` turns it off. Resolution is a four-rung ladder, first
+hit winning and supplying the *whole* prompt: matching per-model entry > top-level text/file >
+embedded default > nothing. The template's whole vocabulary is four strictly-spelled
+placeholders — `{{workspace}}`, `{{datetime}}` (the **date** only, so a local server's prefix
+cache survives a turn), `{{mode}}`, `{{scratch}}` — and an unknown one is a startup error, never
+raw braces on the wire. It is **request-scoped**: seeded into the
 request projection at position 0 and never committed to the conversation, so it appears in no
 history and in no Session record, and a Mechanism's directives and the Model profile's rendered
 tool menu fold in **after** it within that one message, as does the engine's
 **Orientation block** (prompt → orientation → context files → directives → tool block). A
 **Sub-agent inherits** it. Distinct from apogee's two **internal** prompts, which it never
-reaches by construction: the Compaction summariser's instruction and the probe battery's. See
-[ADR 0023](docs/adr/0023-the-system-prompt-is-a-configured-template-rendered-per-request.md).
+reaches by construction: the Compaction summariser's instruction and the probe battery's. It is
+**config-tier**, part of the Bypass floor in both arms, never a Mechanism — and which home a new
+sentence of guidance belongs in (host fact → Orientation block, standing steering → this template,
+model-gated and measured → Mechanism, task-shaped → Skill) is ADR 0064's placement rule. See
+[ADR 0023](docs/adr/0023-the-system-prompt-is-a-configured-template-rendered-per-request.md) and
+[ADR 0064](docs/adr/0064-the-system-prompt-ships-an-embedded-default.md).
 _Avoid_: "persona", "preamble" (either may be its *content*; the term names the channel),
 "prompt" alone (in TUI speech that is the user's own input line), "instructions block" (that is
 the profile's engine-owned tool menu, which follows it). Distinct from a **Skill**, which is

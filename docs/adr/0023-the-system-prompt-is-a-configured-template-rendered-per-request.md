@@ -71,8 +71,10 @@ another machine, would make the travelling config of §2 unusable everywhere els
 precedent), so a Go embedder's typo fails construction loudly instead of shipping raw braces to the
 model; the host-side check fires first for config users and names the config key.
 
-**4. The template language is exactly three placeholders, strictly spelled, and closed.**
-`{{workspace}}` (the absolute workspace path), `{{datetime}}`, `{{mode}}` (the autonomy mode label).
+**4. The template language is exactly four placeholders, strictly spelled, and closed.**
+`{{workspace}}` (the absolute workspace path), `{{datetime}}`, `{{mode}}` (the autonomy mode label),
+`{{scratch}}` (the session scratch dir, joined with
+[ADR 0056](0056-terminal-fail-fast-and-session-scratch.md) §3).
 Nothing else, and the set is **closed by decision**, not pending expansion — every placeholder is a
 promise the engine must keep rendering. Three properties are load-bearing:
 
@@ -80,7 +82,7 @@ promise the engine must keep rendering. Three properties are load-bearing:
   first system message every turn and throw away the prefix KV cache a local llama.cpp server
   relies on; a date is stable within a day, which is the resolution the model actually needs.
 - **Spelling is strict**: `{{ workspace }}`, `{{WORKSPACE}}` and `{{foo}}` are all *unknown
-  placeholders* and all are a **startup error listing the known three** — never silent literals
+  placeholders* and all are a **startup error listing the known four** — never silent literals
   shipped to the model, because raw braces in a system prompt are exactly the kind of defect a
   small model copies rather than questions. Stray or unclosed braces are not placeholders and pass
   through verbatim.
@@ -93,11 +95,12 @@ startup) and the engine (`internal/agent`, rendering per request) share one impl
 import cycle and one error wording.
 
 **5. `Config.SystemPrompt` carries the TEMPLATE; the Agent supplies the render inputs.** The field
-is the validated template, never a rendered string, because two of the three inputs are **live**:
-the autonomy mode changes on a Shift+Tab, and the date changes at midnight in a long-running
-session. All three inputs already sit on the Agent — `cfg.WorkspaceDir`, the lock-guarded `Mode()`,
-and a new injectable `now func() time.Time` (the `sessionHost.now` shape) — so rendering is a
-private method, not a public render-provider seam with exactly one implementation.
+is the validated template, never a rendered string, because three of the four inputs are **live**:
+the autonomy mode changes on a Shift+Tab, the date changes at midnight in a long-running session,
+and the session scratch dir moves at a session boundary. All four inputs already sit on the Agent —
+`cfg.WorkspaceDir`, the lock-guarded `Mode()`, the lock-guarded `ScratchDir()`, and a new injectable
+`now func() time.Time` (the `sessionHost.now` shape) — so rendering is a private method, not a
+public render-provider seam with exactly one implementation.
 
 **6. Seeding is at `buildRequest`, position 0 — one system message, in one fixed order.** The
 rendered prompt is prepended to the message projection before `domain.NewRequest` is built, which
@@ -303,3 +306,30 @@ Riding directly after the prompt means no workspace text ever precedes the host 
 is untouched: the empty check is still taken on the two configured sources *before* the block is
 composed in, so "no prompt AND no context files" still seeds nothing. The fence around the blocks
 is [ADR 0026](0026-workspace-context-files-are-session-scoped-prompt-data.md)'s own 2026-08-26 addendum.
+
+## Amendment (2026-08-31) — §8's "no compiled-in fallback" is SUPERSEDED by ADR 0064
+
+[ADR 0064](0064-the-system-prompt-ships-an-embedded-default.md) ships the default template
+**embedded in the binary**, so two pieces of this record no longer hold and are explicitly
+superseded:
+
+- **§8's rule** that "there is deliberately **no compiled-in fallback**: the default lives in the
+  file the user can read and edit, deleting the key is how you turn it off, and an upgrade
+  therefore changes nothing for anyone already running". The rest of §8 stands — the shipped
+  template still sets exactly one system-prompt key and every other key still parses to nothing —
+  except that the key it seeds is now **commented out**, so a fresh install runs on the embedded
+  default rather than on a copy of it.
+- **The rejected alternative** "*A compiled-in default prompt* (a fallback used whenever the key is
+  absent)". Its two objections are answered rather than dismissed: the behaviour change on upgrade
+  is opted out of with `use-default-prompt: false`, and the text is read and edited through the
+  settings editor, which pre-fills it. The evidence §8 did not have is that a seeded file is frozen
+  per install, so the default could not be improved for anyone already running — the same gap this
+  ADR's own 2026-08-25 amendment named when it moved host **facts** into the orientation block.
+
+Resolution is now a four-rung ladder — a matching `system-prompt-models` entry > top-level
+`system-prompt-text`/`system-prompt-file` > the embedded default when `use-default-prompt` is not
+`false` > nothing — with §2's whole-entry replacement unchanged all the way down. §6's "`""` seeds
+**nothing**" anchor is untouched as a rule but is now **reached only** through
+`use-default-prompt: false` or an explicitly empty configured template: a stock run seeds a system
+message. Everything else above — the placeholder language, per-request rendering, position-0
+seeding, sub-agent inheritance, the restore-seam normalization — is unchanged.
