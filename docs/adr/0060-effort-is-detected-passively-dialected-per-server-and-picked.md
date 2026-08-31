@@ -131,6 +131,14 @@ gate, the footer segment, the picker rows and the override-clear are all host po
 fact that must reach the engine is the wire **dialect**, and it travels the channel the output
 cap already uses: the composition-root rebind spec, into a private Agent field, onto
 `provider.Request`. Intent stays semantic at the seam, expression stays in the Client.
+*Amended 2026-08-31:* the dialect now reaches the engine through a SECOND channel alongside the
+rebind spec — the **Delegation target**
+([ADR 0045](0045-sub-agents-route-to-the-flagged-server-with-its-own-posture.md)), which carries
+the Sub-agent server's own dialect to a routed child, because decision 3 makes the dialect a
+property of the server and a routed child is on another one (a target naming none leaves the
+child on the parent's). Both channels are composition-root ▸ engine, and the dialect is still
+the ONLY effort fact that crosses: the reported set, the reported default and `Mandatory` stay
+host-side under this decision's own rule.
 
 ## Considered and rejected
 
@@ -166,7 +174,7 @@ cap already uses: the composition-root rebind spec, into a private Agent field, 
   becomes a picker and gains the narrow clear-on-switch exception.
 - `provider.Discover` reports an `EffortSupport` observation (supported, dialect, levels,
   default) on `ModelInfo`; it rides the Beat to the TUI and the dialect rides the rebind spec
-  to the engine.
+  to the engine — and, since 2026-08-31, the Delegation target to a routed child (ADR 0045).
 - `servers:` entries gain `effort-dialect:`; `CONTEXT.md`'s Thinking-effort entry and the
   configuration and commands manual pages state the widened vocabulary, the three dialects, the
   footer readout and the picker.

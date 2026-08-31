@@ -184,7 +184,11 @@ to**, so a cheap grunt model does delegated work while a smarter model orchestra
 one entry may carry the flag (a second is a startup error). The flagged entry may also carry
 the children's **posture** — `bypass:` and `mechanisms:` overrides that apply to every child
 *routed there* (present key replaces whole, absent key inherits the parent's live value;
-where the *parent* runs is irrelevant). No flag anywhere means today's behavior: children
+where the *parent* runs is irrelevant). Delegations there also speak that server's own
+[Thinking-effort](#identity-and-shape) **wire dialect** — its `effort-dialect:` pin, else
+what it advertises — because the dialect is a property of the server a request lands on; an entry
+that names neither leaves its delegates speaking the SESSION server's dialect, and apogee says so
+once when routing engages. No flag anywhere means today's behavior: children
 share the parent's Upstream. Ratified 2026-08-11
 ([ADR 0045](docs/adr/0045-sub-agents-route-to-the-flagged-server-with-its-own-posture.md)).
 _Avoid_: "grunt server" (colloquial), "worker server", "delegation server" (the config key
@@ -193,8 +197,10 @@ says `sub-agents:`).
 **Delegation target**:
 The engine-side latched spec a sub-agent spawn reads to build its own Upstream: the
 Sub-agent server's endpoint and key plus its *observed* facts — model, per-slot window,
-Parallel-agents cap, model profile — kept fresh by a second heartbeat monitor and pinned by
-the entry's `model:` / `context-window:` where set. Mutex-read at spawn (never idle-gated:
+Parallel-agents cap, model profile, **effort dialect** — kept fresh by a second heartbeat monitor
+and pinned by the entry's `model:` / `context-window:` / `effort-dialect:` where set. A fact the
+target names is what the routed child gets; a fact it names *not at all* falls back to the
+parent's (the dialect, like the window). Mutex-read at spawn (never idle-gated:
 beats land mid-Exchange; each spawn snapshots). An **unusable** target (no beat yet, server
 down, no model) is not an error: the spawn **falls back** to the parent's Upstream *and*
 parent posture, with one notice per routing state change. Ratified 2026-08-11 (ADR 0045).

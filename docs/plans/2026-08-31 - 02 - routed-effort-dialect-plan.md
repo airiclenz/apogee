@@ -265,7 +265,11 @@ excluded override emits both notes in a stable order.
 
 `feat(tui): a note says when the bound model cannot disable reasoning`
 
-## 5. ADR 0045 names the effort dialect among what routing replaces
+## 5. ADR 0045 names the effort dialect among what routing replaces — ✅ DONE (2026-08-31)
+
+NOTES (2026-08-31): both guard greps were run and every hit settled. Amended: ADR 0060 D9 (`:127-133`, the "only the dialect enters the engine" claim, which now names the Delegation target as a second composition-root ▸ engine channel while keeping the ONLY-effort-fact claim) and its Consequences `EffortSupport` bullet. Confirmed still true and left alone: ADR 0044:100 (rebind spec carrying the model profile, not a dialect claim), ADR 0011:179 and ADR 0036:34 ("all four" in unrelated senses), ADR 0045:14 (the per-server Parallel-agents cap, context prose not an enumeration), CONTEXT.md:113 (the routed window fallback), `internal/agent/subagent.go:368` and `internal/agent/delegationtarget.go:50` (window comments; item 2 already carried the dialect into that file's header enumeration). Archived plan docs and this run's own plan document were left as historical records.
+NOTES (2026-08-31): CONTEXT.md's Thinking-effort entry (`:375-400`) asserts nothing about routing or the sole channel, so it gained no edit; the dialect link added to the Sub-agent server entry points at `#identity-and-shape`, the section that entry actually lives under.
+NOTES (2026-08-31): the manual paragraph quotes the advice note verbatim from `dialectAdvice` (`cmd/apogee/delegation.go:355`) with the page's own example server name `rented-box` in the `<server>` slot.
 
 Depends on item 2.
 

@@ -51,8 +51,10 @@ the flagged server changes nothing about what its children run with.
 **3 — A second heartbeat monitor observes the flagged server; its facts latch as the
 Delegation target.** Same beat machinery as the session's own monitor (ADR 0024's
 one-code-path rule — no second discovery idiom). Observations latch an engine-side
-**Delegation target** spec: endpoint, key, model, per-slot window, Parallel-agents cap, and
-the model profile resolved for the OBSERVED model via the per-model resolution (ADR 0044).
+**Delegation target** spec: endpoint, key, model, per-slot window, Parallel-agents cap, the
+server's thinking-**effort dialect** (the wire shape ADR 0060 detects per server; amended
+2026-08-31 — see the Consequences), and the model profile resolved for the OBSERVED model via
+the per-model resolution (ADR 0044).
 The entry's `model:` stays a pin, and the entry GROWS a `context-window:` pin (the
 `parallel-agents` idiom; a cloud server reports nothing, so the pins are how one is usable
 at all). The latch is mutex-read at spawn and never idle-gated — beats land mid-Exchange,
@@ -115,7 +117,16 @@ the rest — the first debugging clue when routing surprises.
 - `ServerEntry` grows `sub-agents:`, `bypass:`, `mechanisms:`, and `context-window:`;
   `ValidateServers` grows the two-flags and posture-on-unflagged refusals.
 - The engine gains the Delegation-target latch and its setter; `newChildAgent` consults it
-  for upstream, window, profile, and posture instead of inheriting all four from the parent.
+  for upstream, window, profile, posture, and the **effort dialect** instead of inheriting all
+  five from the parent. *Amended 2026-08-31 — this record originally said "all four", before
+  the dialect existed; that enumeration is superseded, not merely extended.*
+  [ADR 0060](0060-effort-is-detected-passively-dialected-per-server-and-picked.md) decision 3
+  makes the thinking-effort wire dialect a property of the SERVER, and a routed child is on
+  another server, so a child that inherited the ORCHESTRATOR's dialect sent its compaction
+  summariser's "no reasoning" request in a shape the routed server does not read: the fold
+  spent its whole output cap on reasoning and faulted at every Turn boundary. A target that
+  NAMES no dialect — the entry pins none and the server advertises none — still leaves the
+  child on the parent's, so the fix adds a rung rather than moving the floor.
 - CONTEXT.md's Sub-agent claim "its context window is not reduced" becomes conditional on
   routing — the child works against the TARGET's window once routed.
 - The per-model-profiles plan (`docs/plans/2026-08-11 - 05`) must execute before this

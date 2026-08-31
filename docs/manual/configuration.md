@@ -587,6 +587,20 @@ run says which model it ran on. If that server's API key cannot be resolved,
 delegations fall back to the session's own server and the reason is reported
 once.
 
+Sub-agents there also ask for thinking effort the way that server understands
+it — the entry's `effort-dialect:` if it names one, else whatever the server
+advertises. A flagged server that advertises no dialect and pins none is the
+one gap: its delegates keep speaking the *session* server's dialect, so a
+sub-agent's request to think less can go out in a shape the flagged server
+never reads — most visibly when a long sub-agent run compacts and its summary
+comes back as reasoning and nothing else. apogee tells you once when it routes
+there:
+
+    sub-agents: rented-box advertises no thinking-effort dialect — delegates there speak this session's; set effort-dialect: on its entry
+
+Adding `effort-dialect:` to the flagged entry — the same key, the same
+values as above — is the fix.
+
 **`server:` keeps itself current.** Every `/server` switch onto a listed entry
 splices `server: <name>` back into the file — that one key, your comments and layout
 untouched — so your next start begins where you left off. A move onto a server the
