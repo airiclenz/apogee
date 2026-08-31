@@ -330,8 +330,10 @@ func TestExpandedBlockPaintsItsWholeBody(t *testing.T) {
 				tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "write_file",
 					Arguments: []byte(`{"path":"notes.txt","content":"alpha\nbeta\ngamma\ndelta"}`)}})
 			},
-			wantCount:    "+4 more lines",
-			wantExpanded: []string{"    + alpha", "    + beta", "    + gamma", "    + delta"},
+			wantCount: "+4 more lines",
+			// The rows are numbered: a write's body states the whole AFTER file, so its lines carry
+			// their 1..N numbers in the gutter, which widens the paint's lead past the bare indent.
+			wantExpanded: []string{"    1 + alpha", "    2 + beta", "    3 + gamma", "    4 + delta"},
 		},
 	}
 	for _, tc := range cases {

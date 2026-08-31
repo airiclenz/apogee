@@ -355,6 +355,46 @@ func appendTagged(body []detailLine, lines []string, tag string, kind detailKind
 	return body
 }
 
+// numberedBody is the wrapper the two FILE-CONTENT bodies put over changedLines' output: it
+// numbers the inserted lines 1..N in each line's Gutter, right-aligned to the width of the widest
+// number through the body's own sizing rule (stackedGutter), so an announced write and the stacked
+// reading that replaces it when the result lands agree about where the number column sits.
+//
+// It wraps rather than folds into changedLines because the two find-and-replace bodies share that
+// renderer and must stay UNNUMBERED: a needle's position in the file is unknown until the tool has
+// run, and so is a patch hunk's (apogee's patch dialect writes "@@" with no ranges, patchOpener).
+// What a write or a full-content edit says, by contrast, is the whole AFTER file, whose numbering
+// is 1..N by construction — and those announce-time numbers are re-read as the recorded regions'
+// real ones when the result arrives (domain.EditRegions), which is the reading being replaced, not
+// a flicker.
+//
+// The number lands in Gutter and never at the head of Text: Text keeps its "+ " marker so the clip
+// still takes the tail, and the diff kind's band still tints Text alone (ADR 0052's 2026-08-19
+// amendment, stackedRow.line).
+func numberedBody(body []detailLine) []detailLine {
+	inserted := 0
+	for _, line := range body {
+		if line.Kind == detailDiffAdded {
+			inserted++
+		}
+	}
+	if inserted == 0 {
+		return body
+	}
+	gutter := stackedGutter([]stackedRow{{number: inserted}})
+	numbered := make([]detailLine, len(body))
+	number := 0
+	for i, line := range body {
+		numbered[i] = line
+		if line.Kind != detailDiffAdded {
+			continue
+		}
+		number++
+		numbered[i].Gutter = fmt.Sprintf("%*d ", gutter, number)
+	}
+	return numbered
+}
+
 // ----------------------------------------------------------------------------
 // git_diff_range — the regions of git's own unified diff
 // ----------------------------------------------------------------------------
@@ -839,7 +879,7 @@ func fileEditBody(args map[string]any) []detailLine {
 	if isPatchArgument(content) {
 		return changedLines(patchEditPairs(content))
 	}
-	return changedLines([]editPair{replacedText("", content)})
+	return numberedBody(changedLines([]editPair{replacedText("", content)}))
 }
 
 // patchOpener matches the "*** Begin Patch" marker edit_existing_file's patch form opens with,
@@ -907,5 +947,5 @@ func writtenLines(args map[string]any) []detailLine {
 	if !ok {
 		return nil
 	}
-	return changedLines([]editPair{replacedText("", content)})
+	return numberedBody(changedLines([]editPair{replacedText("", content)}))
 }

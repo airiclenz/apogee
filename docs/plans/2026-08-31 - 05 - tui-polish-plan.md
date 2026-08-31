@@ -122,7 +122,10 @@ sentences that spell it, `internal/domain/doc.go:72` ("its eight variants") and
 `internal/domain/toolsummary.go:41` ("the eight below").
 `refactor(domain): retire WroteBytes now that write_file records regions`
 
-## 3. The write and full-content edit bodies carry line numbers
+## 3. The write and full-content edit bodies carry line numbers — ✅ DONE (2026-08-31)
+
+NOTES (2026-08-31): the wrapper is named `numberedBody`, not the item's `numberedLines` — `numberedLines` is already a test helper in `internal/tui/render_test.go:359` and renaming an existing identifier is out of scope.
+NOTES (2026-08-31): `internal/tui/splitdiff_test.go` (listed under the item's Files) needed no edit — its `TestStacked…` gutter pins pass unchanged; the item's Files list names it as a pin that must still hold, which it does.
 
 **What.** `writtenLines` (`internal/tui/diffbody.go:905`) and the full-content branch of
 `fileEditBody` (`diffbody.go:834`) number their `+` lines 1..N in each line's `Gutter`

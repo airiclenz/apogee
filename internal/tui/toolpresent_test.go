@@ -1220,6 +1220,97 @@ func TestWriteCallCarriesTheWrittenLines(t *testing.T) {
 	}
 }
 
+// gutterColumn is a body's number column, one entry per line — empty on every line carrying no
+// number — so a test can state both what a numbered body shows and that an unnumbered one shows
+// nothing at all.
+func gutterColumn(t *testing.T, tv toolView) []string {
+	t.Helper()
+	out := make([]string, 0, tv.Details.len())
+	for _, d := range tv.Details.all() {
+		out = append(out, d.Gutter)
+	}
+	return out
+}
+
+// TestWriteBodyNumbersEveryLineItStates: what a write asks for is the whole AFTER file, whose
+// numbering is 1..N by construction, so every line of its body wears the number it will sit on.
+// The number is the line's chrome GUTTER, right-aligned across the body to the width of the widest
+// of them; the "+ " marker and the text it tags stay exactly where they were, which is what keeps
+// the clip taking the tail and the green band tinting the text alone.
+func TestWriteBodyNumbersEveryLineItStates(t *testing.T) {
+	short := presentToolCall(domain.ToolCall{ID: "1", Tool: "write_file",
+		Arguments: []byte(`{"path":"notes.txt","content":"alpha\nbeta\ngamma"}`)}, "", workspaceRoot{})
+
+	if got, want := gutterColumn(t, short), []string{"1 ", "2 ", "3 "}; !slices.Equal(got, want) {
+		t.Errorf("gutters = %q, want the written lines numbered %q", got, want)
+	}
+	if got, want := changedBody(t, short), []string{"+ alpha", "+ beta", "+ gamma"}; !slices.Equal(got, want) {
+		t.Errorf("text = %q, want the marker and the line untouched: %q", got, want)
+	}
+
+	const lines = 12 // two digits, so a body-wide width is the only thing that can align the column
+	content := strings.TrimSuffix(strings.Repeat("x\\n", lines), "\\n")
+	long := presentToolCall(domain.ToolCall{ID: "2", Tool: "write_file",
+		Arguments: []byte(`{"path":"notes.txt","content":"` + content + `"}`)}, "", workspaceRoot{})
+
+	gutters := gutterColumn(t, long)
+	if len(gutters) != lines {
+		t.Fatalf("body has %d lines, want all %d written ones", len(gutters), lines)
+	}
+	if gutters[0] != " 1 " || gutters[lines-1] != "12 " {
+		t.Errorf("gutters run %q … %q, want them right-aligned to width 2", gutters[0], gutters[lines-1])
+	}
+}
+
+// TestEditCallsNumberOnlyTheFullContentBody: a number is a claim about WHERE a line lands, so only
+// the body that knows makes it. edit_existing_file's full-content form states the whole after file
+// and is numbered 1..N like a write; its patch form is not (apogee's dialect writes "@@" with no
+// ranges, so a hunk's position is the applier's to find), and neither are the two find-and-replace
+// bodies (a needle's position is unknown until the tool has run). Those three read byte-identically
+// to the bodies they always drew.
+func TestEditCallsNumberOnlyTheFullContentBody(t *testing.T) {
+	cases := []struct {
+		name string
+		call domain.ToolCall
+		want []string
+	}{
+		{
+			name: "edit_existing_file: full replacement content is numbered 1..N",
+			call: domain.ToolCall{ID: "1", Tool: "edit_existing_file",
+				Arguments: []byte(`{"path":"main.go","content":"package main\n\nfunc main() {}\n"}`)},
+			want: []string{"1 ", "2 ", "3 "},
+		},
+		{
+			name: "edit_existing_file: a patch's hunks carry no numbers",
+			call: domain.ToolCall{ID: "2", Tool: "edit_existing_file",
+				Arguments: []byte(`{"path":"main.go","content":"*** Begin Patch\n*** Update File: main.go\n` +
+					`@@\n ctx\n-old one\n+new one\n*** End Patch"}`)},
+			want: []string{"", ""},
+		},
+		{
+			name: "single_find_and_replace carries no numbers",
+			call: domain.ToolCall{ID: "3", Tool: "single_find_and_replace",
+				Arguments: []byte(`{"path":"main.go","oldText":"one\ntwo","newText":"uno\ndos"}`)},
+			want: []string{"", "", "", ""},
+		},
+		{
+			name: "multi_find_and_replace carries no numbers",
+			call: domain.ToolCall{ID: "4", Tool: "multi_find_and_replace",
+				Arguments: []byte(`{"path":"main.go","replacements":[` +
+					`{"oldText":"first","newText":"1st"},{"oldText":"second","newText":"2nd"}]}`)},
+			want: []string{"", "", "", ""},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tv := presentToolCall(tc.call, "", workspaceRoot{})
+			if got := gutterColumn(t, tv); !slices.Equal(got, tc.want) {
+				t.Errorf("gutters = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 // A call whose path does not point where it reads says so on the branch row, beside the argument
 // rather than instead of it: the model's `path` stays on the screen as written and where the write
 // really lands follows it. The row is where it has to be — a targeted block hides its BODY whole
