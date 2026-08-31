@@ -148,7 +148,22 @@ layer is untouched; only its subtest name and comment gain the dispatch refusal.
 
 **Commit:** `fix(agent): a call that answers one parameter twice is refused`
 
-## 3. Streamed tool calls accumulate by their wire index
+## 3. Streamed tool calls accumulate by their wire index — ✅ DONE (2026-08-31)
+
+NOTES (2026-08-31): the item's tests drive raw SSE through the existing `sseServer` helper as the
+item's Tests: line prescribes; the coding-standards `testing.go` rule preferring `internal/stubllm`
+yields here, since stubllm cannot emit the index-bearing, id-repeating and index-only fragment
+shapes these cases pin.
+
+NOTES (2026-08-31): verified the new tests bite — stashing only the two source files leaves
+`InterleavedIndexedToolCallsStayApart`, `ToolCallsEmitInIndexOrder`, `RepeatedIDContinuesOneCall`,
+`InBandErrorDropsEveryAccumulatedCall` and `ToolCallSizeCapSumsAcrossCalls` failing at `07daba40`;
+`FlushesOpenCallsWithoutDone` and `IndexOnlyFragmentOpensNothing` pin preserved behaviour and pass
+both sides by design.
+
+NOTES (2026-08-31): gofmt re-aligned the four neighbouring constants in `internal/provider/client.go`'s
+const block when `maxToolCallBytes` gained its doc comment — a formatter consequence of the amended
+comment, not a hand edit.
 
 **What:** Recast at the regression check (2026-08-31). `internal/provider/stream.go` accumulates
 streamed tool-call fragments with no notion of `index` at all — the rule is "a fragment with an id

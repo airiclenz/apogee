@@ -15,11 +15,15 @@ import (
 )
 
 const (
-	defaultChatPath  = "/v1/chat/completions"
-	modelsPath       = "/v1/models"
-	propsPath        = "/props"
-	maxErrorLength   = 500
-	maxToolCallBytes = 1 << 20 // 1 MiB — cap on accumulated streamed tool-call arguments
+	defaultChatPath = "/v1/chat/completions"
+	modelsPath      = "/v1/models"
+	propsPath       = "/props"
+	maxErrorLength  = 500
+
+	// maxToolCallBytes caps the argument bytes one streamed reply accumulates across ALL of
+	// its tool calls, not one call each: a server opening call after call cannot multiply the
+	// bound by their number.
+	maxToolCallBytes = 1 << 20 // 1 MiB
 
 	// maxErrorBodyBytes caps how much of a non-2xx body is read before it is classified. The
 	// request timeouts default to 0, so a hostile or broken upstream answering a multi-GB
@@ -37,8 +41,9 @@ const (
 	maxReplyTextBytes = 8 << 20
 
 	// maxResponseBodyBytes caps a NON-streamed 200 body, which must hold the same reply text
-	// as a stream plus one maxToolCallBytes tool call plus metadata. A body cut at the limit
-	// fails the JSON decode and surfaces as the existing decode error — no error kind of its own.
+	// as a stream plus the maxToolCallBytes its whole tool-call set may sum to, plus metadata.
+	// A body cut at the limit fails the JSON decode and surfaces as the existing decode
+	// error — no error kind of its own.
 	maxResponseBodyBytes = 16 << 20
 
 	// topLogProbsCount is how many alternatives a Request that asks for LogProbs requests per

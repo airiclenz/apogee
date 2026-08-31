@@ -183,6 +183,225 @@ func TestStream_TerminatesWithoutDone(t *testing.T) {
 	}
 }
 
+// streamKindsAndCalls splits a drained stream into the delta kinds in arrival order and the
+// tool calls those deltas carried, so a test can assert both the content and the ordering.
+func streamKindsAndCalls(t *testing.T, deltas []Delta) ([]DeltaKind, []ToolCall) {
+	t.Helper()
+
+	kinds := make([]DeltaKind, 0, len(deltas))
+	var calls []ToolCall
+	for i := range deltas {
+		kinds = append(kinds, deltas[i].Kind)
+		if deltas[i].Kind == DeltaToolCall {
+			calls = append(calls, *deltas[i].ToolCall)
+		}
+	}
+	return kinds, calls
+}
+
+// assertCall fails unless a tool call carries exactly this id, name and joined arguments.
+func assertCall(t *testing.T, got ToolCall, id, name, args string) {
+	t.Helper()
+
+	if got.ID != id || got.Function.Name != name || got.Function.Arguments != args {
+		t.Errorf("call = %+v, want id %q name %q args %q", got, id, name, args)
+	}
+}
+
+// TestStream_InterleavedIndexedToolCallsStayApart pins the shape the pre-index accumulator
+// mis-joined: two parallel calls whose argument fragments arrive interleaved. Keyed by wire
+// index each keeps its own arguments; keyed by arrival order the second call's id would have
+// flushed the first mid-arguments and the tail of call 0 would have landed on call 1.
+func TestStream_InterleavedIndexedToolCallsStayApart(t *testing.T) {
+	t.Parallel()
+
+	const body = `data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"tc_a","function":{"name":"grep","arguments":"{\"q\":"}}]}}]}
+
+data: {"choices":[{"delta":{"tool_calls":[{"index":1,"id":"tc_b","function":{"name":"read","arguments":"{\"p\":"}}]}}]}
+
+data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"x\"}"}}]}}]}
+
+data: {"choices":[{"delta":{"tool_calls":[{"index":1,"function":{"arguments":"\"y\"}"}}]}}]}
+
+data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}
+
+data: [DONE]
+
+`
+	srv := sseServer(body)
+	defer srv.Close()
+
+	kinds, calls := streamKindsAndCalls(t, collectStream(NewClient(srv.URL, "m"), Request{}))
+	if len(calls) != 2 {
+		t.Fatalf("tool calls = %+v, want two", calls)
+	}
+	assertCall(t, calls[0], "tc_a", "grep", `{"q":"x"}`)
+	assertCall(t, calls[1], "tc_b", "read", `{"p":"y"}`)
+
+	// Every call reaches the consumer before the terminal Done, exactly as it did when calls
+	// were flushed mid-stream.
+	want := []DeltaKind{DeltaToolCall, DeltaToolCall, DeltaDone}
+	if !reflect.DeepEqual(kinds, want) {
+		t.Errorf("delta kinds = %v, want %v", kinds, want)
+	}
+}
+
+// TestStream_ToolCallsEmitInIndexOrder pins the emission order: the wire index orders the
+// calls, not the order the server happened to open them in.
+func TestStream_ToolCallsEmitInIndexOrder(t *testing.T) {
+	t.Parallel()
+
+	const body = `data: {"choices":[{"delta":{"tool_calls":[{"index":2,"id":"tc_late","function":{"name":"read","arguments":"{}"}}]}}]}
+
+data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"tc_early","function":{"name":"grep","arguments":"{}"}}]}}]}
+
+data: [DONE]
+
+`
+	srv := sseServer(body)
+	defer srv.Close()
+
+	_, calls := streamKindsAndCalls(t, collectStream(NewClient(srv.URL, "m"), Request{}))
+	if len(calls) != 2 {
+		t.Fatalf("tool calls = %+v, want two", calls)
+	}
+	if calls[0].ID != "tc_early" || calls[1].ID != "tc_late" {
+		t.Errorf("call ids = %q, %q, want tc_early, tc_late (ascending index)", calls[0].ID, calls[1].ID)
+	}
+}
+
+// TestStream_RepeatedIDContinuesOneCall covers the server that repeats the call's id on every
+// fragment and sends no index: that is one call, not one per fragment.
+func TestStream_RepeatedIDContinuesOneCall(t *testing.T) {
+	t.Parallel()
+
+	const body = `data: {"choices":[{"delta":{"tool_calls":[{"id":"tc_1","function":{"name":"grep","arguments":"{\"q\":"}}]}}]}
+
+data: {"choices":[{"delta":{"tool_calls":[{"id":"tc_1","function":{"arguments":"\"x\""}}]}}]}
+
+data: {"choices":[{"delta":{"tool_calls":[{"id":"tc_1","function":{"arguments":"}"}}]}}]}
+
+data: [DONE]
+
+`
+	srv := sseServer(body)
+	defer srv.Close()
+
+	_, calls := streamKindsAndCalls(t, collectStream(NewClient(srv.URL, "m"), Request{}))
+	if len(calls) != 1 {
+		t.Fatalf("tool calls = %+v, want one joined call", calls)
+	}
+	assertCall(t, calls[0], "tc_1", "grep", `{"q":"x"}`)
+}
+
+// TestStream_FlushesOpenCallsWithoutDone pins the second terminal path: a server that closes
+// the connection without [DONE] still hands over the calls it opened, before the synthesised
+// Done.
+func TestStream_FlushesOpenCallsWithoutDone(t *testing.T) {
+	t.Parallel()
+
+	const body = `data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"tc_1","function":{"name":"grep","arguments":"{\"q\":"}}]}}]}
+
+data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"x\"}"}}]}}]}
+
+`
+	srv := sseServer(body)
+	defer srv.Close()
+
+	kinds, calls := streamKindsAndCalls(t, collectStream(NewClient(srv.URL, "m"), Request{}))
+	if len(calls) != 1 {
+		t.Fatalf("tool calls = %+v, want one flushed call", calls)
+	}
+	assertCall(t, calls[0], "tc_1", "grep", `{"q":"x"}`)
+	want := []DeltaKind{DeltaToolCall, DeltaDone}
+	if !reflect.DeepEqual(kinds, want) {
+		t.Errorf("delta kinds = %v, want %v", kinds, want)
+	}
+}
+
+// TestStream_IndexOnlyFragmentOpensNothing pins the guard against manufacturing a nameless,
+// id-less call: an index-bearing fragment carrying neither, arriving when no call is open, is
+// dropped in silence — no delta of any kind, in particular no DeltaError. (internal/provider
+// imports no internal/domain, so the loop's ErrorEvent for such a call is not observable here;
+// the point is that no call reaches the loop to be reported at all.)
+func TestStream_IndexOnlyFragmentOpensNothing(t *testing.T) {
+	t.Parallel()
+
+	const body = `data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"q\":1}"}}]}}]}
+
+data: {"choices":[{"delta":{"content":"hi"}}]}
+
+data: [DONE]
+
+`
+	srv := sseServer(body)
+	defer srv.Close()
+
+	kinds, calls := streamKindsAndCalls(t, collectStream(NewClient(srv.URL, "m"), Request{}))
+	if len(calls) != 0 {
+		t.Errorf("tool calls = %+v, want none — the fragment names no call to open", calls)
+	}
+	want := []DeltaKind{DeltaContent, DeltaDone}
+	if !reflect.DeepEqual(kinds, want) {
+		t.Errorf("delta kinds = %v, want %v", kinds, want)
+	}
+}
+
+// TestStream_InBandErrorDropsEveryAccumulatedCall pins what buffering costs: an in-band fault
+// now discards every call of the reply, not only the one in progress. The second id-bearing
+// fragment is what makes the assertion bite — before this item it flushed the first call, so
+// a DeltaToolCall reached the consumer ahead of the fault.
+func TestStream_InBandErrorDropsEveryAccumulatedCall(t *testing.T) {
+	t.Parallel()
+
+	const body = `data: {"choices":[{"delta":{"tool_calls":[{"id":"tc_1","function":{"name":"grep","arguments":"{}"}}]}}]}
+
+data: {"choices":[{"delta":{"tool_calls":[{"id":"tc_2","function":{"name":"read","arguments":"{}"}}]}}]}
+
+data: {"error":{"message":"upstream died","code":502}}
+
+data: [DONE]
+
+`
+	srv := sseServer(body)
+	defer srv.Close()
+
+	kinds, calls := streamKindsAndCalls(t, collectStream(NewClient(srv.URL, "m"), Request{}))
+	if len(calls) != 0 {
+		t.Errorf("tool calls = %+v, want none — the reply is faulted, not partly usable", calls)
+	}
+	want := []DeltaKind{DeltaError}
+	if !reflect.DeepEqual(kinds, want) {
+		t.Errorf("delta kinds = %v, want %v", kinds, want)
+	}
+}
+
+// TestStream_ToolCallSizeCapSumsAcrossCalls pins the cap on the SUM: two calls each just over
+// half the limit trip it together, so a server cannot multiply maxToolCallBytes by the number
+// of calls it opens.
+func TestStream_ToolCallSizeCapSumsAcrossCalls(t *testing.T) {
+	t.Parallel()
+
+	half := strings.Repeat("a", maxToolCallBytes/2+1)
+	body := fmt.Sprintf(`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"tc_a","function":{"name":"grep","arguments":%q}}]}}]}
+
+data: {"choices":[{"delta":{"tool_calls":[{"index":1,"id":"tc_b","function":{"name":"read","arguments":%q}}]}}]}
+
+data: [DONE]
+
+`, half, half)
+	srv := sseServer(body)
+	defer srv.Close()
+
+	kinds, calls := streamKindsAndCalls(t, collectStream(NewClient(srv.URL, "m"), Request{}))
+	if len(calls) != 0 {
+		t.Errorf("tool calls = %d, want none past the cap", len(calls))
+	}
+	if len(kinds) != 1 || kinds[0] != DeltaError {
+		t.Fatalf("delta kinds = %v, want a single error", kinds)
+	}
+}
+
 func TestStream_ContextOverflow(t *testing.T) {
 	t.Parallel()
 
