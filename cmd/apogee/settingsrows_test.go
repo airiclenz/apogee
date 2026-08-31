@@ -181,11 +181,75 @@ func TestSettingsRowsCarryThePromptTextBesideItsSummary(t *testing.T) {
 		t.Errorf("row text = %q; want the prompt itself", row.Text)
 	}
 
+	// An unset prompt still reads blank on BOTH cells, though an unset key now resolves to the
+	// embedded default (ADR 0064 §1): this projection answers for the FILE, and it is the spelling
+	// the external-edit diff compares two reads of config.yaml in (settingsedit.go). The default is
+	// pre-filled one layer up, on the pane's own row feed (seedPromptEditor), so a config nobody
+	// wrote a prompt into never diffs as a prompt somebody wrote.
 	opts.SystemPrompt = config.SystemPromptSettings{}
 	blank := rowsByPath(t, settingsRows(opts))["system-prompt-text"]
 	if blank.Value != "" || blank.Text != "" {
 		t.Errorf("an unset prompt reads {%q %q}; want both blank — the row seeds a field, so no word "+
-			"stands in for emptiness", blank.Value, blank.Text)
+			"stands in for emptiness, and the embedded default is the pane feed's to add", blank.Value, blank.Text)
+	}
+}
+
+// The pane's own feed is where the embedded default reaches the editor: the field ⏎ opens over a
+// text row ([tui.SettingRow.Text]) starts from the prompt the session is actually sending rather
+// than from an empty buffer. Only that row's PROSE moves — the value cell still summarizes what the
+// config says — and only when nothing is written for it, since a seed stands where nothing was
+// written and never replaces what was.
+func TestSeedPromptEditorFillsOnlyTheUnwrittenPromptRow(t *testing.T) {
+	t.Parallel()
+
+	opts := fabricatedSettings()
+	opts.SystemPrompt = config.SystemPromptSettings{}
+	unset := settingsRows(opts)
+	seeded := rowsByPath(t, seedPromptEditor(unset, "seeded prose"))["system-prompt-text"]
+	if seeded.Text != "seeded prose" {
+		t.Errorf("an unset prompt row opens on %q; want the seed", seeded.Text)
+	}
+	if seeded.Value != "" {
+		t.Errorf("the seeded row's value cell reads %q; want the file's own answer, unmoved", seeded.Value)
+	}
+	if got := rowsByPath(t, unset)["system-prompt-text"]; got.Text != "" {
+		t.Errorf("the rows handed in came back carrying %q; the feed copies rather than writing "+
+			"through, so a projection a caller kept is never moved under it", got.Text)
+	}
+
+	// A prompt somebody wrote is never displaced by the default — the editor opens on their prose.
+	opts.SystemPrompt = config.SystemPromptSettings{Global: config.PromptSource{Text: "mine\n"}}
+	written := rowsByPath(t, seedPromptEditor(settingsRows(opts), "seeded prose"))["system-prompt-text"]
+	if written.Text != "mine\n" {
+		t.Errorf("a written prompt opens on %q; want the configured prose untouched", written.Text)
+	}
+
+	// And an empty seed seeds nothing at all: the holder answers that way whenever the global prompt
+	// IS set, `system-prompt-file` alone included, and the feed then hands the rows straight through.
+	opts.SystemPrompt = config.SystemPromptSettings{}
+	rows := settingsRows(opts)
+	if got := seedPromptEditor(rows, ""); !reflect.DeepEqual(got, rows) {
+		t.Error("an empty seed changed the rows; nothing to seed must leave the projection alone")
+	}
+}
+
+// The whole feed, from the settings holder to the row the pane paints: what /settings hands the
+// editor for an unset `system-prompt-text` is the embedded default's own bytes.
+func TestSettingsHostRowsSeedTheEditorWithTheEmbeddedDefault(t *testing.T) {
+	t.Parallel()
+
+	opts := fabricatedSettings()
+	opts.SystemPrompt = config.SystemPromptSettings{}
+	host := settingsHost{opts: opts, promptSeed: newLiveSettings(opts, nil).promptEditorSeed}
+	row := rowsByPath(t, host.Rows())["system-prompt-text"]
+	if row.Text != config.DefaultSystemPrompt() {
+		t.Errorf("the pane's prompt row opens on %q; want the embedded default verbatim", row.Text)
+	}
+
+	// A host composed without a settings holder — a Driver that wired no live settings (ADR 0031) —
+	// still gets the file's own answers, which is what "nothing to ask" honestly reads as.
+	if row := rowsByPath(t, settingsHost{opts: opts}.Rows())["system-prompt-text"]; row.Text != "" {
+		t.Errorf("a host with no prompt seam seeded %q; want the projection's own blank", row.Text)
 	}
 }
 

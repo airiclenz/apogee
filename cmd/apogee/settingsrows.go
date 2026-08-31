@@ -68,6 +68,8 @@ const settingKeyMechanisms = "mechanisms"
 const (
 	settingKeyMode               = "mode"
 	settingKeyConfineToWorkspace = "confine-to-workspace"
+	// And the row whose PROSE the pane seeds an editor from rather than shows (seedPromptEditor).
+	settingKeySystemPromptText = "system-prompt-text"
 )
 
 // settingSection is one header the pane groups rows under: a NAME and the registry path that opens
@@ -194,6 +196,35 @@ func overlayLiveSettings(rows []tui.SettingRow, live runningSettings) []tui.Sett
 		}
 	}
 	return overlaid
+}
+
+// seedPromptEditor pre-fills the `system-prompt-text` row's prose with the embedded default when
+// nothing is written for that key — the field ⏎ opens the multi-line editor over ([SettingRow.Text],
+// ADR 0037 decision 10), so what the human starts editing is the prompt the session is actually
+// sending instead of an empty buffer (ADR 0064 §1).
+//
+// It sits BESIDE the projection like overlayLiveSettings above, and for the same reason: this is the
+// pane's row feed, not the file's answer. settingsRows keeps its blank-when-unset contract, so the
+// external-edit diff (settingsedit.go) still compares two reads of config.yaml in the file's own
+// spelling and never mistakes a seeded field for a prompt somebody wrote.
+//
+// An empty seed seeds nothing — the settings holder answers that way whenever the global prompt IS
+// set, including by `system-prompt-file` alone — and a row that already carries prose is left alone,
+// because a seed is what stands where nothing was written and never what replaces it. Only the ROW's
+// prose moves: the value cell still summarizes what the config says, since the row's job is to
+// report the setting and the seed's is to open an editor.
+func seedPromptEditor(rows []tui.SettingRow, seed string) []tui.SettingRow {
+	if seed == "" {
+		return rows
+	}
+	seeded := make([]tui.SettingRow, len(rows))
+	copy(seeded, rows)
+	for i := range seeded {
+		if seeded[i].Path == settingKeySystemPromptText && seeded[i].Text == "" {
+			seeded[i].Text = seed
+		}
+	}
+	return seeded
 }
 
 // settingKind projects a registry kind onto the renderer's vocabulary. The two vocabularies are

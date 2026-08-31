@@ -2207,3 +2207,67 @@ func TestApplySettingSavesTheTopLevelResponseReserveWithoutMovingTheSession(t *t
 			base.ResponseReserve)
 	}
 }
+
+// The seed the `/settings` prompt editor opens on, and the one condition under which there is one:
+// the whole GLOBAL prompt is empty. `system-prompt-file` set beside a seeded text field would make
+// the very first ctrl+s commit a config the next resolution refuses — both keys set is an error —
+// so a file-only config seeds nothing and stays the config that works today.
+func TestPromptEditorSeedAnswersOnlyAnEmptyGlobalPrompt(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name   string
+		global config.PromptSource
+		want   string
+	}{
+		{"nothing configured", config.PromptSource{}, config.DefaultSystemPrompt()},
+		{"an inline prompt", config.PromptSource{Text: "mine\n"}, ""},
+		{"a prompt file", config.PromptSource{File: "prompt.md"}, ""},
+		{"both keys", config.PromptSource{Text: "mine\n", File: "prompt.md"}, ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			live := newLiveSettings(config.Options{
+				SystemPrompt: config.SystemPromptSettings{Global: c.global},
+			}, nil)
+			if got := live.promptEditorSeed(); got != c.want {
+				t.Errorf("promptEditorSeed() = %q; want %q", got, c.want)
+			}
+		})
+	}
+
+	// The answer is the SESSION's, not the launch snapshot's: a prompt installed mid-session stops
+	// the seeding from the moment it lands, which is what makes the row feed safe to re-ask per paint.
+	live := newLiveSettings(config.Options{}, nil)
+	live.setSystemPrompt(config.SystemPromptSettings{Global: config.PromptSource{File: "prompt.md"}}, true)
+	if got := live.promptEditorSeed(); got != "" {
+		t.Errorf("after a mid-session prompt file the seed is %q; want none", got)
+	}
+}
+
+// Saving what the editor was seeded with persists it: the seed is display-only until ctrl+s, and
+// from there it is explicit config like any other prompt. The embedded default is a multi-line
+// template full of `{{placeholders}}`, so the block-scalar writer has to carry it back byte for byte
+// — a prompt that came back re-indented or re-wrapped would be a prompt the human never wrote.
+func TestSeededPromptPersistsThroughTheSettingsWrite(t *testing.T) {
+	t.Parallel()
+
+	home := t.TempDir()
+	path := filepath.Join(home, "config.yaml")
+	if err := config.SaveConfigSetting(path, "system-prompt-text", config.DefaultSystemPrompt()); err != nil {
+		t.Fatalf("save the seeded prompt: %v", err)
+	}
+
+	resolved := config.Options{ConfigDir: home}
+	err := config.ApplyConfig(&resolved, func(string) bool { return false },
+		func(string) string { return "" }, os.ReadFile, func(string) {})
+	var undetermined *config.StartupUndetermined
+	if err != nil && !errors.As(err, &undetermined) {
+		t.Fatalf("ApplyConfig: %v", err)
+	}
+	if resolved.SystemPrompt.Global.Text != config.DefaultSystemPrompt() {
+		t.Errorf("the saved prompt reads back as %q; want the embedded default verbatim",
+			resolved.SystemPrompt.Global.Text)
+	}
+}

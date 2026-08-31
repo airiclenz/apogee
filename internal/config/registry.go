@@ -211,7 +211,10 @@ var KeyRegistry = []Key{
 		// The row shows how MUCH prose there is, since no row holds prose; Text carries the prose
 		// itself, which is what the editor opens on. Blank when nothing is set inline — the answer
 		// every row whose value seeds a field gives, since "none" would be a word standing where the
-		// prompt goes.
+		// prompt goes. Blank is also what the FILE says, and this projection answers for the file:
+		// the embedded default an unset key resolves to (ADR 0064 §1) is pre-filled into the editor
+		// by the pane's own row feed, one layer up, so that the diff two reads of config.yaml are
+		// compared in never reads a default nobody wrote as somebody's prompt.
 		Read: func(o Options) string { return countSummary(lineCount(o.SystemPrompt.Global.Text), "line") },
 		Text: func(o Options) string { return o.SystemPrompt.Global.Text },
 	},

@@ -428,6 +428,33 @@ func (s *liveSettings) setSystemPrompt(sp config.SystemPromptSettings, useDefaul
 	s.useDefaultPrompt = useDefault
 }
 
+// promptEditorSeed is the text the `/settings` pane's `system-prompt-text` editor OPENS on when
+// nothing has been written for it: the embedded default's own bytes (config.DefaultSystemPrompt,
+// ADR 0064 §1), so the human starts from the prompt this session is ACTUALLY sending rather than
+// from a blank field they would have to write a prompt into from nothing. The seed is DISPLAY-only
+// — no key is written and no resolution moves until ctrl+s commits it, at which point the text
+// becomes explicit config like any other prompt and replaces the default the way an explicit prompt
+// always does (ADR 0064 §2).
+//
+// It is answered here rather than by the registry row's `Text:` projection because the answer is
+// this SESSION's, not the file's: the row's blank-when-unset contract is what the external-edit
+// diff compares two reads of config.yaml in (settingsedit.go), and a projection that answered the
+// embedded default would make every unset config read as a prompt somebody wrote.
+//
+// The whole GLOBAL source has to be empty, not just the text key: `system-prompt-file` set beside a
+// seeded text field would make the very first ctrl+s commit a config the next resolution refuses —
+// both keys set is an error (config.ResolveSystemPrompt), and a config that works today must not be
+// walked into one that does not by a field apogee pre-filled. The two are read under one lock for
+// setSystemPrompt's reason: they are one prompt.
+func (s *liveSettings) promptEditorSeed() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.systemPrompt.Global.Text != "" || s.systemPrompt.Global.File != "" {
+		return ""
+	}
+	return config.DefaultSystemPrompt()
+}
+
 // setContextFilesEnable flips the `context-files:` off-switch and reports the names to install with
 // it. The pair is read and written under ONE lock because the engine takes it as a pair: an enable
 // that read the names outside the lock could install a half of one edit beside a half of another.
