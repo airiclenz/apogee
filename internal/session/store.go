@@ -105,20 +105,21 @@ type Meta struct {
 	UserMsgs     int       `json:"userMsgs"`
 	CtxUsed      int       `json:"ctxUsed,omitempty"` // last observed context fill, for the gauge relight
 	// Usage is the MAIN agent's cumulative token accounting as of this Save — the latest reading
-	// its Driver took off a UsageEvent, not a sum the store computed. It is restored on reopen, so
-	// a session says what it has spent instead of reporting nothing until its next completion. It
-	// stays main-agent-only, so the SESSION's spend is Usage + DelegateUsage and never this field
-	// alone. A delegate's per-run detail is not here either — that rides in the Driver's own
+	// its writer took off a UsageEvent (a Driver's, or internal/run's own tap on an unattended
+	// Firing), not a sum the store computed. It is restored on reopen, so a session says what it
+	// has spent instead of reporting nothing until its next completion. It stays main-agent-only,
+	// so the SESSION's spend is Usage + DelegateUsage and never this field alone. A delegate's per-run detail is not here either — that rides in the Driver's own
 	// transcript blob, on the run head each child filled — only its sum, in DelegateUsage below,
 	// does. Like ScheduleID above it is deliberately NOT a RecordVersion bump — a record written
 	// before it existed decodes to the zero Usage (a pre-feature session simply reports zero), and
 	// an older build ignores a key it cannot place.
 	Usage Usage `json:"usage,omitzero"`
-	// DelegateUsage is the sum of the latest reading of every sub-agent run head the Driver held at
-	// Save; zero when no delegate spent. It is kept BESIDE Usage rather than folded into it so the
-	// record answers both questions a session raises — what the conversation the human steered
-	// cost, and what the work it handed out cost — and so a reader that wants the session total
-	// adds the two deliberately rather than mistaking one for it. Like Usage it is compatible in
+	// DelegateUsage is the sum of the latest reading of every sub-agent run its writer held at
+	// Save — a Driver's run heads, or the finished runs internal/run.Once folds; zero when no
+	// delegate spent. It is kept BESIDE Usage rather than folded into it so the record answers
+	// both questions a session raises — what the conversation the human steered cost, and what
+	// the work it handed out cost — and so a reader that wants the session total adds the two
+	// deliberately rather than mistaking one for it. Like Usage it is compatible in
 	// both directions: an older record decodes to the zero Usage, an older build ignores the key.
 	DelegateUsage Usage `json:"delegateUsage,omitzero"`
 }

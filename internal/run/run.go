@@ -103,7 +103,9 @@ type Result struct {
 	// the whole run, compaction folds included. It is the spend beside Meta.CtxUsed's fill: the
 	// fill says how full the window ended, these totals say what the run cost to get there. A
 	// delegated run's spend is its own and is absent here (SubAgents carries it), so a
-	// session-wide figure is the sum a caller chooses to take across the two.
+	// session-wide figure is the sum across the two — which Once itself takes when it writes
+	// the record (Meta.Usage plus Meta.DelegateUsage), and a caller reading the Result takes
+	// for itself.
 	Usage Usage
 	// Err is the run's own error — the loop's failure, or the cancellation that stopped it
 	// before an answer. It is nil on a Firing that reached its answer, even one whose
@@ -117,9 +119,11 @@ type Result struct {
 // an observer that joined late — and it counts the maintenance work a Compaction fold does,
 // which no fill reading shows.
 //
-// It is per-agent and never rolls up: a sub-agent starts from zero and its totals stay its own
-// (Result.SubAgents), so a session-wide figure is a sum the caller takes, not one this package
-// takes for it. Every counter is zero when nothing accounted for the agent at all — an
+// It is per-agent as REPORTED: a sub-agent starts from zero and its totals stay its own on
+// Result.SubAgents, so this figure is the top-level agent's alone. The session-wide sum is taken
+// once, where the record is written: Once folds the delegated runs' counters into the record's
+// Meta.DelegateUsage beside this figure's Meta.Usage, because an unattended record has no Driver
+// to take that sum for it. Every counter is zero when nothing accounted for the agent at all — an
 // Upstream that reports no usage, or a run that never completed a call.
 type Usage struct {
 	// Calls is how many completed upstream calls the agent accounted for, Compaction folds
@@ -282,16 +286,18 @@ func Once(ctx context.Context, spec Spec) (Result, error) {
 	}
 	rec := session.Record{
 		Meta: session.Meta{
-			ID:           recordID,
-			Title:        res.Title,
-			CreatedAt:    startedAt.UTC(),
-			UpdatedAt:    finishedAt,
-			Workspace:    cfg.WorkspaceDir,
-			Model:        cfg.Model,
-			ScheduleID:   spec.ScheduleID,
-			ScheduleName: spec.ScheduleName,
-			UserMsgs:     1, // a Firing submits exactly one prompt
-			CtxUsed:      tap.fill(),
+			ID:            recordID,
+			Title:         res.Title,
+			CreatedAt:     startedAt.UTC(),
+			UpdatedAt:     finishedAt,
+			Workspace:     cfg.WorkspaceDir,
+			Model:         cfg.Model,
+			ScheduleID:    spec.ScheduleID,
+			ScheduleName:  spec.ScheduleName,
+			UserMsgs:      1, // a Firing submits exactly one prompt
+			CtxUsed:       tap.fill(),
+			Usage:         sessionUsage(tap.totals()),
+			DelegateUsage: delegateTotals(tap.subAgentRuns()),
 		},
 		Session: snap,
 	}
@@ -300,6 +306,38 @@ func Once(ctx context.Context, spec Spec) (Result, error) {
 	}
 	res.SessionID = rec.Meta.ID
 	return res, runErr
+}
+
+// sessionUsage restates a Firing's own accounting in the record's shape. run.Usage and
+// session.Usage carry the same five counters in a DIFFERENT field order, so the conversion is
+// written out field by field on purpose: a positional literal would transpose them silently.
+func sessionUsage(u Usage) session.Usage {
+	return session.Usage{
+		Calls:              u.Calls,
+		PromptTokens:       u.PromptTokens,
+		CachedPromptTokens: u.CachedPromptTokens,
+		CompletionTokens:   u.CompletionTokens,
+		TotalTokens:        u.TotalTokens,
+	}
+}
+
+// delegateTotals sums the five flat counters of every finished sub-agent run into the single
+// figure Meta.DelegateUsage holds. It is the ONE roll-up this package takes, and it is taken
+// here rather than left to a caller because an unattended record has no other producer: the
+// Firing's caller is a scheduler, not a Driver holding run heads, and the /sessions spend cell
+// reads Meta.Usage + Meta.DelegateUsage off the record alone. Per-run detail is not lost by
+// summing — Result.SubAgents still carries it, entry by entry, to a caller that wants it.
+// A Firing that delegated nothing sums to the zero Usage, which omitzero keeps out of the JSON.
+func delegateTotals(runs []SubAgentUsage) session.Usage {
+	var total session.Usage
+	for _, r := range runs {
+		total.Calls += r.Calls
+		total.PromptTokens += r.PromptTokens
+		total.CachedPromptTokens += r.CachedPromptTokens
+		total.CompletionTokens += r.CompletionTokens
+		total.TotalTokens += r.TotalTokens
+	}
+	return total
 }
 
 // knownSkillID is the catalog membership test refs.SkillSpans needs to tell a skill token

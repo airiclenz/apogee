@@ -1074,6 +1074,125 @@ func TestOnceReportsWhatTheFiringSpent(t *testing.T) {
 	}
 }
 
+// TestOnceRecordsWhatTheFiringAndItsDelegatesSpent is the producer half of the /sessions spend
+// cell: an unattended record carries BOTH grains, because nothing else will fill them — a
+// Schedule fires and walks away, so there is no Driver holding run heads at Save. Meta.Usage
+// takes the Firing's own totals and Meta.DelegateUsage the SUM over its delegated runs. The
+// script delegates TWICE with deliberately different counts, so a save that kept one run's
+// numbers instead of summing them fails, as does one that let a child's spend reach Meta.Usage.
+func TestOnceRecordsWhatTheFiringAndItsDelegatesSpent(t *testing.T) {
+	t.Parallel()
+
+	const (
+		firstTask  = "audit every open issue"
+		secondTask = "summarise the release notes"
+		firstArgs  = `{"task":"audit every open issue"}`
+		secondArgs = `{"task":"summarise the release notes"}`
+	)
+
+	registry := domain.NewToolRegistry()
+	if err := registry.Register(tools.NewSubAgent()); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	up := newUpstream(t, func(w http.ResponseWriter, req request) {
+		switch {
+		case req.lastRoleIs(domain.RoleTool) && req.toolMsgs() == 1:
+			// The first delegation is back; the parent spends again and delegates once more.
+			writeUsage(w, 800, 100, 900)
+			writeToolCall(w, "call_2", tools.SubAgentToolName, secondArgs)
+		case req.lastRoleIs(domain.RoleTool):
+			// The second is back too; the parent answers for itself.
+			writeUsage(w, 900, 100, 1000)
+			writeFinal(w, "both audits are done")
+		case req.lastTextHas(firstTask):
+			writeUsage(w, 5000, 50, 5050)
+			writeFinal(w, "four issues are open")
+		case req.lastTextHas(secondTask):
+			writeUsage(w, 3000, 30, 3030)
+			writeFinal(w, "the notes are ready")
+		default:
+			writeUsage(w, 600, 100, 700)
+			writeToolCall(w, "call_1", tools.SubAgentToolName, firstArgs)
+		}
+	})
+
+	store := session.NewStore(t.TempDir())
+	spec := planSpec(up.url, "close out the day")
+	spec.Config.Tools = registry
+	spec.Config.Context.MaxContextTokens = 32000
+	spec.Store = store
+
+	res, err := Once(context.Background(), spec)
+	if err != nil {
+		t.Fatalf("Once: %v", err)
+	}
+	if len(res.SubAgents) != 2 {
+		t.Fatalf("Result.SubAgents = %+v, want two finished runs; the script proves nothing", res.SubAgents)
+	}
+
+	rec, err := store.Load(res.SessionID)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	wantOwn := session.Usage{Calls: 3, PromptTokens: 2300, CompletionTokens: 300, TotalTokens: 2600}
+	if rec.Meta.Usage != wantOwn {
+		t.Errorf("Meta.Usage = %+v, want %+v — the firing's own three calls, and only those",
+			rec.Meta.Usage, wantOwn)
+	}
+	wantDelegated := session.Usage{Calls: 2, PromptTokens: 8000, CompletionTokens: 80, TotalTokens: 8080}
+	if rec.Meta.DelegateUsage != wantDelegated {
+		t.Errorf("Meta.DelegateUsage = %+v, want %+v — the SUM over both delegated runs",
+			rec.Meta.DelegateUsage, wantDelegated)
+	}
+}
+
+// TestOnceRecordsNoDelegateSpendWhenNothingWasDelegated is the zero-value guard: a Firing that
+// delegated nothing leaves Meta.DelegateUsage at the zero Usage, which omitzero keeps out of the
+// JSON entirely — so a record written by this build has exactly the shape one written before the
+// fill did, and an older build reading it finds no key it cannot place.
+func TestOnceRecordsNoDelegateSpendWhenNothingWasDelegated(t *testing.T) {
+	t.Parallel()
+
+	up := newUpstream(t, func(w http.ResponseWriter, _ request) {
+		writeUsage(w, 600, 100, 700)
+		writeFinal(w, "the build is green")
+	})
+
+	dir := t.TempDir()
+	store := session.NewStore(dir)
+	spec := planSpec(up.url, "check the build")
+	spec.Store = store
+
+	res, err := Once(context.Background(), spec)
+	if err != nil {
+		t.Fatalf("Once: %v", err)
+	}
+
+	rec, err := store.Load(res.SessionID)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	wantOwn := session.Usage{Calls: 1, PromptTokens: 600, CompletionTokens: 100, TotalTokens: 700}
+	if rec.Meta.Usage != wantOwn {
+		t.Errorf("Meta.Usage = %+v, want %+v", rec.Meta.Usage, wantOwn)
+	}
+	if (rec.Meta.DelegateUsage != session.Usage{}) {
+		t.Errorf("Meta.DelegateUsage = %+v, want the zero Usage — nothing was delegated",
+			rec.Meta.DelegateUsage)
+	}
+
+	raw, err := os.ReadFile(filepath.Join(dir, res.SessionID+".json"))
+	if err != nil {
+		t.Fatalf("read the record: %v", err)
+	}
+	if strings.Contains(string(raw), "delegateUsage") {
+		t.Errorf("the record carries a delegateUsage key at zero; omitzero must keep the "+
+			"old JSON shape:\n%s", raw)
+	}
+}
+
 // TestSpecTitle covers the three title sources and the truncation the browser's rows rely on.
 func TestSpecTitle(t *testing.T) {
 	t.Parallel()

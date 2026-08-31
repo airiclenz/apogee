@@ -50,6 +50,19 @@ func (r request) userMsgs() int {
 	return n
 }
 
+// toolMsgs counts the tool-role messages the request carried — how many tool calls have already
+// come back in this conversation, which is how a script tells a parent's FIRST return from its
+// second and branches to a different reply for each.
+func (r request) toolMsgs() int {
+	n := 0
+	for _, role := range r.Roles {
+		if role == string(domain.RoleTool) {
+			n++
+		}
+	}
+	return n
+}
+
 // lastRoleIs reports whether the request's final message carries role want.
 func (r request) lastRoleIs(want domain.Role) bool {
 	return len(r.Roles) > 0 && r.Roles[len(r.Roles)-1] == string(want)

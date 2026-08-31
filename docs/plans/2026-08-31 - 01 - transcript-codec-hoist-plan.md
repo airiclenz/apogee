@@ -85,7 +85,12 @@ Depends on item 1.
 
 **Commit.** `refactor(session,tui): the transcript codec moves to internal/session; the TUI keeps the adapters`
 
-## 3. Unattended records carry the run's spend
+## 3. Unattended records carry the run's spend — ✅ DONE (2026-08-31)
+
+NOTES (2026-08-31): the declining-roll-up rewrite covered `internal/run/doc.go`'s spend paragraph, `run.go:119-124` (the `Usage` type doc the guard names) and `run.go:101-108` (`Result.Usage`, which states the same rule in a spelling the guard's grep does not match). The grep's two remaining hits are NOT rewritten and stay true: `run.go:99` ("the entries carry no nesting … never rolls up") is about `Result.SubAgents` staying flat per run, which this item does not change, and `run_test.go:766` is the same fact about the tap's per-depth attribution.
+NOTES (2026-08-31): consequential edit — internal/session/store.go: made necessary by the new fill — `Meta.Usage`/`Meta.DelegateUsage` named a Driver as their only writer, which `internal/run.Once` is not; both field docs now name the second producer.
+NOTES (2026-08-31): the delegate test scripts TWO delegations rather than one, so the assertion distinguishes a real sum from a save that kept a single run's counters; verified by mutation (replacing `delegateTotals(...)` with the zero Usage turns the test red).
+NOTES (2026-08-31): `request.toolMsgs()` added to `harness_test.go` beside the existing `userMsgs()` — the two-delegation script needs to tell the parent's first tool return from its second.
 
 **What.** `internal/run/run.go:278-295`: the saved `session.Record` gains `Usage:` built from `tap.totals()` (explicit field-by-field literal — `run.Usage` and `session.Usage` field ORDER differs, so no conversion) and `DelegateUsage:` summed over `tap.subAgentRuns()`'s five flat counters. This is the ratified policy change: `internal/run/doc.go:69-76`'s paragraph declining the roll-up is rewritten to state the fill and why (the /sessions spend cell sums `Meta.Usage + Meta.DelegateUsage` — `internal/tui/sessions.go:721-733`). The journey is already pinned on the tui side by `TestSessionRowCellsSpendIsTheSessionTotal` (`internal/tui/sessions_test.go:878`); this item's tests pin the producer.
 

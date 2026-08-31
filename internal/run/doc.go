@@ -74,6 +74,15 @@
 // keying: the Firing's own cumulative totals land on Result.Usage and each delegated run's on
 // its Result.SubAgents entry. Spend is not fill — it counts every completion the agent
 // accounted for, the Compaction folds included, where a fill says only how full the window
-// ended — and it is per-agent, so a session-wide figure is a sum the caller takes across the
-// two grains rather than one this package takes for it.
+// ended — and it is per-agent, so the two grains are reported apart.
+//
+// Unlike fill, spend is also SUMMED into the record this package saves: Meta.Usage takes the
+// Firing's own totals and Meta.DelegateUsage the sum of every delegated run's. That roll-up is
+// taken here rather than left to a caller because an unattended record has no caller holding
+// the run heads — a Schedule fires and walks away — while the /sessions browser reads a
+// session's spend as Meta.Usage + Meta.DelegateUsage off the record alone, and would otherwise
+// report every Firing as having cost nothing. Summing loses no detail a Driver can still use:
+// Result.SubAgents keeps the per-run entries for the caller that wants them. The two stay
+// separate keys, never one folded figure, so a reader can still tell the Firing's own spend
+// from what it delegated.
 package run
