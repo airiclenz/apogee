@@ -10,6 +10,12 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- Discovery now reads the `mandatory` flag an OpenRouter-shaped `/v1/models` entry carries on its `reasoning` object, so `EffortSupport` reports when a model's reasoning cannot be turned off. The flag describes the model rather than the wire, so it survives a server entry's forced `effort-dialect:` — only the forced `off` clears it — and a server that writes something other than a boolean there loses the flag alone, never the dial.
+
+- A model switch now says so when the newly bound model cannot turn its reasoning off: a transcript note names the model and warns that the engine's capped internal calls (compaction folds, title calls) spend part of that cap on a thinking pass the model cannot decline. It fires per rebind, after the excluded-override clear, and only where the beat reported a usable dial.
+
+- ADR 0045 now names the effort dialect among the facts a routed spawn takes from the Sub-agent server (its "all four" Consequences enumeration is superseded), ADR 0060 D9 records the Delegation target as the dialect's second channel into the engine, and CONTEXT.md's Sub-agent server / Delegation target entries and the configuration manual document the routed dialect and the `effort-dialect:` remedy for a flagged server that advertises no tell.
+
 - The transcript wire model and codec are now **Driver-neutral**: `internal/session` gains the
   exported scrollback types (`Entry`, `SkillSpan`, `ToolView`, `DetailLine`, `BranchSummary`,
   `StatValue`, `EditRegion`, `Presented`), the nine persisted entry-kind constants, its own
@@ -416,6 +422,19 @@ point is a **minor** bump, not a breaking change.
   saved as `docs/reviews/architecture-review-2026-08-30.html`.
 
 ### Fixed
+
+- A delegation routed to the Sub-agent server now expresses its thinking-effort intent in THAT
+  server's wire dialect instead of the orchestrator's. `DelegationTarget` gains `EffortDialect`,
+  resolved pin-else-observe from the flagged entry's `effort-dialect:` and its own heartbeat's
+  passive tell (ADR 0060 §3), and a routed spawn takes it whenever the target names one; a target
+  naming none leaves the child on the session's shape, exactly as before. The regression it closes
+  is the routed compaction fold: since the dialect seam landed, a routed child's summariser asked
+  for "no reasoning" in a field the grunt server does not read, so the fold spent its whole output
+  cap reasoning and faulted at every Turn boundary. A flagged server that advertises no tell and
+  pins no key is now advised about it once in the transcript — `sub-agents: <server> advertises no
+  thinking-effort dialect — delegates there speak this session's; set effort-dialect: on its entry`.
+
+- The capped-compaction fault no longer diagnoses a server the engine cannot inspect. `cappedSummaryErrFmt` keeps the cap and the estimated reasoning spend and now ends in one of two causes, chosen on what the summary request itself asked for: `the summarizer asked for no reasoning and this server reasoned anyway` when the call carried the off rung, and `the cap went on a reasoning pass this server was never asked to skip` when it did not. The split is keyed on the request's own `ThinkingEffort`, never on the dialect, so a session on no dialect whose profile pins `effort: off` still reads as having asked. Neither text invites a retry (ADR 0046), and a capped summary that produced visible text is still kept and marked rather than faulted.
 
 - Fixed: **a finished sub-agent no longer prints its report twice.** The early, badly formatted copy
   was the delegation's own tool-result body, which the inline expanded shape (`expandedSubAgentView`)
