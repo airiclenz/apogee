@@ -810,6 +810,35 @@ func TestLoadShippedSkillsAllParse(t *testing.T) {
 	}
 }
 
+// The shipped catalog's id set is PINNED here, in a list a contributor edits by hand. Every other
+// shipped-skill test enumerates the ids from the embed, so adding, renaming or removing a folder
+// under shipped/ keeps `go test ./internal/skills/...` green — while it rewrites the /skills
+// listing apogee ANNOUNCES, which two cmd/apogee tests pin. This guard is what makes that breakage
+// surface here, in the package the change was made in, rather than two packages away.
+func TestShippedCatalogIDsArePinned(t *testing.T) {
+	t.Parallel()
+
+	// Edit this list ONLY together with the cmd/apogee fixtures the failure message names.
+	want := []string{"code-review", "commit-hygiene", "debugging", "planning"}
+
+	cat, _ := Load(Sources{UseShippedSkills: true})
+	got := make([]string, 0, cat.Len())
+	for _, s := range cat.List() {
+		got = append(got, s.ID)
+	}
+	slices.Sort(got)
+
+	if !slices.Equal(got, want) {
+		t.Fatalf("the shipped catalog announces %v, want %v.\n"+
+			"Adding, renaming or removing a shipped skill rewrites the /skills listing apogee "+
+			"announces, which cmd/apogee pins in TestE2EHostileSurfacesKeepTheirOwnRows (golden "+
+			"frame cmd/apogee/testdata/frames/t12-skills.txt) and in TestE2ESmokeInProcess. Update "+
+			"the list in this test, re-record the golden with `go test ./cmd/apogee -run "+
+			"TestE2EHostileSurfacesKeepTheirOwnRows -update`, then run `go test ./cmd/apogee "+
+			"-count=1` to confirm TestE2ESmokeInProcess still passes.", got, want)
+	}
+}
+
 // The debugging skill is the one this item authors, so its identity is pinned by name: an id
 // rename would silently break every `/debugging` a user has in muscle memory.
 func TestLoadShippedDebuggingSkill(t *testing.T) {
