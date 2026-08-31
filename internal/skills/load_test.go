@@ -773,3 +773,133 @@ func TestReadRootsListADirThatDoesNotExist(t *testing.T) {
 		t.Errorf("readRoots() = %v, want every source listed in scan order %v", got, want)
 	}
 }
+
+// ADR 0065 §1: four skills ship embedded in the binary. This is the standing check that every one
+// of them PARSES — a shipped skill that fails the loader is a broken build the /skills report would
+// have to explain to a user who cannot fix it, so the whole shipped tree is enumerated from the
+// embed rather than from a hard-coded list, and items added later are covered without touching this
+// test.
+func TestLoadShippedSkillsAllParse(t *testing.T) {
+	want := shippedIDs(t)
+	if len(want) == 0 {
+		t.Fatal("the embedded shipped tree holds no skill folders; go:embed all:shipped is not covering it")
+	}
+
+	cat, err := Load(Sources{UseShippedSkills: true})
+	if err != nil {
+		t.Fatalf("the shipped skills must load cleanly, got: %v", err)
+	}
+	if got := len(cat.List()); got != len(want) {
+		t.Fatalf("shipped load produced %d skills, want %d (%v): %+v", got, len(want), want, cat.Skipped())
+	}
+	for _, id := range want {
+		sk, ok := cat.Get(id)
+		if !ok {
+			t.Errorf("shipped skill %q did not load: %+v", id, cat.Skipped())
+			continue
+		}
+		if sk.Body == "" {
+			t.Errorf("shipped skill %q loaded with an empty body", id)
+		}
+		// Body-only for now: a shipped skill names no folder, so the injected block carries no
+		// files: line and apogee never announces a path nothing can open (ADR 0065 §3 changes this
+		// when the virtual mount lands).
+		if sk.Dir != "" {
+			t.Errorf("shipped skill %q announces Dir = %q, want none until the virtual mount exists", id, sk.Dir)
+		}
+	}
+}
+
+// The debugging skill is the one this item authors, so its identity is pinned by name: an id
+// rename would silently break every `/debugging` a user has in muscle memory.
+func TestLoadShippedDebuggingSkill(t *testing.T) {
+	cat, _ := Load(Sources{UseShippedSkills: true})
+	sk, ok := cat.Get("debugging")
+	if !ok {
+		t.Fatalf("the debugging skill did not load: %+v", cat.Skipped())
+	}
+	if sk.DisplayName == "" || sk.Summary == "" {
+		t.Errorf("debugging loaded without a menu label/hint: displayName=%q summary=%q", sk.DisplayName, sk.Summary)
+	}
+	if len(sk.Triggers) == 0 {
+		t.Error("debugging declares no triggers:, so the suggestion band can never offer it")
+	}
+}
+
+// The gate's zero value is off, so every caller that predates the shipped source — and every test
+// pinning a catalog's exact contents — loads exactly the disk sources it always did.
+func TestLoadWithoutShippedSourceIsUnchanged(t *testing.T) {
+	home := t.TempDir()
+	writeSkill(t, filepath.Join(home, "skills"), "alpha", "---\nid: alpha\nsummary: the alpha skill\n---\nbody A")
+
+	cat, err := Load(Sources{Home: home}) // UseShippedSkills left at its zero value
+	if err != nil {
+		t.Fatalf("Load soft error: %v", err)
+	}
+	if got := len(cat.List()); got != 1 {
+		t.Fatalf("loaded %d skills, want only the disk one: %+v", got, cat.List())
+	}
+	if _, ok := cat.Get("debugging"); ok {
+		t.Error("a shipped skill reached the catalog with UseShippedSkills unset")
+	}
+}
+
+// ADR 0065 §1: shipped is the LOWEST-priority source, so a user who writes their own `debugging`
+// keeps it — and the displaced shipped copy is recorded through the same ShadowedError channel
+// ADR 0032 built, rather than vanishing.
+func TestLoadHomeLibraryShadowsAShippedSkill(t *testing.T) {
+	home := t.TempDir()
+	writeSkill(t, filepath.Join(home, "skills"), "debugging",
+		"---\nid: debugging\nsummary: my own\n---\nFROM THE USER")
+
+	cat, _ := Load(Sources{Home: home, UseShippedSkills: true})
+	sk, ok := cat.Get("debugging")
+	if !ok {
+		t.Fatal("debugging is missing from the catalog entirely")
+	}
+	if sk.Body != "FROM THE USER" {
+		t.Errorf("collision winner body = %q, want the user's own copy to win the shipped one", sk.Body)
+	}
+	assertShadowedAmong(t, cat,
+		filepath.Join(shippedSource, "debugging", skillFileName),
+		filepath.Join(home, "skills", "debugging", skillFileName))
+}
+
+// The shipped source is embedded, not installed, so it must never be rendered as a host path: a
+// pseudo-path in sourceDirs is a phantom directory in the /skills report, and one in readRoots is
+// handed to the read tools and resolved against the process's working directory.
+func TestShippedSourceIsNeverRenderedAsAHostPath(t *testing.T) {
+	home, ws := t.TempDir(), t.TempDir()
+	src := Sources{Home: home, Workspace: ws, UseProjectSkills: true, UseShippedSkills: true}
+
+	for name, got := range map[string][]string{"sourceDirs": sourceDirs(src), "readRoots": readRoots(src)} {
+		if len(got) != 3 {
+			t.Errorf("%s = %v, want only the three disk anchors", name, got)
+		}
+		for _, dir := range got {
+			if !filepath.IsAbs(dir) {
+				t.Errorf("%s produced the non-absolute entry %q", name, dir)
+			}
+			if filepath.Base(dir) == shippedSource {
+				t.Errorf("%s rendered the embedded shipped source as the path %q", name, dir)
+			}
+		}
+	}
+}
+
+// shippedIDs lists the folder names of the embedded shipped tree — the ids those skills are
+// expected to load under, read from the embed itself so the tests track the tree.
+func shippedIDs(t *testing.T) []string {
+	t.Helper()
+	entries, err := shippedFiles.ReadDir(shippedDir)
+	if err != nil {
+		t.Fatalf("reading the embedded shipped tree: %v", err)
+	}
+	var ids []string
+	for _, e := range entries {
+		if e.IsDir() {
+			ids = append(ids, e.Name())
+		}
+	}
+	return ids
+}

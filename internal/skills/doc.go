@@ -1,4 +1,5 @@
-// Package skills discovers user-authored skills from disk and serves them as a catalog.
+// Package skills discovers skills — the user's own, from disk, and apogee's four shipped ones,
+// from an embedded tree — and serves them as one catalog.
 //
 // A skill is a folder containing a SKILL.md file — YAML frontmatter (id/name, displayName,
 // summary/description) plus a Markdown body of instructions. The directory-plus-SKILL.md
@@ -15,17 +16,21 @@
 // It is grounded in:
 //
 //	ADR 0001  no implicit ~/.apogee — the state roots are injected (here, via Sources)
-//	ADR 0002  skills are user-authored extensions over an open point — no builtins shipped
+//	ADR 0002  skills are an open extension point — anyone may add one, nobody's is privileged
+//	ADR 0065  four skills ship embedded, as the LOWEST-priority source (supersedes the
+//	          "no builtins shipped" attribution this list used to hang on ADR 0002)
 //	ADR 0010  package layout: depend only on internal/domain (downward), never the root facade
 //	ADR 0032  the user's global library outranks the workspace on an id collision
 //
 // Layering (load.go): the sources are walked in DECREASING priority with the user's global
-// library FIRST, and an id collision keeps the copy already loaded — so a workspace skill may
-// contribute a NEW id but can never replace one the user already has (ADR 0032). Walking the
-// highest-priority source first is also what keeps the global skill cap from undoing that
-// precedence: the cap is first-come, so it can only ever cut into the LOWEST-priority source.
-// The two workspace dirs keep their relative order among themselves. Every collision is recorded, cross-source or inside one dir alike: the losing
-// SKILL.md goes onto the catalog as a skip carrying a ShadowedError that names the winning file.
+// library FIRST and the embedded shipped tree LAST, and an id collision keeps the copy already
+// loaded — so a workspace skill may contribute a NEW id but can never replace one the user
+// already has (ADR 0032). Walking the highest-priority source first is also what keeps the global
+// skill cap from undoing that precedence: the cap is first-come, so it can only ever cut into the
+// LOWEST-priority source. The two workspace dirs keep their relative order among themselves, and
+// a shipped skill — the weakest claim on an id in the system (ADR 0065) — loses to every one of
+// them. Every collision is recorded, cross-source or inside one dir alike: the losing SKILL.md
+// goes onto the catalog as a skip carrying a ShadowedError that names the winning file.
 // Robustness is by design — a missing source dir is skipped, and a malformed skill is skipped
 // rather than failing the whole load, so one bad file never blanks the catalog. Every skip is
 // recorded ON the catalog (Catalog.Skipped) so the /skills report can say which file was passed
@@ -48,7 +53,9 @@
 // people actually type is pinned against testdata/library/ — a frontmatter-only copy of the
 // owner's real skill library, loaded through the ordinary Load by suggest_library_test.go.
 //
-// No builtin/embedded skills and no auto-created ~/.apogee/skills directory ship in v1 (the
-// creation-deferred convention — a writer creates what it needs); both are additive future
-// hooks, not a current gap.
+// The shipped skills are served straight out of the binary and are never INSTALLED: no
+// ~/.apogee/skills directory is auto-created for them (the creation-deferred convention — a
+// writer creates what it needs), so an upgrade refreshes all four for every user and nothing on
+// disk goes stale (ADR 0065). The gate is Sources.UseShippedSkills, whose zero value is off, so
+// a caller that never asks for them loads exactly the disk sources it always did.
 package skills

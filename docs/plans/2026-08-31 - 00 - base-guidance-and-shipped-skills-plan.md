@@ -195,7 +195,41 @@ commit.
 **Acceptance:** `go test ./internal/run/... && go build ./...` — the known-token test must fail against the pre-item tree.
 **Commit:** `fix(run): headless and firing prompts resolve /skill tokens`
 
-## 7. Shipped skill source + the debugging skill
+## 7. Shipped skill source + the debugging skill — ✅ DONE (2026-08-31)
+
+NOTES (2026-08-31): the shipped source is loaded beside the anchor loop in `Load`, not appended as a
+fourth `sourceAnchor` — the item's regression guard offers this as the alternative to teaching both
+host-path renderers a skip, and it is the stronger of the two: a `skillAnchor` is a base + a path
+below it, and the shipped tree has neither, so `sourceDirs` and `readRoots` cannot render a
+pseudo-path they never see. Priority is unchanged by the move (walked last ⇒ keep-first lets every
+disk source shadow it), and `TestShippedSourceIsNeverRenderedAsAHostPath` pins both renderers at the
+three disk anchors with every entry absolute.
+NOTES (2026-08-31): the walk was generalized by splitting `loadDir` into "open the os.Root" and a
+shared `walkSkills(cat, sourceTree)`; `sourceTree` carries the `fs.FS`, the name the source is
+reported under, and a `dirFor(relDir) string` that renders the announced `Skill.Dir`. The disk
+sources return the host folder as before; the shipped source returns `""`, which is the one line
+item 9 changes when the `shipped:<id>` mount lands. Keeping "is this source on disk?" in `dirFor` is
+what let the caps, the dotted-dir skip and the skip recording stay in ONE walk.
+NOTES (2026-08-31): consequential edit — internal/skills/skill.go: made necessary by the embedded
+source — `Skill`'s doc called every skill "user-authored" and `Dir` "the absolute path to the
+skill's folder", both false for a shipped skill (body-only, `Dir=""`). Doc text only; the struct is
+untouched.
+NOTES (2026-08-31): the shipped frontmatter carries BOTH `summary:` and `description:` as the item
+enumerates, but under apogee's parser only the first is read (`parseWithFrontmatter`: `summary :=
+firstNonEmpty(fm.Summary, fm.Description)`, and `Skill.Description` is that same text under the
+wider clamp). The `description:` key is therefore interop text for the tools that read only that key
+(the Anthropic/Claude-Code agent-skills convention `doc.go` names), not a second indexed field here
+— the matcher vocabulary this skill needs rides `triggers:` instead, which is what ADR 0065's
+Consequences expects of the four shipped skills.
+NOTES (2026-08-31): the `debugging` body is 91 lines (cap 150) and uses no `{{SKILL_DIR}}` token —
+with `Dir=""` the token would travel literal, and no bundled file exists to point at until item 9.
+NOTES (2026-08-31): pre-existing, recorded here only — `internal/skills/skill.go:19-20` still says
+an id collision is won by "the later-loaded source"; keep-first has been the rule since ADR 0032 and
+the sentence has been stale since. It sits in the comment block this item amended but is not this
+item's to change, and no behaviour depends on it.
+NOTES (2026-08-31): the untracked `docs/plans/2026-08-31 - 01 - transcript-codec-hoist-plan.md`
+belongs to a concurrent session and was left exactly as found; it is in neither FILES nor the
+commit.
 
 **What:** Depends on item 2. `internal/skills` gains an embedded source: `internal/skills/shipped/<id>/SKILL.md` via `//go:embed all:shipped`; generalize the walk to load from an `fs.FS` (disk sources keep their existing `os.Root`-fenced path). Priority: shipped is appended **last** in `sourceAnchors` (`load.go:92-116`) so keep-first lets any user/workspace id shadow it, recorded as `ShadowedError` like today. First shipped skill: `shipped/debugging/SKILL.md` — frontmatter (id `debugging`, displayName, summary, description, `triggers:`) + body ≤150 lines (reproduce → isolate → fix → verify protocol), **body-only for now** (`Dir=""`, no `files:` line) — the bundled file arrives with item 9's mount so no announced path is ever unreadable. Update `internal/skills/doc.go` ("no builtin skills" sentence dies).
 **Regression guard.** `Sources` gains the shipped gate in THIS item (zero value = off), so `Load(Sources{...})` stays shipped-free — the count-pinned load tests (`load_test.go:37,67,101,257`) and this item's "catalog without shipped source unchanged" test hold; item 8 only wires the config key to it. Keep the embedded source out of the `[]skillAnchor` host-path renderers: `sourceDirs` (`load.go:133`) and `readRoots` (`load.go:162`) must not render a shipped pseudo-anchor as a host path (a phantom dir in the /skills report; a cwd-relative mount on the trusted branch) — load it beside the anchor loop, or teach both consumers an explicit shipped label/skip. Reword every `doc.go` line carrying the no-builtins claim (`grep -n "builtin" internal/skills/doc.go` — :18's "no builtins shipped" ADR 0002 attribution and :51), superseded by ADR 0065 (item 2 names the superseded stance).

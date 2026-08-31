@@ -84,7 +84,9 @@ func (p *Provider) sources() Sources {
 // is holding a live view with no plumbing of its own.
 //
 // It is the DISPLAY view — the /skills report names each source as configured, symlink and all;
-// the host that MOUNTS these dirs for the model's read tools takes ReadRoots instead.
+// the host that MOUNTS these dirs for the model's read tools takes ReadRoots instead. Neither
+// lists the embedded shipped source: it is compiled in rather than installed, so it has no host
+// path to name (load.go's sourceDirs).
 func (p *Provider) SourceDirs() []string { return sourceDirs(p.sources()) }
 
 // ReadRoots lists the same dirs as the paths a host may MOUNT — each one symlink-resolved, and a

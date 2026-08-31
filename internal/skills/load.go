@@ -1,6 +1,7 @@
 package skills
 
 import (
+	"embed"
 	"errors"
 	"fmt"
 	"io"
@@ -42,14 +43,38 @@ const maxSkillDirs = 4096
 // below that (references/, scripts/), so eight levels is far past any real skill.
 const maxSkillDirDepth = 8
 
+// shippedFiles is the embedded shipped-skill tree: apogee's own skills, compiled into the binary
+// rather than installed on disk (ADR 0065 §1-§2), following the built-in colour schemes' pattern
+// (ADR 0040 §1). `all:` is deliberate — a bundled resource beside a SKILL.md may legitimately be a
+// dotfile, and go:embed drops those without it.
+//
+//go:embed all:shipped
+var shippedFiles embed.FS
+
+// shippedDir is the directory inside shippedFiles the shipped source is rooted at, and
+// shippedSource is the name that source is REPORTED under — the label a skip record or a shadow
+// record carries where a disk source carries a host path. It is not a path: nothing on the host
+// answers to it (ADR 0065 §2 — shipped skills are never installed), which is why it never reaches
+// sourceDirs or readRoots.
+const (
+	shippedDir    = "shipped"
+	shippedSource = "shipped"
+)
+
 // Sources are the injected roots Load discovers skills under (ADR 0001 — no implicit ~/.apogee).
 // Home is the apogee home (its skills/ subdir is the global library); Workspace is the project
 // root (its .apogee/skills and, when UseProjectSkills, its skills/ folder). An empty Home or
 // Workspace simply contributes no dirs.
+//
+// UseShippedSkills is the odd one out: it names no root at all, because the shipped source is
+// embedded in the binary rather than found on disk. Its ZERO VALUE is off, so a Sources built
+// before the shipped source existed — and every test that pins a catalog's exact contents — loads
+// exactly what it always did; the host opts in explicitly (`use-shipped-skills`).
 type Sources struct {
 	Home             string
 	Workspace        string
 	UseProjectSkills bool
+	UseShippedSkills bool
 }
 
 // Load discovers skills from the layered source dirs and returns the assembled Catalog. The
@@ -67,6 +92,15 @@ func Load(src Sources) (*Catalog, error) {
 	cat := newCatalog()
 	for _, a := range sourceAnchors(src) {
 		loadDir(cat, a)
+	}
+	if src.UseShippedSkills {
+		// The shipped source is walked LAST, below every disk anchor, so keep-first (Catalog.set)
+		// lets any user or workspace folder shadow a shipped id — the weakest claim on an id in the
+		// system (ADR 0065 §1). It is loaded HERE rather than as a fourth sourceAnchor because an
+		// anchor is a host path: sourceDirs and readRoots render the anchors, and the shipped tree
+		// has no host path to render — a phantom dir in the /skills report, or a cwd-relative mount
+		// handed to the read tools, is what folding it into that list would produce.
+		loadShipped(cat)
 	}
 	cat.finalize()
 	return cat, cat.skipError()
@@ -130,6 +164,10 @@ func sourceAnchors(src Sources) []skillAnchor {
 // sourceDirs renders the same list as plain host paths, for the callers that only DISPLAY the
 // sources (Provider.SourceDirs, the /skills report). Discovery itself walks the anchors, which
 // carry the base each dir must stay inside.
+//
+// The shipped source is deliberately absent: it is embedded, not installed (ADR 0065 §2), so
+// there is no host path to name and a rendered `shipped` would be a directory the human could
+// neither open nor fix. The /skills listing names it by its source LABEL instead (shippedSource).
 func sourceDirs(src Sources) []string {
 	anchors := sourceAnchors(src)
 	dirs := make([]string, 0, len(anchors))
@@ -159,6 +197,11 @@ func sourceDirs(src Sources) []string {
 // A missing dir is still listed, exactly as sourceDirs lists it: this reports where skills come
 // from, and the mount side skips an unusable root of its own accord. Beyond resolving symlinks the
 // function does no I/O.
+//
+// The shipped source is absent here for a sharper reason than in sourceDirs: these strings are
+// handed to the read tools as real roots, so an entry that is not an absolute host path would be
+// resolved against the process's working directory and mount whatever `./shipped` happens to be.
+// A shipped skill's bundled files reach the model through their own virtual mount instead.
 func readRoots(src Sources) []string {
 	anchors := sourceAnchors(src)
 	roots := make([]string, 0, len(anchors))
@@ -178,15 +221,14 @@ func readRoots(src Sources) []string {
 	return roots
 }
 
-// loadDir walks one source dir through os.Root and loads every SKILL.md it finds, recording a
-// SkipError on the catalog per unreadable/malformed skill (a missing source dir records none — it
-// is simply skipped). The fence is pinned by openAnchor. For a workspace source dir it covers the
-// ANCHOR as well as the walk below it: neither a symlinked `.apogee`, `.apogee/skills` or `skills`
-// nor a symlink deeper in the tree can move the walk out of the workspace root. For the operator's
-// global library it is pinned at the dir the home's `skills` RESOLVES to, so the walk below it is
-// contained against that target and a symlink leaving it is still refused. Dotted subdirs are
-// skipped (no .git, no hidden folders), and the walk is bounded by maxSkillDirs and
-// maxSkillDirDepth so an unloadably deep or wide tree terminates instead of touring the disk.
+// loadDir opens one DISK source dir through os.Root and hands it to walkSkills (a missing source
+// dir records nothing — it is simply skipped). The fence is pinned by openAnchor. For a workspace
+// source dir it covers the ANCHOR as well as the walk below it: neither a symlinked `.apogee`,
+// `.apogee/skills` or `skills` nor a symlink deeper in the tree can move the walk out of the
+// workspace root. For the operator's global library it is pinned at the dir the home's `skills`
+// RESOLVES to, so the walk below it is contained against that target and a symlink leaving it is
+// still refused. Everything past opening the root is the shared walk, which the embedded shipped
+// source takes too.
 func loadDir(cat *Catalog, a skillAnchor) {
 	dir := a.dir()
 	root, err := openAnchor(a)
@@ -203,10 +245,64 @@ func loadDir(cat *Catalog, a skillAnchor) {
 		return
 	}
 	defer root.Close()
-	fsys := root.FS()
+	walkSkills(cat, sourceTree{
+		fsys: root.FS(),
+		name: dir,
+		// A disk skill's announced Dir is the host folder its SKILL.md sits in, so the model can
+		// read the resources bundled beside it through the extra-roots mount (readRoots).
+		dirFor: func(relDir string) string { return filepath.Join(dir, filepath.FromSlash(relDir)) },
+	})
+}
 
+// loadShipped walks the embedded shipped tree — the same walk every disk source takes, over an
+// fs.FS that happens to live in the binary instead of under an os.Root. There is no fence to pin
+// because there is no filesystem to escape: the bytes were compiled in from this repo, so the
+// containment openAnchor exists to provide is a property of the source rather than a check. The
+// walk's caps still apply unchanged; they cost nothing over four folders and keep ONE walk.
+//
+// A failure here is a broken build, not a broken install, so it is recorded like any other skip
+// rather than swallowed: the /skills report is where a shipped skill that did not load has to
+// surface, exactly as a malformed one in the user's library does.
+func loadShipped(cat *Catalog) {
+	fsys, err := fs.Sub(shippedFiles, shippedDir)
+	if err != nil {
+		cat.addSkip(SkipError{
+			Path: shippedSource,
+			Err:  fmt.Errorf("the embedded shipped skills were not scanned: %w", err),
+		})
+		return
+	}
+	walkSkills(cat, sourceTree{
+		fsys: fsys,
+		name: shippedSource,
+		// Body-only for now: a shipped skill announces no directory, so resolveSkillRefs emits no
+		// files: line and no path apogee names is unreadable. The virtual `shipped:<id>` mount that
+		// makes the bundled files reachable arrives with it (ADR 0065 §3), and this is the one line
+		// that changes when it does.
+		dirFor: func(string) string { return "" },
+	})
+}
+
+// sourceTree is one OPENED skill source the walk reads, and the whole of what the walk needs to
+// know about where it came from: the fs.FS rooted at the source dir, the name that source is
+// reported under (a host path for a disk source, the "shipped" label for the embedded one), and
+// how the announced Dir of a skill folder found at relDir is rendered. dirFor is the seam that
+// keeps "is this source on disk?" out of the walk itself — a disk source names the host folder,
+// the embedded one names nothing (yet).
+type sourceTree struct {
+	fsys   fs.FS
+	name   string
+	dirFor func(relDir string) string
+}
+
+// walkSkills walks one opened source tree and loads every SKILL.md it finds, recording a SkipError
+// on the catalog per unreadable/malformed skill. Dotted subdirs are skipped (no .git, no hidden
+// folders), and the walk is bounded by maxSkillDirs and maxSkillDirDepth so an unloadably deep or
+// wide tree terminates instead of touring the disk.
+func walkSkills(cat *Catalog, src sourceTree) {
+	dir := src.name
 	dirsSeen, deepBranchNoted := 0, false
-	_ = fs.WalkDir(fsys, ".", func(p string, d fs.DirEntry, walkErr error) error {
+	_ = fs.WalkDir(src.fsys, ".", func(p string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			if p != "." {
 				// An entry the walk could not read — an unreadable sub-directory, a file that
@@ -265,7 +361,7 @@ func loadDir(cat *Catalog, a skillAnchor) {
 			})
 			return fs.SkipAll
 		}
-		loadSkillFile(cat, fsys, dir, p)
+		loadSkillFile(cat, src, p)
 		return nil
 	})
 }
@@ -306,13 +402,14 @@ func openAnchor(a skillAnchor) (*os.Root, error) {
 // slash-separated fs.FS form the walk yields, never a host path.
 func walkDepth(p string) int { return strings.Count(p, "/") + 1 }
 
-// loadSkillFile reads and parses one SKILL.md at the dir-relative path p (read through the
-// os.Root FS, so the fence still holds) and inserts the parsed Skill, stamping its absolute Dir.
-// A read or parse failure is recorded as a SkipError on the catalog rather than returned, so the
-// walk continues past one bad file AND the human can still be told that file was passed over.
-func loadSkillFile(cat *Catalog, fsys fs.FS, dir, p string) {
-	abs := absSkillPath(dir, p)
-	data, err := readBounded(fsys, p, maxSkillFileBytes)
+// loadSkillFile reads and parses one SKILL.md at the source-relative path p (read through the
+// source's own fs.FS, so a disk source's os.Root fence still holds) and inserts the parsed Skill,
+// stamping the Dir that source announces. A read or parse failure is recorded as a SkipError on
+// the catalog rather than returned, so the walk continues past one bad file AND the human can
+// still be told that file was passed over.
+func loadSkillFile(cat *Catalog, src sourceTree, p string) {
+	abs := absSkillPath(src.name, p)
+	data, err := readBounded(src.fsys, p, maxSkillFileBytes)
 	if err != nil {
 		cat.addSkip(SkipError{Path: abs, Err: err})
 		return
@@ -322,19 +419,21 @@ func loadSkillFile(cat *Catalog, fsys fs.FS, dir, p string) {
 	if skillDirRel == "." {
 		// A SKILL.md sitting directly in the source root has no enclosing skill folder; name it
 		// from the source dir itself so the degenerate layout still yields a usable id.
-		dirName = filepath.Base(dir)
+		dirName = filepath.Base(src.name)
 	}
 	sk, err := parseSkill(string(data), dirName)
 	if err != nil {
 		cat.addSkip(SkipError{Path: abs, Err: err})
 		return
 	}
-	sk.Dir = filepath.Join(dir, filepath.FromSlash(skillDirRel))
+	sk.Dir = src.dirFor(skillDirRel)
 	cat.set(sk, abs)
 }
 
-// absSkillPath resolves a walk-relative SKILL.md path back to a host path under dir, so a
-// reported skip names a file the human can open.
+// absSkillPath resolves a walk-relative SKILL.md path back to a path under the source's name, so a
+// reported skip names a file the human can open. For the embedded source the name is a label
+// rather than a host path, so what it renders is the SKILL.md's address inside the shipped tree —
+// which is what a human hunting a shipped skill wants named anyway.
 func absSkillPath(dir, p string) string {
 	return filepath.Join(dir, filepath.FromSlash(p))
 }

@@ -5,14 +5,17 @@ import (
 	"path/filepath"
 )
 
-// Skill is one discovered, user-authored skill: a folder (Dir) containing a SKILL.md whose
-// frontmatter and body define it. ID is the stable key the chat input attaches and the loop
-// resolves; DisplayName and Summary drive the merged "/" menu; Body is the instruction text the
-// loop prepends to the turn when the skill is attached.
+// Skill is one discovered skill: a folder containing a SKILL.md whose frontmatter and body define
+// it — one the user wrote, or one of the four apogee ships embedded (ADR 0065). ID is the stable
+// key the chat input attaches and the loop resolves; DisplayName and Summary drive the merged "/"
+// menu; Body is the instruction text the loop prepends to the turn when the skill is attached.
 //
-// Dir is the absolute path to the skill's folder. It rides through ResolveSkills into the block
-// the loop injects, which names it so the model can read the resources bundled beside the
-// SKILL.md (refs/, prompts, scripts) without re-walking the source dirs.
+// Dir is the absolute path to the skill's folder, or empty when the skill announces no readable
+// folder at all — which is what a shipped skill does today: its bytes are in the binary, not on
+// disk, so naming a path would name one nothing can open. It rides through ResolveSkills into the
+// block the loop injects, which names it so the model can read the resources bundled beside the
+// SKILL.md (refs/, prompts, scripts) without re-walking the source dirs; an empty Dir omits that
+// line entirely (internal/agent's resolveSkillRefs).
 // It plays no part in identity — two skills with the same ID collide regardless of Dir, and
 // the later-loaded source wins (load.go).
 type Skill struct {
