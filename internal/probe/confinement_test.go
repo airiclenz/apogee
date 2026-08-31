@@ -156,3 +156,61 @@ func TestResidualNotice(t *testing.T) {
 		t.Errorf("notice fired in %d cells of the matrix; want exactly 1 (auto + confine + FSWrite + a residual)", fired)
 	}
 }
+
+// The auto ladder an UNATTENDED run is held to is the one a LAUNCH is held to (ADR 0033, decision
+// 3) — never stricter, and never silently escalating: the verdict fires iff confinement was asked
+// for AND the backend cannot fence, which is the mirror of caps.AutoEligible(). Both surfaces that
+// offer Auto with nobody behind it — a Schedule's Firing and `apogee headless` — read the same
+// sentence out of it, so it is asserted here for both nouns and for a named and an unnamed-fence
+// backend: a user who meets this refusal at one surface must not meet a weaker story at the other.
+func TestAutoUnattendedBlockedMirrorsTheAutoLadder(t *testing.T) {
+	t.Parallel()
+
+	fencing := domain.ConfinementCaps{FSWrite: true}
+	var none domain.ConfinementCaps
+
+	tests := []struct {
+		name               string
+		caps               domain.ConfinementCaps
+		confineToWorkspace bool
+		wantBlocked        bool
+	}{
+		{name: "a host that can fence offers auto", caps: fencing, confineToWorkspace: true},
+		{
+			name:               "a host that cannot fence blocks auto — an unattended run has no approval rung",
+			caps:               none,
+			confineToWorkspace: true,
+			wantBlocked:        true,
+		},
+		{name: "the user's own unconfined opt-in offers auto anyway", caps: none},
+		{name: "unconfined on a fencing host offers auto", caps: fencing},
+	}
+	for _, tt := range tests {
+		for _, subject := range []string{"a firing", "a headless run"} {
+			for _, backend := range []string{"deny", "landlock"} {
+				t.Run(tt.name+" / "+subject+" on "+backend, func(t *testing.T) {
+					t.Parallel()
+
+					got := probe.AutoUnattendedBlocked(subject, backend, tt.caps, tt.confineToWorkspace)
+
+					if blocked := got != ""; blocked != tt.wantBlocked {
+						t.Fatalf("AutoUnattendedBlocked = %q (blocked=%v), want blocked=%v",
+							got, blocked, tt.wantBlocked)
+					}
+					if tt.wantBlocked != (tt.confineToWorkspace && !tt.caps.AutoEligible()) {
+						t.Fatalf("the case itself disagrees with caps.AutoEligible()=%v; the verdict is its mirror",
+							tt.caps.AutoEligible())
+					}
+					if !tt.wantBlocked {
+						return
+					}
+					want := "the " + backend + " backend on this host reports no filesystem confinement, " +
+						"so auto falls back to approval — and " + subject + " has nobody to ask"
+					if got != want {
+						t.Errorf("the refusal reads\n  %q\nwant\n  %q", got, want)
+					}
+				})
+			}
+		}
+	}
+}

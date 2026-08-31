@@ -332,7 +332,7 @@ func TestHeadlessAutoRefusalSharesTheScheduleSentence(t *testing.T) {
 
 	const want = "the landlock backend on this host reports no filesystem confinement, " +
 		"so auto falls back to approval — and a headless run has nobody to ask"
-	got := autoUnattendedBlocked("a headless run", "landlock", unfenceable, true)
+	got := probe.AutoUnattendedBlocked("a headless run", "landlock", unfenceable, true)
 	if got != want {
 		t.Errorf("the refusal reads\n  %q\nwant\n  %q", got, want)
 	}
@@ -342,10 +342,10 @@ func TestHeadlessAutoRefusalSharesTheScheduleSentence(t *testing.T) {
 
 	// The cells that are not a refusal: a backend that can fence, and a posture that asked for no
 	// confinement at all (the user's own explicit loosen, never blocked).
-	if blocked := autoUnattendedBlocked("a headless run", "landlock", apogee.ConfinementCaps{FSWrite: true}, true); blocked != "" {
+	if blocked := probe.AutoUnattendedBlocked("a headless run", "landlock", apogee.ConfinementCaps{FSWrite: true}, true); blocked != "" {
 		t.Errorf("a fenceable host was refused auto: %q", blocked)
 	}
-	if blocked := autoUnattendedBlocked("a headless run", "deny", unfenceable, false); blocked != "" {
+	if blocked := probe.AutoUnattendedBlocked("a headless run", "deny", unfenceable, false); blocked != "" {
 		t.Errorf("an unconfined run was refused auto: %q", blocked)
 	}
 }

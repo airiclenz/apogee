@@ -224,7 +224,7 @@ func runDaemon(ctx context.Context, opts *config.Options, changed func(string) b
 	// journals it. Only the residual cell speaks here: a backend that fences but knowingly leaves
 	// a write-class access open (landlock ABI 1–2 and truncate(2)) — disclosure, never a blocker.
 	// The degraded cell has no notice to print because it is REFUSED instead, by the
-	// autoUnattendedBlocked verdict daemonHost hands internal/daemon below. The mode is fixed to
+	// scheduleAutoBlocked verdict daemonHost hands internal/daemon below. The mode is fixed to
 	// Auto because that is the only mode the disclosure is about, and an auto Firing is what this
 	// process exists to run.
 	if notice := probe.ResidualNotice(probe.BackendName(wiring.confiner),
@@ -556,7 +556,7 @@ func daemonHost(opts config.Options, home string, wiring *daemonWiring) daemon.H
 			}
 			return daemon.ServerFacts{}, false
 		},
-		AutoEligible: autoUnattendedBlocked("a firing", probe.BackendName(wiring.confiner),
+		AutoEligible: scheduleAutoBlocked(probe.BackendName(wiring.confiner),
 			wiring.confiner.Capabilities(), opts.ConfineToWorkspace) == "",
 	}
 }

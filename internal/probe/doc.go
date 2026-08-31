@@ -37,9 +37,10 @@
 // half asks the network, and it asks read-only: GET /v1/models plus llama.cpp's GET /props, with a
 // zero Discovery meaning "no endpoint was configured", which is a report and not a failure.
 // confinement.go is the shared confinement wording — BackendName, CapabilityLine,
-// DegradedNotice, ResidualNotice — rendered once here and quoted by the CLI report, the TUI's
-// /confine status and startup, so three surfaces cannot tell a user three stories about one
-// verdict.
+// DegradedNotice, ResidualNotice, AutoUnattendedBlocked — rendered once here and quoted by the CLI
+// report, the TUI's /confine status and startup, and the two unattended surfaces that refuse Auto
+// (a Schedule's Firing and `apogee headless`), so no surface can tell a user its own story about
+// one verdict.
 //
 // The model half, the part that spends tokens. battery.go is the live suite: the Capability slugs
 // (stable, because they are folded into the fingerprint), the Chat seam it calls the Upstream

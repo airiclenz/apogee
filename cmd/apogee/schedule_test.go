@@ -980,44 +980,6 @@ func TestIdleGateHoldsAFiringUntilTheSessionIsQuiescent(t *testing.T) {
 	})
 }
 
-// The auto ladder a Schedule is held to is the one a LAUNCH is held to (decision 3) — never
-// stricter, and never silently escalating.
-func TestScheduleAutoBlockedMirrorsTheAutoLadder(t *testing.T) {
-	t.Parallel()
-
-	fencing := apogee.ConfinementCaps{FSWrite: true}
-	var none apogee.ConfinementCaps
-
-	tests := []struct {
-		name               string
-		caps               apogee.ConfinementCaps
-		confineToWorkspace bool
-		wantBlocked        bool
-	}{
-		{name: "a host that can fence offers auto", caps: fencing, confineToWorkspace: true},
-		{
-			name:               "a host that cannot fence blocks auto — a firing has no approval rung",
-			caps:               none,
-			confineToWorkspace: true,
-			wantBlocked:        true,
-		},
-		{name: "the user's own unconfined opt-in offers auto anyway", caps: none},
-		{name: "unconfined on a fencing host offers auto", caps: fencing},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			got := scheduleAutoBlocked("deny", tt.caps, tt.confineToWorkspace)
-			if blocked := got != ""; blocked != tt.wantBlocked {
-				t.Fatalf("scheduleAutoBlocked = %q (blocked=%v), want blocked=%v", got, blocked, tt.wantBlocked)
-			}
-			if tt.wantBlocked && !strings.Contains(got, "deny") {
-				t.Errorf("the refusal %q does not name the backend that caused it", got)
-			}
-		})
-	}
-}
-
 // The wiring-level claim: runRoot hands the renderer a live scheduler plus the two values that
 // answer it, and the whole thing is closed when the TUI returns — a TUI-hosted Schedule dies with
 // the TUI, which is exactly what makes v1 honest about persistence.

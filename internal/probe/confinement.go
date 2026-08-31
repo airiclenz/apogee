@@ -112,3 +112,28 @@ func ResidualNotice(backendName string, caps domain.ConfinementCaps, mode domain
 			"  A kernel ≥ 6.2 closes it; until then treat auto's fence as create-and-write only.",
 		backendName, strings.Join(caps.Residuals, ", "))
 }
+
+// AutoUnattendedBlocked returns the reason an UNATTENDED auto run may not start on this host, or ""
+// when it may. Two surfaces offer Auto without a human behind it — a Schedule's Firing and `apogee
+// headless` — and each refuses it itself ("the surface that offers Auto is the one that refuses it",
+// ADR 0033, decision 3), so the verdict lives here once and differs only in the noun it calls the
+// run (subject). A user who meets this refusal at one surface must not meet a weaker story at the
+// other.
+//
+// It is the MIRROR of DegradedNotice's gate, with the mode fixed: an interactive Auto on a host
+// that cannot fence keeps working because every terminal command falls back to the Approval path,
+// and that is precisely the rung an unattended run does not have — its Approver denies rather than
+// asks (ADR 0033, decision 2), so auto there would be a plan run that fails loudly at every write.
+// The unconfined case (`confine-to-workspace: false`) is NOT blocked: that is the user's own
+// explicit "I am the sandbox", the same ladder that lets the session launch in Auto, and neither a
+// schedule nor a headless run is held to a stricter bar than a launch (decision 3).
+//
+// Pure, so the wording is table-testable without a host.
+func AutoUnattendedBlocked(subject, backend string, caps domain.ConfinementCaps, confineToWorkspace bool) string {
+	if !confineToWorkspace || caps.AutoEligible() {
+		return ""
+	}
+	return fmt.Sprintf(
+		"the %s backend on this host reports no filesystem confinement, so auto falls back to "+
+			"approval — and %s has nobody to ask", backend, subject)
+}

@@ -304,7 +304,7 @@ func runHeadless(cmd *cobra.Command, args []string, opts *config.Options, noSave
 	// refusal happens before the Config is composed for that reason: nothing is sent, and exit 2
 	// tells the script this is an invocation to fix rather than an outcome to read.
 	if mode == domain.ModeAuto {
-		if blocked := autoUnattendedBlocked(
+		if blocked := probe.AutoUnattendedBlocked(
 			"a headless run", probe.BackendName(confiner), confiner.Capabilities(), opts.ConfineToWorkspace); blocked != "" {
 			return notStarted(fmt.Errorf(
 				"apogee headless: --mode auto cannot run on this host — %s (use --mode plan, or "+
