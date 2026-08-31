@@ -466,6 +466,15 @@ func TestDiscover_EffortSupport(t *testing.T) {
 	const plainModels = `{"data":[{"id":"m","context_length":32768}]}`
 	const reasoningModels = `{"data":[{"id":"m","context_length":32768,` +
 		`"reasoning":{"supported_efforts":["low","medium","high"],"default_effort":"medium"}}]}`
+	// The two shapes below are the payload https://openrouter.ai/api/v1/models actually served on
+	// 2026-08-31, verbatim: z-ai/glm-5.3-flash reports reasoning it will not skip, z-ai/glm-5.2
+	// reports the same object with the flag false.
+	const mandatoryModels = `{"data":[{"id":"z-ai/glm-5.3-flash","context_length":32768,` +
+		`"reasoning":{"mandatory":true,"default_enabled":true,` +
+		`"supported_efforts":["max","high","low"],"default_effort":"max"}}]}`
+	const optionalModels = `{"data":[{"id":"z-ai/glm-5.2","context_length":32768,` +
+		`"reasoning":{"mandatory":false,"default_enabled":true,` +
+		`"supported_efforts":["max","high","low"],"default_effort":"max"}}]}`
 
 	tests := []struct {
 		name   string
@@ -544,6 +553,64 @@ func TestDiscover_EffortSupport(t *testing.T) {
 			props:  "",
 			hint:   "someone-elses-model",
 			want:   EffortSupport{},
+		},
+		{
+			name:   "an entry flagging mandatory reasoning ⇒ Mandatory beside the vocabulary",
+			models: mandatoryModels,
+			props:  "",
+			want: EffortSupport{
+				Supported: true,
+				Dialect:   EffortDialectReasoning,
+				Efforts:   []string{"max", "high", "low"},
+				Default:   "max",
+				Mandatory: true,
+			},
+		},
+		{
+			name:   "an entry flagging mandatory false ⇒ the dial can be turned off",
+			models: optionalModels,
+			props:  "",
+			want: EffortSupport{
+				Supported: true,
+				Dialect:   EffortDialectReasoning,
+				Efforts:   []string{"max", "high", "low"},
+				Default:   "max",
+			},
+		},
+		{
+			name:   "a reasoning object naming no mandatory ⇒ not mandatory",
+			models: reasoningModels,
+			props:  "",
+			want: EffortSupport{
+				Supported: true,
+				Dialect:   EffortDialectReasoning,
+				Efforts:   []string{"low", "medium", "high"},
+				Default:   "medium",
+			},
+		},
+		{
+			name: "an explicit null mandatory ⇒ not mandatory, vocabulary intact",
+			models: `{"data":[{"id":"m","context_length":32768,` +
+				`"reasoning":{"supported_efforts":["low","high"],"mandatory":null}}]}`,
+			props: "",
+			want: EffortSupport{
+				Supported: true,
+				Dialect:   EffortDialectReasoning,
+				Efforts:   []string{"low", "high"},
+			},
+		},
+		{
+			name:   "an unlisted routing variant inherits its base slug's mandatory flag",
+			models: mandatoryModels,
+			props:  "",
+			hint:   "z-ai/glm-5.3-flash:exacto",
+			want: EffortSupport{
+				Supported: true,
+				Dialect:   EffortDialectReasoning,
+				Efforts:   []string{"max", "high", "low"},
+				Default:   "max",
+				Mandatory: true,
+			},
 		},
 	}
 
@@ -653,6 +720,36 @@ func TestDiscover_MalformedEffortPayloadsStayBestEffort(t *testing.T) {
 	}
 }
 
+// One unexpected flag must cost the flag and not the dial: `mandatory` is read in a pass of its
+// own precisely so that a server writing a word where a boolean belongs still gets its vocabulary
+// through. It cannot ride in TestDiscover_MalformedEffortPayloadsStayBestEffort above, whose single
+// shared assertion wants the zero value from every row — this payload's whole point is that
+// Supported stays true.
+func TestDiscover_NonBooleanMandatoryKeepsTheDial(t *testing.T) {
+	t.Parallel()
+
+	const models = `{"data":[{"id":"m","context_length":32768,` +
+		`"reasoning":{"supported_efforts":["low","high"],"mandatory":"always"}}]}`
+
+	srv, _ := discoveryServer(models, "")
+	defer srv.Close()
+
+	info, err := NewClient(srv.URL, "").Discover(context.Background())
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+
+	want := EffortSupport{
+		Supported: true,
+		Dialect:   EffortDialectReasoning,
+		Efforts:   []string{"low", "high"},
+	}
+	if !reflect.DeepEqual(info.EffortSupport, want) {
+		t.Errorf("EffortSupport = %+v, want the vocabulary intact and only the flag lost %+v",
+			info.EffortSupport, want)
+	}
+}
+
 // A server entry that FORCES a dialect outranks both passive tells (ADR 0060 decision 3): the key
 // exists for the providers that advertise nothing, so what it says is what discovery reports — the
 // wire shape and, with it, the verdict that the dial exists at all. `off` is the one forcing that
@@ -664,6 +761,9 @@ func TestDiscover_ForcedEffortDialect(t *testing.T) {
 	const reasoningModels = `{"data":[{"id":"m","context_length":32768,` +
 		`"reasoning":{"supported_efforts":["low","medium","high"],"default_effort":"medium"}}]}`
 	const kwargsProps = `{"chat_template":"{% if reasoning_effort %}...{% endif %}"}`
+	const mandatoryModels = `{"data":[{"id":"m","context_length":32768,` +
+		`"reasoning":{"mandatory":true,"default_enabled":true,` +
+		`"supported_efforts":["max","high","low"],"default_effort":"max"}}]}`
 
 	tests := []struct {
 		name   string
@@ -718,6 +818,30 @@ func TestDiscover_ForcedEffortDialect(t *testing.T) {
 			forced: EffortDialectOpenAI,
 			models: reasoningModels,
 			want:   EffortSupport{Supported: true, Dialect: EffortDialectOpenAI},
+		},
+		{
+			name:   "forcing the detected dialect keeps the mandatory flag with the vocabulary",
+			forced: EffortDialectReasoning,
+			models: mandatoryModels,
+			want: EffortSupport{
+				Supported: true,
+				Dialect:   EffortDialectReasoning,
+				Efforts:   []string{"max", "high", "low"},
+				Default:   "max",
+				Mandatory: true,
+			},
+		},
+		{
+			name:   "forcing a DIFFERENT dialect keeps the mandatory flag though not the vocabulary",
+			forced: EffortDialectOpenAI,
+			models: mandatoryModels,
+			want:   EffortSupport{Supported: true, Dialect: EffortDialectOpenAI, Mandatory: true},
+		},
+		{
+			name:   "off forced over a model that cannot stop thinking ⇒ the zero verdict anyway",
+			forced: EffortDialectOff,
+			models: mandatoryModels,
+			want:   EffortSupport{Dialect: EffortDialectOff},
 		},
 	}
 

@@ -125,6 +125,13 @@ type EffortSupport struct {
 	// Default is the level the server said it uses when a request names none, and "" when the
 	// source states none.
 	Default string
+	// Mandatory reports that this model's reasoning cannot be turned off, which is why a request
+	// that asks for none still comes back with a thinking pass. Like Efforts and Default it is a
+	// REPORTED fact — only a source that says so sets it — and it is meaningless when Supported
+	// is false. Unlike them it describes the MODEL rather than the wire shape, so a server entry
+	// that FORCES a dialect carries it across unchanged; only the forced EffortDialectOff clears
+	// it along with everything else (see forceEffortDialect).
+	Mandatory bool
 }
 
 // Discover resolves the active model and its context window from the Upstream. It runs two
@@ -185,6 +192,11 @@ func (c *Client) Discover(ctx context.Context) (ModelInfo, error) {
 // already found is therefore a no-op rather than a downgrade, which is what makes the key safe to
 // leave in a file after a provider grows a tell.
 //
+// The detected Mandatory flag, deliberately unlike that vocabulary, survives EVERY forced wire
+// dialect: that a model cannot be asked to stop thinking is a fact about the model, and rewriting
+// the shape of the request does not make it false. Only the forced EffortDialectOff clears it, with
+// the rest of the verdict.
+//
 // It is total: EffortDialectNone forces nothing (the `auto` an absent key means), and any other
 // value is applied as the wire dialect it names — the config loader's enum is what refuses a word
 // that names no dialect, one boundary further out.
@@ -195,7 +207,7 @@ func forceEffortDialect(forced EffortDialect, detected EffortSupport) EffortSupp
 	case EffortDialectOff:
 		return EffortSupport{Dialect: EffortDialectOff}
 	}
-	support := EffortSupport{Supported: true, Dialect: forced}
+	support := EffortSupport{Supported: true, Dialect: forced, Mandatory: detected.Mandatory}
 	if detected.Supported && detected.Dialect == forced {
 		support.Efforts, support.Default = detected.Efforts, detected.Default
 	}
@@ -361,9 +373,14 @@ type modelsResponse struct {
 // Its mere PRESENCE is the tell (see EffortSupport): a server that describes the dial at all
 // supports it, even when it names neither a vocabulary nor a default — so the entry holds the field
 // raw and decodeReasoning distinguishes an absent object from an empty one.
+// The `mandatory` flag it may also carry — reasoning this model cannot be asked to skip, as
+// https://openrouter.ai/api/v1/models reports for z-ai/glm-5.3-flash and z-ai/glm-5.3 but not for
+// z-ai/glm-5.2 — is deliberately NOT a tagged field here: decodeReasoning reads it in a pass of its
+// own so that a server writing something other than a boolean there costs only the flag.
 type modelReasoning struct {
 	SupportedEfforts []string `json:"supported_efforts"`
 	DefaultEffort    string   `json:"default_effort"`
+	Mandatory        bool     `json:"-"`
 }
 
 // jsonNullLiteral is the encoding of an explicit JSON null, which a raw field carries as bytes
@@ -419,6 +436,7 @@ func (r modelsResponse) effortSupport(active string) EffortSupport {
 		Dialect:   EffortDialectReasoning,
 		Efforts:   reasoning.SupportedEfforts,
 		Default:   reasoning.DefaultEffort,
+		Mandatory: reasoning.Mandatory,
 	}
 }
 
@@ -447,6 +465,16 @@ func decodeReasoning(raw json.RawMessage) *modelReasoning {
 	var reasoning modelReasoning
 	if err := json.Unmarshal(raw, &reasoning); err != nil {
 		return nil
+	}
+	// `mandatory` is read separately, and its failure is deliberately swallowed rather than
+	// returned: decoding it alongside the vocabulary would let a non-boolean value fail the WHOLE
+	// object, which reads as "no tell" and takes the dial off the menu entirely. One unexpected
+	// flag must cost the flag, never the dial.
+	var flag struct {
+		Mandatory bool `json:"mandatory"`
+	}
+	if err := json.Unmarshal(raw, &flag); err == nil {
+		reasoning.Mandatory = flag.Mandatory
 	}
 	return &reasoning
 }
