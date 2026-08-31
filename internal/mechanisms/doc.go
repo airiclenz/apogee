@@ -63,7 +63,10 @@
 // recent successful reads, write-path collection); membership and thresholds stay at the call
 // site. intent.go is the lexical action/analysis/question classifier — a shared helper with no
 // catalogue row of its own (catalogue C6). retired.go is the roll of IDs this build no longer
-// catalogues, so a saved config or Validated set naming one is tolerated rather than refused.
+// catalogues, so a saved config or Validated set naming one is tolerated rather than refused — and
+// the home of ResolveEnabled, the resolver a Driver runs a `mechanisms:` block through: it
+// validates every key against the catalogue, drops the retired ones, and hands back the notices
+// naming those the block still turns on.
 // offramps.go carries the Wave-1 off-ramp helpers: the
 // read-tool set, tool-call path extraction, and the conversation predicates the off-ramps gate on.
 // robustness.go carries the Wave-1 robustness helpers: the robustnessIssue type, the correction
