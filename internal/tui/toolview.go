@@ -105,6 +105,24 @@ type branchSummary struct {
 	// composed delegation row that carries a head's verdict onto words of its own (subAgentSummary).
 	failed bool
 
+	// succeeded is the block's OWN verdict that a DELEGATION finished — the scheme's `success` green
+	// the outcome slot takes (summaryStyle), which is the done ✓ on the row said again in the one
+	// cell that says how the call came out. It is [branchSummary.failed]'s mirror in every way but
+	// one: failure is a verdict any tool can reach, where this is anchored on the delegation
+	// vocabulary ALONE (succeededSummary). No other tool's `clean`, `PASS` or `exit 0` earns it —
+	// those are a tool's reading of its own work, where `done` is the ENGINE's reading of a run it
+	// drove to its boundary, and only that reading is a verdict apogee is willing to paint green
+	// (ratified call 3 of docs/plans/"2026-08-31 - 05").
+	//
+	// It rides WITH the text for the reason the failure verdict does: the wording is put to the
+	// vocabulary once, at the seams that WORD a slot (typedSummary live, namedSummary on replay),
+	// and every reader downstream asks the field instead of reading the same sentence back out —
+	// summaryStyle, and the composed delegation row that carries a head's verdict onto words of its
+	// own (subAgentSummary). A quoted line never carries it, exactly as it never carries a failure:
+	// a promoted output line reading "done" is the TOOL's word about itself (F-29). Where both
+	// verdicts stand, failure wins.
+	succeeded bool
+
 	// stat is the ARITHMETIC the text spells out, for the summaries a presenter worded from a fact
 	// it had counted: a run's type row adds its members' stats up from these rather than reading its
 	// own wording back out of them (sumStats). It is empty on every other summary — a quoted
@@ -141,8 +159,17 @@ const (
 // It is the ONE place named wording is put to the failure vocabulary (failedSummary): the words
 // here are the block's own, so a verdict spelled in them IS the block's verdict, and it is settled
 // onto the summary rather than re-derived by each seam that later has to know it.
+//
+// It is also where REPLAY recovers a delegation's success verdict (succeededSummary,
+// [branchSummary.succeeded]): a record restores a plain stat as a named summary
+// (fromWireToolView), so the seam that words a slot on the way back is this one, and a finished run
+// replays in the same green it was shown in rather than dropping to the ordinary marker tone.
 func namedSummary(line detailLine) branchSummary {
-	return branchSummary{detailLine: line, failed: failedSummary(line.Text)}
+	return branchSummary{
+		detailLine: line,
+		failed:     failedSummary(line.Text),
+		succeeded:  succeededSummary(line.Text),
+	}
 }
 
 // quotedSummary is a summary carrying text the block QUOTES rather than words of its own — a
@@ -170,7 +197,14 @@ func typedSummary(v statValue) branchSummary {
 		// A stat's phrase is a READING and never a verdict (branchSummary.failed): "exit 0" says
 		// what the call came to whatever number stands in it, so it is not put to the failure
 		// vocabulary the way a worded sentence is.
-		return branchSummary{detailLine: line}
+		//
+		// The ONE exception is the delegation vocabulary ([branchSummary.succeeded]): `done` is not
+		// a tool's reading of its own work but the engine's word for a run it drove to its
+		// boundary, and this is the seam that spells it on the live path (delegationStat). The
+		// predicate is anchored on that vocabulary and nothing else, so every other plain phrase —
+		// `clean`, `PASS`, `exit 0`, a short hash — reaches the slot with no verdict on it exactly
+		// as before.
+		return branchSummary{detailLine: line, succeeded: succeededSummary(line.Text)}
 	}
 	return branchSummary{detailLine: line, stat: v}
 }

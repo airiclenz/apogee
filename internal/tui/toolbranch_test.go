@@ -1140,3 +1140,136 @@ func TestRunAggregateCarriesItsFailureVerdict(t *testing.T) {
 		t.Error("the aggregate carries no failure verdict; the type row would paint in the ordinary tone")
 	}
 }
+
+// ----------------------------------------------------------------------------
+// A finished delegation's `done` reads in the success colour (tui-polish plan, item 4)
+// ----------------------------------------------------------------------------
+
+// The outcome slot's ONE non-failure verdict: a delegation the engine drove to its own boundary
+// says `done`, and that word takes the scheme's `success` role — the very green the done ✓ beside
+// the run's name already wears, so a finished run is marked once in one colour rather than twice in
+// two. Everything else on the row is unmoved: a run stopped at its step cap did not finish and keeps
+// the marker tone, and a failed one is red, since the success verdict may never talk a failure out
+// of its red.
+func TestDelegationDoneReadsInTheSuccessTone(t *testing.T) {
+	th := newTheme(scheme.Default())
+	if !colorActive(th) {
+		t.Skip("no colour profile in this environment; the SGR assertion would be vacuous")
+	}
+
+	// delegation folds ONE sub-agent call and the result the engine wrapped its answer in, so every
+	// case here is worded by the presenter's own seam (delegationStat) rather than by a summary
+	// spelled in the test.
+	delegation := func(t *testing.T, content string, failed bool) toolView {
+		t.Helper()
+		tv := presentToolCall(domain.ToolCall{ID: "s1", Tool: "sub_agent",
+			Arguments: []byte(`{"task":"survey the tests"}`)}, "", workspaceRoot{})
+		tv.enrichWithResult(domain.ToolResult{CallID: "s1", Content: content, IsError: failed},
+			workspaceRoot{})
+		return tv
+	}
+
+	for _, tc := range []struct {
+		name    string
+		content string
+		failed  bool
+		slot    string
+		tone    lipgloss.Style
+	}{
+		{
+			name:    "a run that finished is green",
+			content: "the suite is clean\nnothing else to report",
+			slot:    "done",
+			tone:    th.successMark,
+		},
+		{
+			name: "and stays green with the steering cell beside it",
+			content: "the suite is clean\nnothing else to report\n" +
+				"(the user sent 2 messages to this sub-agent while it ran)",
+			slot: "done · steered by 2 messages",
+			tone: th.successMark,
+		},
+		{
+			name: "a run stopped at its step cap did not finish",
+			content: "[delegate stopped at its step cap (3 steps); partial result — its last " +
+				"visible text follows]\nhalfway there",
+			slot: "stopped at its step cap",
+			tone: th.toolMarker,
+		},
+		{
+			name:    "a failed run is red, and no success verdict overrides it",
+			content: "it fell over",
+			failed:  true,
+			slot:    "error: it fell over",
+			tone:    th.errorText,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			view := delegation(t, tc.content, tc.failed)
+
+			if got := view.Summary.Text; got != tc.slot {
+				t.Fatalf("outcome slot = %q, want %q", got, tc.slot)
+			}
+			row := leaderRow(th, view, branchMarker(true), 70, false, noRemainder)
+
+			if !strings.Contains(row, tc.tone.Render(tc.slot)) {
+				t.Errorf("slot %q is not painted in the expected tone: %q", tc.slot, row)
+			}
+			// The three tones are distinct, so "painted in the expected one" is only a claim if the
+			// other two are excluded: a green that also matched the marker role would pin nothing.
+			for _, other := range []lipgloss.Style{th.successMark, th.toolMarker, th.errorText} {
+				if other.Render(tc.slot) == tc.tone.Render(tc.slot) {
+					continue
+				}
+				if strings.Contains(row, other.Render(tc.slot)) {
+					t.Errorf("slot %q also wears a tone it must not: %q", tc.slot, row)
+				}
+			}
+		})
+	}
+}
+
+// The success verdict is anchored on the DELEGATION vocabulary and on nothing else. Every other
+// plain phrase an outcome slot carries is a tool's reading of its own work — diagnostics' `clean`, a
+// command's `PASS`, a process's `exit 0` — and apogee does not paint those green: the green says
+// the ENGINE drove a run to its boundary. The match is on the whole phrase too, so a sentence that
+// merely contains the word is not the verdict.
+func TestSummaryStyleGreensOnlyTheDelegationVerdict(t *testing.T) {
+	th := newTheme(scheme.Default())
+
+	for _, tc := range []struct {
+		text string
+		want bool
+	}{
+		{delegationDoneVerdict, true},
+		{"done · steered by 1 message", true},
+		{"done · steered by 3 messages", true},
+		{delegationCappedVerdict, false},
+		{"stopped at its step cap · steered by 1 message", false},
+		{"clean", false},
+		{"PASS", false},
+		{"exit 0", false},
+		{"done deal", false},
+		{"1 tool call · done", false},
+		{"", false},
+	} {
+		t.Run(tc.text, func(t *testing.T) {
+			got := succeededSummary(tc.text)
+			if got != tc.want {
+				t.Fatalf("succeededSummary(%q) = %v, want %v", tc.text, got, tc.want)
+			}
+
+			style := summaryStyle(th, branchSummary{succeeded: got}, false)
+			if green := reflect.DeepEqual(style, th.successMark); green != tc.want {
+				t.Errorf("slot %q painted in the success role = %v, want %v", tc.text, green, tc.want)
+			}
+		})
+	}
+
+	// Where both verdicts stand the failure wins: a run the engine faulted is red however its words
+	// read, which is what keeps the success verdict from ever talking a failure out of its red.
+	both := branchSummary{failed: true, succeeded: true}
+	if got := summaryStyle(th, both, false); !reflect.DeepEqual(got, th.errorText) {
+		t.Error("a summary carrying both verdicts is not red; failure must win")
+	}
+}

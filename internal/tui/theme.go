@@ -156,7 +156,7 @@ type theme struct {
 	// state (toolMarkerBright, summaryStyle).
 	toolDetailBright lipgloss.Style
 	toolLeader       lipgloss.Style // the ⋯ run carrying a tool row's eye from its target to the outcome slot at the row's edge (its own `tool-leader` role, seeded from `muted`): chrome like the ▶ it runs up to, so the dots never read as content — and its own role so a scheme can damp them without moving the indicator with them
-	toolMarker       lipgloss.Style // the synthesized "+N more lines" remainder marker beneath a hidden body, and the outcome slot at a tool row's right edge (summaryStyle): its own `tool-marker` role (a warm orange under `dark`, a cooler blue under `light`), no background and no bold weight, so a marker is never mistakable for a body line that happens to open with "+" — the prompt block's see-more keeps the heavier promptToggle treatment
+	toolMarker       lipgloss.Style // the synthesized "+N more lines" remainder marker beneath a hidden body, and the outcome slot at a tool row's right edge (summaryStyle — with two verdicts overriding it: a failure's red, and the `success` green of a finished delegation's `done`): its own `tool-marker` role (a warm orange under `dark`, a cooler blue under `light`), no background and no bold weight, so a marker is never mistakable for a body line that happens to open with "+" — the prompt block's see-more keeps the heavier promptToggle treatment
 	// toolMarkerBright is toolMarker's open step, the same one-ramp pair toolDetail /
 	// toolDetailBright models one level down (the scheme's `tool-marker-bright` role): the outcome
 	// slot of an EXPANDED block, a step out of the collapsed slots around it. It is the marker role
@@ -167,8 +167,10 @@ type theme struct {
 	// every colour on screen is a role a scheme can name (ADR 0040).
 	toolMarkerBright lipgloss.Style
 	subRail          lipgloss.Style // the sub-agent frame: the │ rail down a Depth > 0 block, the ┌ that opened a delegation's header row and the ┊ that closed its span (both pre-ADR 0063) (toolLabel's `tool-header` role — one tone for the whole frame)
-	// successMark is the ✓ a FINISHED delegation wears after its name (the scheme's `success` role,
-	// green): errorText's counterpart, and read as one — the two are what the transcript says about
+	// successMark is what a FINISHED delegation is marked with (the scheme's `success` role, green):
+	// the ✓ after its name, and the `done` verdict in its outcome slot (summaryStyle) — one style
+	// for both, so the two marks on one run cannot come to disagree about the colour of finishing.
+	// It is errorText's counterpart, and read as one — the two are what the transcript says about
 	// how something came out. It is a foreground alone, with no bold weight, because the mark is a
 	// small punctuation of a row the reader is skimming rather than a verdict shouted at them; the
 	// red that DOES shout belongs to a failure, which wears no glyph of its own (design call 6).

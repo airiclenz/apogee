@@ -155,7 +155,13 @@ lead at `toolbody.go:103` — so `TestExpandedBlockPaintsItsWholeBody`'s pinned 
 (`toolbranch_test.go:334`) are restated as numbered here, never left to fail.
 `feat(tui): the write and full-content edit bodies carry line numbers`
 
-## 4. A finished delegation's `done` reads in the scheme's success colour
+## 4. A finished delegation's `done` reads in the scheme's success colour — ✅ DONE (2026-08-31)
+
+NOTES (2026-08-31): the transcript-codec round-trip case the item's Tests ask for went into `internal/tui/transcriptbridge_test.go` (`TestTranscriptCodecReplaysAFinishedDelegationGreen`), which the item's Files list does not name — that file is where every `TestTranscriptCodec…` lives and where the codec helpers are, and the acceptance regex names that prefix. Its import block gained `internal/scheme` for the tone assertion.
+NOTES (2026-08-31): `internal/tui/toolpresent_test.go` is listed under the item's Files but needed no edit — its delegation pins are the slot's SPELLINGS (`toolpresent_test.go:1652`, unchanged by this item) and the tone claims belong beside the existing outcome-slot verdict sections in `toolbranch_test.go` and `subagentblock_test.go`, both also listed.
+NOTES (2026-08-31): every tone fixture uses a TWO-LINE delegation report on purpose. A one-line report is PROMOTED into the slot and marked quoted, and a quoted summary carries neither verdict (the item's own regression guard) — so a slot reading `done` is only reachable with a report that hangs in the body, or after the promote-guard demotes.
+NOTES (2026-08-31): prose guard — the sites amended are `layout.md`'s outcome-slot paragraph and its "an open block reads a step brighter" cross-reference, `docs/layout/tool-layout.md:79`'s `<tool-top-level-details>` Colour rule, `internal/tui/theme.go`'s `successMark` and `toolMarker` comments, `typedSummary`'s "never a verdict" comment, `namedSummary`'s, `subAgentSummary`'s and `summaryStyle`'s. `internal/tui/toolbranch.go:479` and `internal/tui/theme.go:155` were deliberately left alone: both say the outcome slot is off the `muted`/`muted-bright` EMPHASIS ramp and already elide the failure red, so neither asserts a count of non-failure tones.
+NOTES (2026-08-31): the predicate `succeededSummary` (internal/tui/toolleader.go, beside `failedSummary`) matches the whole phrase — `done`, or `done · steered by …` — and `rg` confirms `delegationDoneVerdict` is the only producer of that word in the package, so no non-delegation named summary can reach the green.
 
 **What.** `branchSummary` (`internal/tui/toolview.go:75`) gains `succeeded`, the mirror of `failed`.
 It is set from the delegation vocabulary at the two seams that WORD a slot and never by a painter:

@@ -265,6 +265,14 @@ func toolRowCells(th theme, width int) int {
 // block is open, with a summary that says the call FAILED overriding both in red — design call 11
 // makes that red the only failure marking, so no glyph and no header changes with it.
 //
+// A finished DELEGATION is the one non-failure exception to the marker pair, and it is narrow by
+// construction: a summary carrying the success verdict ([branchSummary.succeeded], anchored on the
+// delegation vocabulary alone) takes the scheme's `success` role — the very style the done ✓ on that
+// row already wears (theme.successMark), so the two marks on one run are one colour and one fact
+// rather than two that could drift. Nothing else on screen reaches it: no other tool's `clean`,
+// `PASS` or `exit 0` is put to that vocabulary, and a quoted line carries no verdict at all. Where
+// both verdicts stand, failure wins — a run the engine faulted is red whatever its words say.
+//
 // It is the MARKER role and not the two-tone detail gray the rest of the row wears (design call 2 of
 // docs/plans/"2026-08-11 - 00"). The slot is apogee's reading of what the call came to rather than a
 // line the tool printed — "12 lines", "exit 0 · 1.2s", the quoted line a promotion lifted out of the
@@ -287,6 +295,9 @@ func summaryStyle(th theme, s branchSummary, expanded bool) lipgloss.Style {
 	}
 	if s.failed {
 		return th.errorText
+	}
+	if s.succeeded {
+		return th.successMark
 	}
 	return slot
 }
@@ -318,6 +329,27 @@ func failedSummary(text string) bool {
 	}
 	n, noun, ok := countPhrase(text)
 	return ok && n > 0 && strings.TrimSuffix(noun, "s") == errorNoun
+}
+
+// succeededSummary reads a WORDING for the one verdict of success apogee paints: a delegation the
+// engine drove to its own boundary, whose slot delegationVerdict words `done` — alone, or with the
+// steering cell a human's messages append to whichever verdict stands (delegationSteeredCell, ADR
+// 0063 D3).
+//
+// It is failedSummary's mirror and is read at the same seams, once, on the way in (namedSummary,
+// typedSummary), so no painter asks the words again. What it deliberately is NOT is a general
+// vocabulary of good news: it is anchored on the delegation constants and matches nothing else, so
+// `stopped at its step cap` — a run the engine stopped mid-task, which did not finish — stays in the
+// ordinary marker tone, and diagnostics' `clean`, a test command's `PASS` and a process's `exit 0`
+// are readings a TOOL made of its own work rather than a verdict apogee reached about a run it drove
+// (ratified call 3 of docs/plans/"2026-08-31 - 05"). The match is on the WHOLE phrase for the same
+// reason: a sentence that merely contains the word — a report line, a target reading "done deal" —
+// is not this verdict.
+func succeededSummary(text string) bool {
+	if text == delegationDoneVerdict {
+		return true
+	}
+	return strings.HasPrefix(text, delegationDoneVerdict+slotSeparator+delegationSteeredLead)
 }
 
 // clipCells fits text into ONE row of at most cells columns, ending it in clipTail when it had to

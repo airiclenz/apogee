@@ -656,6 +656,13 @@ func subAgentSummary(head paintInput, span []paintInput) branchSummary {
 	// saying both at once. One field answers both, so the red slot and the missing ✓ cannot disagree:
 	// what failed a delegation is its result's error status (enrichWithResult), never a sentence.
 	summary.failed = head.tool.Summary.failed
+	// The success verdict travels for exactly the same reason and by exactly the same route
+	// ([branchSummary.succeeded]): this line opens with a count of the work, so a painter reading
+	// its words would find no verdict of any kind in them, and the head's own TEXT is the child's
+	// quoted report — a report that happens to read "done" is not the engine's word that the run
+	// finished. One field answers for the collapsed row and the head alike, so a finished run reads
+	// green in both readings of it.
+	summary.succeeded = head.tool.Summary.succeeded
 	return summary
 }
 

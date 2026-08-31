@@ -11,6 +11,7 @@ import (
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/schedule"
+	"github.com/airiclenz/apogee/internal/scheme"
 	"github.com/airiclenz/apogee/internal/session"
 )
 
@@ -1921,4 +1922,58 @@ func TestTranscriptCodecRoundTripsToolArguments(t *testing.T) {
 			t.Errorf("a blob predating the member decoded arguments %s, want none", got[0].tool.argsWire)
 		}
 	})
+}
+
+// TestTranscriptCodecReplaysAFinishedDelegationGreen pins the success verdict across a resume. The
+// green a finished run's outcome slot wears is the presenter's verdict about the run
+// ([branchSummary.succeeded]) rather than a colour stored in the record, and the record stores a
+// plain stat with no mark on it — so the seam that has to reach the verdict again on the way back is
+// namedSummary, which fromWireToolView restores a stat-only summary through. Without that the same
+// session would drop to the ordinary marker tone the moment it was resumed, which is a record that
+// paints differently from the conversation it is a record OF.
+//
+// The report is two lines on purpose: a one-line report is PROMOTED into the slot and quoted, which
+// carries no verdict either way, and this case is about the verdict.
+func TestTranscriptCodecReplaysAFinishedDelegationGreen(t *testing.T) {
+	t.Parallel()
+	th := newTheme(scheme.Default())
+	if !colorActive(th) {
+		t.Skip("no colour profile in this environment; the SGR assertion would be vacuous")
+	}
+	const width = 100
+	const slot = "1 tool call · done"
+
+	tr := &transcript{}
+	loneDelegation(tr, "s1", "survey", "a.go", "all clear\nnothing else to report")
+
+	data, err := encodeTranscript(tr)
+	if err != nil {
+		t.Fatalf("encodeTranscript: %v", err)
+	}
+	got, err := decodeTranscript(data)
+	if err != nil {
+		t.Fatalf("decodeTranscript: %v", err)
+	}
+	replayed := &transcript{entries: got}
+
+	row := ""
+	for _, ln := range replayed.renderLines(th, width) {
+		if strings.Contains(strip(ln), slot) {
+			row = ln
+		}
+	}
+	if row == "" {
+		t.Fatalf("no replayed row carries %q:\n%s", slot, renderPlain(replayed, width))
+	}
+	if !strings.Contains(row, th.successMark.Render(slot)) {
+		t.Errorf("the replayed run's slot is not green: %q", row)
+	}
+	if strings.Contains(row, th.toolMarker.Render(slot)) {
+		t.Errorf("the replayed run's slot fell back to the ordinary marker tone: %q", row)
+	}
+	if live, back := strings.Join(tr.renderLines(th, width), "\n"),
+		strings.Join(replayed.renderLines(th, width), "\n"); live != back {
+		t.Errorf("the replay does not paint what the conversation did:\n--- live ---\n%s\n--- replayed ---\n%s",
+			live, back)
+	}
 }

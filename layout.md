@@ -830,7 +830,13 @@ slot wears that same role**, in both states, with an open block's slot taking th
 step `tool-marker-bright`: the slot is apogee's reading of what the call came to — `12 lines`,
 `exit 0 · 1.2s`, `+8 −3`, a quoted line lifted out of the body — and not a line the tool printed,
 so it speaks in apogee's voice like the marker does rather than in the detail gray of the output it
-summarises. A failed call's red overrides it and nothing else does; every kind of summary,
+summarises. Two verdicts override it and nothing else does. A failed call's red is the first; the
+second is the `success` green of a **finished delegation's `done`** — the same role its done ✓
+wears, so a run says it finished once in two places rather than twice in two colours. That
+exception is anchored on the **delegation vocabulary** and reaches nothing else: it is the engine's
+word for a run it drove to its own boundary, where a tool's `clean`, `PASS` or `exit 0` is that
+tool's reading of its own work and stays in the marker tone, as does a run `stopped at its step
+cap`, which did not finish. Where both verdicts stand the red wins. Every other kind of summary,
 promoted and quoted ones included, takes the marker tone. The sketch at the
 top of this file shows both states side by side: a collapsed `Terminal` row over its remainder
 marker, and a `Diff Preview` deliberately drawn open so the shape of a full body appears too — a
@@ -850,7 +856,9 @@ member's `│` gutter — because those are apogee's marks on the block rather t
 to say, and brightening them alongside the content would make the affordances shout exactly where
 the content was meant to. The outcome slot is off this ramp entirely (above): it walks the
 `tool-marker` / `tool-marker-bright` pair, the same one step in the same direction, so an opened
-block still lifts as a whole. Diff-coloured lines keep their red and green in both states too: the
+block still lifts as a whole — except where a verdict has taken the slot, a failure's red or a
+finished delegation's `success` green (above), and a verdict does not brighten: what it says is the
+same in both states. Diff-coloured lines keep their red and green in both states too: the
 colour already says which way a line went, and an emphasis step layered onto it would be a second
 thing the same colour means.
 

@@ -78,9 +78,15 @@ record of a shape the screen no longer has.
   **Colour:** the `tool-marker` role while the block is collapsed and
   `tool-marker-bright` once it is open — the slot is apogee's reading of what
   the call came to, so it speaks in the same voice as the `+N more lines`
-  marker rather than in the detail gray of the body it summarises. A failed
-  summary is red (`error`) and that red wins; nothing else overrides the role,
-  and every kind takes it, promoted and quoted ones included.
+  marker rather than in the detail gray of the body it summarises. Two
+  verdicts override that pair. A failed summary is red (`error`) and that red
+  wins over both. The other is a **finished delegation's `done`**, which takes
+  the `success` role — the same green its done ✓ wears, so a run marks its
+  finishing once in one colour. That exception is anchored on the delegation
+  vocabulary alone: a run `stopped at its step cap` did not finish and stays in
+  the marker tone, and so do a tool's own readings of its own work (`clean`,
+  `PASS`, `exit 0`) and every promoted or quoted line, which carry no verdict
+  at all. Nothing else overrides the role, and every other kind takes it.
 
 ## Width and overflow
 

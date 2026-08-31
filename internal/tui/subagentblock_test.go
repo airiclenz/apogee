@@ -1257,3 +1257,85 @@ func TestResultEnvelopeIsReadOffTheEnginesOwnLinesOnly(t *testing.T) {
 		})
 	}
 }
+
+// ----------------------------------------------------------------------------
+// A finished delegation's collapsed row (tui-polish plan, item 4)
+// ----------------------------------------------------------------------------
+
+// A run that FINISHED paints its outcome slot in the scheme's `success` green on the one row it
+// has, and wears the done ✓ beside its name — the two marks being one style and one fact
+// (theme.successMark). The collapsed row is where the claim bites: its line is a COMPOSED reading,
+// "1 tool call · done", whose leading words are a count of the work and say nothing about how the
+// run ended, so the verdict has to be the HEAD's, carried onto that line exactly as a failure's is
+// (subAgentSummary). A painter reading the composed words instead would find no verdict in them.
+//
+// The other half of the claim is that the green is anchored on the delegation vocabulary and not on
+// the row's spelling: a run stopped at its step cap did not finish, keeps the ordinary marker tone,
+// and wears no ✓.
+func TestSubAgentFinishedRunReadsInTheSuccessTone(t *testing.T) {
+	th := newTheme(scheme.Default())
+	if !colorActive(th) {
+		t.Skip("no colour profile in this environment; the SGR assertion would be vacuous")
+	}
+	// Wide enough that no row has to give up its outcome slot: what is under test is the slot's
+	// tone, and a clipped slot would assert the geometry instead.
+	const width = 100
+
+	// A report of two lines, so the run's answer hangs in the block's body and the slot carries the
+	// ENGINE's verdict rather than a one-line report promoted into it (promotedOutput) — which is
+	// quoted, carries no verdict of either kind, and is a different claim.
+	const report = "all clear\nnothing else to report"
+
+	paintedRow := func(t *testing.T, tr *transcript, text string) string {
+		t.Helper()
+		found := ""
+		for _, ln := range tr.renderLines(th, width) {
+			if !strings.Contains(strip(ln), text) {
+				continue
+			}
+			if found != "" {
+				t.Fatalf("two painted rows carry %q", text)
+			}
+			found = ln
+		}
+		if found == "" {
+			t.Fatalf("no painted row carries %q", text)
+		}
+		return found
+	}
+
+	t.Run("a finished run is green on the one row it has", func(t *testing.T) {
+		const slot = "1 tool call · done"
+
+		tr := &transcript{}
+		loneDelegation(tr, "s1", "survey", "a.go", report)
+
+		row := paintedRow(t, tr, slot)
+		if !strings.Contains(row, th.successMark.Render(slot)) {
+			t.Errorf("slot %q is not painted in the success role: %q", slot, row)
+		}
+		if strings.Contains(row, th.toolMarker.Render(slot)) {
+			t.Errorf("slot %q still wears the ordinary marker tone: %q", slot, row)
+		}
+		if !strings.Contains(strip(row), glyphDone) {
+			t.Errorf("the finished run wears no done ✓: %q", strip(row))
+		}
+	})
+
+	t.Run("a run stopped at its step cap keeps the marker tone", func(t *testing.T) {
+		const slot = "1 tool call · stopped at its step cap"
+
+		tr := &transcript{}
+		loneDelegation(tr, "s1", "survey", "a.go",
+			"[delegate stopped at its step cap (3 steps); partial result — its last visible "+
+				"text follows]\nhalfway there")
+
+		row := paintedRow(t, tr, slot)
+		if !strings.Contains(row, th.toolMarker.Render(slot)) {
+			t.Errorf("slot %q does not wear the ordinary marker tone: %q", slot, row)
+		}
+		if strings.Contains(row, th.successMark.Render(slot)) {
+			t.Errorf("a run that did not finish is painted green: %q", row)
+		}
+	})
+}
