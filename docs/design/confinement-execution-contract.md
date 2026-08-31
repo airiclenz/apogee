@@ -633,8 +633,10 @@ rest of the Session (and, the memory being the whole agent tree's, for its paren
 too). The arguments are digested in their canonical spelling (`tools.CanonicalArgs`: keys sorted, a
 duplicated key collapsed to the **last** — the value stdlib JSON hands the executor and the
 approval pane shows), so a reordered or duplicated key cannot mint a second identity for one
-executed call; arguments that do not decode yield the **empty** key, which the memory refuses at
-both ends, so such a call re-prompts. The deliberate cost is ergonomic: allowing `npm test` does not
+executed call. That last-wins reading stands: dispatch refuses a key answered twice with
+**differing** values before resolve() (`domain.RepeatedArgumentKeys`), so the only repeat that ever
+reaches the digest is the byte-identical one. Arguments that do not decode yield the **empty** key,
+which the memory refuses at both ends, so such a call re-prompts. The deliberate cost is ergonomic: allowing `npm test` does not
 clear `npm run build`. **mcp** keeps the **server grain** `mcp-server:<alias>` so approving one of a
 server's tools clears its siblings for the Session (ADR 0012's server-grain promise; the
 `mcp-server:` prefix keeps the grain collision-proof, and an MCP tool that does not expose its

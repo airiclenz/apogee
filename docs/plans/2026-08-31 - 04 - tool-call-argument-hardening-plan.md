@@ -97,7 +97,11 @@ green.
 
 **Commit:** `feat(domain): RepeatedArgumentKeys reports a key given two answers`
 
-## 2. Dispatch refuses a call that answers one parameter twice
+## 2. Dispatch refuses a call that answers one parameter twice — ✅ DONE (2026-08-31)
+
+NOTES (2026-08-31): consequential edit — internal/tui/toolpresent_test.go: the duplicate-key test's prose stated the executor runs a duplicate last-wins, made necessary by the item's rule that the last-wins grep covers test prose as well as code.
+NOTES (2026-08-31): the item's named prose sites are a floor — the same grep also caught `internal/tui/toolargs.go:30` (the file-overview line for [orderedArgs]/[lastWins]) and both dispatch.go doc comments that enumerate the dispatch facts answered before resolve() (`prepareDelegation`'s "two dispatch facts", now three, and `resolveAndExecute`'s neighbour-row paragraph); all gained the differing-case refusal.
+NOTES (2026-08-31): `internal/domain/tools.go` and `internal/domain/tools_test.go` also match the grep, but every one of their last-wins lines is scoped to the byte-identical case, which this item leaves true, and already points at `RepeatedArgumentKeys` for the differing case (item 1) — left unchanged.
 
 **What:** Depends on item 1. A call whose arguments answer one parameter twice is refused before
 resolution, exactly as a fold collision is — the defect the incident above exercised: apogee ran a

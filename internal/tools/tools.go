@@ -94,7 +94,10 @@ func decodeArgs(raw json.RawMessage, dst any) error {
 // those bytes can agree on: object keys folded and sorted, a duplicated key collapsed to the
 // occurrence that WINS (the last — decodeArgs above is stdlib JSON, and so is every guard reading
 // the same call), insignificant whitespace dropped, and empty arguments canonicalised to the
-// empty object exactly as decodeArgs decodes them.
+// empty object exactly as decodeArgs decodes them. The last-wins collapse describes what actually
+// reaches this function: dispatch refuses a repeat whose two values DIFFER before the call is
+// resolved (agent.resolveAndExecute, domain.RepeatedArgumentKeys), so the repeats digested here
+// are the byte-identical ones, for which last-wins is the pinned contract.
 //
 // It exists so a decision made ABOUT a call — today the allow-for-session key a Gate carries
 // (internal/agent) — can be keyed on what the executor will actually RUN rather than on the byte
@@ -159,7 +162,10 @@ func canonicalJSON(raw json.RawMessage) ([]byte, error) {
 // sorted on that folded form. Decoding into a map is what collapses a duplicated key to its LAST
 // occurrence — the same value stdlib JSON hands the executor — and the fold is what collapses its
 // two case spellings, which that same decode also treats as one parameter; between them the
-// canonical form describes the call that will actually run.
+// canonical form describes the call that will actually run. Both collapses are total by
+// construction rather than by what dispatch admits, though dispatch refuses the case that would
+// make either of them lossy — one name spelled two ways, and one spelling given two different
+// values — before a digest is ever taken (agent.resolveAndExecute).
 //
 // Two DISTINCT spellings of one folded name are refused here rather than folded: this function
 // could only emit them as one object key twice over, in an order a map range does not fix, and a

@@ -28,7 +28,8 @@ import (
 // tool receives is the caller's bytes, untouched by anything here; what the screen gets is bounded
 // and disambiguated so an approval cannot be given on a reading the executor will not act on —
 // [orderedArgs] and [lastWins] show the duplicate key the executor will really run and say the
-// earlier ones existed, [argumentValueLines] caps one value so it cannot evict its siblings while
+// earlier ones existed (dispatch refuses a repeat whose values DIFFER before the pane is asked;
+// this collapse holds by construction for every path, see [argumentDetails]), [argumentValueLines] caps one value so it cannot evict its siblings while
 // keeping the value's LAST line as well as its head, and every argument-derived line sits at
 // [argumentValueIndent] so nothing the model wrote can paint where a label of the surface's own
 // lives. Each of those rules states its own reasoning at the declaration below.
@@ -120,6 +121,14 @@ const argumentValueIndent = "  "
 // wire order let `{"command":"npm test","command":"curl …|sh"}` be approved off a line the executor
 // discards — so the surviving pair sits where its winning value arrived, in wire order among the
 // other survivors, and the note says the earlier ones existed rather than hiding them.
+//
+// On the dispatched path that pair no longer reaches the pane: dispatch refuses a repeat whose two
+// values DIFFER before the Approver is consulted (agent.resolveAndExecute,
+// domain.RepeatedArgumentKeys), so what survives to be approved is the byte-identical repeat, where
+// last-wins is the pinned contract and the note only says the earlier spelling existed. The
+// rendering keeps the last-wins collapse for the differing case regardless, for the same reason the
+// fold below is kept — a Driver that skips resolveAndExecute still gets a pane reading the call the
+// executor would run.
 //
 // That decode folds key CASE as well — it matches an object key to a struct field
 // case-insensitively (domain.FoldArgumentKey) — so `command` and `Command` are ONE parameter to

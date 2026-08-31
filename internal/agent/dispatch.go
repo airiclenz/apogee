@@ -235,11 +235,12 @@ func (a *Agent) dispatchFanOut(ctx context.Context, turn, width int, calls []dom
 // the shared read-only dangerous-action floor still re-fires on every call a child actually
 // makes (ADR 0013 D3).
 //
-// The two dispatch facts resolveAndExecute answers before resolve() are answered here too, and in
+// The three dispatch facts resolveAndExecute answers before resolve() are answered here too, and in
 // its order: the registry miss, then arguments whose keys fold together
-// (collidingArgumentKeysResult). Both produce a final, unaudited slot with no child — the Approver
-// is never consulted and nothing runs — so a call's disposition never depends on whether the
-// reply that carried it happened to fan out.
+// (collidingArgumentKeysResult), then one key answered twice with different values
+// (repeatedArgumentKeysResult). All three produce a final, unaudited slot with no child — the
+// Approver is never consulted and nothing runs — so a call's disposition never depends on whether
+// the reply that carried it happened to fan out.
 func (a *Agent) prepareDelegation(ctx context.Context, turn int, call domain.ToolCall) fanOutSlot {
 	a.cfg.Events.Emit(domain.ToolCallEvent{EventBase: a.base(turn), Call: call, ResolvedPath: a.resolvedPath(call)})
 
@@ -260,6 +261,9 @@ func (a *Agent) prepareDelegation(ctx context.Context, turn int, call domain.Too
 	}
 
 	if result, refused := collidingArgumentKeysResult(call); refused {
+		return fanOutSlot{call: call, result: result}
+	}
+	if result, refused := repeatedArgumentKeysResult(call); refused {
 		return fanOutSlot{call: call, result: result}
 	}
 
@@ -393,12 +397,22 @@ func (a *Agent) commitDelegation(ctx context.Context, turn int, slot *fanOutSlot
 // runs. Arguments that do not DECODE are left alone — the tool's own decodeToolArgs reports
 // those, with the parameter names the tool actually has. The refusal itself lives in
 // collidingArgumentKeysResult, because prepareDelegation owes a fanned-out call the same answer.
+//
+// Its own neighbour is the same malformation spelled one way instead of two: ONE key given two
+// DIFFERING answers (domain.RepeatedArgumentKeys), where last-wins runs the call the model did not
+// write and the earlier answer vanishes with no signal to retry. It is refused right after the
+// colliding check (repeatedArgumentKeysResult), so the colliding refusal keeps precedence and its
+// wording; a byte-identical repeat is not refused at all, since last-wins for an exact duplicate is
+// the pinned contract every reader of the raw bytes already shares.
 func (a *Agent) resolveAndExecute(ctx context.Context, turn int, call domain.ToolCall) (domain.ToolResult, dispatchOutcome) {
 	tool, ok := a.lookupTool(call.Tool)
 	if !ok {
 		return errorToolResult(call.ID, fmt.Sprintf("unknown tool %q", call.Tool)), dispatchDone
 	}
 	if result, refused := collidingArgumentKeysResult(call); refused {
+		return result, dispatchDone
+	}
+	if result, refused := repeatedArgumentKeysResult(call); refused {
 		return result, dispatchDone
 	}
 
@@ -450,6 +464,44 @@ func collidingArgumentKeysResult(call domain.ToolCall) (domain.ToolResult, bool)
 		return domain.ToolResult{}, false
 	}
 	return errorToolResult(call.ID, collidingArgumentKeysMessage(groups)), true
+}
+
+// repeatedArgumentKeysPrefix and repeatedArgumentKeysAdvice are the two halves of the ONE wording a
+// call refused for a repeated argument key carries. Like the colliding pair above they are
+// constants because the refusal is the model's only signal about what to do differently: it must
+// name the keys it answered twice and prescribe the single fix, in the same words every time, so a
+// retry loop can recognise it rather than re-emit the same call.
+const (
+	repeatedArgumentKeysPrefix = "invalid arguments: repeated with different values: "
+	repeatedArgumentKeysAdvice = " — spell each argument once"
+)
+
+// repeatedArgumentKeysMessage is the error result text for a call whose argument object answers one
+// parameter twice with two different values, listing each repeated key as domain.RepeatedArgumentKeys
+// rendered it.
+func repeatedArgumentKeysMessage(names []string) string {
+	return repeatedArgumentKeysPrefix + strings.Join(names, ", ") + repeatedArgumentKeysAdvice
+}
+
+// repeatedArgumentKeysResult is the refusal for the neighbouring malformation: ONE spelling given
+// two DIFFERENT answers (`{"task":A,…,"task":B}`), where stdlib JSON's last-wins hands the executor
+// one of them and the model wrote both. That is not a call anyone can read one way either — the
+// pane, the dangerous-action guard and the allow-for-session digest all take the last value while
+// the model meant its first — so it is refused before resolve() in the same shape as
+// collidingArgumentKeysResult, and for the same reason: the serial path and the fan-out path must
+// answer such a call IDENTICALLY, or a disposition would depend on the bound server's Parallel
+// agents cap.
+//
+// A BYTE-IDENTICAL repeat is deliberately not this rule's business: domain.RepeatedArgumentKeys
+// reports no group for it, and last-wins for an exact duplicate stays the pinned contract every
+// reader already shares. Arguments that do not parse at all are not either — that is reported as an
+// error and left to the tool's own decodeToolArgs, which can name the parameters the tool has.
+func repeatedArgumentKeysResult(call domain.ToolCall) (domain.ToolResult, bool) {
+	names, err := domain.RepeatedArgumentKeys(call.Arguments)
+	if err != nil || len(names) == 0 {
+		return domain.ToolResult{}, false
+	}
+	return errorToolResult(call.ID, repeatedArgumentKeysMessage(names)), true
 }
 
 // resolutionInput assembles the facts resolve() decides from for one call: the effective mode,

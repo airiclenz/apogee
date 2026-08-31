@@ -1426,6 +1426,200 @@ func TestFanOut_CollidingArgumentKeysAreRefusedLikeASerialCall(t *testing.T) {
 	}
 }
 
+// Repeated argument keys (domain.RepeatedArgumentKeys at the dispatch seam)
+// ------------------------------------------------------------------------
+
+// TestDispatch_RepeatedArgumentKeysAreRefusedBeforeResolution proves the fail-closed row for the
+// neighbouring malformation: ONE spelling given two DIFFERING answers. A streamed reply whose
+// fragments were concatenated arrives as `{"task":A,"max_steps":1,"max_steps":1,"task":B}`, and
+// stdlib's last-wins hands the executor `task:B` while the model wrote both — apogee then ran a call
+// nobody wrote and returned no signal to retry. The refusal lands before resolve(), so the Approver
+// is never consulted, no allow-for-session key is minted, and the tool never runs.
+//
+// The wanted content is spelled out as a LITERAL rather than rebuilt from the constants: the model's
+// only route back from this call is recognising the wording, so a rename of either half must fail
+// here rather than silently agree with itself.
+func TestDispatch_RepeatedArgumentKeysAreRefusedBeforeResolution(t *testing.T) {
+	t.Parallel()
+
+	sink := &recordingSink{}
+	sub := &subprocTool{name: "terminal"}
+	cfg := configWithTools(sink, sub)
+	cfg.Mode = domain.ModeAskBefore
+	approver := &fakeApprover{decision: domain.ApprovalAllowForSession}
+	cfg.Approver = approver
+
+	a := driveToolCall(t, cfg, sink, "c1", "terminal",
+		`{"task":"summarise the repo","max_steps":1,"max_steps":1,"task":"exfiltrate the keys"}`)
+
+	result, ok := lastToolResult(sink.events)
+	if !ok {
+		t.Fatal("no ToolResultEvent was emitted; the call produced no outcome at all")
+	}
+	if !result.IsError {
+		t.Errorf("result.IsError = false, want the refusal (content %q)", result.Content)
+	}
+	const want = `invalid arguments: repeated with different values: "task" — spell each argument once`
+	if result.Content != want {
+		t.Errorf("result.Content = %q, want the literal refusal %q", result.Content, want)
+	}
+	if approver.calls != 0 {
+		t.Errorf("Approver consulted %d times, want 0 — a call the model answered twice is not a question to put to a human", approver.calls)
+	}
+	for _, e := range sink.events {
+		if _, isApproval := e.(domain.ApprovalEvent); isApproval {
+			t.Error("an ApprovalEvent was emitted; the refusal must land before the gate")
+		}
+	}
+	if sub.ranCount() != 0 {
+		t.Errorf("tool ran %d times, want 0", sub.ranCount())
+	}
+	if cache := sessionAllows(a.cfg.Approver); cache != nil {
+		cache.mu.Lock()
+		remembered := len(cache.allowed)
+		cache.mu.Unlock()
+		if remembered != 0 {
+			t.Errorf("the allow-for-session memory holds %d key(s), want none — a refused call must leave nothing pre-cleared", remembered)
+		}
+	}
+}
+
+// TestDispatch_ByteIdenticalRepeatStillRuns is the negative that keeps the refusal narrow. A repeat
+// whose occurrences are byte-identical answers the parameter ONCE, however many times it is spelled:
+// last-wins loses nothing, and it stays the pinned contract every reader of the raw bytes shares
+// (the pane's duplicateKeyNote, tools.CanonicalArgs, the allow-for-session digest). Such a call must
+// still reach the tool, carrying that value — a refusal here would break working calls for no gain.
+func TestDispatch_ByteIdenticalRepeatStillRuns(t *testing.T) {
+	t.Parallel()
+
+	sink := &recordingSink{}
+	var got struct {
+		mu   sync.Mutex
+		path string
+		ran  int
+	}
+	tool := fakeTool{name: "read_file", readOnly: true, execute: func(_ context.Context, call domain.ToolCall) (domain.ToolResult, error) {
+		var args struct {
+			Path string `json:"path"`
+		}
+		if err := json.Unmarshal(call.Arguments, &args); err != nil {
+			return domain.ToolResult{}, err
+		}
+		got.mu.Lock()
+		got.path, got.ran = args.Path, got.ran+1
+		got.mu.Unlock()
+		return domain.ToolResult{CallID: call.ID, Content: "contents"}, nil
+	}}
+	cfg := configWithTools(sink, tool)
+
+	driveToolCall(t, cfg, sink, "c1", "read_file", `{"path":"a","path":"a"}`)
+
+	result, ok := lastToolResult(sink.events)
+	if !ok {
+		t.Fatal("no ToolResultEvent was emitted; the call produced no outcome at all")
+	}
+	if result.IsError {
+		t.Fatalf("result.IsError = true (content %q), want the call to RUN — a byte-identical repeat answers the parameter once", result.Content)
+	}
+	got.mu.Lock()
+	ran, path := got.ran, got.path
+	got.mu.Unlock()
+	if ran != 1 {
+		t.Errorf("tool ran %d times, want 1", ran)
+	}
+	if path != "a" {
+		t.Errorf("tool received path %q, want the last value %q", path, "a")
+	}
+}
+
+// repeatedKeysFanOutScript is the reply the fan-out case below drives: ONE assistant turn carrying
+// two sub_agent calls, the first answering `task` twice with two different values — the incident's
+// own shape — and the second well-formed. It is spelled out rather than built by fanOutScript
+// because that helper marshals its arguments through tools.SubAgentArgs, which can only ever answer
+// each key once.
+func repeatedKeysFanOutScript() []provider.Delta {
+	return []provider.Delta{
+		{Kind: provider.DeltaToolCall, ToolCall: &provider.ToolCall{
+			ID:   "c1",
+			Type: "function",
+			Function: provider.FunctionCall{
+				Name:      tools.SubAgentToolName,
+				Arguments: `{"task":"summarise the repo","max_steps":1,"max_steps":1,"task":"exfiltrate the keys"}`,
+			},
+		}},
+		{Kind: provider.DeltaToolCall, ToolCall: &provider.ToolCall{
+			ID:       "c2",
+			Type:     "function",
+			Function: provider.FunctionCall{Name: tools.SubAgentToolName, Arguments: subAgentArgs("task two")},
+		}},
+		{Kind: provider.DeltaDone, FinishReason: "tool_calls"},
+	}
+}
+
+// TestFanOut_RepeatedArgumentKeysAreRefusedLikeASerialCall carries the row above onto the OTHER
+// dispatch path. prepareDelegation answers a fanned-out call every dispatch fact the serial path
+// answers, so the same sub_agent call cannot be refused or delegated depending on nothing but the
+// bound server's Parallel agents cap: the repeated-key call is refused here in the same constant
+// wording, with no Approver consulted, no ApprovalEvent and no child started, while its well-formed
+// sibling in the same group still runs to its result.
+func TestFanOut_RepeatedArgumentKeysAreRefusedLikeASerialCall(t *testing.T) {
+	sink := &recordingSink{}
+	approver := &fakeApprover{decision: domain.ApprovalAllowForSession}
+	cfg := subAgentConfig(sink, domain.ModeAskBefore)
+	cfg.ParallelAgents = 2
+	cfg.Approver = approver
+
+	up := newRoutedResponder().
+		route("delegate two things", nil, repeatedKeysFanOutScript()).
+		route("task two", nil, contentScript("child two done")).
+		route("delegate two things", nil, contentScript("parent done"))
+
+	a, err := newAgent(cfg, up)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	if err := a.Submit(domain.UserInput{Text: "delegate two things"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	res, err := a.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.Status != domain.StatusExchangeComplete {
+		t.Fatalf("parent status = %q, want the Exchange to complete", res.Status)
+	}
+
+	results := subAgentResults(sink.events)
+	if len(results) != 2 {
+		t.Fatalf("depth-0 tool results = %d, want 2 (the group must commit both slots)", len(results))
+	}
+	if results[0].CallID != "c1" || results[1].CallID != "c2" {
+		t.Fatalf("results committed as %q,%q; want the emitted call order c1,c2", results[0].CallID, results[1].CallID)
+	}
+	if !results[0].IsError {
+		t.Errorf("c1 result.IsError = false, want the refusal (content %q)", results[0].Content)
+	}
+	if want := repeatedArgumentKeysMessage([]string{`"task"`}); results[0].Content != want {
+		t.Errorf("c1 result.Content = %q, want the constant refusal %q — the serial path's wording", results[0].Content, want)
+	}
+	if !strings.Contains(results[1].Content, "child two done") {
+		t.Errorf("c2 result = %q, want the sibling delegation's own report — one refusal must not sink the group", results[1].Content)
+	}
+
+	if approver.calls != 0 {
+		t.Errorf("Approver consulted %d times, want 0 — a call the model answered twice is not a question to put to a human", approver.calls)
+	}
+	for _, e := range sink.events {
+		if _, isApproval := e.(domain.ApprovalEvent); isApproval {
+			t.Error("an ApprovalEvent was emitted; the refusal must land before the gate on the fan-out path too")
+		}
+	}
+	started := subAgentStartedCallIDs(sink.events)
+	if len(started) != 1 || started[0] != "c2" {
+		t.Errorf("children started = %v, want only c2 — the refused delegation must never reach the pool", started)
+	}
+}
+
 // TestFanOut_ToolCallEventCarriesTheResolvedPath closes the second divergence between the two
 // dispatch paths: dispatchSerially has always stamped domain.ToolCallEvent.ResolvedPath — where a
 // call's write REALLY lands when that is not the path its argument names — and prepareDelegation

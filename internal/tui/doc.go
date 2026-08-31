@@ -902,7 +902,8 @@
 // read rather than formatting the bytes themselves (ADR 0043) — [argumentDetails]' labelled
 // lines, one `name:` per argument with the value's real lines hanging beneath it, showing a
 // repeated key as the last-wins reading the executor will actually run ([orderedArgs],
-// [lastWins]) instead of in wire order, capping one value so a long `content` cannot evict the
+// [lastWins]) instead of in wire order — a by-construction reading, since dispatch refuses a
+// repeat whose two values DIFFER before the pane is ever asked (agent.resolveAndExecute) — capping one value so a long `content` cannot evict the
 // `path:` beside it and keeping that value's LAST line as well as its head ([argumentValueLines]),
 // and hanging every argument-derived line at [argumentValueIndent] so nothing a model wrote can
 // paint where a label of the surface's own lives; plus [resolvedPathNote], the one wording every
