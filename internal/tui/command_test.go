@@ -421,7 +421,7 @@ func TestTheActuationLatchRefusesExactlyTheServerAndExchangeVerbs(t *testing.T) 
 // hook on a row that does not take arguments is dead code. Every grammar here words its BARE form
 // as a report rather than an error, which is what lets verbArgsOf answer the zero value for a line
 // the hook never ran for. And the set carrying one is named: it is exactly the switch that was
-// deleted, so a fourth grammar is a deliberate edit at this line rather than a silent one.
+// deleted, so a further grammar is a deliberate edit at this line rather than a silent one.
 func TestOnlyTheGrammarVerbsCarryAParseArgsHook(t *testing.T) {
 	var got []string
 	for _, spec := range commandSpecs {
@@ -438,7 +438,7 @@ func TestOnlyTheGrammarVerbsCarryAParseArgsHook(t *testing.T) {
 		}
 	}
 
-	if want := []string{"color-scheme", "confine", "undo"}; !reflect.DeepEqual(got, want) {
+	if want := []string{"color-scheme", "confine", "skills", "undo"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("verbs with a grammar of their own = %v, want exactly %v", got, want)
 	}
 }

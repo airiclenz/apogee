@@ -222,7 +222,8 @@ func (m *Model) resetSessionView() {
 // resets the session view and reprints the start-up box synchronously and stays idle
 // (startNewSession), /settings opens the configuration pane the same synchronous way
 // (settings.go), /version records the build version as a note the same synchronous way,
-// /skills records the discovered skill catalog the same synchronous way (skills.go), /color-scheme
+// /skills records the discovered skill catalog — or exports a shipped skill — the same synchronous
+// way (skillscmd.go, skills.go), /color-scheme
 // lists, switches or exports a palette the same synchronous way (colorscheme.go), and /confine
 // reports or swaps Auto's blast radius the same synchronous way (confine.go), /effort opens the
 // thinking-effort picker over the levels the model reports the same synchronous way (effort.go),
@@ -233,7 +234,8 @@ func (m *Model) resetSessionView() {
 // launch — OR, for a reporting line alone, while a worker runs. Its callers own that gate
 // ([Model.commandRunnable]); by the time a verb arrives here it is either at a boundary or
 // boundary-FREE. The verbs that can arrive mid-run are boundary-free by inspection: /version and
-// /skills are synchronous notes touching no engine at all, and /confine's status form reads
+// /skills' LISTING form are synchronous notes touching no engine at all (/skills export writes a
+// file and is idle-only, the /confine split one clause on), and /confine's status form reads
 // [Engine.ConfineToWorkspace], which the Agent serves under its own RWMutex precisely so the UI may
 // ask while a Step dispatches (agent.go — the SetMode class). /effort belongs to that last class in
 // both of its halves: the verb itself only opens a popup, and the accept behind it drives two doors
@@ -392,11 +394,12 @@ func (m Model) runCommand(parsed parsedInput) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case "skills":
-		// Re-scan the source dirs and print the catalog as a note (skills.go). No upstream call and
-		// no worker — it only reports what discovery found — but the walk itself rides a Cmd
-		// goroutine like the merged "/" menu's, so the listing lands on that scan's message rather
-		// than holding the render loop for the length of a disk walk.
-		return m.runSkills()
+		// Re-scan the source dirs and print the catalog as a note, or export a shipped skill into
+		// the global library (skillscmd.go routes the two; skills.go builds the report). No upstream
+		// call and no worker either way — the listing only reports what discovery found, and its
+		// walk rides a Cmd goroutine like the merged "/" menu's so the listing lands on that scan's
+		// message rather than holding the render loop for the length of a disk walk.
+		return m.runSkillsCommand(verbArgsOf[skillsArgs](parsed))
 
 	case "schedule":
 		// List the live Schedules, or put a prompt on a cycle — directly from the argument form,

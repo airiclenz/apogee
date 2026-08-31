@@ -935,11 +935,13 @@ func TestAcceptServerRunsItAndOpensThePicker(t *testing.T) {
 	}
 }
 
-// Drift guard on the accept carve-out: exactly the two picker verbs fire from the menu while still
-// reading an argument. The flag is one word on a table row and invisible once copied onto a
-// neighbour — a /rename or /schedule that quietly started firing bare would destroy the argument
-// the human was about to type — so the set is pinned by name, and every member is checked to be
-// argument-taking (the flag says nothing on a verb that reads no arguments).
+// Drift guard on the accept carve-out: exactly the two picker verbs and /skills fire from the menu
+// while still reading an argument — the three whose BARE form is the whole verb (a picker that
+// mutates nothing until its own accept; for /skills, the catalog report). The flag is one word on a
+// table row and invisible once copied onto a neighbour — a /rename or /schedule that quietly started
+// firing bare would destroy the argument the human was about to type — so the set is pinned by name,
+// and every member is checked to be argument-taking (the flag says nothing on a verb that reads no
+// arguments).
 func TestOnlyThePickerVerbsRunBareAtAccept(t *testing.T) {
 	var got []string
 	for _, spec := range commandSpecs {
@@ -952,7 +954,7 @@ func TestOnlyThePickerVerbsRunBareAtAccept(t *testing.T) {
 		}
 	}
 
-	if want := []string{"model", "server"}; !reflect.DeepEqual(got, want) {
+	if want := []string{"model", "server", "skills"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("runsBareAtAccept verbs = %v, want exactly %v — every other argument-taking verb completes and waits", got, want)
 	}
 }

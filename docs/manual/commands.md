@@ -10,13 +10,13 @@ Both work **anywhere in the line and at any time**: the menu completes the token
 cursor is on, so you can start typing a message and reach for a command halfway
 through, or go back and fix a misspelled name. Accepting a command from the menu
 **runs it and keeps the rest of your draft** — unless the command takes arguments, in
-which case the menu completes it to `/command ` and waits for you to type them; `/model`
-and `/server` are the exception to that exception and run straight away, since bare
-they only open a picker. The menu stays open while the model is working, too —
+which case the menu completes it to `/command ` and waits for you to type them; `/model`,
+`/server` and `/skills` are the exception to that exception and run straight away, since bare
+they only open a picker or print a report. The menu stays open while the model is working, too —
 commands that need a quiet engine wear an `— idle only` tag for as long as the engine
-is busy, and say so if you pick one anyway, while `/version`, `/skills`, `/usage`,
-`/inspect`, `/effort`, `/schedule`, `/schedule-stop` and `/confine`'s status report answer
-immediately. Once the engine is idle that tag is gone from the menu entirely — there
+is busy, and say so if you pick one anyway, while `/version`, `/usage`,
+`/inspect`, `/effort`, `/schedule`, `/schedule-stop`, `/skills`' listing and `/confine`'s status
+report answer immediately. Once the engine is idle that tag is gone from the menu entirely — there
 is nothing left for it to warn about. A token
 lights up in the box exactly when it resolves — the `skill` role for a skill your catalog
 has, the `file-ref` role for a file your workspace has (violet and green under `dark`) — so
@@ -26,7 +26,7 @@ a typo is visible before you send.
 |---|---|---|
 | `/<skill-id>` | Invoke a skill — type its id anywhere in your message | ✅ rides the queued message |
 | `@<path>` | Hand a workspace file to the model | ✅ rides the queued message |
-| `/skills` | List the discovered skills — id, name, summary, any declared `triggers:`, and where each came from | ✅ |
+| `/skills` | List the discovered skills — id, name, summary, any declared `triggers:`, and where each came from; `/skills export <id>` copies a skill apogee [ships](configuration.md#skills-apogee-ships--use-shipped-skills) into `~/.apogee/skills/<id>/` so you can edit it | ✅ listing only |
 | `/version` | Show the apogee version | ✅ |
 | `/usage` | What this session has spent — one row for the main agent, one per sub-agent, and a session total; a `cached` column joins them when the server reports how much of a prompt it answered from its own cache | ✅ |
 | `/inspect` | The raw request and response traffic of the recent model calls — armed by `ui.inspector` (off by default) | ✅ |
@@ -167,7 +167,11 @@ machine, so the address is `shipped:<id>` — `shipped:debugging/checklist.md` n
 inside the binary. Both spellings work in `read_file`, `list_dir`, `grep`, `find_files` and as
 the **source** of a `copy_file`, which is how you take a bundled file out into your project.
 Neither is writable: `shipped:` is refused by every write, and the skill folders on disk are
-mounted read-only.
+mounted read-only. To edit a shipped skill, take a copy of it first: `/skills export <id>` writes
+the whole folder — SKILL.md and everything bundled beside it — to `~/.apogee/skills/<id>/`, and
+from the next scan on that copy is what `/<id>` resolves to, since your library outranks the
+shipped source. It never overwrites: if the folder is already there apogee says so and changes
+nothing, so a copy you have been editing is safe.
 
 ## Undoing the agent's file writes — `/undo`
 

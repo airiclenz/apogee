@@ -294,7 +294,9 @@ project's folders, below everything on disk. A skill of the same id anywhere els
 shipped copy is recorded as shadowed rather than dropped, so writing your own `debugging` replaces
 apogee's without your having to switch anything off. That is the same collision rule
 [ADR 0032](../adr/0032-the-user-skill-library-outranks-the-workspace.md) states for the folders,
-with the shipped source added at the bottom.
+with the shipped source added at the bottom. `/skills export <id>` is the shortcut for exactly
+that: it writes apogee's copy into `~/.apogee/skills/<id>/` for you to edit — see
+[the commands page](commands.md#in-chat-commands-skills-and-file-references).
 
 The flip is live, exactly like `use-project-skills:` above: commit the `use-shipped-skills` row in
 `/settings`, or save the file, and the catalog is re-scanned in the session you are already in.

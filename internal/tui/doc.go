@@ -112,7 +112,8 @@
 // is why [Model.runCommand] never touches the editor and its callers prepare it instead. A row
 // that takes arguments is the carve-out: it COMPLETES to "/verb " and waits for them rather than
 // firing unfinished, unless it also carries commandSpec.runsBareAtAccept — /model and /server,
-// whose bare form only opens a picker — which puts it back among the rows that run. The
+// whose bare form only opens a picker, and /skills, whose bare form only reports the catalog —
+// which puts it back among the rows that run. The
 // whole-input form keeps ownership of arguments ("/confine off --save"), so ⏎ on a finished token
 // falls through to submit exactly there and executes at accept everywhere else. All three regions
 // stay open while the model WORKS — the namespace is most wanted exactly where it used to vanish,
@@ -832,7 +833,9 @@
 // ([LauncherHost.Restore], `remember-model:`); skills.go the browsing half of the
 // skill flow — the /skills report, and [Model.knownSkillID], the single predicate the parser, the
 // inline accents and the merged "/" menu all resolve a token through, so the three can never
-// disagree about what a skill is; workspacepath.go the presentation-only shortening of the
+// disagree about what a skill is, with skillscmd.go the verb's own argument grammar beside it and
+// the `export` form that writes a copy of a SHIPPED skill into the user's library, the only way one
+// of the embedded four reaches an editor (ADR 0065); workspacepath.go the presentation-only shortening of the
 // workspace root out of the paths a tool block NAMES (its target, and its own one-line summary)
 // and out of nothing it QUOTES; paintcache.go the per-block paint memo that makes a streaming
 // repaint cost the live tail instead of the whole scrollback — a VALIDATION cache nothing

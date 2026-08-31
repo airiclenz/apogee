@@ -21,6 +21,10 @@ import (
 // by opening the menu and scrolling it. It is a read-only report: no engine call, no worker,
 // nothing staged. The report builder below is pure, so the wording stays table-testable
 // without a Model (the confine.go posture).
+//
+// The verb's argument grammar and its one WRITING form — `/skills export <id>`, which copies a
+// shipped skill into the user's library — live next door in skillscmd.go, so this file stays the
+// listing and nothing here writes.
 
 // knownSkillID reports whether id names a skill in the wired catalog. It is the predicate the pure
 // parse layer resolves inline "/token" references against (parseInput → refs.SkillSpans) and the

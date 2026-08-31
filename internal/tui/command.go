@@ -72,8 +72,9 @@ type parsedInput struct {
 //     finished would be wrong.
 //
 //   - runsBareAtAccept — the verb takes arguments, but its BARE form is meaningful and safe to fire
-//     from the completion menu: it opens a chooser and mutates nothing until the picker's own accept.
-//     /model and /server are the only rows of that shape, so accepting one RUNS it — the same answer
+//     from the completion menu: it mutates nothing on its own. /model and /server open a chooser and
+//     change nothing until the picker's own accept; /skills only reports its catalog, its one writing
+//     form being spelled out ("/skills export <id>"). Accepting such a row RUNS it — the same answer
 //     /settings' row gives — instead of leaving a "/model " nobody meant to finish standing in the
 //     box. It qualifies takesArgs at the accept path alone: the parser still reads the flag above it,
 //     so the argument form "/model qwen" is untouched (an argument token never reaches the accept
@@ -189,6 +190,12 @@ func verbGrammar[T any](parse func([]string) (T, error)) func([]string) (any, er
 // built-in into the human's schemes folder. Idle-only like every other verb that writes config, and
 // argument-taking like /confine, whose grammar it follows down to the usage line.
 //
+// /skills is that same pair for the skill catalog (skills.go, skillscmd.go, ADR 0065): bare it
+// reports what discovery found — mid-run as readily as at idle, since it only reads — and
+// `export <id>` writes an editable copy of a SHIPPED skill into the user's global library, where it
+// shadows the embedded original (ADR 0032). Only that second form needs a quiescent engine, which
+// is the /confine nuance again and the reason safeWhileRunning reads the parsed LINE.
+//
 // /effort is the Thinking-effort dial (ADR 0050, amended by ADR 0060): it opens a picker of the
 // levels the bound model itself reports, a picked level layers a session override above that model
 // profile's own `thinking.effort:`, and the picker's `auto` row drops the override so the profile's
@@ -246,7 +253,7 @@ var commandSpecs = []commandSpec{
 	{name: "server", summary: "switch to another configured server", takesArgs: true, runsBareAtAccept: true, touchesServer: true},
 	{name: "sessions", summary: "browse, resume, rename or delete saved sessions"},
 	{name: "settings", summary: "view the configuration this session resolved", noRecall: true},
-	{name: "skills", summary: "list the available skills", whileRunning: true},
+	{name: "skills", summary: "list the available skills, or export a shipped one", takesArgs: true, runsBareAtAccept: true, whileRunning: true, parseArgs: verbGrammar(parseSkills)},
 	{name: "stop-server", summary: "stop the server this session is on", touchesServer: true},
 	{name: "undo", summary: "put back the files the last exchange wrote (bare = preview)", takesArgs: true, parseArgs: verbGrammar(parseUndo)},
 	{name: "unload-model", summary: "free the model of the server this session is on", touchesServer: true},
@@ -365,19 +372,23 @@ func verbArgsOf[T any](p parsedInput) T {
 // dropdown's accept (acceptAutocomplete) read, so the menu's "— idle only" tag and what the key
 // actually does can never disagree.
 //
-// Two tests, because the policy is about the line and not only about the verb. The verb's own
+// Three tests, because the policy is about the line and not only about the verb. The verb's own
 // commandSpec.whileRunning says it does nothing this session's engine must be quiescent for —
 // /version, /skills, /confine report, and the Schedule pair /schedule, /schedule-stop touches only
-// the scheduler library (ADR 0033, see commandSpecs). /confine then adds the one nuance: its
-// STATUS form reports (Engine.ConfineToWorkspace is goroutine-safe, read under
+// the scheduler library (ADR 0033, see commandSpecs). Two of those verbs then add the same nuance,
+// once each: /confine's STATUS form reports (Engine.ConfineToWorkspace is goroutine-safe, read under
 // the engine's own confineMu), while "/confine off|on" swaps Auto's blast radius under a Step that
-// is already dispatching tool calls and is idle-only for the same reason /clear is. confineArgs'
-// zero value IS confineStatus, so that second test reads true for every other verb without naming
-// one — and an argument error, which parseConfine reports as the zero value, stays runnable so a
-// mistyped /confine earns its usage line mid-run exactly as it does at idle.
+// is already dispatching tool calls and is idle-only for the same reason /clear is; and /skills'
+// LISTING answers from disk alone, while "/skills export <id>" writes a folder into the user's
+// library and is idle-only like every other config-writing form. Each grammar's zero value IS its
+// reporting form (confineStatus, skillsList), so those two tests read true for every other verb
+// without naming one — and an argument error, which both parses report as the zero value, stays
+// runnable so a mistyped line earns its usage line mid-run exactly as it does at idle.
 func (p parsedInput) safeWhileRunning() bool {
 	spec, ok := commandByName(p.command)
-	return ok && spec.whileRunning && verbArgsOf[confineArgs](p).action == confineStatus
+	return ok && spec.whileRunning &&
+		verbArgsOf[confineArgs](p).action == confineStatus &&
+		verbArgsOf[skillsArgs](p).action == skillsList
 }
 
 // opensExchange reports whether driving this parsed command LINE would open an Exchange with the
