@@ -10,6 +10,12 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- `domain.RepeatedArgumentKeys` reports every argument name one tool-call object answers more than
+  once with differing values — `{"task":"a","task":"b"}` → `"task"` — walking nested objects and
+  objects inside arrays, comparing each occurrence's bytes after `json.Compact` so whitespace is
+  ignored while `1` and `1.0` stay two answers. A byte-identical repeat remains last-wins, and a
+  fold collision alone stays `CollidingArgumentKeys`' business.
+
 - Discovery now reads the `mandatory` flag an OpenRouter-shaped `/v1/models` entry carries on its `reasoning` object, so `EffortSupport` reports when a model's reasoning cannot be turned off. The flag describes the model rather than the wire, so it survives a server entry's forced `effort-dialect:` — only the forced `off` clears it — and a server that writes something other than a boolean there loses the flag alone, never the dial.
 
 - A model switch now says so when the newly bound model cannot turn its reasoning off: a transcript note names the model and warns that the engine's capped internal calls (compaction folds, title calls) spend part of that cap on a thinking pass the model cannot decline. It fires per rebind, after the excluded-override clear, and only where the beat reported a usable dial.
@@ -422,6 +428,26 @@ point is a **minor** bump, not a breaking change.
   saved as `docs/reviews/architecture-review-2026-08-30.html`.
 
 ### Fixed
+
+- A tool call whose arguments answer one parameter twice with DIFFERING values is now refused before resolution instead of running as last-wins. `repeatedArgumentKeysResult` fires at both dispatch seams — the serial `resolveAndExecute` and the fan-out `prepareDelegation` — immediately after the colliding-keys check, so the fan-out and serial paths answer such a call identically and the colliding refusal keeps precedence. The model gets one constant wording, `invalid arguments: repeated with different values: "task" — spell each argument once`, that a retry loop can recognise. A byte-identical repeat still runs last-wins, unchanged.
+
+- Streamed tool calls now accumulate by their **wire index** instead of by arrival order.
+  `sseToolCall` gains an `Index *int` (a pointer, so index 0 is legal and an absent index does
+  not read as one) and the single in-progress `*ToolCall` is replaced by an ordered set of open
+  calls: an index-bearing fragment addresses the call at that index — opening it only when the
+  fragment also carries an id or a name, so the provider never manufactures a nameless, id-less
+  call — an index-less fragment with an id continues the open call of that id rather than
+  splitting one call into many, and a fragment with neither appends to the call addressed most
+  recently. A server that interleaves parallel calls by index no longer has their arguments
+  mis-joined, and one that repeats the id on every fragment no longer has its call split.
+  Emission moves with it: nothing is yielded mid-stream, and every call is yielded in ascending
+  index order (calls opened without an index keep arrival order behind them) immediately before
+  the terminal `DeltaDone`, on both the `[DONE]` and the stream-ended-without-`[DONE]` paths, so
+  the `DeltaToolCall`* → `DeltaDone` ordering every consumer sees is unchanged. `maxToolCallBytes`
+  now bounds the sum of accumulated argument bytes across every open call rather than one call
+  each, so a server opening call after call cannot multiply the bound; its error text is
+  unchanged. An in-band error still drops what was not emitted — with buffering that is now every
+  call of the reply, as its comment already intended.
 
 - A delegation routed to the Sub-agent server now expresses its thinking-effort intent in THAT
   server's wire dialect instead of the orchestrator's. `DelegationTarget` gains `EffortDialect`,
