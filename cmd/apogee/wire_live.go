@@ -271,8 +271,10 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	// The Sub-agent server (ADR 0045): the `servers:` entry the root `sub-agents-server:` key names,
 	// the second heartbeat that discovers what it is serving, and the Delegation target every beat
 	// resolves for the engine to route spawns against. It is built from the holder's list rather than
-	// from the launch snapshot, like every other read of `servers:` since ADR 0037 — and the NAME is
-	// handed in from the resolved options, which is the one place routing consults the key.
+	// from the launch snapshot, like every other read of `servers:` since ADR 0037 — the holder's
+	// READER goes in rather than one call's answer, since a mid-session retarget resolves its name
+	// against the list as it stands then — and the NAME is handed in from the resolved options,
+	// which is the one place routing consults the key.
 	//
 	// It is wired AFTER the bind and reads the engine holder rather than the Agent, for the reason
 	// every seam in this block does: a pre-bound session has no Agent yet, and the named server is
@@ -285,7 +287,7 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	// routing state changes on the second heartbeat's own goroutine, which needs a send that is safe
 	// before the program exists and safe from anywhere after it does (tui.Bridge.NotifyRouting).
 	w.delegation, err = newDelegationWiring(w.opts.SubAgentsServer,
-		w.live.serverList(), w.cfg, w.engine, w.live.modelProfileEntries, w.bridge.NotifyRouting, w.keys)
+		w.live.serverList, w.cfg, w.engine, w.live.modelProfileEntries, w.bridge.NotifyRouting, w.keys)
 	if err != nil {
 		return err
 	}

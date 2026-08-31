@@ -567,6 +567,32 @@ type LauncherActs struct {
 	CanRestore bool
 }
 
+// DelegationHost is the sub-agent routing seam: where this session's DELEGATIONS run, which is a
+// different question from where the session itself is bound ([ServerHost]) — a smart model
+// orchestrating while a cheaper one, possibly on another box, does the grunt work (ADR 0045).
+//
+// The split is [ServerHost]'s exactly. The renderer owns WHEN — a human picking a row — and the host
+// owns WHAT: which entries the `servers:` list carries, what a name resolves to, the posture keys on
+// it and the second heartbeat that discovers what that box is serving are all things this package
+// never reads.
+//
+// A nil host means this Driver routes nothing: no pane offers the pick, and delegations run wherever
+// the composition root left them. That is the posture of every hand-built Options and of every
+// Driver that is not the interactive TUI (ADR 0031).
+type DelegationHost interface {
+	// Retarget points every delegation spawned from now on at the `servers:` entry name names, and
+	// with an EMPTY name at this session's own upstream — the opt-out, and the default a config
+	// naming no Sub-agent server already has.
+	//
+	// It may be called while the agent RUNS: children already in flight keep the server they were
+	// spawned against, so the pick moves the next spawn and nothing else. It answers an error for the
+	// two things that make a name unusable — no entry carries it, or the entry's posture keys are
+	// defective — and changes nothing when it does. Success is deliberately SILENT here: the routing
+	// change reaches the transcript through the host's own notice path, once, when the newly named
+	// server is first observed.
+	Retarget(name string) error
+}
+
 // ----------------------------------------------------------------------------
 // The engine seam (phase-2 detail plan §3 C5)
 // ----------------------------------------------------------------------------
@@ -1131,6 +1157,15 @@ type Options struct {
 	// `/model` falling back to the advertised models, the one sentence both actuation verbs answer
 	// with, a load nobody records and a start-up that restores nothing — is [LauncherHost]'s to state.
 	Launcher LauncherHost
+
+	// Delegation is the sub-agent routing seam ([DelegationHost]): the one act that re-points this
+	// session's delegations at another `servers:` entry, without a relaunch and without the file
+	// having to change first.
+	//
+	// nil ⇒ this Driver routes nothing — a bench or a headless run composes no picker, and nothing
+	// in the renderer offers to retarget (ADR 0031's degrade, the posture of every hand-built
+	// Options).
+	Delegation DelegationHost
 
 	// Schedules is the scheduler this session's Schedules live in (the [Scheduler] seam the binary
 	// backs with a live schedule.Scheduler); nil ⇒ scheduling is unwired and both verbs say so.

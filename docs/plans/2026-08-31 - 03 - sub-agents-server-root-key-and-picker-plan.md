@@ -178,7 +178,11 @@ render them; and a `servers:` re-read still re-resolves the target, `reloadServe
 
 **Depends on:** item 1.
 
-## 3. Runtime retarget: the wiring seam
+## 3. Runtime retarget: the wiring seam — ✅ DONE (2026-08-31)
+
+NOTES (2026-08-31): the item's Files list names four files; exposing the seam to the TUI layer, which the item's What requires, also needed `internal/tui/tui.go` — the new `DelegationHost` interface and the `Options.Delegation` member `cmd/apogee/wire_options.go` fills.
+NOTES (2026-08-31): `newDelegationWiring` now takes the `servers:` list as a reader func (`w.live.serverList`) instead of one snapshot, because a retarget must resolve its name against the list as it stands then; the six test call sites go through the new `staticServerList` helper.
+NOTES (2026-08-31): the live-target field the guard requires is a PAIR — `target` (what routing resolves against) beside `configured` (the key the file last carried) — because `relist`'s caller (wire_settings.go, not in this item's Files) still passes the file's key. Comparing the two is what keeps a file edit of `sub-agents-server:` winning, as item 2 delivered it, while an unrelated save leaves a retarget standing.
 
 **What:** Add `Retarget(name string) error` on `delegationWiring`: resolve NAME against the live
 entries, build its `subAgentServer` via `newSubAgentServer` (a defective `mechanisms:` map fails

@@ -92,6 +92,23 @@ type delegationWiring struct {
 	mu sync.Mutex
 	// server is the named entry and its beat, or nil when the key names none of the list's entries.
 	server *subAgentServer
+	// target is the entry name routing resolves against RIGHT NOW: the `sub-agents-server:` key at
+	// composition time, and whatever a `/sub-agents-server` pick last moved it to (Retarget). It is
+	// held rather than re-read off the file on every `servers:` apply because a retarget is a choice
+	// made in the RUNNING session: a save that touched some other entry re-reads the whole file, and
+	// a relist resolving against the file's key would revert that choice and silently re-latch the
+	// old server (relist).
+	target string
+	// configured is the `sub-agents-server:` key as the file last read carried it, which is the only
+	// thing that can tell a relist whether the FILE moved the target. A re-read whose key differs from
+	// this is the human editing the key — it wins, and becomes the new target above; a re-read whose
+	// key is unchanged says nothing about routing at all and leaves the live target alone.
+	configured string
+	// servers reports the `servers:` list as it stands NOW, which is what a retarget resolves a name
+	// against: the list is editable mid-session (ADR 0037), so an entry added an hour in is as valid
+	// a delegation target as one written before launch. nil ⇒ no list to resolve against, and every
+	// retarget to a name refuses — the degrade a Driver that wired no live settings takes.
+	servers func() []config.ServerEntry
 	// missingNotice is the sentence a `sub-agents-server:` naming no entry of the current list has
 	// earned — "" when the key is empty or names one. It is RENDERED where the list is known (the
 	// constructor, relist) and SAID on the first observe, never at composition time: the notify seam
@@ -131,8 +148,11 @@ type delegationWiring struct {
 	engine delegationSetter
 }
 
-// newDelegationWiring finds the Sub-agent server in entries — the one name names, `sub-agents-server:`
-// as it stands at composition time — and builds everything a beat on it will need. With an EMPTY name
+// newDelegationWiring finds the Sub-agent server in the `servers:` list — the one name names,
+// `sub-agents-server:` as it stands at composition time — and builds everything a beat on it will
+// need. The list arrives as a FUNC rather than as a snapshot because the wiring outlives the launch
+// it was built at: a retarget resolves its name against the list as it stands then (Retarget), and
+// that list is editable mid-session (ADR 0037). With an EMPTY name
 // it answers a wiring holding no server: no monitor is constructed and no target is ever pushed, so a
 // session whose config says nothing about delegation routing behaves exactly as it did before
 // (ADR 0045 §4's floor, and the default) until an edit says otherwise.
@@ -157,14 +177,18 @@ type delegationWiring struct {
 // it was written, and a posture that silently armed nothing would be invisible for months.
 func newDelegationWiring(
 	name string,
-	entries []config.ServerEntry,
+	servers func() []config.ServerEntry,
 	base apogee.Config,
 	engine delegationSetter,
 	userProfiles func() []profiles.Entry,
 	notify func(string),
 	keys *config.KeyResolver,
 ) (*delegationWiring, error) {
+	entries := servers()
 	wiring := &delegationWiring{
+		target:        name,
+		configured:    name,
+		servers:       servers,
 		missingNotice: missingNameNotice(name, entries),
 		base:          base,
 		userProfiles:  userProfiles,
@@ -424,9 +448,16 @@ func (d *delegationWiring) dialectAdvice(name string, target *apogee.DelegationT
 // (wire_settings.go), whether the edit came from the `/settings` pane or from the watcher noticing
 // the file changed under it (ADR 0041).
 //
-// name is passed in rather than remembered because the file is the source of both halves: the key
-// and the list are re-read together, so an edit that renames the target entry and re-points the key
-// in one save resolves as one act.
+// name is the key the FILE now carries, and it is passed in because the file is the source of both
+// halves: the key and the list are re-read together, so an edit that renames the target entry and
+// re-points the key in one save resolves as one act.
+//
+// What it re-resolves against, though, is the LIVE target (d.target), which the file's key only moves
+// when the file's key MOVED. A `/sub-agents-server` pick retargets the running session without
+// touching the file, and every `servers:` save re-reads the whole file — so a relist that took the
+// file's key as gospel would revert that pick, and re-latch the old server, on the next save about
+// some entirely unrelated entry. The comparison against d.configured is what tells the two apart:
+// a key that changed is the human editing routing and wins; a key that did not is not about routing.
 //
 // Four things a file can do to routing, and each is answered where the human would expect:
 //
@@ -451,17 +482,24 @@ func (d *delegationWiring) dialectAdvice(name string, target *apogee.DelegationT
 // as it did while the human fixes the file. A list whose Sub-agent server is untouched — the common
 // case, since most `servers:` edits are about some other entry — is a comparison and no work at all.
 func (d *delegationWiring) relist(name string, entries []config.ServerEntry) error {
-	entry, found := config.SubAgentsServerTarget(entries, name)
-	missing := missingNameNotice(name, entries)
-
 	d.mu.Lock()
-	current, said := d.server, d.missingNotice
+	current, said, target := d.server, d.missingNotice, d.target
+	if name != d.configured {
+		target = name
+	}
 	d.mu.Unlock()
 
+	entry, found := config.SubAgentsServerTarget(entries, target)
+	missing := missingNameNotice(target, entries)
+
 	if !found && current == nil && missing == said {
-		return nil // a file that named no reachable entry before still names none, and says the same
+		// A file that named no reachable entry before still names none, and says the same. The key
+		// it now carries is still recorded, or the NEXT save would read as a move it is not.
+		d.adopt(name, target)
+		return nil
 	}
 	if found && current != nil && reflect.DeepEqual(current.entry, entry) {
+		d.adopt(name, target)
 		return nil // the edit was somewhere else in the list
 	}
 
@@ -483,6 +521,7 @@ func (d *delegationWiring) relist(name string, entries []config.ServerEntry) err
 	d.server = next
 	d.generation++
 	d.missingNotice = missing
+	d.configured, d.target = name, target
 	if stale || missing != said {
 		// The state is forgotten rather than reported: a server the file stopped naming is not a
 		// server that became unavailable, and the human reading the notice is the one who just
@@ -496,6 +535,72 @@ func (d *delegationWiring) relist(name string, entries []config.ServerEntry) err
 	if stale {
 		d.engine.SetDelegationTarget(nil)
 	}
+	return nil
+}
+
+// adopt records what a relist that installed NOTHING still learned: the key the file now carries,
+// and the name routing goes on resolving against. Only the pair matters — the next relist reads the
+// key against the one recorded here to tell a human editing routing from a save about anything else
+// — so a relist that returned early records it exactly as one that installed a server does.
+func (d *delegationWiring) adopt(configured, target string) {
+	d.mu.Lock()
+	d.configured, d.target = configured, target
+	d.mu.Unlock()
+}
+
+// Retarget moves this session's delegations onto the `servers:` entry NAME names — the
+// `/sub-agents-server` pick's whole act, and the one seam through which routing changes without the
+// file changing first.
+//
+// It is deliberately not idle-gated, like the latch underneath it (ADR 0045): the pick is allowed
+// while the agent runs, and what it moves is where the delegations spawned AFTER it go. Children
+// already in flight are untouched by construction — a spawn snapshots its target, so nothing here
+// can reach one.
+//
+// It refuses a name the list does not carry, and that is the one place this seam differs from the
+// FILE's key (missingNameNotice, which degrades to the session's own server and says so). A name in
+// a config file is a thing written once and read for months, so refusing to load over it would be a
+// hostage-taking; a name handed to this seam comes from a human picking a row in this session, and
+// the honest answer to a row that names nothing is to say so and change nothing. An entry whose
+// `mechanisms:` map this build refuses is refused for the same reason and returned whole — the
+// reload rule (relist), so a defective posture never lands half-installed.
+//
+// An EMPTY name is not a refusal but the opt-out: routing stops and delegations run on this session's
+// own Upstream, which is the behaviour of a config that names no Sub-agent server at all.
+//
+// What it does NOT do is announce anything. The nil push below unlatches the old server immediately —
+// a delegation spawned in the seconds after the pick must not still go to the box the human just
+// moved off — and the routing state is FORGOTTEN with it, so the new server's first beat says where
+// delegations are going exactly once, through the same notify path every other routing change uses
+// (stateChange). Saying it here as well would state routing that is not in force yet.
+func (d *delegationWiring) Retarget(name string) error {
+	var next *subAgentServer
+	if name != "" {
+		var entries []config.ServerEntry
+		if d.servers != nil {
+			entries = d.servers()
+		}
+		entry, found := config.SubAgentsServerTarget(entries, name)
+		if !found {
+			return fmt.Errorf("no servers entry named %q", name)
+		}
+		built, err := newSubAgentServer(entry, d.base)
+		if err != nil {
+			return err
+		}
+		next = built
+	}
+
+	d.mu.Lock()
+	d.server, d.target = next, name
+	d.generation++
+	// The name came from this session rather than from the file, so there is no stale-name sentence
+	// to hold: the only name this seam accepts is one the list carries, or none at all.
+	d.missingNotice = ""
+	d.routed, d.stated, d.dialectAdvised = false, false, false
+	d.mu.Unlock()
+
+	d.engine.SetDelegationTarget(nil)
 	return nil
 }
 

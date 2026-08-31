@@ -57,6 +57,12 @@ type noticeSpy struct {
 
 func (s *noticeSpy) add(note string) { s.notes = append(s.notes, note) }
 
+// staticServerList is the `servers:` reader the wiring takes, over a list that never moves — what a
+// test that does its editing through relist rather than through the holder needs.
+func staticServerList(entries []config.ServerEntry) func() []config.ServerEntry {
+	return func() []config.ServerEntry { return entries }
+}
+
 // testDelegationWiring assembles a wiring already holding one Sub-agent server, with the entry's
 // beat written down rather than dialled. notices may be nil — the Driver that shows nothing.
 func testDelegationWiring(
@@ -314,7 +320,7 @@ func TestNewDelegationWiringWithoutATargetObservesNothing(t *testing.T) {
 	spy := &delegationSpy{}
 	notices := &noticeSpy{}
 	wiring, err := newDelegationWiring(
-		"", entries, validCfg(t), spy, noProfiles, notices.add, config.NewKeyResolver(""))
+		"", staticServerList(entries), validCfg(t), spy, noProfiles, notices.add, config.NewKeyResolver(""))
 	if err != nil {
 		t.Fatalf("newDelegationWiring with no target named: %v", err)
 	}
@@ -341,7 +347,7 @@ func TestNewDelegationWiringBuildsTheNamedEntry(t *testing.T) {
 		{Name: "other-grunt", Endpoint: "http://127.0.0.1:3333"},
 	}
 	wiring, err := newDelegationWiring(
-		"grunt", entries, validCfg(t), &delegationSpy{}, noProfiles, nil, config.NewKeyResolver(""))
+		"grunt", staticServerList(entries), validCfg(t), &delegationSpy{}, noProfiles, nil, config.NewKeyResolver(""))
 	if err != nil {
 		t.Fatalf("newDelegationWiring: %v", err)
 	}
@@ -370,7 +376,7 @@ func TestNewDelegationWiringSaysWhichNameWentMissing(t *testing.T) {
 	spy := &delegationSpy{}
 	notices := &noticeSpy{}
 	wiring, err := newDelegationWiring(
-		"grunt", entries, validCfg(t), spy, noProfiles, notices.add, config.NewKeyResolver(""))
+		"grunt", staticServerList(entries), validCfg(t), spy, noProfiles, notices.add, config.NewKeyResolver(""))
 	if err != nil {
 		t.Fatalf("newDelegationWiring with a stale name: %v", err)
 	}
@@ -491,7 +497,7 @@ func TestNewDelegationWiringTakesThePostureOfTheNamedEntry(t *testing.T) {
 	}
 
 	wiring, err := newDelegationWiring(
-		"grunt", entries, base, &delegationSpy{}, noProfiles, nil, config.NewKeyResolver(""))
+		"grunt", staticServerList(entries), base, &delegationSpy{}, noProfiles, nil, config.NewKeyResolver(""))
 	if err != nil {
 		t.Fatalf("newDelegationWiring: %v", err)
 	}
@@ -555,7 +561,7 @@ func TestNewDelegationWiringRefusesADefectiveMechanismsMap(t *testing.T) {
 		Mechanisms: map[string]bool{"libary": true},
 	}}
 	_, err := newDelegationWiring(
-		"grunt", entries, validCfg(t), &delegationSpy{}, noProfiles, nil, config.NewKeyResolver(""))
+		"grunt", staticServerList(entries), validCfg(t), &delegationSpy{}, noProfiles, nil, config.NewKeyResolver(""))
 	if err == nil {
 		t.Fatal("a misspelled mechanism key was accepted; want the run refused")
 	}
@@ -766,7 +772,7 @@ func TestDelegationRelistNamesATarget(t *testing.T) {
 	spy := &delegationSpy{}
 	notices := &noticeSpy{}
 	wiring, err := newDelegationWiring("",
-		[]config.ServerEntry{{Name: "here", Endpoint: "http://127.0.0.1:1111"}},
+		staticServerList([]config.ServerEntry{{Name: "here", Endpoint: "http://127.0.0.1:1111"}}),
 		validCfg(t), spy, noProfiles, notices.add, config.NewKeyResolver(""))
 	if err != nil {
 		t.Fatalf("newDelegationWiring: %v", err)
@@ -1004,6 +1010,243 @@ func TestApplySettingServersDrivesTheSubAgentServer(t *testing.T) {
 	}
 	if len(spy.pushes) != 1 || spy.pushes[0] != nil {
 		t.Errorf("pushes = %+v; want exactly the edit's clearing push", spy.pushes)
+	}
+}
+
+// ----------------------------------------------------------------------------
+// The mid-session retarget (the `/sub-agents-server` seam)
+// ----------------------------------------------------------------------------
+
+// retargetableWiring is a wiring already routing to entry, with everything a RETARGET needs beside
+// it: the live `servers:` list a name is resolved against and the session Config an entry's posture
+// is built from. testDelegationWiring stops short of both, because every test before this one moved
+// routing through the file rather than through the session.
+func retargetableWiring(
+	t *testing.T,
+	entry config.ServerEntry,
+	entries []config.ServerEntry,
+	observed heartbeat.Beat,
+	engine delegationSetter,
+	notices *noticeSpy,
+) *delegationWiring {
+	t.Helper()
+	wiring := testDelegationWiring(entry, observed, engine, notices)
+	wiring.target, wiring.configured = entry.Name, entry.Name
+	wiring.servers = staticServerList(entries)
+	wiring.base = validCfg(t)
+	return wiring
+}
+
+// The pick's whole act: the next spawn goes to the server the human just named. The latch is cleared
+// on the spot rather than at the next beat — a delegation made in the seconds after the pick must not
+// still reach the box they moved off — and the new server announces itself once, when it is first
+// observed, through the same notice path every other routing change uses.
+func TestDelegationRetargetMovesTheNextSpawnsServer(t *testing.T) {
+	t.Parallel()
+
+	entries := []config.ServerEntry{
+		{Name: "grunt", Endpoint: "http://127.0.0.1:2222"},
+		{Name: "cheaper", Endpoint: "http://127.0.0.1:3333"},
+	}
+	spy := &delegationSpy{}
+	notices := &noticeSpy{}
+	wiring := retargetableWiring(t, entries[0], entries,
+		heartbeat.Beat{Reachable: true, ActiveModel: "cheap-7b"}, spy, notices)
+	wiring.observe(context.Background())()
+
+	if err := wiring.Retarget("cheaper"); err != nil {
+		t.Fatalf("Retarget onto a configured entry: %v", err)
+	}
+	if wiring.server == nil || wiring.server.entry.Name != "cheaper" {
+		t.Fatalf("server after the pick = %+v; want the cheaper entry", wiring.server)
+	}
+	if len(spy.pushes) != 2 || spy.pushes[1] != nil {
+		t.Fatalf("pushes = %+v; want the old server unlatched by the pick itself", spy.pushes)
+	}
+
+	wiring.server.beat = beatSource(heartbeat.Beat{Reachable: true, ActiveModel: "tiny-3b"})
+	wiring.observe(context.Background())()
+	if len(spy.pushes) != 3 || spy.pushes[2] == nil || spy.pushes[2].Endpoint != "http://127.0.0.1:3333" {
+		t.Fatalf("pushes = %+v; want the next beat latching the picked server", spy.pushes)
+	}
+	// Four: each server announced itself and then advised about its own missing dialect — the pick
+	// forgets that latch with the rest of the routing state, exactly as a file edit does.
+	if len(notices.notes) != 4 || notices.notes[2] != "sub-agents: routing to cheaper (tiny-3b)" {
+		t.Fatalf("notices = %q; want the picked server to announce itself", notices.notes)
+	}
+
+	// Per state change, never per spawn (ADR 0045 §4): the server is the same one it was a beat ago,
+	// so a second beat on it is not news.
+	wiring.observe(context.Background())()
+	if len(notices.notes) != 4 {
+		t.Errorf("notices after a second beat = %q; want the routing change said once", notices.notes)
+	}
+}
+
+// The pick is allowed while the agent RUNS, so a beat resolved against the old server can still be in
+// flight when it lands. It is dropped whole — the generation the pick bumped is what drops it — or
+// the old box would take the delegations for a whole interval after the human moved off it, with no
+// further beat coming to correct it.
+func TestDelegationRetargetMidRunDropsTheOldServersLanding(t *testing.T) {
+	t.Parallel()
+
+	entries := []config.ServerEntry{
+		{Name: "grunt", Endpoint: "http://127.0.0.1:2222"},
+		{Name: "cheaper", Endpoint: "http://127.0.0.1:3333"},
+	}
+	spy := &delegationSpy{}
+	notices := &noticeSpy{}
+	wiring := retargetableWiring(t, entries[0], entries,
+		heartbeat.Beat{Reachable: true, ActiveModel: "cheap-7b"}, spy, notices)
+	wiring.observe(context.Background())()
+	inFlight := wiring.generation
+
+	if err := wiring.Retarget("cheaper"); err != nil {
+		t.Fatalf("Retarget mid-run: %v", err)
+	}
+	wiring.land(inFlight, "grunt", &apogee.DelegationTarget{Model: "cheap-7b"}, nil)
+
+	if len(spy.pushes) != 2 || spy.pushes[1] != nil {
+		t.Fatalf("pushes = %+v; want the old server's landing dropped, not re-latched", spy.pushes)
+	}
+	if len(notices.notes) != 2 {
+		t.Errorf("notices = %q; want the dropped landing to narrate nothing", notices.notes)
+	}
+}
+
+// A name the list does not carry is REFUSED here, which is where this seam parts company with the
+// file's own key (missingNameNotice's degrade): the name came from a human picking in this session,
+// so the honest answer is to say so and change nothing at all — routing stays exactly where it was.
+func TestDelegationRetargetRefusesANameNoEntryCarries(t *testing.T) {
+	t.Parallel()
+
+	entries := []config.ServerEntry{
+		{Name: "grunt", Endpoint: "http://127.0.0.1:2222"},
+		{Name: "cheaper", Endpoint: "http://127.0.0.1:3333"},
+	}
+	spy := &delegationSpy{}
+	notices := &noticeSpy{}
+	wiring := retargetableWiring(t, entries[0], entries,
+		heartbeat.Beat{Reachable: true, ActiveModel: "cheap-7b"}, spy, notices)
+	wiring.observe(context.Background())()
+
+	err := wiring.Retarget("chaper")
+	if err == nil {
+		t.Fatal("a name no entry carries was accepted; want the pick refused")
+	}
+	if !strings.Contains(err.Error(), "chaper") {
+		t.Errorf("error = %q; want it to name what was asked for", err)
+	}
+	if wiring.server == nil || wiring.server.entry.Name != "grunt" {
+		t.Fatalf("server after the refusal = %+v; want the old target untouched", wiring.server)
+	}
+	if len(spy.pushes) != 1 || len(notices.notes) != 2 {
+		t.Errorf("a refused pick pushed %+v and said %q; want neither moved", spy.pushes, notices.notes)
+	}
+}
+
+// The reload rule (relist): an entry whose `mechanisms:` map this build refuses is refused with
+// NOTHING installed, and the message reaches the caller whole — it is the only place a human learns
+// which key on which entry they mistyped.
+func TestDelegationRetargetRefusesADefectiveMechanismsMap(t *testing.T) {
+	t.Parallel()
+
+	entries := []config.ServerEntry{
+		{Name: "grunt", Endpoint: "http://127.0.0.1:2222"},
+		{Name: "cheaper", Endpoint: "http://127.0.0.1:3333", Mechanisms: map[string]bool{"libary": true}},
+	}
+	spy := &delegationSpy{}
+	wiring := retargetableWiring(t, entries[0], entries,
+		heartbeat.Beat{Reachable: true, ActiveModel: "cheap-7b"}, spy, nil)
+	wiring.observe(context.Background())()
+
+	err := wiring.Retarget("cheaper")
+	if err == nil {
+		t.Fatal("a misspelled mechanism key was accepted; want the pick refused")
+	}
+	if !strings.Contains(err.Error(), "libary") || !strings.Contains(err.Error(), "cheaper") {
+		t.Errorf("error = %q; want it to name both the key and the entry that asked for it", err)
+	}
+	if wiring.server == nil || wiring.server.entry.Name != "grunt" || len(spy.pushes) != 1 {
+		t.Errorf("a refused pick installed %+v and pushed %+v; want the old target still live",
+			wiring.server, spy.pushes)
+	}
+}
+
+// An EMPTY name is the opt-out rather than a refusal: routing stops, the latch is cleared, and
+// delegations run on this session's own upstream — the behaviour of a config that names no Sub-agent
+// server at all.
+func TestDelegationRetargetToNoServerFallsBackToTheSession(t *testing.T) {
+	t.Parallel()
+
+	entries := []config.ServerEntry{{Name: "grunt", Endpoint: "http://127.0.0.1:2222"}}
+	spy := &delegationSpy{}
+	wiring := retargetableWiring(t, entries[0], entries,
+		heartbeat.Beat{Reachable: true, ActiveModel: "cheap-7b"}, spy, nil)
+	wiring.observe(context.Background())()
+
+	if err := wiring.Retarget(""); err != nil {
+		t.Fatalf("Retarget onto no server: %v", err)
+	}
+	if wiring.server != nil {
+		t.Fatalf("server after the opt-out = %+v; want none", wiring.server)
+	}
+	if len(spy.pushes) != 2 || spy.pushes[1] != nil {
+		t.Fatalf("pushes = %+v; want the latch cleared by the opt-out", spy.pushes)
+	}
+	wiring.observe(context.Background())()
+	if len(spy.pushes) != 2 {
+		t.Errorf("pushes = %+v; want nothing observed once routing is off", spy.pushes)
+	}
+}
+
+// The watcher fires a `servers:` re-read on ANY save (ADR 0041), and every such re-read carries the
+// file's `sub-agents-server:` key — which a pick made in this session has deliberately outrun. So the
+// key is compared against what the file said LAST rather than against the live target: a save about
+// some other entry leaves the pick standing, and only a human editing the key itself moves routing
+// back.
+func TestDelegationRelistKeepsTheRetargetedServer(t *testing.T) {
+	t.Parallel()
+
+	entries := []config.ServerEntry{
+		{Name: "grunt", Endpoint: "http://127.0.0.1:2222"},
+		{Name: "cheaper", Endpoint: "http://127.0.0.1:3333"},
+	}
+	spy := &delegationSpy{}
+	wiring := retargetableWiring(t, entries[0], entries,
+		heartbeat.Beat{Reachable: true, ActiveModel: "cheap-7b"}, spy, nil)
+	wiring.observe(context.Background())()
+	if err := wiring.Retarget("cheaper"); err != nil {
+		t.Fatalf("Retarget onto a configured entry: %v", err)
+	}
+
+	// A save somewhere else in the list: the file still names grunt, because nothing wrote the pick
+	// down, and the pick must survive it.
+	edited := []config.ServerEntry{
+		{Name: "grunt", Endpoint: "http://127.0.0.1:2222", Model: "cheap-7b"},
+		{Name: "cheaper", Endpoint: "http://127.0.0.1:3333"},
+	}
+	if err := wiring.relist("grunt", edited); err != nil {
+		t.Fatalf("relist after a retarget: %v", err)
+	}
+	if wiring.server == nil || wiring.server.entry.Name != "cheaper" {
+		t.Fatalf("server after an unrelated save = %+v; want the picked server kept", wiring.server)
+	}
+
+	// The key ITSELF moving is the other half: that is a human editing routing in the file, and the
+	// file wins.
+	if err := wiring.relist("grunt", entries); err != nil {
+		t.Fatalf("relist re-pointing the key: %v", err)
+	}
+	if wiring.server == nil || wiring.server.entry.Name != "cheaper" {
+		t.Fatalf("server after a save that did not move the key = %+v; want the pick kept", wiring.server)
+	}
+	if err := wiring.relist("grunt2", append(entries, config.ServerEntry{
+		Name: "grunt2", Endpoint: "http://127.0.0.1:4444"})); err != nil {
+		t.Fatalf("relist re-pointing the key: %v", err)
+	}
+	if wiring.server == nil || wiring.server.entry.Name != "grunt2" {
+		t.Fatalf("server after the key was edited = %+v; want the file's own re-point to win", wiring.server)
 	}
 }
 
