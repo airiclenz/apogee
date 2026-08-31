@@ -1,13 +1,13 @@
 package tui
 
 import (
-	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/session"
+	"github.com/airiclenz/apogee/internal/title"
 )
 
 // ----------------------------------------------------------------------------
@@ -405,31 +405,10 @@ func (m *Model) pumpOrQuit() tea.Cmd {
 	return nil
 }
 
-// sessionTitleMax is the longest a derived session title runs before word-boundary truncation
-// (apogee-code's MAX_TITLE_LENGTH).
-const sessionTitleMax = 50
-
-// sessionTitle derives a browsable one-line title from the first user message's text, ported from
-// apogee-code's generateTitle: the first line, returned as-is when it fits, otherwise truncated to
-// sessionTitleMax runes at the last word boundary past 60% (falling back to a hard cut) and closed
-// with an ellipsis. A message that is empty or opens a code fence has no useful title, so it falls
-// back to a dated "Session <date>" — every stored session still gets a human label.
+// sessionTitle derives a browsable one-line title from the first user message's text: the shared
+// rule in internal/title, at the width every session-browser row is cut to, spelled against this
+// Driver's own clock. It stays as this package's word for that rule — the sanitize.go precedent —
+// so the call sites read in the TUI's vocabulary rather than in the library's.
 func sessionTitle(text string) string {
-	trimmed := strings.TrimSpace(text)
-	if trimmed == "" || strings.HasPrefix(trimmed, "```") {
-		return "Session " + time.Now().Format("2006-01-02")
-	}
-	firstLine := trimmed
-	if i := strings.IndexByte(trimmed, '\n'); i >= 0 {
-		firstLine = trimmed[:i]
-	}
-	runes := []rune(firstLine)
-	if len(runes) <= sessionTitleMax {
-		return firstLine
-	}
-	truncated := string(runes[:sessionTitleMax])
-	if lastSpace := strings.LastIndex(truncated, " "); lastSpace > sessionTitleMax*6/10 {
-		truncated = truncated[:lastSpace]
-	}
-	return truncated + "…"
+	return title.Derive(text, title.MaxRunes, time.Now())
 }

@@ -12,6 +12,7 @@ import (
 	"github.com/airiclenz/apogee/internal/agent"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/session"
+	"github.com/airiclenz/apogee/internal/title"
 	"github.com/airiclenz/apogee/internal/tools"
 )
 
@@ -294,10 +295,6 @@ func Once(ctx context.Context, spec Spec) (Result, error) {
 	return res, runErr
 }
 
-// titleMax bounds a derived title at the same 50 runes the interactive browser's titles
-// take, so a Firing's row is no wider than any other session's.
-const titleMax = 50
-
 // title is the record's title for this Firing: the Spec's own when set, else the Schedule
 // form "<name> — <HH:MM>", else the first-prompt heuristic.
 //
@@ -319,39 +316,10 @@ func (s Spec) title(now time.Time) string {
 	}
 	// The generic Once fallback is LOCAL as well, by its own reasoning: its dated label is read in
 	// /sessions by the person who ran it, and "which day was that?" is their day, not the day the
-	// caller's clock happened to be located in. promptTitle formats what it is given and never
-	// relocates it, so this line is the whole of the zone choice for this path.
-	return promptTitle(s.Prompt, now.Local())
-}
-
-// promptTitle derives a one-line title from the prompt: the first line as-is when it fits,
-// otherwise truncated to titleMax runes at the last word boundary past 60% (falling back to
-// a hard cut) and closed with an ellipsis. A prompt that is empty or opens a code fence has
-// no useful title, so it falls back to a dated label — every record still gets one. It formats
-// now in whatever zone now already carries: the zone is its caller's stated choice (see title),
-// never this function's, so nothing here can move a caller's spelling from under it.
-//
-// It duplicates the interactive browser's heuristic rather than sharing it: that one lives
-// in internal/tui, which this package must not import (ADR 0010). The duplication is one
-// small pure function and keeps the dependency arrow pointing down.
-func promptTitle(text string, now time.Time) string {
-	trimmed := strings.TrimSpace(text)
-	if trimmed == "" || strings.HasPrefix(trimmed, "```") {
-		return "Session " + now.Format("2006-01-02")
-	}
-	firstLine := trimmed
-	if i := strings.IndexByte(trimmed, '\n'); i >= 0 {
-		firstLine = trimmed[:i]
-	}
-	runes := []rune(firstLine)
-	if len(runes) <= titleMax {
-		return firstLine
-	}
-	truncated := string(runes[:titleMax])
-	if lastSpace := strings.LastIndex(truncated, " "); lastSpace > titleMax*6/10 {
-		truncated = truncated[:lastSpace]
-	}
-	return truncated + "…"
+	// caller's clock happened to be located in. title.Derive formats what it is given and never
+	// relocates it, so this line is the whole of the zone choice for this path. Its cap is the
+	// browser's own, so a Firing's row is no wider than any other session's.
+	return title.Derive(s.Prompt, title.MaxRunes, now.Local())
 }
 
 // denier is a Firing's Approver: it refuses every gated action immediately and counts the
@@ -621,7 +589,7 @@ func runWindow(child, firing int) int {
 // firstTaskLine reads the sub_agent call's task argument and returns its first line, "" when
 // the arguments are malformed or name no task. It is the gist the TUI puts on a delegation's
 // branch row, derived here rather than shared because internal/tui sits above this package
-// and cannot be imported from it (ADR 0010) — the same reason promptTitle is duplicated.
+// and cannot be imported from it (ADR 0010).
 func firstTaskLine(args json.RawMessage) string {
 	var decoded struct {
 		Task string `json:"task"`

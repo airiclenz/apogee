@@ -1,16 +1,26 @@
-// Package title builds and cleans up the session-naming completion — the cosmetic,
-// out-of-band call that gives a Session record a human title instead of the first line
-// of the user's first prompt.
+// Package title owns the naming of a session: the cosmetic, out-of-band completion that gives a
+// Session record a human title instead of the first line of the user's first prompt, the sanitizer
+// that turns whatever came back into one, and the pure title rules every Driver shares.
 //
-// It is deliberately two pure functions and one shared sentinel error, and nothing else. Prompt
-// renders the request from a WINDOW of the user's requests — one entry for the automatic call at
-// first-prompt submit, because one is all that exists when it fires; a bounded, budget-capped
-// selection of the session's user side when the human asks for a name later. Sanitize turns
-// whatever text came back into a title or reports that nothing usable did. Neither one talks to a
-// server, a Session record, or the TUI, so both are table-testable and the policy that surrounds
-// them — when to fire, whether to apply the result, which title wins — lives entirely with the
-// callers that own that state. ErrTruncated is the shared word for the one failure the callers on
-// both sides of the seam must agree on.
+// Prompt renders the naming request from a WINDOW of the user's requests — one entry for the
+// automatic call at first-prompt submit, because one is all that exists when it fires; a bounded,
+// budget-capped selection of the session's user side when the human asks for a name later.
+// Sanitize turns whatever text came back into a title or reports that nothing usable did.
+// ErrTruncated is the shared word for the one failure the callers on both sides of the naming seam
+// must agree on.
+//
+// Clip and Derive are the heuristic half — the first-line title a record wears from its first save,
+// until and unless the completion improves on it. They live here because EVERY Driver derives one:
+// the TUI's session save, a Firing's record (internal/run), a Schedule's display name
+// (internal/schedule). Each of those carried its own copy of the same dozen lines, apologising for
+// the duplication, because the rule sat in a package above them; it sits below them now, which is
+// the direction ADR 0010 lets a shared rule move. Both take their cap as a parameter — a
+// Schedule's label is not a session title's width — and Derive spells the instant it is handed
+// without relocating it.
+//
+// Nothing here talks to a server, a Session record, or the TUI, so all of it is table-testable and
+// the policy that surrounds it — when to fire, whether to apply the result, which title wins, which
+// zone a derived one is spelled in — lives entirely with the callers that own that state.
 //
 // The naming call's prompt text is not written in Go: title.go embeds the prompts/ directory,
 // whose plain files — system-instruction.txt (the naming call's system prompt),
@@ -81,15 +91,19 @@ const (
 	windowTailEntries = 3
 )
 
-// titleMaxRunes is the longest a title runs before word-boundary truncation. It matches the
-// heuristic sessionTitle's cap (internal/tui/model.go) so a generated title and the fallback it
-// replaces occupy the same width in the session browser.
-const titleMaxRunes = 50
+// MaxRunes is the longest a session title runs before word-boundary truncation. It is exported
+// because it is the ONE width a generated title and the heuristic fallback it replaces share: both
+// occupy the same session-browser row, so both are capped by one number rather than by three that
+// happen to agree. Clip's callers pass it; a caller whose label is not a session title — a
+// Schedule's name (internal/schedule) — passes its own cap instead.
+const MaxRunes = 50
 
-// titleWordBoundaryFloor is the earliest rune index at which truncation will break on a word
-// boundary. Below it the boundary would throw away more of the title than the ellipsis saves,
-// so a hard cut at titleMaxRunes is preferred — the heuristic's 60% rule, kept identical.
-const titleWordBoundaryFloor = titleMaxRunes * 6 / 10
+// titleWordBoundaryFloor is the earliest rune index at which Sanitize's truncation will break on a
+// word boundary. Below it the boundary would throw away more of the title than the ellipsis saves,
+// so a hard cut at MaxRunes is preferred. Clip applies the same 60% rule to the heuristic title,
+// but against a BYTE index — the arithmetic the copies it replaced all shared, kept verbatim so the
+// move changed no title.
+const titleWordBoundaryFloor = MaxRunes * 6 / 10
 
 // maxAffixPasses bounds the strip-the-wrapping loop in Sanitize. Models stack these wrappers in
 // any order (`"Title: fix the parser"` and `Title: "fix the parser"` are both common), so the
@@ -336,7 +350,7 @@ func capRunes(s string, limit int) string {
 // a rendered browser row); strip the wrapping models add — surrounding quotes or backticks, a
 // leading comment or heading marker, a leading "Title:" label — until the string stops
 // changing; collapse inner whitespace; drop a trailing period; and word-boundary truncate to
-// titleMaxRunes with an ellipsis.
+// MaxRunes with an ellipsis.
 //
 // An empty result is a failure, not an empty title: the caller keeps whatever title the record
 // already has.
@@ -566,15 +580,15 @@ func collapseWhitespace(s string) string {
 	return strings.Join(strings.Fields(s), " ")
 }
 
-// truncate caps s at titleMaxRunes, breaking on the last word boundary past
+// truncate caps s at MaxRunes, breaking on the last word boundary past
 // titleWordBoundaryFloor and closing with an ellipsis. Everything is counted in RUNES, so a CJK
 // title is capped by the characters the browser row shows rather than by its byte length.
 func truncate(s string) string {
 	runes := []rune(s)
-	if len(runes) <= titleMaxRunes {
+	if len(runes) <= MaxRunes {
 		return s
 	}
-	cut := runes[:titleMaxRunes]
+	cut := runes[:MaxRunes]
 	for i := len(cut) - 1; i > titleWordBoundaryFloor; i-- {
 		if cut[i] == ' ' {
 			cut = cut[:i]
@@ -582,4 +596,47 @@ func truncate(s string) string {
 		}
 	}
 	return string(cut) + "…"
+}
+
+// Clip reduces text to one browsable line of at most max runes: the text is trimmed, its first
+// line taken and trimmed in turn, and returned as it stands when it fits. A longer line is cut to
+// max runes at the last space past 60% of the cap — a hard cut when the only space sits at or
+// before that floor, since a boundary that early throws away more of the line than the ellipsis
+// saves — and closed with an ellipsis.
+//
+// The 60% test compares a BYTE index against a rune cap. That is the arithmetic every copy of this
+// rule performed, and it is reproduced rather than idealised so the one rule is behaviour-identical
+// to the three it replaced on every input, ASCII or not. On a multibyte line the byte index runs
+// ahead of the rune one, so the floor is cleared sooner than "60% of the characters" reads — a
+// quirk the tests pin against today's output rather than against an idealised rune boundary.
+func Clip(text string, max int) string {
+	line := strings.TrimSpace(text)
+	if i := strings.IndexByte(line, '\n'); i >= 0 {
+		line = strings.TrimSpace(line[:i])
+	}
+	runes := []rune(line)
+	if len(runes) <= max {
+		return line
+	}
+	truncated := string(runes[:max])
+	if lastSpace := strings.LastIndex(truncated, " "); lastSpace > max*6/10 {
+		truncated = truncated[:lastSpace]
+	}
+	return truncated + "…"
+}
+
+// Derive names a record from the text that opened it: Clip(text, max), or the dated
+// "Session <date>" fallback when the text is empty or opens a code fence. Neither of those two
+// yields anything a person could pick a session out of a list by, and every stored record still
+// gets a human label.
+//
+// now is formatted in whatever zone it already carries and is never relocated: which zone a derived
+// title is SPELLED in is the caller's own stated choice — internal/run's Spec.title makes it on its
+// own line, for its own reasons — so nothing here can move a caller's spelling out from under it.
+func Derive(text string, max int, now time.Time) string {
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" || strings.HasPrefix(trimmed, "```") {
+		return "Session " + now.Format("2006-01-02")
+	}
+	return Clip(trimmed, max)
 }

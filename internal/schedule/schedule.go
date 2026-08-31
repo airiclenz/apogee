@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/title"
 )
 
 // MinCycle is the floor under a Schedule's cycle. It guards the single-slot local server
@@ -542,23 +543,11 @@ const nameMax = 40
 // word boundary that leaves most of the budget intact. The prompt is already known
 // non-empty, so every Schedule gets a name.
 //
-// It duplicates neither more nor less of the title heuristics that internal/run and
-// internal/tui carry: those derive a SESSION TITLE and live in packages this one must not
-// import (ADR 0010). A dozen lines of pure string work is the cheaper price.
+// The clipping itself is the shared rule in internal/title, at this package's own narrower cap:
+// a name is not a session title, but it is cut the same way, and the copy that used to stand
+// here said so at length.
 func deriveName(prompt string) string {
-	line := strings.TrimSpace(prompt)
-	if i := strings.IndexByte(line, '\n'); i >= 0 {
-		line = strings.TrimSpace(line[:i])
-	}
-	runes := []rune(line)
-	if len(runes) <= nameMax {
-		return line
-	}
-	truncated := string(runes[:nameMax])
-	if lastSpace := strings.LastIndex(truncated, " "); lastSpace > nameMax*6/10 {
-		truncated = truncated[:lastSpace]
-	}
-	return truncated + "…"
+	return title.Clip(prompt, nameMax)
 }
 
 // idRandomBytes is how much randomness a schedule id carries.

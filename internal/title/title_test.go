@@ -760,8 +760,8 @@ func TestSanitizeTruncatesOnAWordBoundary(t *testing.T) {
 	if !strings.HasSuffix(got, "…") {
 		t.Errorf("truncated title %q does not end in an ellipsis", got)
 	}
-	if n := len([]rune(got)); n > titleMaxRunes+1 {
-		t.Errorf("title is %d runes (%q), want at most %d plus the ellipsis", n, got, titleMaxRunes)
+	if n := len([]rune(got)); n > MaxRunes+1 {
+		t.Errorf("title is %d runes (%q), want at most %d plus the ellipsis", n, got, MaxRunes)
 	}
 	if strings.HasSuffix(strings.TrimSuffix(got, "…"), " ") {
 		t.Errorf("truncated title %q keeps the boundary space", got)
@@ -779,7 +779,7 @@ func TestSanitizeHardCutsWhenThereIsNoLateWordBoundary(t *testing.T) {
 	if !ok {
 		t.Fatal("Sanitize reported failure on a single long word")
 	}
-	if want := strings.Repeat("x", titleMaxRunes) + "…"; got != want {
+	if want := strings.Repeat("x", MaxRunes) + "…"; got != want {
 		t.Errorf("Sanitize hard cut = %q, want %q", got, want)
 	}
 }
@@ -793,9 +793,9 @@ func TestSanitizeCountsMultibyteRunesNotBytes(t *testing.T) {
 	if !ok {
 		t.Fatal("Sanitize reported failure on a CJK title")
 	}
-	if want := strings.Repeat("日", titleMaxRunes) + "…"; got != want {
+	if want := strings.Repeat("日", MaxRunes) + "…"; got != want {
 		t.Errorf("Sanitize(CJK) = %q (%d runes), want %d runes plus the ellipsis",
-			got, len([]rune(got)), titleMaxRunes)
+			got, len([]rune(got)), MaxRunes)
 	}
 }
 
@@ -832,5 +832,81 @@ func TestEmbeddedPromptsLoadWithoutTrailingNewline(t *testing.T) {
 		if strings.HasSuffix(got, "\n") {
 			t.Errorf("prompt asset %s still ends in a newline after load: %q", e.Name(), got)
 		}
+	}
+}
+
+// TestClip pins the heuristic title rule the TUI, internal/run and internal/schedule used to keep
+// three copies of. The 60% floor is compared as a BYTE index against a rune cap in every one of
+// those copies, so it is pinned here as it behaves rather than as it reads: the non-ASCII case
+// below breaks on a boundary a rune-indexed floor would have refused.
+func TestClip(t *testing.T) {
+	t.Parallel()
+
+	long := "The quick brown fox jumps over the lazy dog and then keeps running"
+	tests := []struct {
+		name string
+		in   string
+		max  int
+		want string
+	}{
+		{"a short line is its own title", "fix the login bug", MaxRunes, "fix the login bug"},
+		{"the first line wins over the rest", "rename the store\nand add tests", MaxRunes, "rename the store"},
+		{"an over-cap line breaks at the last space past the floor", long, MaxRunes, "The quick brown fox jumps over the lazy dog and…"},
+		{"a hard cut when the only space is at or before the floor", "ab " + strings.Repeat("x", 60), MaxRunes, "ab " + strings.Repeat("x", 47) + "…"},
+		{"trailing spaces on the first line are dropped", "fix the bug   \nand more", MaxRunes, "fix the bug"},
+		{"the byte-indexed floor clears early on a multibyte line", strings.Repeat("日", 20) + " " + strings.Repeat("x", 40), MaxRunes, strings.Repeat("日", 20) + "…"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := Clip(tc.in, tc.max); got != tc.want {
+				t.Errorf("Clip(%q, %d) = %q, want %q", tc.in, tc.max, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestDerive pins the fallback half: text that names no task earns the dated label instead, and
+// everything else is clipped.
+func TestDerive(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 8, 30, 14, 5, 0, 0, time.UTC)
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"a prompt is its own title", "check the build", "check the build"},
+		{"empty text falls back to the dated label", "   ", "Session 2026-08-30"},
+		{"a code fence has no useful title", "```go\nfunc main() {}", "Session 2026-08-30"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := Derive(tc.in, MaxRunes, now); got != tc.want {
+				t.Errorf("Derive(%q, %d, %v) = %q, want %q", tc.in, MaxRunes, now, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestDeriveSpellsTheZoneItIsHanded proves the dated fallback never relocates the instant: which
+// zone a derived title is spelled in is the CALLER's stated choice (internal/run's Spec.title makes
+// it on its own line), so the same instant handed in twice, in two zones straddling midnight,
+// spells two different dates.
+func TestDeriveSpellsTheZoneItIsHanded(t *testing.T) {
+	t.Parallel()
+
+	instant := time.Date(2026, 8, 30, 23, 30, 0, 0, time.UTC)
+	ahead := instant.In(time.FixedZone("UTC+9", 9*60*60))
+
+	if got, want := Derive("", MaxRunes, instant), "Session 2026-08-30"; got != want {
+		t.Errorf("Derive in UTC = %q, want %q", got, want)
+	}
+	if got, want := Derive("", MaxRunes, ahead), "Session 2026-08-31"; got != want {
+		t.Errorf("Derive in UTC+9 = %q, want %q", got, want)
 	}
 }
