@@ -223,10 +223,10 @@ func runDaemon(ctx context.Context, opts *config.Options, changed func(string) b
 	// The confinement posture a Firing will run under, said once at startup where a supervisor
 	// journals it. Only the residual cell speaks here: a backend that fences but knowingly leaves
 	// a write-class access open (landlock ABI 1–2 and truncate(2)) — disclosure, never a blocker.
-	// The degraded cell has no notice to print because it is REFUSED instead, by the
-	// scheduleAutoBlocked verdict daemonHost hands internal/daemon below. The mode is fixed to
-	// Auto because that is the only mode the disclosure is about, and an auto Firing is what this
-	// process exists to run.
+	// The degraded cell has no notice to print because it is REFUSED instead, at validation: the
+	// confinement facts daemonHost hands internal/daemon below are what it asks probe with. The
+	// mode is fixed to Auto because that is the only mode the disclosure is about, and an auto
+	// Firing is what this process exists to run.
 	if notice := probe.ResidualNotice(probe.BackendName(wiring.confiner),
 		wiring.confiner.Capabilities(), domain.ModeAuto, opts.ConfineToWorkspace); notice != "" {
 		fmt.Fprintln(errOut, notice)
@@ -528,17 +528,17 @@ func daemonDefects(err error) []string {
 }
 
 // daemonHost is the facts internal/daemon's validation cannot learn from the file itself: where a
-// `~` expands to, what a `server:` name resolves to, and whether this host may run an unattended
-// Auto at all.
+// `~` expands to, what a `server:` name resolves to, and what this host can fence.
 //
 // The server lookup answers for the EMPTY name as well as for a written one, because that is what
 // an entry with no `server:` asks with — the host's startup default. Skipping it would leave every
 // default-bound entry outside ADR 0055's rule that a `model:` on a launcher-fronted server is a
 // request to actuate a load, which is precisely the entry most people will write first.
 //
-// Auto eligibility is the SAME verdict `apogee headless` and the `/schedule` picker reach, through
-// the same function, because a user who meets this refusal at one surface must not meet a weaker
-// story at another (ADR 0033 decision 3).
+// The confinement FACTS are handed over, not the Auto verdict they imply: internal/daemon asks
+// [probe.AutoUnattendedBlocked] with them, which is the same function `apogee headless` and the
+// `/schedule` picker (scheduleAutoBlocked) reach their verdict through, because a user who meets
+// this refusal at one surface must not meet a weaker story at another (ADR 0033 decision 3).
 func daemonHost(opts config.Options, home string, wiring *daemonWiring) daemon.Host {
 	return daemon.Host{
 		Home: home,
@@ -556,8 +556,11 @@ func daemonHost(opts config.Options, home string, wiring *daemonWiring) daemon.H
 			}
 			return daemon.ServerFacts{}, false
 		},
-		AutoEligible: scheduleAutoBlocked(probe.BackendName(wiring.confiner),
-			wiring.confiner.Capabilities(), opts.ConfineToWorkspace) == "",
+		Confinement: daemon.HostConfinement{
+			Backend:    probe.BackendName(wiring.confiner),
+			Caps:       wiring.confiner.Capabilities(),
+			Unconfined: !opts.ConfineToWorkspace,
+		},
 	}
 }
 

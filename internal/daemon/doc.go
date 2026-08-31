@@ -11,11 +11,13 @@
 // # Pure by construction
 //
 // Nothing here starts a clock, opens a socket, reads config.yaml or asks the host what it can do.
-// The two facts validation cannot derive from the file — which `servers:` entries exist and
-// whether this host clears the Auto-eligibility ladder — arrive as [Host], injected by the caller
-// that already holds them. That keeps every rule testable without a config file, a launcher or a
-// kernel, and it keeps the file's meaning in one place while the hosts that supply those facts
-// vary. The one exception is deliberate: a `workspace:` is checked against the real filesystem,
+// The facts validation cannot derive from the file — which `servers:` entries exist, and what this
+// host can fence ([HostConfinement]) — arrive as [Host], injected by the caller that already holds
+// them. The Auto-eligibility VERDICT is not among them: this package asks
+// [probe.AutoUnattendedBlocked] for it with those facts, so a Firing cannot be refused on a
+// different ladder than a headless run (ADR 0033 decision 3). That keeps every rule testable
+// without a config file, a launcher or a kernel, and it keeps the file's meaning in one place while
+// the hosts that supply those facts vary. The one exception is deliberate: a `workspace:` is checked against the real filesystem,
 // because a Firing that runs somewhere that does not exist is the defect this file most wants to
 // catch before the daemon adopts it, not hours later in a saved record.
 //

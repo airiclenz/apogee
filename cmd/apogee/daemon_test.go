@@ -623,8 +623,11 @@ func TestDaemonHostLooksUpTheStartupDefault(t *testing.T) {
 			t.Errorf("LookupServer(%q) launcher-fronted = %v; want %v", tc.name, facts.IsLauncherFronted, tc.launcher)
 		}
 	}
-	if !host.AutoEligible {
-		t.Error("a host whose backend can fence is not Auto-eligible")
+	// The facts, not a verdict: what they have to add up to is the verdict internal/daemon asks
+	// probe for, which is what scheduleAutoBlocked asks it for at the other surfaces.
+	if blocked := scheduleAutoBlocked(host.Confinement.Backend, host.Confinement.Caps,
+		!host.Confinement.Unconfined); blocked != "" {
+		t.Errorf("a host whose backend can fence refuses an unattended auto Firing: %s", blocked)
 	}
 	if host.Home != h.home {
 		t.Errorf("Host.Home = %q; want the apogee home %q", host.Home, h.home)
@@ -659,9 +662,12 @@ func TestDaemonHostRefusesAutoOnAHostThatCannotFence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newDaemonWiring: %v", err)
 	}
-	host := daemonHost(opts, h.home, wiring)
-	if host.AutoEligible {
-		t.Fatal("a host with no filesystem confinement was reported Auto-eligible")
+	file := "schedules:\n  - name: nightly\n    on:\n      cycle: 24h\n" +
+		"    run:\n      prompt: audit\n      workspace: " + t.TempDir() + "\n      mode: auto\n"
+	if _, err := daemon.Load([]byte(file), daemonHost(opts, h.home, wiring)); err == nil {
+		t.Fatal("mode: auto was accepted on a host with no filesystem confinement")
+	} else if !strings.Contains(err.Error(), "cannot confine a run to its workspace") {
+		t.Errorf("the defect reads %q; it should be the unattended-Auto refusal", err)
 	}
 }
 

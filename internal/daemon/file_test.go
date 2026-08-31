@@ -31,7 +31,10 @@ func testHost(t *testing.T) (Host, string) {
 				return ServerFacts{}, false
 			}
 		},
-		AutoEligible: true,
+		Confinement: HostConfinement{
+			Backend: "landlock",
+			Caps:    domain.ConfinementCaps{FSWrite: true},
+		},
 	}
 	return host, workspace
 }
@@ -211,8 +214,29 @@ func TestLoadNamesEveryDefect(t *testing.T) {
 		{
 			name:   "auto on a host that cannot confine",
 			yaml:   entry(workspaceLine + "      mode: auto\n"),
-			mutate: func(h *Host) { h.AutoEligible = false },
+			mutate: func(h *Host) { h.Confinement = HostConfinement{Backend: "none"} },
 			wants:  []string{"mode: auto", "cannot confine a run to its workspace"},
+		},
+		{
+			// The zero value fails CLOSED: a Driver that builds a Host and forgets the confinement
+			// facts must be refused, never handed an unattended auto Firing (which is why
+			// HostConfinement stores the waiver inverted, as Unconfined).
+			name:   "auto on a host that states no confinement facts at all",
+			yaml:   entry(workspaceLine + "      mode: auto\n"),
+			mutate: func(h *Host) { *h = Host{} },
+			wants:  []string{"mode: auto", "cannot confine a run to its workspace"},
+		},
+		{
+			name: "auto on a host whose backend fences the filesystem is legal",
+			yaml: entry(workspaceLine + "      mode: auto\n"),
+		},
+		{
+			// `confine-to-workspace: false` is the user's own "I am the sandbox" — the same ladder
+			// that lets a session launch in Auto, and a Firing is not held to a stricter bar
+			// (ADR 0033 decision 3).
+			name:   "auto where the user waived the fence is legal",
+			yaml:   entry(workspaceLine + "      mode: auto\n"),
+			mutate: func(h *Host) { h.Confinement = HostConfinement{Backend: "none", Unconfined: true} },
 		},
 		{
 			name:  "a server no entry answers to",

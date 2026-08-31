@@ -62,7 +62,7 @@ type daemonWiring struct {
 	// confiner is this host's confinement backend, built once through the newConfiner seam. A
 	// Firing takes it whatever its mode: an Auto entry is fenced by it, and a Plan entry's terminal
 	// commands are confined by the same posture a session's are. Whether this host may run Auto
-	// unattended at all was ruled on at VALIDATION (internal/daemon's Host.AutoEligible), where the
+	// unattended at all was ruled on at VALIDATION (internal/daemon's Host.Confinement), where the
 	// refusal could name the entry, so nothing here re-asks. [daemonWiring.closeConfiner] is the
 	// other end of it: a backend that has to put the disk back is torn down when the daemon stops.
 	confiner apogee.Confiner

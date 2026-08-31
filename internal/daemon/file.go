@@ -14,6 +14,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/probe"
 	"github.com/airiclenz/apogee/internal/schedule"
 )
 
@@ -96,10 +97,29 @@ type Host struct {
 	// inventing a defect. A nil LookupServer answers "unknown" to everything, so every entry that
 	// names a server is refused; the caller is expected to supply one.
 	LookupServer func(name string) (ServerFacts, bool)
-	// AutoEligible is this host's Auto-eligibility verdict (ADR 0012: workspace confinement is
-	// available). False refuses every `mode: auto` entry at validation, where the refusal can name
-	// the entry, rather than at the Firing that would have run unconfined.
-	AutoEligible bool
+	// Confinement is what this host can fence and what its user asked for. A posture that cannot
+	// run an unattended Auto refuses every `mode: auto` entry at validation, where the refusal can
+	// name the entry, rather than at the Firing that would have run unconfined.
+	Confinement HostConfinement
+}
+
+// HostConfinement is the three facts the unattended-Auto verdict needs (ADR 0012; ADR 0033
+// decision 3): which backend this host fences with, what that backend reports it can fence, and
+// whether the user waived the fence. The verdict itself is not injected — [Load] asks
+// [probe.AutoUnattendedBlocked] for it, so a Schedule, a headless run and a session all reach the
+// same answer from the same function rather than from a bool each caller computes its own way.
+type HostConfinement struct {
+	// Backend names the confinement backend this host builds (landlock, seatbelt, none). It reaches
+	// the user only through the verdict's wording, never through a rule.
+	Backend string
+	// Caps is the capability matrix that backend reports (domain.ConfinementCaps.AutoEligible is
+	// the filesystem-write bit the Auto gate reads).
+	Caps domain.ConfinementCaps
+	// Unconfined is `confine-to-workspace: false` — the user's own explicit "I am the sandbox",
+	// which is NOT blocked (ADR 0033 decision 3). It is stored INVERTED, so the zero value is
+	// confined-and-unproven and therefore refuses: a Driver that builds a Host without filling
+	// Confinement in must not thereby be handed an unattended auto Firing.
+	Unconfined bool
 }
 
 // Load decodes and validates a schedules file's bytes, returning the file with its defaults
@@ -233,7 +253,7 @@ func validateEntry(index int, entry Entry, host Host, named map[string]struct{})
 		defects = append(defects, defect)
 	}
 
-	mode, defect := resolveMode(label, entry.Run.Mode, host.AutoEligible)
+	mode, defect := resolveMode(label, entry.Run.Mode, host)
 	entry.Run.Mode = mode
 	if defect != nil {
 		defects = append(defects, defect)
@@ -321,15 +341,19 @@ func expandHome(path, home string) (string, error) {
 }
 
 // resolveMode defaults an absent mode to plan and refuses every rung a Firing may not run in —
-// including auto on a host that cannot confine it.
-func resolveMode(label string, mode domain.Mode, autoEligible bool) (domain.Mode, error) {
+// including auto on a host that cannot confine it. That last verdict is
+// [probe.AutoUnattendedBlocked]'s, asked with the host's own facts, so a Firing and a headless run
+// refuse the same postures (ADR 0033 decision 3); only the WORDING is this package's, because a
+// defect here names the entry the file has to fix.
+func resolveMode(label string, mode domain.Mode, host Host) (domain.Mode, error) {
 	switch mode {
 	case "":
 		return domain.ModePlan, nil
 	case domain.ModePlan:
 		return mode, nil
 	case domain.ModeAuto:
-		if !autoEligible {
+		if probe.AutoUnattendedBlocked("a firing", host.Confinement.Backend, host.Confinement.Caps,
+			!host.Confinement.Unconfined) != "" {
 			return mode, fmt.Errorf("%s run: mode: auto, but this host cannot confine a run to its workspace — an "+
 				"unattended autonomous Firing is not something apogee will start for you unconfined; run this entry in "+
 				"plan mode, or check `apogee doctor` for what this host is missing", label)
