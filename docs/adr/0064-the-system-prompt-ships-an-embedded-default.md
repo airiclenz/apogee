@@ -101,8 +101,8 @@ and per-model *behaviour* stays with Mechanisms; there is no per-model default v
 between and no tier detection. The editing seam is the settings editor, which pre-fills the embedded
 text when nothing is configured, so editing the default is "open it, change a line, save" and the
 saved result is ordinary rung-2 configuration. There is deliberately **no export command** for the
-prompt (unlike `/scheme export`): a second copy on disk re-freezes exactly what §1 unfroze, and the
-editor already hands the user the bytes.
+prompt (unlike `/color-scheme export`): a second copy on disk re-freezes exactly what §1 unfroze,
+and the editor already hands the user the bytes.
 
 ## Considered options
 
@@ -111,9 +111,9 @@ editor already hands the user the bytes.
 - **Re-seed or merge the shipped text into `~/.apogee/config.yaml` on upgrade** — rejected.
   `seedConfig`'s never-overwrite is load-bearing (it is what makes the config file safe to hand-edit
   at all), and a merge would have to guess which of the user's lines were theirs.
-- **An export command mirroring `/scheme export`** — rejected. The scheme case exports a file the
-  resolver then reads *instead* of the built-in, which is the freeze this ADR removes. Pre-filling
-  the editor gives the same starting point without creating a stale copy.
+- **An export command mirroring `/color-scheme export`** — rejected. The scheme case exports a
+  file the resolver then reads *instead* of the built-in, which is the freeze this ADR removes.
+  Pre-filling the editor gives the same starting point without creating a stale copy.
 - **Make the default prompt a Mechanism** so it can be gated per model — rejected by §6. A Mechanism
   is measured against a floor; the base guidance *is* part of the floor, and a floor that switches
   itself off under Bypass is not a floor.
