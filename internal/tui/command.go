@@ -72,9 +72,9 @@ type parsedInput struct {
 //     finished would be wrong.
 //
 //   - runsBareAtAccept — the verb takes arguments, but its BARE form is meaningful and safe to fire
-//     from the completion menu: it mutates nothing on its own. /model and /server open a chooser and
-//     change nothing until the picker's own accept; /skills only reports its catalog, its one writing
-//     form being spelled out ("/skills export <id>"). Accepting such a row RUNS it — the same answer
+//     from the completion menu: it mutates nothing on its own. /model, /server and /sub-agents-server
+//     open a chooser and change nothing until the picker's own accept; /skills only reports its
+//     catalog, its one writing form being spelled out ("/skills export <id>"). Accepting such a row RUNS it — the same answer
 //     /settings' row gives — instead of leaving a "/model " nobody meant to finish standing in the
 //     box. It qualifies takesArgs at the accept path alone: the parser still reads the flag above it,
 //     so the argument form "/model qwen" is untouched (an argument token never reaches the accept
@@ -83,8 +83,9 @@ type parsedInput struct {
 //   - whileRunning — the verb is safe to run while a worker is working, because nothing it does
 //     needs this session's engine quiescent: it either only REPORTS, or — the Schedule pair
 //     /schedule and /schedule-stop — writes only to the scheduler library, whose Schedules fire as
-//     separate headless runs (ADR 0033). Either way: no engine mutation, no worker of its own, no
-//     quiescent boundary needed. Every other verb is idle-only and earns commandsAtIdleNote mid-run
+//     separate headless runs (ADR 0033), or — /sub-agents-server — moves where the NEXT delegation is
+//     spawned, which no sub-agent already in flight can be reached by (ADR 0045). Any of the three:
+//     no engine mutation, no worker of its own, no quiescent boundary needed. Every other verb is idle-only and earns commandsAtIdleNote mid-run
 //     instead of running (parsedInput.safeWhileRunning is where the flag is read, and /confine's
 //     reporting FORM is the one nuance it adds).
 //
@@ -231,6 +232,14 @@ func verbGrammar[T any](parse func([]string) (T, error)) func([]string) (any, er
 // the `ui.inspector` config key and offered whether or not that key is on: a verb withheld until a
 // key is set is a verb nobody finds the key for, and the pane's own first row names it.
 //
+// /sub-agents-server picks the `servers:` entry this session's DELEGATIONS run on (picker.go, ADR
+// 0045): bare it opens a picker over the configured entries, with a name it takes that entry, and
+// either way the choice is recorded as the `sub-agents-server:` key. It is /server's grammar — one
+// optional name, the picker as the bare form — for a different question, and it parts from /server
+// on the one flag that matters: it is safe while a worker works. Retargeting moves where the NEXT
+// delegation is spawned and cannot reach a sub-agent already in flight, so the moment a human wants
+// it is precisely the moment an orchestration is running.
+//
 // Order is display order, and it is ALPHABETICAL — declared here in the literal rather than sorted
 // at render time, because this table is the registry and the order the dropdown reads is one of the
 // things it declares. A menu the human can scan without knowing the table is worth more than any
@@ -255,6 +264,7 @@ var commandSpecs = []commandSpec{
 	{name: "settings", summary: "view the configuration this session resolved", noRecall: true},
 	{name: "skills", summary: "list the available skills, or export a shipped one", takesArgs: true, runsBareAtAccept: true, whileRunning: true, parseArgs: verbGrammar(parseSkills)},
 	{name: "stop-server", summary: "stop the server this session is on", touchesServer: true},
+	{name: "sub-agents-server", summary: "pick the servers: entry that takes delegations (bare = pick)", takesArgs: true, runsBareAtAccept: true, whileRunning: true},
 	{name: "undo", summary: "put back the files the last exchange wrote (bare = preview)", takesArgs: true, parseArgs: verbGrammar(parseUndo)},
 	{name: "unload-model", summary: "free the model of the server this session is on", touchesServer: true},
 	{name: "usage", summary: "session token usage — main agent and every sub-agent", whileRunning: true, noRecall: true},

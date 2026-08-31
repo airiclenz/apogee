@@ -591,6 +591,26 @@ type DelegationHost interface {
 	// change reaches the transcript through the host's own notice path, once, when the newly named
 	// server is first observed.
 	Retarget(name string) error
+
+	// Targets is the `servers:` entries a delegation may be pointed AT, asked per draw so a list the
+	// human edits mid-session (ADR 0037) is offered the moment the edit lands.
+	//
+	// It is deliberately NOT [ServerHost.List]: that list is what the SESSION can be switched to, and
+	// it carries one row the file does not — the synthesized entry a raw `--endpoint` override builds
+	// for this run alone (ADR 0036 decision 6). That row names no `servers:` entry, so it can be
+	// neither resolved nor recorded here, and offering it would be offering a target that refuses
+	// itself. An empty list is "nothing to delegate to", which the verb words itself.
+	Targets() []ServerChoice
+
+	// RecordChoice persists the entry this session's delegations run on as the `sub-agents-server:`
+	// key, so the NEXT session routes there without being asked — [ServerHost.RecordChoice]'s twin,
+	// key for key and answer for answer (ADR 0036 decision 2's shape, ADR 0045's key).
+	//
+	// It answers whether it WROTE: a name no `servers:` entry holds is skipped silently (false, no
+	// error), which is also the answer of a host that records nothing at all. Like its twin it is
+	// best-effort persistence of something that ALREADY happened — the retarget landed before this is
+	// called and stays landed whatever it answers — so an error is a note and never an undo.
+	RecordChoice(name string) (recorded bool, err error)
 }
 
 // ----------------------------------------------------------------------------

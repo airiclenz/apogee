@@ -78,14 +78,15 @@ import (
 type pickerKind int
 
 const (
-	pickerModel        pickerKind = iota // the models the Upstream advertises — /model without a launcher
-	pickerServer                         // the servers config.yaml names — /server, over m.opts.Server
-	pickerLoad                           // the Launch profiles the launcher defines — /model with one
-	pickerCycle                          // how often a new Schedule fires — /schedule's first popup
-	pickerScheduleMode                   // the mode that Schedule's Firings run in — /schedule's second
-	pickerScheduleStop                   // the live Schedules — /schedule-stop with more than one
-	pickerKeyMigration                   // what to do about one entry's plaintext key — the start-up offer
-	pickerEffort                         // the levels the bound model's thinking-effort dial offers — /effort
+	pickerModel           pickerKind = iota // the models the Upstream advertises — /model without a launcher
+	pickerServer                            // the servers config.yaml names — /server, over m.opts.Server
+	pickerLoad                              // the Launch profiles the launcher defines — /model with one
+	pickerCycle                             // how often a new Schedule fires — /schedule's first popup
+	pickerScheduleMode                      // the mode that Schedule's Firings run in — /schedule's second
+	pickerScheduleStop                      // the live Schedules — /schedule-stop with more than one
+	pickerKeyMigration                      // what to do about one entry's plaintext key — the start-up offer
+	pickerEffort                            // the levels the bound model's thinking-effort dial offers — /effort
+	pickerSubAgentsServer                   // the servers a delegation may run on — /sub-agents-server
 )
 
 // picker is the overlay's inline state on the Model. Its zero value is "closed", so it lives inline
@@ -144,7 +145,7 @@ const pickerHint = "type to filter · ↑/↓ select · ⏎ switch · esc close"
 // wrong on every kind that is not one.
 func pickerHintFor(k pickerKind) string {
 	switch k {
-	case pickerCycle, pickerScheduleMode, pickerEffort:
+	case pickerCycle, pickerScheduleMode, pickerEffort, pickerSubAgentsServer:
 		return "type to filter · ↑/↓ select · ⏎ choose · esc close"
 	case pickerScheduleStop:
 		return "type to filter · ↑/↓ select · ⏎ stop · esc close"
@@ -419,6 +420,147 @@ func (m Model) switchToServer(choice ServerChoice) (tea.Model, tea.Cmd) {
 // what [savedChoiceClause] states as a clause, for the one path that has no move to hang a clause on
 // — the same key, named the same way, because the key is what the human will find in config.yaml.
 const serverSavedNote = "server: saved — this entry starts the next session"
+
+// ----------------------------------------------------------------------------
+// /sub-agents-server — where this session's DELEGATIONS run (ADR 0045)
+// ----------------------------------------------------------------------------
+
+// subAgentsServerUsage is the note a surplus argument earns. It is /server's usage line for
+// /server's grammar: one optional name, the picker as the bare form.
+const subAgentsServerUsage = "usage: /sub-agents-server [name]"
+
+// subAgentsServerTitle names what the overlay is choosing. It says SUB-AGENTS rather than "server",
+// because the one thing a human must not read this pane as is the /server picker: taking a row here
+// moves where the delegations go and leaves the session exactly where it is.
+const subAgentsServerTitle = "sub-agents server — where delegations run"
+
+// noSubAgentsTargetsNote is the one line the verb owes when there is nowhere to delegate to. An
+// empty list and an unwired host are worded the same, for noServersNote's reason: they are one
+// situation for the human — this build offers no target — and two sentences would only drift.
+const noSubAgentsTargetsNote = "no servers configured — add a servers: block to config.yaml"
+
+// subAgentsSavedClause is what a RECORDED pick adds to the line stating it: the `sub-agents-server:`
+// key now names the entry this session's delegations run on, so the next session routes there
+// without being asked. It names the key rather than describing it — savedChoiceClause's own reason,
+// since the key is what the human will find in config.yaml.
+const subAgentsSavedClause = " · sub-agents-server: saved"
+
+// runSubAgentsServerCommand drives the /sub-agents-server verb in both its forms: bare, it opens the
+// picker over the `servers:` entries a delegation may run on; with one argument it takes that entry
+// by name. Surplus arguments are a usage note.
+//
+// The degrade is asked first and for both forms, /server's ladder exactly: an argument form reaching
+// the accept path with no seam would move nothing and say nothing. What it asks is the DELEGATION
+// host rather than the server one — a session may be perfectly able to switch its own upstream and
+// still route no delegations at all (a Driver that composed no such host, ADR 0031) — and the name
+// is resolved against the targets the picker would have listed, so the two forms can never disagree
+// about what exists.
+func (m Model) runSubAgentsServerCommand(args []string) (tea.Model, tea.Cmd) {
+	if len(args) > 1 {
+		return m.pickerNote(subAgentsServerUsage)
+	}
+	targets := m.subAgentsTargets()
+	if len(targets) == 0 {
+		return m.pickerNote(noSubAgentsTargetsNote)
+	}
+	if len(args) == 1 {
+		if choice, ok := serverNamed(targets, args[0]); ok {
+			return m.retargetSubAgents(choice.Name)
+		}
+		return m.pickerNote(fmt.Sprintf(
+			"unknown server %q — configured: %s", args[0], serverNameList(targets)))
+	}
+	// It opens on the FIRST row rather than on a marked one: which entry takes the delegations right
+	// now is the wiring's state, not the renderer's, and a highlight guessed from the session's own
+	// server would point at the wrong row on every session that routes elsewhere.
+	m.picker = picker{open: true, kind: pickerSubAgentsServer}
+	m.layout()
+	return m, nil
+}
+
+// subAgentsTargets is the entries a delegation may be pointed at as they stand RIGHT NOW
+// ([DelegationHost.Targets], asked per draw): the one read this verb's picker, its argument form and
+// its accept all go through, so what is offered, what is resolved and what is taken are one list.
+// An unwired host is an empty list — the nil-seam degrade every other seam takes.
+func (m Model) subAgentsTargets() []ServerChoice {
+	if m.opts.Delegation == nil {
+		return nil
+	}
+	return m.opts.Delegation.Targets()
+}
+
+// subAgentsServerRows is one row per configured entry: the name and its endpoint, the two cells
+// /server's rows carry. It carries NO third marker cell, and that is deliberate — the "· current"
+// mark of the server picker is drawn from [Options.HostAlias], the entry this SESSION is bound to,
+// which is the one thing a delegation target is not: marking it here would tell a human their
+// delegations run on the box they are talking to, on every session where they do not.
+func (m Model) subAgentsServerRows() []popupRow {
+	targets := m.subAgentsTargets()
+	rows := make([]popupRow, 0, len(targets))
+	for _, choice := range targets {
+		rows = append(rows, popupRow{
+			stripEscapes(choice.Name), "— " + stripEscapes(choice.Endpoint),
+		})
+	}
+	return rows
+}
+
+// retargetSubAgents is the accept path both forms of the verb share — a highlighted row and
+// "/sub-agents-server <name>". It closes the overlay, asks the host to move the routing
+// ([DelegationHost.Retarget], synchronously on the Update loop like every other seam call), and folds
+// what came back.
+//
+// The seam is validate-then-commit: an error means nothing moved and the note is the whole of the
+// answer. A success states the CHOICE and nothing about routing — that the delegations now go there
+// is said once, by the routing notice, when the newly named server is first observed
+// ([DelegationHost.Retarget]), and a second sentence here would either duplicate it or, worse, state
+// a route that is not in force yet.
+//
+// Naming the entry the delegations already run on is not answered specially, because nothing here
+// can know it is: the live target is the wiring's, and re-pointing at it is idempotent — the same
+// entry re-resolved, the same routing, one recording of a choice the human just made deliberately.
+func (m Model) retargetSubAgents(name string) (tea.Model, tea.Cmd) {
+	m.picker = picker{}
+	if m.opts.Delegation == nil {
+		// Neither caller can reach here with an unwired host — both resolve the name against the
+		// targets first, and an unwired host offers none — so this is the nil-seam degrade stated
+		// rather than relied on: a modal accept is the last place a renderer may panic.
+		return m.pickerNote(noSubAgentsTargetsNote)
+	}
+	if err := m.opts.Delegation.Retarget(name); err != nil {
+		m.transcript.addNote("could not retarget the sub-agents: " + stripEscapes(err.Error()))
+		m.layout()
+		return m, nil
+	}
+	// The move is now true, so it is also the choice this human should not have to make again: the
+	// name goes to the recording seam, which writes it when it belongs to a configured entry and
+	// skips it silently when it does not ([DelegationHost.RecordChoice]).
+	record := recordSubAgentsChoice(m.opts.Delegation, name)
+	clause := ""
+	if record.saved {
+		clause = subAgentsSavedClause
+	}
+	m.transcript.addNote("sub-agents server: " + name + clause)
+	record.warn(&m.transcript)
+	m.layout()
+	return m, nil
+}
+
+// recordSubAgentsChoice persists the entry this session's delegations now run on as the key the NEXT
+// session starts from, through the seam the binary backs. It is [recordServerChoice] one key across,
+// and it answers the same three ways: recorded, silently skipped (a name no `servers:` entry holds,
+// or a host that records nothing), or failed — and a failure is a warning and nothing more, because
+// the retarget already landed and stays landed.
+func recordSubAgentsChoice(host DelegationHost, name string) choiceRecord {
+	if host == nil || name == "" {
+		return choiceRecord{}
+	}
+	saved, err := host.RecordChoice(name)
+	if err != nil {
+		return choiceRecord{warning: "could not record the sub-agents server choice: " + stripEscapes(err.Error())}
+	}
+	return choiceRecord{saved: saved}
+}
 
 // ----------------------------------------------------------------------------
 // /model over the Launch profiles — the launcher's offering (ADR 0029 D3)
@@ -712,6 +854,14 @@ func (m Model) acceptPicker() (tea.Model, tea.Cmd) {
 		return m.acceptKeyMigration(offered)
 	case pickerEffort:
 		return m.acceptEffort(offered)
+	case pickerSubAgentsServer:
+		// Re-read for pickerServer's reason and with the same answer: the targets are asked per draw,
+		// so a `servers:` block that shrank under the open overlay costs the accept and nothing more.
+		targets := m.subAgentsTargets()
+		if offered >= len(targets) {
+			return m, nil
+		}
+		return m.retargetSubAgents(targets[offered].Name)
 	}
 	return m, nil
 }
@@ -875,6 +1025,8 @@ func (m Model) pickerTitle() string {
 		return m.keyMigrationTitle()
 	case pickerEffort:
 		return "thinking effort — how hard the model thinks"
+	case pickerSubAgentsServer:
+		return subAgentsServerTitle
 	}
 	return ""
 }
@@ -910,6 +1062,8 @@ func (m Model) pickerOfferingRows() []popupRow {
 		return keyMigrationRows(m.opts.KeyMigration.StoreName)
 	case pickerEffort:
 		return effortRows(m.effortSupport())
+	case pickerSubAgentsServer:
+		return m.subAgentsServerRows()
 	}
 	return nil
 }

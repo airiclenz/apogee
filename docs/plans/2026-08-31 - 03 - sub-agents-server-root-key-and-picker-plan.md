@@ -219,7 +219,15 @@ keeps the retargeted server rather than reverting to the configured name.
 
 **Depends on:** item 2.
 
-## 4. `/sub-agents-server`: the picker, the recording, the mid-run posture
+## 4. `/sub-agents-server`: the picker, the recording, the mid-run posture — ✅ DONE (2026-08-31)
+
+NOTES (2026-08-31): deviation — the plan's Files line named `internal/tui/upstream.go`, which does not exist; the configured-names helpers live in `cmd/apogee/upstream.go` and needed no edit, since the new `delegationHost.Targets` projects the live `servers:` list through the existing `serverChoices`.
+NOTES (2026-08-31): deviation — the recording could NOT go through `config.SaveConfigSetting` as the item's text assumed: that writer refuses a key whose registry row is not `Editable`, and item 1's ratified row for `sub-agents-server` is `Editable: false`. Added `config.SaveSubAgentsServer` beside it, sharing the identical splice/verify/atomic write through an extracted `saveScalar` helper (no behaviour change to `SaveConfigSetting`).
+NOTES (2026-08-31): deviation — `Options.Delegation` now carries a `delegationHost{w: *rootWiring}` adapter instead of item 3's `w.delegation` directly, because two of the seam's three acts are not the routing wiring's: the offered list is the live `servers:` holder's and the recording is a config splice. Retarget still forwards to the wiring untouched; item 3's comment on that line was reworded to say so.
+NOTES (2026-08-31): consequential edit — internal/tui/doc.go: made necessary by the new verb joining the runsBareAtAccept set and the picker's verb list, both of which doc.go enumerates.
+NOTES (2026-08-31): consequential edit — internal/tui/model.go: made necessary by the new verb becoming a SECOND whileRunning picker kind, which the picker's key-claim comment enumerated as /schedule's alone.
+NOTES (2026-08-31): docs/manual and the ADR were deliberately left alone — item 6 ("Docs and the ADR") owns them and is not yet done.
+NOTES (2026-08-31): the picker offers no "auto (session server)" row, so the opt-out (`Retarget("")`, an empty key) is still reachable only by editing config.yaml. The item's text describes rows over the configured names only; see DEFER.
 
 **What:** New commandSpecs row (`internal/tui/command.go:202`): `{name: "sub-agents-server",
 summary: "pick the servers: entry that takes delegations (bare = pick)", takesArgs: true,

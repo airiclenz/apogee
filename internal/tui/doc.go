@@ -111,8 +111,9 @@
 // — [Model.acceptAutocomplete] cuts the verb out and leaves the rest of the draft standing, which
 // is why [Model.runCommand] never touches the editor and its callers prepare it instead. A row
 // that takes arguments is the carve-out: it COMPLETES to "/verb " and waits for them rather than
-// firing unfinished, unless it also carries commandSpec.runsBareAtAccept — /model and /server,
-// whose bare form only opens a picker, and /skills, whose bare form only reports the catalog —
+// firing unfinished, unless it also carries commandSpec.runsBareAtAccept — /model, /server and
+// /sub-agents-server, whose bare form only opens a picker, and /skills, whose bare form only
+// reports the catalog —
 // which puts it back among the rows that run. The
 // whole-input form keeps ownership of arguments ("/confine off --save"), so ⏎ on a finished token
 // falls through to submit exactly there and executes at accept everywhere else. All three regions
@@ -780,7 +781,8 @@
 // recall.go prompt recall — the per-workspace list of sent inputs the box walks with ↑/↓, where
 // this package owns only WHEN (one load at start-up, one fire-and-forget append per send) while
 // internal/recall owns the file and cmd/apogee owns which directory and which workspace
-// ([Options.Recall]); picker.go the modal single-select overlay behind /model and /server;
+// ([Options.Recall]); picker.go the modal single-select overlay behind /model, /server and
+// /sub-agents-server;
 // listsurface.go the surface that overlay, the /sessions browser, the /settings key list with its
 // two sub-lists and the "/" | "@" dropdown all ARE underneath their own wording — the [listCursor]
 // value ({selected}) every one of them embeds and the key contract it carries (arrows by a per-pane

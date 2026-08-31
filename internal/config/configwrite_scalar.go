@@ -50,6 +50,38 @@ func SaveConfigSetting(path, key, value string) error {
 	if err != nil {
 		return err
 	}
+	return saveScalar(path, k, value)
+}
+
+// subAgentsServerPath is the registry path of the key below, named here because two spellings of one
+// key is how a writer starts writing a key nothing reads.
+const subAgentsServerPath = "sub-agents-server"
+
+// SaveSubAgentsServer writes name as the config file's `sub-agents-server:` key — the `servers:`
+// entry this session's delegations run on (ADR 0045), recorded by `/sub-agents-server` so the next
+// session routes there without being asked. It is [SaveConfigSetting]'s write in every respect that
+// touches the file: the same splice, the same round-trip gate, the same atomic mode-preserving
+// rename, and the same seeding of an absent config from the template.
+//
+// It is a function of its own for one reason, and the reason is not about writing: the key's registry
+// row is deliberately not Editable, because the settings pane routes ⏎ by a row's Kind and an
+// editable KindServer row would call the `/server` switch and move the SESSION instead of the
+// delegation target (registry.go). Editable is also what gates the settings-surface writer above, so
+// a key that is read-only IN THE PANE would otherwise be unwritable ANYWHERE — and this key has
+// exactly one writing surface, which is the verb that picks it.
+func SaveSubAgentsServer(path, name string) error {
+	k, ok := LookupKey(subAgentsServerPath)
+	if !ok {
+		return fmt.Errorf("apogee: %q is not a setting apogee knows", subAgentsServerPath)
+	}
+	return saveScalar(path, k, name)
+}
+
+// saveScalar is the write both of those share: the key's own admission test, then the splice and the
+// gate it must pass. It takes a resolved [Key] rather than a path because WHICH keys a surface may
+// write is that surface's question — the settings pane asks writableKey, and the one verb that
+// records a non-editable key asks nothing — while how a scalar reaches the file is one answer.
+func saveScalar(path string, k Key, value string) error {
 	if err := validateSettingValue(k, value); err != nil {
 		return err
 	}

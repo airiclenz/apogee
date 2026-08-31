@@ -39,6 +39,21 @@ import (
 // done: it names where the NEXT session starts.
 const settingKeyServer = "server"
 
+// settingKeySubAgentsServer is the second such key, for the same reason one key across.
+// `sub-agents-server:` is the RECORDED delegation target (ADR 0045), and moving a running session's
+// delegations onto another entry is a deliberate act at the `/sub-agents-server` picker — a retarget,
+// an unlatch and a routing notice on the next beat. Re-reading a file is not that act.
+//
+// It also has to be exempt, where its neighbour merely deserves to be: the pane never applies this
+// key (its registry row is not editable), so a report of it would be a change nothing can apply — and
+// the report itself would be wrong, since the change the watcher would be reporting is the write
+// `/sub-agents-server` had just made. ADR 0041 decision 8's own rule: a change apogee itself made is
+// not a change by the time the watcher looks. A hand-edited `sub-agents-server:` does what a
+// hand-edited `server:` does — it names where the NEXT session's delegations start — and reaches a
+// running session the way every `servers:` edit does, through the re-read the list's own apply makes
+// (reloadServers).
+const settingKeySubAgentsServer = "sub-agents-server"
+
 // lineJumpEditors are the editors known to take `+<line>` as "open here" (ADR 0037 binding B). The
 // argument is passed to these and to nothing else on purpose: an editor that does not know it takes
 // it as a FILENAME and opens an empty buffer called "+37", which is a far worse outcome than landing
@@ -216,8 +231,9 @@ func (e *externalEdit) spec(key string) (tui.EditorCommand, error) {
 // failures: it is the pre-bound start ADR 0036 answers with a picker, and it is a perfectly ordinary
 // state to leave a config in halfway through adding a server.
 //
-// Two kinds of key are never reported: the confinement pair, whose interlock stays single-homed in
-// /confine (ADR 0012 — binding G), and `server:` (settingKeyServer).
+// Three kinds of key are never reported: the confinement pair, whose interlock stays single-homed in
+// /confine (ADR 0012 — binding G), `server:` (settingKeyServer), and `sub-agents-server:`
+// (settingKeySubAgentsServer) — both of them recorded choices a picker makes deliberately.
 func (e *externalEdit) changed() ([]tui.AppliedSetting, error) {
 	after, err := e.projection()
 	if err != nil {
@@ -230,7 +246,7 @@ func (e *externalEdit) changed() ([]tui.AppliedSetting, error) {
 
 	var applied []tui.AppliedSetting
 	for i, k := range config.KeyRegistry {
-		if k.GlobalOnly || k.Path == settingKeyServer {
+		if k.GlobalOnly || k.Path == settingKeyServer || k.Path == settingKeySubAgentsServer {
 			continue
 		}
 		if i >= len(before.rows) || i >= len(after.rows) {

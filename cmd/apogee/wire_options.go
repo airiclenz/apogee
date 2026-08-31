@@ -110,12 +110,13 @@ func (w *rootWiring) options() tui.Options {
 		// nil-host degrade tui.LauncherHost documents is what a Driver composes (ADR 0031), never
 		// this binary's.
 		Launcher: launcherHost{w: w},
-		// Where this session's DELEGATIONS run (ADR 0045, delegation.go): the one act that re-points
-		// them at another `servers:` entry mid-session. The wiring IS the seam — it already holds the
-		// live list, the base config and the engine latch a retarget needs — so no adapter stands
-		// between them, and it is always present in this binary: what a Driver leaves nil (ADR 0031),
-		// a full apogee session simply has.
-		Delegation: w.delegation,
+		// Where this session's DELEGATIONS run (ADR 0045, delegation.go): what may be delegated to, the
+		// act that re-points the routing at another `servers:` entry mid-session, and the recording of
+		// that choice. It is a host over the ROOT rather than the routing wiring itself, because only
+		// the retarget is the wiring's: the offered list is the live `servers:` holder's and the
+		// recording is a config splice. It is always present in this binary: what a Driver leaves nil
+		// (ADR 0031), a full apogee session simply has.
+		Delegation: delegationHost{w: w},
 		// The resolved `ui:` block: which animation paints the status-line spinner, whether its
 		// colour loop runs, whether the transcript's scroll bar is painted at all, and how long the
 		// engine may go silent before the status line reports the quiet. Independent values, resolved

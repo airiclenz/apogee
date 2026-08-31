@@ -171,6 +171,30 @@ func (w *rootWiring) recordServerChoice(name string) (bool, error) {
 	return true, nil
 }
 
+// recordSubAgentsServerChoice is that same act for the DELEGATION target — the `sub-agents-server:`
+// key a `/sub-agents-server` pick becomes, so the next session routes its sub-agents where this one
+// ended without being asked (ADR 0045, ADR 0036 decision 2's shape).
+//
+// The CONFIGURED check is the neighbour's, name for name and list for list: the picker offers the
+// file's own entries, so a name that is not one of them is a name the file cannot be made to carry,
+// and it is skipped SILENTLY (false, no error) rather than refused. That covers the one race the
+// check exists for — an entry deleted between the offer and the accept — and it is why the check is
+// made here and not at the picker: only this layer reads the file.
+//
+// It writes through a splice of its own rather than through SaveConfigSetting, because the key's
+// registry row is deliberately NOT editable: a KindServer row the settings pane could take ⏎ on would
+// route into the `/server` switch and move the SESSION (registry.go), so the pane shows the key
+// read-only and this verb is the single surface that writes it (config.SaveSubAgentsServer).
+func (w *rootWiring) recordSubAgentsServerChoice(name string) (bool, error) {
+	if !configuredServer(w.live.serverList(), name) {
+		return false, nil
+	}
+	if err := config.SaveSubAgentsServer(filepath.Join(w.roots.config, "config.yaml"), name); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 // recordModelChoice is the composition root's half of remembering a MODEL pick — the `model:` key on
 // the entry this session is on, so the next session there comes back on the model this one ended on
 // without being asked. It sits beside recordServerChoice because it answers the same kind of question

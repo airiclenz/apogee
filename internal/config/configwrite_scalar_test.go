@@ -975,3 +975,41 @@ func TestSpliceScalarSettingQuotesValuesThatNeedIt(t *testing.T) {
 		})
 	}
 }
+
+// The `sub-agents-server:` key has a writer of its own because its registry row is deliberately not
+// editable — the settings pane shows it read-only so ⏎ on a KindServer row cannot move the SESSION
+// (registry.go) — and the settings-surface writer refuses a non-editable key by design. What the
+// verb that records it needs is every other property of that writer: the key lands under its own
+// commented example in a seeded file, the template's documentation survives, and nothing else moves.
+func TestConfigWriteSubAgentsServerWritesTheNonEditableKey(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "config.yaml")
+
+	if err := SaveConfigSetting(path, "sub-agents-server", "my-box"); err == nil {
+		t.Error("SaveConfigSetting wrote a non-editable key; the settings surface must refuse it")
+	}
+	if err := SaveSubAgentsServer(path, "my-box"); err != nil {
+		t.Fatalf("SaveSubAgentsServer: %v", err)
+	}
+
+	written := readTestConfig(t, path)
+	if got, ok, err := scalarAtPath([]byte(written), "sub-agents-server"); err != nil || !ok || got != "my-box" {
+		t.Errorf("the config reads sub-agents-server = %q (set=%v, err=%v), want \"my-box\":\n%s", got, ok, err, written)
+	}
+	if got, want := commentLines(written), commentLines(string(defaultConfigYAML)); !slices.Equal(got, want) {
+		t.Errorf("the write changed the template's documentation: %d comment lines, want %d", len(got), len(want))
+	}
+	assertOnlyKeyChanged(t, string(defaultConfigYAML), written, "sub-agents-server")
+
+	// A re-pick moves the same line rather than adding a second one.
+	if err := SaveSubAgentsServer(path, "other-box"); err != nil {
+		t.Fatalf("SaveSubAgentsServer over an existing line: %v", err)
+	}
+	again := readTestConfig(t, path)
+	if got, ok, _ := scalarAtPath([]byte(again), "sub-agents-server"); !ok || got != "other-box" {
+		t.Errorf("the re-pick reads sub-agents-server = %q, want \"other-box\":\n%s", got, again)
+	}
+	if n := strings.Count(again, "\nsub-agents-server:"); n != 1 {
+		t.Errorf("the file carries %d active sub-agents-server lines, want exactly 1:\n%s", n, again)
+	}
+}

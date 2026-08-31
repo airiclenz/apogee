@@ -1257,7 +1257,8 @@ var keyClaimOrder = []keyClaimant{
 	{
 		// The picker is the browser's simpler sibling and claims keys the same way: while it is open the
 		// selection, the accept and esc are all its own (picker.go). It claims them in BOTH live states,
-		// because /schedule opens its cycle and mode popups mid-Exchange as well — the verb is
+		// because /schedule opens its cycle and mode popups mid-Exchange as well, and
+		// /sub-agents-server the one it retargets delegations from — those verbs are
 		// whileRunning (commandSpecs), and an overlay that renders without taking keys would be a modal
 		// the human cannot answer. The older kinds are unaffected: their verbs are idle-only, and a
 		// picker cannot be open when a worker STARTS, since it owns ⏎ for as long as it is up.

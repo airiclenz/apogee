@@ -169,14 +169,17 @@ func resolvedEditorArgv(argv []string) []string {
 }
 
 // The return trip reports what the human CHANGED and nothing else: the baseline is taken when the
-// editor is launched, so a key they left alone is silent however this session resolved it. Two kinds
-// of key are never reported — the confinement pair, whose interlock stays single-homed in /confine
-// (ADR 0012), and `server:`, whose live move is a deliberate act at the picker (ADR 0037 decision 4).
+// editor is launched, so a key they left alone is silent however this session resolved it. Three
+// kinds of key are never reported — the confinement pair, whose interlock stays single-homed in
+// /confine (ADR 0012), and the two RECORDED picks, `server:` and `sub-agents-server:`, whose live
+// move is a deliberate act at a picker (ADR 0037 decision 4, ADR 0045). The second of those has to
+// be silent as well as deserving to be: `/sub-agents-server` writes it itself, so reporting it would
+// hand the pane apogee's own write back as an external change nothing can apply.
 func TestExternalEditReloadReportsTheKeysTheFileChanged(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
 	path := filepath.Join(home, "config.yaml")
-	writeSettingsFixture(t, path, "server: local\nmode: ask-before\nservers:\n"+
+	writeSettingsFixture(t, path, "server: local\nsub-agents-server: local\nmode: ask-before\nservers:\n"+
 		"  - name: local\n    endpoint: http://127.0.0.1:1111\n")
 
 	e := newExternalEdit(config.Options{ConfigDir: home}, "", func(string) string { return "" })
@@ -185,7 +188,7 @@ func TestExternalEditReloadReportsTheKeysTheFileChanged(t *testing.T) {
 		t.Fatalf("spec: %v", err)
 	}
 
-	writeSettingsFixture(t, path, "server: other\nmode: auto\nconfine-to-workspace: false\nservers:\n"+
+	writeSettingsFixture(t, path, "server: other\nsub-agents-server: other\nmode: auto\nconfine-to-workspace: false\nservers:\n"+
 		"  - name: local\n    endpoint: http://127.0.0.1:1111\n"+
 		"  - name: other\n    endpoint: http://127.0.0.1:2222\n"+
 		"system-prompt-text: |\n  hand written\n")
@@ -204,7 +207,7 @@ func TestExternalEditReloadReportsTheKeysTheFileChanged(t *testing.T) {
 			t.Errorf("reload reported %s = %q, want %q", path, got[path], value)
 		}
 	}
-	for _, skipped := range []string{"server", "confine-to-workspace", "unconfined-hosts"} {
+	for _, skipped := range []string{"server", "sub-agents-server", "confine-to-workspace", "unconfined-hosts"} {
 		if v, ok := got[skipped]; ok {
 			t.Errorf("reload reported %s = %q; that key is never applied from a re-read", skipped, v)
 		}

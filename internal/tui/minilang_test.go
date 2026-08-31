@@ -954,7 +954,7 @@ func TestOnlyThePickerVerbsRunBareAtAccept(t *testing.T) {
 		}
 	}
 
-	if want := []string{"model", "server", "skills"}; !reflect.DeepEqual(got, want) {
+	if want := []string{"model", "server", "skills", "sub-agents-server"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("runsBareAtAccept verbs = %v, want exactly %v — every other argument-taking verb completes and waits", got, want)
 	}
 }

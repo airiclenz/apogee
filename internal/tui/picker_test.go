@@ -2531,3 +2531,307 @@ func TestEffortPickerPaneNamesTheDialAndChooses(t *testing.T) {
 		t.Errorf("hint = %q, want the choosing verb rather than a switch", got)
 	}
 }
+
+// ----------------------------------------------------------------------------
+// /sub-agents-server — where the DELEGATIONS run (ADR 0045)
+// ----------------------------------------------------------------------------
+
+// fakeDelegationHost stands in for [DelegationHost]: the targets it offers, every name it was asked
+// to retarget to and every name offered to its recording seam, with the two failures each act can
+// answer with. It is called synchronously on the test's own goroutine, so it needs no guard.
+type fakeDelegationHost struct {
+	targets     []ServerChoice
+	retargets   []string
+	retargetErr error
+	recorded    []string
+	saved       bool
+	recordErr   error
+}
+
+func (h *fakeDelegationHost) Targets() []ServerChoice { return h.targets }
+
+func (h *fakeDelegationHost) Retarget(name string) error {
+	if h.retargetErr != nil {
+		return h.retargetErr
+	}
+	h.retargets = append(h.retargets, name)
+	return nil
+}
+
+func (h *fakeDelegationHost) RecordChoice(name string) (bool, error) {
+	h.recorded = append(h.recorded, name)
+	return h.saved, h.recordErr
+}
+
+// ephemeralRow is the synthesized `--endpoint` startup the SESSION's switchable list carries and the
+// file does not (ADR 0036 decision 6). Every seed below puts it at the head of [ServerHost.List], so
+// a picker that read the wrong list would name it.
+var ephemeralRow = ServerChoice{Name: "rented (endpoint)", Endpoint: "http://rented:9000"}
+
+// seededSubAgents is a ready model whose SESSION can switch between three rows — the ephemeral one
+// and the two configured entries — while its delegation host offers only the two the file carries.
+func seededSubAgents(t *testing.T, host *fakeDelegationHost) Model {
+	t.Helper()
+	if host.targets == nil {
+		host.targets = twoServers
+	}
+	opts := testOpts
+	seams := serverSeams(&opts)
+	seams.list = staticServers(append([]ServerChoice{ephemeralRow}, twoServers...))
+	seams.switchTo = (&fakeSwitch{}).switchTo
+	opts.Delegation = host
+	m, _ := seededPicker(t, opts)
+	return m
+}
+
+// The picker lists what the FILE carries — the delegation host's own targets — and nothing else: not
+// the synthesized ephemeral row of the session's switchable list, and no "· current" mark, which on
+// this pane could only name the server the session is bound to rather than the one its delegations
+// run on.
+func TestSubAgentsServerPickerListsTheConfiguredTargets(t *testing.T) {
+	host := &fakeDelegationHost{}
+	m := seededSubAgents(t, host)
+
+	m, cmd := typeCommand(t, m, "/sub-agents-server")
+
+	if cmd != nil {
+		t.Error("/sub-agents-server returned a Cmd; opening the picker retargets nothing yet")
+	}
+	if !m.picker.open || m.picker.kind != pickerSubAgentsServer {
+		t.Fatalf("picker = {open:%v kind:%v}, want an open sub-agents picker", m.picker.open, m.picker.kind)
+	}
+	if len(host.retargets) != 0 {
+		t.Errorf("retargets = %v, want none — opening the picker moves nothing", host.retargets)
+	}
+	got := plain(m.View())
+	for _, want := range []string{subAgentsServerTitle, "test-host", "http://remote:8080"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the pane is missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, ephemeralRow.Name) {
+		t.Errorf("the pane offered the synthesized --endpoint row, which names no servers: entry:\n%s", got)
+	}
+	rows := m.pickerRows()
+	if len(rows) != len(twoServers) {
+		t.Fatalf("rows = %v, want one per configured entry", rows)
+	}
+	for i, row := range rows {
+		if len(row) != 2 {
+			t.Errorf("rows[%d] = %v, want two cells — no marker borrowed from the session's server", i, row)
+		}
+		for _, cell := range row {
+			if cell == currentRowCell {
+				t.Errorf("rows[%d] = %v, want no %q mark on a delegation target", i, row, currentRowCell)
+			}
+		}
+	}
+}
+
+// ⏎ on a row retargets through the seam and records the choice, and the note states the CHOICE with
+// the recording hung off it — never the routing, which the host's own notice says once the newly
+// named server is observed.
+func TestSubAgentsServerAcceptRetargetsAndRecords(t *testing.T) {
+	host := &fakeDelegationHost{saved: true}
+	m := seededSubAgents(t, host)
+
+	m, _ = typeCommand(t, m, "/sub-agents-server")
+	m, _ = stepCmd(t, m, tea.KeyPressMsg{Code: tea.KeyDown})
+	m, _ = stepCmd(t, m, keyEnter())
+
+	if want := []string{"remote"}; !reflect.DeepEqual(host.retargets, want) {
+		t.Errorf("retargets = %v, want %v — the highlighted row's entry", host.retargets, want)
+	}
+	if want := []string{"remote"}; !reflect.DeepEqual(host.recorded, want) {
+		t.Errorf("recorded = %v, want %v", host.recorded, want)
+	}
+	if m.picker.open {
+		t.Error("the picker stayed open after an accept")
+	}
+	want := "sub-agents server: remote" + subAgentsSavedClause
+	if got := noteTexts(m); len(got) == 0 || got[len(got)-1] != want {
+		t.Errorf("notes = %v, want %q", got, want)
+	}
+}
+
+// esc closes the overlay and changes nothing at all — neither the routing nor the file.
+func TestSubAgentsServerPickerEscCloses(t *testing.T) {
+	host := &fakeDelegationHost{saved: true}
+	m := seededSubAgents(t, host)
+
+	m, _ = typeCommand(t, m, "/sub-agents-server")
+	m, _ = stepCmd(t, m, keyEsc())
+
+	if m.picker.open {
+		t.Error("esc left the picker open")
+	}
+	if len(host.retargets) != 0 || len(host.recorded) != 0 {
+		t.Errorf("retargets = %v, recorded = %v, want neither — esc chooses nothing", host.retargets, host.recorded)
+	}
+	if got := noteTexts(m); len(got) != 0 {
+		t.Errorf("notes = %v, want none", got)
+	}
+}
+
+// The argument form skips the picker entirely and takes the named entry — the "/server <name>" idiom,
+// resolved against the very list the picker would have shown.
+func TestSubAgentsServerArgumentFormSkipsThePicker(t *testing.T) {
+	host := &fakeDelegationHost{saved: true}
+	m := seededSubAgents(t, host)
+
+	m, _ = typeCommand(t, m, "/sub-agents-server remote")
+
+	if m.picker.open {
+		t.Error("the argument form opened the picker")
+	}
+	if want := []string{"remote"}; !reflect.DeepEqual(host.retargets, want) {
+		t.Errorf("retargets = %v, want %v", host.retargets, want)
+	}
+	if want := []string{"remote"}; !reflect.DeepEqual(host.recorded, want) {
+		t.Errorf("recorded = %v, want %v", host.recorded, want)
+	}
+}
+
+// The answers that are notes: a name no entry carries, surplus arguments, and nothing to delegate to
+// (an empty list and an unwired host being one situation for the human).
+func TestSubAgentsServerAnswersWithoutRetargeting(t *testing.T) {
+	t.Run("unknown name lists the configured ones", func(t *testing.T) {
+		host := &fakeDelegationHost{}
+		m := seededSubAgents(t, host)
+
+		m, _ = typeCommand(t, m, "/sub-agents-server nope")
+
+		if len(host.retargets) != 0 {
+			t.Errorf("retargets = %v, want none", host.retargets)
+		}
+		assertPickerDegrade(t, m, `unknown server "nope" — configured: test-host, remote`)
+	})
+
+	t.Run("surplus arguments earn the usage line", func(t *testing.T) {
+		host := &fakeDelegationHost{}
+		m := seededSubAgents(t, host)
+
+		m, _ = typeCommand(t, m, "/sub-agents-server a b")
+
+		if len(host.retargets) != 0 {
+			t.Errorf("retargets = %v, want none", host.retargets)
+		}
+		assertPickerDegrade(t, m, subAgentsServerUsage)
+	})
+
+	t.Run("nothing to delegate to", func(t *testing.T) {
+		for _, tc := range []struct {
+			name string
+			host *fakeDelegationHost
+		}{
+			{name: "empty targets", host: &fakeDelegationHost{targets: []ServerChoice{}}},
+			{name: "unwired host", host: nil},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				var m Model
+				if tc.host == nil {
+					opts := testOpts
+					serverSeams(&opts).list = staticServers(twoServers)
+					m, _ = seededPicker(t, opts) // Options.Delegation left nil
+				} else {
+					m = seededSubAgents(t, tc.host)
+				}
+
+				m, _ = typeCommand(t, m, "/sub-agents-server")
+
+				assertPickerDegrade(t, m, noSubAgentsTargetsNote)
+			})
+		}
+	})
+}
+
+// A refused retarget is the whole of the answer: nothing moved, so nothing is recorded either.
+func TestSubAgentsServerRefusedRetargetRecordsNothing(t *testing.T) {
+	host := &fakeDelegationHost{saved: true, retargetErr: errors.New("no servers entry named \"remote\"")}
+	m := seededSubAgents(t, host)
+
+	m, _ = typeCommand(t, m, "/sub-agents-server remote")
+
+	if len(host.recorded) != 0 {
+		t.Errorf("recorded = %v, want none — the retarget was refused", host.recorded)
+	}
+	want := `could not retarget the sub-agents: no servers entry named "remote"`
+	if got := noteTexts(m); len(got) == 0 || got[len(got)-1] != want {
+		t.Errorf("notes = %v, want %q", got, want)
+	}
+}
+
+// A recording that did not happen claims nothing, and one that FAILED warns while the retarget
+// stands: the routing already moved, and the key is best-effort persistence of that fact.
+func TestSubAgentsServerRecordingIsBestEffort(t *testing.T) {
+	t.Run("skipped silently", func(t *testing.T) {
+		host := &fakeDelegationHost{} // saved false, no error: the binary's silent skip
+		m := seededSubAgents(t, host)
+
+		m, _ = typeCommand(t, m, "/sub-agents-server remote")
+
+		if want := "sub-agents server: remote"; noteTexts(m)[0] != want {
+			t.Errorf("notes = %v, want %q with no saved clause", noteTexts(m), want)
+		}
+	})
+
+	t.Run("a failed write warns and the retarget stands", func(t *testing.T) {
+		host := &fakeDelegationHost{recordErr: errors.New("permission denied")}
+		m := seededSubAgents(t, host)
+
+		m, _ = typeCommand(t, m, "/sub-agents-server remote")
+
+		if want := []string{"remote"}; !reflect.DeepEqual(host.retargets, want) {
+			t.Errorf("retargets = %v, want %v — a failed recording undoes nothing", host.retargets, want)
+		}
+		want := []string{"sub-agents server: remote", "could not record the sub-agents server choice: permission denied"}
+		if got := noteTexts(m); !reflect.DeepEqual(got, want) {
+			t.Errorf("notes = %v, want %v", got, want)
+		}
+	})
+}
+
+// The ratified mid-run posture (ADR 0045): the verb runs while a worker works, because it moves
+// where the NEXT delegation is spawned and reaches no sub-agent already in flight. It is also not on
+// the actuation latch's list, so a launcher verb in flight does not block it either.
+func TestSubAgentsServerRunsWhileTheWorkerWorks(t *testing.T) {
+	spec, ok := commandByName("sub-agents-server")
+	if !ok || !spec.whileRunning || !spec.takesArgs || !spec.runsBareAtAccept {
+		t.Fatalf("commandSpec = %+v, want an argument-taking, bare-running verb that is safe mid-run", spec)
+	}
+	if actuationBlocked("sub-agents-server") {
+		t.Error("the actuation latch blocked /sub-agents-server; retargeting touches no server this session is on")
+	}
+
+	host := &fakeDelegationHost{saved: true}
+	opts := testOpts
+	seams := serverSeams(&opts)
+	seams.list = staticServers(append([]ServerChoice{ephemeralRow}, twoServers...))
+	host.targets = twoServers
+	opts.Delegation = host
+	m := newTestModelEng(t, &fakeEngine{}, opts)
+	m, _ = typeCommand(t, m, "open the exchange")
+	if m.state != stateRunning {
+		t.Fatalf("precondition: state = %v, want running", m.state)
+	}
+
+	m, _ = typeCommand(t, m, "/sub-agents-server remote")
+
+	if want := []string{"remote"}; !reflect.DeepEqual(host.retargets, want) {
+		t.Errorf("retargets = %v, want %v mid-run", host.retargets, want)
+	}
+	if got := plain(m.View()); strings.Contains(got, commandsAtIdleNote) {
+		t.Errorf("the idle-only refusal was said for a whileRunning verb:\n%s", got)
+	}
+
+	// The BARE form too: the overlay opens over a working agent and claims its own keys, or it would
+	// be a modal nobody can answer (the picker's key claim, model.go).
+	m, _ = typeCommand(t, m, "/sub-agents-server")
+	if !m.picker.open || m.picker.kind != pickerSubAgentsServer {
+		t.Fatalf("picker = {open:%v kind:%v} mid-run, want the sub-agents picker", m.picker.open, m.picker.kind)
+	}
+	m, _ = stepCmd(t, m, keyEnter())
+	if want := []string{"remote", "test-host"}; !reflect.DeepEqual(host.retargets, want) {
+		t.Errorf("retargets = %v, want %v — the picker's own accept lands mid-run", host.retargets, want)
+	}
+}

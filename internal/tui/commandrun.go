@@ -374,6 +374,13 @@ func (m Model) runCommand(parsed parsedInput) (tea.Model, tea.Cmd) {
 		// the engine and constructs a client, which Agent.SwitchUpstream allows only at a boundary.
 		return m.runServerCommand(parsed.args)
 
+	case "sub-agents-server":
+		// Open the picker over the `servers:` entries a delegation may run on, or take the entry named
+		// as an argument (picker.go, ADR 0045). Unlike its two neighbours this one runs MID-RUN: it
+		// moves where the next delegation is spawned, touches neither this session's engine nor a
+		// sub-agent already in flight, and is wanted exactly while an orchestration is working.
+		return m.runSubAgentsServerCommand(parsed.args)
+
 	case "unload-model":
 		// Free the model of the server this session is talking to. No picker and no argument: the
 		// session's own endpoint is the only thing either actuation verb may act on (ADR 0029 D3), and

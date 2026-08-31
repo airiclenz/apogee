@@ -39,7 +39,40 @@ import (
 	"github.com/airiclenz/apogee/internal/mechanisms"
 	"github.com/airiclenz/apogee/internal/profiles"
 	"github.com/airiclenz/apogee/internal/provider"
+	"github.com/airiclenz/apogee/internal/tui"
 )
+
+// delegationHost is the renderer's view of that seam ([tui.DelegationHost]): the three acts
+// `/sub-agents-server` needs — what may be delegated to, the retarget itself, and the recording of
+// the choice — as one value over the wiring root.
+//
+// It holds the root rather than the wiring alone, for serverHost's reason: only one of the three
+// acts is the routing wiring's. The offered list is the LIVE `servers:` holder's (ADR 0037), and the
+// recording is a splice into config.yaml — a path and a writer the wiring has never held and has no
+// business holding.
+type delegationHost struct{ w *rootWiring }
+
+// Targets is the entries the file itself carries, projected onto the renderer's view of a server. It
+// asks the HOLDER on every call rather than a launch snapshot, so an entry added mid-session is a
+// delegation target the moment the edit lands — serverHost.List's contract, minus the one row that
+// list adds: the synthesized ephemeral `--endpoint` startup (upstreamChoices) names no entry, so it
+// could be neither resolved nor recorded here.
+func (h delegationHost) Targets() []tui.ServerChoice {
+	return serverChoices(h.w.live.serverList())
+}
+
+// Retarget points every delegation spawned from now on at the named entry, through the wiring that
+// owns the latch, the second heartbeat and the posture keys (delegationWiring.Retarget). It refuses
+// a name the live list does not carry, and an entry whose `mechanisms:` map this build does not
+// know, and changes nothing when it does.
+func (h delegationHost) Retarget(name string) error { return h.w.delegation.Retarget(name) }
+
+// RecordChoice persists that choice as the `sub-agents-server:` key, and answers whether it wrote: a
+// name in no `servers:` entry is skipped silently, which only this layer can tell
+// (recordSubAgentsServerChoice).
+func (h delegationHost) RecordChoice(name string) (bool, error) {
+	return h.w.recordSubAgentsServerChoice(name)
+}
 
 // delegationSetter is the engine mutation a resolved target is pushed through, named as the ONE
 // method it needs so the wiring below is exercisable without constructing an Agent — the
