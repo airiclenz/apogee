@@ -14,6 +14,7 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/heartbeat"
 	"github.com/airiclenz/apogee/internal/profiles"
+	"github.com/airiclenz/apogee/internal/provider"
 )
 
 // delegationSpy records what the wiring pushed at the engine, in order. It needs no lock: observe
@@ -247,6 +248,36 @@ func TestResolveDelegationTargetCarriesThePostureVerbatim(t *testing.T) {
 	}
 }
 
+// The dialect follows the same rank order every other field does (ADR 0060 §3): the entry's forced
+// `effort-dialect:` outranks the tell the beat saw, the beat answers what the file left open, and
+// with neither the zero says this target names none — which leaves a routed child on the SESSION
+// server's shape (internal/agent's routed spawn) and is what the advice below exists for.
+func TestResolveDelegationTargetRanksTheEffortDialect(t *testing.T) {
+	t.Parallel()
+
+	entry := config.ServerEntry{Name: "grunt", Endpoint: "http://127.0.0.1:2222", SubAgents: true}
+	observed := heartbeat.Beat{
+		Reachable:     true,
+		ActiveModel:   "loaded-model",
+		EffortSupport: provider.EffortSupport{Supported: true, Dialect: provider.EffortDialectReasoning},
+	}
+
+	forced := entry
+	forced.EffortDialect = "kwargs"
+	if got := resolveDelegationTarget(forced, "", observed, nil, nil).EffortDialect; got != provider.EffortDialectKwargs {
+		t.Errorf("dialect with a pin = %q; want the entry's forced %q", got, provider.EffortDialectKwargs)
+	}
+	if got := resolveDelegationTarget(entry, "", observed, nil, nil).EffortDialect; got != provider.EffortDialectReasoning {
+		t.Errorf("dialect with no pin = %q; want the beat's observed %q", got, provider.EffortDialectReasoning)
+	}
+
+	tellLess := observed
+	tellLess.EffortSupport = provider.EffortSupport{}
+	if got := resolveDelegationTarget(entry, "", tellLess, nil, nil).EffortDialect; got != provider.EffortDialectNone {
+		t.Errorf("dialect with neither = %q; want the zero that names none", got)
+	}
+}
+
 // An unusable Sub-agent server is not an error, it is the FALLBACK: nil says "not routing", and the
 // engine reads that as the parent's Upstream with the parent's posture — today's behaviour (ADR 0042).
 func TestResolveDelegationTargetRefusesAnUnusableBeat(t *testing.T) {
@@ -444,13 +475,18 @@ func TestDelegationNoticesOnlyOnARoutingStateChange(t *testing.T) {
 	beat(down) // still lost: nothing to say
 	beat(up)   // recovered: said again
 
+	// The dialect advice rides the FIRST engagement and is not repeated on the recovery: it
+	// describes the entry the human wrote, and a server going down and coming back changed nothing
+	// they could act on (dialectAdvice).
 	want := []string{
 		"sub-agents: routing to grunt (cheap-7b)",
+		"sub-agents: grunt advertises no thinking-effort dialect — delegates there speak this session's; set effort-dialect: on its entry",
 		"sub-agents: grunt unavailable — delegations run on the session server",
 		"sub-agents: routing to grunt (cheap-7b)",
 	}
 	if len(notices.notes) != len(want) {
-		t.Fatalf("notices = %q; want exactly one per transition: %q", notices.notes, want)
+		t.Fatalf("notices = %q; want exactly one per transition plus the one-off dialect advice: %q",
+			notices.notes, want)
 	}
 	for i, w := range want {
 		if notices.notes[i] != w {
@@ -612,8 +648,9 @@ func TestDelegationRelistAddsTheFlag(t *testing.T) {
 	if len(spy.pushes) != 1 || spy.pushes[0] == nil || spy.pushes[0].Endpoint != "http://127.0.0.1:2222" {
 		t.Fatalf("pushes after the first beat = %+v; want the new server's target", spy.pushes)
 	}
-	if len(notices.notes) != 1 || notices.notes[0] != "sub-agents: routing to grunt (cheap-7b)" {
-		t.Errorf("notices = %q; want the routing line for the newly flagged server", notices.notes)
+	if len(notices.notes) != 2 || notices.notes[0] != "sub-agents: routing to grunt (cheap-7b)" {
+		t.Errorf("notices = %q; want the routing line for the newly flagged server, then its dialect advice",
+			notices.notes)
 	}
 }
 
@@ -672,7 +709,9 @@ func TestDelegationRelistRePointsTheFlag(t *testing.T) {
 
 	wiring.server.beat = beatSource(heartbeat.Beat{Reachable: true, ActiveModel: "tiny-3b"})
 	wiring.observe(context.Background())()
-	if len(notices.notes) != 2 || notices.notes[1] != "sub-agents: routing to cheaper (tiny-3b)" {
+	// Four: each server announced itself and then advised about its own missing dialect — the
+	// advice latch is forgotten with the rest of the routing state when the flag moves.
+	if len(notices.notes) != 4 || notices.notes[2] != "sub-agents: routing to cheaper (tiny-3b)" {
 		t.Errorf("notices = %q; want the second server to announce itself", notices.notes)
 	}
 }
@@ -709,8 +748,8 @@ func TestDelegationRelistEditsTheFlaggedEntryInPlace(t *testing.T) {
 	if next == nil || next.Bypass == nil || !*next.Bypass || next.ContextWindow != 16384 {
 		t.Errorf("the next resolved target = %+v; want the edited posture and pin", next)
 	}
-	if len(notices.notes) != 1 {
-		t.Errorf("notices = %q; want the same server not to re-announce itself", notices.notes)
+	if len(notices.notes) != 2 {
+		t.Errorf("notices = %q; want the same server not to re-announce itself or re-advise", notices.notes)
 	}
 }
 
@@ -940,5 +979,51 @@ func TestResolveDelegationTargetCarriesTheWorkingWindow(t *testing.T) {
 	}
 	if unbounded.WorkingWindow != 0 {
 		t.Errorf("WorkingWindow = %d with no key on the entry; want the honest 0", unbounded.WorkingWindow)
+	}
+}
+
+// The dialect advice is the operator half of the two-rung ladder: a flagged server that advertises
+// no passive tell and pins no `effort-dialect:` leaves its delegates speaking the SESSION server's
+// shape, and the human is told so in the words that name the remedy. The string is BINDING, so it
+// is asserted verbatim off the emitting path rather than off a fixture.
+func TestDelegationAdvisesWhenTheTargetNamesNoDialect(t *testing.T) {
+	t.Parallel()
+
+	entry := config.ServerEntry{Name: "grunt", Endpoint: "http://127.0.0.1:2222", SubAgents: true}
+	notices := &noticeSpy{}
+	wiring := testDelegationWiring(entry,
+		heartbeat.Beat{Reachable: true, ActiveModel: "cheap-7b"}, &delegationSpy{}, notices)
+
+	wiring.observe(context.Background())()
+
+	want := "sub-agents: grunt advertises no thinking-effort dialect — " +
+		"delegates there speak this session's; set effort-dialect: on its entry"
+	if len(notices.notes) != 2 || notices.notes[1] != want {
+		t.Fatalf("notices = %q; want the routing line then %q", notices.notes, want)
+	}
+
+	// Once, not per beat: nothing about the entry changed, so there is nothing further to say.
+	wiring.observe(context.Background())()
+	if len(notices.notes) != 2 {
+		t.Errorf("notices after a second beat = %q; want the advice said once", notices.notes)
+	}
+}
+
+// And a server that DOES name one is advised about nothing: its delegates already speak its own
+// shape, which is the whole point of the field.
+func TestDelegationSaysNothingWhenTheTargetNamesADialect(t *testing.T) {
+	t.Parallel()
+
+	entry := config.ServerEntry{
+		Name: "grunt", Endpoint: "http://127.0.0.1:2222", SubAgents: true, EffortDialect: "kwargs",
+	}
+	notices := &noticeSpy{}
+	wiring := testDelegationWiring(entry,
+		heartbeat.Beat{Reachable: true, ActiveModel: "cheap-7b"}, &delegationSpy{}, notices)
+
+	wiring.observe(context.Background())()
+
+	if len(notices.notes) != 1 || notices.notes[0] != "sub-agents: routing to grunt (cheap-7b)" {
+		t.Errorf("notices = %q; want the routing line alone for a server that names its dialect", notices.notes)
 	}
 }

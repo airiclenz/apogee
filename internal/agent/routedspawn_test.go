@@ -10,6 +10,12 @@ package agent
 // the CONSTRUCTION produces; the loop-level behaviour of a nested Agent is already covered.
 
 import (
+	"context"
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"sync"
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
@@ -524,4 +530,115 @@ func expectedChildLimit(working, window int) int {
 		return working
 	}
 	return window
+}
+
+// TestRoutedSpawnSpeaksTheTargetsEffortDialect is the routed half of ADR 0060 §3's rule that a
+// dialect is a property of the SERVER: the child is on the Sub-agent server, so it expresses an
+// effort intent in the shape THAT server reads, not the one the orchestrator's server reads. The
+// session's own shape is left exactly where it was — routing changes what a spawn builds, never
+// what the session speaks.
+func TestRoutedSpawnSpeaksTheTargetsEffortDialect(t *testing.T) {
+	t.Parallel()
+
+	parent := routingParent(t)
+	parent.effortDialect = provider.EffortDialectReasoning
+	target := routedTarget()
+	target.EffortDialect = provider.EffortDialectKwargs
+	parent.SetDelegationTarget(target)
+
+	child := spawn(t, parent)
+
+	if child.effortDialect != provider.EffortDialectKwargs {
+		t.Errorf("routed child dialect = %q, want the target's %q",
+			child.effortDialect, provider.EffortDialectKwargs)
+	}
+	if parent.effortDialect != provider.EffortDialectReasoning {
+		t.Errorf("parent dialect = %q after a routed spawn, want its own %q untouched",
+			parent.effortDialect, provider.EffortDialectReasoning)
+	}
+}
+
+// TestRoutedSpawnWithoutATargetDialectKeepsTheParents is the other rung of the two-rung ladder: a
+// flagged server that advertises no passive tell and pins no `effort-dialect:` resolves to the
+// zero, and the child then speaks the PARENT's shape — which is what every routed child spoke
+// before the target could name one at all. The host advises the human about that entry
+// (cmd/apogee/delegation.go); the engine simply keeps today's behaviour.
+func TestRoutedSpawnWithoutATargetDialectKeepsTheParents(t *testing.T) {
+	t.Parallel()
+
+	parent := routingParent(t)
+	parent.effortDialect = provider.EffortDialectReasoning
+	target := routedTarget()
+	if target.EffortDialect != provider.EffortDialectNone {
+		t.Fatalf("the fixture target names dialect %q, want the zero for this case", target.EffortDialect)
+	}
+	parent.SetDelegationTarget(target)
+
+	child := spawn(t, parent)
+
+	if child.effortDialect != provider.EffortDialectReasoning {
+		t.Errorf("routed child dialect = %q, want the parent's %q — a target naming none replaces nothing",
+			child.effortDialect, provider.EffortDialectReasoning)
+	}
+}
+
+// TestRoutedChildSummarizerSpeaksTheTargetsDialectOnTheWire walks the whole journey the routed
+// dialect exists for, over a real client on a real Sub-agent server: the child folds, its
+// summarizer asks for no reasoning (compact.go), and the request that reaches the GRUNT box
+// carries that intent in the grunt box's own shape. The contrast is the regression: with the
+// orchestrator's `reasoning` shape the off request would arrive as a field llama.cpp ignores, the
+// fold would spend its whole cap thinking, and the summary would come back empty.
+func TestRoutedChildSummarizerSpeaksTheTargetsDialectOnTheWire(t *testing.T) {
+	t.Parallel()
+
+	var (
+		mu     sync.Mutex
+		bodies [][]byte
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		bodies = append(bodies, raw)
+		mu.Unlock()
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"FOLDED\"},\"finish_reason\":null}]}\n\n")
+		_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n")
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+	}))
+	t.Cleanup(srv.Close)
+
+	parent := routingParent(t)
+	parent.effortDialect = provider.EffortDialectReasoning // the ORCHESTRATOR's server's shape
+	target := routedTarget()
+	target.Endpoint, target.APIKey = srv.URL, ""
+	target.EffortDialect = provider.EffortDialectKwargs // the GRUNT server's
+	parent.SetDelegationTarget(target)
+
+	child := spawn(t, parent)
+	t.Cleanup(func() { _ = child.Close() })
+	seedFoldable(child)
+	if _, err := child.Compact(context.Background()); err != nil {
+		t.Fatalf("routed child Compact: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(bodies) != 1 {
+		t.Fatalf("requests to the Sub-agent server = %d, want exactly the child's one summary call", len(bodies))
+	}
+	var sent struct {
+		ChatTemplateKwargs map[string]any  `json:"chat_template_kwargs"`
+		Reasoning          json.RawMessage `json:"reasoning"`
+	}
+	if err := json.Unmarshal(bodies[0], &sent); err != nil {
+		t.Fatalf("summary request body: %v", err)
+	}
+	if enabled, ok := sent.ChatTemplateKwargs["enable_thinking"].(bool); !ok || enabled {
+		t.Errorf("summary request chat_template_kwargs = %v, want enable_thinking false in the target's shape",
+			sent.ChatTemplateKwargs)
+	}
+	if sent.Reasoning != nil {
+		t.Errorf("summary request carries reasoning %s — the parent's shape reached the routed server",
+			sent.Reasoning)
+	}
 }

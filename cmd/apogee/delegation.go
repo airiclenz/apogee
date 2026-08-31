@@ -33,6 +33,7 @@ import (
 	"github.com/airiclenz/apogee/internal/heartbeat"
 	"github.com/airiclenz/apogee/internal/mechanisms"
 	"github.com/airiclenz/apogee/internal/profiles"
+	"github.com/airiclenz/apogee/internal/provider"
 )
 
 // delegationSetter is the engine mutation a resolved target is pushed through, named as the ONE
@@ -97,6 +98,10 @@ type delegationWiring struct {
 	// FIRST resolved state news whichever way it goes — a flagged server that was never reachable
 	// degrades as visibly as one that stopped being.
 	stated bool
+	// dialectAdvised records that this server has already been advised about its missing
+	// `effort-dialect:` — a fact about the ENTRY rather than about the routing state, so it is said
+	// once and not again each time the box goes down and comes back (dialectAdvice).
+	dialectAdvised bool
 	// base is the session's own Config, kept because a re-read `servers:` list has to build the new
 	// entry's Mechanism catalogue out of exactly what startup built the old one from.
 	base apogee.Config
@@ -278,11 +283,20 @@ func (d *delegationWiring) land(generation int, name string, target *apogee.Dele
 		return
 	}
 	note := d.stateChange(name, target, keyErr)
+	advice := d.dialectAdvice(name, target)
 	d.engine.SetDelegationTarget(target)
 	d.mu.Unlock()
 
-	if note != "" && d.notify != nil {
-		d.notify(note)
+	if d.notify != nil {
+		if note != "" {
+			d.notify(note)
+		}
+		// After the routing line, never instead of it: the advice is about the server the line just
+		// named, and a human reading "delegates there speak this session's" first would not know
+		// where "there" is.
+		if advice != "" {
+			d.notify(advice)
+		}
 	}
 }
 
@@ -316,6 +330,30 @@ func (d *delegationWiring) stateChange(name string, target *apogee.DelegationTar
 	default:
 		return "sub-agents: " + name + " unavailable — delegations run on the session server"
 	}
+}
+
+// dialectAdvice answers the advice a routed target that names NO effort dialect is worth, and ""
+// otherwise — including for every unusable beat, which has no target and therefore no dialect to
+// be missing. Called with the mutex held.
+//
+// A flagged server that advertises no passive tell (ADR 0060 §3) and pins no `effort-dialect:`
+// leaves its delegates speaking the SESSION server's shape: an effort intent expressed for the
+// orchestrator's box, sent to a box that reads another field. That is the very bug class this seam
+// exists to close, and without the key it is unavoidable — the engine has nothing better to speak
+// there, and the parent's shape is what a routed child has always spoken. So this ADVISES rather
+// than announcing a loss, and it names the remedy the operator can actually apply.
+//
+// It is said ONCE per flagged server rather than per state change: it describes the human's file,
+// not the server's availability, so a box that goes down and comes back has changed nothing they
+// could act on. relist forgets it with the rest of the routing state when the flag moves, so the
+// next server advises for itself.
+func (d *delegationWiring) dialectAdvice(name string, target *apogee.DelegationTarget) string {
+	if d.dialectAdvised || target == nil || target.EffortDialect != provider.EffortDialectNone {
+		return ""
+	}
+	d.dialectAdvised = true
+	return "sub-agents: " + name + " advertises no thinking-effort dialect — " +
+		"delegates there speak this session's; set effort-dialect: on its entry"
 }
 
 // relist re-points the wiring at the `servers:` list as it now stands — the Sub-agent server's half
@@ -374,8 +412,9 @@ func (d *delegationWiring) relist(entries []config.ServerEntry) error {
 	if stale {
 		// The state is forgotten rather than reported: a server the file stopped flagging is not a
 		// server that became unavailable, and the human reading the notice is the one who just
-		// edited it. Forgetting is what lets the NEXT server announce itself on its first beat.
-		d.routed, d.stated = false, false
+		// edited it. Forgetting is what lets the NEXT server announce itself on its first beat —
+		// and advise about its OWN missing dialect, which is why that latch is forgotten with it.
+		d.routed, d.stated, d.dialectAdvised = false, false, false
 	}
 	d.mu.Unlock()
 
@@ -431,6 +470,14 @@ func resolveDelegationTarget(
 	// the model the HUMAN is looking at, and this resolution re-runs every ten seconds on a model
 	// they are not — a beat is no place to repeat a sentence.
 	profile, _ := resolveModelProfile(model, userProfiles)
+	// The wire shape this server reads a thinking-effort intent in, pin-else-observe like every
+	// field above (ADR 0060 §3): the entry's forced `effort-dialect:` outranks the tell the beat
+	// saw, and with neither the zero says this target names none — a routed child then keeps the
+	// session's own shape (subagent.go), which is what dialectAdvice tells the human about.
+	dialect := provider.EffortDialectFor(entry.EffortDialect)
+	if dialect == provider.EffortDialectNone {
+		dialect = observed.EffortSupport.Dialect
+	}
 	return &apogee.DelegationTarget{
 		Endpoint: entry.Endpoint,
 		// The key the beat above just authenticated with, resolved from the entry's key source by
@@ -456,6 +503,7 @@ func resolveDelegationTarget(
 		ResponseReserveFraction: entry.ResponseReserve,
 		ParallelAgents:          config.ResolveParallelAgents(entry.ParallelAgents, observed.TotalSlots),
 		Profile:                 profile,
+		EffortDialect:           dialect,
 		Bypass:                  entry.Bypass,
 		Mechanisms:              catalogue,
 	}

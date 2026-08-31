@@ -75,8 +75,9 @@ type RebindSpec = agent.RebindSpec
 type UpstreamSpec = agent.UpstreamSpec
 
 // DelegationTarget carries the Sub-agent server every delegation routes to — its endpoint, key,
-// model, context window, Parallel-agents cap, resolved Model profile, and the Bypass/Mechanisms
-// posture its delegations run with (ADR 0045). The host resolves it whole from its own discovery
+// model, context window, Parallel-agents cap, resolved Model profile, the effort dialect it reads
+// a thinking-effort intent in, and the Bypass/Mechanisms posture its delegations run with
+// (ADR 0045). The host resolves it whole from its own discovery
 // and latches it with Agent.SetDelegationTarget, which is never idle-gated; nil clears it and
 // delegations fall back to this session's own Upstream. See internal/agent for the contract.
 type DelegationTarget = agent.DelegationTarget

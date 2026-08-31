@@ -118,7 +118,20 @@ zeroes it).
 
 `feat(provider): EffortSupport reports when a model's reasoning cannot be disabled`
 
-## 2. A routed child speaks the Sub-agent server's effort dialect
+## 2. A routed child speaks the Sub-agent server's effort dialect — ✅ DONE (2026-08-31)
+
+NOTES (2026-08-31): the advice note is emitted ONCE per flagged server — a `dialectAdvised` latch on
+`delegationWiring`, forgotten beside `routed`/`stated` when `relist` moves the flag — rather than on
+every routing state change. The plan pinned `cmd/apogee/delegation_test.go:452` at 4 notes, which a
+per-state-change note would make 5 (the server there is lost and recovered); once-per-server also
+matches the fact advised: the human's entry, not the box's availability. `land` now emits the
+routing line first and the advice after it, so "delegates there" has a named server.
+NOTES (2026-08-31): enumeration-is-a-floor — `internal/agent/subagent.go`'s step-cap comment claimed
+"ADR 0045 replaces only the dial facts and the two posture keys", which this item makes false; it now
+names the effort dialect too. Same file, already listed.
+NOTES (2026-08-31): `internal/provider/discovery.go` and `discovery_test.go` were dirty in the
+working tree on arrival (item 1's `Mandatory` work, running concurrently) and were left untouched;
+they are not in this item's FILES list.
 
 **What:** Recast at the regression check (2026-08-31). Regression from the ADR 0060 dialect
 seam: before it every request carried the `chat_template_kwargs` anchor, so a routed child on

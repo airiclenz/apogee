@@ -355,6 +355,11 @@ func (a *Agent) newChildAgent(spawnCallID, task, name string) (*Agent, error) {
 	// ownsUpstream travels with the client below: a routed spawn DIALS one and hands the child the
 	// right to tear it down, an unrouted spawn borrows the session's and hands over nothing.
 	ownsUpstream := false
+	// The routed server's effort dialect, kept out of the block below because the field it settles
+	// is written after construction (see the assignment past newAgent). The zero is the honest
+	// "this spawn is not routed, or its target names no dialect" — both leave the parent's shape
+	// standing.
+	routedDialect := provider.EffortDialectNone
 	if target := a.delegationTarget(); target != nil {
 		childCfg.Endpoint = target.Endpoint
 		childCfg.APIKey = target.APIKey
@@ -392,6 +397,7 @@ func (a *Agent) newChildAgent(spawnCallID, task, name string) (*Agent, error) {
 			childCfg.Context.ResponseReserveFraction = target.ResponseReserveFraction
 		}
 		childCfg.Profile = target.Profile
+		routedDialect = target.EffortDialect
 		if target.Bypass != nil {
 			childCfg.Bypass = *target.Bypass
 		}
@@ -412,17 +418,27 @@ func (a *Agent) newChildAgent(spawnCallID, task, name string) (*Agent, error) {
 	// A routed child closes the client it dialled; an unrouted one must never close the session's
 	// out from under the parent that is still speaking over it (Agent.Close).
 	child.ownsUpstream = ownsUpstream
-	// The wire shape an effort intent is expressed in, taken from the parent's LIVE field rather
-	// than from the childCfg copy newAgent just seeded it from. The field is the authority the way
-	// it is everywhere else — the Config only ever SEEDS it (agent.go), and a Rebind writes the two
+	// The wire shape an effort intent is expressed in. The FLOOR is the parent's LIVE field rather
+	// than the childCfg copy newAgent just seeded it from. The field is the authority the way it is
+	// everywhere else — the Config only ever SEEDS it (agent.go), and a Rebind writes the two
 	// together — so reading the field is what makes the child speak the shape the parent's own next
 	// request will speak, whatever a rebind arriving around this spawn leaves on the copy. Read the
 	// copy instead and every effort-gated decision downstream (the compaction summarizer's
-	// EffortOff, compact.go) could be taken against the wrong server. Routing does not change the
-	// answer: ADR 0045 replaces the dial facts and the two posture keys, and a dialect is neither,
-	// so a routed child speaks its parent's until a Rebind of its own observes the target's —
-	// which is what an unrouted child got from the Config before this line existed.
+	// EffortOff, compact.go) could be taken against the wrong server.
+	//
+	// Routing DOES change the answer, and that is what this line was wrong about before: a dialect
+	// is a property of the SERVER (ADR 0060 §3) and a routed child is on another one, so the target
+	// names its own and the spawn takes it — the flagged entry's `effort-dialect:` pin, else the
+	// tell that server's own heartbeat saw. Handing a routed child the ORCHESTRATOR's shape is what
+	// made its summarizer ask for no reasoning in a field the grunt server ignores: the fold then
+	// spent the whole compaction cap thinking and faulted at every Turn boundary. A target that
+	// names NO dialect (the zero) leaves the parent's standing, which is exactly what a routed child
+	// spoke before this line could tell the difference; an unrouted spawn never reaches the second
+	// line at all.
 	child.effortDialect = a.effortDialect
+	if routedDialect != provider.EffortDialectNone {
+		child.effortDialect = routedDialect
+	}
 	// The child's token estimator needs no reset for a routed spawn — the reason SwitchUpstream and
 	// Rebind reset theirs (a chars→token calibration that described the departed model) cannot
 	// arise here: newAgent seeds every child with a fresh apogeectx.NewTokenEstimator, and
@@ -432,8 +448,8 @@ func (a *Agent) newChildAgent(spawnCallID, task, name string) (*Agent, error) {
 	// The delegate step cap, seeded HERE and only here: a top-level Agent stays at 0 (uncapped)
 	// however the key is set, because the bound is on delegates alone. It rides childCfg, which is
 	// the parent's whole Config, so a ROUTED spawn takes the same cap as an unrouted one — the key
-	// is top-level, not per-server (ADR 0045 replaces only the dial facts and the two posture
-	// keys) — and a grandchild inherits it the same way. runSubAgent may lower it for this one
+	// is top-level, not per-server (ADR 0045 replaces the dial facts, the two posture keys and the
+	// server's effort dialect — no bound on spend) — and a grandchild inherits it the same way. runSubAgent may lower it for this one
 	// delegation from the spawning call's max_steps.
 	child.stepCap = childCfg.Delegation.MaxSteps
 	// And the child's other structural bound on runaway context: it folds under budget pressure at

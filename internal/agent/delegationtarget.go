@@ -4,8 +4,9 @@ package agent
 // server — the Sub-agent server, the one `servers:` entry flagged `sub-agents: true` — so a
 // smart model orchestrates the session while a cheaper one, possibly on another box, does the
 // delegated grunt work. What that server IS (endpoint, key, model, window, fan-out width, model
-// profile) and what its delegations run WITH (Bypass, Mechanisms) is discovered by the host's
-// second heartbeat monitor and handed to the engine here as one resolved value.
+// profile, the wire shape it reads a thinking-effort intent in) and what its delegations run WITH
+// (Bypass, Mechanisms) is discovered by the host's second heartbeat monitor and handed to the
+// engine here as one resolved value.
 //
 // The engine stays wire-silent (ADR 0031): it never learns that a `servers:` list exists, which
 // entry carries the flag, or how a posture map spells itself. It is handed a resolved spec and
@@ -21,6 +22,7 @@ import (
 	"sync"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/provider"
 )
 
 // DelegationTarget is the resolved Sub-agent server a delegation routes to: everything a spawn
@@ -84,6 +86,18 @@ type DelegationTarget struct {
 	// meaningful — native tool calls, no inline thinking — so a routed child on a model that
 	// matches nothing parses exactly as an unprofiled session does.
 	Profile domain.ModelProfile
+	// EffortDialect is the wire shape THIS server reads a thinking-effort intent in — the flagged
+	// entry's `effort-dialect:` pin, else the shape its own heartbeat saw a passive tell for (ADR
+	// 0060 §3, where the dialect is a property of the SERVER). Any named value REPLACES the
+	// parent's, because a routed child is on another server: an intent expressed in the
+	// orchestrator's shape reaches this one as a field it ignores, which is how a routed
+	// summariser's "no reasoning" went unheard and spent the whole fold cap thinking.
+	//
+	// The zero means something different HERE from what it means on a RebindSpec: there it is the
+	// wire anchor a caller that names no dialect settles on, here it says this TARGET names none —
+	// the entry pins nothing and the server advertised no tell — and the child then keeps the
+	// PARENT's dialect, exactly as every delegation did before this field existed.
+	EffortDialect provider.EffortDialect
 	// Bypass is the flagged entry's `bypass:` posture (ADR 0045 §2). Non-nil REPLACES the
 	// inherited value whole: delegations to this server run with this flag whatever the parent's
 	// is. nil inherits the parent's LIVE flag at spawn, which is today's rule.
