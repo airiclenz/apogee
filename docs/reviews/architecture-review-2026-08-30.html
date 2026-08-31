@@ -1,0 +1,403 @@
+<title>Hoisting the TUI's Host Half</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,500;8..60,600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --ground: #f3f5f7; --card: #ffffff; --ink: #1c2430; --muted: #5b6675; --line: #d7dde4;
+    --accent: #0f766e; --accent-ink: #ffffff; --accent-soft: #e3f1ef;
+    --leak: #b42318; --leak-soft: #fbe9e6; --warn: #b45309; --warn-soft: #fdf1e3;
+    --slate: #64748b; --slate-soft: #e9edf2; --code: #eef1f4;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #141a21; --card: #1b232c; --ink: #e6eaee; --muted: #9aa6b4; --line: #2c3742;
+      --accent: #2fb5a8; --accent-ink: #0b1512; --accent-soft: #163a37;
+      --leak: #f0776a; --leak-soft: #3d1f1b; --warn: #e5a04a; --warn-soft: #3a2a14;
+      --slate: #a0acbb; --slate-soft: #253040; --code: #232d38;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #141a21; --card: #1b232c; --ink: #e6eaee; --muted: #9aa6b4; --line: #2c3742;
+    --accent: #2fb5a8; --accent-ink: #0b1512; --accent-soft: #163a37;
+    --leak: #f0776a; --leak-soft: #3d1f1b; --warn: #e5a04a; --warn-soft: #3a2a14;
+    --slate: #a0acbb; --slate-soft: #253040; --code: #232d38;
+  }
+  body { background: var(--ground); color: var(--ink); font-family: "IBM Plex Sans", system-ui, sans-serif; font-size: 15px; line-height: 1.55; }
+  main { max-width: 880px; margin: 0 auto; padding: 48px 24px 96px; display: flex; flex-direction: column; gap: 40px; }
+  h1, h2, h3 { font-family: "Source Serif 4", Georgia, serif; font-weight: 600; text-wrap: balance; margin: 0; line-height: 1.2; }
+  h1 { font-size: 34px; }
+  h2 { font-size: 22px; }
+  h3 { font-size: 18px; }
+  p { margin: 0; max-width: 68ch; }
+  code, .mono { font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace; font-size: 13px; }
+  code { background: var(--code); padding: 1px 5px; border-radius: 3px; }
+  .eyebrow { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+  header { display: flex; flex-direction: column; gap: 12px; border-bottom: 1px solid var(--line); padding-bottom: 24px; }
+  .meta { display: flex; flex-wrap: wrap; gap: 18px; color: var(--muted); font-size: 13px; }
+  .legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 12px; color: var(--muted); align-items: center; }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .sw { width: 22px; height: 12px; border: 1.5px solid var(--slate); border-radius: 2px; display: inline-block; }
+  .sw.deep { background: var(--accent); border-color: var(--accent); }
+  .sw.leak { border-style: dashed; border-color: var(--leak); }
+  .sw.seam { border: 0; border-top: 2px dashed var(--slate); height: 0; }
+
+  section { display: flex; flex-direction: column; gap: 20px; }
+  .group-head { display: flex; flex-direction: column; gap: 6px; }
+  .group-head p { color: var(--muted); }
+
+  article { background: var(--card); border: 1px solid var(--line); border-radius: 6px; padding: 22px 24px; display: flex; flex-direction: column; gap: 14px; }
+  .title-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px 14px; }
+  .id { font-family: "IBM Plex Mono", monospace; font-size: 12px; color: var(--muted); }
+  .badges { display: flex; gap: 8px; flex-wrap: wrap; }
+  .badge { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; font-weight: 600; padding: 3px 8px; border-radius: 3px; }
+  .badge.strong { background: var(--accent-soft); color: var(--accent); }
+  .badge.explore { background: var(--warn-soft); color: var(--warn); }
+  .badge.spec { background: var(--slate-soft); color: var(--slate); }
+  .badge.tag { background: var(--code); color: var(--muted); font-weight: 500; }
+  .files { font-family: "IBM Plex Mono", monospace; font-size: 12.5px; color: var(--muted); line-height: 1.7; word-break: break-word; }
+  .files b { color: var(--ink); font-weight: 500; }
+  dl { display: grid; grid-template-columns: 84px 1fr; gap: 6px 14px; margin: 0; }
+  dt { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 600; padding-top: 3px; }
+  dd { margin: 0; }
+  ul.wins { margin: 0; padding-left: 18px; columns: 2; gap: 24px; }
+  ul.wins li { break-inside: avoid; margin-bottom: 3px; }
+  .adr { background: var(--warn-soft); color: var(--warn); border-left: 3px solid var(--warn); padding: 8px 12px; font-size: 13.5px; border-radius: 0 4px 4px 0; }
+
+  /* before / after band */
+  .band { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; overflow-x: auto; }
+  .pane { border: 1px solid var(--line); border-radius: 4px; padding: 12px; min-height: 150px; display: flex; flex-direction: column; gap: 10px; background: var(--ground); }
+  .pane .eyebrow { margin-bottom: 2px; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: stretch; }
+  .box { border: 1.5px solid var(--slate); border-radius: 3px; padding: 6px 9px; font-family: "IBM Plex Mono", monospace; font-size: 11.5px; line-height: 1.35; background: var(--card); min-width: 110px; }
+  .box small { display: block; color: var(--muted); font-size: 10.5px; margin-top: 2px; }
+  .box.leak { border-style: dashed; border-color: var(--leak); background: var(--leak-soft); }
+  .box.deep { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 500; }
+  .box.deep small { color: var(--accent-ink); opacity: .85; }
+  .box.thin { border-style: dashed; color: var(--muted); }
+  .box.faded { opacity: .55; }
+  .seamline { border-top: 2px dashed var(--slate); margin: 4px 0; position: relative; }
+  .seamline::after { content: attr(data-label); position: absolute; right: 0; top: -9px; font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); background: var(--ground); padding: 0 4px; }
+  .arrow { color: var(--muted); font-size: 12px; align-self: center; }
+  .arrow.leak { color: var(--leak); }
+  .stack { display: flex; flex-direction: column; gap: 6px; }
+  .mass { display: flex; gap: 6px; align-items: flex-end; height: 96px; }
+  .mass div { width: 46px; border-radius: 2px 2px 0 0; font-size: 10px; text-align: center; color: var(--muted); display: flex; align-items: flex-end; justify-content: center; padding-bottom: 3px; }
+  .mass .if { background: var(--slate-soft); border: 1px solid var(--slate); }
+  .mass .impl { background: var(--accent-soft); border: 1px solid var(--accent); }
+
+  table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+  th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+  .tablewrap { overflow-x: auto; }
+  .top { border: 2px solid var(--accent); background: var(--card); border-radius: 6px; padding: 22px 24px; display: flex; flex-direction: column; gap: 10px; }
+  .top a { color: var(--accent); }
+  .note { color: var(--muted); font-size: 13.5px; }
+  @media (max-width: 640px) { .band { grid-template-columns: 1fr; } ul.wins { columns: 1; } dl { grid-template-columns: 1fr; } }
+</style>
+
+<main>
+<header>
+  <div class="eyebrow">Architecture review · apogee</div>
+  <h1>Hoisting the TUI's Host Half</h1>
+  <p>The engine/TUI seam holds — <code>internal/agent</code> never imports <code>internal/tui</code>, the TUI reaches the engine only through <code>tui.Engine</code>, and <code>headless.go</code> and <code>daemon.go</code> drive the same engine with zero <code>tui.</code> references. What this review finds is host behaviour that lives on the wrong side of that seam: Driver-neutral rules that only the TUI can reach, spelled again by hand in every other Driver.</p>
+  <div class="meta"><span>2026-08-30</span><span>base <code>a9ec2131</code></span><span>internal/tui 43.3k lines · internal/agent 9.1k · cmd/apogee 12.8k</span></div>
+  <div class="legend">
+    <span><i class="sw"></i> module</span>
+    <span><i class="sw deep"></i> deep module</span>
+    <span><i class="sw leak"></i> a copy of a rule that leaks</span>
+    <span><i class="sw seam"></i> seam</span>
+  </div>
+</header>
+
+<section id="group-a">
+  <div class="group-head">
+    <div class="eyebrow">Group A</div>
+    <h2>Rules that live in <code>internal/tui</code> and are re-spelled elsewhere</h2>
+    <p>Every candidate here has a sibling <code>internal/&lt;pkg&gt;</code> that already owns half the concept. The pattern is the one <code>internal/sanitize</code> and <code>internal/format</code> already ratified: the library owns the rule, the TUI keeps a three-line delegate as its grep-able vocabulary.</p>
+  </div>
+
+  <article id="a1">
+    <div class="title-row"><span class="id">A1</span><h3>One session-title rule in <code>internal/title</code></h3></div>
+    <div class="badges"><span class="badge strong">Strong</span><span class="badge tag">in-process</span><span class="badge tag">4 copies → 1</span></div>
+    <div class="files"><b>internal/tui/sessionsave.go:410-435</b> sessionTitle · <b>internal/run/run.go:299,337</b> promptTitle · <b>internal/schedule/schedule.go:540,548</b> deriveName · <b>internal/title/title.go:87,92</b> titleMaxRunes, titleWordBoundaryFloor</div>
+    <div class="band">
+      <div class="pane"><div class="eyebrow">Before</div>
+        <div class="row">
+          <div class="box leak">tui.sessionTitle<small>50 runes · 60% floor</small></div>
+          <div class="box leak">run.promptTitle<small>"duplicates … must not import tui"</small></div>
+          <div class="box leak">schedule.deriveName<small>40 runes · same floor</small></div>
+        </div>
+        <div class="seamline" data-label="internal/title"></div>
+        <div class="row"><div class="box faded">title.Sanitize<small>holds the two constants, uses neither</small></div></div>
+      </div>
+      <div class="pane"><div class="eyebrow">After</div>
+        <div class="row"><div class="box deep">title.FromPrompt(text, max, now)<small>+ MaxRunes · the one rule</small></div></div>
+        <div class="seamline" data-label="callers"></div>
+        <div class="row"><div class="box thin">tui</div><div class="box thin">run</div><div class="box thin">schedule (cap 40)</div></div>
+      </div>
+    </div>
+    <dl>
+      <dt>Problem</dt><dd>One rule, four spellings; two of them carry an ADR 0010 apology in their own comment.</dd>
+      <dt>Solution</dt><dd>Move the heuristic beside the constants it already shares in <code>internal/title</code>; delete the three copies.</dd>
+      <dt>Wins</dt><dd><ul class="wins"><li>locality: one place the rule can drift</li><li>leverage: three callers, one test table</li><li>net −70 lines</li><li>proves the pattern for A2–A4</li></ul></dd>
+    </dl>
+  </article>
+
+  <article id="a2">
+    <div class="title-row"><span class="id">A2</span><h3>One delegate-naming rule</h3></div>
+    <div class="badges"><span class="badge strong">Strong</span><span class="badge tag">in-process</span><span class="badge tag">4 copies → 1</span></div>
+    <div class="files"><b>internal/tui/usage.go:261</b> usageAgentName · <b>internal/tui/toolregistry.go:1143</b> subAgentTarget · <b>cmd/apogee/headless.go:610-617</b> headlessSubAgentTarget · <b>internal/run/run.go:624-646</b> firstTaskLine, delegationName</div>
+    <div class="band">
+      <div class="pane"><div class="eyebrow">Before</div>
+        <div class="stack">
+          <div class="row"><div class="box leak">tui.subAgentTarget</div><div class="box leak">tui.usageAgentName</div></div>
+          <div class="row"><div class="box leak">headless…Target<small>"kept on the Driver that has no header to paint"</small></div><div class="box leak">run.delegationName<small>ADR 0010 apology</small></div></div>
+        </div>
+      </div>
+      <div class="pane"><div class="eyebrow">After</div>
+        <div class="row"><div class="box deep">run.DelegateLabel(name, task)<small>name → first task line → fallback</small></div></div>
+        <div class="seamline" data-label="each caller extracts its two strings"></div>
+        <div class="row"><div class="box thin">tui (entry)</div><div class="box thin">headless (RawMessage)</div><div class="box thin">run (Spec)</div></div>
+      </div>
+    </div>
+    <dl>
+      <dt>Problem</dt><dd>The name→task→fallback ladder is stated four times over three input shapes.</dd>
+      <dt>Solution</dt><dd>One exported helper over <code>(name, task string)</code> next to <code>run.SubAgentUsage</code>; every caller extracts its own two strings.</dd>
+      <dt>Wins</dt><dd><ul class="wins"><li>locality: one ladder</li><li>headless and TUI cannot disagree</li><li>net −40 lines</li></ul></dd>
+    </dl>
+  </article>
+
+  <article id="a3">
+    <div class="title-row"><span class="id">A3</span><h3>The <code>@file</code> / <code>/skill</code> reference grammar and the workspace lister leave the TUI</h3></div>
+    <div class="badges"><span class="badge strong">Strong</span><span class="badge tag">in-process</span><span class="badge tag">closes a gap</span></div>
+    <div class="files"><b>internal/tui/command.go:619-768</b> refSpan, fileRefSpans, skillRefSpans, extractFileRefs, extractSkillRefs, scanRefToken · <b>internal/tui/filecache.go</b> (131 lines, zero apogee imports, Model-free tests) · <b>internal/run/run.go:236</b> submits UserInput with FileRefs unset · <b>internal/domain/config.go:683</b></div>
+    <div class="band">
+      <div class="pane"><div class="eyebrow">Before</div>
+        <div class="row"><div class="box">tui.parseInput<small>known func injected — already pure</small></div><div class="box">tui.fileCache<small>os.OpenRoot walk</small></div></div>
+        <div class="seamline" data-label="Drivers"></div>
+        <div class="row"><div class="box thin">TUI: @src/x.go → FileRefs</div><div class="box leak">headless: @src/x.go → prose</div></div>
+      </div>
+      <div class="pane"><div class="eyebrow">After</div>
+        <div class="row"><div class="box deep">prompt.Refs(text, known)<small>spans + extraction</small></div><div class="box deep">workspace lister<small>bounded, symlink-safe</small></div></div>
+        <div class="seamline" data-label="Drivers"></div>
+        <div class="row"><div class="box thin">tui: skillTokenSpans adapter</div><div class="box thin">run: FileRefs filled</div></div>
+      </div>
+    </div>
+    <dl>
+      <dt>Problem</dt><dd>The parser is pure today but unreachable: a headless <code>@path</code> is sent as prose while the interactive path resolves it.</dd>
+      <dt>Solution</dt><dd>Move the ref grammar into <code>internal/prompt</code> and the lister to a sibling; <code>skillTokenSpans</code> (returns a render type) stays in tui as the adapter.</dd>
+      <dt>Wins</dt><dd><ul class="wins"><li>headless gains @file for free</li><li>tests already Model-free</li><li>leverage: two Drivers, one grammar</li></ul></dd>
+    </dl>
+  </article>
+
+  <article id="a4">
+    <div class="title-row"><span class="id">A4</span><h3>Blast-radius wording joins <code>internal/probe</code></h3></div>
+    <div class="badges"><span class="badge explore">Worth exploring</span><span class="badge tag">in-process</span></div>
+    <div class="files"><b>internal/tui/confine.go:89-217</b> autoBlastRadiusLine/Clause, confineStatusReport, confineOn/OffNote, confineBackendName, confineHostLabel · <b>internal/tui/tui.go:1392</b> ConfinementInfo · <b>internal/agent/resolution.go:63</b> paraphrase · <b>cmd/apogee/wire_engine.go:539-543</b> friendlyConstructErr · precedent <b>confine.go:202</b> → probe.CapabilityLine</div>
+    <div class="band">
+      <div class="pane"><div class="eyebrow">Before</div>
+        <div class="row"><div class="box">probe.CapabilityLine</div><div class="arrow">←</div><div class="box">tui.confineBackendLine<small>the precedent</small></div></div>
+        <div class="row"><div class="box leak">tui: 7 note builders</div><div class="box leak">agent/resolution.go<small>re-words the hint</small></div><div class="box leak">wire_engine: hand-written</div></div>
+      </div>
+      <div class="pane"><div class="eyebrow">After</div>
+        <div class="row"><div class="box deep">probe: ConfinementInfo + notes<small>one verdict, one wording</small></div></div>
+        <div class="seamline" data-label="width stays in tui"></div>
+        <div class="row"><div class="box thin">tui picks line vs clause by width</div><div class="box thin">agent, headless quote it</div></div>
+      </div>
+    </div>
+    <dl>
+      <dt>Problem</dt><dd>One verdict rendered in three places is becoming three verdicts; the file's own precedent already delegates one line to <code>probe</code>.</dd>
+      <dt>Solution</dt><dd>Lift the pure wording and <code>ConfinementInfo</code> beside <code>probe.CapabilityLine</code>; only the width-driven line-vs-clause pick stays in tui.</dd>
+      <dt>Wins</dt><dd><ul class="wins"><li>locality: one escape hint</li><li>headless error quotes the real line</li></ul></dd>
+    </dl>
+  </article>
+
+  <article id="a5">
+    <div class="title-row"><span class="id">A5</span><h3>Skill-source disclosure reads the loader's anchors</h3></div>
+    <div class="badges"><span class="badge explore">Worth exploring</span><span class="badge tag">in-process</span><span class="badge tag">closes a gap</span></div>
+    <div class="files"><b>internal/tui/skills.go:199-226</b> skillSource, underSkillRoot · <b>internal/skills/load.go:274-296</b> sourceAnchors · <b>cmd/apogee/wire_firing.go:161-168</b> fresh Provider, Skipped() never read</div>
+    <div class="band">
+      <div class="pane"><div class="eyebrow">Before</div>
+        <div class="row"><div class="box">skills loader<small>knows each skill's root</small></div><div class="arrow leak">⇢</div><div class="box leak">tui.skillSource<small>re-derives it from paths</small></div></div>
+        <div class="row"><div class="box leak">headless: a skill that failed to parse is silent</div></div>
+      </div>
+      <div class="pane"><div class="eyebrow">After</div>
+        <div class="row"><div class="box deep">skills.Skill.Source<small>set by the loader</small></div><div class="box deep">skills.ReportLines(Skipped)</div></div>
+        <div class="row"><div class="box thin">tui /skills</div><div class="box thin">headless stderr</div></div>
+      </div>
+    </div>
+    <dl>
+      <dt>Problem</dt><dd>The loader knows which root a skill came from; the TUI recomputes it, and no other Driver can see a failed or shadowed skill at all.</dd>
+      <dt>Solution</dt><dd>Loader stamps the source; the report builders move to <code>internal/skills</code>; headless prints <code>Skipped()</code>.</dd>
+      <dt>Wins</dt><dd><ul class="wins"><li>one source of "where from"</li><li>headless gains skill diagnostics</li></ul></dd>
+    </dl>
+  </article>
+
+  <article id="a6">
+    <div class="title-row"><span class="id">A6</span><h3>A Driver-neutral transcript codec in <code>internal/session</code></h3></div>
+    <div class="badges"><span class="badge explore">Worth exploring</span><span class="badge tag">in-process</span><span class="badge tag">closes a user-visible gap</span><span class="badge tag">two-step</span></div>
+    <div class="files"><b>internal/tui/transcriptcodec.go</b> (738 lines, Model-free) · <b>internal/tui/wireargs.go</b> · <b>internal/tui/sessionsave.go:21-60</b> savePayload · <b>internal/run/run.go:275-289</b> writes Record with no Transcript, no Meta.Usage · <b>internal/tui/sessions.go:519,733</b> resumeLoaded, sessionSpendCell</div>
+    <div class="band">
+      <div class="pane"><div class="eyebrow">Before</div>
+        <div class="mass">
+          <div class="if" style="height:88px">wire ⇄ entry</div><div class="impl" style="height:92px">codec</div>
+          <div style="width:12px"></div>
+          <div class="if" style="height:20px">—</div><div class="impl" style="height:30px">run</div>
+        </div>
+        <p class="note">Codec's interface is the render types (<code>entry</code>, <code>toolView</code>, <code>skillSpan</code>). A headless or daemon record replays blank in <code>/sessions</code> and shows no spend.</p>
+      </div>
+      <div class="pane"><div class="eyebrow">After</div>
+        <div class="mass">
+          <div class="if" style="height:26px">neutral entry</div><div class="impl" style="height:92px">session codec</div>
+          <div style="width:12px"></div>
+          <div class="if" style="height:26px">same</div><div class="impl" style="height:60px">run fills both</div>
+        </div>
+        <p class="note">Step 1: a neutral entry model the tui converts to. Step 2: the codec moves and <code>run</code> writes Transcript + Usage.</p>
+      </div>
+    </div>
+    <dl>
+      <dt>Problem</dt><dd>The only concept with no neutral half at all; the store calls the blob "opaque" and only one Driver can produce it.</dd>
+      <dt>Solution</dt><dd>Hoist a neutral entry model first, then the codec; the TUI keeps the region mirroring ADR 0022 §5 ratified.</dd>
+      <dt>Wins</dt><dd><ul class="wins"><li>daemon runs resumable in /sessions</li><li>spend cell for unattended runs</li><li>~900 lines leave tui</li></ul></dd>
+    </dl>
+    <div class="adr">ADR 0022 §5: the blob stays independently versioned and no other layer version-checks it — the move keeps that; only the owner package changes. The 2026-08-24 denial of dropping <code>EditRegions</code> is untouched.</div>
+  </article>
+
+  <article id="a7">
+    <div class="title-row"><span class="id">A7</span><h3>Offline debounce and rebind intent as a heartbeat layer</h3></div>
+    <div class="badges"><span class="badge spec">Speculative</span><span class="badge tag">new layer, not a move</span></div>
+    <div class="files"><b>internal/tui/heartbeat.go:28-129,461</b> heartbeatState, rebindIntent, offlineFailureThreshold · <b>internal/heartbeat/heartbeat.go:14-16</b> "one Beat, never an error" · <b>cmd/apogee/daemon.go</b> never beats</div>
+    <dl>
+      <dt>Problem</dt><dd>The daemon has no offline notion; the state machine that would give it one is welded to <code>tea.Cmd</code> folds.</dd>
+      <dt>Solution</dt><dd>A monitor module in <code>internal/heartbeat</code> owning threshold and intent; the tui keeps the Cmd scheduling. Medium value, high effort, one adapter today.</dd>
+    </dl>
+    <div class="adr">One adapter = hypothetical seam. Recommend deferring until the daemon actually wants reachability.</div>
+  </article>
+
+  <article id="a8">
+    <div class="title-row"><span class="id">A8</span><h3>The effort ladder is a provider fact</h3></div>
+    <div class="badges"><span class="badge spec">Speculative</span></div>
+    <div class="files"><b>internal/tui/effort.go:59-81</b> canonicalEfforts, openAIEfforts, effortLevels · <b>internal/provider</b> EffortSupport · <b>cmd/apogee/headless.go:125</b> discoverDialect</div>
+    <dl>
+      <dt>Problem</dt><dd>The fallback ladder is spelled in tui while <code>provider.EffortSupport</code> carries dialect and efforts; no forcing bug today.</dd>
+      <dt>Solution</dt><dd>Move the ladder to <code>internal/provider</code>. Tidiness only — no second consumer yet.</dd>
+    </dl>
+  </article>
+</section>
+
+<section id="group-b">
+  <div class="group-head">
+    <div class="eyebrow">Group B</div>
+    <h2>Semantics welded to <code>package main</code></h2>
+    <p>Not in <code>internal/tui</code>, but the same shape one level up: <code>cmd/apogee/wire_*.go</code> carries decision ladders that <code>internal/daemon</code> and <code>internal/run</code> cannot import, so they take the answer as an injected bool or recompute it.</p>
+  </div>
+
+  <article id="b1">
+    <div class="title-row"><span class="id">B1</span><h3>The unattended-Auto verdict becomes a library call</h3></div>
+    <div class="badges"><span class="badge strong">Strong</span><span class="badge tag">in-process</span></div>
+    <div class="files"><b>cmd/apogee/schedule.go:254-280</b> autoUnattendedBlocked ("the verdict lives here once") · consumers <b>headless.go:306</b>, <b>daemon.go:559</b>, <b>wire_options.go:258</b> · <b>internal/daemon/file.go:88</b> Host.AutoEligible injected bool</div>
+    <div class="band">
+      <div class="pane"><div class="eyebrow">Before</div>
+        <div class="row"><div class="box deep">main.autoUnattendedBlocked</div></div>
+        <div class="seamline" data-label="package main cannot be imported"></div>
+        <div class="row"><div class="box leak">internal/daemon takes a bool</div><div class="box thin">headless</div><div class="box thin">tui schedule</div></div>
+      </div>
+      <div class="pane"><div class="eyebrow">After</div>
+        <div class="row"><div class="box deep">probe.AutoUnattendedBlocked(...)<small>beside the notice ladder</small></div></div>
+        <div class="row"><div class="box thin">daemon calls it</div><div class="box thin">headless</div><div class="box thin">tui</div></div>
+      </div>
+    </div>
+    <dl>
+      <dt>Problem</dt><dd>The one place the verdict lives is the one package nothing can import.</dd>
+      <dt>Solution</dt><dd>Move it beside <code>internal/probe</code>'s confinement ladder; <code>daemon.Host</code> drops the injected bool.</dd>
+      <dt>Wins</dt><dd><ul class="wins"><li>interface shrinks: one field gone</li><li>three callers, one function</li></ul></dd>
+    </dl>
+  </article>
+
+  <article id="b2">
+    <div class="title-row"><span class="id">B2</span><h3>Mechanism-id validation and the retired-id notice move to <code>internal/config</code></h3></div>
+    <div class="badges"><span class="badge strong">Strong</span><span class="badge tag">in-process</span><span class="badge tag">closes a gap</span></div>
+    <div class="files"><b>cmd/apogee/wire_tools.go:272-348</b> mechanismIDs, retiredMechanismRelease, retiredMechanismNotices, knownMechanismList · callers <b>headless.go:341</b>, <b>daemonfire.go:93</b>, <b>wire_live.go:169</b>, <b>wire_settings.go:1652</b></div>
+    <dl>
+      <dt>Problem</dt><dd>Pure map-in/list-out validation in <code>main</code>; on the headless and daemon paths a retired id is dropped silently ("only the pre-TUI callers print", <code>wire_tools.go:271</code>).</dd>
+      <dt>Solution</dt><dd>One module returning ids + notices; all four callers print what it returns.</dd>
+      <dt>Wins</dt><dd><ul class="wins"><li>retired-id notice on every Driver</li><li>four callers, one table</li></ul></dd>
+    </dl>
+  </article>
+
+  <article id="b3">
+    <div class="title-row"><span class="id">B3</span><h3>Per-model rebind resolution as a library</h3></div>
+    <div class="badges"><span class="badge explore">Worth exploring</span></div>
+    <div class="files"><b>cmd/apogee/wire_settings.go:1796-1856</b> rebindSpecFor · <b>validatedsets.go:93-238</b> · <b>modelprofile.go:35-102</b> · <b>wire_firing.go:136-142</b> spells the overlay by hand</div>
+    <dl>
+      <dt>Problem</dt><dd>Already the de-facto shared resolver; it sits in <code>main</code> only because it needs <code>stateRoots</code>.</dd>
+      <dt>Solution</dt><dd>Move with the validated-set and model-profile ladders into a library taking roots as an argument.</dd>
+    </dl>
+  </article>
+
+  <article id="b4">
+    <div class="title-row"><span class="id">B4</span><h3>State-root layout, scratch GC and the plaintext-key notice</h3></div>
+    <div class="badges"><span class="badge explore">Worth exploring</span></div>
+    <div class="files"><b>cmd/apogee/wire.go:359-455</b> resolveRoots, gcScratchDirs, ensureScratchDir · <b>keymigrate.go:103-155</b> plaintextKeyEntries/Notice (daemon never calls it) · <b>wire_server.go:34-48</b> startupEntry</div>
+    <dl>
+      <dt>Problem</dt><dd>Facts about the install, not about a Driver; all four Drivers call them from <code>main</code>.</dd>
+      <dt>Solution</dt><dd>Library homes beside <code>internal/config</code>; the daemon gains the key disclosure it is the strongest case for.</dd>
+    </dl>
+  </article>
+
+  <article id="b5">
+    <div class="title-row"><span class="id">B5</span><h3>The settings apply corpus</h3></div>
+    <div class="badges"><span class="badge spec">Speculative</span></div>
+    <div class="files"><b>cmd/apogee/wire_settings.go:757-1753</b> settingsApplier, settingsTable (30 keys), group applies, reach predicates, reload machinery</div>
+    <dl>
+      <dt>Problem</dt><dd>~1 000 lines of key semantics only the TUI can reach.</dd>
+      <dt>Solution</dt><dd>None yet — no second adapter exists; a daemon <code>config.yaml</code> reload is ADR 0055's deliberate non-goal.</dd>
+    </dl>
+    <div class="adr">One adapter = hypothetical seam. Leave until a second Driver needs live apply; the 2026-08-24 table refactor already gave it locality.</div>
+  </article>
+</section>
+
+<section id="group-c">
+  <div class="group-head">
+    <div class="eyebrow">Group C · observations, not hoists</div>
+    <h2>Driver-parity gaps the surveys tripped over</h2>
+    <p>Behaviour a headless or daemon run plausibly needs and has no way to reach. Not architecture — these are feature gaps for a separate plan or the issue register.</p>
+  </div>
+  <div class="tablewrap"><table>
+    <tr><th>Gap</th><th>TUI</th><th>Missing in</th></tr>
+    <tr><td>Context-files report (unreadable / over-budget)</td><td class="mono">model.go:742</td><td>headless, daemon — <code>run.Result</code> carries none</td></tr>
+    <tr><td>Token spend + sub-agent fill</td><td class="mono">usage.go:184</td><td>daemon — <code>daemonfire.go:236</code> drops <code>res.Usage</code></td></tr>
+    <tr><td>Validated-set / profile / roster notices</td><td class="mono">wire_live.go:180</td><td>daemon — <code>daemonfire.go:200</code> discards the slice</td></tr>
+    <tr><td>Unconfined-Auto warning</td><td class="mono">wire_boot.go:278</td><td>daemon</td></tr>
+    <tr><td>Windows label pre-warm</td><td class="mono">wire_boot.go:315</td><td>headless, daemon</td></tr>
+    <tr><td>Offline refusal before send</td><td class="mono">heartbeat.go:620</td><td>headless, daemon (fails after the fact)</td></tr>
+    <tr><td>"Model not advertised" hint</td><td class="mono">upstream.go:559</td><td>headless, daemon</td></tr>
+    <tr><td>Undo surface for an auto run</td><td class="mono">undo.go:45</td><td>headless, daemon</td></tr>
+    <tr><td><code>--server</code> / <code>--bypass</code> flags</td><td class="mono">root.go:105,117</td><td>headless</td></tr>
+  </table></div>
+</section>
+
+<section id="verified">
+  <div class="group-head">
+    <div class="eyebrow">Verified correct — do not touch</div>
+    <h2>Splits that already match the pattern</h2>
+  </div>
+  <div class="tablewrap"><table>
+    <tr><th>Module</th><th>Library owns</th><th>TUI owns</th></tr>
+    <tr><td><code>recall.go</code></td><td><code>internal/recall</code>: file, dedupe, compaction</td><td>only when</td></tr>
+    <tr><td><code>suggestband.go</code></td><td><code>internal/skills.Suggest</code> (ADR 0061)</td><td>the band</td></tr>
+    <tr><td><code>sanitize.go</code></td><td><code>internal/sanitize</code>: the escape set</td><td>three delegates</td></tr>
+    <tr><td><code>usage.go</code> numbers</td><td><code>internal/format.Tokens</code></td><td>the pane</td></tr>
+    <tr><td><code>settingsapply.go</code></td><td><code>internal/config</code> registry validates</td><td>routing to Model fields</td></tr>
+    <tr><td><code>diagnostics.go</code>, <code>settingswatcher.go</code>, <code>prebound.go</code>, <code>sessionrule.go</code></td><td>—</td><td>terminal-specific by construction</td></tr>
+    <tr><td>Sub-packages under <code>internal/tui</code></td><td colspan="2">denied — ADR 0043 "stays flat"; the hoists above go to siblings</td></tr>
+  </table></div>
+</section>
+
+<section id="top-recommendation">
+  <div class="top">
+    <div class="eyebrow">Top recommendation</div>
+    <h2><a href="#a1">A1 · one session-title rule</a>, then A2 and A3 in the same plan</h2>
+    <p>A1 is the smallest move with the highest evidence — four spellings, two of them apologising in comments, and the target package already holds the constants. It proves the sibling-package pattern at −70 lines; A2 repeats it; A3 is the first hoist that gives another Driver a capability it lacks. A6 is the biggest payoff but needs the neutral entry model first — a plan of its own.</p>
+  </div>
+</section>
+</main>
