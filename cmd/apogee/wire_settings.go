@@ -1687,12 +1687,14 @@ func (a settingsApplier) reloadServers() (bool, error) {
 	if err := config.ValidateServers(file.Servers); err != nil {
 		return false, err
 	}
-	// The Sub-agent server the list now flags (ADR 0045), re-pointed BEFORE anything is installed:
-	// it is the one part of this apply that can still refuse — a flagged entry whose `mechanisms:`
+	// The Sub-agent server the file now names (ADR 0045), re-pointed BEFORE anything is installed:
+	// it is the one part of this apply that can still refuse — a named entry whose `mechanisms:`
 	// map this build does not know — and a refusal has to leave the session on the list it was
-	// already running, not half-way onto a new one.
+	// already running, not half-way onto a new one. Both halves come from the SAME re-read: the
+	// root `sub-agents-server:` key names the entry and the list carries it, so a save that moves
+	// both resolves as one act.
 	if a.delegation != nil {
-		if err := a.delegation.relist(file.Servers); err != nil {
+		if err := a.delegation.relist(file.SubAgentsServer, file.Servers); err != nil {
 			return false, err
 		}
 	}

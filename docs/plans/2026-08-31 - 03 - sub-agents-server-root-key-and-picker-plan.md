@@ -120,7 +120,15 @@ TestKeyAccessorsBindDescribedKeys and TestEveryConfigKeyReachesTheOptions green.
 
 **Depends on:** nothing.
 
-## 2. Routing consults the key; the flag retires
+## 2. Routing consults the key; the flag retires — ✅ DONE (2026-08-31)
+
+NOTES (2026-08-31): the item's "retire the flag's documentation from the seeded template" had nothing to remove — `internal/config/defaults/config.yaml` never documented the `sub-agents:` entry flag (verified against 6d3d7522, item 1's only template edit), so the file is untouched and not in FILES.
+NOTES (2026-08-31): the missing-name notice's "(configured: …)" tail reads `none` when the `servers:` list is empty — a case the item's sentence did not spell.
+NOTES (2026-08-31): the item's citation of `routingNotice` is wrong (no such function); the notice is rendered by `missingNameNotice` and emitted through `land`/`stateChange` on the first observe, as the item's own Regression guard prescribes.
+NOTES (2026-08-31): `config.posturedKeys` was deleted with the refusal that was its only caller (dead-code rule); `TestSubAgentServer` was deleted with the function it tested, superseded by item 1's `TestSubAgentsServerTarget`.
+NOTES (2026-08-31): consequential edit — cmd/apogee/doc.go: made necessary by retiring the `sub-agents:` entry flag (the package map's delegation.go line named it).
+NOTES (2026-08-31): consequential edit — internal/agent/delegationtarget.go: made necessary by retiring the `sub-agents:` entry flag (the latch's doc comment named it twice).
+NOTES (2026-08-31): consequential edit — internal/mechanisms/retired.go: made necessary by retiring the `sub-agents:` entry flag (two comment lines called the per-server posture the `sub-agents:` posture).
 
 **What:** `newDelegationWiring` (`cmd/apogee/delegation.go:139`) resolves its entry by
 `cfg.SubAgentsServer` via `SubAgentsServerTarget` instead of `config.SubAgentServer`; empty key ⇒

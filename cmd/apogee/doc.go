@@ -78,7 +78,7 @@
 // the shipped table, plus the two one-line notices that resolution produces: a built-in
 // match announcing itself (ADR 0044) and a switch's non-empty roster deltas (ADR 0057);
 // delegation.go the Sub-agent
-// server — the second heartbeat on the `sub-agents:`-flagged entry, the Delegation
+// server — the second heartbeat on the entry `sub-agents-server:` names, the Delegation
 // target each of its beats resolves for the engine to route spawns against, the one
 // notice each change of routing state is worth, and the re-point a live `servers:` edit
 // drives (ADR 0045);

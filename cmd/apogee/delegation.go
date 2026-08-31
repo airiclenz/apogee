@@ -2,12 +2,12 @@ package main
 
 // The Sub-agent server seam of the composition root (ADR 0045).
 //
-// One `servers:` entry may be flagged `sub-agents: true`, and every delegation this session makes
-// then runs on THAT server — a smart model orchestrating while a cheaper one, possibly on another
-// box, does the grunt work. What that server is serving, in which window and across how many slots,
-// is not something a config file can know, so it is DISCOVERED: a second heartbeat Monitor observes
-// the flagged entry on the session monitor's own cadence, and each beat is resolved into the one
-// value the engine latches — the Delegation target.
+// The root `sub-agents-server:` key names one `servers:` entry, and every delegation this session
+// makes then runs on THAT server — a smart model orchestrating while a cheaper one, possibly on
+// another box, does the grunt work. What that server is serving, in which window and across how many
+// slots, is not something a config file can know, so it is DISCOVERED: a second heartbeat Monitor
+// observes the named entry on the session monitor's own cadence, and each beat is resolved into the
+// one value the engine latches — the Delegation target.
 //
 // The split is ADR 0031's: the resolution happens HERE, at the layer that knows the file, the pins,
 // the profile tiers and the Mechanism catalogue, and the engine is handed a finished spec it applies
@@ -16,16 +16,21 @@ package main
 // run on the session's own Upstream exactly as they did before any of this existed.
 //
 // Two things make that degrade VISIBLE and keep it current. The routing STATE — are delegations
-// going to the flagged server or to this session's own — is tracked beside the beat, and each time
-// it changes the transcript says so once (ADR 0045 §4: per state change, never per spawn). And the
-// flagged entry is re-read whenever `servers:` is edited mid-session (ADR 0037/0041), so adding the
-// flag starts observing, removing it stops and unlatches, and re-pointing it moves the whole thing
-// to the other server — none of which waits for a relaunch.
+// going to the named server or to this session's own — is tracked beside the beat, and each time it
+// changes the transcript says so once (ADR 0045 §4: per state change, never per spawn). And the
+// named entry is re-read whenever `servers:` is edited mid-session (ADR 0037/0041), so naming a
+// server starts observing, clearing the key stops and unlatches, and re-pointing it moves the whole
+// thing to the other server — none of which waits for a relaunch.
+//
+// A key naming an entry the list does not carry is not a refusal: nothing is observed, delegations
+// stay on the session's own upstream, and ONE notice says which name went missing and which names
+// the file does carry (missingNameNotice).
 
 import (
 	"context"
 	"fmt"
 	"reflect"
+	"strings"
 	"sync"
 
 	"github.com/airiclenz/apogee"
@@ -44,10 +49,10 @@ type delegationSetter interface {
 	SetDelegationTarget(*apogee.DelegationTarget)
 }
 
-// subAgentServer is one flagged `servers:` entry as the wiring holds it: the entry itself — the dial
-// facts a target is built from, the pins that outrank discovery, and the posture keys that ride the
-// flag — beside the two things a beat on it needs, both derived from that entry and therefore
-// replaced WITH it whenever the file re-points the flag somewhere else.
+// subAgentServer is the named `servers:` entry as the wiring holds it: the entry itself — the dial
+// facts a target is built from, the pins that outrank discovery, and the posture keys that apply
+// while it is the target — beside the two things a beat on it needs, both derived from that entry
+// and therefore replaced WITH it whenever the key is re-pointed somewhere else.
 type subAgentServer struct {
 	entry config.ServerEntry
 	// beat observes the Sub-agent server with the key that server's entry resolved to. It is a func
@@ -68,16 +73,16 @@ type subAgentServer struct {
 	catalogue func() *apogee.MechanismRegistry
 }
 
-// delegationWiring is this session's Sub-agent server: which entry is flagged right now, the beat
-// that observes it, the routing state the transcript is told about, and the two things the root
-// resolves for every beat — where the model-profile match reads its user tier, and where a resolved
-// target is latched.
+// delegationWiring is this session's Sub-agent server: which entry `sub-agents-server:` names right
+// now, the beat that observes it, the routing state the transcript is told about, and the two things
+// the root resolves for every beat — where the model-profile match reads its user tier, and where a
+// resolved target is latched.
 //
-// With NO entry flagged it holds no server: no beat, no second Monitor, nothing ever latched, which
-// is behaviour identical to before routing existed (ADR 0045 §4's floor). The wiring itself is
-// always present even then, because the flag can arrive later: `servers:` is editable mid-session
-// (ADR 0037), so "there is no Sub-agent server" is a state this holder moves out of rather than a
-// reason not to exist.
+// With NO entry named — the key absent, which is the DEFAULT — it holds no server: no beat, no
+// second Monitor, nothing ever latched, which is behaviour identical to before routing existed
+// (ADR 0045 §4's floor). The wiring itself is always present even then, because the name can arrive
+// later: `servers:` is editable mid-session (ADR 0037), so "there is no Sub-agent server" is a state
+// this holder moves out of rather than a reason not to exist.
 //
 // It is a pointer with a mutex for that same reason. The beat goroutine reads the server on every
 // interval while the Update goroutine replaces it from a config reload, so the fields are genuinely
@@ -85,8 +90,13 @@ type subAgentServer struct {
 // (agent.SetDelegationTarget).
 type delegationWiring struct {
 	mu sync.Mutex
-	// server is the flagged entry and its beat, or nil when the list flags none.
+	// server is the named entry and its beat, or nil when the key names none of the list's entries.
 	server *subAgentServer
+	// missingNotice is the sentence a `sub-agents-server:` naming no entry of the current list has
+	// earned — "" when the key is empty or names one. It is RENDERED where the list is known (the
+	// constructor, relist) and SAID on the first observe, never at composition time: the notify seam
+	// is the Bridge's, and a send before Run has bound the program is dropped on the floor.
+	missingNotice string
 	// generation counts REPLACEMENTS of the server above. A beat resolves off a snapshot, and an
 	// edit that lands while it is in flight must not be overwritten by what the previous server's
 	// observation resolved to — so a landing whose generation has moved on is dropped.
@@ -95,7 +105,7 @@ type delegationWiring struct {
 	// Sub-agent server, false while they fall back to this session's own Upstream.
 	routed bool
 	// stated records that the state above has been reported at least once, which is what makes the
-	// FIRST resolved state news whichever way it goes — a flagged server that was never reachable
+	// FIRST resolved state news whichever way it goes — a named server that was never reachable
 	// degrades as visibly as one that stopped being.
 	stated bool
 	// dialectAdvised records that this server has already been advised about its missing
@@ -111,7 +121,7 @@ type delegationWiring struct {
 	// notify puts one routing notice in front of the human, and is nil for a Driver that shows
 	// nothing (a bench, a headless run) — the degrade every seam this root hands across takes.
 	notify func(string)
-	// keys resolves the flagged entry's key source. It is asked on every beat rather than once at
+	// keys resolves the named entry's key source. It is asked on every beat rather than once at
 	// wiring time, and that is the whole reason a resolver caches: the command runs on the first
 	// beat and the ten thousand after it read the answer — while a beat whose resolution FAILED
 	// asks again ten seconds later, which is what lets a keychain the human unlocks mid-session
@@ -121,21 +131,32 @@ type delegationWiring struct {
 	engine delegationSetter
 }
 
-// newDelegationWiring finds the Sub-agent server in entries and builds everything a beat on it will
-// need. With no entry flagged it answers a wiring holding no server — no monitor is constructed and
-// no target is ever pushed, so a session whose config says nothing about delegation routing behaves
-// exactly as it did before (ADR 0045 §4's floor) until an edit says otherwise.
+// newDelegationWiring finds the Sub-agent server in entries — the one name names, `sub-agents-server:`
+// as it stands at composition time — and builds everything a beat on it will need. With an EMPTY name
+// it answers a wiring holding no server: no monitor is constructed and no target is ever pushed, so a
+// session whose config says nothing about delegation routing behaves exactly as it did before
+// (ADR 0045 §4's floor, and the default) until an edit says otherwise.
 //
-// base is the session's own Config, and it is read for exactly what building the flagged entry's
+// The name is a parameter rather than something read back off base, which is the session's own
+// apogee.Config and carries no such field: the key lives in the config file's own schema, so the
+// composition root that resolved it passes it in — and item by item, that is the SINGLE place routing
+// consults the key, which is what a future per-call parameter slots into without touching this
+// recursion path.
+//
+// A name matching no entry is not a refusal: the wiring holds no server, delegations fall back to the
+// session's upstream, and the notice missingNameNotice renders is said on the first observe.
+//
+// base is the session's own Config, and it is read for exactly what building the named entry's
 // Mechanism catalogue needs: the state roots. The entry's own endpoint and `model:` pin replace the
 // session's on the copy that build sees, so the identity a Library observation is filed under is the
 // SUB-AGENT server's model rather than the orchestrator's.
 //
-// It fails the run rather than degrading when the flagged entry's `mechanisms:` map is defective —
+// It fails the run rather than degrading when the named entry's `mechanisms:` map is defective —
 // an unknown key, or a set the stacking gates refuse. That is the same posture the session's own
 // block takes at this same boundary (mechanisms.ResolveEnabled, wireSession): a typo in a file outlives the day
 // it was written, and a posture that silently armed nothing would be invisible for months.
 func newDelegationWiring(
+	name string,
 	entries []config.ServerEntry,
 	base apogee.Config,
 	engine delegationSetter,
@@ -144,13 +165,14 @@ func newDelegationWiring(
 	keys *config.KeyResolver,
 ) (*delegationWiring, error) {
 	wiring := &delegationWiring{
-		base:         base,
-		userProfiles: userProfiles,
-		notify:       notify,
-		keys:         keys,
-		engine:       engine,
+		missingNotice: missingNameNotice(name, entries),
+		base:          base,
+		userProfiles:  userProfiles,
+		notify:        notify,
+		keys:          keys,
+		engine:        engine,
 	}
-	entry, ok := config.SubAgentServer(entries)
+	entry, ok := config.SubAgentsServerTarget(entries, name)
 	if !ok {
 		return wiring, nil
 	}
@@ -162,7 +184,34 @@ func newDelegationWiring(
 	return wiring, nil
 }
 
-// newSubAgentServer builds the beat and the Mechanism catalogue for one flagged entry. It is the
+// missingNameNotice answers the notice a `sub-agents-server:` name earns when the `servers:` list
+// carries no entry by that name, and "" when the name is empty — the ordinary opt-out — or names one
+// of them. It names what the file says AND what it could have said, because the whole defect is a
+// spelling: a human who reads only "no such server" has to go and open the file to find the name
+// they meant.
+//
+// It is a plain sentence rather than an error for the reason SubAgentsServerTarget answers false: a
+// stale name never refuses to load a config, it degrades to the session's own upstream and says so.
+func missingNameNotice(name string, entries []config.ServerEntry) string {
+	if name == "" {
+		return ""
+	}
+	if _, ok := config.SubAgentsServerTarget(entries, name); ok {
+		return ""
+	}
+	configured := "none"
+	if len(entries) > 0 {
+		names := make([]string, 0, len(entries))
+		for _, e := range entries {
+			names = append(names, e.Name)
+		}
+		configured = strings.Join(names, ", ")
+	}
+	return fmt.Sprintf("sub-agents: no servers entry named %q — delegations run on the session "+
+		"server (configured: %s)", name, configured)
+}
+
+// newSubAgentServer builds the beat and the Mechanism catalogue for one named entry. It is the
 // step a startup and a config reload share, so a Sub-agent server that arrives hours into a session
 // is assembled exactly as one named at launch — including the refusal of a defective `mechanisms:`
 // map, which a reload returns to the settings row rather than to the terminal.
@@ -178,7 +227,7 @@ func newSubAgentServer(entry config.ServerEntry, base apogee.Config) (*subAgentS
 	}, nil
 }
 
-// subAgentBeat builds the beat for one flagged entry: the Monitor that observes it, constructed on
+// subAgentBeat builds the beat for one named entry: the Monitor that observes it, constructed on
 // the first beat that has a key in hand and reused by every beat after it.
 //
 // The discovery hint it is built with is the entry's own `model:` pin, empty when it pins none — the
@@ -223,9 +272,17 @@ func subAgentBeat(entry config.ServerEntry) func(context.Context, string) heartb
 // (see land), which is what keeps the edit's own push the last word.
 func (d *delegationWiring) observe(ctx context.Context) func() {
 	d.mu.Lock()
-	server, generation := d.server, d.generation
+	server, generation, missing := d.server, d.generation, d.missingNotice
 	d.mu.Unlock()
 	if server == nil {
+		if missing != "" {
+			// The key names an entry the list does not carry. There is nothing to observe, but there
+			// IS something to say, and this is the first moment it can be said: the notify seam is
+			// bound by the time a beat runs and was not when this wiring was built. It goes through
+			// land like every other routing sentence, so it is stated once and re-stated only when
+			// the file moves it (relist).
+			d.land(generation, "", nil, nil)
+		}
 		return func() {}
 	}
 	done := make(chan struct{})
@@ -321,6 +378,11 @@ func (d *delegationWiring) stateChange(name string, target *apogee.DelegationTar
 	switch {
 	case routed:
 		return "sub-agents: routing to " + name + " (" + target.Model + ")"
+	case d.missingNotice != "":
+		// A key naming no entry, which is a fact about the FILE rather than about a server: it is
+		// held rather than recomputed here, because the list it was rendered against is the one the
+		// human would have to fix, and relist re-renders it whenever that list moves.
+		return d.missingNotice
 	case keyErr != nil:
 		// The resolver's own sentence, which already names the entry and quotes what the command
 		// said. It is carried through whole rather than summarized: it is the only place the human
@@ -356,51 +418,62 @@ func (d *delegationWiring) dialectAdvice(name string, target *apogee.DelegationT
 		"delegates there speak this session's; set effort-dialect: on its entry"
 }
 
-// relist re-points the wiring at the `servers:` list as it now stands — the Sub-agent server's half
-// of ADR 0037's live apply, reached from the same reloadServers every other `servers:` re-read goes
-// through (wire_settings.go), whether the edit came from the `/settings` pane or from the watcher
-// noticing the file changed under it (ADR 0041).
+// relist re-resolves the wiring against the `servers:` list as it now stands and the
+// `sub-agents-server:` name that list is read with — the Sub-agent server's half of ADR 0037's live
+// apply, reached from the same reloadServers every other `servers:` re-read goes through
+// (wire_settings.go), whether the edit came from the `/settings` pane or from the watcher noticing
+// the file changed under it (ADR 0041).
 //
-// Four things a list can do to routing, and each is answered where the human would expect:
+// name is passed in rather than remembered because the file is the source of both halves: the key
+// and the list are re-read together, so an edit that renames the target entry and re-points the key
+// in one save resolves as one act.
 //
-//   - ADDS the flag ⇒ the entry is assembled and observed from the next beat on. Nothing is latched
-//     here, because nothing has been observed yet; the first beat says whether it is usable.
-//   - REMOVES it ⇒ the beat stops and the latch is cleared NOW rather than at the next beat. Routing
-//     ends when the file says it ends, and a target left latched for another interval would keep
-//     sending delegations to a server that is no longer the Sub-agent server.
-//   - RE-POINTS it at another entry ⇒ both of the above, in that order, for that same reason.
-//   - EDITS the flagged entry in place ⇒ the new pins and posture are installed and the NEXT beat
+// Four things a file can do to routing, and each is answered where the human would expect:
+//
+//   - NAMES an entry ⇒ it is assembled and observed from the next beat on. Nothing is latched here,
+//     because nothing has been observed yet; the first beat says whether it is usable.
+//   - CLEARS the name, or the named entry LEAVES the list ⇒ the beat stops and the latch is cleared
+//     NOW rather than at the next beat. Routing ends when the file says it ends, and a target left
+//     latched for another interval would keep sending delegations to a server that is no longer the
+//     Sub-agent server.
+//   - RE-POINTS the name at another entry ⇒ both of the above, in that order, for that same reason.
+//   - EDITS the named entry in place ⇒ the new pins and posture are installed and the NEXT beat
 //     resolves against them (never later than that, which is the freshness the plan requires).
 //     Routing is not interrupted and the state is not re-stated: it is the same server, still
 //     taking the same delegations, and nothing about that changed for the human to be told.
 //
-// It is validate-then-commit, like every other live re-read: a flagged entry whose `mechanisms:` map
+// A name that now matches nothing re-renders the missing-name notice and forgets the routing state,
+// so the next beat says it once — and a list edited elsewhere while the name is still missing
+// re-renders the SAME sentence, which is not news and is not said again.
+//
+// It is validate-then-commit, like every other live re-read: a named entry whose `mechanisms:` map
 // this build refuses returns the error with NOTHING installed, so the session keeps routing exactly
 // as it did while the human fixes the file. A list whose Sub-agent server is untouched — the common
 // case, since most `servers:` edits are about some other entry — is a comparison and no work at all.
-func (d *delegationWiring) relist(entries []config.ServerEntry) error {
-	entry, flagged := config.SubAgentServer(entries)
+func (d *delegationWiring) relist(name string, entries []config.ServerEntry) error {
+	entry, found := config.SubAgentsServerTarget(entries, name)
+	missing := missingNameNotice(name, entries)
 
 	d.mu.Lock()
-	current := d.server
+	current, said := d.server, d.missingNotice
 	d.mu.Unlock()
 
-	if !flagged && current == nil {
-		return nil // a list that named no Sub-agent server still names none
+	if !found && current == nil && missing == said {
+		return nil // a file that named no reachable entry before still names none, and says the same
 	}
-	if flagged && current != nil && reflect.DeepEqual(current.entry, entry) {
+	if found && current != nil && reflect.DeepEqual(current.entry, entry) {
 		return nil // the edit was somewhere else in the list
 	}
 
 	var next *subAgentServer
-	if flagged {
+	if found {
 		built, err := newSubAgentServer(entry, d.base)
 		if err != nil {
 			return err
 		}
 		next = built
 	}
-	// Whether what is LATCHED still describes the flagged server. An entry edited in place still
+	// Whether what is LATCHED still describes the named server. An entry edited in place still
 	// does — same name, same endpoint, so the delegations in flight are going to the right box and
 	// only the pins and posture the next beat reads have moved.
 	stale := current != nil && (next == nil || next.entry.Name != current.entry.Name ||
@@ -409,11 +482,13 @@ func (d *delegationWiring) relist(entries []config.ServerEntry) error {
 	d.mu.Lock()
 	d.server = next
 	d.generation++
-	if stale {
-		// The state is forgotten rather than reported: a server the file stopped flagging is not a
+	d.missingNotice = missing
+	if stale || missing != said {
+		// The state is forgotten rather than reported: a server the file stopped naming is not a
 		// server that became unavailable, and the human reading the notice is the one who just
 		// edited it. Forgetting is what lets the NEXT server announce itself on its first beat —
 		// and advise about its OWN missing dialect, which is why that latch is forgotten with it.
+		// A name that went missing is forgotten for the same reason, so its notice is said once.
 		d.routed, d.stated, d.dialectAdvised = false, false, false
 	}
 	d.mu.Unlock()

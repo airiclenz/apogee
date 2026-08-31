@@ -1336,21 +1336,16 @@ type UnconfinedHost struct {
 // agents means a smaller context window each, since `--parallel N` splits one window into N slots
 // (ADR 0024 — Apogee's numbers are per-slot-honest either way).
 //
-// SubAgents is ADR 0045 decision 1's routing flag: the ONE entry spelling `sub-agents: true` is the
-// Sub-agent server, and every delegation at every depth runs against it rather than against the
-// parent's upstream. Absent is today's behaviour — a child shares the parent's server — and two
-// flagged entries are refused by ValidateServers on the duplicate-name reasoning: a delegation
-// routes to ONE server, so a second flag is a defect in the file rather than a preference between
-// two entries.
-//
-// Bypass and Mechanisms are that entry's POSTURE (ADR 0045 decision 2), in the top-level keys'
-// shapes verbatim: "delegations to this server run with this". A present key replaces the value the
-// child would otherwise have inherited WHOLE — a present `mechanisms:` map is the child's entire
-// catalogue, with no per-ID merge, which would need an `inherit` spelling to be readable — and an
-// absent one inherits the parent's LIVE value at spawn, exactly today's rule. Bypass is a pointer
-// for the reason the top-level key is one: an explicit `bypass: false` is a posture, not an absent
-// key. Both are refused on an UNflagged entry, where they would describe delegations that never
-// arrive; posture rides the ROUTING, so where the parent itself happens to be running is irrelevant
+// Bypass and Mechanisms are this entry's DELEGATION POSTURE (ADR 0045 decision 2), in the top-level
+// keys' shapes verbatim: "delegations to this server run with this". A present key replaces the
+// value the child would otherwise have inherited WHOLE — a present `mechanisms:` map is the child's
+// entire catalogue, with no per-ID merge, which would need an `inherit` spelling to be readable —
+// and an absent one inherits the parent's LIVE value at spawn, exactly today's rule. Bypass is a
+// pointer for the reason the top-level key is one: an explicit `bypass: false` is a posture, not an
+// absent key. Both are legal on ANY entry, like `context-window:` below: which entry takes the
+// delegations is the root `sub-agents-server:` key's answer and it moves in a running session, so
+// the posture is written where the server is described and applies whenever that entry is the
+// target. Posture rides the ROUTING, so where the parent itself happens to be running is irrelevant
 // to what its children run as.
 //
 // ContextWindow PINS this server's per-slot context window in tokens — the top-level
@@ -1442,7 +1437,6 @@ type ServerEntry struct {
 	LlamaLauncher   string          `yaml:"llama-launcher,omitempty"`
 	LaunchProfile   string          `yaml:"launch-profile,omitempty"`
 	ParallelAgents  int             `yaml:"parallel-agents,omitempty"`
-	SubAgents       bool            `yaml:"sub-agents,omitempty"`
 	Bypass          *bool           `yaml:"bypass,omitempty"`
 	Mechanisms      map[string]bool `yaml:"mechanisms,omitempty"`
 	ContextWindow   TokenCount      `yaml:"context-window,omitempty"`
@@ -1538,16 +1532,12 @@ func canonicaliseServers(fc *fileConfig) {
 // the entry, the key and what may stand there, the way the thinking axes' own enum refusal does
 // (validateThinkingAxes). Absent is `auto` spelled by omission and is not a defect.
 //
-// The entry's optional `sub-agents:` flag and the posture keys that ride it carry two defects
-// between them (ADR 0045 decisions 1 and 2). A SECOND flagged entry is refused with BOTH entries
-// named, because the fix is a choice between two entries the file already spells: delegations route
-// to one server, so a second flag is the duplicate-name defect wearing another key. And
-// `bypass:`/`mechanisms:` on an entry the flag is absent from is refused because they would describe
-// delegations that never route there — the posture rides the flag, and a key with nothing to govern
-// reads as configured while doing nothing.
+// What it deliberately does NOT check is the delegation posture: `bypass:`/`mechanisms:` are legal
+// on every entry, because which one takes the delegations is the root `sub-agents-server:` key's
+// answer and that key moves in a running session (`/sub-agents-server`). A posture written on an
+// entry nothing currently delegates to is a description of that server, not a defect in the file.
 func ValidateServers(servers []ServerEntry) error {
 	seen := make(map[string]struct{}, len(servers))
-	flagged := -1
 	for i, s := range servers {
 		if strings.TrimSpace(s.Name) == "" {
 			return fmt.Errorf("apogee: servers: entry %d (%q): has no name — the name is what selects "+
@@ -1646,18 +1636,6 @@ func ValidateServers(servers []ServerEntry) error {
 				"openai to force one of the three, or off to send no thinking effort at all; or "+
 				"remove the key, which is auto", i+1, s.Name, dialect)
 		}
-		if s.SubAgents {
-			if flagged >= 0 {
-				return fmt.Errorf("apogee: servers: entry %d (%q): sub-agents: true, but entry %d (%q) is "+
-					"already flagged — delegations route to ONE server, so flag the entry that should take "+
-					"them and remove the flag from the other", i+1, s.Name, flagged+1, servers[flagged].Name)
-			}
-			flagged = i
-		} else if keys := posturedKeys(s); keys != "" {
-			return fmt.Errorf("apogee: servers: entry %d (%q): %s without sub-agents: true — those keys say "+
-				"what DELEGATIONS to this server run as, so they ride the sub-agents: flag; add "+
-				"sub-agents: true to route delegations here, or remove the keys", i+1, s.Name, keys)
-		}
 	}
 	return nil
 }
@@ -1675,22 +1653,6 @@ func isKnownEffortDialect(name string) bool {
 	default:
 		return false
 	}
-}
-
-// posturedKeys names the sub-agent posture keys this entry carries, in file order, for the refusal
-// that reports them — and is empty when it carries neither, which is what makes it the condition of
-// that refusal too. A present-but-empty `mechanisms: {}` counts as written: an empty catalogue is a
-// posture (run the child with no Mechanisms at all), and only an absent key inherits.
-func posturedKeys(s ServerEntry) string {
-	switch {
-	case s.Bypass != nil && s.Mechanisms != nil:
-		return "bypass: and mechanisms:"
-	case s.Bypass != nil:
-		return "bypass:"
-	case s.Mechanisms != nil:
-		return "mechanisms:"
-	}
-	return ""
 }
 
 // keySourceKeys names the key-source keys this entry sets, in file order: `api-key:`,
@@ -1723,21 +1685,8 @@ func joinAnd(names []string) string {
 	return strings.Join(names[:len(names)-1], ", ") + " and " + names[len(names)-1]
 }
 
-// SubAgentServer answers the one question ADR 0045 decision 1 asks of a resolved `servers:` list:
-// which entry, if any, takes the delegations. ValidateServers has already refused a second flagged
-// entry by the time anything calls this, so the first match is THE match — and false means the
-// flag is absent from the whole list, which is not a defect but today's behaviour: children share
-// the parent's upstream, no second monitor runs, and nothing latches.
-func SubAgentServer(entries []ServerEntry) (ServerEntry, bool) {
-	for _, e := range entries {
-		if e.SubAgents {
-			return e, true
-		}
-	}
-	return ServerEntry{}, false
-}
-
-// SubAgentsServerTarget answers the same question one key out: which `servers:` entry the root
+// SubAgentsServerTarget answers the one question ADR 0045 decision 1 asks of a resolved `servers:`
+// list, one key out: which entry, if any, takes the delegations — the entry the root
 // `sub-agents-server:` key names. name is that key's value, and an empty one is the ordinary case —
 // no target is configured, so false means delegations run on the session's own upstream exactly as
 // they did before the key existed.

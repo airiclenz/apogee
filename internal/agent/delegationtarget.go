@@ -1,7 +1,7 @@
 package agent
 
 // The Delegation target latch (ADR 0045). A session may send every delegation to a SECOND
-// server — the Sub-agent server, the one `servers:` entry flagged `sub-agents: true` — so a
+// server — the Sub-agent server, the `servers:` entry the root `sub-agents-server:` key names — so a
 // smart model orchestrates the session while a cheaper one, possibly on another box, does the
 // delegated grunt work. What that server IS (endpoint, key, model, window, fan-out width, model
 // profile, the wire shape it reads a thinking-effort intent in) and what its delegations run WITH
@@ -9,7 +9,7 @@ package agent
 // engine here as one resolved value.
 //
 // The engine stays wire-silent (ADR 0031): it never learns that a `servers:` list exists, which
-// entry carries the flag, or how a posture map spells itself. It is handed a resolved spec and
+// entry the key names, or how a posture map spells itself. It is handed a resolved spec and
 // builds a client from it exactly as SwitchUpstream does — the same posture Rebind takes for the
 // per-model bindings and SwapTools for the tool set, which is also what keeps routing benchable
 // all the way up: a bench Driver drives this setter directly, with no config file in sight.

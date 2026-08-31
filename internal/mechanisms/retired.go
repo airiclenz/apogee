@@ -9,7 +9,7 @@ import (
 )
 
 // retiredIDs is the roll of catalogue IDs apogee once carried and no longer does. It exists so a
-// user's saved configuration survives a deletion: a `mechanisms:` key, a per-server `sub-agents:`
+// user's saved configuration survives a deletion: a `mechanisms:` key, a per-server delegation
 // posture or a Validated-set record naming a retired ID was valid at the release before the
 // removal, and the removal must not turn it into a refusal (AGENTS.md: a value apogee itself
 // accepted yesterday and rejects today is a regression, never a deferral).
@@ -58,7 +58,7 @@ const RetiredRelease = "v0.18.7"
 // its value: the key was valid at the release before the removal, so refusing it would break a
 // configuration the user never edited. The roll is read here rather than injected beside known
 // because every path that resolves the block must tolerate it identically — a Driver's startup, a
-// live `/settings` apply, each delegate's `sub-agents:` posture, a headless run, a daemon Firing —
+// live `/settings` apply, each delegate's per-server posture, a headless run, a daemon Firing —
 // and a path that forgot to pass it would refuse where its siblings tolerate. The silence in ids is
 // the same requirement: several of those paths run with the alt screen up, where a stderr line is
 // painted over the TUI.
