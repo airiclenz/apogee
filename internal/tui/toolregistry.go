@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/title"
 )
 
 // ----------------------------------------------------------------------------
@@ -1137,14 +1138,12 @@ func subAgentName(args map[string]any) string {
 // it, run here and again on the way out (sanitize, idempotent) — because a name is model output and
 // the strip can empty one out: a "name" of nothing but control characters is non-empty as it
 // arrives, so deciding on the raw string would pick it over the task and then paint a blank slot.
-// The trim goes with the strip for the same reason, a control character being all that separated
-// two spaces. headlessSubAgentTarget (cmd/apogee) decides the same question the same way, so the
-// Driver with no header to paint and the one that paints it name a child alike.
+// That is why the STRIPPED spellings are what go in. The trim goes with the strip for the same
+// reason, a control character being all that separated two spaces. headlessSubAgentTarget
+// (cmd/apogee) and this both call title.DelegateLabel, so the Driver with no header to paint and the
+// one that paints it name a child alike.
 func subAgentTarget(args map[string]any) string {
-	if n := strings.TrimSpace(stripEscapes(subAgentName(args))); n != "" {
-		return n
-	}
-	return firstLineArg("task")(args)
+	return title.DelegateLabel(stripEscapes(subAgentName(args)), firstLineArg("task")(args))
 }
 
 // joinedArgs returns a target extractor that joins the named string arguments with a space,

@@ -640,3 +640,34 @@ func Derive(text string, max int, now time.Time) string {
 	}
 	return Clip(trimmed, max)
 }
+
+// FirstLine reduces s to the one form every single-line display can paint: the text before the
+// first newline, trimmed of surrounding whitespace. A string that holds nothing else comes back
+// empty, which is the ABSENT signal a label's callers read — nothing here decides what to do about
+// that, only what the line is.
+//
+// It takes s as it stands. Where a render seam demands untrusted model text be escape-stripped
+// first, the CALLER strips it and hands the result in (sanitize.StripEscapesToLine at the headless
+// seam, the view's own strip in the TUI): the strip belongs to the seam that paints, the first-line
+// rule belongs here, and keeping them apart is what lets one rule serve seams with different strips.
+func FirstLine(s string) string {
+	line, _, _ := strings.Cut(s, "\n")
+	return strings.TrimSpace(line)
+}
+
+// DelegateLabel says WHICH delegation a display is reporting on: the short name the sub_agent call
+// gave it, falling back to the delegated task's first line when it gave none — which is every
+// delegation written before the name argument existed, and every one a Mechanism synthesises
+// (guided decomposition names nothing). Both spellings go through FirstLine, so a name is folded to
+// one line exactly as a task is.
+//
+// The fallback is decided on the form the caller handed in, not on the raw argument: a "name" of
+// nothing but control characters is non-empty as it arrives off the wire, so a caller that strips at
+// its render seam and passes the STRIPPED name gets the task showing rather than a blank slot. That
+// is why both parameters are already-stripped strings — the decision and the paint then agree.
+func DelegateLabel(name, task string) string {
+	if line := FirstLine(name); line != "" {
+		return line
+	}
+	return FirstLine(task)
+}

@@ -910,3 +910,64 @@ func TestDeriveSpellsTheZoneItIsHanded(t *testing.T) {
 		t.Errorf("Derive in UTC+9 = %q, want %q", got, want)
 	}
 }
+
+// TestFirstLine pins the one form every single-line display paints a delegation in: the text ahead
+// of the first newline, trimmed. The \r\n case is the one worth spelling out — the cut is made on
+// the \n, so the \r is left behind for the trim rather than surviving into a rendered row.
+func TestFirstLine(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"a single line is its own first line", "repo-scout", "repo-scout"},
+		{"padding is trimmed", "   repo-scout\t ", "repo-scout"},
+		{"multi-line keeps the first", "repo-scout\nand then some prose", "repo-scout"},
+		{"a padded multi-line first is trimmed", "  repo-scout  \n more prose\n", "repo-scout"},
+		{"\\r\\n leaves no \\r behind", "repo-scout\r\nprose", "repo-scout"},
+		{"a leading blank line is absent", "\nrepo-scout", ""},
+		{"whitespace only is absent", "   \n  ", ""},
+		{"empty is empty", "", ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := FirstLine(tc.in); got != tc.want {
+				t.Errorf("FirstLine(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestDelegateLabel pins which of the two spellings a delegation display leads with. The
+// whitespace-only name is the case the callers depend on: a "name" that their own render-seam strip
+// emptied out must leave the task showing rather than blanking the slot.
+func TestDelegateLabel(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		label string
+		name  string
+		task  string
+		want  string
+	}{
+		{"a name wins over the task", "repo-scout", "audit the config loader", "repo-scout"},
+		{"an empty name falls back to the task", "", "audit the config loader", "audit the config loader"},
+		{"a whitespace-only name falls back to the task", "  \t ", "audit the config loader", "audit the config loader"},
+		{"both spellings are folded to one line", "repo-scout\nprose", "audit\nmore", "repo-scout"},
+		{"the fallback is folded too", "", "audit the loader\nmore", "audit the loader"},
+		{"neither spelling names anything", "  ", "\n", ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.label, func(t *testing.T) {
+			t.Parallel()
+
+			if got := DelegateLabel(tc.name, tc.task); got != tc.want {
+				t.Errorf("DelegateLabel(%q, %q) = %q, want %q", tc.name, tc.task, got, tc.want)
+			}
+		})
+	}
+}

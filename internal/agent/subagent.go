@@ -4,10 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/provider"
+	"github.com/airiclenz/apogee/internal/title"
 	"github.com/airiclenz/apogee/internal/tools"
 )
 
@@ -99,8 +99,7 @@ func isSubAgentCall(call domain.ToolCall) bool {
 // the recursion point rather than at each display, so a model that pads or newlines its name
 // cannot break a status line or a prompt body downstream.
 func delegationName(raw string) string {
-	first, _, _ := strings.Cut(raw, "\n")
-	return strings.TrimSpace(first)
+	return title.FirstLine(raw)
 }
 
 // runSubAgent is the recursion point: it parses the delegated task, constructs a nested Agent

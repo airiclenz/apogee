@@ -1489,6 +1489,34 @@ func TestSubAgentPromptLineComposition(t *testing.T) {
 	})
 }
 
+// TestSubAgentTargetFallsBackWhenTheNameStripsToNothing pins the run header's half of the same
+// question the approval pane answers above, and pins it on the one input where the two ways of
+// asking it come apart: a "name" of nothing but control characters is non-empty as it arrives off
+// the wire, and empty once this view's escape strip has had it. The header must then show the TASK
+// rather than a blank slot — the rule title.DelegateLabel holds for every Driver, with the headless
+// twin pinning it at cmd/apogee/headless_test.go.
+func TestSubAgentTargetFallsBackWhenTheNameStripsToNothing(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name string
+		args map[string]any
+		want string
+	}{
+		{"a real name leads the header", map[string]any{"name": "repo-scout", "task": "audit the loader"}, "repo-scout"},
+		{"no name shows the task", map[string]any{"task": "audit the loader"}, "audit the loader"},
+		{"a control-only name shows the task", map[string]any{"name": "\x1b\x07\x00", "task": "audit the loader"}, "audit the loader"},
+		{"a padded task is trimmed", map[string]any{"task": "  audit the loader  "}, "audit the loader"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := subAgentTarget(tc.args); got != tc.want {
+				t.Errorf("subAgentTarget(%v) = %q, want %q", tc.args, got, tc.want)
+			}
+		})
+	}
+}
+
 // The top-level agent's own request carries no task, and its pane is unchanged to the byte — the
 // serial floor for a session that never delegates.
 func TestModelApprovalTopLevelDrawsNoSubAgentLine(t *testing.T) {

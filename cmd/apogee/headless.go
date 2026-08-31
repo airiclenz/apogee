@@ -25,6 +25,7 @@ import (
 	"github.com/airiclenz/apogee/internal/run"
 	"github.com/airiclenz/apogee/internal/sanitize"
 	"github.com/airiclenz/apogee/internal/session"
+	"github.com/airiclenz/apogee/internal/title"
 )
 
 // ----------------------------------------------------------------------------
@@ -604,21 +605,22 @@ func headlessTokens(n int) string {
 
 // headlessSubAgentTarget says WHICH delegation a sub-agent line is reporting on: the short name the
 // call gave it, falling back to the delegated task's first line when it gave none — which is every
-// delegation written before the name argument existed, and every one a Mechanism synthesises. That
-// is the collapsed run header's rule (subAgentTarget, internal/tui) kept on the Driver that has no
-// header to paint, so the two twins name a child the same way rather than in two dialects.
+// delegation written before the name argument existed, and every one a Mechanism synthesises. The
+// choice itself is title.DelegateLabel, the one rule every Driver's delegation display asks; this
+// Driver has no run header to paint, and still names a child exactly as the one that does.
 //
-// Both spellings get the same treatment, because run.SubAgentUsage hands both over as raw model
-// output on the same terms as the answer: stripped of control characters HERE, at this render seam,
-// in the line-safe form — so neither can rewind or re-column the reading it sits beside — and
-// clipped, so a model that "named" a delegation with a screenful of instructions cannot take the
-// terminal over with one line. The fallback is decided on the RENDERED form, so a name that is
+// What is this seam's own is the treatment both spellings get before the rule sees them, because
+// run.SubAgentUsage hands both over as raw model output on the same terms as the answer: stripped of
+// control characters HERE, at this render seam, in the line-safe form — so neither can rewind or
+// re-column the reading it sits beside — and clipped afterwards, so a model that "named" a
+// delegation with a screenful of instructions cannot take the terminal over with one line. Passing
+// the STRIPPED spellings in is what decides the fallback on the rendered form: a name that is
 // nothing but control characters leaves the task showing rather than blanking the slot.
 func headlessSubAgentTarget(r run.SubAgentUsage) string {
-	if name := clipSubAgentTask(sanitize.StripEscapesToLine(r.Name)); name != "" {
-		return name
-	}
-	return clipSubAgentTask(sanitize.StripEscapesToLine(r.Task))
+	return clipSubAgentTask(title.DelegateLabel(
+		sanitize.StripEscapesToLine(r.Name),
+		sanitize.StripEscapesToLine(r.Task),
+	))
 }
 
 // headlessTaskMax is how wide a delegated task prints on a sub-agent line, in runes: enough for a
