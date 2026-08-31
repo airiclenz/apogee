@@ -49,7 +49,23 @@ NOTES (2026-08-31): ADR 0064:33 and :84 cite ADR 0065 (the placement rule's task
 **Acceptance:** files exist; `grep -c "0064" docs/adr/0023-*.md` ≥ 1; `grep -rn "three.*placeholder" CONTEXT.md docs/adr/0023-*.md` returns nothing.
 **Commit:** `docs(adr): the system prompt ships an embedded default (ADR 0064)`
 
-## 2. ADR 0065 — shipped skills and the load_skill door
+## 2. ADR 0065 — shipped skills and the load_skill door — ✅ DONE (2026-08-31)
+
+NOTES (2026-08-31): un-batch retry — `docs/adr/0065-*.md` and the ADR 0061 amendment were carried
+over intact from the earlier batched attempt and verified here (every cross-ADR link resolves to an
+existing file; the acceptance grep counts 4 hits of "0065" in ADR 0061). Only the CONTEXT.md *Skill*
+entry hunk, reverted to HEAD during item 1's recovery, was re-authored in this dispatch; CONTEXT.md
+now carries item 2's changes alone (`git diff CONTEXT.md` touches only the *Skill* entry).
+NOTES (2026-08-31): the *Skill* entry's closing `_Avoid_` sentence and its discovery sentence were
+re-wrapped where the inserted clauses pushed lines past the file's ~100-column wrap; no wording
+outside the item's scope changed, and the file's count of >100-column lines is back at its HEAD
+value (82).
+NOTES (2026-08-31): ADR 0065's Consequences names `internal/skills/doc.go`'s "no builtins shipped —
+ADR 0002" attribution as superseded but does not edit it — that rewording is item 7's own listed
+work (per this plan's item-7 regression-check line), so it is left untouched here rather than folded
+in as a consequential edit.
+NOTES (2026-08-31): the untracked `docs/plans/2026-08-31 - 01 - transcript-codec-hoist-plan.md`
+belongs to a concurrent session and was left exactly as found; it is not in this item's FILES.
 
 **What:** Author `docs/adr/0065-shipped-skills-and-the-load-skill-door.md`: the four shipped skills as an embedded lowest-priority source (user library wins, ADR 0032); bundled files served through a virtual read mount; `use-shipped-skills`; the `/skills` verb; `load_skill` default-on with the adaptive single-call shape — this **explicitly supersedes ADR 0061 Decision 4's B2 deferral only**; B1 auto-attach stays deferred pending its own supersede + bench arm. Record the tool-tier framing: `load_skill` rides `tools.enabled/disabled`, is not a Mechanism, and the catalog still never enters the standing prompt. Add the amendment note to ADR 0061. Update CONTEXT.md's "Skill" entry (~line 1093): shipped source, `/skills` verb, `load_skill`.
 **Files:** `docs/adr/0065-shipped-skills-and-the-load-skill-door.md` (new), `docs/adr/0061-skill-suggestions-are-driver-side-over-an-engine-matcher.md`, `CONTEXT.md`

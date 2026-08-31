@@ -104,3 +104,32 @@ painting over an engine-level matcher that never reaches the model — is unchan
 - **A suggestion is a new term in the domain language.** CONTEXT.md's *Skill* entry defines it and
   points here; it is a hint, never an invocation, and the distinction is what keeps "the model sees
   a skill only through a `/id`" true after this ships.
+
+## Amendment (2026-08-31) — Decision 4's B2 deferral is SUPERSEDED by ADR 0065
+
+[ADR 0065](0065-shipped-skills-and-the-load-skill-door.md) builds **B2**, the model-callable
+`load_skill` tool, and is the explicit supersession Decision 4 demanded. The supersession is
+**narrow**: it covers B2 only. **B1** — auto-attaching a skill body to a message that carries no
+`/id` — stays deferred on exactly the terms written above, and building it still needs its own ADR
+superseding this record, plus the Mechanism catalogue entry, per-model gate and bench arm that a
+change to the model's unbidden input requires.
+
+Two of Decision 4's grounds for B2 are answered rather than waved through:
+
+- **"It needs a Mechanism's apparatus"** — it does not. `load_skill` adds a tool, and a tool is an
+  open extension point ([ADR 0002](0002-tools-are-an-open-extension-point-mechanisms-are-curated.md))
+  governed by `tools.enabled`/`tools.disabled`, not a catalogued Mechanism. The deferral inherited
+  B1's argument: B1 changes the model's input on apogee's initiative, B2 changes it only when the
+  model asks. There is no standing directive for `--bypass` to remove and no arm for a bench to
+  measure.
+- **"It contradicts CONTEXT.md's *Skill* entry (`Avoid`: 'tool')"** — the Avoid line survives
+  intact. A skill is still prompt text that steers and adds no capability; `load_skill` is a tool
+  that *fetches* that text, as `read_file` fetches a file without making a file a tool. See
+  ADR 0065 §7.
+
+**Decision 2 is narrowed, not withdrawn.** Nothing about the catalog reaches the model *unbidden*:
+no id, description or body is added to the standing system prompt because the catalog exists, and a
+**suggestion** — this ADR's own subject — still never reaches the model at all. What changes is that
+a body can now enter a turn by the model's own call as well as by the user's `/token`. Decisions 1
+and 3, and the 2026-08-27 matcher amendment, are untouched; ADR 0065 §6 reuses that same ranking and
+evidence gate for `load_skill`'s confident-hit rung.
