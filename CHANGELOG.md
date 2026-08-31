@@ -168,6 +168,96 @@ point is a **minor** bump, not a breaking change.
   `internal/security/doc.go` and as the `Amended 2026-08-30` block of
   `docs/design/confinement-execution-contract.md`.
 
+- The heuristic session-title rule — first line, cut at the last word boundary past 60% of the
+  cap, a dated `Session <date>` label when the text is empty or opens a code fence — is now one
+  rule in `internal/title` (`Clip` and `Derive`, with the cap as a parameter and the exported
+  `title.MaxRunes` = 50) instead of three copies that each apologised for the duplication. The
+  TUI's session save, a Firing's record title (`internal/run`) and a Schedule's display name
+  (`internal/schedule`, at its own narrower 40) all read it from there; `Derive` spells the
+  instant it is handed without relocating it, so each caller's time zone stays its own stated
+  choice. Titles are unchanged apart from one: the TUI now drops trailing spaces from a first
+  line, as the other two copies always did.
+
+- The rule that names a delegation on a display — the sub-agent's short name folded to one
+  trimmed first line, falling back to the delegated task's first line when the call named none —
+  is now one rule in `internal/title` (`FirstLine` and `DelegateLabel`) instead of four copies,
+  two of which apologised for the duplication. The recursion point (`internal/agent`), a Firing's
+  sub-agent readings (`internal/run`), the headless sub-agent line and the TUI's run header all
+  read it from there; escape-stripping and clipping stay at each render seam, so the fallback is
+  still decided on the form the Driver will actually paint and a name of nothing but control
+  characters still leaves the task showing. One label changes: the TUI's task fallback is now
+  trimmed, so a task sent as `" audit"` heads its row as `audit`.
+
+- New `internal/refs` package owning the `@file` / `/skill` inline reference grammar — the span
+  locators, the token scanner and the name reducers — so every Driver reads one grammar instead of
+  the TUI's private copy. Stdlib-only; no behaviour change (the TUI keeps its copy until it is
+  switched over).
+
+- The prompt box now parses its `@file` and `/skill` tokens through `internal/refs` instead of
+  keeping its own copy of the grammar: `internal/tui/command.go` loses `refSpan`, `fileRefSpans`,
+  `skillRefSpans`, `spanNames`, `extractFileRefs`, `extractSkillRefs`, `scanRefToken` and
+  `isInputSpace`, and keeps only `skillTokenSpans` — the one render-typed adapter from a
+  `refs.Span` to the byte range a sent block paints. The parser, the inline accents, the
+  autocomplete overlay and the skill-suggestion band now read one scanner that sits below every
+  Driver, so they cannot drift apart. Behaviour-preserving: what resolves, what lights up and what
+  travels with a message are unchanged.
+
+- A Firing's prompt now resolves its **`@file` references**. `internal/run` parses the prompt on
+  the shared `internal/refs` grammar and submits the paths as `domain.UserInput.FileRefs`, so
+  `apogee headless` and every scheduled run read the named workspace files into the message
+  exactly as an interactive session does — bare (`@go.mod`) or quoted (`@"a b.md"`), resolved
+  within the workspace fence and clamped by the same structural floor. A missing or escaping ref
+  is skipped *without* notice: the loop reports one as an `ErrorEvent` and a Firing has no event
+  sink to carry it. Inline `/skill` tokens stay unset for a Firing.
+
+- The verdict that refuses **unattended Auto** on a host that cannot fence the filesystem now
+  lives in `internal/probe` as `AutoUnattendedBlocked(subject, backend, caps, confineToWorkspace)`,
+  beside `DegradedNotice` whose gate it mirrors, instead of inside `package main`. `apogee
+  headless` and a Schedule's Firing (through the `scheduleAutoBlocked` delegate that fixes the noun
+  "a firing") read the same sentence out of it, and any future Driver can reach it. The wording,
+  the gate and both surfaces' behaviour are unchanged.
+
+- `internal/daemon` no longer takes the unattended-Auto VERDICT as an injected bool. A `Host` now
+  carries the confinement FACTS — `HostConfinement{Backend, Caps, Unconfined}` — and validation asks
+  `probe.AutoUnattendedBlocked` for the verdict itself, so a `mode: auto` entry in
+  `schedules.yaml` is refused on exactly the ladder `apogee headless` and the `/schedule` picker
+  refuse it on (ADR 0033 decision 3), through the same function rather than through three callers
+  that each computed a bool. The refusal's wording, which names the entry, is unchanged.
+  `confine-to-workspace: false` is stored INVERTED as `Unconfined`, so a zero `Host{}` — a Driver
+  that never filled the facts in — reads as confined-and-unproven and still refuses `mode: auto`,
+  instead of reading as the user's own "I am the sandbox"; that waiver is now separately reachable,
+  and a Firing on a host whose user took it is accepted, as a session's Auto launch already was.
+
+- `internal/mechanisms` gained `ResolveEnabled(enabled, known)` — the one resolver a Driver runs a
+  `mechanisms:` configuration block through. It validates every key against the known catalogue
+  (enabled and disabled alike, so a typo'd disabled key still fails loudly), returns the enabled ids
+  in sorted canonical order for `EnableMechanisms`, silently drops the ids this build retired, and
+  hands back the user-facing notices naming the retired ids the block still turns ON — returned
+  *with* the ids, so a caller cannot take the ids and forget the lines. `RetiredRelease` moved in
+  beside it as an exported const. The rule previously lived only in `cmd/apogee`, out of reach of
+  the headless and daemon Drivers.
+
+- `cmd/apogee`'s private `mechanisms:` producer is gone: every path that turns the block into the
+  engine's ID list — the TUI boot path, the live `/settings` apply, a delegate's `sub-agents:`
+  posture, a headless run and a daemon Firing — now calls `mechanisms.ResolveEnabled` directly, so
+  the validation, the retired-id tolerance and the retired-id notice wording are one library rule
+  instead of a composition-root copy no other Driver can reach. Behaviour is unchanged; the
+  validated-set retired-member notice reads the same release string from `mechanisms.RetiredRelease`.
+
+- A `mechanisms:` key naming a Mechanism a release retired is now reported on every Driver, not
+  just the TUI's startup. `apogee headless` prints one line per retired id set ON to **stderr**,
+  beside its other resolution notices, before the run starts; `apogee daemon` logs the same line
+  once at startup, through the log that is its whole user interface, before the schedules file is
+  loaded. The id is still tolerated rather than refused — it was valid at the release before the
+  removal — but an unattended run no longer arms nothing without saying so. The startup boundary
+  that prints it is pinned by a test on all three Drivers (TUI boot, headless, daemon), closing the
+  `ISSUES.md` entry that recorded the missing coverage.
+
+- The nine Driver-parity gaps the 2026-08-30 architecture review found — behaviour only the
+  interactive TUI can reach — are recorded in `ISSUES.md` under *Parked / deferred work*, each with
+  its TUI site and the Driver (headless, daemon, or both) that lacks it; the review report itself is
+  saved as `docs/reviews/architecture-review-2026-08-30.html`.
+
 ### Fixed
 
 - Fixed: **a finished sub-agent no longer prints its report twice.** The early, badly formatted copy
