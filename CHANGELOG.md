@@ -90,6 +90,126 @@ point is a **minor** bump, not a breaking change.
   report, which is the trade the parent notice buys. Two golden frames, `t17-run-view` (working) and
   `t18-run-view-finished` (at rest), pin the layout.
 
+- Ratified ADR 0064 — the system prompt ships an embedded default: the default template is
+  compiled into the binary (the `go:embed` scheme pattern of ADR 0040) and refreshed by every
+  upgrade, replacing ADR 0023 §8's seeded-once `config.yaml` copy, which was frozen per install
+  and so could not be improved for anyone already running. Resolution becomes a four-rung ladder
+  — matching `system-prompt-models` entry > top-level `system-prompt-text`/`system-prompt-file` >
+  the embedded default when `use-default-prompt` is not `false` > nothing — with ADR 0023 §2's
+  whole-entry replacement unchanged all the way down. Migration is a silent keep: an existing
+  config's explicit `system-prompt-text:` still wins, and new seeds ship the key commented out.
+  The ADR also records the placement rule for any new sentence of guidance (host fact →
+  orientation block, standing steering → the default template, model-gated and measured →
+  Mechanism, task-shaped → Skill) and the config-tier framing: the default prompt is part of the
+  Bypass floor in both arms and is never a Mechanism. Explicitly supersedes ADR 0023 §8's
+  "no compiled-in fallback" rule and its matching rejected alternative, and nothing else.
+
+- Ratified ADR 0065 — shipped skills and the `load_skill` door: four skills (`debugging`,
+  `planning`, `code-review`, `commit-hygiene`) ship embedded in the binary as a fourth,
+  lowest-priority catalog source, never installed to disk and refreshed by every upgrade, so a
+  fresh install stops meeting an empty `/skills` list, an empty `/` menu and a suggestion band
+  with nothing to suggest. The user's global library — and either project dir — still wins any
+  id clash (ADR 0032 unchanged), the whole source switches off with `use-shipped-skills`
+  (mirroring `use-project-skills`), and files bundled beside a shipped `SKILL.md` are served
+  through a read-only virtual `shipped:` mount rather than a host read root. `/skills` gains a
+  per-row source label and a `/skills export <id>` form that copies a shipped skill's folder into
+  the global library, refusing to overwrite one already there. `load_skill` becomes a default-on
+  tool on the ordinary `tools.enabled`/`tools.disabled` lever — never a Mechanism — with an
+  adaptive single-call shape: an exact id returns the body, a confident match returns the body
+  plus the other ids that matched, and anything less returns id-and-summary candidates. The
+  catalog still never enters the standing prompt. Explicitly supersedes ADR 0061 Decision 4's B2
+  deferral only; B1 auto-attach stays deferred pending its own supersede, Mechanism catalogue
+  entry and bench arm.
+
+- apogee now ships its **own default system prompt**, embedded in the binary (ADR 0064). With no
+  `system-prompt-text:` / `system-prompt-file:` / `system-prompt-models:` key set, a session runs on
+  that text instead of no prompt at all — and every upgrade brings the current wording, including to
+  a `~/.apogee/config.yaml` seeded long ago. An existing configured prompt still wins and is never
+  merged with it. The new file-only `use-default-prompt:` key (default `true`, editable in
+  `/settings`) is how you ask for the promptless run: set it `false` with nothing else configured.
+  The seeded template now ships `system-prompt-text:` commented out.
+
+- The `/settings` pane's **system-prompt editor now opens on apogee's built-in prompt** when
+  nothing is configured: ⏎ on `system-prompt-text` starts from the text the session is actually
+  sending rather than an empty buffer, so editing the default is a change to a draft instead of a
+  rewrite from nothing. The seed is display-only until ctrl+s, at which point it becomes explicit
+  config and replaces the built-in default the way any configured prompt does (ADR 0064 §2). It is
+  offered only when the whole global prompt is empty — never beside a `system-prompt-file:`, where
+  committing a seeded text field would write the both-keys-set config the next resolution refuses —
+  and it is the SESSION's answer, so a prompt written through the pane stops the seeding from the
+  keypress that lands it. The registry projection keeps its blank-when-unset contract, so the
+  external-edit diff still reads a config nobody wrote a prompt into as exactly that.
+
+- **Attached skill bodies meet the @file block's structural floor.** A `/skill` body was injected
+  verbatim, so an outsized `SKILL.md` could hand the emergency fold a most-recent message it cannot
+  shed — the one message a skill block always rides in. A body past its share of the History
+  allocation is now elided to the same head/tail-plus-marker shape a capped tool result and an
+  `@file` block get, before its `<skill: …>` header and `files:` line are added, and `{{SKILL_DIR}}`
+  expands before the clamp measures. The split is now shared per MESSAGE: the new `refBound` divides
+  the History allocation across ALL of a message's references — attached skills and `@file` refs
+  together — and one bound is computed once and handed to both resolvers, at the opening-message
+  seam and at `Interject` alike, so a message carrying one of each can no longer commit twice the
+  allocation the fold can render.
+
+- Headless runs, daemon Firings and `/schedule` firings now resolve `/skill` tokens in their
+  prompt: a token naming a skill in the run's catalog attaches that skill's instructions to the
+  message exactly as typing it into a session does, while any other slash word stays plain text
+  (Driver parity, ADR 0031). A run with no skill catalog wired is byte-identical to before.
+
+- apogee now ships skills of its own, compiled into the binary rather than installed on disk (ADR 0065). The first is `debugging` — a reproduce → isolate → fix → verify protocol. Shipped skills are the lowest-priority source, so a skill of the same id in your own library or in a workspace always wins, and the displaced shipped copy is named in the `/skills` report exactly like any other shadowed skill.
+
+- **`use-shipped-skills`** (config-file only, default **true**) switches the skills apogee ships
+  compiled into the binary on and off — the mirror of `use-project-skills` for the embedded source
+  ADR 0065 §4 places below every skill folder on disk. Default true is what turns the shipped set
+  on for the first time: a fresh install now finds `/debugging` in its `/` menu and its `/skills`
+  report with nothing installed. Every source on disk still wins an id clash with it, so writing
+  your own copy of a shipped id replaces it rather than needing the switch. The flip is live —
+  commit the row in `/settings`, or save the file, and the catalog re-scans in the session you are
+  already in — and both gates now read back the Provider's current sources before writing one
+  field, so moving either one leaves the other exactly as it stands. The gate travels to
+  **headless runs, daemon Firings and schedules** off the same resolved options a session reads
+  (ADR 0031 Driver parity), so a `/token` naming a shipped skill attaches its body in an unattended
+  run exactly as it does in the TUI.
+
+- A shipped skill's **bundled files are now readable**. The read-only file tools gained a second
+  mount seam beside `ExtraReadRoots`: `domain.Config.VirtualReadRoots`, a live
+  `map[prefix]fs.FS` of read-only trees that have no host path at all, consulted before the disk
+  roots. Apogee's own skills are served through it under the reserved `shipped:` prefix, so a
+  shipped skill announces its folder as `shipped:<id>` — the address its injected `files:` line
+  names and every `{{SKILL_DIR}}` in its body expands to — and `read_file`, `list_dir`, `grep`,
+  `find_files` and `copy_file`'s **source** all resolve it. The `debugging` skill ships its first
+  bundled file, a stuck checklist its body points at. Writes never reach a mount: the address
+  spelling is refused on the write side with the uniform out-of-workspace error rather than
+  resolving to a colon-named file inside the workspace. `/skills` and the `/` menu label a shipped
+  skill **shipped**. (ADR 0065 §3)
+
+- `/skills` gained an `export` form: `/skills export <id>` copies a shipped skill's whole folder — SKILL.md and every bundled file, bytes verbatim — into `~/.apogee/skills/<id>/`, where the copy shadows the embedded original (ADR 0032, ADR 0065). It never overwrites an existing folder, refuses a non-shipped id by naming what the binary does carry, and is the only form of the verb that needs an idle engine: the bare listing still answers while the model works.
+
+- Two more **shipped skills** ride in the binary beside `debugging`: `planning` (restate the goal,
+  survey the real files, enumerate ordered steps that each name their files and their verification,
+  execute one at a time, adapt out loud) and `code-review` (correctness first down a severity order,
+  a realistic trigger required for every finding, each finding verified against the tree as it
+  actually is, and an explicit do-not-report list that keeps formatting, taste and speculation out).
+  Both are body-only, carry `triggers:` for the suggestion matcher, and are shadowed by a
+  same-id skill in the user library like every shipped skill (ADR 0065).
+
+- Shipped skills: `commit-hygiene` completes the embedded set (one logical change per commit, conventional messages, changelog discipline, the project's own checks before the commit), and the configuration manual now names all four shipped ids.
+
+- **`load_skill` — the model's own door onto the skill catalogue** (ADR 0065 §6). A default-on tool
+  that takes a skill id, or a few words describing the task, and answers in one call: an exact id
+  returns that skill's instructions; a confident match returns the winner's body plus the other ids
+  that matched; anything less returns id-and-summary candidates to call again with; nothing matched
+  says so, naming the query back. It reuses the suggestion matcher's BM25 index and evidence gate
+  (`skills.Catalog.Lookup`) rather than growing a second one, and drops only the band's
+  minimum-word floor, which exists to stop a half-typed draft flickering and has no business
+  gating a deliberate query. A found body is rendered exactly as the loop renders an attached
+  skill — same `<skill: …>` wrapper, same `files:` line, same `{{SKILL_DIR}}` expansion — so a body
+  means the same thing whichever door it came through. The catalogue still never enters the
+  standing prompt: the tool description names no skill. It rides the ordinary roster lever
+  (`tools.disabled:` / `tools.enabled:` and a profile's `tools:` axis) and is not a Mechanism;
+  Bypass does not touch it. Wired in every Driver — session, `headless` and daemon Firings alike —
+  and absent by construction where a host wires no catalogue.
+
 ### Changed
 
 - The status line keeps one activity slot per run instead of one for the session, so concurrent sub-agents no longer overwrite each other's phrase and clock. With two or more delegates working the top level reads `N sub-agents · working` on the oldest child's clock; with one it still reads `<name> · <phrase>`; with none it reads the parent's own word. A delegate's slot closes on its `SubAgentFinished`, on any depth-0 event, and wholesale when the worker unwinds.

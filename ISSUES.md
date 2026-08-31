@@ -35,6 +35,31 @@ closeout commit message), never here; the work the run completed belongs in `CHA
 
 ## Open defects
 
+### Residuals deferred out of the 2026-08-31 base-guidance-and-shipped-skills plan
+
+**Status:** found 2026-08-31 at the close of the base guidance and shipped skills plan
+(`docs/plans/archived/2026-08-31 - 00 - base-guidance-and-shipped-skills-plan.md`), deferred out
+of that run.
+
+- [ ] **ADR 0023 §1 still counts three top-level system-prompt keys.** The sentence at
+  `docs/adr/0023-the-system-prompt-is-a-configured-template-rendered-per-request.md:40` — "The
+  configuration surface is file-only: three top-level keys" — is stale now that
+  `use-default-prompt:` exists (ADR 0064). ADR 0064 states that it supersedes §8 "and nothing
+  else", so the record is defensible as written, but a reader counting the surface from §1 gets
+  the wrong number.
+
+- [ ] **The skill-gate applier test pins only one direction of the mirror.**
+  `TestApplySettingSkillGatesLeaveEachOtherAlone`
+  (`cmd/apogee/wire_settings_test.go:1338`) asserts `UseShippedSkills` survives an
+  `apply("use-project-skills", …)` (`:1362`), but after `apply("use-shipped-skills", "false")`
+  (`:1369`) it never asserts that `UseProjectSkills` survived — the symmetric zeroing the test
+  exists to forbid would pass.
+
+- [ ] **The re-recorded `/skills` golden no longer captures the `· N skills available:` header.**
+  The header scrolled off the frame the golden records
+  (`cmd/apogee/e2e_hostile_test.go:123`, `cmd/apogee/testdata/frames/t12-skills.txt`), so a
+  count drift in that announced line is no longer caught by the golden that used to carry it.
+
 ### Residuals deferred out of the 2026-08-30 sub-agent run-view plan
 
 **Status:** found 2026-08-30 at the close of the sub-agent run-view plan
