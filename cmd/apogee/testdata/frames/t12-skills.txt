@@ -1,13 +1,13 @@
-    /code-review · shipped  Code Review — Review for correctness first — report only findings you  │
-  can trigger and have verified against the tree, and leave style, taste and speculation out.      │
-      triggers: review this, code review, review my changes, review the diff, review this pr, look │
-  over this code, check this code, any …                                                           │
+    /commit-hygiene · shipped  Commit Hygiene — Land one logical change per commit, with a message │
+  that says what changed and why, after the project's own checks have passed.                      │
+      triggers: commit this, commit message, write a commit, git commit, stage these changes,      │
+  split this commit, amend the commit, updat…                                                      │
     /debugging · shipped  Debugging — Chase a bug down in four steps — reproduce, isolate, fix the │
   cause, verify — with the rules that keep each step honest.                                       │
       triggers: debug this, fix this bug, why is this failing, why does this crash, this test      │
   fails, test is failing, stack trace, panic…                                                      │
     /dupe · workspace  Dupe — a duplicate id                                                       │
-    /planning · shipped  Planning — Plan before you build — restate the goal, enumerate the steps  ┃
+    /planning · shipped  Planning — Plan before you build — restate the goal, enumerate the steps  │
   against real files, then execute one step at a time and verify each before starting the next.    ┃
       triggers: make a plan, plan this, plan out, how should i approach, break this down, what are ┃
   the steps, implement this feature, wh…                                                           ┃

@@ -284,6 +284,19 @@ there is no folder to look in, nothing to keep up to date, and they simply appea
 beside the ones you wrote. `use-shipped-skills:` (default `true`) is the switch that leaves them
 out.
 
+There are four, and they cover the working habits a model most often needs reminding of rather
+than anything about apogee itself:
+
+| Skill | What it is for |
+| --- | --- |
+| `debugging` | Chase a bug down in four steps — reproduce, isolate, fix the cause, verify |
+| `planning` | Restate the goal, enumerate the steps, then execute one at a time |
+| `code-review` | Correctness first, with a real trigger and a verified finding for every remark |
+| `commit-hygiene` | One logical change per commit, a message that says why, checks run first |
+
+They are attached the way any skill is — write `/debugging` in your message, or pick it from the
+`/` menu — and [`/skills`](commands.md) lists them beside the ones you installed yourself.
+
 ```yaml
 # ~/.apogee/config.yaml
 use-shipped-skills: false
