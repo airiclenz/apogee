@@ -918,10 +918,6 @@ B3–B5) are recorded by the report and by that plan's out-of-scope list, not he
   workspace context files contributed and what was dropped for budget. `run.Result`
   (`internal/run/run.go:67-111`) carries no such field, so a **headless or daemon** run never
   learns that a context file was skipped or truncated.
-- [ ] **The daemon's Firing line reports no token spend and no sub-agent fill.** `run.Result`
-  carries `Usage` and `SubAgents` (`internal/run/run.go:96-107`), but the `schedule.Outcome` built
-  at `cmd/apogee/daemonfire.go:247` copies neither, so the **daemon**'s Notify line names Turns,
-  denials and the fault and nothing about what the run cost.
 - [ ] **The daemon discards the Firing's resolution notices.** `cmd/apogee/daemonfire.go:217`
   calls `cfg, _, err := firingConfig(` and drops the `[]string` of validated-set / profile /
   roster notices that `cmd/apogee/headless.go:371` keeps and prints. The **daemon** resolves the

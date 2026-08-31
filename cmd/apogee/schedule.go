@@ -166,13 +166,15 @@ func (w scheduleWiring) fire(ctx context.Context, f schedule.Firing) (schedule.O
 	// is runner-agnostic (ADR 0033) — and a Driver renders the Firing from these fields alone: the
 	// answer without decoding a record, the stats without a second seam onto the run.
 	out := schedule.Outcome{
-		RecordID:  res.SessionID,
-		Title:     res.Title,
-		FinalText: res.FinalText,
-		Turns:     res.Turns,
-		Denied:    res.Denied,
-		Faulted:   res.Faulted,
-		Fault:     res.Fault,
+		RecordID:    res.SessionID,
+		Title:       res.Title,
+		FinalText:   res.FinalText,
+		Turns:       res.Turns,
+		Denied:      res.Denied,
+		Faulted:     res.Faulted,
+		Fault:       res.Fault,
+		TotalTokens: firingSpend(res),
+		SubAgents:   len(res.SubAgents),
 	}
 	if err != nil {
 		// A failed Firing still reports what it salvaged: run.Once fills its Result with whatever
@@ -185,6 +187,21 @@ func (w scheduleWiring) fire(ctx context.Context, f schedule.Firing) (schedule.O
 		return out, err
 	}
 	return out, nil
+}
+
+// firingSpend is what one Firing cost in tokens: the run's own cumulative total plus every
+// delegated run's. It is the SAME sum /sessions shows as a session's spend
+// (internal/tui/sessions.go:734, Meta.Usage + Meta.DelegateUsage), taken here because
+// schedule.Outcome is flat — the library is runner-agnostic (ADR 0033) and never imports the
+// runner's shapes to take it for itself. Both builders of an Outcome go through it, this
+// package's and the daemon's (daemonfire.go), so a Firing's cost reads the same whichever
+// Driver fired it.
+func firingSpend(res run.Result) int {
+	total := res.Usage.TotalTokens
+	for _, sub := range res.SubAgents {
+		total += sub.TotalTokens
+	}
+	return total
 }
 
 // idleGate is the host half of schedule.Config.Gate: the TUI publishes its activity through

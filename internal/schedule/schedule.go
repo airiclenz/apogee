@@ -73,7 +73,8 @@ type Firing struct {
 
 // Outcome is the runner's report about one Firing, passed through. The library reads none
 // of these fields — it stays runner-agnostic (ADR 0033) and carries them only so a surface
-// can show a human what the Firing did without a seam of its own onto the runner.
+// can show a human what the Firing did, and what it cost, without a seam of its own onto
+// the runner.
 type Outcome struct {
 	// RecordID is the saved session record's id, empty when the runner persisted nothing.
 	RecordID string
@@ -96,6 +97,16 @@ type Outcome struct {
 	// is RAW upstream text — a surface escape-strips it at its own render seam, this library
 	// does not.
 	Fault string
+	// TotalTokens is what the whole Firing spent: the run's OWN cumulative total plus every
+	// delegated run's, summed by the runner — the same figure /sessions shows as a session's
+	// spend. It is 0 both when the Upstream reported no usage at all and when a caller fills
+	// nothing, which a surface treats alike: it omits the reading rather than printing a zero.
+	TotalTokens int
+	// SubAgents is how many runs the Firing delegated. It is a COUNT and nothing more —
+	// per-delegation detail stays on the runner's own report and does not cross this seam. It
+	// is 0 on a Firing that delegated nothing, omitted by a surface for the same reason
+	// TotalTokens is.
+	SubAgents int
 }
 
 // Status is one live Schedule as a surface displays it.

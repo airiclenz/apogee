@@ -1051,6 +1051,21 @@ func TestDaemonNotifyLinesArePinned(t *testing.T) {
 			want: "2026-08-22T03:04:05Z completed nightly-audit in 4m1s — 12 turns, 0 denied, saved as ses_abc",
 		},
 		{
+			// What the run cost, in the coarse whole-k spelling every other token count this
+			// program prints uses (format.Tokens), after the counts and before the record.
+			name: "completed with spend",
+			event: schedule.Event{
+				Kind: schedule.EventCompleted, ScheduleName: "nightly-audit", Elapsed: 4 * time.Minute,
+				Outcome: schedule.Outcome{
+					RecordID: "ses_abc", Turns: 12, TotalTokens: 41984, SubAgents: 2,
+				},
+			},
+			want: "2026-08-22T03:04:05Z completed nightly-audit in 4m0s — 12 turns, 0 denied, " +
+				"41k tokens, 2 sub-agents, saved as ses_abc",
+		},
+		{
+			// A firing that spent nothing and delegated nothing reads exactly as it did before the
+			// two readings existed — the omit-at-zero rule, pinned where the line is pinned.
 			name: "completed with nothing saved",
 			event: schedule.Event{
 				Kind: schedule.EventCompleted, ScheduleName: "nightly-audit", Elapsed: time.Second,

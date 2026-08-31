@@ -291,6 +291,11 @@ func TestDaemonFireReportsWhatTheRunDid(t *testing.T) {
 		FinalText: "three findings",
 		Turns:     7,
 		Denied:    2,
+		Usage:     run.Usage{TotalTokens: 30000},
+		SubAgents: []run.SubAgentUsage{
+			{Task: "read the tree", TotalTokens: 8000},
+			{Task: "read the tests", TotalTokens: 3984},
+		},
 	}
 
 	entry := entryFor(t, "audit", daemon.Action{})
@@ -311,6 +316,10 @@ func TestDaemonFireReportsWhatTheRunDid(t *testing.T) {
 		FinalText: "three findings",
 		Turns:     7,
 		Denied:    2,
+		// The whole Firing's spend, the run's own plus both delegations' — the sum /sessions
+		// shows — and the delegations as a COUNT, which is all the report line says of them.
+		TotalTokens: 41984,
+		SubAgents:   2,
 	}
 	if out != want {
 		t.Errorf("the firing reports %+v, want the run's own %+v", out, want)

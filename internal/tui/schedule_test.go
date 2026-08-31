@@ -762,6 +762,51 @@ func TestScheduleFiringMarksAnAbandonedFinalTurn(t *testing.T) {
 	}
 }
 
+// What the run COST joins the stats line after the denial cell and before the faulted one, so the
+// faulted cell stays the line's last word however much the line gained (layout.md). Both readings
+// are self-hiding, which is why a faulted Firing that also spent tokens is the case worth pinning:
+// it is the only one that shows the whole order at once.
+func TestScheduleFiringStatsReportWhatTheRunCost(t *testing.T) {
+	m := scheduleModel(t, &fakeScheduler{}, "")
+	m = fireSchedule(t, m, "sch-1", "nightly tidy", "check the log")
+
+	m = step(t, m, scheduleEventMsg{Event: schedule.Event{
+		Kind: schedule.EventCompleted, ScheduleID: "sch-1", ScheduleName: "nightly tidy",
+		Elapsed: 4 * time.Second,
+		Outcome: schedule.Outcome{
+			FinalText: "half a thought", Turns: 2, Denied: 1, TotalTokens: 41984, SubAgents: 2,
+			Faulted: true,
+		},
+	}})
+
+	want := []string{
+		"prompt: check the log",
+		"2 turns · 4s · 1 denied · 41k tokens · 2 sub-agents · faulted",
+		"final turn abandoned",
+	}
+	if got := firingBody(lastEntry(t, m)); !slices.Equal(got, want) {
+		t.Errorf("body = %q, want the spend cells between the denial and the fault: %q", got, want)
+	}
+}
+
+// A Firing that spent nothing and delegated nothing renders the stats line it always did — the
+// omit-at-zero rule, which is what keeps an unspent run's line byte-identical to yesterday's.
+func TestScheduleFiringStatsOmitAnAbsentSpend(t *testing.T) {
+	m := scheduleModel(t, &fakeScheduler{}, "")
+	m = fireSchedule(t, m, "sch-1", "nightly tidy", "check the log")
+
+	m = step(t, m, scheduleEventMsg{Event: schedule.Event{
+		Kind: schedule.EventCompleted, ScheduleID: "sch-1", ScheduleName: "nightly tidy",
+		Elapsed: 4 * time.Second,
+		Outcome: schedule.Outcome{FinalText: "the log is clean", Turns: 2},
+	}})
+
+	want := []string{"prompt: check the log", "2 turns · 4s"}
+	if got := firingBody(lastEntry(t, m)); !slices.Equal(got, want) {
+		t.Errorf("body = %q, want the stats line unchanged by the spend cells: %q", got, want)
+	}
+}
+
 // A fault that surfaced no cause still gets its line: that the Turn was abandoned is the fact, and
 // the cause is the detail — a line naming none is not the same as no fault at all.
 func TestScheduleFiringMarksAFaultWithNoCause(t *testing.T) {

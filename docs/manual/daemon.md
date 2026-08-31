@@ -103,12 +103,16 @@ $ apogee daemon
 2026-08-22T21:00:00+02:00 created   nightly-audit — on the clock
 2026-08-22T21:00:00+02:00 watching /home/you/.apogee/daemon/schedules.yaml — 1 schedule on the clock
 2026-08-23T21:00:00+02:00 fired     nightly-audit — /code-audit internal/tui
-2026-08-23T21:07:41+02:00 completed nightly-audit in 7m41s — 9 turns, 0 denied, saved as 20260823-210000-3b7d
+2026-08-23T21:07:41+02:00 completed nightly-audit in 7m41s — 9 turns, 0 denied, 41k tokens, 2 sub-agents, saved as 20260823-210000-3b7d
 ```
+
+The completed line names what the run cost after the counts: the tokens the whole firing spent —
+its own plus every sub-agent's — and how many runs it delegated. Each is dropped when it is zero,
+so a firing that delegated nothing, or one whose server reports no usage, logs the counts alone.
 
 A firing whose final turn the engine **abandoned** logs `faulted` in place of `completed` and
 names the reason ahead of the counts — `faulted   nightly-audit in 7m41s — final turn abandoned
-(upstream returned an empty reply); 9 turns, 0 denied, saved as 20260823-210000-3b7d`. It is
+(upstream returned an empty reply); 9 turns, 0 denied, 41k tokens, saved as 20260823-210000-3b7d`. It is
 saved like any other firing, and the record holds what the run last said rather than an answer to
 its prompt. The daemon keeps running and still exits `0`; only `apogee headless` turns that into
 an exit code (`3`).

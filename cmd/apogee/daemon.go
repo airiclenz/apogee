@@ -35,6 +35,7 @@ import (
 	"github.com/airiclenz/apogee/internal/daemon"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/filewatch"
+	"github.com/airiclenz/apogee/internal/format"
 	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/probe"
 	"github.com/airiclenz/apogee/internal/schedule"
@@ -663,8 +664,19 @@ func (l *daemonLog) notify(ev schedule.Event) {
 // scanning the log acts on; the counts and the record still follow, since they are as true of a
 // faulted run as of any other and the record is exactly the one worth opening. A fault that
 // surfaced no cause (run.Result.Fault empty) still says a fault happened, naming none.
+//
+// What the run COST joins the work clause after the counts, and only when there is something to
+// say: a Firing whose Upstream reported no usage, and one that delegated nothing, read exactly as
+// they did before the two readings existed. The spelling is [format.Tokens]' coarse whole-k form,
+// the same one every other token count this program prints uses.
 func daemonOutcome(out schedule.Outcome) string {
 	work := fmt.Sprintf("%s, %d denied", counted(out.Turns, "turn", "turns"), out.Denied)
+	if out.TotalTokens > 0 {
+		work += ", " + format.Tokens(out.TotalTokens) + " tokens"
+	}
+	if out.SubAgents > 0 {
+		work += ", " + counted(out.SubAgents, "sub-agent", "sub-agents")
+	}
 	if out.Faulted {
 		fault := "final turn abandoned"
 		if out.Fault != "" {

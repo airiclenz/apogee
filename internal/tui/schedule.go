@@ -9,6 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/format"
 	"github.com/airiclenz/apogee/internal/schedule"
 )
 
@@ -567,14 +568,25 @@ func promptDetails(prompt string) []detailLine {
 // SCHEDULER's measurement (schedule.Event.Elapsed), spelled the way every other duration on this
 // surface is (formatCycle).
 //
+// What the run COST follows on the same self-hiding terms: the tokens it spent and the runs it
+// delegated, each cell dropped when the reading is zero, so a Firing whose Upstream reported no
+// usage still reads exactly as it did before the two cells existed. The token spelling is
+// [format.Tokens], the coarse form /sessions shows a record's spend in.
+//
 // A faulted Firing gets a last cell for the same reason a denial gets one: the run RETURNED, so
 // nothing else on the branch says its final Turn was abandoned and its answer is not one. Why it
 // was abandoned is a body line of its own (firingFaultLine) — the cell is what a collapsed block
-// can still show.
+// can still show, and it stays LAST whatever else the line gained.
 func firingStats(ev schedule.Event) string {
 	cells := []string{plural(ev.Outcome.Turns, "turn"), formatCycle(ev.Elapsed)}
 	if ev.Outcome.Denied > 0 {
 		cells = append(cells, fmt.Sprintf("%d denied", ev.Outcome.Denied))
+	}
+	if ev.Outcome.TotalTokens > 0 {
+		cells = append(cells, format.Tokens(ev.Outcome.TotalTokens)+" tokens")
+	}
+	if ev.Outcome.SubAgents > 0 {
+		cells = append(cells, plural(ev.Outcome.SubAgents, "sub-agent"))
 	}
 	if ev.Outcome.Faulted {
 		cells = append(cells, scheduleFaultedCell)

@@ -27,6 +27,7 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/library"
 	"github.com/airiclenz/apogee/internal/platform"
+	"github.com/airiclenz/apogee/internal/run"
 	"github.com/airiclenz/apogee/internal/schedule"
 	"github.com/airiclenz/apogee/internal/session"
 	"github.com/airiclenz/apogee/internal/skills"
@@ -299,6 +300,78 @@ func TestScheduleFiringCarriesTheParallelAgentsWidth(t *testing.T) {
 	if got := stub.spec.Config.ParallelAgents; got != 6 {
 		t.Errorf("the firing runs at ParallelAgents = %d, want the wired width 6 — it inherited the "+
 			"pre-bind zero instead of the cap the session's server resolves to", got)
+	}
+}
+
+// What the run COST crosses the fire seam with everything else it learned about itself: the
+// session's Schedule reports it exactly as the daemon does, since a Firing's report line must not
+// depend on which Driver fired it. The token figure is the WHOLE run's — the top-level agent's
+// spend plus every delegation's — and the delegations themselves cross as a bare count.
+//
+// Composed against the package's runner seam rather than a live model, which is why this test does
+// not call t.Parallel: it replaces a package-level var, exactly as the width test above does.
+func TestScheduleFiringReportsWhatTheRunCost(t *testing.T) {
+	roots, err := resolveRoots(t.TempDir(), t.TempDir())
+	if err != nil {
+		t.Fatalf("resolveRoots: %v", err)
+	}
+	stub := &stubRunner{res: run.Result{
+		Usage: run.Usage{TotalTokens: 30000},
+		SubAgents: []run.SubAgentUsage{
+			{Task: "read the tree", TotalTokens: 8000},
+			{Task: "read the tests", TotalTokens: 3984},
+		},
+	}}
+	prevRunner := runOnce
+	runOnce = stub.once
+	t.Cleanup(func() { runOnce = prevRunner })
+
+	w := scheduleWiring{
+		roots:   roots,
+		live:    newLiveSettings(config.Options{}, nil),
+		binding: func() upstreamBinding { return upstreamBinding{Endpoint: "http://bound.invalid", Model: "bound-model"} },
+		width:   func() int { return 1 },
+	}
+
+	out, err := w.fire(context.Background(), schedule.Firing{Prompt: "check the build", Mode: domain.ModePlan})
+	if err != nil {
+		t.Fatalf("fire: %v", err)
+	}
+	if out.TotalTokens != 41984 {
+		t.Errorf("Outcome.TotalTokens = %d, want the run's own 30000 plus both delegations' 11984 — "+
+			"the report line would understate what the firing cost", out.TotalTokens)
+	}
+	if out.SubAgents != 2 {
+		t.Errorf("Outcome.SubAgents = %d, want the 2 runs the firing delegated", out.SubAgents)
+	}
+}
+
+// A Firing that delegated nothing and whose Upstream reported no usage leaves both readings at
+// zero, which is what lets every surface omit them and read exactly as it did before they existed.
+func TestScheduleFiringReportsNoSpendWhenThereWasNone(t *testing.T) {
+	roots, err := resolveRoots(t.TempDir(), t.TempDir())
+	if err != nil {
+		t.Fatalf("resolveRoots: %v", err)
+	}
+	stub := &stubRunner{}
+	prevRunner := runOnce
+	runOnce = stub.once
+	t.Cleanup(func() { runOnce = prevRunner })
+
+	w := scheduleWiring{
+		roots:   roots,
+		live:    newLiveSettings(config.Options{}, nil),
+		binding: func() upstreamBinding { return upstreamBinding{Endpoint: "http://bound.invalid", Model: "bound-model"} },
+		width:   func() int { return 1 },
+	}
+
+	out, err := w.fire(context.Background(), schedule.Firing{Prompt: "check the build", Mode: domain.ModePlan})
+	if err != nil {
+		t.Fatalf("fire: %v", err)
+	}
+	if out.TotalTokens != 0 || out.SubAgents != 0 {
+		t.Errorf("Outcome spend = (%d tokens, %d sub-agents), want both zero so the report line omits them",
+			out.TotalTokens, out.SubAgents)
 	}
 }
 

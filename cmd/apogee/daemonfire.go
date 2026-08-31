@@ -245,13 +245,15 @@ func (w *daemonWiring) fire(ctx context.Context, f schedule.Firing) (schedule.Ou
 	// — it is runner-agnostic (ADR 0033) — and the Notify line renders the Firing from these fields
 	// alone: the answer without decoding a record, the counts without a second seam onto the run.
 	out := schedule.Outcome{
-		RecordID:  res.SessionID,
-		Title:     res.Title,
-		FinalText: res.FinalText,
-		Turns:     res.Turns,
-		Denied:    res.Denied,
-		Faulted:   res.Faulted,
-		Fault:     res.Fault,
+		RecordID:    res.SessionID,
+		Title:       res.Title,
+		FinalText:   res.FinalText,
+		Turns:       res.Turns,
+		Denied:      res.Denied,
+		Faulted:     res.Faulted,
+		Fault:       res.Fault,
+		TotalTokens: firingSpend(res),
+		SubAgents:   len(res.SubAgents),
 	}
 	if err != nil {
 		// A failed Firing still reports what it salvaged: run.Once saves whatever completed before

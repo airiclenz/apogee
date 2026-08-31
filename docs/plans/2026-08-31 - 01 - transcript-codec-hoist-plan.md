@@ -129,7 +129,11 @@ Depends on items 1 and 3.
 
 **Commit.** `feat(run): the runner writes the transcript blob — unattended records replay in /sessions`
 
-## 5. A Firing's report line says what the run cost
+## 5. A Firing's report line says what the run cost — ✅ DONE (2026-08-31)
+
+NOTES (2026-08-31): the summed spend is taken by one shared helper, `firingSpend(run.Result)` in `cmd/apogee/schedule.go`, rather than the sum being spelled inline in each of the two Outcome builders — same value, one reason to change.
+NOTES (2026-08-31): `docs/manual/daemon.md` gained a short paragraph under the console sample stating the omit-at-zero rule, beside the two reworded sample lines.
+NOTES (2026-08-31): added a second scheduleWiring test (`TestScheduleFiringReportsNoSpendWhenThereWasNone`) pinning the zero case at the builder as well as at both renderers.
 
 **What.** Closes the ISSUES.md:894-897 gap ("The daemon's Firing line reports no token spend and no sub-agent fill"). `schedule.Outcome` (`internal/schedule/schedule.go:77-98`) gains `TotalTokens int` and `SubAgents int` — runner-reported, and the library reads neither (extend the `Outcome` doc comment's existing sentence). Both builders fill them: `cmd/apogee/daemonfire.go:247` and `cmd/apogee/schedule.go:168` set `TotalTokens: res.Usage.TotalTokens + Σ res.SubAgents[i].TotalTokens` (the same sum the /sessions spend cell shows) and `SubAgents: len(res.SubAgents)`. Renderers: `firingStats` (`internal/tui/schedule.go:574-583`) appends a cell `format.Tokens(TotalTokens) + " tokens"` and a cell `plural(SubAgents, "sub-agent")`, each omitted at zero; `daemonOutcome` (`cmd/apogee/daemon.go:666`) appends `", " + format.Tokens(TotalTokens) + " tokens"` and `", " + counted(SubAgents, "sub-agent", "sub-agents")` to the work clause, each omitted at zero. Remove the ISSUES.md:894-897 bullet (the closure lands in this item's CHANGELOG sidecar at closeout — never edit CHANGELOG.md here).
 
