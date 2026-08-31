@@ -873,3 +873,58 @@ the claim leaves the machine, and the proxy beside it *is* what "that item passe
   a real API key. The post-publish half runs by hand as `make release-smoke VERSION=vX.Y.Z`
   (`scripts/release-smoke.sh`); the container walk (`TestNewcomerFollowsTheDocs`) judges
   everything that needs neither.
+
+---
+
+### Driver-parity gaps — behaviour only the TUI can reach (architecture review 2026-08-30)
+
+**Status:** recorded 2026-08-30 by the architecture review, parked at the close of plan
+`docs/plans/2026-08-30 - 02 - tui-host-hoist-plan.md` (Group C: the review's parity findings that
+are FEATURE work on a Driver, not a hoist of a shared rule). Each line is a capability the
+interactive session has and a headless run, a daemon Firing, or both do not — with the TUI site
+that owns it and the Driver that lacks it. None is a regression: every one has been absent since
+the Driver was built. The hoists the same review proposed and this plan did NOT take (A4–A8,
+B3–B5) are recorded by the report and by that plan's out-of-scope list, not here.
+
+- [ ] **The session's context-files report reaches no Firing.** `noteContextFiles`
+  (`internal/tui/model.go:742`) reads `Agent.ContextFilesReport()` and tells the human what the
+  workspace context files contributed and what was dropped for budget. `run.Result`
+  (`internal/run/run.go:67-111`) carries no such field, so a **headless or daemon** run never
+  learns that a context file was skipped or truncated.
+- [ ] **The daemon's Firing line reports no token spend and no sub-agent fill.** `run.Result`
+  carries `Usage` and `SubAgents` (`internal/run/run.go:96-107`), but the `schedule.Outcome` built
+  at `cmd/apogee/daemonfire.go:247` copies neither, so the **daemon**'s Notify line names Turns,
+  denials and the fault and nothing about what the run cost.
+- [ ] **The daemon discards the Firing's resolution notices.** `cmd/apogee/daemonfire.go:217`
+  calls `cfg, _, err := firingConfig(` and drops the `[]string` of validated-set / profile /
+  roster notices that `cmd/apogee/headless.go:371` keeps and prints. The **daemon** resolves the
+  same config and says none of it.
+- [ ] **No unconfined-Auto warning on a daemon run.** `announceConfinement`
+  (`cmd/apogee/wire_boot.go:278`) warns once per session when Auto runs with
+  `confine-to-workspace: false` — ADR 0012's one blanket loosen. It is reached only from `runRoot`
+  (`cmd/apogee/wire.go:120`), so a **daemon** Firing takes that posture unannounced.
+- [ ] **No Windows label pre-warm on headless or daemon runs.** The same function
+  (`cmd/apogee/wire_boot.go:315`) runs `platform.PrewarmLabelWalk` on the TUI boot path only, so
+  on Windows the first confined write in a **headless or daemon** run pays the label walk mid-run
+  instead of at startup.
+- [ ] **No offline refusal before send outside the TUI.** The heartbeat that flips a session
+  offline and refuses the send lives at `internal/tui/heartbeat.go:620` (`foldBeatFailure`). A
+  **headless or daemon** Firing has no liveness probe, so an unreachable server surfaces as the
+  run's error after the attempt rather than as a refusal before it.
+- [ ] **The "model not advertised" hint is TUI-only.** `hintNotice`
+  (`cmd/apogee/upstream.go:559`) says so when a session binds a model id the server never
+  advertised; its one caller is the TUI rebind seam (`cmd/apogee/wire_verbs.go:58`,
+  `rootWiring.rebind` → `tui.RebindResult`). A **headless or daemon** Firing binding the same id
+  is told nothing.
+- [ ] **An Auto Firing has no undo surface.** `Agent.UndoPreview` / `Agent.UndoRevert`
+  (`internal/agent/agent.go:742,761`) are engine-level, but the only surface over them is the
+  TUI's `runUndo` (`internal/tui/undo.go:45`). An auto **headless or daemon** run leaves its
+  Exchange groups with nothing a human can revert.
+- [ ] **`headless` registers neither `--server` nor `--bypass`.** Both are root-command flags
+  (`cmd/apogee/root.go:105` and `:117`); `headless` registers `--endpoint`, `--model`, `--mode`,
+  `--workspace`, `--config` and `--no-save` only (`cmd/apogee/headless.go:190-200`). So a
+  **headless** run reaches a `servers:` entry through `APOGEE_SERVER` alone — the fallback
+  `root.go:107-108`'s comment already names — and cannot run Bypass at all.
+
+The full findings, with the candidates this plan took and the ones it left, are in
+[`docs/reviews/architecture-review-2026-08-30.html`](docs/reviews/architecture-review-2026-08-30.html).
