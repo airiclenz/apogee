@@ -157,6 +157,19 @@ func (p *Provider) Suggest(draft string, exclude func(id string) bool, limit int
 	return p.current().Suggest(draft, exclude, limit)
 }
 
+// Lookup answers a model's load_skill query against the snapshot in force at the moment it is
+// called (see Catalog.Lookup). Like every accessor here it takes its OWN p.current() load, which is
+// the property that matters for this one: a skill added or edited mid-session is reachable through
+// the door as soon as the next Reload lands, with no re-wiring of the tool that asks.
+func (p *Provider) Lookup(query string) LookupResult { return p.current().Lookup(query) }
+
+// LookupSkill satisfies domain.SkillLookup against the current snapshot, so the load_skill tool
+// searches whatever catalog the last Reload installed — the same snapshot ResolveSkills answers
+// the user's attached "/id" from (see Catalog.LookupSkill).
+func (p *Provider) LookupSkill(query string) domain.SkillLookupResult {
+	return p.current().LookupSkill(query)
+}
+
 // ResolveSkills satisfies domain.SkillResolver against the current snapshot, so the loop resolves
 // attached IDs through whatever catalog the last Reload installed (see Catalog.ResolveSkills).
 func (p *Provider) ResolveSkills(ids []string) []domain.ResolvedSkill {
@@ -166,3 +179,7 @@ func (p *Provider) ResolveSkills(ids []string) []domain.ResolvedSkill {
 // Compile-time proof the provider satisfies the loop's resolver seam, exactly as *Catalog does —
 // so it is a drop-in for Config.Skills while adding the reload capability.
 var _ domain.SkillResolver = (*Provider)(nil)
+
+// And the model-facing door onto the same catalog (ADR 0065), so one *Provider is all a host
+// injects for both seams.
+var _ domain.SkillLookup = (*Provider)(nil)

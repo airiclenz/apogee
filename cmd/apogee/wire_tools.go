@@ -198,7 +198,8 @@ func (t *liveTools) webSearch() *tools.WebSearch {
 
 // registryWithMCP builds the Agent's tool registry: the built-in default tools scoped to the
 // workspace (with the same host configuration the Agent would derive from Config — the
-// url-safety guard, the web-search endpoint, the Asker, the Presenter, the credential scrub) PLUS
+// url-safety guard, the web-search endpoint, the Asker, the Presenter, the skill catalog, the
+// credential scrub) PLUS
 // the dynamically discovered MCP tools registered on top. MCP tools are DYNAMIC (discovered from a
 // server at runtime), so they are NOT in DefaultTools — they ride the registry as classMCP
 // ExternalEffectTools the dispatch disposition gates in Auto. A duplicate name (an MCP server's
@@ -220,7 +221,11 @@ func registryWithMCP(workspace string, cfg apogee.Config, mcpTools []apogee.Tool
 		WebSearchEndpoint: cfg.WebSearchEndpoint,
 		Asker:             cfg.Asker,
 		Presenter:         cfg.Presenter,
-		Disabled:          cfg.DisabledTools,
+		// The catalog load_skill searches (ADR 0065), off the same Config the engine would have
+		// read it from — this hand-assembly must not be the one path on which connecting an MCP
+		// server takes the skill door away from the model.
+		SkillLookup: cfg.SkillLookup,
+		Disabled:    cfg.DisabledTools,
 		// The two rungs above the global disable — the `tools.enabled:` lift and the bound model's
 		// `tools:` axis (ADR 0057) — off the same Config the engine would have read them from. This
 		// hand-assembly must not be the one path on which a configured roster quietly stops

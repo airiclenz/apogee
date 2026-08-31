@@ -1161,7 +1161,9 @@ func (a *Agent) readFileRef(ref string) ([]byte, error) {
 // skillDirToken is the placeholder a skill author may write anywhere in a SKILL.md body to
 // mean "this skill's absolute directory". resolveSkillRefs expands it only when the resolver
 // handed over a Dir; without one the token travels literal, by design.
-const skillDirToken = "{{SKILL_DIR}}"
+// It is domain's constant rather than a literal here because the load_skill tool expands the SAME
+// token in the bodies IT returns (internal/tools): one spelling, two consumers, no drift.
+const skillDirToken = domain.SkillDirToken
 
 // resolveSkillRefs resolves each attached skill ID through Config.Skills and returns the
 // labeled instruction blocks to prepend to the user message — mirroring resolveFileRefs. The

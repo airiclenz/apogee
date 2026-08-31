@@ -127,6 +127,15 @@ type Config struct {
 	// 0010). The host (cmd/apogee) loads the catalog and injects it.
 	Skills SkillResolver
 
+	// SkillLookup lets the MODEL search that same catalog mid-Turn through the load_skill tool
+	// (ADR 0065); nil ⇒ load_skill is not registered, so the model is never offered a door onto a
+	// catalog nothing can answer for. It is separate from Skills above because the two seams are
+	// separate questions — resolving ids the user attached versus ranking a query the model wrote
+	// — and a Driver may wire either alone. The host (cmd/apogee) injects the same *skills.Provider
+	// into both, so a mid-session reload is one catalog for the user's "/id" and the model's query
+	// alike.
+	SkillLookup SkillLookup
+
 	// Injected state roots — no implicit ~/.apogee (ADR 0001). The bench points
 	// these at ephemeral dirs so sim runs never touch the production Library.
 	LibraryDir string
@@ -723,6 +732,62 @@ type ResolvedSkill struct {
 	DisplayName string
 	Body        string
 	Dir         string
+}
+
+// SkillDirToken is the placeholder a skill author may write anywhere in a SKILL.md body to name
+// the skill's own folder: every consumer that hands a body to the model replaces it with the
+// resolved Dir first, so an instruction can point at a file bundled beside the SKILL.md without
+// the author knowing where the folder will live (a host path for a library skill, the virtual
+// `shipped:<id>` address for one of apogee's own).
+//
+// It lives here rather than in either consumer because there are two of them and they must agree:
+// the loop expands it in the block it injects for an attached "/id" (internal/agent), and the
+// load_skill tool expands it in the body it returns for a query (internal/tools). A token one of
+// the two failed to expand would hand the model a literal `{{SKILL_DIR}}/file` path every read
+// tool refuses.
+const SkillDirToken = "{{SKILL_DIR}}"
+
+// SkillLookup searches the skill catalog on the MODEL's behalf — the load_skill door of
+// [ADR 0065]. It is the second seam onto the same catalog SkillResolver resolves against, and it
+// is deliberately separate: SkillResolver answers "the user attached these ids", this answers
+// "something matched this query, and here is how confident that is". A host that wires one need
+// not wire the other, and a nil SkillLookup simply leaves load_skill out of the tool menu, exactly
+// as a nil Asker leaves out ask_user.
+//
+// Like SkillResolver it is defined here and implemented by internal/skills, so the tool package
+// fulfils the seam without importing the catalog (ADR 0010 — the dependency flows toward domain).
+//
+// [ADR 0065]: docs/adr/0065-shipped-skills-and-the-load-skill-door.md
+type SkillLookup interface {
+	// LookupSkill matches query against the catalog and returns the one answer load_skill sends
+	// back: a body when the match is certain enough to spend the tokens on, candidate ids when it
+	// is not, and neither when nothing matched at all.
+	LookupSkill(query string) SkillLookupResult
+}
+
+// SkillLookupResult is one lookup's answer, in the three shapes load_skill can return.
+//
+// Found ⇒ Skill carries the body to hand the model, and Also names any OTHER skill the query
+// matched — the "you got this one, these were close" line that keeps a confident pick honest
+// without spending a second body on it. Also is empty when the query was an exact id (nothing was
+// ranked at all) or when exactly one skill cleared the evidence gate.
+//
+// Not found with Candidates ⇒ nothing was confident enough to spend a body on, so the model gets
+// ids and summaries and may call again with one it can now spell. Not found with no Candidates ⇒
+// nothing matched; the tool says so, naming the query back.
+type SkillLookupResult struct {
+	Found      bool
+	Skill      ResolvedSkill
+	Also       []string
+	Candidates []SkillCandidate
+}
+
+// SkillCandidate is one skill named but NOT spent: the id to call load_skill with next and the
+// one-line summary that says whether it is worth the call. No body travels on it — that is the
+// whole point of the rung it belongs to.
+type SkillCandidate struct {
+	ID      string
+	Summary string
 }
 
 // StepResult reports the outcome of one Step at the quiescent boundary.

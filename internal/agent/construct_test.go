@@ -396,3 +396,44 @@ func TestConfinedCallBoxCarriesTheScratchDir(t *testing.T) {
 		t.Errorf("after SetScratchDir, box WritablePaths = %v still carries the OLD session's dir", box.WritablePaths)
 	}
 }
+
+// stubSkillLookup is a host skill catalog that answers nothing — enough to prove the seam is
+// THREADED, which is the only thing hostTools decides. What a real catalog answers is
+// internal/skills' question.
+type stubSkillLookup struct{}
+
+func (stubSkillLookup) LookupSkill(string) domain.SkillLookupResult {
+	return domain.SkillLookupResult{}
+}
+
+// TestHostToolsThreadsTheSkillLookupOntoTheDefaultRoster pins the Config → hostTools → registry
+// thread for load_skill (ADR 0065 §6). The tool is registered by CONSTRUCTION from this one field,
+// so a Config that carries a catalog and a roster that does not offer the door is the whole failure
+// mode — and the engine's own assembly is the path a Driver takes whenever it injects no
+// Config.Tools of its own.
+func TestHostToolsThreadsTheSkillLookupOntoTheDefaultRoster(t *testing.T) {
+	t.Parallel()
+
+	workspace := t.TempDir()
+
+	withCatalog := defaultRoster(domain.Config{WorkspaceDir: workspace, SkillLookup: stubSkillLookup{}})
+	if _, ok := withCatalog.Lookup("load_skill"); !ok {
+		t.Error("Config.SkillLookup never reached the tools: load_skill is not on the default roster")
+	}
+
+	// And the graceful half: no catalog, no door — the model is never offered a tool nothing can
+	// answer for, exactly as a nil Asker omits ask_user.
+	without := defaultRoster(domain.Config{WorkspaceDir: workspace})
+	if _, ok := without.Lookup("load_skill"); ok {
+		t.Error("load_skill was registered with no SkillLookup configured")
+	}
+
+	// The ordinary roster lever still closes it — it is a tool, not a Mechanism (ADR 0065 §6).
+	disabled := defaultRoster(domain.Config{
+		WorkspaceDir: workspace, SkillLookup: stubSkillLookup{},
+		DisabledTools: []string{"load_skill"},
+	})
+	if _, ok := disabled.Lookup("load_skill"); ok {
+		t.Error("`tools.disabled: [load_skill]` did not reach the assembly")
+	}
+}

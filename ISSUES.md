@@ -828,19 +828,21 @@ knob value, and the run had a frame-verified keeper in hand.
 
 ---
 
-### Model-facing skill discovery (B1 auto-attach / B2 `load_skill` tool) — deferred by ADR 0061
+### Model-facing skill discovery: B1 auto-attach — deferred by ADR 0061
 
 **Status:** deferred 2026-08-27 by
-[ADR 0061](docs/adr/0061-skill-suggestions-are-driver-side-over-an-engine-matcher.md) decision 4.
-**B1** attaches a matched skill's body to a message carrying no `/id`; **B2** registers a
-model-callable `load_skill` tool that pulls a body mid-Turn. **Deferred because** either one puts
-catalog-derived prompt text into the request, making it a **Mechanism** — catalogued, gated, bound
-by the Bypass never-worse floor — and B2 also contradicts CONTEXT.md's *Skill* entry outright
-(*"_Avoid_: 'tool'"*), a domain-language change before it is a feature. **Before it is built:** its
-own grill, an ADR **explicitly superseding ADR 0061**, and a bench arm against Bypass. **The
-reusable half exists:** `skills.Catalog.Suggest` (plan `docs/plans/archived/2026-08-27 - 01 -
-skill-suggestions-band-plan.md`) is engine-level and model-free, so B1 would consume the matcher
-rather than grow a second one.
+[ADR 0061](docs/adr/0061-skill-suggestions-are-driver-side-over-an-engine-matcher.md) decision 4,
+and left deferred by
+[ADR 0065](docs/adr/0065-shipped-skills-and-the-load-skill-door.md) §8, which superseded that
+decision for **B2 alone**. **B1** attaches a matched skill's body to a message carrying no `/id`.
+**Deferred because** it puts catalog-derived prompt text in front of the model that the user did not
+ask for, which changes the model's input on apogee's own initiative — a **Mechanism** in the exact
+sense of ADR 0003, so it must be catalogued, gated per model, and bound by the Bypass never-worse
+floor. **Before it is built:** its own grill, an ADR **explicitly superseding ADR 0061 decision 4
+for B1**, and a bench arm against Bypass. **The reusable half exists:** `skills.Catalog.Suggest`
+(plan `docs/plans/archived/2026-08-27 - 01 - skill-suggestions-band-plan.md`) is engine-level and
+model-free, so B1 would consume the matcher rather than grow a second one — as `Catalog.Lookup`,
+B2's half, now does.
 
 ---
 

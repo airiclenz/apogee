@@ -253,8 +253,10 @@
 // Host delegates and the recursion point. ask_user.go is ask_user over the host's Asker,
 // including the queueing that keeps concurrent askers off one prompt. present_document.go is
 // present_document over the host's Presenter ladder, naming the rung actually reached.
-// sub_agent.go is sub_agent — the recursion point that drives a nested Agent and deliberately
-// carries none of the disposition markers.
+// load_skill.go is load_skill over the host's SkillLookup — the model's own door onto the skill
+// catalog (ADR 0065), rendering a found body the way the loop renders an attached one and a miss
+// as candidate ids to ask again with. sub_agent.go is sub_agent — the recursion point that
+// drives a nested Agent and deliberately carries none of the disposition markers.
 //
 // # The package spine, one line each
 //

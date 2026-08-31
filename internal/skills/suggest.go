@@ -110,10 +110,13 @@ var stemSuffixes = []struct {
 	{"ed", "", func(_, stemmed string) bool { return !strings.HasSuffix(stemmed, "e") }},
 }
 
-// Suggestion is one ranked match between a draft and a skill: enough to paint a row (ID,
-// DisplayName, Summary) plus why it ranked where it did (Score, TriggerHit). It is a host-side
-// value — nothing here ever reaches the model, which learns a skill exists only when the user
-// attaches it as a "/id" (ADR 0061).
+// Suggestion is one ranked match between a query and a skill: enough to paint a row (ID,
+// DisplayName, Summary) plus why it ranked where it did (Score, TriggerHit).
+//
+// Every Suggest row is host-side: the band paints them and nothing here goes upstream. The one
+// place any of it reaches the model is Lookup's candidate rung, where an ID and Summary come back
+// as the answer to a load_skill call the model chose to make (ADR 0065 §7) — a body never travels
+// on this value in either direction, and Score and TriggerHit never leave the host at all.
 type Suggestion struct {
 	ID          string
 	DisplayName string
@@ -150,9 +153,30 @@ func (c *Catalog) Suggest(draft string, exclude func(id string) bool, limit int)
 	if limit <= 0 {
 		limit = defaultSuggestLimit
 	}
-	draftTokens := tokenize(draft)
+	if len(strings.Fields(draft)) < minDraftWords {
+		return nil
+	}
+	out := rank(c, draft, exclude)
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out
+}
+
+// rank is the scoring half of Suggest, split out so the model-facing lookup (lookup.go) reuses the
+// SAME index, evidence gate and ordering rather than growing a second matcher beside it. It returns
+// every skill that cleared the gate, strongest first, with no limit applied.
+//
+// What it deliberately does NOT carry is Suggest's minDraftWords floor. That floor is a property of
+// the SUGGESTION BAND — a half-typed chat draft must not flicker a guess at the user on every
+// keystroke — and not of matching: a lookup's query is a deliberate one-shot argument ("debugging",
+// "cut a release"), where a single word is the normal case and refusing to score it would make the
+// door answer "no match" to the queries most likely to be right. The gate that decides whether a
+// skill matched at all (minMatchedTerms, or a trigger hit) is shared and unchanged.
+func rank(c *Catalog, query string, exclude func(id string) bool) []Suggestion {
+	draftTokens := tokenize(query)
 	queryTerms := distinctTerms(draftTokens)
-	if len(strings.Fields(draft)) < minDraftWords || len(queryTerms) == 0 {
+	if len(queryTerms) == 0 {
 		return nil
 	}
 
@@ -188,9 +212,6 @@ func (c *Catalog) Suggest(draft string, exclude func(id string) bool, limit int)
 		}
 		return out[i].ID < out[j].ID
 	})
-	if len(out) > limit {
-		out = out[:limit]
-	}
 	return out
 }
 

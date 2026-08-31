@@ -376,7 +376,9 @@ func TestKnownToolNamesCoversTheComposedSet(t *testing.T) {
 	for _, name := range KnownToolNames() {
 		known[name] = true
 	}
-	composed := DefaultToolsWithHost(t.TempDir(), HostTools{Asker: stubAsker{}, Presenter: stubPresenter{}})
+	composed := DefaultToolsWithHost(t.TempDir(), HostTools{
+		Asker: stubAsker{}, Presenter: stubPresenter{}, SkillLookup: &stubLookup{},
+	})
 	for _, tool := range composed {
 		if !known[tool.Name()] {
 			t.Errorf("%q is a built-in tool but KnownToolNames does not list it", tool.Name())

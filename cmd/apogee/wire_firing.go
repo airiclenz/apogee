@@ -255,6 +255,10 @@ func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, []string
 		SystemPrompt: spec.SystemPrompt,
 		ContextFiles: in.opts.ContextFiles,
 		Skills:       skillProvider,
+		// And the same provider behind the model-facing door (ADR 0065 §6): an unattended run gets
+		// load_skill exactly as a session does, so a Firing's model can reach a written procedure
+		// without a human there to attach one (ADR 0031's Driver parity).
+		SkillLookup: skillProvider,
 		// The same read-only mounts a session gets: the model can read the bundled files of a skill
 		// it was given exactly as an interactive one can. Sub-agents inherit them through the tool
 		// instances a Subset carries, so no per-child wiring exists.

@@ -468,7 +468,8 @@ func composesDefaultRoster(cfg domain.Config) bool {
 // and configuration can only tighten it), the configured
 // web-search endpoint (empty ⇒ web_search's built-in DuckDuckGo default; "off" disables it),
 // the Asker delegate (nil ⇒ ask_user is not registered), the Presenter delegate (nil ⇒
-// present_document is not registered — ADR 0019), the three rungs of the roster ladder — the
+// present_document is not registered — ADR 0019), the skill catalog the model may search (nil ⇒
+// load_skill is not registered — ADR 0065), the three rungs of the roster ladder — the
 // global `tools.disabled:`/`tools.enabled:` lists and the bound model's profile axis, over the
 // build's own default-off declarations (ADR 0057; all empty ⇒ the whole built-in set) —, the
 // credential variable names the execution tools scrub from a
@@ -490,6 +491,9 @@ func hostTools(cfg domain.Config) tools.HostTools {
 		WebSearchEndpoint: cfg.WebSearchEndpoint,
 		Asker:             cfg.Asker,
 		Presenter:         cfg.Presenter,
+		// The catalog load_skill searches on the model's behalf (ADR 0065). Like the two delegates
+		// above it is carried, never consulted here: nil ⇒ the tool is simply not in the roster.
+		SkillLookup: cfg.SkillLookup,
 		// The GLOBAL rung of the roster ladder (`tools.disabled:` / `tools.enabled:`, ADR 0057):
 		// the disabled names are left out of the set this builds, which is the whole of that key —
 		// an Agent cannot offer or dispatch a tool its registry does not hold — and the enabled

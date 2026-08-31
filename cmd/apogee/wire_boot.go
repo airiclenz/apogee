@@ -225,6 +225,11 @@ func (w *rootWiring) resolveConfig() error {
 		// the request is exactly what it was before the key existed.
 		ContextFiles: w.opts.ContextFiles,
 		Skills:       w.skillProvider,
+		// The SAME provider as the model-facing door (ADR 0065 §6): load_skill searches the catalog
+		// the user's "/id" resolves against, so a skill added or edited mid-session is reachable
+		// through both as soon as the next Reload lands. nil would simply leave the tool out of the
+		// roster; wiring it is what puts the door in the menu.
+		SkillLookup: w.skillProvider,
 		// The skill source dirs, mounted as read-only roots for the model's read tools: an
 		// attached skill names its folder, and this is what makes that address readable
 		// (read_file, list_dir, grep, find_files — nothing else; the dirs stay unwritable).

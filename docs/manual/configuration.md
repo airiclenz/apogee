@@ -97,13 +97,14 @@ The names this build knows are fixed. In menu order they are `read_file`, `write
 `view_diff`, `copy_file`, `move_file`, `delete_file`, `terminal`, `python_exec`, `git_branch`,
 `git_commit`, `git_diff_range`, `git_status`, `git_log`, `diagnostics`, `run_tests`, `web_fetch`,
 `http_request`, `web_search`, `sub_agent`, the default-off Console four `console_open`,
-`console_send`, `console_read` and `console_close`, and the two the **host** supplies rather than
-the build — `ask_user` and `present_document`, which the TUI wires and a `headless` or `daemon` run
-does not, so a list naming one of those in a run without them is no typo and raises nothing: it
-simply matches no tool that run offers. That list is what `tools.disabled:`, `tools.enabled:` and a
-`model-profiles:` entry's `tools:` axis are all checked against, and a name outside it is the notice
-above (as of this build; `KnownToolNames` in `internal/tools` is the source, and a test fails when
-this list falls behind it).
+`console_send`, `console_read` and `console_close`, `load_skill` — the model's own door onto the
+[skill catalogue](#skills-apogee-ships--use-shipped-skills), which every apogee run wires — and
+the two the **host** supplies rather than the build — `ask_user` and `present_document`, which the
+TUI wires and a `headless` or `daemon` run does not, so a list naming one of those in a run without
+them is no typo and raises nothing: it simply matches no tool that run offers. That list is what
+`tools.disabled:`, `tools.enabled:` and a `model-profiles:` entry's `tools:` axis are all checked
+against, and a name outside it is the notice above (as of this build; `KnownToolNames` in
+`internal/tools` is the source, and a test fails when this list falls behind it).
 
 The block is global (it applies to every model this config runs) and it is live like every other:
 save the file, or commit the row in `/settings`, and the next request is built from the roster that
@@ -296,6 +297,15 @@ than anything about apogee itself:
 
 They are attached the way any skill is — write `/debugging` in your message, or pick it from the
 `/` menu — and [`/skills`](commands.md) lists them beside the ones you installed yourself.
+
+The model can also reach one on its own, through a tool called `load_skill`. It takes a skill id,
+or a few words describing the task when it does not know one, and gets back that skill's
+instructions — or, when nothing clearly matches, a short list of ids to ask again with. It searches
+the same catalogue you see in `/skills`, so a skill you wrote is as reachable as one apogee ships,
+and nothing about the catalogue is put in front of the model until it asks: no ids, no summaries
+and no bodies ride along in every request. The tool is on by default and is an ordinary entry in the
+`tools:` roster near the top of this page — `tools.disabled: [load_skill]` closes the door,
+globally or for one model.
 
 ```yaml
 # ~/.apogee/config.yaml

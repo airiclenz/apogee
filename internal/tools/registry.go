@@ -12,9 +12,10 @@ import (
 // but the workspace-scoped file tools do not: the url-safety guard (with its default-on SSRF
 // floor) for the network tools, the configured web-search endpoint (empty ⇒ the built-in
 // DuckDuckGo default; "off" disables the tool), the Asker delegate (nil ⇒ ask_user is NOT
-// registered, so the model is never offered a question it cannot have answered), and the
+// registered, so the model is never offered a question it cannot have answered), the
 // Presenter delegate (nil ⇒ present_document is NOT registered, so a headless host never
-// offers the model a document-showing affordance nobody can honour — ADR 0019). It is the
+// offers the model a document-showing affordance nobody can honour — ADR 0019), and the
+// SkillLookup catalog (nil ⇒ load_skill is NOT registered — ADR 0065). It is the
 // seam NewDefaultRegistryWithHost threads from Config so the registry stays the single place
 // the default tool set is assembled (P3.11).
 type HostTools struct {
@@ -22,6 +23,15 @@ type HostTools struct {
 	WebSearchEndpoint string
 	Asker             domain.Asker
 	Presenter         domain.Presenter
+
+	// SkillLookup is the catalog the load_skill tool searches on the model's behalf (ADR 0065 §6);
+	// nil ⇒ load_skill is NOT registered, so a Driver with no skill catalog never offers the model
+	// a door onto nothing — the same graceful degradation a nil Asker gives ask_user.
+	//
+	// It carries no knowledge of what a skill IS into this package: the seam is a query in and an
+	// answer out (domain.SkillLookup), and the host decides what backs it (ADR 0031 — engine seams
+	// stay driver-agnostic).
+	SkillLookup domain.SkillLookup
 
 	// Disabled names the built-in tools this host must NOT offer — the global `tools.disabled:`
 	// key. A named tool is left OUT of the assembled set entirely, which is both halves of the
@@ -174,7 +184,9 @@ func DefaultTools(root string) []domain.Tool {
 // through the Asker). present_document (ADR 0019) closes the menu on the same terms: appended
 // only when host.Presenter is set, ReadOnly and mode-independent through the Presenter, and
 // no more an ExternalEffectTool than ask_user is — showing the user a document they already
-// own is not a non-forkable remote effect.
+// own is not a non-forkable remote effect. load_skill (ADR 0065) joins them on the same terms:
+// appended only when host.SkillLookup is set, ReadOnly (fetching prompt text writes nothing) and
+// no ExternalEffectTool either — the catalog it searches is in this process.
 //
 // host.ExtraReadRoots and host.VirtualReadRoots are threaded, as ONE ReadMounts, into the four
 // read-only file tools (read_file, list_dir, grep, find_files) and — since 2026-08-12, for its
@@ -239,6 +251,9 @@ func builtinTools(root string, host HostTools) []domain.Tool {
 		NewConsoleSend(),
 		NewConsoleRead(),
 		NewConsoleClose(),
+	}
+	if host.SkillLookup != nil {
+		all = append(all, NewLoadSkill(host.SkillLookup))
 	}
 	if host.Asker != nil {
 		all = append(all, NewAskUser(host.Asker))
@@ -402,13 +417,13 @@ func trimmedNames(names []string) []string {
 // a name apogee knows: `tools.enabled:` exists precisely to name one, and must never be told its
 // only valid entry is a typo.
 //
-// The two host-delegate tools are included by CONSTRUCTION rather than by composition: a nil Asker
-// or Presenter leaves them out of a registry (graceful degradation), but their names are still
-// names apogee knows — so the answer is a fact about the build, not about one Driver's wiring.
-// TestKnownToolNamesCoversTheComposedSet pins it to the assembly above.
+// The three host-delegate tools are included by CONSTRUCTION rather than by composition: a nil
+// Asker, Presenter or SkillLookup leaves them out of a registry (graceful degradation), but their
+// names are still names apogee knows — so the answer is a fact about the build, not about one
+// Driver's wiring. TestKnownToolNamesCoversTheComposedSet pins it to the assembly above.
 func KnownToolNames() []string {
 	all := builtinTools("", HostTools{})
-	all = append(all, NewAskUser(nil), NewPresentDocument("", nil))
+	all = append(all, NewLoadSkill(nil), NewAskUser(nil), NewPresentDocument("", nil))
 	names := make([]string, 0, len(all))
 	for _, tool := range all {
 		names = append(names, tool.Name())

@@ -326,6 +326,15 @@ func (stubAsker) Ask(context.Context, domain.AskRequest) (domain.AskAnswer, erro
 	return domain.AskAnswer{}, nil
 }
 
+// stubSkillLookup stands in for the host's skill catalog, so load_skill (ADR 0065) is on the menu
+// the pin walks — it is host-supplied like the two delegates below, and a menu missing it would be
+// a tool whose write classification nobody answered.
+type stubSkillLookup struct{}
+
+func (stubSkillLookup) LookupSkill(string) domain.SkillLookupResult {
+	return domain.SkillLookupResult{}
+}
+
 type stubPresenter struct{}
 
 func (stubPresenter) Present(context.Context, domain.PresentRequest) (domain.PresentOutcome, error) {
@@ -348,9 +357,10 @@ func TestWave4WriteToolsCoversEveryWorkspaceWritingBuiltin(t *testing.T) {
 	// be answered for it here rather than the day someone turns it on. Lifting the whole build rung
 	// by name is what makes the menu the pin walks the same set KnownToolNames spells.
 	menu := tools.DefaultToolsWithHost("", tools.HostTools{
-		Asker:     stubAsker{},
-		Presenter: stubPresenter{},
-		Enabled:   tools.KnownToolNames(),
+		Asker:       stubAsker{},
+		Presenter:   stubPresenter{},
+		SkillLookup: stubSkillLookup{},
+		Enabled:     tools.KnownToolNames(),
 	})
 	if len(menu) != len(tools.KnownToolNames()) {
 		t.Fatalf("menu has %d tools, KnownToolNames %d: the pin is not walking the whole roster", len(menu), len(tools.KnownToolNames()))

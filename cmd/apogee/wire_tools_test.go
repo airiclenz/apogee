@@ -89,6 +89,34 @@ func TestRegistryWithMCPThreadsVirtualReadRoots(t *testing.T) {
 	}
 }
 
+// The model's own door onto the skill catalog reaches the assembly on the same argument: load_skill
+// is registered by CONSTRUCTION from Config.SkillLookup (ADR 0065 §6), so a hand-assembly that
+// dropped the field would take the door away in exactly the sessions that connect an MCP server and
+// leave it in every session that does not. The provider is the real one, so what comes back is a
+// shipped skill's actual body.
+func TestRegistryWithMCPThreadsSkillLookup(t *testing.T) {
+	t.Parallel()
+	provider := skills.NewProvider(skills.Sources{UseShippedSkills: true})
+	cfg := validCfg(t)
+	cfg.SkillLookup = provider
+
+	tool, found := registryWithMCP(cfg.WorkspaceDir, cfg, nil).Lookup("load_skill")
+	if !found {
+		t.Fatal("load_skill is missing from the MCP registry build")
+	}
+	result, err := tool.Execute(context.Background(), apogee.ToolCall{
+		ID:        "c1",
+		Tool:      "load_skill",
+		Arguments: []byte(`{"query":"debugging"}`),
+	})
+	if err != nil {
+		t.Fatalf("load_skill returned a Go error: %v", err)
+	}
+	if result.IsError || !strings.Contains(result.Content, "<skill:") {
+		t.Errorf("the shipped debugging skill did not come back: %q — the MCP build dropped SkillLookup", result.Content)
+	}
+}
+
 // The `url-safety:` hosts reach the assembly the same way, and they are the one field where the
 // hand-assembly drifting apart from the engine's own is a SECURITY regression rather than a missing
 // convenience: configuring an MCP server would re-open a host the operator denied, in a session

@@ -30,16 +30,23 @@ type Skill struct {
 	// Description is the summary's source text past the maxSummaryLen clamp Summary carries for
 	// the "/" menu — the frontmatter's summary/description, or the fallback's first prose line,
 	// under the far wider maxDescriptionLen (4096 runes) instead of 200. It is read ONLY by the
-	// suggestion matcher (Suggest), which indexes it so a phrase an author placed past the menu
-	// cap still finds the skill; it is never shown.
+	// matcher — Suggest, for the Driver's suggestion band, and Lookup, for the model's load_skill
+	// query — which indexes it so a phrase an author placed past the menu cap still finds the
+	// skill; it is never displayed anywhere, and the text itself never leaves the host.
 	Description string
 
 	// Triggers is the optional list of phrases the SKILL.md's author declared under "triggers:":
 	// lowercase, whitespace-normalised fragments they expect to appear in a prompt this skill
-	// fits ("review this diff", "cut a release"). It is read ONLY by the suggestion matcher
-	// (Suggest), which uses a hit as a boost on top of its scoring — never as the sole reason to
-	// offer a skill. It is never shown to the model: the catalog stays host-side, and a skill
-	// reaches a prompt only when the user attaches it as a "/id" (ADR 0061).
+	// fits ("review this diff", "cut a release"). It is read ONLY by the matcher — Suggest and
+	// Lookup alike — which uses a hit as a boost on top of its scoring, never as the sole reason
+	// to offer a skill. The phrases themselves are never shown to anyone: they are matcher input,
+	// not text.
+	//
+	// What ADR 0061 kept from the model is narrower since ADR 0065 §7 and still holds where it
+	// counts: nothing about the catalog enters the STANDING prompt, and a skill's body reaches a
+	// turn only when the user attaches it as a "/id" — or when the model itself asks for one
+	// through the load_skill door (lookup.go), which is a question it chose to spend a call on
+	// rather than a listing apogee volunteered.
 	Triggers []string
 }
 
