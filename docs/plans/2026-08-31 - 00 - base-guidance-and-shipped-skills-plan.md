@@ -156,7 +156,38 @@ belongs to a concurrent session and was left exactly as found; it is in neither 
 **Acceptance:** `go test ./internal/agent/... && go build ./...` — new clamp tests must fail against the pre-item tree (gap-closing fix).
 **Commit:** `fix(agent): clamp attached skill bodies like @file references`
 
-## 6. Headless and Firing prompts resolve /skill tokens
+## 6. Headless and Firing prompts resolve /skill tokens — ✅ DONE (2026-08-31)
+
+NOTES (2026-08-31): the membership test is a named helper, `knownSkillID(domain.SkillResolver)` in
+`run.go`, rather than an inline closure — it is the one place the "a token is a reference only if
+the resolver the loop will inject through can resolve it" rule is stated, and it is what makes the
+nil-resolver case (returns nil ⇒ `refs.SkillSpans`' documented "no catalog is wired" branch ⇒ every
+`/` token is prose) readable at the seam.
+NOTES (2026-08-31): consequential edit — internal/run/doc.go: made necessary by the new SkillIDs
+seam — the package doc's "its @file tokens are parsed here" paragraph enumerated the prompt
+mini-language as file references alone; it now names the `/skill` half and states the nil-resolver
+and unknown-id skips on the same no-event-sink terms.
+NOTES (2026-08-31): the announced-surface test asserts the WHOLE user message byte-for-byte against
+the block `resolveSkillRefs` emits (`<skill: %s>\n%s\n</skill>\n\n` + the prompt), not a
+`strings.Contains` — the item calls this an announced surface, so the spelling and the "token stays
+in the text" rule are both pinned. Proven gap-closing: with `run.go` stashed,
+`TestOnceResolvesTheFiringsSkillRefs` fails (the message arrives as the bare prompt); `run.go` was
+verified byte-identical to the delivered version after the stash pop.
+NOTES (2026-08-31): `docs/manual/daemon.md` needed only its `prompt:` comment widened to "@file and
+/skill references resolve as in a session" — the page carries no prose paragraph about the prompt
+field, and its own worked example already uses `/code-audit`, which this item makes live. All three
+unattended entry points (`cmd/apogee/headless.go:371`, `daemonfire.go:217`, `schedule.go:126`)
+compose `Config.Skills` through the one `firingConfig`, so both manual sentences hold for every one
+of them.
+NOTES (2026-08-31): CONTEXT.md was left untouched — no line in it becomes false. Its *File
+reference* entry already carries the Firing-parity sentence and its *Skill* entry already says the
+`/token` grammar is "exactly parallel to an `@path`"; the *Skill* entry's "The TUI parses and offers
+…; the agent resolves" describes the TUI's offering surface and makes no exclusivity claim.
+Neighbouring-doc improvement only, recorded here and nowhere else: that entry could gain the same
+explicit Firing sentence the *File reference* entry has.
+NOTES (2026-08-31): the untracked `docs/plans/2026-08-31 - 01 - transcript-codec-hoist-plan.md`
+belongs to a concurrent session and was left exactly as found; it is in neither FILES nor the
+commit.
 
 **What:** Gap: `internal/run/run.go:239` submits `UserInput` with `FileRefs` only, so a Firing/headless prompt containing `/code-audit` never attaches the body even though `Config.Skills` is wired (`cmd/apogee/wire_firing.go:157-168`). Add `SkillIDs: refs.SkillRefs(spec.Prompt, known)` where `known(id)` probes `Config.Skills.ResolveSkills([]string{id})` for one hit; a nil resolver skips skill parsing. Note the behaviour in `docs/manual/headless.md` and `docs/manual/daemon.md`.
 **Files:** `internal/run/run.go`, `internal/run/run_test.go`, `docs/manual/headless.md`, `docs/manual/daemon.md`

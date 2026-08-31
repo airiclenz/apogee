@@ -11,9 +11,13 @@
 //
 // A Firing's Prompt is a full apogee message, not a bare string: its @file tokens are parsed
 // here through internal/refs and submitted as domain.UserInput.FileRefs, so the loop resolves
-// them within the workspace fence exactly as it resolves a session's. A missing or escaping
-// ref is skipped WITHOUT notice — the loop reports one as an ErrorEvent, and a Firing has no
-// event sink to carry it (headless and the daemon both leave Config.Events nil).
+// them within the workspace fence exactly as it resolves a session's. Its /skill tokens are
+// parsed by the same package and submitted as domain.UserInput.SkillIDs, against the catalog
+// Config.Skills already carries — so a Firing whose prompt names a skill reaches the same
+// injected body a chat message does, and a Config with no resolver leaves every "/" token
+// prose. A missing or escaping ref — and an unknown skill ID — is skipped WITHOUT notice: the
+// loop reports one as an ErrorEvent, and a Firing has no event sink to carry it (headless and
+// the daemon both leave Config.Events nil).
 //
 // # Nothing waits for a human
 //

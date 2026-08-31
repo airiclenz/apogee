@@ -234,9 +234,14 @@ func Once(ctx context.Context, spec Spec) (Result, error) {
 	}
 	defer func() { _ = a.Close() }()
 
-	// The prompt carries the same @file grammar a chat message does (internal/refs), so a
-	// Firing's references resolve in the loop exactly as a session's do.
-	if err := a.Submit(domain.UserInput{Text: spec.Prompt, FileRefs: refs.FileRefs(spec.Prompt)}); err != nil {
+	// The prompt carries the same @file and /skill grammars a chat message does
+	// (internal/refs), so a Firing's references resolve in the loop exactly as a session's do.
+	in := domain.UserInput{
+		Text:     spec.Prompt,
+		FileRefs: refs.FileRefs(spec.Prompt),
+		SkillIDs: refs.SkillRefs(spec.Prompt, knownSkillID(spec.Config.Skills)),
+	}
+	if err := a.Submit(in); err != nil {
 		return Result{}, fmt.Errorf("apogee: submit the firing's prompt: %w", err)
 	}
 
@@ -295,6 +300,18 @@ func Once(ctx context.Context, spec Spec) (Result, error) {
 	}
 	res.SessionID = rec.Meta.ID
 	return res, runErr
+}
+
+// knownSkillID is the catalog membership test refs.SkillSpans needs to tell a skill token
+// apart from prose — the Firing's counterpart to the TUI's own, built off the SAME resolver the
+// loop will inject the body through, so a token this test accepts is a token the loop can
+// resolve. A nil resolver returns nil, which SkillSpans reads as "no catalog is wired": no "/"
+// token is a reference then, and the prompt travels exactly as it did before this seam existed.
+func knownSkillID(r domain.SkillResolver) func(string) bool {
+	if r == nil {
+		return nil
+	}
+	return func(id string) bool { return len(r.ResolveSkills([]string{id})) == 1 }
 }
 
 // title is the record's title for this Firing: the Spec's own when set, else the Schedule

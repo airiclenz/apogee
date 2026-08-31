@@ -1225,3 +1225,122 @@ func TestOnceSkipsAMissingFileRefWithoutNotice(t *testing.T) {
 		t.Errorf("the firing's user message = %q, want the prompt verbatim %q", got, prompt)
 	}
 }
+
+// ---------------------------------------------------------------------------
+
+// stubSkills is a domain.SkillResolver over a literal catalog — the run-layer stand-in for the
+// internal/skills provider a host injects. It answers ResolveSkills the way the real catalog
+// does: the known IDs in the requested order, unknown ones skipped.
+type stubSkills struct {
+	byID map[string]domain.ResolvedSkill
+}
+
+// newStubSkills builds a resolver holding one skill per given entry.
+func newStubSkills(skills ...domain.ResolvedSkill) *stubSkills {
+	byID := make(map[string]domain.ResolvedSkill, len(skills))
+	for _, s := range skills {
+		byID[s.ID] = s
+	}
+	return &stubSkills{byID: byID}
+}
+
+// ResolveSkills returns the known skills among ids, in the order asked.
+func (s *stubSkills) ResolveSkills(ids []string) []domain.ResolvedSkill {
+	var out []domain.ResolvedSkill
+	for _, id := range ids {
+		if sk, ok := s.byID[id]; ok {
+			out = append(out, sk)
+		}
+	}
+	return out
+}
+
+// TestOnceResolvesTheFiringsSkillRefs is the Driver-parity claim of ADR 0031 for the OTHER half
+// of the prompt mini-language: the /skill grammar a session's message carries is read from a
+// Firing's prompt too, so a headless or scheduled run reaches the same injected skill body a
+// chat message does. It asserts the ANNOUNCED surface — the exact block spelling the loop emits
+// — because that block is what the model reads.
+func TestOnceResolvesTheFiringsSkillRefs(t *testing.T) {
+	t.Parallel()
+
+	const prompt = "/code-audit internal/tui"
+	skill := domain.ResolvedSkill{
+		ID:          "code-audit",
+		DisplayName: "Code Audit",
+		Body:        "Review correctness first, then report.",
+	}
+
+	up := newUpstream(t, alwaysFinal("audited"))
+	spec := planSpec(up.url, prompt)
+	spec.Config.WorkspaceDir = t.TempDir()
+	spec.Config.Skills = newStubSkills(skill)
+
+	if _, err := Once(context.Background(), spec); err != nil {
+		t.Fatalf("Once: %v", err)
+	}
+
+	reqs := up.requests()
+	if len(reqs) != 1 {
+		t.Fatalf("the Upstream saw %d requests, want 1", len(reqs))
+	}
+	got := reqs[0].Texts[len(reqs[0].Texts)-1]
+	want := "<skill: " + skill.DisplayName + ">\n" + skill.Body + "\n</skill>\n\n" + prompt
+	if got != want {
+		t.Errorf("the firing's user message =\n%q\nwant\n%q", got, want)
+	}
+}
+
+// TestOnceLeavesAnUnknownSkillTokenAsProse pins the grammar's own gate: only a token the wired
+// catalog confirms is a reference, so a slash word that names no skill — a path, a typo — travels
+// to the model untouched and attaches nothing.
+func TestOnceLeavesAnUnknownSkillTokenAsProse(t *testing.T) {
+	t.Parallel()
+
+	const prompt = "/code-adit internal/tui"
+
+	up := newUpstream(t, alwaysFinal("nothing to audit"))
+	spec := planSpec(up.url, prompt)
+	spec.Config.WorkspaceDir = t.TempDir()
+	spec.Config.Skills = newStubSkills(domain.ResolvedSkill{
+		ID:          "code-audit",
+		DisplayName: "Code Audit",
+		Body:        "Review correctness first, then report.",
+	})
+
+	if _, err := Once(context.Background(), spec); err != nil {
+		t.Fatalf("Once: %v", err)
+	}
+
+	reqs := up.requests()
+	if len(reqs) != 1 {
+		t.Fatalf("the Upstream saw %d requests, want 1", len(reqs))
+	}
+	if got := reqs[0].Texts[len(reqs[0].Texts)-1]; got != prompt {
+		t.Errorf("the firing's user message = %q, want the prompt verbatim %q", got, prompt)
+	}
+}
+
+// TestOnceWithoutASkillCatalogSendsTheTokenVerbatim pins the nil-resolver case: with no catalog
+// wired there is nothing to test a token against, so no "/" word is a reference and the prompt
+// is byte-identical to what it was before this seam existed.
+func TestOnceWithoutASkillCatalogSendsTheTokenVerbatim(t *testing.T) {
+	t.Parallel()
+
+	const prompt = "/code-audit internal/tui"
+
+	up := newUpstream(t, alwaysFinal("audited"))
+	spec := planSpec(up.url, prompt)
+	spec.Config.WorkspaceDir = t.TempDir()
+
+	if _, err := Once(context.Background(), spec); err != nil {
+		t.Fatalf("Once: %v", err)
+	}
+
+	reqs := up.requests()
+	if len(reqs) != 1 {
+		t.Fatalf("the Upstream saw %d requests, want 1", len(reqs))
+	}
+	if got := reqs[0].Texts[len(reqs[0].Texts)-1]; got != prompt {
+		t.Errorf("the firing's user message = %q, want the prompt verbatim %q", got, prompt)
+	}
+}

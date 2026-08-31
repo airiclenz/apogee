@@ -17,7 +17,10 @@ The prompt is the single **quoted** argument; with no argument the whole of stdi
 the prompt, so `cat task.md | apogee headless` works too. Empty from both is a usage
 error. `@path` tokens in the prompt are **file references** — bare or quoted
 (`@"a b.md"`) — read from the workspace and attached to the message as in a session; a
-missing ref is skipped without notice — a Firing has no event sink.
+missing ref is skipped without notice — a Firing has no event sink. `/id` tokens are
+**skill references** on the same terms: a token naming a skill in this run's catalog
+attaches that skill's instructions to the message exactly as typing it into a session
+would, and any other slash word — a path, a typo — stays plain text.
 `--endpoint`, `--model`, `--workspace` and `--config` resolve exactly as a
 session's do — flag over `APOGEE_*` environment over `config.yaml` — so the run has the
 shape a session on this host would have; which listed entry it starts on comes from

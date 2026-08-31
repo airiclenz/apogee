@@ -31,7 +31,7 @@ schedules:
       cycle: 24h               # required; a Go duration, 30s floor
     run:
       prompt: "/code-audit internal/tui"  # required — what you would type into apogee
-                                          # @file references resolve as in a session
+                                          # @file and /skill references resolve as in a session
       workspace: ~/repos/apogee           # required; `~` expands, must exist
       mode: plan                          # optional: plan (default) or auto
       server: workstation                 # optional: a `servers:` entry by name
