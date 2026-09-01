@@ -147,7 +147,14 @@ inherits `Namer` verbatim (nested delegations are named too). The goroutine is j
 **Regression guard.** `TestRoutedSpawnClosesItsOwnClient` and the fan-out suite unchanged; a spawn with `Namer == nil` produces the identical event stream to today (assert with the existing sink-stamp test).
 **Commit:** `feat(agent): name an unnamed delegation out of band and emit SubAgentNamedEvent`
 
-## 4. Host namer: one completion on the child's Upstream, gated by the live `auto-title`
+## 4. Host namer: one completion on the child's Upstream, gated by the live `auto-title` — ✅ DONE (2026-09-01)
+
+NOTES (2026-09-01): the gate is an `atomic.Bool` on the namer with a `setEnabled` method, rather than the item's separate `enabled func() bool` field over an atomic held elsewhere — the decision block requires `OnAutoTitle` to "flip the namer's gate atomic", and a func field over that same cell would have been a second name for one read. It is still read at call time, which is the property the item states.
+NOTES (2026-09-01): the two Upstream readers are wired as `*rootWiring` methods (`sessionNamingUpstream`, `routedNamingUpstream`) in naming.go instead of as closures written at the wiring site, because the Config is assembled in wire_boot while `holder`/`live`/`delegation` are filled by the live assembly that runs after it — so cmd/apogee/wire_live.go needed no edit and is dropped from Files, while cmd/apogee/wire.go (the `namer` field on rootWiring) and cmd/apogee/wire_options.go (the `OnAutoTitle: w.namer.setEnabled` hook the item requires) are added.
+NOTES (2026-09-01): naming_test.go is built on title_test.go's own `titleServer`/`scriptedTitleServer` (same package) rather than on `stubllm.New`: `stubllm.Request` records the model, messages and tool names but not the raw body, so the item's dialect, dropped-thinking-ask and `finish_reason: length` assertions are not observable through it.
+NOTES (2026-09-01): cmd/apogee/settingsrows_test.go needed no edit — `TestSettingsRowsFormatEffectiveValues` compares each row's Desc against the registry entry it came from (settingsrows_test.go:559), so the new wording is pinned without being spelled twice.
+NOTES (2026-09-01): consequential edit — cmd/apogee/upstream.go: made necessary by the namer reading `upstreamHolder.Binding` — that method's doc comment enumerates its readers, and the delegation-naming call is a new one. Comment text only.
+NOTES (2026-09-01): consequential edit — internal/config/defaults/config.yaml: made necessary by `auto-title:` now gating the delegation namer too — the seeded template's prose for the key described session titles alone ("one short request per session"), which this item makes incomplete. Comment prose only; the key's value is untouched.
 
 Depends on item 2.
 **What:** Recast at the regression check (2026-09-01). `cmd/apogee/naming.go` (new): `delegationNamer` implements `domain.DelegationNamer`.

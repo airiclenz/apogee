@@ -1088,6 +1088,16 @@ type Options struct {
 	// binary said so.
 	AutoTitle bool
 
+	// OnAutoTitle is told when a `/settings` edit — the pane, or the config file the watcher
+	// re-reads — moves the `auto-title:` key, with the value the renderer just applied to
+	// AutoTitle above. It exists because the key gates TWO namers: this side's session titles,
+	// which are Model state and apply themselves, and the HOST's delegation namer (ADR 0068),
+	// which is behind the engine's Config and can only be reached by being told.
+	//
+	// nil ⇒ nobody is listening, which is what every hand-built test Options and every host with
+	// no delegation namer passes; the local apply is unaffected either way.
+	OnAutoTitle func(enabled bool)
+
 	// Server is the whole Upstream seam as one named capability (ADR 0054): which servers this
 	// session can be on, the two verbs that put it on one, the choice each move records for the next
 	// session, and the observation that says what the server it is on is actually serving. The six

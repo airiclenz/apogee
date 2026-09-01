@@ -292,5 +292,14 @@ func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, []string
 		// A Firing runs while nobody watches, which is exactly the case a runaway delegation
 		// must not be able to become.
 		Delegation: apogee.DelegationConfig{MaxSteps: in.opts.DelegateMaxSteps},
+		// And the namer an unnamed delegation is named by (ADR 0068), so a Firing's saved record
+		// reads the same way a session's transcript does rather than carrying a wall of task first
+		// lines (ADR 0031's Driver parity). It is bound to the run's OWN server — this composition
+		// routes nothing, so no child is ever routed and the seat question never arises — and gated
+		// by `auto-title:` as it stood at startup, an unattended run having no live door to flip it
+		// through.
+		Namer: newFiringNamer(
+			upstreamBinding{Endpoint: in.entry.Endpoint, Model: spec.Model, APIKey: apiKey},
+			effortDialect, in.opts.AutoTitle),
 	}, notices, nil
 }

@@ -184,7 +184,12 @@ type rootWiring struct {
 	bridge       *tui.Bridge
 	presentation *livePresentation
 	confiner     domain.Confiner
-	cfg          apogee.Config
+	// namer names an unnamed delegation out of band on the child's own Upstream (ADR 0068). It is
+	// held rather than left inside cfg because the `auto-title:` gate on it is live: the renderer
+	// flips it through tui.Options.OnAutoTitle when the pane or the file moves the key, long after
+	// the engine captured the namer off the Config (naming.go).
+	namer *delegationNamer
+	cfg   apogee.Config
 
 	// The live session (wire_live.go). The tool registry and the Mechanism list are folded onto
 	// cfg above rather than held here — the engine reads them off the Config it is built from.

@@ -153,7 +153,8 @@ func (h *upstreamHolder) Endpoint() string {
 // rebind without a seam of its own.
 //
 //   - the session-naming call (title.go) constructs a fresh provider.Client per call from all three
-//     fields;
+//     fields, and the delegation-naming call (naming.go) does the same for a child that is not
+//     routed away from this session's own server (ADR 0068);
 //   - the rebind closure (wire.go) hands it to liveSettings.rebindInputs, so the per-model
 //     resolution keys on the server the session is on NOW rather than on the launch endpoint;
 //   - a scheduled Firing (schedule.go) takes BOTH halves of its upstream from it — the wire it

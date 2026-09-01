@@ -529,6 +529,10 @@ auto-compact: true
 # one short request per session, it never appears in the transcript or the context gauge, and if it
 # fails the title apogee derived from your prompt stays. Turning it off stops only the AUTOMATIC
 # naming — /rename still sets a title by hand, and bare /rename still asks the model for one.
+# The same switch also names DELEGATIONS: a sub-agent the model spawned without naming it gets a
+# two-to-four-word name from one more short request, made on whichever server that sub-agent is
+# itself running on, so the run reads as "scout config keys" rather than as the first line of the
+# task it was handed.
 # Config-file only (no flag or env). Default: true.
 auto-title: true
 

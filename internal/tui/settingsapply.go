@@ -251,6 +251,13 @@ func (m Model) settingsApplyLocal(path, value string) (Model, string, tea.Cmd, b
 	switch path {
 	case settingKeyAutoTitle:
 		m.opts.AutoTitle = value == settingTrue
+		// The key names one switch and gates two namers. This side's half is the field above; the
+		// other half is the host's delegation namer (ADR 0068), which sits behind the engine's
+		// Config and cannot read a renderer field — so it is TOLD, here, where the value is parsed
+		// once. A host that wired no hook is the ordinary nil case, not a degrade.
+		if m.opts.OnAutoTitle != nil {
+			m.opts.OnAutoTitle(m.opts.AutoTitle)
+		}
 	case settingKeyShowScrollbar:
 		// The config key is positive and the option is inverted (the polarity flips in cmd/apogee).
 		// The bar's gutter column is transcript width, so the frame is laid out again from here

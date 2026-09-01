@@ -394,8 +394,9 @@ var KeyRegistry = []Key{
 	{
 		Path: "auto-title", Kind: KindBool, Default: "true",
 		Editable: true,
-		Desc:     "Name a new session from its first prompt with one small extra completion.",
-		Read:     func(o Options) string { return boolValue(o.AutoTitle) },
+		Desc: "Name a new session from its first prompt, and an unnamed delegation from its " +
+			"task, with one small extra completion each.",
+		Read: func(o Options) string { return boolValue(o.AutoTitle) },
 	},
 	{
 		Path: "remember-model", Kind: KindBool, Default: "false",

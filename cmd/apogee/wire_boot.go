@@ -158,18 +158,30 @@ func (w *rootWiring) resolveConfig() error {
 		return err
 	}
 
+	// The delegation-naming seam (ADR 0068), built here because the Config below is where it is
+	// installed and read through closures because the two holders it reads — the session's Upstream
+	// and the Sub-agent server's landing — are filled by the live assembly that runs after this
+	// step. It is wired UNCONDITIONALLY, `auto-title:` false at launch included: the key is
+	// live-editable, so a namer left nil here could never be switched on again without a relaunch,
+	// and the gate the value seeds answers "", nil without making a request for exactly as long as
+	// the switch is off (naming.go).
+	w.namer = newDelegationNamer(w.sessionNamingUpstream, w.routedNamingUpstream, w.opts.AutoTitle)
+
 	w.cfg = apogee.Config{
 		Endpoint: w.opts.Endpoint,
 		Model:    w.opts.Model,
 		// The upstream bearer token resolved above, from the startup `servers:` entry's own key
 		// source, which APOGEE_API_KEY overlays. Empty — the keyless local default — sends no
 		// Authorization header at all.
-		APIKey:       apiKey,
-		Mode:         w.mode,
-		Bypass:       w.opts.Bypass,
-		Events:       w.bridge.Sink(),
-		Approver:     w.bridge.Approver(),
-		Asker:        w.bridge.Asker(),
+		APIKey:   apiKey,
+		Mode:     w.mode,
+		Bypass:   w.opts.Bypass,
+		Events:   w.bridge.Sink(),
+		Approver: w.bridge.Approver(),
+		Asker:    w.bridge.Asker(),
+		// The namer built above: an unnamed delegation is named out of band on the CHILD's own
+		// Upstream (ADR 0068), so the engine never learns which endpoint answered.
+		Namer:        w.namer,
 		Presenter:    w.bridge.Presenter(),
 		ConfigDir:    w.roots.config,
 		LibraryDir:   w.roots.library,

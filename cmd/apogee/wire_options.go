@@ -269,6 +269,10 @@ func (w *rootWiring) options() tui.Options {
 		// call — so `/rename` regenerates on demand regardless.
 		GenerateTitle: w.titles.generate,
 		AutoTitle:     w.opts.AutoTitle,
+		// The same key gates the DELEGATION namer (ADR 0068), and that one lives on this side: the
+		// renderer applies `auto-title:` locally, so without this hook a `/settings` flip would move
+		// the session's own naming and leave the host generating delegation names nobody asked for.
+		OnAutoTitle: w.namer.setEnabled,
 		// The scheduler surface (ADR 0033): the seam /schedule and /schedule-stop drive, the reason
 		// auto is unavailable on this host (empty ⇒ it is available, and the picker offers it), and
 		// the activity report the Gate above releases a due Firing on. All three are wired together
