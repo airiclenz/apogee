@@ -165,10 +165,16 @@ type SubAgentUsage struct {
 	// Task is the first line of the delegated task, "" when the call carried none. Like
 	// FinalText it is RAW model output — a surface escape-strips it at its own render seam.
 	Task string
-	// Name is the OPTIONAL short name the sub_agent call gave the delegation, "" when it named
-	// none — the signal to fall back to Task, which is what every surface did before names
-	// existed. RAW model output on the same terms as Task: a surface escape-strips and clips it
-	// at its own render seam.
+	// Name is the delegation's OPTIONAL short name, "" when it has none — the signal to fall back
+	// to Task, which is what every surface did before names existed. TWO events feed it and they
+	// never compete: the delegating sub_agent call's own name argument (ToolCallEvent) when the
+	// model gave one, else the name the out-of-band naming call generated for it while it ran
+	// (SubAgentNamedEvent, ADR 0068), which is emitted only for a delegation whose call named
+	// nothing. Which of the two filled it is not recorded, because no reader has a reason to
+	// treat them differently: both are a name for this run.
+	//
+	// RAW model output on the same terms as Task, whichever event carried it: a surface
+	// escape-strips and clips it at its own render seam.
 	Name string
 	// Model is the model this run went to when that is NOT the model the Firing itself is bound
 	// to — a delegation routed to the Sub-agent server (ADR 0045) — and "" when the two match,
@@ -440,7 +446,8 @@ func (d *denier) count() int {
 // with the child Agent unless it is caught here. So the tap BRACKETS each run BY THE CALL THAT
 // ASKED FOR IT: the delegating sub_agent ToolCallEvent opens a bracket under its call id, the
 // child's usage — stamped with that same id as its run identity (domain.EventBase.CallID) —
-// updates it, and the tool result closing that call closes the bracket into Result.SubAgents.
+// updates it, a SubAgentNamedEvent stamped the same way names it (ADR 0068), and the tool result
+// closing that call closes the bracket into Result.SubAgents.
 //
 // The call id is what makes the bracketing survive CONCURRENT delegation (ADR 0039): siblings
 // spawned by one reply share a depth, so a depth-keyed bracket would braid their fills
@@ -473,10 +480,11 @@ type eventTap struct {
 	runs []SubAgentUsage
 }
 
-// openSubAgent is one sub-agent run in flight: the task it was given, the optional name it was
-// given with it, the latest fill its own Turns have reported, the model and window those readings
-// came from, and its latest cumulative reading. The delegating call that will close it is the map
-// key it is filed under, not a member — one run, one identity.
+// openSubAgent is one sub-agent run in flight: the task it was given, the optional name it carries
+// (the one its call gave, or the one generated for it mid-run — SubAgentUsage.Name), the latest fill
+// its own Turns have reported, the model and window those readings came from, and its latest
+// cumulative reading. The delegating call that will close it is the map key it is filed under, not a
+// member — one run, one identity.
 //
 // model is held RAW and measured against the Firing's only when the run closes: the "is it worth
 // saying" question belongs to the reading that gets filed (SubAgentUsage.Model), not to every
@@ -514,6 +522,8 @@ func (t *eventTap) Emit(e domain.Event) {
 		if ev.Call.Tool == tools.SubAgentToolName {
 			t.openSubAgentRun(ev.Call)
 		}
+	case domain.SubAgentNamedEvent:
+		t.nameSubAgentRun(ev.CallID, ev.Name)
 	case domain.ToolResultEvent:
 		// A tool result carries no tool NAME, so the call id is what identifies it as the
 		// delegation's: only the result closing the call that opened the bracket closes it.
@@ -605,6 +615,29 @@ func (t *eventTap) openSubAgentRun(call domain.ToolCall) {
 		task: firstTaskLine(call.Arguments),
 		name: delegationName(call.Arguments),
 	}
+}
+
+// nameSubAgentRun records the name the out-of-band naming call generated for a delegation the model
+// left unnamed (domain.SubAgentNamedEvent, ADR 0068), on the run that call opened. It is the second
+// and last event that feeds SubAgentUsage.Name, and it arrives WHILE the run is open — the naming
+// call is bounded by the child's lifetime — so the reading filed at close carries it.
+//
+// The name is taken as it comes, without a "was one already given" test, because the engine emits
+// this event only for a delegation whose own call named nothing: a name the model gave always wins
+// by never being contested. What IS refused is an empty name, which would replace a usable label
+// with nothing, and a name for a call that opened no bracket — a rename for a run this tap never
+// saw, or one that has already closed, which is the same drop every unbracketed reading takes.
+func (t *eventTap) nameSubAgentRun(callID, name string) {
+	if name == "" {
+		return
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	run := t.open[callID]
+	if run == nil {
+		return
+	}
+	run.name = name
 }
 
 // closeSubAgentRun finishes the run callID delegated, appending its reading in finish order. A

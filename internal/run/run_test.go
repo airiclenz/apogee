@@ -851,6 +851,77 @@ func namedSubAgentCall(depth int, id, task, name string) domain.ToolCallEvent {
 	}
 }
 
+// subAgentNamed is the out-of-band naming event for the run call id delegated (ADR 0068), emitted
+// at the CHILD's depth with the spawning call as its run identity — the stamp every event that
+// child emits carries.
+func subAgentNamed(depth int, id, name string) domain.SubAgentNamedEvent {
+	return domain.SubAgentNamedEvent{
+		EventBase: domain.EventBase{Depth: depth, CallID: id},
+		Name:      name,
+	}
+}
+
+// TestEventTapFoldsTheGeneratedDelegationName pins the second event that feeds SubAgentUsage.Name
+// (ADR 0068): a delegation the model left unnamed is GIVEN a name while it runs, and the reading
+// filed when it closes carries that name instead of nothing — which is what makes a headless run
+// report a generated name on its sub-agent line. A delegation whose own call named it is never
+// renamed, because no event is emitted for one: the name the model gave wins by never being
+// contested, and this pins that it still stands beside a sibling that was renamed.
+func TestEventTapFoldsTheGeneratedDelegationName(t *testing.T) {
+	t.Parallel()
+
+	const window = 32000
+	tap := &eventTap{window: window}
+
+	tap.Emit(subAgentCall(0, "call_a", "audit the config loader"))
+	tap.Emit(namedSubAgentCall(0, "call_b", "summarise the findings", "scribe"))
+	tap.Emit(usageAt(1, "call_a", 4000))
+	tap.Emit(usageAt(1, "call_b", 9000))
+	tap.Emit(subAgentNamed(1, "call_a", "audit config keys"))
+	tap.Emit(toolResult(0, "call_a"))
+	tap.Emit(toolResult(0, "call_b"))
+
+	want := []SubAgentUsage{
+		{Used: 4000, Limit: window, Task: "audit the config loader", Name: "audit config keys"},
+		{Used: 9000, Limit: window, Task: "summarise the findings", Name: "scribe"},
+	}
+	runs := tap.subAgentRuns()
+	if len(runs) != len(want) {
+		t.Fatalf("subAgentRuns() = %+v, want %+v", runs, want)
+	}
+	for i := range want {
+		if runs[i] != want[i] {
+			t.Errorf("subAgentRuns()[%d] = %+v, want %+v", i, runs[i], want[i])
+		}
+	}
+}
+
+// TestEventTapDropsANameWithNothingToName pins the two names that change no reading: one for a call
+// this tap opened no bracket for — a run it never saw, or one that has already closed, the same
+// drop every unbracketed reading takes — and an empty one, which would replace a usable label with
+// nothing.
+func TestEventTapDropsANameWithNothingToName(t *testing.T) {
+	t.Parallel()
+
+	const window = 32000
+	tap := &eventTap{window: window}
+
+	tap.Emit(subAgentCall(0, "call_a", "audit the config loader"))
+	tap.Emit(usageAt(1, "call_a", 4000))
+	tap.Emit(subAgentNamed(1, "call_gone", "names nobody here"))
+	tap.Emit(subAgentNamed(1, "call_a", ""))
+	tap.Emit(toolResult(0, "call_a"))
+
+	want := SubAgentUsage{Used: 4000, Limit: window, Task: "audit the config loader"}
+	runs := tap.subAgentRuns()
+	if len(runs) != 1 {
+		t.Fatalf("subAgentRuns() = %+v, want exactly one finished run", runs)
+	}
+	if runs[0] != want {
+		t.Errorf("subAgentRuns()[0] = %+v, want %+v", runs[0], want)
+	}
+}
+
 // TestEventTapRecordsTheDelegationName pins what a headless caller can say about a run beyond its
 // fill: the short name the delegation was given, normalised on the way in the way the recursion
 // point normalises it (first line, trimmed), so a record carries a label a line can hold. A

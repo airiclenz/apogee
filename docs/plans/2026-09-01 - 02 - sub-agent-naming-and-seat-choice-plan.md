@@ -205,7 +205,20 @@ the persisted target.
 **Regression guard.** `TestModelNoBuilderByValue` passes (no Builder introduced); existing subagentblock tests unchanged; every frame under cmd/apogee/testdata/frames that paints a sub_agent head is byte-identical when no named event fires.
 **Commit:** `feat(tui): paint a generated delegation name everywhere the head is named, and persist it`
 
-## 6. Run driver + headless: the generated name reaches `run.SubAgentUsage.Name`
+## 6. Run driver + headless: the generated name reaches `run.SubAgentUsage.Name` — ✅ DONE (2026-09-01)
+
+NOTES (2026-09-01): `nameSubAgentRun` takes the name unconditionally rather than only when the run
+is still unnamed — the engine emits the event only for a delegation whose call named nothing, so a
+model-given name is never contested. It matches the TUI's own rename seam (internal/tui/transcript.go
+`addSubAgentName`), which sets the head's name on the same terms; both refuse an empty name.
+NOTES (2026-09-01): beyond the plan's two run_test cases the item adds
+`TestEventTapDropsANameWithNothingToName` — a name for a call id that opened no bracket, and an
+empty name, change no reading. It pins the drop rule the tap already applies to every unbracketed
+reading, so a late or stray rename cannot land on the wrong run.
+NOTES (2026-09-01): the eventTap's own bracket doc comment (run.go:447) enumerated the events that
+update a bracket and now names `SubAgentNamedEvent` beside them — the item's "document which events
+feed `Name`" applied at the second place in run.go that made the claim; `openSubAgent`'s doc gained
+the same one-clause correction. Comment text only, both inside a listed file.
 
 Depends on item 2.
 **What:** `internal/run/run.go` (SubAgentUsage :152): fold `SubAgentNamedEvent` by CallID into the

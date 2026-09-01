@@ -1164,6 +1164,41 @@ func TestHeadlessOutputRouting(t *testing.T) {
 	})
 }
 
+// TestHeadlessSubAgentLineUsesTheGeneratedName pins this Driver's half of the naming journey (ADR
+// 0068): a delegation the model left unnamed, named out of band while it ran, reaches headless as a
+// run.SubAgentUsage whose Name is the generated one — and the line prints it exactly as it prints a
+// name the call gave. That indistinguishability IS the claim: nothing here asks where the name came
+// from, so the sibling rows are the byte-identical pin that a call-given name and an unnamed
+// delegation still print the line they always printed.
+func TestHeadlessSubAgentLineUsesTheGeneratedName(t *testing.T) {
+	stub := &stubRunner{res: run.Result{
+		FinalText: "the answer", Turns: 4,
+		SubAgents: []run.SubAgentUsage{
+			// Unnamed by its call, named by the naming call: run.go folds the generated
+			// name onto this reading, so it arrives here in the same field as any other.
+			{Used: 12000, Limit: 32768, Task: "audit the config loader", Name: "audit config keys"},
+			{Used: 8000, Limit: 32768, Task: "read the manual", Name: "repo-scout"},
+			{Used: 4000, Limit: 32768, Task: "summarise the findings"},
+		},
+	}}
+	_, errOut, err := headlessRun(t, stub, "a prompt")
+	if err != nil {
+		t.Fatalf("headless: %v", err)
+	}
+	lines := subAgentStderrLines(errOut)
+	want := []string{
+		"sub-agent: 12k/32k · audit config keys",
+		"sub-agent: 8k/32k · repo-scout",
+		"sub-agent: 4k/32k · summarise the findings",
+	}
+	if !slices.Equal(lines, want) {
+		t.Errorf("sub-agent lines = %q; want %q", lines, want)
+	}
+	if strings.Contains(errOut, "audit the config loader") {
+		t.Errorf("a renamed delegation printed its task beside the generated name: %q", errOut)
+	}
+}
+
 // The sanitizer's whole job as THIS Driver spends it, pinned character by character. The set and
 // its reasons belong to internal/sanitize, which tests them exhaustively; what this table guards is
 // that the two CLI-visible forms keep coming from that one helper — a C0 control character is an
