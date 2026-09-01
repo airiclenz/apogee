@@ -457,9 +457,10 @@ func (s *liveSettings) setSystemPrompt(sp config.SystemPromptSettings, useDefaul
 // resolves to an empty prompt, which is what the run sends and so what the editor opens on.
 //
 // The block and its flag are snapshotted under ONE lock for setSystemPrompt's reason — they are one
-// prompt — and resolved outside it, because the resolution reads prompt files from disk and no
-// holder lock is worth holding across I/O. A resolution that FAILS (an unreadable prompt file, say)
-// seeds nothing: what the run sends is then an error, not the default.
+// prompt — and resolved outside it, since no holder lock is worth holding across a resolution. The
+// resolution runs against promptSeedNoDiskRead rather than os.ReadFile: this is asked on the pane's
+// render path, once per PAINT, and a paint reads no files. A resolution that FAILS seeds nothing —
+// what the run sends is then an error, not the default — and a refused read reaches exactly that.
 func (s *liveSettings) promptEditorSeed(model, home string) string {
 	s.mu.RLock()
 	systemPrompt, useDefault := s.systemPrompt, s.useDefaultPrompt
@@ -468,12 +469,29 @@ func (s *liveSettings) promptEditorSeed(model, home string) string {
 	if systemPrompt.Global.Text != "" || systemPrompt.Global.File != "" || len(systemPrompt.Layers) > 0 {
 		return ""
 	}
-	resolved, err := config.ResolveSystemPrompt(systemPrompt, model, home, useDefault, os.ReadFile)
+	resolved, err := config.ResolveSystemPrompt(systemPrompt, model, home, useDefault, promptSeedNoDiskRead)
 	if err != nil || resolved != config.DefaultSystemPrompt() {
 		return ""
 	}
 	return resolved
 }
+
+// errPromptSeedNoDiskRead is what a prompt source with a file to read gets on the render path. It is
+// never shown to anyone: promptEditorSeed turns every resolution error into "no seed".
+var errPromptSeedNoDiskRead = errors.New("apogee: the prompt-editor seed resolves without reading files")
+
+// promptSeedNoDiskRead is the file reader promptEditorSeed resolves with, and it reads nothing. The
+// seed is re-asked on every paint of the `/settings` pane (settingsHost.Rows), so an os.ReadFile here
+// would put the disk in front of each frame for as long as the pane is open.
+//
+// The answer loses nothing by refusing. Only ONE resolution still reaches this reader — a
+// `system-prompt-models` entry matching the bound model with a `file:` — and its file is one the seed
+// would read only to conclude what the entry's mere existence already says: this session sends the
+// prompt the human configured for this model, so the editor opens empty (ADR 0067 Consequences,
+// ADR 0064 §7). Every other file-bearing source is refused a line above. Keeping the refusal in the
+// reader rather than in a fourth guard clause is what keeps the paint off the disk even if those
+// clauses are one day loosened.
+func promptSeedNoDiskRead(string) ([]byte, error) { return nil, errPromptSeedNoDiskRead }
 
 // setContextFilesEnable flips the `context-files:` off-switch and reports the names to install with
 // it. The pair is read and written under ONE lock because the engine takes it as a pair: an enable

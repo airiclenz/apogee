@@ -2500,6 +2500,24 @@ func TestPromptEditorSeedAnswersOnlyAnEmptyGlobalPrompt(t *testing.T) {
 	if got := layered.promptEditorSeed(bound, t.TempDir()); got != "" {
 		t.Errorf("after a mid-session layer the seed is %q; want none", got)
 	}
+
+	// And the seed reads no files, because the pane asks it once per PAINT. The one resolution that
+	// could still reach a reader — a `system-prompt-models` entry for the bound model with a `file:`
+	// — answers empty without touching the disk, which a file holding the embedded default's own
+	// bytes pins: a seed that read it would come back with the default.
+	home := t.TempDir()
+	if err := os.WriteFile(filepath.Join(home, "prompt.md"), []byte(config.DefaultSystemPrompt()), 0o600); err != nil {
+		t.Fatalf("write the per-model prompt file: %v", err)
+	}
+	perModel := newLiveSettings(config.Options{
+		SystemPrompt: config.SystemPromptSettings{
+			Models: map[string]config.PromptSource{bound: {File: "prompt.md"}},
+		},
+		UseDefaultPrompt: true,
+	}, nil)
+	if got := perModel.promptEditorSeed(bound, home); got != "" {
+		t.Errorf("a per-model prompt file was read on the render path and seeded %q; want none", got)
+	}
 }
 
 // Saving what the editor was seeded with persists it: the seed is display-only until ctrl+s, and
